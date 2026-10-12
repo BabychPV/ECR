@@ -70,6 +70,50 @@ export function cellsOfSaveError(
     }));
 }
 
+/** Причина відмови для однієї названої комірки (D2, приймальна Land 12.10). */
+export interface RejectedCellReason {
+  readonly rowKey: string;
+  readonly columnCode: string;
+  readonly message: string;
+}
+
+/**
+ * Скільки причин максимум виводить банер збереження; решта — «…».
+ */
+export const SaveErrorReasonsLimit = 5;
+
+/**
+ * Причини, які сервер назвав у тілі відмови (`cells[].message`, `ECR-CELL-0422`).
+ *
+ * ⛔ D2: банер казав лише «Validation rejected the save: 1 cell(s) with an error» —
+ * правило («Value must be <= 672») доїжджало в тілі, але не показувалось. Беруться
+ * лише комірки з іменем колонки й непорожнім текстом; однакові пари зводяться.
+ */
+export function rejectedCellReasons(error: unknown): readonly RejectedCellReason[] {
+  if (!(error instanceof EcrApiError)) return [];
+
+  const cells = error.problem.extensions2?.['cells'];
+  if (!Array.isArray(cells)) return [];
+
+  const seen = new Set<string>();
+  const result: RejectedCellReason[] = [];
+
+  for (const raw of cells as unknown[]) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const { rowKey, columnCode, message } = raw as Record<string, unknown>;
+    if (typeof columnCode !== 'string' || typeof message !== 'string' || message.trim().length === 0) continue;
+
+    const row = typeof rowKey === 'string' ? rowKey : '';
+    const key = `${row}:${columnCode}:${message}`;
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    result.push({ rowKey: row, columnCode, message });
+  }
+
+  return result;
+}
+
 /**
  * Які правки пакета ТРИМАТИ після відмови (`V-01`) — і чи тримати взагалі.
  *

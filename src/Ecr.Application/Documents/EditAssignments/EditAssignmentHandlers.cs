@@ -25,6 +25,9 @@ public sealed class ListEditAssignmentsHandler(
     IMetadataCache metadata,
     Common.ICurrentUser currentUser)
 {
+    /// <summary>Стеля профілів виконавців, які перелік будує для позначки видимості (решта — <c>Unknown</c>).</summary>
+    private const int MaxVisibilityProfiles = 200;
+
     /// <summary>Повертає передачі документа.</summary>
     /// <exception cref="NotFoundException">Документ невидимий.</exception>
     /// <exception cref="AccessDeniedException">Викликач не автор і не менеджер проєкту.</exception>
@@ -59,7 +62,45 @@ public sealed class ListEditAssignmentsHandler(
         }
 
         var users = await store.GetUsersAsync(ids, ct).ConfigureAwait(false);
-        var items = visible.Select(a => EditAssignmentMapper.ToDto(a, users)).ToList();
+
+        // RC20 D-2: чи бачить кожен виконавець документ за своїми прямими призначеннями. Профіль виконавця
+        // будується так само, як при передачі (`PrepareAsync`); стеля — щоб перелік не став N запитів.
+        //
+        // ⛔ Вимкнений/відсутній виконавець профілю не має (служба доступу кидає ECR-AUTH-0401, а клієнт
+        // виходив би з сесії МЕНЕДЖЕРА): для нього visibility = Unknown, перелік — 200 (аудит P1).
+        // ⚠ Порядок — за `userId` і стеля фіксована: при перевищенні однакові виконавці лишаються без позначки в
+        // кожному запиті, а не різні від виклику до виклику. Обрано 200 (профіль кешується; типова передача — до
+        // десятка виконавців), а не 50: нижча стеля ховала б позначку саме в документах із наборами.
+        var recipientScopes = new Dictionary<int, DocumentReadScope?>();
+        foreach (var recipientId in visible
+                     .SelectMany(a => a.Recipients.Select(r => r.UserId))
+                     .Distinct()
+                     .OrderBy(id => id))
+        {
+            if (recipientScopes.Count >= MaxVisibilityProfiles)
+            {
+                break;
+            }
+
+            if (!users.TryGetValue(recipientId, out var recipientRef) || !recipientRef.IsActive)
+            {
+                continue;
+            }
+
+            var recipientProfile = await EditAssignmentAccess
+                .TryBuildProfileAsync(access, recipientId, ct).ConfigureAwait(false);
+            if (recipientProfile is null)
+            {
+                continue;
+            }
+
+            recipientScopes[recipientId] = recipientProfile.SeesDocumentsOf(document.ProjectId)
+                && PermissionCheck.IsGrantedIn(recipientProfile, "Document.View", document.ProjectId)
+                    ? DocumentReadScope.For(recipientProfile, document.ProjectId, snapshot)
+                    : null;
+        }
+
+        var items = visible.Select(a => EditAssignmentMapper.ToDto(a, users, recipientScopes)).ToList();
 
         return new EditAssignmentListDto(
             users.TryGetValue(document.CreatedByUserId, out var owner) ? owner.DisplayName : string.Empty,
@@ -71,7 +112,37 @@ public sealed class ListEditAssignmentsHandler(
 /// <summary>Мапінг сутностей у DTO.</summary>
 internal static class EditAssignmentMapper
 {
-    public static EditAssignmentDto ToDto(EditAssignment a, IReadOnlyDictionary<int, EditAssignmentUserRef> users)
+    /// <summary>Видимість виконавця: див. <see cref="EditAssignmentRecipientDto.Visibility"/>.</summary>
+    /// <param name="a">Передача.</param>
+    /// <param name="userId">Виконавець.</param>
+    /// <param name="user">Довідка про користувача (може бракувати).</param>
+    /// <param name="scopes">
+    /// Межі читання виконавця: ключ є і значення <c>null</c> — документ йому не видно; ключа немає чи словника
+    /// немає — не обчислювалось.
+    /// </param>
+    public static RecipientVisibility VisibilityOf(
+        EditAssignment a, int userId, EditAssignmentUserRef? user,
+        IReadOnlyDictionary<int, DocumentReadScope?>? scopes)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+
+        if (scopes is null || !scopes.TryGetValue(userId, out var scope))
+        {
+            return RecipientVisibility.Unknown;
+        }
+
+        if (scope is not null && (a.SheetCode is null || scope.CanReadSheetCode(a.SheetCode)))
+        {
+            return RecipientVisibility.Visible;
+        }
+
+        // Доменний обліковий запис міг би бачити документ через групу AD, яку профіль без токена сесії не знає.
+        return user is { IsWindowsAccount: true } ? RecipientVisibility.Unknown : RecipientVisibility.NotVisible;
+    }
+
+    public static EditAssignmentDto ToDto(
+        EditAssignment a, IReadOnlyDictionary<int, EditAssignmentUserRef> users,
+        IReadOnlyDictionary<int, DocumentReadScope?>? recipientScopes = null)
     {
         var recipients = a.Recipients
             .OrderBy(r => users.TryGetValue(r.UserId, out var u) ? u.DisplayName : string.Empty, StringComparer.CurrentCultureIgnoreCase)
@@ -83,7 +154,8 @@ internal static class EditAssignmentMapper
                 r.ReturnedAt,
                 r.ReturnReason,
                 r.ReturnCount,
-                users.TryGetValue(r.UserId, out var user) && user.IsActive))
+                users.TryGetValue(r.UserId, out var user) && user.IsActive,
+                VisibilityOf(a, r.UserId, users.GetValueOrDefault(r.UserId), recipientScopes)))
             .ToList();
 
         return new EditAssignmentDto(
@@ -100,7 +172,8 @@ internal static class EditAssignmentMapper
             a.AppliedSetName,
             recipients,
             a.ModifiedAt,
-            EditAssignmentVersion.Of(a));
+            EditAssignmentVersion.Of(a),
+            a.ExpiresAt);
     }
 
     /// <summary>Текст листа: подробиці зрізу людською мовою (англійська — базова мова каталогу).</summary>
@@ -195,12 +268,22 @@ public sealed class UpsertEditAssignmentHandler(
     /// Знімок набору без пошуку (copy: набір міг бути іншого менеджера — його не шукаємо за власником).
     /// </param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="keepExpiresAt">
+    /// Пакетні дії (apply-set/copy) не мають поля терміну: термін НАЯВНОЇ передачі лишається як є, нова — без
+    /// терміну (EA6-D2).
+    /// </param>
+    /// <param name="keepNote">
+    /// Копіювання не переносить примітку джерела (вона писана про місяць джерела, RC20 D-4): примітка НАЯВНОЇ
+    /// цільової передачі лишається, нова — без примітки.
+    /// </param>
     internal async Task<PreparedUpsert> PrepareAsync(
         long documentId,
         UpsertEditAssignmentRequest request,
         bool overwrite,
         AppliedSetSnapshot? appliedSetOverride,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool keepExpiresAt = false,
+        bool keepNote = false)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -229,6 +312,14 @@ public sealed class UpsertEditAssignmentHandler(
             throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentTooManyRecipients", "У передачі забагато виконавців.");
         }
 
+        // EA6-D2: термін дії — UTC, у майбутньому, не далі за стелю домену; повторно перевіряється під
+        // транзакцією (годинник між підготовкою й записом ішов далі).
+        DateTime? expiresAt = null;
+        if (request.ExpiresAtSpecified && request.ExpiresAt is { } requestedExpiry)
+        {
+            expiresAt = EditAssignmentAccess.RequireValidExpiry(requestedExpiry, clock.UtcNow);
+        }
+
         // «Лише в межах власних прав»: з даних шаблону, у сесії того, хто передає.
         var templateVersionId = await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
@@ -250,8 +341,9 @@ public sealed class UpsertEditAssignmentHandler(
                 throw RecipientInvalid();
             }
 
-            var recipientProfile = await access.BuildProfileAsync(id, ct).ConfigureAwait(false);
-            if (!recipientProfile.SeesDocumentsOf(document.ProjectId)
+            var recipientProfile = await EditAssignmentAccess.TryBuildProfileAsync(access, id, ct).ConfigureAwait(false);
+            if (recipientProfile is null
+                || !recipientProfile.SeesDocumentsOf(document.ProjectId)
                 || !PermissionCheck.IsGrantedIn(recipientProfile, "Document.View", document.ProjectId))
             {
                 throw RecipientInvalid();
@@ -269,7 +361,13 @@ public sealed class UpsertEditAssignmentHandler(
 
         return new PreparedUpsert(
             document, userId, slice, recipientIds, request.IsExclusive, note, appliedSet, users,
-            request.BaseVersion, overwrite);
+            request.BaseVersion, overwrite)
+        {
+            ExpiresAt = expiresAt,
+            // Поле відсутнє в запиті (або пакетна дія) — термін наявної передачі не змінюється.
+            KeepExpiresAt = keepExpiresAt || !request.ExpiresAtSpecified,
+            KeepNote = keepNote,
+        };
     }
 
     /// <summary>Записує підготовлену передачу в одній транзакції.</summary>
@@ -282,7 +380,7 @@ public sealed class UpsertEditAssignmentHandler(
         var userId = p.UserId;
         var slice = p.Slice;
         var recipientIds = p.RecipientIds;
-        var note = p.Note;
+        var requestedNote = p.Note;
         var users = p.Users;
         var now = clock.UtcNow;
         EditAssignment? result = null;
@@ -313,6 +411,9 @@ public sealed class UpsertEditAssignmentHandler(
                 var existing = await store
                     .FindBySliceKeyForUpdateAsync(documentId, slice.Key, innerCt).ConfigureAwait(false);
 
+                // RC20 D-4: копія примітку не переносить — вона писана про місяць джерела.
+                var note = p.KeepNote ? existing?.Note : requestedNote;
+
                 var events = new List<SecurityEventRecord>();
                 var newlyAssigned = new List<int>();
 
@@ -332,7 +433,8 @@ public sealed class UpsertEditAssignmentHandler(
 
                     var assignment = new EditAssignment(
                         documentId, slice, p.IsExclusive, delegatedByUserId: userId, Guid.NewGuid(), userId, now,
-                        expiresAt: null, note: note);
+                        expiresAt: p.KeepExpiresAt ? null : EditAssignmentAccess.RequireValidExpiryOrNull(p.ExpiresAt, now),
+                        note: note);
                     foreach (var id in recipientIds)
                     {
                         assignment.AddRecipient(id, userId, now);
@@ -348,8 +450,12 @@ public sealed class UpsertEditAssignmentHandler(
 
                     var sameMembers = existing.Recipients.Select(r => r.UserId).OrderBy(i => i)
                         .SequenceEqual(recipientIds.OrderBy(i => i));
+                    // Термін: пакетні дії його не чіпають; upsert ЗАМІНЮЄ (пропуск знімає). Незмінний термін не
+                    // перевіряється заново — прострочений, але не змінений термін не блокує інших правок.
+                    var expiryChanged = !p.KeepExpiresAt && existing.ExpiresAt != p.ExpiresAt;
                     var sameFlags = existing.IsExclusive == p.IsExclusive
-                        && string.Equals(existing.Note ?? string.Empty, note ?? string.Empty, StringComparison.Ordinal);
+                        && string.Equals(existing.Note ?? string.Empty, note ?? string.Empty, StringComparison.Ordinal)
+                        && !expiryChanged;
                     // Відсутній набір у запиті мітку НЕ знімає (повтор без набору ідемпотентний, знімок лишається).
                     var sameSet = p.AppliedSet is null || existing.AppliedSetId == p.AppliedSet.Id;
 
@@ -365,6 +471,7 @@ public sealed class UpsertEditAssignmentHandler(
                         EditAssignmentAccess.RequireVersion(p.BaseVersion, existing);
                     }
 
+                    var previousExpiresAt = existing.ExpiresAt;
                     var removed = existing.Recipients.Where(r => !recipientIds.Contains(r.UserId)).Select(r => r.UserId).ToList();
                     foreach (var id in removed)
                     {
@@ -381,6 +488,11 @@ public sealed class UpsertEditAssignmentHandler(
 
                     // Додавання/зняття виконавця саме скидає валідацію (домен); знімання «Заповнено»-виконавця її не ламає.
                     existing.Reconfigure(p.IsExclusive, note, userId, now);
+                    if (expiryChanged)
+                    {
+                        existing.SetExpiry(EditAssignmentAccess.RequireValidExpiryOrNull(p.ExpiresAt, now), userId, now);
+                    }
+
                     existing.Redelegate(userId, now);
 
                     foreach (var id in removed)
@@ -390,7 +502,10 @@ public sealed class UpsertEditAssignmentHandler(
 
                     if (!sameFlags)
                     {
-                        events.Add(Event(ChangedEvent, now, null, userId, documentId, existing, "flags"));
+                        // EA6-D2: зняття строку = безстрокова передача — аудит бачить і новий, і попередній строк.
+                        events.Add(Event(
+                            ChangedEvent, now, null, userId, documentId, existing, "flags",
+                            expiryChanged, previousExpiresAt));
                     }
 
                     result = existing;
@@ -404,7 +519,9 @@ public sealed class UpsertEditAssignmentHandler(
 
                 foreach (var id in newlyAssigned)
                 {
-                    events.Add(Event(GrantedEvent, now, id, userId, documentId, result, "grant"));
+                    events.Add(Event(
+                        GrantedEvent, now, id, userId, documentId, result, "grant",
+                        includeExpiry: result.ExpiresAt is not null));
                 }
 
                 // Лист — лише тим, у кого є адреса; recipients: null (розсилка всім) заборонено.
@@ -441,18 +558,30 @@ public sealed class UpsertEditAssignmentHandler(
     }
 
     private SecurityEventRecord Event(
-        string type, DateTime now, int? targetUserId, int byUserId, long documentId, EditAssignment a, string via)
-        => new(
-            now, type, targetUserId, TargetRoleId: null,
-            JsonSerializer.Serialize(new
-            {
-                documentId,
-                assignmentId = a.Id,
-                slice = a.SliceKey,
-                isExclusive = a.IsExclusive,
-                via,
-            }),
-            byUserId, currentUser.CorrelationId);
+        string type, DateTime now, int? targetUserId, int byUserId, long documentId, EditAssignment a, string via,
+        bool includeExpiry = false, DateTime? previousExpiresAt = null)
+    {
+        // ⚠ Порядок й імена наявних полів не змінюються (журнал шукають за `"documentId":N`); строк дії —
+        // додаткові поля лише коли він передавався/змінився.
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["documentId"] = documentId,
+            ["assignmentId"] = a.Id,
+            ["slice"] = a.SliceKey,
+            ["isExclusive"] = a.IsExclusive,
+            ["via"] = via,
+        };
+
+        if (includeExpiry)
+        {
+            payload["expiresAt"] = a.ExpiresAt;
+            payload["previousExpiresAt"] = previousExpiresAt;
+        }
+
+        return new(
+            now, type, targetUserId, TargetRoleId: null, JsonSerializer.Serialize(payload), byUserId,
+            currentUser.CorrelationId);
+    }
 
     private static bool IsUniqueViolation(Exception ex)
     {
@@ -495,7 +624,18 @@ internal sealed record PreparedUpsert(
     AppliedSetSnapshot? AppliedSet,
     IReadOnlyDictionary<int, EditAssignmentUserRef> Users,
     string? BaseVersion,
-    bool Overwrite);
+    bool Overwrite)
+{
+    /// <summary>Не переносити примітку з запиту: наявна лишається, нова — без примітки (copy).</summary>
+    public bool KeepNote { get; init; }
+
+    /// <summary>Термін дії (UTC, уже нормалізований); <c>null</c> — безстроково.</summary>
+    public DateTime? ExpiresAt { get; init; }
+
+    /// <summary>Не чіпати термін наявної передачі (apply-set/copy).</summary>
+    public bool KeepExpiresAt { get; init; }
+}
+
 /// <summary>Зняття передачі (разом із виконавцями).</summary>
 public sealed class DeleteEditAssignmentHandler(
     IEditAssignmentStore assignments,
@@ -942,8 +1082,9 @@ public sealed class ListEditAssignmentCandidatesHandler(
                 .SearchCandidatesAsync(q, page * PageSize, PageSize, ct).ConfigureAwait(false);
             foreach (var u in batch.Where(u => u.Id != userId && u.Id != document.CreatedByUserId))
             {
-                var candidate = await access.BuildProfileAsync(u.Id, ct).ConfigureAwait(false);
-                if (candidate.SeesDocumentsOf(document.ProjectId)
+                var candidate = await EditAssignmentAccess.TryBuildProfileAsync(access, u.Id, ct).ConfigureAwait(false);
+                if (candidate is not null
+                    && candidate.SeesDocumentsOf(document.ProjectId)
                     && PermissionCheck.IsGrantedIn(candidate, "Document.View", document.ProjectId))
                 {
                     result.Add(new EditAssignmentCandidateDto(u.Id, u.DisplayName));

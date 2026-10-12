@@ -1,4 +1,4 @@
-﻿using Ecr.Infrastructure.Persistence;
+using Ecr.Infrastructure.Persistence;
 using Ecr.Application.Security;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
@@ -411,8 +411,9 @@ public sealed class SeedTests(SqlServerFixture sql)
         //
         // ✎ 2026-10-11 (`FP:sysadmin-rights`, рішення людини за проходом «від першого обличчя»):
         // третій поіменний виняток — SystemAdministrator отримує ВІСІМ адмін-прав керування
-        // (`SysAdminDangerous` нижче), окремим MERGE. Решта небезпечного (Period.Reopen,
-        // Document.ChangeKey, Report.EditDefinition) йому не видана — і цей тест тримає саме це.
+        // (`SysAdminDangerous` нижче), окремим MERGE; ✎ 2026-10-12 — ще `Period.Reopen` і
+        // `Document.ChangeKey` (десять). Решта небезпечного (Report.EditDefinition) йому не видана —
+        // і цей тест тримає саме це.
         Assert.Equal(0, await ScalarAsync($"""
             SELECT COUNT(*)
             FROM sec.RolePermission AS rp
@@ -479,12 +480,14 @@ public sealed class SeedTests(SqlServerFixture sql)
         "Security.ManageUsers", "Security.ManageRoles", "Security.Simulate",
         "Integration.Manage", "System.ManageNotifications", "System.RunJob",
         "Report.ViewCampaign", "Calculation.Publish",
+        // ✎ 2026-10-12 (рішення людини, квіз 12.10, №1): ще два, тією самою секцією.
+        "Period.Reopen", "Document.ChangeKey",
     ];
 
     /// <summary>Небезпечні права, які SystemAdministrator НЕ має (на рішення людини, див. секцію сіду).</summary>
     private static readonly string[] SysAdminWithheld =
     [
-        "Report.EditDefinition", "Period.Reopen", "Document.ChangeKey",
+        "Report.EditDefinition",
     ];
 
     private static string SysAdminDangerousSql
@@ -588,7 +591,7 @@ public sealed class SeedTests(SqlServerFixture sql)
               AND rp.PermissionCode IN ({string.Join(", ", SysAdminWithheld.Select(code => $"N'{code}'"))})
             """));
 
-        // Перелік виданих небезпечних — рівно названі вісім: нічого зайвого.
+        // Перелік виданих небезпечних — рівно названі десять: нічого зайвого.
         Assert.Equal(SysAdminDangerous.Length, await ScalarAsync("""
             SELECT COUNT(*)
             FROM sec.RolePermission AS rp
@@ -632,6 +635,88 @@ public sealed class SeedTests(SqlServerFixture sql)
             JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
             WHERE r.Code = N'SystemAdministrator' AND rp.PermissionCode IN ({SysAdminDangerousSql})
             """));
+    }
+
+    /// <remarks>
+    /// ✎ 2026-10-12 (квіз 12.10, №1). База після RC20 має вісім прав, без `Period.Reopen` і
+    /// `Document.ChangeKey`: сід додає саме ці дві пари, пише про них одну подію й нічого більше;
+    /// повтор — нуль змін. `Report.EditDefinition` лишається утриманим. Мутація: прибрати
+    /// `Period.Reopen`/`Document.ChangeKey` зі списку MERGE — перша частина червоніє; послабити
+    /// `NOT EXISTS` події — червоніє повтор.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.12")]
+    public async Task Системний_адміністратор_отримує_Period_Reopen_і_Document_ChangeKey_а_EditDefinition_лишається_утриманим()
+    {
+        const string EventFilter =
+            "EventType = N'RolePermissionsGranted' AND DetailsJson LIKE N'%seed FP:sysadmin-rights%'";
+        const string Added = "N'Period.Reopen', N'Document.ChangeKey'";
+
+        // Стан бази RC20: вісім прав є, двох нових немає.
+        await ExecuteAsync($"""
+            DELETE rp
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator' AND rp.PermissionCode IN ({Added})
+            """);
+
+        var eventsBefore = await ScalarAsync($"SELECT COUNT(*) FROM aud.SecurityEvent WHERE {EventFilter}");
+        var pairsBefore = await ScalarAsync($"""
+            SELECT COUNT(*) FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator'
+            """);
+
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(2, await ScalarAsync($"""
+            SELECT COUNT(*) FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator' AND rp.PermissionCode IN ({Added})
+            """));
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*) FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator' AND rp.PermissionCode = N'Report.EditDefinition'
+            """));
+        Assert.Equal(pairsBefore + 2, await ScalarAsync("""
+            SELECT COUNT(*) FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator'
+            """));
+
+        // Одна подія, і в ній рівно дві нові пари.
+        Assert.Equal(
+            eventsBefore + 1,
+            await ScalarAsync($"SELECT COUNT(*) FROM aud.SecurityEvent WHERE {EventFilter}"));
+        var details = await StringAsync(
+            $"SELECT TOP (1) DetailsJson FROM aud.SecurityEvent WHERE {EventFilter} ORDER BY Id DESC");
+        using var json = System.Text.Json.JsonDocument.Parse(details!);
+        Assert.Equal(2, json.RootElement.GetProperty("count").GetInt32());
+        Assert.Equal(
+            ["Document.ChangeKey", "Period.Reopen"],
+            json.RootElement.GetProperty("permissions").EnumerateArray()
+                .Select(p => p.GetString()!).Order(StringComparer.Ordinal));
+
+        // Ідемпотентність: повторний сід — ні пар, ні подій.
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(pairsBefore + 2, await ScalarAsync("""
+            SELECT COUNT(*) FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator'
+            """));
+        Assert.Equal(
+            eventsBefore + 1,
+            await ScalarAsync($"SELECT COUNT(*) FROM aud.SecurityEvent WHERE {EventFilter}"));
     }
 
     [Fact]
@@ -808,10 +893,10 @@ public sealed class SeedTests(SqlServerFixture sql)
     public async Task Кожна_розмірність_має_рівно_одну_базову_одиницю()
     {
         // Первинні розмірності (1..7; 12, 14, 15 — HSE301 F1: StdVolume,
-        // Velocity, Area) мають базову одиницю; похідні (8..11, 13, 16..19) —
-        // ні, бо складаються з чисельника і знаменника.
-        Assert.Equal(10, await ScalarAsync("SELECT COUNT(*) FROM uom.Unit WHERE IsBase = 1"));
-        Assert.Equal(10, await ScalarAsync("SELECT COUNT(*) FROM uom.Dimension WHERE BaseUnitId IS NOT NULL"));
+        // Velocity, Area; 21, 23 — LAND:units: Power, Pressure) мають базову одиницю; похідні
+        // (8..11, 13, 16..20, 22) — ні, бо складаються з чисельника і знаменника.
+        Assert.Equal(12, await ScalarAsync("SELECT COUNT(*) FROM uom.Unit WHERE IsBase = 1"));
+        Assert.Equal(12, await ScalarAsync("SELECT COUNT(*) FROM uom.Dimension WHERE BaseUnitId IS NOT NULL"));
 
         // Двох базових в одній розмірності бути не може — це тримає
         // фільтрований унікальний індекс UX_Unit_BasePerDimension, тобто
@@ -830,8 +915,9 @@ public sealed class SeedTests(SqlServerFixture sql)
         // Складаються ПОСИЛАННЯМИ, а не розбором рядка «g_per_s» (ФВ-16.2):
         // розбір коду означав би, що перейменування одиниці ламає конверсію.
         // 14 (ФВ-16.2 і HSE301:F1) + mg_per_Sm3 і Sm3_per_day (UNITS:ecr-derived)
-        // + Nm3_per_s/_h/_day і mg_per_Nm3 (HSE301:NM3).
-        Assert.Equal(20, await ScalarAsync(
+        // + Nm3_per_s/_h/_day і mg_per_Nm3 (HSE301:NM3)
+        // + rpm, m3_per_h, l_per_h, kg_per_h, t_per_h, mg_per_l (LAND:units).
+        Assert.Equal(26, await ScalarAsync(
             "SELECT COUNT(*) FROM uom.Unit WHERE NumeratorUnitId IS NOT NULL AND DenominatorUnitId IS NOT NULL"));
 
         // UNITS:ecr-derived: чисельник і знаменник — саме ті, що в коді, а не

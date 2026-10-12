@@ -412,6 +412,21 @@ public sealed class UnitTable
         table.Add("Nm3_per_day", dimension: 13, factorToBase: 0.000012421525955756m);
         table.Add("mg_per_Nm3", dimension: 16, factorToBase: 0.000000931775541532m);
 
+        // LAND:units — секція `-- LAND:units` сіду (G8). Розмірності 20 VolumeFlow, 21 Power,
+        // 22 Frequency (похідні), 21 Power (база W) і 23 Pressure (база Pa) — первинні. Множники — як у decimal(38,18).
+        table.Add("Pa", dimension: 23, factorToBase: 1m);
+        table.Add("kPa", dimension: 23, factorToBase: 1000m);
+        table.Add("thousand_m3", dimension: 2, factorToBase: 1000m);
+        table.Add("ppm_wt", dimension: 9, factorToBase: 0.000001m);
+        table.Add("W", dimension: 21, factorToBase: 1m);
+        table.Add("kW", dimension: 21, factorToBase: 1000m);
+        table.Add("rpm", dimension: 22, factorToBase: 0.016666666666666667m);
+        table.Add("m3_per_h", dimension: 20, factorToBase: 0.000277777777777778m);
+        table.Add("l_per_h", dimension: 20, factorToBase: 0.000000277777777778m);
+        table.Add("kg_per_h", dimension: 8, factorToBase: 0.000277777777777778m);
+        table.Add("t_per_h", dimension: 8, factorToBase: 0.277777777777777778m);
+        table.Add("mg_per_l", dimension: 11, factorToBase: 0.001m);
+
         // Похідні одиниці сіду: чисельник і знаменник (колонки `NumCode`/`DenCode` секцій сіду; Z2-05).
         table.AddRate("g_per_s", "g", "s");
         table.AddRate("t_per_year", "t", "year");
@@ -433,6 +448,12 @@ public sealed class UnitTable
         table.AddRate("Nm3_per_h", "Nm3", "h");
         table.AddRate("Nm3_per_day", "Nm3", "day");
         table.AddRate("mg_per_Nm3", "mg", "Nm3");
+        table.AddRate("rpm", "one", "min");
+        table.AddRate("m3_per_h", "m3", "h");
+        table.AddRate("l_per_h", "l", "h");
+        table.AddRate("kg_per_h", "kg", "h");
+        table.AddRate("t_per_h", "t", "h");
+        table.AddRate("mg_per_l", "mg", "l");
 
         return table;
     }

@@ -127,6 +127,7 @@ public sealed class ImportDiffBuilder
         var changes = new List<ImportChange>();
         var rejected = new List<ImportRejection>();
         var overwritable = new List<ImportChange>();
+        var hiddenDenied = new List<DeniedCellRef>();
 
         foreach (var row in block.Rows)
         {
@@ -166,6 +167,7 @@ public sealed class ImportDiffBuilder
                             row.RowKey, column.Code, "ECR-ACCS-0403",
                             $"Editing the cell is not allowed: {EditDenyReason.NoGrant}.",
                             table.Code, table.NameL10n, ImportMessageKeys.Denied(EditDenyReason.NoGrant), excelCell));
+                        hiddenDenied.Add(new DeniedCellRef(row.RowKey, column.Code));
                     }
 
                     continue;
@@ -491,7 +493,7 @@ public sealed class ImportDiffBuilder
             }
         }
 
-        return new TableDiff(block.TableInstanceId, periodKey, changes, rejected, versions, overwritable);
+        return new TableDiff(block.TableInstanceId, periodKey, changes, rejected, versions, overwritable, hiddenDenied);
     }
 
     /// <summary>
@@ -902,13 +904,24 @@ public sealed class ImportDiffBuilder
 /// людина явно позначила «перезаписати»; без позначки — як у AN-103, ніяк.
 /// <c>null</c> — план, збережений до цієї правки.
 /// </param>
+/// <param name="HiddenDenied">
+/// ✎ RC21 (EA-6, «все або нічого»). Комірки <paramref name="Rejected"/> з відмовою правами, що стоять у
+/// колонках, яких користувач НЕ бачить (S6): вони лишаються в переліку відмов перегляду, але відмова
+/// застосування їх не називає — лише рахує. <c>null</c> — план до цієї правки.
+/// </param>
 public sealed record TableDiff(
     long TableInstanceId,
     int PeriodKey,
     IReadOnlyList<ImportChange> Changes,
     IReadOnlyList<ImportRejection> Rejected,
     IReadOnlyDictionary<string, string> RowVersions,
-    IReadOnlyList<ImportChange>? Overwritable = null);
+    IReadOnlyList<ImportChange>? Overwritable = null,
+    IReadOnlyList<DeniedCellRef>? HiddenDenied = null);
+
+/// <summary>Адреса комірки в плані імпорту: рядок і колонка таблиці.</summary>
+/// <param name="RowKey">Рядок.</param>
+/// <param name="ColumnCode">Колонка.</param>
+public sealed record DeniedCellRef(string RowKey, string ColumnCode);
 
 /// <summary>
 /// Ключі текстів відмов прев'ю імпорту в каталозі (D-95, `V-10`).

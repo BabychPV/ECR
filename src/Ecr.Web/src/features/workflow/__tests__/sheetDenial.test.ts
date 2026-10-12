@@ -19,6 +19,9 @@ const Strings = {
   'err.ECR-ACCS-0403.submitDenied': 'Лист {sheetDefId} нельзя подать: {reason}.',
   'err.ECR-ACCS-0403.reopenDenied': 'Лист {sheetDefId} нельзя вернуть в работу: {reason}.',
   'deny.InsufficientGrantLevel': 'Недостаточный уровень доступа.',
+  'deny.PeriodClosed': 'Период закрыт.',
+  'deny.NoGrant': 'У вас нет права редактировать эту ячейку.',
+  'deny.approve.NoRight': 'нет права утверждать или отклонять листы в этом проекте',
 };
 
 beforeAll(async () => {
@@ -62,13 +65,36 @@ describe('sheetDenialText: відмова називає аркуш назвою
   it('approveDenied — назва і причина з каталогу за reasonKey, без подвійної крапки', () => {
     const text = sheetDenialText(
       denial('err.ECR-ACCS-0403.approveDenied', {
-        reason: 'InsufficientGrantLevel',
-        reasonKey: 'deny.InsufficientGrantLevel',
+        reason: 'PeriodClosed',
+        reasonKey: 'deny.PeriodClosed',
       }),
       'Выбросы',
     );
 
-    expect(text).toBe('Лист «Выбросы» нельзя утвердить или вернуть в работу: Недостаточный уровень доступа.');
+    expect(text).toBe('Лист «Выбросы» нельзя утвердить или вернуть в работу: Период закрыт.');
+  });
+
+  it('D4: approveDenied без права — причина про затвердження, а не про правку комірки', () => {
+    for (const reasonKey of ['deny.NoGrant', 'deny.InsufficientGrantLevel']) {
+      const text = sheetDenialText(
+        denial('err.ECR-ACCS-0403.approveDenied', { reason: 'NoGrant', reasonKey }),
+        'Выбросы',
+      );
+
+      expect(text).toBe(
+        'Лист «Выбросы» нельзя утвердить или вернуть в работу: нет права утверждать или отклонять листы в этом проекте.',
+      );
+      expect(text).not.toContain('ячейк');
+    }
+  });
+
+  it('D4: інші причини затвердження лишаються як є', () => {
+    const text = sheetDenialText(
+      denial('err.ECR-ACCS-0403.approveDenied', { reason: 'Locked', reasonKey: 'deny.Locked' }),
+      'Выбросы',
+    );
+
+    expect(text).toBe('Лист «Выбросы» нельзя утвердить или вернуть в работу: Locked.');
   });
 
   it('submitDenied без рядка причини в каталозі — сирий reason, як у сервера', () => {

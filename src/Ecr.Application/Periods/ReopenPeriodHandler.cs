@@ -15,7 +15,9 @@ namespace Ecr.Application.Periods;
 
 /// <summary>
 /// Адміністративне відкриття закритого періоду (ФВ-1.10). Право
-/// <c>Period.Reopen</c> — небезпечне, у складені ролі не входить (ФВ-6.12).
+/// <c>Period.Reopen</c> — небезпечне, у шаблонні роздачі складених ролей не входить (ФВ-6.12); поіменно його має
+/// лише <c>SystemAdministrator</c> (секція сіду <c>FP:sysadmin-rights</c>, рішення людини 12.10) і ролі, створені
+/// адміністратором.
 /// </summary>
 public sealed partial class ReopenPeriodHandler(
     IPeriodStore periods,

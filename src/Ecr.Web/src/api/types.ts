@@ -341,6 +341,9 @@ export type SaveCalculationBindingRequest = Schemas['SaveCalculationBindingReque
 /** Число, яке дав актуальний прогін розрахунку на документі. */
 export type CalculationResultDto = Schemas['CalculationResultDto'];
 
+/** Стан актуального прогону документа за період: рядки без правила розрахунку (D14). */
+export type CalculationRunStatusDto = Schemas['CalculationRunStatusDto'];
+
 /** Diff публікації методології: що саме зміниться в числах (`ФВ-9.6`). */
 export type MethodologyPublicationDiff = Schemas['MethodologyPublicationDiff'];
 
@@ -510,6 +513,9 @@ export type SetCurrentPeriodRequest = Schemas['SetCurrentPeriodRequest'];
 
 /** Створення рядка динамічної таблиці (`ФВ-3.2`). */
 export type CreateRowRequest = Schemas['CreateRowRequest'];
+
+/** Видалення рядка динамічної таблиці (`D3-A`). */
+export type DeleteRowResponse = Schemas['DeleteRowResponse'];
 
 /** Перегляд імпорту: зміни, конфлікти, відхилення і токен застосування. */
 export type ImportPreview = Schemas['ImportPreview'];

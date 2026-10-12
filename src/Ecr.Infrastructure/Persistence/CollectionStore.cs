@@ -89,8 +89,8 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
     /// <c>SetValue</c> перезаписував ранішній), а стелі читання немає зовсім.
     /// </para>
     /// <para>
-    /// ⚠ Паралельний збір тієї самої сутності (ручний «зібрати зараз» поруч
-    /// із плановим) серіалізується <c>sp_getapplock</c> на сутність у
+    /// ⚠ Паралельний збір (ручний «зібрати зараз» поруч із плановим, або Hours і Fuel
+    /// одного документа) серіалізується <c>sp_getapplock</c> на таблицю (<see cref="RawPointLockResource"/>) у
     /// транзакції БАТЧА, а не прогону: лок живе мілісекунди, два прогони
     /// чергуються батчами і не чекають один одного годинами, а check-then-insert
     /// всередині <c>MERGE</c> більше не має вікна для гонки. Лок у задачі
@@ -145,7 +145,7 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
                     new SqlParameter("@retrievedAt", SqlDbType.DateTime2) { Scale = 3, Value = clock.UtcNow },
                     new SqlParameter("@resource", SqlDbType.NVarChar, 255)
                     {
-                        Value = string.Create(CultureInfo.InvariantCulture, $"Ecr.RawDataPoint:{sourceEntityId}"),
+                        Value = RawPointLockResource,
                     },
                     written,
                 ],
@@ -172,7 +172,20 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
     /// <remarks>⚠ Без <c>Z</c>: <c>datetime2</c> в <c>OPENJSON … WITH</c> суфікс зони не приймає (див. <c>MaterializationTargets</c>).</remarks>
     private const string StoredTimestampFormat = "yyyy-MM-ddTHH:mm:ss.fff";
 
-    /// <summary>Скільки чекати лок сутності, мс; менше за <c>CommandTimeout</c> (60 с).</summary>
+    /// <summary>
+    /// Ресурс <c>sp_getapplock</c>, що серіалізує ЗАПИС сирих точок усіх сутностей (одна таблиця — один лок).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Було: лок на СУТНІСТЬ (<c>Ecr.RawDataPoint:{id}</c>). Він ділив лише два збори тієї самої сутності, а
+    /// збори РІЗНИХ сутностей (Hours і Fuel одного документа) йшли паралельно в той самий унікальний індекс
+    /// <c>UQ_RawDataPoint (SourceEntityId, SourcePath, Timestamp)</c>: ключі різних сутностей лежать поруч в одному
+    /// індексі, і діапазонні замки MERGE сусідніх сутностей перетинаються на межах діапазонів — 1205 у ~80 подіях на
+    /// 20 перших зборів (RC19 P3-1), по три повтори EF не завжди вистачало. Один лок на таблицю прибирає саме
+    /// паралельний запис у неї; батч — мілісекунди, тож черга коротка.
+    /// </remarks>
+    public const string RawPointLockResource = "Ecr.RawDataPoint";
+
+    /// <summary>Скільки чекати лок запису сирих точок, мс; менше за <c>CommandTimeout</c> (60 с).</summary>
     private const int RawPointLockTimeoutMs = 30_000;
 
     /// <summary>Set-based upsert батча сирих точок.</summary>
@@ -197,7 +210,7 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         EXEC @lock = sp_getapplock @Resource = @resource, @LockMode = 'Exclusive',
                                    @LockOwner = 'Transaction', @LockTimeout = {RawPointLockTimeoutMs};
         IF @lock < 0
-            THROW 50001, N'ext.RawDataPoint: не вдалося взяти лок сутності джерела для запису точок (sp_getapplock < 0).', 1;
+            THROW 50001, N'ext.RawDataPoint: не вдалося взяти лок таблиці для запису точок (sp_getapplock < 0).', 1;
 
         WITH batch AS (
             SELECT j.SourcePath,

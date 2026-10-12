@@ -11,6 +11,19 @@ namespace Ecr.Application.Documents.EditAssignments;
 /// <param name="PeriodKey">Ключ періоду <c>Рік*100+№</c>.</param>
 public sealed record EditAssignmentSliceDto(string? SheetCode, string? TableCode, byte? MonthNumber, int? PeriodKey);
 
+/// <summary>Чи бачить виконавець документ (і аркуш передачі) за прямими призначеннями ролей (RC20 D-2).</summary>
+public enum RecipientVisibility
+{
+    /// <summary>Не обчислювалось або невідомо (групи AD чужої людини, вимкнений обліковий запис, стеля).</summary>
+    Unknown = 0,
+
+    /// <summary>Бачить документ (і аркуш передачі).</summary>
+    Visible = 1,
+
+    /// <summary>Не бачить документ чи аркуш: передача для нього без ефекту.</summary>
+    NotVisible = 2,
+}
+
 /// <summary>Виконавець у передачі.</summary>
 /// <param name="UserId">Користувач.</param>
 /// <param name="DisplayName">Ім'я.</param>
@@ -20,6 +33,11 @@ public sealed record EditAssignmentSliceDto(string? SheetCode, string? TableCode
 /// <param name="ReturnReason">Причина повернення.</param>
 /// <param name="ReturnCount">Скільки разів повертали.</param>
 /// <param name="IsActive">Обліковий запис не вимкнений.</param>
+/// <param name="Visibility">
+/// Чи бачить виконавець документ (і аркуш передачі) за ПРЯМИМИ призначеннями ролей:
+/// <c>Visible</c> | <c>NotVisible</c> | <c>Unknown</c> (групи AD чужої людини невідомі; у відповідях, що не є
+/// переліком передач, не обчислюється). RC20 D-2.
+/// </param>
 public sealed record EditAssignmentRecipientDto(
     int UserId,
     string DisplayName,
@@ -28,7 +46,8 @@ public sealed record EditAssignmentRecipientDto(
     DateTime? ReturnedAt,
     string? ReturnReason,
     int ReturnCount,
-    bool IsActive);
+    bool IsActive,
+    RecipientVisibility Visibility = RecipientVisibility.Unknown);
 
 /// <summary>Передача зрізу з виконавцями.</summary>
 /// <param name="Id">Ідентифікатор.</param>
@@ -45,6 +64,7 @@ public sealed record EditAssignmentRecipientDto(
 /// <param name="Recipients">Виконавці.</param>
 /// <param name="ModifiedAt">Коли змінено.</param>
 /// <param name="Version">Версія для <c>baseVersion</c>.</param>
+/// <param name="ExpiresAt">Термін дії передачі (UTC); <c>null</c> — безстроково.</param>
 public sealed record EditAssignmentDto(
     long Id,
     EditAssignmentSliceDto Slice,
@@ -59,7 +79,8 @@ public sealed record EditAssignmentDto(
     string? AppliedSetName,
     IReadOnlyList<EditAssignmentRecipientDto> Recipients,
     DateTime ModifiedAt,
-    string Version);
+    string Version,
+    DateTime? ExpiresAt = null);
 
 /// <summary>Перелік передач документа для менеджера.</summary>
 /// <param name="OwnerDisplayName">Автор документа.</param>
@@ -81,7 +102,35 @@ public sealed record UpsertEditAssignmentRequest(
     bool IsExclusive = true,
     string? Note = null,
     int? AppliedSetId = null,
-    string? BaseVersion = null);
+    string? BaseVersion = null)
+{
+    private DateTime? _expiresAt;
+    private bool _expiresAtSpecified;
+
+    /// <summary>
+    /// Термін дії передачі, UTC: у майбутньому й не пізніше ніж через 366 діб. PATCH-семантика: ПОЛЕ ВІДСУТНЄ в
+    /// тілі — термін наявної передачі не змінюється (нова — без терміну); явний <c>null</c> — термін знімається;
+    /// значення — замінює.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не параметр конструктора навмисно: <c>System.Text.Json</c> викликає init-аксесор лише для присутнього
+    /// в JSON поля (у тому числі зі значенням <c>null</c>), і тому розрізняє «відсутнє» й «null» —
+    /// <see cref="ExpiresAtSpecified"/>.
+    /// </remarks>
+    public DateTime? ExpiresAt
+    {
+        get => _expiresAt;
+        init
+        {
+            _expiresAt = value;
+            _expiresAtSpecified = true;
+        }
+    }
+
+    /// <summary>Чи було поле <see cref="ExpiresAt"/> у тілі запиту (навіть зі значенням <c>null</c>).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ExpiresAtSpecified => _expiresAtSpecified;
+}
 
 /// <summary>Тіло валідації.</summary>
 /// <param name="BaseVersion">Версія передачі, яку бачив власник.</param>

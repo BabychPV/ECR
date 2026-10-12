@@ -96,4 +96,34 @@ public sealed class PackageExportTests
         Assert.False(plainJson.TryGetProperty("categoryRule", out _));
         Assert.False(plainJson.GetProperty("formulas")[0].TryGetProperty("scope", out _));
     }
+
+    /// <remarks>
+    /// G12 (Land, 7.16): методологія з формулою <c>ECW_Category</c> без <c>ECW_Location</c> отримує правило
+    /// <c>!ECW_Category</c>. Мутація: прибрати гілку <c>CategoryFormula</c> в <c>CategoryRuleOf</c> - тест червоний.
+    /// </remarks>
+    [Fact]
+    public void Формула_ECW_Category_без_Location_дає_categoryRule_за_нею()
+    {
+        var xml = new AfXmlBuilder()
+            .Formula("ECW_C07_16", "V1", "ECW_Category", "", "'Summer'")
+            .Formula("ECW_C07_16", "V1", "ECW_EC_tons_333", "", "1")
+            .Constant("ECW_C07_16", "V1", "k", "1", category: "Summer")
+            .Constant("ECW_C07_16", "V1", "k", "2", category: "Winter")
+            .Formula("ECW_C07_98", "V1", "ECW_Category", "", "'Summer'")
+            .Constant("ECW_C07_98", "V1", "k", "1")
+            .Formula("ECW_C07_99", "V1", "ECW_EC_tons_333", "", "1")
+            .Build();
+
+        var package = Package(xml);
+
+        Assert.Equal(
+            "!ECW_Category",
+            package.Methodologies.Single(m => m.Name == "ECW_C07_16").Versions.Single().CategoryRule?.Expression);
+
+        // G12: формула ECW_Category без категорійних констант (лише спільна категорія) правила не дає.
+        Assert.Null(package.Methodologies.Single(m => m.Name == "ECW_C07_98").Versions.Single().CategoryRule);
+
+        // Без жодної категорійної формули правила немає.
+        Assert.Null(package.Methodologies.Single(m => m.Name == "ECW_C07_99").Versions.Single().CategoryRule);
+    }
 }

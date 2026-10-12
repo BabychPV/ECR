@@ -476,10 +476,21 @@ async function expectPasteDenied(page: Page): Promise<void> {
   // Перевіряємо текст, а не лише факт модалки, інакше цей самий тест пройшов
   // би і на геть іншій причині — зокрема на `deny.NoGrant`, яка означала б,
   // що `EditRules.CanEdit` знову злив «немає гранта» і «грант замалий».
+  //
+  // ⚠ Передумова: оператор НЕ виконавець жодної діючої передачі в документі. Інакше (RC20 D-3,
+  // `EditAccessFacts.IsExecutor`) причина — `deny.NotAssignedToYou`, і це правильно для продукту. Передачу, яку лишав
+  // `editAssignments.spec.ts` (файл раніше за цей), тепер знімає його `afterAll`; не прибирайте його.
+  //
+  // ⚠ Шукаємо ТІЛЬКИ в модалці відмови: той самий текст для гранта `Read` є й у прихованому
+  // `<span id="ecr-add-row-denial" hidden>` (D9, `DocumentGrid.tsx`: опис кнопки «Add row» для `aria-describedby`), тож
+  // глобальний `getByText` дає два збіги (strict mode violation, run 38230443717). Модалка — єдине місце, де
+  // причину бачить користувач після вставки, і саме її ми перевіряємо.
   await expect(
-    page.getByText(
-      'Your grant level is too low for this action: ask for a higher grant level, not a new grant.',
-    ),
+    page
+      .getByRole('dialog', { name: 'Some cells were not saved' })
+      .getByText(
+        'Your grant level is too low for this action: ask for a higher grant level, not a new grant.',
+      ),
     'причина відмови не збігається з очікуваною (deny.InsufficientGrantLevel)',
   ).toBeVisible();
 

@@ -56,6 +56,15 @@ public sealed class EcrMetrics
     /// </summary>
     public const string CspViolations = "ecr.csp.violations";
 
+    /// <summary>
+    /// Відповіді 503 «база тимчасово зайнята» (<c>ECR-SYS-0503</c> <c>databaseBusy</c>): тайм-аут команди,
+    /// deadlock після повторів, вичерпаний пул. Тег <c>kind</c> - закритий перелік (<c>timeout</c>,
+    /// <c>deadlock</c>, <c>lockTimeout</c>, <c>pool</c>, <c>other</c>). RC19 P3-2: без лічильника
+    /// частоту таких 503 було видно лише з журналу.
+    /// </summary>
+    public const string DatabaseBusy = "ecr.db.busy.count";
+
+    private readonly Counter<long> _databaseBusy;
     private readonly Counter<long> _cspViolations;
     private readonly Histogram<double> _jobStartLatency;
     private readonly Histogram<double> _cellsRead;
@@ -78,7 +87,13 @@ public sealed class EcrMetrics
         _jobStartLatency = meter.CreateHistogram<double>(
             JobStartLatency, "ms", "Затримка від постановки задачі в чергу до її старту");
         _cspViolations = meter.CreateCounter<long>(CspViolations, "1", "Порушення CSP за звітами браузерів");
+        _databaseBusy = meter.CreateCounter<long>(DatabaseBusy, "1", "Відповіді 503 databaseBusy");
     }
+
+    /// <summary>Фіксує одну відповідь 503 «база зайнята».</summary>
+    /// <param name="kind">Вид збою з закритого переліку (див. <see cref="DatabaseBusy"/>).</param>
+    public void RecordDatabaseBusy(string kind)
+        => _databaseBusy.Add(1, new KeyValuePair<string, object?>("kind", kind));
 
     /// <summary>Фіксує одне порушення CSP (<c>S14</c>).</summary>
     /// <param name="directive">

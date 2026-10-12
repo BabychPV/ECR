@@ -109,6 +109,7 @@ public static partial class EcrConfigurationValidation
         "Security:RateLimit:TrustForwardedFor",
         "Security:Csp:ReportOnly",
         "Security:Csp:Enforce",
+        "Health:WarmupOnStart",
         "Jobs:NightlyRecalculation:Enabled",
         "Logging:File:Json",
         Ecr.Api.Observability.TelemetrySetup.EnabledKey,

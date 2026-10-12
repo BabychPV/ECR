@@ -32,49 +32,31 @@ public sealed class CreateRowHandler(
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
-
-        // ⛔ Належність екземпляра таблиці документові з МАРШРУТУ. Без цієї
-        // звірки шлях у URL декоративний: клієнт указав би чужий
-        // `TableInstanceId` і писав би в чужий документ, маючи право лише на
-        // свій. `Patch` цю перевірку робить і пояснює навіщо
-        // (`CellsController.Patch`); сюди вона не доїхала, хоча `documentId`
-        // сюди приходив — і не читався взагалі.
-        //
-        // ⚠ Стоїть в ОБРОБНИКУ, а не в контролері, як у `Patch`: обробник —
-        // єдина точка, повз яку не пройде другий виклик.
-        if (instance.DocumentId != documentId)
+        // ⛔ S-4: ВІДСУТНІЙ екземпляр дає те саме тіло 404, що й чужий/недоступний (без оракула існування).
+        TableInstanceRef instance;
+        try
         {
-            throw new Errors.NotFoundException(
-                "ECR-DOC-0404",
-                $"Екземпляр таблиці {tableInstanceId} не належить документу {documentId}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.tableInstanceNotInDocument",
-                    ["tableInstanceId"] = tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        }
+        catch (Errors.NotFoundException)
+        {
+            throw DocumentVisibility.DocumentNotFound(documentId);
         }
 
-        // ⛔ Видимість документа — до будь-якої відмови про таблицю (V-02, той
-        // самий клас, що й у `PatchCellsHandler`). Нижче відмови кажуть режим
-        // таблиці, межу рядків і чи зайнятий ключ — і все це діставалося
-        // користувачеві із забороною на проєкт, бо права питалися лише
-        // наприкінці. Відповідь — як на читання: 404, не 403.
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
+        // ⛔ Належність екземпляра таблиці документові з МАРШРУТУ + видимість документа (V-02): 404, не 403.
+        // ⛔ P3 (оракул існування): «екземпляр чужого документа» і «документ недоступний» — ОДНА відповідь
+        // (404 `err.ECR-DOC-0404.document`); окремий текст дозволяв вгадувати чужі `TableInstanceId`.
+        var read = instance.DocumentId == documentId
+            ? await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false)
+            : EditDecision.Deny(EditDenyReason.NoGrant);
         if (!read.IsAllowed)
         {
-            throw new Errors.NotFoundException(
-                "ECR-DOC-0404",
-                $"Документ {documentId} не знайдено.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.document",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            throw DocumentVisibility.DocumentNotFound(documentId);
         }
-
         // ⛔ D-6: схована таблиця для читача НЕ ІСНУЄ — 404 ДО відмови «RowMode = Fixed», що називала її код.
+        //
+        // ⚠ EA6-D1: тіло — `tableInstance` (як у поштучного PATCH, книги й GET зрізу; D-6 і `HiddenTableConflictLeakTests`
+        // це закріплюють). Відсутній і ЧУЖИЙ екземпляр вище — `document`, без оракула існування екземплярів.
         await DocumentVisibility
             .RequireTableVisibleAsync(
                 access, profile, documentId, instance.TableInstanceId, instance.TableDefId, instance.PeriodKey, ct)
@@ -295,10 +277,17 @@ public sealed class CreateRowHandler(
                 });
         }
 
-        // 6. Id береться з SEQUENCE ДО вставки — саме це дозволяє вантажити
+        // 6. Порядковий номер — НАЙБІЛЬШИЙ наявний + 1 (D3), а не кількість + 1: після видалення рядка
+        //    «живих + 1» повторював би номер уже наявного рядка (і номер видаленого в аудиті). Рахується
+        //    під тим самим блокуванням аркуша, що й вставка, тож два одночасні створення номер не задвоюють.
+        var ordinal = await rowStore
+            .GetMaxOrdinalAsync(tableInstanceId, PeriodKeyOf(instance), ct)
+            .ConfigureAwait(false) + 1;
+
+        // 7. Id береться з SEQUENCE ДО вставки — саме це дозволяє вантажити
         //    рядок і його комірки одним проходом SqlBulkCopy.
         await rowStore.CreateRowAsync(tableInstanceId, PeriodKeyOf(instance), key,
-                                      ordinal: existing.Count + 1, ct).ConfigureAwait(false);
+                                      ordinal, ct).ConfigureAwait(false);
 
         // ⛔ Новий рядок — це зміна документа (`H-23d`). Без цього «додав рядок»
         // не змінювало ані `ModifiedAt`, ані автора: у переліку документ

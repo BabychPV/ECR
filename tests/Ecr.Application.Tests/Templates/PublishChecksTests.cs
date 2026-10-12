@@ -542,6 +542,111 @@ public sealed class PublishChecksTests
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.7")]
+    public void Комірочна_формула_між_таблицями_з_діленням_на_1000_публікується_без_зауважень()
+    {
+        // ⛔ D1 (7.0 Water consolidation ← 7. Water Report): Cell-формула суми
+        // кількох рядків ІНШОГО аркуша, поділена на літерал 1000. Перевірка
+        // одиниць (ФВ-16.7) цього не блокує: літерал безрозмірний (`* 1000` не
+        // робить із м3 тис. м3 — це робить формула автора), а результат не
+        // звіряється з одиницею цільової колонки — звіряються лише операнди.
+        var (version, formula) = CellConsolidation(
+            "([Water_Report].[Report].[7001001].[Jan] + [Water_Report].[Report].[7001002].[Jan]) / 1000",
+            CubicMetreUnit, CubicMetreUnit);
+
+        Assert.Empty(Run(version, Units()));
+        Assert.Empty(FormulaTargetConflicts.Check(version, _engine));
+
+        // Ребра графа — на обидва джерельні рядки, прив'язані до САМОЇ комірочної формули.
+        var sources = PublishChecks.Dependencies(version, _engine)
+            .Where(d => d.FormulaDefId == formula.Id && d.RowKey is not null)
+            .Select(d => d.RowKey)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(["7001001", "7001002"], sources);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.7")]
+    public void Комірочна_формула_не_обходить_перевірку_одиниць_операндів()
+    {
+        // Друга половина: комірочна область не послаблює ФВ-16.7 — додати
+        // кубометри до тонн без CONVERT і тут відмова (інакше попередній тест
+        // був би зеленим і від «Cell не перевіряється взагалі»).
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var source = builder.Table(builder.Sheet("Water_Report"), "Report");
+        builder.Column(source, "Jan", isMonthColumn: true, unitId: CubicMetreUnit);
+        builder.Column(source, "Feb", isMonthColumn: true, unitId: TonneUnit);
+        builder.Row(source, "7001001", 1);
+        var total = builder.Table(builder.Sheet("Water_Total"), "Total");
+        var target = builder.Column(total, "Jan", CellDataType.Formula, unitId: CubicMetreUnit);
+        var row = builder.Row(total, "R02", 1);
+        builder.Formula(
+            total,
+            "([Water_Report].[Report].[7001001].[Jan] + [Water_Report].[Report].[7001001].[Feb]) / 1000",
+            FormulaScope.Cell, target, row);
+
+        Assert.Contains(
+            ExpressionErrors.UnitMismatch,
+            Render(Run(builder.Version(), Units())),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-5.11")]
+    public void Комірочна_формула_не_знімає_обовязковість_з_усієї_колонки()
+    {
+        // Червоний до фіксу: Cell-формула однієї комірки R02 · Total приховувала 4225 для колонки
+        // цілком. Контроль нижче: формула області Column колонку справді покриває.
+        var cell = CellConsolidationRequired(FormulaScope.Cell);
+        var column = CellConsolidationRequired(FormulaScope.Column);
+
+        Assert.Contains(ExpressionErrors.RequiredNotCovered, Render(PublishChecks.CheckRules(cell)), StringComparison.Ordinal);
+        Assert.DoesNotContain(ExpressionErrors.RequiredNotCovered, Render(PublishChecks.CheckRules(column)), StringComparison.Ordinal);
+    }
+
+    private static TemplateVersion CellConsolidationRequired(FormulaScope scope)
+    {
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var total = builder.Table(builder.Sheet("Water_Total"), "Total");
+        var target = builder.Column(total, "Jan", CellDataType.Formula, isMonthColumn: true);
+        target.SetRequired(true);
+        var row = builder.Row(total, "R02", 1);
+        builder.Row(total, "R03", 2);
+        _ = scope == FormulaScope.Cell
+            ? builder.Formula(total, "1 + 1", FormulaScope.Cell, target, row)
+            : builder.Formula(total, "1 + 1", FormulaScope.Column, target);
+
+        return builder.Version();
+    }
+
+    /// <summary>
+    /// Дві таблиці на різних аркушах: джерело (<c>Water_Report.Report</c>, два
+    /// рядки) і консолідація (<c>Water_Total.Total</c>, комірка <c>R02·Jan</c>
+    /// з Cell-формулою).
+    /// </summary>
+    private static (TemplateVersion Version, FormulaDef Formula) CellConsolidation(
+        string expression, int sourceUnit, int targetUnit)
+    {
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var report = builder.Table(builder.Sheet("Water_Report"), "Report");
+        builder.Column(report, "Jan", isMonthColumn: true, unitId: sourceUnit);
+        builder.Row(report, "7001001", 1);
+        builder.Row(report, "7001002", 2);
+
+        var total = builder.Table(builder.Sheet("Water_Total"), "Total");
+        var target = builder.Column(total, "Jan", CellDataType.Formula, isMonthColumn: true, unitId: targetUnit);
+        var row = builder.Row(total, "R02", 1);
+        var formula = builder.Formula(total, expression, FormulaScope.Cell, target, row);
+
+        return (builder.Version(), formula);
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-9.4")]
     public void Залежності_несуть_формулу_і_колонку()

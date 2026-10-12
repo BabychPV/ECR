@@ -43,6 +43,7 @@ import { createUnitCellEditor, unitCellDisplay, unitIdOfCode } from './UnitCellE
 import { createDateCellEditor } from './DateCellEditor';
 import { roundToScale, type RoundedCell } from './rounding';
 import {
+  addRowDenialOf,
   cellKey,
   cellsNeedingConfirmation,
   confirmationOf,
@@ -127,8 +128,14 @@ import {
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showWarning } from '@/shared/ui/notify';
-import { refusalText } from './saveErrors';
+import {
+  refusalText,
+  rejectedCellReasons,
+  SaveErrorReasonsLimit,
+  type RejectedCellReason,
+} from './saveErrors';
 import { useAddRow } from './useAddRow';
+import { DeleteRowControl } from './DeleteRowControl';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
 // ⚠ Порядок стилів збережений: `cell-states.css` (раніше — у `App.tsx`) іде
@@ -618,6 +625,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // сервер щойно прийняв (`discardPendingRows` вище): відхилена комірка
         // того самого рядка, якої в пакеті не було, лишається позначеною.
         setSaveError(null);
+        setSaveErrorReasons([]);
         // ⚠ AN-123: збереження пройшло — стан «чекає, доки дані звільняться» знято.
         // ⛔ Y8-04: лише для ЦЬОГО зрізу — повтор іншого зрізу не скасовується.
         noteBusyRetryResolved(tableInstanceId, periodKey);
@@ -646,6 +654,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // (`requiredInputBlocked`) — другий банер із тим самим по суті
           // повідомленням розсіював би увагу, а не додавав інформацію.
           setSaveError(null);
+          setSaveErrorReasons([]);
         } else if (error instanceof EcrApiError && error.isTransientBusy) {
           // ⛔ AN-123 (`R1-03`/`R2-01`): «дані зайняті» — не відмова, а очікування.
           // Червоного банера немає: правки не утримано, повтор заплановано
@@ -655,6 +664,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // `DatabaseBusyAutoRetries`), це вже відмова — причина в банері, поруч
           // «Retry save» і позначка (`noteSaveFailed` у `holdRejectedEdits`).
           if (!isBusyRetryWaiting()) setSaveError(refusalText(error));
+          setSaveErrorReasons([]);
         } else {
           // ⛔ Q-30x (High): ось сам фікс — реальний, локалізований текст
           // сервера («Колонка «C1» очікує число.» і подібні) показується як
@@ -667,6 +677,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // неї — назва проблеми з каталогу. Те саме для не нашої відмови
           // (мережа, `TypeError`): доти тут стояв `String(error)`.
           setSaveError(refusalText(error));
+          setSaveErrorReasons(rejectedCellReasons(error));
         }
 
         // ⚠ Рестрибок НЕ повторюється: жоден викликач (`onPaste`, кнопка
@@ -776,6 +787,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // (`requiredInputBlocked` нижче) — дублювати той самий текст у двох
   // банерах означало б розсіювати увагу там, де причина вже названа.
   const [saveError, setSaveError] = useState<string | null>(null);
+  // ✎ D2: причини з тіла 422 (`cells[].message`) — банер називає правило, а не лише кількість.
+  const [saveErrorReasons, setSaveErrorReasons] = useState<readonly RejectedCellReason[]>([]);
 
   // ⛔ `V-01`: комірки, які сервер відхилив, — зі СХОВИЩА документа, а не зі
   // стану сітки. Там їх бачить автозбереження (щоб не везти), там вони
@@ -2249,6 +2262,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
   const saveLoading = usePendingLoading(isPending);
   const addRowLoading = usePendingLoading(addRow.isPending);
+  // ✎ D9: грант не дозволяє правити жодну вхідну комірку — «Add row» вимкнена з причиною.
+  const addRowDenial = useMemo(() => (data === undefined ? null : addRowDenialOf(data)), [data]);
 
   return (
     /*
@@ -2421,7 +2436,13 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           <Button
             variant="default"
             loading={addRowLoading}
-            disabled={maxDynamicRows !== null && (data?.rows.length ?? 0) >= maxDynamicRows}
+            disabled={
+              addRowDenial !== null || (maxDynamicRows !== null && (data?.rows.length ?? 0) >= maxDynamicRows)
+            }
+            // ✎ D9: причина — підказкою кнопки (у вимкненої кнопки немає власного `title`-тексту).
+            title={addRowDenial?.hint}
+            aria-describedby={addRowDenial === null ? undefined : 'ecr-add-row-denial'}
+            data-add-row-denied={addRowDenial?.reason}
             onClick={() => {
               if (addRow.isPending) return;
               addRow.mutate();
@@ -2429,6 +2450,23 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           >
             {t('grid.addRow')}
           </Button>
+        )}
+
+        {/* ✎ D3-A: видалення рядка, доданого користувачем (діє на рядок фокусної комірки); підтвердження в
+            самому компоненті. Той самий предикат видимості, що й «Додати рядок». */}
+        {allowsDynamicRows && !readOnly && data !== undefined && (
+          <DeleteRowControl
+            documentId={documentId}
+            tableInstanceId={tableInstanceId}
+            periodKey={periodKey}
+            slice={data}
+            onDeleted={() => void slice.refetch()}
+          />
+        )}
+        {addRowDenial !== null && (
+          <span id="ecr-add-row-denial" hidden>
+            {addRowDenial.hint}
+          </span>
         )}
       </Group>
 
@@ -2442,6 +2480,24 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // позначка в рядку кнопок. Одна відмова — одне повідомлення.
         <Alert color="statusError" title={t('grid.saveError')} role="alert">
           <Text size="sm">{saveErrorText}</Text>
+          {saveError !== null && saveErrorReasons.length > 0 && (
+            // ✎ D2: правило, що відхилило запис, — з посиланням на комірку (колонка · рядок).
+            <Stack gap="xs" mt="xs" data-testid="save-error-reasons">
+              {saveErrorReasons.slice(0, SaveErrorReasonsLimit).map((reason) => {
+                const header =
+                  data?.columns.find((column) => column.code === reason.columnCode)?.header ?? reason.columnCode;
+                const row = data?.rows.find((candidate) => candidate.rowKey === reason.rowKey);
+                const place = row === undefined ? header : `${header} · ${rowLabelOf(row)}`;
+
+                return (
+                  <Text size="sm" key={`${reason.rowKey}:${reason.columnCode}:${reason.message}`}>
+                    {`${place}: ${reason.message}`}
+                  </Text>
+                );
+              })}
+              {saveErrorReasons.length > SaveErrorReasonsLimit && <Text size="sm">…</Text>}
+            </Stack>
+          )}
         </Alert>
       )}
 

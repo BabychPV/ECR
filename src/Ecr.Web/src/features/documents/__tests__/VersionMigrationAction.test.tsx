@@ -68,6 +68,10 @@ function report(overrides: Partial<VersionMigrationReport>): VersionMigrationRep
     lockedSheets: 0,
     items: [{ path: 'GEN.T1.C4', kind: 'Added', changeClass: 'Safe', values: 0 }],
     itemsTruncated: false,
+    mappingsRemapped: 0,
+    mappingsUnmapped: 0,
+    otherProjectsOnSourceVersion: 0,
+    otherDocumentsOnSourceVersion: 0,
     ...overrides,
   };
 }
@@ -347,6 +351,41 @@ describe('useVersionMigrationAction', () => {
 
     await screen.findByText('⟦documents.migrateRefusalMethodologyKeysNotMapped⟧');
     expect(screen.queryByText('methodologyKeysNotMapped')).toBeNull();
+  });
+
+  it('причина mappingsNotMapped показується підписом каталогу, а не сирим кодом (D-1)', async () => {
+    show(['Template.Edit'], report({ canApply: false, refusals: ['mappingsNotMapped'] }));
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+    await screen.findByText('⟦documents.migrateRefusalMappingsNotMapped⟧');
+    expect(screen.queryByText('mappingsNotMapped')).toBeNull();
+  });
+
+  it('попередження про інші проєкти на старій версії є, коли їх більше нуля, і не блокує перенос (D-1b P2-3)', async () => {
+    show(['Template.Edit'], report({ canApply: true, otherProjectsOnSourceVersion: 2, otherDocumentsOnSourceVersion: 5 }));
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-migrate-other-projects]')).not.toBeNull();
+    });
+    // Перенос не заблоковано: звіт далі каже «можна».
+    expect(document.querySelector('[data-migrate-can-apply]')).not.toBeNull();
+  });
+
+  it('без інших проєктів на старій версії попередження немає (D-1b P2-3)', async () => {
+    show(['Template.Edit'], report({ canApply: true }));
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-migrate-can-apply]')).not.toBeNull();
+    });
+    expect(document.querySelector('[data-migrate-other-projects]')).toBeNull();
   });
 
   it('blockedGrantCount показується рядком із кількістю; без нього рядка немає (ent7 P3-4)', async () => {

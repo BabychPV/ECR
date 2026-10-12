@@ -319,12 +319,40 @@ public sealed class ContractIntegrityTests
         produced.Add(AssignmentReason(AssigneeProgress.Assigned, validated: false, mine: false));
         produced.Add(AssignmentReason(AssigneeProgress.Assigned, validated: false, mine: true, expired: true));
 
+        // RC20 D-3: виконавець (Read за роллю) у частині, яку йому не передано, — окрема причина.
+        produced.Add(NotAssignedReason());
+
         var unreachable = Enum.GetValues<EditDenyReason>()
             .Except(produced)
             .Select(r => r.ToString())
             .ToList();
 
         Assert.Empty(unreachable);
+    }
+
+    /// <summary>Виконавець із Read у місяці, якого його передача не стосується (RC20 D-3).</summary>
+    private static EditDenyReason NotAssignedReason()
+    {
+        var fact = new EditAssignmentFact(
+            SheetCode: null, TableCode: null, MonthNumber: 1, Period: null,
+            IsExclusive: true, IsValidated: false, DelegatorActive: true,
+            DelegatedByUserId: 2, ExpiresAt: null, MyProgress: AssigneeProgress.Assigned);
+
+        var facts = EditAssignmentGuard.Evaluate(
+            userId: 7, documentOwnerUserId: 1, isIntegrationWriter: false, [fact],
+            new EditSliceFacts("F1", "T1", new Ecr.Domain.ValueObjects.PeriodKey(202602), ColumnIsMonth: true, ColumnMonthNumber: 2),
+            new DateTime(2026, 10, 11, 0, 0, 0, DateTimeKind.Utc));
+
+        var reader = new AccessBuilder().Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read).Build();
+
+        return EditRules.CanEdit(
+            reader,
+            AccessBuilder.Cell() with
+            {
+                DelegatedWrite = facts.DelegatedWrite,
+                AssignmentLock = facts.Lock,
+                IsAssignmentExecutor = facts.IsExecutor,
+            }).Reason;
     }
 
     /// <summary>Причина відмови запису від передачі зрізу (EA-B) через правило й <c>EditRules</c>.</summary>

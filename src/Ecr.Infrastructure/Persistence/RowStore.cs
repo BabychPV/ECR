@@ -1,3 +1,4 @@
+using Ecr.Application.Documents;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Documents;
@@ -19,7 +20,8 @@ namespace Ecr.Infrastructure.Persistence;
 /// </remarks>
 public sealed class RowStore(
     EcrDbContext db, BulkCellLoader bulk, Domain.Abstractions.IClock clock, ArchiveAwareCellReader? archive = null,
-    ISheetEditGate? structureGate = null)
+    ISheetEditGate? structureGate = null,
+    Microsoft.Extensions.Logging.ILogger<RowStore>? log = null)
     : IRowStore
 {
     // ⚠ F-13. `archive` — необов'язковий параметр, а не звичайна залежність:
@@ -353,6 +355,106 @@ public sealed class RowStore(
         }
 
         return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<int> GetMaxOrdinalAsync(long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+    {
+        // ⚠ ВСІ рядки, включно з видаленими (див. порт): навмисно без `!IsDeleted`.
+        var max = await db.TableRows.AsNoTracking()
+            .Where(r => r.PeriodKeyValue == periodKey.Value && r.TableInstanceId == tableInstanceId)
+            .MaxAsync(r => (int?)r.Ordinal, ct)
+            .ConfigureAwait(false);
+
+        return max ?? 0;
+    }
+
+    /// <inheritdoc />
+    public Task<LiveRowRef?> FindLiveRowAsync(
+        long tableInstanceId, PeriodKey periodKey, string rowKey, CancellationToken ct)
+        => RowsQuery(db, tableInstanceId, periodKey)
+            .Where(r => r.RowKeyValue == rowKey)
+            .Select(r => new LiveRowRef(
+                r.Id, r.Ordinal, r.RowDefId,
+                // Рядок, який веде синхронізація подій джерела: ручне видалення зламало б її (ключ зайнятий).
+                db.SourceEventLinks.Any(l => l.TableInstanceId == r.TableInstanceId
+                                             && l.PeriodKey == r.PeriodKeyValue
+                                             && l.RowKey == r.RowKeyValue)))
+            .FirstOrDefaultAsync(ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Деградація (D-264, як `AuditReader.WithArchiveFallbackAsync`): службовий акаунт може не мати `SELECT` на
+    /// `arc.AuditCellChange` (DBA дає лише `EXECUTE` на `arc.usp_*`) — відмова 229/230 повторює запит ЛИШЕ по
+    /// гарячому `aud.CellChange` + попередження в журналі, а не 500 на кожне видалення рядка.
+    /// ⚠ Напрям не змінено: при деградації машинне походження міряється лише за гарячим журналом, тож рядок, чия
+    /// остання машинна зміна — в архіві, а права на архів немає, видалити МОЖНА (fail-open саме для архіву). Це
+    /// прийнятно: перенесена в архів зміна старша за вікно гарячого журналу, а блок — захист від «відродження»
+    /// свіжих машинних даних.
+    /// </remarks>
+    public Task<bool> HasMachineOriginAsync(long documentId, PeriodKey periodKey, long rowId, CancellationToken ct)
+        => AuditReader.WithArchiveFallbackAsync(
+            withArchive => QueryMachineOriginAsync(documentId, periodKey, rowId, withArchive, ct), log);
+
+    private async Task<bool> QueryMachineOriginAsync(
+        long documentId, PeriodKey periodKey, long rowId, bool withArchive, CancellationToken ct)
+    {
+        // ⚠ Журнал не є сутністю EF; `IX_CellChange_Cell (DocumentId, TableRowId, ColumnDefId, ChangedAt DESC)`.
+        // Береться ОСТАННЯ зміна кожної комірки, окрім перерахунку (він міняє похідне, а не вхід).
+        var query = withArchive
+            ? db.Database
+                .SqlQuery<int>($"""
+                    SELECT TOP (1) 1 AS Value
+                    FROM (
+                        SELECT u.Origin,
+                               ROW_NUMBER() OVER (PARTITION BY u.ColumnDefId ORDER BY u.ChangedAt DESC, u.Id DESC) AS Rn
+                        FROM (
+                            SELECT c.Id, c.ChangedAt, c.ColumnDefId, c.Origin
+                            FROM aud.CellChange c
+                            WHERE c.DocumentId = {documentId} AND c.TableRowId = {rowId} AND c.PeriodKey = {periodKey.Value}
+                            UNION ALL
+                            SELECT a.Id, a.ChangedAt, a.ColumnDefId, a.Origin
+                            FROM arc.AuditCellChange a
+                            WHERE a.DocumentId = {documentId} AND a.TableRowId = {rowId} AND a.PeriodKey = {periodKey.Value}
+                        ) u
+                        WHERE u.Origin <> {CellChangeOrigins.Recalculation}
+                    ) x
+                    WHERE x.Rn = 1 AND x.Origin = {CellChangeOrigins.Integration}
+                    """)
+            : db.Database
+                .SqlQuery<int>($"""
+                    SELECT TOP (1) 1 AS Value
+                    FROM (
+                        SELECT c.Origin,
+                               ROW_NUMBER() OVER (PARTITION BY c.ColumnDefId ORDER BY c.ChangedAt DESC, c.Id DESC) AS Rn
+                        FROM aud.CellChange c
+                        WHERE c.DocumentId = {documentId} AND c.TableRowId = {rowId} AND c.PeriodKey = {periodKey.Value}
+                          AND c.Origin <> {CellChangeOrigins.Recalculation}
+                    ) x
+                    WHERE x.Rn = 1 AND x.Origin = {CellChangeOrigins.Integration}
+                    """);
+
+        var found = await query.ToListAsync(ct).ConfigureAwait(false);
+
+        return found.Count > 0;
+    }
+    /// <inheritdoc />
+    public async Task<bool> SoftDeleteRowAsync(long rowId, PeriodKey periodKey, CancellationToken ct)
+    {
+        // ⚠ З ключем партиції (`PeriodKey`) і лише ЖИВИЙ: повторне видалення — `false`, не помилка бази.
+        var row = await db.TableRows
+            .FirstOrDefaultAsync(r => r.PeriodKeyValue == periodKey.Value && r.Id == rowId && !r.IsDeleted, ct)
+            .ConfigureAwait(false);
+
+        if (row is null)
+        {
+            return false;
+        }
+
+        row.SoftDelete(clock.UtcNow);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return true;
     }
 
     /// <inheritdoc />

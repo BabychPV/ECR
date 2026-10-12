@@ -80,7 +80,7 @@ public sealed class SystemHealthFailedSourcesTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Кеш_тримає_число_до_60_с_і_оновлює_після()
+    public async Task Кеш_тримає_число_до_30_с_і_оновлює_після()
     {
         var created = new List<int>();
         try
@@ -93,11 +93,11 @@ public sealed class SystemHealthFailedSourcesTests(SqlServerFixture sql)
             var s = await SourceAsync(db, created, active: true);
             await RunsAsync(db, s.E1, ("Failed", -1));
 
-            // У межах 60 с — старе число, запиту до БД немає.
-            Assert.Equal(first, await FailedAsync(db, cache, Now.AddSeconds(59)));
+            // У межах 30 с (SnapshotTtl знімка — єдиний рівень кешу) — старе число, запиту до БД немає.
+            Assert.Equal(first, await FailedAsync(db, cache, Now.AddSeconds(29)));
 
-            // Після 60 с — нове.
-            Assert.Equal(first + 1, await FailedAsync(db, cache, Now.AddSeconds(61)));
+            // Після 30 с — нове.
+            Assert.Equal(first + 1, await FailedAsync(db, cache, Now.AddSeconds(31)));
         }
         finally
         {

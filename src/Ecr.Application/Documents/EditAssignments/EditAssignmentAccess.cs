@@ -36,6 +36,30 @@ internal static class EditAssignmentAccess
                 ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
             });
 
+    /// <summary>
+    /// Профіль ЧУЖОГО користувача або <c>null</c>, якщо його не можна побудувати (вимкнений/відсутній: служба доступу
+    /// кидає <c>ECR-AUTH-0401</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>AccessDeniedException</c> з <c>ECR-AUTH-0401</c> клієнт трактує як «сесію скасовано» й виходить із
+    /// застосунку. Побудова профілю ВИКОНАВЦЯ/КАНДИДАТА, не викликача, ніколи не повинна віддавати цю відмову
+    /// викликачеві: його сесія тут ні до чого (RC20 D-2, аудит P1).
+    /// </remarks>
+    public static async Task<AccessProfile?> TryBuildProfileAsync(
+        IAccessDecisionService access, int userId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        try
+        {
+            return await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        }
+        catch (AccessDeniedException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Межі читання документа для профілю (приховані аркуші, S6/D-214).</summary>
     public static async Task<DocumentReadScope> ReadScopeAsync(
         IDocumentStore documents, IMetadataCache metadata, AccessProfile profile, int projectId, long documentId,
@@ -250,6 +274,25 @@ internal static class EditAssignmentAccess
                 ["messageKey"] = "err.ECR-DOC-0409.editAssignmentState",
                 ["state"] = state,
             });
+
+    /// <summary>
+    /// Нормалізований термін дії або 422 <c>editAssignmentExpiresAtInvalid</c> (не в майбутньому / далі за
+    /// стелю <see cref="EditAssignment.MaxLifetimeDays"/> діб).
+    /// </summary>
+    public static DateTime RequireValidExpiry(DateTime raw, DateTime utcNow)
+        => EditAssignment.TryNormalizeExpiry(raw, utcNow, out var expiry)
+            ? expiry
+            : throw Invalid(
+                "err.ECR-REQ-0422.editAssignmentExpiresAtInvalid",
+                "Термін дії передачі має бути в майбутньому й не пізніше ніж через 366 діб.",
+                new Dictionary<string, object?>
+                {
+                    ["maxDays"] = EditAssignment.MaxLifetimeDays.ToString(CultureInfo.InvariantCulture),
+                });
+
+    /// <summary>Те саме для <c>null</c> (безстроково): повертає <c>null</c>.</summary>
+    public static DateTime? RequireValidExpiryOrNull(DateTime? raw, DateTime utcNow)
+        => raw is { } value ? RequireValidExpiry(value, utcNow) : null;
 
     /// <summary>Вимагає <c>baseVersion</c> і звіряє її з поточною.</summary>
     public static void RequireVersion(string? baseVersion, EditAssignment assignment)

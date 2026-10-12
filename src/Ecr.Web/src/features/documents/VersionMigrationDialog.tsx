@@ -40,6 +40,8 @@ export function refusalText(reason: string): string {
       return t('documents.migrateRefusalBindingsNotMapped');
     case 'methodologyKeysNotMapped':
       return t('documents.migrateRefusalMethodologyKeysNotMapped');
+    case 'mappingsNotMapped':
+      return t('documents.migrateRefusalMappingsNotMapped');
     default:
       return reason;
   }
@@ -270,6 +272,15 @@ function MigrationReport({ report }: { readonly report: VersionMigrationReport }
           guarded: report.guardedValues,
         })}
       </Text>
+
+      {report.otherProjectsOnSourceVersion > 0 && (
+        <Alert color="statusWarning" data-migrate-other-projects="">
+          {t('documents.migrateOtherProjectsWarning', {
+            projects: report.otherProjectsOnSourceVersion,
+            documents: report.otherDocumentsOnSourceVersion,
+          })}
+        </Alert>
+      )}
 
       {report.canApply ? (
         <Alert color="statusSuccess" data-migrate-can-apply="">

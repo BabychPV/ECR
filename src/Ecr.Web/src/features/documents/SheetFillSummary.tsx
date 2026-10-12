@@ -24,7 +24,7 @@ interface SheetFillSummaryProps {
  * Дріб рахує ТАБЛИЦІ, ЗАПОВНЕНІ ПОВНІСТЮ, — таблиця з 710 заповненими
  * комірками з 774 у чисельник не потрапляє взагалі, і без цих слів «0 / 91»
  * не можна прочитати правильно навіть здогадом. Тому підпис називає не
- * «заповненість», а саме те, що рахується: `document.tablesFilled`.
+ * «заповненість», а саме те, що рахується: `document.tablesFilledInDocument`.
  *
  * ⛔ Крапка помилки НЕ малюється, доки документ не перевіряли. Сірий стан і
  * зелений — різні відповіді: «не знаємо» і «порушень немає». Показати друге
@@ -51,7 +51,7 @@ export function SheetFillSummary({ documentId, periodKey }: SheetFillSummaryProp
       {summary.total > 0 && (
         // ✎ UI-15: дрібний підпис у рядку прогресу шапки (макет `.dp-l`), не заголовок.
         <Text size="xs" c="dimmed" data-testid="sheet-fill-count">
-          {t('document.tablesFilled', { filled: summary.filled, total: summary.total })}
+          {t('document.tablesFilledInDocument', { filled: summary.filled, total: summary.total })}
         </Text>
       )}
 

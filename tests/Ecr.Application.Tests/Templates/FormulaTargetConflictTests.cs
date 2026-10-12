@@ -65,6 +65,52 @@ public sealed class FormulaTargetConflictTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void Комірочна_формула_на_колонці_з_колонковою_формулою_відхиляється_публікацією()
+    {
+        // ⛔ D1: правило конфлікту для Cell. Комірку обчислює ЛИШЕ одна формула:
+        // Cell на (R1, CFRM) і Column на CFRM перетинаються саме в R1·CFRM, і
+        // котре з двох чисел автор мав на увазі, знає лише він (V-03).
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var table = builder.Table(builder.Sheet("FSHEET"), "FT2");
+        builder.Column(table, "CDEC");
+        var frm = builder.Column(table, "CFRM", CellDataType.Formula);
+        var r1 = builder.Row(table, "R1");
+        builder.Row(table, "R2");
+        builder.Formula(table, "[CDEC] * 2", FormulaScope.Column, column: frm);
+        builder.Formula(table, "[CDEC] + 1", FormulaScope.Cell, frm, r1);
+
+        var diagnostic = Assert.Single(FormulaTargetConflicts.Check(builder.Version(), _engine));
+
+        Assert.Equal("*·CFRM", diagnostic.MessageParams!["first"]);
+        Assert.Equal("R1·CFRM", diagnostic.MessageParams["second"]);
+        Assert.Equal("R1·CFRM", diagnostic.MessageParams["cell"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void Комірочні_формули_різних_комірок_і_різних_колонок_не_конфліктують()
+    {
+        // Контроль межі: саме так будується 7.0 (18 рядків × 12 місяців) — по
+        // одній формулі на комірку, і вони між собою не перетинаються; а колонкова
+        // формула сусідньої колонки (Q1 = SUM) комірочних не зачіпає.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var table = builder.Table(builder.Sheet("FSHEET"), "FT2");
+        builder.Column(table, "CDEC");
+        var jan = builder.Column(table, "Jan", CellDataType.Formula);
+        var feb = builder.Column(table, "Feb", CellDataType.Formula);
+        var q1 = builder.Column(table, "Q1", CellDataType.Formula);
+        var r1 = builder.Row(table, "R1");
+        var r2 = builder.Row(table, "R2");
+        builder.Formula(table, "[CDEC] + 1", FormulaScope.Cell, jan, r1);
+        builder.Formula(table, "[CDEC] + 2", FormulaScope.Cell, jan, r2);
+        builder.Formula(table, "[CDEC] + 3", FormulaScope.Cell, feb, r1);
+        builder.Formula(table, "SUM([Jan], [Feb])", FormulaScope.Column, column: q1);
+
+        Assert.Empty(FormulaTargetConflicts.Check(builder.Version(), _engine));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public void Формули_різних_колонок_не_конфліктують()
     {
         var builder = new TemplateBuilder { TemplateVersionId = 1 };

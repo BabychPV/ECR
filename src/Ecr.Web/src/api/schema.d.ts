@@ -3153,6 +3153,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{documentId}/tables/{tableInstanceId}/rows/{rowKey}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * М'яко видаляє динамічний рядок таблиці (D3).
+         * @description Лише рядки, додані користувачем; лише поки аркуш у Draft/Rejected; право — те саме, що на створення рядка.
+         *     Рядка немає або його вже видалено — однакова 404 (нерозкриття).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                    tableInstanceId: number;
+                    rowKey: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeleteRowResponse"];
+                        "text/json": components["schemas"]["DeleteRowResponse"];
+                        "text/plain": components["schemas"]["DeleteRowResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}": {
         parameters: {
             query?: never;
@@ -3432,6 +3511,52 @@ export interface paths {
                         "application/json": components["schemas"]["CalculationResultDto"][];
                         "text/json": components["schemas"]["CalculationResultDto"][];
                         "text/plain": components["schemas"]["CalculationResultDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/calculation-run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Стан актуального прогону документа за період: рядки без правила (D14). Право `Calculation.View`.
+         * @description ⚠ Інформація, а не помилка: рядок, якому не підійшло жодне правило (напр. статус не Running), у розрахунку
+         *     не бере участі. Відповідь не містить профілю часу по модулях і чужих документів прогону.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CalculationRunStatusDto"];
+                        "text/json": components["schemas"]["CalculationRunStatusDto"];
+                        "text/plain": components["schemas"]["CalculationRunStatusDto"];
                     };
                 };
             };
@@ -16302,6 +16427,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/cell/{rowKey}/{columnDefId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Записує формулу ОДНІЄЇ комірки таблиці версії-чернетки (область
+         *     `Cell`, D1). Право `Template.Edit`.
+         * @description ⚠ Окремий маршрут, а не ще одне значення `{scope}`: адреса комірки —
+         *     ПАРА (рядок, колонка), і єдиний сегмент `{target}` її не вміщає без
+         *     склеювання, яке довелося б розбирати назад. Колонка комірки мусить бути
+         *     обчислюваною (`ECR-TMPL-4227`, як і для `column`); перетин із
+         *     колонковою чи рядковою формулою тієї ж комірки відхиляє ПУБЛІКАЦІЯ (V-03).
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Таблиця, якій належить комірка. */
+                    tableDefId: number;
+                    /** @description `RowKey` рядка комірки (текстом). */
+                    rowKey: string;
+                    /** @description Числовий `ColumnDefId` колонки комірки. */
+                    columnDefId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveFormulaDefRequest"];
+                    "application/json": components["schemas"]["SaveFormulaDefRequest"];
+                    "text/json": components["schemas"]["SaveFormulaDefRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FormulaDto"];
+                        "text/json": components["schemas"]["FormulaDto"];
+                        "text/plain": components["schemas"]["FormulaDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Прибирає формулу комірки з чернетки (м'яко, `ФВ-7.6`). Право `Template.Edit`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Таблиця, якій належить комірка. */
+                    tableDefId: number;
+                    /** @description `RowKey` рядка комірки. */
+                    rowKey: string;
+                    /** @description Числовий `ColumnDefId` колонки комірки. */
+                    columnDefId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/{scope}/{target}": {
         parameters: {
             query?: never;
@@ -16453,6 +16722,95 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/template-versions/{id}/tables/{tableId}/columns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Записує пачку колонок таблиці чернетки одним запитом і однією транзакцією. Право `Template.Edit`.
+         * @description ⛔ G13 (Land): по одній колонці 5000 колонок шаблону писалися годинами — кожен `PUT` читає всю
+         *     структуру версії. Тут вона читається раз; перевірки ті самі, що в одиночному `PUT`, і йдуть ДО запису:
+         *     пачка застосовується цілком або не змінює нічого. Створення чи зміна — за кодом, як в одиночному записі.
+         *     Відповідь — колонки в порядку запиту.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Таблиця, якій належать колонки. */
+                    tableId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveColumnsBatchRequest"];
+                    "application/json": components["schemas"]["SaveColumnsBatchRequest"];
+                    "text/json": components["schemas"]["SaveColumnsBatchRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ColumnDefDto"][];
+                        "text/json": components["schemas"]["ColumnDefDto"][];
+                        "text/plain": components["schemas"]["ColumnDefDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -19363,6 +19721,20 @@ export interface components {
              */
             value: string;
         };
+        /** @description Стан актуального прогону документа за період для аркуша (D14). */
+        CalculationRunStatusDto: {
+            /**
+             * Format: date-time
+             * @description Коли прогін завершився (UTC).
+             */
+            finishedAt: null | string;
+            /**
+             * Format: int64
+             * @description Актуальний прогін; `null` — документ за цей період не рахували.
+             */
+            runId: null | number;
+            unmatchedRows: null | components["schemas"]["UnmatchedRowsDto"];
+        };
         /**
          * @description Джерело календарних величин періоду (D-78). Різниця конвенцій змінює всі
          *     числа при перерахунку в г/с і т/рік.
@@ -20693,6 +21065,11 @@ export interface components {
             sourceEntities: number;
             transport: components["schemas"]["ExternalTransport"];
         };
+        /** @description Видалений рядок динамічної таблиці (D3). */
+        DeleteRowResponse: {
+            /** @description Задача перерахунку, поставлена видаленням; `null` — таблиця без колонок. */
+            recalculationJobId: null | string;
+        };
         /** @description Запит на виведення версії з обігу. */
         DeprecateVersionRequest: {
             /** @description Причина; потрапляє в журнал публікацій. Обов'язкова: «чому цю версію
@@ -21102,8 +21479,42 @@ export interface components {
              * @description Скільки введених значень зникло б.
              */
             lostValues: number;
+            /**
+             * Format: int32
+             * @description D-1 RC20: скільки мапінгів збору (`ext.EntityFieldMap`) на колонки вихідної версії переїде на колонки-
+             *     відповідники цільової (за кодами аркуш/таблиця/колонка) — у сухому прогоні «буде», у застосованому — «перенесено».
+             *     Призупинені мапінги переносяться теж (щоб відновлення не писало в колонку старої версії).
+             * @default 0
+             */
+            mappingsRemapped: number;
+            /**
+             * Format: int32
+             * @description D-1 RC20: скільки АКТИВНИХ мапінгів збору адресують колонку, якої в цільовій версії немає. Такий мапінг після
+             *     переносу «успішно» збирав би точки й нічого не писав, тому перенос відмовляє (`mappingsNotMapped`), доки
+             *     мапінг не призупинено. Призупинені без відповідника не рахуються: вони нічого не пишуть.
+             * @default 0
+             */
+            mappingsUnmapped: number;
+            /** @description До 10 (`MaxMappingKeysListed`) ключів: `SHEET.TABLE.COLUMN` колонки вихідної версії для мапінгу збору,
+             *     `events SHEET.TABLE` для мапінгу подій і `window SHEET.TABLE.COLUMN` для прив'язки вікна (D-1b).
+             *     ⛔ Лише шлях у шаблоні (його й так показує звіт відмінностей): джерело, сутність і поле джерела не розкриваються. */
+            mappingsUnmappedKeys?: null | string[];
             /** @description Режим. */
             mode: components["schemas"]["VersionMigrationMode"];
+            /**
+             * Format: int32
+             * @description D-1b P3: скільки документів у цих проєктах.
+             * @default 0
+             */
+            otherDocumentsOnSourceVersion: number;
+            /**
+             * Format: int32
+             * @description D-1b P3: скільки ІНШИХ проєктів лишається на вихідній версії шаблону. Мапінги збору, подій і вікон глобальні
+             *     (одна ціль): після цього переносу вони вказують на нову версію, і ті проєкти не збираються, доки їх не перенесено.
+             *     ⛔ Лише кількість, без переліку проєктів.
+             * @default 0
+             */
+            otherProjectsOnSourceVersion: number;
             /**
              * Format: int32
              * @description Його проєкт — версія живе на проєкті, тож переносяться всі його документи.
@@ -21173,6 +21584,11 @@ export interface components {
              */
             delegatedByUserId: number;
             /**
+             * Format: date-time
+             * @description Термін дії передачі (UTC); `null` — безстроково.
+             */
+            expiresAt?: null | string;
+            /**
              * Format: int64
              * @description Ідентифікатор.
              */
@@ -21241,6 +21657,10 @@ export interface components {
              * @description Користувач.
              */
             userId: number;
+            /** @description Чи бачить виконавець документ (і аркуш передачі) за ПРЯМИМИ призначеннями ролей:
+             *     `Visible` | `NotVisible` | `Unknown` (групи AD чужої людини невідомі; у відповідях, що не є
+             *     переліком передач, не обчислюється). RC20 D-2. */
+            visibility?: components["schemas"]["RecipientVisibility"];
         };
         /** @description Зріз передачі: усі селектори необов'язкові; жодного — «весь документ». */
         EditAssignmentSliceDto: {
@@ -21263,7 +21683,7 @@ export interface components {
          * @description Причина відмови в доступі. Повертається замість `bool` (ФВ-6.8).
          * @enum {unknown}
          */
-        EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow" | "InsufficientGrantLevel" | "LockedByOwner" | "AssignmentFilled" | "AssignmentValidated" | "AssignmentExpired";
+        EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow" | "InsufficientGrantLevel" | "LockedByOwner" | "AssignmentFilled" | "AssignmentValidated" | "AssignmentExpired" | "NotAssignedToYou";
         /** @description Набір виконавців власника. */
         EditorSetDto: {
             /**
@@ -21530,7 +21950,7 @@ export interface components {
         FormulaDto: {
             /**
              * Format: int32
-             * @description Колонка, якщо `Scope == Column`.
+             * @description Колонка, якщо `Scope == Column` чи `Cell`.
              */
             columnDefId: null | number;
             /** @description Діалект виразу. */
@@ -21544,10 +21964,10 @@ export interface components {
             id: number;
             /**
              * Format: int32
-             * @description Рядок, якщо `Scope == Row` (сурогатний ключ; адреса запиту — `RowKey`).
+             * @description Рядок, якщо `Scope == Row` чи `Cell` (сурогатний ключ; адреса запиту — `RowKey`).
              */
             rowDefId: null | number;
-            /** @description Область: `Column` чи `Row`. */
+            /** @description Область: `Column`, `Row` чи `Cell`. */
             scope: components["schemas"]["FormulaScope"];
             /**
              * Format: int32
@@ -23761,6 +24181,12 @@ export interface components {
              */
             sheetDefId: number;
         };
+        /**
+         * @description Чи бачить виконавець документ (і аркуш передачі) за прямими призначеннями ролей (RC20 D-2).
+         * @default Unknown
+         * @enum {unknown}
+         */
+        RecipientVisibility: "Unknown" | "Visible" | "NotVisible";
         /** @description Один рядок пакета. */
         RegistryBatchItemDto: {
             /** @description `version` рядка з `GET …/rows` (`D-166`); не збігся — помилка рядка `entryChanged`.
@@ -25232,6 +25658,71 @@ export interface components {
              *     не збігається з жодним рядком, і прив'язка мовчки не спрацьовувала б. */
             matchJson: string;
         };
+        /** @description Колонка пачки: код і ті самі налаштування, що в SaveColumnDefRequest. */
+        SaveColumnBatchItem: {
+            /** @description Код колонки. */
+            code: string;
+            /** @description Тип даних; незмінний після створення. */
+            dataType: components["schemas"]["CellDataType"];
+            /** @description Значення за замовчуванням порожньої комірки. */
+            defaultValue: null | string;
+            /** @description Формат відображення; презентаційне поле. */
+            displayFormat: null | string;
+            /** @description Заголовок колонки мовами каталогу. */
+            headerL10n: {
+                [key: string]: string;
+            };
+            /** @description Видимість колонки; презентаційне поле. */
+            isHidden: boolean;
+            /** @description Колонка прив'язана до календарного місяця; вимагає `MonthNumber`. */
+            isMonthColumn?: null | boolean;
+            /** @description Заборона ручного вводу. */
+            isReadOnly: boolean;
+            /** @description Обов'язковість заповнення. */
+            isRequired: boolean;
+            /** @description Звуження списку довідника. */
+            lookupFilter: null | string;
+            /**
+             * Format: int32
+             * @description Довідник; лише для колонки типу `Lookup`.
+             */
+            lookupRegistryDefId: null | number;
+            /**
+             * Format: uint8
+             * @description Місяць 1..12; лише разом з `IsMonthColumn`.
+             */
+            monthNumber?: null | number;
+            /**
+             * Format: int32
+             * @description `null` — нова колонка стає останньою за порядком.
+             */
+            ordinal: null | number;
+            /**
+             * Format: uint8
+             * @description Точність для `Decimal`.
+             */
+            precision: null | number;
+            /**
+             * Format: uint8
+             * @description Масштаб для `Decimal`.
+             */
+            scale: null | number;
+            /**
+             * Format: int32
+             * @description Стиль показу; презентаційне поле.
+             */
+            styleId: null | number;
+            /**
+             * Format: int32
+             * @description Одиниця значень колонки (ФВ-16.1); не для типу `Unit`.
+             */
+            unitId: null | number;
+            /**
+             * Format: int32
+             * @description Типова ширина, px, 40..800; `null` — типова за типом.
+             */
+            widthPx?: null | number;
+        };
         /** @description Налаштування колонки таблиці чернетки (`W5.2`). */
         SaveColumnDefRequest: {
             /** @description Тип даних; незмінний після створення. */
@@ -25294,6 +25785,11 @@ export interface components {
              * @description Типова ширина, px, 40..800 (D-234); `null` — типова за типом.
              */
             widthPx?: null | number;
+        };
+        /** @description Тіло пакетного запису колонок таблиці (`PUT …/tables/{tableId}/columns`, G13). */
+        SaveColumnsBatchRequest: {
+            /** @description Колонки пачки; не більше 500; коди різні. */
+            columns: components["schemas"]["SaveColumnBatchItem"][];
         };
         /** @description Тіло `PUT …/conditional-formats`. */
         SaveConditionalFormatsRequest: {
@@ -27476,6 +27972,31 @@ export interface components {
             /** @description Шлях атрибута в джерелі. */
             sourcePath: string;
         };
+        /** @description Один рядок без правила (D14). */
+        UnmatchedRowItemDto: {
+            /** @description Публічний ключ рядка. */
+            rowKey: string;
+            /**
+             * Format: int32
+             * @description Номер рядка, з 1, у порядку створення.
+             */
+            rowNumber: number;
+            /**
+             * Format: int64
+             * @description Екземпляр таблиці.
+             */
+            tableInstanceId: number;
+        };
+        /** @description Рядки документа, яким не підійшло жодне правило розрахунку (D14). */
+        UnmatchedRowsDto: {
+            /**
+             * Format: int32
+             * @description Скільки рядків документа не закрило жодне правило.
+             */
+            count: number;
+            /** @description До 10 рядків за зростанням таблиці й номера. */
+            rows: components["schemas"]["UnmatchedRowItemDto"][];
+        };
         /** @description Тіло зміни розкладу. */
         UpdateCollectionScheduleRequest: {
             /** @description `true` — зняти залежність (перемагає DependsOnScheduleId). */
@@ -27642,6 +28163,13 @@ export interface components {
             appliedSetId?: null | number;
             /** @description Обов'язкова для зміни наявної передачі. */
             baseVersion?: null | string;
+            /**
+             * Format: date-time
+             * @description Термін дії передачі, UTC: у майбутньому й не пізніше ніж через 366 діб. PATCH-семантика: ПОЛЕ ВІДСУТНЄ в
+             *     тілі — термін наявної передачі не змінюється (нова — без терміну); явний `null` — термін знімається;
+             *     значення — замінює.
+             */
+            expiresAt?: null | string;
             /**
              * @description Закрити зріз іншим за ролями; за замовчуванням `true`.
              * @default true

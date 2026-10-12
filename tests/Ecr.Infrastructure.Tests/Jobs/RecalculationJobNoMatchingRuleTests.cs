@@ -88,14 +88,49 @@ public sealed class RecalculationJobNoMatchingRuleTests(SqlServerFixture sql)
             r => r.Message?.Contains("jobs.recalcNoMatchingRule", StringComparison.Ordinal) == true);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.9")]
+    public async Task G14_Пропущені_неопубліковані_методології_потрапляють_у_повідомлення_а_задача_не_падає()
+    {
+        var (builder, document) = await ArrangeAsync();
+        var progress = new RecordingProgress();
+
+        await RunAsync(builder, document, progress, [], [], skippedUnpublished: [99, 7]);
+
+        var (_, message) = progress.Reports.Last(
+            r => r.Message?.Contains("jobs.recalcMethodologyUnpublished", StringComparison.Ordinal) == true);
+        Assert.True(JobProgressMessageCodec.TryDecode(message, out var envelope));
+        Assert.Equal("2", envelope.Params!["count"]);
+        Assert.Equal("7, 99", envelope.Params["methodologies"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.9")]
+    public async Task G14_Без_пропущених_повідомлення_немає()
+    {
+        var (builder, document) = await ArrangeAsync();
+        var progress = new RecordingProgress();
+
+        await RunAsync(builder, document, progress, []);
+
+        Assert.DoesNotContain(
+            progress.Reports,
+            r => r.Message?.Contains("jobs.recalcMethodologyUnpublished", StringComparison.Ordinal) == true);
+    }
+
     private static async Task RunAsync(
         TestDocumentBuilder builder, TestDocument document, RecordingProgress progress, IReadOnlyList<UnmatchedRow> unmatched,
-        IReadOnlyList<RejectedRow>? rejected = null)
+        IReadOnlyList<RejectedRow>? rejected = null, IReadOnlyList<int>? skippedUnpublished = null)
     {
         var clock = new TestClock(new DateTime(2026, 9, 30, 8, 0, 0, DateTimeKind.Utc));
         await using var db = builder.CreateContext();
         var job = new RecalculationJob(
-            db, new UnmatchedRunner(unmatched, rejected ?? []), RunHandler(), FormulaService(), clock, jobs: null, budget: null);
+            db, new UnmatchedRunner(unmatched, rejected ?? [], skippedUnpublished ?? []),
+            RunHandler(), FormulaService(), clock, jobs: null, budget: null);
 
         await job.ExecuteAsync(
             new RecalculationRequest(document.ProjectId, document.DocumentId, document.PeriodKey.Value, TriggeredByUserId: null),
@@ -158,7 +193,8 @@ public sealed class RecalculationJobNoMatchingRuleTests(SqlServerFixture sql)
             Substitute.For<IAuditWriter>());
 
     /// <summary>Оркестратор, що повертає профіль із заданими рядками без правила.</summary>
-    private sealed class UnmatchedRunner(IReadOnlyList<UnmatchedRow> unmatched, IReadOnlyList<RejectedRow> rejected)
+    private sealed class UnmatchedRunner(
+        IReadOnlyList<UnmatchedRow> unmatched, IReadOnlyList<RejectedRow> rejected, IReadOnlyList<int> skippedUnpublished)
         : ICalculationRunner
     {
         public Task<ModuleProfile> RunAsync(
@@ -168,6 +204,7 @@ public sealed class RecalculationJobNoMatchingRuleTests(SqlServerFixture sql)
             var profile = new ModuleProfile();
             profile.RecordUnmatched(unmatched);
             profile.RecordRejected(rejected);
+            profile.RecordSkippedUnpublished(skippedUnpublished);
 
             return Task.FromResult(profile);
         }

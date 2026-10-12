@@ -215,6 +215,26 @@ public sealed partial class DocumentVersionMigrationTests
             int sourceVersionId, IReadOnlyDictionary<int, int> columnMap, CancellationToken ct)
             => inner.CountUnmappedBindingsAsync(sourceVersionId, columnMap, ct);
 
+        public Task<IReadOnlyList<CollectionMappingRef>> ListCollectionMappingsAsync(int sourceVersionId, CancellationToken ct)
+            => inner.ListCollectionMappingsAsync(sourceVersionId, ct);
+
+        public Task<int> RemapCollectionMappingsAsync(
+            IReadOnlyDictionary<int, int> columnMap, IReadOnlyCollection<int> mappingIds, CancellationToken ct)
+            => inner.RemapCollectionMappingsAsync(columnMap, mappingIds, ct);
+
+        public Task<ProjectsOnVersion> CountOtherProjectsOnVersionAsync(int projectId, int versionId, CancellationToken ct)
+            => inner.CountOtherProjectsOnVersionAsync(projectId, versionId, ct);
+
+        public Task<IReadOnlyList<EventMapRef>> ListEventMapsAsync(IReadOnlyCollection<long> documentIds, CancellationToken ct)
+            => inner.ListEventMapsAsync(documentIds, ct);
+
+        public Task<IReadOnlyList<RowWindowMapRef>> ListRowWindowMapsAsync(IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+            => inner.ListRowWindowMapsAsync(tableDefIds, ct);
+
+        public Task RemapEventAndWindowMapsAsync(
+            int projectId, ExtendedMappingRemap remap, IReadOnlyDictionary<int, int> columnMap, CancellationToken ct)
+            => inner.RemapEventAndWindowMapsAsync(projectId, remap, columnMap, ct);
+
         public Task<IReadOnlyList<string>> ListForeignMethodologyKeysAsync(int targetVersionId, int limit, CancellationToken ct)
             => inner.ListForeignMethodologyKeysAsync(targetVersionId, limit, ct);
 

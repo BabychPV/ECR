@@ -292,6 +292,60 @@ public sealed class Hse301UnitsTests
             + string.Join(Environment.NewLine, mismatches.Take(20)));
     }
 
+    /// <summary>G8: одиниці шаблону Land лежать у правильних розмірностях і конвертуються точно.</summary>
+    /// <remarks>
+    /// Мутація: прибрати секцію <c>-- LAND:units</c> із сіду — червоний перший блок (одиниці немає);
+    /// поставити kW у розмірність 3 — червоний другий; змінити множник l_per_h — червоний останній.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.2")]
+    public void G8_Одиниці_Land_є_в_сіді_у_своїх_розмірностях_і_конвертуються()
+    {
+        var (units, dimensions) = LoadSeed();
+        var byId = dimensions.Values.ToDictionary(d => d.Id);
+
+        var expected = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["kW"] = "Power",
+            ["W"] = "Power",
+            ["rpm"] = "Frequency",
+            ["m3_per_h"] = "VolumeFlow",
+            ["l_per_h"] = "VolumeFlow",
+            ["kg_per_h"] = "MassFlow",
+            ["t_per_h"] = "MassFlow",
+            ["mg_per_l"] = "MassPerVolume",
+            ["thousand_m3"] = "Volume",
+            ["kPa"] = "Pressure",
+            ["Pa"] = "Pressure",
+            ["ppm_wt"] = "MassPerMass",
+        };
+
+        foreach (var (code, dimension) in expected)
+        {
+            Assert.True(units.TryGetValue(code, out var unit), $"Одиниці {code} у сіді немає.");
+            Assert.Equal(dimension, byId[unit!.Dimension].Code);
+        }
+
+        // Нові похідні розмірності складаються з наявних (ФВ-16.2).
+        AssertRatio(dimensions["VolumeFlow"], dimensions["Volume"], dimensions["Time"]);
+        Assert.False(dimensions["Power"].IsDerived);
+        AssertRatio(dimensions["Frequency"], dimensions["Dimensionless"], dimensions["Time"]);
+        Assert.False(dimensions["Pressure"].IsDerived);
+
+        // Конверсії: дзеркало воркера рахує швидкість у швидкість через чисельник і знаменник.
+        Assert.Equal(1000m, Convert(1m, "kW", "W"));
+        Assert.Equal(1000m, Convert(1m, "t_per_h", "kg_per_h"));
+        Assert.Equal(0.001m, Convert(1m, "l_per_h", "m3_per_h"));
+        Assert.Equal(1000m, Convert(1m, "mg_per_l", "mg_per_m3"));
+        Assert.Equal(1000m, Convert(1m, "kPa", "Pa"));
+        Assert.Equal(1000m, Convert(1m, "thousand_m3", "m3"));
+
+        // Робочий і стандартний кубометр у витраті не змішуються (V-12).
+        Assert.Equal(ExpressionErrors.BadUnit, ErrorOf("m3_per_h", "Sm3_per_h"));
+        Assert.Equal(ExpressionErrors.BadUnit, ErrorOf("kW", "kg_per_h"));
+    }
+
     /// <summary>Обидві одиниці похідні, а їхні чисельники й знаменники однієї розмірності (маршрут «швидкість у швидкість»).</summary>
     private static bool IsRatePair(Dictionary<string, SeedUnit> units, SeedUnit from, SeedUnit to)
         => from.Numerator is { } fromNumerator && from.Denominator is { } fromDenominator

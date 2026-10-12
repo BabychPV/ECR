@@ -826,8 +826,28 @@ public sealed class AccessDecisionService(
     /// СУСІДНЬОЇ таблиці інакше отримала б рішення під чужим зрізом — тоді як
     /// поштучний шлях її просто не знаходить.
     /// </remarks>
-    public async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> CanEditCellsBatchAsync(
+    public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> CanEditCellsBatchAsync(
         AccessProfile profile, IReadOnlyCollection<CellsAccessRequest> requests, CancellationToken ct)
+        => CanEditCellsCoreAsync(profile, requests, ignoreColumnFlags: false, ct);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanClearCellsAsync(
+        AccessProfile profile, long tableInstanceId, PeriodKey periodKey,
+        IReadOnlyCollection<CellAddress> addresses, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(addresses);
+
+        var all = await CanEditCellsCoreAsync(
+                profile, [new CellsAccessRequest(tableInstanceId, periodKey, addresses)], ignoreColumnFlags: true, ct)
+            .ConfigureAwait(false);
+
+        return all[tableInstanceId];
+    }
+
+    private async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> CanEditCellsCoreAsync(
+        AccessProfile profile, IReadOnlyCollection<CellsAccessRequest> requests, bool ignoreColumnFlags,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(requests);
@@ -887,7 +907,7 @@ public sealed class AccessDecisionService(
                         ? windows
                         : EmptyWindows;
 
-                    decisions[address] = Decide(profile, slice, row.RowKey, column, sourceValues);
+                    decisions[address] = Decide(profile, slice, row.RowKey, column, sourceValues, ignoreColumnFlags);
                 }
 
                 result[request.TableInstanceId] = decisions;
@@ -1063,7 +1083,7 @@ public sealed class AccessDecisionService(
                         ColumnIsMonth: false, ColumnMonthNumber: null, IsRowLevel: true),
                     delegation.UtcNow);
 
-                rowContext = rowContext with { AssignmentLock = facts.Lock };
+                rowContext = rowContext with { AssignmentLock = facts.Lock, IsAssignmentExecutor = facts.IsExecutor };
             }
 
             var columns = new Dictionary<int, EditDecision>(slice.Columns.Count);
@@ -1093,6 +1113,9 @@ public sealed class AccessDecisionService(
     /// <param name="rowKey">Ключ рядка — наявного або того, що створюється.</param>
     /// <param name="column">Колонка.</param>
     /// <param name="sourceValues">Вікна чинності записів довідника цього рядка.</param>
+    /// <param name="ignoreColumnFlags">
+    /// <c>true</c> — «стерти значення» (D3-A): ознаки колонки «обчислювана»/«лише читання» не враховуються.
+    /// </param>
     /// <remarks>
     /// ⚠ Спільне для наявних і для нових рядків. Різниця між ними — рівно два
     /// входи: <c>RowId</c> (у нового немає) і вікна чинності довідника (у
@@ -1104,7 +1127,8 @@ public sealed class AccessDecisionService(
         SliceContext slice,
         string rowKey,
         ColumnDef column,
-        IReadOnlyDictionary<int, SourceValidity> sourceValues)
+        IReadOnlyDictionary<int, SourceValidity> sourceValues,
+        bool ignoreColumnFlags = false)
     {
         var def = RowDefOf(slice, rowKey);
 
@@ -1112,8 +1136,9 @@ public sealed class AccessDecisionService(
         {
             TableDefId = slice.TableDefId,
             ColumnDefId = column.Id,
-            ColumnIsComputed = column.IsComputed,
-            ColumnIsReadOnly = column.IsReadOnly,
+            // S-2 (D3-A): для «стерти значення» ознаки колонки не заважають — грант перевіряється завжди.
+            ColumnIsComputed = !ignoreColumnFlags && column.IsComputed,
+            ColumnIsReadOnly = !ignoreColumnFlags && column.IsReadOnly,
             RowIsReadOnly = def?.IsReadOnly ?? false,
         };
 
@@ -1135,7 +1160,12 @@ public sealed class AccessDecisionService(
                     column.IsMonthColumn, column.MonthNumber),
                 delegation.UtcNow);
 
-            context = context with { DelegatedWrite = facts.DelegatedWrite, AssignmentLock = facts.Lock };
+            context = context with
+            {
+                DelegatedWrite = facts.DelegatedWrite,
+                AssignmentLock = facts.Lock,
+                IsAssignmentExecutor = facts.IsExecutor,
+            };
         }
 
         var decision = EditRules.CanEdit(profile, context);
@@ -1610,6 +1640,7 @@ public sealed class AccessDecisionService(
                where tableInstanceIds.Contains(row.TableInstanceId)
                      && cell.PeriodKeyValue == periodKey.Value
                      && row.PeriodKeyValue == periodKey.Value
+                     && !row.IsDeleted
                      && cell.ValueRegistryEntryId != null
                      && sourceColumns.Contains(cell.ColumnDefId)
                select new SourceWindowRow(

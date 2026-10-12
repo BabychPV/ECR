@@ -173,6 +173,40 @@ public sealed class RelationRollupRecalculationTests(SqlServerFixture sql)
         Assert.Equal(17m, await NumericAsync(pair.Target, pair.Target.RowIds[0], FormulaCol));
         Assert.Equal(34m, await NumericAsync(pair.Target, pair.Target.RowIds[0], TotalCol));
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.6")]
+    public async Task Rollup_і_формула_над_ціллю_після_м_якого_видалення_рядка_джерела_рахуються_без_нього_D3()
+    {
+        // D3-A: насіння — адреса ВИДАЛЕНОГО рядка (його вже немає серед живих, а в плані адреси немає).
+        // Rollup рахується для документа цілком, формула над ціллю — каскадом від цілі.
+        var pair = await ArrangeAsync();
+        await using (var db = CreateContext([]))
+        {
+            await Build(db, pair, flag: true, withRollup: true, withHook: true, withColumnFormula: false, withTargetFormula: true)
+                .RecalculateAllAsync(pair.Target.DocumentId, pair.Target.PeriodKey, CancellationToken.None);
+        }
+
+        Assert.Equal(15m, await NumericAsync(pair.Target, pair.Target.RowIds[0], FormulaCol));
+
+        await ExecuteAsync(
+            $"UPDATE doc.TableRow SET IsDeleted = 1 WHERE PeriodKey = {pair.Source.PeriodKey.Value} "
+            + $"AND Id = {pair.Source.RowIds[1]}");
+        var dirty = new DirtySet();
+        dirty.Add(new CellAddress(pair.Source.PeriodKey, pair.Source.RowIds[1], pair.Source.ColumnDefIds[DecimalCol]));
+
+        await using (var db = CreateContext([]))
+        {
+            await Build(db, pair, flag: true, withRollup: true, withHook: true, withColumnFormula: false, withTargetFormula: true)
+                .RecalculateAsync(pair.Source.TableInstanceId, dirty, CancellationToken.None);
+        }
+
+        Assert.Equal(5m, await NumericAsync(pair.Target, pair.Target.RowIds[0], FormulaCol));
+        Assert.Equal(10m, await NumericAsync(pair.Target, pair.Target.RowIds[0], TotalCol));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

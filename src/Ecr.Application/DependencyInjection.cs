@@ -77,6 +77,7 @@ public static class DependencyInjection
         // Третій і четвертий зрізи — колонка й рядок таблиці (ФВ-2.1..ФВ-2.5,
         // W5.2), за зразком аркуша й таблиці вище.
         services.AddScoped<SaveColumnDefHandler>();
+        services.AddScoped<SaveColumnDefsBatchHandler>();
         services.AddScoped<GetColumnDefHandler>();
         services.AddScoped<DeleteColumnDefHandler>();
         services.AddScoped<SaveRowDefHandler>();
@@ -137,6 +138,7 @@ public static class DependencyInjection
         services.AddScoped<GetDocumentHandler>();
         services.AddScoped<GetTableSliceHandler>();
         services.AddScoped<CreateRowHandler>();
+        services.AddScoped<DeleteRowHandler>();
 
         // Вирази, валідація і перерахунок (модулі 2.6–2.8)
         services.AddScoped<Validation.ValidationEngine>();
@@ -334,6 +336,7 @@ public static class DependencyInjection
         services.AddScoped<Calculations.RuleCoverageHandler>();
         services.AddScoped<Calculations.CompareMethodologyVersionsHandler>();
         services.AddScoped<Documents.GetCalculationResultsHandler>();
+        services.AddScoped<Documents.GetCalculationRunStatusHandler>();
         services.AddScoped<Calculations.RunCalculationHandler>();
         services.AddScoped<Calculations.RecalculationApprovalHandlers>();
         services.AddScoped<Localization.SetUiStringHandler>();

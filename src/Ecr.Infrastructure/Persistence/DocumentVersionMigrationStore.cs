@@ -326,6 +326,234 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<CollectionMappingRef>> ListCollectionMappingsAsync(
+        int sourceVersionId, CancellationToken ct)
+    {
+        // З'єднання через ColumnDef → TableDef → SheetDef: мапінг власного TemplateVersionId не має.
+        var rows = await (
+                from map in db.EntityFieldMaps.AsNoTracking()
+                where map.TargetKind == Domain.Entities.External.FieldTargetKind.Column && map.TargetColumnDefId != null
+                join column in db.ColumnDefs.AsNoTracking() on map.TargetColumnDefId equals (int?)column.Id
+                join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                where sheet.TemplateVersionId == sourceVersionId
+                select new
+                {
+                    map.Id,
+                    ColumnDefId = column.Id,
+                    map.IsActive,
+                    TableDefId = table.Id,
+                    map.TargetRowKey,
+                    Path = sheet.Code + "." + table.Code + "." + column.Code,
+                })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows
+            .OrderBy(r => r.Path, StringComparer.Ordinal)
+            .ThenBy(r => r.Id)
+            .Select(r => new CollectionMappingRef(r.Id, r.ColumnDefId, r.IsActive, r.Path, r.TableDefId, r.TargetRowKey))];
+    }
+
+    /// <inheritdoc />
+    public async Task<int> RemapCollectionMappingsAsync(
+        IReadOnlyDictionary<int, int> columnMap, IReadOnlyCollection<int> mappingIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(columnMap);
+        ArgumentNullException.ThrowIfNull(mappingIds);
+
+        _ = db.Database.CurrentTransaction
+            ?? throw new InvalidOperationException(
+                "RemapCollectionMappingsAsync викликано поза транзакцією: перенос мапінгів мусить бути атомарним із переносом документів.");
+
+        var pairs = columnMap
+            .Where(p => p.Key != p.Value)
+            .Select(p => new { o = p.Key, n = p.Value })
+            .ToList();
+        if (pairs.Count == 0 || mappingIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var json = JsonSerializer.Serialize(pairs);
+        var idsJson = JsonSerializer.Serialize(mappingIds);
+
+        // ⚠ Колонка-відповідник — з ІНШОЇ версії (o <> n), тож повторний запуск нічого не міняє. Унікальність
+        // `UQ_EntityFieldMap` — за (сутність, поле), а не за колонкою: переніс її не порушує.
+        return await db.Database
+            .ExecuteSqlAsync($"""
+                UPDATE m
+                SET    m.TargetColumnDefId = x.n
+                FROM   ext.EntityFieldMap m
+                JOIN   OPENJSON({json}) WITH (o int, n int) x ON x.o = m.TargetColumnDefId
+                JOIN   OPENJSON({idsJson}) WITH (id int '$') k ON k.id = m.Id
+                WHERE  m.TargetKind = 0
+                """, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<ProjectsOnVersion> CountOtherProjectsOnVersionAsync(
+        int projectId, int versionId, CancellationToken ct)
+    {
+        var projects = await db.Projects.AsNoTracking()
+            .CountAsync(p => p.TemplateVersionId == versionId && p.Id != projectId, ct)
+            .ConfigureAwait(false);
+        if (projects == 0)
+        {
+            return new ProjectsOnVersion(0, 0);
+        }
+
+        var documents = await (
+                from d in db.Documents.AsNoTracking()
+                join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                where p.TemplateVersionId == versionId && p.Id != projectId
+                select d.Id)
+            .CountAsync(ct)
+            .ConfigureAwait(false);
+
+        return new ProjectsOnVersion(projects, documents);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<EventMapRef>> ListEventMapsAsync(
+        IReadOnlyCollection<long> documentIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(documentIds);
+        if (documentIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = documentIds.ToList();
+        var maps = await db.SourceEventMaps.AsNoTracking()
+            .Where(m => ids.Contains(m.DocumentId))
+            .Select(m => new { m.Id, m.SourceEntityId, m.DocumentId, m.TableDefId, m.IsActive })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (maps.Count == 0)
+        {
+            return [];
+        }
+
+        var mapIds = maps.Select(m => m.Id).ToList();
+        var fields = await db.SourceEventFieldMaps.AsNoTracking()
+            .Where(f => mapIds.Contains(f.SourceEventMapId))
+            .Select(f => new { f.Id, f.SourceEventMapId, f.TargetColumnDefId })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var byMap = fields.ToLookup(f => f.SourceEventMapId);
+
+        return [.. maps.Select(m => new EventMapRef(
+            m.Id, m.SourceEntityId, m.DocumentId, m.TableDefId, m.IsActive,
+            [.. byMap[m.Id].Select(f => new EventFieldRef(f.Id, f.TargetColumnDefId))]))];
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RowWindowMapRef>> ListRowWindowMapsAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableDefIds);
+        if (tableDefIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = tableDefIds.ToList();
+        return await db.RowWindowMaps.AsNoTracking()
+            .Where(m => ids.Contains(m.TableDefId))
+            .OrderBy(m => m.Id)
+            .Select(m => new RowWindowMapRef(
+                m.Id, m.TableDefId, m.TargetColumnDefId, m.StartColumnDefId, m.EndColumnDefId,
+                m.SelectorColumnDefId, m.IsActive))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task RemapEventAndWindowMapsAsync(
+        int projectId, ExtendedMappingRemap remap, IReadOnlyDictionary<int, int> columnMap, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(remap);
+        ArgumentNullException.ThrowIfNull(columnMap);
+
+        _ = db.Database.CurrentTransaction
+            ?? throw new InvalidOperationException(
+                "RemapEventAndWindowMapsAsync викликано поза транзакцією: перенос мапінгів мусить бути атомарним із переносом документів.");
+
+        using var timeout = ExtendTimeout();
+
+        if (remap.Events.Count > 0)
+        {
+            var maps = JsonSerializer.Serialize(remap.Events.Select(e => new { id = e.MapId, t = e.TableDefId }));
+            var fields = JsonSerializer.Serialize(
+                remap.Events.SelectMany(e => e.Fields).Select(f => new { id = f.FieldId, n = f.ColumnDefId }));
+
+            await db.Database
+                .ExecuteSqlAsync($"""
+                    UPDATE m
+                    SET    m.TableDefId = x.t
+                    FROM   ext.SourceEventMap m
+                    JOIN   OPENJSON({maps}) WITH (id int, t int) x ON x.id = m.Id
+                    """, ct)
+                .ConfigureAwait(false);
+            await db.Database
+                .ExecuteSqlAsync($"""
+                    UPDATE f
+                    SET    f.TargetColumnDefId = x.n
+                    FROM   ext.SourceEventFieldMap f
+                    JOIN   OPENJSON({fields}) WITH (id int, n int) x ON x.id = f.Id
+                    """, ct)
+                .ConfigureAwait(false);
+        }
+
+        if (remap.Windows.Count > 0)
+        {
+            // ⚠ Таблиця й усі колонки — одним оператором: FK_RWM_Target/Start/End/Selector складені
+            // (TableDefId, ColumnDefId), і перевіряються по закінченні оператора.
+            var windows = JsonSerializer.Serialize(remap.Windows.Select(w => new
+            {
+                id = w.MapId,
+                t = w.TableDefId,
+                tg = w.TargetColumnDefId,
+                s = w.StartColumnDefId,
+                e = w.EndColumnDefId,
+                sel = w.SelectorColumnDefId,
+            }));
+
+            await db.Database
+                .ExecuteSqlAsync($"""
+                    UPDATE w
+                    SET    w.TableDefId = x.t, w.TargetColumnDefId = x.tg, w.StartColumnDefId = x.s,
+                           w.EndColumnDefId = x.e, w.SelectorColumnDefId = x.sel
+                    FROM   ext.RowWindowMap w
+                    JOIN   OPENJSON({windows}) WITH (id int, t int, tg int, s int, e int, sel int) x ON x.id = w.Id
+                    """, ct)
+                .ConfigureAwait(false);
+        }
+
+        // Провенанс підтягувань екземплярів ЦЬОГО проєкту: «чинний запис комірки» шукається за колонкою, і
+        // без перенесення KeptManual/попередній статус для переїхалих комірок пропали б. PeriodKey — з періодів
+        // проєкту (партиціонована таблиця).
+        var pairs = columnMap.Where(p => p.Key != p.Value).Select(p => new { o = p.Key, n = p.Value }).ToList();
+        if (remap.Windows.Count > 0 && pairs.Count > 0)
+        {
+            var json = JsonSerializer.Serialize(pairs);
+            await db.Database
+                .ExecuteSqlAsync($"""
+                    UPDATE v
+                    SET    v.ColumnDefId = x.n
+                    FROM   ext.RowWindowValue v
+                    JOIN   doc.Period p        ON p.ProjectId = {projectId} AND p.PeriodKey = v.PeriodKey
+                    JOIN   doc.TableInstance ti ON ti.PeriodKey = v.PeriodKey AND ti.Id = v.TableInstanceId
+                    JOIN   doc.Document d       ON d.Id = ti.DocumentId AND d.ProjectId = {projectId}
+                    JOIN   OPENJSON({json}) WITH (o int, n int) x ON x.o = v.ColumnDefId
+                    """, ct)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<string>> ListForeignMethodologyKeysAsync(
         int targetVersionId, int limit, CancellationToken ct)
     {

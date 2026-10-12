@@ -227,8 +227,9 @@ public sealed class EditorSetsHandler(
                 var valid = id != ownerId
                     && found.TryGetValue(id, out var u)
                     && u.IsActive
-                    && EditAssignmentAccess.HasReadInAnyProject(
-                        await access.BuildProfileAsync(id, ct).ConfigureAwait(false));
+                    && await EditAssignmentAccess.TryBuildProfileAsync(access, id, ct).ConfigureAwait(false)
+                        is { } memberProfile
+                    && EditAssignmentAccess.HasReadInAnyProject(memberProfile);
 
                 if (!valid)
                 {
@@ -311,7 +312,7 @@ public sealed class BatchEditAssignmentsHandler(
             prepared.Add(await upsert.PrepareAsync(
                 documentId,
                 new UpsertEditAssignmentRequest(slice, members, request.IsExclusive, request.Note, set.Id),
-                overwrite: true, snapshot, ct).ConfigureAwait(false));
+                overwrite: true, snapshot, ct, keepExpiresAt: true).ConfigureAwait(false));
         }
 
         await RequireRoomAsync(documentId, prepared, ct).ConfigureAwait(false);
@@ -350,8 +351,8 @@ public sealed class BatchEditAssignmentsHandler(
         {
             prepared.Add(await upsert.PrepareAsync(
                 documentId,
-                new UpsertEditAssignmentRequest(slice, members, source.IsExclusive, source.Note, source.AppliedSetId),
-                overwrite: true, snapshot, ct).ConfigureAwait(false));
+                new UpsertEditAssignmentRequest(slice, members, source.IsExclusive, Note: null, source.AppliedSetId),
+                overwrite: true, snapshot, ct, keepExpiresAt: true, keepNote: true).ConfigureAwait(false));
         }
 
         await RequireRoomAsync(documentId, prepared, ct).ConfigureAwait(false);

@@ -42,7 +42,8 @@ export type DenyReason =
   | 'LockedByOwner'
   | 'AssignmentFilled'
   | 'AssignmentValidated'
-  | 'AssignmentExpired';
+  | 'AssignmentExpired'
+  | 'NotAssignedToYou';
 
 /** Рішення про комірку. */
 export interface CellDecision {
@@ -86,6 +87,7 @@ const Hints: Record<DenyReason, string> = {
   AssignmentFilled: 'deny.AssignmentFilled',
   AssignmentValidated: 'deny.AssignmentValidated',
   AssignmentExpired: 'deny.AssignmentExpired',
+  NotAssignedToYou: 'deny.NotAssignedToYou',
 };
 
 /** Ключ комірки у словнику прав, який віддає сервер. */
@@ -180,6 +182,39 @@ export function denyText(reason: string): string | null {
   const known = reasonOf(reason);
 
   return known === null ? null : deny(known).hint;
+}
+
+/**
+ * Причина, через яку людина не може додати рядок (D9, приймальна Land): у КОЖНІЙ
+ * вхідній комірці зрізу (усі колонки × усі рядки) сервер відхилив правку саме за грантом. Тоді кнопка «Add row»
+ * лише обіцяла б те, що сервер відхилить, — вона вимикається з тією самою підказкою,
+ * що й сіра комірка.
+ *
+ * ⚠ Клієнт не вгадує права: висновок лише з `cellPermissions` самого сервера. Порожня
+ * таблиця (немає рядків, на які сервер міг би відповісти) — `null`: кнопка лишається,
+ * а відмову сервера покаже `useAddRow` локалізованим текстом.
+ */
+export function addRowDenialOf(slice: TableSliceDto): { reason: DenyReason; hint: string } | null {
+  if (slice.rows.length === 0) return null;
+
+  // ⚠ Сервер вирішує на рівні РЯДКА (`CanCreateRowsAsync`), а гранти бувають на колонку: достатньо
+  // одного дозволеного грантом поля будь-якої вхідної колонки, щоб кнопка лишилась активною.
+  const columns = slice.columns.filter(
+    (candidate) => candidate.dataType !== 'Formula' && candidate.dataType !== 'Calculated' && !candidate.isReadOnly,
+  );
+  if (columns.length === 0) return null;
+
+  let found: DenyReason | null = null;
+
+  for (const column of columns) {
+    for (const row of slice.rows) {
+      const permission = slice.cellPermissions[cellKey(row.rowKey, column.code)];
+      if (permission !== 'NoGrant' && permission !== 'InsufficientGrantLevel') return null;
+      found ??= permission;
+    }
+  }
+
+  return found === null ? null : { reason: found, hint: deny(found).hint };
 }
 
 function deny(reason: DenyReason): CellDecision {

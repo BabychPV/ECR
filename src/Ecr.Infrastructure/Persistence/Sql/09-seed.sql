@@ -370,6 +370,112 @@ WHERE u.SymbolL10n = N'{"en":"' + u.Code + N'"}' AND u.NameL10n = N'{"en":"' + u
 GO
 -- HSE301:NM3 ── кінець секції ───────────────────────────────────────────────
 
+-- LAND:units ── одиниці шаблону Land (G8): потужність, оберти, обʼємна витрата, тиск ──
+-- Перелік одиниць із заголовків колонок Excel-шаблону (template-model.json), яких бракувало
+-- в каталозі: kW, rpm, l/h, m3/h, kg/h, t/h, mg/l, thous. m3, kPa, ppm wt. kg/h, t/h, mg/l і
+-- thous. m3 раніше заводились лише через API стенда (Build-LandTemplate.ps1) - тепер вони в сіді,
+-- тож свіжа база їх має. Лише дописування: наявні одиниці й розмірності не змінюються (MERGE
+-- вставляє відсутні, наявну одиницю з тим самим кодом не чіпає); Id розмірностей 20-23 вільні
+-- (1-19 зайняті), Id одиниць - IDENTITY.
+--
+-- ⚠ Нові розмірності: VolumeFlow = Volume/Time (20) і Frequency = Dimensionless/Time (22) - похідні, без
+-- базової одиниці, складаються посиланнями (ФВ-16.2); Power (21, база W) і Pressure (23, база Pa) -
+-- первинні: kW - не J/s із знаменником s (швидкість у швидкість ігнорує власний множник одиниць з однаковими
+-- чисельником і знаменником), а кратна W. Не змішується з StdVolumeFlow (13): m3/h - робочий
+-- кубометр, Sm3/h - стандартний (V-12), CONVERT між ними відмовляє (#UNIT).
+-- ⚠ Множники - як їх зберігає decimal(38,18): 1/3600 = 0.000277777777777778 (як Sm3_per_h),
+-- l/h = 1/3 600 000 до 18 знаків; швидкість у швидкість конвертується через чисельник і
+-- знаменник (Z2-05), тож округлення на точність CONVERT між похідними не впливає.
+-- ⚠ Не заведено: kg/month (24 колонки; одиниці «місяць» у каталозі немає, а 30 днів - вигадка;
+-- колонка - обсяг за місяць, тобто kg), g/m2*sec (2 колонки; потрібна розмірність
+-- «потік маси на площу»), hours/day (частка годин - не одиниця виміру). Дзеркало воркера -
+-- `UnitTable.Seed` (Ecr.Calculations), звіряє `Hse301UnitsTests`.
+MERGE uom.Dimension AS t
+USING (VALUES
+  (20, N'VolumeFlow', 1, 2,    4),      -- Volume / Time
+  (21, N'Power',      0, NULL, NULL),
+  (22, N'Frequency',  1, 7,    4),      -- Dimensionless / Time
+  (23, N'Pressure',   0, NULL, NULL)
+) AS s (Id, Code, IsDerived, Num, Den)
+ON t.Id = s.Id
+WHEN NOT MATCHED THEN INSERT (Id, Code, NameL10n, IsDerived, NumeratorDimensionId, DenominatorDimensionId)
+     VALUES (s.Id, s.Code, N'{"en":"' + s.Code + N'"}', s.IsDerived, s.Num, s.Den);
+GO
+
+MERGE uom.Unit AS t
+USING (VALUES
+  (N'W',           21, 1, 1.0,       0.0),
+  (N'kW',          21, 0, 1000.0,    0.0),
+  (N'Pa',          23, 1, 1.0,       0.0),
+  (N'kPa',         23, 0, 1000.0,    0.0),
+  (N'thousand_m3',  2, 0, 1000.0,    0.0),
+  (N'ppm_wt',       9, 0, 0.000001,  0.0)
+) AS s (Code, DimensionId, IsBase, Factor, [Offset])
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT (Code, SymbolL10n, NameL10n, DimensionId, IsBase, FactorToBase, OffsetToBase)
+     VALUES (s.Code, N'{"en":"' + s.Code + N'"}', N'{"en":"' + s.Code + N'"}',
+             s.DimensionId, s.IsBase, s.Factor, s.[Offset]);
+GO
+
+MERGE uom.Unit AS t
+USING (VALUES
+  (N'rpm',      22, N'one', N'min', 0.016666666666666667),   -- 1 / 60
+  (N'm3_per_h', 20, N'm3', N'h',   0.000277777777777778),    -- 1 / 3600
+  (N'l_per_h',  20, N'l',  N'h',   0.000000277777777778),    -- 0.001 / 3600
+  (N'kg_per_h',  8, N'kg', N'h',   0.000277777777777778),    -- 1 / 3600
+  (N't_per_h',   8, N't',  N'h',   0.277777777777777778),    -- 1000 / 3600
+  (N'mg_per_l', 11, N'mg', N'l',   0.001)                    -- 1e-6 / 1e-3
+) AS s (Code, DimensionId, NumCode, DenCode, Factor)
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT
+     (Code, SymbolL10n, NameL10n, DimensionId, IsBase, FactorToBase, OffsetToBase,
+      NumeratorUnitId, DenominatorUnitId)
+     VALUES (s.Code, N'{"en":"' + s.Code + N'"}', N'{"en":"' + s.Code + N'"}',
+             s.DimensionId, 0, s.Factor, 0,
+             (SELECT Id FROM uom.Unit WHERE Code = s.NumCode),
+             (SELECT Id FROM uom.Unit WHERE Code = s.DenCode));
+GO
+
+UPDATE d SET BaseUnitId = u.Id
+FROM uom.Dimension d
+JOIN uom.Unit u ON u.DimensionId = d.Id AND u.IsBase = 1
+WHERE d.BaseUnitId IS NULL AND d.Id IN (21, 23);
+GO
+
+-- en/ru/kz символи й назви: лише поки в базі стоїть вставлений код-заглушка
+-- (правку адміністратора з /admin/units не затирає).
+UPDATE u SET SymbolL10n = s.Symbol, NameL10n = s.Name
+FROM uom.Unit u
+JOIN (VALUES
+  (N'Pa',          N'{"en":"Pa","ru":"Па","kz":"Па"}',
+                   N'{"en":"Pascal","ru":"Паскаль","kz":"Паскаль"}'),
+  (N'kPa',         N'{"en":"kPa","ru":"кПа","kz":"кПа"}',
+                   N'{"en":"Kilopascal","ru":"Килопаскаль","kz":"Килопаскаль"}'),
+  (N'thousand_m3', N'{"en":"thous. m3","ru":"тыс. м3","kz":"мың м3"}',
+                   N'{"en":"Thousand cubic metres","ru":"Тысяча кубометров","kz":"Мың текше метр"}'),
+  (N'ppm_wt',      N'{"en":"ppm wt","ru":"чнм вес.","kz":"салм. млн-1"}',
+                   N'{"en":"Parts per million by weight","ru":"Части на миллион по весу","kz":"Салмағы бойынша миллионнан бір бөлік"}'),
+  (N'W',           N'{"en":"W","ru":"Вт","kz":"Вт"}',
+                   N'{"en":"Watt","ru":"Ватт","kz":"Ватт"}'),
+  (N'kW',          N'{"en":"kW","ru":"кВт","kz":"кВт"}',
+                   N'{"en":"Kilowatt","ru":"Киловатт","kz":"Киловатт"}'),
+  (N'rpm',         N'{"en":"rpm","ru":"об/мин","kz":"айн/мин"}',
+                   N'{"en":"Revolutions per minute","ru":"Оборотов в минуту","kz":"Минутына айналым"}'),
+  (N'm3_per_h',    N'{"en":"m3/h","ru":"м3/ч","kz":"м3/сағ"}',
+                   N'{"en":"Cubic metre per hour","ru":"Кубометр в час","kz":"Сағатына текше метр"}'),
+  (N'l_per_h',     N'{"en":"l/h","ru":"л/ч","kz":"л/сағ"}',
+                   N'{"en":"Litre per hour","ru":"Литр в час","kz":"Сағатына литр"}'),
+  (N'kg_per_h',    N'{"en":"kg/h","ru":"кг/ч","kz":"кг/сағ"}',
+                   N'{"en":"Kilogram per hour","ru":"Килограмм в час","kz":"Сағатына килограмм"}'),
+  (N't_per_h',     N'{"en":"t/h","ru":"т/ч","kz":"т/сағ"}',
+                   N'{"en":"Tonne per hour","ru":"Тонна в час","kz":"Сағатына тонна"}'),
+  (N'mg_per_l',    N'{"en":"mg/l","ru":"мг/л","kz":"мг/л"}',
+                   N'{"en":"Milligram per litre","ru":"Миллиграмм на литр","kz":"Литріне миллиграмм"}')
+) AS s (Code, Symbol, Name) ON s.Code = u.Code
+WHERE u.SymbolL10n = N'{"en":"' + u.Code + N'"}' AND u.NameL10n = N'{"en":"' + u.Code + N'"}';
+GO
+-- LAND:units ── кінець секції ──────────────────────────────────────────────────
+
 -- Політика паролів і вбудовані ролі
 MERGE sec.PasswordPolicy AS t USING (VALUES (N'Default')) AS s (Code) ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code) VALUES (s.Code);
@@ -7374,6 +7480,10 @@ USING (VALUES
     (N'methodologies.categoryRuleSaved', N'en', N'The category rule has been saved.', 1),
     (N'methodologies.categoryRuleDeleted', N'en', N'The category rule has been deleted.', 1),
     -- CAT:l2ui ── кінець секції ──
+    -- COLL:g13colbatch ── G13: пакетний запис колонок таблиці; ru/kz — порцією COLL:g13colbatch нижче ──
+    (N'err.ECR-TMPL-0422.columnBatchTooLarge', N'en', N'The batch has {count} columns; one request accepts at most {max}. Split it into several requests.', 1),
+    (N'err.ECR-TMPL-0422.columnBatchDuplicateCode', N'en', N'Column code "{columnCode}" appears more than once in the batch: one code is one column.', 1),
+    -- COLL:g13colbatch ── кінець секції ──
     -- COLL:stale-err ── resultsStale у переліку документів: відмови параметрів; ru/kz — порцією COLL:stale-err нижче ──
     (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'en', N'Filtering by stale results needs a period: staleness belongs to a period.', 1),
     (N'err.ECR-REQ-0422.staleBy', N'en', N'staleBy accepts only "me" and only together with resultsStale=true.', 1),
@@ -7381,6 +7491,9 @@ USING (VALUES
     -- COLL:l26rowreject ── L2-6: помилка правила категорії відмовляє лише своєму рядку; ru/kz — порцією COLL:l26rowreject нижче ──
     (N'jobs.recalcCategoryRuleRejected', N'en', N'The category rule rejected {count} row(s) (rows: {rows}): it gave no category key for them. These rows were not calculated; the other rows were.', 1),
     -- COLL:l26rowreject ── кінець секції ──
+    -- COLL:g14unpub ── G14: привʼязана методологія без опублікованих версій пропускається; ru/kz — порцією COLL:g14unpub нижче ──
+    (N'jobs.recalcMethodologyUnpublished', N'en', N'{count} bound methodology(ies) have no published version and were skipped (methodology ids: {methodologies}). Publish them to include them in the calculation; the other methodologies were calculated.', 1),
+    -- COLL:g14unpub ── кінець секції ──
     -- COLL:stale-ui ── банер "результати застаріли" у картці документа; ru/kz — порцією COLL:stale-ui нижче ──
     (N'document.staleResults.title', N'en', N'Calculation results are out of date', 1),
     (N'document.staleResults.hint', N'en', N'Input data was changed after the last calculation. Recalculate to refresh the results.', 1),
@@ -7788,6 +7901,9 @@ USING (VALUES
     -- COLL:rc20rule ── R16-4: правило категорії - єдиний код ECR-CALC-0422 для @Nope, CST.X, !X; ru/kz - порцією COLL:rc20rule нижче ──
     ,(N'err.ECR-CALC-0422.categoryRuleUnknownArgument', N'en', N'The category rule uses argument(s) {arguments}, which have no matching column in {tableCount} bound table(s): the rule runs on a row of that table, so the argument would always be empty.', 1)
     -- COLL:rc20rule ── кінець секції ──
+    -- COLL:rc21excel ── RC21 EA-6: імпорт .xlsx виконавця з передачею місяця - «все або нічого», 403; ru/kz - порцією COLL:rc21excel нижче ──
+    ,(N'err.ECR-ACCS-0403.importDeniedCells', N'en', N'The file was refused as a whole: it contains {deniedCount} cell(s) you are not allowed to change under your assignment. Nothing was written. Remove those values from the file (or ask the owner to change the assignment) and import again.', 1)
+    -- COLL:rc21excel ── кінець секції ──
     -- COLL:ea-api ── EA-C: передача місяця виконавцям (керування, переходи, відмови); ru/kz — порцією COLL:ea-api нижче ──
     ,(N'err.ECR-ACCS-0403.notEditAssignmentManager', N'en', N'Only the document author or a project manager can manage month assignments.', 1)
     ,(N'err.ECR-ACCS-0403.editAssignmentReadOnly', N'en', N'The document is read-only now (archive or simulation).', 1)
@@ -7823,6 +7939,41 @@ USING (VALUES
     -- COLL:rpt-version-race ── гонка двох створень версії звіту (UQ_ReportVersion) -> 409; ru/kz - порцією COLL:rpt-version-race нижче ──
     ,(N'err.ECR-RPT-4091.versionConcurrent', N'en', N'Someone else has just created a version with this number in this report definition. Reload the definition and pick another version number.', 1)
     -- COLL:rpt-version-race ── кінець секції ──
+    -- COLL:d3rowdelete ── D3-A: видалення динамічного рядка документа (кнопка, підтвердження, відмови); ru/kz — порцією COLL:d3rowdelete нижче ──
+    ,(N'grid.deleteRow', N'en', N'Delete row', 1)
+    ,(N'grid.deleteRowHint', N'en', N'Select a cell of a row you added to delete it.', 1)
+    ,(N'grid.deleteRowTitle', N'en', N'Delete row “{row}”?', 1)
+    ,(N'grid.deleteRowConsequence', N'en', N'The row disappears from the table, totals and reports. Its values are kept in the audit trail.', 1)
+    ,(N'grid.deleteRowNote', N'en', N'There is no undo for this action. Only a row you added can be deleted, and only while the sheet is a draft or rejected.', 1)
+    ,(N'grid.deleteRowVerb', N'en', N'Delete row', 1)
+    ,(N'grid.deleteRowOrdinalLabel', N'en', N'row #{n}', 1)
+    ,(N'err.ECR-ACCS-0403.deleteRowDenied', N'en', N'A row cannot be deleted from this table: {reason}.', 1)
+    ,(N'err.ECR-ACCS-0403.deleteRowValuesDenied', N'en', N'This row cannot be deleted: it holds values you are not allowed to clear.', 1)
+    ,(N'err.ECR-ACCS-0403.deleteRowOutOfWindow', N'en', N'This row cannot be deleted: some of its values are outside the period access window.', 1)
+    ,(N'err.ECR-ROW-0404.rowNotFound', N'en', N'The row was not found in this table. It may have been deleted already.', 1)
+    ,(N'err.ECR-ROW-0409.templateRowNotDeletable', N'en', N'This row comes from the template and cannot be deleted.', 1)
+    ,(N'err.ECR-ROW-0409.sourceRowNotDeletable', N'en', N'This row holds data loaded by an integration, import or collection (or is maintained by a source event) and cannot be deleted by hand.', 1)
+    -- COLL:d3rowdelete ── кінець секції ──
+    -- COLL:rc21misc ── RC21: дрібні пункти черги (EA6-D2 термін дії передачі, RC20 D-2/D-3/D-4); ru/kz — порцією COLL:rc21misc нижче ──
+    ,(N'err.ECR-REQ-0422.editAssignmentExpiresAtInvalid', N'en', N'The assignment expiry must be in the future and no later than 366 days from now (UTC).', 1)
+    ,(N'deny.NotAssignedToYou', N'en', N'This part is not assigned to you. You can edit only the parts the owner assigned to you; ask the owner to assign this one to you.', 1)
+    ,(N'editAssign.notVisible', N'en', N'(cannot see the document)', 1)
+    ,(N'editAssign.notVisibleHint', N'en', N'This person cannot see this document or sheet, so the assignment has no effect for them. Ask an administrator to grant them a role that opens it, for example the Executor role.', 1)
+    -- COLL:rc21misc ── кінець секції ──
+    -- COLL:d1remap ── D-1 RC20: перенос мапінгів збору разом із версією шаблону; ru/kz — порцією COLL:d1remap нижче ──
+    ,(N'err.ECR-SCHM-0422.migrateMappingsNotMapped', N'en', N'An active collection, source-event or row-window mapping points to a column or table that the target version does not have, or its place in the target version is already taken (the items are listed in mappingColumns). After the move, collection would read points and write nothing. Pause that mapping (or add the column to the target version and clone again), then move the project. Mappings with a matching column move automatically.', 1)
+    ,(N'documents.migrateRefusalMappingsNotMapped', N'en', N'Active collection, source-event or row-window mappings point to columns or tables that the target version does not have (or whose place is taken); nothing would be written there. Pause those mappings first.', 1)
+    ,(N'documents.migrateOtherProjectsWarning', N'en', N'Collection, source-event and row-window mappings are shared: after this move, {projects} other project(s) ({documents} document(s)) still on the old version will not collect until they are moved too.', 1)
+    -- COLL:d1remap ── кінець секції ──
+    -- COLL:d14unmatched ── D14: рядки без правила розрахунку - інформація на аркуші; ru/kz - порцією COLL:d14unmatched нижче ──
+    ,(N'document.unmatchedRows.title', N'en', N'Some rows are not included in the calculation', 1)
+    ,(N'document.unmatchedRows.hint', N'en', N'{count} row(s) matched no calculation rule and were skipped, for example because the status is not Running. This is information, not an error. Row: {rows}', 1)
+    -- COLL:d14unmatched ── кінець секції ──
+    -- LUF:fixes ── приймальна Land 12.10 (D4/D11): текст відмови затвердження без права; лічильники таблиць із підписом області; ru/kz — порцією LUF:fixes нижче ──
+    ,(N'deny.approve.NoRight', N'en', N'you cannot approve or reject this sheet right now: you lack the approval right, or the current workflow step is for another role', 1)
+    ,(N'grid.tree.tablesFilledSheet', N'en', N'{filled} of {total} tables filled on this sheet', 1)
+    ,(N'document.tablesFilledInDocument', N'en', N'Tables filled completely in the whole document: {filled} of {total}', 1)
+    -- LUF:fixes ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18508,6 +18659,17 @@ OPTION (RECOMPILE);
 GO
 -- COLL:l26rowreject ── кінець секції ──
 
+-- COLL:g14unpub ── ru/kz G14: методологія без опублікованих версій пропущена; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'jobs.recalcMethodologyUnpublished', N'ru', N'Привязанные методологии без опубликованных версий пропущены: {count} (идентификаторы: {methodologies}). Опубликуйте их, чтобы они участвовали в расчёте; остальные методологии рассчитаны.'),
+    (N'jobs.recalcMethodologyUnpublished', N'kz', N'Жарияланған нұсқасы жоқ байланыстырылған әдістемелер өткізіп жіберілді: {count} (идентификаторлары: {methodologies}). Есепке қосу үшін оларды жариялаңыз; қалған әдістемелер есептелді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:g14unpub ── кінець секції ──
+
 -- COLL:bind2 ── ru/kz P2-1: дві активні прив'язки з однаковим предикатом на одну колонку; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -18518,6 +18680,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:bind2 ── кінець секції ──
+
+-- COLL:g13colbatch ── ru/kz G13: пакетний запис колонок таблиці; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.columnBatchTooLarge', N'ru', N'В пачке столбцов: {count}, а один запрос принимает не больше {max}. Разбейте пачку на несколько запросов.'),
+    (N'err.ECR-TMPL-0422.columnBatchTooLarge', N'kz', N'Пакетте {count} баған бар, ал бір сұрау ең көбі {max} қабылдайды. Пакетті бірнеше сұрауға бөліңіз.'),
+    (N'err.ECR-TMPL-0422.columnBatchDuplicateCode', N'ru', N'Код столбца «{columnCode}» повторяется в пачке: один код - один столбец.'),
+    (N'err.ECR-TMPL-0422.columnBatchDuplicateCode', N'kz', N'«{columnCode}» баған коды пакетте қайталанады: бір код - бір баған.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:g13colbatch ── кінець секції ──
 
 -- COLL:l21scope ── ru/kz: область формули (scope) у PUT формули й порівнянні версій; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
@@ -19610,6 +19785,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rc20rule ── кінець секції ──
+-- COLL:rc21excel ── ru/kz RC21 EA-6: імпорт .xlsx виконавця з передачею місяця - «все або нічого»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-ACCS-0403.importDeniedCells', N'ru', N'Файл отклонён целиком: в нём {deniedCount} ячеек, которые вам нельзя изменять в рамках вашей передачи. Ничего не записано. Уберите эти значения из файла (или попросите владельца изменить передачу) и повторите импорт.'),
+    (N'err.ECR-ACCS-0403.importDeniedCells', N'kz', N'Файл толығымен қабылданбады: онда тапсырмаңыз шеңберінде Сізге өзгертуге болмайтын {deniedCount} ұяшық бар. Ештеңе жазылмады. Бұл мәндерді файлдан алып тастаңыз (немесе иесінен тапсырманы өзгертуді сұраңыз) және импортты қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc21excel ── кінець секції ──
 -- COLL:ea-api ── ru/kz: передача місяця виконавцям (EA-C); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -19688,6 +19873,97 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rpt-version-race ── кінець секції ──
+-- COLL:d3rowdelete ── ru/kz D3-A: видалення динамічного рядка документа; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.deleteRow', N'ru', N'Удалить строку'),
+    (N'grid.deleteRow', N'kz', N'Жолды жою'),
+    (N'grid.deleteRowHint', N'ru', N'Выберите ячейку строки, которую вы добавили, чтобы удалить её.'),
+    (N'grid.deleteRowHint', N'kz', N'Жолды жою үшін өзіңіз қосқан жолдың ұяшығын таңдаңыз.'),
+    (N'grid.deleteRowTitle', N'ru', N'Удалить строку «{row}»?'),
+    (N'grid.deleteRowTitle', N'kz', N'«{row}» жолын жою керек пе?'),
+    (N'grid.deleteRowConsequence', N'ru', N'Строка исчезнет из таблицы, итогов и отчётов. Её значения сохранятся в журнале аудита.'),
+    (N'grid.deleteRowConsequence', N'kz', N'Жол кестеден, қорытындылардан және есептерден жоғалады. Оның мәндері аудит журналында сақталады.'),
+    (N'grid.deleteRowNote', N'ru', N'Отменить это действие нельзя. Удалить можно только добавленную вами строку и только пока лист в черновике или отклонён.'),
+    (N'grid.deleteRowNote', N'kz', N'Бұл әрекетті болдырмау мүмкін емес. Тек өзіңіз қосқан жолды және тек парақ жоба немесе қабылданбаған күйде болғанда жоюға болады.'),
+    (N'grid.deleteRowVerb', N'ru', N'Удалить строку'),
+    (N'grid.deleteRowVerb', N'kz', N'Жолды жою'),
+    (N'grid.deleteRowOrdinalLabel', N'ru', N'строка №{n}'),
+    (N'grid.deleteRowOrdinalLabel', N'kz', N'№{n} жол'),
+    (N'err.ECR-ACCS-0403.deleteRowDenied', N'ru', N'Из этой таблицы нельзя удалить строку: {reason}.'),
+    (N'err.ECR-ACCS-0403.deleteRowDenied', N'kz', N'Бұл кестеден жолды жоюға болмайды: {reason}.'),
+    (N'err.ECR-ACCS-0403.deleteRowValuesDenied', N'ru', N'Строку нельзя удалить: в ней есть значения, которые вам нельзя стирать.'),
+    (N'err.ECR-ACCS-0403.deleteRowValuesDenied', N'kz', N'Бұл жолды жоюға болмайды: онда сізге өшіруге рұқсат етілмеген мәндер бар.'),
+    (N'err.ECR-ACCS-0403.deleteRowOutOfWindow', N'ru', N'Строку нельзя удалить: часть её значений вне окна доступа к периоду.'),
+    (N'err.ECR-ACCS-0403.deleteRowOutOfWindow', N'kz', N'Бұл жолды жоюға болмайды: оның кейбір мәндері кезеңге қол жеткізу терезесінен тыс.'),
+    (N'err.ECR-ROW-0404.rowNotFound', N'ru', N'Строка в этой таблице не найдена. Возможно, она уже удалена.'),
+    (N'err.ECR-ROW-0404.rowNotFound', N'kz', N'Бұл кестеде жол табылмады. Ол бұрын жойылған болуы мүмкін.'),
+    (N'err.ECR-ROW-0409.templateRowNotDeletable', N'ru', N'Эта строка берётся из шаблона, её нельзя удалить.'),
+    (N'err.ECR-ROW-0409.templateRowNotDeletable', N'kz', N'Бұл жол үлгіден алынған, оны жоюға болмайды.'),
+    (N'err.ECR-ROW-0409.sourceRowNotDeletable', N'ru', N'В этой строке данные, загруженные интеграцией, импортом или сбором (или строку ведёт событие источника): удалить её вручную нельзя.'),
+    (N'err.ECR-ROW-0409.sourceRowNotDeletable', N'kz', N'Бұл жолда интеграция, импорт немесе жинау арқылы жүктелген деректер бар (немесе оны дереккөз оқиғасы жүргізеді): оны қолмен жоюға болмайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d3rowdelete ── кінець секції ──
+-- COLL:rc21misc ── ru/kz: RC21 дрібні пункти черги (EA6-D2, RC20 D-2/D-3/D-4); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.editAssignmentExpiresAtInvalid', N'ru', N'Срок действия передачи должен быть в будущем и не позже чем через 366 дней (UTC).'),
+    (N'err.ECR-REQ-0422.editAssignmentExpiresAtInvalid', N'kz', N'Тапсыру мерзімі болашақта болуы және бүгіннен бастап 366 күннен кеш болмауы керек (UTC).'),
+    (N'deny.NotAssignedToYou', N'ru', N'Эта часть вам не передана. Править можно только части, переданные вам владельцем; попросите владельца передать вам и эту.'),
+    (N'deny.NotAssignedToYou', N'kz', N'Бұл бөлік сізге берілмеген. Тек иесі сізге тапсырған бөліктерді ғана өзгертуге болады; иесінен осы бөлікті де сізге беруін сұраңыз.'),
+    (N'editAssign.notVisible', N'ru', N'(не видит документ)'),
+    (N'editAssign.notVisible', N'kz', N'(құжатты көрмейді)'),
+    (N'editAssign.notVisibleHint', N'ru', N'Этот человек не видит документ или лист, поэтому передача для него не действует. Попросите администратора выдать ему роль, открывающую документ, например «Исполнитель».'),
+    (N'editAssign.notVisibleHint', N'kz', N'Бұл адам құжатты немесе парақты көрмейді, сондықтан тапсыру оған әсер етпейді. Әкімшіден оған құжатты ашатын рөлді, мысалы «Орындаушы» рөлін беруін сұраңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc21misc ── кінець секції ──
+
+-- COLL:d1remap ── ru/kz: D-1 RC20, перенос мапінгів збору при переносі версії шаблону; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-SCHM-0422.migrateMappingsNotMapped', N'ru', N'Активное сопоставление сбора, событий источника или окна строки указывает на колонку или таблицу, которой нет в целевой версии, либо её место в целевой версии уже занято (названы в mappingColumns). После переноса сбор читал бы точки и ничего не писал. Приостановите это сопоставление (или добавьте колонку в целевую версию и клонируйте заново), затем переносите проект. Сопоставления с соответствующей колонкой переносятся автоматически.'),
+    (N'err.ECR-SCHM-0422.migrateMappingsNotMapped', N'kz', N'Жинаудың, көз оқиғаларының немесе жол терезесінің белсенді сәйкестендіруі мақсатты нұсқада жоқ бағанға немесе кестеге сілтейді не оның орны мақсатты нұсқада бос емес (mappingColumns ішінде аталған). Көшіруден кейін жинау нүктелерді оқып, ештеңе жазбас еді. Бұл сәйкестендіруді тоқтатыңыз (немесе бағанды мақсатты нұсқаға қосып, қайта клондаңыз), содан кейін жобаны көшіріңіз. Сәйкес бағаны бар сәйкестендірулер автоматты түрде көшіріледі.'),
+    (N'documents.migrateRefusalMappingsNotMapped', N'ru', N'Активные сопоставления сбора, событий источника или окна строки указывают на колонки или таблицы, которых нет в целевой версии (или чьё место занято); туда ничего не записалось бы. Сначала приостановите эти сопоставления.'),
+    (N'documents.migrateRefusalMappingsNotMapped', N'kz', N'Жинаудың, көз оқиғаларының немесе жол терезесінің белсенді сәйкестендірулері мақсатты нұсқада жоқ бағандарға немесе кестелерге сілтейді (не олардың орны бос емес); оларға ештеңе жазылмас еді. Алдымен осы сәйкестендірулерді тоқтатыңыз.'),
+    (N'documents.migrateOtherProjectsWarning', N'ru', N'Сопоставления сбора, событий источника и окна строки общие: после этого переноса другие проекты ({projects}; документов: {documents}) на старой версии не будут собирать данные, пока их тоже не перенесут.'),
+    (N'documents.migrateOtherProjectsWarning', N'kz', N'Жинау, көз оқиғалары және жол терезесінің сәйкестендірулері ортақ: осы көшіруден кейін ескі нұсқадағы басқа жобалар ({projects}; құжаттар: {documents}) өздері де көшірілгенге дейін деректерді жинамайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d1remap ── кінець секції ──
+-- COLL:d14unmatched ── ru/kz D14: рядки без правила розрахунку; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.unmatchedRows.title', N'ru', N'Часть строк не вошла в расчёт'),
+    (N'document.unmatchedRows.title', N'kz', N'Кейбір жолдар есептеуге кірмеді'),
+    (N'document.unmatchedRows.hint', N'ru', N'Строк, к которым не подошло ни одно правило расчёта: {count}; они пропущены, например из-за статуса, отличного от Running. Это информация, а не ошибка. Строки: {rows}'),
+    (N'document.unmatchedRows.hint', N'kz', N'Ешқандай есептеу ережесіне сәйкес келмеген жолдар: {count}; олар өткізіп жіберілді, мысалы мәртебесі Running емес болғандықтан. Бұл қате емес, ақпарат. Жолдар: {rows}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d14unmatched ── кінець секції ──
+-- LUF:fixes ── ru/kz: приймальна Land 12.10 (D4/D11); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'deny.approve.NoRight', N'ru', N'вы не можете утвердить или отклонить этот лист сейчас: нет права утверждения или очередь другой роли'),
+    (N'deny.approve.NoRight', N'kz', N'қазір бұл парақты бекіте немесе қайтара алмайсыз: бекіту құқығы жоқ немесе кезек басқа рөлге тиесілі'),
+    (N'grid.tree.tablesFilledSheet', N'ru', N'Заполнено таблиц на этом листе: {filled} из {total}'),
+    (N'grid.tree.tablesFilledSheet', N'kz', N'Осы парақта толтырылған кестелер: {filled} / {total}'),
+    (N'document.tablesFilledInDocument', N'ru', N'Полностью заполнено таблиц во всём документе: {filled} из {total}'),
+    (N'document.tablesFilledInDocument', N'kz', N'Бүкіл құжатта толық толтырылған кестелер: {filled} / {total}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- LUF:fixes ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
@@ -19842,7 +20118,7 @@ GO
 -- `Report.EditDefinition` — окремий MERGE `D-203`; `BootstrapAdministrator` — два права).
 -- Той самий механізм, що й у двох наявних поіменних винятків.
 --
--- ⚠ Видано рівно ВІСІМ прав — адмін-керування (`D-207`: розділення обов'язків адміністраторів
+-- ⚠ Видано ВІСІМ прав адмін-керування (+2 нижче, 2026-10-12) (`D-207`: розділення обов'язків адміністраторів
 -- не обмежуємо; `D-121`: носій `Security.ManageRoles` і так видає будь-яке право):
 --   Security.ManageUsers · Security.ManageRoles · Security.Simulate  — користувачі, ролі, «View as»;
 --   Integration.Manage — джерела, мапінг, конвеєр; System.ManageNotifications — канали й SMTP;
@@ -19852,9 +20128,14 @@ GO
 -- публікація методики автором її створення відмовляється (`ФВ-9.6`, `D-226`), Reopen вимагає
 -- причини, симуляція пишеться в аудит, а ціль симуляції з небезпечним правом заборонена.
 --
--- ⛔ НЕ видано навмисно (операційні/бізнесові, а не адмін-керування — на рішення людини):
---   Report.EditDefinition (авторство державної форми; `D-203`, лише Approver) ·
---   Period.Reopen (повторне відкриття закритого періоду) · Document.ChangeKey (зміна бізнес-ключа).
+-- ✎ 2026-10-12 (рішення людини, квіз 12.10, №1): до восьми додано ще ДВА — `Period.Reopen`
+-- (повторне відкриття закритого періоду) і `Document.ChangeKey` (зміна бізнес-ключа), разом ДЕСЯТЬ.
+-- Вони йдуть тим самим MERGE (NOT MATCHED, без міграції) і тією самою подією `RolePermissionsGranted`:
+-- наявна база отримує лише відсутні пари, подія перелічує рівно те, що додано. Захист — у точці
+-- використання: Reopen вимагає причини й гранта на проєкт, зміна ключа пишеться в аудит.
+--
+-- ⛔ НЕ видано навмисно (на рішення людини):
+--   Report.EditDefinition (авторство державної форми; `D-203`, лише Approver).
 --
 -- ⚠ MERGE … WHEN NOT MATCHED: наявна база отримує пари на наступному старті (`SeedRunner`)
 -- без міграції схеми; право, зняте адміністратором з вбудованої ролі, повторний сід поверне
@@ -19872,7 +20153,9 @@ USING (
     FROM (VALUES
         (N'Security.ManageUsers'), (N'Security.ManageRoles'), (N'Security.Simulate'),
         (N'Integration.Manage'), (N'System.ManageNotifications'), (N'System.RunJob'),
-        (N'Report.ViewCampaign'), (N'Calculation.Publish')
+        (N'Report.ViewCampaign'), (N'Calculation.Publish'),
+        -- ✎ 2026-10-12 (рішення людини, квіз 12.10, №1; D-388 доповнено): ще два, у ТІЙ САМІЙ секції.
+        (N'Period.Reopen'), (N'Document.ChangeKey')
     ) AS m (Code)
     JOIN sec.Permission AS p ON p.Code = m.Code
     CROSS JOIN sec.Role AS r

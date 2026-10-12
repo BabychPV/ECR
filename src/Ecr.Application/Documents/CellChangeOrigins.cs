@@ -28,6 +28,12 @@ public static class CellChangeOrigins
     /// <summary>Правка людини в сітці — єдине, що може заявити клієнт.</summary>
     public const string UserEdit = "UserEdit";
 
+    /// <summary>Запис інтеграції/збору (<c>IntegrationCellPatcher</c>) — єдине МАШИННЕ походження входу (D3-A).</summary>
+    public const string Integration = "Integration";
+
+    /// <summary>Перерахунок: міняє похідне, а не вхід; для визначення «хто ввів значення» пропускається.</summary>
+    public const string Recalculation = "Recalculation";
+
     /// <summary>
     /// Імпорт книги Excel (<c>ExcelImporter</c>): значення, які людина ввела в
     /// книгу й свідомо застосувала.

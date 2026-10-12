@@ -67,6 +67,9 @@ public sealed record MethodologyVersionDto(
 /// <param name="TriggeredByUserId">Хто запустив; <c>null</c> — за розкладом.</param>
 /// <param name="ResultCount">Скільки результатів записано.</param>
 /// <param name="ModulesProfileJson">Профіль часу по модулях.</param>
+/// <param name="UnmatchedRows">
+/// Рядки без правила (D14, інформація, не помилка); <c>null</c> — таких немає або профіль їх не містить.
+/// </param>
 public sealed record CalculationRunDto(
     long Id,
     int ProjectId,
@@ -76,4 +79,26 @@ public sealed record CalculationRunDto(
     DateTime? FinishedAt,
     int? TriggeredByUserId,
     int ResultCount,
-    string? ModulesProfileJson);
+    string? ModulesProfileJson,
+    UnmatchedRowsDto? UnmatchedRows = null);
+
+/// <summary>Рядки документа, яким не підійшло жодне правило розрахунку (D14).</summary>
+/// <remarks>
+/// ⚠ Це ІНФОРМАЦІЯ: у Land рядок зі статусом «не Running» виключається навмисно й без помилки.
+/// Значень комірок тут немає навмисно — лише кількість і ключі рядків.
+/// </remarks>
+/// <param name="Count">Скільки рядків документа не закрило жодне правило.</param>
+/// <param name="Rows">До 10 рядків за зростанням таблиці й номера.</param>
+public sealed record UnmatchedRowsDto(int Count, IReadOnlyList<UnmatchedRowItemDto> Rows);
+
+/// <summary>Один рядок без правила (D14).</summary>
+/// <param name="TableInstanceId">Екземпляр таблиці.</param>
+/// <param name="RowNumber">Номер рядка, з 1, у порядку створення.</param>
+/// <param name="RowKey">Публічний ключ рядка.</param>
+public sealed record UnmatchedRowItemDto(long TableInstanceId, int RowNumber, string RowKey);
+
+/// <summary>Стан актуального прогону документа за період для аркуша (D14).</summary>
+/// <param name="RunId">Актуальний прогін; <c>null</c> — документ за цей період не рахували.</param>
+/// <param name="FinishedAt">Коли прогін завершився (UTC).</param>
+/// <param name="UnmatchedRows">Рядки без правила; <c>null</c> — таких немає, а також для читача зі звуженою видимістю.</param>
+public sealed record CalculationRunStatusDto(long? RunId, DateTime? FinishedAt, UnmatchedRowsDto? UnmatchedRows);

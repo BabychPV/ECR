@@ -229,7 +229,7 @@ public sealed partial class DenyReadTests(SqlServerFixture sql)
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-6.6")]
     [Trait("Requirement", "ФВ-14.2")]
-    public async Task Заборонена_таблиця_і_таблиця_забороненого_аркуша_виглядають_як_неіснуючі()
+    public async Task Заборонена_таблиця_і_таблиця_забороненого_аркуша_дають_404_tableInstance_без_значень()
     {
         var s = await ArrangeAsync().ConfigureAwait(true);
 
@@ -254,10 +254,9 @@ public sealed partial class DenyReadTests(SqlServerFixture sql)
             Assert.Equal("ECR-DOC-0404", problem.GetProperty("errorCode").GetString());
             Assert.Equal("err.ECR-DOC-0404.tableInstance", problem.GetProperty("messageKey").GetString());
 
-            // ⚠ Речення відрізняється від неіснуючого ЛИШЕ ідентифікатором (B-08).
-            Assert.Equal(
-                Detail(absent).Replace(missing.ToString(CultureInfo.InvariantCulture), "{id}", StringComparison.Ordinal),
-                Detail(body).Replace(instance.ToString(CultureInfo.InvariantCulture), "{id}", StringComparison.Ordinal));
+            // ⚠ P3-7: схована таблиця ВИДИМОГО документа — "tableInstance" (D-6, прийняте розкриття всередині
+            // видимого документа); відсутній екземпляр — "document", як у PATCH/POST (тест у DenyReadTests.ForeignInstance).
+            Assert.Equal("err.ECR-DOC-0404.document", JsonDocument.Parse(absent).RootElement.GetProperty("messageKey").GetString());
         }
 
         // Інша таблиця того самого документа — на місці.

@@ -71,16 +71,18 @@ public sealed class EditAssignment : Entity<long>
             throw new ArgumentException("Ідентифікатор групи передачі не може бути порожнім.", nameof(handoffId));
         }
 
-        // Час — завжди UTC: Local переводимо, Unspecified вважаємо UTC.
-        expiresAt = expiresAt is { } raw
-            ? (raw.Kind == DateTimeKind.Local ? raw.ToUniversalTime() : DateTime.SpecifyKind(raw, DateTimeKind.Utc))
-            : null;
-
-        // Термін дії: не в минулому й не далі за стелю (аудит P3).
-        if (expiresAt is { } expiry && (expiry <= utcNow || expiry > utcNow.AddDays(MaxLifetimeDays)))
+        // Час — завжди UTC: Local переводимо, Unspecified вважаємо UTC. Термін дії: не в минулому й не далі
+        // за стелю (аудит P3).
+        DateTime? normalizedExpiry = null;
+        if (expiresAt is { } raw)
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(expiresAt), expiresAt, $"Термін дії передачі має бути в майбутньому й не пізніше ніж через {MaxLifetimeDays} діб.");
+            if (!TryNormalizeExpiry(raw, utcNow, out var expiry))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(expiresAt), expiresAt, $"Термін дії передачі має бути в майбутньому й не пізніше ніж через {MaxLifetimeDays} діб.");
+            }
+
+            normalizedExpiry = expiry;
         }
 
         DocumentId = documentId;
@@ -93,7 +95,7 @@ public sealed class EditAssignment : Entity<long>
         ValidationStatus = EditAssignmentValidationStatus.NotValidated;
         DelegatedByUserId = delegatedByUserId;
         HandoffId = handoffId;
-        ExpiresAt = expiresAt;
+        ExpiresAt = normalizedExpiry;
         Note = NormalizeNote(note);
         CreatedAt = utcNow;
         CreatedByUserId = createdByUserId;
@@ -288,6 +290,49 @@ public sealed class EditAssignment : Entity<long>
 
         recipient.MarkReturned(byUserId, text, utcNow);
         ResetValidation(byUserId, utcNow);
+    }
+
+    /// <summary>
+    /// Нормалізує термін дії: UTC (Local переводиться, Unspecified вважається UTC), точність до мілісекунди
+    /// (колонка <c>datetime2(3)</c> — інакше повтор того самого значення «змінював би» передачу) і перевірка
+    /// «у майбутньому, не далі за <see cref="MaxLifetimeDays"/> діб».
+    /// </summary>
+    /// <param name="raw">Значення із запиту.</param>
+    /// <param name="utcNow">Момент з <c>IClock.UtcNow</c>.</param>
+    /// <param name="expiry">Нормалізований термін (UTC); заповнюється й тоді, коли перевірка не пройшла.</param>
+    /// <returns><c>true</c> — термін допустимий.</returns>
+    public static bool TryNormalizeExpiry(DateTime raw, DateTime utcNow, out DateTime expiry)
+    {
+        var utc = raw.Kind == DateTimeKind.Local ? raw.ToUniversalTime() : DateTime.SpecifyKind(raw, DateTimeKind.Utc);
+        expiry = new DateTime(utc.Ticks - (utc.Ticks % TimeSpan.TicksPerMillisecond), DateTimeKind.Utc);
+
+        return expiry > utcNow && expiry <= utcNow.AddDays(MaxLifetimeDays);
+    }
+
+    /// <summary>
+    /// Встановлює чи знімає термін дії (<c>null</c> — безстроково). Валідація стану виконавців не чіпається:
+    /// термін — ознака передачі, як ексклюзивність.
+    /// </summary>
+    /// <param name="expiresAt">Новий термін (UTC) або <c>null</c>.</param>
+    /// <param name="byUserId">Хто змінює.</param>
+    /// <param name="utcNow">Момент з <c>IClock.UtcNow</c>.</param>
+    /// <exception cref="ArgumentOutOfRangeException">Термін у минулому чи за стелею.</exception>
+    public void SetExpiry(DateTime? expiresAt, int byUserId, DateTime utcNow)
+    {
+        DateTime? normalized = null;
+        if (expiresAt is { } raw)
+        {
+            if (!TryNormalizeExpiry(raw, utcNow, out var expiry))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(expiresAt), expiresAt, $"Термін дії передачі має бути в майбутньому й не пізніше ніж через {MaxLifetimeDays} діб.");
+            }
+
+            normalized = expiry;
+        }
+
+        ExpiresAt = normalized;
+        Touch(byUserId, utcNow);
     }
 
     /// <summary>Змінює ексклюзивність і примітку (склад і зріз — окремо).</summary>

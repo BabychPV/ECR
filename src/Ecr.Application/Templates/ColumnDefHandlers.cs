@@ -264,7 +264,7 @@ public sealed class SaveColumnDefHandler(
     /// вирішує сумісність) — виклик «на всякий випадок» з <c>null</c> нічого
     /// не додав би, а виклик зі значенням на невідповідному типі має впасти.
     /// </remarks>
-    private static void ApplyOptionalFields(ColumnDef column, SaveColumnDefCommand command)
+    internal static void ApplyOptionalFields(ColumnDef column, SaveColumnDefCommand command)
     {
         column.SetRequired(command.IsRequired);
         column.SetReadOnly(command.IsReadOnly);
@@ -298,7 +298,7 @@ public sealed class SaveColumnDefHandler(
     /// давала б голий <c>500</c> на 547 замість <c>422</c> з ключем.
     /// </remarks>
     /// <exception cref="BusinessRuleException"><c>ECR-TMPL-0422</c>, ключ <c>unknownUnit</c>.</exception>
-    private static async Task RequireKnownUnitAsync(
+    internal static async Task RequireKnownUnitAsync(
         IUnitCatalog units, int? unitId, string code, CancellationToken ct)
     {
         if (unitId is not { } id)

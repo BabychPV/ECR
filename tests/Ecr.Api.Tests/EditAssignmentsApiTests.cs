@@ -376,7 +376,27 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         var body = await JsonAsync(await owner.GetAsync(card).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
         Assert.Equal(s.Author.Id, body.GetProperty("ownerUserId").GetInt32());
     }
+
     [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Картка_документа_не_розкриває_ownerUserId_звуженому_читачеві()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var card = new Uri($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}", UriKind.Relative);
+
+        // Контроль: незвужений читач (Manage) автора бачить — тест не зелений «за відсутністю поля».
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+        var full = await JsonAsync(await owner.GetAsync(card).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Equal(s.Author.Id, full.GetProperty("ownerUserId").GetInt32());
+
+        // Менеджер із забороною на аркуш документа (звужений): автор документа — те саме розкриття, що й ім'я автора.
+        using var hidden = await SignedInAsync(app, s.HiddenManager.UserName).ConfigureAwait(true);
+        var narrowed = await JsonAsync(await hidden.GetAsync(card).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.True(
+            !narrowed.TryGetProperty("ownerUserId", out var v) || v.ValueKind == JsonValueKind.Null,
+            $"ownerUserId звуженому читачеві: {narrowed}");
+    }    [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Автор_документа_з_одним_Write_передає_і_знімає_передачу()
     {
@@ -392,6 +412,362 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         var id = created.GetProperty("id").GetInt64();
         var del = await author.DeleteAsync(new Uri($"{ListUri(s)}/{id.ToString(CultureInfo.InvariantCulture)}", UriKind.Relative)).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
+    }
+
+    // ───────────────────────── EA6-D2: строк дії передачі в API ─────────────────────────
+
+    private static DateTime? ExpiryOf(JsonElement assignment)
+        => assignment.TryGetProperty("expiresAt", out var v) && v.ValueKind != JsonValueKind.Null
+            ? v.GetDateTime().ToUniversalTime()
+            : null;
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "EA6-D2")]
+    public async Task Строк_дії_задається_змінюється_знімається_і_повертається_у_відповіді_й_переліку()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+
+        var in30 = DateTime.UtcNow.AddDays(30);
+        var created = await JsonAsync(
+            await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id, expiresAt: in30)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var stored = ExpiryOf(created);
+        Assert.NotNull(stored);
+        Assert.True(Math.Abs((stored.Value - in30).TotalMilliseconds) < 1.0, $"{stored:O} ≠ {in30:O}");
+        var version = created.GetProperty("version").GetString();
+
+        // Повтор того самого значення — ідемпотентний: версія не змінилась.
+        var repeat = await JsonAsync(
+            await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id, expiresAt: stored)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Equal(version, repeat.GetProperty("version").GetString());
+
+        // Перелік повертає строк.
+        var list = await JsonAsync(await owner.GetAsync(ListUri(s)).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Equal(stored, ExpiryOf(Assert.Single(list.GetProperty("assignments").EnumerateArray())));
+
+        // Зміна строку: потребує baseVersion, дає нову версію й подію змін.
+        var in60 = DateTime.UtcNow.AddDays(60);
+        var noVersion = await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id, expiresAt: in60)).ConfigureAwait(true);
+        var needsVersion = await JsonAsync(noVersion, HttpStatusCode.UnprocessableEntity, app).ConfigureAwait(true);
+        Assert.Equal("err.ECR-REQ-0422.editAssignmentBaseVersion", needsVersion.GetProperty("messageKey").GetString());
+
+        var changed = await JsonAsync(
+            await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id, baseVersion: version, expiresAt: in60)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.NotEqual(version, changed.GetProperty("version").GetString());
+        Assert.True(Math.Abs((ExpiryOf(changed)!.Value - in60).TotalMilliseconds) < 1.0);
+        Assert.Contains("EditAssignmentChanged", await EventTypesAsync(s).ConfigureAwait(true));
+
+        // Аудит: у події зміни ознак — і новий, і попередній строк.
+        var changedDetails = await EventDetailsAsync(s, "EditAssignmentChanged").ConfigureAwait(true);
+        Assert.Contains(changedDetails, d => d.Contains("\"previousExpiresAt\":\"", StringComparison.Ordinal)
+            && d.Contains("\"expiresAt\":\"", StringComparison.Ordinal));
+
+        // Повторне збереження БЕЗ expiresAt (інша ознака змінена) строк, виставлений через API, НЕ знімає.
+        var kept = await JsonAsync(
+            await owner.PostAsJsonAsync(
+                ListUri(s),
+                CreateBody(s, s.Executor.Id, isExclusive: false, baseVersion: changed.GetProperty("version").GetString()))
+                .ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.False(kept.GetProperty("isExclusive").GetBoolean());
+        Assert.True(Math.Abs((ExpiryOf(kept)!.Value - in60).TotalMilliseconds) < 1.0);
+
+        // Явний null знімає строк.
+        var cleared = await JsonAsync(
+            await owner.PostAsJsonAsync(
+                ListUri(s),
+                CreateBody(s, s.Executor.Id, isExclusive: false, baseVersion: kept.GetProperty("version").GetString(), clearExpiry: true))
+                .ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Null(ExpiryOf(cleared));
+
+        // Зняття строку в аудиті: expiresAt = null, previousExpiresAt — те, що було.
+        var afterClear = await EventDetailsAsync(s, "EditAssignmentChanged").ConfigureAwait(true);
+        Assert.Contains(afterClear, d => d.Contains("\"expiresAt\":null", StringComparison.Ordinal)
+            && d.Contains("\"previousExpiresAt\":\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "EA6-D2")]
+    public async Task Строк_у_минулому_чи_далі_за_366_діб_дає_422_і_нічого_не_створює()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+
+        foreach (var bad in new[] { DateTime.UtcNow.AddMinutes(-5), DateTime.UtcNow.AddDays(367) })
+        {
+            var response = await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id, expiresAt: bad)).ConfigureAwait(true);
+            var problem = await JsonAsync(response, HttpStatusCode.UnprocessableEntity, app).ConfigureAwait(true);
+            Assert.Equal("ECR-REQ-0422", problem.GetProperty("errorCode").GetString());
+            Assert.Equal("err.ECR-REQ-0422.editAssignmentExpiresAtInvalid", problem.GetProperty("messageKey").GetString());
+        }
+
+        var list = await JsonAsync(await owner.GetAsync(ListUri(s)).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Empty(list.GetProperty("assignments").EnumerateArray());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "EA6-D2")]
+    public async Task Копіювання_й_застосування_набору_не_чіпають_строк_наявної_цільової_передачі()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+
+        // Джерело: увесь аркуш; ціль — лютий зі строком.
+        await JsonAsync(
+            await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var expiry = DateTime.UtcNow.AddDays(45);
+        var target = await JsonAsync(
+            await owner.PostAsJsonAsync(
+                ListUri(s),
+                new
+                {
+                    slice = new { sheetCode = s.SheetCode, periodKey = (int?)202602 },
+                    recipientUserIds = new[] { s.Executor.Id },
+                    isExclusive = true,
+                    expiresAt = expiry,
+                }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var before = ExpiryOf(target);
+        Assert.NotNull(before);
+
+        var copied = await JsonAsync(
+            await owner.PostAsJsonAsync(
+                new Uri($"{ListUri(s)}/copy", UriKind.Relative),
+                new
+                {
+                    fromSlice = new { sheetCode = s.SheetCode },
+                    toSlices = new[] { new { sheetCode = s.SheetCode, periodKey = (int?)202602 } },
+                }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+
+        Assert.Equal(before, ExpiryOf(Assert.Single(copied.GetProperty("assignments").EnumerateArray())));
+    }
+
+    // ───────────────────────── RC20 D-2/D-4: visibility виконавця, примітка не копіюється ─────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "RC20-D2")]
+    public async Task Перелік_віддає_visibility_виконавця_а_NotVisible_лише_для_того_хто_втратив_доступ()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+
+        using (var app = new EcrApiFactory(sql))
+        using (var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true))
+        {
+            await JsonAsync(
+                await owner.PostAsJsonAsync(
+                    ListUri(s),
+                    new
+                    {
+                        slice = new { sheetCode = s.SheetCode },
+                        recipientUserIds = new[] { s.Executor.Id, s.OtherExecutor.Id },
+                        isExclusive = true,
+                    }).ConfigureAwait(true),
+                HttpStatusCode.OK, app).ConfigureAwait(true);
+        }
+
+        // Виконавець втрачає роль уже після передачі (передача створюється лише для видимих).
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"DELETE FROM sec.RoleAssignment WHERE UserId = {s.OtherExecutor.Id}").ConfigureAwait(true);
+        }
+
+        // Свіжий вузол: профілі не з кешу попереднього.
+        using var fresh = new EcrApiFactory(sql);
+        using var manager = await SignedInAsync(fresh, s.Manager.UserName).ConfigureAwait(true);
+        var list = await JsonAsync(await manager.GetAsync(ListUri(s)).ConfigureAwait(true), HttpStatusCode.OK, fresh).ConfigureAwait(true);
+
+        var recipients = Assert.Single(list.GetProperty("assignments").EnumerateArray()).GetProperty("recipients").EnumerateArray()
+            .ToDictionary(r => r.GetProperty("userId").GetInt32(), r => r.GetProperty("visibility").GetString());
+        Assert.Equal("Visible", recipients[s.Executor.Id]);
+        Assert.Equal("NotVisible", recipients[s.OtherExecutor.Id]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "RC20-D4")]
+    public async Task Копіювання_не_переносить_примітку_джерела_а_примітку_наявної_цілі_лишає()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+
+        Task<HttpResponseMessage> Upsert(int? periodKey, string note)
+            => owner.PostAsJsonAsync(
+                ListUri(s),
+                new
+                {
+                    slice = new { sheetCode = s.SheetCode, periodKey },
+                    recipientUserIds = new[] { s.Executor.Id },
+                    isExclusive = true,
+                    note,
+                });
+
+        // Джерело — січень із приміткою про січень; лютий уже має власну примітку.
+        await JsonAsync(await Upsert(202601, "Please fill January fuel").ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        await JsonAsync(await Upsert(202602, "February: use meters").ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+
+        var copied = await JsonAsync(
+            await owner.PostAsJsonAsync(
+                new Uri($"{ListUri(s)}/copy", UriKind.Relative),
+                new
+                {
+                    fromSlice = new { sheetCode = s.SheetCode, periodKey = (int?)202601 },
+                    toSlices = new[]
+                    {
+                        new { sheetCode = s.SheetCode, periodKey = (int?)202602 },
+                        new { sheetCode = s.SheetCode, periodKey = (int?)202603 },
+                    },
+                }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+
+        string? NoteOf(int periodKey) => copied.GetProperty("assignments").EnumerateArray()
+            .Single(a => a.GetProperty("slice").GetProperty("periodKey").GetInt32() == periodKey)
+            .GetProperty("note").GetString();
+
+        Assert.Equal("February: use meters", NoteOf(202602));
+        Assert.Null(NoteOf(202603));
+    }
+
+    // ───────────────────────── Аудит RC20/EA6 (P1/P3): вимкнений виконавець, строк ─────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "RC20-D2-P1")]
+    public async Task Вимкнений_виконавець_не_ламає_перелік_а_visibility_Unknown_і_менеджера_не_виходить_із_сесії()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+
+        using (var app = new EcrApiFactory(sql))
+        using (var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true))
+        {
+            await JsonAsync(
+                await owner.PostAsJsonAsync(
+                    ListUri(s),
+                    new
+                    {
+                        slice = new { sheetCode = s.SheetCode },
+                        recipientUserIds = new[] { s.Executor.Id, s.OtherExecutor.Id },
+                        isExclusive = true,
+                    }).ConfigureAwait(true),
+                HttpStatusCode.OK, app).ConfigureAwait(true);
+        }
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE sec.[User] SET IsActive = 0 WHERE Id = {s.OtherExecutor.Id}").ConfigureAwait(true);
+        }
+
+        // Свіжий вузол: профіль вимкненого не з кешу.
+        using var fresh = new EcrApiFactory(sql);
+        using var manager = await SignedInAsync(fresh, s.Manager.UserName).ConfigureAwait(true);
+        var response = await manager.GetAsync(ListUri(s)).ConfigureAwait(true);
+        var list = await JsonAsync(response, HttpStatusCode.OK, fresh).ConfigureAwait(true);
+
+        var recipients = Assert.Single(list.GetProperty("assignments").EnumerateArray()).GetProperty("recipients").EnumerateArray()
+            .ToDictionary(r => r.GetProperty("userId").GetInt32(), r => r.GetProperty("visibility").GetString());
+        Assert.Equal("Visible", recipients[s.Executor.Id]);
+        Assert.Equal("Unknown", recipients[s.OtherExecutor.Id]);
+
+        // Сесія менеджера жива: наступний запит — теж 200, а не 401.
+        Assert.Equal(HttpStatusCode.OK, (await manager.GetAsync(ListUri(s)).ConfigureAwait(true)).StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "EA6-D2")]
+    public async Task Явний_null_на_новій_передачі_безстроковий_а_apply_set_не_чіпає_строк_наявної_цілі()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+
+        // Явний null на НОВІЙ передачі.
+        var fresh = await JsonAsync(
+            await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id, clearExpiry: true)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Null(ExpiryOf(fresh));
+
+        // apply-set на наявну ціль зі строком: строк лишається.
+        var expiry = DateTime.UtcNow.AddDays(40);
+        await JsonAsync(
+            await owner.PostAsJsonAsync(
+                ListUri(s),
+                new
+                {
+                    slice = new { sheetCode = s.SheetCode, periodKey = (int?)202602 },
+                    recipientUserIds = new[] { s.Executor.Id },
+                    isExclusive = true,
+                    expiresAt = expiry,
+                }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var set = await JsonAsync(
+            await owner.PostAsJsonAsync(
+                new Uri("/api/v1/me/editor-sets", UriKind.Relative),
+                new { name = "Exp", memberUserIds = new[] { s.Executor.Id } }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var applied = await JsonAsync(
+            await owner.PostAsJsonAsync(
+                new Uri($"{ListUri(s)}/apply-set", UriKind.Relative),
+                new
+                {
+                    setId = set.GetProperty("id").GetInt32(),
+                    slices = new[] { new { sheetCode = s.SheetCode, periodKey = (int?)202602 } },
+                }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var item = Assert.Single(applied.GetProperty("assignments").EnumerateArray());
+        Assert.True(Math.Abs((ExpiryOf(item)!.Value - expiry).TotalMilliseconds) < 1.0);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "EA6-D2")]
+    public async Task Прострочений_але_не_змінений_строк_не_блокує_інших_правок_передачі()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+
+        await JsonAsync(
+            await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id, expiresAt: DateTime.UtcNow.AddDays(10))).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+
+        // Строк минув (прямо в базі: через API минулий строк поставити не можна).
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE doc.EditAssignment SET ExpiresAt = DATEADD(DAY, -1, SYSUTCDATETIME()) WHERE DocumentId = {s.DocumentId}")
+                .ConfigureAwait(true);
+        }
+
+        var listed = await JsonAsync(await owner.GetAsync(ListUri(s)).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        var current = Assert.Single(listed.GetProperty("assignments").EnumerateArray());
+        var pastExpiry = ExpiryOf(current);
+        Assert.True(pastExpiry < DateTime.UtcNow);
+
+        // Інша ознака, БЕЗ expiresAt: 200, строк (прострочений) не чіпається й не перевіряється заново.
+        var updated = await JsonAsync(
+            await owner.PostAsJsonAsync(
+                ListUri(s),
+                CreateBody(s, s.Executor.Id, isExclusive: false, baseVersion: current.GetProperty("version").GetString()))
+                .ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.False(updated.GetProperty("isExclusive").GetBoolean());
+        Assert.Equal(pastExpiry, ExpiryOf(updated));
     }
 
     // ───────────────────────── Аудит EA-C (P1/P2): приховані аркуші, IDOR, RequireManager, атомарність ─────────────────────────
@@ -850,20 +1226,44 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
 
     private static Uri MeUri() => new("/api/v1/me/edit-assignments", UriKind.Relative);
 
-    private static object CreateBody(Scenario s, int recipient, bool isExclusive = true, string? baseVersion = null)
-        => new
+    /// <summary>
+    /// Тіло upsert. ⚠ <c>expiresAt</c> іде в тіло ЛИШЕ коли задано значення або <paramref name="clearExpiry"/>
+    /// (явний <c>null</c>): пропуск поля означає «не змінювати» (PATCH-семантика, EA6-D2).
+    /// </summary>
+    private static Dictionary<string, object?> CreateBody(
+        Scenario s, int recipient, bool isExclusive = true, string? baseVersion = null, DateTime? expiresAt = null,
+        bool clearExpiry = false)
+    {
+        var body = new Dictionary<string, object?>
         {
-            slice = new { sheetCode = s.SheetCode },
-            recipientUserIds = new[] { recipient },
-            isExclusive,
-            baseVersion,
+            ["slice"] = new { sheetCode = s.SheetCode },
+            ["recipientUserIds"] = new[] { recipient },
+            ["isExclusive"] = isExclusive,
+            ["baseVersion"] = baseVersion,
         };
+
+        if (expiresAt is not null || clearExpiry)
+        {
+            body["expiresAt"] = expiresAt;
+        }
+
+        return body;
+    }
 
     private static async Task<JsonElement> JsonAsync(HttpResponseMessage response, HttpStatusCode status, EcrApiFactory app)
     {
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
         Assert.True(response.StatusCode == status, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
         return JsonDocument.Parse(body).RootElement.Clone();
+    }
+
+    private async Task<List<string>> EventDetailsAsync(Scenario s, string eventType)
+    {
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var docMarker = $"\"documentId\":{s.DocumentId.ToString(CultureInfo.InvariantCulture)}";
+        return await db.Database
+            .SqlQuery<string>($"SELECT DetailsJson AS Value FROM aud.SecurityEvent WHERE EventType = {eventType} AND DetailsJson LIKE {"%" + docMarker + "%"}")
+            .ToListAsync().ConfigureAwait(false);
     }
 
     private async Task<List<string>> EventTypesAsync(Scenario s)

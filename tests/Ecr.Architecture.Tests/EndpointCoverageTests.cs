@@ -419,6 +419,7 @@ public sealed partial class EndpointCoverageTests
                 "deny.CalculatedCell", "deny.ProjectArchived", "deny.ArchivingInProgress", "deny.BusinessRule",
                 "deny.SimulationReadOnly", "deny.OutsidePermitWindow", "deny.InsufficientGrantLevel",
                 "deny.LockedByOwner", "deny.AssignmentFilled", "deny.AssignmentValidated", "deny.AssignmentExpired",
+                "deny.NotAssignedToYou",
             ],
             "Підказка сірої комірки за причиною заборони."),
 
@@ -1350,6 +1351,17 @@ public sealed partial class EndpointCoverageTests
         // смуга показників сторінки «Аудит» ще не під'єднана — споживач з'явиться разом із UI-38.
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/audit`.
         "GET /api/v1/audit/cells/summary",
+
+        // G13 (Land): пакетний запис колонок для скриптів розгортання шаблону (tools/land, імпорт з Excel), де
+        // 5000 одиночних PUT = години. Екран структури правит колонку по одній, пачки в ньому немає.
+        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/templates` (імпорт пачкою).
+        "PUT /api/v1/template-versions/{p}/tables/{p}/columns",
+
+        // D1: авторство формули комірки (Cell) йде з API/скрипта побудови шаблону
+        // (tools/land/Build-LandTemplate.ps1); екрана редактора комірочних формул ще немає.
+        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/templates`.
+        "PUT /api/v1/template-versions/{p}/tables/{p}/formulas/cell/{p}/{p}",
+        "DELETE /api/v1/template-versions/{p}/tables/{p}/formulas/cell/{p}/{p}",
 
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було

@@ -131,7 +131,27 @@ public interface ICalculationResultStore
     /// </remarks>
     public Task<IReadOnlyList<CalculationResultRow>> ReadCurrentAsync(
         long documentId, int periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Профіль <b>актуального</b> прогону документа за період (D14): з нього читається діагностика «рядок без правила».
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період; <c>0</c> — прогін без періоду.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>null</c> — актуального прогону за цей період немає.</returns>
+    /// <remarks>
+    /// ⚠ Та сама вибірка прогонів, що й у <see cref="ReadCurrentAsync"/> (власний документний прогін має перевагу
+    /// над проєктним), звужена до прогону саме цього періоду: числа читаються з партиції періоду, а прогони
+    /// проєкту живуть по одному на період.
+    /// </remarks>
+    public Task<CurrentRunProfile?> ReadCurrentRunProfileAsync(long documentId, int periodKey, CancellationToken ct);
 }
+
+/// <summary>Актуальний прогін документа й збережений профіль (D14).</summary>
+/// <param name="RunId">Прогін.</param>
+/// <param name="FinishedAt">Коли завершився (UTC); <c>null</c> — немає.</param>
+/// <param name="ModulesProfileJson">Профіль; формат — <c>ModuleProfile.ToJson</c> або масив старого формату.</param>
+public sealed record CurrentRunProfile(long RunId, DateTime? FinishedAt, string? ModulesProfileJson);
 
 /// <summary>Які результати попереднього актуального прогону перенести в новий (RC14, P2-4).</summary>
 /// <param name="DocumentId">Документ прогону.</param>

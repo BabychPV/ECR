@@ -693,6 +693,44 @@
         ],
         "type": "object"
       },
+      "CalculationRunStatusDto": {
+        "description": "Стан актуального прогону документа за період для аркуша (D14).",
+        "properties": {
+          "finishedAt": {
+            "description": "Коли прогін завершився (UTC).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "runId": {
+            "description": "Актуальний прогін; `null` — документ за цей період не рахували.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "unmatchedRows": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UnmatchedRowsDto",
+                "description": "Рядки без правила; `null` — таких немає, а також для читача зі звуженою видимістю."
+              }
+            ]
+          }
+        },
+        "required": [
+          "runId",
+          "finishedAt",
+          "unmatchedRows"
+        ],
+        "type": "object"
+      },
       "CalendarMode": {
         "description": "Джерело календарних величин періоду (D-78). Різниця конвенцій змінює всі\nчисла при перерахунку в г/с і т/рік.",
         "enum": [
@@ -3590,6 +3628,22 @@
         ],
         "type": "object"
       },
+      "DeleteRowResponse": {
+        "description": "Видалений рядок динамічної таблиці (D3).",
+        "properties": {
+          "recalculationJobId": {
+            "description": "Задача перерахунку, поставлена видаленням; `null` — таблиця без колонок.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "recalculationJobId"
+        ],
+        "type": "object"
+      },
       "DeprecateVersionRequest": {
         "description": "Запит на виведення версії з обігу.",
         "properties": {
@@ -4295,9 +4349,43 @@
             "format": "int64",
             "type": "integer"
           },
+          "mappingsRemapped": {
+            "default": 0,
+            "description": "D-1 RC20: скільки мапінгів збору (`ext.EntityFieldMap`) на колонки вихідної версії переїде на колонки-\nвідповідники цільової (за кодами аркуш/таблиця/колонка) — у сухому прогоні «буде», у застосованому — «перенесено».\nПризупинені мапінги переносяться теж (щоб відновлення не писало в колонку старої версії).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "mappingsUnmapped": {
+            "default": 0,
+            "description": "D-1 RC20: скільки АКТИВНИХ мапінгів збору адресують колонку, якої в цільовій версії немає. Такий мапінг після\nпереносу «успішно» збирав би точки й нічого не писав, тому перенос відмовляє (`mappingsNotMapped`), доки\nмапінг не призупинено. Призупинені без відповідника не рахуються: вони нічого не пишуть.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "mappingsUnmappedKeys": {
+            "description": "До 10 (`MaxMappingKeysListed`) ключів: `SHEET.TABLE.COLUMN` колонки вихідної версії для мапінгу збору,\n`events SHEET.TABLE` для мапінгу подій і `window SHEET.TABLE.COLUMN` для прив'язки вікна (D-1b).\n⛔ Лише шлях у шаблоні (його й так показує звіт відмінностей): джерело, сутність і поле джерела не розкриваються.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "mode": {
             "$ref": "#/components/schemas/VersionMigrationMode",
             "description": "Режим."
+          },
+          "otherDocumentsOnSourceVersion": {
+            "default": 0,
+            "description": "D-1b P3: скільки документів у цих проєктах.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "otherProjectsOnSourceVersion": {
+            "default": 0,
+            "description": "D-1b P3: скільки ІНШИХ проєктів лишається на вихідній версії шаблону. Мапінги збору, подій і вікон глобальні\n(одна ціль): після цього переносу вони вказують на нову версію, і ті проєкти не збираються, доки їх не перенесено.\n⛔ Лише кількість, без переліку проєктів.",
+            "format": "int32",
+            "type": "integer"
           },
           "projectId": {
             "description": "Його проєкт — версія живе на проєкті, тож переносяться всі його документи.",
@@ -4442,6 +4530,14 @@
             "description": "Чиїми правами обмежено передачу.",
             "format": "int32",
             "type": "integer"
+          },
+          "expiresAt": {
+            "description": "Термін дії передачі (UTC); `null` — безстроково.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "id": {
             "description": "Ідентифікатор.",
@@ -4590,6 +4686,10 @@
             "description": "Користувач.",
             "format": "int32",
             "type": "integer"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/RecipientVisibility",
+            "description": "Чи бачить виконавець документ (і аркуш передачі) за ПРЯМИМИ призначеннями ролей:\n`Visible` | `NotVisible` | `Unknown` (групи AD чужої людини невідомі; у відповідях, що не є\nпереліком передач, не обчислюється). RC20 D-2."
           }
         },
         "required": [
@@ -4668,7 +4768,8 @@
           "LockedByOwner",
           "AssignmentFilled",
           "AssignmentValidated",
-          "AssignmentExpired"
+          "AssignmentExpired",
+          "NotAssignedToYou"
         ]
       },
       "EditorSetDto": {
@@ -5284,7 +5385,7 @@
         "description": "Формула для відповіді клієнту.",
         "properties": {
           "columnDefId": {
-            "description": "Колонка, якщо `Scope == Column`.",
+            "description": "Колонка, якщо `Scope == Column` чи `Cell`.",
             "format": "int32",
             "type": [
               "null",
@@ -5305,7 +5406,7 @@
             "type": "integer"
           },
           "rowDefId": {
-            "description": "Рядок, якщо `Scope == Row` (сурогатний ключ; адреса запиту — `RowKey`).",
+            "description": "Рядок, якщо `Scope == Row` чи `Cell` (сурогатний ключ; адреса запиту — `RowKey`).",
             "format": "int32",
             "type": [
               "null",
@@ -5314,7 +5415,7 @@
           },
           "scope": {
             "$ref": "#/components/schemas/FormulaScope",
-            "description": "Область: `Column` чи `Row`."
+            "description": "Область: `Column`, `Row` чи `Cell`."
           },
           "tableDefId": {
             "description": "Таблиця, якій належить формула.",
@@ -10068,6 +10169,15 @@
         ],
         "type": "object"
       },
+      "RecipientVisibility": {
+        "default": "Unknown",
+        "description": "Чи бачить виконавець документ (і аркуш передачі) за прямими призначеннями ролей (RC20 D-2).",
+        "enum": [
+          "Unknown",
+          "Visible",
+          "NotVisible"
+        ]
+      },
       "RegistryBatchItemDto": {
         "description": "Один рядок пакета.",
         "properties": {
@@ -13302,6 +13412,148 @@
         ],
         "type": "object"
       },
+      "SaveColumnBatchItem": {
+        "description": "Колонка пачки: код і ті самі налаштування, що в SaveColumnDefRequest.",
+        "properties": {
+          "code": {
+            "description": "Код колонки.",
+            "type": "string"
+          },
+          "dataType": {
+            "$ref": "#/components/schemas/CellDataType",
+            "description": "Тип даних; незмінний після створення."
+          },
+          "defaultValue": {
+            "description": "Значення за замовчуванням порожньої комірки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "displayFormat": {
+            "description": "Формат відображення; презентаційне поле.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "headerL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Заголовок колонки мовами каталогу.",
+            "type": "object"
+          },
+          "isHidden": {
+            "description": "Видимість колонки; презентаційне поле.",
+            "type": "boolean"
+          },
+          "isMonthColumn": {
+            "description": "Колонка прив'язана до календарного місяця; вимагає `MonthNumber`.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "isReadOnly": {
+            "description": "Заборона ручного вводу.",
+            "type": "boolean"
+          },
+          "isRequired": {
+            "description": "Обов'язковість заповнення.",
+            "type": "boolean"
+          },
+          "lookupFilter": {
+            "description": "Звуження списку довідника.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lookupRegistryDefId": {
+            "description": "Довідник; лише для колонки типу `Lookup`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "monthNumber": {
+            "description": "Місяць 1..12; лише разом з `IsMonthColumn`.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "ordinal": {
+            "description": "`null` — нова колонка стає останньою за порядком.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "precision": {
+            "description": "Точність для `Decimal`.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "scale": {
+            "description": "Масштаб для `Decimal`.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "styleId": {
+            "description": "Стиль показу; презентаційне поле.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "unitId": {
+            "description": "Одиниця значень колонки (ФВ-16.1); не для типу `Unit`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "widthPx": {
+            "description": "Типова ширина, px, 40..800; `null` — типова за типом.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "headerL10n",
+          "ordinal",
+          "dataType",
+          "isRequired",
+          "isReadOnly",
+          "isHidden",
+          "precision",
+          "scale",
+          "defaultValue",
+          "displayFormat",
+          "styleId",
+          "lookupRegistryDefId",
+          "lookupFilter",
+          "unitId"
+        ],
+        "type": "object"
+      },
       "SaveColumnDefRequest": {
         "description": "Налаштування колонки таблиці чернетки (`W5.2`).",
         "properties": {
@@ -13436,6 +13688,22 @@
           "lookupRegistryDefId",
           "lookupFilter",
           "unitId"
+        ],
+        "type": "object"
+      },
+      "SaveColumnsBatchRequest": {
+        "description": "Тіло пакетного запису колонок таблиці (`PUT …/tables/{tableId}/columns`, G13).",
+        "properties": {
+          "columns": {
+            "description": "Колонки пачки; не більше 500; коди різні.",
+            "items": {
+              "$ref": "#/components/schemas/SaveColumnBatchItem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "columns"
         ],
         "type": "object"
       },
@@ -18046,6 +18314,53 @@
         ],
         "type": "object"
       },
+      "UnmatchedRowItemDto": {
+        "description": "Один рядок без правила (D14).",
+        "properties": {
+          "rowKey": {
+            "description": "Публічний ключ рядка.",
+            "type": "string"
+          },
+          "rowNumber": {
+            "description": "Номер рядка, з 1, у порядку створення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "tableInstanceId": {
+            "description": "Екземпляр таблиці.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tableInstanceId",
+          "rowNumber",
+          "rowKey"
+        ],
+        "type": "object"
+      },
+      "UnmatchedRowsDto": {
+        "description": "Рядки документа, яким не підійшло жодне правило розрахунку (D14).",
+        "properties": {
+          "count": {
+            "description": "Скільки рядків документа не закрило жодне правило.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rows": {
+            "description": "До 10 рядків за зростанням таблиці й номера.",
+            "items": {
+              "$ref": "#/components/schemas/UnmatchedRowItemDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "rows"
+        ],
+        "type": "object"
+      },
       "UpdateCollectionScheduleRequest": {
         "description": "Тіло зміни розкладу.",
         "properties": {
@@ -18406,6 +18721,14 @@
           },
           "baseVersion": {
             "description": "Обов'язкова для зміни наявної передачі.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "expiresAt": {
+            "description": "Термін дії передачі, UTC: у майбутньому й не пізніше ніж через 366 діб. PATCH-семантика: ПОЛЕ ВІДСУТНЄ в\nтілі — термін наявної передачі не змінюється (нова — без терміну); явний `null` — термін знімається;\nзначення — замінює.",
+            "format": "date-time",
             "type": [
               "null",
               "string"
@@ -23584,6 +23907,127 @@
         ]
       }
     },
+    "/api/v1/documents/{documentId}/tables/{tableInstanceId}/rows/{rowKey}": {
+      "delete": {
+        "description": "Лише рядки, додані користувачем; лише поки аркуш у Draft/Rejected; право — те саме, що на створення рядка.\nРядка немає або його вже видалено — однакова 404 (нерозкриття).",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tableInstanceId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rowKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteRowResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteRowResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteRowResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "М'яко видаляє динамічний рядок таблиці (D3).",
+        "tags": [
+          "Cells"
+        ]
+      }
+    },
     "/api/v1/documents/{id}": {
       "delete": {
         "description": "Лише чернетку: хоч один аркуш поданий, погоджений, відхилений або вже\nпроходив погодження — `409` `ECR-DOC-0409` із причиною.\nЧужий документ — `404`, як і неіснуючий.",
@@ -23946,6 +24390,57 @@
           }
         },
         "summary": "Числа, які дав розрахунок методологій. Право `Calculation.View`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/calculation-run": {
+      "get": {
+        "description": "⚠ Інформація, а не помилка: рядок, якому не підійшло жодне правило (напр. статус не Running), у розрахунку\nне бере участі. Відповідь не містить профілю часу по модулях і чужих документів прогону.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationRunStatusDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationRunStatusDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationRunStatusDto"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Стан актуального прогону документа за період: рядки без правила (D14). Право `Calculation.View`.",
         "tags": [
           "Documents"
         ]
@@ -41452,6 +41947,257 @@
         ]
       }
     },
+    "/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/cell/{rowKey}/{columnDefId}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належить комірка.",
+            "in": "path",
+            "name": "tableDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`RowKey` рядка комірки.",
+            "in": "path",
+            "name": "rowKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Числовий `ColumnDefId` колонки комірки.",
+            "in": "path",
+            "name": "columnDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає формулу комірки з чернетки (м'яко, `ФВ-7.6`). Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      },
+      "put": {
+        "description": "⚠ Окремий маршрут, а не ще одне значення `{scope}`: адреса комірки —\nПАРА (рядок, колонка), і єдиний сегмент `{target}` її не вміщає без\nсклеювання, яке довелося б розбирати назад. Колонка комірки мусить бути\nобчислюваною (`ECR-TMPL-4227`, як і для `column`); перетин із\nколонковою чи рядковою формулою тієї ж комірки відхиляє ПУБЛІКАЦІЯ (V-03).",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належить комірка.",
+            "in": "path",
+            "name": "tableDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`RowKey` рядка комірки (текстом).",
+            "in": "path",
+            "name": "rowKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Числовий `ColumnDefId` колонки комірки.",
+            "in": "path",
+            "name": "columnDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveFormulaDefRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveFormulaDefRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveFormulaDefRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormulaDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormulaDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormulaDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Записує формулу ОДНІЄЇ комірки таблиці версії-чернетки (область\n`Cell`, D1). Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
     "/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/{scope}/{target}": {
       "delete": {
         "parameters": [
@@ -41696,6 +42442,151 @@
           }
         },
         "summary": "Записує формулу колонки чи рядка чернетки (`W5.3`). Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/tables/{tableId}/columns": {
+      "put": {
+        "description": "⛔ G13 (Land): по одній колонці 5000 колонок шаблону писалися годинами — кожен `PUT` читає всю\nструктуру версії. Тут вона читається раз; перевірки ті самі, що в одиночному `PUT`, і йдуть ДО запису:\nпачка застосовується цілком або не змінює нічого. Створення чи зміна — за кодом, як в одиночному записі.\nВідповідь — колонки в порядку запиту.",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належать колонки.",
+            "in": "path",
+            "name": "tableId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveColumnsBatchRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveColumnsBatchRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveColumnsBatchRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ColumnDefDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ColumnDefDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ColumnDefDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Записує пачку колонок таблиці чернетки одним запитом і однією транзакцією. Право `Template.Edit`.",
         "tags": [
           "TemplateVersions"
         ]

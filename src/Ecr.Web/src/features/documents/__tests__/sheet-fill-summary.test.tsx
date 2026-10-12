@@ -71,7 +71,7 @@ describe('SheetFillSummary', () => {
    * ⛔ Що саме доводиться. Тут стояв `toBe('2 / 3')` — і він лишався б
    * ЗЕЛЕНИМ при рівно тій ваді, про яку звіт: число правильне, а що воно
    * рахує, не сказано ніде. Тому перевіряється не саме число, а те, що
-   * підпис береться з каталогу за ключем `document.tablesFilled` і несе
+   * підпис береться з каталогу за ключем `document.tablesFilledInDocument` і несе
    * ОБИДВА числа. Каталог у компонентних тестах порожній, тож `t()`
    * навмисно повертає `⟦ключ (параметри)⟧` — саме в цьому вигляді ключ і
    * параметри видно в DOM.
@@ -91,7 +91,7 @@ describe('SheetFillSummary', () => {
     await waitFor(() => {
       const text = screen.getByTestId('sheet-fill-count').textContent ?? '';
 
-      expect(text).toContain('document.tablesFilled');
+      expect(text).toContain('document.tablesFilledInDocument (');
       expect(text).toContain('filled=1');
       expect(text).toContain('total=2');
     });
