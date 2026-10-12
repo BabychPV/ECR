@@ -15,6 +15,7 @@ import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/Loc
 import { showApiError } from '@/shared/ui/notify';
 import { StillNeeded } from '@/shared/ui/StillNeeded';
 import { t } from '@/shared/i18n';
+import { pickDefaultVersionId, type PublishedVersionOption } from './defaultTemplateVersion';
 
 /** Види періоду; значення збігаються з `PeriodKind` домену. */
 const PeriodKinds = ['Monthly', 'Quarterly', 'Yearly', 'Custom'];
@@ -215,14 +216,26 @@ export function CreateProjectModal({
   });
 
   /** Опубліковані версії всіх шаблонів, підписані кодом шаблону. */
-  const publishedVersions = (templates.data?.items ?? []).flatMap((template, index) =>
-    (versionQueries[index]?.data?.items ?? [])
-      .filter((version) => version.status === 'Published')
-      .map((version) => ({
-        value: String(version.id),
-        label: `${template.code} · ${version.version}`,
-      })),
+  const publishedVersions: PublishedVersionOption[] = (templates.data?.items ?? []).flatMap(
+    (template, index) =>
+      (versionQueries[index]?.data?.items ?? [])
+        .filter((version) => version.status === 'Published')
+        .map((version) => ({
+          value: String(version.id),
+          label: `${template.code} · ${version.version}`,
+          publishedAt: version.publishedAt,
+          archived: template.isArchived,
+        })),
   );
+
+  // ✎ ФВ-1.2 (рішення людини 12.10): НОВИЙ проєкт за замовчуванням пропонує останню опубліковану версію.
+  // ⚠ Лише пропозиція у формі: версія наявних проєктів не змінюється (її переносить `migrate-version`).
+  // Виводиться, а не зберігається в стані: вибір людини (`versionId`) завжди старший, а після створення форма
+  // знову пропонує актуальну. Поки жодне джерело не завантажене повністю (або є відмова) — пропозиції немає:
+  // «остання» з неповного переліку була б хибною.
+  const sourcesReady = templates.isSuccess && versionQueries.every((query) => query.isSuccess);
+  const defaultVersionId = sourcesReady ? pickDefaultVersionId(publishedVersions) : null;
+  const effectiveVersionId = versionId ?? defaultVersionId;
 
   const create = useMutation({
     mutationFn: () =>
@@ -232,7 +245,7 @@ export function CreateProjectModal({
           // `timeZoneId` тут уже не `null`: кнопка недоступна, доки пояс не
           // обрано (`incomplete` нижче).
           createProjectBody({
-            code, name, periodKind, timeZoneId: timeZoneId ?? '', versionId, policyId, customPeriodCount,
+            code, name, periodKind, timeZoneId: timeZoneId ?? '', versionId: effectiveVersionId, policyId, customPeriodCount,
           }),
         ),
       }),
@@ -259,7 +272,7 @@ export function CreateProjectModal({
   // полів рахується один раз і використовується двічі: для `incomplete` і
   // для підказки біля кнопки нижче.
   const missingFields = createProjectMissingFields({
-    code, name, timeZoneId, versionId, policyId, periodKind, customPeriodCount,
+    code, name, timeZoneId, versionId: effectiveVersionId, policyId, periodKind, customPeriodCount,
   });
   const incomplete = missingFields.length > 0;
 
@@ -378,9 +391,10 @@ export function CreateProjectModal({
         required
         label={t('periods.templateVersion')}
         description={t('periods.templateVersionHint')}
-        data={publishedVersions}
-        value={versionId}
+        data={publishedVersions.map(({ value, label }) => ({ value, label }))}
+        value={effectiveVersionId}
         onChange={setVersionId}
+        allowDeselect={false}
       />
 
       <Select
