@@ -1113,6 +1113,11 @@ def _arg_bridges():
 
 _arg_bridges()
 
+# ---- склад газу HSE400 (LP-10): довідники LAND_HSE400_STREAM / LAND_HSE400_COMPOSITION і мости аргументів Density20, Vddg ...
+# Значень складу в моделі немає (їх одноразово завантажує tools/land/Import-LandHse400Composition.ps1); див. hse400_bridges.py.
+import hse400_bridges  # noqa: E402
+stat_cols += hse400_bridges.apply(out, registries)
+
 cfs = []
 seen_cf = set()
 for sh in X['sheets']:
