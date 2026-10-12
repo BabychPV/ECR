@@ -156,6 +156,22 @@ describe('ConditionalFormatPanel', () => {
     expect(seedOf(loaded, own_, new Set(['Q', 'N', 'OTHER'])).others.map((rule) => rule.columnCode)).toEqual(['OTHER']);
   });
 
+  it('seedOf: правило з областю (L6) їде назад на сервер як було, а не стає колонковим', () => {
+    // Серверне правило «лише рядки R1» для ТІЄЇ Ж колонки Q, зі звичайним оператором: без охорони
+    // `ruleFromWire` прочитав би його як колонкове, і PUT втратив би область.
+    const scoped = {
+      ...own,
+      scope: 'row',
+      tableCode: 'Main',
+      rowKeys: ['R1'],
+    } as unknown as ConditionalFormatRuleDto;
+
+    const seeded = seedOf(set([own, scoped], '"V"'), new Set(['Q', 'N']));
+
+    expect(seeded.own).toHaveLength(1);
+    expect(seeded.others).toEqual([scoped]);
+  });
+
   it('неповне правило блокує збереження й пояснює чому', async () => {
     renderPanel();
     const user = userEvent.setup();

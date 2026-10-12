@@ -282,12 +282,41 @@ function isOperator(value: string): value is ConditionOperator {
 }
 
 /**
+ * Поля області правила (CELL-STYLE L6): таблиця, рядки, колонка-джерело («статус рядка»), штрих. Колонковий
+ * редактор їх не вміє показувати й зберегти без втрат.
+ */
+export interface ScopedWireFields {
+  readonly scope?: string | null;
+  readonly tableCode?: string | null;
+  readonly rowKeys?: readonly string[] | null;
+  readonly refColumnCode?: string | null;
+  readonly pattern?: string | null;
+}
+
+/** Чи правило виходить за межі колонкової форми (область, таблиця, рядки, «усі колонки», штрих). */
+export function isScopedWire(wire: ConditionalRuleWire & ScopedWireFields): boolean {
+  return (
+    (wire.scope ?? 'column') !== 'column' ||
+    (wire.tableCode ?? null) !== null ||
+    (wire.rowKeys ?? null) !== null ||
+    (wire.refColumnCode ?? null) !== null ||
+    (wire.pattern ?? null) !== null ||
+    wire.columnCode === '*'
+  );
+}
+
+/**
  * Правило з відповіді сервера. `null` у полях — порожньо (колір теми, немає
  * операнда). Невідомий оператор — `null`: сервер такого не збереже
  * (`ECR-CFG-0422`), а вгадати, що він означав, клієнт не може.
+ *
+ * ⛔ L6: правило з областю (`isScopedWire`) — теж `null`. Інакше редактор прочитав би його як звичайне колонкове,
+ * збереження (`PUT` замінює набір цілком) відіслало б без області — і правило «лише рядки 7a/8» фарбувало б
+ * усю колонку в усіх таблицях. `null` тут означає «не моє»: панель повертає такі правила на сервер як були
+ * (`seedOf` → `others`), прев'ю їх не малює.
  */
-export function ruleFromWire(wire: ConditionalRuleWire): ConditionalRule | null {
-  if (!isOperator(wire.operator)) return null;
+export function ruleFromWire(wire: ConditionalRuleWire & ScopedWireFields): ConditionalRule | null {
+  if (!isOperator(wire.operator) || isScopedWire(wire)) return null;
 
   return {
     columnCode: wire.columnCode,
