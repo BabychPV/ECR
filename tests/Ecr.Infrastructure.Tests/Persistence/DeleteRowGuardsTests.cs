@@ -50,6 +50,11 @@ public sealed class DeleteRowGuardsTests(SqlServerFixture sql) : IDisposable
         Validate,
         Expire,
         MakeExclusive,
+
+        /// <summary>Передачі в документі НЕ БУЛО на момент рішення; створюється одразу після нього (S-5).</summary>
+        CreateFilledAfterDecision,
+        CreateExpiredAfterDecision,
+        CreateExclusiveAfterDecision,
     }
 
     // ── P1-2: значення колонок ──────────────────────────────────────────────
@@ -91,7 +96,7 @@ public sealed class DeleteRowGuardsTests(SqlServerFixture sql) : IDisposable
         Assert.True(error is AccessDeniedException, error?.ToString());
         var denied = (AccessDeniedException)error!;
         Assert.Equal("ECR-ACCS-0403", denied.ErrorCode);
-        Assert.Equal("err.ECR-ACCS-0403.deleteRowDenied", denied.Details!["messageKey"]);
+Assert.Equal("err.ECR-ACCS-0403.deleteRowValuesDenied", denied.Details!["messageKey"]);
         // S-4: reason фіксований — прихована колонка не відрізняється від відкритої.
         Assert.Equal(nameof(EditDenyReason.BusinessRule), denied.Details["reason"]?.ToString());
 
@@ -115,7 +120,8 @@ public sealed class DeleteRowGuardsTests(SqlServerFixture sql) : IDisposable
     [InlineData("Integration", "UserEdit", false)]
     [InlineData("Import", null, false)]
     [InlineData("ImportOverwrite", null, false)]
-    [InlineData("UserEdit", null, false)]    public async Task Рядок_з_останнім_значенням_від_машини_не_видаляється_а_після_правки_людини_видаляється(
+    [InlineData("UserEdit", null, false)]
+    public async Task Рядок_з_останнім_значенням_від_машини_не_видаляється_а_після_правки_людини_видаляється(
         string first, string? second, bool blocked)
     {
         var scene = await ArrangeAsync(withAssignment: false);
@@ -300,6 +306,65 @@ public sealed class DeleteRowGuardsTests(SqlServerFixture sql) : IDisposable
         Assert.Equal(0, await IsDeletedAsync(scene));
         Assert.Equal(777.25m, await ValueAsync(scene));
     }
+    // ── S-5: у документа НЕ БУЛО передач на момент рішення (прапорець AssignmentsPresent = false) ──
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "EA-B S-5")]
+    [InlineData(Interference.CreateFilledAfterDecision, EditDenyReason.AssignmentFilled, true)]
+    [InlineData(Interference.CreateExpiredAfterDecision, EditDenyReason.AssignmentExpired, true)]
+    [InlineData(Interference.CreateExclusiveAfterDecision, EditDenyReason.LockedByOwner, false)]
+    public async Task Передача_створена_ПІСЛЯ_рішення_у_документа_без_передач_відхиляє_видалення(
+        Interference interference, EditDenyReason expected, bool asExecutor)
+    {
+        // Мутація «прочитати прапорець до замка»: прапорець false → гейт пропускає, рядок видаляється → червоніє.
+        var scene = await ArrangeAsync(withAssignment: false);
+        var actor = asExecutor ? scene.ExecutorId : scene.StrangerId;
+        var profile = new AccessBuilder { UserId = actor }
+            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
+
+        var error = await RunAsync(scene, profile, interference);
+
+        AssertDenied(error, expected);
+        Assert.Equal(0, await IsDeletedAsync(scene));
+    }
+
+    // ── S-2 (симетрично readonly): обчислювана колонка з явним Deny ──
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D3-A S-2")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Обчислювана_колонка_з_явним_Deny_блокує_а_без_Deny_не_заважає(bool deny)
+    {
+        var scene = await ArrangeAsync(withAssignment: false);
+        var column = scene.Doc.ColumnDefIds[1];
+
+        // IsComputed = DataType ∈ {Formula (6), Calculated (8)}.
+        await ExecuteAsync($"UPDATE cfg.ColumnDef SET DataType = 6 WHERE Id = {column}");
+
+        var builder = new AccessBuilder { UserId = scene.StrangerId }
+            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write);
+        var profile = (deny ? builder.Deny(ResourceKind.Column, column) : builder).Build();
+
+        var error = await RunAsync(scene, profile, Interference.None);
+
+        if (deny)
+        {
+            Assert.IsType<AccessDeniedException>(error);
+            Assert.Equal(0, await IsDeletedAsync(scene));
+            Assert.Equal(777.25m, await ValueAsync(scene));
+        }
+        else
+        {
+            Assert.Null(error);
+            Assert.Equal(1, await IsDeletedAsync(scene));
+        }
+    }
+
     private static void AssertDenied(Exception? error, EditDenyReason expected)
     {
         var denied = Assert.IsType<AccessDeniedException>(error);
@@ -404,8 +469,39 @@ public sealed class DeleteRowGuardsTests(SqlServerFixture sql) : IDisposable
             case Interference.MakeExclusive:
                 await ExecuteAsync($"UPDATE doc.EditAssignment SET IsExclusive = 1 WHERE Id = {scene.AssignmentId}");
                 break;
-            default:
+            case Interference.CreateFilledAfterDecision:
+            case Interference.CreateExpiredAfterDecision:
+            case Interference.CreateExclusiveAfterDecision:
+                await CreateAssignmentAsync(scene, interference);
+                break;            default:
                 break;
+        }
+    }
+
+    /// <summary>Передача, якої не було, коли рішення про права будувалося (S-5).</summary>
+    private async Task CreateAssignmentAsync(Scene scene, Interference interference)
+    {
+        await using var db = CreateContext();
+        var exclusive = interference == Interference.CreateExclusiveAfterDecision;
+        var assignment = new EditAssignment(
+            scene.Doc.DocumentId,
+            EditAssignmentSlice.Create(null, null, null, scene.Doc.PeriodKey.Value),
+            isExclusive: exclusive, delegatedByUserId: scene.DelegatorId, handoffId: Guid.NewGuid(),
+            createdByUserId: scene.DelegatorId, utcNow: Now);
+
+        // Одержувач — виконавець (заборони «Заповнено»/строк) або інша особа (ексклюзивність для третьої).
+        assignment.AddRecipient(exclusive ? scene.DelegatorId : scene.ExecutorId, scene.DelegatorId, Now);
+        if (interference == Interference.CreateFilledAfterDecision)
+        {
+            assignment.FillRecipient(scene.ExecutorId, Now);
+        }
+
+        new EditAssignmentStore(db).Add(assignment);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        if (interference == Interference.CreateExpiredAfterDecision)
+        {
+            await ExecuteAsync($"UPDATE doc.EditAssignment SET ExpiresAt = '2026-01-01' WHERE Id = {assignment.Id}");
         }
     }
 

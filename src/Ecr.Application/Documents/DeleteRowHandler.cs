@@ -196,6 +196,24 @@ public sealed class DeleteRowHandler(
 
     // ⚠ Без ключа рядка й коду таблиці в тексті та деталях (сторож `DenyLeakGuardTests`, T1-01): відмова
     // «немає / уже видалено» мусить бути БАЙТ-в-байт однаковою, а клієнт і так знає, який рядок просив.
+    /// <summary>
+    /// Відмова через ЗНАЧЕННЯ комірок рядка (колонковий грант, правила періоду). ⚠ Без `{reason}` у тексті й без
+    /// назви колонки: reason фіксований (`BusinessRule`) — різні причини розрізняли б приховану колонку.
+    /// </summary>
+    private static Errors.AccessDeniedException DeleteCellsDenied(bool window)
+        => new(
+            "ECR-ACCS-0403",
+            window
+                ? "Рядок видалити не можна: значення в ньому поза вікном доступу до періоду."
+                : "Рядок видалити не можна: у ньому є значення, які ви не можете стерти.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = window
+                    ? "err.ECR-ACCS-0403.deleteRowOutOfWindow"
+                    : "err.ECR-ACCS-0403.deleteRowValuesDenied",
+                ["reason"] = nameof(EditDenyReason.BusinessRule),
+            });
+
     private static Errors.NotFoundException RowNotFound()
         => new(
             "ECR-ROW-0404",
@@ -285,8 +303,10 @@ public sealed class DeleteRowHandler(
         // на колонки й правил доступу до періоду. Видалення стирає значення КОЖНОЇ непорожньої комірки, тож для
         // кожної питаємо рішення «стерти» (`CanClearCellsAsync`): те саме, що для правки, але БЕЗ ознак колонки
         // «обчислювана»/«лише для читання» (S-2: вони йдуть раніше за грант і ховали б явний Deny).
-        // Будь-яка заборона — а також дозвіл «за підтвердженням»/«з позначкою» (S-3: каналу підтвердження для
-        // DELETE немає, а `PatchCellsHandler` такі комірки теж не пише без нього) — блокує видалення.
+        // Будь-яка заборона — а також дозвіл «за підтвердженням» і «з позначкою» (S-3) — блокує видалення.
+        // ⚠ Видалення СТРОГІШЕ за PATCH: PatchCellsHandler пропускає `Warn` («з позначкою») без підтвердження,
+        // а AllowWithConfirmation пише лише з підтвердженням оператора; у DELETE каналу підтвердження немає,
+        // тож обидва випадки — відмова. Це прийнятно: стерти значення поза вікном — гірше, ніж виправити його.
         // ⚠ S-4 (нерозкриття): reason ОДИН для всіх заборонених КОМІРОК (`BusinessRule`) і без назви колонки:
         // різні причини розрізняли б «у прихованій колонці є значення» і «у відкритій».
         // ⚠ Рядок лише з порожніми комірками цієї перевірки не проходить (нічого стирати) — вікно періоду для
@@ -300,12 +320,22 @@ public sealed class DeleteRowHandler(
 
             foreach (var address in filled)
             {
-                if (!decisions.TryGetValue(address, out var decision)
-                    || !decision.IsAllowed
-                    || decision.RequiresConfirmation
-                    || decision.OutOfWindowMark)
+                if (!decisions.TryGetValue(address, out var decision))
                 {
-                    throw DeleteDenied(EditDenyReason.BusinessRule);
+                    throw DeleteCellsDenied(window: false);
+                }
+
+                // Поза вікном доступу: заборона, або «дозволено за підтвердженням»/«з позначкою».
+                if (decision.RequiresConfirmation
+                    || decision.OutOfWindowMark
+                    || decision.Reason is EditDenyReason.OutOfAccessWindow or EditDenyReason.OutsidePermitWindow)
+                {
+                    throw DeleteCellsDenied(window: true);
+                }
+
+                if (!decision.IsAllowed)
+                {
+                    throw DeleteCellsDenied(window: false);
                 }
             }
         }

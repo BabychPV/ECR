@@ -241,7 +241,7 @@ public sealed class DeleteRowTests
         var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Run());
 
         Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
-        Assert.Equal("err.ECR-ACCS-0403.deleteRowDenied", ex.Details!["messageKey"]);
+Assert.Equal("err.ECR-ACCS-0403.deleteRowDenied", ex.Details!["messageKey"]);
         Assert.Equal(nameof(EditDenyReason.PeriodClosed), ex.Details["reason"]);
         await _uow.DidNotReceive().ExecuteInTransactionAsync(
             Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>());
@@ -326,8 +326,12 @@ public sealed class DeleteRowTests
         var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Run());
 
         Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
-        Assert.Equal("err.ECR-ACCS-0403.deleteRowDenied", ex.Details!["messageKey"]);
-        // S-4: reason ОДИН для всіх заборон на комірки — не розрізняє «прихована колонка» і «відкрита».
+Assert.Equal(
+            reason == EditDenyReason.OutOfAccessWindow
+                ? "err.ECR-ACCS-0403.deleteRowOutOfWindow"
+                : "err.ECR-ACCS-0403.deleteRowValuesDenied",
+            ex.Details!["messageKey"]);
+        // Без {reason} в основному тексті; S-4: reason ОДИН для всіх заборон на комірки — не розрізняє «прихована колонка» і «відкрита».
         Assert.Equal(nameof(EditDenyReason.BusinessRule), ex.Details["reason"]);
         Assert.DoesNotContain("31", ex.Message, StringComparison.Ordinal);
         await _rows.DidNotReceive().SoftDeleteRowAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
@@ -355,6 +359,7 @@ public sealed class DeleteRowTests
         var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Run());
 
         Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
+        Assert.Equal("err.ECR-ACCS-0403.deleteRowOutOfWindow", ex.Details!["messageKey"]);
         await _rows.DidNotReceive().SoftDeleteRowAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
     }
 
@@ -372,6 +377,7 @@ public sealed class DeleteRowTests
         await Assert.ThrowsAsync<AccessDeniedException>(() => Run());
         await _rows.DidNotReceive().SoftDeleteRowAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
     }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "D3-A P1-3")]

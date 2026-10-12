@@ -7832,6 +7832,8 @@ USING (VALUES
     ,(N'grid.deleteRowVerb', N'en', N'Delete row', 1)
     ,(N'grid.deleteRowOrdinalLabel', N'en', N'row #{n}', 1)
     ,(N'err.ECR-ACCS-0403.deleteRowDenied', N'en', N'A row cannot be deleted from this table: {reason}.', 1)
+    ,(N'err.ECR-ACCS-0403.deleteRowValuesDenied', N'en', N'This row cannot be deleted: it holds values you are not allowed to clear.', 1)
+    ,(N'err.ECR-ACCS-0403.deleteRowOutOfWindow', N'en', N'This row cannot be deleted: some of its values are outside the period access window.', 1)
     ,(N'err.ECR-ROW-0404.rowNotFound', N'en', N'The row was not found in this table. It may have been deleted already.', 1)
     ,(N'err.ECR-ROW-0409.templateRowNotDeletable', N'en', N'This row comes from the template and cannot be deleted.', 1)
     ,(N'err.ECR-ROW-0409.sourceRowNotDeletable', N'en', N'This row holds data loaded by an integration, import or collection (or is maintained by a source event) and cannot be deleted by hand.', 1)
@@ -19721,6 +19723,10 @@ SELECT v.[Key], v.Lang, v.Val
     (N'grid.deleteRowOrdinalLabel', N'kz', N'№{n} жол'),
     (N'err.ECR-ACCS-0403.deleteRowDenied', N'ru', N'Из этой таблицы нельзя удалить строку: {reason}.'),
     (N'err.ECR-ACCS-0403.deleteRowDenied', N'kz', N'Бұл кестеден жолды жоюға болмайды: {reason}.'),
+    (N'err.ECR-ACCS-0403.deleteRowValuesDenied', N'ru', N'Строку нельзя удалить: в ней есть значения, которые вам нельзя стирать.'),
+    (N'err.ECR-ACCS-0403.deleteRowValuesDenied', N'kz', N'Бұл жолды жоюға болмайды: онда сізге өшіруге рұқсат етілмеген мәндер бар.'),
+    (N'err.ECR-ACCS-0403.deleteRowOutOfWindow', N'ru', N'Строку нельзя удалить: часть её значений вне окна доступа к периоду.'),
+    (N'err.ECR-ACCS-0403.deleteRowOutOfWindow', N'kz', N'Бұл жолды жоюға болмайды: оның кейбір мәндері кезеңге қол жеткізу терезесінен тыс.'),
     (N'err.ECR-ROW-0404.rowNotFound', N'ru', N'Строка в этой таблице не найдена. Возможно, она уже удалена.'),
     (N'err.ECR-ROW-0404.rowNotFound', N'kz', N'Бұл кестеде жол табылмады. Ол бұрын жойылған болуы мүмкін.'),
     (N'err.ECR-ROW-0409.templateRowNotDeletable', N'ru', N'Эта строка берётся из шаблона, её нельзя удалить.'),
