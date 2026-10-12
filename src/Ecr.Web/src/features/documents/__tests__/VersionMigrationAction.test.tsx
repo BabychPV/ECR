@@ -363,6 +363,31 @@ describe('useVersionMigrationAction', () => {
     expect(screen.queryByText('mappingsNotMapped')).toBeNull();
   });
 
+  it('попередження про інші проєкти на старій версії є, коли їх більше нуля, і не блокує перенос (D-1b P2-3)', async () => {
+    show(['Template.Edit'], report({ canApply: true, otherProjectsOnSourceVersion: 2, otherDocumentsOnSourceVersion: 5 }));
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-migrate-other-projects]')).not.toBeNull();
+    });
+    // Перенос не заблоковано: звіт далі каже «можна».
+    expect(document.querySelector('[data-migrate-can-apply]')).not.toBeNull();
+  });
+
+  it('без інших проєктів на старій версії попередження немає (D-1b P2-3)', async () => {
+    show(['Template.Edit'], report({ canApply: true }));
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-migrate-can-apply]')).not.toBeNull();
+    });
+    expect(document.querySelector('[data-migrate-other-projects]')).toBeNull();
+  });
+
   it('blockedGrantCount показується рядком із кількістю; без нього рядка немає (ent7 P3-4)', async () => {
     show(['Template.Edit'], report({ canApply: false, refusals: ['grantsNotMapped'], blockedGrantCount: 3 }));
     await openAndPickTarget();
