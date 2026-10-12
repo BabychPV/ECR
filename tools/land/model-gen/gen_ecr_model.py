@@ -379,7 +379,10 @@ try:
     _ro = json.load(open('land-result-outputs.json', encoding='utf-8'))
 except FileNotFoundError:
     _ro = {'methodologies': {}}
-for _m, _d in sorted(_ro['methodologies'].items()):
+_ro_all = dict(_ro['methodologies'])
+# supplementalMethodologies: виходи, яких немає в пакеті AF XML (ECW_C09_02_01 -> T7b_00); записані зі стенда (структура)
+_ro_all.update(_ro.get('supplementalMethodologies', {}))
+for _m, _d in sorted(_ro_all.items()):
     for _t in _d['tables']:
         _e = RESULT_TABLES.setdefault(_t, {'methodologies': [], 'outputs': []})
         _e['methodologies'].append(_m)
@@ -439,10 +442,10 @@ def sec_of(title):
     # Номер секції з заголовка таблиці: «9a.16 ...», а також з літерою після номера: «9a.17а» (кирилична а), «9a.21a» (латинська a).
     # Раніше вираз вимагав межі слова одразу після цифр, тож такі заголовки не розпізнавались, а код таблиці брався з
     # порядкового номера блоку (T9a_03/T9a_06/T9a_07 замість T9a_17a/T9a_21a/T9a_21b) - LP-09.
-    m = re.match(r'^\s*(\d{1,2}[a-d]?(?:\.\d+)+)([a-dа])?(?!\w)', title or '')
+    m = re.match(r'^\s*(\d{1,2}[a-d]?(?:\.\d+)+)([a-d\u0430])?(?!\w)', title or '')
     if not m:
         return None
-    return m.group(1) + (m.group(2).replace('а', 'a') if m.group(2) else '')
+    return m.group(1) + (m.group(2).replace('\u0430', 'a') if m.group(2) else '')
 
 
 def table_code(sh_idx, sheet_name, t, k, nblocks):
@@ -818,7 +821,8 @@ for sh in X['sheets']:
             for o in rt['outputs']:
                 if o in have:
                     raise SystemExit('result columns: колонка %s уже є в %s' % (o, tcode))
-                t_out['columns'].append({'code': o, 'dataType': 'Calculated', 'headerEn': o, 'headerRu': '', 'unit': 't' if '_tons_' in o else 'g/s',
+                t_out['columns'].append({'code': o, 'dataType': 'Calculated', 'headerEn': o, 'headerRu': '',
+                                         'unit': 't' if re.match(r'^ECW_EC_tons(_|$)', o) else 'g/s',
                                          'hidden': False, 'readOnly': True, 'excel': None, 'month': None, 'precision': 28, 'scale': 12,
                                          'ecrAdded': 'methodology output (CalculationBinding)'})
             t_out['calc'] = {'methodologies': rt['methodologies'], 'outputs': rt['outputs']}
@@ -900,7 +904,7 @@ for sh in X['sheets']:
                         t_out['rows'].append({'key': 'R%03d' % r, 'en': ' / '.join(x for x in vals[1:] if x) or vals[0], 'ru': '', 'kind': 'Item', 'parent': None, 'excelRow': r})
             t_out['maxRows'] = None
             # константні значення у даних Fixed-таблиць (ліміти тощо) — для наповнення документів
-            colmap = {c['excel']: c['code'] for c in t_out['columns']}
+            colmap = {c['excel']: c['code'] for c in t_out['columns'] if c.get('excel')}   # без доданих ECR колонок (excel=None)
             rowmap = {rw['excelRow']: rw['key'] for rw in t_out['rows']}
             for L, ccode in colmap.items():
                 cd = [c for c in cols if c['letter'] == L][0]
