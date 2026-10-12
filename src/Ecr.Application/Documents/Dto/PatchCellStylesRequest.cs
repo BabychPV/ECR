@@ -41,7 +41,7 @@ public sealed record PatchCellStylesRequest(
     /// Стеля розгорнутих комірок <see cref="Scope"/> на один запит. Збережена, прав і запису —
     /// одна транзакція, чанками по 1000.
     /// </summary>
-    public const int ScopeMaxCells = 100_000;
+    public const int ScopeMaxCells = 50_000;
 
     private static readonly Regex HexColor = new(
         "^#[0-9A-Fa-f]{6}$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
