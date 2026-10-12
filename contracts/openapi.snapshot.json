@@ -1334,19 +1334,29 @@
         "description": "Результат спрацювання правила умовного форматування (ФВ-2.6/2.7): колір\n`#rrggbb` (або `null` — колір теми) і жирність.",
         "properties": {
           "backgroundHex": {
+            "description": "`#rrggbb` або `null` — колір теми.",
             "type": [
               "null",
               "string"
             ]
           },
           "foregroundHex": {
+            "description": "`#rrggbb` або `null`.",
             "type": [
               "null",
               "string"
             ]
           },
           "isBold": {
+            "description": "Жирний.",
             "type": "boolean"
+          },
+          "pattern": {
+            "description": "Штрих (`hatch` — «неактуальна комірка»); лише від умовного форматування, `null` — немає.\n⚠ Додано в L6 останнім необов'язковим полем: клієнт, що його не знає, малює решту як раніше.",
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
         "required": [
@@ -2175,6 +2185,44 @@
           "operator": {
             "description": "gt, ge, lt, le, eq, ne, between, empty, notEmpty.",
             "type": "string"
+          },
+          "pattern": {
+            "description": "`hatch` — штрих («неактуальна комірка»); `null` — без штриху.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "refColumnCode": {
+            "description": "Колонка, чиє значення в тому самому рядку перевіряє умова («статус рядка»); `null` — значення самої комірки.\nДля колонки довідника порівнюється КОД запису (без урахування регістру).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rowKeys": {
+            "description": "Ключі рядків (лише для `row`), до 500.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "scope": {
+            "description": "`column` (за замовчуванням, поле відсутнє) — усі рядки; `row` — лише RowKeys.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableCode": {
+            "description": "Код таблиці; `null` — усі таблиці версії. Обов'язковий для `row` і для колонки `*`.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "value": {
             "description": "Операнд (число); не потрібен для empty/notEmpty.",
