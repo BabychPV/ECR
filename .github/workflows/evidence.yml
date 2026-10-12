@@ -51,7 +51,7 @@ env:
 
 jobs:
   build:
-    name: build
+    name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'build (повний, пропущено на rc)' || 'build' }}
     if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -70,7 +70,7 @@ jobs:
         run: dotnet build Ecr.sln -c Release --no-incremental --no-restore
 
   test:
-    name: test
+    name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'test (повний, пропущено на rc)' || 'test' }}
     if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -170,7 +170,7 @@ jobs:
           WORKFLOW_FILE: evidence.yml
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          ATTEST_WAIT_MIN: '20'
+          ATTEST_WAIT_MIN: '10'
         run: |
           set -euo pipefail
           REPO="$GITHUB_REPOSITORY"
@@ -186,7 +186,7 @@ jobs:
           while true; do
             : > found.jsonl
             runs="$(gh api "repos/$REPO/actions/workflows/$WORKFLOW_FILE/runs?head_sha=$HEAD_SHA&per_page=100" \
-              --jq '.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch" or .event == "schedule" or (.event == "pull_request" and ((.head_branch | startswith("rc/")) | not))) | .id')"
+              --jq '.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch" or .event == "schedule" or (.event == "pull_request" and (((.head_branch // "") | startswith("rc/")) | not))) | .id')"
             for run_id in $runs; do
               gh api --paginate "repos/$REPO/actions/runs/$run_id/jobs?per_page=100&filter=latest" \
                 | jq -c --arg n "$CHECK" '.jobs[] | select(.name == $n) | {run_id, status, conclusion, completed_at, url: .html_url}' >> found.jsonl
@@ -200,8 +200,8 @@ jobs:
                 exit 0
                 ;;
             esac
-            if [ "$pending" -gt 0 ] && [ "$(date +%s)" -lt "$deadline" ]; then
-              echo "повний прогін «$CHECK» на $HEAD_SHA ще йде ($pending у процесі) — чекаю 90 с"
+            if { [ "$pending" -gt 0 ] || [ "$total" -eq 0 ]; } && [ "$(date +%s)" -lt "$deadline" ]; then
+              echo "повний прогін «$CHECK» на $HEAD_SHA ще не завершився (знайдено: $total, у процесі: $pending) — чекаю 90 с"
               sleep 90
               continue
             fi
