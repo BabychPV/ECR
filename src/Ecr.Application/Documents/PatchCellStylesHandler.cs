@@ -63,10 +63,17 @@ public sealed class PatchCellStylesHandler(
     /// <summary>Скільки комірок (з переходом «було → стало») кладеться в подробиці події.</summary>
     private const int AuditCellsCap = 100;
 
+    /// <summary>Скільки ключів рядків області кладеться в подію (решта — лише кількість і <c>rowKeysTruncated</c>).</summary>
+    private const int AuditRowKeysCap = 100;
+
     /// <summary>Скільки рядків передається в одне рішення про права й одне читання оформлення (ліміт параметрів SQL).</summary>
     private const int RowChunk = 1000;
 
-    /// <summary>Скільки змін накопичується між проміжними <c>SaveChanges</c> (усе в ОДНІЙ транзакції).</summary>
+    /// <summary>
+    /// Поріг змін між проміжними <c>SaveChanges</c> (усе в ОДНІЙ транзакції). Перевіряється ПІСЛЯ кожної порції
+    /// рядків (<see cref="RowChunk"/>), а не після кожної тисячі змін: на 1000 рядків × N колонок збереження
+    /// йде за порцію, тож змін за раз може бути й більше за 1000 (до рядків порції × колонок).
+    /// </summary>
     private const int SaveChunk = 1000;
 
     /// <summary>Скільки причин відмови повертається клієнту.</summary>
@@ -419,19 +426,31 @@ public sealed class PatchCellStylesHandler(
             ? null
             : new { background = style.BackgroundHex, foreground = style.ForegroundHex, bold = style.IsBold };
 
-    /// <summary>Опис області для журналу: кількості й задані кольори, без переліку комірок.</summary>
+    /// <summary>
+    /// Опис області для журналу: кількості, задані кольори й ПЕРЕЛІК рядків/колонок області (рядки — до
+    /// <see cref="AuditRowKeysCap"/> + <c>rowKeysTruncated</c>; колонки — усі: їх не більше, ніж у таблиці), без
+    /// переліку самих комірок — інакше «яку частину таблиці перефарбовано» не розслідувати.
+    /// </summary>
     private static object DescribeScope(CellStyleScope scope)
-        => new
+    {
+        var rowKeys = scope.AllRows ? null : (scope.RowKeys ?? []).Distinct(StringComparer.Ordinal).ToList();
+        var columnCodes = scope.AllColumns ? null : (scope.ColumnCodes ?? []).Distinct(StringComparer.Ordinal).ToList();
+
+        return new
         {
             rows = scope.AllRows ? "all" : "list",
-            rowKeysCount = scope.AllRows ? (int?)null : (scope.RowKeys?.Distinct(StringComparer.Ordinal).Count() ?? 0),
+            rowKeysCount = rowKeys?.Count,
+            rowKeys = rowKeys?.Take(AuditRowKeysCap).ToList(),
+            rowKeysTruncated = rowKeys is not null && rowKeys.Count > AuditRowKeysCap,
             columns = scope.AllColumns ? "all" : "list",
-            columnCodesCount = scope.AllColumns ? (int?)null : (scope.ColumnCodes?.Distinct(StringComparer.Ordinal).Count() ?? 0),
+            columnCodesCount = columnCodes?.Count,
+            columnCodes,
             reset = scope.Reset,
             background = scope.Reset ? null : scope.BackgroundHex,
             foreground = scope.Reset ? null : scope.ForegroundHex,
             bold = scope.Reset ? null : scope.IsBold,
         };
+    }
 
     /// <summary>
     /// Розгортає область у комірки: рядки × колонки, яких читач не бачить, не входять (<c>allColumns</c>)
