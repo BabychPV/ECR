@@ -80,6 +80,7 @@ param(
     [string[]]$MigrateDocumentId,
     [switch]$Async,
     [int]$MigrateTimeoutMinutes = 60,
+    [string]$ConfirmStand,
     [switch]$DryRun
 )
 
@@ -112,6 +113,9 @@ $manifest = Get-Content -LiteralPath (Join-Path $DataDir 'header-fields.json') -
 $wanted = @($manifest.fields | Where-Object { $_.kind -ne 'Service' })
 foreach ($w in $wanted) { if (-not $Labels.ContainsKey($w.key)) { throw "Немає підпису для поля $($w.key)." } }
 
+# Лише локальний стенд; мутації (не -DryRun/-WhatIf) — лише з явним -ConfirmStand.
+Assert-LocalBaseUrl $BaseUrl
+if (-not $dry) { Set-EcrStandConfirmation -Stand $ConfirmStand -Url $BaseUrl }
 Connect-Ecr -BaseUrl $BaseUrl -User $User -Password $Password
 
 # --- шаблон і версії ---------------------------------------------------------------------

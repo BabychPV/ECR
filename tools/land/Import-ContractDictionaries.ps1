@@ -53,6 +53,7 @@ param(
     [securestring]$Password,
     [string]$DataDir,
     [string[]]$Only,
+    [string]$ConfirmStand,
     [switch]$DryRun
 )
 
@@ -99,6 +100,9 @@ foreach ($t in $targets) {
     $plan += [pscustomobject]@{ Registry = $t.registry; Csv = $t.csv; Rows = $rows }
 }
 
+# Лише локальний стенд; мутації (не -DryRun/-WhatIf) — лише з явним -ConfirmStand.
+Assert-LocalBaseUrl $BaseUrl
+if (-not $dry) { Set-EcrStandConfirmation -Stand $ConfirmStand -Url $BaseUrl }
 Connect-Ecr -BaseUrl $BaseUrl -User $User -Password $Password
 $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
 

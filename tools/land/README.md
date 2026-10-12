@@ -28,6 +28,15 @@
    Перегляньте її, опублікуйте чи видаліть вручну або запустіть із `-UseExistingDraft`
    (несумісний з `-SourceVersionId`).
 
+## Безпека стенда (RC21)
+
+- Лише локальний стенд: `-BaseUrl` має вести на `localhost`, `127.0.0.1`, `[::1]` або `*.localhost`, а SQL (`-SqlConnection`
+  у Build-LandTemplate) — на локальний сервер (`localhost`, `.`, `(local)`, `127.0.0.1`, `::1`, ім'я цієї машини, `(localdb)`).
+  Чужа адреса (в т.ч. https) - відмова ще до входу.
+- Мутації — лише з явним `-ConfirmStand <імʼя або адреса стенду>` (наприклад `localhost:5094` або `http://localhost:5094`; має
+  збігатися з `-BaseUrl`). Без нього скрипти не роблять жодного не-GET виклику і SQL-запису; `-DryRun` лише читає.
+  Build-LandTemplate передає підтвердження дочірнім Apply-ContractHeader/Import-ContractDictionaries сам.
+
 ## Адреса і вхід
 
 - `-BaseUrl` або `$env:ECR_BASE_URL` (за замовчуванням `http://localhost:5092`).
