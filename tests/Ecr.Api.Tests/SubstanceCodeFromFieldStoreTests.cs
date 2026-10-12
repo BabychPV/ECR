@@ -54,12 +54,12 @@ public sealed class SubstanceCodeFromFieldStoreTests(SqlServerFixture sql)
         var version = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, now);
         db.MethodologyVersions.Add(version);
         await db.SaveChangesAsync();
-        db.MethodologySubstances.Add(version.AddSubstance(e301.Id, 0));
-        db.MethodologySubstances.Add(version.AddSubstance(e1325.Id, 1));   // поле є, значення немає -> код запису
-        db.MethodologySubstances.Add(version.AddSubstance(plain.Id, 2));   // довідник без поля -> код запису
+        db.MethodologySubstances.Add(new MethodologySubstance(version.Id, e301.Id, 0));
+        db.MethodologySubstances.Add(new MethodologySubstance(version.Id, e1325.Id, 1));   // поле є, значення немає -> код запису
+        db.MethodologySubstances.Add(new MethodologySubstance(version.Id, plain.Id, 2));   // довідник без поля -> код запису
         await db.SaveChangesAsync();
 
-        var codes = await new MethodologyStore(db).GetSubstanceCodesAsync(version.Id, CancellationToken.None);
+        var codes = await new MethodologyStore(db, constantCap: 1000).GetSubstanceCodesAsync(version.Id, CancellationToken.None);
 
         Assert.Equal("301", codes[e301.Id]);
         Assert.Equal("E1325", codes[e1325.Id]);
