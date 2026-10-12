@@ -251,6 +251,25 @@ internal static class EditAssignmentAccess
                 ["state"] = state,
             });
 
+    /// <summary>
+    /// Нормалізований термін дії або 422 <c>editAssignmentExpiresAtInvalid</c> (не в майбутньому / далі за
+    /// стелю <see cref="EditAssignment.MaxLifetimeDays"/> діб).
+    /// </summary>
+    public static DateTime RequireValidExpiry(DateTime raw, DateTime utcNow)
+        => EditAssignment.TryNormalizeExpiry(raw, utcNow, out var expiry)
+            ? expiry
+            : throw Invalid(
+                "err.ECR-REQ-0422.editAssignmentExpiresAtInvalid",
+                "Термін дії передачі має бути в майбутньому й не пізніше ніж через 366 діб.",
+                new Dictionary<string, object?>
+                {
+                    ["maxDays"] = EditAssignment.MaxLifetimeDays.ToString(CultureInfo.InvariantCulture),
+                });
+
+    /// <summary>Те саме для <c>null</c> (безстроково): повертає <c>null</c>.</summary>
+    public static DateTime? RequireValidExpiryOrNull(DateTime? raw, DateTime utcNow)
+        => raw is { } value ? RequireValidExpiry(value, utcNow) : null;
+
     /// <summary>Вимагає <c>baseVersion</c> і звіряє її з поточною.</summary>
     public static void RequireVersion(string? baseVersion, EditAssignment assignment)
     {

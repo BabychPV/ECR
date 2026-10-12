@@ -45,6 +45,7 @@ public sealed record EditAssignmentRecipientDto(
 /// <param name="Recipients">Виконавці.</param>
 /// <param name="ModifiedAt">Коли змінено.</param>
 /// <param name="Version">Версія для <c>baseVersion</c>.</param>
+/// <param name="ExpiresAt">Термін дії передачі (UTC); <c>null</c> — безстроково.</param>
 public sealed record EditAssignmentDto(
     long Id,
     EditAssignmentSliceDto Slice,
@@ -59,7 +60,8 @@ public sealed record EditAssignmentDto(
     string? AppliedSetName,
     IReadOnlyList<EditAssignmentRecipientDto> Recipients,
     DateTime ModifiedAt,
-    string Version);
+    string Version,
+    DateTime? ExpiresAt = null);
 
 /// <summary>Перелік передач документа для менеджера.</summary>
 /// <param name="OwnerDisplayName">Автор документа.</param>
@@ -75,13 +77,18 @@ public sealed record EditAssignmentListDto(
 /// <param name="Note">Інструкція (≤ 500).</param>
 /// <param name="AppliedSetId">Набір, з якого взято склад (знімок назви беремо на сервері).</param>
 /// <param name="BaseVersion">Обов'язкова для зміни наявної передачі.</param>
+/// <param name="ExpiresAt">
+/// Термін дії передачі, UTC: у майбутньому й не пізніше ніж через 366 діб. Відсутнє чи <c>null</c> —
+/// безстроково (як і <paramref name="Note"/>, значення ЗАМІНЮЄ наявне: пропуск знімає термін).
+/// </param>
 public sealed record UpsertEditAssignmentRequest(
     EditAssignmentSliceDto Slice,
     IReadOnlyList<int> RecipientUserIds,
     bool IsExclusive = true,
     string? Note = null,
     int? AppliedSetId = null,
-    string? BaseVersion = null);
+    string? BaseVersion = null,
+    DateTime? ExpiresAt = null);
 
 /// <summary>Тіло валідації.</summary>
 /// <param name="BaseVersion">Версія передачі, яку бачив власник.</param>
