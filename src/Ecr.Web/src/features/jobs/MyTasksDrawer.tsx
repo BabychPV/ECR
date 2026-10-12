@@ -113,7 +113,7 @@ export function MyTasksDrawer({
         {(list) => (
           <Stack gap="sm">
             {list.map((job) => (
-              <MyTaskRow key={job.jobId} job={job} />
+              <MyTaskRow key={job.jobId} job={job} onNavigate={onClose} />
             ))}
           </Stack>
         )}
@@ -131,7 +131,7 @@ export function MyTasksDrawer({
  * спробу» і «що робити з `errorCode = null`» розійшлася б із двома наявними
  * при першій же правці.
  */
-function MyTaskRow({ job }: { readonly job: JobSummary }): JSX.Element {
+function MyTaskRow({ job, onNavigate }: { readonly job: JobSummary; readonly onNavigate: () => void }): JSX.Element {
   const queryClient = useQueryClient();
   const active = isActiveJob(job.state);
 
@@ -199,7 +199,7 @@ function MyTaskRow({ job }: { readonly job: JobSummary }): JSX.Element {
           <Text size="xs" c="dimmed">
             <Timestamp value={queuedAt} />
           </Text>
-          <JobDocumentLink documentId={job.documentId} documentHrefOf={myTaskDocumentHref} />
+          <JobDocumentLink documentId={job.documentId} documentHrefOf={myTaskDocumentHref} onNavigate={onNavigate} />
         </Group>
       </Stack>
     </Card>

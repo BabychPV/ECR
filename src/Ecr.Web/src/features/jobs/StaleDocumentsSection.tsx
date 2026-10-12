@@ -13,7 +13,14 @@ import { useStaleDocuments } from './useStaleDocuments';
  * перелік тут - єдине місце, де лишається слід. Порожній і завантажувальний стани мовчать (блок не заважає
  * переліку задач); відмова - видима, а не німа (`L10`).
  */
-export function StaleDocumentsSection({ opened }: { readonly opened: boolean }): JSX.Element | null {
+export function StaleDocumentsSection({
+  opened,
+  onNavigate,
+}: {
+  readonly opened: boolean;
+  /** Перехід на документ: шухляда закривається, інакше лишається поверх нього. */
+  readonly onNavigate?: (() => void) | undefined;
+}): JSX.Element | null {
   const stale = useStaleDocuments(opened);
 
   if (stale.error !== null) {
@@ -49,7 +56,7 @@ export function StaleDocumentsSection({ opened }: { readonly opened: boolean }):
                 </Text>
               )}
             </div>
-            <Anchor component={Link} to={staleDocumentHref(document.id, periodKey)} size="sm">
+            <Anchor component={Link} to={staleDocumentHref(document.id, periodKey)} size="sm" onClick={onNavigate}>
               {t('jobs.staleDocuments.open')}
             </Anchor>
           </Group>

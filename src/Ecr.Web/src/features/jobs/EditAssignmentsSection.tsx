@@ -15,7 +15,14 @@ import type { MyEditAssignment } from '@/features/editAssignments/types';
  * інакше шухляда «My tasks» писала б «не вдалося завантажити» КОЖНОМУ користувачу. Дані - лише
  * рядки викликача. Статус - текстом (не лише кольором); коментар повернення - екранований текст React.
  */
-export function EditAssignmentsSection({ opened }: { readonly opened: boolean }): JSX.Element | null {
+export function EditAssignmentsSection({
+  opened,
+  onNavigate,
+}: {
+  readonly opened: boolean;
+  /** Перехід на документ: шухляда закривається, інакше лишається поверх нього. */
+  readonly onNavigate?: (() => void) | undefined;
+}): JSX.Element | null {
   const query = useMyEditAssignments(opened);
 
   if (query.error !== null) {
@@ -38,12 +45,14 @@ export function EditAssignmentsSection({ opened }: { readonly opened: boolean })
         title={t('myTasks.assignToFill')}
         items={data.assignedToMe}
         validate={false}
+        onNavigate={onNavigate}
       />
       <AssignmentGroup
         id="my-tasks-validation"
         title={t('myTasks.awaitingValidation')}
         items={data.awaitingMyValidation}
         validate
+        onNavigate={onNavigate}
       />
     </>
   );
@@ -54,11 +63,13 @@ function AssignmentGroup({
   title,
   items,
   validate,
+  onNavigate,
 }: {
   readonly id: string;
   readonly title: string;
   readonly items: readonly MyEditAssignment[];
   readonly validate: boolean;
+  readonly onNavigate: (() => void) | undefined;
 }): JSX.Element | null {
   if (items.length === 0) return null;
 
@@ -97,11 +108,11 @@ function AssignmentGroup({
             )}
             <Group justify="flex-end" gap="md">
               {validate && (
-                <Anchor component={Link} to={editAssignmentHref(item.documentId, true)} size="sm" data-action="validate">
+                <Anchor component={Link} to={editAssignmentHref(item.documentId, true)} size="sm" data-action="validate" onClick={onNavigate}>
                   {t('myTasks.edit.validate')}
                 </Anchor>
               )}
-              <Anchor component={Link} to={editAssignmentHref(item.documentId, false)} size="sm" data-action="open">
+              <Anchor component={Link} to={editAssignmentHref(item.documentId, false)} size="sm" data-action="open" onClick={onNavigate}>
                 {t('myTasks.edit.open')}
               </Anchor>
             </Group>
