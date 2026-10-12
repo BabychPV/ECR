@@ -232,6 +232,14 @@ def parse_sheet(z, path, sst):
             fs = [ff.text for ff in r.findall(M + 'formula')]
             rules.append({'type': r.get('type'), 'op': r.get('operator'), 'f': fs, 'dxfId': r.get('dxfId'), 'priority': r.get('priority')})
         meta['condFmt'].append({'sqref': cf.get('sqref'), 'rules': rules})
+    # expression-правила (CF за формулою, напр. N($B5="Inactive")) - ВСІ, без обрізання до 200 блоків: аркуш 10 має 489 блоків,
+    # а `condFmt` вище лишається як був (його споживачі - cellIs/conditionalFormats - не повинні змінитися).
+    meta['condFmtExpr'] = []
+    for cf in cfs:
+        for r in cf.findall(M + 'cfRule'):
+            if r.get('type') == 'expression':
+                meta['condFmtExpr'].append({'sqref': cf.get('sqref'), 'f': [ff.text for ff in r.findall(M + 'formula')],
+                                            'dxfId': r.get('dxfId'), 'priority': r.get('priority')})
     tp = root.find(M + 'tableParts')
     meta['tableParts'] = len(tp) if tp is not None else 0
     meta['hasDrawing'] = root.find(M + 'drawing') is not None

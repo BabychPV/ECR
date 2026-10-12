@@ -230,6 +230,7 @@ public static class DependencyInjection
         services.AddScoped<Documents.EditAssignments.ReturnEditAssignmentHandler>();
         services.AddScoped<Documents.EditAssignments.ListEditAssignmentCandidatesHandler>();
         services.AddScoped<Documents.EditAssignments.ListMyEditAssignmentsHandler>();
+        services.AddScoped<Workflow.ApprovalQueue.ListMyApprovalQueueHandler>();
         services.AddScoped<Documents.EditAssignments.EditorSetsHandler>();
         services.AddScoped<Documents.EditAssignments.BatchEditAssignmentsHandler>();
 

@@ -20,7 +20,7 @@ Describe 'Land-CfRules: conditionalFormatsRowScoped -> правила умовн
         if (@($ne | Where-Object { $_.backgroundHex -ne '#FF0000' -or $_.value -ne '0' }).Count -ne 0) { throw 'ne 0 мусить бути #FF0000' }
         if (@($eq | Where-Object { $_.backgroundHex -ne '#00FF00' -or $_.value -ne '0' }).Count -ne 0) { throw 'eq 0 мусить бути #00FF00' }
 
-        $text = @($rules | Where-Object { $_.operator -eq 'textEq' })
+        $text = @($rules | Where-Object { $_.operator -eq 'textEq' -and $_.columnCode -ne '*' })   # без правил статусу рядка (Inactive)
         if ($text.Count -eq 0) { throw 'Немає textEq' }
         $bad = @($text | Where-Object { $_.value -ne 'Removed' -or $_.foregroundHex -ne '#FF0000' -or -not $_.isBold -or $_.scope -or -not $_.tableCode -or $_.rowKeys })
         if ($bad.Count -ne 0) { throw 'textEq Removed: червоний жирний на колонці таблиці без rowKeys' }
@@ -42,7 +42,9 @@ Describe 'Land-CfRules: conditionalFormatsRowScoped -> правила умовн
         foreach ($r in $rules) {
             if ($r.operator -notin 'eq', 'ne', 'textEq', 'textNe', 'gt', 'ge', 'lt', 'le') { throw "оператор $($r.operator)" }
             if (-not $r.tableCode -or -not $cols.ContainsKey($r.tableCode)) { throw "таблиця $($r.tableCode)" }
-            if ($cols[$r.tableCode] -notcontains $r.columnCode) { throw "колонки $($r.columnCode) немає в $($r.tableCode)" }
+            if ($r.columnCode -ne '*' -and $cols[$r.tableCode] -notcontains $r.columnCode) { throw "колонки $($r.columnCode) немає в $($r.tableCode)" }
+            if ($r.refColumnCode -and $cols[$r.tableCode] -notcontains $r.refColumnCode) { throw "колонки-джерела $($r.refColumnCode) немає в $($r.tableCode)" }
+            if ($r.columnCode -eq '*' -and -not $r.refColumnCode) { throw '"*" без колонки-джерела' }
             foreach ($hex in @($r.backgroundHex, $r.foregroundHex)) { if ($hex -and $hex -notmatch '^#[0-9a-fA-F]{6}$') { throw "колір $hex" } }
             if ($r.operator -in 'eq', 'ne', 'gt', 'ge', 'lt', 'le') { $d = [decimal]0; if (-not [decimal]::TryParse([string]$r.value, [Globalization.NumberStyles]::Number, [Globalization.CultureInfo]::InvariantCulture, [ref]$d)) { throw "операнд $($r.value)" } }
             if ($r.scope -eq 'row') {
@@ -52,7 +54,7 @@ Describe 'Land-CfRules: conditionalFormatsRowScoped -> правила умовн
                 foreach ($x in $k) { if ($rowKeys[$r.tableCode] -notcontains $x) { throw "рядка $x немає в $($r.tableCode)" } }
             }
             elseif ($null -ne $r.rowKeys -or $r.scope) { throw 'rowKeys/scope лише разом' }
-            $key = "$($r.tableCode)|$($r.columnCode)|$($r.operator)|$($r.value)|$($r.scope)|$(@($r.rowKeys) -join ',')"
+            $key = "$($r.tableCode)|$($r.columnCode)|$($r.refColumnCode)|$($r.operator)|$($r.value)|$($r.scope)|$(@($r.rowKeys) -join ',')"
             if ($seen.ContainsKey($key)) { throw "дубль правила $key" }
             $seen[$key] = $true
         }
@@ -68,5 +70,17 @@ Describe 'Land-CfRules: conditionalFormatsRowScoped -> правила умовн
         $r = @(ConvertTo-LandCfRules $m)
         if ($r.Count -ne 1) { throw "очікувалось 1 правило, є $($r.Count): текстовий gt відкидається, два row-правила зливаються" }
         if (@($r[0].rowKeys).Count -ne 3 -or $r[0].scope -ne 'row' -or $r[0].columnCode -ne 'A') { throw 'злиття rowKeys: R1,R2,R3' }
+    }
+    It 'Inactive: правила за статусом рядка -> "*" + refColumnCode (статусна колонка таблиці) + textEq Inactive 00CCFF; колонка C не переноситься' {
+        $repo = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
+        . (Join-Path $repo 'tools/land/Land-CfRules.ps1')
+        $model = Get-Content -LiteralPath (Join-Path $repo 'docs/delivery/reference-data/land-template/land-template.model.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $rules = @(ConvertTo-LandCfRules $model)
+
+        $inactive = @($rules | Where-Object { $_.operator -eq 'textEq' -and $_.value -eq 'Inactive' })
+        if ($inactive.Count -ne @($model.conditionalFormatsRowStatus).Count -or $inactive.Count -eq 0) { throw "Inactive-правил $($inactive.Count), у моделі $(@($model.conditionalFormatsRowStatus).Count)" }
+        $bad = @($inactive | Where-Object { $_.columnCode -ne '*' -or $_.backgroundHex -ne '#00CCFF' -or -not $_.refColumnCode -or -not $_.tableCode -or $_.scope -or $_.rowKeys })
+        if ($bad.Count -ne 0) { throw 'Inactive: columnCode * + refColumnCode + таблиця + 00CCFF, без scope/rowKeys' }
+        if (@($model.conditionalFormatsStatusUnproven).Count -eq 0) { throw 'колонка C (не доведено) мусить лежати в conditionalFormatsStatusUnproven' }
     }
 }

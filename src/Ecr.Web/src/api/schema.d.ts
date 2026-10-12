@@ -6052,6 +6052,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/approval-queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Подані аркуші, які поточний користувач може затвердити зараз: документ і аркуш видимі йому, крок
+         *     маршруту погодження — його ролі, рівень гранта не нижчий за `Approve`, подав не він сам.
+         *     Найдавніші подання першими; без імен схованого. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Розмір сторінки 1..200 (за замовчуванням 50). */
+                    limit?: number;
+                    /** @description Курсор попередньої відповіді. */
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApprovalQueueDto"];
+                        "text/json": components["schemas"]["ApprovalQueueDto"];
+                        "text/plain": components["schemas"]["ApprovalQueueDto"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me/edit-assignments": {
         parameters: {
             query?: never;
@@ -19609,6 +19665,58 @@ export interface components {
             setId: number;
             /** @description Зрізи (1..12). */
             slices: components["schemas"]["EditAssignmentSliceDto"][];
+        };
+        /** @description Сторінка черги «До погодження»: найдавніші подання першими. */
+        ApprovalQueueDto: {
+            /** @description Аркуші, які поточний користувач МОЖЕ затвердити зараз. */
+            items: components["schemas"]["ApprovalQueueItemDto"][];
+            /** @description Непрозорий курсор наступної сторінки; `null` — кінець черги. */
+            nextCursor: null | string;
+        };
+        /** @description Аркуш, що чекає погодження ПОТОЧНОГО користувача («До погодження», ФВ-12.5). */
+        ApprovalQueueItemDto: {
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /** @description Бізнес-ключ документа. */
+            documentKey: string;
+            /**
+             * Format: int32
+             * @description Ключ періоду `Рік*100+№` (для `approve` і для відкриття документа).
+             */
+            periodKey: number;
+            /** @description Код проєкту документа. */
+            projectCode: string;
+            /** @description Код аркуша. */
+            sheetCode: string;
+            /**
+             * Format: int32
+             * @description Аркуш (для `POST /documents/{id}/approve`).
+             */
+            sheetDefId: number;
+            /**
+             * Format: int32
+             * @description Скільки кроків у маршруті; `null` — маршруту немає.
+             */
+            stepCount: null | number;
+            /**
+             * Format: int32
+             * @description Номер поточного кроку маршруту; `null` — маршруту немає (одноетапне).
+             */
+            stepOrdinal: null | number;
+            /** @description Код ролі поточного кроку; `null` — маршруту немає. */
+            stepRoleCode: null | string;
+            /**
+             * Format: date-time
+             * @description Коли подано, UTC.
+             */
+            submittedAt: string;
+            /** @description Хто подав; `null` — користувача вже немає. */
+            submittedByDisplayName: null | string;
+            /** @description Код шаблону проєкту. */
+            templateCode: string;
         };
         /** @description Маршрут погодження проєкту. */
         ApprovalRouteDto: {

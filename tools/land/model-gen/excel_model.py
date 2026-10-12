@@ -489,6 +489,15 @@ for idx, s in enumerate(d['sheets'], 1):
                 cis.append({'sqref': cf['sqref'], 'op': r['op'], 'f': r['f'][:2], 'fill': fill, 'font': dx['fontColor'], 'bold': dx['bold'],
                             'pattern': dx['pattern'], 'priority': r.get('priority')})
     sh['cellIsFormats'] = cis
+    # expression-правила з кольором dxf (CF за формулою, напр. N($B5="Inactive")): основа для правил за статусом рядка
+    exs = []
+    for r in s.get('condFmtExpr', []):
+        if r.get('dxfId') is not None and int(r['dxfId']) < len(DX):
+            dx = DX[int(r['dxfId'])]
+            fill = (dx['bg'] or dx['fg']) if dx['pattern'] in (None, 'solid') else None
+            exs.append({'sqref': r['sqref'], 'f': r['f'][:1], 'fill': fill, 'font': dx['fontColor'], 'bold': dx['bold'],
+                        'pattern': dx['pattern'], 'priority': r.get('priority')})
+    sh['exprFormats'] = exs
     model['sheets'].append(sh)
 
 model['dictionaries'] = dictionaries
