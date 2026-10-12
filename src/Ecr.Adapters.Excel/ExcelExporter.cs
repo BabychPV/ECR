@@ -554,7 +554,8 @@ public sealed class ExcelExporter(
             Widen(contentLength, labelColumn, text.Length);
         }
 
-        ApplyConditionalFormats(worksheet, cells, rowIds, columns, columnNumbers, rowNumbers, formatRules);
+        ApplyConditionalFormats(
+            worksheet, cells, rowIds, columns, columnNumbers, rowNumbers, formatRules, table.Code, lookups);
 
         return new ExcelTableBlock(
             instance.TableInstanceId, table.Id, table.Code, sheetName, headerRow, columnRefs, rowRefs);
@@ -716,7 +717,9 @@ public sealed class ExcelExporter(
         List<ColumnDef> columns,
         Dictionary<int, int> columnNumbers,
         Dictionary<string, int> rowNumbers,
-        IReadOnlyDictionary<string, IReadOnlyList<ConditionalFormatRule>> formatRules)
+        IReadOnlyDictionary<string, IReadOnlyList<ConditionalFormatRule>> formatRules,
+        string tableCode,
+        IReadOnlyDictionary<int, IReadOnlyDictionary<long, string>> lookups)
     {
         if (formatRules.Count == 0 || rowNumbers.Count == 0)
         {
@@ -730,18 +733,51 @@ public sealed class ExcelExporter(
                 Ecr.Expressions.Evaluation.CellValueMapping.ToRuleValue(cell.Value);
         }
 
+        // ⛔ Нерозкриття: колонка-джерело правила («статус рядка») береться ЛИШЕ з колонок, що потрапили в книгу
+        // (`columns` — без прихованих і заборонених доступом); невидима → правило не застосовується.
+        var byCode = columns
+            .GroupBy(c => c.Code, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
         foreach (var column in columns)
         {
-            if (!formatRules.TryGetValue(column.Code, out var rules))
+            var rules = Ecr.Application.Templates.ConditionalFormatEvaluator.RulesFor(formatRules, column.Code);
+            if (rules.Count == 0)
             {
                 continue;
             }
 
             foreach (var (rowKey, number) in rowNumbers)
             {
-                values.TryGetValue((rowIds[rowKey], column.Id), out var value);
+                var rowId = rowIds[rowKey];
+                values.TryGetValue((rowId, column.Id), out var value);
 
-                if (Ecr.Application.Templates.ConditionalFormatEvaluator.Evaluate(rules, value) is { } format)
+                var context = new Ecr.Application.Templates.RuleCellContext(
+                    tableCode,
+                    rowKey,
+                    (string code, out object? found) =>
+                    {
+                        found = null;
+                        if (!byCode.TryGetValue(code, out var source))
+                        {
+                            return false;
+                        }
+
+                        values.TryGetValue((rowId, source.Id), out found);
+
+                        // Довідник — КОД запису (як у книзі), а не Id.
+                        if (found is long entryId
+                            && source.LookupRegistryDefId is { } registryId
+                            && lookups.TryGetValue(registryId, out var entries)
+                            && entries.TryGetValue(entryId, out var entryCode))
+                        {
+                            found = entryCode;
+                        }
+
+                        return true;
+                    });
+
+                if (Ecr.Application.Templates.ConditionalFormatEvaluator.Evaluate(rules, value, context) is { } format)
                 {
                     styleMapper.ApplyConditional(
                         worksheet.Cell(number, columnNumbers[column.Id]).Style, format);

@@ -143,6 +143,19 @@ public sealed class StyleMapper
         {
             target.Font.Bold = true;
         }
+
+        // CELL-STYLE L6: штрих «неактуальної комірки» (як lightTrellis оригіналу). Заливка, якщо задана,
+        // лишається фоном штриху; штрих малюється сірим.
+        if (format.Pattern == Ecr.Domain.Entities.Configuration.ConditionalFormatRule.PatternHatch)
+        {
+            if (format.BackgroundHex is null)
+            {
+                target.Fill.BackgroundColor = XLColor.White;
+            }
+
+            target.Fill.PatternType = XLFillPatternValues.LightTrellis;
+            target.Fill.PatternColor = XLColor.FromHtml("#808080");
+        }
     }
 
     /// <summary>Позначає комірку як таку, що рахується системою.</summary>
