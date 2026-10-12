@@ -56,7 +56,8 @@ $pw = Read-Host 'Пароль bootstrap' -AsSecureString
   таблиця: `headerStyleRole` (мода шапок немісячних колонок). Роль колонки ставиться, лише коли найчастіший xf охоплює >= 80 % її рядків.
 * `conditionalFormats` лишається порожнім. Правила Excel «баланс <> 0 -> FF0000 / = 0 -> 00FF00» і «Removed -> червоний жирний» стоять на окремих
   рядках, а правило колонки ECR діє на всі рядки колонки в усіх таблицях версії, тому вони лежать у `conditionalFormatsRowScoped`
-  (рядки за `rowKeys`, колонки за кодами) і чекають серверної підтримки scope = row (L6 плану).
+  (рядки за `rowKeys`, колонки за кодами). `Build-LandTemplate.ps1` перетворює їх (`tools/land/Land-CfRules.ps1`) у правила з областю
+  (`scope = row`, `tableCode`, `rowKeys`, `textEq`) і PUT-ить за контрактом L6 (lane cellstyle-l6-3); без неї відкочує до колонкових.
 
 `Build-LandTemplate.ps1` ставить стилі через `PUT .../styles/{code}`, `styleId`/`widthPx`/`displayFormat` — у колонках (обидва режими), а стиль шапки
 таблиці — `cfg.TableDef.HeaderStyleId` лише в `-StructureMode Sql` (у API-контракті таблиці поля немає; до сітки шапка дійде з L2 плану).

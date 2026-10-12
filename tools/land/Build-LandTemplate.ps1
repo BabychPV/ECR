@@ -60,6 +60,7 @@ if (-not $modelFile) { $modelFile = Join-Path $repo 'docs\delivery\reference-dat
 $afFile = $AfPackage
 if (-not $afFile) { $afFile = Join-Path $repo 'docs\delivery\reference-data\land-template\af-land-package.json' }
 . (Join-Path $here 'EcrApi.ps1')
+. (Join-Path $here 'Land-CfRules.ps1')
 Set-StrictMode -Off
 
 # Безпека стенда: лише локальні API і SQL (база з іменем EcrLand*); мутації лише з явним
@@ -751,15 +752,30 @@ function Stage-Template {
     Log "  колонок $nCols, формул $nF, рядків $nRows, правил $nRules"
     $nCell = Put-CellFormulas $vid
 
-    # умовне форматування (cellIs Removed → сірий): одним PUT на версію
-    if (@($Mdl.conditionalFormats).Count -gt 0) {
+    # умовне форматування: колонкові правила моделі + правила з областю (L6: scope row / tableCode, textEq/textNe) - одним PUT на версію.
+    # Правила з областю потребують lane cellstyle-l6-3: сервер без неї міг би проігнорувати поля області й зробити правило колонковим
+    # (фарбувало б усю колонку), тому після PUT читаємо набір назад і, якщо області не збереглися, відкочуємо до колонкових правил.
+    $scopedRules = @(ConvertTo-LandCfRules $Mdl)
+    if (@($Mdl.conditionalFormats).Count -gt 0 -or $scopedRules.Count -gt 0) {
         $g = Invoke-Ecr -Method GET -Path "/api/v1/template-versions/$vid/conditional-formats"
         $etag = [string]$g.Headers['ETag']
         $rules = @($Mdl.conditionalFormats | ForEach-Object { @{ columnCode = [string]$_.columnCode; operator = [string]$_.operator; value = [string]$_.value; valueTo = $null
                     backgroundHex = [string]$_.backgroundHex; foregroundHex = [string]$_.foregroundHex; isBold = [bool]$_.isBold } })
+        $plain = @($rules)
         $h = @{}; if ($etag) { $h['If-Match'] = $etag }
-        $cr = Invoke-Ecr -Method PUT -Path "/api/v1/template-versions/$vid/conditional-formats" -Body @{ rules = $rules } -Headers $h
-        Log ("  умовне форматування: HTTP {0} {1}" -f $cr.Status, $(if ($cr.Status -ne 200) { ([string]$cr.Text).Substring(0, [Math]::Min(250, ([string]$cr.Text).Length)) } else { '' }))
+        $cr = Invoke-Ecr -Method PUT -Path "/api/v1/template-versions/$vid/conditional-formats" -Body @{ rules = @($plain + $scopedRules) } -Headers $h
+        Log ("  умовне форматування: правил {0} (з областю {1}): HTTP {2} {3}" -f ($plain.Count + $scopedRules.Count), $scopedRules.Count, $cr.Status, $(if ($cr.Status -ne 200) { ([string]$cr.Text).Substring(0, [Math]::Min(250, ([string]$cr.Text).Length)) } else { '' }))
+        if ($cr.Status -eq 200 -and $scopedRules.Count -gt 0) {
+            $back = Invoke-Ecr -Method GET -Path "/api/v1/template-versions/$vid/conditional-formats"
+            $kept = @(@($back.Json) | Where-Object { $_.tableCode }).Count
+            if ($kept -lt $scopedRules.Count) {
+                Log "  ПОПЕРЕДЖЕННЯ: сервер зберіг $kept із $($scopedRules.Count) правил з областю (потрібна lane cellstyle-l6-3); відкочую до колонкових правил."
+                $etag2 = [string]$back.Headers['ETag']
+                $h2 = @{}; if ($etag2) { $h2['If-Match'] = $etag2 }
+                $rb = Invoke-Ecr -Method PUT -Path "/api/v1/template-versions/$vid/conditional-formats" -Body @{ rules = $plain } -Headers $h2
+                Log ("  відкат умовного форматування: HTTP {0}" -f $rb.Status)
+            }
+        }
     }
     # шапка Contract (13 полів) — офіційним скриптом на цій чернетці, з публікацією
     $pw = ConvertTo-SecureString $Acc['land-owner'] -AsPlainText -Force
