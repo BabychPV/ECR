@@ -137,6 +137,11 @@ public sealed class ConstantResolver(IConstantStore constants)
         var byCategory = category is null
             ? bySubstance
             : Narrow(bySubstance, c => string.Equals(c.Category, category, StringComparison.Ordinal))
+              // ✎ LP-07: старий HSE-сервіс будує ключ із NAE як `Trim().Replace(" ", "")`, а категорії
+              // AF бувають і зі пробілом («6585 (001)»), і без («6482(003)»). Збіг без урахування
+              // пробілів — лише ЯКЩО точного немає; кілька таких → `constantAmbiguous`, як і раніше.
+              ?? Narrow(bySubstance, c => c.Category is not null
+                  && string.Equals(StripSpaces(c.Category), StripSpaces(category), StringComparison.Ordinal))
               ?? Narrow(bySubstance, c => c.Category is null
                   || string.Equals(c.Category, MethodologyConstant.CommonCategory, StringComparison.Ordinal));
 
@@ -209,6 +214,9 @@ public sealed class ConstantResolver(IConstantStore constants)
             ? new ResolvedConstant(chosen.Value, null, chosen.UnitId)
             : new ResolvedConstant(null, chosen.TextValue, null);
     }
+
+    private static string StripSpaces(string value)
+        => string.Concat(value.Where(ch => !char.IsWhiteSpace(ch)));
 
     /// <summary>Звуження, яке не робиться, якщо нічого не залишає.</summary>
     /// <remarks>

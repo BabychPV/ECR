@@ -250,15 +250,19 @@ async function openSlice(page: Page, periodKey?: number): Promise<Slice> {
         /^\/api\/v1\/documents\/\d+\/tables\/\d+$/.test(new URL(response.url()).pathname),
       { timeout: 90_000 },
     )
+    // Тіло читається ОДРАЗУ: після очікування `response.json()` падає «No resource with given identifier found».
+    .then(
+      async (response) =>
+        (await response.json()) as Omit<Slice, 'styleAccess'> & { styleAccess?: StyleAccess | null },
+    )
     .catch(() => null);
 
   await page.goto(periodKey === undefined ? DocumentUrl : `/documents/${DocumentId}?periodKey=${String(periodKey)}`);
   await expect(page.getByRole('heading').first(), 'документ не відрендерився').toBeVisible({ timeout: 30_000 });
 
-  const response = await pending;
-  if (response === null) throw new Error('зріз таблиці не завантажився (GET …/tables/{id})');
+  const raw = await pending;
+  if (raw === null) throw new Error('зріз таблиці не завантажився (GET …/tables/{id})');
 
-  const raw = (await response.json()) as Omit<Slice, 'styleAccess'> & { styleAccess?: StyleAccess | null };
   if (raw.styleAccess === undefined || raw.styleAccess === null) {
     throw new Error('зріз не має styleAccess (контракт CELL-STYLE P1A)');
   }

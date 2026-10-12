@@ -10,8 +10,8 @@ import { expect, test, type Browser, type Locator, type Page, type Response } fr
  * тут шлях «меню -> scope» проти справжнього сервера.
  *
  * ⚠ Сценарій «часткова відмова» доводить КЛІЄНТА: справжній PATCH іде на сервер, а відповідь, що повертається в
- * застосунок, доповнюється `deniedCells` (маршрут `page.route` + `route.fetch`). Сервер частково відмовляє іншими
- * тестами (`cellColorScopeLive` №4).
+ * застосунок, підміняється відповіддю з `deniedCells` (маршрут `page.route` + `route.fulfill`). Сервер частково
+ * відмовляє іншими тестами (`cellColorScopeLive` №4).
  * ⚠ Без локального прогону (на машині автора немає стенда): перший живий прогін - CI.
  */
 const Admin = { user: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
@@ -174,18 +174,32 @@ test.describe('cellColorGrid: колір рядка/колонки/таблиц�
 
   test('cellColorGrid: поданий аркуш -> кнопки вимкнені, scope не шле запит', async ({ browser }) => {
     await ensureOperatorLevel(browser, 'Write');
+
+    // Подає Адміністратор: `POST …/submit` від Operator -> 403 ECR-ACCS-0403 (у ролі немає права Submit), як у `cellColorLive`.
+    const admin = await openAs(browser, Admin, 'light');
+    try {
+      await makeSheetEditable(admin.page);
+      await submitSheet(admin.page);
+    } finally {
+      await admin.context.close();
+    }
+
     const { page, context } = await openAs(browser, Operator, 'light');
 
     try {
-      await makeSheetEditable(page);
-      await submitSheet(page);
       await openDocument(page);
       await selectAnyCell(page);
       await expectMenuDisabled(page.getByTestId('cell-color-fill').first(), 'аркуш подано, а «Заливка» ввімкнена');
       await expect(page.getByTestId('cell-color-fill').first()).toHaveAttribute('data-disabled-reason', /\S+/);
     } finally {
-      await makeSheetEditable(page).catch(() => undefined);
       await context.close();
+      // Повернення в Draft (`Document.Reopen`) - теж від Адміністратора: Operator цього права не має.
+      const cleanup = await openAs(browser, Admin, 'light');
+      try {
+        await makeSheetEditable(cleanup.page);
+      } finally {
+        await cleanup.context.close();
+      }
     }
   });
 
@@ -199,10 +213,21 @@ test.describe('cellColorGrid: колір рядка/колонки/таблиц�
       touched.push(slice);
       await selectColourableCell(page);
 
+      // ⚠ Відповідь підміняється повністю (`route.fulfill`), а не доповнюється через `route.fetch()`: запит із Node іде
+      // без `Sec-Fetch-Site` і з `Origin` dev-сервера, тож `CsrfOriginMiddleware` (L1-04) відповів би 403 csrfOrigin.
+      // Це доводить КЛІЄНТА (тост із `deniedCells`); форма - `PatchCellStylesResponse`, причина - `EditDenyReason`.
       await page.route(/\/tables\/\d+\/cell-styles$/, async (route) => {
-        const real = await route.fetch();
-        const body = (await real.json()) as Record<string, unknown>;
-        await route.fulfill({ response: real, json: { ...body, deniedCells: 2, deniedByReason: { NoWriteRight: 2 } } });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            appliedCells: 0,
+            resetCells: 0,
+            skippedCells: 0,
+            deniedCells: 2,
+            deniedByReason: { InsufficientGrantLevel: 2 },
+          }),
+        });
       });
 
       await chooseScope(page, 'row');
@@ -417,6 +442,13 @@ async function submitSheet(page: Page): Promise<void> {
   });
 }
 
+interface SliceBody {
+  tableInstanceId?: number;
+  periodKey?: number;
+  columns?: { code: string }[];
+  rows?: { rowKey: string }[];
+}
+
 /** Слухач ДО навігації: відповідь на зріз таблиці дає `tableInstanceId`, період і першу комірку. */
 function watchSlice(page: Page): () => Promise<SliceRef> {
   const pending = page
@@ -427,18 +459,14 @@ function watchSlice(page: Page): () => Promise<SliceRef> {
         /^\/api\/v1\/documents\/\d+\/tables\/\d+$/.test(new URL(response.url()).pathname),
       { timeout: 90_000 },
     )
+    // Тіло читається ОДРАЗУ: після довгого очікування `response.json()` падає «No resource with given identifier found».
+    .then(async (response) => (await response.json()) as SliceBody)
     .catch(() => null);
 
   return async () => {
-    const response = await pending;
-    if (response === null) throw new Error('зріз таблиці не завантажився (GET …/tables/{id})');
+    const body = await pending;
+    if (body === null) throw new Error('зріз таблиці не завантажився (GET …/tables/{id})');
 
-    const body = (await response.json()) as {
-      tableInstanceId?: number;
-      periodKey?: number;
-      columns?: { code: string }[];
-      rows?: { rowKey: string }[];
-    };
     const column = body.columns?.[0]?.code;
     const row = body.rows?.[0]?.rowKey;
     if (body.tableInstanceId === undefined || body.periodKey === undefined || column === undefined || row === undefined) {
