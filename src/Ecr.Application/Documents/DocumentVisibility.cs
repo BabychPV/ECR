@@ -142,6 +142,45 @@ public static class DocumentVisibility
             });
 
     /// <summary>
+    /// Розв'язує екземпляр таблиці з тіла запиту запису, нічого не розкриваючи про документ з маршруту (EA6-D1):
+    /// відсутній екземпляр, екземпляр ЧУЖОГО документа й невидимий (чи неіснуючий) документ — одна відповідь
+    /// <see cref="DocumentNotFound"/>, байт у байт, незалежно від порядку перевірок.
+    /// </summary>
+    /// <param name="rows">Сховище рядків.</param>
+    /// <param name="documentId">Документ з маршруту.</param>
+    /// <param name="tableInstanceId">Екземпляр з тіла запиту.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Екземпляр, що належить документові з маршруту (видимість документа перевіряє викликач).</returns>
+    /// <exception cref="NotFoundException"><c>err.ECR-DOC-0404.document</c> — екземпляр відсутній чи чужий, або документ невидимий.</exception>
+    /// <remarks>
+    /// ⛔ Було: чужий екземпляр давав <c>tableInstanceNotInDocument</c> ДО перевірки видимості, а власний екземпляр
+    /// схованого документа — <c>document</c>: за різницею видно, які документи існують у чужих проєктах. Видимість
+    /// питається лише на відмові — щасливий шлях не платить зайвим запитом.
+    /// </remarks>
+    public static async Task<TableInstanceRef> ResolveInDocumentAsync(
+        IRowStore rows, long documentId, long tableInstanceId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        TableInstanceRef? instance = null;
+        try
+        {
+            instance = await rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        }
+        catch (NotFoundException)
+        {
+            // Нижче: відповідь та сама, що й для чужого екземпляра.
+        }
+
+        if (instance is not null && instance.DocumentId == documentId)
+        {
+            return instance;
+        }
+
+        throw DocumentNotFound(documentId);
+    }
+
+    /// <summary>
     /// Таблиця, якої читач не бачить (Deny на таблицю чи її аркуш), для нього НЕ ІСНУЄ: ТА САМА відповідь,
     /// що й на читання зрізу (<c>404 ECR-DOC-0404 tableInstance</c>), — до будь-якої відмови про режим
     /// рядків, версії чи ключі. Інакше 409 «Table "X" has RowMode = Fixed…» називав би схований ресурс (D-6).

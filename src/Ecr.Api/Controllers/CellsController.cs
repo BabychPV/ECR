@@ -76,26 +76,14 @@ public sealed class CellsController(
         // будь-якої роботи. Без цієї перевірки шлях у URL стає декоративним:
         // клієнт указав би чужий TableInstanceId і писав би в чужий документ,
         // маючи право лише на свій.
-        var owner = await rows.ResolveTableInstanceAsync(request.TableInstanceId, ct)
+        //
+        // ⛔ EA6-D1: відсутній/чужий екземпляр і невидимий документ — ОДНА відповідь (`err.ECR-DOC-0404.document`,
+        // як у `CreateRowHandler`/`DeleteRowHandler`, D3-A S-4): `DocumentVisibility.ResolveInDocumentAsync`.
+        // Кидок, а не `NotFound(new { errorCode })`: анонімний об'єкт — звичайний JSON, і
+        // `ExceptionHandlingMiddleware` його б не бачив (`UI-WALKTHROUGH.md`, F4).
+        var owner = await Ecr.Application.Documents.DocumentVisibility
+            .ResolveInDocumentAsync(rows, documentId, request.TableInstanceId, ct)
             .ConfigureAwait(false);
-
-        if (owner.DocumentId != documentId)
-        {
-            // ⛔ Кидок, а не `NotFound(new { errorCode })`: анонімний об'єкт —
-            // звичайний JSON, тож `ExceptionHandlingMiddleware` його не бачить
-            // і в тілі не лишається ні `title`, ні `detail`. Клієнт показував
-            // би «HTTP 404» (`UI-WALKTHROUGH.md`, F4, той самий дефект, що в
-            // `DocumentsController`). Речення в каталозі вже є.
-            throw new Ecr.Application.Errors.NotFoundException(
-                "ECR-DOC-0404",
-                $"Екземпляр таблиці {request.TableInstanceId} не належить документу {documentId}.",
-                new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.tableInstanceNotInDocument",
-                    ["tableInstanceId"] = request.TableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
-        }
 
         // ⚠ Звірка періоду з тіла з періодом екземпляра таблиці — в ОБРОБНИКУ
         // (`PatchCellsHandler.LoadContextAsync`, `DAT-04`), а не тут: його

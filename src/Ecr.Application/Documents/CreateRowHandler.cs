@@ -54,18 +54,13 @@ public sealed class CreateRowHandler(
             throw DocumentVisibility.DocumentNotFound(documentId);
         }
         // ⛔ D-6: схована таблиця для читача НЕ ІСНУЄ — 404 ДО відмови «RowMode = Fixed», що називала її код.
-        try
-        {
-            await DocumentVisibility
-                .RequireTableVisibleAsync(
-                    access, profile, documentId, instance.TableInstanceId, instance.TableDefId, instance.PeriodKey, ct)
-                .ConfigureAwait(false);
-        }
-        catch (Errors.NotFoundException)
-        {
-            // S-4: схована таблиця — те саме тіло, що й «документа немає».
-            throw DocumentVisibility.DocumentNotFound(documentId);
-        }
+        //
+        // ⚠ EA6-D1: тіло — `tableInstance` (як у поштучного PATCH, книги й GET зрізу; D-6 і `HiddenTableConflictLeakTests`
+        // це закріплюють). Відсутній і ЧУЖИЙ екземпляр вище — `document`, без оракула існування екземплярів.
+        await DocumentVisibility
+            .RequireTableVisibleAsync(
+                access, profile, documentId, instance.TableInstanceId, instance.TableDefId, instance.PeriodKey, ct)
+            .ConfigureAwait(false);
 
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
 
