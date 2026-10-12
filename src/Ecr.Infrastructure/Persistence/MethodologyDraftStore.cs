@@ -147,6 +147,37 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
     public void Remove(MethodologyCategoryRule rule) => db.MethodologyCategoryRules.Remove(rule);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<MethodologySubstance>> GetSubstancesTrackedAsync(
+        int methodologyVersionId, CancellationToken ct)
+        => await db.MethodologySubstances
+            .Where(s => s.MethodologyVersionId == methodologyVersionId)
+            .OrderBy(s => s.Ordinal)
+            .ThenBy(s => s.SubstanceEntryId)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<MethodologySubstanceRow>> ListSubstanceRowsAsync(
+        int methodologyVersionId, CancellationToken ct)
+        => await (
+                from substance in db.MethodologySubstances.AsNoTracking()
+                join entry in db.RegistryEntries.AsNoTracking() on substance.SubstanceEntryId equals entry.Id
+                where substance.MethodologyVersionId == methodologyVersionId
+                orderby substance.Ordinal, substance.SubstanceEntryId
+                select new MethodologySubstanceRow(
+                    substance.SubstanceEntryId, substance.Ordinal, entry.Code, entry.RegistryDefId, entry.IsDeleted))
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public void Add(MethodologySubstance substance) => db.MethodologySubstances.Add(substance);
+
+    /// <inheritdoc />
+    public void Remove(MethodologySubstance substance) => db.MethodologySubstances.Remove(substance);
+
+    /// <inheritdoc />
     public async Task<MethodologyRequiredInput?> FindRequiredInputAsync(
         int methodologyVersionId, int columnDefId, CancellationToken ct)
         => await db.MethodologyRequiredInputs

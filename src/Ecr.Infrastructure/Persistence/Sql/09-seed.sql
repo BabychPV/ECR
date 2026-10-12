@@ -8029,6 +8029,17 @@ USING (VALUES
     ,(N'err.ECR-CELL-4224.scopeEmptyChange', N'en', N'Formatting by area: nothing to apply. Set a fill, a text color or bold, or reset the formatting.', 1)
     ,(N'err.ECR-CELL-4224.tooManyCells', N'en', N'The area covers {count} cells; one request can format at most {max}. Format the table in parts.', 1)
     -- COLL:cellstyle-scope ── кінець секції ──
+    -- COLL:migrate-rename-map ── перенос версії: мапа «було → стало» кодів таблиць/колонок; ru/kz — порцією COLL:migrate-rename-map нижче ──
+    ,(N'err.ECR-SCHM-0422.migrateRenameConflict', N'en', N'The rename map leads into a table or column that already has a counterpart by code in the version being moved from, or two entries lead into the same one. Nothing was moved, so values are not merged into one place. Fix the map (or the target version) and retry; the report lists each conflicting pair.', 1)
+    ,(N'err.ECR-SCHM-0422.migrateRenameMapInvalid', N'en', N'The table rename map is malformed: codes must be non-empty (up to 64 characters), a source table may be listed once, and at most {maxTableRenames} tables with at most {maxColumnRenames} column renames each are allowed.', 1)
+    -- COLL:migrate-rename-map ── кінець секції ──
+    -- COLL:methodology-substances ── PUT/GET …/versions/{vid}/substances: склад речовин версії; ru/kz — порцією COLL:methodology-substances нижче ──
+    ,(N'err.ECR-CALC-0422.substancesRequired', N'en', N'The substance list is missing: an empty composition is written as an empty list, not an absent one.', 1)
+    ,(N'err.ECR-CALC-0422.substancesTooMany', N'en', N'A version cannot have more than {max} substances (sent: {count}).', 1)
+    ,(N'err.ECR-CALC-0422.substanceDuplicate', N'en', N'Substance {substanceEntryId} is listed twice.', 1)
+    ,(N'err.ECR-CALC-0422.substanceNotFound', N'en', N'Substance (registry entry) {substanceEntryId} does not exist.', 1)
+    ,(N'err.ECR-CALC-0409.substanceInUse', N'en', N'The substance cannot be removed: constants {constantCodes} (total: {count}) are narrowed to it. Change those constants first.', 1)
+    -- COLL:methodology-substances ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -20157,6 +20168,37 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:approval-queue ── кінець секції ──
+
+-- COLL:migrate-rename-map ── ru/kz: перенос версии, карта «было → стало» кодов таблиц/колонок; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-SCHM-0422.migrateRenameConflict', N'ru', N'Карта переименований ведёт в таблицу или колонку, у которой уже есть соответствие по коду в переносимой версии, либо две записи ведут в одну и ту же. Ничего не перенесено, значения не сливаются в одно место. Исправьте карту (или целевую версию) и повторите; отчёт перечисляет каждую конфликтную пару.'),
+    (N'err.ECR-SCHM-0422.migrateRenameConflict', N'kz', N'Атауды өзгерту картасы көшірілетін нұсқада коды бойынша сәйкестігі бар кестеге немесе бағанға апарады, не екі жазба бір кестеге апарады. Ештеңе көшірілмеді, мәндер бір жерге біріктірілмейді. Картаны (немесе мақсатты нұсқаны) түзетіп, қайталаңыз; есеп әрбір қайшы жұпты көрсетеді.'),
+    (N'err.ECR-SCHM-0422.migrateRenameMapInvalid', N'ru', N'Карта переименований таблиц составлена неверно: коды должны быть непустыми (до 64 символов), исходная таблица указывается один раз, допускается не более {maxTableRenames} таблиц и не более {maxColumnRenames} переименований колонок в каждой.'),
+    (N'err.ECR-SCHM-0422.migrateRenameMapInvalid', N'kz', N'Кестелердің атын өзгерту картасы дұрыс құрастырылмаған: кодтар бос болмауы керек (64 таңбаға дейін), бастапқы кесте бір рет көрсетіледі, ең көбі {maxTableRenames} кесте және әрқайсысында ең көбі {maxColumnRenames} бағанның атын өзгертуге болады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:migrate-rename-map ── кінець секції ──
+-- COLL:methodology-substances ── ru/kz: склад речовин версії методології; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.substancesRequired', N'ru', N'Перечень веществ не передан: пустой состав записывается пустым перечнем, а не отсутствующим.'),
+    (N'err.ECR-CALC-0422.substancesRequired', N'kz', N'Заттар тізімі берілмеген: бос құрам бос тізіммен жазылады, жоқ тізіммен емес.'),
+    (N'err.ECR-CALC-0422.substancesTooMany', N'ru', N'В версии не может быть больше {max} веществ (передано: {count}).'),
+    (N'err.ECR-CALC-0422.substancesTooMany', N'kz', N'Нұсқада {max} заттан артық болмауы тиіс (жіберілгені: {count}).'),
+    (N'err.ECR-CALC-0422.substanceDuplicate', N'ru', N'Вещество {substanceEntryId} указано дважды.'),
+    (N'err.ECR-CALC-0422.substanceDuplicate', N'kz', N'{substanceEntryId} заты екі рет көрсетілген.'),
+    (N'err.ECR-CALC-0422.substanceNotFound', N'ru', N'Вещество (запись справочника) {substanceEntryId} не существует.'),
+    (N'err.ECR-CALC-0422.substanceNotFound', N'kz', N'{substanceEntryId} заты (анықтамалық жазбасы) жоқ.'),
+    (N'err.ECR-CALC-0409.substanceInUse', N'ru', N'Вещество нельзя убрать: на него сужены константы {constantCodes} (всего: {count}). Сначала измените эти константы.'),
+    (N'err.ECR-CALC-0409.substanceInUse', N'kz', N'Затты алып тастауға болмайды: оған {constantCodes} тұрақтылары тарылтылған (барлығы: {count}). Алдымен осы тұрақтыларды өзгертіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:methodology-substances ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

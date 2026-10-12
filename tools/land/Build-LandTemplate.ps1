@@ -372,9 +372,28 @@ function Fill-StructureSql([int]$vid) {
         }
         # --- колонки
         $have = @{}
-        foreach ($r in (Sql-Query $cn 'SELECT c.TableDefId, c.Code FROM cfg.ColumnDef c JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v' @{ v = $vid }).Rows) {
+        $haveInfo = @{}
+        foreach ($r in (Sql-Query $cn 'SELECT c.Id, c.TableDefId, c.Code, c.DataType FROM cfg.ColumnDef c JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v' @{ v = $vid }).Rows) {
             $have["$($r.TableDefId)/$($r.Code)"] = $true
+            $haveInfo["$($r.TableDefId)/$($r.Code)"] = @{ id = [int]$r.Id; type = [int]$r.DataType }
         }
+        # Колонка чернетки-клону, яку модель тепер веде як Formula/Calculated (7.0: місячні колонки з формулами комірок), а в
+        # клоні вона ще Decimal: тип змінюється лише в чернетці (опубліковану версію захищає тригер), інакше PUT formulas/cell
+        # дає ECR-TMPL-4227. Лише перехід у обчислюваний тип; решта розбіжностей типів не чіпається.
+        $retype = 0
+        foreach ($sh in @($Mdl.sheets)) {
+            foreach ($tb in @($sh.tables)) {
+                $tid0 = $tableIds["$($sh.code)/$($tb.code)"]
+                foreach ($c in @($tb.columns | Where-Object { $_.dataType -eq 'Formula' -or $_.dataType -eq 'Calculated' })) {
+                    $hi = $haveInfo["$tid0/$($c.code)"]
+                    if ($null -eq $hi -or $hi.type -eq [int]$DataTypeCode[[string]$c.dataType]) { continue }
+                    if ($hi.type -notin 2, 1) { continue }   # лише Decimal/Int -> Formula/Calculated
+                    $null = Sql-Exec $cn 'UPDATE cfg.ColumnDef SET DataType=@t, IsReadOnly=1 WHERE Id=@i' @{ t = [byte]$DataTypeCode[[string]$c.dataType]; i = $hi.id }
+                    $retype++
+                }
+            }
+        }
+        if ($retype -gt 0) { Log "  колонок переведено в обчислюваний тип (чернетка-клон): $retype" }
         $dt = New-Object System.Data.DataTable
         foreach ($n in 'TableDefId:int', 'Code:string', 'HeaderL10n:string', 'Ordinal:int', 'DataType:byte', 'Precision:byte', 'Scale:byte', 'IsReadOnly:bool', 'IsRequired:bool',
             'IsHidden:bool', 'IsMonthColumn:bool', 'MonthNumber:byte', 'DefaultValue:string', 'LookupRegistryDefId:int', 'UnitId:int', 'IsBusinessKey:bool', 'IsScopeField:bool', 'IsIndexed:bool', 'IsDeleted:bool') {
@@ -441,11 +460,17 @@ function Fill-StructureSql([int]$vid) {
             }
         }
         if ($dp.Rows.Count -gt 0) {
-            $null = Sql-Exec $cn 'CREATE TABLE #CP (Id int, StyleId int NULL, DisplayFormat nvarchar(50) NULL, WidthPx int NULL)'
+            # Порціями по 200 рядків: тригер cfg.TR_ColumnDef_Immutable порівнює inserted x deleted без індексів (O(n^2) на один
+            # UPDATE): на клоні версії з тисячами колонок одна команда йшла понад 300 с і падала з Execution Timeout.
+            $null = Sql-Exec $cn 'CREATE TABLE #CP (N int IDENTITY(1,1) PRIMARY KEY, Id int, StyleId int NULL, DisplayFormat nvarchar(50) NULL, WidthPx int NULL)'
             $bc = New-Object System.Data.SqlClient.SqlBulkCopy($cn); $bc.DestinationTableName = '#CP'
             foreach ($n in 'Id', 'StyleId', 'DisplayFormat', 'WidthPx') { [void]$bc.ColumnMappings.Add($n, $n) }
             $bc.WriteToServer($dp); $bc.Close()
-            $np = Sql-Exec $cn 'UPDATE c SET StyleId = ISNULL(p.StyleId, c.StyleId), DisplayFormat = ISNULL(p.DisplayFormat, c.DisplayFormat), WidthPx = ISNULL(p.WidthPx, c.WidthPx) FROM cfg.ColumnDef c JOIN #CP p ON p.Id = c.Id WHERE (p.StyleId IS NOT NULL AND ISNULL(c.StyleId, -1) <> p.StyleId) OR (p.DisplayFormat IS NOT NULL AND ISNULL(c.DisplayFormat, N'''') <> p.DisplayFormat) OR (p.WidthPx IS NOT NULL AND ISNULL(c.WidthPx, -1) <> p.WidthPx); DROP TABLE #CP'
+            $np = 0
+            for ($lo = 0; $lo -lt $dp.Rows.Count; $lo += 200) {
+                $np += Sql-Exec $cn 'UPDATE c SET StyleId = ISNULL(p.StyleId, c.StyleId), DisplayFormat = ISNULL(p.DisplayFormat, c.DisplayFormat), WidthPx = ISNULL(p.WidthPx, c.WidthPx) FROM cfg.ColumnDef c JOIN #CP p ON p.Id = c.Id WHERE p.N > @lo AND p.N <= @hi AND ((p.StyleId IS NOT NULL AND ISNULL(c.StyleId, -1) <> p.StyleId) OR (p.DisplayFormat IS NOT NULL AND ISNULL(c.DisplayFormat, N'''') <> p.DisplayFormat) OR (p.WidthPx IS NOT NULL AND ISNULL(c.WidthPx, -1) <> p.WidthPx))' @{ lo = $lo; hi = ($lo + 200) }
+            }
+            $null = Sql-Exec $cn 'DROP TABLE #CP'
             Log "  презентація колонок (стиль/ширина/формат): оновлено $np із $($dp.Rows.Count)"
         }
         # --- рядки
@@ -1061,6 +1086,43 @@ function Stage-Methodologies {
             Log "    прив'язки $name вимкнено (методологія лишилась чернеткою)"
         }
     }
+    Bind-ResultColumns $mid
+}
+
+# LP-08: прив'язка виходів методологій C08/C09/C11/C12 (імпортує окремий процес: tools/Ecr.MethodologyImport + POST /methodologies/import)
+# до колонок результатів ECW_EC_* таблиць аркушів 6, 9-11 (колонки створює Structure зі land-template.model.json, tb.calc).
+# Методології, яких на сервері немає, пропускаються; виходу, якого немає у версії методології, ні. Прив'язка активна лише
+# якщо остання версія опублікована: активна прив'язка до чернетки валить перерахунки документа (див. цикл вище).
+function Bind-ResultColumns($mid) {
+    $bound = 0; $off = 0; $noMeth = @{}; $noOut = 0; $noCol = 0
+    $vinfo = @{}
+    foreach ($sh in @($Mdl.sheets)) {
+        if ($sh.calc) { continue }   # аркуші 3-5 ведуть цикл Stage-Methodologies вище
+        foreach ($tb in @($sh.tables)) {
+            if (-not $tb.calc) { continue }
+            foreach ($name in @($tb.calc.methodologies)) {
+                $m = $mid[[string]$name]
+                if (-not $m) { $noMeth[[string]$name] = $true; continue }
+                if (-not $vinfo.ContainsKey($name)) {
+                    $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
+                    $v = $vers | Sort-Object id -Descending | Select-Object -First 1
+                    $codes = @{}
+                    foreach ($f in @(Items (Api GET "/api/v1/methodologies/$m/versions/$([int]$v.id)/formulas").Json)) { $codes[[string]$f.code] = $true }
+                    $vinfo[$name] = @{ active = ([string]$v.status -eq 'Published'); codes = $codes }
+                }
+                $vi = $vinfo[$name]
+                foreach ($o in @($tb.calc.outputs)) {
+                    if (-not $vi.codes.ContainsKey([string]$o)) { $noOut++; continue }   # вихід належить іншій методології таблиці
+                    $cid = $S.Cols[$S.ShortTable[[string]$tb.code]][[string]$o]
+                    if (-not $cid) { $noCol++; Log "  ! немає колонки $($tb.code)/$o"; continue }
+                    $r = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/bindings/$cid/$o" -Body @{ isActive = [bool]$vi.active; matchJson = '{}' }
+                    if ($r.Status -eq 200) { if ($vi.active) { $bound++ } else { $off++ } }
+                    else { Log "  ! прив'язка $name/$($tb.code)/${o}: HTTP $($r.Status) $(Get-EcrErrorCode $r)" }
+                }
+            }
+        }
+    }
+    Log ("  колонки результатів (LP-08): прив'язок {0} активних, {1} вимкнених (чернетки); методологій на сервері немає: {2}; виходів без формули: {3}; без колонки: {4}" -f $bound, $off, $noMeth.Count, $noOut, $noCol)
 }
 
 function Stage-Documents {

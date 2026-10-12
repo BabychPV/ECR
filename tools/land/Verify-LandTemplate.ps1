@@ -35,7 +35,7 @@ $ver = $vers | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Desc
 $st = (Invoke-Ecr -Method GET -Path "/api/v1/template-versions/$($ver.id)/structure").Json
 $hf = @((Invoke-Ecr -Method GET -Path "/api/v1/template-versions/$($ver.id)/header-fields").Json)
 
-$bad = @(); $monthTotal = 0
+$bad = @(); $monthTotal = 0; $calcChecked = 0
 $pres = @{ checked = 0; width = 0; format = 0 }
 $rows = @()
 $sheetByCode = @{}
@@ -54,6 +54,13 @@ foreach ($sh in @($mdl.sheets)) {
         $xc += $mc.Count; $ec += $ecs.Count
         $miss = @($mc | Where-Object { $ecs -notcontains $_ })
         if ($miss.Count) { $bad += "$($sh.code)/$($tb.code): немає колонок: $($miss -join ',')" }
+        # LP-08: колонки результатів методологій (ecrAdded 'methodology output') мусять бути Calculated, тобто лише для читання
+        foreach ($mcol in @($tb.columns | Where-Object { [string]$_.dataType -eq 'Calculated' })) {
+            $ecol = @($etb.columns) | Where-Object { $_.code -eq $mcol.code } | Select-Object -First 1
+            if ($null -eq $ecol) { continue }
+            $calcChecked++
+            if (-not ([string]$ecol.dataType -in 'Calculated', '8')) { $bad += "$($sh.code)/$($tb.code): колонка результату $($mcol.code) має тип $($ecol.dataType), а не Calculated" }
+        }
         # L1 (стилі комірок): ширина й формат числа з моделі проти структури версії (styleId у DTO структури немає - див. перелік стилів нижче)
         foreach ($mcol in @($tb.columns)) {
             if (-not $mcol.widthPx -and -not $mcol.displayFormat) { continue }
@@ -79,6 +86,7 @@ foreach ($sh in @($mdl.sheets)) {
     $tot.xt += $xt; $tot.et += $et; $tot.xc += $xc; $tot.ec += $ec; $tot.xr += $xr; $tot.er += $er
 }
 $rows | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+Write-Host "Колонок результатів (Calculated) перевірено: $calcChecked"
 Write-Host ("Разом: таблиць {0}/{1}, колонок {2}/{3}, рядків Fixed {4}/{5}; місячних колонок у моделі {9}; версія {6} ({7}); полів шапки {8}" -f $tot.xt, $tot.et, $tot.xc, $tot.ec, $tot.xr, $tot.er, $ver.version, $ver.status, $hf.Count, $monthTotal)
 
 # довідники

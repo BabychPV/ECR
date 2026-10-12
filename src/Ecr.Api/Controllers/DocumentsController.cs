@@ -383,13 +383,15 @@ public sealed class DocumentsController(
 
         if (request.Async && !request.DryRun)
         {
-            var jobId = await migrateVersion.EnqueueAsync(id, request.TargetVersionId, mode, ct).ConfigureAwait(false);
+            var jobId = await migrateVersion
+                .EnqueueAsync(id, request.TargetVersionId, mode, request.TableRenames, ct)
+                .ConfigureAwait(false);
 
             return Accepted(new Contracts.MigrationAcceptedResponse(jobId, id));
         }
 
         return Ok(await migrateVersion
-            .HandleAsync(id, request.TargetVersionId, mode, request.DryRun, ct)
+            .HandleAsync(id, request.TargetVersionId, mode, request.DryRun, request.TableRenames, ct)
             .ConfigureAwait(false));
     }
 
@@ -713,11 +715,18 @@ public sealed record ChangeDocumentKeyRequest(string? BusinessKey, string? Expec
 /// <c>GET /jobs/{jobId}</c>. Типово <c>false</c> — як і раніше, синхронно з <c>200</c> і звітом
 /// (зворотна сумісність зовнішніх викликачів; веб-клієнт передає <c>true</c>).
 /// </param>
+/// <param name="TableRenames">
+/// Необов'язкова мапа «було → стало» кодів таблиць (і колонок) для структури, перейменованої в цільовій версії
+/// (напр. <c>T9a_03 → T9a_17a</c>): без неї таблиця з новим кодом — «нова», а стара — «зникла», і введені в неї
+/// значення блокують перенос (<c>dataLoss</c>). Діє лише там, де відповідника за кодом немає; суперечність парі
+/// версій — <c>422 ECR-SCHM-0422</c> (<c>renameConflict</c>). Права ті самі, що й у переносу.
+/// </param>
 public sealed record MigrateDocumentVersionRequest(
     int TargetVersionId,
     Application.Documents.VersionMigration.VersionMigrationMode? Mode,
     bool DryRun,
-    bool Async = false);
+    bool Async = false,
+    IReadOnlyList<Application.Documents.VersionMigration.VersionMigrationTableRename>? TableRenames = null);
 
 /// <summary>Запит на експорт.</summary>
 /// <param name="IncludeFormulas">

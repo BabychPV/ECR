@@ -196,21 +196,40 @@ public sealed class MigrateDocumentVersionHandler(
     /// <exception cref="ConcurrencyConflictException">
     /// <c>ECR-DOC-0409</c> — є подані чи затверджені аркуші, або проєкт архівовано.
     /// </exception>
-    public async Task<DocumentVersionMigrationDto> HandleAsync(
+    public Task<DocumentVersionMigrationDto> HandleAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode, bool dryRun, CancellationToken ct)
+        => HandleAsync(documentId, targetVersionId, mode, dryRun, renames: null, ct);
+
+    /// <summary>Будує звіт і, якщо це не сухий прогін, переносить — з мапою перейменувань таблиць/колонок.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="targetVersionId">Цільова версія того самого шаблону.</param>
+    /// <param name="mode">Режим.</param>
+    /// <param name="dryRun"><c>true</c> — лише звіт.</param>
+    /// <param name="renames">
+    /// Мапа «було → стало» кодів таблиць (і колонок) для структури, перейменованої в цільовій версії; <c>null</c> —
+    /// без мапи. Діє лише там, де відповідника за кодом немає; суперечність мапи парі версій — <c>renameConflict</c>.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="BusinessRuleException">
+    /// Також <c>ECR-SCHM-0422</c> (<c>migrateRenameMapInvalid</c>) — зламана форма мапи.
+    /// </exception>
+    public async Task<DocumentVersionMigrationDto> HandleAsync(
+        long documentId, int targetVersionId, VersionMigrationMode mode, bool dryRun,
+        IReadOnlyList<VersionMigrationTableRename>? renames, CancellationToken ct)
     {
         var request = await ResolveAsync(documentId, targetVersionId, tolerateSame: false, ct).ConfigureAwait(false);
+        VersionMigrationRenames.Validate(renames);
 
         if (dryRun)
         {
             var (dto, _, _, _) = await PlanAsync(
                 documentId, request.ProjectId, request.SourceVersionId, request.Target, mode, request.Archived,
-                dryRun: true, ct).ConfigureAwait(false);
+                dryRun: true, renames, ct).ConfigureAwait(false);
             return dto;
         }
 
         // Синхронний шлях без приймача прогресу завжди дає звіт (збіг версій там — виняток, не "вже перенесено").
-        return (await ApplyAsync(request, documentId, mode, onProgress: null, ct).ConfigureAwait(false))!;
+        return (await ApplyAsync(request, documentId, mode, renames, onProgress: null, ct).ConfigureAwait(false))!;
     }
 
     /// <summary>
@@ -240,10 +259,23 @@ public sealed class MigrateDocumentVersionHandler(
     /// <c>Running</c>: черга в базі ставила б другий перенос ПОЗАДУ виконуваного.
     /// </para>
     /// </remarks>
-    public async Task<string> EnqueueAsync(
+    public Task<string> EnqueueAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode, CancellationToken ct)
+        => EnqueueAsync(documentId, targetVersionId, mode, renames: null, ct);
+
+    /// <summary>Ставить перенос у чергу з мапою перейменувань (форма мапи перевіряється одразу, зміст — у задачі).</summary>
+    /// <param name="documentId">Документ, з якого відкрили перенос.</param>
+    /// <param name="targetVersionId">Цільова версія того самого шаблону.</param>
+    /// <param name="mode">Режим.</param>
+    /// <param name="renames">Мапа перейменувань; <c>null</c> — без мапи.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатор задачі.</returns>
+    public async Task<string> EnqueueAsync(
+        long documentId, int targetVersionId, VersionMigrationMode mode,
+        IReadOnlyList<VersionMigrationTableRename>? renames, CancellationToken ct)
     {
         var request = await ResolveAsync(documentId, targetVersionId, tolerateSame: false, ct).ConfigureAwait(false);
+        VersionMigrationRenames.Validate(renames);
 
         if (request.Archived)
         {
@@ -260,7 +292,7 @@ public sealed class MigrateDocumentVersionHandler(
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            return await EnqueueLockedAsync(request, documentId, targetVersionId, mode, ct).ConfigureAwait(false);
+            return await EnqueueLockedAsync(request, documentId, targetVersionId, mode, renames, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -272,7 +304,8 @@ public sealed class MigrateDocumentVersionHandler(
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, SemaphoreSlim> ProjectGates = new();
 
     private async Task<string> EnqueueLockedAsync(
-        Resolved request, long documentId, int targetVersionId, VersionMigrationMode mode, CancellationToken ct)
+        Resolved request, long documentId, int targetVersionId, VersionMigrationMode mode,
+        IReadOnlyList<VersionMigrationTableRename>? renames, CancellationToken ct)
     {
         var documentIds = (await store.ListDocumentIdsAsync(request.ProjectId, ct).ConfigureAwait(false)).ToHashSet();
         var active = await FindActiveJobAsync(documentIds, ct).ConfigureAwait(false);
@@ -298,7 +331,9 @@ public sealed class MigrateDocumentVersionHandler(
         var jobId = await jobs
             .EnqueueCoalescedAsync<IMigrateDocumentVersionJob>(
                 TargetOf(request.ProjectId),
-                new MigrateDocumentVersionTask(documentId, targetVersionId, mode.ToString(), actor),
+                new MigrateDocumentVersionTask(
+                    documentId, targetVersionId, mode.ToString(), actor,
+                    renames is { Count: > 0 } ? renames : null),
                 ct,
                 currentUser.UserId)
             .ConfigureAwait(false);
@@ -346,11 +381,26 @@ public sealed class MigrateDocumentVersionHandler(
     /// синхронного шляху (<c>ECR-SCHM-0422</c>, <c>ECR-DOC-0409</c>): задача стає <c>Failed</c> з його кодом,
     /// а документи лишаються на старій версії (атомарність — одна транзакція).
     /// </remarks>
+    public Task<VersionMigrationRunResult> RunQueuedAsync(
+        long documentId, int targetVersionId, VersionMigrationMode mode,
+        VersionMigrationProgressReporter onProgress, CancellationToken ct)
+        => RunQueuedAsync(documentId, targetVersionId, mode, renames: null, onProgress, ct);
+
+    /// <summary>Виконує перенос у задачі черги з мапою перейменувань (її поставив запит; тут перевіряється ще раз).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="targetVersionId">Цільова версія.</param>
+    /// <param name="mode">Режим.</param>
+    /// <param name="renames">Мапа перейменувань; <c>null</c> — без мапи.</param>
+    /// <param name="onProgress">Приймач прогресу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Звіт: що перенесено.</returns>
     public async Task<VersionMigrationRunResult> RunQueuedAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode,
+        IReadOnlyList<VersionMigrationTableRename>? renames,
         VersionMigrationProgressReporter onProgress, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(onProgress);
+        VersionMigrationRenames.Validate(renames);
 
         await onProgress(StartedPercent, "jobs.migrateStarted", null, ct).ConfigureAwait(false);
 
@@ -365,7 +415,7 @@ public sealed class MigrateDocumentVersionHandler(
             return await AlreadyMigratedAsync(request, ct).ConfigureAwait(false);
         }
 
-        var dto = await ApplyAsync(request, documentId, mode, onProgress, ct).ConfigureAwait(false);
+        var dto = await ApplyAsync(request, documentId, mode, renames, onProgress, ct).ConfigureAwait(false);
 
         return dto is null
             ? await AlreadyMigratedAsync(request, ct).ConfigureAwait(false)
@@ -463,6 +513,7 @@ public sealed class MigrateDocumentVersionHandler(
     /// <returns>Звіт; <c>null</c> — лише для фонової задачі: проєкт під блоком уже на цільовій версії.</returns>
     private async Task<DocumentVersionMigrationDto?> ApplyAsync(
         Resolved request, long documentId, VersionMigrationMode mode,
+        IReadOnlyList<VersionMigrationTableRename>? renames,
         VersionMigrationProgressReporter? onProgress, CancellationToken ct)
     {
         var profile = request.Profile;
@@ -511,8 +562,8 @@ public sealed class MigrateDocumentVersionHandler(
             }
 
             var (dto, plan, foreignKeys, extended) = await PlanAsync(
-                documentId, projectId, current, target, mode, archived, dryRun: false, innerCt).ConfigureAwait(false);
-            ThrowIfRefused(dto, foreignKeys);
+                documentId, projectId, current, target, mode, archived, dryRun: false, renames, innerCt).ConfigureAwait(false);
+            ThrowIfRefused(dto, foreignKeys, plan.RenameConflicts);
 
             grantedUsers = await store.ListUsersWithGrantsAsync(plan, MaxInvalidatedUsers, innerCt).ConfigureAwait(false);
 
@@ -582,6 +633,7 @@ public sealed class MigrateDocumentVersionHandler(
                         documents = result.DocumentCount,
                         transferredValues = result.TransferredValues,
                         mappingsRemapped = result.MappingsRemapped,
+                        renames = plan.Items.Count(i => i.Kind == "Renamed"),
                     }),
                     profile.UserId, currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
@@ -625,14 +677,15 @@ public sealed class MigrateDocumentVersionHandler(
 
     private async Task<(DocumentVersionMigrationDto Dto, VersionMigrationPlan Plan, IReadOnlyList<string> ForeignKeys, ExtendedMappingRemap Extended)> PlanAsync(
         long documentId, int projectId, int sourceVersionId, TemplateVersion target,
-        VersionMigrationMode mode, bool archived, bool dryRun, CancellationToken ct)
+        VersionMigrationMode mode, bool archived, bool dryRun,
+        IReadOnlyList<VersionMigrationTableRename>? renames, CancellationToken ct)
     {
         var source = await versions.GetAsync(sourceVersionId, ct).ConfigureAwait(false);
         var from = await metadata.GetAsync(sourceVersionId, ct).ConfigureAwait(false);
         var to = await metadata.GetAsync(target.Id, ct).ConfigureAwait(false);
         var scope = await store.ReadScopeAsync(projectId, ct).ConfigureAwait(false);
 
-        var plan = VersionMigrationPlanner.Plan(from, to, scope.Cells, scope.HeaderValues);
+        var plan = VersionMigrationPlanner.Plan(from, to, scope.Cells, scope.HeaderValues, renames);
 
         var refusals = plan.RefusalsFor(mode).ToList();
         if (scope.LockedSheets > 0)
@@ -812,7 +865,8 @@ public sealed class MigrateDocumentVersionHandler(
                 ["versionId"] = versionId.ToString(CultureInfo.InvariantCulture),
             });
 
-    private static void ThrowIfRefused(DocumentVersionMigrationDto dto, IReadOnlyList<string> foreignKeys)
+    private static void ThrowIfRefused(
+        DocumentVersionMigrationDto dto, IReadOnlyList<string> foreignKeys, IReadOnlyList<string>? renameConflicts = null)
     {
         if (dto.Refusals.Contains("projectArchived") || dto.Refusals.Contains("sheetsLocked"))
         {
@@ -850,6 +904,8 @@ public sealed class MigrateDocumentVersionHandler(
             {
                 ["messageKey"] = dto.Refusals.Contains("structural")
                     ? "err.ECR-SCHM-0422.migrateStructural"
+                    : dto.Refusals.Contains("renameConflict")
+                    ? "err.ECR-SCHM-0422.migrateRenameConflict"
                     : dto.Refusals.Contains("grantsNotMapped") && dto.LostValues == 0 && dto.GuardedValues == 0
                         ? "err.ECR-SCHM-0422.migrateGrantsNotMapped"
                         : dto.Refusals.Contains("bindingsNotMapped") && dto.LostValues == 0 && dto.GuardedValues == 0
@@ -869,6 +925,8 @@ public sealed class MigrateDocumentVersionHandler(
                     ? dto.MappingsUnmapped.ToString(CultureInfo.InvariantCulture)
                     : null,
                 ["mappingColumns"] = dto.MappingsUnmappedKeys is { Count: > 0 } ? dto.MappingsUnmappedKeys : null,
+                // ⚠ Лише коди шаблону (шлях → цільовий код); значень і документів тут немає.
+                ["renameConflicts"] = renameConflicts is { Count: > 0 } ? renameConflicts : null,
             });
     }
 }

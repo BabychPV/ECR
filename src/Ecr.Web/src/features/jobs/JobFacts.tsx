@@ -107,14 +107,17 @@ export function JobFailure({
 export function JobDocumentLink({
   documentId,
   documentHrefOf,
+  onNavigate,
 }: {
   readonly documentId?: number | null | undefined;
   readonly documentHrefOf: (id: number) => string;
+  /** Перехід на документ (шухляда «My tasks» закривається). */
+  readonly onNavigate?: (() => void) | undefined;
 }): JSX.Element | null {
   if (documentId === null || documentId === undefined) return null;
 
   return (
-    <Anchor component={Link} to={documentHrefOf(documentId)} size="xs">
+    <Anchor component={Link} to={documentHrefOf(documentId)} size="xs" onClick={onNavigate}>
       {t('jobs.openDocument', { id: documentId })}
     </Anchor>
   );

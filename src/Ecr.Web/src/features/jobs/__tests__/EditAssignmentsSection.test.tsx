@@ -40,7 +40,7 @@ const payload: MyEditAssignmentsView = {
   ],
 };
 
-function show(body: unknown, status = 200): void {
+function show(body: unknown, status = 200, onNavigate?: () => void): void {
   vi.stubGlobal(
     'fetch',
     vi.fn((input: RequestInfo | URL) => {
@@ -56,7 +56,7 @@ function show(body: unknown, status = 200): void {
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
-          <EditAssignmentsSection opened />
+          <EditAssignmentsSection opened onNavigate={onNavigate} />
         </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
@@ -97,6 +97,18 @@ describe('EditAssignmentsSection', () => {
     expect(section.querySelector('a[data-action="validate"]')?.getAttribute('href')).toBe(
       '/documents/13?panel=edit-assignments',
     );
+  });
+
+  it('клік Open і Validate… викликає onNavigate (шухляда закривається при переході)', async () => {
+    const onNavigate = vi.fn();
+    show(payload, 200, onNavigate);
+
+    const section = await screen.findByTestId('my-tasks-validation');
+    fireEvent.click(section.querySelector('a[data-action=\"open\"]') as HTMLElement);
+    fireEvent.click(section.querySelector('a[data-action=\"validate\"]') as HTMLElement);
+    fireEvent.click((await screen.findByTestId('my-tasks-assigned')).querySelector('a[data-action=\"open\"]') as HTMLElement);
+
+    expect(onNavigate).toHaveBeenCalledTimes(3);
   });
 
   it('порожні відповіді мовчать, без секцій', async () => {

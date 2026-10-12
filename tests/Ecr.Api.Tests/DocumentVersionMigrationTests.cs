@@ -382,7 +382,15 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
 
         /// <summary>Та сама структура, але таблиця стає змішаною (D-1b P2-1).</summary>
         RowModeBecomesMixed,
+
+        /// <summary>Таблиця отримує інший код (<c>…_NEW</c>); колонки й рядки ті самі (перейменування, як T9a_03 → T9a_17a).</summary>
+        TableRenamed,
+
+        /// <summary>Інший код таблиці (<c>…_NEW</c>) і інший код колонки C2 (<c>C2X_…</c>).</summary>
+        TableAndColumnRenamed,
     }
+
+    private static bool RenamesTable(Target target) => target is Target.TableRenamed or Target.TableAndColumnRenamed;
 
     private static Task<HttpResponseMessage> PostAsync(HttpClient client, Scenario s, string mode, bool dryRun)
         => client.PostAsJsonAsync(
@@ -480,8 +488,9 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
 
         var tableCode = await db.TableDefs.AsNoTracking()
             .Where(t => t.Id == doc.TableDefId).Select(t => t.Code).SingleAsync().ConfigureAwait(false);
+        var targetTableCode = RenamesTable(target) ? tableCode + "_NEW" : tableCode;
         var table = new TableDef(
-            sheet.Id, EcrCode.Create(tableCode), Name($"Table {tag} v2"), 1,
+            sheet.Id, EcrCode.Create(targetTableCode), Name($"Table {tag} v2"), 1,
             TableLayoutKind.PerPeriodInstance,
             target == Target.RowModeBecomesMixed ? TableRowMode.Mixed : TableRowMode.Fixed);
         db.TableDefs.Add(table);
@@ -490,7 +499,9 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         var columns = new Dictionary<string, ColumnDef>(StringComparer.Ordinal);
         void Column(string code, int ordinal, CellDataType type)
         {
-            var column = new ColumnDef(table.Id, EcrCode.Create($"{code}_{tag}"), Name($"{code} relabelled"), ordinal, type);
+            // ⚠ Ключ словника — логічне ім'я (C2); код у цільовій версії може відрізнятися (C2X_…).
+            var codePrefix = code == "C2" && target == Target.TableAndColumnRenamed ? "C2X" : code;
+            var column = new ColumnDef(table.Id, EcrCode.Create($"{codePrefix}_{tag}"), Name($"{code} relabelled"), ordinal, type);
             columns[code] = column;
             db.ColumnDefs.Add(column);
         }
@@ -548,7 +559,9 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         return new Scenario(
             doc, tag, userName, user.Id, version.Id, sheet.Id, table.Id,
             columns.ToDictionary(c => c.Key, c => c.Value.Id, StringComparer.Ordinal),
-            rowDefs.Count > 2 ? rowDefs[2].Id : null);
+            rowDefs.Count > 2 ? rowDefs[2].Id : null,
+            tableCode,
+            targetTableCode);
     }
 
     private static LocalizedText Name(string value)
@@ -563,5 +576,7 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         int TargetSheetDefId,
         int TargetTableDefId,
         IReadOnlyDictionary<string, int> TargetColumns,
-        int? TargetRowR3);
+        int? TargetRowR3,
+        string SourceTableCode = "",
+        string TargetTableCode = "");
 }

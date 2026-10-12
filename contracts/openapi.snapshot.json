@@ -8246,6 +8246,58 @@
         ],
         "type": "object"
       },
+      "MethodologySubstanceDto": {
+        "description": "Речовина, яку рахує версія методології (`calc.MethodologySubstance`).",
+        "properties": {
+          "code": {
+            "description": "Код запису довідника (`RegistryEntry.Code`, для повітряних речовин — 301, 304, …): те, що\nформа B підставляє у ключ константи `{ключ}_{код}`.",
+            "type": "string"
+          },
+          "isDeleted": {
+            "description": "Запис довідника видалено логічно (речовина лишилась у складі старої версії).",
+            "type": "boolean"
+          },
+          "ordinal": {
+            "description": "Порядок у переліку речовин версії.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "registryDefId": {
+            "description": "Довідник, до якого належить запис.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "substanceEntryId": {
+            "description": "Запис довідника речовин.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "substanceEntryId",
+          "code",
+          "registryDefId",
+          "ordinal",
+          "isDeleted"
+        ],
+        "type": "object"
+      },
+      "MethodologySubstancesDto": {
+        "description": "Склад речовин версії методології.",
+        "properties": {
+          "items": {
+            "description": "Речовини в порядку `ordinal`; порожньо — версія без речовин.",
+            "items": {
+              "$ref": "#/components/schemas/MethodologySubstanceDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "MethodologySummaryDto": {
         "description": "Методологія-контейнер, як її бачить конфігуратор — <b>без</b> версій.",
         "properties": {
@@ -8434,6 +8486,16 @@
                 "$ref": "#/components/schemas/VersionMigrationMode",
                 "description": "Режим; без нього — `Safe`."
               }
+            ]
+          },
+          "tableRenames": {
+            "description": "Необов'язкова мапа «було → стало» кодів таблиць (і колонок) для структури, перейменованої в цільовій версії\n(напр. `T9a_03 → T9a_17a`): без неї таблиця з новим кодом — «нова», а стара — «зникла», і введені в неї\nзначення блокують перенос (`dataLoss`). Діє лише там, де відповідника за кодом немає; суперечність парі\nверсій — `422 ECR-SCHM-0422` (`renameConflict`). Права ті самі, що й у переносу.",
+            "items": {
+              "$ref": "#/components/schemas/VersionMigrationTableRename"
+            },
+            "type": [
+              "null",
+              "array"
             ]
           },
           "targetVersionId": {
@@ -14512,6 +14574,26 @@
         ],
         "type": "object"
       },
+      "SaveMethodologySubstancesRequest": {
+        "description": "Запит на заміну складу речовин версії-чернетки.",
+        "properties": {
+          "substanceEntryIds": {
+            "description": "Записи довідника речовин у порядку переліку; порожній перелік очищує склад, відсутній — 422.",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "substanceEntryIds"
+        ],
+        "type": "object"
+      },
       "SaveMethodologyTestCaseRequest": {
         "description": "Запит на запис тесту золотого набору.",
         "properties": {
@@ -19731,6 +19813,24 @@
         ],
         "type": "object"
       },
+      "VersionMigrationColumnRename": {
+        "description": "Перейменування колонки таблиці між версіями: «було → стало» за кодом колонки.",
+        "properties": {
+          "fromColumnCode": {
+            "description": "Код колонки у вихідній версії.",
+            "type": "string"
+          },
+          "toColumnCode": {
+            "description": "Код колонки в цільовій версії.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fromColumnCode",
+          "toColumnCode"
+        ],
+        "type": "object"
+      },
       "VersionMigrationItem": {
         "description": "Одна відмінність між версіями, як її бачить перенос.",
         "properties": {
@@ -19787,6 +19887,41 @@
           "Safe",
           "Presentation"
         ]
+      },
+      "VersionMigrationTableRename": {
+        "description": "Перейменування таблиці між версіями: «було → стало» за кодом таблиці (і, за потреби, колонок).",
+        "properties": {
+          "columns": {
+            "description": "Перейменування колонок цієї таблиці; `null` — колонки збігаються за кодами.",
+            "items": {
+              "$ref": "#/components/schemas/VersionMigrationColumnRename"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "fromTableCode": {
+            "description": "Код таблиці у вихідній версії.",
+            "type": "string"
+          },
+          "sheetCode": {
+            "description": "Код аркуша; `null` — діє на будь-якому аркуші, де є така таблиця.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "toTableCode": {
+            "description": "Код таблиці в цільовій версії; рівний FromTableCode — лише перейменування колонок.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fromTableCode",
+          "toTableCode"
+        ],
+        "type": "object"
       },
       "WorkflowEventDto": {
         "description": "Подія журналу переходів стану аркуша (`BE-11b`).",
@@ -31553,6 +31688,215 @@
           }
         },
         "summary": "Записує правило відбору рядків. Право `Calculation.EditRule`.",
+        "tags": [
+          "Methodologies"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/substances": {
+      "get": {
+        "description": "⚠ Порожній склад — законний стан (`200` з порожнім `items`); `404` — версії немає.",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologySubstancesDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologySubstancesDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologySubstancesDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Склад речовин версії. Право `Calculation.View`.",
+        "tags": [
+          "Methodologies"
+        ]
+      },
+      "put": {
+        "description": "⛔ Це набір, а не дельта: те, чого немає в запиті, зі складу прибирається (ідемпотентно). Речовини\nпотрібні формі B (ключ константи `{ключ}_{код речовини}`) — без складу ітерація по речовинах\nпорожня. Прибрати речовину, на яку звужена константа версії, не можна (`409 ECR-CALC-0409`).",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologySubstancesRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologySubstancesRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologySubstancesRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologySubstancesDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologySubstancesDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologySubstancesDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Замінює склад речовин версії-чернетки. Право `Calculation.EditFormula`.",
         "tags": [
           "Methodologies"
         ]

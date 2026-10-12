@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -34,7 +34,7 @@ function respond(url: string): unknown {
   return {};
 }
 
-function show(opened: boolean): void {
+function show(opened: boolean, onNavigate?: () => void): void {
   vi.stubGlobal(
     'fetch',
     vi.fn((input: RequestInfo | URL) => {
@@ -50,7 +50,7 @@ function show(opened: boolean): void {
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
-          <StaleDocumentsSection opened={opened} />
+          <StaleDocumentsSection opened={opened} onNavigate={onNavigate} />
         </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
@@ -76,6 +76,16 @@ describe('StaleDocumentsSection', () => {
     expect(listCalls[0]).toContain('periodKey=202610');
     expect(listCalls[0]).toContain('resultsStale=true');
     expect(listCalls[0]).toContain('staleBy=me');
+  });
+
+  it('клік «Open» викликає onNavigate (шухляда закривається при переході)', async () => {
+    const onNavigate = vi.fn();
+    show(true, onNavigate);
+
+    const section = await screen.findByTestId('my-tasks-stale');
+    fireEvent.click(section.querySelector('a') as HTMLElement);
+
+    expect(onNavigate).toHaveBeenCalledTimes(1);
   });
 
   it('поки шухляда закрита, жодного запиту', async () => {
