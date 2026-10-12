@@ -40,6 +40,8 @@ export function refusalText(reason: string): string {
       return t('documents.migrateRefusalBindingsNotMapped');
     case 'methodologyKeysNotMapped':
       return t('documents.migrateRefusalMethodologyKeysNotMapped');
+    case 'mappingsNotMapped':
+      return t('documents.migrateRefusalMappingsNotMapped');
     default:
       return reason;
   }

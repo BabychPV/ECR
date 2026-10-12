@@ -17,7 +17,11 @@ public sealed record MigrateDocumentVersionTask(long DocumentId, int TargetVersi
 /// <param name="DocumentCount">Скільки документів проєкту.</param>
 /// <param name="TransferredValues">Скільки значень перенесено (0, якщо вже було перенесено).</param>
 /// <param name="AlreadyMigrated">Проєкт уже стояв на цільовій версії: задача нічого не змінила.</param>
-public sealed record VersionMigrationRunResult(string ToVersion, int DocumentCount, long TransferredValues, bool AlreadyMigrated);
+/// <param name="MappingsRemapped">D-1: скільки мапінгів збору перенесено на колонки цільової версії.</param>
+/// <param name="MappingsUnmapped">D-1: активних мапінгів без відповідника (завжди 0 у виконаному переносі: вони відмовляють).</param>
+public sealed record VersionMigrationRunResult(
+    string ToVersion, int DocumentCount, long TransferredValues, bool AlreadyMigrated,
+    int MappingsRemapped = 0, int MappingsUnmapped = 0);
 
 /// <summary>Стадії переносу, які сховище називає приймачу прогресу.</summary>
 public static class VersionMigrationStages

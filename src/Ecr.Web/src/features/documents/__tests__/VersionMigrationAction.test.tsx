@@ -349,6 +349,16 @@ describe('useVersionMigrationAction', () => {
     expect(screen.queryByText('methodologyKeysNotMapped')).toBeNull();
   });
 
+  it('причина mappingsNotMapped показується підписом каталогу, а не сирим кодом (D-1)', async () => {
+    show(['Template.Edit'], report({ canApply: false, refusals: ['mappingsNotMapped'] }));
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+    await screen.findByText('⟦documents.migrateRefusalMappingsNotMapped⟧');
+    expect(screen.queryByText('mappingsNotMapped')).toBeNull();
+  });
+
   it('blockedGrantCount показується рядком із кількістю; без нього рядка немає (ent7 P3-4)', async () => {
     show(['Template.Edit'], report({ canApply: false, refusals: ['grantsNotMapped'], blockedGrantCount: 3 }));
     await openAndPickTarget();

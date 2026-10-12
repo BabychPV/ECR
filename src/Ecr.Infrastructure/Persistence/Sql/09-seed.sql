@@ -7844,6 +7844,10 @@ USING (VALUES
     ,(N'editAssign.notVisible', N'en', N'(cannot see the document)', 1)
     ,(N'editAssign.notVisibleHint', N'en', N'This person cannot see this document or sheet, so the assignment has no effect for them. Ask an administrator to grant them a role that opens it, for example the Executor role.', 1)
     -- COLL:rc21misc ── кінець секції ──
+    -- COLL:d1remap ── D-1 RC20: перенос мапінгів збору разом із версією шаблону; ru/kz — порцією COLL:d1remap нижче ──
+    ,(N'err.ECR-SCHM-0422.migrateMappingsNotMapped', N'en', N'An active collection mapping points to a column that the target version does not have (the column is listed in mappingColumns). After the move, collection would read points and write nothing. Pause that mapping (or add the column to the target version and clone again), then move the project. Mappings with a matching column move automatically.', 1)
+    ,(N'documents.migrateRefusalMappingsNotMapped', N'en', N'Active collection mappings point to columns that the target version does not have; collection would write nothing into them. Pause those mappings first.', 1)
+    -- COLL:d1remap ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -19759,6 +19763,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rc21misc ── кінець секції ──
+
+-- COLL:d1remap ── ru/kz: D-1 RC20, перенос мапінгів збору при переносі версії шаблону; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-SCHM-0422.migrateMappingsNotMapped', N'ru', N'Активное сопоставление сбора указывает на колонку, которой нет в целевой версии (колонка названа в mappingColumns). После переноса сбор читал бы точки и ничего не писал. Приостановите это сопоставление (или добавьте колонку в целевую версию и клонируйте заново), затем переносите проект. Сопоставления с соответствующей колонкой переносятся автоматически.'),
+    (N'err.ECR-SCHM-0422.migrateMappingsNotMapped', N'kz', N'Жинаудың белсенді сәйкестендіруі мақсатты нұсқада жоқ бағанға сілтейді (баған mappingColumns ішінде аталған). Көшіруден кейін жинау нүктелерді оқып, ештеңе жазбас еді. Бұл сәйкестендіруді тоқтатыңыз (немесе бағанды мақсатты нұсқаға қосып, қайта клондаңыз), содан кейін жобаны көшіріңіз. Сәйкес бағаны бар сәйкестендірулер автоматты түрде көшіріледі.'),
+    (N'documents.migrateRefusalMappingsNotMapped', N'ru', N'Активные сопоставления сбора указывают на колонки, которых нет в целевой версии; сбор ничего в них не записал бы. Сначала приостановите эти сопоставления.'),
+    (N'documents.migrateRefusalMappingsNotMapped', N'kz', N'Жинаудың белсенді сәйкестендірулері мақсатты нұсқада жоқ бағандарға сілтейді; жинау оларға ештеңе жазбас еді. Алдымен осы сәйкестендірулерді тоқтатыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d1remap ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
