@@ -20496,7 +20496,7 @@ export interface components {
             foregroundHex: null | string;
             /** @description Жирний. */
             isBold: boolean;
-            /** @description gt, ge, lt, le, eq, ne, between, empty, notEmpty. */
+            /** @description gt, ge, lt, le, eq, ne, between, empty, notEmpty; текстові (L6): textEq, textNe. */
             operator: string;
             /** @description `hatch` — штрих («неактуальна комірка»); `null` — без штриху. */
             pattern?: null | string;
@@ -20509,7 +20509,7 @@ export interface components {
             scope?: null | string;
             /** @description Код таблиці; `null` — усі таблиці версії. Обов'язковий для `row` і для колонки `*`. */
             tableCode?: null | string;
-            /** @description Операнд (число); не потрібен для empty/notEmpty. */
+            /** @description Операнд: число (для textEq/textNe — текст, регістр ігнорується); не потрібен для empty/notEmpty. */
             value: null | string;
             /** @description Верхня межа — лише для between. */
             valueTo: null | string;

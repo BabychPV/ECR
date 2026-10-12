@@ -2183,7 +2183,7 @@
             "type": "boolean"
           },
           "operator": {
-            "description": "gt, ge, lt, le, eq, ne, between, empty, notEmpty.",
+            "description": "gt, ge, lt, le, eq, ne, between, empty, notEmpty; текстові (L6): textEq, textNe.",
             "type": "string"
           },
           "pattern": {
@@ -2225,7 +2225,7 @@
             ]
           },
           "value": {
-            "description": "Операнд (число); не потрібен для empty/notEmpty.",
+            "description": "Операнд: число (для textEq/textNe — текст, регістр ігнорується); не потрібен для empty/notEmpty.",
             "type": [
               "null",
               "string"
