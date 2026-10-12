@@ -90,6 +90,30 @@ public sealed class CellStyleStoreTests(SqlServerFixture sql)
             s => s.PeriodKeyValue == other.PeriodKey.Value && s.TableRowId == other.RowIds[0]));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Завантаження_для_зміни_приймає_рівно_стелю_у_2000_рядків_на_справжній_СУБД()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(columnCount: 1, rowCount: 1);
+
+        await using (var db = builder.CreateContext())
+        {
+            db.CellStyles.Add(Styled(doc, doc.RowIds[0], doc.ColumnDefIds[0], "#FFFF00"));
+            await db.SaveChangesAsync();
+        }
+
+        // 2000 ідентифікаторів: перший — справжній, решта — вигадані (рядків немає).
+        var ids = Enumerable.Range(0, 2000).Select(i => i == 0 ? doc.RowIds[0] : 9_000_000_000L + i).ToList();
+
+        await using var read = builder.CreateContext();
+        var loaded = await new CellStyleStore(read).LoadForUpdateAsync(doc.PeriodKey, ids, CancellationToken.None);
+
+        var single = Assert.Single(loaded);
+        Assert.Equal("#FFFF00", single.BackgroundHex);
+    }
+
     private static CellStyle Styled(TestDocument doc, long rowId, int columnId, string background)
     {
         var style = new CellStyle(new CellAddress(doc.PeriodKey, rowId, columnId), userId: 1, At);
