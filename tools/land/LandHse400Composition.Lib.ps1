@@ -61,14 +61,14 @@ function ConvertTo-LandHse400StreamPlan {
     $duplicates = 0
     foreach ($raw in $Texts) {
         if ([string]::IsNullOrWhiteSpace($raw)) { continue }
-        $text = $raw.Trim()
-        $prefix = Get-LandHse400StreamPrefix -Text $text
+        $trimmed = $raw.Trim()
+        $prefix = Get-LandHse400StreamPrefix -Text $trimmed
         if ($null -eq $prefix) { $unmatched++; continue }
-        $key = $text.ToLowerInvariant()
+        $key = $trimmed.ToLowerInvariant()
         if ($seen.ContainsKey($key)) { $duplicates++; continue }
         $seen[$key] = $true
-        $display = if ($text.Length -gt 200) { $text.Substring(0, 200) } else { $text }
-        $items.Add([pscustomobject]@{ Text = $text; Display = $display; Prefix = $prefix; EntryCode = Get-LandHse400StreamEntryCode -Text $text })
+        $display = if ($trimmed.Length -gt 200) { $trimmed.Substring(0, 200) } else { $trimmed }
+        $items.Add([pscustomobject]@{ Text = $trimmed; Display = $display; Prefix = $prefix; EntryCode = Get-LandHse400StreamEntryCode -Text $trimmed })
     }
     return [pscustomobject]@{ Items = @($items | Sort-Object Prefix, Text); Unmatched = $unmatched; Duplicates = $duplicates }
 }
