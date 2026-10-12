@@ -170,6 +170,7 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
                   ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
                 WHERE r.TableInstanceId = {tableInstanceId}
                   AND r.PeriodKey = {periodKey.Value}
+                  AND r.IsDeleted = 0
                 ORDER BY c.TableRowId, c.ColumnDefId
                 """)
             .ToListAsync(ct)
@@ -264,7 +265,7 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
                            ROW_NUMBER() OVER (PARTITION BY ti.Id ORDER BY c.TableRowId, c.ColumnDefId) AS Rn
                     FROM ti
                     JOIN arc.TableRow r
-                      ON r.TableInstanceId = ti.Id AND r.PeriodKey = ti.PeriodKey
+                      ON r.TableInstanceId = ti.Id AND r.PeriodKey = ti.PeriodKey AND r.IsDeleted = 0
                     JOIN arc.CellValue c
                       ON c.PeriodKey = r.PeriodKey AND c.TableRowId = r.Id
                 )
@@ -353,6 +354,7 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
                 SELECT r.RowKey, r.Id
                 FROM arc.TableRow r
                 WHERE r.TableInstanceId = {tableInstanceId} AND r.PeriodKey = {periodKey.Value}
+                  AND r.IsDeleted = 0
                 ORDER BY r.Id
                 """)
             .ToListAsync(ct)
@@ -396,6 +398,7 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
                 SELECT r.Id, r.IsOrphaned
                 FROM arc.TableRow r
                 WHERE r.TableInstanceId = {tableInstanceId} AND r.PeriodKey = {periodKey.Value}
+                  AND r.IsDeleted = 0
                 ORDER BY r.Id
                 """)
             .ToListAsync(ct)
