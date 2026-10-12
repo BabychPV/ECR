@@ -1737,7 +1737,7 @@ CREATE TABLE calc.CalculationRun
     StartedAt         datetime2(3)  NOT NULL,
     FinishedAt        datetime2(3)  NULL,
     Status            nvarchar(32)  NOT NULL,
-    ModulesProfileJson nvarchar(max) NULL,       -- профіль по модулях (питання J-1)
+    ModulesProfileJson nvarchar(max) NULL,       -- профіль по модулях (питання J-1); ✎ 2026-10-12 (D14): об'єкт {"modules":[…],"unmatched":[…]}, старі прогони — масив модулів
     ErrorMessage      nvarchar(2000) NULL,
     -- RK04 (D-158): системний момент знімка довідників — ставиться на старті
     -- прогону, усі довідники прогону читаються FOR SYSTEM_TIME AS OF нього.

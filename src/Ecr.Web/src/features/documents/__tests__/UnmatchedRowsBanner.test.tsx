@@ -24,6 +24,8 @@ describe('UnmatchedRowsBanner', () => {
 
     const banner = screen.getByTestId('document-unmatched-rows');
     expect(banner.textContent).toContain('document.unmatchedRows.title');
+    // ⚠ Інформація, не помилка: роль status стоїть на обгортці (Alert завжди alert).
+    expect(screen.getByTestId('document-unmatched-rows-status').getAttribute('role')).toBe('status');
     const hint = screen.getByTestId('document-unmatched-rows-hint').textContent ?? '';
     expect(hint).toContain('document.unmatchedRows.hint');
     expect(hint).toContain('2 (R-REMOVED)');

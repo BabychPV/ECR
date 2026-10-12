@@ -70,6 +70,21 @@ public sealed class CalculationRunStatusApiTests(SqlServerFixture sql)
         Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("unmatchedRows").ValueKind);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Без_права_Calculation_View_відповідь_403_і_ключів_рядків_немає()
+    {
+        var s = await ArrangeAsync(withRun: true, "Document.View").ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var reply = await GetAsync(client, s).ConfigureAwait(true);
+
+        Assert.True(reply.Status == HttpStatusCode.Forbidden, $"{reply.Status}: {reply.Body}\n{app.ErrorsText}");
+        Assert.DoesNotContain(s.RemovedRowKey, reply.Body, StringComparison.Ordinal);
+    }
+
     private sealed record Reply(HttpStatusCode Status, string Body);
 
     private sealed record Scenario(long DocumentId, int PeriodKey, string UserName, string RemovedRowKey);
@@ -84,8 +99,9 @@ public sealed class CalculationRunStatusApiTests(SqlServerFixture sql)
         return new Reply(response.StatusCode, await response.Content.ReadAsStringAsync().ConfigureAwait(false));
     }
 
-    private async Task<Scenario> ArrangeAsync(bool withRun)
+    private async Task<Scenario> ArrangeAsync(bool withRun, params string[] permissions)
     {
+        var granted = permissions.Length == 0 ? new[] { "Document.View", "Calculation.View" } : permissions;
         var b = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync().ConfigureAwait(false);
         var userName = $"crs{Guid.NewGuid():N}"[..20];
         var removedKey = $"RM{Guid.NewGuid():N}"[..10].ToUpperInvariant();
@@ -101,7 +117,7 @@ public sealed class CalculationRunStatusApiTests(SqlServerFixture sql)
         db.Roles.Add(role);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        foreach (var permission in new[] { "Document.View", "Calculation.View" })
+        foreach (var permission in granted)
         {
             db.RolePermissions.Add(new RolePermission(role.Id, permission));
         }

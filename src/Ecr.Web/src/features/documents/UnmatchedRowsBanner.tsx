@@ -22,15 +22,13 @@ export function UnmatchedRowsBanner({ rows }: UnmatchedRowsBannerProps): JSX.Ele
   const list = rows.count > rows.rows.length ? `${shown}, …` : shown;
 
   return (
-    <Alert
-      color="brand"
-      variant="light"
-      title={t('document.unmatchedRows.title')}
-      data-testid="document-unmatched-rows"
-    >
-      <Text size="sm" data-testid="document-unmatched-rows-hint">
-        {t('document.unmatchedRows.hint', { count: String(rows.count), rows: list })}
-      </Text>
-    </Alert>
+    // ⚠ `role="status"` - на обгортці: Mantine `Alert` власну `role` не приймає (завжди `alert`).
+    <div role="status" data-testid="document-unmatched-rows-status">
+      <Alert color="brand" variant="light" title={t('document.unmatchedRows.title')} data-testid="document-unmatched-rows">
+        <Text size="sm" data-testid="document-unmatched-rows-hint">
+          {t('document.unmatchedRows.hint', { count: String(rows.count), rows: list })}
+        </Text>
+      </Alert>
+    </div>
   );
 }

@@ -4142,6 +4142,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/external-keys` | `Registry.EditData` | 8 |
 | `DELETE` | `/api/v1/registries/{code}/external-keys/{id}` | `Registry.EditData` | 8 |
 
+> ✎ 2026-10-12 (D14): `GET /documents/{id}/calculation-run?periodKey=` → `CalculationRunStatusDto { runId, finishedAt, unmatchedRows? }` — рядки документа, яким не підійшло жодне правило розрахунку (інформація, не помилка; до 10 ключів + `count`). **Формат `calc.CalculationRun.ModulesProfileJson` змінено**: корінь — об'єкт `{"modules":[{module,ms,rows,calls}],"unmatched":[{documentId,count,rows:[{tableInstanceId,rowNumber,rowKey}]}]}` (`unmatched` — лише коли такі рядки є) замість масиву модулів. Прогони, записані раніше, лишаються масивами; читач (`ModuleProfile.ReadUnmatched`) підтримує обидві форми, а профіль часу назовні не віддається. Міграції немає (стовпець той самий `nvarchar(max)`).
+
 > ✎ 2026-10-05: `GET /documents/{id}` — `sheetStates` і `sheets` повертаються лише за вказаного `periodKey`: стан робочого процесу має гранулярність «аркуш × період» (`D-38`); без `periodKey` обидва поля порожні — це свідомо (`DocumentSummary`: «порожньо без періоду»). Клієнт завжди передає `periodKey`.
 
 > ✎ 2026-09-30 (ФВ-2.6/2.7): `GET /documents/{id}/tables/{tableInstanceId}` → `TableSliceDto.cellFormats`
