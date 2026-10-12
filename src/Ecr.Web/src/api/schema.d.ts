@@ -20187,6 +20187,35 @@ export interface components {
             verticalAlign: null | number;
             wrapText: boolean;
         };
+        /** @description Область оформлення «рядки × колонки»: сервер розгортає її на живі рядки таблиці й колонки,
+         *     які викликач бачить; права — ті самі, що в `items`. */
+        CellStyleScope: {
+            /**
+             * @description `true` — усі колонки, які бачить викликач (приховані/заборонені не входять).
+             * @default false
+             */
+            allColumns: boolean;
+            /**
+             * @description `true` — усі живі рядки екземпляра.
+             * @default false
+             */
+            allRows: boolean;
+            /** @description Заливка `#rrggbb`; `null` — не чіпати; `""` — зняти. */
+            backgroundHex?: null | string;
+            /** @description Коди колонок; колонки немає чи вона прихована — `unknownCell`. */
+            columnCodes?: null | string[];
+            /** @description Колір тексту `#rrggbb`; `null` — не чіпати; `""` — зняти. */
+            foregroundHex?: null | string;
+            /** @description Жирність; `null` — не чіпати. */
+            isBold?: null | boolean;
+            /**
+             * @description `true` — зняти все оформлення з області.
+             * @default false
+             */
+            reset: boolean;
+            /** @description Ключі рядків; рядка немає в зрізі — `unknownCell`. */
+            rowKeys?: null | string[];
+        };
         /**
          * @description Клас структурної зміни (документ 10 «Еволюція схеми»).
          * @enum {unknown}
@@ -23764,7 +23793,7 @@ export interface components {
         /** @description Користувацьке оформлення комірок (заливка, колір тексту, жирність) —
          *     `PATCH /api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-styles`. */
         PatchCellStylesRequest: {
-            /** @description Комірки й нове оформлення; одна комірка — один раз. */
+            /** @description Комірки й нове оформлення; одна комірка — один раз. Може бути порожнім, якщо задано Scope. */
             items: components["schemas"]["CellStyleChange"][];
             /**
              * Format: int32
@@ -23772,10 +23801,11 @@ export interface components {
              */
             periodKey: number;
             /**
-             * @description `true` — зняти все оформлення з перелічених комірок.
+             * @description `true` — зняти все оформлення з перелічених у Items комірок.
              * @default false
              */
             reset: boolean;
+            scope?: null | components["schemas"]["CellStyleScope"];
         };
         /** @description Відповідь на `PATCH …/cell-styles`. */
         PatchCellStylesResponse: {
@@ -23784,6 +23814,18 @@ export interface components {
              * @description Комірок, оформлення яких змінено (без no-op).
              */
             appliedCells: number;
+            /** @description Причини відмови з лічильниками (не більше 10; без назв рядків і колонок), лише коли
+             *     DeniedCells більше нуля. */
+            deniedByReason?: null | {
+                [key: string]: number;
+            };
+            /**
+             * Format: int32
+             * @description Комірок області `scope`, відмовлених правами/станом (часткова відмова; решта застосована).
+             *     Для `items` відмова лишається повною (403). Колонки, яких викликач не бачить, не входять у лік.
+             * @default 0
+             */
+            deniedCells: number;
             /**
              * Format: int32
              * @description Комірок, з яких знято все оформлення (рядок стилю видалено).

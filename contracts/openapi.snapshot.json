@@ -1457,6 +1457,68 @@
         ],
         "type": "object"
       },
+      "CellStyleScope": {
+        "description": "Область оформлення «рядки × колонки»: сервер розгортає її на живі рядки таблиці й колонки,\nякі викликач бачить; права — ті самі, що в `items`.",
+        "properties": {
+          "allColumns": {
+            "default": false,
+            "description": "`true` — усі колонки, які бачить викликач (приховані/заборонені не входять).",
+            "type": "boolean"
+          },
+          "allRows": {
+            "default": false,
+            "description": "`true` — усі живі рядки екземпляра.",
+            "type": "boolean"
+          },
+          "backgroundHex": {
+            "description": "Заливка `#rrggbb`; `null` — не чіпати; `\"\"` — зняти.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "columnCodes": {
+            "description": "Коди колонок; колонки немає чи вона прихована — `unknownCell`.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "foregroundHex": {
+            "description": "Колір тексту `#rrggbb`; `null` — не чіпати; `\"\"` — зняти.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isBold": {
+            "description": "Жирність; `null` — не чіпати.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "reset": {
+            "default": false,
+            "description": "`true` — зняти все оформлення з області.",
+            "type": "boolean"
+          },
+          "rowKeys": {
+            "description": "Ключі рядків; рядка немає в зрізі — `unknownCell`.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "ChangeClass": {
         "description": "Клас структурної зміни (документ 10 «Еволюція схеми»).",
         "enum": [
@@ -9242,7 +9304,7 @@
         "description": "Користувацьке оформлення комірок (заливка, колір тексту, жирність) —\n`PATCH /api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-styles`.",
         "properties": {
           "items": {
-            "description": "Комірки й нове оформлення; одна комірка — один раз.",
+            "description": "Комірки й нове оформлення; одна комірка — один раз. Може бути порожнім, якщо задано Scope.",
             "items": {
               "$ref": "#/components/schemas/CellStyleChange"
             },
@@ -9255,8 +9317,19 @@
           },
           "reset": {
             "default": false,
-            "description": "`true` — зняти все оформлення з перелічених комірок.",
+            "description": "`true` — зняти все оформлення з перелічених у Items комірок.",
             "type": "boolean"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CellStyleScope",
+                "description": "Оформлення ОБЛАСТЮ «рядки × колонки» одним запитом (фарбувати рядок/таблицю миттєво).\n`null` — лише Items. Обидва можна передати разом: на спільній комірці\nitems сильніші за scope."
+              }
+            ]
           }
         },
         "required": [
@@ -9270,6 +9343,23 @@
         "properties": {
           "appliedCells": {
             "description": "Комірок, оформлення яких змінено (без no-op).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "deniedByReason": {
+            "additionalProperties": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "description": "Причини відмови з лічильниками (не більше 10; без назв рядків і колонок), лише коли\nDeniedCells більше нуля.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "deniedCells": {
+            "default": 0,
+            "description": "Комірок області `scope`, відмовлених правами/станом (часткова відмова; решта застосована).\nДля `items` відмова лишається повною (403). Колонки, яких викликач не бачить, не входять у лік.",
             "format": "int32",
             "type": "integer"
           },
