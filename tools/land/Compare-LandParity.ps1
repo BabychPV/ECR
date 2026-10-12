@@ -28,6 +28,8 @@
       METHODOLOGY_DIFF both have the component, but different methodology codes
       AMBIGUOUS_KEY    several rows share one NAE in the legacy store (result has no Land_No): not comparable
       LEGACY_DUP_CONFLICT several stored copies of the result disagree
+      LEGACY_STATUS_SKIP  explained by legacy behaviour 9: the row is not 'Running' (old engine skips it; the stored
+                       result found by the NAE key belongs to another row)
       NOT_ALIGNED      sample row has no counterpart in the oracle (selection order / duplicates)
     Raw values are NOT written to OutFile unless -IncludeValues is passed; the file must be outside the repo.
 .PARAMETER TolAbs   absolute tolerance for NEAR (default 1e-9)
@@ -262,6 +264,10 @@ WHERE cr.DocumentId = @d AND cr.PeriodKey = @p
                     if ($null -eq $ecrV) {
                         $tableMeth = $ecrMeth.ContainsKey("$table|$meth")
                         $class = if (-not $tableMeth) { Get-MissingClass $meth } elseif (-not $ecrRowAny.ContainsKey("$table|$rowKey")) { 'MISSING_ROW' } else { 'MISSING_OUTPUT' }
+                        # Legacy behaviour 9 (R_Land_RuleMatcher): a row whose Land_Status is not 'Running' is skipped by the old
+                        # engine; results found for it by the NAE key belong to another row (key artefact), not a defect.
+                        $stProp = $srow.PSObject.Properties['Land_Status']
+                        if ($class -in 'MISSING_ROW', 'MISSING_OUTPUT' -and $null -ne $stProp -and $null -ne $stProp.Value -and [string]$stProp.Value -ne 'Running') { $class = 'LEGACY_STATUS_SKIP' }
                         if ($oldV -eq 0) { $class = $class + '_ZERO' }
                         Add-Class $docName $table $rowKey $meth $outLabel $class 0 0 $oldV $null
                         continue

@@ -127,15 +127,16 @@ public sealed class LandParityHarnessTests
                             new { Land_No = 2, Land_Status = "Running", H = 20.0 },
                             new { Land_No = 3, Land_Status = "Running", H = 30.0 },
                             new { Land_No = 4, Land_Status = "Running", H = 40.0 },
+                            new { Land_No = 5, Land_Status = "NULL", H = 50.0 },
                         },
                     },
                 },
             };
-            object LegacyRow(int seq, double h, double tons) => new
+            object LegacyRow(int seq, double h, double tons, string status = "Running") => new
             {
                 seq,
                 naeAmbiguous = false,
-                inputs = new { Land_No = seq, Land_Status = "Running", H = h },
+                inputs = new { Land_No = seq, Land_Status = status, H = h },
                 results = new[]
                 {
                     new { component = "301", phase = "", tons, gsec = (double?)null, methodology = "ECW_C05_02", modified = "2026-01-01T00:00:00", source = "x" },
@@ -153,7 +154,7 @@ public sealed class LandParityHarnessTests
                         {
                             [table] = new
                             {
-                                rows = new[] { LegacyRow(1, 10, 0.001), LegacyRow(2, 20, 0.5), LegacyRow(3, 30, 0.2), LegacyRow(4, 40, 1.0) },
+                                rows = new[] { LegacyRow(1, 10, 0.001), LegacyRow(2, 20, 0.5), LegacyRow(3, 30, 0.2), LegacyRow(4, 40, 1.0), LegacyRow(5, 50, 0.3, "NULL") },
                             },
                         },
                     },
@@ -199,6 +200,7 @@ public sealed class LandParityHarnessTests
             Assert.Equal(1, classes["MISMATCH_ECR_ZERO"]);
             Assert.Equal(1, classes["MISMATCH_RATIO_x1000"]);
             Assert.Equal(1, classes["MISSING_ROW"]);
+            Assert.Equal(1, classes["LEGACY_STATUS_SKIP"]);
             Assert.False(classes.ContainsKey("NOT_ALIGNED"));
             // Значення не потрапляють у файл без -IncludeValues.
             Assert.DoesNotContain("\"old\"", File.ReadAllText(outFile), StringComparison.Ordinal);
