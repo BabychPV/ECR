@@ -4324,7 +4324,7 @@
             "type": "integer"
           },
           "mappingsUnmappedKeys": {
-            "description": "До 10 (`MaxMappingKeysListed`) шляхів `SHEET.TABLE.COLUMN` колонок\nвихідної версії, на які вказують такі мапінги. ⛔ Лише шлях колонки шаблону (його й так показує звіт відмінностей):\nджерело, сутність і поле джерела не розкриваються.",
+            "description": "До 10 (`MaxMappingKeysListed`) ключів: `SHEET.TABLE.COLUMN` колонки вихідної версії для мапінгу збору,\n`events SHEET.TABLE` для мапінгу подій і `window SHEET.TABLE.COLUMN` для прив'язки вікна (D-1b).\n⛔ Лише шлях у шаблоні (його й так показує звіт відмінностей): джерело, сутність і поле джерела не розкриваються.",
             "items": {
               "type": "string"
             },
@@ -4336,6 +4336,18 @@
           "mode": {
             "$ref": "#/components/schemas/VersionMigrationMode",
             "description": "Режим."
+          },
+          "otherDocumentsOnSourceVersion": {
+            "default": 0,
+            "description": "D-1b P3: скільки документів у цих проєктах.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "otherProjectsOnSourceVersion": {
+            "default": 0,
+            "description": "D-1b P3: скільки ІНШИХ проєктів лишається на вихідній версії шаблону. Мапінги збору, подій і вікон глобальні\n(одна ціль): після цього переносу вони вказують на нову версію, і ті проєкти не збираються, доки їх не перенесено.\n⛔ Лише кількість, без переліку проєктів.",
+            "format": "int32",
+            "type": "integer"
           },
           "projectId": {
             "description": "Його проєкт — версія живе на проєкті, тож переносяться всі його документи.",

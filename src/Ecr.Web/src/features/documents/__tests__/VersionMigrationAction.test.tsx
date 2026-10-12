@@ -70,6 +70,8 @@ function report(overrides: Partial<VersionMigrationReport>): VersionMigrationRep
     itemsTruncated: false,
     mappingsRemapped: 0,
     mappingsUnmapped: 0,
+    otherProjectsOnSourceVersion: 0,
+    otherDocumentsOnSourceVersion: 0,
     ...overrides,
   };
 }

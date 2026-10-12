@@ -21202,12 +21202,26 @@ export interface components {
              * @default 0
              */
             mappingsUnmapped: number;
-            /** @description До 10 (`MaxMappingKeysListed`) шляхів `SHEET.TABLE.COLUMN` колонок
-             *     вихідної версії, на які вказують такі мапінги. ⛔ Лише шлях колонки шаблону (його й так показує звіт відмінностей):
-             *     джерело, сутність і поле джерела не розкриваються. */
+            /** @description До 10 (`MaxMappingKeysListed`) ключів: `SHEET.TABLE.COLUMN` колонки вихідної версії для мапінгу збору,
+             *     `events SHEET.TABLE` для мапінгу подій і `window SHEET.TABLE.COLUMN` для прив'язки вікна (D-1b).
+             *     ⛔ Лише шлях у шаблоні (його й так показує звіт відмінностей): джерело, сутність і поле джерела не розкриваються. */
             mappingsUnmappedKeys?: null | string[];
             /** @description Режим. */
             mode: components["schemas"]["VersionMigrationMode"];
+            /**
+             * Format: int32
+             * @description D-1b P3: скільки документів у цих проєктах.
+             * @default 0
+             */
+            otherDocumentsOnSourceVersion: number;
+            /**
+             * Format: int32
+             * @description D-1b P3: скільки ІНШИХ проєктів лишається на вихідній версії шаблону. Мапінги збору, подій і вікон глобальні
+             *     (одна ціль): після цього переносу вони вказують на нову версію, і ті проєкти не збираються, доки їх не перенесено.
+             *     ⛔ Лише кількість, без переліку проєктів.
+             * @default 0
+             */
+            otherProjectsOnSourceVersion: number;
             /**
              * Format: int32
              * @description Його проєкт — версія живе на проєкті, тож переносяться всі його документи.
