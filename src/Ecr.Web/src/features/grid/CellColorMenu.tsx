@@ -2,7 +2,7 @@ import { useRef, useState, type JSX } from 'react';
 import { Button, Popover } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import './cellColorMenu.css';
-import { isHexColour, StandardColours, ThemeColours, ThemeShades } from './userCellStyle';
+import { isHexColour, StandardColours, StyleScopes, ThemeColours, ThemeShades, type StyleScope } from './userCellStyle';
 
 /**
  * «Заливка» і «Колір тексту» у тулбарі сітки (L4) — палітра як у Excel: рядок
@@ -23,11 +23,29 @@ interface Props {
   readonly disabledReason?: 'readOnly' | 'noSelection';
   /** Рядок стану недоступності для людини, що читає з екрана. */
   readonly pending?: boolean;
+  /** Область: виділення / весь рядок / вся колонка / вся таблиця. */
+  readonly scope?: StyleScope;
+  readonly onScopeChange?: (scope: StyleScope) => void;
 }
 
-export function CellColorMenu({ onApply, disabled, disabledHint, disabledReason, pending = false }: Props): JSX.Element {
+export function CellColorMenu({ onApply, disabled, disabledHint, disabledReason, pending = false, scope = 'selection', onScopeChange }: Props): JSX.Element {
   return (
     <div className="ecr-cell-color-menu" role="group" aria-label={t('grid.cellColor.group')} data-testid="cell-color-menu">
+      {onScopeChange === undefined ? null : (
+        <select
+          className="ecr-cell-color-scope"
+          aria-label={t('grid.cellColor.scopeLabel')}
+          data-testid="cell-color-scope"
+          value={scope}
+          onChange={(event) => onScopeChange(event.target.value as StyleScope)}
+        >
+          {StyleScopes.map((value) => (
+            <option key={value} value={value}>
+              {t(`grid.cellColor.scope.${value}`)}
+            </option>
+          ))}
+        </select>
+      )}
       <ColourButton target="fill" onApply={onApply} disabled={disabled} hint={disabledHint} reason={disabledReason} pending={pending} />
       <ColourButton target="text" onApply={onApply} disabled={disabled} hint={disabledHint} reason={disabledReason} pending={pending} />
     </div>

@@ -10,6 +10,9 @@ import {
   userStyleOf,
   withUserStyle,
   chunkPatches,
+  headerStyleProps,
+  scopeRange,
+  withRowStyle,
   isValidPatch,
 } from '../userCellStyle';
 
@@ -184,5 +187,44 @@ describe('палітра', () => {
     expect(ThemeShades).toHaveLength(5);
     expect(ThemeShades.every((r) => r.length === 10 && r.every((h) => /^#[0-9a-f]{6}$/.test(h)))).toBe(true);
     expect(ThemeShades[0]?.[1]).toBe('#cccccc');
+  });
+});
+
+describe('область застосування кольору', () => {
+  const s = slice();
+  const one = { fromRow: 0, toRow: 0, fromColumn: 0, toColumn: 0 };
+
+  it('рядок — на всю ширину, колонка — на всю висоту, таблиця — усе без виділення', () => {
+    expect(colourableCells(s, scopeRange(s, one, 0, 'row'), 0).map((c) => `${c.rowKey}:${c.columnCode}`)).toEqual(['R1:A', 'R1:B']);
+    expect(colourableCells(s, scopeRange(s, one, 0, 'column'), 0).map((c) => `${c.rowKey}:${c.columnCode}`)).toEqual(['R1:A', 'R2:A']);
+    expect(colourableCells(s, scopeRange(s, null, 0, 'table'), 0)).toHaveLength(4);
+    expect(scopeRange(s, null, 0, 'row')).toBeNull();
+  });
+
+  it('заборонені комірки не потрапляють і в «весь рядок»; зсув колонки підпису враховано', () => {
+    const denied = slice({ cellPermissions: { 'R1:A': 'NoWriteRight' } });
+
+    expect(colourableCells(denied, scopeRange(denied, one, 0, 'row'), 0).map((c) => c.columnCode)).toEqual(['B']);
+
+    const labelled = slice({ rows: [row('R1', 'Підпис')] });
+    expect(colourableCells(labelled, scopeRange(labelled, { fromRow: 0, toRow: 0, fromColumn: 1, toColumn: 1 }, 1, 'row'), 1)).toHaveLength(2);
+  });
+});
+
+describe('шар «рядок» і шапка', () => {
+  const style = (extra: Record<string, unknown>) => ({ isBold: false, isItalic: false, foregroundArgb: null, backgroundArgb: null, horizontalAlign: null, verticalAlign: null, wrapText: false, ...extra }) as never;
+
+  it('рядок перекриває колір колонки, жирність додається, порожній рядок не чіпає', () => {
+    const merged = withRowStyle(style({ backgroundArgb: 1, isBold: true }), style({ backgroundArgb: 2 }));
+
+    expect(merged?.backgroundArgb).toBe(2);
+    expect(merged?.isBold).toBe(true);
+    expect(withRowStyle(style({ backgroundArgb: 1 }), null)?.backgroundArgb).toBe(1);
+    expect(withRowStyle(null, style({ backgroundArgb: 2 }))?.backgroundArgb).toBe(2);
+  });
+
+  it('headerStyleProps: без стилю — null, із заливкою — клас і змінні', () => {
+    expect(headerStyleProps(null)).toBeNull();
+    expect(headerStyleProps(style({ backgroundArgb: (0xff000000 | 0xffc000) | 0 }))).toMatchObject({ class: 'ecr-header-styled', style: { '--ecr-cell-fill': '#ffc000' } });
   });
 });

@@ -1,4 +1,5 @@
-import type { CellFormatDto, CellStyleChange, TableSliceDto } from '@/api/types';
+import type { CellFormatDto, CellStyleChange, CellStyleDto, TableSliceDto } from '@/api/types';
+import { cellAppearanceOf } from './cellAppearance';
 import { isHexColour } from '@/shared/theme/cellPalette';
 import { withCellFormat } from './conditionalAppearance';
 import { cellKey } from './permissions';
@@ -41,6 +42,70 @@ export function isValidPatch(patch: CellStylePatch): boolean {
   return [patch.backgroundHex, patch.foregroundHex].every(
     (color) => color === undefined || color === null || color === '' || isHexColour(color),
   );
+}
+
+/** Область застосування кольору: виділення або розширення до рядка/колонки/таблиці. */
+export type StyleScope = 'selection' | 'row' | 'column' | 'table';
+
+export const StyleScopes: readonly StyleScope[] = ['selection', 'row', 'column', 'table'];
+
+/**
+ * Прямокутник (індекси в сітці) для області. `selection` — як є; `row` — виділені рядки
+ * на всю ширину; `column` — виділені колонки на всю висоту; `table` — усе (виділення не потрібне).
+ * `null` — область порожня (немає виділення для рядка/колонки).
+ */
+export function scopeRange(
+  slice: Pick<TableSliceDto, 'rows' | 'columns'>,
+  range: GridSelection['range'] | null,
+  labelOffset: number,
+  scope: StyleScope,
+): GridSelection['range'] | null {
+  const lastRow = slice.rows.length - 1;
+  const firstColumn = labelOffset;
+  const lastColumn = labelOffset + slice.columns.length - 1;
+
+  if (scope === 'table') return { fromRow: 0, toRow: lastRow, fromColumn: firstColumn, toColumn: lastColumn };
+  if (range === null) return null;
+  if (scope === 'row') return { ...range, fromColumn: firstColumn, toColumn: lastColumn };
+  if (scope === 'column') return { ...range, fromRow: 0, toRow: lastRow };
+
+  return range;
+}
+
+/**
+ * Шар «рядок»: шаблонний стиль рядка (`RowDto.style`) поверх стилю колонки. Колір/вирівнювання
+ * рядка перекриває колонку, жирність/курсив/перенос — додаються.
+ */
+export function withRowStyle(column: CellStyleDto | null | undefined, row: CellStyleDto | null | undefined): CellStyleDto | null {
+  if (row === null || row === undefined) return column ?? null;
+  if (column === null || column === undefined) return row;
+
+  return {
+    ...column,
+    isBold: column.isBold || row.isBold,
+    isItalic: column.isItalic || row.isItalic,
+    wrapText: column.wrapText || row.wrapText,
+    foregroundArgb: row.foregroundArgb ?? column.foregroundArgb,
+    backgroundArgb: row.backgroundArgb ?? column.backgroundArgb,
+    horizontalAlign: row.horizontalAlign ?? column.horizontalAlign,
+    verticalAlign: row.verticalAlign ?? column.verticalAlign,
+  };
+}
+
+/** Властивості комірки заголовка за `TableSliceDto.headerStyle` (клас + змінні, як у комірок). */
+export function headerStyleProps(style: CellStyleDto | null | undefined): { class: string; style: Record<string, string> } | null {
+  const appearance = cellAppearanceOf(style);
+
+  if (appearance === undefined) return null;
+
+  const vars: Record<string, string> = {};
+  for (const [name, value] of Object.entries(appearance)) {
+    if (name.startsWith('--') && typeof value === 'string') vars[name] = value;
+  }
+  if (appearance.fontWeight === 'bold') vars['--ecr-header-weight'] = 'bold';
+  if (appearance.fontStyle === 'italic') vars['--ecr-header-style'] = 'italic';
+
+  return { class: 'ecr-header-styled', style: vars };
 }
 
 export function userStyleOf(slice: Pick<TableSliceDto, 'cellStyles'>, key: string): UserCellFormat | null {
