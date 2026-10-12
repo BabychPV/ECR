@@ -91,8 +91,20 @@ jobs:
   # ⛔ `fail-fast: false` — з тієї ж причини, що й `Step` у `verify-all.ps1`:
   # перевірки не зупиняють одна одну, інакше червона частина ховала б стан
   # решти.
+  #
+  # ✎ 2026-10-12 (CI-швидкість, «чекати стільки неприпустимо»): (1) `Ecr.Api.Tests`
+  # — ЧОТИРИ частини (api-1…api-4) замість двох: замір 2026-10-12 давав 33 і 24 хв
+  # на частину (сума тестів 2829 с, один процес на частину), тепер ~700 с суми
+  # (≈ 18 хв стіни разом зі складанням). Склад — `tools/api-test-shards.psd1`,
+  # повноту розбиття стереже `ApiTestShardsTests`. (2) На push у НЕ-інтеграційну
+  # `lane/**` важкі завдання (server-part, client, a11y, windows) пропускаються —
+  # там іде швидкий контур: Evidence (build + test + honesty-guard), `lane-affected`
+  # (тести зачеплених тестових класів) і `lane-client` (клієнт, якщо чіпали
+  # `src/Ecr.Web`). Повний набір — на `lane/integ-*`, `dev/integration`, `main`,
+  # PR (у т.ч. `rc/*` → `main`) і вручну. Імена обов'язкових перевірок не змінено.
   server-part:
     name: server-part (${{ matrix.part }})
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -223,9 +235,13 @@ jobs:
   # ⚠ `if: always()` — НЕ прикраса. Без нього при червоній частині це
   # завдання було б `skipped`, а пропущена обов'язкова перевірка GitHub
   # зараховує як пройдену: червона частина дала б зелений `server`.
+  #
+  # ✎ 2026-10-12: на push у не-інтеграційну `lane/**` частини пропущені навмисно, тож
+  # агрегатор там теж пропускається (`skipped`), а не червоніє. На PR/dev/integration/
+  # main/integ-* умова істинна й `server` рахує всі частини, як і раніше.
   server:
     needs: server-part
-    if: ${{ always() }}
+    if: ${{ always() && !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) }}
     runs-on: ubuntu-latest
     steps:
       - name: Усі частини server зелені
@@ -237,6 +253,7 @@ jobs:
           fi
 
   client:
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -265,6 +282,7 @@ jobs:
   # близько 35 с на маршрут, і одна тема іде 16-23 хвилини. У складі
   # `client` вона тримала б решту гейтів заручниками; поруч — не тримає нікого.
   a11y:
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) }}
     runs-on: ubuntu-latest
     # ⚠ W4.3 (accessibility.a11y.test.tsx, коментар над ECR_A11Y_THEME) описував
     # матрицю light/dark як чинну — вона такою не була: ця джоба досі проганяла
@@ -331,6 +349,7 @@ jobs:
   # зачіпає.
   worker-windows:
     name: worker (windows)
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -389,6 +408,7 @@ jobs:
   # зачіпає.
   msi-windows:
     name: msi (windows)
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -515,7 +535,8 @@ jobs:
   windows:
     name: windows
     needs: [ worker-windows, msi-windows, msi-install ]
-    if: ${{ always() }}
+    # ✎ 2026-10-12: на push у не-інтеграційну `lane/**` Windows-завдання пропущені навмисно — агрегатор теж.
+    if: ${{ always() && !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) }}
     runs-on: ubuntu-latest
     steps:
       - name: Усі Windows-завдання зелені
@@ -629,3 +650,88 @@ jobs:
             echo "::notice::гарячі файли в діфі: $(echo "$HOT" | tr '\n' ' ')"
           fi
           exit 0
+
+  # ✎ 2026-10-12 (CI-швидкість): швидкий контур для push у НЕ-інтеграційну `lane/**`.
+  # Повний набір (server-part ×4, client, a11y, windows) там пропущено; його ганяють
+  # `lane/integ-*`, `dev/integration`, PR у `main` (в т.ч. `rc/*`). Цей контур разом з
+  # Evidence (build + test + honesty-guard) тримає ≤ ~12 хв: тести лише ТЕСТОВИХ КЛАСІВ,
+  # змінених у diff проти `origin/dev/integration` (`tools/ci-lane-affected.ps1`), включно з
+  # інтеграційними (SQL у контейнері). Зміна лише в `src/**` без тестів іде через Evidence
+  # (усі тести `Category!=Integration`), а інтеграційні покриває повний набір на integ/rc.
+  # ⛔ Не обов'язковий гейт: ні в `server`, ні в ruleset `main` не входить.
+  lane-affected:
+    name: lane-affected
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: План (змінені тестові класи)
+        id: plan
+        shell: pwsh
+        run: pwsh -File tools/ci-lane-affected.ps1 -Plan
+
+      - name: SQL Server у контейнері
+        if: steps.plan.outputs.has_work == 'true'
+        run: |
+          set -euo pipefail
+          SA="$(openssl rand -hex 16)Aa1!"
+          echo "::add-mask::$SA"
+          echo "ECR_SQL_PASSWORD=$SA" >> "$GITHUB_ENV"
+          docker run -d --name ecr-mssql -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=$SA" \
+            -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        if: steps.plan.outputs.has_work == 'true'
+        with:
+          global-json-file: global.json
+
+      - name: Тести зачеплених класів
+        if: steps.plan.outputs.has_work == 'true'
+        env:
+          ECR_TEST_SQL: 'Server=localhost,1433;User Id=sa;Password=${{ env.ECR_SQL_PASSWORD }};TrustServerCertificate=true'
+        run: pwsh -File tools/ci-lane-affected.ps1 -Run
+
+  # ✎ 2026-10-12: клієнт на lane-пуші — лише якщо diff чіпає `src/Ecr.Web` або `contracts/`
+  # (швидкий підмножинний набір: типи, стиль, vitest; без `npm audit`, збірки й бюджету — вони
+  # на integ/rc). Не обов'язковий гейт.
+  lane-client:
+    name: lane-client
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Чи чіпає diff клієнт
+        id: diff
+        run: |
+          git fetch origin dev/integration || true
+          BASE="$(git merge-base origin/dev/integration HEAD)"
+          if git diff --name-only "$BASE" HEAD | grep -qE '^(src/Ecr\.Web/|contracts/)'; then
+            echo "web=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "web=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::diff не чіпає src/Ecr.Web і contracts/ — тести клієнта пропущено"
+          fi
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.diff.outputs.web == 'true'
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Ecr.Web/package-lock.json
+
+      - name: npm ci
+        if: steps.diff.outputs.web == 'true'
+        working-directory: src/Ecr.Web
+        run: npm ci
+
+      - name: Швидкі гейти клієнта
+        if: steps.diff.outputs.web == 'true'
+        run: pwsh -File tools/verify-all.ps1 -SkipDeployment -Only 'Типи клієнта зі знімка','Типи клієнта','Стиль клієнта','Тести клієнта'
