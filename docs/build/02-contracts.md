@@ -3723,6 +3723,7 @@ public sealed class NotFoundException(string errorCode, string message)
 
 | `messageKey` | HTTP | Коли |
 |---|---|---|
+| `err.ECR-ACCS-0403.importDeniedCells` | 403 | `POST /documents/{id}/import/apply` (і постановка у чергу): перегляд побудовано виконавцем із чинною передачею місяця (EA), і в ньому є хоч одна комірка, заборонена йому правами, — ВЕСЬ перегляд відхилено, нічого не записано («все або нічого», рішення людини 12.10). `deniedCount` — усі заборонені комірки (рядок); `cells` — до 20 тих, що виконавець бачить (`tableCode`, `rowKey`, `columnCode`, `excelCell`, `messageKey`), комірки прихованих колонок лише в `deniedCount`. Перегляд (`import/preview`) показує ті самі комірки в `rejected` і далі відповідає 200; для решти користувачів — без змін (заборонені комірки показані, решта застосовується) |
 | `err.ECR-CALC-0422.methodologyImportBlocked` | 422 | пакет методологій має блокери (нерезолвні посилання тощо) — запис не виконується (`POST /methodologies/import`) |
 | `err.ECR-CALC-0422.methodologyImportTimeZone` | 422 | пояс дат AF в імпорті пакета невідомий |
 | `err.ECR-CALC-0409.methodologyImportConflict` | 409 | пакет змінює вже наявну версію методології без нового номера версії |

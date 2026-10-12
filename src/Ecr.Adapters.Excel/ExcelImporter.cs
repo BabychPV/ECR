@@ -322,8 +322,12 @@ public sealed class ExcelImporter(
                 token,
                 // ⛔ L6-02 / N1-04: версія шаблону, за якою побудовано перегляд, їде в план — під
                 // замком структури `ApplyAsync` звіряє її з версією проєкту.
+                // ✎ RC21 (EA-6): виконавець із передачею — «все або нічого» при застосуванні.
                 JsonSerializer.Serialize(
-                    new ImportPlan(documentId, map.PeriodKey, diffs, userId, instances[0].TemplateVersionId), Options),
+                    new ImportPlan(
+                        documentId, map.PeriodKey, diffs, userId, instances[0].TemplateVersionId,
+                        AllOrNothing: IsUnderAssignment(decisionsBatch)),
+                    Options),
                 PreviewLifetime,
                 ct)
             .ConfigureAwait(false);
@@ -925,7 +929,116 @@ public sealed class ExcelImporter(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.previewOtherDocument" });
         }
 
+        EnsureAllOrNothing(plan);
+
         return plan;
+    }
+
+    /// <summary>Скільки заборонених комірок названо у відмові (решта — лише число).</summary>
+    public const int MaxDeniedCellsShown = 20;
+
+    /// <summary>
+    /// Чи будує перегляд виконавець із чинною передачею місяця: хоч одне рішення про комірку дозволено САМЕ
+    /// передачею, або заборонено станом передачі (Заповнено / Валідовано / Строк минув).
+    /// </summary>
+    /// <param name="decisions">Рішення про доступ на всю книгу (екземпляр → комірка → рішення).</param>
+    /// <returns><c>true</c> — діє модель EA для цього користувача.</returns>
+    /// <remarks>
+    /// ⚠ Не «документ має передачі» (<c>AssignmentsPresent</c>): ту ознаку несуть рішення й для власника
+    /// та сторонніх ролей, а правило «все або нічого» — про виконавця. <c>LockedByOwner</c> теж не рахується:
+    /// його отримує і ТОЙ, кому передачі не видано.
+    /// </remarks>
+    public static bool IsUnderAssignment(
+        IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>> decisions)
+    {
+        ArgumentNullException.ThrowIfNull(decisions);
+
+        foreach (var table in decisions.Values)
+        {
+            foreach (var decision in table.Values)
+            {
+                if (decision.ViaAssignment
+                    || (!decision.IsAllowed
+                        && decision.Reason is Ecr.Domain.Enums.EditDenyReason.AssignmentFilled
+                            or Ecr.Domain.Enums.EditDenyReason.AssignmentValidated
+                            or Ecr.Domain.Enums.EditDenyReason.AssignmentExpired))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// ⛔ RC21 (EA-6, рішення людини 12.10, квіз 5 №13): перегляд виконавця з передачею місяця, у якому є хоч
+    /// одна заборонена йому комірка, не застосовується ВЗАГАЛІ — 403, нічого не записано.
+    /// </summary>
+    /// <param name="plan">План перегляду.</param>
+    /// <exception cref="AccessDeniedException"><c>ECR-ACCS-0403</c>, <c>importDeniedCells</c>.</exception>
+    /// <remarks>
+    /// ⚠ Нерозкриття: названі лише комірки, які виконавець бачить (колонки його читання), до
+    /// <see cref="MaxDeniedCellsShown"/>; комірки прихованих колонок лише входять у <c>deniedCount</c>.
+    /// Перевірка — у <see cref="LoadPlanAsync"/>, тобто ДО порогу «у чергу», ДО транзакції і ДО будь-якого запису.
+    /// Лише для відмов ПРАВАМИ (<c>ECR-ACCS-0403</c>): обчислювана комірка, тип, межі й конфлікт версії
+    /// лишаються показаними відмовами перегляду, як і було.
+    /// </remarks>
+    private static void EnsureAllOrNothing(ImportPlan plan)
+    {
+        if (plan.AllOrNothing != true)
+        {
+            return;
+        }
+
+        var denied = new List<ImportRejection>();
+        var hiddenCount = 0;
+        foreach (var table in plan.Tables)
+        {
+            var hidden = (table.HiddenDenied ?? [])
+                .Select(h => (h.RowKey, h.ColumnCode))
+                .ToHashSet();
+            foreach (var rejection in table.Rejected.Where(r => r.ReasonCode == "ECR-ACCS-0403"))
+            {
+                if (hidden.Contains((rejection.RowKey, rejection.ColumnCode)))
+                {
+                    hiddenCount++;
+                }
+                else
+                {
+                    denied.Add(rejection);
+                }
+            }
+        }
+
+        var total = denied.Count + hiddenCount;
+        if (total == 0)
+        {
+            return;
+        }
+
+        var shown = denied
+            .Take(MaxDeniedCellsShown)
+            .Select(r => new Dictionary<string, string?>(StringComparer.Ordinal)
+            {
+                ["tableCode"] = r.TableCode,
+                ["rowKey"] = r.RowKey,
+                ["columnCode"] = r.ColumnCode,
+                ["excelCell"] = r.ExcelCell,
+                ["messageKey"] = r.MessageKey,
+            })
+            .ToList();
+
+        throw new AccessDeniedException(
+            "ECR-ACCS-0403",
+            $"The import was refused as a whole: {total} cell(s) in the file are not allowed to you. Nothing was written.",
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["messageKey"] = "err.ECR-ACCS-0403.importDeniedCells",
+                ["deniedCount"] = total.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["shownCount"] = shown.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["cells"] = shown,
+            });
     }
 
     /// <summary>Відкриває книгу або каже, що це не книга.</summary>
@@ -1084,5 +1197,16 @@ public sealed class ExcelImporter(
 /// Версія шаблону, за якою збудовано перегляд (L6-02 / N1-04); <c>null</c> — план до цієї правки,
 /// звірка версії тоді лише за екземплярами, прочитаними при застосуванні.
 /// </param>
+/// <param name="AllOrNothing">
+/// ✎ RC21 (EA-6, рішення людини 12.10): перегляд будував виконавець із чинною передачею місяця
+/// (<see cref="ExcelImporter.IsUnderAssignment"/>). Тоді хоч одна комірка, заборонена йому правами,
+/// відхиляє ВЕСЬ перелік змін при застосуванні — нічого не записується. <c>null</c>/<c>false</c> —
+/// колишня поведінка (заборонені комірки лише показані, решта застосовується).
+/// </param>
 public sealed record ImportPlan(
-    long DocumentId, int PeriodKey, IReadOnlyList<TableDiff> Tables, int? UserId = null, int? TemplateVersionId = null);
+    long DocumentId,
+    int PeriodKey,
+    IReadOnlyList<TableDiff> Tables,
+    int? UserId = null,
+    int? TemplateVersionId = null,
+    bool? AllOrNothing = null);

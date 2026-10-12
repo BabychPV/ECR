@@ -7788,6 +7788,9 @@ USING (VALUES
     -- COLL:rc20rule ── R16-4: правило категорії - єдиний код ECR-CALC-0422 для @Nope, CST.X, !X; ru/kz - порцією COLL:rc20rule нижче ──
     ,(N'err.ECR-CALC-0422.categoryRuleUnknownArgument', N'en', N'The category rule uses argument(s) {arguments}, which have no matching column in {tableCount} bound table(s): the rule runs on a row of that table, so the argument would always be empty.', 1)
     -- COLL:rc20rule ── кінець секції ──
+    -- COLL:rc21excel ── RC21 EA-6: імпорт .xlsx виконавця з передачею місяця - «все або нічого», 403; ru/kz - порцією COLL:rc21excel нижче ──
+    ,(N'err.ECR-ACCS-0403.importDeniedCells', N'en', N'The file was refused as a whole: it contains {deniedCount} cell(s) you are not allowed to change under your assignment. Nothing was written. Remove those values from the file (or ask the owner to change the assignment) and import again.', 1)
+    -- COLL:rc21excel ── кінець секції ──
     -- COLL:ea-api ── EA-C: передача місяця виконавцям (керування, переходи, відмови); ru/kz — порцією COLL:ea-api нижче ──
     ,(N'err.ECR-ACCS-0403.notEditAssignmentManager', N'en', N'Only the document author or a project manager can manage month assignments.', 1)
     ,(N'err.ECR-ACCS-0403.editAssignmentReadOnly', N'en', N'The document is read-only now (archive or simulation).', 1)
@@ -19645,6 +19648,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rc20rule ── кінець секції ──
+-- COLL:rc21excel ── ru/kz RC21 EA-6: імпорт .xlsx виконавця з передачею місяця - «все або нічого»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-ACCS-0403.importDeniedCells', N'ru', N'Файл отклонён целиком: в нём {deniedCount} ячеек, которые вам нельзя изменять в рамках вашей передачи. Ничего не записано. Уберите эти значения из файла (или попросите владельца изменить передачу) и повторите импорт.'),
+    (N'err.ECR-ACCS-0403.importDeniedCells', N'kz', N'Файл толығымен қабылданбады: онда тапсырмаңыз шеңберінде Сізге өзгертуге болмайтын {deniedCount} ұяшық бар. Ештеңе жазылмады. Бұл мәндерді файлдан алып тастаңыз (немесе иесінен тапсырманы өзгертуді сұраңыз) және импортты қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc21excel ── кінець секції ──
 -- COLL:ea-api ── ru/kz: передача місяця виконавцям (EA-C); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val

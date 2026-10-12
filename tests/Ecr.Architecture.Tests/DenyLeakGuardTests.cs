@@ -92,6 +92,10 @@ public sealed partial class DenyLeakGuardTests
             (1, "таблиця книги, яку ExcelImporter уже пропустив за CanReadTable"),
         ["src/Ecr.Adapters.Excel/ImportDiffBuilder.cs | деталь tableCode | table.Code"] =
             (1, "те саме, що текст TooManyChanges"),
+        ["src/Ecr.Adapters.Excel/ExcelImporter.cs | деталь tableCode | r.TableCode"] =
+            (1, "RC21 EA-6: перелік заборонених комірок відмови застосування — лише відмови прав з перегляду цього ж користувача по колонках, які він ЧИТАЄ; комірки прихованих колонок (S6) у перелік не йдуть, лише в deniedCount (тест «Відмова_не_розкриває_прихованих_колонок»)"),
+        ["src/Ecr.Adapters.Excel/ExcelImporter.cs | деталь columnCode | r.ColumnCode"] =
+            (1, "те саме, що tableCode: колонка з видимої відмови перегляду; прихована колонка лише рахується"),
         ["src/Ecr.Application/Documents/CreateRowHandler.cs | текст | key.Value"] =
             (2, "ключ рядка — ввід самого запиту або щойно згенерований GUID, не дані колонок"),
         ["src/Ecr.Application/Documents/CreateRowHandler.cs | деталь rowKey | key.Value"] =
