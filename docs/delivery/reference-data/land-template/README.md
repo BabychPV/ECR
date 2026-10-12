@@ -46,6 +46,21 @@ $pw = Read-Host 'Пароль bootstrap' -AsSecureString
 * Структура заливається масово SQL (`-StructureMode Sql`, за замовчуванням): PUT колонки через API вантажить усю версію на кожен виклик
   (O(n)), для 5 тис. колонок це години. Гілка `-StructureMode Api` лишилась для малих шаблонів.
 
+## Стилі комірок (ролі Excel, L1)
+
+Ключі моделі, які генерує `run-model-gen.ps1` зі `styles.xml` xlsm (кольори тільки з книги; теми й indexed-палітра переведені в RGB):
+
+* `styles[]` — ролі: `LAND_HEADER` (CCFFCC), `LAND_HEADER_MONTH` (FFCC99), `LAND_INPUT` (FFFFFF), `LAND_AUTO` (CCFFCC), `LAND_SERVICE` (FFFF00),
+  `LAND_TAG` (FFFF99) та похідні (`_BOLD`, `_RED`, `LAND_FILL_<HEX>`); поля = `SaveStyleDefCommand` (ARGB — знакове int).
+* колонка: `styleRole`, `headerStyleRole`, `widthPx` (40..800; px = `<col width>` x 7), `displayFormat` (лише числові колонки, <= 50 символів);
+  таблиця: `headerStyleRole` (мода шапок немісячних колонок). Роль колонки ставиться, лише коли найчастіший xf охоплює >= 80 % її рядків.
+* `conditionalFormats` лишається порожнім. Правила Excel «баланс <> 0 -> FF0000 / = 0 -> 00FF00» і «Removed -> червоний жирний» стоять на окремих
+  рядках, а правило колонки ECR діє на всі рядки колонки в усіх таблицях версії, тому вони лежать у `conditionalFormatsRowScoped`
+  (рядки за `rowKeys`, колонки за кодами) і чекають серверної підтримки scope = row (L6 плану).
+
+`Build-LandTemplate.ps1` ставить стилі через `PUT .../styles/{code}`, `styleId`/`widthPx`/`displayFormat` — у колонках (обидва режими), а стиль шапки
+таблиці — `cfg.TableDef.HeaderStyleId` лише в `-StructureMode Sql` (у API-контракті таблиці поля немає; до сітки шапка дійде з L2 плану).
+
 Перелік прогалин і пропозицій по змінах коду — у звіті `.sync-local/reports/LAND-TEMPLATE-BUILD-2026-10-11.md`.
 ## Відповідність прод-колонкам HSE (prodColumnMapping)
 

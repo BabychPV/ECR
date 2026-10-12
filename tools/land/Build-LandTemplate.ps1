@@ -355,12 +355,17 @@ function Fill-StructureSql([int]$vid) {
             foreach ($tb in @($sh.tables)) {
                 $to++
                 $key = "$($sh.code)/$($tb.code)"
+                $hs = [DBNull]::Value; $hsid = Style-IdOf $tb.headerStyleRole; if ($null -ne $hsid) { $hs = [int]$hsid }
                 if (-not $tableIds.ContainsKey($key)) {
                     $mx = [DBNull]::Value; if ($tb.maxRows) { $mx = [int]$tb.maxRows }
-                    $id = Sql-Query $cn 'INSERT INTO cfg.TableDef (SheetDefId, Code, NameL10n, Ordinal, LayoutKind, RowMode, MaxDynamicRows, HeaderStyleId, StorageMode, IsDeleted) OUTPUT inserted.Id VALUES (@s,@c,@n,@o,@l,@r,@mx,NULL,0,0)' @{
+                    $id = Sql-Query $cn 'INSERT INTO cfg.TableDef (SheetDefId, Code, NameL10n, Ordinal, LayoutKind, RowMode, MaxDynamicRows, HeaderStyleId, StorageMode, IsDeleted) OUTPUT inserted.Id VALUES (@s,@c,@n,@o,@l,@r,@mx,@hs,0,0)' @{
                         s = $sheetIds[[string]$sh.code]; c = [string]$tb.code; n = (Json-L10n $tb.nameEn $tb.nameRu); o = $to
-                        l = [byte]$LayoutCode[[string]$tb.layout]; r = [byte]$RowModeCode[[string]$tb.rowMode]; mx = $mx }
+                        l = [byte]$LayoutCode[[string]$tb.layout]; r = [byte]$RowModeCode[[string]$tb.rowMode]; mx = $mx; hs = $hs }
                     $tableIds[$key] = [int]$id.Rows[0].Id
+                }
+                elseif ($hs -isnot [DBNull]) {
+                    # шапка таблиці: стиль ролі (TableDef.HeaderStyleId; API для нього немає - лише SQL-гілка стенда)
+                    $null = Sql-Exec $cn 'UPDATE cfg.TableDef SET HeaderStyleId=@h WHERE Id=@t AND (HeaderStyleId IS NULL OR HeaderStyleId<>@h)' @{ h = [int]$hs; t = [int]$tableIds[$key] }
                 }
             }
         }
@@ -414,6 +419,33 @@ function Fill-StructureSql([int]$vid) {
         $colId = @{}
         foreach ($r in (Sql-Query $cn 'SELECT c.Id, c.TableDefId, c.Code FROM cfg.ColumnDef c JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v' @{ v = $vid }).Rows) {
             $colId["$($r.TableDefId)/$($r.Code)"] = [int]$r.Id
+        }
+        # --- презентація колонок (L1): styleId ролі, widthPx, displayFormat - для нових і наявних колонок; ідемпотентно
+        $dp = New-Object System.Data.DataTable
+        [void]$dp.Columns.Add('Id', [int]); [void]$dp.Columns.Add('StyleId', [int]); [void]$dp.Columns.Add('DisplayFormat', [string]); [void]$dp.Columns.Add('WidthPx', [int])
+        foreach ($sh in @($Mdl.sheets)) {
+            foreach ($tb in @($sh.tables)) {
+                $tid = $tableIds["$($sh.code)/$($tb.code)"]
+                foreach ($c in @($tb.columns)) {
+                    $sid = Style-IdOf $c.styleRole
+                    if ($null -eq $sid -and -not $c.displayFormat -and -not $c.widthPx) { continue }
+                    $cid = $colId["$tid/$($c.code)"]
+                    if (-not $cid) { continue }
+                    $row = $dp.NewRow(); $row['Id'] = [int]$cid
+                    if ($null -ne $sid) { $row['StyleId'] = [int]$sid }
+                    if ($c.displayFormat) { $row['DisplayFormat'] = [string]$c.displayFormat }
+                    if ($c.widthPx) { $row['WidthPx'] = [int]$c.widthPx }
+                    $dp.Rows.Add($row)
+                }
+            }
+        }
+        if ($dp.Rows.Count -gt 0) {
+            $null = Sql-Exec $cn 'CREATE TABLE #CP (Id int, StyleId int NULL, DisplayFormat nvarchar(50) NULL, WidthPx int NULL)'
+            $bc = New-Object System.Data.SqlClient.SqlBulkCopy($cn); $bc.DestinationTableName = '#CP'
+            foreach ($n in 'Id', 'StyleId', 'DisplayFormat', 'WidthPx') { [void]$bc.ColumnMappings.Add($n, $n) }
+            $bc.WriteToServer($dp); $bc.Close()
+            $np = Sql-Exec $cn 'UPDATE c SET StyleId = ISNULL(p.StyleId, c.StyleId), DisplayFormat = ISNULL(p.DisplayFormat, c.DisplayFormat), WidthPx = ISNULL(p.WidthPx, c.WidthPx) FROM cfg.ColumnDef c JOIN #CP p ON p.Id = c.Id WHERE (p.StyleId IS NOT NULL AND ISNULL(c.StyleId, -1) <> p.StyleId) OR (p.DisplayFormat IS NOT NULL AND ISNULL(c.DisplayFormat, N'''') <> p.DisplayFormat) OR (p.WidthPx IS NOT NULL AND ISNULL(c.WidthPx, -1) <> p.WidthPx); DROP TABLE #CP'
+            Log "  презентація колонок (стиль/ширина/формат): оновлено $np із $($dp.Rows.Count)"
         }
         # --- рядки
         $haveRows = @{}
@@ -564,6 +596,41 @@ function Put-CellFormulas([int]$vid) {
     return $n
 }
 
+# L1 (CELL-STYLE-PLAN-2026-10-12): стилі за ролями Excel -> cfg.StyleDef через PUT .../styles/{code} (контракт SaveStyleDefCommand).
+# Заводяться лише стилі, на які посилаються колонки (styleRole) і таблиці (headerStyleRole). Upsert за кодом: повтор = 0 змін.
+# Старі моделі без ключа `styles` проходять без змін (стилів немає - styleId лишається null, як було).
+function Ensure-Styles([int]$vid) {
+    $S.StyleIds = @{}
+    $used = @{}
+    foreach ($sh in @($Mdl.sheets)) {
+        foreach ($tb in @($sh.tables)) {
+            if ($tb.headerStyleRole) { $used[[string]$tb.headerStyleRole] = $true }
+            foreach ($c in @($tb.columns)) { if ($c.styleRole) { $used[[string]$c.styleRole] = $true } }
+        }
+    }
+    $n = 0
+    foreach ($st in @($Mdl.styles)) {
+        if ($null -eq $st -or -not $used.ContainsKey([string]$st.code)) { continue }
+        $body = @{
+            fontName = $null; fontSize = $null; isBold = [bool]$st.isBold; isItalic = [bool]$st.isItalic
+            foregroundArgb = $(if ($null -ne $st.foregroundArgb) { [int]$st.foregroundArgb } else { $null })
+            backgroundArgb = $(if ($null -ne $st.backgroundArgb) { [int]$st.backgroundArgb } else { $null })
+            borderJson = $null
+            horizontalAlign = $(if ($null -ne $st.horizontalAlign) { [int]$st.horizontalAlign } else { $null })
+            verticalAlign = $(if ($null -ne $st.verticalAlign) { [int]$st.verticalAlign } else { $null })
+            wrapText = [bool]$st.wrapText; numberFormat = $null
+        }
+        $r = Api PUT "/api/v1/template-versions/$vid/styles/$($st.code)" $body
+        $S.StyleIds[[string]$st.code] = [int]$r.Json.id
+        $n++
+    }
+    Log "  стилів ролей Excel: $n"
+}
+function Style-IdOf($role) {
+    if ($role -and $S.StyleIds -and $S.StyleIds.ContainsKey([string]$role)) { return [int]$S.StyleIds[[string]$role] }
+    return $null
+}
+
 function Stage-Template {
     Log '== Template =='
     LoginAs 'land-owner'
@@ -595,6 +662,7 @@ function Stage-Template {
     $vid = [int]$draft.id
     $S.VersionId = $vid
     Log "  чернетка версії $($draft.version) (id $vid)"
+    Ensure-Styles $vid
 
     $nCols = 0; $nRows = 0; $nRules = 0; $nF = 0
     $apiSheets = @($Mdl.sheets)
@@ -626,8 +694,8 @@ function Stage-Template {
                     headerL10n = (L10n ([string]$c.headerEn).Substring(0, [Math]::Min(250, ([string]$c.headerEn).Length)) $c.headerRu)
                     ordinal = $ord; dataType = $type; isRequired = [bool]$c.required; isReadOnly = [bool]($c.readOnly -or $type -in 'Formula', 'Calculated')
                     isHidden = [bool]$c.hidden; precision = $(if ($c.precision) { [int]$c.precision } else { $null }); scale = $(if ($c.scale) { [int]$c.scale } else { $null })
-                    defaultValue = $(if ($c.default) { [string]$c.default } else { $null }); displayFormat = $null; styleId = $null
-                    lookupRegistryDefId = $lookup; lookupFilter = $null; unitId = (UnitId $c.unit); widthPx = $null
+                    defaultValue = $(if ($c.default) { [string]$c.default } else { $null }); displayFormat = $(if ($c.displayFormat) { [string]$c.displayFormat } else { $null }); styleId = (Style-IdOf $c.styleRole)
+                    lookupRegistryDefId = $lookup; lookupFilter = $null; unitId = (UnitId $c.unit); widthPx = $(if ($c.widthPx) { [int]$c.widthPx } else { $null })
                     isMonthColumn = $isMonth; monthNumber = $(if ($isMonth) { [int]$c.month } else { $null })
                 }
                 if ($c.header_hint) { }

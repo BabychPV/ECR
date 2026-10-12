@@ -50,6 +50,87 @@ def split_enru(v):
     return t, ''
 
 
+
+# ---------- стилі за ролями Excel (L1, .sync-local/reports/CELL-STYLE-PLAN-2026-10-12.md) ----------
+# Кольори беруться ЛИШЕ з xlsm (styles.xml: заливка xf комірки шапки/даних колонки), нічого не вигадано.
+# Роль колонки = найчастіший xf її рядків даних; приймається, лише якщо охоплює >= STYLE_MIN_SHARE рядків
+# (інакше колонка в Excel неоднорідна, і єдиний стиль колонки в ECR збрехав би - «не доведено», стиль не ставиться).
+STYLE_MIN_SHARE = 0.8
+DATA_ROLE_BY_FILL = {'CCFFCC': 'AUTO', 'FFFFFF': 'INPUT', 'FFFF00': 'SERVICE', 'FFFF99': 'TAG'}
+HEADER_ROLE_BY_FILL = {'CCFFCC': 'HEADER', 'FFCC99': 'HEADER_MONTH'}
+FONT_ROLE = {'0000FF': 'BLUE', 'FF0000': 'RED'}   # синій - розрахункові комірки; червоний - перевірки
+HALIGN = {'left': 0, 'center': 1, 'right': 2, 'justify': 3}
+VALIGN = {'top': 0, 'center': 1, 'bottom': 2}
+STYLE_DEFS = {}
+
+
+def argb_int(rgb):
+    v = 0xFF000000 | int(rgb, 16)
+    return v - (1 << 32) if v >= (1 << 31) else v
+
+
+def _style_code(kind, fill, font, bold, halign=None, valign=None, wrap=False):
+    if kind == 'header':
+        role = HEADER_ROLE_BY_FILL.get(fill) or ('FILL_' + fill if fill else None)
+    else:
+        role = DATA_ROLE_BY_FILL.get(fill) or ('FILL_' + fill if fill else None)
+        if role is None and font == '0000FF':
+            role, font = 'CALC', None
+    if role is None and not (font or bold):
+        return None
+    parts = ['LAND', 'HDR' if kind == 'header' and role and not role.startswith('HEADER') else None, role or 'TEXT']
+    if font and font in FONT_ROLE:
+        parts.append(FONT_ROLE[font])
+    if bold:
+        parts.append('BOLD')
+    code = '_'.join(p for p in parts if p)
+    if code not in STYLE_DEFS:
+        STYLE_DEFS[code] = {'code': code, 'role': role or 'TEXT', 'backgroundHex': ('#' + fill) if fill else None,
+                            'backgroundArgb': argb_int(fill) if fill else None,
+                            'foregroundHex': ('#' + font) if font in FONT_ROLE else None,
+                            'foregroundArgb': argb_int(font) if font in FONT_ROLE else None,
+                            'isBold': bool(bold), 'isItalic': False,
+                            'horizontalAlign': None, 'verticalAlign': None, 'wrapText': False, 'columns': 0, 'headers': 0, 'tables': 0, '_al': collections.Counter()}
+    if kind == 'header':
+        STYLE_DEFS[code]['_al'][(HALIGN.get(halign), VALIGN.get(valign), bool(wrap))] += 1
+    return code
+
+
+def _norm_font(color):
+    # лише кольори ролей плану (синій - розрахунок, червоний - перевірка); решта кольорів тексту не переноситься
+    return color if color in FONT_ROLE else None
+
+
+def header_style_code(c):
+    h = c.get('hdrStyle')
+    if not h or (not h.get('fill') and not h.get('bold')):
+        return None
+    return _style_code('header', h.get('fill'), _norm_font(h.get('fontColor')), h.get('bold'), h.get('halign'), h.get('valign'), h.get('wrap'))
+
+
+def style_attrs(c, dtype, hidden):
+    """Ролі стилю, ширина й формат числа колонки за xlsm; порожній словник, якщо в Excel нічого не доведено."""
+    out = {}
+    d = c.get('dataStyle')
+    if d and d.get('share', 0) >= STYLE_MIN_SHARE:
+        code = _style_code('data', d.get('fill'), _norm_font(d.get('fontColor')), d.get('bold'))
+        if code:
+            out['styleRole'] = code
+            STYLE_DEFS[code]['columns'] += 1
+        nf = d.get('numFmt')
+        if nf and dtype in ('Decimal', 'Int') and nf not in ('@', 'General') and not nf.startswith('builtin:') and len(nf) <= 50:
+            out['displayFormat'] = nf
+    hc = header_style_code(c)
+    if hc:
+        out['headerStyleRole'] = hc
+        STYLE_DEFS[hc]['headers'] += 1
+    w = c.get('xlWidth')
+    if w and not hidden:
+        # OOXML <col width> уже включає 5 px відступу: px = width * MDW (7 для Calibri 11); ColumnDef: 40..800 px
+        out['widthPx'] = max(40, min(800, int(round(w * 7))))
+    return out
+
+
 # ---------- одиниці ----------
 UNIT_MAP = {'t': 't', 'h': 'h', 'd': 'day', 'Sm3': 'Sm3', 'm3': 'm3', 'kg': 'kg', 'g/s': 'g_per_s', 'kg/h': 'kg_per_h', 't/h': 't_per_h',
             'mg/l': 'mg_per_l', 'kW': None, 'rpm': None, 'l/h': None, 'pcs': 'one'}
@@ -638,7 +719,14 @@ for sh in X['sheets']:
                 col['precision'] = 28; col['scale'] = 12
             if c.get('validation') and any(x['allowBlank'] in ('0', 0, False) for x in c['validation']):
                 col['required'] = False  # allowBlank=0 у шаблоні лише підказка, обов'язковість не примушується
+            col.update(style_attrs(c, dtype, col.get('hidden')))
             t_out['columns'].append(col)
+        hdr_roles = collections.Counter(x['headerStyleRole'] for x in t_out['columns']
+                                        if x.get('headerStyleRole') and not x.get('month') and not x.get('hidden'))
+        if not hdr_roles:
+            hdr_roles = collections.Counter(x['headerStyleRole'] for x in t_out['columns'] if x.get('headerStyleRole'))
+        if hdr_roles:
+            t_out['headerStyleRole'] = hdr_roles.most_common(1)[0][0]
         # ---- розрахункові таблиці: «Ref»-колонки, мостові формули, виходи методологій
         if is_calc and tcode in CALC:
             if tcode == 'T4_01':
@@ -987,6 +1075,62 @@ out['prodMapping'] = {'formatVersion': 1, 'source': 'LAND-PROD-SAMPLE-2026-10-12
 
 out['conditionalFormats'] = []  # ECR підтримує лише числові пороги (eq/ne/gt/...); Excel-правила за текстом «Removed» не переносяться
 out['conditionalFormatsNotTransferred'] = cfs
+
+# ---- стилі за ролями (ключ `styles`) і умовне форматування cellIs з прив'язкою до рядків/колонок ECR
+# `conditionalFormats` лишається порожнім: правило ECR діє на колонку з цим кодом у ВСІХ таблицях версії й на всі її рядки, а правила
+# Excel (баланс <>0 / =0, статус Removed) стоять на конкретних рядках - перенесення на колонку пофарбувало б усі комірки колонки.
+# Тому вони лежать окремо (`conditionalFormatsRowScoped`) і застосовуються, коли сервер вміє scope = row (L6 плану).
+from openpyxl.utils import range_boundaries as _rb
+
+
+def _cf_scoped():
+    res = []
+    for sh in out['sheets']:
+        xs = next((x for x in X['sheets'] if x['name'] == sh['excelName']), None)
+        if xs is None:
+            continue
+        for cf in xs.get('cellIsFormats', []):
+            op = {'equal': 'eq', 'notEqual': 'ne', 'greaterThan': 'gt', 'lessThan': 'lt', 'greaterThanOrEqual': 'ge', 'lessThanOrEqual': 'le'}.get(cf['op'])
+            val = (cf['f'][0] if cf['f'] else '')
+            text = val.startswith('"')
+            if op is None or (not cf['fill'] and not cf['font']):
+                continue
+            val = val.strip('"')
+            for part in (cf['sqref'] or '').split():
+                try:
+                    c1, r1, c2, r2 = _rb(part)
+                except Exception:
+                    continue
+                for t in sh['tables']:
+                    ex = t['excel']
+                    if r2 < ex['firstDataRow'] or r1 > ex['lastDataRow']:
+                        continue
+                    cols = [c['code'] for c in t['columns'] if c.get('excel') and c1 <= column_index_from_string(c['excel']) <= c2]
+                    if not cols:
+                        continue
+                    keys = [r['key'] for r in t['rows'] if r1 <= r.get('excelRow', 0) <= r2]
+                    if t['rowMode'] == 'Fixed' and not keys:
+                        continue
+                    res.append({'sheet': sh['code'], 'table': t['code'], 'excelRange': part, 'columns': cols, 'rowKeys': keys if t['rowMode'] == 'Fixed' else None,
+                                'excelRows': [max(r1, ex['firstDataRow']), min(r2, ex['lastDataRow'])], 'operator': op, 'value': val,
+                                'valueKind': 'text' if text else 'number', 'backgroundHex': ('#' + cf['fill']) if cf['fill'] else None,
+                                'foregroundHex': ('#' + cf['font']) if cf['font'] else None, 'isBold': bool(cf['bold'])})
+    return res
+
+
+for _s in out['sheets']:
+    for _t in _s['tables']:
+        if _t.get('headerStyleRole'):
+            STYLE_DEFS[_t['headerStyleRole']]['tables'] += 1
+for _d in STYLE_DEFS.values():
+    # вирівнювання/перенос шапки - найчастіше серед шапок цієї ролі (рахується з xlsm, не припускається)
+    if _d['_al']:
+        (_d['horizontalAlign'], _d['verticalAlign'], _d['wrapText']), _n = _d['_al'].most_common(1)[0]
+    del _d['_al']
+out['styles'] = [STYLE_DEFS[k] for k in sorted(STYLE_DEFS)]
+out['conditionalFormatsRowScoped'] = _cf_scoped()
+print('styles:', len(out['styles']), [(s['code'], s['columns'], s['headers'], s['tables']) for s in out['styles']])
+print('cf row-scoped:', len(out['conditionalFormatsRowScoped']))
 out['registries'] = list(registries.values())
 out['stats'] = {'excelSheets': len(X['sheets']), 'reportSheets': len(out['sheets']), 'tables': stat_tables, 'columns': stat_cols,
                 'registries': len(registries), 'registryEntries': sum(len(r['entries']) for r in registries.values())}

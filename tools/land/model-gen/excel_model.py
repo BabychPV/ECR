@@ -20,6 +20,45 @@ def one(v):
 
 
 sheetsByName = {s['name']: s for s in d['sheets']}
+XFS = d.get('styles', {}).get('xfs', [])
+XF_KEYS = ('fill', 'pattern', 'fontColor', 'bold', 'italic', 'numFmt', 'wrap', 'halign', 'valign', 'locked')
+
+
+def xf_of(idx):
+    x = XFS[idx] if 0 <= idx < len(XFS) else None
+    return {k: x[k] for k in XF_KEYS} if x else None
+
+
+def col_attr(s, c, key):
+    """Атрибут <col> (width/style), що охоплює колонку c; None - немає явного запису."""
+    for cd in s['cols']:
+        if cd['min'] <= c <= cd['max']:
+            return cd.get(key)
+    return None
+
+
+def style_info(s, rows_range, c, header_row, mm):
+    """Стиль колонки в Excel: комірка шапки + найчастіший xf даних (частка й кількість рядків) + ширина в символах."""
+    if not XFS:
+        return {}
+    cs = s.get('cellStyle', {})
+    L = get_column_letter(c)
+    col_default = col_attr(s, c, 'style')
+    col_default = int(col_default) if col_default else 0
+    src = mm.get((header_row, c), (header_row, c))
+    hdr = cs.get('%s%d' % (get_column_letter(src[1]), src[0]), 0)
+    cnt = collections.Counter()
+    for r in rows_range:
+        cnt[cs.get('%s%d' % (L, r), col_default)] += 1
+    out = {'hdrStyle': xf_of(hdr)}
+    if cnt:
+        xi, n = cnt.most_common(1)[0]
+        out['dataStyle'] = dict(xf_of(xi), share=round(n / sum(cnt.values()), 3), rows=sum(cnt.values()))
+    w = col_attr(s, c, 'width')
+    if w:
+        out['xlWidth'] = float(w)
+    return out
+
 names = {n['name']: n['text'] for n in d['names'] if n['localSheetId'] is None and n['text']}
 
 
@@ -366,6 +405,7 @@ def build_table(s, rows, b, mm):
                         ent['dictKey'] = register_dict(nm, rg, vals)
                 ents.append(ent)
             col['validation'] = ents
+        col.update(style_info(s, data_rows, c, en, mm))
         cols.append(col)
     # групові заголовки (merged верхні рядки) як 'headerGroups'
     groups = []
@@ -437,6 +477,18 @@ for idx, s in enumerate(d['sheets'], 1):
         for r in cf['rules']:
             cfs.append({'sqref': cf['sqref'], 'type': r['type'], 'op': r['op'], 'f': r['f'][:2]})
     sh['conditionalFormats'] = cfs[:400]
+    # cellIs-правила з кольорами dxf (усі, без обрізання до 400): основа для row-scoped умовного форматування
+    DX = d.get('styles', {}).get('dxfs', [])
+    cis = []
+    for cf in s['condFmt']:
+        for r in cf['rules']:
+            if r['type'] == 'cellIs' and r.get('dxfId') is not None and int(r['dxfId']) < len(DX):
+                dx = DX[int(r['dxfId'])]
+                # у dxf із solid-заливкою колір заливки лежить у bgColor (особливість Excel); без заливки pattern None/none
+                fill = (dx['bg'] or dx['fg']) if dx['pattern'] in (None, 'solid') else None
+                cis.append({'sqref': cf['sqref'], 'op': r['op'], 'f': r['f'][:2], 'fill': fill, 'font': dx['fontColor'], 'bold': dx['bold'],
+                            'pattern': dx['pattern'], 'priority': r.get('priority')})
+    sh['cellIsFormats'] = cis
     model['sheets'].append(sh)
 
 model['dictionaries'] = dictionaries
