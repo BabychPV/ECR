@@ -6,9 +6,9 @@ import { describe, expect, it } from 'vitest';
  * `U-06`: підпис над деревом аркушів існує В КАТАЛОЗІ й каже, що рахується.
  *
  * ⛔ Навіщо окремий набір поруч із `sheet-fill-summary.test.tsx`. Той
- * доводить, що компонент ПРОСИТЬ у каталогу ключ `document.tablesFilled` із
+ * доводить, що компонент ПРОСИТЬ у каталогу ключ `document.tablesFilledInDocument` із
  * двома числами, — і лишився б зеленим, якби ключа в `09-seed.sql` не було
- * взагалі: у продукті на екрані стояло б `⟦document.tablesFilled⟧`, тобто
+ * взагалі: у продукті на екрані стояло б `⟦document.tablesFilledInDocument⟧`, тобто
  * рівно те, чим і виправдовували відсутність підпису до цього коміту. Тому
  * друге твердження перевіряється по САМОМУ сіду.
  *
@@ -39,18 +39,18 @@ function seedMergeBlock(): string {
   return seed.slice(start, end);
 }
 
-/** Значення ключа `document.tablesFilled` для `en` у блоці MERGE. */
-function tablesFilledText(): string {
+/** Значення ключа `document.tablesFilledInDocument` для `en` у блоці MERGE. */
+function tablesFilledInDocumentText(): string {
   const row = /\(N'document\.tablesFilledInDocument',\s*N'en',\s*N'([^']*)'/.exec(seedMergeBlock());
 
-  expect(row, "09-seed.sql: у MERGE немає ключа document.tablesFilled (en)").not.toBeNull();
+  expect(row, "09-seed.sql: у MERGE немає ключа document.tablesFilledInDocument (en)").not.toBeNull();
 
   return row?.[1] ?? '';
 }
 
 describe('U-06 · підпис заповненості в каталозі', () => {
-  it('ключ document.tablesFilled є в сіді й несе обидва параметри', () => {
-    const text = tablesFilledText();
+  it('ключ document.tablesFilledInDocument є в сіді й несе обидва параметри', () => {
+    const text = tablesFilledInDocumentText();
 
     // ⛔ Без обох підстановок підпис показував би одне число з двох — тобто
     // або «скільки», або «зі скількох», і жодне з них само по собі не
@@ -60,7 +60,7 @@ describe('U-06 · підпис заповненості в каталозі', ()
   });
 
   it('текст називає САМЕ те, що рахується: таблиці, заповнені повністю', () => {
-    const text = tablesFilledText().toLowerCase();
+    const text = tablesFilledInDocumentText().toLowerCase();
 
     // ⛔ «Tables» — бо рахуються таблиці, а не комірки й не аркуші.
     expect(text).toContain('tables');
