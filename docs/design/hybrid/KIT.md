@@ -423,6 +423,7 @@ E.tasks.open()
 Сторінка: `page` (+`page-fill`, `narrow`) · `split` > `side` | `main` | `aside` · `pane-h` · `editor-head` > `eh-title` | `eh-ctx` > `eh-actions` · `section` · `tabs`
 Дрібне: `chip` (моно-мітка: код, адреса комірки) · `count` (+`bad` `warn` `run`) · `badge` (лише через StatusBadge) · `dot` (+`filled` `partial` `empty` `error` `submitted` `draft` `returned`) · `spin` · `mini-empty` · `conseq` · `sumline` · `was` · `pick`
 Сітка даних (прев'ю шаблону тощо): `grid-wrap` > `table.grid`; рядковий заголовок `th.rh`; комірка `td.c` + `is-calc` `is-locked` `is-dirty` `is-rounded` `is-error` `is-warn` `sel` `active`. Таблиця в діалозі: `div.table-wrap > table.data` (колонки чисел — `class="num"`).
+Колір комірки користувачем (заливка/текст, Excel-стиль): клас `has-fill`/`has-fg` + змінні `--cf`, `--cf-on`, `--cf-fg-l`, `--cf-fg-d` на `td`; палітра `.cf-palette` в `E.Popover`, контекстне меню — `E.openMenu`; специфікація, шари й контракт — `GRID-STYLE-SPEC.md`.
 
 ---
 

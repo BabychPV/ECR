@@ -80,6 +80,22 @@ document.write('<script src="edit-assignments/kit-ext.js"><\/script><script src=
     '.doc-insp .cell-legend div{display:flex;align-items:center;gap:var(--s2);font-size:var(--fs-xs);color:var(--muted)}',
     '.doc-drop{display:grid;justify-items:center;gap:var(--s2);padding:var(--s5);border:1px dashed var(--border-strong);border-radius:var(--r2);background:var(--sunken);text-align:center}',
     '.doc-drop svg{color:var(--muted)}',
+    /* ---- заливка і колір тексту комірки (як в Excel; GRID-STYLE-SPEC.md §4) ---- */
+    '.c.has-fill:not(.is-error):not(.is-warn){background-color:var(--cf);color:var(--cf-on)}',
+    '.c.has-fill.sel:not(.is-error):not(.is-warn){background-image:linear-gradient(color-mix(in srgb,var(--accent) 26%,transparent),color-mix(in srgb,var(--accent) 26%,transparent))}',
+    '.c.has-fg:not(.has-fill):not(.is-error){color:var(--cf-fg-l)}',
+    '@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .c.has-fg:not(.has-fill):not(.is-error){color:var(--cf-fg-d)}}',
+    ':root[data-theme="dark"] .c.has-fg:not(.has-fill):not(.is-error){color:var(--cf-fg-d)}',
+    '.c.has-fill.is-locked{background-image:repeating-linear-gradient(135deg,color-mix(in srgb,var(--cf-on) 14%,transparent) 0 1.5px,transparent 1.5px 7px)}',
+    '.cf-split{display:inline-flex}.cf-split .icon-btn:first-child{border-top-right-radius:0;border-bottom-right-radius:0}.cf-split .icon-btn+.icon-btn{width:16px;border-top-left-radius:0;border-bottom-left-radius:0;margin-left:-1px}',
+    '.cf-btn{position:relative}.cf-btn .cf-bar{position:absolute;left:7px;right:7px;bottom:4px;height:3px;border-radius:1px;background:var(--cf-bar,var(--border-strong))}',
+    '.cf-palette{display:grid;gap:var(--s2);width:236px}.cf-palette h4{font:500 var(--fs-xs)/1 var(--sans);color:var(--muted);margin:var(--s1) 0 0}',
+    '.cf-row{display:grid;grid-template-columns:repeat(10,20px);gap:2px}',
+    '.cf-sw{width:20px;height:20px;border-radius:3px;border:1px solid var(--border-strong);padding:0;background:var(--sw);cursor:pointer}',
+    '.cf-sw:hover{outline:2px solid var(--accent);outline-offset:1px}.cf-sw:focus-visible{outline:2px solid var(--focus);outline-offset:1px}',
+    '.cf-sw[aria-pressed="true"]{box-shadow:inset 0 0 0 2px var(--surface),0 0 0 2px var(--accent)}',
+    '.cf-none{display:flex;align-items:center;gap:var(--s2);width:100%}.cf-none i{width:16px;height:16px;border:1px solid var(--border-strong);border-radius:3px;background:linear-gradient(135deg,transparent calc(50% - 1px),var(--danger) calc(50% - 1px) calc(50% + 1px),transparent calc(50% + 1px))}',
+    '.cf-custom{display:flex;align-items:center;gap:var(--s2);font-size:var(--fs-sm)}.cf-custom input{width:28px;height:24px;padding:0;border:1px solid var(--border-strong);border-radius:3px;background:none}',
     '@media (max-width:640px){.doc-work .tablebar .meta,.doc-work .selstats .opt,.doc-work .fbar-col,.doc-work .issues-btn span{display:none}.doc-work .fbar-addr{width:80px}}'
   ].join('\n'));
 
@@ -120,6 +136,7 @@ document.write('<script src="edit-assignments/kit-ext.js"><\/script><script src=
       if (t === 36) put(10, 1, 731);
     } else if (S.docId === MAIN && s === 0) {
       if (t === 0) { put(3, 2, -12.5); put(19, 1, 744); X.over[11] = 1; X.lockedRows[8] = 'Locked: source out of service in September 2026'; put(21, 3, null); put(24, 2, null);
+        [[1, 2, '#ffff99'], [1, 3, '#ffff99'], [6, 4, '#ffc000'], [7, 4, '#ffc000'], [12, 5, '#92d050']].forEach(function (f) { X.cells[f[0]][f[1]].fill = f[2]; }); X.cells[9][3].fg = '#c00000'; X.cells[9][4].fg = '#0070c0';
         DEMO_DIRTY.forEach(function (d, i) { var cl = X.cells[d[0]][d[1]]; if (cl.v == null) cl.v = +(40 + i * 17.25).toFixed(4); cl.rounded = false; cl.dirty = true; cl.orig = +(cl.v * 0.92).toFixed(4); }); }
       if (t === 9) { put(5, 4, null); X.cells[5][4].req = true; }
       if (t === 36) { put(2, 2, -3.2); put(10, 1, 731); put(16, 3, null); X.cells[16][3].req = true; }
@@ -156,7 +173,7 @@ document.write('<script src="edit-assignments/kit-ext.js"><\/script><script src=
   function canEdit(r, c) { return !lockText(r, c); }
 
   /* ================= grid ================= */
-  function cellCls(r, c) { var cl = T.cells[r][c], k = 'c', col = T.cols[c][3], is = T.issues[r + ':' + c]; if (col === 'calc') k += ' is-calc'; else if (col === 'locked' || T.lockedRows[r] || (E.ea && E.ea.lockText(S.docId, S.period))) k += ' is-locked'; if (cl.dirty) k += ' is-dirty'; if (cl.rounded) k += ' is-rounded'; if (is) k += is.sev === 'error' ? ' is-error' : ' is-warn'; return k; }
+  function cellCls(r, c) { var cl = T.cells[r][c], k = 'c', col = T.cols[c][3], is = T.issues[r + ':' + c]; if (col === 'calc') k += ' is-calc'; else if (col === 'locked' || T.lockedRows[r] || (E.ea && E.ea.lockText(S.docId, S.period))) k += ' is-locked'; if (cl.fill) k += ' has-fill'; if (cl.fg) k += ' has-fg'; if (cl.dirty) k += ' is-dirty'; if (cl.rounded) k += ' is-rounded'; if (is) k += is.sev === 'error' ? ' is-error' : ' is-warn'; return k; }
   function cellTip(r, c) { var cl = T.cells[r][c], p = [], is = T.issues[r + ':' + c], lt = lockText(r, c); if (is) p.push(is.msg); if (lt) p.push(lt); if (cl.dirty) p.push('Unsaved change'); if (cl.rounded) p.push('Shown rounded to 4 decimals'); return p.join(' · '); }
   function cellHtml(r, c) { var cl = T.cells[r][c], s = fmt(cl.v); return cl.rounded ? '<span class="v">' + s + '</span>' : s; }
   function renderGrid() {
@@ -165,7 +182,7 @@ document.write('<script src="edit-assignments/kit-ext.js"><\/script><script src=
     gridEl.innerHTML = html + '</tr></thead><tbody id="doc-grid-body"></tbody><tfoot id="doc-grid-foot"></tfoot></table>'; gridEl.scrollTop = 0; gridEl.scrollLeft = 0; renderBody();
   }
   function renderBody() {
-    var html = ''; T.rows.forEach(function (name, r) { html += '<tr><th class="rh" scope="row" data-hr="' + r + '" title="' + esc(name) + '"><span class="cc">' + (r + 1) + '</span>' + esc(name) + '</th>'; for (var c = 0; c < 12; c++) { var tip = cellTip(r, c); html += '<td class="' + cellCls(r, c) + '" data-r="' + r + '" data-c="' + c + '"' + (tip ? ' title="' + esc(tip) + '"' : '') + '>' + cellHtml(r, c) + '</td>'; } html += '</tr>'; });
+    var html = ''; T.rows.forEach(function (name, r) { html += '<tr><th class="rh" scope="row" data-hr="' + r + '" title="' + esc(name) + '"><span class="cc">' + (r + 1) + '</span>' + esc(name) + '</th>'; for (var c = 0; c < 12; c++) { var tip = cellTip(r, c); html += '<td class="' + cellCls(r, c) + '" data-r="' + r + '" data-c="' + c + '"' + cellFillAttr(r, c) + (tip ? ' title="' + esc(tip) + '"' : '') + '>' + cellHtml(r, c) + '</td>'; } html += '</tr>'; });
     q('#doc-grid-body').innerHTML = html; var f = '<tr><th class="rh" scope="row">Σ Total · ' + T.rows.length + ' rows</th>';
     for (var c = 0; c < 12; c++) { var s = 0, any = false; T.cells.forEach(function (row) { if (row[c].v != null) { s += row[c].v; any = true; } }); f += '<td>' + (any ? fmt(s) : '') + '</td>'; }
     q('#doc-grid-foot').innerHTML = f + '</tr>'; tdMap = []; qa('#doc-grid-body tr').forEach(function (tr, r) { tdMap[r] = Array.prototype.slice.call(tr.querySelectorAll('td')); }); editing = null; paint(true);
@@ -175,7 +192,7 @@ document.write('<script src="edit-assignments/kit-ext.js"><\/script><script src=
     Array.prototype.forEach.call(gridEl.querySelectorAll('.sel,.active,.hl'), function (n) { n.classList.remove('sel', 'active', 'hl'); }); var g = range(), multi = g.r0 !== g.r1 || g.c0 !== g.c1;
     if (multi) for (var r = g.r0; r <= g.r1; r++) for (var c = g.c0; c <= g.c1; c++) tdMap[r][c].classList.add('sel');
     var td = tdMap[S.act.r][S.act.c]; td.classList.add('active'); var hc = gridEl.querySelector('[data-hc="' + S.act.c + '"]'), hr = gridEl.querySelector('[data-hr="' + S.act.r + '"]'); if (hc) hc.classList.add('hl'); if (hr) hr.classList.add('hl');
-    if (!noReveal) reveal(td); updateFbar(); updateStats(); if (S.inspOpen && S.inspTab !== 'issues') renderInspector();
+    if (!noReveal) reveal(td); updateFbar(); updateStats(); updateColorBtns(); if (S.inspOpen && S.inspTab !== 'issues') renderInspector();
   }
   function reveal(td) { var w = gridEl, hh = w.querySelector('thead').offsetHeight, fh = w.querySelector('tfoot').offsetHeight, fw = w.querySelector('thead .rh').offsetWidth, t = td.offsetTop, l = td.offsetLeft;
     if (t - hh < w.scrollTop) w.scrollTop = t - hh; else if (t + td.offsetHeight > w.scrollTop + w.clientHeight - fh) w.scrollTop = t + td.offsetHeight - w.clientHeight + fh;
@@ -192,11 +209,62 @@ document.write('<script src="edit-assignments/kit-ext.js"><\/script><script src=
 
   /* ---------- editing, undo, clipboard ---------- */
   function parseNum(s) { s = String(s).trim().replace(/[\s  ]/g, '').replace('−', '-').replace(',', '.'); if (s === '') return null; var n = Number(s); return isFinite(n) ? +n.toFixed(7) : undefined; }
-  function snap(cl) { return { v: cl.v, dirty: cl.dirty, orig: cl.orig, rounded: cl.rounded }; }
+  function snap(cl) { return { v: cl.v, dirty: cl.dirty, orig: cl.orig, rounded: cl.rounded, fill: cl.fill, fg: cl.fg }; }
+  /* ---------- заливка / колір тексту (GRID-STYLE-SPEC.md §4) ----------
+     Модель комірки: cl.fill / cl.fg — '#rrggbb' або undefined («без заливки» / «авто»). Зберігається з документом,
+     входить в Undo, право — те саме, що на редагування аркуша (readOnlyReason), а НЕ побічне блокування окремої комірки:
+     як в Excel, форматувати можна й розрахункову. Помилка/попередження/блокування малюються ПОВЕРХ заливки. */
+  var LIGHT_SURFACE = '#FFFFFF', DARK_SURFACE = '#191C27', TEXT_DARK = '#1B1E2B', TEXT_LIGHT = '#FFFFFF';
+  function lum(hex) { var n = parseInt(hex.slice(1), 16), a = [n >> 16, (n >> 8) & 255, n & 255].map(function (v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2]; }
+  function contrast(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  function bestOn(bg) { var d = contrast(TEXT_DARK, bg), l = contrast(TEXT_LIGHT, bg); if (Math.max(d, l) >= 4.5) return d >= l ? TEXT_DARK : TEXT_LIGHT; return '#000000'; } /* на середніх тонах (напр. FF0000) ні текст теми, ні білий не дають 4.5:1 — чорний дає завжди ≥ 4.58 */
+  function readable(fg, bg) { return fg && contrast(fg, bg) >= 4.5 ? fg : null; }
+  function cellFillAttr(r, c) {
+    var cl = T.cells[r][c]; if (!cl.fill && !cl.fg) return ''; var st = [];
+    if (cl.fill) { st.push('--cf:' + cl.fill, '--cf-on:' + (readable(cl.fg, cl.fill) || bestOn(cl.fill))); }
+    if (cl.fg) { st.push('--cf-fg-l:' + (readable(cl.fg, LIGHT_SURFACE) || 'var(--text)'), '--cf-fg-d:' + (readable(cl.fg, DARK_SURFACE) || 'var(--text)')); }
+    return ' style="' + st.join(';') + '"';
+  }
+  var recent = { fill: [], fg: [] }, lastPick = { fill: '#FFFF00', fg: '#C00000' };
+  function selectedCells() { var g = range(), l = []; for (var r = g.r0; r <= g.r1; r++) for (var c = g.c0; c <= g.c1; c++) l.push({ r: r, c: c }); return l; }
+  function applyColor(kind, hex) {
+    var ro = readOnlyReason(); if (ro) { E.Toast(ro); return 0; }
+    var batch = []; selectedCells().forEach(function (p) { var cl = T.cells[p.r][p.c]; if ((cl[kind] || null) === (hex ? hex.toLowerCase() : null)) return; var prev = snap(cl); cl[kind] = hex ? hex.toLowerCase() : undefined; batch.push({ r: p.r, c: p.c, prev: prev, next: snap(cl) }); });
+    if (hex) { lastPick[kind] = hex.toUpperCase(); recent[kind] = [hex.toUpperCase()].concat(recent[kind].filter(function (x) { return x !== hex.toUpperCase(); })).slice(0, 10); }
+    updateColorBtns(); if (!batch.length) return 0;
+    T.undo.push(batch); T.redo = []; renderBody(); q('#doc-undo').disabled = !T.undo.length; q('#doc-redo').disabled = !T.redo.length; scheduleAutosave();
+    E.Toast(hex ? (kind === 'fill' ? 'Fill ' : 'Text colour ') + hex.toUpperCase() + ' · ' + plural(batch.length, 'cell', 'cells') : (kind === 'fill' ? 'Fill removed' : 'Text colour set to automatic') + ' · ' + plural(batch.length, 'cell', 'cells')); return batch.length;
+  }
+  function tint(hex, t) { var n = parseInt(hex.slice(1), 16), tg = t > 0 ? 255 : 0, a = Math.abs(t); function ch(sh) { return Math.round(((n >> sh) & 255) * (1 - a) + tg * a).toString(16).padStart(2, '0'); } return '#' + ch(16) + ch(8) + ch(0); }
+  var THEME_BASE = ['#FFFFFF', '#000000', '#E7E6E6', '#44546A', '#4472C4', '#ED7D31', '#A5A5A5', '#FFC000', '#5B9BD5', '#70AD47'], STD = ['#C00000', '#FF0000', '#FFC000', '#FFFF00', '#92D050', '#00B050', '#00B0F0', '#0070C0', '#002060', '#7030A0'];
+  function colorPalette(pop, kind, done) {
+    var cur = (T.cells[S.act.r][S.act.c][kind] || '').toUpperCase();
+    function sw(hex) { var b = h('button', { class: 'cf-sw', type: 'button', 'data-hex': hex.toLowerCase(), style: '--sw:' + hex, 'aria-label': hex.toUpperCase(), title: hex.toUpperCase(), 'aria-pressed': String(cur === hex.toUpperCase()) }); b.addEventListener('click', function () { done(); applyColor(kind, hex); }); return b; }
+    function row(list) { return h('div', { class: 'cf-row' }, list.map(sw)); }
+    var box = h('div', { class: 'cf-palette', 'data-testid': 'fill-palette' });
+    box.appendChild(h('h4', 'Theme colours')); [0, 0.8, 0.6, 0.4, -0.25, -0.5].forEach(function (t) { box.appendChild(row(THEME_BASE.map(function (x) { return t ? tint(x, t) : x; }))); });
+    box.appendChild(h('h4', 'Standard colours')); box.appendChild(row(STD));
+    if (recent[kind].length) { box.appendChild(h('h4', 'Recent')); box.appendChild(row(recent[kind])); }
+    var none = h('button', { class: 'btn cf-none', type: 'button', id: 'doc-' + kind + '-none' }, h('i'), kind === 'fill' ? 'No fill' : 'Automatic'); none.addEventListener('click', function () { done(); applyColor(kind, null); }); box.appendChild(none);
+    var inp = h('input', { type: 'color', id: 'doc-' + kind + '-custom', value: (cur || lastPick[kind]).toLowerCase(), 'aria-label': 'Custom colour' }); inp.addEventListener('change', function () { done(); applyColor(kind, inp.value); });
+    box.appendChild(h('label', { class: 'cf-custom' }, inp, 'More colours…')); pop.appendChild(box);
+  }
+  function openColor(anchor, kind) { var rec = E.Popover(anchor, { title: kind === 'fill' ? 'Fill colour' : 'Text colour', align: 'left', content: function (p) { colorPalette(p, kind, function () { rec.close(true); }); } }); return rec; }
+  function updateColorBtns() { var ro = !!readOnlyReason(), t = ro ? 'Not available: ' + readOnlyReason() : null;
+    ['fill', 'fg'].forEach(function (k) { var b = q('#doc-' + k + '-apply'), m = q('#doc-' + k + '-more'); if (!b) return; b.disabled = m.disabled = ro; b.style.setProperty('--cf-bar', lastPick[k]); var base = k === 'fill' ? 'Fill colour' : 'Text colour'; b.title = t || base + ' ' + lastPick[k] + ' — apply to selection'; b.setAttribute('aria-label', base + ' ' + lastPick[k]); m.title = t || base + ' — choose…'; }); }
+  function cellMenu(e) {
+    var td = e.target.closest('td.c'); if (!td) return; e.preventDefault(); var r = +td.dataset.r, c = +td.dataset.c, g = range();
+    if (r < g.r0 || r > g.r1 || c < g.c0 || c > g.c1) { S.act = { r: r, c: c }; S.anc = { r: r, c: c }; paint(true); }
+    var ro = !!readOnlyReason(), a = h('div', { style: 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;width:1px;height:1px', 'aria-hidden': 'true' }); document.body.appendChild(a);
+    var has = selectedCells().some(function (p) { return T.cells[p.r][p.c].fill; }), hasFg = selectedCells().some(function (p) { return T.cells[p.r][p.c].fg; });
+    var rec = E.openMenu(a, [{ heading: 'Cell format' }, { label: 'Fill colour…', icon: 'grid', disabled: ro, id: 'doc-cm-fill', onClick: function () { setTimeout(function () { openColor(a, 'fill'); }, 0); } }, { label: 'Text colour…', icon: 'pencil', disabled: ro, id: 'doc-cm-fg', onClick: function () { setTimeout(function () { openColor(a, 'fg'); }, 0); } },
+      { label: 'No fill', icon: 'x', disabled: ro || !has, id: 'doc-cm-nofill', onClick: function () { applyColor('fill', null); } }, { label: 'Automatic text colour', icon: 'undo', disabled: ro || !hasFg, id: 'doc-cm-nofg', onClick: function () { applyColor('fg', null); } }], { align: 'left' });
+    setTimeout(function () { a.remove(); }, 4000);
+  }
   function applyChanges(list) { var batch = []; list.forEach(function (ch) { if (!canEdit(ch.r, ch.c)) return; var cl = T.cells[ch.r][ch.c]; if (cl.v === ch.v) return; var prev = snap(cl); if (cl.orig === undefined) cl.orig = cl.v; cl.v = ch.v; cl.dirty = true; cl.rounded = ch.v != null && +ch.v.toFixed(4) !== ch.v; batch.push({ r: ch.r, c: ch.c, prev: prev, next: snap(cl) }); });
     if (!batch.length) return 0; T.undo.push(batch); T.redo = []; afterDataChange(); scheduleAutosave(); return batch.length; }
   function afterDataChange() { recalc(T); validate(T); renderBody(); renderTree(); renderCounts(); q('#doc-undo').disabled = !T.undo.length; q('#doc-redo').disabled = !T.redo.length; if (S.inspOpen) renderInspector(); }
-  function undoRedo(from, to, key) { var b = from.pop(); if (!b) return; b.forEach(function (ch) { var cl = T.cells[ch.r][ch.c], s = ch[key]; cl.v = s.v; cl.dirty = s.dirty; cl.orig = s.orig; cl.rounded = s.rounded; }); to.push(b); S.act = { r: b[0].r, c: b[0].c }; S.anc = { r: S.act.r, c: S.act.c }; afterDataChange(); scheduleAutosave(); }
+  function undoRedo(from, to, key) { var b = from.pop(); if (!b) return; b.forEach(function (ch) { var cl = T.cells[ch.r][ch.c], s = ch[key]; cl.v = s.v; cl.dirty = s.dirty; cl.orig = s.orig; cl.rounded = s.rounded; cl.fill = s.fill; cl.fg = s.fg; }); to.push(b); S.act = { r: b[0].r, c: b[0].c }; S.anc = { r: S.act.r, c: S.act.c }; afterDataChange(); scheduleAutosave(); }
   function startEdit(initial) { if (editing) return; if (!canEdit(S.act.r, S.act.c)) { E.Toast(lockText(S.act.r, S.act.c)); return; }
     var td = tdMap[S.act.r][S.act.c], cl = T.cells[S.act.r][S.act.c], inp = h('input', { class: 'cell-editor', id: 'doc-cell-editor', 'aria-label': 'Edit ' + addr(S.act.r, S.act.c), autocomplete: 'off', inputmode: 'decimal' });
     inp.value = initial != null ? initial : (cl.v == null ? '' : String(cl.v)); td.appendChild(inp); editing = { r: S.act.r, c: S.act.c, inp: inp, done: false }; inp.focus(); if (initial == null) inp.select();
@@ -308,7 +376,7 @@ document.write('<script src="edit-assignments/kit-ext.js"><\/script><script src=
       body.innerHTML = html; }
     else { var c2 = T.cols[S.act.c], tb2 = TABLES[S.s][S.t], cl2 = T.cells[S.act.r][S.act.c]; body.textContent = '';
       body.appendChild(h('div', { class: 'p-3' }, E.KeyValue([{ label: 'Cell', value: addr(S.act.r, S.act.c), mono: true }, { label: 'Row', value: T.rows[S.act.r] }, { label: 'Column', value: c2[0] + ', ' + c2[1] }, { label: 'Type', value: 'Decimal(18,4)', mono: true }, { label: 'Input', value: c2[3] === 'calc' ? 'Calculated on the server' : c2[3] === 'locked' ? 'Registry “Permit limits”' : 'Manual · paste · import' }, { label: 'Stored value', value: cl2.v == null ? null : String(cl2.v), mono: true }, { label: 'State', value: cellTip(S.act.r, S.act.c) || 'Editable' }, { label: 'Table', value: tb2.no + ' ' + tb2.name }, { label: 'Template', value: S.doc.template + ' · v' + S.doc.version, mono: true }, { label: 'Methodology', value: 'Order № 221-Ө, rev. 2025' }])));
-      body.appendChild(E.Collapsible({ id: 'doc-legend', title: 'Cell markers', summary: '5 states, two carriers each', content: h('div', { class: 'cell-legend', html: '<div><span class="sw c is-dirty">1.25</span>Unsaved change — corner triangle</div><div><span class="sw c is-calc">ƒ 4.50</span>Calculated — tinted, ƒ in header</div><div><span class="sw c is-error" style="padding-left:18px">−2.0</span>Error — frame + marker</div><div><span class="sw c is-locked">3.75</span>Locked — hatch under text + lock</div><div><span class="sw c is-rounded"><span class="v">0.12</span></span>Rounded — dashed underline</div>' }) })); }
+      body.appendChild(E.Collapsible({ id: 'doc-legend', title: 'Cell markers', summary: '5 states + user fill', content: h('div', { class: 'cell-legend', html: '<div><span class="sw c is-dirty">1.25</span>Unsaved change — corner triangle</div><div><span class="sw c is-calc">ƒ 4.50</span>Calculated — tinted, ƒ in header</div><div><span class="sw c is-error" style="padding-left:18px">−2.0</span>Error — frame + marker</div><div><span class="sw c is-locked">3.75</span>Locked — hatch under text + lock</div><div><span class="sw c is-rounded"><span class="v">0.12</span></span>Rounded — dashed underline</div><div><span class="sw c has-fill" style="--cf:#ffff99;--cf-on:#1B1E2B">8.00</span>Fill — user colour, yields to error and lock</div>' }) })); }
   }
   function renderCounts() { var c = counts(), b = q('#doc-issues-btn'), lk = lockedSheet(S.s); b.className = 'issues-btn' + (lk ? '' : c.errors ? ' bad' : c.warnings ? ' warn' : ''); b.hidden = lk && !c.warnings; b.setAttribute('aria-pressed', String(S.inspOpen && S.inspTab === 'issues')); b.innerHTML = ic(c.all ? 'alert' : 'checkCircle') + '<span>' + (lk ? plural(c.warnings, 'warning', 'warnings') : c.all ? plural(c.all, 'issue', 'issues') : 'No issues') + '</span>'; b.title = plural(c.errors, 'error', 'errors') + ', ' + plural(c.warnings, 'warning', 'warnings') + ' on this sheet — open the list';
     q('#doc-history-btn').setAttribute('aria-pressed', String(S.inspOpen && S.inspTab === 'history')); renderProgress(); }
@@ -414,11 +482,12 @@ document.write('<script src="edit-assignments/kit-ext.js"><\/script><script src=
       '<div id="doc-result"></div><div class="split">' +
       '<aside class="side doc-nav" id="doc-nav" aria-label="Table navigator"><div class="doc-progress" id="doc-progress"></div><div class="nav-tools"><div class="with-icon">' + ic('search', 14) + '<input class="input" id="doc-nav-search" type="search" placeholder="Filter tables" aria-label="Filter tables of this sheet"></div><button class="icon-btn" type="button" id="doc-nav-errors" aria-pressed="false" title="Show only tables with errors" aria-label="Show only tables with errors">' + ic('alert') + '</button></div><div class="tree" id="doc-tree"></div></aside>' +
       '<div class="main doc-work" id="doc-work"><div id="doc-banner"></div><div id="doc-ea-bar"></div><div class="tablebar"><button class="icon-btn" type="button" id="doc-nav-toggle" aria-pressed="true" title="Table navigator" aria-label="Toggle table navigator">' + ic('panelL') + '</button><span class="vsep"></span><h2 id="doc-table-title"></h2><span class="meta" id="doc-table-meta"></span><span class="sp"></span>' +
-      '<button class="icon-btn" type="button" id="doc-undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>' + ic('undo') + '</button><button class="icon-btn" type="button" id="doc-redo" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>' + ic('redo') + '</button><span class="vsep"></span><button class="issues-btn" type="button" id="doc-issues-btn" aria-pressed="false"></button><button class="icon-btn" type="button" id="doc-history-btn" aria-pressed="false" title="History of the selected cell" aria-label="History of the selected cell">' + ic('history') + '</button></div>' +
+      '<button class="icon-btn" type="button" id="doc-undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>' + ic('undo') + '</button><button class="icon-btn" type="button" id="doc-redo" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>' + ic('redo') + '</button><span class="vsep"></span><span class="cf-split" role="group" aria-label="Cell colours"><button class="icon-btn cf-btn" type="button" id="doc-fill-apply" aria-label="Fill colour">' + ic('grid') + '<span class="cf-bar"></span></button><button class="icon-btn" type="button" id="doc-fill-more" aria-haspopup="dialog" aria-expanded="false" aria-label="Choose fill colour">' + ic('chevD', 12) + '</button></span><span class="cf-split" role="group" aria-label="Text colour"><button class="icon-btn cf-btn" type="button" id="doc-fg-apply" aria-label="Text colour">' + ic('pencil') + '<span class="cf-bar"></span></button><button class="icon-btn" type="button" id="doc-fg-more" aria-haspopup="dialog" aria-expanded="false" aria-label="Choose text colour">' + ic('chevD', 12) + '</button></span><span class="vsep"></span><button class="issues-btn" type="button" id="doc-issues-btn" aria-pressed="false"></button><button class="icon-btn" type="button" id="doc-history-btn" aria-pressed="false" title="History of the selected cell" aria-label="History of the selected cell">' + ic('history') + '</button></div>' +
       '<div class="fbar" aria-label="Formula bar"><div class="fbar-addr" id="doc-fbar-addr">R1 · C1</div><div class="fbar-fx" aria-hidden="true">fx</div><div class="fbar-val" id="doc-fbar-val"></div><div class="fbar-col" id="doc-fbar-col"></div></div>' +
       '<div class="grid-wrap" id="doc-grid" tabindex="0" role="grid" aria-label="Table data. Arrow keys move, Enter edits, Ctrl+V pastes from Excel."></div><div class="statusbar"><div class="sheet-tabs" id="doc-sheet-tabs" role="tablist" aria-label="Sheets"></div><div class="selstats" id="doc-selstats"></div></div></div>' +
       '<aside class="aside doc-insp" id="doc-insp" aria-label="Inspector" hidden><div class="pane-h"><h2>Inspector <span class="chip" id="doc-insp-addr">R1 · C1</span></h2><button class="icon-btn" type="button" id="doc-insp-close" aria-label="Close inspector" title="Close inspector">' + ic('x') + '</button></div><div class="tabs inset" role="tablist" aria-label="Inspector sections"><button class="tab" type="button" role="tab" id="doc-insp-tab-issues">Issues<span class="count bad" id="doc-insp-count">0</span></button><button class="tab" type="button" role="tab" id="doc-insp-tab-history">History</button><button class="tab" type="button" role="tab" id="doc-insp-tab-info">Info</button></div><div class="insp-body" id="doc-insp-body" role="tabpanel"></div></aside></div>';
-    gridEl = q('#doc-grid'); bindGrid();
+    gridEl = q('#doc-grid'); bindGrid(); gridEl.addEventListener('contextmenu', cellMenu);
+    ['fill', 'fg'].forEach(function (k) { q('#doc-' + k + '-apply').addEventListener('click', function () { applyColor(k, lastPick[k]); }); q('#doc-' + k + '-more').addEventListener('click', function (e) { e.stopPropagation(); var b = this; if (b.getAttribute('aria-expanded') === 'true') { E.closeFloats && E.closeFloats(); return; } openColor(b, k); }); }); updateColorBtns();
     periodPicker = E.PeriodPicker({ id: 'doc-period', value: S.period, onChange: function (p) { S.period = p; showResult(null); renderDoc(); } }); q('#doc-period-slot').appendChild(periodPicker);
     q('#doc-nav').hidden = !S.navOpen; q('#doc-nav-toggle').setAttribute('aria-pressed', String(S.navOpen)); q('#doc-insp').hidden = !S.inspOpen;
     q('#doc-nav-search').value = S.navQ; q('#doc-nav-errors').setAttribute('aria-pressed', String(S.navErr));
