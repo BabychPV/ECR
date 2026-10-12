@@ -87,4 +87,37 @@ public sealed class PatchCellStylesRequestTests
 
         Assert.Equal("err.ECR-CELL-4224.emptyChange", KeyOf(ex));
     }
+
+    // CI e2e-stand 38283603905: після «items необов'язкове» запит без items і scope (чужа форма `{cells}` з правильним
+    // periodKey) проходив як 200 `appliedCells: 0`. Тепер - ТА САМА відмова emptyChange, що й для комірки без змін.
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void Запит_без_items_і_без_scope_відхиляється_emptyChange(bool itemsNull, bool reset)
+    {
+        var request = new PatchCellStylesRequest(202610, itemsNull ? null : [], reset, null);
+
+        var ex = Assert.Throws<BusinessRuleException>(() => request.EnsureValid());
+
+        Assert.Equal(ErrorCodes.CellStyleInvalid, ex.ErrorCode);
+        Assert.Equal("err.ECR-CELL-4224.emptyChange", KeyOf(ex));
+    }
+
+    [Fact]
+    public void Запит_лише_зі_scope_без_items_проходить()
+    {
+        new PatchCellStylesRequest(
+            202610,
+            null,
+            false,
+            new CellStyleScope(AllRows: true, AllColumns: true, BackgroundHex: "#FFFF00")).EnsureValid();
+
+        new PatchCellStylesRequest(
+            202610,
+            [],
+            false,
+            new CellStyleScope(RowKeys: ["r1"], AllColumns: true, Reset: true)).EnsureValid();
+    }
 }

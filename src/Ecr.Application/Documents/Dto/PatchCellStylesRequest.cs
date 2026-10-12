@@ -66,6 +66,18 @@ public sealed record PatchCellStylesRequest(
                 ("max", MaxItems.ToString(CultureInfo.InvariantCulture)));
         }
 
+        // ⛔ Запит без жодної комірки й без області - не «порожній успіх», а чужа/зіпсована форма (наприклад,
+        // `{cells: [...]}` клієнта L4 з правильним periodKey). `reset` діє лише на перелічені items, тож
+        // `{reset: true}` без items і scope так само нічого не зняв би. Той самий ключ, що й для комірки без змін.
+        if (items.Count == 0 && Scope is null)
+        {
+            throw Refusal(
+                "Запит не містить ні комірок (items), ні області (scope): застосовувати нічого.",
+                "err.ECR-CELL-4224.emptyChange",
+                ("rowKey", "—"),
+                ("columnCode", "—"));
+        }
+
         Scope?.EnsureValid();
 
         var seen = new HashSet<(string, string)>();

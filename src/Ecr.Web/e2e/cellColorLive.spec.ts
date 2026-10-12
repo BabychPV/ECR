@@ -328,6 +328,16 @@ test.describe('cellColor: колір комірки на реальному ст
       // модель проходить, а `periodKey` у чужій формі відсутній (= 0) і не збігається з періодом екземпляра:
       // `ECR-PRD-0422` / `err.ECR-PRD-0422.periodMismatch`. Обидва - 422 ДО будь-якого запису, і саме це контракт.
       expect(response.text).toMatch(/ECR-(REQ|PRD)-0422/);
+
+      // З ПРАВИЛЬНИМ periodKey чужа форма не має проходити як «порожній успіх» (регрес scope-2: 200 appliedCells 0):
+      // запит без items і без scope - 422 `ECR-CELL-4224` / `err.ECR-CELL-4224.emptyChange`.
+      const withPeriod = await patchRaw(page, slice, {
+        periodKey: slice.periodKey,
+        cells: [{ rowKey: slice.rowKey, columnCode: slice.columnCode, backgroundHex: Yellow }],
+      });
+      expect(withPeriod.status, `PATCH {periodKey, cells}: ${withPeriod.text}`).toBe(422);
+      expect(withPeriod.text).toContain('ECR-CELL-4224');
+      expect(withPeriod.text).toContain('err.ECR-CELL-4224.emptyChange');
     } finally {
       await context.close();
     }
