@@ -234,7 +234,11 @@ test.describe('cellColor: колір комірки на реальному ст
       const fill = page.getByTestId('cell-color-fill').first();
       await expectMenuDisabled(fill, 'кнопка «Заливка» має бути вимкнена на поданому аркуші');
       // `DocumentGrid`: `readOnly` -> підказка `grid.cellColor.readOnly`, а не «виділіть комірки».
-      await expect(fill).toHaveAttribute('title', /locked for editing|закрит|закрыт/i);
+      // `disabledHint` = deny-hint сервера («The document is submitted: it must be returned for rework first.»).
+      await expect(fill).toHaveAttribute(
+        'title',
+        /locked for editing|submitted|returned for rework|закрит|закрыт|подан|возвращ/i,
+      );
 
       const status = await patchStyles(page, slice, { backgroundHex: Yellow });
       expect(status.status, 'сервер мав відмовити на поданому аркуші').toBe(403);
@@ -477,18 +481,22 @@ function watchSlice(page: Page): () => Promise<SliceRef> {
         /^\/api\/v1\/documents\/\d+\/tables\/\d+$/.test(new URL(response.url()).pathname),
       { timeout: 90_000 },
     )
+    // Тіло читається ОДРАЗУ: після довгого очікування `response.json()` падає «No resource with given identifier found».
+    .then(
+      async (response) =>
+        (await response.json()) as {
+          tableInstanceId?: number;
+          periodKey?: number;
+          columns?: { code: string }[];
+          rows?: { rowKey: string }[];
+        },
+    )
     .catch(() => null);
 
   return async () => {
-    const response = await pending;
-    if (response === null) throw new Error('зріз таблиці не завантажився (GET …/tables/{id})');
+    const body = await pending;
+    if (body === null) throw new Error('зріз таблиці не завантажився (GET …/tables/{id})');
 
-    const body = (await response.json()) as {
-      tableInstanceId?: number;
-      periodKey?: number;
-      columns?: { code: string }[];
-      rows?: { rowKey: string }[];
-    };
     const column = body.columns?.[0]?.code;
     const row = body.rows?.[0]?.rowKey;
     if (body.tableInstanceId === undefined || body.periodKey === undefined || column === undefined || row === undefined) {
