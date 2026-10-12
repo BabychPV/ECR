@@ -3079,6 +3079,30 @@ public interface IConditionalFormatStore
     public Task ReplaceAsync(int templateVersionId, IReadOnlyList<ConditionalFormatRule> rules, CancellationToken ct);
 }
 ```
+
+#### `ICellStyleStore`
+
+Користувацьке оформлення комірок документа (`doc.CellStyle`, CELL-STYLE L3b, 12.10): заливка,
+колір тексту, жирність — розріджена таблиця ПОЗА `doc.CellValue` (не дані: версія рядка, значення
+й журнал значень не змінюються). Ключ — `(PeriodKey, TableRowId, ColumnDefId)` без зовнішніх
+ключів (архівація звільняє партиції `doc.TableRow` через `TRUNCATE`); цілісність тримають явні дії
+видалення документа, переносу версії й синхронізації подій. Зріз віддає оформлення лише видимих
+колонок (`TableSliceDto.CellStyles`); Excel-експорт кладе його між стилем колонки й умовним
+форматуванням.
+
+```csharp
+public interface ICellStyleStore
+{
+    public Task<IReadOnlyList<CellStyle>> ReadInstanceAsync(long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
+    public Task<IReadOnlyDictionary<long, IReadOnlyList<CellStyle>>> ReadInstancesAsync(
+        IReadOnlyCollection<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct);
+    public Task<IReadOnlyList<CellStyle>> LoadForUpdateAsync(
+        PeriodKey periodKey, IReadOnlyCollection<long> rowIds, CancellationToken ct);
+    public void Add(CellStyle style);
+    public void Remove(CellStyle style);
+}
+```
+
 #### `ITableFillStore`
 
 Заповненість таблиць документа за період (`BE-10`): скільки рядків

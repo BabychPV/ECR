@@ -2433,6 +2433,48 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                             }));
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.CellStyle", b =>
+                {
+                    b.Property<int>("PeriodKeyValue")
+                        .HasColumnType("int")
+                        .HasColumnName("PeriodKey");
+
+                    b.Property<long>("TableRowId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("TableRowId");
+
+                    b.Property<int>("ColumnDefId")
+                        .HasColumnType("int")
+                        .HasColumnName("ColumnDefId");
+
+                    b.Property<string>("BackgroundHex")
+                        .HasColumnType("char(7)");
+
+                    b.Property<string>("ForegroundHex")
+                        .HasColumnType("char(7)");
+
+                    b.Property<bool>("IsBold")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_CellStyle_Bold");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("UpdatedByUserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("PeriodKeyValue", "TableRowId", "ColumnDefId")
+                        .HasName("PK_CellStyle");
+
+                    b.ToTable("CellStyle", "doc", t =>
+                        {
+                            t.HasCheckConstraint("CK_CellStyle_Background", "BackgroundHex IS NULL OR BackgroundHex LIKE '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'");
+
+                            t.HasCheckConstraint("CK_CellStyle_Foreground", "ForegroundHex IS NULL OR ForegroundHex LIKE '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'");
+                        });
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.CellValue", b =>
                 {
                     b.Property<int>("PeriodKeyValue")

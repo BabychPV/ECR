@@ -126,13 +126,17 @@ public sealed class CellsController(
         request.EnsureValid();
 
         // Чужий/невидимий екземпляр і невидимий документ — ОДНА відповідь (EA6-D1).
-        await Ecr.Application.Documents.DocumentVisibility
+        var instance = await Ecr.Application.Documents.DocumentVisibility
             .ResolveInDocumentAsync(rows, documentId, tableInstanceId, ct)
             .ConfigureAwait(false);
 
-        return await cellStylesHandler
-            .HandleAsync(documentId, tableInstanceId, request, ct)
+        var response = await cellStylesHandler
+            .HandleAsync(documentId, instance, request, ct)
             .ConfigureAwait(false);
+
+        Observability.EcrMetrics.ReportCount(HttpContext, response.AppliedCells + response.ResetCells);
+
+        return response;
     }
 
     /// <summary>Додає рядок у динамічну таблицю.</summary>

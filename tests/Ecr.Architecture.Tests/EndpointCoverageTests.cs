@@ -623,6 +623,8 @@ public sealed partial class EndpointCoverageTests
         new("features/audit/auditLabels.ts", "key", 1, "features/audit/auditLabels.ts",
             ["audit.eventLabel.AccessDenied",
              "audit.eventLabel.AuditStructureExported",
+             "audit.eventLabel.CellStyleReset",
+             "audit.eventLabel.CellStyleSet",
              "audit.eventLabel.ConsistencyCheckRunRequested",
              "audit.eventLabel.DataSourceConnectionTested",
              "audit.eventLabel.DataSourceDeleted",

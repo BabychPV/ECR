@@ -81,6 +81,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<TableInstance> TableInstances => Set<TableInstance>();
     public DbSet<TableRow> TableRows => Set<TableRow>();
     public DbSet<CellValue> CellValues => Set<CellValue>();
+
+    /// <summary>Користувацька заливка/колір тексту/жирність комірок (CELL-STYLE L3b).</summary>
+    public DbSet<CellStyle> CellStyles => Set<CellStyle>();
     public DbSet<DocumentHeaderValue> DocumentHeaderValues => Set<DocumentHeaderValue>();
 
     /// <summary>Передачі зрізу документа виконавцям (EA-1): зріз, ексклюзивність, стан валідації.</summary>

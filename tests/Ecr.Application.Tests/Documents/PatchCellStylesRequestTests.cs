@@ -87,15 +87,4 @@ public sealed class PatchCellStylesRequestTests
 
         Assert.Equal("err.ECR-CELL-4224.emptyChange", KeyOf(ex));
     }
-
-    [Fact]
-    public async Task Каркас_обробника_відмовляє_чесно_а_не_мовчки_200()
-    {
-        var handler = new PatchCellStylesHandler();
-
-        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => handler.HandleAsync(
-            1, 2, Req(false, new CellStyleChange("r1", "c1", "#FFFF00")), CancellationToken.None));
-
-        Assert.Equal("err.ECR-CELL-4224.notAvailable", KeyOf(ex));
-    }
 }

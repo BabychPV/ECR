@@ -151,6 +151,12 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
             .Where(c => rows.Any(r => r.Id == c.TableRowId && r.PeriodKeyValue == c.PeriodKeyValue))
             .ExecuteDeleteAsync(ct).ConfigureAwait(false);
 
+        // CELL-STYLE L3b: користувацьке оформлення комірок (doc.CellStyle) — без зовнішнього ключа на рядок
+        // (архівація), тож видаляється явно, ДО рядків: після їх видалення по ключу рядка його вже не знайти.
+        await db.CellStyles
+            .Where(s => rows.Any(r => r.Id == s.TableRowId && r.PeriodKeyValue == s.PeriodKeyValue))
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
         // ⛔ L10-06: значення PI за вікном рядка ключуються екземпляром таблиці
         // без зовнішнього ключа — після видалення екземплярів їх уже не знайти.
         await db.RowWindowValues

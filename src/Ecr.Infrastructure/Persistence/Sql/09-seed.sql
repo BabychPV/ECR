@@ -7981,7 +7981,8 @@ USING (VALUES
     ,(N'err.ECR-CELL-4224.duplicateCell', N'en', N'The same cell is listed twice: row {rowKey}, column {columnCode}.', 1)
     ,(N'err.ECR-CELL-4224.invalidColor', N'en', N'The color must be written as #rrggbb (row {rowKey}, column {columnCode}).', 1)
     ,(N'err.ECR-CELL-4224.emptyChange', N'en', N'Nothing to apply for row {rowKey}, column {columnCode}: set a fill, a text color or bold, or reset the formatting.', 1)
-    ,(N'err.ECR-CELL-4224.notAvailable', N'en', N'Saving cell formatting is not available yet on this server.', 1)
+    ,(N'audit.eventLabel.CellStyleSet', N'en', N'Cell formatting set', 1)
+    ,(N'audit.eventLabel.CellStyleReset', N'en', N'Cell formatting reset', 1)
     -- COLL:cellstyle ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -19989,8 +19990,10 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-CELL-4224.invalidColor', N'kz', N'Түс #rrggbb түрінде жазылуы керек (жол {rowKey}, баған {columnCode}).'),
     (N'err.ECR-CELL-4224.emptyChange', N'ru', N'Для строки {rowKey}, столбца {columnCode} нечего применять: задайте заливку, цвет текста или жирность либо сбросьте оформление.'),
     (N'err.ECR-CELL-4224.emptyChange', N'kz', N'Жол {rowKey}, баған {columnCode} үшін қолданатын ештеңе жоқ: толтыруды, мәтін түсін немесе қалың қаріпті беріңіз не форматтауды тастаңыз.'),
-    (N'err.ECR-CELL-4224.notAvailable', N'ru', N'Сохранение оформления ячеек на этом сервере пока недоступно.'),
-    (N'err.ECR-CELL-4224.notAvailable', N'kz', N'Ұяшықтарды форматтауды сақтау бұл серверде әзірге қолжетімсіз.')
+    (N'audit.eventLabel.CellStyleSet', N'ru', N'Оформление ячеек задано'),
+    (N'audit.eventLabel.CellStyleSet', N'kz', N'Ұяшық форматтауы белгіленді'),
+    (N'audit.eventLabel.CellStyleReset', N'ru', N'Оформление ячеек сброшено'),
+    (N'audit.eventLabel.CellStyleReset', N'kz', N'Ұяшық форматтауы тасталды')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

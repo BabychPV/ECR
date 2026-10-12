@@ -46,6 +46,10 @@ namespace Ecr.Application.Documents;
 /// Рушій виразів — для <c>ColumnDto.Expression</c> (UI-25, B4): розбір формули колонки й збір її
 /// посилань. Необов'язковий лише заради тестів; без нього вираз не віддається ніколи.
 /// </param>
+/// <param name="cellStyles">
+/// Користувацьке оформлення комірок (CELL-STYLE L3b); один запит на зріз. Необов'язковий лише заради
+/// тестів, що конструюють обробник вручну.
+/// </param>
 public sealed class GetTableSliceHandler(
     IRowStore rowStore,
     ICellStore cellStore,
@@ -60,7 +64,8 @@ public sealed class GetTableSliceHandler(
     IConditionalFormatStore? conditionalFormats = null,
     IAuditReader? audit = null,
     IFormulaEngine? formulaEngine = null,
-    IColumnPathMapper? columnMapper = null)
+    IColumnPathMapper? columnMapper = null,
+    ICellStyleStore? cellStyles = null)
 {
     private readonly MethodologyRequiredColumnsCache _required = new(memory);
 
@@ -353,8 +358,53 @@ public sealed class GetTableSliceHandler(
         var outOfWindow = await OutOfWindowCellsAsync(
             documentId, instance.PeriodKey, keyById, columnCodeById, readable, ct).ConfigureAwait(false);
 
+        var userStyles = await UserCellStylesAsync(tableInstanceId, instance.PeriodKey, keyById, columns, ct)
+            .ConfigureAwait(false);
+
         return new TableSliceDto(
-            tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations, formats, outOfWindow);
+            tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations, formats, outOfWindow,
+            userStyles);
+    }
+
+    /// <summary>
+    /// Користувацьке оформлення комірок зрізу (заливка, колір тексту, жирність): ключ
+    /// <c>"{rowKey}:{columnCode}"</c>. ОДИН запит на зріз.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ S6, нерозкриття: лише колонки, що потрапили у відповідь (<paramref name="columns"/> —
+    /// без схованих і заборонених читачеві), — оформлення схованої колонки не віддається, як і її значення.
+    /// Рядок оформлення без живого рядка таблиці (сирота) сюди не доходить за побудовою запиту.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<string, Templates.CellFormatDto>> UserCellStylesAsync(
+        long tableInstanceId,
+        int periodKey,
+        Dictionary<long, string> keyById,
+        List<ColumnDto> columns,
+        CancellationToken ct)
+    {
+        var result = new Dictionary<string, Templates.CellFormatDto>(StringComparer.Ordinal);
+
+        if (cellStyles is null)
+        {
+            return result;
+        }
+
+        var visibleCodeById = columns.ToDictionary(c => c.Id, c => c.Code);
+        var all = await cellStyles
+            .ReadInstanceAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(periodKey), ct)
+            .ConfigureAwait(false);
+
+        foreach (var style in all)
+        {
+            if (keyById.TryGetValue(style.TableRowId, out var rowKey)
+                && visibleCodeById.TryGetValue(style.ColumnDefId, out var code))
+            {
+                result[$"{rowKey}:{code}"] = new Templates.CellFormatDto(
+                    style.BackgroundHex, style.ForegroundHex, style.IsBold);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
