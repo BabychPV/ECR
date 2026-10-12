@@ -959,9 +959,10 @@ public sealed class ExcelImporter(
             {
                 if (decision.ViaAssignment
                     || (!decision.IsAllowed
-                        && decision.Reason is Ecr.Domain.Enums.EditDenyReason.AssignmentFilled
-                            or Ecr.Domain.Enums.EditDenyReason.AssignmentValidated
-                            or Ecr.Domain.Enums.EditDenyReason.AssignmentExpired))
+                        && (decision.Reason is Ecr.Domain.Enums.EditDenyReason.AssignmentFilled
+                                or Ecr.Domain.Enums.EditDenyReason.AssignmentValidated
+                                or Ecr.Domain.Enums.EditDenyReason.AssignmentExpired
+                            || IsNotAssignedToYou(decision.Reason))))
                 {
                     return true;
                 }
@@ -970,6 +971,21 @@ public sealed class ExcelImporter(
 
         return false;
     }
+
+    /// <summary>Числове значення <c>EditDenyReason.NotAssignedToYou</c> (RC20 D-3).</summary>
+    private const byte NotAssignedToYouValue = 20;
+
+    /// <summary>
+    /// «Ця частина вам не передана» (RC20 D-3) — відмова, яку служба доступу повертає лише виконавцеві
+    /// передачі цього документа, тож вона сама визначає його, без жодної дозволеної через передачу комірки.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ За числом і ім'ям, а не за константою переліку: значення додає лінія RC20 (D-2/D-3), і ця правка не
+    /// мусить чекати її зведення. Після влиття лінії обидві гілки збігаються; число 20 — з її <c>Enums.cs</c>.
+    /// </remarks>
+    private static bool IsNotAssignedToYou(Ecr.Domain.Enums.EditDenyReason reason)
+        => (byte)reason == NotAssignedToYouValue
+           || string.Equals(reason.ToString(), "NotAssignedToYou", StringComparison.Ordinal);
 
     /// <summary>
     /// ⛔ RC21 (EA-6, рішення людини 12.10, квіз 5 №13): перегляд виконавця з передачею місяця, у якому є хоч

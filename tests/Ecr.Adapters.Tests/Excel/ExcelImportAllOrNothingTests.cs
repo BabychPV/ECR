@@ -208,6 +208,61 @@ public sealed class ExcelImportAllOrNothingTests
             await importer.CountPendingChangesAsync(DocumentId, preview.PreviewToken, null, CancellationToken.None));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "EA-6")]
+    public async Task Змішаний_користувач_виконавець_і_власні_права_через_роль_весь_файл_відхиляється_за_D390()
+    {
+        // ⚠ Одна людина в одному документі: R2.A їй дозволено ролью (звичайний Allow), R1.B — передачею,
+        // R1.A — заборонено. Поведінка зафіксована: наявність хоч однієї комірки через передачу вмикає
+        // «все або нічого» для ВСЬОГО файлу, зокрема й для змін, що дозволені її власною роллю.
+        using var workbook = await ExportAsync();
+        workbook.Worksheet("Sheet").Cell(3, 1).Value = 10; // R1.A — заборонено
+        workbook.Worksheet("Sheet").Cell(4, 1).Value = 6; // R2.A — дозволено роллю
+
+        var (importer, preview) = await ImportAsync(
+            workbook,
+            new Dictionary<CellAddress, EditDecision>
+            {
+                [new CellAddress(Period, 1001, InputColumnId)] = EditDecision.Deny(EditDenyReason.InsufficientGrantLevel),
+                [new CellAddress(Period, 1002, InputColumnId)] = EditDecision.Allow(),
+                [new CellAddress(Period, 1001, SecondColumnId)] = EditDecision.AllowViaAssignment(),
+            });
+
+        Assert.Equal("R2", Assert.Single(preview.Changes).RowKey);
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => importer.ApplyAsync(DocumentId, preview.PreviewToken, null, CancellationToken.None));
+        Assert.Equal("1", error.Details!["deniedCount"]);
+        Assert.DoesNotContain(_cells.ReceivedCalls(), c => c.GetMethodInfo().Name == "ApplyBatchAsync");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "EA-6")]
+    public async Task Відмова_NotAssignedToYou_сама_визначає_виконавця_без_комірок_через_передачу()
+    {
+        // RC20 D-3: «ця частина вам не передана» — відмова лише виконавця передачі. Жодної комірки
+        // ViaAssignment/Заповнено немає: без явного розпізнавання план лишився б на частковому шляху.
+        // Мутація: прибрати `IsNotAssignedToYou` з `IsUnderAssignment` — червоний.
+        const byte NotAssignedToYou = 20;
+        using var workbook = await ExportAsync();
+        workbook.Worksheet("Sheet").Cell(3, 1).Value = 10; // R1.A — не передано
+        workbook.Worksheet("Sheet").Cell(4, 1).Value = 6; // R2.A — дозволено роллю
+
+        var (importer, preview) = await ImportAsync(
+            workbook,
+            new Dictionary<CellAddress, EditDecision>
+            {
+                [new CellAddress(Period, 1001, InputColumnId)] = EditDecision.Deny((EditDenyReason)NotAssignedToYou),
+                [new CellAddress(Period, 1002, InputColumnId)] = EditDecision.Allow(),
+            });
+
+        Assert.True(SavedPlan().AllOrNothing);
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => importer.CountPendingChangesAsync(DocumentId, preview.PreviewToken, null, CancellationToken.None));
+    }
+
     private ImportPlan SavedPlan()
     {
         Assert.NotNull(_savedPlan);

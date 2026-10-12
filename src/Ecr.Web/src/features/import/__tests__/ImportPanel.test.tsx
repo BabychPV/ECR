@@ -430,6 +430,70 @@ describe('ImportPanel: застосування впирається в блок
   });
 });
 
+describe('ImportPanel: «все або нічого» — 403 ECR-ACCS-0403 importDeniedCells (RC21 EA-6)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('403 несе локалізований текст із кількістю заборонених комірок, а не загальну помилку', async () => {
+    const show = vi.spyOn(notifications, 'show');
+    const detail =
+      'The file was refused as a whole: it contains 2 cell(s) you are not allowed to change under your assignment. Nothing was written.';
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('/import/preview')) {
+          return new Response(
+            JSON.stringify({
+              previewToken: 'tok',
+              changes: [{ rowKey: 'R2', columnCode: 'A', oldValue: null, newValue: 6, tableCode: 'T1' }],
+              rejected: [],
+              conflicts: [],
+              overwritable: [],
+            } satisfies ImportPreview),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+
+        if (url.includes('/import/apply')) {
+          return new Response(
+            JSON.stringify({
+              type: 'https://ecr/errors/ECR-ACCS-0403',
+              title: 'Forbidden',
+              status: 403,
+              detail,
+              errorCode: 'ECR-ACCS-0403',
+              correlationId: 'corr-1',
+              messageKey: 'err.ECR-ACCS-0403.importDeniedCells',
+              deniedCount: '2',
+              shownCount: '1',
+              cells: [{ tableCode: 'T1', rowKey: 'R1', columnCode: 'A', excelCell: 'A3', messageKey: 'deny.NotAssignedToYou' }],
+            }),
+            { status: 403, headers: { 'Content-Type': 'application/problem+json' } },
+          );
+        }
+
+        throw new Error(`неочікуваний запит у тесті: ${url}`);
+      }),
+    );
+
+    await openPreview();
+    await userEvent.click(screen.getByRole('button', { name: '⟦import.apply⟧' }));
+
+    // ⛔ Мутація: `onError: showApiError` застосування замінити загальною помилкою — тут буде
+    // `⟦state.errorTitle⟧` без числа заборонених комірок.
+    await vi.waitFor(() =>
+      expect(show).toHaveBeenCalledWith(expect.objectContaining({ color: 'statusError', message: detail })),
+    );
+    expect(show).not.toHaveBeenCalledWith(expect.objectContaining({ message: '⟦state.errorTitle⟧' }));
+    expect(vi.mocked(showDone)).not.toHaveBeenCalledWith('⟦import.applied⟧');
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+});
+
 describe('ImportPanel: синхронне застосування повторює 409 sheetBeingSubmitted (Z1-02)', () => {
   const Default = [...importBusyRetry.delaysMs];
 
