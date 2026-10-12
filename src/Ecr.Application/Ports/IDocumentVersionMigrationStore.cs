@@ -20,6 +20,11 @@ public sealed record VersionMigrationScope(
 /// <param name="ColumnPath">Шлях колонки за кодами <c>SHEET.TABLE.COLUMN</c> (джерело й поле не розкриваються).</param>
 public sealed record CollectionMappingRef(int MappingId, int ColumnDefId, bool IsActive, string ColumnPath);
 
+/// <summary>Скільки проєктів і документів, крім переносимого, лишається на версії шаблону (D-1b P3).</summary>
+/// <param name="Projects">Проєктів.</param>
+/// <param name="Documents">Документів у них.</param>
+public sealed record ProjectsOnVersion(int Projects, int Documents);
+
 /// <summary>Поле мапінгу подій «атрибут → колонка» (D-1b RC20).</summary>
 /// <param name="FieldId"><c>ext.SourceEventFieldMap.Id</c>.</param>
 /// <param name="ColumnDefId">Колонка-ціль.</param>
@@ -154,6 +159,19 @@ public interface IDocumentVersionMigrationStore
     /// інших версій) не зачіпає.
     /// </remarks>
     public Task<int> RemapCollectionMappingsAsync(IReadOnlyDictionary<int, int> columnMap, CancellationToken ct);
+
+    /// <summary>
+    /// Скільки ІНШИХ проєктів (і їхніх документів) стоїть на вихідній версії шаблону (D-1b P3).
+    /// </summary>
+    /// <param name="projectId">Проєкт, що переноситься (не рахується).</param>
+    /// <param name="versionId">Вихідна версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Мапінги збору, подій і вікон глобальні (одна ціль на мапінг): після переносу вони вказують на нову
+    /// версію, і проєкти, що лишилися на старій, перестають збиратися, доки їх не перенесено. Лише кількості —
+    /// без переліку проєктів (нерозкриття).
+    /// </remarks>
+    public Task<ProjectsOnVersion> CountOtherProjectsOnVersionAsync(int projectId, int versionId, CancellationToken ct);
 
     /// <summary>
     /// Мапінги подій джерела (<c>ext.SourceEventMap</c> із полями) документів проєкту (D-1b RC20).
