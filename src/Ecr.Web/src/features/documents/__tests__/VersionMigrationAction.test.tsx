@@ -68,6 +68,8 @@ function report(overrides: Partial<VersionMigrationReport>): VersionMigrationRep
     lockedSheets: 0,
     items: [{ path: 'GEN.T1.C4', kind: 'Added', changeClass: 'Safe', values: 0 }],
     itemsTruncated: false,
+    mappingsRemapped: 0,
+    mappingsUnmapped: 0,
     ...overrides,
   };
 }
