@@ -656,6 +656,20 @@ UPDATE t
     (N'templates.searchPlaceholder', N'en', N'Template code', N'Template name or code'),
     (N'templates.searchPlaceholder', N'ru', N'Код шаблона', N'Название или код шаблона'),
     (N'templates.searchPlaceholder', N'kz', N'Үлгі коды', N'Үлгі атауы немесе коды'),
+    -- COLL:ea-i18n EA D-3/D-4: вичитка ru/kz editAssign.* (термін «валидация» скрізь; рід {slice}; kz «кезең» прибрано)
+    (N'editAssign.bar.returned', N'ru', N'{slice} возвращён владельцем: {reason}', N'{slice}: возвращено владельцем — {reason}'),
+    (N'editAssign.bar.returnedNoReason', N'ru', N'{slice} возвращён владельцем', N'{slice}: возвращено владельцем'),
+    (N'editAssign.validate', N'ru', N'Проверить', N'Валидировать'),
+    (N'editAssign.status.Filled', N'ru', N'Заполнено, ждёт проверки', N'Заполнено, ждёт валидации'),
+    (N'editAssign.status.Validated', N'ru', N'Проверено', N'Валидировано'),
+    (N'editAssign.awaiting', N'ru', N'Ожидают проверки: {count}', N'Ожидают валидации: {count}'),
+    (N'editAssign.done.validated', N'ru', N'{slice}: проверено', N'{slice}: валидировано'),
+    (N'editAssign.wizard.summary.exclusive', N'ru', N'Остальные не смогут редактировать эти ячейки, пока месяц не проверен или не забран.', N'Остальные не смогут редактировать эти ячейки, пока месяц не валидирован или не забран.'),
+    (N'editAssign.wizard.note', N'ru', N'Заметка для исполнителей (необязательно)', N'Примечание для исполнителей (необязательно)'),
+    (N'editAssign.col.person', N'ru', N'Человек', N'Пользователь'),
+    (N'editAssign.hint', N'ru', N'Передайте месяц исполнителю на заполнение, затем проверьте его.', N'Передайте месяц исполнителю на заполнение, затем валидируйте его.'),
+    (N'editAssign.returnTitle', N'kz', N'{slice} кезеңін пысықтауға қайтару', N'{slice} пысықтауға қайтару'),
+    (N'editAssign.removeTitle', N'kz', N'{slice} кезеңін орындаушылардан қайтарып алу керек пе?', N'{slice}: орындаушылардан қайтарып алу керек пе?'),
     -- COLL:an43fix D-285: загальний deny.InsufficientGrantLevel повернуто до загального формулювання (подання має власний ключ .Submit).
     (N'deny.InsufficientGrantLevel',     N'en', N'Your access level is too low for this action: ask for a higher level. To submit a sheet you need the Submit level, or the Write level together with the Submit documents right in this project.', N'Your grant level is too low for this action: ask for a higher grant level, not a new grant.'),
     (N'deny.InsufficientGrantLevel',     N'ru', N'Уровень вашего доступа недостаточен для этого действия: запросите более высокий уровень. Для подачи листа нужен уровень «Подача» либо уровень «Запись» вместе с правом «Подача документов» в этом проекте.', N'Уровень вашего доступа недостаточен для этого действия: запросите более высокий уровень доступа, а не новый доступ.'),
@@ -7768,6 +7782,7 @@ USING (VALUES
     ,(N'deny.AssignmentFilled', N'en', N'You marked this part as filled, so it is closed for you. You can edit it again only if the owner returns it for rework.', 1)
     ,(N'deny.AssignmentValidated', N'en', N'The owner validated this part, so it is closed for editing. Ask the owner to return it if a correction is needed.', 1)
     ,(N'deny.AssignmentExpired', N'en', N'The handover period for this part has expired, so it is closed for you. Ask the owner to extend or renew the handover.', 1)
+    ,(N'deny.AssignmentOtherMonth', N'en', N'This month is not assigned to you. You can edit only the months the owner handed to you; ask the owner if you need this one too.', 1)
     -- COLL:ea-b-deny ── кінець секції ──
     -- FP:fixes ── прохід «від першого обличчя» 2026-10-11 (P2/P3): тексти en; ru/kz — порцією FP:fixes нижче ──
     ,(N'documents.noProjects', N'en', N'You have no access to any project', 1)
@@ -14837,9 +14852,9 @@ SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'editAssign.bar.assigned', N'ru', N'Месяц передан вам: {slice}'),
     (N'editAssign.bar.assigned', N'kz', N'Ай сізге берілді: {slice}'),
-    (N'editAssign.bar.returned', N'ru', N'{slice} возвращён владельцем: {reason}'),
+    (N'editAssign.bar.returned', N'ru', N'{slice}: возвращено владельцем — {reason}'),
     (N'editAssign.bar.returned', N'kz', N'{slice} иесі қайтарды: {reason}'),
-    (N'editAssign.bar.returnedNoReason', N'ru', N'{slice} возвращён владельцем'),
+    (N'editAssign.bar.returnedNoReason', N'ru', N'{slice}: возвращено владельцем'),
     (N'editAssign.bar.returnedNoReason', N'kz', N'{slice} иесі қайтарды'),
     (N'editAssign.bar.filled', N'ru', N'{slice}: заполнено, ожидает валидации владельцем'),
     (N'editAssign.bar.filled', N'kz', N'{slice}: толтырылды, иесінің валидациясын күтуде'),
@@ -19232,11 +19247,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'editAssign.title', N'kz', N'Өңдеу рұқсаты'),
     (N'editAssign.close', N'ru', N'Закрыть панель доступа к редактированию'),
     (N'editAssign.close', N'kz', N'Өңдеу рұқсаты панелін жабу'),
-    (N'editAssign.hint', N'ru', N'Передайте месяц исполнителю на заполнение, затем проверьте его.'),
+    (N'editAssign.hint', N'ru', N'Передайте месяц исполнителю на заполнение, затем валидируйте его.'),
     (N'editAssign.hint', N'kz', N'Айды толтыру үшін орындаушыға беріңіз, содан кейін растаңыз.'),
     (N'editAssign.owner', N'ru', N'Владелец: {name}'),
     (N'editAssign.owner', N'kz', N'Иесі: {name}'),
-    (N'editAssign.awaiting', N'ru', N'Ожидают проверки: {count}'),
+    (N'editAssign.awaiting', N'ru', N'Ожидают валидации: {count}'),
     (N'editAssign.awaiting', N'kz', N'Растауды күтуде: {count}'),
     (N'editAssign.view', N'ru', N'Вид'),
     (N'editAssign.view', N'kz', N'Көрініс'),
@@ -19252,7 +19267,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'editAssign.col.status', N'kz', N'Күйі'),
     (N'editAssign.col.actions', N'ru', N'Действия'),
     (N'editAssign.col.actions', N'kz', N'Әрекеттер'),
-    (N'editAssign.col.person', N'ru', N'Человек'),
+    (N'editAssign.col.person', N'ru', N'Пользователь'),
     (N'editAssign.col.person', N'kz', N'Адам'),
     (N'editAssign.rowActions', N'ru', N'Действия для {slice}'),
     (N'editAssign.rowActions', N'kz', N'{slice} үшін әрекеттер'),
@@ -19262,9 +19277,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'editAssign.status.Assigned', N'kz', N'Берілді'),
     (N'editAssign.status.InProgress', N'ru', N'В работе'),
     (N'editAssign.status.InProgress', N'kz', N'Орындалуда'),
-    (N'editAssign.status.Filled', N'ru', N'Заполнено, ждёт проверки'),
+    (N'editAssign.status.Filled', N'ru', N'Заполнено, ждёт валидации'),
     (N'editAssign.status.Filled', N'kz', N'Толтырылды, растауды күтуде'),
-    (N'editAssign.status.Validated', N'ru', N'Проверено'),
+    (N'editAssign.status.Validated', N'ru', N'Валидировано'),
     (N'editAssign.status.Validated', N'kz', N'Расталды'),
     (N'editAssign.status.Returned', N'ru', N'Возвращено'),
     (N'editAssign.status.Returned', N'kz', N'Қайтарылды'),
@@ -19284,7 +19299,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'editAssign.assign', N'kz', N'Айды беру…'),
     (N'editAssign.repeatNext', N'ru', N'Повторить на следующий месяц'),
     (N'editAssign.repeatNext', N'kz', N'Келесі айға қайталау'),
-    (N'editAssign.validate', N'ru', N'Проверить'),
+    (N'editAssign.validate', N'ru', N'Валидировать'),
     (N'editAssign.validate', N'kz', N'Растау'),
     (N'editAssign.return', N'ru', N'Вернуть…'),
     (N'editAssign.return', N'kz', N'Қайтару…'),
@@ -19293,11 +19308,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'editAssign.remove', N'ru', N'Снять передачу'),
     (N'editAssign.remove', N'kz', N'Беруді алу'),
     (N'editAssign.returnTitle', N'ru', N'Вернуть {slice} на доработку'),
-    (N'editAssign.returnTitle', N'kz', N'{slice} кезеңін пысықтауға қайтару'),
+    (N'editAssign.returnTitle', N'kz', N'{slice} пысықтауға қайтару'),
     (N'editAssign.returnReason', N'ru', N'Что нужно исправить'),
     (N'editAssign.returnReason', N'kz', N'Не түзету керек'),
     (N'editAssign.removeTitle', N'ru', N'Забрать {slice} у исполнителей?'),
-    (N'editAssign.removeTitle', N'kz', N'{slice} кезеңін орындаушылардан қайтарып алу керек пе?'),
+    (N'editAssign.removeTitle', N'kz', N'{slice}: орындаушылардан қайтарып алу керек пе?'),
     (N'editAssign.removeText', N'ru', N'Исполнители больше не смогут редактировать эти ячейки. Уже введённые значения останутся в документе.'),
     (N'editAssign.removeText', N'kz', N'Орындаушылар бұл ұяшықтарды енді өңдей алмайды. Енгізілген мәндер құжатта қалады.'),
     (N'editAssign.empty', N'ru', N'Пока ничего не передано'),
@@ -19306,7 +19321,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'editAssign.emptyHint', N'kz', N'Айды толтыруға беру үшін «Айды беру…» батырмасын басыңыз.'),
     (N'editAssign.done.assigned', N'ru', N'Передано месяцев: {count}'),
     (N'editAssign.done.assigned', N'kz', N'Берілген айлар: {count}'),
-    (N'editAssign.done.validated', N'ru', N'{slice}: проверено'),
+    (N'editAssign.done.validated', N'ru', N'{slice}: валидировано'),
     (N'editAssign.done.validated', N'kz', N'{slice}: расталды'),
     (N'editAssign.done.returned', N'ru', N'{slice} возвращено на доработку'),
     (N'editAssign.done.returned', N'kz', N'{slice} пысықтауға қайтарылды'),
@@ -19346,7 +19361,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'editAssign.wizard.saveAsSet', N'kz', N'Жинақ ретінде сақтау'),
     (N'editAssign.wizard.setName', N'ru', N'Название набора'),
     (N'editAssign.wizard.setName', N'kz', N'Жинақ атауы'),
-    (N'editAssign.wizard.note', N'ru', N'Заметка для исполнителей (необязательно)'),
+    (N'editAssign.wizard.note', N'ru', N'Примечание для исполнителей (необязательно)'),
     (N'editAssign.wizard.note', N'kz', N'Орындаушыларға ескертпе (міндетті емес)'),
     (N'editAssign.wizard.noRecipients', N'ru', N'Выберите хотя бы одного исполнителя или набор.'),
     (N'editAssign.wizard.noRecipients', N'kz', N'Кемінде бір орындаушыны немесе жинақты таңдаңыз.'),
@@ -19362,7 +19377,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'editAssign.wizard.summary.sheet', N'kz', N'Тек парақ'),
     (N'editAssign.wizard.summary.fromSet', N'ru', N'Из набора «{name}»'),
     (N'editAssign.wizard.summary.fromSet', N'kz', N'«{name}» жинағынан'),
-    (N'editAssign.wizard.summary.exclusive', N'ru', N'Остальные не смогут редактировать эти ячейки, пока месяц не проверен или не забран.'),
+    (N'editAssign.wizard.summary.exclusive', N'ru', N'Остальные не смогут редактировать эти ячейки, пока месяц не валидирован или не забран.'),
     (N'editAssign.wizard.summary.exclusive', N'kz', N'Ай расталмайынша немесе қайтарып алынбайынша, басқалар бұл ұяшықтарды өңдей алмайды.'),
     (N'editAssign.wizard.summary.shared', N'ru', N'Остальные с правом редактирования по роли тоже смогут их редактировать.'),
     (N'editAssign.wizard.summary.shared', N'kz', N'Рөл бойынша өңдеу құқығы бар басқалар да оларды өңдей алады.'),
@@ -19393,7 +19408,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'deny.AssignmentValidated', N'ru', N'Владелец валидировал эту часть, поэтому она закрыта для правок. Если нужно исправление, попросите владельца вернуть её.'),
     (N'deny.AssignmentValidated', N'kz', N'Иесі бұл бөлікті растады, сондықтан ол түзетуге жабық. Түзету қажет болса, иесінен оны қайтаруды сұраңыз.'),
     (N'deny.AssignmentExpired', N'ru', N'Срок передачи этой части истёк, поэтому для вас она закрыта. Попросите владельца продлить или повторить передачу.'),
-    (N'deny.AssignmentExpired', N'kz', N'Бұл бөлікті тапсыру мерзімі аяқталды, сондықтан ол сіз үшін жабық. Иесінен тапсыруды ұзартуды немесе қайталауды сұраңыз.')
+    (N'deny.AssignmentExpired', N'kz', N'Бұл бөлікті тапсыру мерзімі аяқталды, сондықтан ол сіз үшін жабық. Иесінен тапсыруды ұзартуды немесе қайталауды сұраңыз.'),
+    (N'deny.AssignmentOtherMonth', N'ru', N'Этот месяц вам не передан. Вы можете править только месяцы, переданные вам владельцем; если нужен и этот, обратитесь к владельцу.'),
+    (N'deny.AssignmentOtherMonth', N'kz', N'Бұл ай сізге берілмеген. Тек иесі берген айларды ғана өңдей аласыз; бұл ай да қажет болса, иесіне хабарласыңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

@@ -65,3 +65,11 @@ export function editAssignmentHref(documentId: number, validate: boolean): strin
 export function pendingEditAssignmentCount(data: MyEditAssignmentsView | undefined): number {
   return (data?.assignedToMe.length ?? 0) + (data?.awaitingMyValidation.length ?? 0);
 }
+
+/**
+ * Чи має поточний користувач у цьому документі передачу МІСЯЦЯ (D-3): тоді сіра комірка з `InsufficientGrantLevel` - це
+ * комірка іншого місяця («Цей місяць вам не передано»). Передачі інших документів і не місячні зрізи не рахуються.
+ */
+export function hasMonthAssignment(view: MyEditAssignmentsView | undefined, documentId: number): boolean {
+  return (view?.assignedToMe ?? []).some((a) => a.documentId === documentId && a.slice.monthNumber != null);
+}

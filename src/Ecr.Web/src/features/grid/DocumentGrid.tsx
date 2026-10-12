@@ -138,6 +138,8 @@ import '@/shared/theme/cell-states.css';
 import './cellEditors.css';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
+import { getMyEditAssignments } from '@/features/editAssignments/api';
+import { hasMonthAssignment } from '@/features/editAssignments/model';
 
 /** Властивості grid. */
 interface DocumentGridProps {
@@ -1147,6 +1149,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [data, pending, overrides],
   );
 
+  // ✎ EA D-3: лише ЧИТАННЯ кешу «моїх передач» (його наповнює смуга виконавця тієї ж сторінки): `enabled: false` - сітка не
+  // робить власного запиту, тож тести сітки без цього ендпоінта не змінюються.
+  const myAssignments = useQuery({
+    queryKey: queryKeys.editAssignments.mine(),
+    queryFn: getMyEditAssignments,
+    enabled: false,
+  });
+  const executorHasMonthAssignment = hasMonthAssignment(myAssignments.data, documentId);
+
   const columns = useMemo(
     () =>
       data === undefined
@@ -1165,6 +1176,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             navigatedCell,
             outOfWindow,
             unlistedLabelsByRegistryId,
+            executorHasMonthAssignment,
           ),
     [
       data,
@@ -1180,6 +1192,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       navigatedCell,
       outOfWindow,
       unlistedLabelsByRegistryId,
+      executorHasMonthAssignment,
     ],
   );
 
@@ -2695,6 +2708,10 @@ export function gridColumns(
   // ✎ PS-P2: підписи закритих записів довідників (`registryId → id → підпис`);
   // лише для показу — у переліку вибору їх немає.
   unlistedLabelsByRegistryId: ReadonlyMap<number, ReadonlyMap<number, string>> = new Map(),
+
+  // ✎ EA D-3: у документа є передача МІСЯЦЯ для поточного користувача, а ця комірка - не в ній. Сервер дає для неї загальне
+  // `InsufficientGrantLevel` («рівень гранта замалий»), що виконавцеві нічого не пояснює: підказка називає причину.
+  executorHasMonthAssignment: boolean = false,
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -3005,7 +3022,9 @@ export function gridColumns(
         // Стан доступний і ТЕКСТОМ, не лише кольором/формою: причина заборони
         // чи незаповненого входу вже є на сервері — читалка має її почути.
         const hint = [
-          decision.hint,
+          executorHasMonthAssignment && decision.reason === 'InsufficientGrantLevel'
+            ? t('deny.AssignmentOtherMonth')
+            : decision.hint,
           submittedHint,
           requiredInputMessage,
           saveErrorMessage,

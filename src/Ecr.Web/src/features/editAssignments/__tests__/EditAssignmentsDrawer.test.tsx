@@ -153,18 +153,20 @@ describe('EditAssignmentsDrawer — переходи', () => {
     expect(sent.find((s) => s.method === 'DELETE')?.url).toContain('/edit-assignments/2');
   });
 
-  it('Repeat for next month копіює склад на наступний місяць; для грудня пункту немає', async () => {
+  it('Repeat for next month переносить склад на наступний місяць БЕЗ примітки власника; для грудня пункту немає', async () => {
     show({ list: { ownerDisplayName: 'O', canManage: true, assignments: [January, December] } });
 
     const jan = await rowOf('January');
     fireEvent.click(within(jan).getByRole('button', { name: '⟦editAssign.rowActions (slice=January)⟧' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: '⟦editAssign.repeatNext⟧' }));
 
-    await waitFor(() => expect(sent.some((s) => s.url.endsWith('/copy'))).toBe(true));
-    expect(sent.find((s) => s.url.endsWith('/copy'))?.body).toEqual({
-      fromSlice: slice(1),
-      toSlices: [slice(2)],
-    });
+    await waitFor(() => expect(sent.some(isUpsert)).toBe(true));
+    const body = sent.find(isUpsert)?.body as Record<string, unknown>;
+    expect(body['slice']).toEqual(slice(2));
+    expect(body['recipientUserIds']).toEqual(January.recipients.map((r) => r.userId));
+    // D-4: примітка попереднього місяця не їде на наступний (раніше `/copy` її переносив разом з назвою місяця).
+    expect(body).not.toHaveProperty('note');
+    expect(sent.some((s) => s.url.endsWith('/copy'))).toBe(false);
     cleanup();
 
     show({ list: { ownerDisplayName: 'O', canManage: true, assignments: [December] } });

@@ -13,7 +13,6 @@ import { problemText } from '@/shared/ui/problemText';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import {
-  copyEditAssignment,
   createEditorSet,
   deleteEditAssignment,
   getEditAssignments,
@@ -126,13 +125,23 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
     onSettled: refresh,
   });
 
+  // D-4: примітка власника написана для попереднього місяця (часто з його назвою) - на наступний вона не переноситься.
+  // Тому не `copy` (сервер копіює й примітку), а upsert без `note`; склад, ексклюзивність і набір - ті самі.
   const repeat = useMutation({
     meta: handled,
     mutationFn: (a: EditAssignment) => {
       const next = nextMonthSlice(a.slice);
       if (next === null) throw new Error('no next slice');
 
-      return copyEditAssignment(documentId, { fromSlice: a.slice, toSlices: [next] });
+      const existing = assignments.find((x) => sameSlice(x.slice, next));
+
+      return upsertEditAssignment(documentId, {
+        slice: next,
+        recipientUserIds: a.recipients.map((r) => r.userId),
+        isExclusive: a.isExclusive,
+        ...(a.appliedSetId == null ? {} : { appliedSetId: a.appliedSetId }),
+        ...(existing === undefined ? {} : { baseVersion: existing.version }),
+      });
     },
     onSuccess: (_, a) => done(t('editAssign.done.repeated', { month: formatMonthName((nextMonthSlice(a.slice)?.monthNumber ?? 1)) })),
     onError: showApiError,
