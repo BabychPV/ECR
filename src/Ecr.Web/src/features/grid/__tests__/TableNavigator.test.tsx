@@ -154,7 +154,7 @@ describe('TableNavigator', () => {
   it('рядок заповненості аркуша і число зауважень', () => {
     renderNavigator();
 
-    expect(screen.getByTestId('table-navigator-progress').textContent).toContain('grid.tree.tablesFilled');
+    expect(screen.getByTestId('table-navigator-progress').textContent).toContain('grid.tree.tablesFilledSheet (');
     expect(screen.getByTestId('table-navigator-progress').textContent).toContain('grid.tree.issues');
   });
 });

@@ -186,7 +186,7 @@ export function denyText(reason: string): string | null {
 
 /**
  * Причина, через яку людина не може додати рядок (D9, приймальна Land): у КОЖНІЙ
- * вхідній комірці зрізу сервер відхилив правку саме за грантом. Тоді кнопка «Add row»
+ * вхідній комірці зрізу (усі колонки × усі рядки) сервер відхилив правку саме за грантом. Тоді кнопка «Add row»
  * лише обіцяла б те, що сервер відхилить, — вона вимикається з тією самою підказкою,
  * що й сіра комірка.
  *
@@ -197,17 +197,21 @@ export function denyText(reason: string): string | null {
 export function addRowDenialOf(slice: TableSliceDto): { reason: DenyReason; hint: string } | null {
   if (slice.rows.length === 0) return null;
 
-  const column = slice.columns.find(
+  // ⚠ Сервер вирішує на рівні РЯДКА (`CanCreateRowsAsync`), а гранти бувають на колонку: достатньо
+  // одного дозволеного грантом поля будь-якої вхідної колонки, щоб кнопка лишилась активною.
+  const columns = slice.columns.filter(
     (candidate) => candidate.dataType !== 'Formula' && candidate.dataType !== 'Calculated' && !candidate.isReadOnly,
   );
-  if (column === undefined) return null;
+  if (columns.length === 0) return null;
 
   let found: DenyReason | null = null;
 
-  for (const row of slice.rows) {
-    const permission = slice.cellPermissions[cellKey(row.rowKey, column.code)];
-    if (permission !== 'NoGrant' && permission !== 'InsufficientGrantLevel') return null;
-    found ??= permission;
+  for (const column of columns) {
+    for (const row of slice.rows) {
+      const permission = slice.cellPermissions[cellKey(row.rowKey, column.code)];
+      if (permission !== 'NoGrant' && permission !== 'InsufficientGrantLevel') return null;
+      found ??= permission;
+    }
   }
 
   return found === null ? null : { reason: found, hint: deny(found).hint };

@@ -2430,6 +2430,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             }
             // ✎ D9: причина — підказкою кнопки (у вимкненої кнопки немає власного `title`-тексту).
             title={addRowDenial?.hint}
+            aria-describedby={addRowDenial === null ? undefined : 'ecr-add-row-denial'}
             data-add-row-denied={addRowDenial?.reason}
             onClick={() => {
               if (addRow.isPending) return;
@@ -2450,6 +2451,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             slice={data}
             onDeleted={() => void slice.refetch()}
           />
+        )}
+        {addRowDenial !== null && (
+          <span id="ecr-add-row-denial" hidden>
+            {addRowDenial.hint}
+          </span>
         )}
       </Group>
 

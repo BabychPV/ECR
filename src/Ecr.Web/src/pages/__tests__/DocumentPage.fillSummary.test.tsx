@@ -174,7 +174,7 @@ describe('DocumentPage: заповненість видно на сторінц�
       // — це і є вада, заради якої цей рядок змінили.
       const shown = count.textContent?.replace(/\s+/gu, ' ').trim() ?? '';
 
-      expect(shown).toContain('document.tablesFilled');
+      expect(shown).toContain('document.tablesFilledInDocument (');
       expect(shown).toContain('filled=1');
       expect(shown).toContain('total=2');
 
