@@ -760,6 +760,11 @@ for sh in X['sheets']:
             for code_, (typ, expr, unit_, hdr) in EXTRA.get(tcode, {}).items():
                 col_ = {'code': code_, 'dataType': typ, 'headerEn': hdr, 'headerRu': '', 'hidden': False, 'readOnly': typ == 'Formula', 'excel': None,
                         'month': None, 'ecrAdded': 'calculation argument (not in the Excel sheet)'}
+                if code_ == 'DaysInCalcMonth' and 'Land_Measure_OperTimeDays' in bases:
+                    # Паритет зі старою системою (12.10): аргумент 7.7 = відпрацьовані дні поточного місяця
+                    # (Land_Measure_OperTimeDays), а не календарні дні періоду; при 0 днів методологія дає 0.
+                    expr = ''.join('[Period].Sequence = %d ? [Land_Measure_OperTimeDays_M%02d] : ' % (m, m) for m in range(1, 12)) + '[Land_Measure_OperTimeDays_M12]'
+                    col_['ecrAdded'] = 'calculation argument = operating days of the current month (legacy parity)'
                 if expr:
                     col_['expression'] = expr
                 if unit_:
