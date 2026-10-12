@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EcrApiError } from '@/api/client';
-import { ConditionalFormatPanel, seedOf } from '../ConditionalFormatPanel';
+import { ConditionalFormatPanel, mergeForSave, seedOf } from '../ConditionalFormatPanel';
 import type { ConditionalFormatRuleDto, ConditionalFormatSet } from '../conditionalFormatApi';
 import { renderWithQuery } from '@/test/render';
 
@@ -116,7 +116,7 @@ describe('ConditionalFormatPanel', () => {
     const [id, rules, etag] = api.saveConditionalFormats.mock.calls[0] as [number, ConditionalFormatRuleDto[], string];
     expect(id).toBe(7);
     expect(etag).toBe('"V1"');
-    expect(rules).toEqual([foreign, { ...own, value: '200' }]);
+    expect(rules).toEqual([{ ...own, value: '200' }, foreign]);
     await waitFor(() => expect(notify.showDone).toHaveBeenCalledWith(expect.stringMatching(/conditionalFormat\.saved/)));
 
     // Збережене — нова точка відліку: зберігати знову нічого.
@@ -144,7 +144,7 @@ describe('ConditionalFormatPanel', () => {
 
     await waitFor(() => expect(api.saveConditionalFormats).toHaveBeenCalledTimes(1));
     const [, rules] = api.saveConditionalFormats.mock.calls[0] as [number, ConditionalFormatRuleDto[], string];
-    expect(rules).toEqual([foreign, { ...own, value: '200' }]);
+    expect(rules).toEqual([{ ...own, value: '200' }, foreign]);
   });
 
   it('seedOf: без versionCodes відсікання немає; з ними — сироти зникають', () => {
@@ -172,6 +172,48 @@ describe('ConditionalFormatPanel', () => {
     expect(seeded.others).toEqual([scoped]);
   });
 
+  it('seedOf (P1-1): правило «усі колонки таблиці» ("*") і правила з областю не відкидаються як сироти', () => {
+    const wide = {
+      columnCode: '*',
+      operator: 'textEq',
+      value: 'Removed',
+      backgroundHex: '#ff9900',
+      isBold: false,
+      scope: null,
+      tableCode: 'Main',
+      refColumnCode: 'Land_Status',
+    } as unknown as ConditionalFormatRuleDto;
+    const rows = {
+      ...own,
+      columnCode: 'GONE_COLUMN_ELSEWHERE',
+      scope: 'row',
+      tableCode: 'Other',
+      rowKeys: ['R1'],
+    } as unknown as ConditionalFormatRuleDto;
+    const orphan: ConditionalFormatRuleDto = { ...foreign, columnCode: 'GONE' };
+
+    const seeded = seedOf(set([own, wide, rows, orphan], '"V"'), new Set(['Q', 'N']), new Set(['Q', 'N', 'OTHER']));
+
+    expect(seeded.others).toEqual([wide, rows]);
+    expect(mergeForSave(seeded.layout, seeded.own)).toEqual([own, wide, rows]);
+  });
+
+  it('mergeForSave (P2-3): правила з областю лишаються на своїх місцях відносно власних правил колонки', () => {
+    const scopedBefore = { ...own, columnCode: 'Q', scope: 'row', tableCode: 'Main', rowKeys: ['R1'] } as unknown as ConditionalFormatRuleDto;
+    const second: ConditionalFormatRuleDto = { ...own, operator: 'lt', value: '5' };
+
+    const seeded = seedOf(set([scopedBefore, own, second], '"V"'), new Set(['Q']));
+
+    // Вихідний порядок: [область, власне 1, власне 2] — на збереженні він не змінюється.
+    expect(mergeForSave(seeded.layout, seeded.own)).toEqual([scopedBefore, own, second]);
+    // Видалили перше власне й додали нове: слоти лишаються, нове — в кінці.
+    const added = { ...seeded.own[1]!, value: '9' };
+    expect(mergeForSave(seeded.layout, [added, { ...added, value: '10' }])).toEqual([
+      scopedBefore,
+      expect.objectContaining({ value: '9' }),
+      expect.objectContaining({ value: '10' }),
+    ]);
+  });
   it('неповне правило блокує збереження й пояснює чому', async () => {
     renderPanel();
     const user = userEvent.setup();
