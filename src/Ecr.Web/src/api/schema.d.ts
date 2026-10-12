@@ -3153,6 +3153,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{documentId}/tables/{tableInstanceId}/rows/{rowKey}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * М'яко видаляє динамічний рядок таблиці (D3).
+         * @description Лише рядки, додані користувачем; лише поки аркуш у Draft/Rejected; право — те саме, що на створення рядка.
+         *     Рядка немає або його вже видалено — однакова 404 (нерозкриття).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                    tableInstanceId: number;
+                    rowKey: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeleteRowResponse"];
+                        "text/json": components["schemas"]["DeleteRowResponse"];
+                        "text/plain": components["schemas"]["DeleteRowResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}": {
         parameters: {
             query?: never;
@@ -20692,6 +20771,11 @@ export interface components {
             /** Format: int32 */
             sourceEntities: number;
             transport: components["schemas"]["ExternalTransport"];
+        };
+        /** @description Видалений рядок динамічної таблиці (D3). */
+        DeleteRowResponse: {
+            /** @description Задача перерахунку, поставлена видаленням; `null` — таблиця без колонок. */
+            recalculationJobId: null | string;
         };
         /** @description Запит на виведення версії з обігу. */
         DeprecateVersionRequest: {

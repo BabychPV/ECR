@@ -3590,6 +3590,22 @@
         ],
         "type": "object"
       },
+      "DeleteRowResponse": {
+        "description": "Видалений рядок динамічної таблиці (D3).",
+        "properties": {
+          "recalculationJobId": {
+            "description": "Задача перерахунку, поставлена видаленням; `null` — таблиця без колонок.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "recalculationJobId"
+        ],
+        "type": "object"
+      },
       "DeprecateVersionRequest": {
         "description": "Запит на виведення версії з обігу.",
         "properties": {
@@ -23579,6 +23595,127 @@
           }
         },
         "summary": "Зріз таблиці для grid.",
+        "tags": [
+          "Cells"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/tables/{tableInstanceId}/rows/{rowKey}": {
+      "delete": {
+        "description": "Лише рядки, додані користувачем; лише поки аркуш у Draft/Rejected; право — те саме, що на створення рядка.\nРядка немає або його вже видалено — однакова 404 (нерозкриття).",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tableInstanceId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rowKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteRowResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteRowResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteRowResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "М'яко видаляє динамічний рядок таблиці (D3).",
         "tags": [
           "Cells"
         ]
