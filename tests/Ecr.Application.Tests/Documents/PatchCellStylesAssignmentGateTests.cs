@@ -140,6 +140,35 @@ public sealed class PatchCellStylesAssignmentGateTests
         _styles.Received(1).Add(Arg.Any<CellStyle>());
     }
 
+    [Theory]
+    [InlineData(DocumentStatus.Submitted)]
+    [InlineData(DocumentStatus.Approved)]
+    public async Task Аркуш_поданий_між_рішенням_і_записом_відмова_без_запису_під_замком(DocumentStatus statusUnderLock)
+    {
+        // Рішення ДО транзакції — «Draft, дозволено»; під блокуванням аркуш уже поданий/затверджений.
+        _access.CanClearCellsAsync(
+                Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+            .Returns(call => new Dictionary<CellAddress, EditDecision>
+            {
+                [new CellAddress(new PeriodKey(Period), 1, ColumnId)] = EditDecision.Allow(),
+            });
+        _gate.EnterEditAsync(Document, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(statusUnderLock);
+        _assignments.ReadFactsForGateAsync(Document, UserId, Arg.Any<CancellationToken>())
+                    .Returns(new EditAssignmentGateFacts(OwnerId, []));
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Handler().HandleAsync(
+            Document,
+            new TableInstanceRef(TableInstance, Document, TableDef, 2, Period),
+            new PatchCellStylesRequest(Period, [new CellStyleChange("R1", "Volume", "#FFFF00")], false),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
+        _styles.DidNotReceive().Add(Arg.Any<CellStyle>());
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
     private static List<EditAssignmentFact> Facts(string scenario) => scenario switch
     {
         "filled" => [Fact(progress: AssigneeProgress.Filled)],
