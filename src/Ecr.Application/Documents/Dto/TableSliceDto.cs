@@ -1,4 +1,4 @@
-﻿// src/Ecr.Application/Documents/Dto/TableSliceDto.cs
+// src/Ecr.Application/Documents/Dto/TableSliceDto.cs
 using Ecr.Domain.Entities.Configuration;
 
 namespace Ecr.Application.Documents.Dto;
@@ -151,8 +151,8 @@ public sealed record CellStyleDto(
 /// </param>
 /// <param name="Style">
 /// Стиль рядка шаблону (<c>RowDef.StyleId</c> → <c>StyleDef</c>); <c>null</c> — стилю рядка немає (для
-/// динамічного рядка, якого немає в шаблоні, — завжди <c>null</c>). Шар у сітці: стиль колонки &lt; стиль
-/// рядка &lt; користувацьке оформлення &lt; умовний формат.
+/// динамічного рядка, якого немає в шаблоні, — завжди <c>null</c>). Порядок шарів у сітці: стиль колонки, стиль
+/// рядка, користувацьке оформлення, умовний формат.
 /// </param>
 public sealed record RowDto(
     string RowKey,
