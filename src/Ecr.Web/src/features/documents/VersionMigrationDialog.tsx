@@ -273,6 +273,15 @@ function MigrationReport({ report }: { readonly report: VersionMigrationReport }
         })}
       </Text>
 
+      {report.otherProjectsOnSourceVersion > 0 && (
+        <Alert color="statusWarning" data-migrate-other-projects="">
+          {t('documents.migrateOtherProjectsWarning', {
+            projects: report.otherProjectsOnSourceVersion,
+            documents: report.otherDocumentsOnSourceVersion,
+          })}
+        </Alert>
+      )}
+
       {report.canApply ? (
         <Alert color="statusSuccess" data-migrate-can-apply="">
           {t('documents.migrateCanApply')}
