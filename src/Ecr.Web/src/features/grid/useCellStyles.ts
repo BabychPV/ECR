@@ -8,6 +8,20 @@ import { notificationCloseButtonProps } from '@/shared/ui/notify';
 import { logSuppressedDetail, problemText } from '@/shared/ui/problemText';
 import { applyStylePatches, chunkPatches, isValidPatch, type CellStylePatch, type StyleArea } from './userCellStyle';
 
+function mergeResponses(a: PatchCellStylesResponse, b: PatchCellStylesResponse): PatchCellStylesResponse {
+  const reasons: Record<string, number> = { ...(a.deniedByReason ?? {}) };
+
+  for (const [reason, count] of Object.entries(b.deniedByReason ?? {})) reasons[reason] = (reasons[reason] ?? 0) + count;
+
+  return {
+    appliedCells: a.appliedCells + b.appliedCells,
+    resetCells: a.resetCells + b.resetCells,
+    deniedCells: a.deniedCells + b.deniedCells,
+    skippedCells: a.skippedCells + b.skippedCells,
+    deniedByReason: reasons,
+  };
+}
+
 /**
  * Запис користувацького кольору комірок (L4): `PATCH …/tables/{tid}/cell-styles`
  * (`PatchCellStylesRequest`: `periodKey`, `items`, `reset`).
@@ -32,30 +46,38 @@ export function useCellStyles(documentId: number, tableInstanceId: number, perio
   return useMutation({
     mutationFn: async ({
       cells,
-      area = null,
+      areas = null,
       reset = false,
     }: {
       cells: readonly CellStylePatch[];
-      area?: StyleArea | null;
+      /** Області одного `scope` кожна (≤ 50 000 комірок, `areaChunks`); `null` — йдуть `items`. */
+      areas?: readonly StyleArea[] | null;
       reset?: boolean;
     }): Promise<PatchCellStylesResponse | null> => {
-      if (area !== null) {
+      if (areas !== null) {
         const first = cells[0];
-        const body: PatchCellStylesRequest = {
-          periodKey,
-          reset: false,
-          scope: {
-            ...area,
-            reset,
-            allRows: area.allRows ?? false,
-            allColumns: area.allColumns ?? false,
-            backgroundHex: first?.backgroundHex ?? null,
-            foregroundHex: first?.foregroundHex ?? null,
-            isBold: first?.isBold ?? null,
-          },
-        };
+        let total: PatchCellStylesResponse | null = null;
 
-        return apiFetch<PatchCellStylesResponse>(path, { method: 'PATCH', body: JSON.stringify(body) });
+        for (const area of areas) {
+          const body: PatchCellStylesRequest = {
+            periodKey,
+            reset: false,
+            scope: {
+              ...area,
+              reset,
+              allRows: area.allRows ?? false,
+              allColumns: area.allColumns ?? false,
+              backgroundHex: first?.backgroundHex ?? null,
+              foregroundHex: first?.foregroundHex ?? null,
+              isBold: first?.isBold ?? null,
+            },
+          };
+          const response = await apiFetch<PatchCellStylesResponse>(path, { method: 'PATCH', body: JSON.stringify(body) });
+
+          total = total === null ? response : mergeResponses(total, response);
+        }
+
+        return total;
       }
 
       for (const chunk of chunkPatches(cells)) {

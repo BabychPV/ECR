@@ -157,12 +157,56 @@ export function withUserStyle(
 }
 
 /**
- * Причини відмови, які на колір НЕ впливають: обчислена комірка і колонка «лише
- * читання» не редагуються, але фарбуються (як в Excel — захищений аркуш з
- * дозволом форматувати). Усе інше (немає запису, заборона, подано) колір теж
- * забороняє; останнє слово — за сервером.
+ * Причини відмови, які на колір НЕ впливають (лише для старого сервера без `styleAccess`): обчислена
+ * комірка і колонка «лише читання» не редагуються, але фарбуються (як в Excel).
  */
 const StyleNeutralReasons: ReadonlySet<string> = new Set(['None', 'CalculatedCell', 'ColumnReadOnly']);
+
+/** Чи можна фарбувати комірку: за `styleAccess` сервера (одне джерело істини), інакше — за нейтральними причинами. */
+export function canColourCell(slice: TableSliceDto, rowKey: string, columnCode: string): boolean {
+  const access = slice.styleAccess;
+
+  if (access === null || access === undefined) {
+    const permission = slice.cellPermissions[cellKey(rowKey, columnCode)];
+
+    return permission === undefined || StyleNeutralReasons.has(permission);
+  }
+
+  return (
+    access.canStyle &&
+    !access.styleDeniedRowKeys.includes(rowKey) &&
+    !access.styleDeniedColumnCodes.includes(columnCode) &&
+    access.styleDeniedCells[cellKey(rowKey, columnCode)] === undefined
+  );
+}
+
+/** Скільки комірок у прямокутнику (для «N з M» у попередженні). */
+export function rangeCellCount(range: GridSelection['range'] | null): number {
+  return range === null ? 0 : (range.toRow - range.fromRow + 1) * (range.toColumn - range.fromColumn + 1);
+}
+
+/** Стеля сервера на комірок в одному `scope` (`tooManyCells`). */
+export const CellStyleScopeMaxCells = 50_000;
+
+/** Розбиває область на запити ≤ 50 000 комірок: понад стелю — явні `rowKeys` порціями. */
+export function areaChunks(slice: Pick<TableSliceDto, 'rows' | 'columns'>, area: StyleArea): StyleArea[] {
+  const columns = area.columnCodes?.length ?? (area.allColumns === true ? slice.columns.length : 0);
+  const rowKeys = area.rowKeys ?? (area.allRows === true ? slice.rows.map((r) => r.rowKey) : []);
+
+  if (columns === 0 || rowKeys.length * columns <= CellStyleScopeMaxCells) return [area];
+
+  const perChunk = Math.max(1, Math.floor(CellStyleScopeMaxCells / columns));
+  const result: StyleArea[] = [];
+
+  for (let i = 0; i < rowKeys.length; i += perChunk) {
+    result.push({
+      rowKeys: rowKeys.slice(i, i + perChunk),
+      ...(area.columnCodes === undefined ? { allColumns: true } : { columnCodes: area.columnCodes }),
+    });
+  }
+
+  return result;
+}
 
 /**
  * Комірки виділеного прямокутника (індекси — у даних, не в сітці), на які в
@@ -188,8 +232,7 @@ export function colourableCells(
       const column = slice.columns[c];
       if (column === undefined) continue;
 
-      const permission = slice.cellPermissions[cellKey(row.rowKey, column.code)];
-      if (permission === undefined || StyleNeutralReasons.has(permission)) {
+      if (canColourCell(slice, row.rowKey, column.code)) {
         cells.push({ rowKey: row.rowKey, columnCode: column.code });
       }
     }

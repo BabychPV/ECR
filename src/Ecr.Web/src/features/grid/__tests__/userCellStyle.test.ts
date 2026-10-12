@@ -9,7 +9,9 @@ import {
   ThemeShades,
   userStyleOf,
   withUserStyle,
+  areaChunks,
   areaOf,
+  canColourCell,
   chunkPatches,
   headerStyleProps,
   scopeRange,
@@ -244,5 +246,45 @@ describe('areaOf: область запиту scope', () => {
 
   it('зсув колонки підпису віднімається від індексів сітки', () => {
     expect(areaOf(s, { fromRow: 0, toRow: 0, fromColumn: 2, toColumn: 2 }, 1, 'column')).toEqual({ columnCodes: ['B'], allRows: true });
+  });
+});
+
+describe('styleAccess: рішення сервера про колір', () => {
+  const access = (extra = {}) => ({ canStyle: true, deniedReason: null, styleDeniedCells: {}, styleDeniedColumnCodes: [], styleDeniedRowKeys: [], truncated: false, ...extra });
+
+  it('без styleAccess — стара логіка нейтральних причин; з ним — лише його перелік', () => {
+    const old = slice({ cellPermissions: { 'R1:A': 'NoWriteRight', 'R1:B': 'CalculatedCell' } });
+    expect(canColourCell(old, 'R1', 'A')).toBe(false);
+    expect(canColourCell(old, 'R1', 'B')).toBe(true);
+
+    // Сервер сказав «можна» — нейтральні причини з cellPermissions більше нічого не вирішують.
+    const withAccess = slice({ cellPermissions: { 'R1:A': 'NoWriteRight' }, styleAccess: access() });
+    expect(canColourCell(withAccess, 'R1', 'A')).toBe(true);
+  });
+
+  it('canStyle=false, заборонені рядки/колонки/комірки виключаються', () => {
+    expect(canColourCell(slice({ styleAccess: access({ canStyle: false, deniedReason: 'PeriodClosed' }) }), 'R1', 'A')).toBe(false);
+
+    const s = slice({ styleAccess: access({ styleDeniedRowKeys: ['R2'], styleDeniedColumnCodes: ['B'], styleDeniedCells: { 'R1:A': 'NoWriteRight' } }) });
+    expect(canColourCell(s, 'R1', 'A')).toBe(false);
+    expect(canColourCell(s, 'R2', 'A')).toBe(false);
+    expect(canColourCell(s, 'R1', 'B')).toBe(false);
+    expect(canColourCell(slice({ styleAccess: access() }), 'R1', 'A')).toBe(true);
+  });
+});
+
+describe('areaChunks: стеля 50 000', () => {
+  const big = { rows: Array.from({ length: 1000 }, (_, i) => row(`R${String(i)}`)), columns: Array.from({ length: 60 }, (_, i) => column(`C${String(i)}`)) };
+
+  it('у межах стелі — одна область', () => {
+    expect(areaChunks(slice(), { allRows: true, allColumns: true })).toEqual([{ allRows: true, allColumns: true }]);
+  });
+
+  it('понад стелю — порції rowKeys, разом усі рядки, кожна ≤ 50 000', () => {
+    const chunks = areaChunks(big, { allRows: true, allColumns: true });
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.flatMap((c) => c.rowKeys ?? [])).toHaveLength(1000);
+    expect(chunks.every((c) => (c.rowKeys?.length ?? 0) * 60 <= 50_000 && c.allColumns === true)).toBe(true);
   });
 });

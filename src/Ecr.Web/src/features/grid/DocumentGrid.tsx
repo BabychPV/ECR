@@ -19,7 +19,7 @@ import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
 import { cellFormatOf, withCellFormat } from './conditionalAppearance';
 import { CellColorMenu, type ColourTarget } from './CellColorMenu';
 import { useCellStyles } from './useCellStyles';
-import { areaOf, colourableCells, headerStyleProps, scopeRange, userStyleOf, withRowStyle, withUserStyle, type StyleScope } from './userCellStyle';
+import { areaChunks, areaOf, colourableCells, headerStyleProps, scopeRange, userStyleOf, withRowStyle, withUserStyle, type StyleScope } from './userCellStyle';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn, isTextColumnType, sameColumnValue } from './cellValue';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
 import { planPaste, type PasteRejection } from './clipboard';
@@ -53,6 +53,7 @@ import {
   decide,
   guardOf,
   rowKeyOfCellKey,
+  denyText,
 } from './permissions';
 import { markConfirmed } from './confirmedEdits';
 import { markSliceHidden, takeMissedInvalidation } from './sliceCache';
@@ -396,6 +397,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
     return colourableCells(slice.data, scopeRange(slice.data, styleSelection, offset, styleScope), offset);
   }, [slice.data, styleSelection, readOnly, styleScope]);
+  // Сервер вирішив, що фарбувати не можна нічого: причина — його (`styleAccess.deniedReason`, текст `deny.{reason}`).
+  const styleAccess = slice.data?.styleAccess;
+  const styleDenied =
+    styleAccess !== null && styleAccess !== undefined && !styleAccess.canStyle && styleAccess.deniedReason !== null
+      ? { reason: styleAccess.deniedReason, hint: denyText(styleAccess.deniedReason) }
+      : null;
   const applyColour = useCallback(
     (target: ColourTarget, hex: string | null) => {
       if (colourTargets.length === 0) return;
@@ -410,7 +417,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           ...(target === 'fill' ? { backgroundHex: value } : { foregroundHex: value }),
         })),
         // Рядок/колонка/таблиця — один PATCH зі `scope` (сервер розгортає й дає часткову відмову).
-        area: slice.data === undefined ? null : areaOf(slice.data, styleSelection, offset, styleScope),
+        areas: (() => {
+          const area = slice.data === undefined ? null : areaOf(slice.data, styleSelection, offset, styleScope);
+
+          return area === null || slice.data === undefined ? null : areaChunks(slice.data, area);
+        })(),
       });
     },
     [colourTargets, cellStyles, slice.data, styleSelection, styleScope],
@@ -2339,8 +2350,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         <CellColorMenu
           onApply={applyColour}
           disabled={colourTargets.length === 0}
-          disabledHint={t(readOnly ? 'grid.cellColor.readOnly' : 'grid.cellColor.noSelection')}
-          disabledReason={readOnly ? 'readOnly' : 'noSelection'}
+          disabledHint={styleDenied?.hint ?? t(readOnly ? 'grid.cellColor.readOnly' : 'grid.cellColor.noSelection')}
+          disabledReason={styleDenied?.reason ?? (readOnly ? 'readOnly' : 'noSelection')}
           scope={styleScope}
           onScopeChange={setStyleScope}
           pending={cellStyles.isPending}
