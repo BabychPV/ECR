@@ -35,6 +35,21 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// через це блокують перенос; <c>null</c>, коли таких немає. ⛔ Лише кількість — які саме ресурси й ролі, не
 /// розкривається, доки перелік не фільтрується через AccessProfile.
 /// </param>
+/// <param name="MappingsRemapped">
+/// D-1 RC20: скільки мапінгів збору (<c>ext.EntityFieldMap</c>) на колонки вихідної версії переїде на колонки-
+/// відповідники цільової (за кодами аркуш/таблиця/колонка) — у сухому прогоні «буде», у застосованому — «перенесено».
+/// Призупинені мапінги переносяться теж (щоб відновлення не писало в колонку старої версії).
+/// </param>
+/// <param name="MappingsUnmapped">
+/// D-1 RC20: скільки АКТИВНИХ мапінгів збору адресують колонку, якої в цільовій версії немає. Такий мапінг після
+/// переносу «успішно» збирав би точки й нічого не писав, тому перенос відмовляє (<c>mappingsNotMapped</c>), доки
+/// мапінг не призупинено. Призупинені без відповідника не рахуються: вони нічого не пишуть.
+/// </param>
+/// <param name="MappingsUnmappedKeys">
+/// До <see cref="MigrateDocumentVersionHandler.MaxMappingKeysListed"/> шляхів <c>SHEET.TABLE.COLUMN</c> колонок
+/// вихідної версії, на які вказують такі мапінги. ⛔ Лише шлях колонки шаблону (його й так показує звіт відмінностей):
+/// джерело, сутність і поле джерела не розкриваються.
+/// </param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
     int ProjectId,
@@ -54,7 +69,10 @@ public sealed record DocumentVersionMigrationDto(
     int LockedSheets,
     IReadOnlyList<VersionMigrationItem> Items,
     bool ItemsTruncated,
-    int? BlockedGrantCount = null);
+    int? BlockedGrantCount = null,
+    int MappingsRemapped = 0,
+    int MappingsUnmapped = 0,
+    IReadOnlyList<string>? MappingsUnmappedKeys = null);
 
 /// <summary>Куди можна перенести документ: поточна версія й опубліковані версії того самого шаблону.</summary>
 /// <param name="ProjectId">Проєкт документа — переноситься весь.</param>
@@ -131,6 +149,9 @@ public sealed class MigrateDocumentVersionHandler(
 
     /// <summary>Скільки ключів методологій на чужі колонки називає відмова (<c>methodologyKeys</c>).</summary>
     public const int MaxMethodologyKeysListed = 20;
+
+    /// <summary>Скільки колонок із мапінгами без відповідника називає звіт (<c>mappingsUnmappedKeys</c>).</summary>
+    public const int MaxMappingKeysListed = 10;
 
     /// <summary>
     /// ⛔ L1-08 (HU-11 Q3=A): перенос міняє структуру ВСІХ документів проєкту, тож потрібен грант
@@ -340,7 +361,9 @@ public sealed class MigrateDocumentVersionHandler(
 
         return dto is null
             ? await AlreadyMigratedAsync(request, ct).ConfigureAwait(false)
-            : new VersionMigrationRunResult(dto.ToVersion, dto.DocumentCount, dto.TransferredValues, AlreadyMigrated: false);
+            : new VersionMigrationRunResult(
+                dto.ToVersion, dto.DocumentCount, dto.TransferredValues, AlreadyMigrated: false,
+                MappingsRemapped: dto.MappingsRemapped, MappingsUnmapped: dto.MappingsUnmapped);
     }
 
     private async Task<VersionMigrationRunResult> AlreadyMigratedAsync(Resolved request, CancellationToken ct)
@@ -512,7 +535,15 @@ public sealed class MigrateDocumentVersionHandler(
             }
 
             await store.ApplyAsync(projectId, target.Id, plan, onStep, innerCt).ConfigureAwait(false);
-            result = dto with { Applied = true };
+
+            // ⛔ D-1: мапінги збору — в ТІЙ САМІЙ транзакції, що й документи й версія проєкту: збій відкочує все,
+            // і збір не опиняється між версіями. Рахується те, що справді перенесено (мапінг могли додати між
+            // планом і оновленням — він теж переїде, якщо його колонка є в мапі).
+            var remapped = await store
+                .RemapCollectionMappingsAsync(
+                    plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId), innerCt)
+                .ConfigureAwait(false);
+            result = dto with { Applied = true, MappingsRemapped = remapped };
 
             // ⛔ F2-03 (аудит R11): журнал — В ТІЙ САМІЙ транзакції (`AuditWriter` бере поточну
             // транзакцію контексту): перенос структури всіх документів проєкту не комітиться без
@@ -529,6 +560,7 @@ public sealed class MigrateDocumentVersionHandler(
                         mode = result.Mode.ToString(),
                         documents = result.DocumentCount,
                         transferredValues = result.TransferredValues,
+                        mappingsRemapped = result.MappingsRemapped,
                     }),
                     profile.UserId, currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
@@ -612,12 +644,25 @@ public sealed class MigrateDocumentVersionHandler(
         // ⛔ D-13: активна прив'язка методології до колонки вихідної версії, якої нема в цільовій, після
         // переносу не рахувала б нічого — колонка лишалася б порожньою без помилки. Блокуємо, доки
         // конфігуратор не перенесе прив'язку (клон версії тепер копіює їх сам) або не вимкне її.
-        var unmappedBindings = await store.CountUnmappedBindingsAsync(
-            sourceVersionId, plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId), ct)
+        var columnMap = plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId);
+        var unmappedBindings = await store.CountUnmappedBindingsAsync(sourceVersionId, columnMap, ct)
             .ConfigureAwait(false);
         if (unmappedBindings > 0)
         {
             refusals.Add("bindingsNotMapped");
+        }
+
+        // ⛔ D-1 (RC20): мапінг збору адресує колонку числовим ColumnDefId КОНКРЕТНОЇ версії; після переносу
+        // проєкту матеріалізація шукає екземпляри за цією колонкою, і мапінг, що лишився на колонці старої версії,
+        // «успішно» збирав би точки й нічого не писав. Мапінги з відповідником (за кодами — той самий план, що й
+        // для комірок) переносяться в тій самій транзакції; активний мапінг без відповідника — відмова, як і для
+        // прив'язок методологій (призупинений мапінг нічого не пише й перенос не блокує).
+        var mappings = await store.ListCollectionMappingsAsync(sourceVersionId, ct).ConfigureAwait(false);
+        var mappingsRemapped = mappings.Count(m => columnMap.ContainsKey(m.ColumnDefId));
+        var unmappedMappings = mappings.Where(m => m.IsActive && !columnMap.ContainsKey(m.ColumnDefId)).ToList();
+        if (unmappedMappings.Count > 0)
+        {
+            refusals.Add("mappingsNotMapped");
         }
 
         // ⛔ D1: правила й обов'язкові входи методології адресують колонки числовим ColumnDefId КОНКРЕТНОЇ версії
@@ -646,7 +691,16 @@ public sealed class MigrateDocumentVersionHandler(
             mode, dryRun, Applied: false, CanApply: refusals.Count == 0, refusals,
             plan.TransferredValues, plan.LostValues, plan.GuardedValues, scope.LockedSheets,
             [.. ordered.Take(MaxItems)], ordered.Count > MaxItems,
-            denied > 0 ? denied : null);
+            denied > 0 ? denied : null,
+            mappingsRemapped,
+            unmappedMappings.Count,
+            unmappedMappings.Count == 0
+                ? null
+                : [.. unmappedMappings
+                    .Select(m => m.ColumnPath)
+                    .Distinct(StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal)
+                    .Take(MaxMappingKeysListed)]);
 
         return (dto, plan, foreignKeys);
     }
@@ -754,13 +808,19 @@ public sealed class MigrateDocumentVersionHandler(
                             ? "err.ECR-SCHM-0422.migrateBindingsNotMapped"
                             : dto.Refusals.Contains("methodologyKeysNotMapped") && dto.LostValues == 0 && dto.GuardedValues == 0
                                 ? "err.ECR-SCHM-0422.migrateMethodologyKeysNotMapped"
-                                : "err.ECR-SCHM-0422.migrateDataLoss",
+                                : dto.Refusals.Contains("mappingsNotMapped") && dto.LostValues == 0 && dto.GuardedValues == 0
+                                    ? "err.ECR-SCHM-0422.migrateMappingsNotMapped"
+                                    : "err.ECR-SCHM-0422.migrateDataLoss",
                 ["lostValues"] = dto.LostValues.ToString(CultureInfo.InvariantCulture),
                 ["guardedValues"] = dto.GuardedValues.ToString(CultureInfo.InvariantCulture),
                 ["mode"] = dto.Mode.ToString(),
                 ["refusals"] = dto.Refusals,
                 ["blockedGrantCount"] = dto.BlockedGrantCount?.ToString(CultureInfo.InvariantCulture),
                 ["methodologyKeys"] = foreignKeys.Count > 0 ? foreignKeys : null,
+                ["mappingsUnmapped"] = dto.MappingsUnmapped > 0
+                    ? dto.MappingsUnmapped.ToString(CultureInfo.InvariantCulture)
+                    : null,
+                ["mappingColumns"] = dto.MappingsUnmappedKeys is { Count: > 0 } ? dto.MappingsUnmappedKeys : null,
             });
     }
 }

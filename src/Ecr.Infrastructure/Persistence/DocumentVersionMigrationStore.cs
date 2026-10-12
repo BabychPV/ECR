@@ -326,6 +326,67 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<CollectionMappingRef>> ListCollectionMappingsAsync(
+        int sourceVersionId, CancellationToken ct)
+    {
+        // З'єднання через ColumnDef → TableDef → SheetDef: мапінг власного TemplateVersionId не має.
+        var rows = await (
+                from map in db.EntityFieldMaps.AsNoTracking()
+                where map.TargetKind == Domain.Entities.External.FieldTargetKind.Column && map.TargetColumnDefId != null
+                join column in db.ColumnDefs.AsNoTracking() on map.TargetColumnDefId equals (int?)column.Id
+                join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                where sheet.TemplateVersionId == sourceVersionId
+                select new
+                {
+                    map.Id,
+                    ColumnDefId = column.Id,
+                    map.IsActive,
+                    Path = sheet.Code + "." + table.Code + "." + column.Code,
+                })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows
+            .OrderBy(r => r.Path, StringComparer.Ordinal)
+            .ThenBy(r => r.Id)
+            .Select(r => new CollectionMappingRef(r.Id, r.ColumnDefId, r.IsActive, r.Path))];
+    }
+
+    /// <inheritdoc />
+    public async Task<int> RemapCollectionMappingsAsync(IReadOnlyDictionary<int, int> columnMap, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(columnMap);
+
+        _ = db.Database.CurrentTransaction
+            ?? throw new InvalidOperationException(
+                "RemapCollectionMappingsAsync викликано поза транзакцією: перенос мапінгів мусить бути атомарним із переносом документів.");
+
+        var pairs = columnMap
+            .Where(p => p.Key != p.Value)
+            .Select(p => new { o = p.Key, n = p.Value })
+            .ToList();
+        if (pairs.Count == 0)
+        {
+            return 0;
+        }
+
+        var json = JsonSerializer.Serialize(pairs);
+
+        // ⚠ Колонка-відповідник — з ІНШОЇ версії (o <> n), тож повторний запуск нічого не міняє. Унікальність
+        // `UQ_EntityFieldMap` — за (сутність, поле), а не за колонкою: переніс її не порушує.
+        return await db.Database
+            .ExecuteSqlAsync($"""
+                UPDATE m
+                SET    m.TargetColumnDefId = x.n
+                FROM   ext.EntityFieldMap m
+                JOIN   OPENJSON({json}) WITH (o int, n int) x ON x.o = m.TargetColumnDefId
+                WHERE  m.TargetKind = 0
+                """, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<string>> ListForeignMethodologyKeysAsync(
         int targetVersionId, int limit, CancellationToken ct)
     {

@@ -80,6 +80,8 @@ public sealed class MigrateDocumentVersionJob(
                     ["version"] = report.ToVersion,
                     ["documents"] = report.DocumentCount.ToString(CultureInfo.InvariantCulture),
                     ["values"] = report.TransferredValues.ToString(CultureInfo.InvariantCulture),
+                    ["mappingsRemapped"] = report.MappingsRemapped.ToString(CultureInfo.InvariantCulture),
+                    ["mappingsUnmapped"] = report.MappingsUnmapped.ToString(CultureInfo.InvariantCulture),
                 },
                 ct)
             .ConfigureAwait(false);

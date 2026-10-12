@@ -13,6 +13,13 @@ public sealed record VersionMigrationScope(
     IReadOnlyDictionary<int, long> HeaderValues,
     int LockedSheets);
 
+/// <summary>Мапінг збору, що адресує колонку вихідної версії шаблону (D-1 RC20).</summary>
+/// <param name="MappingId">Мапінг (<c>ext.EntityFieldMap.Id</c>).</param>
+/// <param name="ColumnDefId">Колонка вихідної версії, на яку він вказує.</param>
+/// <param name="IsActive"><c>false</c> — призупинений (збір за ним нічого не пише).</param>
+/// <param name="ColumnPath">Шлях колонки за кодами <c>SHEET.TABLE.COLUMN</c> (джерело й поле не розкриваються).</param>
+public sealed record CollectionMappingRef(int MappingId, int ColumnDefId, bool IsActive, string ColumnPath);
+
 /// <summary>Користувачі, чиї профілі в кеші треба скинути після переносу.</summary>
 /// <param name="Ids">Користувачі (не більше стелі).</param>
 /// <param name="Overflow">Користувачів більше за стелю: перелік неповний, скидати треба ВЕСЬ кеш.</param>
@@ -64,6 +71,32 @@ public interface IDocumentVersionMigrationStore
     /// </remarks>
     public Task<int> CountUnmappedBindingsAsync(
         int sourceVersionId, IReadOnlyDictionary<int, int> columnMap, CancellationToken ct);
+
+    /// <summary>
+    /// Мапінги збору (<c>ext.EntityFieldMap</c>), що адресують колонки вихідної версії шаблону (D-1 RC20).
+    /// </summary>
+    /// <param name="sourceVersionId">Вихідна версія шаблону.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Мапінг не має ані проєкту, ані власної версії: він адресує колонку числовим <c>ColumnDefId</c> конкретної
+    /// версії шаблону, і матеріалізація шукає екземпляри таблиць саме за цією колонкою. Після переносу проєкту
+    /// на іншу версію мапінг, що лишився на колонці старої, нічого не пише (збір «успішний», а комірки порожні).
+    /// </remarks>
+    public Task<IReadOnlyList<CollectionMappingRef>> ListCollectionMappingsAsync(int sourceVersionId, CancellationToken ct);
+
+    /// <summary>
+    /// Переносить мапінги збору з колонок вихідної версії на колонки цільової за мапою переносу (D-1 RC20).
+    /// </summary>
+    /// <param name="columnMap">Колонка вихідної версії → колонка цільової (з плану).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки мапінгів перенесено.</returns>
+    /// <remarks>
+    /// ⚠ Лише всередині транзакції переносу, після <see cref="LockProjectVersionAsync"/>: мапінги й документи
+    /// перемикаються разом, інакше збір писав би за мапінгом, чия колонка вже не відповідає версії проєкту.
+    /// Чіпає лише мапінги на колонку (<c>TargetKind = Column</c>) з ключем у мапі — решту (довідники, колонки
+    /// інших версій) не зачіпає.
+    /// </remarks>
+    public Task<int> RemapCollectionMappingsAsync(IReadOnlyDictionary<int, int> columnMap, CancellationToken ct);
 
     /// <summary>
     /// Ключі опублікованих версій методологій, прив'язаних до цільової версії, що посилаються на колонки
