@@ -442,6 +442,11 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         Assert.True(Math.Abs((ExpiryOf(changed)!.Value - in60).TotalMilliseconds) < 1.0);
         Assert.Contains("EditAssignmentChanged", await EventTypesAsync(s).ConfigureAwait(true));
 
+        // Аудит: у події зміни ознак — і новий, і попередній строк.
+        var changedDetails = await EventDetailsAsync(s, "EditAssignmentChanged").ConfigureAwait(true);
+        Assert.Contains(changedDetails, d => d.Contains("\"previousExpiresAt\":\"", StringComparison.Ordinal)
+            && d.Contains("\"expiresAt\":\"", StringComparison.Ordinal));
+
         // Повторне збереження БЕЗ expiresAt (інша ознака змінена) строк, виставлений через API, НЕ знімає.
         var kept = await JsonAsync(
             await owner.PostAsJsonAsync(
@@ -460,6 +465,11 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
                 .ConfigureAwait(true),
             HttpStatusCode.OK, app).ConfigureAwait(true);
         Assert.Null(ExpiryOf(cleared));
+
+        // Зняття строку в аудиті: expiresAt = null, previousExpiresAt — те, що було.
+        var afterClear = await EventDetailsAsync(s, "EditAssignmentChanged").ConfigureAwait(true);
+        Assert.Contains(afterClear, d => d.Contains("\"expiresAt\":null", StringComparison.Ordinal)
+            && d.Contains("\"previousExpiresAt\":\"", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1097,6 +1107,15 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
         Assert.True(response.StatusCode == status, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
         return JsonDocument.Parse(body).RootElement.Clone();
+    }
+
+    private async Task<List<string>> EventDetailsAsync(Scenario s, string eventType)
+    {
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var docMarker = $"\"documentId\":{s.DocumentId.ToString(CultureInfo.InvariantCulture)}";
+        return await db.Database
+            .SqlQuery<string>($"SELECT DetailsJson AS Value FROM aud.SecurityEvent WHERE EventType = {eventType} AND DetailsJson LIKE {"%" + docMarker + "%"}")
+            .ToListAsync().ConfigureAwait(false);
     }
 
     private async Task<List<string>> EventTypesAsync(Scenario s)
