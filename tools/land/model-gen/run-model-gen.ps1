@@ -27,6 +27,10 @@ if (-not $AfPackage) { $AfPackage = Join-Path $refDir 'af-land-package.json' }
 if (-not $OutModel) { $OutModel = Join-Path $refDir 'land-template.model.json' }
 New-Item -ItemType Directory -Force $Work | Out-Null
 Copy-Item -LiteralPath $AfPackage (Join-Path $Work 'af-land-package.json') -Force
+# виходи методологій C08/C09/C11/C12 (колонки результатів, LP-08); складає extract_result_outputs.py
+$resultOutputs = Join-Path $refDir 'land-result-outputs.json'
+Remove-Item -LiteralPath (Join-Path $Work 'land-result-outputs.json') -Force -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $resultOutputs) { Copy-Item -LiteralPath $resultOutputs (Join-Path $Work 'land-result-outputs.json') -Force }
 $env:PYTHONIOENCODING = 'utf-8'
 Push-Location $Work
 try {

@@ -1061,6 +1061,43 @@ function Stage-Methodologies {
             Log "    прив'язки $name вимкнено (методологія лишилась чернеткою)"
         }
     }
+    Bind-ResultColumns $mid
+}
+
+# LP-08: прив'язка виходів методологій C08/C09/C11/C12 (імпортує окремий процес: tools/Ecr.MethodologyImport + POST /methodologies/import)
+# до колонок результатів ECW_EC_* таблиць аркушів 6, 9-11 (колонки створює Structure зі land-template.model.json, tb.calc).
+# Методології, яких на сервері немає, пропускаються; виходу, якого немає у версії методології, ні. Прив'язка активна лише
+# якщо остання версія опублікована: активна прив'язка до чернетки валить перерахунки документа (див. цикл вище).
+function Bind-ResultColumns($mid) {
+    $bound = 0; $off = 0; $noMeth = @{}; $noOut = 0; $noCol = 0
+    $vinfo = @{}
+    foreach ($sh in @($Mdl.sheets)) {
+        if ($sh.calc) { continue }   # аркуші 3-5 ведуть цикл Stage-Methodologies вище
+        foreach ($tb in @($sh.tables)) {
+            if (-not $tb.calc) { continue }
+            foreach ($name in @($tb.calc.methodologies)) {
+                $m = $mid[[string]$name]
+                if (-not $m) { $noMeth[[string]$name] = $true; continue }
+                if (-not $vinfo.ContainsKey($name)) {
+                    $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
+                    $v = $vers | Sort-Object id -Descending | Select-Object -First 1
+                    $codes = @{}
+                    foreach ($f in @(Items (Api GET "/api/v1/methodologies/$m/versions/$([int]$v.id)/formulas").Json)) { $codes[[string]$f.code] = $true }
+                    $vinfo[$name] = @{ active = ([string]$v.status -eq 'Published'); codes = $codes }
+                }
+                $vi = $vinfo[$name]
+                foreach ($o in @($tb.calc.outputs)) {
+                    if (-not $vi.codes.ContainsKey([string]$o)) { $noOut++; continue }   # вихід належить іншій методології таблиці
+                    $cid = $S.Cols[$S.ShortTable[[string]$tb.code]][[string]$o]
+                    if (-not $cid) { $noCol++; Log "  ! немає колонки $($tb.code)/$o"; continue }
+                    $r = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/bindings/$cid/$o" -Body @{ isActive = [bool]$vi.active; matchJson = '{}' }
+                    if ($r.Status -eq 200) { if ($vi.active) { $bound++ } else { $off++ } }
+                    else { Log "  ! прив'язка $name/$($tb.code)/${o}: HTTP $($r.Status) $(Get-EcrErrorCode $r)" }
+                }
+            }
+        }
+    }
+    Log ("  колонки результатів (LP-08): прив'язок {0} активних, {1} вимкнених (чернетки); методологій на сервері немає: {2}; виходів без формули: {3}; без колонки: {4}" -f $bound, $off, $noMeth.Count, $noOut, $noCol)
 }
 
 function Stage-Documents {

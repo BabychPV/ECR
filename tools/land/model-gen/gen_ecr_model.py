@@ -370,6 +370,20 @@ AF = {  # (sheet prefix, table section) -> {normalized header: AF column code}
 PKG = json.load(open('af-land-package.json', encoding='utf-8'))
 CALC = {'T3_00': ['ECW_C05_01', 'ECW_C05_02', 'ECW_C05_03', 'ECW_C05_04', 'ECW_C05_05'], 'T4_01': ['ECW_C06_01'],
         'T5_08': ['ECW_C07_07', 'ECW_C07_07_01'], 'T5_09': ['ECW_C07_08'], 'T5_22': ['ECW_C07_16'], 'T5_27': ['ECW_C07_21']}
+# Виходи методологій C08/C09/C11/C12 -> таблиці без колонок результатів (LP-08). Файл land-result-outputs.json складає
+# extract_result_outputs.py (структура пакета методологій AF x таблиці правил прода, без значень); див. docs/.../land-template/README.md.
+RESULT_TABLES = {}
+RESULT_TABLES_USED = set()
+RESULT_OUTPUTS_PENDING = {}   # таблиці зі зіставлення, яких немає в моделі (чекають LP-09)
+try:
+    _ro = json.load(open('land-result-outputs.json', encoding='utf-8'))
+except FileNotFoundError:
+    _ro = {'methodologies': {}}
+for _m, _d in sorted(_ro['methodologies'].items()):
+    for _t in _d['tables']:
+        _e = RESULT_TABLES.setdefault(_t, {'methodologies': [], 'outputs': []})
+        _e['methodologies'].append(_m)
+        _e['outputs'] = sorted(set(_e['outputs']) | set(_d['outputs']))
 TEXT_ARGS = {'T3_00': ['Land_OverhauledEngines', 'Land_Rotation'], 'T5_09': ['Land_TypePetrStation'], 'T5_27': ['Land_TypeBurnFuel']}
 EXTRA = {
     'T3_00': {'CalculationMonth': ('Formula', '[Period].Sequence', 'one', 'Calculation month'),
@@ -781,6 +795,19 @@ for sh in X['sheets']:
                                          'hidden': False, 'readOnly': True, 'excel': None, 'month': None, 'precision': 28, 'scale': 12,
                                          'ecrAdded': 'methodology output (CalculationBinding)'})
             t_out['calc'] = {'methodologies': CALC[tcode], 'outputs': sorted(outs)}
+        elif tcode in RESULT_TABLES:
+            # Колонки результатів методологій C08/C09/C11/C12 (LP-08): та сама форма, що й у CALC-таблиць вище
+            # (Calculated, readOnly, 28/12, t або g/s, код колонки = код виходу методології).
+            rt = RESULT_TABLES[tcode]
+            have = {c['code'] for c in t_out['columns']}
+            for o in rt['outputs']:
+                if o in have:
+                    raise SystemExit('result columns: колонка %s уже є в %s' % (o, tcode))
+                t_out['columns'].append({'code': o, 'dataType': 'Calculated', 'headerEn': o, 'headerRu': '', 'unit': 't' if '_tons_' in o else 'g/s',
+                                         'hidden': False, 'readOnly': True, 'excel': None, 'month': None, 'precision': 28, 'scale': 12,
+                                         'ecrAdded': 'methodology output (CalculationBinding)'})
+            t_out['calc'] = {'methodologies': rt['methodologies'], 'outputs': rt['outputs']}
+            RESULT_TABLES_USED.add(tcode)
         # ---- рівномірні формули колонок (єдині, що виражаються в діалекті шаблону)
         if sh['name'].startswith('7.0'):
             qmap = {'Q1': (1, 2, 3), 'Q2': (4, 5, 6), 'Q3': (7, 8, 9), 'Q4': (10, 11, 12), 'Annual': tuple(range(1, 13))}
@@ -1196,6 +1223,9 @@ print('cf row-scoped:', len(out['conditionalFormatsRowScoped']))
 out['registries'] = list(registries.values())
 out['stats'] = {'excelSheets': len(X['sheets']), 'reportSheets': len(out['sheets']), 'tables': stat_tables, 'columns': stat_cols,
                 'registries': len(registries), 'registryEntries': sum(len(r['entries']) for r in registries.values())}
+# таблиці, для яких виходи відомі, а самої таблиці в шаблоні ще немає (LP-09): колонки з'являться після додавання таблиці
+out['resultOutputsPending'] = {t: RESULT_TABLES[t] for t in sorted(RESULT_TABLES) if t not in RESULT_TABLES_USED}
+print('result columns: tables %d, pending %s' % (len(RESULT_TABLES_USED), sorted(out['resultOutputsPending'])))
 json.dump(out, open(OUT, 'w', encoding='utf-8'), ensure_ascii=False, indent=None, separators=(',', ':'))
 print(out['stats'])
 for s in out['sheets']:
