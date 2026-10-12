@@ -21257,6 +21257,11 @@ export interface components {
              */
             delegatedByUserId: number;
             /**
+             * Format: date-time
+             * @description Термін дії передачі (UTC); `null` — безстроково.
+             */
+            expiresAt?: null | string;
+            /**
              * Format: int64
              * @description Ідентифікатор.
              */
@@ -27726,6 +27731,12 @@ export interface components {
             appliedSetId?: null | number;
             /** @description Обов'язкова для зміни наявної передачі. */
             baseVersion?: null | string;
+            /**
+             * Format: date-time
+             * @description Термін дії передачі, UTC: у майбутньому й не пізніше ніж через 366 діб. Відсутнє чи `null` —
+             *     безстроково (як і Note, значення ЗАМІНЮЄ наявне: пропуск знімає термін).
+             */
+            expiresAt?: null | string;
             /**
              * @description Закрити зріз іншим за ролями; за замовчуванням `true`.
              * @default true

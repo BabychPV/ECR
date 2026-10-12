@@ -4459,6 +4459,14 @@
             "format": "int32",
             "type": "integer"
           },
+          "expiresAt": {
+            "description": "Термін дії передачі (UTC); `null` — безстроково.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "id": {
             "description": "Ідентифікатор.",
             "format": "int64",
@@ -18422,6 +18430,14 @@
           },
           "baseVersion": {
             "description": "Обов'язкова для зміни наявної передачі.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "expiresAt": {
+            "description": "Термін дії передачі, UTC: у майбутньому й не пізніше ніж через 366 діб. Відсутнє чи `null` —\nбезстроково (як і Note, значення ЗАМІНЮЄ наявне: пропуск знімає термін).",
+            "format": "date-time",
             "type": [
               "null",
               "string"
