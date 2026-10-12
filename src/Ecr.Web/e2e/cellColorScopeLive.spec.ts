@@ -10,8 +10,8 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
  * тулбар. Тому «один запит замість N» тут — це лічильник власних викликів (`patchCount`), а не мережевий слід UI.
  *
  * Сценарії (назва кожного містить `cellColorScopeLive` для `-Grep`):
- *  1. allRows x allColumns -> один PATCH 200, applied+skipped+denied = рядки x колонки, зріз віддає оформлення,
- *     у сітці після reload комірка має `data-user-style`; повтор — applied 0 (ідемпотентність);
+ *  1. allRows x allColumns -> один PATCH 200, applied+skipped+denied = рядки x колонки, зріз віддає оформлення;
+ *     повтор — applied 0 (ідемпотентність). Сітка (`data-user-style`) — не перевіряється: клієнта L4 у базі ще немає;
  *  2. rowKeys x columnCodes — лише перетин;
  *  3. reset-scope — зняття всього одним запитом;
  *  4. часткова відмова: на одну колонку — грант `Read` -> deniedCells > 0, решта застосована;
@@ -29,7 +29,6 @@ const DocumentId = process.env['ECR_E2E_DOCUMENT'] ?? '';
 const DocumentUrl = `/documents/${DocumentId}?periodKey=${PeriodKey}`;
 
 const Yellow = '#ffff00';
-const YellowRgb = 'rgb(255, 255, 0)';
 
 interface SliceDto {
   tableInstanceId: number;
@@ -93,22 +92,8 @@ test.describe('cellColorScopeLive: фарбування області одни�
       const again = await patchScope(page, slice, { allRows: true, allColumns: true, backgroundHex: Yellow });
       expect(again.status).toBe(200);
       expect((JSON.parse(again.text) as ScopeResponse).appliedCells, 'повтор мав не змінити нічого').toBe(0);
-
-      // Сітка: після reload оформлення приходить із сервера.
-      await page.goto(DocumentUrl);
-      const firstCell = page.locator('revo-grid').first().locator('revogr-data[type="rgRow"] .rgCell').first();
-      await expect(firstCell, 'рядки сітки не завантажилися').toBeVisible({ timeout: 60_000 });
-      await expect
-        .poll(async () => page.locator('revo-grid').first().locator('.rgCell[data-user-style="true"]').count(), {
-          message: 'у сітці жодна комірка не має користувацького оформлення',
-          timeout: 20_000,
-        })
-        .toBeGreaterThan(0);
-
-      const styled = page.locator('revo-grid').first().locator('.rgCell[data-user-style="true"]').first();
-      expect(normalizeRgb(await styled.evaluate((n) => getComputedStyle(n).backgroundColor))).toBe(
-        normalizeRgb(YellowRgb),
-      );
+      // ⚠ Відображення в сітці (data-user-style) тут не перевіряється: клієнт L4 («колір комірки») у цій базі ще
+      // не влитий (живе в lane cell-color-*), тож доказ — зріз із сервера (cellStyles).
     } finally {
       await context.close();
     }
@@ -216,8 +201,10 @@ test.describe('cellColorScopeLive: фарбування області одни�
   test('cellColorScopeLive: поданий аркуш — 403 DocumentSubmitted, оформлення не записано', async ({ browser }) => {
     await ensureOperatorLevel(browser, 'Write');
 
+    // Чиста база сценарію: оформлення від попередніх тестів знімається ДО подання (на поданому аркуші не скинути).
     const admin = await openAs(browser, Admin, 'light');
     try {
+      await resetAll(admin.page, await readSlice(admin.page));
       await makeSheetEditable(admin.page);
       await submitSheet(admin.page);
     } finally {
@@ -449,14 +436,6 @@ async function resetAll(page: Page, slice: SliceDto): Promise<void> {
     { data: { periodKey: slice.periodKey, scope: { allRows: true, allColumns: true, reset: true } } },
   );
   expect([200, 403], `скидання базової лінії: ${String(response.status())}`).toContain(response.status());
-}
-
-function normalizeRgb(value: string): string {
-  const parts = (value.match(/[\d.]+/g) ?? []).map(Number);
-  if (parts.length < 3) return value.trim().toLowerCase();
-  if (parts.length >= 4 && parts[3] === 0) return 'transparent';
-
-  return parts.slice(0, 3).join(',');
 }
 
 async function findClosedPeriod(page: Page): Promise<number | null> {
