@@ -46,6 +46,11 @@ namespace Ecr.Application.Documents.Dto;
 /// тут немає, як і в <see cref="Columns"/>). Шар у сітці — над стилем колонки, під умовним
 /// форматуванням (<see cref="CellFormats"/>). <c>null</c>/порожній — оформлення немає.
 /// </param>
+/// <param name="HeaderStyle">
+/// Стиль шапки таблиці, заданий автором шаблону (<c>TableDef.HeaderStyleId</c> → <c>StyleDef</c>); <c>null</c> —
+/// стиль не задано (або посилання висить). Це дані самої таблиці: таблиця під забороною/схована
+/// не віддає зрізу взагалі (404), тож стиль шапки окремо розкрити не може.
+/// </param>
 public sealed record TableSliceDto(
     long TableInstanceId,
     int PeriodKey,
@@ -55,7 +60,8 @@ public sealed record TableSliceDto(
     IReadOnlyDictionary<string, string> CellConfirmations,
     IReadOnlyDictionary<string, Ecr.Application.Templates.CellFormatDto>? CellFormats = null,
     IReadOnlyList<string>? OutOfWindowCells = null,
-    IReadOnlyDictionary<string, Ecr.Application.Templates.CellFormatDto>? CellStyles = null);
+    IReadOnlyDictionary<string, Ecr.Application.Templates.CellFormatDto>? CellStyles = null,
+    CellStyleDto? HeaderStyle = null);
 
 /// <summary>Опис колонки для клієнта.</summary>
 /// <remarks>
@@ -143,6 +149,11 @@ public sealed record CellStyleDto(
 /// обчислюється при читанні: перерахунок на кожен зріз не вкладається в
 /// бюджет 400 мс. Читання не блокує, <c>Submit</c> блокує.
 /// </param>
+/// <param name="Style">
+/// Стиль рядка шаблону (<c>RowDef.StyleId</c> → <c>StyleDef</c>); <c>null</c> — стилю рядка немає (для
+/// динамічного рядка, якого немає в шаблоні, — завжди <c>null</c>). Шар у сітці: стиль колонки &lt; стиль
+/// рядка &lt; користувацьке оформлення &lt; умовний формат.
+/// </param>
 public sealed record RowDto(
     string RowKey,
     int Ordinal,
@@ -150,4 +161,5 @@ public sealed record RowDto(
     string? Label,
     string RowVersion,
     IReadOnlyDictionary<string, object?> Cells,
-    bool IsOrphaned = false);
+    bool IsOrphaned = false,
+    CellStyleDto? Style = null);

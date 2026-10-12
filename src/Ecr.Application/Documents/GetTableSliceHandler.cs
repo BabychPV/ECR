@@ -306,7 +306,8 @@ public sealed class GetTableSliceHandler(
                     .ToDictionary(
                         c => columnCodeById.TryGetValue(c.Address.ColumnDefId, out var code) ? code : c.Address.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                         c => Unwrap(c.Value)),
-                IsOrphaned: orphans.TryGetValue(r.RowId, out var orph) && orph))
+                IsOrphaned: orphans.TryGetValue(r.RowId, out var orph) && orph,
+                Style: StyleOf(styleById, r.Def?.StyleId)))
             .ToList();
 
         // 5. Компактні мапи: grid має одразу знати, що сіре і чому (заборони),
@@ -354,7 +355,8 @@ public sealed class GetTableSliceHandler(
             documentId, instance.PeriodKey, keyById, columnCodeById, readable, ct).ConfigureAwait(false);
 
         return new TableSliceDto(
-            tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations, formats, outOfWindow);
+            tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations, formats, outOfWindow,
+            HeaderStyle: StyleOf(styleById, table.HeaderStyleId));
     }
 
     /// <summary>

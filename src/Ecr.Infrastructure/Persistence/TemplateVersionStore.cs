@@ -1335,9 +1335,11 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
             [("ColumnDef", "WidthPx")] = Int(columnScope, "WidthPx"),
             [("RowDef", "LabelL10n")] = Text(rowScope, "LabelL10n"),
             [("RowDef", "Ordinal")] = Int(rowScope, "Ordinal"),
+            [("RowDef", "StyleId")] = Int(rowScope, "StyleId"),
             [("SheetDef", "NameL10n")] = Text(sheetScope, "NameL10n"),
             [("SheetDef", "IsVisible")] = Bit(sheetScope, "IsVisible"),
             [("TableDef", "NameL10n")] = Text(tableScope, "NameL10n"),
+            [("TableDef", "HeaderStyleId")] = Int(tableScope, "HeaderStyleId"),
         };
     }
 

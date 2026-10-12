@@ -39,7 +39,8 @@ public sealed class SaveRowDefHandler(
     IUnitOfWork uow,
     IClock clock,
     IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IStyleCatalog? styles = null)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
@@ -131,6 +132,26 @@ public sealed class SaveRowDefHandler(
 
         var parentRowDefId = ResolveParent(table, code, command.ParentRowKey);
 
+        // ⛔ CELL-STYLE L2 (за зразком A1-04 у SaveColumnDefHandler): `StyleId` приходить з тіла запиту, а ключа
+        // на `cfg.StyleDef` у рядка немає. Стиль ЧУЖОЇ версії (чи неіснуючий) записувався б мовчки: показ читав би
+        // чужий вигляд, клон версії лишав би посилання порожнім. Лише при створенні або зміні стилю.
+        if (styles is not null && command.StyleId is { } styleId && existing?.StyleId != styleId)
+        {
+            var ofVersion = await styles.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+            if (!ofVersion.ContainsKey(styleId))
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.TemplateInvalid,
+                    $"Стиль {styleId} не належить версії {templateVersionId}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0422.presentationValueInvalid",
+                        ["entityType"] = nameof(RowDef),
+                        ["field"] = nameof(RowDef.StyleId),
+                    });
+            }
+        }
+
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
 
         // ⚠ Класифікація йде і для СТВОРЕННЯ теж — той самий підхід, що й у
@@ -161,6 +182,7 @@ public sealed class SaveRowDefHandler(
                 existing = new RowDef(tableDefId, rowKey, ordinal, label, command.RowKind);
                 existing.SetReadOnly(command.IsReadOnly);
                 existing.SetParent(parentRowDefId);
+                existing.SetStyle(command.StyleId);
 
                 table.AddRow(existing);
 
@@ -174,6 +196,7 @@ public sealed class SaveRowDefHandler(
                 existing.Rename(label);
                 existing.SetReadOnly(command.IsReadOnly);
                 existing.SetParent(parentRowDefId);
+                existing.SetStyle(command.StyleId);
 
                 if (command.Ordinal is { } ordinal)
                 {
@@ -255,7 +278,7 @@ public sealed class SaveRowDefHandler(
             : null;
 
         return new RowDefDto(
-            row.Id, row.RowKeyValue, row.LabelL10n, row.Ordinal, row.RowKind, parentKey, row.IsReadOnly);
+            row.Id, row.RowKeyValue, row.LabelL10n, row.Ordinal, row.RowKind, parentKey, row.IsReadOnly, row.StyleId);
     }
 
     /// <summary>Стан рядка для аудиту.</summary>
@@ -268,6 +291,7 @@ public sealed class SaveRowDefHandler(
             row.RowKind,
             row.ParentRowDefId,
             row.IsReadOnly,
+            row.StyleId,
         });
 }
 
@@ -277,12 +301,17 @@ public sealed class SaveRowDefHandler(
 /// <param name="RowKind">Роль рядка; незмінна після створення (див. коментар класу).</param>
 /// <param name="ParentRowKey">Ключ батьківського рядка в тій самій таблиці; <c>null</c> — корінь.</param>
 /// <param name="IsReadOnly">Заборона ручного вводу (наприклад, підсумковий рядок).</param>
+/// <param name="StyleId">
+/// Стиль рядка (<c>cfg.StyleDef</c> цієї версії); <c>null</c> — без стилю рядка. Повний PUT, як у колонки:
+/// відсутнє значення скидає стиль.
+/// </param>
 public sealed record SaveRowDefCommand(
     IReadOnlyDictionary<string, string> LabelL10n,
     int? Ordinal,
     RowKind RowKind,
     string? ParentRowKey,
-    bool IsReadOnly);
+    bool IsReadOnly,
+    int? StyleId = null);
 
 /// <summary>Рядок у відповіді на запис/читання через цей обробник.</summary>
 /// <remarks>
@@ -297,7 +326,8 @@ public sealed record RowDefDto(
     int Ordinal,
     RowKind RowKind,
     string? ParentRowKey,
-    bool IsReadOnly);
+    bool IsReadOnly,
+    int? StyleId = null);
 
 /// <summary>
 /// Прибирає рядок із таблиці версії-чернетки — м'яко (<c>ФВ-7.6</c>).

@@ -71,7 +71,7 @@ public sealed class PatchPresentationHandler(
         // `cfg.StyleDef` не має, тож стиль чужої версії чи неіснуючий записувався мовчки.
         if (styles is not null)
         {
-            var styleChanges = changes.Where(c => c.Field == "StyleId" && c.Value is not null).ToList();
+            var styleChanges = changes.Where(c => c.Field is "StyleId" or "HeaderStyleId" && c.Value is not null).ToList();
             if (styleChanges.Count > 0)
             {
                 var ofVersion = await styles.GetAsync(templateVersionId, ct).ConfigureAwait(false);
@@ -336,7 +336,7 @@ public sealed class PatchPresentationHandler(
 
         return field switch
         {
-            "StyleId" => value is null || int.TryParse(
+            "StyleId" or "HeaderStyleId" => value is null || int.TryParse(
                 value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out _),
             "DisplayFormat" => value is null || value.Length <= MaxDisplayFormatLength,
             _ => true,
