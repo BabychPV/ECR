@@ -120,6 +120,28 @@ public interface IMethodologyDraftStore
     /// <param name="rule">Правило, дозволене <c>MethodologyVersion.RemoveCategoryRule</c>.</param>
     public void Remove(MethodologyCategoryRule rule);
 
+    /// <summary>Склад речовин версії — відстежувані записи, за порядком.</summary>
+    /// <param name="methodologyVersionId">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Речовини версії в порядку <c>Ordinal</c>.</returns>
+    public Task<IReadOnlyList<MethodologySubstance>> GetSubstancesTrackedAsync(
+        int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>Склад речовин версії з кодом і станом запису довідника — для читання.</summary>
+    /// <param name="methodologyVersionId">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Речовини в порядку <c>Ordinal</c>; невідстежувані.</returns>
+    public Task<IReadOnlyList<MethodologySubstanceRow>> ListSubstanceRowsAsync(
+        int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>Ставить речовину складу в чергу на вставку; зберігає <c>IUnitOfWork</c>.</summary>
+    /// <param name="substance">Запис, створений <c>MethodologyVersion.AddSubstance</c>.</param>
+    public void Add(MethodologySubstance substance);
+
+    /// <summary>Ставить речовину складу в чергу на видалення; зберігає <c>IUnitOfWork</c>.</summary>
+    /// <param name="substance">Запис, дозволений <c>MethodologyVersion.RemoveSubstance</c>.</param>
+    public void Remove(MethodologySubstance substance);
+
     /// <summary>Вимога версії за колонкою — відстежувана; <c>null</c>, якщо її немає.</summary>
     /// <param name="methodologyVersionId">Версія.</param>
     /// <param name="columnDefId">Колонка документа.</param>
@@ -268,3 +290,12 @@ public interface IMethodologyDraftStore
     public Task<IReadOnlyList<Methodology>> ListWithVersionsAsync(
         IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
 }
+
+/// <summary>Речовина складу версії методології, прочитана для редактора.</summary>
+/// <param name="SubstanceEntryId">Запис довідника речовин.</param>
+/// <param name="Ordinal">Порядок у переліку.</param>
+/// <param name="Code">Код запису довідника (<c>RegistryEntry.Code</c>).</param>
+/// <param name="RegistryDefId">Довідник, до якого належить запис.</param>
+/// <param name="IsDeleted">Запис довідника видалено логічно.</param>
+public sealed record MethodologySubstanceRow(
+    long SubstanceEntryId, int Ordinal, string Code, int RegistryDefId, bool IsDeleted);

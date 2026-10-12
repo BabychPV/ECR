@@ -59,6 +59,12 @@
     За замовчуванням вимкнено: старіші сервери поля не знають. Відповідь 202 обробляється завжди,
     незалежно від цього прапора (опитування GET /jobs/{jobId}).
 
+.PARAMETER TableRenameMap
+    Шлях до JSON-файлу з мапою «було → стало» кодів таблиць (і колонок) для структури, перейменованої між
+    версіями: [{"fromTableCode":"T9a_03","toTableCode":"T9a_17a","sheetCode":null,"columns":[{"fromColumnCode":"A","toColumnCode":"B"}]}].
+    Передається в тіло migrate-version як tableRenames (і на dry-run, і на застосування). Без параметра
+    тіло як раніше. Готова мапа для трьох таблиць 9a: tools/land/rename-maps/land-9a-missing-tables.json.
+
 .PARAMETER MigrateTimeoutMinutes
     Скільки чекати завершення фонової міграції (за замовчуванням 60 хв).
 
@@ -79,6 +85,7 @@ param(
     [switch]$NoPublish,
     [string[]]$MigrateDocumentId,
     [switch]$Async,
+    [string]$TableRenameMap,
     [int]$MigrateTimeoutMinutes = 60,
     [string]$ConfirmStand,
     [switch]$DryRun
@@ -90,6 +97,15 @@ if (-not $DataDir) { $DataDir = Join-Path $here '..\..\docs\delivery\reference-d
 . (Join-Path $here 'EcrApi.ps1')
 # `powershell -File ... -MigrateDocumentId 3,10` передає ОДИН рядок «3,10» (не масив) — розбираємо самі.
 $migrateIds = @(ConvertTo-DocumentIdList $MigrateDocumentId)
+# Мапа перейменувань таблиць для migrate-version (необов'язкова; без неї тіло запиту не змінюється).
+$tableRenames = $null
+if ($TableRenameMap) {
+    # ⚠ Windows PowerShell 5.1: масив з ConvertFrom-Json серіалізується як {"value":[…],"Count":n}, якщо покласти його
+    # в тіло запиту як є, — розгортаємо в звичайний масив елементів.
+    $rawRenames = Get-Content -LiteralPath $TableRenameMap -Raw -Encoding UTF8 | ConvertFrom-Json
+    $tableRenames = @(foreach ($renameItem in $rawRenames) { $renameItem })
+    if ($tableRenames.Count -eq 0) { throw "Мапа перейменувань $TableRenameMap порожня." }
+}
 
 # Підписи за аркушем «2. Contract» (EN - RU). Там, де в Excel немає російського підпису
 # (Processed on, Permit Number), RU не вигадується.
@@ -200,7 +216,9 @@ function Invoke-DocumentMigration {
         if (-not $docId) { continue }
         $path = "/api/v1/documents/$docId/migrate-version"
         # dry-run завжди синхронний.
-        $preview = Invoke-Ecr -Method POST -Path $path -Body @{ targetVersionId = $TargetVersionId; mode = 'Safe'; dryRun = $true }
+        $previewBody = @{ targetVersionId = $TargetVersionId; mode = 'Safe'; dryRun = $true }
+        if ($tableRenames) { $previewBody.tableRenames = $tableRenames }
+        $preview = Invoke-Ecr -Method POST -Path $path -Body $previewBody
         if (Test-EcrMigrateSameVersion $preview) {
             # Ідемпотентність: сервер відмовляє (422, messageKey migrateSameVersion), коли документ уже на цільовій версії.
             Write-Host "документ ${docId}: вже на версії ${TargetVersionId} — 0 змін"
@@ -217,6 +235,7 @@ function Invoke-DocumentMigration {
         }
         $body = @{ targetVersionId = $TargetVersionId; mode = 'Safe'; dryRun = $false }
         if ($Async) { $body.async = $true }
+        if ($tableRenames) { $body.tableRenames = $tableRenames }
         $apply = Invoke-Ecr -Method POST -Path $path -Body $body
         if (Test-EcrMigrateSameVersion $apply) {
             Write-Host "документ ${docId}: вже на версії ${TargetVersionId} — 0 змін"

@@ -31,4 +31,8 @@ public sealed class MethodologySubstance : Entity<int>
     /// перестав би пояснювати власні числа. Прибрати речовину — це нова версія.
     /// </remarks>
     public int Ordinal { get; private set; }
+
+    /// <summary>Переставляє речовину в переліку; вхід лише через <c>MethodologyVersion.SetSubstanceOrdinal</c>.</summary>
+    /// <param name="ordinal">Новий порядок.</param>
+    internal void SetOrdinal(int ordinal) => Ordinal = ordinal;
 }

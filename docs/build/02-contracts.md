@@ -3521,6 +3521,8 @@ public interface IValidationResultStore
 з іншого шаблону чи та сама — `422 ECR-TMPL-0422`. Подія — `aud.SecurityEvent`
 (`DocumentVersionMigrated`). Сигнатури — у `src/Ecr.Application/Ports/IDocumentVersionMigrationStore.cs`.
 
+Необов'язкове поле запиту `tableRenames` (`[{fromTableCode, toTableCode, sheetCode?, columns?: [{fromColumnCode, toColumnCode}]}]`) — адитивна мапа «було → стало» кодів таблиць і колонок для структури, перейменованої в цільовій версії (напр. `T9a_03 → T9a_17a`); міграції схеми немає. Діє лише там, де відповідника за кодом немає, і лише для записів, що стосуються пари версій; план бачить перейменовану таблицю як відповідник, тож комірки, права, мапінги збору/подій/вікон і прив'язки переїжджають тим самим шляхом. Звіт називає застосоване елементами `Kind = Renamed`. Мапа веде в таблицю/колонку, що вже має відповідника за кодом, або двоє записів ведуть в одну — відмова `renameConflict` (`422 ECR-SCHM-0422`, `err.ECR-SCHM-0422.migrateRenameConflict`, перелік у `renameConflicts`); зламана форма — `err.ECR-SCHM-0422.migrateRenameMapInvalid`. Без поля поведінка не змінюється; мапа йде й у фонову задачу (`async = true`).
+
 #### `IColumnPathMapper`
 
 Переклад `ColumnDefId` однієї версії шаблону в Id тієї самої колонки іншої версії за шляхом «код аркуша → код
@@ -4053,6 +4055,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/category-rule` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/category-rule` | `Calculation.EditRule` | 7 |
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/category-rule` | `Calculation.EditRule` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/substances` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/substances` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs/{columnDefId}` | `Calculation.ManageRequiredInputs` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/outputs` | `Calculation.View` | 7 |

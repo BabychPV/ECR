@@ -1,0 +1,5 @@
+[
+  { "fromTableCode": "T9a_03", "toTableCode": "T9a_17a" },
+  { "fromTableCode": "T9a_06", "toTableCode": "T9a_21a" },
+  { "fromTableCode": "T9a_07", "toTableCode": "T9a_21b" }
+]

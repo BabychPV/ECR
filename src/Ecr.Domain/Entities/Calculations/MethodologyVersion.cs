@@ -502,6 +502,58 @@ public sealed class MethodologyVersion : Entity<int>
         RequireOwn(rule.MethodologyVersionId, "Правило категорії", "category-rule");
     }
 
+    /// <summary>Додає речовину до складу версії. Лише для чернетки (ФВ-8.8).</summary>
+    /// <param name="substanceEntryId">Запис довідника речовин.</param>
+    /// <param name="ordinal">Порядок у переліку.</param>
+    /// <returns>Новий запис складу (треба додати до сховища).</returns>
+    /// <exception cref="DomainException"><c>ECR-CALC-0409</c> — версія не чернетка.</exception>
+    /// <remarks>
+    /// ⛔ Вхід лише через версію, як і для решти складу: речовина не знає, опублікована її версія
+    /// чи ні, а склад речовин визначає, по чому ітерує рушій (форма B, ключ <c>{ключ}_{код}</c>).
+    /// </remarks>
+    public MethodologySubstance AddSubstance(long substanceEntryId, int ordinal)
+    {
+        RequireDraft("склад речовин");
+
+        return new MethodologySubstance(Id, substanceEntryId, ordinal);
+    }
+
+    /// <summary>Переставляє речовину складу. Лише для чернетки.</summary>
+    /// <param name="substance">Запис, який уже належить цій версії.</param>
+    /// <param name="ordinal">Новий порядок.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія не чернетка або запис чужий.
+    /// </exception>
+    public void SetSubstanceOrdinal(MethodologySubstance substance, int ordinal)
+    {
+        ArgumentNullException.ThrowIfNull(substance);
+
+        RequireDraft("склад речовин");
+        RequireOwn(
+            substance.MethodologyVersionId,
+            "Речовину",
+            substance.SubstanceEntryId.ToString(CultureInfo.InvariantCulture));
+
+        substance.SetOrdinal(ordinal);
+    }
+
+    /// <summary>Дозволяє прибрати речовину зі складу версії. Лише для чернетки.</summary>
+    /// <param name="substance">Запис, який уже належить цій версії.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія не чернетка або запис чужий.
+    /// </exception>
+    /// <remarks>Як <see cref="RemoveFormula"/>: сутність лише дозволяє, видаляє сховище.</remarks>
+    public void RemoveSubstance(MethodologySubstance substance)
+    {
+        ArgumentNullException.ThrowIfNull(substance);
+
+        RequireDraft("склад речовин");
+        RequireOwn(
+            substance.MethodologyVersionId,
+            "Речовину",
+            substance.SubstanceEntryId.ToString(CultureInfo.InvariantCulture));
+    }
+
     /// <summary>
     /// Оголошує обов'язкову вхідну колонку методології. Лише для чернетки
     /// (директива «обов'язкові вхідні колонки методології»).

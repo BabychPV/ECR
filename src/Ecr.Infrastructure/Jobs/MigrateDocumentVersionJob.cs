@@ -66,7 +66,7 @@ public sealed class MigrateDocumentVersionJob(
         var reporter = new ThrottledReporter(progress, scopes, clock);
 
         var report = await handler
-            .RunQueuedAsync(task.DocumentId, task.TargetVersionId, mode, reporter.ReportAsync, ct)
+            .RunQueuedAsync(task.DocumentId, task.TargetVersionId, mode, task.TableRenames, reporter.ReportAsync, ct)
             .ConfigureAwait(false);
 
         // ⚠ Результат — у повідомленні прогресу (структурований конверт, мовою читача при GET /jobs):

@@ -48,6 +48,8 @@ public sealed class MethodologiesController(
     SetMethodologyModesHandler setModes,
     ListCalculationBindingsHandler listBindings,
     SaveCalculationBindingHandler saveBinding,
+    ListMethodologySubstancesHandler listSubstances,
+    SaveMethodologySubstancesHandler saveSubstances,
     MethodologyVersionScope scope) : ControllerBase
 {
     // ⛔ B-07 (UX-прохід, четвертий раунд): кожна дія з `{vid}` спершу
@@ -388,6 +390,49 @@ public sealed class MethodologiesController(
         await deleteCategoryRule.HandleAsync(vid, ct).ConfigureAwait(false);
 
         return NoContent();
+    }
+
+    /// <summary>Склад речовин версії. Право <c>Calculation.View</c>.</summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="vid">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Порожній склад — законний стан (<c>200</c> з порожнім <c>items</c>); <c>404</c> — версії немає.
+    /// </remarks>
+    [HttpGet("{id:int}/versions/{vid:int}/substances")]
+    [ProducesResponseType<MethodologySubstancesDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<MethodologySubstancesDto>> Substances(int id, int vid, CancellationToken ct)
+    {
+        await scope.RequireAsync(id, vid, ListMethodologySubstancesHandler.Permission, ct).ConfigureAwait(false);
+
+        return Ok(await listSubstances.HandleAsync(vid, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Замінює склад речовин версії-чернетки. Право <c>Calculation.EditFormula</c>.
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="vid">Версія-чернетка.</param>
+    /// <param name="request">Записи довідника речовин у порядку переліку.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Це набір, а не дельта: те, чого немає в запиті, зі складу прибирається (ідемпотентно). Речовини
+    /// потрібні формі B (ключ константи <c>{ключ}_{код речовини}</c>) — без складу ітерація по речовинах
+    /// порожня. Прибрати речовину, на яку звужена константа версії, не можна (<c>409 ECR-CALC-0409</c>).
+    /// </remarks>
+    [HttpPut("{id:int}/versions/{vid:int}/substances")]
+    [ProducesResponseType<MethodologySubstancesDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<MethodologySubstancesDto>> SaveSubstances(
+        int id, int vid, [FromBody] SaveMethodologySubstancesRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await scope.RequireAsync(id, vid, SaveMethodologySubstancesHandler.Permission, ct).ConfigureAwait(false);
+
+        return Ok(await saveSubstances.HandleAsync(vid, request.SubstanceEntryIds, ct).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -812,6 +857,12 @@ public sealed record SaveMethodologyRuleRequest(string MatchJson, int Priority, 
 /// <summary>Правило категорії константи версії (L-2): вираз діалекту Methodology.</summary>
 /// <param name="Expression">Вираз, що з рядка документа дає ключ категорії (текст).</param>
 public sealed record SaveMethodologyCategoryRuleRequest(string Expression);
+
+/// <summary>Запит на заміну складу речовин версії-чернетки.</summary>
+/// <param name="SubstanceEntryIds">
+/// Записи довідника речовин у порядку переліку; порожній перелік очищує склад, відсутній — 422.
+/// </param>
+public sealed record SaveMethodologySubstancesRequest(IReadOnlyList<long>? SubstanceEntryIds);
 
 /// <summary>Запит на запис обов'язкової вхідної колонки.</summary>
 /// <param name="Severity">Блокує чи лише попереджає збереження.</param>

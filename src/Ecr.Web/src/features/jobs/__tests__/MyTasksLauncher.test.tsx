@@ -116,6 +116,36 @@ function mockFetch(): void {
         );
       }
 
+      if (url.includes('/api/v1/projects/7/periods')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ periods: [{ periodKey: 202610, state: 'Open', isCurrent: true }] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }
+
+      if (url.includes('/api/v1/projects')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ items: [{ id: 7 }], nextCursor: null, totalCount: 1 }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }
+
+      if (url.includes('/api/v1/documents')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              items: [{ id: 9, businessKey: 'AIR-2026-10', resultsStale: true, resultsStaleSince: '2026-10-07T09:30:00Z' }],
+              nextCursor: null,
+              totalCount: 1,
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
       if (url.includes('/api/v1/me/approval-queue')) {
         return Promise.resolve(
           new Response(
@@ -283,6 +313,31 @@ describe('перехід із блоку «До погодження»', () => {
       return el as HTMLElement;
     });
     fireEvent.click(review);
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'my-tasks-stub' })).toBeNull());
+  });
+});
+
+describe('перехід із сусідніх блоків шухляди', () => {
+  it.each([
+    ['Assigned to me - Open', '[data-testid="my-tasks-assigned"] a[data-action="open"]'],
+    ['Awaiting validation - Validate', '[data-testid="my-tasks-validation"] a[data-action="validate"]'],
+    ['Awaiting validation - Open', '[data-testid="my-tasks-validation"] a[data-action="open"]'],
+    ['Потребують перерахунку - Open', '[data-testid="my-tasks-stale"] a'],
+  ])('клік «%s» закриває шухляду', async (_name, selector) => {
+    mockFetch();
+    mount();
+
+    fireEvent.click(await screen.findByRole('button', { name: '⟦jobs.myTasks⟧' }));
+    expect(await screen.findByRole('dialog', { name: 'my-tasks-stub' })).toBeTruthy();
+
+    const link = await waitFor(() => {
+      const el = document.querySelector(selector);
+      expect(el).not.toBeNull();
+
+      return el as HTMLElement;
+    });
+    fireEvent.click(link);
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'my-tasks-stub' })).toBeNull());
   });

@@ -8471,6 +8471,135 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/versions/{vid}/substances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Склад речовин версії. Право `Calculation.View`.
+         * @description ⚠ Порожній склад — законний стан (`200` з порожнім `items`); `404` — версії немає.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologySubstancesDto"];
+                        "text/json": components["schemas"]["MethodologySubstancesDto"];
+                        "text/plain": components["schemas"]["MethodologySubstancesDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /**
+         * Замінює склад речовин версії-чернетки. Право `Calculation.EditFormula`.
+         * @description ⛔ Це набір, а не дельта: те, чого немає в запиті, зі складу прибирається (ідемпотентно). Речовини
+         *     потрібні формі B (ключ константи `{ключ}_{код речовини}`) — без складу ітерація по речовинах
+         *     порожня. Прибрати речовину, на яку звужена константа версії, не можна (`409 ECR-CALC-0409`).
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія-чернетка. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveMethodologySubstancesRequest"];
+                    "application/json": components["schemas"]["SaveMethodologySubstancesRequest"];
+                    "text/json": components["schemas"]["SaveMethodologySubstancesRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologySubstancesDto"];
+                        "text/json": components["schemas"]["MethodologySubstancesDto"];
+                        "text/plain": components["schemas"]["MethodologySubstancesDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/versions/{vid}/tests": {
         parameters: {
             query?: never;
@@ -23390,6 +23519,34 @@ export interface components {
              */
             priority: number;
         };
+        /** @description Речовина, яку рахує версія методології (`calc.MethodologySubstance`). */
+        MethodologySubstanceDto: {
+            /** @description Код запису довідника (`RegistryEntry.Code`, для повітряних речовин — 301, 304, …): те, що
+             *     форма B підставляє у ключ константи `{ключ}_{код}`. */
+            code: string;
+            /** @description Запис довідника видалено логічно (речовина лишилась у складі старої версії). */
+            isDeleted: boolean;
+            /**
+             * Format: int32
+             * @description Порядок у переліку речовин версії.
+             */
+            ordinal: number;
+            /**
+             * Format: int32
+             * @description Довідник, до якого належить запис.
+             */
+            registryDefId: number;
+            /**
+             * Format: int64
+             * @description Запис довідника речовин.
+             */
+            substanceEntryId: number;
+        };
+        /** @description Склад речовин версії методології. */
+        MethodologySubstancesDto: {
+            /** @description Речовини в порядку `ordinal`; порожньо — версія без речовин. */
+            items: components["schemas"]["MethodologySubstanceDto"][];
+        };
         /** @description Методологія-контейнер, як її бачить конфігуратор — <b>без</b> версій. */
         MethodologySummaryDto: {
             /** @description Код — те, чим на неї посилаються імпорти й прив'язки. */
@@ -23486,6 +23643,11 @@ export interface components {
             /** @description `true` — лише звіт, без змін (завжди синхронно: швидкий). */
             dryRun: boolean;
             mode: null | components["schemas"]["VersionMigrationMode"];
+            /** @description Необов'язкова мапа «було → стало» кодів таблиць (і колонок) для структури, перейменованої в цільовій версії
+             *     (напр. `T9a_03 → T9a_17a`): без неї таблиця з новим кодом — «нова», а стара — «зникла», і введені в неї
+             *     значення блокують перенос (`dataLoss`). Діє лише там, де відповідника за кодом немає; суперечність парі
+             *     версій — `422 ECR-SCHM-0422` (`renameConflict`). Права ті самі, що й у переносу. */
+            tableRenames?: null | components["schemas"]["VersionMigrationTableRename"][];
             /**
              * Format: int32
              * @description Опублікована версія того самого шаблону.
@@ -26318,6 +26480,11 @@ export interface components {
              */
             priority: number;
         };
+        /** @description Запит на заміну складу речовин версії-чернетки. */
+        SaveMethodologySubstancesRequest: {
+            /** @description Записи довідника речовин у порядку переліку; порожній перелік очищує склад, відсутній — 422. */
+            substanceEntryIds: null | number[];
+        };
         /** @description Запит на запис тесту золотого набору. */
         SaveMethodologyTestCaseRequest: {
             /** @description Очікувані виходи: `{"tons":12.5}`. */
@@ -28769,6 +28936,13 @@ export interface components {
              */
             versionId: number;
         };
+        /** @description Перейменування колонки таблиці між версіями: «було → стало» за кодом колонки. */
+        VersionMigrationColumnRename: {
+            /** @description Код колонки у вихідній версії. */
+            fromColumnCode: string;
+            /** @description Код колонки в цільовій версії. */
+            toColumnCode: string;
+        };
         /** @description Одна відмінність між версіями, як її бачить перенос. */
         VersionMigrationItem: {
             /** @description Клас зміни (ФВ-7.3). */
@@ -28797,6 +28971,17 @@ export interface components {
          * @enum {unknown}
          */
         VersionMigrationMode: "Safe" | "Presentation";
+        /** @description Перейменування таблиці між версіями: «було → стало» за кодом таблиці (і, за потреби, колонок). */
+        VersionMigrationTableRename: {
+            /** @description Перейменування колонок цієї таблиці; `null` — колонки збігаються за кодами. */
+            columns?: null | components["schemas"]["VersionMigrationColumnRename"][];
+            /** @description Код таблиці у вихідній версії. */
+            fromTableCode: string;
+            /** @description Код аркуша; `null` — діє на будь-якому аркуші, де є така таблиця. */
+            sheetCode?: null | string;
+            /** @description Код таблиці в цільовій версії; рівний FromTableCode — лише перейменування колонок. */
+            toTableCode: string;
+        };
         /** @description Подія журналу переходів стану аркуша (`BE-11b`). */
         WorkflowEventDto: {
             /** @description Дія (`ApprovalAction`). */

@@ -370,6 +370,24 @@ AF = {  # (sheet prefix, table section) -> {normalized header: AF column code}
 PKG = json.load(open('af-land-package.json', encoding='utf-8'))
 CALC = {'T3_00': ['ECW_C05_01', 'ECW_C05_02', 'ECW_C05_03', 'ECW_C05_04', 'ECW_C05_05'], 'T4_01': ['ECW_C06_01'],
         'T5_08': ['ECW_C07_07', 'ECW_C07_07_01'], 'T5_09': ['ECW_C07_08'], 'T5_22': ['ECW_C07_16'], 'T5_27': ['ECW_C07_21']}
+# Виходи методологій C08/C09/C11/C12 -> таблиці без колонок результатів (LP-08). Файл land-result-outputs.json складає
+# extract_result_outputs.py (структура пакета методологій AF x таблиці правил прода, без значень); див. docs/.../land-template/README.md.
+RESULT_TABLES = {}
+RESULT_TABLES_USED = set()
+RESULT_OUTPUTS_PENDING = {}   # таблиці зі зіставлення, яких немає в моделі (чекають LP-09)
+try:
+    _ro = json.load(open('land-result-outputs.json', encoding='utf-8'))
+except FileNotFoundError:
+    _ro = {'methodologies': {}}
+_ro_all = dict(_ro['methodologies'])
+# supplementalMethodologies: виходи, яких немає в пакеті AF XML (ECW_C09_02_01 -> T7b_00); записані зі стенда (структура)
+_ro_all.update(_ro.get('supplementalMethodologies', {}))
+for _m, _d in sorted(_ro_all.items()):
+    for _t in _d['tables']:
+        _e = RESULT_TABLES.setdefault(_t, {'methodologies': [], 'outputs': [], 'inputs': []})
+        _e['methodologies'].append(_m)
+        _e['outputs'] = sorted(set(_e['outputs']) | set(_d['outputs']))
+        _e['inputs'] = sorted(set(_e['inputs']) | set(_d.get('inputs', [])))
 TEXT_ARGS = {'T3_00': ['Land_OverhauledEngines', 'Land_Rotation'], 'T5_09': ['Land_TypePetrStation'], 'T5_27': ['Land_TypeBurnFuel']}
 EXTRA = {
     'T3_00': {'CalculationMonth': ('Formula', '[Period].Sequence', 'one', 'Calculation month'),
@@ -422,8 +440,13 @@ def af_lookup(prefix, en, ru):
 
 
 def sec_of(title):
-    m = re.match(r'^\s*(\d{1,2}[a-d]?(?:\.\d+)+)\b', title or '')
-    return m.group(1) if m else None
+    # Номер секції з заголовка таблиці: «9a.16 ...», а також з літерою після номера: «9a.17а» (кирилична а), «9a.21a» (латинська a).
+    # Раніше вираз вимагав межі слова одразу після цифр, тож такі заголовки не розпізнавались, а код таблиці брався з
+    # порядкового номера блоку (T9a_03/T9a_06/T9a_07 замість T9a_17a/T9a_21a/T9a_21b) - LP-09.
+    m = re.match(r'^\s*(\d{1,2}[a-d]?(?:\.\d+)+)([a-d\u0430])?(?!\w)', title or '')
+    if not m:
+        return None
+    return m.group(1) + (m.group(2).replace('\u0430', 'a') if m.group(2) else '')
 
 
 def table_code(sh_idx, sheet_name, t, k, nblocks):
@@ -581,7 +604,12 @@ for sh in X['sheets']:
     for k, t in enumerate(sh['tables'], 1):
         tcode = table_code(sh['index'], sh['name'], t, k, nblocks)
         if any(x['code'] == tcode for x in s_out['tables']):
-            tcode = '%s_%d' % (tcode, k)
+            # Excel 9a має два блоки з однаковим заголовком «9a.21a» (62 і 50 колонок); прод має AF_..._9a_21a і ..._9a_21b, тож
+            # другий блок = «b» (позиція між 9a.21a і 9a.22, ті самі 50 колонок і ті самі методології, що в 9a.22/9a.23).
+            if tcode[-1] == 'a' and not any(x['code'] == tcode[:-1] + 'b' for x in s_out['tables']):
+                tcode = tcode[:-1] + 'b'
+            else:
+                tcode = '%s_%d' % (tcode, k)
         title_en, title_ru = split_enru(t.get('title') or sh['name'])
         cols = t['columns']
         has_month = any(c.get('month') for c in cols)
@@ -760,6 +788,11 @@ for sh in X['sheets']:
             for code_, (typ, expr, unit_, hdr) in EXTRA.get(tcode, {}).items():
                 col_ = {'code': code_, 'dataType': typ, 'headerEn': hdr, 'headerRu': '', 'hidden': False, 'readOnly': typ == 'Formula', 'excel': None,
                         'month': None, 'ecrAdded': 'calculation argument (not in the Excel sheet)'}
+                if code_ == 'DaysInCalcMonth' and 'Land_Measure_OperTimeDays' in bases:
+                    # Паритет зі старою системою (12.10): аргумент 7.7 = відпрацьовані дні поточного місяця
+                    # (Land_Measure_OperTimeDays), а не календарні дні періоду; при 0 днів методологія дає 0.
+                    expr = ''.join('[Period].Sequence = %d ? [Land_Measure_OperTimeDays_M%02d] : ' % (m, m) for m in range(1, 12)) + '[Land_Measure_OperTimeDays_M12]'
+                    col_['ecrAdded'] = 'calculation argument = operating days of the current month (legacy parity)'
                 if expr:
                     col_['expression'] = expr
                 if unit_:
@@ -781,6 +814,20 @@ for sh in X['sheets']:
                                          'hidden': False, 'readOnly': True, 'excel': None, 'month': None, 'precision': 28, 'scale': 12,
                                          'ecrAdded': 'methodology output (CalculationBinding)'})
             t_out['calc'] = {'methodologies': CALC[tcode], 'outputs': sorted(outs)}
+        elif tcode in RESULT_TABLES:
+            # Колонки результатів методологій C08/C09/C11/C12 (LP-08): та сама форма, що й у CALC-таблиць вище
+            # (Calculated, readOnly, 28/12, t або g/s, код колонки = код виходу методології).
+            rt = RESULT_TABLES[tcode]
+            have = {c['code'] for c in t_out['columns']}
+            for o in rt['outputs']:
+                if o in have:
+                    raise SystemExit('result columns: колонка %s уже є в %s' % (o, tcode))
+                t_out['columns'].append({'code': o, 'dataType': 'Calculated', 'headerEn': o, 'headerRu': '',
+                                         'unit': 't' if re.match(r'^ECW_EC_tons(_|$)', o) else 'g/s',
+                                         'hidden': False, 'readOnly': True, 'excel': None, 'month': None, 'precision': 28, 'scale': 12,
+                                         'ecrAdded': 'methodology output (CalculationBinding)'})
+            t_out['calc'] = {'methodologies': rt['methodologies'], 'outputs': rt['outputs']}
+            RESULT_TABLES_USED.add(tcode)
         # ---- рівномірні формули колонок (єдині, що виражаються в діалекті шаблону)
         if sh['name'].startswith('7.0'):
             qmap = {'Q1': (1, 2, 3), 'Q2': (4, 5, 6), 'Q3': (7, 8, 9), 'Q4': (10, 11, 12), 'Annual': tuple(range(1, 13))}
@@ -858,7 +905,7 @@ for sh in X['sheets']:
                         t_out['rows'].append({'key': 'R%03d' % r, 'en': ' / '.join(x for x in vals[1:] if x) or vals[0], 'ru': '', 'kind': 'Item', 'parent': None, 'excelRow': r})
             t_out['maxRows'] = None
             # константні значення у даних Fixed-таблиць (ліміти тощо) — для наповнення документів
-            colmap = {c['excel']: c['code'] for c in t_out['columns']}
+            colmap = {c['excel']: c['code'] for c in t_out['columns'] if c.get('excel')}   # без доданих ECR колонок (excel=None)
             rowmap = {rw['excelRow']: rw['key'] for rw in t_out['rows']}
             for L, ccode in colmap.items():
                 cd = [c for c in cols if c['letter'] == L][0]
@@ -984,6 +1031,87 @@ import prod_mapping  # noqa: E402
 out['prodColumnMapping'], _added_cols = prod_mapping.apply(out)
 stat_cols += _added_cols
 print('prodColumnMapping: tables %d, new columns %d' % (len(out['prodColumnMapping']['tables']), _added_cols))
+
+
+# ---- мости аргументів методологій C08/C09/C11/C12 для таблиць аркушів 6, 9-11 (LP-10).
+# Для аркушів 3-5 (PerPeriodInstance) місячна колонка `X_M01..X_M12` має Formula-міст `X`, що вибирає місяць за
+# [Period].Sequence; аргумент методології (імена з AF) знаходить колонку за кодом. Таблиці 6, 9-11 (MonthsInColumns) мостів
+# не мали. Тут мости робляться ЛИШЕ там, де відповідність доведена prodColumnMapping (alias прод-колонки AF -> колонка(и)
+# шаблону, evidence header/single/position) для входу, який справді використовує методологія таблиці (inputs з
+# land-result-outputs.json), та для календарних аргументів (ті самі формули, що в EXTRA таблиць 3-5). Усе інше — у
+# argumentBridges.unresolved з причиною: нічого не вгадуємо.
+def _arg_bridges():
+    global stat_cols
+    calendar = {'CalculationMonth': EXTRA['T3_00']['CalculationMonth'], 'DaysInCalcYear': EXTRA['T5_08']['DaysInCalcYear'],
+                'Winter': EXTRA['T5_08']['Winter']}
+    by_code = {}
+    for s_ in out['sheets']:
+        for t_ in s_['tables']:
+            by_code.setdefault(t_['code'], (s_, t_))
+    ptabs = out['prodColumnMapping']['tables']
+    bridged, unresolved, added = {}, {}, 0
+
+    def month_expr(cols_):
+        return ''.join('[Period].Sequence = %d ? [%s] : ' % (m, cols_[m - 1]) for m in range(1, 12)) + '[%s]' % cols_[11]
+
+    for tcode in sorted(RESULT_TABLES):
+        if tcode not in by_code or tcode in CALC:
+            continue
+        s_, t_ = by_code[tcode]
+        if t_['layout'] != 'MonthsInColumns':
+            continue
+        cols = {c['code']: c for c in t_['columns']}
+        info = ptabs.get('%s|%s' % (s_['code'], tcode))
+        alias = {a['prod']: a for a in info['aliases']} if info else {}
+        done, left = [], {}
+        for name in RESULT_TABLES[tcode].get('inputs', []):
+            if name in cols:
+                continue   # колонка з такою назвою вже є (пряме відповідання)
+            new = None
+            if name in calendar:
+                typ, expr, unit_, hdr = calendar[name]
+                new = {'code': name, 'dataType': typ, 'headerEn': hdr, 'unit': unit_, 'expression': expr,
+                       'ecrAdded': 'calculation argument (not in the Excel sheet)'}
+            elif name == 'DaysInCalcMonth':
+                # Правило «DaysInCalcMonth = Land_Measure_OperTimeDays» (7.7) доведено для аркушів 3-5; для 6, 9-11 не доведено
+                # (календарні дні [Period].Days чи відпрацьовані дні - рішення власника методології): мост не створюємо.
+                left[name] = 'правило 7.7 (відпрацьовані дні чи календарні) доведено лише для аркушів 3-5; для цієї таблиці питання власнику'
+            elif name in alias:
+                a = alias[name]
+                if a.get('monthColumns'):
+                    mc = a['monthColumns']
+                    ok = len(mc) == 12 and all(c in cols for c in mc) and [cols[c].get('month') for c in mc] == list(range(1, 13))
+                    if ok:
+                        new = {'code': name, 'dataType': 'Formula', 'headerEn': '%s (argument bridge: selects the month column)' % name,
+                               'unit': cols[mc[0]].get('unit'), 'expression': month_expr(mc),
+                               'ecrAdded': 'bridge: methodology argument %s = prod column alias (evidence %s)' % (name, a['evidence'])}
+                    else:
+                        left[name] = 'alias є, але місячні колонки не збігаються з 12 колонками таблиці'
+                elif a.get('column') in cols and cols[a['column']]['dataType'] in ('Decimal', 'Int'):
+                    src = cols[a['column']]
+                    new = {'code': name, 'dataType': 'Formula', 'headerEn': '%s (argument bridge: %s)' % (name, src['code']),
+                           'unit': src.get('unit'), 'expression': '[%s]' % src['code'],
+                           'ecrAdded': 'bridge: methodology argument %s = prod column alias (evidence %s)' % (name, a['evidence'])}
+                else:
+                    left[name] = 'alias є, але колонка шаблону не числова (мост Formula неможливий без рішення замовника)'
+            else:
+                left[name] = 'відповідності прод-колонці в prodColumnMapping немає (не доведено)'
+            if new is not None:
+                col_ = {'headerRu': '', 'hidden': False, 'readOnly': True, 'excel': None, 'month': None, 'precision': 28, 'scale': 12}
+                col_.update({k: v for k, v in new.items() if v is not None})
+                t_['columns'].append(col_)
+                done.append(name)
+                added += 1
+        if done:
+            bridged[tcode] = sorted(done)
+        if left:
+            unresolved[tcode] = dict(sorted(left.items()))
+    out['argumentBridges'] = {'bridged': dict(sorted(bridged.items())), 'unresolved': dict(sorted(unresolved.items()))}
+    stat_cols += added
+    print('argumentBridges: tables %d, columns %d, unresolved inputs %d' % (len(bridged), added, sum(len(v) for v in unresolved.values())))
+
+
+_arg_bridges()
 
 cfs = []
 seen_cf = set()
@@ -1196,6 +1324,9 @@ print('cf row-scoped:', len(out['conditionalFormatsRowScoped']))
 out['registries'] = list(registries.values())
 out['stats'] = {'excelSheets': len(X['sheets']), 'reportSheets': len(out['sheets']), 'tables': stat_tables, 'columns': stat_cols,
                 'registries': len(registries), 'registryEntries': sum(len(r['entries']) for r in registries.values())}
+# таблиці, для яких виходи відомі, а самої таблиці в шаблоні ще немає (LP-09): колонки з'являться після додавання таблиці
+out['resultOutputsPending'] = {t: RESULT_TABLES[t] for t in sorted(RESULT_TABLES) if t not in RESULT_TABLES_USED}
+print('result columns: tables %d, pending %s' % (len(RESULT_TABLES_USED), sorted(out['resultOutputsPending'])))
 json.dump(out, open(OUT, 'w', encoding='utf-8'), ensure_ascii=False, indent=None, separators=(',', ':'))
 print(out['stats'])
 for s in out['sheets']:

@@ -65,8 +65,12 @@ public sealed record VersionMigrationPlan(
     IReadOnlyList<VersionMigrationItem> Items,
     long TransferredValues,
     long LostValues,
-    long GuardedValues)
+    long GuardedValues,
+    IReadOnlyList<string>? RenameConflicts = null)
 {
+    /// <summary>Скільки пунктів мапи перейменувань суперечать цій парі версій (<c>renameConflict</c>).</summary>
+    public int RenameConflictCount => RenameConflicts?.Count ?? 0;
+
     /// <summary>Чи є серед відмінностей бодай одна непрезентаційна.</summary>
     public bool HasStructuralChanges => Items.Any(i => i.ChangeClass != ChangeClass.Presentation);
 
@@ -98,6 +102,13 @@ public sealed record VersionMigrationPlan(
             reasons.Add("guardedWithData");
         }
 
+        // ⛔ Мапа веде в таблицю/колонку, що вже має відповідник за кодом (або двоє ведуть в одну): мовчки
+        // вибрати котрусь означало б злити чужі дані в одне місце. Відмова, а не вгадування.
+        if (RenameConflictCount > 0)
+        {
+            reasons.Add("renameConflict");
+        }
+
         return reasons;
     }
 }
@@ -117,11 +128,16 @@ public static class VersionMigrationPlanner
     /// <param name="target">Цільова версія.</param>
     /// <param name="cells">Непорожні значення документів за колонками й описами рядків вихідної версії.</param>
     /// <param name="headerValues">Непорожні значення шапки за полями вихідної версії.</param>
+    /// <param name="renames">
+    /// Мапа «було → стало» кодів таблиць (і колонок) для структури, перейменованої між версіями; <c>null</c> —
+    /// без мапи (відповідність лише за однаковим кодом, як і раніше).
+    /// </param>
     public static VersionMigrationPlan Plan(
         TemplateVersionSnapshot source,
         TemplateVersionSnapshot target,
         IReadOnlyList<VersionMigrationCellUsage> cells,
-        IReadOnlyDictionary<int, long> headerValues)
+        IReadOnlyDictionary<int, long> headerValues,
+        IReadOnlyList<VersionMigrationTableRename>? renames = null)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(target);
@@ -134,6 +150,7 @@ public static class VersionMigrationPlanner
         var columns = new List<VersionMigrationColumn>();
         var rows = new Dictionary<int, int>();
         var newRows = new List<VersionMigrationNewRow>();
+        var conflicts = new List<string>();
 
         var valuesByColumn = cells
             .GroupBy(c => c.ColumnDefId)
@@ -159,23 +176,68 @@ public static class VersionMigrationPlanner
             PresentationDiff(items, sheet.Code, "Name", sheet.NameL10n, otherSheet.NameL10n);
 
             var targetTables = Live(otherSheet.Tables).ToDictionary(t => t.Code, StringComparer.Ordinal);
+            var sourceTableCodes = Live(sheet.Tables).Select(t => t.Code).ToHashSet(StringComparer.Ordinal);
+            var renamedTargets = new HashSet<int>();
             foreach (var table in Live(sheet.Tables))
             {
                 var tablePath = $"{sheet.Code}.{table.Code}";
+                var rename = FindRename(renames, sheet.Code, table.Code);
+                string? renamedFrom = null;
+                IReadOnlyList<VersionMigrationColumnRename>? columnRenames = null;
+
                 if (!targetTables.TryGetValue(table.Code, out var otherTable))
                 {
-                    items.Add(Removal(tablePath, Live(table.Columns).Sum(c => Count(valuesByColumn, c.Id))));
-                    continue;
+                    // Мапа спрацьовує лише там, де відповідника за кодом немає: однаковий код завжди першим.
+                    if (rename is not null
+                        && !string.Equals(rename.ToTableCode, table.Code, StringComparison.Ordinal)
+                        && targetTables.TryGetValue(rename.ToTableCode, out var renamedTable))
+                    {
+                        if (sourceTableCodes.Contains(rename.ToTableCode))
+                        {
+                            conflicts.Add($"{tablePath} -> {rename.ToTableCode}: цільова таблиця вже має відповідник за кодом у вихідній версії");
+                            items.Add(new(tablePath, "RenameConflict", ChangeClass.Breaking, 0, "Code", table.Code, rename.ToTableCode));
+                        }
+                        else if (!renamedTargets.Add(renamedTable.Id))
+                        {
+                            conflicts.Add($"{tablePath} -> {rename.ToTableCode}: у цю таблицю вже веде інший запис мапи");
+                            items.Add(new(tablePath, "RenameConflict", ChangeClass.Breaking, 0, "Code", table.Code, rename.ToTableCode));
+                        }
+                        else
+                        {
+                            otherTable = renamedTable;
+                            renamedFrom = table.Code;
+                            columnRenames = rename.Columns;
+                        }
+                    }
+
+                    if (otherTable is null)
+                    {
+                        items.Add(Removal(tablePath, Live(table.Columns).Sum(c => Count(valuesByColumn, c.Id))));
+                        continue;
+                    }
+                }
+                else if (rename is not null && string.Equals(rename.ToTableCode, table.Code, StringComparison.Ordinal))
+                {
+                    columnRenames = rename.Columns;
                 }
 
                 tables[table.Id] = otherTable.Id;
+                var columnsBefore = columns.Count;
                 PresentationDiff(items, tablePath, "Name", table.NameL10n, otherTable.NameL10n);
                 CompareTableShape(items, tablePath, table, otherTable, valuesByColumn);
-                CompareColumns(items, columns, tablePath, table, otherTable, valuesByColumn);
+                CompareColumns(items, columns, conflicts, tablePath, table, otherTable, valuesByColumn, columnRenames);
                 CompareRows(items, rows, newRows, tablePath, table, otherTable, valuesByRow);
+
+                if (renamedFrom is not null)
+                {
+                    // Скільки значень переїздить під новим кодом: лише колонки, що мають відповідника.
+                    var moved = columns.Skip(columnsBefore).Sum(c => Count(valuesByColumn, c.SourceColumnDefId));
+                    items.Add(new(tablePath, "Renamed", ChangeClass.Safe, moved, "Code", renamedFrom, otherTable.Code));
+                }
             }
 
-            foreach (var added in Live(otherSheet.Tables).Where(t => Live(sheet.Tables).All(s => s.Code != t.Code)))
+            foreach (var added in Live(otherSheet.Tables)
+                         .Where(t => Live(sheet.Tables).All(s => s.Code != t.Code) && !renamedTargets.Contains(t.Id)))
             {
                 items.Add(new($"{sheet.Code}.{added.Code}", "Added", ChangeClass.Safe, 0));
             }
@@ -213,7 +275,25 @@ public static class VersionMigrationPlanner
         var guarded = items.Where(i => i.Kind == "Modified").Sum(i => i.Values);
 
         return new VersionMigrationPlan(
-            sheets, tables, columns, rows, headerFields, newRows, items, transferred, lost, guarded);
+            sheets, tables, columns, rows, headerFields, newRows, items, transferred, lost, guarded,
+            conflicts.Count == 0 ? null : conflicts);
+    }
+
+    /// <summary>
+    /// Запис мапи для таблиці: з вказаним аркушем має перевагу над записом «на будь-якому аркуші».
+    /// </summary>
+    private static VersionMigrationTableRename? FindRename(
+        IReadOnlyList<VersionMigrationTableRename>? renames, string sheetCode, string tableCode)
+    {
+        if (renames is null || renames.Count == 0)
+        {
+            return null;
+        }
+
+        return renames.FirstOrDefault(r => string.Equals(r.SheetCode, sheetCode, StringComparison.Ordinal)
+                                           && string.Equals(r.FromTableCode, tableCode, StringComparison.Ordinal))
+               ?? renames.FirstOrDefault(r => r.SheetCode is null
+                                              && string.Equals(r.FromTableCode, tableCode, StringComparison.Ordinal));
     }
 
     private static IEnumerable<SheetDef> Live(IEnumerable<SheetDef> sheets) => sheets.Where(s => !s.IsDeleted);
@@ -257,10 +337,13 @@ public static class VersionMigrationPlanner
     }
 
     private static void CompareColumns(
-        List<VersionMigrationItem> items, List<VersionMigrationColumn> map, string tablePath,
-        TableDef from, TableDef to, IReadOnlyDictionary<int, long> valuesByColumn)
+        List<VersionMigrationItem> items, List<VersionMigrationColumn> map, List<string> conflicts, string tablePath,
+        TableDef from, TableDef to, IReadOnlyDictionary<int, long> valuesByColumn,
+        IReadOnlyList<VersionMigrationColumnRename>? columnRenames)
     {
         var targetColumns = Live(to.Columns).ToDictionary(c => c.Code, StringComparer.Ordinal);
+        var sourceColumnCodes = Live(from.Columns).Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
+        var renamedTargets = new HashSet<int>();
 
         foreach (var column in Live(from.Columns))
         {
@@ -269,8 +352,32 @@ public static class VersionMigrationPlanner
 
             if (!targetColumns.TryGetValue(column.Code, out var other))
             {
-                items.Add(Removal(path, values));
-                continue;
+                // Той самий принцип, що й для таблиць: мапа діє лише там, де відповідника за кодом немає.
+                var rename = columnRenames?.FirstOrDefault(r => string.Equals(r.FromColumnCode, column.Code, StringComparison.Ordinal));
+                if (rename is not null && targetColumns.TryGetValue(rename.ToColumnCode, out var renamedColumn))
+                {
+                    if (sourceColumnCodes.Contains(rename.ToColumnCode))
+                    {
+                        conflicts.Add($"{path} -> {rename.ToColumnCode}: цільова колонка вже має відповідник за кодом у вихідній таблиці");
+                        items.Add(new(path, "RenameConflict", ChangeClass.Breaking, 0, "Code", column.Code, rename.ToColumnCode));
+                    }
+                    else if (!renamedTargets.Add(renamedColumn.Id))
+                    {
+                        conflicts.Add($"{path} -> {rename.ToColumnCode}: у цю колонку вже веде інший запис мапи");
+                        items.Add(new(path, "RenameConflict", ChangeClass.Breaking, 0, "Code", column.Code, rename.ToColumnCode));
+                    }
+                    else
+                    {
+                        other = renamedColumn;
+                        items.Add(new(path, "Renamed", ChangeClass.Safe, values, "Code", column.Code, renamedColumn.Code));
+                    }
+                }
+
+                if (other is null)
+                {
+                    items.Add(Removal(path, values));
+                    continue;
+                }
             }
 
             map.Add(new VersionMigrationColumn(column.Id, other.Id, to.Id));
@@ -295,7 +402,8 @@ public static class VersionMigrationPlanner
             PresentationDiff(items, path, nameof(ColumnDef.IsHidden), column.IsHidden, other.IsHidden);
         }
 
-        foreach (var added in targetColumns.Values.Where(c => Live(from.Columns).All(s => s.Code != c.Code)))
+        foreach (var added in targetColumns.Values
+                     .Where(c => Live(from.Columns).All(s => s.Code != c.Code) && !renamedTargets.Contains(c.Id)))
         {
             items.Add(new($"{tablePath}.{added.Code}", "Added", ChangeClass.Safe, 0));
         }
