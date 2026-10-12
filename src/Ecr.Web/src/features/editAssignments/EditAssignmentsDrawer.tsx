@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Group, SegmentedControl, Stack, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
@@ -77,6 +77,9 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
     enabled: opened,
   });
   const sets = useQuery({ queryKey: queryKeys.editAssignments.editorSets(), queryFn: getEditorSets, enabled: opened && dialog === WizardDialogId });
+
+  // Esc у діалозі закриває лише діалог: інакше Mantine закрив би й шторку під ним (див. `DetailDrawer.closeOnEscape`).
+  const dialogOpen = validating !== null || returning !== null || removing !== null || (opened && dialog === WizardDialogId);
 
   const refresh = (): Promise<void> => queryClient.invalidateQueries({ queryKey: queryKeys.editAssignments.all() });
   const done = (message: string): void => {
@@ -168,7 +171,26 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
     onSettled: refresh,
   });
 
+  // Майстер демонтується разом із `?dialog=` (без переходу закриття), тому `returnFocus` Mantine фокус не повертає -
+  // повертаємо самі на того, хто відкрив (кнопка «⋯» рядка або «Assign»), WCAG 2.4.3.
+  const wizardOpener = useRef<HTMLElement | null>(null);
+  const wizardOpen = opened && dialog === WizardDialogId;
+  const wizardWasOpen = useRef(false);
+  useEffect(() => {
+    if (wizardWasOpen.current && !wizardOpen) {
+      const target = wizardOpener.current;
+      wizardOpener.current = null;
+      // Після розмонтування майстра: пастка фокуса Mantine вже знята.
+      window.setTimeout(() => {
+        if (target?.isConnected === true) target.focus();
+      }, 0);
+    }
+    wizardWasOpen.current = wizardOpen;
+  }, [wizardOpen]);
+
   const openWizard = (next: AssignWizardData): void => {
+    const active = document.activeElement;
+    wizardOpener.current = active instanceof HTMLElement && active !== document.body ? active : null;
     setSeed(next);
     setDialog(WizardDialogId);
   };
@@ -196,6 +218,7 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
         title={t('editAssign.title')}
         closeLabel={t('editAssign.close')}
         size="xl"
+        closeOnEscape={!dialogOpen}
         footer={
           data?.canManage === true && !simulating ? (
             <Button onClick={() => openWizard(emptyAssignData)} data-autofocus>

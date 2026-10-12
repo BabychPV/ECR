@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import { useRef, type JSX } from 'react';
 import { ActionIcon, Group, Menu, Stack, Table, Text, VisuallyHidden } from '@mantine/core';
 import { formatMonthName } from '@/shared/format';
 import { t } from '@/shared/i18n';
@@ -88,24 +88,32 @@ function MonthsTable({
 function RowMenu({ assignment, actions }: { readonly assignment: EditAssignment; readonly actions: MatrixActions }): JSX.Element {
   const label = sliceLabel(assignment.slice);
   const canRepeat = nextMonthSlice(assignment.slice) !== null;
+  const trigger = useRef<HTMLButtonElement>(null);
+  // ⛔ WCAG 2.4.3: пункт меню демонтується при кліку, тож діалог/майстер, відкритий з нього, запам'ятав би
+  // `body` як відкривач і після Esc кинув би фокус туди. Тому перед дією фокус ставиться на кнопку «⋯» рядка:
+  // саме її Mantine запам'ятовує і саме на неї повертає.
+  const run = (action: (a: EditAssignment) => void) => (): void => {
+    trigger.current?.focus();
+    action(assignment);
+  };
 
   return (
     <Menu position="bottom-end" withinPortal>
       <Menu.Target>
-        <ActionIcon variant="subtle" color="gray" aria-label={t('editAssign.rowActions', { slice: label })}>
+        <ActionIcon ref={trigger} variant="subtle" color="gray" aria-label={t('editAssign.rowActions', { slice: label })}>
           <span aria-hidden="true">⋯</span>
         </ActionIcon>
       </Menu.Target>
       <Menu.Dropdown>
         {assignment.status === 'Filled' ? (
-          <Menu.Item onClick={() => actions.onValidate(assignment)}>{t('editAssign.validate')}</Menu.Item>
+          <Menu.Item onClick={run(actions.onValidate)}>{t('editAssign.validate')}</Menu.Item>
         ) : null}
         {assignment.status === 'Filled' || assignment.status === 'Validated' ? (
-          <Menu.Item onClick={() => actions.onReturn(assignment)}>{t('editAssign.return')}</Menu.Item>
+          <Menu.Item onClick={run(actions.onReturn)}>{t('editAssign.return')}</Menu.Item>
         ) : null}
-        <Menu.Item onClick={() => actions.onEdit(assignment)}>{t('editAssign.edit')}</Menu.Item>
-        {canRepeat ? <Menu.Item onClick={() => actions.onRepeat(assignment)}>{t('editAssign.repeatNext')}</Menu.Item> : null}
-        <Menu.Item color="statusError" onClick={() => actions.onRemove(assignment)}>
+        <Menu.Item onClick={run(actions.onEdit)}>{t('editAssign.edit')}</Menu.Item>
+        {canRepeat ? <Menu.Item onClick={run(actions.onRepeat)}>{t('editAssign.repeatNext')}</Menu.Item> : null}
+        <Menu.Item color="statusError" onClick={run(actions.onRemove)}>
           {t('editAssign.remove')}
         </Menu.Item>
       </Menu.Dropdown>

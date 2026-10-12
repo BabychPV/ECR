@@ -48,7 +48,7 @@ function label(state: string): string | null {
   }
 }
 
-export function AssignmentBadge({ state }: { readonly state: string }): JSX.Element {
+export function AssignmentBadge({ state, label: text }: { readonly state: string; readonly label?: string }): JSX.Element {
   const known = Tone[state] !== undefined;
   // Невідомий стан сервера — «увага» з сирим кодом, як в `StatusBadge`: мовчки сірим він не стає.
   const tone: StatusTone = known ? (Tone[state] as StatusTone) : 'warning';
@@ -76,7 +76,7 @@ export function AssignmentBadge({ state }: { readonly state: string }): JSX.Elem
       }}
       data-assignment-status={state}
     >
-      {label(state) ?? state}
+      {text ?? label(state) ?? state}
     </Badge>
   );
 }

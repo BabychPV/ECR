@@ -68,6 +68,13 @@ export interface DetailDrawerProps {
   /** ⚠ Викликається ПІСЛЯ прибирання `?panel=` з адреси. */
   readonly onClose?: (() => void) | undefined;
 
+  /**
+   * Esc закриває шторку (за замовчуванням так). Вимикається, поки НАД шторкою відкрито власний діалог: Mantine
+   * слухає Esc на `window` у КОЖНІЙ відкритій модалці, тож один Esc закрив би і діалог, і шторку під ним
+   * (WCAG 2.1.1/3.2.2: непередбачуване закриття, втрата контексту).
+   */
+  readonly closeOnEscape?: boolean | undefined;
+
   readonly children?: ReactNode | undefined;
 }
 
@@ -80,6 +87,7 @@ export function DetailDrawer({
   footer,
   size,
   onClose,
+  closeOnEscape = true,
   children,
 }: DetailDrawerProps): JSX.Element {
   const [panel, setPanel] = useDetailPanel();
@@ -159,6 +167,7 @@ export function DetailDrawer({
       trapFocus={!wide}
       lockScroll={!wide}
       closeOnClickOutside={!wide}
+      closeOnEscape={closeOnEscape}
       returnFocus
       closeButtonProps={{ 'aria-label': closeLabel }}
       title={

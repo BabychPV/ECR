@@ -1,8 +1,9 @@
 import type { JSX } from 'react';
-import { Anchor, Badge, Card, Group, Stack, Text } from '@mantine/core';
+import { Anchor, Card, Group, Stack, Text } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
+import { AssignmentBadge } from '@/features/editAssignments/AssignmentBadge';
 import { useMyEditAssignments } from '@/features/editAssignments/api';
 import { editAssignmentHref, sliceLabel } from '@/features/editAssignments/model';
 import type { MyEditAssignment } from '@/features/editAssignments/types';
@@ -81,9 +82,8 @@ function AssignmentGroup({
                     && ` · ${t('myTasks.edit.filledAt', { date: formatDateTime(item.statusChangedAt) })}`}
                 </Text>
               </div>
-              <Badge variant={item.status === 'Returned' ? 'filled' : 'light'} color={statusColor(item.status)}>
-                {statusLabel(item.status)}
-              </Badge>
+              {/* Токени статусу (контраст перевірено в обох темах), а не жовтий `filled` Mantine з білим текстом. */}
+              <AssignmentBadge state={item.status} label={statusLabel(item.status)} />
             </Group>
             {item.status === 'Returned' && item.returnReason != null && item.returnReason !== '' && (
               <Text size="xs" data-testid="edit-assignment-return-reason">
@@ -97,11 +97,23 @@ function AssignmentGroup({
             )}
             <Group justify="flex-end" gap="md">
               {validate && (
-                <Anchor component={Link} to={editAssignmentHref(item.documentId, true)} size="sm" data-action="validate">
+                <Anchor
+                  component={Link}
+                  to={editAssignmentHref(item.documentId, true)}
+                  size="sm"
+                  data-action="validate"
+                  aria-label={linkName(t('myTasks.edit.validate'), item)}
+                >
                   {t('myTasks.edit.validate')}
                 </Anchor>
               )}
-              <Anchor component={Link} to={editAssignmentHref(item.documentId, false)} size="sm" data-action="open">
+              <Anchor
+                component={Link}
+                to={editAssignmentHref(item.documentId, false)}
+                size="sm"
+                data-action="open"
+                aria-label={linkName(t('myTasks.edit.open'), item)}
+              >
                 {t('myTasks.edit.open')}
               </Anchor>
             </Group>
@@ -112,18 +124,15 @@ function AssignmentGroup({
   );
 }
 
-/** Позначення стану: `Returned` - warn, `Filled` - info, `Assigned` - нейтральний (зелене «все гаразд» не вживаємо). */
-function statusColor(status: MyEditAssignment['status']): string {
-  if (status === 'Returned') return 'yellow';
-  if (status === 'Filled') return 'blue';
-
-  return 'gray';
-}
-
 /** Літерали ключів, а не шаблон: сторожі каталогу шукають `t('…')` статично. */
 function statusLabel(status: MyEditAssignment['status']): string {
   if (status === 'Returned') return t('myTasks.edit.status.Returned');
   if (status === 'Filled') return t('myTasks.edit.status.Filled');
 
   return t('myTasks.edit.status.Assigned');
+}
+
+/** WCAG 2.4.4: однакові «Open» / «Validate» у кожній картці розрізняються документом і місяцем (видимий текст - префікс назви, 2.5.3). */
+function linkName(action: string, item: MyEditAssignment): string {
+  return `${action}: ${item.documentKey}, ${sliceLabel(item.slice)}`;
 }
