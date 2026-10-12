@@ -32,6 +32,12 @@ public sealed class HealthCountCache
     /// <summary>Скільки живе знімок усіх фактів здоров'я (а не лише <c>sources.failed</c>).</summary>
     public static readonly TimeSpan SnapshotTtl = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Найстаріший знімок, який ще віддається при збої обчислення. Старіший — виняток іде нагору:
+    /// «Здоров'я системи», що годину показує числа 5-хвилинної давності, гірше за явну помилку.
+    /// </summary>
+    public static readonly TimeSpan MaxStaleOnFailure = TimeSpan.FromMinutes(5);
+
     private sealed record SnapshotEntry(DateTime At, SystemHealthSnapshot Value);
 
     private readonly SemaphoreSlim _snapshotGate = new(1, 1);
@@ -81,7 +87,7 @@ public sealed class HealthCountCache
 
                 return value;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && hit is not null)
+            catch (Exception ex) when (ex is not OperationCanceledException && hit is not null && utcNow >= hit.At && utcNow - hit.At < MaxStaleOnFailure)
             {
                 return hit.Value;
             }
