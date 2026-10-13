@@ -63,8 +63,14 @@ public sealed partial class LandCellFormulaNullSafetyTests
             var refs = Reference().Matches(expression).ToList();
             Assert.NotEmpty(refs);
 
+            // WW-03: формула періоду m читає `[Period:#m]` - контекст рахується У тому самому періоді (зсув 0).
+            var sequence = byte.Parse(Period().Match(expression).Groups["k"].Value, System.Globalization.CultureInfo.InvariantCulture);
+            var calendar = new PeriodContext(
+                new DateOnly(2026, sequence, 1), new DateOnly(2026, sequence, 28),
+                Ecr.Domain.Enums.CalendarMode.Actual, 2026, sequence);
+
             // Заповнено лише ПЕРШИЙ операнд числом 5000; решта відсутні (порожні клітинки Water Report).
-            var context = new TestEvaluationContext();
+            var context = new TestEvaluationContext { Period = calendar };
             foreach (var r in refs)
             {
                 Rows(context, r.Groups["s"].Value, r.Groups["t"].Value, r.Groups["r"].Value);
@@ -83,7 +89,7 @@ public sealed partial class LandCellFormulaNullSafetyTests
             Assert.Equal(5m, value.AsNumber());
 
             // Усі операнди відсутні — Excel дав би 0; null-безпечна форма теж 0.
-            var empty = new TestEvaluationContext();
+            var empty = new TestEvaluationContext { Period = calendar };
             foreach (var r in refs)
             {
                 Rows(empty, r.Groups["s"].Value, r.Groups["t"].Value, r.Groups["r"].Value);
@@ -119,6 +125,9 @@ public sealed partial class LandCellFormulaNullSafetyTests
         throw new InvalidOperationException("Не знайдено корінь репозиторію (Ecr.sln).");
     }
 
-    [GeneratedRegex(@"\[(?<s>[^\]]+)\]\.\[(?<t>[^\]]+)\]\.\[(?<r>[^\]]+)\]\.\[(?<c>[^\]]+)\]")]
+    [GeneratedRegex(@"(?:\[Period:#\d+\]\.)?\[(?<s>[^\]]+)\]\.\[(?<t>[^\]]+)\]\.\[(?<r>[^\]]+)\]\.\[(?<c>[^\]]+)\]")]
     private static partial Regex Reference();
+
+    [GeneratedRegex(@"\[Period:#(?<k>\d+)\]")]
+    private static partial Regex Period();
 }
