@@ -6,6 +6,30 @@ import { MemoryRouter } from 'react-router-dom';
 import { createQueryClient } from '@/app/queryClient';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
 
+/*
+ * ⛔ Вкладка Entities у ТЕСТІ монтується без `React.lazy` (12–13.10.2026, `client` у CI:
+ * `Worker exited unexpectedly with exit code 1` на цьому файлі, тричі — PR #506 і
+ * `dev/integration` 38340189891; жодного впалого тесту, воркер мовчки «висів» ~15 хв з
+ * 100 % ядра й помирав від нестачі купи).
+ *
+ * Причина зловлена на живому зависанні (інспектор → `Debugger.pause` у воркері):
+ * `fireEvent.click(tab)` → `act` → `flushActQueue` → `renderRootConcurrent` →
+ * `handleThrow` — синхронний цикл рендера React 19.0.0, у якому ледача вкладка
+ * (`lazyDataSourceForm.SourceEntitiesTab`) кидає очікування всередині `act`. Цикл
+ * синхронний, тож ні `testTimeout`, ні `waitFor` його не перериває. Зависає ~1 з
+ * 100–200 прогонів, лише під навантаженням і лише на кліку, що монтує ледачу вкладку.
+ *
+ * Тут перевіряється вкладка, а не `import()` чанка (бюджет чанка тримає
+ * `lazyDataSourceForm.ts` і сторож розміру маршруту), тож підміняємо ЛИШЕ її:
+ * решта ледачих обгорток — справжні.
+ */
+vi.mock('@/features/integration/lazyDataSourceForm', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/features/integration/lazyDataSourceForm')>();
+  const { SourceEntitiesTab } = await import('@/features/integration/SourceEntitiesTab');
+
+  return { ...original, SourceEntitiesTab };
+});
+
 /**
  * Вкладка «Entities» шухляди з'єднання: сутність збору з каталогу
  * (`ФВ-13.11`) і прив'язка до довідника (`ФВ-8.11`).
