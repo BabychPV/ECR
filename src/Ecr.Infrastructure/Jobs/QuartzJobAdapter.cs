@@ -80,10 +80,17 @@ public sealed partial class QuartzJobAdapter(
         // першим же відкладенням за ЛОКОМ була вже «вичерпаною» й закривалася Failed. Тут лишається лише той відлік,
         // що вже був (задача могла відкладатись за локом до цього).
         var limiter = provider.GetService<QuartzJobTypeLimiter>();
-        using var typeSlot = limiter?.TryEnter(job.GetType(), jobId);
+        //
+        // ⛔ F1 (WW-02): ту саму межу з FIFO мають ДІТИ розкладу перерахунку проєкту (`fanOutParentJobId` у тілі) -
+        // не більше `Jobs:Recalculation:FanOutMaxConcurrency` одночасно; ручний перерахунок документа й
+        // інкрементний після PATCH під неї не потрапляють.
+        var fanOutChild = limiter is not null && RecalculationJob.IsFanOutChild(job.GetType(), payload);
+        using var typeSlot = limiter?.TryEnter(job.GetType(), jobId, fanOutChild);
         if (limiter is not null && typeSlot is null)
         {
-            LogJobTypeLimitReached(logger, jobId, typeName ?? "—", limiter.ExcelMaxConcurrency, limiter.RetryDelay);
+            LogJobTypeLimitReached(
+                logger, jobId, typeName ?? "—",
+                fanOutChild ? limiter.RecalcFanOutMaxConcurrency : limiter.ExcelMaxConcurrency, limiter.RetryDelay);
             await ScheduleDeferredAsync(
                     context, CorrelationOf(context), clock, limiter.RetryDelay, DeferredSince(context))
                 .ConfigureAwait(false);

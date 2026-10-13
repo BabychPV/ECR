@@ -356,7 +356,7 @@ public sealed class FormulaRecalculationDocumentLockTests(SqlServerFixture sql)
     }
 
     /// <summary>Перерахунок формул на реальних сховищах; <paramref name="beforeWrite"/> — точка перемикання.</summary>
-    private static RecalculationService Formulas(EcrDbContext db, TestDocument doc, Func<Task>? beforeWrite)
+    internal static RecalculationService Formulas(EcrDbContext db, TestDocument doc, Func<Task>? beforeWrite)
     {
         var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);
         var clock = new TestClock(Now);

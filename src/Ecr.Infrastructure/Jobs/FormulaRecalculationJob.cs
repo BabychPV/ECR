@@ -125,6 +125,16 @@ public sealed class FormulaRecalculationJob(
             // відкочена, нічого не записано — задача повертається в чергу, не рахуючи спроби.
             throw new JobDeferredException(RecalculationDocumentLock.DeferDelay, busy.Message);
         }
+        catch (Exception ex) when (RecalculationDocumentLock.IsLockWaitTimeout(ex))
+        {
+            // ⛔ F1 (WW-02): вичерпане очікування блокування даних (`ECR-DOC-4091`, `lockTimeout`) — зайнятість, що
+            // минає; не ретрай 30/60/120 с із `Failed` і застарілими обчисленими колонками, а відкладення (див.
+            // `RecalculationJob`). Транзакція відкочена — нічого не записано.
+            throw new JobDeferredException(
+                RecalculationDocumentLock.LockWaitDeferDelay(documentId),
+                "Document data is busy with a long operation; recalculation deferred.",
+                RecalculationDocumentLock.Resource(documentId));
+        }
 
         // WW-03: ланцюжок читачів — зміни цього прогону (насіння й похідні) йдуть в інші періоди року.
         // Постановка coalesced; без змін у записаному далі нічого не ставиться (ланцюжок завершується).

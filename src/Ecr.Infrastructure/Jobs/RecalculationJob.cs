@@ -600,6 +600,20 @@ public sealed partial class RecalculationJob(
                 throw new JobDeferredException(RecalculationDocumentLock.DeferDelay, busy.Message);
             }
 
+            // ⛔ F1 (WW-02): `ECR-DOC-4091` «lockTimeout» (SqlException 1222 після `SET LOCK_TIMEOUT` запису комірок)
+            // — стан зайнятості, а не вердикт про дані: чужа довга операція чи сусідні прогони, що ескалювали
+            // блокування, мине. Раніше він ішов у `JobRetryPolicy` (3 ретраї, 30+60+120 с) і задача падала
+            // `Failed` із застарілими числами в документі (70 із 91 після переносу версії). Тепер — відкладення
+            // без спроби ретраю, потік і слот вільні; стеля — `JobDeferral.MaxDeferral`, після неї `Failed` із
+            // конвертом «ресурс зайнятий» (причина видна), а кнопка «Перерахувати» проєкту лишається повтором.
+            if (RecalculationDocumentLock.IsLockWaitTimeout(ex))
+            {
+                throw new JobDeferredException(
+                    RecalculationDocumentLock.LockWaitDeferDelay(request.DocumentId),
+                    "Document data is busy with a long operation; recalculation deferred.",
+                    RecalculationDocumentLock.Resource(request.DocumentId));
+            }
+
             throw;
         }
 
@@ -1488,6 +1502,37 @@ public sealed partial class RecalculationJob(
         return JsonSerializer.Deserialize<RecalculationRequest>(json, PayloadOptions)
                ?? throw new InvalidOperationException(
                    "Завдання перерахунку не розбирається: невідома форма payload.");
+    }
+
+    /// <summary>
+    /// Чи задача — ДИТИНА розкладу перерахунку проєкту (<see cref="FanOutAsync"/>): документна задача з позначкою
+    /// батька. Лише такі стають під межу <see cref="QuartzJobTypeLimiter.RecalcFanOutMaxConcurrency"/> (F1, WW-02).
+    /// </summary>
+    /// <param name="jobType">Тип реалізації задачі.</param>
+    /// <param name="payload">Тіло задачі (JSON черги).</param>
+    /// <returns><c>true</c> — дитина розкладу.</returns>
+    /// <remarks>
+    /// ⚠ Розбір толерантний: тіло, яке не розбирається, — не дитина (задача піде без межі й сама відмовить у
+    /// <see cref="ExecuteAsync"/> зі своїм повідомленням), а не виняток у адаптері до старту задачі.
+    /// </remarks>
+    internal static bool IsFanOutChild(Type jobType, string? payload)
+    {
+        ArgumentNullException.ThrowIfNull(jobType);
+
+        if (!typeof(IRecalculationJob).IsAssignableFrom(jobType) || string.IsNullOrWhiteSpace(payload))
+        {
+            return false;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<RecalculationRequest>(payload, PayloadOptions) is
+                { DocumentId: > 0, FanOutParentJobId: { Length: > 0 } };
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Екземпляр таблиці документа разом із періодом, якому він належить.</summary>

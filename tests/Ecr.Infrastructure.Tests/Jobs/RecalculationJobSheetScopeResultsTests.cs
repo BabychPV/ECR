@@ -345,10 +345,39 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// F1 (WW-02): запис комірок не дочекався блокування (<c>ECR-DOC-4091</c>, <c>lockTimeout</c>) — задача
+    /// ВІДКЛАДАЄТЬСЯ з паузою <see cref="RecalculationDocumentLock.LockWaitDeferDelay"/>, а не падає в
+    /// <c>JobRetryPolicy</c> (3 ретраї → <c>Failed</c>, застарілі числа після переносу версії).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати гілку <c>IsLockWaitTimeout</c> у <c>RecalculationJob</c> — летить
+    /// <c>ConcurrencyConflictException</c> (виконавець ретраїть 30/60/120 с), тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "F1")]
+    public async Task Вичерпане_очікування_блокування_даних_відкладає_задачу_а_не_провалює()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+
+        var gate = Gate(arranged, busyTimes: int.MaxValue, messageKey: Ecr.Infrastructure.Persistence.LockWaitGuard.MessageKey);
+        var thrown = await Record.ExceptionAsync(() => RunJobAsync(
+            arranged, SheetRequest(arranged, sheetDefId: null), label: 2_000m, gate: gate));
+
+        var deferred = Assert.IsType<JobDeferredException>(thrown);
+        Assert.Equal(RecalculationDocumentLock.LockWaitDeferDelay(arranged.Document.DocumentId), deferred.Delay);
+        Assert.True(deferred.Delay > RecalculationDocumentLock.DeferDelay, "повтор довший за паузу зайнятого лока");
+        Assert.Equal(["A|1001", "B|1001"], await ShapeAsync(arranged));
+    }
+
+    /// <summary>
     /// Фейк воріт аркуша: перший аркуш береться з очікуванням як чернетка, другий без черги
     /// відмовляє «аркуш подається» перші <paramref name="busyTimes"/> разів.
     /// </summary>
-    private static ISheetEditGate Gate(Arranged arranged, int busyTimes)
+    private static ISheetEditGate Gate(
+        Arranged arranged, int busyTimes, string messageKey = "err.ECR-DOC-4091.sheetBeingSubmitted")
     {
         var gate = Substitute.For<ISheetEditGate>();
         gate.EnterEditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
@@ -360,7 +389,7 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
                 ? Task.FromException<DocumentStatus>(new ConcurrencyConflictException(
                     "ECR-DOC-4091",
                     $"Аркуш {arranged.SecondSheetId} подається.",
-                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-4091.sheetBeingSubmitted" }))
+                    new Dictionary<string, object?> { ["messageKey"] = messageKey }))
                 : Task.FromResult(DocumentStatus.Draft));
 
         return gate;

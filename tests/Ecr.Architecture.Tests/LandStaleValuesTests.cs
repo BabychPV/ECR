@@ -23,7 +23,10 @@ public sealed class LandStaleValuesTests
         . (Join-Path $land 'LandStaleValues.Lib.ps1')
 
         $script:Waits = New-Object System.Collections.Generic.List[double]
-        function Wait-LandStale { param([double]$Seconds) $script:Waits.Add($Seconds) }
+        # Керований годинник: пейсинг не залежить від реального часу й навантаження машини.
+        $script:Clock = [DateTime]::new(2026, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
+        function Get-LandStaleUtcNow { return $script:Clock }
+        function Wait-LandStale { param([double]$Seconds) $script:Waits.Add($Seconds); $script:Clock = $script:Clock.AddSeconds($Seconds) }
         $script:Calls = New-Object System.Collections.Generic.List[string]
         $script:Patches = 0
         $script:Store = @{}
@@ -450,7 +453,9 @@ public sealed class LandStaleValuesTests
         var minWait = double.Parse(
             waits[(waits.IndexOf("MINWAIT=", StringComparison.Ordinal) + "MINWAIT=".Length)..],
             System.Globalization.CultureInfo.InvariantCulture);
-        Assert.True(minWait > 1.5, $"Пауза між викликами менша за пейсинг: {waits}");
+        // Годинник керований: кожна пауза рівно PaceSeconds (2.2), по одній між сусідніми викликами.
+        Assert.True(minWait >= 2.2 - 1e-9, $"Пауза між викликами менша за пейсинг: {waits}");
+        Assert.Equal(Counter(plan, "CALLS") - 1, Counter(waits.Split(' ')[0], "WAITS"));
 
         var retry = Run("retry");
         Assert.Contains("WAITS=7", retry, StringComparison.Ordinal);
