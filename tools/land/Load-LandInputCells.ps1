@@ -31,6 +31,9 @@
 .PARAMETER PeriodKey       Обмеження періодів Рік*100+Місяць (202601 або 202601,202602); без нього - усі з файла.
 .PARAMETER Out             Файл звіту JSON (за бажання; без значень комірок).
 .PARAMETER BatchRows       Рядків в одному PATCH (за замовчуванням 25).
+.PARAMETER ModelPath        Модель Land (land-template.model.json); за замовчуванням з репозиторію. З неї береться перелік GTU-колонок
+                           ПО-ТАБЛИЧНО (T10_03: Month + GTU1..4 = 21; T11_03: Month + GTU1..5 = 26).
+.PARAMETER AllowNameMismatch  Не зупиняти на NAME_MISMATCH (ім'я документа на стенді інше, ніж ключ у -DocMap).
 .PARAMETER AllowMissingColumns  Писати наявні колонки, хоч частини колонок плану на стенді немає (за замовчуванням - зупинка).
 .PARAMETER Execute         Виконати запис (без нього - лише передперегляд).
 .PARAMETER DryRun          Явно лише передперегляд (перемагає -Execute).
@@ -58,7 +61,9 @@ param(
     $PeriodKey,
     [string]$Out,
     [int]$BatchRows = 25,
+    [string]$ModelPath,
     [switch]$AllowMissingColumns,
+    [switch]$AllowNameMismatch,
     [switch]$Execute,
     [switch]$DryRun
 )
@@ -80,12 +85,21 @@ $periods = @()
 if ($null -ne $PeriodKey) { $periods = @(ConvertTo-DocumentIdList $PeriodKey) }
 if (-not (Test-Path -LiteralPath $SourcePath -PathType Container)) { throw "Каталог -SourcePath '$SourcePath' не існує." }
 
+$modelColumns = $null
+$orphans = @{}
+if ($Kind -eq 'Gtu') {
+    $modelFile = $ModelPath
+    if (-not $modelFile) { $modelFile = Join-Path $here '..\..\docs\delivery\reference-data\land-template\land-template.model.json' }
+    $modelDoc = Get-Content -LiteralPath $modelFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    $modelColumns = Get-LandModelTableColumns -Model $modelDoc -TableCodes @((Get-LandInputCellKind -Name 'Gtu').SheetOf.Keys)
+}
+
 $plan = [ordered]@{}
 foreach ($docName in @($docIds.Keys)) {
     $file = Join-Path $SourcePath "$docName.json"
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "У каталозі -SourcePath немає файла '$docName.json'." }
     $parsed = ConvertFrom-LandLargeJson -Text ([IO.File]::ReadAllText((Resolve-Path -LiteralPath $file).ProviderPath))
-    $part = New-LandInputCellPlan -KindName $Kind -DocumentName $docName -Document $parsed -Periods $periods
+    $part = New-LandInputCellPlan -KindName $Kind -DocumentName $docName -Document $parsed -Periods $periods -ModelColumns $modelColumns -SourceWithoutTarget $orphans
     foreach ($k in $part.Keys) { $plan[$k] = $part[$k] }
 }
 
@@ -93,6 +107,10 @@ $summary = @(Get-LandInputCellPlanSummary -Plan $plan)
 $sumRows = [int](($summary | Measure-Object Rows -Sum).Sum)
 $sumCells = [int](($summary | Measure-Object Cells -Sum).Sum)
 Write-Host "PLAN ($Kind): table-periods $($summary.Count), rows $sumRows, cells $sumCells (TypeFuel $(($summary | Measure-Object TypeFuel -Sum).Sum), ColdVent $(($summary | Measure-Object ColdVent -Sum).Sum), Gtu $(($summary | Measure-Object Gtu -Sum).Sum))."
+if ($orphans.Count -gt 0) {
+    Write-Host ("WARN source-without-target-column (table/column=cells, no values; the model table has no such column, cells are not loaded): " +
+        ((@($orphans.Keys | Sort-Object) | ForEach-Object { "$_=$($orphans[$_])" }) -join ', '))
+}
 if ($summary.Count -eq 0) { throw 'План порожній: у файлах немає потрібних таблиць/значень.' }
 
 $haveCredentials = (-not [string]::IsNullOrWhiteSpace($User)) -or (-not [string]::IsNullOrWhiteSpace($env:ECR_USER))
@@ -128,6 +146,7 @@ function Get-LookupMap([int]$RegistryId, [string]$AsOfDate) {
 
 # ===== Передперегляд (читання): документ -> таблиця -> колонки -> рядки; нічого не пишеться. =====
 $prepared = [ordered]@{}
+$nameState = @{}
 $results = New-Object System.Collections.ArrayList
 $missingColumnNames = @{}
 foreach ($key in @($plan.Keys | Sort-Object)) {
@@ -136,6 +155,9 @@ foreach ($key in @($plan.Keys | Sort-Object)) {
     $st = [ordered]@{ key = $key; rows = @($plan[$key]).Count; cellsSent = 0; rowsOk = 0; rowsRejected = 0; lookupMiss = 0
         missingColumnCells = 0; missingColumns = ''; codes = ''; skipped = '' }
     $docId = [int]$docIds[$docName]
+    if (-not $nameState.ContainsKey($docName)) { $nameState[$docName] = Get-LandDocumentNameState -DocumentId $docId -ExpectedName $docName }
+    if ($nameState[$docName] -eq 'NO_DOC') { $st.skipped = 'NO_DOC'; [void]$results.Add([pscustomobject]$st); continue }
+    if ($nameState[$docName] -eq 'NAME_MISMATCH' -and -not $AllowNameMismatch) { $st.skipped = 'NAME_MISMATCH'; [void]$results.Add([pscustomobject]$st); continue }
     $tabs = Invoke-LandEcrRetry -HttpMethod GET -ApiPath "/api/v1/documents/$docId/tables?periodKey=$periodNumber"
     if ($tabs.Status -ne 200) { $st.skipped = 'NO_DOC'; $st.codes = "HTTP$($tabs.Status);"; [void]$results.Add([pscustomobject]$st); continue }
     $tableInfo = @($tabs.Json) | Where-Object { $_.sheetCode -eq $def.SheetOf[$tableCode] -and $_.tableCode -eq $tableCode } | Select-Object -First 1
@@ -184,6 +206,7 @@ foreach ($key in @($plan.Keys | Sort-Object)) {
 # ===== Підсумок передперегляду (без значень) =====
 $noDoc = @($results | Where-Object { $_.skipped -eq 'NO_DOC' }).Count
 $noTable = @($results | Where-Object { $_.skipped -eq 'NO_TABLE' }).Count
+$nameMismatch = @($results | Where-Object { $_.skipped -eq 'NAME_MISMATCH' }).Count
 $rowMissing = @($results | Where-Object { $_.codes -like '*ROW_MISSING*' }).Count
 $missingCells = [int](($results | Measure-Object missingColumnCells -Sum).Sum)
 $lookupMisses = [int](($results | Measure-Object lookupMiss -Sum).Sum)
@@ -191,11 +214,11 @@ $readyCells = [int](($prepared.Values | ForEach-Object { @($_.Patch | ForEach-Ob
 foreach ($s in $results) {
     Write-Host ('{0} rows={1} skipped={2} missingColumnCells={3} [{4}] lookupMiss={5} {6}' -f $s.key, $s.rows, $(if ($s.skipped) { $s.skipped } else { '-' }), $s.missingColumnCells, $s.missingColumns, $s.lookupMiss, $s.codes)
 }
-Write-Host "PREVIEW: ready cells $readyCells; NO_DOC $noDoc; NO_TABLE $noTable; ROW_MISSING $rowMissing; skipped-missing-column cells $missingCells; lookupMiss-or-not-number $lookupMisses."
+Write-Host "PREVIEW: ready cells $readyCells; NO_DOC $noDoc; NO_TABLE $noTable; NAME_MISMATCH $nameMismatch; ROW_MISSING $rowMissing; skipped-missing-column cells $missingCells; lookupMiss-or-not-number $lookupMisses."
 if ($missingColumnNames.Count -gt 0) {
     Write-Host ("MISSING COLUMNS (table/column, no values; compare with the model bridges): " + ((@($missingColumnNames.Keys) | Sort-Object) -join ', '))
 }
-$blocked = ($noDoc + $noTable + $rowMissing) -gt 0 -or ($missingCells -gt 0 -and -not $AllowMissingColumns) -or $lookupMisses -gt 0
+$blocked = ($noDoc + $noTable + $nameMismatch + $rowMissing) -gt 0 -or ($missingCells -gt 0 -and -not $AllowMissingColumns) -or $lookupMisses -gt 0
 
 if ($exec) {
     if ($blocked) {

@@ -23,6 +23,7 @@
 .PARAMETER ConfirmStand    Підтвердження стенда (обов'язково, без дефолту): адреса API, host:port або host; для запису -
                            `<адреса>/<база>` (наприклад localhost:5094/EcrLandUi).
 .PARAMETER SqlConnection   Явний рядок підключення стенда (для назви бази в підтвердженні; дефолту немає).
+.PARAMETER AllowNameMismatch  Не зупиняти на NAME_MISMATCH (ім'я документа на стенді інше, ніж ключ у -DocMap).
 .PARAMETER JobTimeoutMinutes  Скільки чекати одну задачу (за замовчуванням 30).
 .PARAMETER Out             Файл звіту JSON (за бажання).
 .PARAMETER Execute         Запустити перерахунки (без нього - лише план).
@@ -44,6 +45,7 @@ param(
     [securestring]$Password,
     [string]$SqlConnection,
     [int]$JobTimeoutMinutes = 30,
+    [switch]$AllowNameMismatch,
     [string]$Out,
     [switch]$Execute,
     [switch]$DryRun
@@ -71,14 +73,18 @@ if ($periods.Count -eq 0) { throw 'Задайте -PeriodKey (202601 або 2026
 Connect-Ecr -BaseUrl $BaseUrl -User $User -Password $Password
 # Передперегляд (читання): кожен документ/період має відкриватися на стенді - інакше NO_DOC і зупинка.
 $noDoc = New-Object System.Collections.Generic.List[string]
+$badName = New-Object System.Collections.Generic.List[string]
 foreach ($n in $docNames) {
+    $nameVerdict = Get-LandDocumentNameState -DocumentId ([int]$idMap[$n]) -ExpectedName $n
+    if ($nameVerdict -eq 'NAME_MISMATCH' -and -not $AllowNameMismatch) { $badName.Add($n) }
     foreach ($p in $periods) {
         $probe = Invoke-LandEcrRetry -HttpMethod GET -ApiPath "/api/v1/documents/$([int]$idMap[$n])/tables?periodKey=$p"
         if ($probe.Status -ne 200) { $noDoc.Add("$n/$p (HTTP $($probe.Status))") }
     }
 }
-if ($noDoc.Count -gt 0) {
-    Write-Host "NO_DOC: $($noDoc -join ', '). Перерахунків не запущено."
+if ($noDoc.Count -gt 0 -or $badName.Count -gt 0) {
+    if ($noDoc.Count -gt 0) { Write-Host "NO_DOC: $($noDoc -join ', '). Перерахунків не запущено." }
+    if ($badName.Count -gt 0) { Write-Host "NAME_MISMATCH: $($badName -join ', ') (ім'я документа на стенді не збігається з ключем -DocMap). Перерахунків не запущено." }
     exit 1
 }
 

@@ -70,12 +70,17 @@ function New-LandInputCellPlan {
     .PARAMETER DocumentName Ім'я документа (з нього береться префікс ключа рядка).
     .PARAMETER Document    Розібраний JSON (IDictionary): periods['YYYY-MM'][<таблиця AF>].rows[].
     .PARAMETER Periods     Обмеження періодів (Рік*100+Місяць); порожньо - усі періоди файла.
+    .PARAMETER ModelColumns Код таблиці -> колонки GTU з моделі (Get-LandModelTableColumns). Вид Gtu бере з файла лише їх;
+                           GTU-колонка файла, якої в моделі цієї таблиці немає (T10_03 не має GTU5), не йде в план, а
+                           лічиться в -SourceWithoutTarget ("таблиця/колонка" -> кількість непорожніх комірок).
     #>
     param(
         [Parameter(Mandatory)][ValidateSet('TypeFuel', 'Gtu')][string]$KindName,
         [Parameter(Mandatory)][string]$DocumentName,
         [Parameter(Mandatory)]$Document,
-        [int[]]$Periods = @()
+        [int[]]$Periods = @(),
+        [hashtable]$ModelColumns,
+        [hashtable]$SourceWithoutTarget
     )
 
     $def = Get-LandInputCellKind -Name $KindName
@@ -107,10 +112,21 @@ function New-LandInputCellPlan {
                     }
                 }
                 else {
-                    foreach ($col in $def.Columns) {
-                        if ($row.ContainsKey($col) -and -not (Test-LandInputCellEmpty $row[$col])) {
-                            [void]$cells.Add([pscustomobject]@{ Col = $col; Text = [string]$row[$col]; Kind = 'Gtu' })
+                    $known = $null
+                    if ($null -ne $ModelColumns -and $ModelColumns.ContainsKey($tableCode)) { $known = @($ModelColumns[$tableCode]) }
+                    foreach ($col in @($row.Keys | Sort-Object)) {
+                        if ([string]$col -notmatch '^Land_Measure_GTU(_Month|\d_(301|304|330|337|O2))$') { continue }
+                        if (Test-LandInputCellEmpty $row[$col]) { continue }
+                        $inModel = if ($null -ne $known) { $known -contains [string]$col } else { $def.Columns -contains [string]$col }
+                        if (-not $inModel) {
+                            if ($null -ne $known -and $null -ne $SourceWithoutTarget) {
+                                $orphanKey = "$tableCode/$col"
+                                $bag = $SourceWithoutTarget
+                                $bag[$orphanKey] = 1 + [int]$bag[$orphanKey]
+                            }
+                            continue
                         }
+                        [void]$cells.Add([pscustomobject]@{ Col = [string]$col; Text = [string]$row[$col]; Kind = 'Gtu' })
                     }
                 }
                 if ($cells.Count -gt 0) { [void]$list.Add([pscustomobject]@{ RowKey = $rowKey; Cells = $cells.ToArray() }) }
@@ -215,4 +231,25 @@ function ConvertFrom-LandLargeJson {
         return $ser.DeserializeObject($Text)
     }
     return ($Text | ConvertFrom-Json -AsHashtable -Depth 100)
+}
+function Get-LandModelTableColumns {
+    <#
+    .SYNOPSIS
+        Код таблиці -> коди колонок моделі Land, що відповідають шаблону (за замовчуванням GTU-входи). Це перелік, який
+        очікує стенд, побудований із моделі: різні таблиці мають різну кількість груп (T10_03 - GTU1..4, T11_03 - GTU1..5).
+    #>
+    param(
+        [Parameter(Mandatory)]$Model,
+        [Parameter(Mandatory)][string[]]$TableCodes,
+        [string]$Pattern = '^Land_Measure_GTU(_Month|\d_(301|304|330|337|O2))$'
+    )
+    $found = @{}
+    foreach ($sheet in @($Model.sheets)) {
+        foreach ($tbl in @($sheet.tables)) {
+            $code = [string]$tbl.code
+            if ($TableCodes -notcontains $code -or $found.ContainsKey($code)) { continue }
+            $found[$code] = @(@($tbl.columns) | ForEach-Object { [string]$_.code } | Where-Object { $_ -match $Pattern })
+        }
+    }
+    return $found
 }

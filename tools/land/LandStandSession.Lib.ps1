@@ -121,3 +121,18 @@ function ConvertFrom-LandDocMap {
     if ($map.Count -eq 0) { throw '-DocMap порожня.' }
     return $map
 }
+function Get-LandDocumentNameState {
+    <#
+    .SYNOPSIS
+        Звіряє id із -DocMap з іменем документа на стенді (GET /api/v1/documents/{id}, nameL10n.values.en - те саме
+        поле, що в списку документів). OK | NO_DOC (не відкривається) | NAME_MISMATCH (ім'я інше або порожнє).
+    #>
+    param([Parameter(Mandatory)][int]$DocumentId, [Parameter(Mandatory)][string]$ExpectedName)
+
+    $resp = Invoke-LandEcrRetry -HttpMethod GET -ApiPath "/api/v1/documents/$DocumentId"
+    if ($resp.Status -ne 200) { return 'NO_DOC' }
+    $actual = ''
+    if ($null -ne $resp.Json -and $null -ne $resp.Json.nameL10n -and $null -ne $resp.Json.nameL10n.values) { $actual = [string]$resp.Json.nameL10n.values.en }
+    if ($actual -ceq $ExpectedName) { return 'OK' }
+    return 'NAME_MISMATCH'
+}

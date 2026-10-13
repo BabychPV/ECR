@@ -400,7 +400,7 @@ public sealed class LandWindowToolsTests
             {"Land_TypeFuel":"NULL"},
             {"Land_TypeFuel":"LPG"}]},
           "AF_Air_Land_Off_Utility_DI_10_03":{"rows":[
-            {"Land_TypeFuel":"A","Land_Measure_GTU_Month":"01","Land_Measure_GTU1_301":"1.5"}]},
+            {"Land_TypeFuel":"A","Land_Measure_GTU_Month":"01","Land_Measure_GTU1_301":"1.5","Land_Measure_GTU5_301":"2"}]},
           "Other_Table":{"rows":[{"Land_TypeFuel":"A"}]}}}}
         """;
 
@@ -488,17 +488,23 @@ public sealed class LandWindowToolsTests
                 {
                     body = "[]";
                 }
-                else if (path.StartsWith("/api/v1/documents/14/", StringComparison.Ordinal))
+                else if (path.StartsWith("/api/v1/documents/14", StringComparison.Ordinal))
                 {
                     status = 404;
                     body = "{\"errorCode\":\"ECR-DOC-0404\"}";
                 }
-                else if (path.StartsWith("/api/v1/documents/15/tables/5", StringComparison.Ordinal))
+                else if (path is "/api/v1/documents/15" or "/api/v1/documents/16" or "/api/v1/documents/17")
+                {
+                    // 15 - DOC-7, 16 - чужа назва, 17 - DOC-8.
+                    var name = path.EndsWith("15", StringComparison.Ordinal) ? "DOC-7" : path.EndsWith("16", StringComparison.Ordinal) ? "OTHER" : "DOC-8";
+                    body = "{\"id\":" + path[^2..] + ",\"nameL10n\":{\"values\":{\"en\":\"" + name + "\"}}}";
+                }
+                else if (System.Text.RegularExpressions.Regex.IsMatch(path, "^/api/v1/documents/1[567]/tables/5"))
                 {
                     body = "{\"columns\":[{\"code\":\"Land_Measure_GTU_Month\"},{\"code\":\"Land_Measure_GTU2_301\"}],"
-                        + "\"rows\":[{\"rowKey\":\"p7-0001\",\"rowVersion\":\"1\"}]}";
+                        + "\"rows\":[{\"rowKey\":\"p7-0001\",\"rowVersion\":\"1\"},{\"rowKey\":\"p8-0001\",\"rowVersion\":\"1\"}]}";
                 }
-                else if (path.StartsWith("/api/v1/documents/15/tables", StringComparison.Ordinal))
+                else if (System.Text.RegularExpressions.Regex.IsMatch(path, "^/api/v1/documents/1[567]/tables"))
                 {
                     body = "[{\"sheetCode\":\"S10_OFF_UTILITY_DI\",\"tableCode\":\"T10_03\",\"tableInstanceId\":5}]";
                 }
@@ -546,11 +552,32 @@ public sealed class LandWindowToolsTests
             Assert.Equal(1, missingExit);
             Assert.Contains("skipped-missing-column cells 1", missing, StringComparison.Ordinal);
             Assert.Contains("T10_03/Land_Measure_GTU1_301", missing, StringComparison.Ordinal);
+            // GTU5 на T10_03: у моделі колонки немає - не "відсутня на стенді", а окремий лічильник із WARN.
+            Assert.Contains("WARN source-without-target-column", missing, StringComparison.Ordinal);
+            Assert.Contains("T10_03/Land_Measure_GTU5_301=1", missing, StringComparison.Ordinal);
+            Assert.DoesNotContain("MISSING COLUMNS (table/column, no values; compare with the model bridges): T10_03/Land_Measure_GTU1_301, T10_03/Land_Measure_GTU5_301", missing, StringComparison.Ordinal);
 
             // З явним -AllowMissingColumns план проходить (відсутні колонки лишаються у звіті).
             var (okExit, ok) = RunToolWithEnv(env, "Load-LandInputCells.ps1", [.. common, "-DocMap", "{\"DOC-7\":15}", "-AllowMissingColumns"]);
             Assert.Equal(0, okExit);
             Assert.Contains("PLAN (no writes)", ok, StringComparison.Ordinal);
+
+            // Лише GTU5 без цільової колонки (решта колонок на стенді є): WARN, код 0.
+            File.WriteAllText(
+                Path.Combine(dir, "DOC-8.json"),
+                "{\"periods\":{\"2026-01\":{\"AF_Air_Land_Off_Utility_DI_10_03\":{\"rows\":[{\"Land_Measure_GTU_Month\":\"01\",\"Land_Measure_GTU2_301\":\"1\",\"Land_Measure_GTU5_301\":\"2\"}]}}}}");
+            var (orphanExit, orphan) = RunToolWithEnv(env, "Load-LandInputCells.ps1", [.. common, "-DocMap", "{\"DOC-8\":17}"]);
+            Assert.Equal(0, orphanExit);
+            Assert.Contains("WARN source-without-target-column", orphan, StringComparison.Ordinal);
+            Assert.Contains("skipped-missing-column cells 0", orphan, StringComparison.Ordinal);
+
+            // Ім'я документа на стенді інше, ніж ключ мапи: NAME_MISMATCH, код 1; -AllowNameMismatch обходить.
+            var (nameExit, name) = RunToolWithEnv(env, "Load-LandInputCells.ps1", [.. common, "-DocMap", "{\"DOC-7\":16}"]);
+            Assert.Equal(1, nameExit);
+            Assert.Contains("NAME_MISMATCH 1", name, StringComparison.Ordinal);
+            var (allowExit, _) = RunToolWithEnv(
+                env, "Load-LandInputCells.ps1", [.. common, "-DocMap", "{\"DOC-7\":16}", "-AllowNameMismatch", "-AllowMissingColumns"]);
+            Assert.Equal(0, allowExit);
 
             // Режим запису з NO_DOC зупиняється до першого PATCH.
             var (execExit, exec) = RunToolWithEnv(
@@ -570,6 +597,12 @@ public sealed class LandWindowToolsTests
                 ["-DocMap", Dm, "-PeriodKey", "202601", "-BaseUrl", url, "-ConfirmStand", $"localhost:{stand.Port}", "-User", "tester"]);
             Assert.Equal(1, recalcExit);
             Assert.Contains("NO_DOC", recalc, StringComparison.Ordinal);
+
+            var (recalcNameExit, recalcName) = RunToolWithEnv(
+                env, "Invoke-LandRecalc.ps1",
+                ["-DocMap", "{\"DOC-7\":16}", "-PeriodKey", "202601", "-BaseUrl", url, "-ConfirmStand", $"localhost:{stand.Port}", "-User", "tester"]);
+            Assert.Equal(1, recalcNameExit);
+            Assert.Contains("NAME_MISMATCH", recalcName, StringComparison.Ordinal);
             lock (stand.Requests)
             {
                 Assert.DoesNotContain(stand.Requests, r => r.Contains("/recalculate", StringComparison.Ordinal));
@@ -660,4 +693,45 @@ public sealed class LandWindowToolsTests
         Assert.DoesNotContain("STAND-WRONGLY", output, StringComparison.Ordinal);
         Assert.DoesNotContain("STAND-ACCEPTED", output, StringComparison.Ordinal);
     }
-}
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void GTU_колонки_по_таблично_з_моделі_T10_03_без_GTU5_T11_03_з_GTU5()
+    {
+        const string script = """
+            $ErrorActionPreference = 'Stop'
+            . $args[0]
+            $model = Get-Content -LiteralPath $args[1] -Raw -Encoding UTF8 | ConvertFrom-Json
+            $cols = Get-LandModelTableColumns -Model $model -TableCodes @('T10_03', 'T11_03')
+            "T10_03=$($cols['T10_03'].Count) GTU5=$(@($cols['T10_03'] | Where-Object { $_ -like 'Land_Measure_GTU5_*' }).Count)"
+            "T11_03=$($cols['T11_03'].Count) GTU5=$(@($cols['T11_03'] | Where-Object { $_ -like 'Land_Measure_GTU5_*' }).Count)"
+            $doc = @{ periods = @{ '2026-01' = @{
+                'AF_Air_Land_Off_Utility_DI_10_03' = @{ rows = @(@{ Land_Measure_GTU_Month = '01'; Land_Measure_GTU1_301 = '1'; Land_Measure_GTU5_301 = '2' }) }
+                'AF_Air_Land_Off_Process_DI_11_03' = @{ rows = @(@{ Land_Measure_GTU5_301 = '3'; Land_Measure_GTU5_O2 = '4' }) } } } }
+            $orphans = @{}
+            $plan = New-LandInputCellPlan -KindName 'Gtu' -DocumentName 'DOC-7' -Document $doc -ModelColumns $cols -SourceWithoutTarget $orphans
+            "CELLS10=" + @($plan['DOC-7|202601|T10_03'] | ForEach-Object { $_.Cells }).Count
+            "CELLS11=" + @($plan['DOC-7|202601|T11_03'] | ForEach-Object { $_.Cells }).Count
+            "ORPHANS=" + (($orphans.Keys | Sort-Object | ForEach-Object { "$_=$($orphans[$_])" }) -join ';')
+            """;
+
+        var (exit, output) = RunPowerShell(script, LandFile("LandInputCells.Lib.ps1"), Path.Combine(Dir, "land-template.model.json"));
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("T10_03=21 GTU5=0", output, StringComparison.Ordinal);
+        Assert.Contains("T11_03=26 GTU5=5", output, StringComparison.Ordinal);
+        Assert.Contains("CELLS10=2", output, StringComparison.Ordinal);
+        Assert.Contains("CELLS11=2", output, StringComparison.Ordinal);
+        Assert.Contains("ORPHANS=T10_03/Land_Measure_GTU5_301=1", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Build_не_має_дефолтного_шляху_AccountsFile_на_диску()
+    {
+        var build = File.ReadAllText(LandFile("Build-LandTemplate.ps1"));
+
+        Assert.Contains("[string]$AccountsFile,", build, StringComparison.Ordinal);
+        Assert.DoesNotContain(@"F:\ecr-backup", build, StringComparison.Ordinal);
+        Assert.Contains(@"Join-Path $repo '.sync-local\land-accounts.local.txt'", build, StringComparison.Ordinal);
+    }}
