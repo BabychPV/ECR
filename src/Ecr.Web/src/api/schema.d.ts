@@ -21885,11 +21885,33 @@ export interface components {
             items: components["schemas"]["VersionMigrationItem"][];
             /** @description Перелік обрізано стелею int MigrateDocumentVersionHandler.MaxItems. */
             itemsTruncated: boolean;
+            /** @description LP-32: перелік поданих/затверджених пар (спершу зачеплені), не більше `MaxLockedItems`; `null` — таких
+             *     аркушів немає. ⛔ Без імен користувачів і значень — лише код аркуша, період, статус. */
+            lockedSheetItems?: null | components["schemas"]["LockedSheetItem"][];
+            /**
+             * @description LP-32: перелік LockedSheetItems обрізано стелею.
+             * @default false
+             */
+            lockedSheetItemsTruncated: boolean;
             /**
              * Format: int32
-             * @description Скільки пар «аркуш × період» подано або затверджено.
+             * @description Скільки пар «аркуш × період» подано або затверджено (усього в проєкті).
              */
             lockedSheets: number;
+            /**
+             * Format: int32
+             * @description LP-32: скільки поданих/затверджених пар «аркуш × період» зачіпав би перенос (звуження/втрата, видалене, нові
+             *     рядки фіксованої таблиці, зміна коду, зміна типу). Більше нуля — відмова `sheetsLocked` (`409 ECR-DOC-0409`).
+             * @default 0
+             */
+            lockedSheetsAffected: number;
+            /**
+             * Format: int32
+             * @description LP-32: скільки поданих/затверджених пар «аркуш × період» перенесено БЕЗ змін — план їх не зачіпає: статус, значення
+             *     й журнал погодження лишаються. Формульні колонки таких аркушів не перераховуються до повернення в роботу.
+             * @default 0
+             */
+            lockedSheetsCarried: number;
             /**
              * Format: int64
              * @description Скільки введених значень зникло б.
@@ -22829,6 +22851,25 @@ export interface components {
             values?: null | {
                 [key: string]: string;
             };
+        };
+        /** @description Подана або затверджена пара «аркуш × період» у звіті переносу (LP-32). */
+        LockedSheetItem: {
+            /** @description `true` — перенос зачепив би цей аркуш (відмова); `false` — переноситься без змін. */
+            affected: boolean;
+            /**
+             * Format: int64
+             * @description Документ проєкту.
+             */
+            documentId: number;
+            /**
+             * Format: int32
+             * @description Період.
+             */
+            periodKey: number;
+            /** @description Код аркуша вихідної версії. */
+            sheetCode: string;
+            /** @description `Submitted` або `Approved`. */
+            status: string;
         };
         /** @description Підсумок одного мапінгу. */
         MappedFieldPreview: {

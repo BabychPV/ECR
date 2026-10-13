@@ -7,11 +7,20 @@ namespace Ecr.Application.Ports;
 /// <param name="Cells">Непорожні значення за колонками й описами рядків поточної версії.</param>
 /// <param name="HeaderValues">Непорожні значення шапки за полями поточної версії.</param>
 /// <param name="LockedSheets">Скільки пар «аркуш × період» подано або затверджено.</param>
+/// <param name="LockedSheetRefs">Самі ці пари (LP-32): за ними план вирішує, чи зачіпає перенос подане.</param>
 public sealed record VersionMigrationScope(
     IReadOnlyList<long> DocumentIds,
     IReadOnlyList<VersionMigrationCellUsage> Cells,
     IReadOnlyDictionary<int, long> HeaderValues,
-    int LockedSheets);
+    int LockedSheets,
+    IReadOnlyList<VersionMigrationLockedSheet>? LockedSheetRefs = null);
+
+/// <summary>Подана або затверджена пара «аркуш × період» документа проєкту (LP-32).</summary>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="SheetDefId">Аркуш вихідної версії.</param>
+/// <param name="PeriodKey">Період.</param>
+/// <param name="Status"><c>Submitted</c> або <c>Approved</c>.</param>
+public sealed record VersionMigrationLockedSheet(long DocumentId, int SheetDefId, int PeriodKey, string Status);
 
 /// <summary>Мапінг збору, що адресує колонку вихідної версії шаблону (D-1 RC20).</summary>
 /// <param name="MappingId">Мапінг (<c>ext.EntityFieldMap.Id</c>).</param>

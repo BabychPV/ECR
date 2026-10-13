@@ -66,12 +66,12 @@ foreach ($sh in @($mdl.sheets)) {
         }
         # L1 (стилі комірок): ширина й формат числа з моделі проти структури версії (styleId у DTO структури немає - див. перелік стилів нижче)
         foreach ($mcol in @($tb.columns)) {
-            if (-not $mcol.widthPx -and -not $mcol.displayFormat) { continue }
+            $wantFmt = Resolve-LandDisplayFormat $mcol; if (-not $mcol.widthPx -and -not $wantFmt) { continue }
             $ecol = @($etb.columns) | Where-Object { $_.code -eq $mcol.code } | Select-Object -First 1
             if ($null -eq $ecol) { continue }
             $pres.checked++
             if ($mcol.widthPx -and [int]$ecol.widthPx -ne [int]$mcol.widthPx) { $pres.width++ }
-            if ($mcol.displayFormat -and [string]$ecol.displayFormat -ne [string]$mcol.displayFormat) { $pres.format++ }
+            if ($wantFmt -and [string]$ecol.displayFormat -ne [string]$wantFmt) { $pres.format++ }
         }
         # LP-29: Precision/Scale колонки мають збігатися з моделлю. Структура версії їх не носить, тому - GET колонки
         # (ліміт на таблицю: -PrecisionChecksPerTable, 0 = усі колонки з precision у моделі).

@@ -724,6 +724,12 @@ public sealed class PublishMethodologyHandler(
                 when string.Equals(function.Name, "CURRENT_SUBSTANCE", StringComparison.Ordinal):
                 return "CURRENT_SUBSTANCE()";
 
+            // ✎ 2026-10-13: застосовність речовини до рядка читає речовину проходу; у Row-формулі вона завжди TRUE
+            // (нічого виключати) - тобто нічого не означає, і така формула помилка конфігурації, а не «завжди застосовна».
+            case Ecr.Expressions.Ast.FunctionNode function
+                when string.Equals(function.Name, "SUBSTANCE_APPLICABLE", StringComparison.Ordinal):
+                return "SUBSTANCE_APPLICABLE()";
+
             default:
                 break;
         }

@@ -286,7 +286,9 @@ public sealed class GenericCalculationModule(
 
                         if (function.Arguments.Count > 0
                             && (RegistryForms.RowScopeNames.Contains(function.Name)
-                                || string.Equals(function.Name, RegistryForms.Find, StringComparison.OrdinalIgnoreCase))
+                                || string.Equals(function.Name, RegistryForms.Find, StringComparison.OrdinalIgnoreCase)
+                                // ✎ 2026-10-13: довідник застосовності - перший літерал SUBSTANCE_APPLICABLE.
+                                || string.Equals(function.Name, "SUBSTANCE_APPLICABLE", StringComparison.Ordinal))
                             && Expressions.Binding.ReferenceResolver.RegistryCodeLiteral(function.Arguments[0]) is { } code)
                         {
                             codes.Add(code);
@@ -442,10 +444,12 @@ public sealed class GenericCalculationModule(
         // у ОБОХ режимах; формули `Legacy` лишаються без нього. Окремий контекст — ті самі константи й `!Row`-результати,
         // але аргументи з `EntryRef`. У `Strict` аргументи вже ті самі — контекст не дублюємо.
         var ruleContext = rowContext;
+        var ruleArgumentValues = arguments;
         if (categoryRule is not null && numeric.Mode != NumericMode.Strict)
         {
             var ruleArguments = input.Arguments.ToDictionary(
                 a => a.ArgumentCode, a => ToValue(a, entryRef: true, legacyNumericText: false), StringComparer.OrdinalIgnoreCase);
+            ruleArgumentValues = ruleArguments;
             ruleContext = new MethodologyEvaluationContext(
                 period,
                 ruleArguments,
@@ -508,9 +512,37 @@ public sealed class GenericCalculationModule(
                 substanceCode = codesById.GetValueOrDefault(substance.SubstanceEntryId);
             }
 
+            // ✎ 2026-10-13 (застосовність речовини на рядок, 02b): правило, що читає SUBSTANCE_APPLICABLE, у циклі
+            // речовин обчислюється ще раз - З кодом речовини. Порожній ключ = речовина до рядка не застосовна:
+            // прохід пропускається (виходів і помилок немає), решта речовин рахуються. Ключ категорії цієї речовини -
+            // результат цього проходу (звичайно збігається з рядковим).
+            var substanceCategory = categoryKey;
+            if (categoryRule is { AppliesPerSubstance: true } && substanceCode is not null)
+            {
+                trace.EnterSubstance(substance?.SubstanceEntryId);
+
+                var perSubstance = new MethodologyEvaluationContext(
+                    period, ruleArgumentValues, rowConstants, units, binding.Registries,
+                    library is null ? null : name => library.Resolve(name, rowPhase: true),
+                    currentSubstanceCode: substanceCode);
+                foreach (var formula in rowFormulas)
+                {
+                    perSubstance.SetFormulaResult(formula.Code, rowContext.GetFormulaResult(formula.Code));
+                }
+
+                substanceCategory = EvaluateSubstanceCategoryRule(categoryRule, perSubstance, numeric, trace);
+                if (substanceCategory is null)
+                {
+                    trace.Step("SubstanceNotApplicable", substanceCode, value: null);
+                    continue;
+                }
+
+                library?.SetCategory(substanceCategory);
+            }
+
             var resolved = ResolveConstants(
                 version.MethodologyVersionId, substanceFormulas, substance?.SubstanceEntryId, period, binding.Constants,
-                constantUnits, categoryKey, substanceCode: substanceCode);
+                constantUnits, substanceCategory, substanceCode: substanceCode);
 
             var context = new MethodologyEvaluationContext(
                 period, arguments, resolved, units, binding.Registries,
@@ -1102,7 +1134,17 @@ public sealed class GenericCalculationModule(
         string Text,
         ParsedExpression? Expression,
         string? ParseError,
-        IReadOnlyCollection<string> ConstantCodes);
+        IReadOnlyCollection<string> ConstantCodes)
+    {
+        /// <summary>
+        /// Правило читає <c>SUBSTANCE_APPLICABLE</c> - у циклі речовин воно обчислюється для кожної речовини.
+        /// </summary>
+        /// <remarks>
+        /// ⚠ Груба текстова ознака (як <c>UsesCurrentSubstance</c>): хибне спрацювання коштує зайвого обчислення
+        /// правила на речовину, а функція без речовини дає <c>TRUE</c> і ключ не змінює.
+        /// </remarks>
+        public bool AppliesPerSubstance => Text.Contains("SUBSTANCE_APPLICABLE", StringComparison.Ordinal);
+    }
 
     /// <summary>Розбирає правило категорії діалектом Methodology.</summary>
     /// <param name="text">Вираз правила версії.</param>
@@ -1142,7 +1184,10 @@ public sealed class GenericCalculationModule(
     /// <param name="rowContext">Row-контекст: аргументи, `!Row`-формули, `CST.` без категорії.</param>
     /// <param name="numeric">Числова політика версії.</param>
     /// <param name="trace">Трейс рядка.</param>
-    /// <returns>Непорожній ключ категорії.</returns>
+    /// <param name="emptyIsNotApplicable">
+    /// Прохід речовини (SUBSTANCE_APPLICABLE): порожній текст - не відмова, а «не застосовується» (<c>null</c>).
+    /// </param>
+    /// <returns>Непорожній ключ категорії; <c>null</c> - лише за <paramref name="emptyIsNotApplicable"/>.</returns>
     /// <exception cref="Ecr.Domain.Abstractions.DomainException">
     /// <c>ECR-CALC-0422</c> (<c>categoryRuleFailed</c>) — вираз не розібрано, дав помилку, порожнє
     /// значення чи не текст.
@@ -1152,8 +1197,9 @@ public sealed class GenericCalculationModule(
     /// кращому разі) або взяв би не ту категорію (у гіршому) — той самий клас мовчазної помилки, що
     /// старе «Category have nothing». Виняток того самого коду й виду, що й `constantAmbiguous`.
     /// </remarks>
-    private string EvaluateCategoryRule(
-        ParsedCategoryRule rule, MethodologyEvaluationContext rowContext, NumericPolicy numeric, TraceRecorder trace)
+    private string? EvaluateCategoryRule(
+        ParsedCategoryRule rule, MethodologyEvaluationContext rowContext, NumericPolicy numeric, TraceRecorder trace,
+        bool emptyIsNotApplicable = false)
     {
         static Ecr.Domain.Abstractions.DomainException Failed(ParsedCategoryRule rule, string reason)
             => new(
@@ -1179,6 +1225,11 @@ public sealed class GenericCalculationModule(
         }
 
         var key = value.Type == Expressions.Ast.ExpressionValueType.Text ? (value.Value as string)?.Trim() : null;
+        if (emptyIsNotApplicable && value.Type == Expressions.Ast.ExpressionValueType.Text && string.IsNullOrEmpty(key))
+        {
+            return null;
+        }
+
         if (string.IsNullOrEmpty(key))
         {
             throw Failed(
@@ -1193,6 +1244,26 @@ public sealed class GenericCalculationModule(
 
         return key;
     }
+
+    /// <summary>
+    /// Правило категорії для РЕЧОВИНИ проходу (02b «Застосовність речовини до рядка»): ключ або <c>null</c> - речовина
+    /// до рядка не застосовна.
+    /// </summary>
+    /// <param name="rule">Розібране правило версії.</param>
+    /// <param name="context">Row-контекст рядка з кодом речовини проходу.</param>
+    /// <param name="numeric">Числова політика версії.</param>
+    /// <param name="trace">Трейс рядка.</param>
+    /// <returns>Непорожній ключ; <c>null</c> - порожній текст (правило само сказало «не застосовується»).</returns>
+    /// <exception cref="Ecr.Domain.Abstractions.DomainException">
+    /// <c>ECR-CALC-0422</c> (<c>categoryRuleFailed</c>) - помилка виразу чи не текст: це відмова, а не пропуск.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Помилка НЕ є «не застосовується»: зіпсоване правило мовчки прибрало б усі речовини рядка. Порожній ключ у
+    /// Row-фазі вже відмовив рядку до цього проходу (там функція дає <c>TRUE</c>), тож тут він - рішення довідника.
+    /// </remarks>
+    private string? EvaluateSubstanceCategoryRule(
+        ParsedCategoryRule rule, MethodologyEvaluationContext context, NumericPolicy numeric, TraceRecorder trace)
+        => EvaluateCategoryRule(rule, context, numeric, trace, emptyIsNotApplicable: true);
 
     /// <summary>Резолвить усі константи, згадані у формулах, для однієї речовини.</summary>
     /// <remarks>

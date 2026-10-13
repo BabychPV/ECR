@@ -4648,8 +4648,35 @@
             "description": "Перелік обрізано стелею int MigrateDocumentVersionHandler.MaxItems.",
             "type": "boolean"
           },
+          "lockedSheetItems": {
+            "description": "LP-32: перелік поданих/затверджених пар (спершу зачеплені), не більше `MaxLockedItems`; `null` — таких\nаркушів немає. ⛔ Без імен користувачів і значень — лише код аркуша, період, статус.",
+            "items": {
+              "$ref": "#/components/schemas/LockedSheetItem"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "lockedSheetItemsTruncated": {
+            "default": false,
+            "description": "LP-32: перелік LockedSheetItems обрізано стелею.",
+            "type": "boolean"
+          },
           "lockedSheets": {
-            "description": "Скільки пар «аркуш × період» подано або затверджено.",
+            "description": "Скільки пар «аркуш × період» подано або затверджено (усього в проєкті).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "lockedSheetsAffected": {
+            "default": 0,
+            "description": "LP-32: скільки поданих/затверджених пар «аркуш × період» зачіпав би перенос (звуження/втрата, видалене, нові\nрядки фіксованої таблиці, зміна коду, зміна типу). Більше нуля — відмова `sheetsLocked` (`409 ECR-DOC-0409`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "lockedSheetsCarried": {
+            "default": 0,
+            "description": "LP-32: скільки поданих/затверджених пар «аркуш × період» перенесено БЕЗ змін — план їх не зачіпає: статус, значення\nй журнал погодження лишаються. Формульні колонки таких аркушів не перераховуються до повернення в роботу.",
             "format": "int32",
             "type": "integer"
           },
@@ -6681,6 +6708,41 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "LockedSheetItem": {
+        "description": "Подана або затверджена пара «аркуш × період» у звіті переносу (LP-32).",
+        "properties": {
+          "affected": {
+            "description": "`true` — перенос зачепив би цей аркуш (відмова); `false` — переноситься без змін.",
+            "type": "boolean"
+          },
+          "documentId": {
+            "description": "Документ проєкту.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "periodKey": {
+            "description": "Період.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetCode": {
+            "description": "Код аркуша вихідної версії.",
+            "type": "string"
+          },
+          "status": {
+            "description": "`Submitted` або `Approved`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId",
+          "sheetCode",
+          "periodKey",
+          "status",
+          "affected"
+        ],
         "type": "object"
       },
       "MappedFieldPreview": {

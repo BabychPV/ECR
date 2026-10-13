@@ -1,0 +1,901 @@
+{
+ "format": 1,
+ "note": "Which substance codes the legacy HSE C# classes calculate for a row, by row key (stream / invnum / NAE). Dictionaries copied from the C# sources; no prod values. Input of model-gen/substance_applicability.py (registry LAND_SUBSTANCE_APPLICABILITY).",
+ "source": "tools/land/model-gen/extract_substance_applicability.py",
+ "methodologies": {
+  "ECW_C11_01": {
+   "kind": "Stream",
+   "argument": "Land_TypeFuelOrStream",
+   "selector": "prefix-chain",
+   "source": "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_01.cs",
+   "provider": "Standard",
+   "providerEntries": [
+    [
+     "Makat",
+     "FG_Makat"
+    ],
+    [
+     "Fuel gas (HMB)",
+     "FG_HMB"
+    ],
+    [
+     "Fuel gas (Export)",
+     "FG_Export"
+    ],
+    [
+     "Fuel gas (Internal)",
+     "FG_Internal"
+    ],
+    [
+     "LPG (HMB)",
+     "LPG_HMB"
+    ],
+    [
+     "LPG (Internal)",
+     "LPG_Internal"
+    ]
+   ],
+   "codes": {
+    "FG_Makat": [
+     "333",
+     "415",
+     "416",
+     "1728"
+    ],
+    "FG_Export": [
+     "333",
+     "415",
+     "416",
+     "1728"
+    ],
+    "FG_Internal": [
+     "333",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "1702",
+     "1707",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "FG_HMB": [
+     "333",
+     "334",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "627",
+     "1702",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "LPG_HMB": [
+     "333",
+     "334",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "627",
+     "1702",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "LPG_Internal": [
+     "333",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "1702",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "14": [
+     "333",
+     "1052"
+    ],
+    "401": [
+     "333",
+     "1715"
+    ],
+    "452": [
+     "330",
+     "333",
+     "1852",
+     "1880"
+    ],
+    "sludge": [
+     "333",
+     "1052",
+     "2754"
+    ],
+    "caustic": [
+     "333",
+     "2754"
+    ],
+    "Wwater": [
+     "333",
+     "1052",
+     "2754"
+    ],
+    "Diesel": [
+     "333",
+     "2754"
+    ]
+   }
+  },
+  "ECW_C11_02": {
+   "kind": "Stream",
+   "argument": "Land_TypeFuelOrStream",
+   "selector": "prefix-required",
+   "source": "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_02.cs",
+   "provider": "ECW_C11_02",
+   "providerEntries": [
+    [
+     "Makat",
+     "FG_Makat"
+    ],
+    [
+     "Fuel gas (HMB)",
+     "FG_HMB"
+    ],
+    [
+     "Fuel gas (Export)",
+     "FG_Export"
+    ],
+    [
+     "Fuel gas (Internal)",
+     "FG_Internal"
+    ],
+    [
+     "LPG (HMB)",
+     "LPG_HMB"
+    ],
+    [
+     "LPG (Internal)",
+     "LPG_Internal"
+    ],
+    [
+     "1-204 sludge - 1-204 шлам",
+     "sludge"
+    ],
+    [
+     "spent caustic - отработанный каустик",
+     "caustic"
+    ]
+   ],
+   "codes": {
+    "FG_Makat": [
+     "333",
+     "415",
+     "416",
+     "1728"
+    ],
+    "FG_Export": [
+     "333",
+     "415",
+     "416",
+     "1728"
+    ],
+    "FG_Internal": [
+     "333",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "1702",
+     "1707",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "FG_HMB": [
+     "333",
+     "334",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "627",
+     "1702",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "LPG_HMB": [
+     "333",
+     "334",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "627",
+     "1702",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "LPG_Internal": [
+     "333",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "1702",
+     "1707",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "sludge": [
+     "333",
+     "1052",
+     "2754"
+    ],
+    "caustic": [
+     "333",
+     "2754"
+    ]
+   }
+  },
+  "ECW_C11_10": {
+   "kind": "Stream",
+   "argument": "Land_TypeFuelOrStream",
+   "selector": "prefix-required",
+   "source": "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_10.cs",
+   "provider": "ECW_C11_10",
+   "providerEntries": [
+    [
+     "Makat",
+     "FG_Makat"
+    ],
+    [
+     "Fuel gas (HMB)",
+     "FG_HMB"
+    ],
+    [
+     "Fuel gas (Export)",
+     "FG_Export"
+    ],
+    [
+     "Fuel gas (Internal)",
+     "FG_Internal"
+    ],
+    [
+     "LPG (HMB)",
+     "LPG_HMB"
+    ],
+    [
+     "LPG (Internal)",
+     "LPG_Internal"
+    ],
+    [
+     "104",
+     "Stream_104"
+    ]
+   ],
+   "codes": {
+    "FG_Makat": [
+     "333",
+     "415",
+     "416",
+     "1728"
+    ],
+    "FG_Export": [
+     "333",
+     "415",
+     "416",
+     "1728"
+    ],
+    "FG_Internal": [
+     "333",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "1702",
+     "1707",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "FG_HMB": [
+     "333",
+     "334",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "627",
+     "1702",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "LPG_HMB": [
+     "333",
+     "334",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "627",
+     "1702",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "LPG_Internal": [
+     "333",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "1702",
+     "1707",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "Stream_104": [
+     "333",
+     "334",
+     "370",
+     "415",
+     "1715",
+     "1728"
+    ]
+   }
+  },
+  "ECW_C11_11_03": {
+   "kind": "NAE",
+   "argument": "Land_NAE",
+   "selector": "nae",
+   "source": "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_11_03.cs",
+   "codes": {
+    "0800(001)": [
+     "333",
+     "2754"
+    ],
+    "0800(002)": [
+     "333",
+     "2754"
+    ],
+    "0800(003)": [
+     "333",
+     "2754"
+    ],
+    "0800(004)": [
+     "333",
+     "2754"
+    ],
+    "0800(005)": [
+     "333",
+     "2754"
+    ],
+    "0800(006)": [
+     "333",
+     "2754"
+    ],
+    "0800(007)": [
+     "333",
+     "2754"
+    ],
+    "6800": [
+     "333",
+     "2754"
+    ],
+    "0782(001)": [
+     "333",
+     "1052",
+     "2754"
+    ],
+    "0782(002)": [
+     "333",
+     "1052",
+     "2754"
+    ],
+    "0782(003)": [
+     "333",
+     "1052",
+     "2754"
+    ],
+    "0782(004)": [
+     "333",
+     "1052",
+     "2754"
+    ],
+    "0782(005)": [
+     "333",
+     "1052",
+     "2754"
+    ],
+    "0782(006)": [
+     "333",
+     "1052",
+     "2754"
+    ],
+    "0782(007)": [
+     "333",
+     "1052",
+     "2754"
+    ],
+    "0782(008)": [
+     "333",
+     "1052",
+     "2754"
+    ],
+    "0804": [
+     "333",
+     "1052",
+     "2754"
+    ],
+    "6784": [
+     "333",
+     "1052",
+     "2754"
+    ],
+    "6801": [
+     "333",
+     "1052",
+     "2754"
+    ],
+    "6802": [
+     "333",
+     "1052",
+     "2754"
+    ],
+    "6803": [
+     "333",
+     "1052",
+     "2754"
+    ]
+   }
+  },
+  "ECW_C11_11_05": {
+   "kind": "NAE",
+   "argument": "Land_NAE",
+   "selector": "nae",
+   "source": "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_11_05.cs",
+   "codes": {
+    "0483": [
+     "330",
+     "333"
+    ],
+    "0480": [
+     "333"
+    ],
+    "0481": [
+     "333"
+    ],
+    "0482": [
+     "333"
+    ],
+    "6482(001)": [
+     "333"
+    ]
+   }
+  },
+  "ECW_C11_19": {
+   "kind": "NAE",
+   "argument": "Land_NAE",
+   "selector": "nae",
+   "source": "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_19.cs",
+   "codes": {
+    "0485": [
+     "330",
+     "331",
+     "333"
+    ],
+    "0486": [
+     "330",
+     "331",
+     "333"
+    ],
+    "0487": [
+     "330",
+     "331",
+     "333"
+    ],
+    "0488": [
+     "330",
+     "331",
+     "333"
+    ],
+    "0489": [
+     "330",
+     "331",
+     "333"
+    ],
+    "0490": [
+     "330",
+     "331",
+     "333"
+    ],
+    "0484": [
+     "333"
+    ]
+   }
+  },
+  "ECW_C12_01": {
+   "kind": "Stream",
+   "argument": "Land_Streams",
+   "selector": "map",
+   "source": "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C12_OFFSHORE_OPERATIONAL/ECW_C12_01.cs",
+   "map": [
+    [
+     "Fuel gas",
+     "FuelGas"
+    ],
+    [
+     "1-D1",
+     "1D-1"
+    ],
+    [
+     "1D-1",
+     "1D-1"
+    ],
+    [
+     "Diesel/arctic diesel",
+     "Diesel"
+    ],
+    [
+     "Diesel",
+     "Diesel"
+    ],
+    [
+     "1D-114",
+     "1D-114"
+    ],
+    [
+     "Lube oil",
+     "LubeOil"
+    ],
+    [
+     "Hydraulic oil",
+     "HydraulicOil"
+    ],
+    [
+     "Hydraulic Oil",
+     "HydraulicOil"
+    ],
+    [
+     "Seal oil",
+     "SealOil"
+    ],
+    [
+     "TEGlycol",
+     "TEGlycol"
+    ],
+    [
+     "Antifoam",
+     "Antifoam"
+    ],
+    [
+     "Asphaltene inhibitor",
+     "AsphalteneInhibitor"
+    ],
+    [
+     "Corrosion inhibitor",
+     "CorrosionInhibitor"
+    ],
+    [
+     "Methanol/Метанол",
+     "Methanol"
+    ],
+    [
+     "Scale inhibitor",
+     "ScaleInhibitor"
+    ],
+    [
+     "TEGAntifoam",
+     "TEGAntifoam"
+    ],
+    [
+     "TEG pH Adjuster/",
+     "TEGpHAdjuster"
+    ],
+    [
+     "Wax inhibitor",
+     "WaxInhibitor"
+    ]
+   ],
+   "codes": {
+    "FuelGas": [
+     "333",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "1702",
+     "1707",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "1D-1": [
+     "333",
+     "334",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "627",
+     "1702",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "Diesel": [
+     "333",
+     "2754"
+    ],
+    "1D-114": [
+     "333",
+     "334",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "627",
+     "1129",
+     "1702",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "LubeOil": [
+     "2735"
+    ],
+    "HydraulicOil": [
+     "2735"
+    ],
+    "SealOil": [
+     "2735"
+    ],
+    "TEGlycol": [
+     "1129"
+    ],
+    "Antifoam": [
+     "1408"
+    ],
+    "CorrosionInhibitor": [
+     "616",
+     "621",
+     "1001",
+     "1051",
+     "1052",
+     "1408",
+     "1860"
+    ],
+    "Methanol": [
+     "1052"
+    ],
+    "ScaleInhibitor": [
+     "2853"
+    ],
+    "TEGAntifoam": [
+     "1040"
+    ],
+    "TEGpHAdjuster": [
+     "1023",
+     "1052"
+    ],
+    "WaxInhibitor": [
+     "616",
+     "621",
+     "2750"
+    ]
+   }
+  },
+  "ECW_C12_03": {
+   "kind": "TypeFuel",
+   "argument": "Land_TypeFuel",
+   "selector": "prefix-required",
+   "source": "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C12_OFFSHORE_OPERATIONAL/ECW_C12_03.cs",
+   "valueExpression": "REGFIELD(@Land_TypeFuel, 'NAME')",
+   "provider": "Standard",
+   "providerEntries": [
+    [
+     "Makat",
+     "FG_Makat"
+    ],
+    [
+     "Fuel gas (HMB)",
+     "FG_HMB"
+    ],
+    [
+     "Fuel gas (Export)",
+     "FG_Export"
+    ],
+    [
+     "Fuel gas (Internal)",
+     "FG_Internal"
+    ],
+    [
+     "LPG (HMB)",
+     "LPG_HMB"
+    ],
+    [
+     "LPG (Internal)",
+     "LPG_Internal"
+    ]
+   ],
+   "codes": {
+    "FG_Makat": [
+     "333",
+     "415",
+     "416",
+     "1728"
+    ],
+    "FG_Export": [
+     "333",
+     "415",
+     "416",
+     "1728"
+    ],
+    "FG_Internal": [
+     "333",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "1702",
+     "1707",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ],
+    "FG_HMB": [
+     "333",
+     "334",
+     "370",
+     "415",
+     "416",
+     "602",
+     "616",
+     "621",
+     "627",
+     "1702",
+     "1715",
+     "1720",
+     "1728",
+     "2754"
+    ]
+   }
+  },
+  "ECW_C12_04_01": {
+   "kind": "InvNum",
+   "argument": "Land_InvNumEqp",
+   "selector": "invnum",
+   "source": "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C12_OFFSHORE_OPERATIONAL/ECW_C12_04_01.cs",
+   "normalize": {
+    "Т": "T",
+    "А": "A"
+   },
+   "codes": {
+    "B4-120-TA-101": [
+     "1001",
+     "1051",
+     "1052",
+     "1860"
+    ],
+    "B4-120-TA-201": [
+     "616",
+     "621",
+     "2750"
+    ],
+    "B4-120-TA-301": [
+     "616",
+     "621",
+     "2750"
+    ],
+    "B4-120-TC-401": [
+     "2853"
+    ],
+    "B4-120-TC-501": [
+     "1408"
+    ],
+    "B4-380-TA-001": [
+     "1129"
+    ],
+    "B4-380-VA-105": [
+     "1023",
+     "1052"
+    ],
+    "B4-380-VA-106": [
+     "1040"
+    ],
+    "B4-380-VA-205": [
+     "1023",
+     "1052"
+    ],
+    "B4-380-VA-206": [
+     "1040"
+    ],
+    "B4-380-VA-305": [
+     "1023",
+     "1052"
+    ],
+    "B4-380-VA-306": [
+     "1040"
+    ]
+   }
+  },
+  "ECW_C12_04_02": {
+   "kind": "TypeFuel",
+   "argument": "Land_TypeStoredMaterial",
+   "selector": "contains",
+   "source": "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C12_OFFSHORE_OPERATIONAL/ECW_C12_04_02.cs",
+   "contains": "Diesel",
+   "codes": {
+    "diesel": [
+     "333",
+     "2754"
+    ],
+    "oil": [
+     "2735"
+    ]
+   },
+   "tokens": {
+    "true": "diesel",
+    "false": "oil"
+   }
+  }
+ }
+}

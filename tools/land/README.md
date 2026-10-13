@@ -251,3 +251,74 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 `Import-LandHse400Substance.ps1` (`-DryRun`, `-ConfirmStand`; прод не читає). Сторожі: LandHse400SubstanceMapTests
 (Architecture), CompositionMassBySubstanceTests (Expressions), LandHse400SubstanceRegistryTests (Infrastructure, реальний SQL).
 
+
+### Застосовність речовини на рядок (LAND_SUBSTANCE_APPLICABILITY)
+
+Склад речовин версії один на ВЕРСІЮ, а старий C# перебирає список кодів ПО РЯДКУ: `pollutionCodeByFuelType[prefix]`
+(C11_01/02/10, C12_03; префікс - `PrefixProvider` за текстом палива/потоку), `polCodeList[typeOfStream]` (C12_01),
+`pollutionCodeByInvNum[InvNum з Т/А кирилицею -> латиниця]` (C12_04_01), `fuelShort` diesel|oil (C12_04_02) і списки
+`NAE -> коди` (C11_11_03, C11_11_05, C11_19). «Чужа» речовина рядка там просто не рахується, а в ECR давала б зайвий рядок
+результату (значення з фолбека `Common`) або `#REF`. Довідник `LAND_SUBSTANCE_APPLICABILITY` переносить цю таблицю в
+дані БЕЗ міграції: ключ `(METHODOLOGY, SELECTOR_KIND, SELECTOR_VALUE, SUBSTANCE_CODE)`, регістр значущий;
+`SELECTOR_KIND` = `NAE` | `InvNum` | `TypeFuel` | `Stream`; запис `(методологія, '*', '*', '*')` - маркер «методологія має
+застосовність» (без нього функція не фільтрує).
+
+- Дані: `land-substance-applicability.json` складає `model-gen/extract_substance_applicability.py` зі словників C#
+  (`--source-root <каталог docs/source основного клону>`; `--check` порівнює з файлом, код 1 при розбіжності; прод не
+  читається), довідник у моделі - `model-gen/substance_applicability.py` (домен текстів потоку: `LEGACY_TEXTS`, довідники
+  шаблону типу палива/потоків і літерали `in(@arg, ...)` правил категорії; InvNum - усі Т/А-варіанти кирилиця/латиниця;
+  NAE - канонічне написання й `NNNN (NNN)`). Опис - `substanceApplicability` моделі (`methodologies.<ім'я>.kind`,
+  `valueExpression`).
+- Рушій: `SUBSTANCE_APPLICABLE(registry, scope, kind, value)` (`docs/build/02b-expressions.md`, «Застосовність речовини до
+  рядка»). Правило категорії, що її містить, у циклі речовин обчислюється для кожної речовини; порожній ключ = речовину для
+  рядка пропущено (виходів і помилок немає, крок трейсу `SubstanceNotApplicable`).
+- Стенд: `Build-LandTemplate.ps1 -Stage Registries` (довідник) і далі `-Stage SubstanceApplicability` (лише явно; обгортає
+  правило категорії ЧЕРНЕТКИ: `if(SUBSTANCE_APPLICABLE('LAND_SUBSTANCE_APPLICABILITY','<методологія>','<вид>',<значення>),
+  <правило>,'')`; опубліковану версію не чіпає; повтор - 0 змін; `-Stage LandParity` обгортку не скидає). Версія має бути
+  вище за Legacy (ECR-CALC-0433). Сторожі: LandSubstanceApplicabilityTests (Architecture), SubstanceApplicableFunctionTests
+  (Expressions), SubstanceApplicabilityModuleTests (Calculations), SubstanceApplicabilitySqlTests (Api, реальний SQL).
+- ⚠ Модель перегенеровується ПІСЛЯ lane, що теж міняють `land-template.model.json` (`run-model-gen.ps1` на вершині).
+
+## Похідні аргументи зі словників C#: групи NAE і Land_MassFraction (LP-10)
+
+Залишок 0438 після мостів за атрибутами AF мав три аргументи, які старий код виводить зі словників у C#. Рушій не
+змінено: вистачає REGFIND/REGFIELD/CURRENT_SUBSTANCE() і `if`.
+
+- **`Land_Power`** (`ECW_C11_03`, лише таблиця 9a_17) і **`Category1`** (`ECW_C11_11_02`, 9_01/9_07/9_08/9a_16/9a_17a/9a_19) -
+  довідник `LAND_NAE_GROUP` (ключ `NAE_NORMALIZED`, поля `POWER_GROUP` Decimal і `CATEGORY1`). Записи ГЕНЕРУЮТЬСЯ з C#
+  (`model-gen/extract_nae_groups.py <docs/source> af-land-nae-groups.json`, далі `run-model-gen.ps1`); прод не читається.
+  Міст: `REGFIELD(REGFIND('LAND_NAE_GROUP', [<колонка NAE>]), 'POWER_GROUP' | 'CATEGORY1')`; немає запису -> `#N/A` ->
+  рядок без результату (стара: «Error Power value» / «Error category1 - NAE», `continue`). Нормалізація NAE: у `C11_11_02`
+  пробіли знімаються, у `C11_03` - ні; діалект шаблонів не має заміни тексту, тому для Category1 є обидва написання
+  (`0788(001)` і `0788 (001)`), а краї й послідовності пробілів знімає сам REGFIND. Довідник на наявних стендах заводить
+  `Import-LandNaeGroup.ps1` (`-DryRun`, `-ConfirmStand`; повтор - 0 змін), на свіжих - `-Stage Registries`.
+- **`Land_MassFraction`** (`ECW_C11_11_04`, 9a_19) - аргумент береться з атрибута `Land_MassFraction_0<код>` за поточною
+  речовиною проходу. Речовин type1 п'ять (415, 416, 602, 616, 621), тому: п'ять мостів `Land_MassFraction_0<код>` на
+  колонки із заголовком «<код>: ...» і фрагмент `if(CURRENT_SUBSTANCE() = '415', @Land_MassFraction_0415, ...)` замість
+  `@Land_MassFraction` у формулі ЧЕРНЕТКИ: `Build-LandTemplate.ps1 -Stage MassFraction` (разом із `-Stage CompositionMass`;
+  чернетці з Legacy ставиться Strict; опубліковане не чіпає; повтор - 0 змін).
+
+Сторожі: LandNaeGroupBridgesModelTests (Architecture), NaeGroupBridgesTests (Expressions, справжній рушій).
+
+
+## Формат відображення Decimal-колонок (LP-21)
+
+Рішення людини 12.10: «Decimal 16 зберігаємо до 16 знаків, показуємо за `DisplayFormat` колонки». Модель
+(`land-template.model.json`) несе `displayFormat` лише там, де xlsm має числовий формат домінантного стилю даних
+колонки (ширше за 80 % рядків; порожні колонки й «General» формату не мають): 595 із 2304 Decimal-колонок.
+Решта (1709: 1255 без заповнених рядків, з них 49 доданих ECR-колонок-аргументів без стовпця Excel; 454 із
+рядками, але «General» або без домінантного стилю) отримує формат із правила `Resolve-LandDisplayFormat` (`LandTemplateDiff.Lib.ps1`), без зміни моделі:
+
+| Колонка | `DisplayFormat` |
+|---|---|
+| має `displayFormat` у моделі (Excel) | він сам, без змін |
+| Decimal без формату Excel, Scale ≥ 1 | `0.` + `0` × min(Scale, 6); для Scale 16 це `0.000000` |
+| Decimal без формату Excel, Scale = 0 | `0` |
+| не Decimal, Scale не задано | не виводиться |
+
+`0.000000` - найчастіший формат самого Excel-шаблону (458 із 595; у 14 таблицях, де є і колонки з форматом, і без
+нього, він домінує у 13). Виводити формат за «сусідніми» колонками таблиці не стали: 1286 без форматів стоять у
+таблицях, де жодна Decimal-колонка форматів не має, а сусід-викид (`0.0`, `0.00`) переніс би чужий формат.
+Build (`Stage Template`, презентація колонок) записує результат правила в `cfg.ColumnDef.DisplayFormat`
+(ідемпотентно, `ISNULL`/порівняння), Verify-LandTemplate звіряє його з версією («презентація колонок»).
+Тест: `LandDisplayFormatRuleTests` (Ecr.Architecture.Tests).

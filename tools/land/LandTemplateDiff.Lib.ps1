@@ -123,3 +123,21 @@ function Get-LandMaxRowsMismatches($Structure, $Mdl) {
     }
     return @($out)
 }
+
+# LP-21: формат відображення Decimal-колонки (cfg.ColumnDef.DisplayFormat).
+# Правило (рішення людини 12.10: «Decimal 16 зберігаємо до 16 знаків, показуємо за DisplayFormat колонки»):
+#   1) displayFormat з моделі (числовий формат Excel-шаблону) - беремо як є;
+#   2) інакше для Decimal: '0.' + '0' x min(Scale, 6) (Scale 0 -> '0'). Це той самий формат, що Excel-шаблон Land має
+#      у 458 із 595 колонок із форматом (0.000000), і єдиний, що виводиться без вигадування: з Scale 16 показ обмежено 6 знаками;
+#   3) не Decimal або Scale не задано - формат не виводиться ($null).
+# Одна функція на Build (запис) і Verify (звірка), тож модель-генератор не мусить нести формат кожної колонки.
+function Resolve-LandDisplayFormat($Column) {
+    if ($null -eq $Column) { return $null }
+    $explicit = [string]$Column.displayFormat
+    if ($explicit) { return $explicit }
+    if ([string]$Column.dataType -ne 'Decimal') { return $null }
+    if ($null -eq $Column.scale -or [string]$Column.scale -eq '') { return $null }
+    $digits = [Math]::Min([Math]::Max([int]$Column.scale, 0), 6)
+    if ($digits -eq 0) { return '0' }
+    return '0.' + ('0' * $digits)
+}

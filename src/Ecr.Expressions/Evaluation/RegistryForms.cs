@@ -68,8 +68,15 @@ public static class RegistryForms
     public static readonly FrozenSet<string> RowScopeNames =
         new[] { One, Sum, Average, Minimum, Maximum, Count }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// ✎ 2026-10-13: застосовність речовини до рядка за довідником (02b). Не пошук запису й не агрегат, але читає
+    /// знімок довідників, названий літералом першого аргументу, - тому живе тут: так її бачать видобувач залежностей
+    /// і перевірки довідників публікації (<c>cfg.RegistryUse</c>), як і <see cref="Find"/>.
+    /// </summary>
+    public const string Applicable = "SUBSTANCE_APPLICABLE";
+
     private static readonly FrozenSet<string> MethodologyNames =
-        new[] { Find, One, Field, Sum, Average, Minimum, Maximum, Count }.ToFrozenSet(StringComparer.Ordinal);
+        new[] { Find, One, Field, Sum, Average, Minimum, Maximum, Count, Applicable }.ToFrozenSet(StringComparer.Ordinal);
 
     private static readonly FrozenSet<string> TemplateNames =
         new[] { Find, One, Sum, Average, Minimum, Maximum, Count }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
@@ -150,6 +157,10 @@ public static class RegistryForms
 
             case Count:
                 return Aggregate(AggregateKind.Count, node.Arguments, context, budget, evaluate);
+
+            case Applicable:
+                return Ecr.Expressions.Functions.MethodologyFunctions.SubstanceApplicable(
+                    [.. node.Arguments.Select(a => evaluate(a, context))], context);
 
             default:
                 return RegFind(node.Arguments, context, evaluate);
