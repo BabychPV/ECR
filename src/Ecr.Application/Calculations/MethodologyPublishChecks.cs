@@ -309,6 +309,27 @@ public static class MethodologyPublishChecks
     }
 
     /// <summary>
+    /// D-OA: множина необов'язкових аргументів — об'єднання маркерів <c>Name?</c> у <c>DeclaredArguments</c>
+    /// усіх формул (версії та бібліотек замикання), без урахування регістру. Та сама функція в публікації й
+    /// у збереженні правила категорії (одна правда); рантайм (<c>Ecr.Calculations</c>) рахує її через
+    /// <see cref="ArgumentDeclarationChecker.OptionalNames"/> за тим самим правилом.
+    /// </summary>
+    /// <param name="formulas">Розібрані формули з оголошеними аргументами.</param>
+    /// <returns>Нормалізовані імена; порожня множина, якщо маркерів немає.</returns>
+    public static IReadOnlySet<string> OptionalArguments(IEnumerable<ParsedFormula> formulas)
+    {
+        ArgumentNullException.ThrowIfNull(formulas);
+
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var formula in formulas)
+        {
+            result.UnionWith(ArgumentDeclarationChecker.OptionalNames(formula.DeclaredArguments));
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Звіряє аргументи, які формули версії РЕАЛЬНО вживають, з кодами колонок
     /// таблиць, куди <c>CalculationBinding</c> цю методологію прив'язує
     /// (директива «структурна перевірка аргументів методології при
@@ -325,6 +346,10 @@ public static class MethodologyPublishChecks
     /// Контекстні аргументи, звільнені від цієї перевірки так само, як від
     /// перевірки оголошення (<see cref="DefaultContextualArguments"/> за
     /// замовчуванням): їх передає збірка, а не структура таблиці.
+    /// </param>
+    /// <param name="optionalArguments">
+    /// D-OA: додаткові необов'язкові аргументи (правило категорії не має власного списку й успадковує
+    /// множину формул версії); поверх маркерів <c>Name?</c> з <c>DeclaredArguments</c> самих формул.
     /// </param>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="formulas"/> або <paramref name="columnCodesByTable"/> —
@@ -351,10 +376,19 @@ public static class MethodologyPublishChecks
     public static void CheckArgumentTableColumns(
         IReadOnlyList<ParsedFormula> formulas,
         IReadOnlyDictionary<int, IReadOnlyList<string>> columnCodesByTable,
-        IReadOnlyList<string>? contextualArguments = null)
+        IReadOnlyList<string>? contextualArguments = null,
+        IReadOnlySet<string>? optionalArguments = null)
     {
         ArgumentNullException.ThrowIfNull(formulas);
         ArgumentNullException.ThrowIfNull(columnCodesByTable);
+
+        // D-OA: `Name?` у списку аргументів будь-якої формули (версії чи бібліотеки замикання) знімає вимогу
+        // колонки для ВСІЄЇ версії; `optionalArguments` — додаткова множина від викликача (правило категорії).
+        var optionalKeys = new HashSet<string>(OptionalArguments(formulas), StringComparer.OrdinalIgnoreCase);
+        if (optionalArguments is not null)
+        {
+            optionalKeys.UnionWith(optionalArguments);
+        }
 
         var contextualKeys = new HashSet<string>(
             (contextualArguments ?? DefaultContextualArguments)
@@ -376,7 +410,7 @@ public static class MethodologyPublishChecks
 
         var requiredArguments = used
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Where(name => !contextualKeys.Contains(name))
+            .Where(name => !contextualKeys.Contains(name) && !optionalKeys.Contains(name))
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToList();
 

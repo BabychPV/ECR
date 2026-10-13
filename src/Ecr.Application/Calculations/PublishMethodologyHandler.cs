@@ -786,9 +786,11 @@ public sealed class PublishMethodologyHandler(
 
         // R16-4: правило категорії - окремо й тим самим кодом, що й при збереженні (`PUT category-rule`):
         // ECR-CALC-0422 / categoryRuleUnknownArgument, а не 0438 формул.
+        // D-OA (Q-OA-3): правило категорії успадковує необов'язкові аргументи формул версії.
+        var optionalArguments = MethodologyPublishChecks.OptionalArguments(formulas);
         foreach (var rule in categoryRule)
         {
-            MethodologyCategoryRuleChecks.CheckArgumentColumns(rule, columnCodesByTable);
+            MethodologyCategoryRuleChecks.CheckArgumentColumns(rule, columnCodesByTable, optionalArguments);
         }
     }
 
@@ -1294,7 +1296,9 @@ public sealed class PublishMethodologyHandler(
                .Select(f => new ParsedFormula(
                    f.Code,
                    f.ResultType,
-                   formulaEngine.Parse(f.Expression, ExpressionDialect.Methodology).Expression?.Root))
+                   formulaEngine.Parse(f.Expression, ExpressionDialect.Methodology).Expression?.Root,
+                   // D-OA: лише для 0438 — маркер `Name?` бібліотечної формули звільняє аргумент викликача.
+                   Ecr.Expressions.Binding.ArgumentDeclarationChecker.Declared(f.ArgumentsCsv)))
            ?? [];
 
     /// <summary>
