@@ -17,7 +17,7 @@ namespace Ecr.Api.Tests;
 /// <c>err.ECR-CALC-0422.strictBackdated</c> і підставленими датами.
 /// </summary>
 /// <remarks>
-/// Мутація: прибрати виклик <c>RejectBackdatedStrict</c> з
+/// Мутація: прибрати виклик <c>RejectBackdatedStrictAsync</c> з
 /// <c>PublishMethodologyHandler</c> — відповідь лишається 422, але вже про порожній
 /// золотий набір (інший <c>messageKey</c>), тож перевірка ключа червоніє.
 /// </remarks>
@@ -32,7 +32,8 @@ public sealed class MethodologyStrictBackdatedApiTests(SqlServerFixture sql)
     [Trait("Requirement", "ФВ-9.9")]
     public async Task Публікація_Strict_із_сьогоднішньою_або_минулою_датою_дає_422_зі_strictBackdated(int offsetDays)
     {
-        var stand = await ArrangeAsync();
+        // ✎ C12-03: гард спрацьовує, лише коли попередня версія вже має результат.
+        var stand = await ArrangeAsync(withResult: true);
         using var app = new EcrApiFactory(sql);
         using var client = await SystemHealthControllerTests.SignedInAsync(
             sql, app, "Calculation.View", "Calculation.Publish");
@@ -52,7 +53,31 @@ public sealed class MethodologyStrictBackdatedApiTests(SqlServerFixture sql)
         Assert.Equal("err.ECR-CALC-0422.strictBackdated", problem.RootElement.GetProperty("messageKey").GetString());
     }
 
-    private async Task<Stand> ArrangeAsync()
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.9")]
+    public async Task Публікація_Strict_заднім_числом_без_результатів_попередньої_версії_не_дає_strictBackdated()
+    {
+        // ✎ C12-03: попередня Legacy-версія нічого не рахувала — заднє число нічого не змінює.
+        // Далі публікація впирається в порожній золотий набір (інша відмова), а не в гард.
+        var stand = await ArrangeAsync(withResult: false);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Calculation.View", "Calculation.Publish");
+
+        var from = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-30)
+            .ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+        var response = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/methodologies/{stand.MethodologyId}/versions/{stand.StrictVersionId}/publish", UriKind.Relative),
+            new { changeReason = "C12-03", effectiveFrom = from });
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("strictBackdated", body, StringComparison.Ordinal);
+    }
+
+    private async Task<Stand> ArrangeAsync(bool withResult)
     {
         await using var db = new EcrDbContext(
             new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
@@ -82,6 +107,24 @@ public sealed class MethodologyStrictBackdatedApiTests(SqlServerFixture sql)
         methodology.PublishVersion(
             legacy, publisher.Id, "ФВ-9.9 arrange", new DateOnly(2020, 1, 1), testsPassed: true, created);
         await db.SaveChangesAsync();
+
+        if (withResult)
+        {
+            // Попередня версія вже щось порахувала: один рядок calc.CalculationResult.
+            var document = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync();
+            var run = new CalculationRun(document.ProjectId, document.PeriodKey.Value, triggeredByUserId: null, created);
+            run.Complete("Succeeded", created.AddMinutes(1), "{}", errorMessage: null);
+            db.CalculationRuns.Add(run);
+            await db.SaveChangesAsync();
+
+            var unitId = await db.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO calc.CalculationResult
+                    (Id, CalculationRunId, MethodologyVersionId, PeriodKey, DocumentId, SourceRowKey, OutputCode, Value, UnitId)
+                VALUES (NEXT VALUE FOR calc.CalculationResultSeq, {run.Id}, {legacy.Id},
+                        {document.PeriodKey.Value}, {document.DocumentId}, N'row-1', N'E_CO2', CAST(1 AS decimal(34,16)), {unitId})
+                """);
+        }
 
         return new Stand(methodology.Id, strict.Id);
     }

@@ -264,9 +264,10 @@ public sealed class MethodologyPublishTests
     public async Task Перехід_у_Strict_заднім_числом_відхиляється_ECR_CALC_0422(int y, int m, int d)
     {
         // ⛔ Strict змінює числа, що вже подані: вмикається лише з нової дати, а
-        // «сьогодні» (включно) і минуле — це заднє число. Мутація: прибрати
-        // `RejectBackdatedStrict` — публікація проходить, тест червоний.
+        // «сьогодні» (включно) і минуле — це заднє число, ЯКЩО попередня версія вже має
+        // результат (C12-03). Мутація: прибрати `RejectBackdatedStrictAsync` — тест червоний.
         PublishPreviousLegacy();
+        StoreHasResults(true);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Handler().HandleAsync(VersionId, "Перехід", new DateOnly(y, m, d), CancellationToken.None));
@@ -274,6 +275,60 @@ public sealed class MethodologyPublishTests
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
         Assert.Equal("err.ECR-CALC-0422.strictBackdated", error.Details!["messageKey"]);
         Assert.False(_version.IsPublished);
+    }
+
+    private void StoreHasResults(bool has)
+        => _store.AnyCalculationResultsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns(has);
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.9")]
+    public async Task Перехід_у_Strict_заднім_числом_без_результатів_попередньої_версії_проходить()
+    {
+        // ✎ C12-03: попередня Legacy нічого не порахувала — змінювати нічого. Мутація: зробити
+        // гард безумовним (прибрати перевірку результатів) — тест червоний.
+        PublishPreviousLegacy();
+        StoreHasResults(false);
+
+        await Handler().HandleAsync(VersionId, "Перехід", new DateOnly(2026, 2, 1), CancellationToken.None);
+
+        Assert.True(_version.IsPublished);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.9")]
+    public async Task Гард_Strict_питає_результати_лише_версій_із_вікна_нової()
+    {
+        // Три версії: 1.0 (2025-01-01), 1.5 (2026-01-01), далі нова від 2026-02-01 і наступна
+        // 3.0 від 2026-04-01. Вікно нової — [2026-02-01, 2026-04-01): зачеплена лише 1.5;
+        // 1.0 закінчилась 2026-01-01 і залишається поза перевіркою.
+        var oldest = AddVersion(40, "0.9.0.0");
+        oldest.SetModes(NumericMode.Legacy, CalendarMode.Actual, TraceLevel.ErrorsOnly);
+        _methodology.PublishVersion(oldest, Reviewer, "Стара", new DateOnly(2025, 1, 1), testsPassed: true, Now);
+        PublishPreviousLegacyFrom(PreviousVersionId, new DateOnly(2026, 1, 1));
+        var later = AddVersion(60, "3.0.0.0");
+        later.SetModes(NumericMode.Strict, CalendarMode.Actual, TraceLevel.ErrorsOnly);
+        _methodology.PublishVersion(later, Reviewer, "Пізня", new DateOnly(2026, 4, 1), testsPassed: true, Now);
+
+        IReadOnlyCollection<int>? asked = null;
+        _store.AnyCalculationResultsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                asked = call.Arg<IReadOnlyCollection<int>>();
+                return false;
+            });
+
+        await Handler().HandleAsync(VersionId, "Перехід", new DateOnly(2026, 2, 1), CancellationToken.None);
+
+        Assert.NotNull(asked);
+        Assert.Equal([PreviousVersionId], asked);
+    }
+
+    private void PublishPreviousLegacyFrom(int id, DateOnly from)
+    {
+        var previous = AddVersion(id, "1.0.0.0");
+        previous.SetModes(NumericMode.Legacy, CalendarMode.Actual, TraceLevel.ErrorsOnly);
+        _methodology.PublishVersion(previous, Reviewer, "Базова", from, testsPassed: true, Now);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
