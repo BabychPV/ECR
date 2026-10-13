@@ -247,6 +247,7 @@ public sealed class SaveFormulaDefHandler(
     /// <param name="table">Таблиця цілі.</param>
     /// <param name="scope">Область формули.</param>
     /// <param name="resolvedId">Колонка при <c>Column</c>; рядок при <c>Row</c>.</param>
+    /// <param name="cellRowDefId">Лише для <c>Cell</c>: рядок цілі; якщо він лише для читання, формула на колонці ручного вводу дозволена (WW-02).</param>
     /// <remarks>
     /// ⛔ Дефект тихої втрати даних оператора. <c>ColumnDef.IsComputed</c> —
     /// це не опис формули, а ТИП колонки, і саме його читає
