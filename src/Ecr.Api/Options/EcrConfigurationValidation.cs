@@ -73,6 +73,9 @@ public static partial class EcrConfigurationValidation
         // AN-116: нуль задач Excel одночасно — не «без межі», а книги, яких не бере ніхто.
         (Infrastructure.Jobs.JobLaneMap.ExcelMaxConcurrencyKey, 1),
         (Infrastructure.Jobs.QuartzJobTypeLimiter.ThreadCountKey, 1),
+
+        // F1 (WW-02): нуль дочірніх задач розкладу перерахунку — не «без межі», а документи, яких не бере ніхто.
+        (Infrastructure.Jobs.QuartzJobTypeLimiter.RecalcFanOutMaxConcurrencyKey, 1),
         ("Audit:ExportMaxRows", 1),
         ("Localization:ImportMaxBytes", 1),
         ("Registries:ImportMaxBytes", 1),
