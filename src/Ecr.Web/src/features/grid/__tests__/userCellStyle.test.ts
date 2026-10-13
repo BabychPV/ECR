@@ -13,7 +13,7 @@ import {
   areaOf,
   canColourCell,
   chunkPatches,
-  darkHeaderFill,
+  isLightHeaderFill,
   headerStyleProps,
   scopeRange,
   withRowStyle,
@@ -235,18 +235,24 @@ describe('шар «рядок» і шапка', () => {
 
 describe('Dark: шапка колонок', () => {
   const style = (extra: Record<string, unknown>) => ({ isBold: false, isItalic: false, foregroundArgb: null, backgroundArgb: null, horizontalAlign: null, verticalAlign: null, wrapText: false, ...extra }) as never;
-  it('darkHeaderFill: світла заливка → темний токен, темна лишається', () => {
-    expect(darkHeaderFill('#ffc000')).toBe('#50431d');
-    expect(darkHeaderFill('#ffffff')).toBe('#505050');
-    expect(darkHeaderFill('#1f3864')).toBeNull();
-    expect(darkHeaderFill('red')).toBeNull();
+  const argb = (rgb: number) => (0xff000000 | rgb) | 0;
+
+  it.each([
+    ['#C6D9F1', true],
+    ['#CCFFCC', true],
+    ['#D9D9D9', true],
+    ['#FFFF00', true],
+    ['#FFC000', false],
+    ['#1F3864', false],
+  ])('isLightHeaderFill(%s) = %s', (hex, expected) => {
+    expect(isLightHeaderFill(hex.toLowerCase())).toBe(expected);
   });
 
-  it('headerStyleProps: змінні Dark є лише для світлої заливки', () => {
-    const light = headerStyleProps(style({ backgroundArgb: (0xff000000 | 0xffc000) | 0 }));
-    expect(light?.style['--ecr-header-fill-dark']).toBe('#50431d');
-    expect(light?.style['--ecr-header-fg-dark']).toBeDefined();
-    expect(headerStyleProps(style({ backgroundArgb: (0xff000000 | 0x1f3864) | 0 }))?.style['--ecr-header-fill-dark']).toBeUndefined();
+  it('headerStyleProps: клас fill-light лише для світлої заливки, колір тексту автора не підмінюється', () => {
+    expect(headerStyleProps(style({ backgroundArgb: argb(0xc6d9f1) }))?.class).toBe('ecr-header-styled ecr-header-fill-light');
+    expect(headerStyleProps(style({ backgroundArgb: argb(0xffc000) }))?.class).toBe('ecr-header-styled');
+    expect(headerStyleProps(style({ backgroundArgb: argb(0x1f3864) }))?.class).toBe('ecr-header-styled');
+    expect(Object.keys(headerStyleProps(style({ backgroundArgb: argb(0xc6d9f1) }))?.style ?? {})).not.toContain('--ecr-header-fg-dark');
   });
 });
 

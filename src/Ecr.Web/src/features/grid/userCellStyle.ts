@@ -1,7 +1,6 @@
 import type { CellFormatDto, CellStyleChange, CellStyleDto, TableSliceDto } from '@/api/types';
-import { DarkSurface, cellAppearanceOf } from './cellAppearance';
-import { AA, contrast } from '@/shared/theme/contrast';
-import { themeSurface } from '@/shared/theme/theme';
+import { cellAppearanceOf } from './cellAppearance';
+import { luminance } from '@/shared/theme/contrast';
 import { isHexColour } from '@/shared/theme/cellPalette';
 import { withCellFormat } from './conditionalAppearance';
 import { cellKey } from './permissions';
@@ -122,20 +121,12 @@ export function withRowStyle(column: CellStyleDto | null | undefined, row: CellS
   };
 }
 
-/** Частка кольору автора в темному токені шапки (решта — поверхня темної теми). */
-const DarkHeaderTint = 0.2;
+/** Відносна яскравість WCAG, від якої заливка шапки вважається «світлою» (рішення Аудиту: #C6D9F1 L≈0,68 — так, #FFC000 L≈0,58 — ні). */
+export const LightHeaderLuminance = 0.6;
 
-/**
- * Темний токен для СВІТЛОЇ заливки шапки: відтінок автора, змішаний з поверхнею темної теми.
- * `null` — заливка вже темна (лишається як є) або не `#rrggbb`.
- */
-export function darkHeaderFill(fill: string): string | null {
-  if (!isHexColour(fill) || contrast(fill, themeSurface.light.body) >= 3) return null;
-
-  const channel = (hex: string, i: number): number => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
-  const mixed = [0, 1, 2].map((i) => Math.round(channel(fill, i) * DarkHeaderTint + channel(DarkSurface, i) * (1 - DarkHeaderTint)));
-
-  return `#${mixed.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+/** Світла заливка шапки: у Dark вона мапиться на токен `--ecr-sunken` (макет D15-01). */
+export function isLightHeaderFill(fill: string): boolean {
+  return isHexColour(fill) && luminance(fill) >= LightHeaderLuminance;
 }
 
 /** Властивості комірки заголовка за `TableSliceDto.headerStyle` (клас + змінні, як у комірок). */
@@ -148,17 +139,14 @@ export function headerStyleProps(style: CellStyleDto | null | undefined): { clas
   for (const [name, value] of Object.entries(appearance)) {
     if (name.startsWith('--') && typeof value === 'string') vars[name] = value;
   }
-  const darkFill = typeof vars['--ecr-cell-fill'] === 'string' ? darkHeaderFill(vars['--ecr-cell-fill']) : null;
-
-  // ⚠ Лише шапка: заливки комірок користувача (`cellStyles`) у Dark не чіпаємо.
-  if (darkFill !== null) {
-    vars['--ecr-header-fill-dark'] = darkFill;
-    vars['--ecr-header-fg-dark'] = contrast(themeSurface.dark.text, darkFill) >= AA.text ? themeSurface.dark.text : themeSurface.light.body;
-  }
   if (appearance.fontWeight === 'bold') vars['--ecr-header-weight'] = 'bold';
   if (appearance.fontStyle === 'italic') vars['--ecr-header-style'] = 'italic';
 
-  return { class: 'ecr-header-styled', style: vars };
+  const fill = vars['--ecr-cell-fill'];
+  // ⚠ Лише шапка: заливки комірок користувача (`cellStyles`) у Dark не чіпаємо.
+  const light = typeof fill === 'string' && isLightHeaderFill(fill);
+
+  return { class: light ? 'ecr-header-styled ecr-header-fill-light' : 'ecr-header-styled', style: vars };
 }
 
 export function userStyleOf(slice: Pick<TableSliceDto, 'cellStyles'>, key: string): UserCellFormat | null {

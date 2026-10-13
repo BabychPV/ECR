@@ -167,8 +167,8 @@
   font-style: var(--ecr-header-style, inherit);
 }
 
-/* Dark: світла заливка шапки → темний токен (змішаний з поверхнею теми); темна лишається. */
-:root[data-mantine-color-scheme='dark'] revo-grid[theme] revogr-header .rgHeaderCell.ecr-header-styled {
-  background-color: var(--ecr-header-fill-dark, var(--ecr-cell-fill, inherit));
-  color: var(--ecr-header-fg-dark, var(--ecr-cell-fill-fg, inherit));
+/* Dark: світла заливка шапки → токен `--ecr-sunken` (макет D15-01); темна лишається. Колір тексту автора не затираємо. */
+:root[data-mantine-color-scheme='dark'] revo-grid[theme] revogr-header .rgHeaderCell.ecr-header-styled.ecr-header-fill-light {
+  background-color: var(--ecr-sunken);
+  color: var(--ecr-cell-fg-dark, var(--ecr-grid-text));
 }
