@@ -56,7 +56,7 @@ internal sealed class PublishedRangeExpander(IReadOnlyDictionary<int, FormulaDep
             if (edge.TableDefId != table.Id
                 || edge.RowKey is not { } key
                 || edge.FilterJson is not null
-                || edge.DependsOnKind is not (0 or 3))
+                || edge.DependsOnKind is not (0 or 3 or 5))
             {
                 return null;
             }

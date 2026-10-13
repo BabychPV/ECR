@@ -184,6 +184,10 @@ public sealed class RecalculationService(
     /// <param name="tableInstanceId">Екземпляр таблиці, у якому сталася правка.</param>
     /// <param name="dirty">Змінені комірки.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="changedColumns">
+    /// WW-03: куди скласти колонки (таблиця, колонка), змінені цим прогоном — насіння й похідні, —
+    /// щоб поставити перерахунок у періоди-читачі; <c>null</c> — не збирати.
+    /// </param>
     /// <returns>Скільки комірок перераховано.</returns>
     /// <remarks>
     /// ⛔ Метод був заглушкою — <c>return Task.CompletedTask</c>. Це і є
@@ -198,7 +202,9 @@ public sealed class RecalculationService(
     /// №11 (T12, `#26`) — <see cref="SliceEvaluationContext.Read"/> тепер уміє
     /// його обчислити, і виключення нижче зняте.
     /// </remarks>
-    public async Task<int> RecalculateAsync(long tableInstanceId, DirtySet dirty, CancellationToken ct)
+    public async Task<int> RecalculateAsync(
+        long tableInstanceId, DirtySet dirty, CancellationToken ct,
+        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null)
     {
         ArgumentNullException.ThrowIfNull(dirty);
 
@@ -213,7 +219,52 @@ public sealed class RecalculationService(
 
         var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
 
-        return await RunAsync(instance, dirty, ct).ConfigureAwait(false);
+        return await RunAsync(instance, dirty, ct, changedColumns: changedColumns).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// WW-03: перераховує формули періоду, які читають ІНШИЙ період документа
+    /// (<c>[Period:-N]</c>, <c>[Period:#k]</c>), після того як там змінилися наведені колонки.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період-читач, який перераховується.</param>
+    /// <param name="sources">Що змінилося: період-джерело (номер у році), таблиця, колонка.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <param name="changedColumns">Куди скласти колонки, змінені цим прогоном (для наступного fan-out).</param>
+    /// <returns>Скільки комірок перераховано.</returns>
+    /// <remarks>
+    /// ⛔ Це G2 із дизайну WW-03: залежність із ненульовим зсувом не входить у зворотний індекс
+    /// плану (правка періоду k не «брудна» для формул періоду m у ТІЄЇ Ж таблиці комірок). Міст —
+    /// цей вхід: цілі = формули з міжперіодним ребром на змінену колонку плюс їхні залежні в
+    /// межах періоду. Закриті періоди тут НЕ перевіряються — це робить постановник (fan-out) і
+    /// задача перед стартом; поданий/затверджений аркуш не пишеться так само, як у всіх входах
+    /// (<see cref="EnterSheetsAsync"/>).
+    /// </remarks>
+    public async Task<int> RecalculateFromOtherPeriodsAsync(
+        long documentId, PeriodKey periodKey, IReadOnlyCollection<CrossPeriodSource> sources, CancellationToken ct,
+        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null)
+    {
+        ArgumentNullException.ThrowIfNull(sources);
+
+        if (sources.Count == 0)
+        {
+            return 0;
+        }
+
+        var instances = await rowStore
+            .GetTableInstancesAsync(documentId, periodKey, ct)
+            .ConfigureAwait(false);
+
+        var written = 0;
+        foreach (var group in instances.GroupBy(i => i.TemplateVersionId).OrderBy(g => g.Key))
+        {
+            written += await RunAsync(
+                    group.First(), dirty: null, ct, sheetDefId: null, heldSheetDefId: null, instances,
+                    changedColumns, sources)
+                .ConfigureAwait(false);
+        }
+
+        return written;
     }
 
     /// <summary>
@@ -228,6 +279,7 @@ public sealed class RecalculationService(
     /// чия таблиця належить цьому аркушу) — читання лишається на весь документ,
     /// бо формула аркуша має право читати сусідній (Q-331, `RecalculationJob`).
     /// </param>
+    /// <param name="changedColumns">WW-03: куди скласти змінені колонки; <c>null</c> — не збирати.</param>
     /// <returns>Скільки комірок перераховано.</returns>
     /// <remarks>
     /// ⛔ Окремий метод, а НЕ прапорець на <see cref="RecalculateAsync"/>.
@@ -251,8 +303,9 @@ public sealed class RecalculationService(
     /// означало б не порахувати ніколи.
     /// </remarks>
     public Task<int> RecalculateAllAsync(
-        long documentId, PeriodKey periodKey, CancellationToken ct, int? sheetDefId = null)
-        => RecalculateDocumentAsync(documentId, periodKey, sheetDefId, heldSheetDefId: null, ct);
+        long documentId, PeriodKey periodKey, CancellationToken ct, int? sheetDefId = null,
+        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null)
+        => RecalculateDocumentAsync(documentId, periodKey, sheetDefId, heldSheetDefId: null, ct, changedColumns);
 
     /// <inheritdoc />
     /// <remarks>
@@ -269,7 +322,8 @@ public sealed class RecalculationService(
 
     /// <summary>Спільне тіло повного прогону документа (або одного аркуша).</summary>
     private async Task<int> RecalculateDocumentAsync(
-        long documentId, PeriodKey periodKey, int? sheetDefId, int? heldSheetDefId, CancellationToken ct)
+        long documentId, PeriodKey periodKey, int? sheetDefId, int? heldSheetDefId, CancellationToken ct,
+        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null)
     {
         var instances = await rowStore
             .GetTableInstancesAsync(documentId, periodKey, ct)
@@ -287,7 +341,8 @@ public sealed class RecalculationService(
         var written = 0;
         foreach (var group in instances.GroupBy(i => i.TemplateVersionId).OrderBy(g => g.Key))
         {
-            written += await RunAsync(group.First(), dirty: null, ct, sheetDefId, heldSheetDefId, instances)
+            written += await RunAsync(
+                    group.First(), dirty: null, ct, sheetDefId, heldSheetDefId, instances, changedColumns)
                 .ConfigureAwait(false);
         }
 
@@ -315,9 +370,16 @@ public sealed class RecalculationService(
     /// прогін читав той самий перелік тричі — тут, у викликачі й у
     /// <see cref="LoadPeriodAsync"/>); <c>null</c> — прочитати.
     /// </param>
+    /// <param name="changedColumns">WW-03: куди скласти змінені колонки; <c>null</c> — не збирати.</param>
+    /// <param name="crossPeriodSources">
+    /// WW-03: прогін по зміні ІНШОГО періоду — цілі лише формули з міжперіодним ребром на ці колонки
+    /// (<see cref="CrossPeriodReaders.Targets"/>); <c>null</c> — звичайний вхід.
+    /// </param>
     private async Task<int> RunAsync(
         TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null,
-        int? heldSheetDefId = null, IReadOnlyList<TableInstanceRef>? knownInstances = null)
+        int? heldSheetDefId = null, IReadOnlyList<TableInstanceRef>? knownInstances = null,
+        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null,
+        IReadOnlyCollection<CrossPeriodSource>? crossPeriodSources = null)
     {
         var periodKey = new PeriodKey(instance.PeriodKey);
 
@@ -354,6 +416,28 @@ public sealed class RecalculationService(
                 : new Dictionary<string, long>(StringComparer.Ordinal);
         }
 
+        // WW-03: насіння каскаду теж «змінене» для читачів інших періодів — навіть якщо жодна похідна
+        // комірка цього періоду не змінилась (читач у сусідньому періоді може читати саме правлену).
+        if (changedColumns is not null && dirty is not null)
+        {
+            var tableOfRow = new Dictionary<long, int>();
+            foreach (var (tableDefId, byKey) in rowIdsByTable)
+            {
+                foreach (var rowId in byKey.Values)
+                {
+                    tableOfRow[rowId] = tableDefId;
+                }
+            }
+
+            foreach (var seed in dirty.Seeds)
+            {
+                if (tableOfRow.TryGetValue(seed.TableRowId, out var seedTable))
+                {
+                    changedColumns.Add((seedTable, seed.ColumnDefId));
+                }
+            }
+        }
+
         // ⛔ Q-2xx (аудит фази 3, звітність): аудит записується за КЛЮЧЕМ
         // рядка (`RowKey`), а не лише за його ідентифікатором — той самий
         // намір, що вже закрив `PatchCellsHandler` (директива №09 `W8` п.4).
@@ -378,7 +462,16 @@ public sealed class RecalculationService(
 
         List<int> targets;
 
-        if (dirty is null)
+        if (crossPeriodSources is not null)
+        {
+            // ⛔ WW-03: прогін ПО ЗМІНІ ІНШОГО періоду. Цілі — формули цього періоду з міжперіодним
+            // ребром на змінену колонку, плюс усе, що в межах періоду читає їхній результат.
+            // Знімки (`IsSnapshot`) не чіпаються, як і в `Plan`; повний прогін документа тут не
+            // потрібен — це і є ціль coalescing/fan-out (шторм перерахунків).
+            targets = CrossPeriodReaders.Targets(
+                dependencies, crossPeriodSources, periodKey.Sequence, plan, formulas.Keys);
+        }
+        else if (dirty is null)
         {
             // ⛔ Повний прогін бере формули з ПЛАНУ, а не з насіння: формула,
             // додана в шаблон після введення даних, не має жодної брудної
@@ -482,7 +575,11 @@ public sealed class RecalculationService(
             ? null
             : new HashSet<long>(dirty.Seeds.Select(seed => seed.TableRowId));
 
-        var (values, stored) = await LoadValuesAsync(instance, scope, (instances, rowIdsBatch), ct).ConfigureAwait(false);
+        // WW-03: які інші періоди читають вирази цілей (відносні зсуви й `[Period:#k]`).
+        var periodReads = RecalculationReadScope.PeriodReferences(parsed.Values.Select(p => p.Root));
+
+        var (values, stored) = await LoadValuesAsync(
+            instance, scope, (instances, rowIdsBatch), periodReads, ct).ConfigureAwait(false);
 
         // ⛔ Знімок довідника одиниць передається В КОНТЕКСТ, а не читається
         // ним самим: `IEvaluationContext.Convert` — синхронний метод діалекту
@@ -696,7 +793,10 @@ public sealed class RecalculationService(
                         formulas.ToDictionary(pair => pair.Key, pair => pair.Value.Table.Id),
                         cascadeUnknown);
                     var (extraValues, extraStored) = await LoadValuesAsync(
-                        instance, extraScope, (instances, rowIdsBatch), ct).ConfigureAwait(false);
+                        instance, extraScope, (instances, rowIdsBatch),
+                        RecalculationReadScope.PeriodReferences(
+                            cascadeTargets.Where(parsed.ContainsKey).Select(id => parsed[id].Root)),
+                        ct).ConfigureAwait(false);
                     foreach (var (key, value) in extraValues)
                     {
                         values.TryAdd(key, value);
@@ -728,7 +828,8 @@ public sealed class RecalculationService(
         var periodState = await periods
             .FindPeriodStateAsync(instance.DocumentId, periodKey.Value, ct)
             .ConfigureAwait(false);
-        var isLateEdit = periodState == Domain.Enums.PeriodState.Grace;
+        // WW-03 (рішення людини 13.10, п. 6): похідна зміна від правки ІНШОГО місяця — не «пізня».
+        var isLateEdit = periodState == Domain.Enums.PeriodState.Grace && crossPeriodSources is null;
 
         // ⛔ Q-2xx (аудит фази 3, звітність). До цього рядка формули шаблону
         // писалися в `doc.CellValue` ЧЕРЕЗ `cellStore.ApplyAsync` без жодного
@@ -811,6 +912,23 @@ public sealed class RecalculationService(
             }
 
             applied = batch.Sum(item => item.Records.Count);
+
+            if (changedColumns is not null)
+            {
+                var tableOfInstance = instances.ToDictionary(t => t.TableInstanceId, t => t.TableDefId);
+                foreach (var (target, records) in batch)
+                {
+                    if (!tableOfInstance.TryGetValue(target, out var changedTable))
+                    {
+                        continue;
+                    }
+
+                    foreach (var record in records)
+                    {
+                        changedColumns.Add((changedTable, record.Address.ColumnDefId));
+                    }
+                }
+            }
 
             if (batch.Count > 0)
             {
@@ -1195,6 +1313,10 @@ public sealed class RecalculationService(
     /// </remarks>
     /// <param name="instance">Екземпляр таблиці — джерело документа й періоду.</param>
     /// <param name="scope">Замикання читання: що саме потрібно цьому прогону.</param>
+    /// <param name="periodReads">
+    /// WW-03: які ІНШІ періоди читають вирази цілей (відносні зсуви й абсолютні <c>[Period:#k]</c>);
+    /// <c>null</c> — невідомо, лишається старе читання попереднього періоду.
+    /// </param>
     /// <param name="current">
     /// Екземпляри й рядки ПОТОЧНОГО періоду, уже прочитані <see cref="RunAsync"/>
     /// (O2): читати їх тут удруге означало б два зайві звернення на кожен
@@ -1208,6 +1330,7 @@ public sealed class RecalculationService(
         RecalculationReadScope scope,
         (IReadOnlyList<TableInstanceRef> Instances,
             IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> RowIds) current,
+        (HashSet<int> Offsets, HashSet<int> Absolutes)? periodReads,
         CancellationToken ct)
     {
         var values = new Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue>();
@@ -1242,11 +1365,41 @@ public sealed class RecalculationService(
         // виконувався БЕЗУМОВНО з лютого й далі — тобто одинадцять місяців
         // на рік документ читався двічі заради значень, яких жодна формула не
         // запитувала.
-        if (scope.ReadsOtherPeriod && periodKey.Sequence > 1)
+        // ⛔ WW-03 (G1): раніше читався ЛИШЕ зсув −1; `[Period:-2]`, `[Period:+1]` мовчки давали
+        // `null`. Тепер читається рівно та множина періодів, яку названо в виразах цілей:
+        // відносні зсуви й абсолютні `[Period:#k]` (k − номер поточного = зсув). Вихід за межі
+        // року (номер < 1 чи > 99) — `null` за визначенням (02b §3.2), період без даних — теж.
+        var wanted = new SortedSet<int>();
+        if (periodReads is not null)
         {
-            var previous = new PeriodKey(periodKey.Value - 1);
+            foreach (var offset in periodReads.Value.Offsets)
+            {
+                wanted.Add(offset);
+            }
+
+            foreach (var absolute in periodReads.Value.Absolutes)
+            {
+                wanted.Add(absolute - periodKey.Sequence);
+            }
+        }
+
+        // Запасний шлях старої поведінки: граф каже «читає інший період», а вираз цілі не розібрано.
+        if (wanted.Count == 0 && scope.ReadsOtherPeriod)
+        {
+            wanted.Add(-1);
+        }
+
+        foreach (var offset in wanted)
+        {
+            var sequence = periodKey.Sequence + offset;
+            if (offset == 0 || sequence is < 1 or > 99)
+            {
+                continue;
+            }
+
             await LoadPeriodAsync(
-                    values, stored: null, instance.DocumentId, previous, offset: -1, scope.TableDefIds, ct)
+                    values, stored: null, instance.DocumentId, new PeriodKey(periodKey.Value + offset), offset,
+                    scope.TableDefIds, ct)
                 .ConfigureAwait(false);
         }
 

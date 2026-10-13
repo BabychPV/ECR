@@ -293,6 +293,12 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
         var resolved = _resolver.Resolve(
             reference, CurrentTableDefId, CurrentRowKey, diagnostics: null, CurrentColumnDefId);
 
+        // WW-03: `[Period:#k]` читається як зсув відносно періоду, який ЗАРАЗ рахується: завантажувач
+        // (`RecalculationService.LoadValuesAsync`) кладе значення сусідніх періодів під ключем зсуву.
+        var periodOffset = reference.AbsolutePeriod is { } absolute
+            ? absolute - Period.Sequence
+            : reference.PeriodOffset;
+
         // ⛔ Нерезолвлене в рантаймі посилання — це `#REF`, а не порожнє
         // значення. Порожнє мовчки перетворило б суму на суму без доданка, і
         // число було б «майже правильним» (`02b` §6.1).
@@ -318,7 +324,7 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
             return
             [
                 .. keys.Select(rowKey => Value(
-                    resolved.TableDefId, rowKey, resolved.ColumnDefId, reference.PeriodOffset)),
+                    resolved.TableDefId, rowKey, resolved.ColumnDefId, periodOffset)),
             ];
         }
 
@@ -330,10 +336,10 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
         if (reference.Row is RowSelector.Predicate predicate)
         {
             return EvaluatePredicate(
-                resolved.TableDefId, predicate.Condition, resolved.ColumnDefId, reference.PeriodOffset);
+                resolved.TableDefId, predicate.Condition, resolved.ColumnDefId, periodOffset);
         }
 
-        return [Value(resolved.TableDefId, resolved.RowKey, resolved.ColumnDefId, reference.PeriodOffset)];
+        return [Value(resolved.TableDefId, resolved.RowKey, resolved.ColumnDefId, periodOffset)];
     }
 
     /// <inheritdoc />
