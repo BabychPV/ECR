@@ -914,7 +914,8 @@ ROUNDDOWN 5 · TEXT 3 · CHAR 3 · CONCATENATE 2 · TEXTBEFORE 2 · TEXTAFTER 2
 
 ```
 REGFIELD(
-  REGFIND('LAND_HSE400_COMPOSITION', [Period].Year, [Period].Sequence, @StreamPrefix,
+  REGFIND('LAND_HSE400_COMPOSITION', [Period].Year, [Period].Sequence,
+          REGFIELD(REGFIND('LAND_HSE400_STREAM', @TypeOfFuel), 'PREFIX'),
           CURRENT_SUBSTANCE() + '_mass'),
   'VALUE')
 ```

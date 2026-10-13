@@ -123,6 +123,32 @@ public sealed class CurrentSubstanceSymbolTests
         Assert.Equal(2m, value.AsNumber());
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Фрагмент_CompositionMass_для_методології_Land_потік_за_текстом_а_показник_за_речовиною()
+    {
+        // Рекомендований текст аргументу CompositionMass у формулі методології Land (LP-10): потік - префікс
+        // за текстом палива зі словника, показник - `{код речовини}_mass`; обидва REGFIND вкладені.
+        const string fragment =
+            "REGFIELD(REGFIND('COMP', [Period].Year, [Period].Sequence, "
+            + "REGFIELD(REGFIND('STREAM', @TypeOfFuel), 'PREFIX'), CURRENT_SUBSTANCE() + '_mass'), 'VALUE')";
+        var snapshot = Composition();
+
+        decimal? For(string substance)
+        {
+            var inner = new TestEvaluationContext
+            {
+                CurrentSubstanceCode = substance,
+                Period = new PeriodContext(new DateOnly(2026, 2, 1), new DateOnly(2026, 2, 28), CalendarMode.Actual, 2026, 2),
+            };
+            inner.Arguments["TypeOfFuel"] = ExpressionValue.Text("Fuel gas (Internal)");
+            return Eval(fragment, snapshot.Attach(inner)).AsNumber();
+        }
+
+        Assert.Equal(0.9m, For("Methane"));
+        Assert.Equal(0.1m, For("Ethane"));
+    }
+
     private static ExpressionValue Eval(string expression, IEvaluationContext context)
         => Expr.Eval(expression, context, ExpressionDialect.Methodology);
 
@@ -130,6 +156,12 @@ public sealed class CurrentSubstanceSymbolTests
     {
         var snapshot = new InMemoryRegistrySnapshot()
             .AddRegistry("COMP", ["YEAR", "MONTH", "STREAM", "INDICATOR", "VALUE"], primaryKey: ["YEAR", "MONTH", "STREAM", "INDICATOR"]);
+
+        snapshot.AddRegistry("STREAM", ["TEXT", "PREFIX"], primaryKey: ["TEXT"]);
+        snapshot.AddEntry(
+            "STREAM", 900, "S1",
+            new() { ["TEXT"] = ExpressionValue.Text("Fuel gas (Internal)"), ["PREFIX"] = ExpressionValue.Text("FG") },
+            ordinal: 1);
 
         long id = 100;
         void Add(int year, int month, string stream, string indicator, decimal value)
