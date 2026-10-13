@@ -1,0 +1,408 @@
+using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using Ecr.TestKit;
+using Xunit;
+
+namespace Ecr.Architecture.Tests;
+
+/// <summary>
+/// Застосовність речовин на рядок (рішення людини 13.10 «2»): довідник <c>LAND_SUBSTANCE_APPLICABILITY</c> у моделі
+/// Land, його відповідність словникам старого C# (значення нижче скопійовано з <c>ECW_C11_*.cs</c> /
+/// <c>ECW_C12_*.cs</c>, не з прода), обгортка правила категорії й етап <c>SubstanceApplicability</c>.
+/// </summary>
+/// <remarks>
+/// Мутаційні докази (лише цей клас): у <c>substance_applicability.py</c> прибрати METHODOLOGY з ключа запису чи
+/// змінити <c>_provider_prefix</c> й перегенерувати модель — червоніють
+/// <see cref="Різні_методології_мають_різні_набори_для_одного_тексту_потоку"/> і
+/// <see cref="Словники_C_sharp_відтворені_побітно_у_довіднику"/>; у <c>Get-LandSubstanceApplicabilityInnerRule</c>
+/// ігнорувати рядкові літерали при пошуку парної дужки — червоніє
+/// <see cref="Обгортка_правила_відновлюється_до_вихідного_а_повторна_не_ставиться"/>.
+/// </remarks>
+public sealed class LandSubstanceApplicabilityTests
+{
+    private static readonly string Dir = Path.Combine(
+        SourceTree.Root, "docs", "delivery", "reference-data", "land-template");
+
+    private static readonly string[] KeyFields = ["METHODOLOGY", "SELECTOR_KIND", "SELECTOR_VALUE", "SUBSTANCE_CODE"];
+
+    private static readonly string[] AllowedKinds = ["NAE", "InvNum", "TypeFuel", "Stream"];
+
+    private static string LandFile(string name) => Path.Combine(SourceTree.Root, "tools", "land", name);
+
+    private static JsonDocument LoadModel()
+        => JsonDocument.Parse(File.ReadAllText(Path.Combine(Dir, "land-template.model.json")));
+
+    // Рядки довідника: (методологія, вид) -> значення селектора -> коди речовин.
+    private static Dictionary<string, Dictionary<string, List<string>>> Rows(JsonDocument model, out HashSet<string> markers)
+    {
+        var registry = model.RootElement.GetProperty("registries").EnumerateArray()
+            .Single(r => r.GetProperty("code").GetString() == "LAND_SUBSTANCE_APPLICABILITY");
+        var result = new Dictionary<string, Dictionary<string, List<string>>>();
+        markers = [];
+        foreach (var entry in registry.GetProperty("entries").EnumerateArray())
+        {
+            var f = entry.GetProperty("fields");
+            var methodology = f.GetProperty("METHODOLOGY").GetString()!;
+            var kind = f.GetProperty("SELECTOR_KIND").GetString()!;
+            var value = f.GetProperty("SELECTOR_VALUE").GetString()!;
+            var code = f.GetProperty("SUBSTANCE_CODE").GetString()!;
+            if (kind == "*")
+            {
+                Assert.Equal("*", value);
+                Assert.Equal("*", code);
+                markers.Add(methodology);
+                continue;
+            }
+
+            if (!result.TryGetValue(methodology, out var byValue))
+            {
+                result[methodology] = byValue = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            }
+
+            if (!byValue.TryGetValue(value, out var codes))
+            {
+                byValue[value] = codes = [];
+            }
+
+            codes.Add(code);
+        }
+
+        return result;
+    }
+
+    private static string[] Codes(Dictionary<string, Dictionary<string, List<string>>> rows, string methodology, string value)
+        => rows.TryGetValue(methodology, out var byValue) && byValue.TryGetValue(value, out var codes)
+            ? [.. codes.Order(StringComparer.Ordinal)]
+            : [];
+
+    private static string[] Sorted(params string[] codes) => [.. codes.Order(StringComparer.Ordinal)];
+
+    // Списки кодів старого C# (pollutionCodeByFuelType; C11_01 / C11_02 / C11_10 / C12_03 - по методологіях).
+    private static readonly string[] FgMakat = ["333", "415", "416", "1728"];
+
+    private static readonly string[] FgInternal =
+        ["333", "370", "415", "416", "602", "616", "621", "1702", "1707", "1715", "1720", "1728", "2754"];
+
+    private static readonly string[] FgHmb =
+        ["333", "334", "370", "415", "416", "602", "616", "621", "627", "1702", "1715", "1720", "1728", "2754"];
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Довідник_має_складений_ключ_з_чотирьох_частин_а_коди_записів_унікальні()
+    {
+        using var model = LoadModel();
+        var registry = model.RootElement.GetProperty("registries").EnumerateArray()
+            .Single(r => r.GetProperty("code").GetString() == "LAND_SUBSTANCE_APPLICABILITY");
+
+        var key = Assert.Single(registry.GetProperty("keys").EnumerateArray());
+        Assert.True(key.GetProperty("isPrimary").GetBoolean());
+        // Регістр значущий: старий C# порівнює рядки ординально; METHODOLOGY - частина ключа.
+        Assert.False(key.GetProperty("ignoreCase").GetBoolean());
+        Assert.Equal(
+            ["METHODOLOGY", "SELECTOR_KIND", "SELECTOR_VALUE", "SUBSTANCE_CODE"],
+            key.GetProperty("fields").EnumerateArray().Select(f => f.GetString()!).ToArray());
+        Assert.All(
+            registry.GetProperty("fieldSpecs").EnumerateArray(),
+            f => Assert.Equal("String", f.GetProperty("dataType").GetString()));
+
+        var codes = registry.GetProperty("entries").EnumerateArray().Select(e => e.GetProperty("code").GetString()!).ToList();
+        Assert.Equal(codes.Count, codes.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.All(codes, c => Assert.Matches("^[A-Z][A-Z0-9]{10}$", c));
+
+        // Складені ключі записів теж унікальні (інакше PUT довідника відхилив би дублікат).
+        var keys = registry.GetProperty("entries").EnumerateArray()
+            .Select(e => string.Join('|', KeyFields
+                .Select(n => e.GetProperty("fields").GetProperty(n).GetString())))
+            .ToList();
+        Assert.Equal(keys.Count, keys.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожна_методологія_з_описом_має_маркер_і_записи_а_вид_селектора_з_допустимих()
+    {
+        using var model = LoadModel();
+        var rows = Rows(model, out var markers);
+        var description = model.RootElement.GetProperty("substanceApplicability");
+        var described = description.GetProperty("methodologies").EnumerateObject().ToDictionary(p => p.Name, p => p.Value);
+
+        Assert.Equal(
+            ["ECW_C11_01", "ECW_C11_02", "ECW_C11_10", "ECW_C11_11_03", "ECW_C11_11_05", "ECW_C11_19",
+                "ECW_C12_01", "ECW_C12_03", "ECW_C12_04_01", "ECW_C12_04_02"],
+            described.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal(described.Keys.Order().ToArray(), markers.Order().ToArray());
+        Assert.Equal(described.Keys.Order().ToArray(), rows.Keys.Order().ToArray());
+
+        var kinds = described.ToDictionary(p => p.Key, p => p.Value.GetProperty("kind").GetString());
+        Assert.Equal("Stream", kinds["ECW_C11_01"]);
+        Assert.Equal("Stream", kinds["ECW_C12_01"]);
+        Assert.Equal("InvNum", kinds["ECW_C12_04_01"]);
+        Assert.Equal("TypeFuel", kinds["ECW_C12_03"]);
+        Assert.Equal("TypeFuel", kinds["ECW_C12_04_02"]);
+        Assert.Equal("NAE", kinds["ECW_C11_11_03"]);
+        Assert.All(kinds.Values, k => Assert.Contains(k, AllowedKinds));
+
+        // Значення селектора у правилі - те саме, що читає правило категорії в Row-фазі.
+        Assert.Equal("@Land_TypeFuelOrStream", described["ECW_C11_02"].GetProperty("valueExpression").GetString());
+        Assert.Equal("@Land_Streams", described["ECW_C12_01"].GetProperty("valueExpression").GetString());
+        Assert.Equal("@Land_InvNumEqp", described["ECW_C12_04_01"].GetProperty("valueExpression").GetString());
+        Assert.Equal("@Land_NAE", described["ECW_C11_19"].GetProperty("valueExpression").GetString());
+        Assert.Equal("REGFIELD(@Land_TypeFuel, 'NAME')", described["ECW_C12_03"].GetProperty("valueExpression").GetString());
+        Assert.Matches(
+            @"^if\(in\(@Land_TypeStoredMaterial,'Diesel - Дизель','Diesel - Дизельное топливо'\),'diesel','oil'\)$",
+            described["ECW_C12_04_02"].GetProperty("valueExpression").GetString()!);
+        Assert.Equal("SUBSTANCE_APPLICABLE", description.GetProperty("function").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Різні_методології_мають_різні_набори_для_одного_тексту_потоку()
+    {
+        using var model = LoadModel();
+        var rows = Rows(model, out _);
+
+        const string internalLpg = "LPG (Internal) - СУГ (Внутренний)";
+        const string diesel = "Diesel - Дизель";
+
+        // C11_01: LPG (Internal) без 1707; C11_02/C11_10: з 1707 (різні словники в старому коді).
+        Assert.Equal(Sorted("333", "370", "415", "416", "602", "616", "621", "1702", "1715", "1720", "1728", "2754"),
+            Codes(rows, "ECW_C11_01", internalLpg));
+        Assert.Equal(Sorted(FgInternal), Codes(rows, "ECW_C11_02", internalLpg));
+        Assert.Equal(Sorted(FgInternal), Codes(rows, "ECW_C11_10", internalLpg));
+
+        // Diesel - лише C11_01 (ланцюг streamfuel); у C11_02 / C11_10 / C12_03 префікса немає - речовин немає.
+        Assert.Equal(Sorted("333", "2754"), Codes(rows, "ECW_C11_01", diesel));
+        Assert.Empty(Codes(rows, "ECW_C11_02", diesel));
+        Assert.Empty(Codes(rows, "ECW_C11_10", diesel));
+        Assert.Empty(Codes(rows, "ECW_C12_03", diesel));
+
+        // C12_03: словник лише газу FG_*; LPG у ньому немає (KeyNotFound у старому коді) - речовин немає.
+        Assert.Empty(Codes(rows, "ECW_C12_03", "LPG (HMB) - СУГ (МТБ)"));
+        Assert.Equal(Sorted(FgHmb), Codes(rows, "ECW_C12_03", "Fuel gas (HMB) - Топливный газ (МТБ)"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Словники_C_sharp_відтворені_побітно_у_довіднику()
+    {
+        using var model = LoadModel();
+        var rows = Rows(model, out _);
+
+        // C11_01 / C11_02 / C11_10: pollutionCodeByFuelType + PrefixProvider.
+        Assert.Equal(Sorted(FgMakat), Codes(rows, "ECW_C11_01", "Makat Gas - Макатский газ"));
+        Assert.Equal(Sorted(FgHmb), Codes(rows, "ECW_C11_01", "LPG (HMB) - СУГ (МТБ)"));
+        Assert.Equal(Sorted(FgInternal), Codes(rows, "ECW_C11_01", "Fuel gas (Internal) - Топливный газ (Внутренний)"));
+        Assert.Equal(Sorted("333", "1052", "2754"), Codes(rows, "ECW_C11_02", "1-204 sludge - 1-204 шлам"));
+        Assert.Equal(Sorted("333", "2754"), Codes(rows, "ECW_C11_02", "spent caustic - отработанный каустик"));
+        Assert.Equal(Sorted("333", "334", "370", "415", "1715", "1728"), Codes(rows, "ECW_C11_10", "104"));
+        Assert.Empty(Codes(rows, "ECW_C11_01", "LPG - СУГ"));   // токен LPG без префікса: у словнику немає
+
+        // C12_01: typeOfStreamsInRDS + polCodeList; Asphaltene inhibitor у polCodeList закоментований.
+        Assert.Equal(Sorted(FgInternal), Codes(rows, "ECW_C12_01", "Fuel gas"));
+        Assert.Equal(Sorted(FgHmb), Codes(rows, "ECW_C12_01", "1-D1"));
+        Assert.Equal(Sorted(FgHmb), Codes(rows, "ECW_C12_01", "1D-1"));
+        Assert.Equal(Sorted("333", "2754"), Codes(rows, "ECW_C12_01", "Diesel/arctic diesel"));
+        Assert.Equal(Sorted("616", "621", "2750"), Codes(rows, "ECW_C12_01", "Wax inhibitor"));
+        Assert.Empty(Codes(rows, "ECW_C12_01", "Asphaltene inhibitor"));
+
+        // C12_04_01: Т/А кирилиця -> латиниця; кожна літера окремо.
+        var cyrillic = "B4-120-ТА-101";
+        Assert.Equal(Sorted("1001", "1051", "1052", "1860"), Codes(rows, "ECW_C12_04_01", "B4-120-TA-101"));
+        Assert.Equal(Sorted("1001", "1051", "1052", "1860"), Codes(rows, "ECW_C12_04_01", cyrillic));
+        Assert.Equal(Sorted("1001", "1051", "1052", "1860"), Codes(rows, "ECW_C12_04_01", "B4-120-TА-101"));
+        Assert.Equal(Sorted("2853"), Codes(rows, "ECW_C12_04_01", "B4-120-ТC-401"));
+        Assert.Equal(Sorted("1023", "1052"), Codes(rows, "ECW_C12_04_01", "B4-380-VА-305"));
+        Assert.Equal(32, rows["ECW_C12_04_01"].Count);
+        Assert.Empty(Codes(rows, "ECW_C12_04_01", "B4-120-TA-999"));
+
+        // C12_04_02: Contains("Diesel") -> diesel / oil.
+        Assert.Equal(Sorted("333", "2754"), Codes(rows, "ECW_C12_04_02", "diesel"));
+        Assert.Equal(Sorted("2735"), Codes(rows, "ECW_C12_04_02", "oil"));
+
+        // NAE-словники: канонічне написання й `NNNN (NNN)` з пробілом.
+        Assert.Equal(Sorted("333", "2754"), Codes(rows, "ECW_C11_11_03", "0800(001)"));
+        Assert.Equal(Sorted("333", "2754"), Codes(rows, "ECW_C11_11_03", "0800 (001)"));
+        Assert.Equal(Sorted("333", "1052", "2754"), Codes(rows, "ECW_C11_11_03", "0782(008)"));
+        Assert.Equal(Sorted("333", "1052", "2754"), Codes(rows, "ECW_C11_11_03", "0804"));
+        Assert.Equal(Sorted("330", "333"), Codes(rows, "ECW_C11_11_05", "0483"));
+        Assert.Equal(Sorted("333"), Codes(rows, "ECW_C11_11_05", "0480"));
+        Assert.Equal(Sorted("333"), Codes(rows, "ECW_C11_11_05", "6482 (001)"));
+        Assert.Equal(Sorted("330", "331", "333"), Codes(rows, "ECW_C11_19", "0485"));
+        Assert.Equal(Sorted("333"), Codes(rows, "ECW_C11_19", "0484"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Файл_словників_і_модель_узгоджені_а_значень_прода_у_файлі_немає()
+    {
+        var specPath = Path.Combine(Dir, "land-substance-applicability.json");
+        using var spec = JsonDocument.Parse(File.ReadAllText(specPath));
+        using var model = LoadModel();
+        _ = Rows(model, out var markers);
+
+        var names = spec.RootElement.GetProperty("methodologies").EnumerateObject().Select(p => p.Name).Order().ToArray();
+        Assert.Equal(markers.Order().ToArray(), names);
+
+        // Кожен код речовини у файлі - число 3-4 цифри (як у PollutionCodeService / AF_PermitConstant).
+        foreach (var m in spec.RootElement.GetProperty("methodologies").EnumerateObject())
+        {
+            foreach (var codes in m.Value.GetProperty("codes").EnumerateObject())
+            {
+                Assert.All(codes.Value.EnumerateArray(), c => Assert.Matches("^[1-9][0-9]{2,3}$", c.GetString()!));
+            }
+
+            Assert.StartsWith("docs/source/ECR Current Back end/", m.Value.GetProperty("source").GetString(), StringComparison.Ordinal);
+        }
+
+        // Скрипт генерації детермінований: той самий вхід -> побітно той самий файл (кінець рядка LF, без часу).
+        var text = File.ReadAllText(specPath);
+        Assert.DoesNotContain("\r", text, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"20\d\d-\d\d-\d\dT\d\d:", text);
+    }
+
+    private static (int Exit, string Output) RunPowerShell(string script, params string[] args)
+    {
+        var start = new ProcessStartInfo(DeployScriptHarness.FindPowerShell())
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+
+        var file = Path.Combine(Path.GetTempPath(), $"ecr-land-appl-{Guid.NewGuid():N}.ps1");
+        File.WriteAllText(file, script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        try
+        {
+            foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file }
+                         .Concat(args))
+            {
+                start.ArgumentList.Add(argument);
+            }
+
+            using var process = Process.Start(start) ?? throw new InvalidOperationException("PowerShell не запустився");
+            var stdout = process.StandardOutput.ReadToEnd();
+            var stderr = process.StandardError.ReadToEnd();
+            if (!process.WaitForExit(120_000))
+            {
+                process.Kill(entireProcessTree: true);
+                throw new TimeoutException("PowerShell не завершився за 120 с.");
+            }
+
+            return (process.ExitCode, stdout + stderr);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Обгортка_правила_відновлюється_до_вихідного_а_повторна_не_ставиться()
+    {
+        const string script = """
+            $ErrorActionPreference = 'Stop'
+            . $args[0]
+            $reg = 'LAND_SUBSTANCE_APPLICABILITY'
+            $inner = "if(in(@Land_InvNumEqp,'B4-120-TA-101'),'B4-120-TA-101','')"
+            $w = New-LandSubstanceApplicabilityRule -Inner $inner -Registry $reg -Methodology 'ECW_C12_04_01' -Kind 'InvNum' -ValueExpression '@Land_InvNumEqp'
+            'WRAPPED=' + $w
+            'ROUNDTRIP=' + ((Get-LandSubstanceApplicabilityInnerRule -Rule $w) -ceq $inner)
+            'IS_WRAPPED=' + (Test-LandSubstanceApplicabilityRule -Rule $w)
+            'IS_WRAPPED_BASE=' + (Test-LandSubstanceApplicabilityRule -Rule $inner)
+            'MATCH_DIRECT=' + (Test-LandRuleMatchesBaseRule -Existing $inner -Base $inner)
+            'MATCH_WRAPPED=' + (Test-LandRuleMatchesBaseRule -Existing $w -Base $inner)
+            'MATCH_OTHER=' + (Test-LandRuleMatchesBaseRule -Existing $w -Base "@Land_NAE")
+            # Значення селектора з дужками, комами й літералами: парна дужка не плутається з рядками.
+            $v = "if(in(@Land_TypeStoredMaterial,'Diesel - Дизель','a),b'),'diesel','oil')"
+            $w2 = New-LandSubstanceApplicabilityRule -Inner "@Land_NAE" -Registry $reg -Methodology 'ECW_C12_04_02' -Kind 'TypeFuel' -ValueExpression $v
+            'ROUNDTRIP2=' + ((Get-LandSubstanceApplicabilityInnerRule -Rule $w2) -ceq '@Land_NAE')
+            $w3 = New-LandSubstanceApplicabilityRule -Inner $inner -Registry $reg -Methodology 'ECW_C12_03' -Kind 'TypeFuel' -ValueExpression "REGFIELD(@Land_TypeFuel, 'NAME')"
+            'ROUNDTRIP3=' + ((Get-LandSubstanceApplicabilityInnerRule -Rule $w3) -ceq $inner)
+            'NOT_WRAPPER=' + ($null -eq (Get-LandSubstanceApplicabilityInnerRule -Rule $inner))
+            """;
+
+        var (exit, output) = RunPowerShell(script, LandFile("LandSubstanceApplicability.Lib.ps1"));
+
+        Assert.True(exit == 0, output);
+        Assert.Contains(
+            "WRAPPED=if(SUBSTANCE_APPLICABLE('LAND_SUBSTANCE_APPLICABILITY','ECW_C12_04_01','InvNum',@Land_InvNumEqp),"
+            + "if(in(@Land_InvNumEqp,'B4-120-TA-101'),'B4-120-TA-101',''),'')",
+            output,
+            StringComparison.Ordinal);
+        Assert.Contains("ROUNDTRIP=True", output, StringComparison.Ordinal);
+        Assert.Contains("IS_WRAPPED=True", output, StringComparison.Ordinal);
+        Assert.Contains("IS_WRAPPED_BASE=False", output, StringComparison.Ordinal);
+        Assert.Contains("MATCH_DIRECT=True", output, StringComparison.Ordinal);
+        Assert.Contains("MATCH_WRAPPED=True", output, StringComparison.Ordinal);
+        Assert.Contains("MATCH_OTHER=False", output, StringComparison.Ordinal);
+        Assert.Contains("ROUNDTRIP2=True", output, StringComparison.Ordinal);
+        Assert.Contains("ROUNDTRIP3=True", output, StringComparison.Ordinal);
+        Assert.Contains("NOT_WRAPPER=True", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void План_довідника_з_моделі_має_десять_маркерів_і_жодного_пропущеного()
+    {
+        const string script = """
+            $ErrorActionPreference = 'Stop'
+            . $args[0]
+            $mdl = Get-Content -LiteralPath $args[1] -Raw -Encoding UTF8 | ConvertFrom-Json
+            $reg = @($mdl.registries) | Where-Object { $_.code -eq 'LAND_SUBSTANCE_APPLICABILITY' } | Select-Object -First 1
+            $plan = ConvertTo-LandSubstanceApplicabilityPlan -Registry $reg
+            'ITEMS=' + @($plan.Items).Count
+            'MARKERS=' + $plan.Markers
+            'SKIPPED=' + $plan.Skipped
+            'ENTRIES=' + @($reg.entries).Count
+            $bad = [pscustomobject]@{ entries = @(
+                [pscustomobject]@{ code = 'A1'; fields = [pscustomobject]@{ METHODOLOGY = 'ECW_X'; SELECTOR_KIND = 'Bogus'; SELECTOR_VALUE = 'v'; SUBSTANCE_CODE = '333' } },
+                [pscustomobject]@{ code = 'A2'; fields = [pscustomobject]@{ METHODOLOGY = 'ECW_X'; SELECTOR_KIND = 'Stream'; SELECTOR_VALUE = 'v'; SUBSTANCE_CODE = '33' } },
+                [pscustomobject]@{ code = 'A3'; fields = [pscustomobject]@{ METHODOLOGY = 'ECW_X'; SELECTOR_KIND = 'Stream'; SELECTOR_VALUE = 'v'; SUBSTANCE_CODE = '333' } },
+                [pscustomobject]@{ code = 'A4'; fields = [pscustomobject]@{ METHODOLOGY = 'ECW_X'; SELECTOR_KIND = 'Stream'; SELECTOR_VALUE = 'v'; SUBSTANCE_CODE = '333' } }) }
+            $p2 = ConvertTo-LandSubstanceApplicabilityPlan -Registry $bad
+            'BAD_ITEMS=' + @($p2.Items).Count
+            'BAD_SKIPPED=' + $p2.Skipped
+            """;
+
+        var (exit, output) = RunPowerShell(
+            script, LandFile("LandSubstanceApplicability.Lib.ps1"), Path.Combine(Dir, "land-template.model.json"));
+
+        Assert.True(exit == 0, output);
+        Assert.Matches(@"ITEMS=\d+", output);
+        Assert.Contains("MARKERS=10", output, StringComparison.Ordinal);
+        Assert.Contains("SKIPPED=0", output, StringComparison.Ordinal);
+        var items = int.Parse(Regex.Match(output, @"ITEMS=(\d+)").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var entries = int.Parse(Regex.Match(output, @"ENTRIES=(\d+)").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal(entries, items);
+        Assert.Contains("BAD_ITEMS=1", output, StringComparison.Ordinal);      // залишається лише перший валідний
+        Assert.Contains("BAD_SKIPPED=3", output, StringComparison.Ordinal);    // невідомий вид, код з 2 цифр, дублікат
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Етап_SubstanceApplicability_лише_явний_і_LandParity_не_скидає_обгортку()
+    {
+        var build = File.ReadAllText(LandFile("Build-LandTemplate.ps1"));
+
+        Assert.Matches(@"ValidateSet\([^)]*'SubstanceApplicability'[^)]*\)", build);
+        Assert.Contains("if ($Stage -contains 'SubstanceApplicability') { Stage-SubstanceApplicability }", build, StringComparison.Ordinal);
+        Assert.DoesNotContain("Want 'SubstanceApplicability'", build, StringComparison.Ordinal);
+
+        // LandParity порівнює правило з файлом через Test-LandRuleMatchesBaseRule, а не `-ceq`.
+        var parity = build[build.IndexOf("function Stage-LandParity", StringComparison.Ordinal)..];
+        parity = parity[..parity.IndexOf("function Stage-CompositionMass", StringComparison.Ordinal)];
+        Assert.Contains("Test-LandRuleMatchesBaseRule", parity, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"Json\.expression\s+-ceq\s+\$expr", parity);
+
+        // Етап не публікує й не створює правил: лише PUT category-rule чернетки.
+        var stage = build[build.IndexOf("function Stage-SubstanceApplicability", StringComparison.Ordinal)..];
+        stage = stage[..stage.IndexOf("function Stage-Documents", StringComparison.Ordinal)];
+        Assert.Contains("-eq 'Published'", stage, StringComparison.Ordinal);
+        Assert.DoesNotContain("/publish", stage, StringComparison.Ordinal);
+    }
+}
