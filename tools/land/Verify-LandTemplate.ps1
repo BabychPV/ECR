@@ -24,6 +24,7 @@ $repo = (Resolve-Path (Join-Path $here '..\..')).Path
 $modelFile = $ModelPath
 if (-not $modelFile) { $modelFile = Join-Path $repo 'docs\delivery\reference-data\land-template\land-template.model.json' }
 . (Join-Path $here 'EcrApi.ps1')
+. (Join-Path $here 'LandTemplateDiff.Lib.ps1')
 Set-StrictMode -Off
 Connect-Ecr -BaseUrl $BaseUrl -User $User -Password $Password
 
@@ -85,6 +86,11 @@ foreach ($sh in @($mdl.sheets)) {
     $rows += [pscustomobject]@{ Sheet = $sh.excelName; XlTables = $xt; EcrTables = $et; ModelCols = $xc; EcrCols = $ec; ModelRows = $xr; EcrRows = $er }
     $tot.xt += $xt; $tot.et += $et; $tot.xc += $xc; $tot.ec += $ec; $tot.xr += $xr; $tot.er += $er
 }
+# D-YE-1: вираз формули колонки (Formula/Calculated) і readOnly зі структури версії проти моделі. Значень не друкуємо:
+# лише таблиця: колонки. Раніше розбіжний вираз клону (T5_08/T5_09 Winter) Verify не ловив.
+$fm = @(Get-LandFormulaMismatches $st $mdl)
+foreach ($m in $fm) { $bad += $m }
+Write-Host ("Формули колонок і readOnly перевірено: розбіжних таблиць {0}" -f $fm.Count)
 $rows | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
 Write-Host "Колонок результатів (Calculated) перевірено: $calcChecked"
 Write-Host ("Разом: таблиць {0}/{1}, колонок {2}/{3}, рядків Fixed {4}/{5}; місячних колонок у моделі {9}; версія {6} ({7}); полів шапки {8}" -f $tot.xt, $tot.et, $tot.xc, $tot.ec, $tot.xr, $tot.er, $ver.version, $ver.status, $hf.Count, $monthTotal)

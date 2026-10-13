@@ -31,7 +31,8 @@
                     CURRENT_SUBSTANCE()); потребує довідника LAND_HSE400_SUBSTANCE (Registries або
                     Import-LandHse400Substance.ps1) і версії вище за Legacy
 
-    ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє. Прод-БД старої системи тут
+    ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє.
+    Формули колонок наявної чернетки-клону порівнюються з моделлю й оновлюються (D-YE-1). Прод-БД старої системи тут
     НЕ читається (набір із прода — окремий локальний скрипт, не в репозиторії).
 
 .PARAMETER BaseUrl            Адреса API (за замовчуванням http://localhost:5094).
@@ -72,6 +73,7 @@ $afFile = $AfPackage
 if (-not $afFile) { $afFile = Join-Path $repo 'docs\delivery\reference-data\land-template\af-land-package.json' }
 . (Join-Path $here 'EcrApi.ps1')
 . (Join-Path $here 'Land-CfRules.ps1')
+. (Join-Path $here 'LandTemplateDiff.Lib.ps1')
 Set-StrictMode -Off
 
 # Безпека стенда: лише локальні API і SQL (база з іменем EcrLand*); мутації лише з явним
@@ -572,9 +574,12 @@ function Fill-StructureSql([int]$vid) {
             }
         }
         # --- формули колонок
+        # D-YE-1: наявні формули читаються з виразом і діалектом - вираз колонки клону порівнюється з моделлю й оновлюється
+        # (раніше відсутні лише вставлялися, і старий вираз клону лишався: T5_08/T5_09 Winter `< 4 OR > 9`).
         $haveF = @{}
-        foreach ($r in (Sql-Query $cn 'SELECT f.TableDefId, f.ColumnDefId FROM cfg.FormulaDef f JOIN cfg.TableDef t ON t.Id=f.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v AND f.IsDeleted=0' @{ v = $vid }).Rows) {
-            $haveF["$($r.TableDefId)/$($r.ColumnDefId)"] = $true
+        foreach ($r in (Sql-Query $cn 'SELECT f.Id, f.TableDefId, f.ColumnDefId, f.Dialect, f.Expression FROM cfg.FormulaDef f JOIN cfg.TableDef t ON t.Id=f.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v AND f.IsDeleted=0 AND f.Scope=0 AND f.ColumnDefId IS NOT NULL ORDER BY f.Id' @{ v = $vid }).Rows) {
+            $fk = "$($r.TableDefId)/$($r.ColumnDefId)"
+            if (-not $haveF.ContainsKey($fk)) { $haveF[$fk] = @{ Id = [int]$r.Id; Dialect = [int]$r.Dialect; Expression = [string]$r.Expression } }
         }
         $df = New-Object System.Data.DataTable
         foreach ($n in 'TableDefId:int', 'Scope:byte', 'ColumnDefId:int', 'Dialect:byte', 'Expression:string', 'EvaluationOrder:int', 'IsCrossSheet:bool', 'IsSnapshot:bool', 'IsDeleted:bool') {
@@ -583,21 +588,61 @@ function Fill-StructureSql([int]$vid) {
             [void]$df.Columns.Add($p[0], $t)
         }
         $nf = 0
+        $wantF = @(); $fCodes = @{}
         foreach ($sh in @($Mdl.sheets)) {
             foreach ($tb in @($sh.tables)) {
                 $tid = $tableIds["$($sh.code)/$($tb.code)"]
                 foreach ($c in @($tb.columns | Where-Object { $_.expression })) {
                     $cid = $colId["$tid/$($c.code)"]
-                    if ($haveF.ContainsKey("$tid/$cid")) { continue }
-                    $row = $df.NewRow()
-                    $row['TableDefId'] = $tid; $row['Scope'] = 0; $row['ColumnDefId'] = $cid; $row['Dialect'] = 0; $row['Expression'] = [string]$c.expression
-                    $row['EvaluationOrder'] = 0; $row['IsCrossSheet'] = [bool]([string]$c.expression -match '\]\.\[.*\]\.\[');  $row['IsSnapshot'] = $false; $row['IsDeleted'] = $false
-                    $df.Rows.Add($row); $nf++
+                    $fk = "$tid/$cid"
+                    $wantF += [pscustomobject]@{ Key = $fk; Expression = [string]$c.expression; Table = [int]$tid; Column = [int]$cid }
+                    $fCodes[$fk] = "$($sh.code)/$($tb.code).$($c.code)"
                 }
             }
         }
+        $fPlan = Get-LandFormulaPlan $wantF $haveF
+        foreach ($w in @($fPlan.Insert)) {
+            $row = $df.NewRow()
+            $row['TableDefId'] = $w.Table; $row['Scope'] = 0; $row['ColumnDefId'] = $w.Column; $row['Dialect'] = 0; $row['Expression'] = [string]$w.Expression
+            $row['EvaluationOrder'] = 0; $row['IsCrossSheet'] = [bool]([string]$w.Expression -match '\]\.\[.*\]\.\[');  $row['IsSnapshot'] = $false; $row['IsDeleted'] = $false
+            $df.Rows.Add($row); $nf++
+        }
         Bulk-Insert $cn 'cfg.FormulaDef' $df
         Log "  формул колонок вставлено: $nf"
+        # Оновлення виразу/діалекту наявних формул чернетки порціями по 200 (тригери cfg.TR_*_Immutable порівнюють
+        # inserted x deleted без індексів: масове UPDATE одним запитом - O(n^2), урок land-build-clone-fixes).
+        $nfu = 0
+        $fUpd = @($fPlan.Update)
+        if ($fUpd.Count -gt 0) {
+            $du = New-Object System.Data.DataTable
+            [void]$du.Columns.Add('Id', [int]); [void]$du.Columns.Add('Expression', [string]); [void]$du.Columns.Add('IsCrossSheet', [bool])
+            foreach ($u in $fUpd) { [void]$du.Rows.Add([int]$u.Id, [string]$u.Expression, [bool]([string]$u.Expression -match '\]\.\[.*\]\.\[')) }
+            $null = Sql-Exec $cn 'CREATE TABLE #FU (N int IDENTITY(1,1) PRIMARY KEY, Id int, Expression nvarchar(max), IsCrossSheet bit)'
+            Assert-EcrMutationAllowed 'SQL-запис (SqlBulkCopy у #FU)'
+            $bc = New-Object System.Data.SqlClient.SqlBulkCopy($cn); $bc.DestinationTableName = '#FU'
+            foreach ($n in 'Id', 'Expression', 'IsCrossSheet') { [void]$bc.ColumnMappings.Add($n, $n) }
+            $bc.WriteToServer($du); $bc.Close()
+            for ($lo = 0; $lo -lt $du.Rows.Count; $lo += 200) {
+                $nfu += Sql-Exec $cn 'UPDATE f SET Expression = p.Expression, Dialect = 0, IsCrossSheet = p.IsCrossSheet FROM cfg.FormulaDef f JOIN #FU p ON p.Id = f.Id WHERE p.N > @lo AND p.N <= @hi' @{ lo = $lo; hi = ($lo + 200) }
+            }
+            $null = Sql-Exec $cn 'DROP TABLE #FU'
+            $names = @($fUpd | ForEach-Object { $fCodes[[string]$_.Key] } | Select-Object -First 30)
+            Log ("  формул колонок оновлено (вираз/діалект відрізнявся від моделі): {0}; колонки: {1}{2}" -f $nfu, ($names -join ', '), $(if ($fUpd.Count -gt 30) { ' ...' } else { '' }))
+        }
+        else { Log '  формул колонок оновлено: 0' }
+        # readOnly: колонка моделі Formula/Calculated (або readOnly) у клоні мусить бути лише для читання.
+        $nro = 0
+        foreach ($sh in @($Mdl.sheets)) {
+            foreach ($tb in @($sh.tables)) {
+                $tid = $tableIds["$($sh.code)/$($tb.code)"]
+                foreach ($c in @($tb.columns | Where-Object { $_.readOnly -or [string]$_.dataType -in 'Formula', 'Calculated' })) {
+                    $cid = $colId["$tid/$($c.code)"]
+                    if (-not $cid) { continue }
+                    $nro += Sql-Exec $cn 'UPDATE cfg.ColumnDef SET IsReadOnly=1 WHERE Id=@i AND IsReadOnly=0' @{ i = [int]$cid }
+                }
+            }
+        }
+        if ($nro -gt 0) { Log "  колонок позначено лише для читання (за моделлю): $nro" }
         # --- правила валідації
         $haveV = @{}
         foreach ($r in (Sql-Query $cn 'SELECT v.TableDefId, v.Code FROM cfg.ValidationRule v JOIN cfg.TableDef t ON t.Id=v.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v' @{ v = $vid }).Rows) {
