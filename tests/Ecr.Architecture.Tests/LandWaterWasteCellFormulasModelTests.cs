@@ -37,7 +37,7 @@ public sealed partial class LandWaterWasteCellFormulasModelTests
     private static readonly string[] ReportSheets =
         ["S07_WATER_REPORT", "S07A_WATER_MEASUREMENTS", "S07B_WATER_MEASUREMENTS", "S08_WASTE_REPORT"];
 
-    [GeneratedRegex(@"\[(?<s>[^\]]+)\]\.\[(?<t>[^\]]+)\]\.\[(?<r>[^\]]+)\]\.\[(?<c>[^\]]+)\]")]
+    [GeneratedRegex(@"(?:\[Period:#\d+\]\.)?\[(?<s>[^\]]+)\]\.\[(?<t>[^\]]+)\]\.\[(?<r>[^\]]+)\]\.\[(?<c>[^\]]+)\]")]
     private static partial Regex Reference();
 
     [Fact]
