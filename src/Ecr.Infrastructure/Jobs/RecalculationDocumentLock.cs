@@ -41,6 +41,51 @@ public static class RecalculationDocumentLock
     /// <summary>Через скільки відкладена задача пробує знову.</summary>
     public static readonly TimeSpan DeferDelay = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// Базова пауза перед повтором після вичерпаного очікування блокування даних (<c>ECR-DOC-4091</c>,
+    /// <c>lockTimeout</c>); F1 (WW-02).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Довша за <see cref="DeferDelay"/>: запис комірок уже чекав <c>LockWaitGuard.LockTimeoutMs</c> (15 с), і
+    /// повтор за 5 с вдарив би в ту саму зайняту таблицю. Стеля сумарного очікування — <c>JobDeferral.MaxDeferral</c>
+    /// (30 хв), тож ~60 повторів замість трьох ретраїв 30/60/120 с.
+    /// </remarks>
+    public static readonly TimeSpan LockWaitDeferBase = TimeSpan.FromSeconds(20);
+
+    /// <summary>Верхня межа «розсіювання» повтору між документами, с (<see cref="LockWaitDeferDelay"/>).</summary>
+    private const int LockWaitJitterSeconds = 10;
+
+    /// <summary>Пауза перед повтором задачі документа, що не дочекалася блокування.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <returns><see cref="LockWaitDeferBase"/> + детерміноване розсіювання 0–9 с за номером документа.</returns>
+    /// <remarks>
+    /// ⚠ Розсіювання за документом, а не <c>Random</c>: десятки задач, що впали в один момент, інакше
+    /// вернулися б до тієї самої таблиці в одну секунду; детермінізм — щоб тест міг його перевірити.
+    /// </remarks>
+    public static TimeSpan LockWaitDeferDelay(long documentId)
+        => LockWaitDeferBase + TimeSpan.FromSeconds(Math.Abs(documentId % LockWaitJitterSeconds));
+
+    /// <summary>
+    /// Чи виняток — вичерпане очікування блокування даних запису (<c>ECR-DOC-4091</c> з ключем
+    /// <c>lockTimeout</c> або сирий <c>SqlException 1222</c> у ланцюжку).
+    /// </summary>
+    /// <param name="ex">Виняток задачі.</param>
+    /// <returns><c>true</c> — зайнятість, що минає.</returns>
+    /// <remarks>
+    /// ⚠ За кодом і ключем каталогу, не за текстом: той самий <c>ECR-DOC-4091</c> несе й «аркуш подається»
+    /// та «структуру змінено» — їх розбирають окремо (<c>FormulaRecalculationJob.IsSheetBeingSubmitted</c>).
+    /// </remarks>
+    public static bool IsLockWaitTimeout(Exception ex)
+    {
+        ArgumentNullException.ThrowIfNull(ex);
+
+        var tagged = ex is Ecr.Application.Errors.ConcurrencyConflictException busy
+                     && busy.ErrorCode == Ecr.Domain.Errors.ErrorCodes.SheetBusy
+                     && busy.Details?.GetValueOrDefault("messageKey") is LockWaitGuard.MessageKey;
+
+        return tagged || LockWaitGuard.FindLockWaitTimeout(ex) is not null;
+    }
+
     /// <summary>Бере ексклюзивний лок документа, чекаючи не довше за <paramref name="timeout"/>.</summary>
     /// <param name="db">Контекст задачі — джерело рядка з'єднання.</param>
     /// <param name="documentId">Документ.</param>

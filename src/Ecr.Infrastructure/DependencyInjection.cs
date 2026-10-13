@@ -285,7 +285,10 @@ public static class DependencyInjection
         });
 
         // AN-116: межа одночасних задач Excel у режимі Quartz (той самий ключ, що й місця лейна excel у Database).
-        services.AddSingleton(new Jobs.QuartzJobTypeLimiter(Jobs.JobLaneMap.ReadExcelMaxConcurrency(configuration)));
+        // F1 (WW-02): діти розкладу перерахунку проєкту — не більше Jobs:Recalculation:FanOutMaxConcurrency (типово 4).
+        services.AddSingleton(new Jobs.QuartzJobTypeLimiter(
+            Jobs.JobLaneMap.ReadExcelMaxConcurrency(configuration),
+            recalcFanOutMaxConcurrency: Jobs.QuartzJobTypeLimiter.ReadRecalcFanOutMaxConcurrency(configuration)));
 
         services.AddQuartzHostedService(options =>
         {
