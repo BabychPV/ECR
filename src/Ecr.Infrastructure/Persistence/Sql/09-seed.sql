@@ -8048,6 +8048,15 @@ USING (VALUES
     -- COLL:ww03-period-absolute ── WW-03: [Period:#k] — абсолютний період року (номер поза 1..99); ru/kz — порцією COLL:ww03-period-absolute нижче ──
     ,(N'expr.periodAbsoluteRange', N'en', N'An absolute period "[Period:#k]" must be a number from 1 to 99.', 1)
     -- COLL:ww03-period-absolute ── кінець секції ──
+    -- COLL:acc-ow-dialog ── CL-8: діалог «Перезаписати значення» при переносі версії; ru/kz — порцією COLL:acc-ow-dialog
+    ,(N'documents.migrateGuardedOverwriteTitle', N'en', N'Overwrite {count} derived values?', 1)
+    ,(N'documents.migrateGuardedOverwriteBody', N'en', N'The target version puts a new cell formula on cells that already hold entered values. After the move the recalculation replaces these values with the formula result. Cells (entered values):', 1)
+    ,(N'documents.migrateGuardedOverwriteItem', N'en', N'{sheet} / {table} / {row} / {column}: {values}', 1)
+    ,(N'documents.migrateGuardedOverwriteMore', N'en', N'More cells not shown.', 1)
+    ,(N'documents.migrateGuardedOverwriteConfirm', N'en', N'Yes, overwrite', 1)
+    ,(N'documents.migrateGuardedOverwriteCancel', N'en', N'No', 1)
+    ,(N'documents.migrateGuardedOverwriteAccepted', N'en', N'Overwrite confirmed: {count} derived values will be replaced by formulas.', 1)
+    -- COLL:acc-ow-dialog ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -20231,6 +20240,28 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ww03-period-absolute ── кінець секції ──
+-- COLL:acc-ow-dialog ── ru/kz: CL-8; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'documents.migrateGuardedOverwriteTitle', N'ru', N'Перезаписать {count} производных значений?'),
+    (N'documents.migrateGuardedOverwriteBody', N'ru', N'Целевая версия кладёт новую формулу ячейки на ячейки с уже введёнными значениями. После переноса пересчёт заменит эти значения результатом формулы. Ячейки (введённых значений):'),
+    (N'documents.migrateGuardedOverwriteItem', N'ru', N'{sheet} / {table} / {row} / {column}: {values}'),
+    (N'documents.migrateGuardedOverwriteMore', N'ru', N'Ещё ячейки не показаны.'),
+    (N'documents.migrateGuardedOverwriteConfirm', N'ru', N'Да, перезаписать'),
+    (N'documents.migrateGuardedOverwriteCancel', N'ru', N'Нет'),
+    (N'documents.migrateGuardedOverwriteAccepted', N'ru', N'Перезапись подтверждена: {count} производных значений заменят формулы.'),
+    (N'documents.migrateGuardedOverwriteTitle', N'kz', N'{count} туынды мәнді қайта жазу керек пе?'),
+    (N'documents.migrateGuardedOverwriteBody', N'kz', N'Мақсатты нұсқа енгізілген мәндері бар ұяшықтарға жаңа ұяшық формуласын қояды. Көшіруден кейін қайта есептеу бұл мәндерді формула нәтижесімен ауыстырады. Ұяшықтар (енгізілген мәндер):'),
+    (N'documents.migrateGuardedOverwriteItem', N'kz', N'{sheet} / {table} / {row} / {column}: {values}'),
+    (N'documents.migrateGuardedOverwriteMore', N'kz', N'Тағы ұяшықтар көрсетілмеген.'),
+    (N'documents.migrateGuardedOverwriteConfirm', N'kz', N'Иә, қайта жазу'),
+    (N'documents.migrateGuardedOverwriteCancel', N'kz', N'Жоқ'),
+    (N'documents.migrateGuardedOverwriteAccepted', N'kz', N'Қайта жазу расталды: {count} туынды мәнді формулалар ауыстырады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:acc-ow-dialog ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
