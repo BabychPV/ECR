@@ -1,5 +1,6 @@
 import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { cellKey } from './permissions';
+import { formatLocale } from '@/shared/format';
 import { decimalTextOf } from './rounding';
 
 /**
@@ -166,35 +167,113 @@ export function columnTotals(
   overlay: TotalsOverlay = {},
 ): Map<string, ColumnTotal> {
   const totals = new Map<string, ColumnTotal>();
+  const touched = touchedColumns(overlay);
+  const base = baseTotalsOf(slice);
 
   for (const column of slice.columns) {
     if (!isTotalableColumn(column)) continue;
 
-    const addends: string[] = [];
+    // ⚠ `P2`: колонка без жодної незбереженої правки/підтвердження дає ту саму суму,
+    // що й сирий зріз, тож рахується ОДИН раз на зріз (`baseTotalsOf`), а не на кожну
+    // зміну `pending`/`overrides` (232 колонки × 500 рядків = ~116 тис. розборів
+    // десяткового до першої видимої комірки).
+    let total: ColumnTotal | null;
 
-    for (let rowIndex = 0; rowIndex < slice.rows.length; rowIndex++) {
-      const addend = addendOf(valueAt(slice, rowIndex, column, overlay));
-      if (addend !== null) addends.push(addend);
+    if (touched.has(column.code)) {
+      total = totalOfColumn(slice, column, overlay);
+    } else {
+      const known = base.get(column.code);
+
+      if (known !== undefined) {
+        total = known;
+      } else {
+        total = totalOfColumn(slice, column, NoOverlay);
+        base.set(column.code, total);
+      }
     }
 
-    if (addends.length === 0) continue;
-
-    // ⚠ Масштаб суми — найдовший дріб серед доданків, а не `column.scale`:
-    // колонка може не оголошувати масштабу зовсім, і тоді зведення до нуля
-    // знаків мовчки відкинуло б дробові частини ще до додавання.
-    const scale = addends.reduce((longest, addend) => {
-      const dot = addend.indexOf('.');
-
-      return dot < 0 ? longest : Math.max(longest, addend.length - dot - 1);
-    }, 0);
-
-    let sum = 0n;
-    for (const addend of addends) sum += scaledOf(addend, scale);
-
-    totals.set(column.code, { sum: unscale(sum, scale), count: addends.length });
+    if (total !== null) totals.set(column.code, total);
   }
 
   return totals;
+}
+
+const NoOverlay: TotalsOverlay = {};
+
+/** Підсумки колонок сирого зрізу (без шарів); зріз незмінний, тож ключ — сам об'єкт. */
+const baseTotals = new WeakMap<TableSliceDto, { locale: string; totals: Map<string, ColumnTotal | null> }>();
+
+/**
+ * ⚠ Ключ ще й локаль: неоднозначний запис (`1.234`) читається за роздільниками
+ * локалі інтерфейсу (`readNumber`), тож зміна мови робить кеш зрізу недійсним.
+ */
+function baseTotalsOf(slice: TableSliceDto): Map<string, ColumnTotal | null> {
+  const locale = formatLocale();
+  const known = baseTotals.get(slice);
+
+  if (known?.locale === locale) return known.totals;
+
+  const fresh = { locale, totals: new Map<string, ColumnTotal | null>() };
+  baseTotals.set(slice, fresh);
+
+  return fresh.totals;
+}
+
+/**
+ * Колонки, чиї значення шари перекривають.
+ *
+ * ⚠ Код колонки з ключа `overrides` береться з ОБОХ боків (перша й остання
+ * двокрапка): `rowKey` двокрапок не має, але помилитися «в бік перерахунку» дешево, а в
+ * бік застарілої суми — ні.
+ */
+function touchedColumns(overlay: TotalsOverlay): ReadonlySet<string> {
+  const touched = new Set<string>();
+
+  if (overlay.pending !== undefined) {
+    for (const [key, edit] of overlay.pending) {
+      touched.add(edit.columnCode);
+      addKeyColumns(touched, key);
+    }
+  }
+
+  if (overlay.overrides !== undefined) {
+    for (const key of overlay.overrides.keys()) addKeyColumns(touched, key);
+  }
+
+  return touched;
+}
+
+function addKeyColumns(touched: Set<string>, key: string): void {
+  const first = key.indexOf(':');
+  if (first < 0) return;
+
+  touched.add(key.slice(first + 1));
+  touched.add(key.slice(key.lastIndexOf(':') + 1));
+}
+
+function totalOfColumn(slice: TableSliceDto, column: ColumnDto, overlay: TotalsOverlay): ColumnTotal | null {
+  const addends: string[] = [];
+
+  for (let rowIndex = 0; rowIndex < slice.rows.length; rowIndex++) {
+    const addend = addendOf(valueAt(slice, rowIndex, column, overlay));
+    if (addend !== null) addends.push(addend);
+  }
+
+  if (addends.length === 0) return null;
+
+  // ⚠ Масштаб суми — найдовший дріб серед доданків, а не `column.scale`:
+  // колонка може не оголошувати масштабу зовсім, і тоді зведення до нуля
+  // знаків мовчки відкинуло б дробові частини ще до додавання.
+  const scale = addends.reduce((longest, addend) => {
+    const dot = addend.indexOf('.');
+
+    return dot < 0 ? longest : Math.max(longest, addend.length - dot - 1);
+  }, 0);
+
+  let sum = 0n;
+  for (const addend of addends) sum += scaledOf(addend, scale);
+
+  return { sum: unscale(sum, scale), count: addends.length };
 }
 
 /**

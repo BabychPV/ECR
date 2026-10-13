@@ -1,5 +1,5 @@
 import type { ColumnDto } from '@/api/types';
-import { formatDate, normalizeDecimal } from '@/shared/format';
+import { formatDate, formatLocale, normalizeDecimal } from '@/shared/format';
 // ⚠ Глибокий імпорт рівно на одну функцію, і це названо, а не сховано:
 // `formatDecimal` з'явився в `shared/format/number.ts` цією ж роботою, а
 // дописати його в бар'єл (`shared/format/index.ts`) не можна — файл поза
@@ -256,6 +256,42 @@ export function cellDisplay(value: unknown, column: ColumnDto): string {
 
   return formatDecimal(value, undefined, undefined, scale ?? 0) ?? String(value);
 }
+
+/**
+ * `cellDisplay` з пам'яттю на одну колонку (`P2`).
+ *
+ * Один і той самий рядок форматується двічі на кожну намальовану комірку
+ * (`cellTemplate` і підказка `title` в `cellProperties`) і знову на кожній
+ * прокрутці, що повертає комірку у видиму зону. Ключ — сире значення; пам'ять
+ * скидається зі зміною локалі (формат залежить від неї) і не росте безмежно.
+ *
+ * ⚠ Лише для рядків: значення іншого типу (число, дата-об'єкт) рахується напряму.
+ */
+export function cellDisplayMemo(column: ColumnDto): (value: unknown) => string {
+  let locale = formatLocale();
+  let memo = new Map<string, string>();
+
+  return (value) => {
+    if (typeof value !== 'string') return cellDisplay(value, column);
+
+    const current = formatLocale();
+
+    if (current !== locale || memo.size >= DisplayMemoLimit) {
+      locale = current;
+      memo = new Map();
+    }
+
+    const known = memo.get(value);
+    if (known !== undefined) return known;
+
+    const shown = cellDisplay(value, column);
+    memo.set(value, shown);
+
+    return shown;
+  };
+}
+
+const DisplayMemoLimit = 8192;
 
 /**
  * Скільки знаків після коми ПОКАЗУВАТИ щонайменше — формат комірки, як у Excel:
