@@ -129,6 +129,7 @@ public sealed class FormulaScopePublishTests
     [InlineData("CST.K * 2", "CST.K")]
     [InlineData("SUBSTANCE('T') * 2", "SUBSTANCE()")]
     [InlineData("if(1 > 0, 1, !T)", "!T")]
+    [InlineData("if(CURRENT_SUBSTANCE() = '301', 1, 2)", "CURRENT_SUBSTANCE()")]
     public async Task Row_формула_з_посиланням_лише_для_речовини_відхиляється(string expression, string reference)
     {
         Formulas(
@@ -144,6 +145,20 @@ public sealed class FormulaScopePublishTests
         Assert.Equal("M", error.Details["formula"]);
         Assert.Equal(reference, error.Details["reference"]);
         Assert.False(_version.IsPublished);
+    }
+
+    /// <remarks>
+    /// Символ «поточна речовина» у формулі речовини публікується (у Row-формулі — відхиляється вище).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Символ_поточної_речовини_у_формулі_речовини_публікується()
+    {
+        Formulas([Formula(1, "T", "if(CURRENT_SUBSTANCE() = '301', 1, 2)", MethodologyFormulaScope.Substance)]);
+
+        await Publish();
+
+        Assert.True(_version.IsPublished);
     }
 
     /// <remarks>

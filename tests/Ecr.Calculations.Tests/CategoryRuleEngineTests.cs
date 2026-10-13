@@ -1,7 +1,8 @@
-﻿// tests/Ecr.Calculations.Tests/CategoryRuleEngineTests.cs
+// tests/Ecr.Calculations.Tests/CategoryRuleEngineTests.cs
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Calculations;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
@@ -209,6 +210,9 @@ internal sealed class RuleStand
     private readonly List<MethodologyOutput> _outputs = [];
     private readonly IMethodologyStore _store = Substitute.For<IMethodologyStore>();
     private int _order;
+    private IRegistryStore? _registryStore;
+    private IRegistrySnapshotLoader? _registryLoader;
+    private int _period = 202601;
 
     public RuleStand(string? rule)
     {
@@ -266,14 +270,51 @@ internal sealed class RuleStand
         return this;
     }
 
+    /// <summary>
+    /// Знімок довідників для <c>REG*</c> у формулах: довідники з літералів формул «знаходяться» (за кодами
+    /// знімка), а завантажувач віддає цей знімок. Період прогону - ключ <paramref name="periodKey"/>.
+    /// </summary>
+    public RuleStand WithRegistries(InMemoryRegistrySnapshot snapshot, int periodKey, params string[] registryCodes)
+    {
+        _period = periodKey;
+        var registries = Substitute.For<IRegistryStore>();
+        registries.FindDefinitionsAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+                  .Returns(registryCodes
+                      .Select(code => new RegistryDef(
+                          EcrCode.Create(code),
+                          new LocalizedText(new Dictionary<string, string> { ["en"] = code }),
+                          isTemporal: false))
+                      .ToList());
+        var loader = Substitute.For<IRegistrySnapshotLoader>();
+        loader.LoadAsync(
+                  Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<DateOnly>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>())
+              .Returns(snapshot);
+        _registryStore = registries;
+        _registryLoader = loader;
+        return this;
+    }
+
+    /// <summary>Версія БЕЗ складу речовин: один прогін із речовиною <c>null</c>.</summary>
+    public RuleStand WithoutSubstances()
+    {
+        _store.GetSubstancesAsync(VersionId, Arg.Any<CancellationToken>()).Returns([]);
+        return this;
+    }
+
+    /// <summary>Скільки разів модуль питав коди записів речовин (<c>GetSubstanceCodesAsync</c>).</summary>
+    public int SubstanceCodeReads
+        => _store.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IMethodologyStore.GetSubstanceCodesAsync));
+
     public async Task<CalculationOutput> RunAsync(params CalculationArgument[] arguments)
     {
         _store.GetFormulasAsync(VersionId, Arg.Any<CancellationToken>()).Returns(_formulas);
         _store.GetOutputsAsync(VersionId, Arg.Any<CancellationToken>()).Returns(_outputs);
 
         var periods = Substitute.For<IPeriodStore>();
-        periods.FindPeriodBoundsAsync(DocumentId, 202601, Arg.Any<CancellationToken>())
-               .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
+        periods.FindPeriodBoundsAsync(DocumentId, _period, Arg.Any<CancellationToken>())
+               .Returns(new PeriodBounds(
+                   new DateOnly(_period / 100, _period % 100, 1),
+                   new DateOnly(_period / 100, _period % 100, DateTime.DaysInMonth(_period / 100, _period % 100))));
 
         var units = Substitute.For<IUnitCatalog>();
         units.GetAsync(Arg.Any<CancellationToken>()).Returns(new UnitCatalogSnapshot(
@@ -287,7 +328,9 @@ internal sealed class RuleStand
             new CalendarContext(),
             units,
             periods,
-            Substitute.For<ICalculationBindingStore>());
+            Substitute.For<ICalculationBindingStore>(),
+            _registryStore,
+            _registryLoader);
 
         var descriptor = new MethodologyDescriptor(
             MethodologyId: 11,
@@ -303,7 +346,7 @@ internal sealed class RuleStand
             descriptor,
             DocumentId,
             TableInstanceId: 500,
-            PeriodKey: new PeriodKey(202601),
+            PeriodKey: new PeriodKey(_period),
             SourceRowKey: "R1",
             Arguments: arguments);
 
