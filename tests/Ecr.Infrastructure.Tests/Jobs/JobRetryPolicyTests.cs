@@ -93,6 +93,43 @@ public sealed class JobRetryPolicyTests
         Assert.Equal(ErrorCodes.ReportImmutable, JobRetryPolicy.ErrorCodeOf(refusal));
     }
 
+    /// <summary>
+    /// RCN-2: детермінована відмова переносу версії (<c>ECR-DOC-0409</c>, подані аркуші / архів) не
+    /// повторюється: задача одразу <c>Failed</c> з кодом, а не «виконується» 210 с із порожнім кодом.
+    /// Інші конфлікти версій і транзієнтні збої повторюються, як і раніше.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати арм <c>ConcurrencyConflictException … IsMigrationRefusal</c> — перші рядки червоні.
+    /// </remarks>
+    [Fact]
+    public void Відмова_переносу_версії_за_станом_не_повторюється_і_має_код_DOC_0409()
+    {
+        foreach (var key in new[] { "err.ECR-DOC-0409.migrateSheetsLocked", "err.ECR-DOC-0409.migrateProjectArchived" })
+        {
+            var refusal = new ConcurrencyConflictException(
+                ErrorCodes.DocumentSubmitted,
+                "Перенос зачепив би подані або затверджені аркуші: 2.",
+                new Dictionary<string, object?> { ["messageKey"] = key, ["lockedSheetsAffected"] = "2" });
+
+            Assert.False(JobRetryPolicy.IsWorthRetrying(refusal));
+            Assert.False(JobRetryPolicy.ShouldRetry(0, refusal));
+            Assert.Equal("ECR-DOC-0409", JobRetryPolicy.ErrorCodeOf(refusal));
+        }
+
+        // Регресія: відмова даних переносу (ECR-SCHM-0422, BusinessRuleException) і раніше не ретраїлась.
+        Assert.False(JobRetryPolicy.ShouldRetry(0, new BusinessRuleException("ECR-SCHM-0422", "dataLoss")));
+
+        // Регресія: конфлікт без ключа переносу (інший ECR-DOC-0409 чи довільний) лишається повторюваним.
+        Assert.True(JobRetryPolicy.IsWorthRetrying(
+            new ConcurrencyConflictException(ErrorCodes.DocumentSubmitted, "подано")));
+        Assert.True(JobRetryPolicy.IsWorthRetrying(
+            new ConcurrencyConflictException(
+                ErrorCodes.DocumentSubmitted,
+                "подано",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-0409.other" })));
+        Assert.True(JobRetryPolicy.IsWorthRetrying(new TimeoutException("503/deadlock")));
+    }
+
     [Fact]
     public void Прикладна_відмова_ретраїться_лише_з_кодом_недоступності()
     {
