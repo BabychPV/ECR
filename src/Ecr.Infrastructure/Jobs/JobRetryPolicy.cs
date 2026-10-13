@@ -103,6 +103,7 @@ public static class JobRetryPolicy
         SourceResponseTooLargeException => false,
         InsufficientExecutionStackException => false,
         BusinessRuleException rule => TransientRuleCodes.Contains(rule.ErrorCode),
+        ConcurrencyConflictException conflict when IsMigrationRefusal(conflict) => false,
         DomainException
             or NotFoundException
             or AccessDeniedException
@@ -123,6 +124,29 @@ public static class JobRetryPolicy
     /// </remarks>
     public static readonly IReadOnlySet<string> TransientRuleCodes =
         new HashSet<string>(StringComparer.Ordinal) { ErrorCodes.SourceUnavailable, ErrorCodes.Archiving };
+
+    /// <summary>Ключі каталогу відмов переносу версії: подані аркуші й архівний проєкт (обидва заведені в сіді).</summary>
+    private static readonly HashSet<string> MigrationRefusalKeys = new(StringComparer.Ordinal)
+    {
+        "err.ECR-DOC-0409.migrateSheetsLocked",
+        "err.ECR-DOC-0409.migrateProjectArchived",
+    };
+
+    /// <summary>
+    /// Відмова переносу версії шаблону за станом даних (<c>ECR-DOC-0409</c>: «перенос зачепив би подані
+    /// аркуші», «проєкт архівовано»): вердикт, а не збій дороги.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Такий виняток — <see cref="ConcurrencyConflictException"/> (HTTP 409), тож без цієї гілки задача
+    /// переносу тричі повторювалась (30+60+120 с) зі статусом «виконується» й порожнім кодом, а людина
+    /// не бачила причини. Стан (подані аркуші, архів) від повтору не зміниться. Розрізнення — за кодом і
+    /// ключем каталогу, не за текстом; решта <see cref="ConcurrencyConflictException"/> лишається
+    /// повторюваною (див. примітку до <see cref="IsWorthRetrying"/>).
+    /// </remarks>
+    private static bool IsMigrationRefusal(ConcurrencyConflictException ex)
+        => ex.ErrorCode == ErrorCodes.DocumentSubmitted
+           && ex.Details?.GetValueOrDefault("messageKey") is string key
+           && MigrationRefusalKeys.Contains(key);
 
     /// <summary>
     /// Код каталогу для провалу (BE-08): власний код доменної чи прикладної
