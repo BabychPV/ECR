@@ -195,7 +195,8 @@ public sealed class LandProdColumnMappingModelTests
         //   з них 2 - OperatingTime T9a_16/T9a_30 за EXCEL_HEADER_OVERRIDES)
         // + 12 мостів похідних аргументів зі словників C# (LP-10, nae_group_bridges.py: Land_Power 1, Category1 6,
         //   Land_MassFraction_0<код> 5)
-        const int resultColumns = 571 + 44 + 44 + 179 + 12;
+        // + 12 колонок GTU-мостів (2026-10-13: T10_03 і T11_03 по 6 = Land_GTU_MonthNo + 5 Land_Measure_Component_*)
+        const int resultColumns = 571 + 44 + 44 + 179 + 12 + 12;
         Assert.Equal(55, model.RootElement.GetProperty("stats").GetProperty("columns").GetInt32() - 5147 - resultColumns);
     }
 

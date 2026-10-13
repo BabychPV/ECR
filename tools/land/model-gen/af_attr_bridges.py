@@ -114,12 +114,46 @@ DIRECT = {
 }
 DIRECT_RX = {a: re.compile(rx) for a, rx in DIRECT.items()}
 
+# ---- GTU (ECW_C12_02): Land_Measure_Component_<код> береться з ІНШОГО рядка того самого документа-періоду --------------
+# Словник NAE -> індекс GTU дослівно з коду старої системи (ECW_C12_02.cs, naeToGtu за таблицею), порядок збережено.
+GTU_NAE = {
+    'T10_03': [('0035', 1), ('0037', 2), ('0039', 3), ('0041', 4)],
+    'T11_03': [('0009', 1), ('0013', 2), ('0019', 3), ('0025', 4), ('0029', 5)],
+}
+GTU_CODES = ('301', '304', '330', '337', 'O2')
+GTU_MONTHS = ('January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October',
+              'November', 'December')
+GTU_MONTH_COLUMN = 'Land_Measure_GTU_Month'
+GTU_MONTHNO_COLUMN = 'Land_GTU_MonthNo'
+GTU_UNIT = {'301': 'mg/m3', '304': 'mg/m3', '330': 'mg/m3', '337': 'mg/m3', 'O2': '%vol'}
+
+
+def gtu_monthno_expression():
+    """12 вкладених умов: англійська назва місяця -> номер; інше -> NULL (рядок не є рядком-джерелом GTU)."""
+    return ''.join("[%s] = '%s' ? %d : " % (GTU_MONTH_COLUMN, m, i + 1) for i, m in enumerate(GTU_MONTHS)) + 'NULL'
+
+
+def gtu_component_expression(tcode, code):
+    """Міст Land_Measure_Component_<код>: GTU<n>_<код> з рядка документа, де GTU_MonthNo = номер періоду.
+
+    n - за NAE розраховуваного рядка (словник коду). Рядок-джерело НЕ обов'язково має власний NAE у цій колонці:
+    беремо MAX по не-null з будь-якого рядка документа (рішення Q3). Предикат без функцій (PredicateValidator),
+    тому місяць-ім'я знято допоміжною колонкою. Невідомий/порожній NAE -> NULL (старий код: type2).
+    Перша гілка (Period.Sequence = 0) НІКОЛИ не береться: вона лише називає Land_GTU_MonthNo у залежностях формули -
+    колонки всередині [WHERE ...] граф залежностей не бачить, а без ребра правка GTU_Month не перерахує міст.
+    """
+    pred = '[%s].[WHERE [%s] = [Period].Sequence]' % (tcode, GTU_MONTHNO_COLUMN)
+    chain = ''.join("[Land_NAE] = '%s' ? MAX(%s.[Land_Measure_GTU%d_%s]) : " % (nae, pred, n, code)
+                    for nae, n in GTU_NAE[tcode])
+    return '[Period].Sequence = 0 ? [%s] : %s' % (GTU_MONTHNO_COLUMN, chain + 'NULL')
+
+
 # Причини для аргументів, яких немає як атрибута AF-таблиці (старий код бере їх інакше).
 def special_reason(arg, tcode):
     if re.match(r'^Land_Measure_Component_', arg):
         return ('[GTU] значення береться з ІНШОГО рядка таблиці: GTU<n>_<код> рядка з Land_Measure_GTU_Month = місяць '
-                'періоду, n - за словником NAE->GTU у коді (ECW_C12_02.cs:57-77, 109-160); формулою одного рядка '
-                'не виразити - потрібен міжрядковий вираз (рішення про механізм)')
+                'періоду, n - за словником NAE->GTU у коді (ECW_C12_02.cs:57-77, 109-160); таблиця не має словника '
+                'NAE->GTU у GTU_NAE (af_attr_bridges.py) - міст не побудовано')
     if arg == 'Land_Power':
         return ('[похідне] Land_Power у старому коді виводиться зі словника груп NAE (powerGroup: ECW_C11_03.cs:94-114, '
                 'ECW_C12_05.cs:88-105), а не з колонки таблиці')
@@ -385,6 +419,43 @@ def apply(out, ro_all, rules, af_attrs, calc_tables):
                 left.pop(a, None)
                 evidences.setdefault(tcode, {})[a] = new['ecrAdded']
                 added += 1
+        # GTU: після основного циклу, бо Land_NAE (джерело NAE) - теж міст і за алфавітом іде ПІСЛЯ Land_Measure_Component_*.
+        if tcode in GTU_NAE:
+            wanted = [a for a in left if a.startswith('Land_Measure_Component_') and a.split('_')[-1] in GTU_CODES]
+            if wanted:
+                needed = [GTU_MONTH_COLUMN, 'Land_NAE'] + ['Land_Measure_GTU%d_%s' % (n, c)
+                                                           for _, n in GTU_NAE[tcode] for c in GTU_CODES]
+                missing = [c for c in needed if c not in cols]
+                if missing:
+                    raise SystemExit('af_attr_bridges: %s: GTU-мости потребують колонок %s' % (tcode, missing))
+                if GTU_MONTHNO_COLUMN in cols:
+                    raise SystemExit('af_attr_bridges: %s.%s уже існує' % (tcode, GTU_MONTHNO_COLUMN))
+                col_base = {'headerRu': '', 'hidden': False, 'readOnly': True, 'excel': None, 'month': None,
+                            'precision': 28, 'scale': 12}
+                helper = dict(col_base, code=GTU_MONTHNO_COLUMN, dataType='Formula',
+                              headerEn='%s (helper: month name of %s -> number 1..12; a predicate cannot call functions)' % (
+                                  GTU_MONTHNO_COLUMN, GTU_MONTH_COLUMN),
+                              expression=gtu_monthno_expression(),
+                              ecrAdded='bridge helper: GTU month number for the predicate of Land_Measure_Component_* '
+                                       '(legacy keys the dictionary by the month name of Land_Measure_GTU_Month, ECW_C12_02.cs)')
+                t_['columns'].append(helper)
+                cols[GTU_MONTHNO_COLUMN] = helper
+                for a in sorted(wanted):
+                    code = a.split('_')[-1]
+                    col_ = dict(col_base, code=a, dataType='Formula', unit=GTU_UNIT[code],
+                                headerEn='%s (argument bridge: GTU of the document row whose month = period)' % a,
+                                expression=gtu_component_expression(tcode, code),
+                                ecrAdded='bridge: GTU component %s = MAX of GTU<n>_%s over rows of the same document-period with '
+                                         'Land_GTU_MonthNo = [Period].Sequence; n by NAE (ECW_C12_02.cs naeToGtu); '
+                                         'no value or unknown NAE -> NULL (legacy type2)' % (a, code))
+                    t_['columns'].append(col_)
+                    cols[a] = col_
+                    bridged.setdefault(tcode, [])
+                    bridged[tcode] = sorted(set(bridged[tcode]) | {a})
+                    left.pop(a, None)
+                    evidences.setdefault(tcode, {})[a] = col_['ecrAdded']
+                    added += 1
+                added += 1  # допоміжна колонка
         if not left:
             unresolved.pop(tcode, None)
         else:

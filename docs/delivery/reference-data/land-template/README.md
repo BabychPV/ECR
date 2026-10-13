@@ -146,3 +146,13 @@ AF-таблиць**: `af-land-table-attributes.json` (структура: іме
 складає `model-gen/extract_substance_applicability.py`, значень прода немає) -> довідник `LAND_SUBSTANCE_APPLICABILITY` і
 розділ `substanceApplicability` моделі (`model-gen/substance_applicability.py`). Опис, функція `SUBSTANCE_APPLICABLE` і
 етап `-Stage SubstanceApplicability` - `tools/land/README.md`, «Застосовність речовини на рядок».
+
+**GTU / C12_02 (2026-10-13, варіант б').** `Land_Measure_Component_{301,304,330,337,O2}` на T10_03 і T11_03 - не `[GTU]`-запис,
+а предикатні мости: допоміжна `Land_GTU_MonthNo` (назва місяця з `Land_Measure_GTU_Month` -> 1..12) і п'ять мостів
+`NAE-гілка ? MAX([T].[WHERE [Land_GTU_MonthNo] = [Period].Sequence].[Land_Measure_GTU<n>_<код>]) : ... : NULL`; n - за
+словником NAE->GTU зі старого коду (T10_03: 0035..0041 -> 1..4; T11_03: 0009/0013/0019/0025/0029 -> 1..5). Рядок-джерело -
+будь-який рядок ТОГО САМОГО документа-періоду (блок «12 місяців»), MAX по не-null; невідомий/порожній NAE -> NULL
+(старий код: `type2`). Перша гілка `[Period].Sequence = 0` не береться ніколи - вона лише називає `Land_GTU_MonthNo` у
+залежностях (колонки всередині `[WHERE ...]` граф не бачить). Одиниці: 301/304/330/337 - `mg/m3` (`mg_per_m3`), O2 -
+`%vol` (`pct_vol`); обидві вже в базовому сіді. Межа: рядки ІНШИХ документів не читаються (на копії 7 EFID паритет 100 %;
+значення між документами збігаються).
