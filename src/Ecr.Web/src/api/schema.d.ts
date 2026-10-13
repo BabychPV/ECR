@@ -21878,6 +21878,30 @@ export interface components {
             fromVersionId: number;
             /**
              * Format: int64
+             * @description ACC-OW: скільки з GuardedValues лежить у комірках, на які цільова версія кладе НОВУ комірочну
+             *     формулу (`CellFormula`, WW-02): це похідні підсумки, які після переносу замінить перерахунок. Лише їх (і
+             *     лише їх) дозволяє перезаписати прапор `acceptGuardedOverwrite`; решта `guardedWithData` (звуження,
+             *     зміна типу, одиниці, довідника, обов'язковості, режиму рядків) прапором НЕ знімається. Рахується завжди (також
+             *     без прапора), щоб діалог показав кількість ДО згоди.
+             * @default 0
+             */
+            guardedOverwritable: number;
+            /**
+             * @description Запит ніс `acceptGuardedOverwrite = true`.
+             * @default false
+             */
+            guardedOverwriteAccepted: boolean;
+            /** @description Перелік комірок шаблону, значення яких перезапише формула (за зростанням шляху), не більше
+             *     `MaxGuardedOverwriteItems`; `null` — таких немає. ⛔ Без значень: лише адреса комірки й кількість
+             *     введених значень у ній (по всіх документах і періодах проєкту). */
+            guardedOverwrittenItems?: null | components["schemas"]["GuardedOverwriteItem"][];
+            /**
+             * @description ACC-OW: перелік обрізано стелею.
+             * @default false
+             */
+            guardedOverwrittenItemsTruncated: boolean;
+            /**
+             * Format: int64
              * @description Скільки введених значень змінили б тлумачення.
              */
             guardedValues: number;
@@ -22513,6 +22537,22 @@ export interface components {
             roleCodes: string[];
             /** @description SID групи безпеки. */
             sid: string;
+        };
+        /** @description Комірка, значення якої перезапише нова комірочна формула (ACC-OW). */
+        GuardedOverwriteItem: {
+            /** @description Код колонки. */
+            columnCode: string;
+            /** @description Ключ рядка. */
+            rowKey: string;
+            /** @description Код аркуша вихідної версії. */
+            sheetCode: string;
+            /** @description Код таблиці. */
+            tableCode: string;
+            /**
+             * Format: int64
+             * @description Скільки непорожніх значень у цій комірці по документах і періодах проєкту.
+             */
+            values: number;
         };
         /** @description Змінене поле шапки документа (ФВ-9.4); значення — рядком, тип — та сама конвенція, що й
          *     CellChangeDto (`null` — число або текст, інакше `date|bool|ref|unit`).
@@ -23674,6 +23714,16 @@ export interface components {
         };
         /** @description Запит на перенос документа на нову версію шаблону (ФВ-7.5). */
         MigrateDocumentVersionRequest: {
+            /**
+             * @description ACC-OW: `true` — не відмовляти `guardedWithData` там, де «змінене тлумачення» — це лише НОВА комірочна
+             *     формула цільової версії на комірці з уже введеним значенням (поле `CellFormula` у звіті): значення
+             *     переїздить, а перерахунок після переносу замінює його результатом формули. Типово `false` (поведінка без
+             *     прапора незмінна). Інші класи `guardedWithData` (звуження, тип, одиниця, довідник, обов'язковість, режим
+             *     рядків) і подані/затверджені аркуші (`409 sheetsLocked`) прапор НЕ знімає. Те, що буде перезаписано,
+             *     сухий прогін показує до згоди: `guardedOverwritable`, `guardedOverwrittenItems`.
+             * @default false
+             */
+            acceptGuardedOverwrite: boolean;
             /**
              * @description `true` — перенос (не сухий прогін) іде ФОНОВОЮ задачею: відповідь `202` з `jobId`, стан —
              *     `GET /jobs/{jobId}`. Типово `false` — як і раніше, синхронно з `200` і звітом

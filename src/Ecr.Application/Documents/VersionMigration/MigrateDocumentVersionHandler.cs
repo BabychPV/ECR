@@ -69,6 +69,20 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// аркушів немає. ⛔ Без імен користувачів і значень — лише код аркуша, період, статус.
 /// </param>
 /// <param name="LockedSheetItemsTruncated">LP-32: перелік <paramref name="LockedSheetItems"/> обрізано стелею.</param>
+/// <param name="GuardedOverwritable">
+/// ACC-OW: скільки з <paramref name="GuardedValues"/> лежить у комірках, на які цільова версія кладе НОВУ комірочну
+/// формулу (<c>CellFormula</c>, WW-02): це похідні підсумки, які після переносу замінить перерахунок. Лише їх (і
+/// лише їх) дозволяє перезаписати прапор <c>acceptGuardedOverwrite</c>; решта <c>guardedWithData</c> (звуження,
+/// зміна типу, одиниці, довідника, обов'язковості, режиму рядків) прапором НЕ знімається. Рахується завжди (також
+/// без прапора), щоб діалог показав кількість ДО згоди.
+/// </param>
+/// <param name="GuardedOverwriteAccepted">Запит ніс <c>acceptGuardedOverwrite = true</c>.</param>
+/// <param name="GuardedOverwrittenItems">
+/// Перелік комірок шаблону, значення яких перезапише формула (за зростанням шляху), не більше
+/// <c>MaxGuardedOverwriteItems</c>; <c>null</c> — таких немає. ⛔ Без значень: лише адреса комірки й кількість
+/// введених значень у ній (по всіх документах і періодах проєкту).
+/// </param>
+/// <param name="GuardedOverwrittenItemsTruncated">ACC-OW: перелік обрізано стелею.</param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
     int ProjectId,
@@ -97,7 +111,20 @@ public sealed record DocumentVersionMigrationDto(
     int LockedSheetsCarried = 0,
     int LockedSheetsAffected = 0,
     IReadOnlyList<LockedSheetItem>? LockedSheetItems = null,
-    bool LockedSheetItemsTruncated = false);
+    bool LockedSheetItemsTruncated = false,
+    long GuardedOverwritable = 0,
+    bool GuardedOverwriteAccepted = false,
+    IReadOnlyList<GuardedOverwriteItem>? GuardedOverwrittenItems = null,
+    bool GuardedOverwrittenItemsTruncated = false);
+
+/// <summary>Комірка, значення якої перезапише нова комірочна формула (ACC-OW).</summary>
+/// <param name="SheetCode">Код аркуша вихідної версії.</param>
+/// <param name="TableCode">Код таблиці.</param>
+/// <param name="RowKey">Ключ рядка.</param>
+/// <param name="ColumnCode">Код колонки.</param>
+/// <param name="Values">Скільки непорожніх значень у цій комірці по документах і періодах проєкту.</param>
+public sealed record GuardedOverwriteItem(
+    string SheetCode, string TableCode, string RowKey, string ColumnCode, long Values);
 
 /// <summary>Подана або затверджена пара «аркуш × період» у звіті переносу (LP-32).</summary>
 /// <param name="DocumentId">Документ проєкту.</param>
@@ -183,6 +210,9 @@ public sealed class MigrateDocumentVersionHandler(
     /// <summary>LP-32: стеля переліку поданих/затверджених пар у звіті й у тілі <c>409</c>.</summary>
     public const int MaxLockedItems = 200;
 
+    /// <summary>ACC-OW: стеля переліку комірок, значення яких перезапише формула (<c>guardedOverwrittenItems</c>).</summary>
+    public const int MaxGuardedOverwriteItems = 200;
+
     /// <summary>Скільки ключів методологій на чужі колонки називає відмова (<c>methodologyKeys</c>).</summary>
     public const int MaxMethodologyKeysListed = 20;
 
@@ -242,9 +272,29 @@ public sealed class MigrateDocumentVersionHandler(
     /// <exception cref="BusinessRuleException">
     /// Також <c>ECR-SCHM-0422</c> (<c>migrateRenameMapInvalid</c>) — зламана форма мапи.
     /// </exception>
-    public async Task<DocumentVersionMigrationDto> HandleAsync(
+    public Task<DocumentVersionMigrationDto> HandleAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode, bool dryRun,
         IReadOnlyList<VersionMigrationTableRename>? renames, CancellationToken ct)
+        => HandleAsync(documentId, targetVersionId, mode, dryRun, renames, acceptGuardedOverwrite: false, ct);
+
+    /// <summary>
+    /// Будує звіт і, якщо це не сухий прогін, переносить — з мапою перейменувань і згодою на перезапис похідних
+    /// значень (ACC-OW).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="targetVersionId">Цільова версія того самого шаблону.</param>
+    /// <param name="mode">Режим.</param>
+    /// <param name="dryRun"><c>true</c> — лише звіт.</param>
+    /// <param name="renames">Мапа перейменувань; <c>null</c> — без мапи.</param>
+    /// <param name="acceptGuardedOverwrite">
+    /// <c>true</c> — не відмовляти <c>guardedWithData</c> там, де «змінене тлумачення» — це ЛИШЕ нова комірочна
+    /// формула на комірці з уже введеним значенням (<c>CellFormula</c>): значення переїздить, а перерахунок після
+    /// переносу замінює його результатом формули. Інші класи guarded і подані/затверджені аркуші прапор не знімає.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<DocumentVersionMigrationDto> HandleAsync(
+        long documentId, int targetVersionId, VersionMigrationMode mode, bool dryRun,
+        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite, CancellationToken ct)
     {
         var request = await ResolveAsync(documentId, targetVersionId, tolerateSame: false, ct).ConfigureAwait(false);
         VersionMigrationRenames.Validate(renames);
@@ -253,12 +303,13 @@ public sealed class MigrateDocumentVersionHandler(
         {
             var (dto, _, _, _) = await PlanAsync(
                 documentId, request.ProjectId, request.SourceVersionId, request.Target, mode, request.Archived,
-                dryRun: true, renames, ct).ConfigureAwait(false);
+                dryRun: true, renames, acceptGuardedOverwrite, ct).ConfigureAwait(false);
             return dto;
         }
 
         // Синхронний шлях без приймача прогресу завжди дає звіт (збіг версій там — виняток, не "вже перенесено").
-        return (await ApplyAsync(request, documentId, mode, renames, onProgress: null, ct).ConfigureAwait(false))!;
+        return (await ApplyAsync(request, documentId, mode, renames, acceptGuardedOverwrite, onProgress: null, ct)
+            .ConfigureAwait(false))!;
     }
 
     /// <summary>
@@ -299,9 +350,22 @@ public sealed class MigrateDocumentVersionHandler(
     /// <param name="renames">Мапа перейменувань; <c>null</c> — без мапи.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Ідентифікатор задачі.</returns>
-    public async Task<string> EnqueueAsync(
+    public Task<string> EnqueueAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode,
         IReadOnlyList<VersionMigrationTableRename>? renames, CancellationToken ct)
+        => EnqueueAsync(documentId, targetVersionId, mode, renames, acceptGuardedOverwrite: false, ct);
+
+    /// <summary>Ставить перенос у чергу з мапою перейменувань і згодою на перезапис похідних значень (ACC-OW).</summary>
+    /// <param name="documentId">Документ, з якого відкрили перенос.</param>
+    /// <param name="targetVersionId">Цільова версія того самого шаблону.</param>
+    /// <param name="mode">Режим.</param>
+    /// <param name="renames">Мапа перейменувань; <c>null</c> — без мапи.</param>
+    /// <param name="acceptGuardedOverwrite">Згода: див. <see cref="HandleAsync(long, int, VersionMigrationMode, bool, IReadOnlyList{VersionMigrationTableRename}?, bool, CancellationToken)"/>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатор задачі.</returns>
+    public async Task<string> EnqueueAsync(
+        long documentId, int targetVersionId, VersionMigrationMode mode,
+        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite, CancellationToken ct)
     {
         var request = await ResolveAsync(documentId, targetVersionId, tolerateSame: false, ct).ConfigureAwait(false);
         VersionMigrationRenames.Validate(renames);
@@ -321,7 +385,8 @@ public sealed class MigrateDocumentVersionHandler(
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            return await EnqueueLockedAsync(request, documentId, targetVersionId, mode, renames, ct).ConfigureAwait(false);
+            return await EnqueueLockedAsync(request, documentId, targetVersionId, mode, renames, acceptGuardedOverwrite, ct)
+                .ConfigureAwait(false);
         }
         finally
         {
@@ -334,7 +399,7 @@ public sealed class MigrateDocumentVersionHandler(
 
     private async Task<string> EnqueueLockedAsync(
         Resolved request, long documentId, int targetVersionId, VersionMigrationMode mode,
-        IReadOnlyList<VersionMigrationTableRename>? renames, CancellationToken ct)
+        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite, CancellationToken ct)
     {
         var documentIds = (await store.ListDocumentIdsAsync(request.ProjectId, ct).ConfigureAwait(false)).ToHashSet();
         var active = await FindActiveJobAsync(documentIds, ct).ConfigureAwait(false);
@@ -362,7 +427,8 @@ public sealed class MigrateDocumentVersionHandler(
                 TargetOf(request.ProjectId),
                 new MigrateDocumentVersionTask(
                     documentId, targetVersionId, mode.ToString(), actor,
-                    renames is { Count: > 0 } ? renames : null),
+                    renames is { Count: > 0 } ? renames : null,
+                    acceptGuardedOverwrite),
                 ct,
                 currentUser.UserId)
             .ConfigureAwait(false);
@@ -423,9 +489,24 @@ public sealed class MigrateDocumentVersionHandler(
     /// <param name="onProgress">Приймач прогресу.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Звіт: що перенесено.</returns>
-    public async Task<VersionMigrationRunResult> RunQueuedAsync(
+    public Task<VersionMigrationRunResult> RunQueuedAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode,
         IReadOnlyList<VersionMigrationTableRename>? renames,
+        VersionMigrationProgressReporter onProgress, CancellationToken ct)
+        => RunQueuedAsync(documentId, targetVersionId, mode, renames, acceptGuardedOverwrite: false, onProgress, ct);
+
+    /// <summary>Виконує перенос у задачі черги з мапою перейменувань і згодою на перезапис похідних значень (ACC-OW).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="targetVersionId">Цільова версія.</param>
+    /// <param name="mode">Режим.</param>
+    /// <param name="renames">Мапа перейменувань; <c>null</c> — без мапи.</param>
+    /// <param name="acceptGuardedOverwrite">Згода (її поставив запит; ПЛАН у задачі перераховується з нею).</param>
+    /// <param name="onProgress">Приймач прогресу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Звіт: що перенесено.</returns>
+    public async Task<VersionMigrationRunResult> RunQueuedAsync(
+        long documentId, int targetVersionId, VersionMigrationMode mode,
+        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
         VersionMigrationProgressReporter onProgress, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(onProgress);
@@ -444,7 +525,8 @@ public sealed class MigrateDocumentVersionHandler(
             return await AlreadyMigratedAsync(request, ct).ConfigureAwait(false);
         }
 
-        var dto = await ApplyAsync(request, documentId, mode, renames, onProgress, ct).ConfigureAwait(false);
+        var dto = await ApplyAsync(request, documentId, mode, renames, acceptGuardedOverwrite, onProgress, ct)
+            .ConfigureAwait(false);
 
         return dto is null
             ? await AlreadyMigratedAsync(request, ct).ConfigureAwait(false)
@@ -542,7 +624,7 @@ public sealed class MigrateDocumentVersionHandler(
     /// <returns>Звіт; <c>null</c> — лише для фонової задачі: проєкт під блоком уже на цільовій версії.</returns>
     private async Task<DocumentVersionMigrationDto?> ApplyAsync(
         Resolved request, long documentId, VersionMigrationMode mode,
-        IReadOnlyList<VersionMigrationTableRename>? renames,
+        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
         VersionMigrationProgressReporter? onProgress, CancellationToken ct)
     {
         var profile = request.Profile;
@@ -592,7 +674,8 @@ public sealed class MigrateDocumentVersionHandler(
             }
 
             var (dto, plan, foreignKeys, extended) = await PlanAsync(
-                documentId, projectId, current, target, mode, archived, dryRun: false, renames, innerCt).ConfigureAwait(false);
+                documentId, projectId, current, target, mode, archived, dryRun: false, renames,
+                acceptGuardedOverwrite, innerCt).ConfigureAwait(false);
             ThrowIfRefused(dto, foreignKeys, plan.RenameConflicts);
 
             grantedUsers = await store.ListUsersWithGrantsAsync(plan, MaxInvalidatedUsers, innerCt).ConfigureAwait(false);
@@ -726,7 +809,7 @@ public sealed class MigrateDocumentVersionHandler(
     private async Task<(DocumentVersionMigrationDto Dto, VersionMigrationPlan Plan, IReadOnlyList<string> ForeignKeys, ExtendedMappingRemap Extended)> PlanAsync(
         long documentId, int projectId, int sourceVersionId, TemplateVersion target,
         VersionMigrationMode mode, bool archived, bool dryRun,
-        IReadOnlyList<VersionMigrationTableRename>? renames, CancellationToken ct)
+        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite, CancellationToken ct)
     {
         var source = await versions.GetAsync(sourceVersionId, ct).ConfigureAwait(false);
         var from = await metadata.GetAsync(sourceVersionId, ct).ConfigureAwait(false);
