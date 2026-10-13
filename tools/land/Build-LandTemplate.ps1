@@ -37,6 +37,10 @@
                     у списку кодів рядка старого C# (потік / InvNum / NAE), для рядка пропускається - кількість рядків
                     результату збігається зі старою системою. Потребує довідника LAND_SUBSTANCE_APPLICABILITY
                     (-Stage Registries) і версії вище за Legacy; повтор - 0 змін; LandParity обгортку не скидає
+      MassFraction  (лише явно, в All не входить; -Stage CompositionMass виконує його теж) у формулах ЧЕРНЕТКИ C11_11_04
+                    токен @Land_MassFraction замінюється фрагментом if(CURRENT_SUBSTANCE() = '415', @Land_MassFraction_0415,
+                    ...) з моделі (argumentBridges.massFraction); версії рівня Legacy ставиться Strict. Довідник
+                    LAND_NAE_GROUP (Land_Power, Category1) заводить етап Registries або Import-LandNaeGroup.ps1
 
     ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє, окрім явного
     -PruneStaleTables (м'яке видалення таблиць чернетки, яких немає в моделі; без прапора - лише попередження).
@@ -65,7 +69,7 @@ param(
     [string]$AccountsFile = 'F:\ecr-backup\land-ui\accounts.local.txt',
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'Data', 'SubstanceApplicability', 'LandParity', 'CompositionMass', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'Data', 'SubstanceApplicability', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection = 'Server=localhost;Database=EcrLandUi;Integrated Security=true;TrustServerCertificate=true',
@@ -309,7 +313,16 @@ function Ensure-Registry($reg) {
         $disp = @{ en = [string]$e.en }
         if ($e.ru) { $disp.ru = [string]$e.ru }
         $vals = @{}
-        if ($reg.fieldNames) { foreach ($p in $e.fields.PSObject.Properties) { $vals[$p.Name] = [string]$p.Value } } else { $vals.NAME = [string]$e.name }
+        if ($reg.fieldNames) {
+            # LP-10: поля Decimal/Int (POWER_GROUP довідника LAND_NAE_GROUP) - числом з InvariantCulture, решта - рядком.
+            $numeric = @{}
+            if ($reg.fieldSpecs) { foreach ($fs in @($reg.fieldSpecs)) { if ([string]$fs.dataType -in 'Decimal', 'Int') { $numeric[[string]$fs.code] = $true } } }
+            foreach ($p in $e.fields.PSObject.Properties) {
+                if ($numeric.ContainsKey([string]$p.Name)) { $vals[$p.Name] = [decimal]::Parse([string]$p.Value, [Globalization.CultureInfo]::InvariantCulture) }
+                else { $vals[$p.Name] = [string]$p.Value }
+            }
+        }
+        else { $vals.NAME = [string]$e.name }
         $r = Invoke-Ecr -Method POST -Path "/api/v1/registries/$code/entries" -Body @{ id = $null; registryDefId = $d.id; code = [string]$e.code; display = @{ values = $disp }; parentEntryId = $null; values = $vals }
         if ($r.Status -in 200, 201) { $created++ } else { Log "  ! $code/$($e.code): HTTP $($r.Status) $(Get-EcrErrorCode $r)" }
     }
@@ -1402,6 +1415,59 @@ function Stage-LandParity {
     Log "  оброблено методологій: $done"
 }
 
+# ==================== MassFraction (LP-10: Land_MassFraction за речовиною проходу) ====================
+# Лише явно: -Stage MassFraction (або разом із -Stage CompositionMass). Для методологій з моделі
+# (argumentBridges.massFraction.methodologies: ECW_C11_11_04) в ЧЕРНЕТЦІ токен @Land_MassFraction у виразах формул
+# замінюється фрагментом if(CURRENT_SUBSTANCE() = '415', @Land_MassFraction_0415, ...), а аргументи формули
+# доповнюються Land_MassFraction_0<код> (колонки-мости на таблиці 9a_19 дає модель). Фрагмент вживає
+# CURRENT_SUBSTANCE()/REGFIND/REGFIELD - ярус Extension, у Legacy його не опублікувати (ECR-CALC-0433): чернетці з
+# Legacy ставиться Strict (PUT .../modes; календар і трасування лишаються). Опубліковану версію не чіпаємо; нову
+# версію чи публікацію етап не робить. Повторний запуск - 0 змін.
+function Stage-MassFraction {
+    Log '== MassFraction =='
+    . (Join-Path $here 'LandHse400Composition.Lib.ps1')
+    LoginAs 'land-owner'
+    $mf = $Mdl.argumentBridges.massFraction
+    if ($null -eq $mf) { throw 'У моделі немає argumentBridges.massFraction: перегенеруйте модель (model-gen).' }
+    $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+    $reg = Invoke-Ecr -Method GET -Path "/api/v1/registries/LAND_HSE400_SUBSTANCE/entries?asOf=$today"
+    if ($reg.Status -ne 200 -or @($reg.Json).Count -eq 0) {
+        Log '  ! довідника LAND_HSE400_SUBSTANCE немає або він порожній (спершу -Stage Registries чи Import-LandHse400Substance.ps1): нічого не змінено'
+        return
+    }
+    $ms = Items (Api GET '/api/v1/methodologies').Json
+    $mid = @{}
+    foreach ($m in $ms) { $mid[[string]$m.code] = [int]$m.id }
+    $changed = 0
+    foreach ($p in $mf.methodologies.PSObject.Properties) {
+        $name = $p.Name
+        $m = $mid[$name]
+        if (-not $m) { Log "  ${name}: методології на сервері немає - пропущено"; continue }
+        $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
+        $v = $vers | Sort-Object id -Descending | Select-Object -First 1
+        if ([string]$v.status -eq 'Published') { Log "  ${name}: остання версія опублікована - не чіпаю"; continue }
+        $vid = [int]$v.id
+        $n = 0
+        foreach ($f in @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/formulas").Json)) {
+            $r = Convert-LandHse400CompositionMassFormula -Expression ([string]$f.expression) -ArgumentsCsv $f.argumentsCsv `
+                -Fragment ([string]$p.Value.fragment) -StreamArguments @($p.Value.arguments) -ArgName ([string]$p.Value.token)
+            if (-not $r.Changed) { continue }
+            $body = @{ expression = $r.Expression; resultType = $f.resultType; outputUnitId = $f.outputUnitId; argumentsCsv = $r.ArgumentsCsv }
+            if ($null -ne $f.scope) { $body.scope = $f.scope }
+            $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/formulas/$($f.code)" -Body $body
+            if ($put.Status -eq 200) { $n++ } else { Log "  ! ${name}/$($f.code): HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
+        }
+        if ($n -gt 0 -and [string]$v.numericMode -ne 'Strict') {
+            $md = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/modes" -Body @{
+                numericMode = 'Strict'; calendarMode = [string]$v.calendarMode; traceLevel = [string]$v.traceLevel }
+            if ($md.Status -eq 200) { Log "  ${name}: версія $vid -> Strict" } else { Log "  ! ${name}: modes HTTP $($md.Status) $(Get-EcrErrorCode $md)" }
+        }
+        $changed += $n
+        Log "  ${name}: формул із фрагментом Land_MassFraction - $n"
+    }
+    Log "  змінено формул: $changed"
+}
+
 # ==================== CompositionMass (LP-10: склад газу HSE400 по речовині) ====================
 # Лише явно: -Stage CompositionMass. Для методологій з моделі (argumentBridges.hse400.compositionMass.methodologies)
 # в ЧЕРНЕТКАХ (опубліковану версію не чіпаємо) токен @CompositionMass у виразах формул замінюється фрагментом, а
@@ -1794,5 +1860,7 @@ function Fill-FullDocument([int]$docId) {
     if ($Stage -contains 'CompositionMass') { Stage-CompositionMass }
 # 2026-10-13: лише явно (-Stage SubstanceApplicability); у 'All' не входить, бо потребує правил LandParity й довідника.
 if ($Stage -contains 'SubstanceApplicability') { Stage-SubstanceApplicability }
+    # LP-10: Land_MassFraction - той самий клас підстановки; лише явно (-Stage MassFraction або разом із CompositionMass).
+    if ($Stage -contains 'MassFraction' -or $Stage -contains 'CompositionMass') { Stage-MassFraction }
 }
 Log 'Готово.'

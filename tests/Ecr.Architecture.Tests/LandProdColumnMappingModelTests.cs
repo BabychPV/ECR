@@ -193,7 +193,9 @@ public sealed class LandProdColumnMappingModelTests
         //   + 7 мостів потоку Land_TypeFuelOrStream для C11_10, STREAM_ARGUMENT_ALIASES)
         // + 179 мостів за атрибутами AF-таблиць (LP-10, af_attr_bridges.py: 170 за атрибутами AF + 9 календарних днів;
         //   з них 2 - OperatingTime T9a_16/T9a_30 за EXCEL_HEADER_OVERRIDES)
-        const int resultColumns = 571 + 44 + 44 + 179;
+        // + 12 мостів похідних аргументів зі словників C# (LP-10, nae_group_bridges.py: Land_Power 1, Category1 6,
+        //   Land_MassFraction_0<код> 5)
+        const int resultColumns = 571 + 44 + 44 + 179 + 12;
         Assert.Equal(55, model.RootElement.GetProperty("stats").GetProperty("columns").GetInt32() - 5147 - resultColumns);
     }
 

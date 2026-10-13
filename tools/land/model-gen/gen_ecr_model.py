@@ -1141,6 +1141,11 @@ substance_applicability.apply(out, registries, _cat_rules)
 # ---- мости за атрибутами AF-таблиць (LP-10, прив'язки C11/C12 -> ECR-CALC-0438/0422): af_attr_bridges.py.
 stat_cols += af_attr_bridges.apply(out, _ro_all, _cat_rules, _af_attrs, set(CALC))
 
+# ---- похідні аргументи зі словників C# (Land_Power, Category1 - довідник LAND_NAE_GROUP; Land_MassFraction - мости
+# за кодом речовини і фрагмент): nae_group_bridges.py. Після af_attr_bridges: потребує мосту Land_NAE і записів unresolved.
+import nae_group_bridges  # noqa: E402
+stat_cols += nae_group_bridges.apply(out, registries, _af_attrs)
+
 cfs = []
 seen_cf = set()
 for sh in X['sheets']:
