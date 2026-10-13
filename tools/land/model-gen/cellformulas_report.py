@@ -7,9 +7,10 @@
   * Лише доведені класи: сума/різниця комірок і діапазонів (по одному стовпцю чи рядку), дужки, `SUM(...)`, унарний
     мінус, масштаб числом над ВСІМ виразом. Усе інше (IF, VLOOKUP, текст, посилання поза моделлю, нечислові колонки) -
     НЕ вгадується: потрапляє в `cellFormulasUnresolved` з причиною або в `cellFormulasSkipped` (довідникові підписи).
-  * Рядок із комірочними формулами позначається `readOnly` (Build -> RowDef.IsReadOnly): колонка лишається ручного вводу
-    для решти рядків, а рядок підсумку/балансу людина не редагує (ECR-TMPL-4227 для Cell дозволений лише на
-    обчислюваній колонці АБО в рядку лише для читання).
+  * Рядки НЕ позначаються лише для читання: захист комірки з формулою живе на рівні КОМІРКИ (рушій: комірка з
+    комірочною формулою не редагується, EditRules `CellIsComputed` -> CalculatedCell), а решта комірок рядка й
+    колонки лишається вводом (Water Report групові рядки, 7a/7b AnnualLimit/грудень, Waste Site*). Ворота
+    ECR-TMPL-4227 для Cell не вимагають обчислюваної колонки.
 """
 import re
 import random
@@ -331,14 +332,11 @@ def apply(out, PS):
             t['cellFormulas'] = res
             t['cellFormulasUnresolved'] = sorted(unres[c], key=lambda q: (_split(q['cell'])[1], q['cell']))
             t['cellFormulasSkipped'] = list(skipped[c].values())
-            ro = readonly_rows.get(c, set())
-            for rw in t['rows']:
-                if rw['key'] in ro:
-                    rw['readOnly'] = True
+            ro = readonly_rows.get(c, set())  # рядки, що мають бодай одну формулу (лише для статистики; readOnly не ставиться)
             stat['total'] += len(res)
             stat['unresolved'] += len(t['cellFormulasUnresolved'])
             stat['skipped'] += sum(s['count'] for s in t['cellFormulasSkipped'])
-            print('WW-02 cellFormulas %s/%s: %d, unresolved %d, skipped %d, readOnly rows %d' % (
+            print('WW-02 cellFormulas %s/%s: %d, unresolved %d, skipped %d, rows with formulas %d' % (
                 sh['code'], c, len(res), len(t['cellFormulasUnresolved']),
                 sum(s['count'] for s in t['cellFormulasSkipped']), len(ro)))
     return stat
