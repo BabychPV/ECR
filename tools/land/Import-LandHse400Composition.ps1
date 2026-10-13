@@ -197,6 +197,14 @@ function Get-HseEntryCodes([string]$code) {
     return $set
 }
 
+function Get-HseProp($obj, [string]$name) {
+    # Значення властивості або $null, без винятку під Set-StrictMode.
+    if ($null -eq $obj) { return $null }
+    $p = $obj.PSObject.Properties[$name]
+    if ($null -eq $p) { return $null }
+    return $p.Value
+}
+
 function Add-HseEntries([string]$code, [object[]]$rows, [switch]$ServerDryRun) {
     # rows: @{ clientRowId; code; display; values } - новий запис; @{ clientRowId; id; values } - зміна наявного
     # (batch upsert за id без code/name: ECR-REG-0409 entryCodeTaken стосується лише НОВОГО рядка з кодом).
@@ -205,22 +213,26 @@ function Add-HseEntries([string]$code, [object[]]$rows, [switch]$ServerDryRun) {
     $dryText = if ($ServerDryRun) { 'true' } else { 'false' }
     for ($i = 0; $i -lt $rows.Count; $i += $BatchSize) {
         $chunk = @($rows[$i..([Math]::Min($i + $BatchSize, $rows.Count) - 1)])
+        # StrictMode (його вмикає EcrApi.ps1): у «нових» рядків немає властивості Id, у «наявних» - Code/Display;
+        # доступ лише через Get-HseProp, пакети нових і наявних збираються окремими запитами (змішаний вхід - два POST).
         $items = @($chunk | ForEach-Object {
-                if ($null -ne $_.Id) { @{ clientRowId = $_.ClientRowId; op = 'upsert'; id = [long]$_.Id; values = $_.Values } }
-                else { @{ clientRowId = $_.ClientRowId; op = 'upsert'; code = $_.Code; name = $_.Display; values = $_.Values } }
+                $idValue = Get-HseProp $_ 'Id'
+                if ($null -ne $idValue) { @{ clientRowId = $_.ClientRowId; op = 'upsert'; id = [long]$idValue; values = $_.Values } }
+                else { @{ clientRowId = $_.ClientRowId; op = 'upsert'; code = (Get-HseProp $_ 'Code'); name = (Get-HseProp $_ 'Display'); values = $_.Values } }
             })
         $r = Invoke-Ecr -Method POST -Path "/api/v1/registries/$code/entries/batch?dryRun=$dryText" -Body @{ items = $items }
         Assert-EcrOk $r "POST entries/batch ($code)"
-        $updated += [int]$r.Json.updated; $unchanged += [int]$r.Json.unchanged
-        $errRows = @($r.Json.rows | Where-Object { $_.status -eq 'error' })
+        $updated += [int](Get-HseProp $r.Json 'updated'); $unchanged += [int](Get-HseProp $r.Json 'unchanged')
+        $jsonRows = @(Get-HseProp $r.Json 'rows')
+        $errRows = @($jsonRows | Where-Object { $null -ne $_ -and (Get-HseProp $_ 'status') -eq 'error' })
         if ($ServerDryRun) {
-            if ($errRows.Count -eq 0) { $added += [int]$r.Json.added; continue }
+            if ($errRows.Count -eq 0) { $added += [int](Get-HseProp $r.Json 'added'); continue }
         }
-        elseif ($r.Json.applied) { $added += $chunk.Count; continue }
+        elseif (Get-HseProp $r.Json 'applied') { $added += $chunk.Count; continue }
         # Пачка відхилена повністю: рахуємо за кодами помилок, без значень.
-        $bad = @($r.Json.rows | Where-Object { $_.status -eq 'error' })
+        $bad = $errRows
         $rejected += $chunk.Count
-        $codes = @($bad | ForEach-Object { @($_.errors) | ForEach-Object { [string]$_.errorCode } } | Group-Object | ForEach-Object { "$($_.Name)×$($_.Count)" })
+        $codes = @($bad | ForEach-Object { @(Get-HseProp $_ 'errors') | ForEach-Object { [string](Get-HseProp $_ 'errorCode') } } | Group-Object | ForEach-Object { "$($_.Name)×$($_.Count)" })
         Write-Warning "Пачка $code [$i..]: відхилено ($($codes -join ', '))."
     }
     return [pscustomobject]@{ Added = $added; Rejected = $rejected; Updated = $updated; Unchanged = $unchanged }

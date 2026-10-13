@@ -178,9 +178,11 @@ public sealed class LandHse400CompositionScriptTests
     {
         const string script = """
             $ErrorActionPreference = 'Stop'
+            # EcrApi.ps1 вмикає StrictMode - так було на :5094: доступ до відсутньої властивості рядка кидає виняток.
+            Set-StrictMode -Version Latest
             $text = Get-Content -Raw -LiteralPath $args[0]
             $ast = [System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$null)
-            $fns = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and ($n.Name -eq 'Add-HseEntries' -or $n.Name -eq 'New-HseCompositionValues') }, $true)
+            $fns = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and ($n.Name -eq 'Add-HseEntries' -or $n.Name -eq 'New-HseCompositionValues' -or $n.Name -eq 'Get-HseProp') }, $true)
             foreach ($f in $fns) { Invoke-Expression $f.Extent.Text }
             $BatchSize = 200
             $script:calls = New-Object System.Collections.Generic.List[object]
@@ -231,6 +233,15 @@ public sealed class LandHse400CompositionScriptTests
             'NEW_HAS_CODE=' + $last.Items[0].ContainsKey('code')
             'NEW_HAS_ID=' + $last.Items[0].ContainsKey('id')
 
+            # Змішаний вхід під StrictMode: нові (без Id) і наявні (без Code/Display) в одному виклику.
+            $mixed = @($newRows[0], $rows[0])
+            $null = Add-HseEntries 'LAND_HSE400_COMPOSITION' $mixed
+            $mi = $script:calls[$script:calls.Count - 1].Items
+            'MIXED_COUNT=' + $mi.Count
+            'MIXED_NEW_CODE=' + $mi[0].ContainsKey('code')
+            'MIXED_EXISTING_ID=' + $mi[1]['id']
+            'MIXED_EXISTING_HAS_CODE=' + $mi[1].ContainsKey('code')
+
             $null = Add-HseEntries 'LAND_HSE400_COMPOSITION' $rows -ServerDryRun
             'DRY_PATH=' + $script:calls[$script:calls.Count - 1].Path.EndsWith('dryRun=true')
             """;
@@ -252,6 +263,10 @@ public sealed class LandHse400CompositionScriptTests
         Assert.Contains("CONFLICT_REJECTED=2", output, StringComparison.Ordinal); // відмова пакета -> exit 1 скрипта
         Assert.Contains("NEW_HAS_CODE=True", output, StringComparison.Ordinal);
         Assert.Contains("NEW_HAS_ID=False", output, StringComparison.Ordinal);
+        Assert.Contains("MIXED_COUNT=2", output, StringComparison.Ordinal);
+        Assert.Contains("MIXED_NEW_CODE=True", output, StringComparison.Ordinal);
+        Assert.Contains("MIXED_EXISTING_ID=4711", output, StringComparison.Ordinal);
+        Assert.Contains("MIXED_EXISTING_HAS_CODE=False", output, StringComparison.Ordinal);
         Assert.Contains("DRY_PATH=True", output, StringComparison.Ordinal);
     }
 
