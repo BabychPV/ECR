@@ -1045,6 +1045,11 @@ def _cell_formulas_7_0():
 
 _cell_formulas_7_0()
 
+# WW-02: cell-формули Water Report / 7a / 7b / Waste Report (групові підсумки, баланси, «Volume», 8001002, Input/Output/Balance).
+import cellformulas_report  # noqa: E402
+_ww02 = cellformulas_report.apply(out, PS)
+print('WW-02 cellFormulas total:', _ww02['total'], 'unresolved:', _ww02['unresolved'], 'skipped(lookups):', _ww02['skipped'])
+
 # ---- відповідність прод-колонок AF і колонки введення, яких немає в Excel (прод-зразок 2026-10-12, прогалини 3-5): див. prod_mapping.py
 import prod_mapping  # noqa: E402
 out['prodColumnMapping'], _added_cols = prod_mapping.apply(out)

@@ -625,7 +625,7 @@ function Fill-StructureSql([int]$vid) {
                     $row = $dr.NewRow()
                     $row['TableDefId'] = $tid; $row['RowKey'] = [string]$rw.key; $row['Ordinal'] = $o
                     $lab = [string]$rw.en; if ($lab.Length -gt 400) { $lab = $lab.Substring(0, 400) }
-                    $row['LabelL10n'] = (Json-L10n $lab $rw.ru); $row['RowKind'] = [byte]$RowKindCode[[string]$rw.kind]; $row['IsReadOnly'] = $false; $row['IsDeleted'] = $false
+                    $row['LabelL10n'] = (Json-L10n $lab $rw.ru); $row['RowKind'] = [byte]$RowKindCode[[string]$rw.kind]; $row['IsReadOnly'] = [bool]$rw.readOnly; $row['IsDeleted'] = $false
                     $dr.Rows.Add($row); $nr++
                 }
             }
@@ -724,6 +724,18 @@ function Fill-StructureSql([int]$vid) {
             }
         }
         if ($nro -gt 0) { Log "  колонок позначено лише для читання (за моделлю): $nro" }
+        # WW-02: рядок моделі з readOnly (групові підсумки, баланси, «Volume», 8001002, Input/Output/Balance) у клоні мусить
+        # бути лише для читання: комірочна формула на колонці ручного вводу дозволена лише в такому рядку (ECR-TMPL-4227).
+        $nrr = 0
+        foreach ($sh in @($Mdl.sheets)) {
+            foreach ($tb in @($sh.tables)) {
+                $tid = $tableIds["$($sh.code)/$($tb.code)"]
+                foreach ($rw in @(@($tb.rows) | Where-Object { $_.readOnly })) {
+                    $nrr += Sql-Exec $cn 'UPDATE cfg.RowDef SET IsReadOnly=1 WHERE TableDefId=@t AND RowKey=@k AND IsReadOnly=0' @{ t = [int]$tid; k = [string]$rw.key }
+                }
+            }
+        }
+        if ($nrr -gt 0) { Log "  рядків позначено лише для читання (за моделлю): $nrr" }
         # --- правила валідації
         $haveV = @{}
         foreach ($r in (Sql-Query $cn 'SELECT v.TableDefId, v.Code FROM cfg.ValidationRule v JOIN cfg.TableDef t ON t.Id=v.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v' @{ v = $vid }).Rows) {
@@ -783,6 +795,79 @@ function Invoke-StaleTables([int]$vid) {
     return $done
 }
 
+# Формули комірок SQL-масово (Scope=2: RowDefId + ColumnDefId, діалект Template). Ідемпотентно: наявні (за ключем
+# таблиця/рядок/колонка) із тим самим виразом не чіпаються, з іншим - оновлюються порціями по 200, відсутні - вставляються.
+# Дзеркало API-воріт ECR-TMPL-4227: колонка мусить бути обчислюваною (Formula/Calculated) АБО рядок - лише для читання.
+# IsCrossSheet лишається 0, як у формул, створених через API (домен не виставляє його; відкладений rollup не потрібен).
+function Put-CellFormulasSql([int]$vid, $planned) {
+    Assert-EcrMutationAllowed 'масовий SQL-запис формул комірок'
+    $null = Assert-LocalSqlConnection $SqlConnection
+    $cn = New-Object System.Data.SqlClient.SqlConnection($SqlConnection)
+    $cn.Open()
+    try {
+        $tid = @{}; $cols = @{}; $rows = @{}
+        foreach ($r in (Sql-Query $cn 'SELECT t.Id, s.Code AS S, t.Code AS T FROM cfg.TableDef t JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v AND t.IsDeleted=0 AND s.IsDeleted=0' @{ v = $vid }).Rows) { $tid["$($r.S)/$($r.T)"] = [int]$r.Id }
+        foreach ($r in (Sql-Query $cn 'SELECT c.Id, c.TableDefId, c.Code, c.DataType FROM cfg.ColumnDef c JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v AND c.IsDeleted=0' @{ v = $vid }).Rows) {
+            $cols["$($r.TableDefId)/$($r.Code)"] = @{ Id = [int]$r.Id; Computed = ([int]$r.DataType -in @($DataTypeCode['Formula'], $DataTypeCode['Calculated'])) }
+        }
+        foreach ($r in (Sql-Query $cn 'SELECT r.Id, r.TableDefId, r.RowKey, r.IsReadOnly FROM cfg.RowDef r JOIN cfg.TableDef t ON t.Id=r.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v AND r.IsDeleted=0' @{ v = $vid }).Rows) {
+            $rows["$($r.TableDefId)/$($r.RowKey)"] = @{ Id = [int]$r.Id; ReadOnly = [bool]$r.IsReadOnly }
+        }
+        $have = @{}
+        foreach ($r in (Sql-Query $cn 'SELECT f.Id, f.TableDefId, f.RowDefId, f.ColumnDefId, f.Expression FROM cfg.FormulaDef f JOIN cfg.TableDef t ON t.Id=f.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v AND f.IsDeleted=0 AND f.Scope=2 ORDER BY f.Id' @{ v = $vid }).Rows) {
+            $k = "$($r.TableDefId)/$($r.RowDefId)/$($r.ColumnDefId)"
+            if (-not $have.ContainsKey($k)) { $have[$k] = @{ Id = [int]$r.Id; Expression = [string]$r.Expression } }
+        }
+        $df = New-Object System.Data.DataTable
+        foreach ($n in 'TableDefId:int', 'Scope:byte', 'ColumnDefId:int', 'RowDefId:int', 'Dialect:byte', 'Expression:string', 'EvaluationOrder:int', 'IsCrossSheet:bool', 'IsSnapshot:bool', 'IsDeleted:bool') {
+            $p = $n -split ':'
+            $ty = switch ($p[1]) { 'int' { [int] } 'byte' { [byte] } 'bool' { [bool] } default { [string] } }
+            [void]$df.Columns.Add($p[0], $ty)
+        }
+        $upd = @(); $same = 0; $seen = @{}
+        foreach ($p in $planned) {
+            $t = $tid["$($p.Sheet)/$($p.Table)"]
+            if ($null -eq $t) { throw "Формула комірки $($p.Row)/$($p.Column): немає таблиці $($p.Sheet)/$($p.Table) у структурі версії $vid." }
+            $c = $cols["$t/$($p.Column)"]
+            if ($null -eq $c) { throw "Формула комірки $($p.Row)/$($p.Column): немає колонки в $($p.Sheet)/$($p.Table)." }
+            $r = $rows["$t/$($p.Row)"]
+            if ($null -eq $r) { throw "Формула комірки $($p.Row)/$($p.Column): немає рядка в $($p.Sheet)/$($p.Table)." }
+            if (-not $c.Computed -and -not $r.ReadOnly) {
+                throw "Формула комірки $($p.Sheet)/$($p.Table) $($p.Row)/$($p.Column): колонка ручного вводу і рядок не лише для читання (ECR-TMPL-4227): формула мовчки затирала б введене."
+            }
+            $k = "$t/$($r.Id)/$($c.Id)"
+            if ($seen.ContainsKey($k)) { throw "Формула комірки $($p.Row)/$($p.Column) в $($p.Sheet)/$($p.Table) задана двічі." }
+            $seen[$k] = $true
+            if ($have.ContainsKey($k)) {
+                if ($have[$k].Expression -ceq [string]$p.Expr) { $same++ } else { $upd += [pscustomobject]@{ Id = $have[$k].Id; Expression = [string]$p.Expr } }
+                continue
+            }
+            $row = $df.NewRow()
+            $row['TableDefId'] = $t; $row['Scope'] = [byte]2; $row['ColumnDefId'] = $c.Id; $row['RowDefId'] = $r.Id; $row['Dialect'] = [byte]0
+            $row['Expression'] = [string]$p.Expr; $row['EvaluationOrder'] = 0; $row['IsCrossSheet'] = $false; $row['IsSnapshot'] = $false; $row['IsDeleted'] = $false
+            $df.Rows.Add($row)
+        }
+        Bulk-Insert $cn 'cfg.FormulaDef' $df
+        Log ("  формул комірок (SQL): вставлено {0}, без змін {1}, оновлено {2}" -f $df.Rows.Count, $same, $upd.Count)
+        if ($upd.Count -gt 0) {
+            $du = New-Object System.Data.DataTable
+            [void]$du.Columns.Add('Id', [int]); [void]$du.Columns.Add('Expression', [string])
+            foreach ($u in $upd) { [void]$du.Rows.Add([int]$u.Id, [string]$u.Expression) }
+            $null = Sql-Exec $cn 'CREATE TABLE #CU (N int IDENTITY(1,1) PRIMARY KEY, Id int, Expression nvarchar(max))'
+            Assert-EcrMutationAllowed 'SQL-запис (SqlBulkCopy у #CU)'
+            $bc = New-Object System.Data.SqlClient.SqlBulkCopy($cn); $bc.DestinationTableName = '#CU'
+            foreach ($n in 'Id', 'Expression') { [void]$bc.ColumnMappings.Add($n, $n) }
+            $bc.WriteToServer($du); $bc.Close()
+            for ($lo = 0; $lo -lt $du.Rows.Count; $lo += 200) {
+                $null = Sql-Exec $cn 'UPDATE f SET Expression = p.Expression, Dialect = 0 FROM cfg.FormulaDef f JOIN #CU p ON p.Id = f.Id WHERE p.N > @lo AND p.N <= @hi' @{ lo = $lo; hi = ($lo + 200) }
+            }
+            $null = Sql-Exec $cn 'DROP TABLE #CU'
+        }
+        return ($df.Rows.Count + $same + $upd.Count)
+    }
+    finally { $cn.Close() }
+}
+
 function Put-CellFormulas([int]$vid) {
     $planned = @()
     foreach ($sh in @($Mdl.sheets)) {
@@ -794,6 +879,9 @@ function Put-CellFormulas([int]$vid) {
         }
     }
     if ($planned.Count -eq 0) { Log '  формул комірок у моделі немає'; return 0 }
+    # WW-02: кілька тисяч формул комірок (Waste 6 346, Water 120, 7a/7b 203) через PUT = години (кожен виклик завантажує всю
+    # версію, G-API-1), тому в Sql-режимі структури вони йдуть масово, як формули колонок; публікація їх так само перевіряє.
+    if ($StructureMode -eq 'Sql') { return (Put-CellFormulasSql $vid $planned) }
     $st = (Api GET "/api/v1/template-versions/$vid/structure").Json
     $ids = @{}
     foreach ($s in @($st.sheets)) {
@@ -956,7 +1044,7 @@ function Stage-Template {
             foreach ($rw in @($tb.rows)) {
                 $ro++
                 $null = Api PUT "/api/v1/template-versions/$vid/tables/$tid/rows/$($rw.key)" @{
-                    labelL10n = (L10n ([string]$rw.en) $rw.ru); ordinal = $ro; rowKind = [string]$rw.kind; parentRowKey = $(if ($rw.parent) { [string]$rw.parent } else { $null }); isReadOnly = $false }
+                    labelL10n = (L10n ([string]$rw.en) $rw.ru); ordinal = $ro; rowKind = [string]$rw.kind; parentRowKey = $(if ($rw.parent) { [string]$rw.parent } else { $null }); isReadOnly = [bool]$rw.readOnly }
                 $nRows++
             }
             foreach ($ru in @($tb.rules)) {
