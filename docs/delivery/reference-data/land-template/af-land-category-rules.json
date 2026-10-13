@@ -198,6 +198,14 @@
                       "normalizesNae":  false,
                       "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C12_OFFSHORE_OPERATIONAL/ECW_C12_04_02.cs:74-87",
                       "note":  "form B: key {diesel|oil}_{code}; C# fuelType.Contains(Diesel). Values of the stored-material field that contain Diesel: the two dictionary entries (prod copy + template registries); any other value is oil as in C#."
+                  },
+                  {
+                      "methodology":  "ECW_C12_03",
+                      "expression":  "if(in(@IDCodeNAEProject,'0026','0030','0036','0038','0040','0042'),'0026','')",
+                      "normalizesNae":  true,
+                      "substancesFromApplicability":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C12_OFFSHORE_OPERATIONAL/ECW_C12_03.cs:116-120,248-255",
+                      "note":  "form B: key {group}_{code}; C# nae = Land_NAE without spaces, group 0026 = NAE 0026/0030/0036/0038/0040/0042, other NAE -> empty key, row rejected. The T10_01/T11_01 tables have no Land_NAE column: the argument source of the Land_NAE bridge is IDCodeNAEProject, so the rule reads it directly. The SUBSTANCE_APPLICABLE wrapper (selector Land_TypeFuel, kind TypeFuel) is put by -Stage SubstanceApplicability, not stored here. substancesFromApplicability: the methodology substance set is the union of codes of land-substance-applicability.json (15 codes), not the constants' category suffixes."
                   }
               ]
 }

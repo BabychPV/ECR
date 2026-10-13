@@ -76,6 +76,8 @@
 .PARAMETER KnownStaleTables   Коди "АРКУШ/ТАБЛИЦЯ" (або лише код таблиці), які не вважати застарілими.
 .PARAMETER KeepNumericMode    -Stage CompositionMass: не переводити чернетки з фрагментом складу в NumericMode=Strict
                               (за замовчуванням переводить: REGFIND/REGFIELD/CURRENT_SUBSTANCE() у Legacy -> ECR-CALC-0433).
+.PARAMETER OnlyMethodology    Етапи LandParity, CompositionMass, SubstanceApplicability: обробити лише ці коди методологій
+                              (напр. ECW_C12_03). Порожньо - усі методології етапу (як раніше).
 .PARAMETER DryRun             Лише читання й підрахунок.
 #>
 [CmdletBinding()]
@@ -98,6 +100,7 @@ param(
     [switch]$PruneStaleTables,
     [switch]$KeepNumericMode,
     [string[]]$KnownStaleTables = @(),
+    [string[]]$OnlyMethodology = @(),
     [switch]$DryRun
 )
 
@@ -1448,6 +1451,7 @@ function Stage-LandParity {
     foreach ($r in $rules) {
         $name = [string]$r.methodology
         $expr = [string]$r.expression
+        if ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains $name) { continue }
         $m = $mid[$name]
         if (-not $m) { continue }
         $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
@@ -1478,6 +1482,16 @@ function Stage-LandParity {
         $consts = @((Api GET "/api/v1/methodologies/$m/versions/$vid/constants").Json)
         $cats = @($consts | ForEach-Object { [string]$_.category } | Where-Object { $_ } | Sort-Object -Unique)
         $codes = Get-LandSubstanceCodes -Categories $cats
+        # ✎ 2026-10-13: правило з `substancesFromApplicability` (ECW_C12_03) - склад = об'єднання кодів словника
+        # застосовності, а не лише суфікси констант (константи можуть не покривати всі 15 кодів).
+        $fromApplicability = $r.PSObject.Properties['substancesFromApplicability']
+        if ($null -ne $fromApplicability -and [bool]$fromApplicability.Value) {
+            $saFile = Join-Path $repo 'docs\delivery\reference-data\land-template\land-substance-applicability.json'
+            $saDoc = Get-Content -LiteralPath $saFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            $saEntry = $saDoc.methodologies.PSObject.Properties[$name]
+            $codes = Get-LandApplicabilityCodeUnion -Codes $(if ($null -ne $saEntry) { $saEntry.Value.codes } else { $null })
+            if ($codes.Count -eq 0) { Log "  ! ${name}: у land-substance-applicability.json немає кодів - склад речовин не задається" }
+        }
         if ($codes.Count -gt 0 -and $air.Count -gt 0) {
             $ids = @(); $missing = @()
             foreach ($c in $codes) {
@@ -1593,6 +1607,7 @@ function Stage-CompositionMass {
     $changed = 0
     foreach ($p in $cm.methodologies.PSObject.Properties) {
         $name = $p.Name
+        if ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains $name) { continue }
         $m = $mid[$name]
         if (-not $m) { Log "  ${name}: методології на сервері немає - пропущено"; continue }
         $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
@@ -1659,6 +1674,7 @@ function Stage-SubstanceApplicability {
     $changed = 0
     foreach ($p in $sa.methodologies.PSObject.Properties) {
         $name = $p.Name
+        if ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains $name) { continue }
         $m = $mid[$name]
         if (-not $m) { Log "  ${name}: методології на сервері немає - пропущено"; continue }
         $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
