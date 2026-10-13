@@ -281,6 +281,33 @@ public sealed class FormulaDefTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "WW-02")]
+    public async Task Формула_комірки_на_колонці_ручного_вводу_приймається_лише_в_рядку_лише_для_читання()
+    {
+        // Змішана колонка (Water Report: елементи вводить людина, групи/баланси рахує формула): вимога
+        // «обчислювана колонка» перенесена на рядок — людина його не редагує, тож перерахунок нічого не затре.
+        var summary = new RowDef(_table.Id, RowKey.Create("7001000"), 1, Text("7001000"), RowKind.Group);
+        SetId(summary, 201);
+        summary.SetReadOnly(true);
+        _table.AddRow(summary);
+
+        var saved = await Save().HandleAsync(
+            1, _table.Id, FormulaScope.Cell, summary.RowKeyValue, Command("[Jan] + [Feb]"),
+            CancellationToken.None, ColumnTarget(_manualColumn));
+
+        Assert.Equal(FormulaScope.Cell, saved.Scope);
+        Assert.Equal(summary.Id, saved.RowDefId);
+        Assert.Equal(_manualColumn.Id, saved.ColumnDefId);
+
+        // Той самий стовпець, але рядок для вводу — як і раніше ECR-TMPL-4227.
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Save().HandleAsync(
+            1, _table.Id, FormulaScope.Cell, _row.RowKeyValue, Command(),
+            CancellationToken.None, ColumnTarget(_manualColumn)));
+        Assert.Equal(ErrorCodes.ComputationOnManualColumn, error.ErrorCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "D1")]
     public async Task Формула_комірки_без_колонки_рядка_чи_з_неіснуючою_адресою_відхиляється_404()
     {
