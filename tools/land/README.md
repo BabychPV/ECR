@@ -1,4 +1,4 @@
-# tools/land: завантаження вкладки «2. Contract» шаблону Land
+﻿# tools/land: завантаження вкладки «2. Contract» шаблону Land
 
 Скрипти PowerShell (Windows PowerShell 5.1 і PowerShell 7) працюють через REST API ECR.
 Нічого не видаляють. Не запускати проти робочої бази замовника без рішення людини.
@@ -361,3 +361,36 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 Build (`Stage Template`, презентація колонок) записує результат правила в `cfg.ColumnDef.DisplayFormat`
 (ідемпотентно, `ISNULL`/порівняння), Verify-LandTemplate звіряє його з версією («презентація колонок»).
 Тест: `LandDisplayFormatRuleTests` (Ecr.Architecture.Tests).
+
+## Перенос значень застарілих таблиць 9a (D-1): `Move-LandStaleTableValues.ps1`
+
+Після публікації нової версії шаблону БЕЗ `-PruneStaleTables` і `migrate-version` (режим Safe, без мапи колонок)
+таблиці `T9a_03 / T9a_06 / T9a_07` лишаються в документах разом зі значеннями. Скрипт переносить ці значення в
+`T9a_17a / T9a_21a / T9a_21b` окремим кроком ПІСЛЯ міграції (мапа таблиць — `rename-maps/land-9a-missing-tables.json`).
+
+```powershell
+$pw = Read-Host 'Пароль ECR' -AsSecureString
+# 1. План (за замовчуванням лише читає; значення не друкуються, лише лічильники й коди):
+.\Move-LandStaleTableValues.ps1 -ApiBase http://localhost:5094 -User admin -Password $pw -DocumentId 2 -PeriodKey 202606
+# усі документи проєкту, усі 12 місяців року:
+.\Move-LandStaleTableValues.ps1 -ApiBase http://localhost:5094 -User admin -Password $pw -ProjectId 1 -Year 2026
+# 2. Запис (після Reopen аркушів людиною/координатором):
+.\Move-LandStaleTableValues.ps1 -ApiBase http://localhost:5094 -User admin -Password $pw -DocumentId 2 -PeriodKey 202606 -Execute -ConfirmStand localhost:5094
+```
+
+- **Відповідність.** Таблиця - за мапою (на тому самому аркуші); рядок - за `rowKey` (він зберігається, як у
+  `migrate-version`); колонка - за кодом колонки (запис мапи може мати `columns[{fromColumnCode,toColumnCode}]`).
+- **Що рахується окремо й НЕ пишеться:** колонки немає в новій таблиці (код колонки друкується), колонка нової
+  таблиці лише для читання (обчислювана), рядка немає в таблиці без динамічних рядків, таблиці-приймача немає.
+- **Конфлікт** (у цільовій комірці вже інше значення) - пропуск і лічильник; перезапис лише з `-OverwriteConflicts`.
+- **Ідемпотентність:** значення, що вже збігається, - «однакове»; повторний запуск після успіху пише 0 рядків.
+- **Джерело** не змінюється; стирання перенесених/однакових значень у старій таблиці - лише з `-ClearSource`.
+- **Reopen.** Аркуш у стані Submitted/Approved для запису треба відкрити (`POST /documents/{id}/reopen`). Скрипт
+  Reopen НЕ виконує (це рішення людини/координатора). Якщо є що писати, а аркуш не відкритий, `-Execute` зупиняється
+  ДО будь-якого запису: «потрібен Reopen аркуша X/період Y». У плані такі аркуші позначено рядками з «!».
+- **Безпека:** лише локальний стенд (як решта скриптів: `Assert-LocalBaseUrl`); запис - лише з `-Execute` і
+  `-ConfirmStand`; пейсинг не частіше 1 виклику на 2.2 с (`-PaceSeconds`), `Retry-After` поважається; значення
+  комірок у вивід не потрапляють. PATCH іде від імені користувача входу з `origin = UserEdit`, тож права на
+  комірки й вікно доступу діють як для людини (відхилені рядки рахуються в «відхилено», код виходу 1).
+- Тест: `LandStaleValuesTests` (Ecr.Architecture.Tests; функції бібліотеки `LandStaleValues.Lib.ps1` виконує справжній
+  PowerShell з підробленим Api).
