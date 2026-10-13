@@ -678,6 +678,37 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
 
     /// <inheritdoc />
     /// <remarks>
+    /// ⚠ Сирий SQL, а не LINQ: потрібен і архів <c>arc.CalculationResult</c>, і рядки
+    /// <c>Superseded</c> — запит без фільтрів, той самий предикат, що й у
+    /// <c>MethodologyVersionDeletionStore</c>.
+    /// </remarks>
+    public async Task<bool> AnyCalculationResultsAsync(
+        IReadOnlyCollection<int> methodologyVersionIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodologyVersionIds);
+
+        foreach (var id in methodologyVersionIds.Distinct())
+        {
+            var used = await db.Database
+                .SqlQuery<int>($"""
+                    SELECT CASE WHEN EXISTS (SELECT 1 FROM calc.CalculationResult WHERE MethodologyVersionId = {id})
+                                  OR EXISTS (SELECT 1 FROM arc.CalculationResult WHERE MethodologyVersionId = {id})
+                                THEN 1 ELSE 0 END AS Value
+                    """)
+                .SingleAsync(ct)
+                .ConfigureAwait(false);
+
+            if (used == 1)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
     /// ⚠ Версії ЗАВАНТАЖУЮТЬСЯ разом із методологією і відстежуються: агрегат
     /// потрібен, щоб перевірити перетин вікон і опублікувати версію в одній
     /// транзакції. <c>AsNoTracking</c> тут зробив би публікацію

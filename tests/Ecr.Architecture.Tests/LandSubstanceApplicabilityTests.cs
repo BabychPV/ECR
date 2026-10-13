@@ -405,4 +405,65 @@ public sealed class LandSubstanceApplicabilityTests
         Assert.Contains("-eq 'Published'", stage, StringComparison.Ordinal);
         Assert.DoesNotContain("/publish", stage, StringComparison.Ordinal);
     }
+
+    // D-7: обгортка читає @Land_TypeFuelOrStream (C11_10), а правило без обгортки - ні, тож PARITY_1 без цього
+    // аргументу дає 422 ECR-CALC-0422. Мутаційний доказ: у Get-LandSubstanceApplicabilitySampleArguments повернути
+    // порожню таблицю (або прибрати виклик зі Stage-SubstanceApplicability) - тест червоніє.
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Обгортка_додає_у_PARITY_1_аргумент_селектора_кожної_методології()
+    {
+        const string script = """
+            $ErrorActionPreference = 'Stop'
+            . $args[0]
+            . $args[2]
+            $m = Get-Content -LiteralPath $args[1] -Raw -Encoding UTF8 | ConvertFrom-Json
+            $sa = $m.substanceApplicability
+            $reg = @($m.registries) | Where-Object { $_.code -eq $sa.registry } | Select-Object -First 1
+            foreach ($p in $sa.methodologies.PSObject.Properties) {
+              $n = Get-LandSubstanceApplicabilitySampleArguments -Methodology $p.Name -Kind ([string]$p.Value.kind) `
+                   -ValueExpression ([string]$p.Value.valueExpression) -Entries @($reg.entries)
+              $names = Get-LandRuleArgumentNames -Expression ([string]$p.Value.valueExpression)
+              $missing = @($names | Where-Object { -not $n.ContainsKey($_) })
+              'M=' + $p.Name + ';NEEDED=' + (($n.Keys | Sort-Object) -join ',') + ';MISSING=' + ($missing -join ',')
+            }
+            $ex = Get-LandSubstanceApplicabilitySampleArguments -Methodology 'ECW_C11_10' -Kind 'Stream' `
+                  -ValueExpression '@Land_TypeFuelOrStream' -Entries @([pscustomobject]@{ fields = [pscustomobject]@{
+                    METHODOLOGY = 'ECW_C11_10'; SELECTOR_KIND = '*'; SELECTOR_VALUE = '*'; SUBSTANCE_CODE = '*' } },
+                  [pscustomobject]@{ fields = [pscustomobject]@{
+                    METHODOLOGY = 'ECW_C11_10'; SELECTOR_KIND = 'Stream'; SELECTOR_VALUE = 'S1'; SUBSTANCE_CODE = '333' } })
+            'SYN=' + $ex['Land_TypeFuelOrStream']
+            'SYNNONE=' + (Get-LandSubstanceApplicabilitySampleArguments -Methodology 'X' -Kind 'Stream' `
+                  -ValueExpression '@A' -Entries @()).Count
+            """;
+
+        var (exit, output) = RunPowerShell(
+            script,
+            LandFile("LandSubstanceApplicability.Lib.ps1"),
+            Path.Combine(Dir, "land-template.model.json"),
+            LandFile("LandParityRuleArgs.Lib.ps1"));
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("M=ECW_C11_10;NEEDED=Land_TypeFuelOrStream;MISSING=", output, StringComparison.Ordinal);
+        Assert.Contains("SYN=S1", output, StringComparison.Ordinal);
+        Assert.Contains("SYNNONE=0", output, StringComparison.Ordinal);
+
+        // Усі методології, крім REGFIELD (C12_03: значення - код запису довідника), отримують свій аргумент.
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Where(l => l.StartsWith("M=", StringComparison.Ordinal)))
+        {
+            if (line.StartsWith("M=ECW_C12_03;", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            Assert.Matches(@"NEEDED=\w+;MISSING=\s*$", line.TrimEnd());
+        }
+
+        // Етап справді вживає це при публікації обгортки.
+        var build = File.ReadAllText(LandFile("Build-LandTemplate.ps1"));
+        var stage = build[build.IndexOf("function Stage-SubstanceApplicability", StringComparison.Ordinal)..];
+        stage = stage[..stage.IndexOf("function Stage-Documents", StringComparison.Ordinal)];
+        Assert.Contains("Get-LandSubstanceApplicabilitySampleArguments", stage, StringComparison.Ordinal);
+        Assert.Contains("/tests/PARITY_1", stage, StringComparison.Ordinal);
+    }
 }

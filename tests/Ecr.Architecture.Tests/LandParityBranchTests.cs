@@ -23,6 +23,11 @@ namespace Ecr.Architecture.Tests;
 /// (415 потрапляє в обгортку) - червоніють <see cref="Код_415_і_type1_не_змінюються"/> та
 /// <see cref="Етап_обгортає_лише_type2_компонентів_і_не_чіпає_415_та_type1"/>; з обгортки прибрати <c>, NULL)</c> -
 /// червоніє <see cref="Обгортка_дає_порожній_вихід_за_наявного_компонента_і_вираз_без_нього"/>.
+/// Маркер `?` (D-397; міст компонента не зберігає комірку за порожньої множини GTU, без `?` type2 = #ARG): з
+/// <c>Convert-LandParityBranchFormula</c> прибрати дописування `?` - червоніють
+/// <see cref="Компонент_аргументи_type2_отримують_маркер_необовязковості_а_чужі_елементи_цілі_і_повтор_нуль_змін"/>,
+/// <see cref="Етап_лише_ставить_маркер_у_вже_обгорнутій_без_нього_формулі_і_не_повторює_обгортку"/> та перевірки
+/// списку аргументів у перших двох тестах.
 /// </remarks>
 public sealed class LandParityBranchTests
 {
@@ -49,6 +54,14 @@ public sealed class LandParityBranchTests
         Out 'R3' $r3
         $r4 = Convert-LandParityBranchFormula -Expression '@Land_Measure_GasConsumption * 2' -ArgumentsCsv '@Land_Measure_GasConsumption;@Land_Measure_Component_330;' -Component '330'
         Out 'R4' $r4
+        # Вже обгорнута, але без `?` (чернетка до D-397): лише маркер, обгортка не повторюється; чужі елементи цілі.
+        $w = 'if(@Land_Measure_Component_304 = NULL, @Land_Measure_GasConsumption * 2, NULL)'
+        $r5 = Convert-LandParityBranchFormula -Expression $w -ArgumentsCsv '@Land_Measure_GasConsumption;@Land_Measure_Component_304;@Land_Measure_Component_O2;@Land_Foreign?;' -Component '304'
+        Out 'R5' $r5
+        $r6 = Convert-LandParityBranchFormula -Expression $r5.Expression -ArgumentsCsv $r5.ArgumentsCsv -Component '304'
+        Out 'R6' $r6
+        $r7 = Convert-LandParityBranchFormula -Expression '@Land_Measure_GasConsumption * 2' -ArgumentsCsv '@Land_Measure_GasConsumption;@Land_Measure_Component_337?;' -Component '337'
+        Out 'R7' $r7
         Out 'N_T1' (Get-LandParityBranchNullType1Component -FormulaCode 'ECW_EC_tons_415_type1' -Components @('415'))
         Out 'N_G1' (Get-LandParityBranchNullType1Component -FormulaCode 'ECW_EC_gsec_415_type1' -Components @('415'))
         Out 'N_T2' (Get-LandParityBranchNullType1Component -FormulaCode 'ECW_EC_tons_415_type2' -Components @('415'))
@@ -92,8 +105,8 @@ public sealed class LandParityBranchTests
                 return @{ Json = @(@{ id = 70; status = $st }) }
             }
             if ($Path -like '*/versions/70/formulas') {
-                $t2 = if ($mode -eq 'wrapped') { $wrapped } else { '@Land_Measure_GasConsumption * 2' }
-                $a2 = if ($mode -eq 'wrapped') { '@Land_Measure_GasConsumption;@Land_Measure_Component_301;' } else { '@Land_Measure_GasConsumption;' }
+                $t2 = if ($mode -eq 'wrapped' -or $mode -eq 'wrappedUnmarked') { $wrapped } else { '@Land_Measure_GasConsumption * 2' }
+                $a2 = if ($mode -eq 'wrapped') { '@Land_Measure_GasConsumption;@Land_Measure_Component_301?;' } elseif ($mode -eq 'wrappedUnmarked') { '@Land_Measure_GasConsumption;@Land_Measure_Component_301;' } else { '@Land_Measure_GasConsumption;' }
                 return @{ Json = @(
                     (Formula 'ECW_EC_tons_301_type1' '@Land_Measure_Component_301 * 2' '@Land_Measure_Component_301;'),
                     (Formula 'ECW_EC_tons_301_type2' $t2 $a2),
@@ -201,7 +214,8 @@ public sealed class LandParityBranchTests
         Assert.Equal(
             "if(@Land_Measure_Component_301 = NULL, @Land_Measure_GasConsumption * 2, NULL)",
             r["R1"].GetProperty("Expression").GetString());
-        Assert.Equal("@Land_Measure_GasConsumption;@Land_Measure_Component_301;", r["R1"].GetProperty("ArgumentsCsv").GetString());
+        // D-397: аргумент-компонент необов'язковий (`?`): міст GTU не зберігає комірку, коли рядка-джерела немає.
+        Assert.Equal("@Land_Measure_GasConsumption;@Land_Measure_Component_301?;", r["R1"].GetProperty("ArgumentsCsv").GetString());
 
         // Повтор на вже обгорнутій формулі - 0 змін.
         Assert.False(r["R2"].GetProperty("Changed").GetBoolean());
@@ -211,10 +225,56 @@ public sealed class LandParityBranchTests
         Assert.True(r["R3"].GetProperty("Changed").GetBoolean());
         Assert.Equal(JsonValueKind.Null, r["R3"].GetProperty("ArgumentsCsv").ValueKind);
 
-        // Аргумент уже в списку - не дублюється.
+        // Аргумент уже в списку - не дублюється, лише отримує маркер `?`.
         Assert.Equal(
-            "@Land_Measure_GasConsumption;@Land_Measure_Component_330;",
+            "@Land_Measure_GasConsumption;@Land_Measure_Component_330?;",
             r["R4"].GetProperty("ArgumentsCsv").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Компонент_аргументи_type2_отримують_маркер_необовязковості_а_чужі_елементи_цілі_і_повтор_нуль_змін()
+    {
+        var r = Lib();
+
+        // Уже обгорнута без `?`: обгортка та сама, лише маркер; усі Land_Measure_Component_* позначені, чужі - ні.
+        Assert.True(r["R5"].GetProperty("Changed").GetBoolean());
+        Assert.Equal(
+            "if(@Land_Measure_Component_304 = NULL, @Land_Measure_GasConsumption * 2, NULL)",
+            r["R5"].GetProperty("Expression").GetString());
+        Assert.Equal(
+            "@Land_Measure_GasConsumption;@Land_Measure_Component_304?;@Land_Measure_Component_O2?;@Land_Foreign?;",
+            r["R5"].GetProperty("ArgumentsCsv").GetString());
+
+        // Повтор - 0 змін.
+        Assert.False(r["R6"].GetProperty("Changed").GetBoolean());
+        Assert.Equal(r["R5"].GetProperty("ArgumentsCsv").GetString(), r["R6"].GetProperty("ArgumentsCsv").GetString());
+
+        // Не обгорнута, маркер уже є: обгортається, `?` не дублюється.
+        Assert.True(r["R7"].GetProperty("Changed").GetBoolean());
+        Assert.Equal(
+            "@Land_Measure_GasConsumption;@Land_Measure_Component_337?;",
+            r["R7"].GetProperty("ArgumentsCsv").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Етап_лише_ставить_маркер_у_вже_обгорнутій_без_нього_формулі_і_не_повторює_обгортку()
+    {
+        var puts = Stage("wrappedUnmarked", out var output);
+
+        // 301_type2 уже обгорнута, але без `?` - ОДИН PUT з тим самим виразом і маркером; 337 - обгортається повністю.
+        var tons = puts.Single(p => p.Path.EndsWith("ECW_EC_tons_301_type2", StringComparison.Ordinal)).Body;
+        Assert.Equal(
+            "if(@Land_Measure_Component_301 = NULL, @Land_Measure_GasConsumption * 2, NULL)",
+            tons.GetProperty("expression").GetString());
+        Assert.Equal("@Land_Measure_GasConsumption;@Land_Measure_Component_301?;", tons.GetProperty("argumentsCsv").GetString());
+        Assert.Equal(2, puts.Count);
+
+        // type1 компонента й код 415 маркера не отримують: їхні формули не пишуться.
+        Assert.DoesNotContain(puts, p => p.Path.EndsWith("_type1", StringComparison.Ordinal));
+        Assert.DoesNotContain(puts, p => p.Path.Contains("_415_", StringComparison.Ordinal));
+        Assert.Contains("змінено формул: 2", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -271,7 +331,7 @@ public sealed class LandParityBranchTests
         Assert.Equal(
             "if(@Land_Measure_Component_301 = NULL, @Land_Measure_GasConsumption * 2, NULL)",
             tons.GetProperty("expression").GetString());
-        Assert.Equal("@Land_Measure_GasConsumption;@Land_Measure_Component_301;", tons.GetProperty("argumentsCsv").GetString());
+        Assert.Equal("@Land_Measure_GasConsumption;@Land_Measure_Component_301?;", tons.GetProperty("argumentsCsv").GetString());
         Assert.Equal(5, tons.GetProperty("outputUnitId").GetInt32());
 
         var gsec = puts.Single(p => p.Path.EndsWith("ECW_EC_gsec_337_type2", StringComparison.Ordinal)).Body;

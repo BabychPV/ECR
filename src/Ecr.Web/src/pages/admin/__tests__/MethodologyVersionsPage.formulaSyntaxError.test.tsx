@@ -129,6 +129,7 @@ const Strings = {
   'methodologies.resultText': 'Text',
   'methodologies.arguments': 'Arguments',
   'methodologies.argumentsHint': 'Comma-separated.',
+  'methodologies.argumentsOptionalHint': 'Name? marks an optional argument.',
   'methodologies.outputUnit': 'Output unit',
   'methodologies.outputUnitHint': 'Unit of the result.',
   'methodologies.noUnit': 'No unit',
@@ -282,5 +283,21 @@ describe('MethodologyVersionsPage: синтаксична помилка вир�
 
     const saveButton = within(dialog).getByRole('button', { name: 'Save formula' });
     expect(saveButton).toHaveProperty('disabled', false);
+  });
+
+  it('поле аргументів підказує маркер необов’язкового аргументу «?» (D-OA)', async () => {
+    mockApi();
+    await loadCatalog('en', 'public');
+    await loadCatalog('en', 'private');
+    const user = userEvent.setup();
+    show();
+
+    await screen.findByText('1.0');
+
+    await user.click(await screen.findByRole('button', { name: 'Add formula' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Formula' });
+
+    expect(within(dialog).getByText(/Name\? marks an optional argument/)).toBeDefined();
   });
 });

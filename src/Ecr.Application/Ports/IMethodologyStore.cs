@@ -259,6 +259,22 @@ public interface IMethodologyStore
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Константи, формули й аргументи версії.</returns>
     public Task<MethodologySymbols> GetSymbolsAsync(int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>
+    /// Чи має хоч одна з версій хоч один рядок результату — у <c>calc.CalculationResult</c>
+    /// або в архіві <c>arc.CalculationResult</c>, у будь-якому статусі (включно з <c>Superseded</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Єдиний слід «версією щось порахували»: зрізи подання (<c>SubmissionSnapshot</c>) версій
+    /// методологій не фіксують (Q-155), тож використання версії видно лише з результатів.
+    /// Потрібне гарду <c>strictBackdated</c> (ФВ-9.9): заднє число небезпечне, лише якщо є
+    /// порахований результат, який воно змінить.
+    /// </remarks>
+    /// <param name="methodologyVersionIds">Версії методології.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>true</c>, якщо хоч для однієї з версій є результат.</returns>
+    public Task<bool> AnyCalculationResultsAsync(
+        IReadOnlyCollection<int> methodologyVersionIds, CancellationToken ct);
 }
 
 /// <summary>
