@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Alert, Badge, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
@@ -20,7 +20,7 @@ import { cellFormatOf, withCellFormat } from './conditionalAppearance';
 import { CellColorMenu, type ColourTarget } from './CellColorMenu';
 import { useCellStyles } from './useCellStyles';
 import { OptimisticMaxCells, areaChunks, areaOf, colourableCells, headerStyleProps, scopeRange, userStyleOf, withRowStyle, withUserStyle, type StyleScope } from './userCellStyle';
-import { cellDisplay, cellText, editorValueOf, isNumericColumn, isTextColumnType, sameColumnValue } from './cellValue';
+import { cellDisplayMemo, cellText, editorValueOf, isNumericColumn, isTextColumnType, sameColumnValue } from './cellValue';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
 import { planPaste, type PasteRejection } from './clipboard';
 import { parseClipboard, toClipboard } from './tsvClipboard';
@@ -1202,9 +1202,25 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    * перезапитується на збереження — тобто лічильник рендерів на `PATCH` цей
    * рядок не рухає.
    */
+  // ⛔ `P2`: підсумки рахуються від ВІДКЛАДЕНОГО `data` — перший малюнок сітки (перша
+  // видима комірка) не чекає на суму 232 колонок; рядок підсумків дозаповнюється
+  // наступним рендером, ще до першої прокрутки.
+  const totalsData = useDeferredValue(data);
   const totals = useMemo(
-    () => (data === undefined ? new Map<string, ColumnTotal>() : columnTotals(data, { pending, overrides })),
-    [data, pending, overrides],
+    () =>
+      totalsData === undefined ? new Map<string, ColumnTotal>() : columnTotals(totalsData, { pending, overrides }),
+    [totalsData, pending, overrides],
+  );
+
+  // ⛔ `P2`: колонки НЕ залежать від мапи підсумків напряму. Вона потрібна лише підказці
+  // комірки підсумків, а нова мапа (відкладений розрахунок, кожна правка) перебудовувала б
+  // 232 визначення колонок і змушувала RevoGrid обробити їх знову. Підказку читаємо в момент
+  // малювання з `ref`; сама комірка підсумків перемальовується зі зміною `pinnedTotals`.
+  const totalsRef = useRef(totals);
+  totalsRef.current = totals;
+  const totalsView = useMemo<Pick<ReadonlyMap<string, ColumnTotal>, 'get'>>(
+    () => ({ get: (code) => totalsRef.current.get(code) }),
+    [],
   );
 
   const columns = useMemo(
@@ -1219,7 +1235,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             requiredInputByCell,
             saveErrorByCell,
             lookupEntriesByRegistryId,
-            totals,
+            totalsView,
             lookupPending,
             units.data ?? null,
             navigatedCell,
@@ -1234,7 +1250,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       requiredInputByCell,
       saveErrorByCell,
       lookupEntriesByRegistryId,
-      totals,
+      totalsView,
       lookupPending,
       units.data,
       navigatedCell,
@@ -2789,7 +2805,7 @@ export function gridColumns(
   // кількість заповнених комірок їде підказкою на клітинці підсумку. Сума без
   // «скільки значень її склало» читається як підсумок по ВСІХ рядках колонки,
   // хоч би скільки з них були порожні.
-  totals: ReadonlyMap<string, ColumnTotal> = new Map(),
+  totals: Pick<ReadonlyMap<string, ColumnTotal>, 'get'> = new Map(),
 
   // ⚠ `X-13`: довідники, що ще їдуть, — редактор показує «завантаження».
   lookupPending: ReadonlySet<number> = new Set(),
@@ -2836,6 +2852,8 @@ export function gridColumns(
      * права.
      */
     const isNumeric = isNumericColumn(column);
+    // `P2`: формат значення — з пам'яттю на колонку (двічі на комірку + кожна прокрутка).
+    const display = cellDisplayMemo(column);
     const numericClass = isNumeric ? 'ecr-cell-numeric' : null;
 
     const headerStyled = headerStyleProps(slice.headerStyle);
@@ -2956,7 +2974,7 @@ export function gridColumns(
       ...(lookupEntries !== null || !isNumericColumn(column)
         ? {}
         : {
-            cellTemplate: (_h, props: { value?: unknown }) => cellDisplay(props.value, column),
+            cellTemplate: (_h, props: { value?: unknown }) => display(props.value),
           }),
 
       // ⛔ `V-07`: логічна комірка — перелік «так / ні / порожньо», а не
@@ -2973,7 +2991,7 @@ export function gridColumns(
       ...(column.dataType === 'Date'
         ? {
             editor: createDateCellEditor(),
-            cellTemplate: (_h, props: { value?: unknown }) => cellDisplay(props.value, column),
+            cellTemplate: (_h, props: { value?: unknown }) => display(props.value),
           }
         : {}),
 
@@ -3096,7 +3114,7 @@ export function gridColumns(
          * нижче рахує `hint` і перекриває цю підказку, якщо він непорожній).
          */
         const fullValueHint =
-          numericClass === null ? null : cellDisplay((model as GridRow)[column.code], column);
+          numericClass === null ? null : display((model as GridRow)[column.code]);
 
         if (
           state === null &&
