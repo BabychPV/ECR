@@ -379,6 +379,13 @@ public sealed class GenericCalculationModule(
             a => a.ArgumentCode, a => ToValue(a, numeric.Mode == NumericMode.Strict, legacyNumericText: numeric.Mode == NumericMode.Legacy),
             StringComparer.OrdinalIgnoreCase);
 
+        // ⛔ D-OA: необов'язковий аргумент (`Name?` у списку формули версії чи бібліотеки) без комірки в рядку
+        // стає `null`, а не `#ARG` — рівно те, що вже дає наявна порожня комірка. Не-optional аргумент без
+        // комірки лишається `#ARG` (другий рубіж 0438). Словник спільний для версії, правила категорії й
+        // бібліотек (union-семантика, дизайн R4).
+        var optionalArguments = OptionalArguments.Of(ordered, binding.Libraries);
+        OptionalArguments.Fill(arguments, optionalArguments);
+
         var values = new List<CalculationOutputValue>();
         var units = await UnitsAsync(ct).ConfigureAwait(false);
 
@@ -449,6 +456,7 @@ public sealed class GenericCalculationModule(
         {
             var ruleArguments = input.Arguments.ToDictionary(
                 a => a.ArgumentCode, a => ToValue(a, entryRef: true, legacyNumericText: false), StringComparer.OrdinalIgnoreCase);
+            OptionalArguments.Fill(ruleArguments, optionalArguments);
             ruleArgumentValues = ruleArguments;
             ruleContext = new MethodologyEvaluationContext(
                 period,
