@@ -26,7 +26,12 @@ namespace Ecr.Infrastructure.Jobs;
 /// методологій — у <c>calc.CalculationResult</c> (<c>D-69</c>). Плутати ці два
 /// шляхи не можна, і саме плутанина й сталася.
 /// </remarks>
-public sealed class FormulaRecalculationJob(RecalculationService recalculation, EcrDbContext db) : IFormulaRecalculationJob
+public sealed class FormulaRecalculationJob(
+    RecalculationService recalculation,
+    EcrDbContext db,
+    // WW-03: необовʼязкові лише для тестів, що збирають задачу вручну; DI підставляє обидва.
+    CrossPeriodFanOut? fanOut = null,
+    IPeriodStore? periods = null) : IFormulaRecalculationJob
 {
     /// <summary>Ключ каталогу відмови спільного блокування аркуша (<c>SheetEditGate.Busy</c>).</summary>
     private const string SheetBeingSubmittedKey = "err.ECR-DOC-4091.sheetBeingSubmitted";
@@ -44,15 +49,27 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation, 
         var dirty = new DirtySet();
         var periodKey = new PeriodKey(request.PeriodKey);
 
+        // WW-03: елемент `cells` із `TableDefId` — не адреса комірки, а «у іншому періоді змінилась
+        // колонка» (постановка `CrossPeriodFanOut`); такі несуть номер періоду-джерела.
+        var sources = new List<CrossPeriodSource>();
+        var hops = 0;
+
         foreach (var cell in request.Cells)
         {
+            if (cell.TableDefId is { } sourceTable && cell.SourcePeriod is { } sourcePeriod)
+            {
+                sources.Add(new CrossPeriodSource(sourcePeriod, sourceTable, cell.ColumnDefId));
+                hops = Math.Max(hops, cell.Hops ?? 0);
+                continue;
+            }
+
             dirty.Add(new CellAddress(periodKey, cell.RowId, cell.ColumnDefId));
         }
 
         // ⛔ Порожній набір змінених комірок — це не «перерахувати все», а
         // «нема чого рахувати». Повний перерахунок від порожнього списку
         // перетворив би кожну правку на прогін по всьому документу.
-        if (dirty.IsEmpty)
+        if (dirty.IsEmpty && sources.Count == 0)
         {
             await progress.ReportKeyAsync(100, FormulaRecalcOutcome.NoneKey, ct).ConfigureAwait(false);
 
@@ -70,18 +87,35 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation, 
         // ⛔ O1 (I2 ФВ-9.8): не чекаємо довгого власника лока, тримаючи слот
         // виконавця. Зайнято довше за `BusyWait` — `JobDeferredException`, і
         // виконавець повертає задачу в чергу через `DeferDelay`, не рахуючи спроби.
-        var documentId = await DocumentOfAsync(request, ct).ConfigureAwait(false);
+        var documentId = request.TableInstanceId != 0
+            ? await DocumentOfAsync(request, ct).ConfigureAwait(false)
+            : request.DocumentId;
 
         var busyWait = RecalculationDocumentLock.BusyWait;
         await using var documentLock =
             await RecalculationDocumentLock.AcquireAsync(db, documentId, busyWait, ct).ConfigureAwait(false);
 
-        int written;
+        int written = 0;
+        var changed = new HashSet<(int TableDefId, int ColumnDefId)>();
         try
         {
-            written = await recalculation
-                .RecalculateAsync(request.TableInstanceId, dirty, ct)
-                .ConfigureAwait(false);
+            if (!dirty.IsEmpty)
+            {
+                written = await recalculation
+                    .RecalculateAsync(request.TableInstanceId, dirty, ct, changed)
+                    .ConfigureAwait(false);
+            }
+
+            // WW-03: період-читач. Закритий період не перераховується ніколи (стан міг змінитись
+            // між постановкою й виконанням); подані аркуші відсікає сам запис прогону.
+            if (sources.Count > 0 && documentId != 0 && periods is not null
+                && await periods.FindPeriodStateAsync(documentId, periodKey.Value, ct).ConfigureAwait(false)
+                    is not (null or Ecr.Domain.Enums.PeriodState.Closed))
+            {
+                written += await recalculation
+                    .RecalculateFromOtherPeriodsAsync(documentId, periodKey, sources, ct, changed)
+                    .ConfigureAwait(false);
+            }
         }
         catch (ConcurrencyConflictException busy) when (IsSheetBeingSubmitted(busy))
         {
@@ -90,6 +124,15 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation, 
             // і не ретрай (спроби 30/60/120 с вичерпались би за годину дедлайну): транзакція
             // відкочена, нічого не записано — задача повертається в чергу, не рахуючи спроби.
             throw new JobDeferredException(RecalculationDocumentLock.DeferDelay, busy.Message);
+        }
+
+        // WW-03: ланцюжок читачів — зміни цього прогону (насіння й похідні) йдуть в інші періоди року.
+        // Постановка coalesced; без змін у записаному далі нічого не ставиться (ланцюжок завершується).
+        if (fanOut is not null && documentId != 0 && changed.Count > 0)
+        {
+            await fanOut
+                .EnqueueReadersAsync(documentId, periodKey, changed, onlyEarlierReaders: false, hops + 1, ct)
+                .ConfigureAwait(false);
         }
 
         await progress
@@ -146,6 +189,9 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation, 
 /// <summary>Завдання на каскадний перерахунок формул.</summary>
 /// <param name="TableInstanceId">Екземпляр таблиці, у якому сталася правка.</param>
 /// <param name="PeriodKey">Період правки.</param>
+/// <param name="DocumentId">
+/// WW-03: документ — коли <paramref name="TableInstanceId"/> = 0 (задача періоду-читача, екземпляра немає).
+/// </param>
 /// <param name="Cells">Змінені комірки — насіння каскаду.</param>
 /// <remarks>
 /// ⚠ Змінені комірки передаються ЯВНО, а не виводяться із «щось змінилося».
@@ -153,9 +199,18 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation, 
 /// залежностей зник би разом із його вартістю.
 /// </remarks>
 public sealed record FormulaRecalculationRequest(
-    long TableInstanceId, int PeriodKey, IReadOnlyList<DirtyCell> Cells);
+    long TableInstanceId, int PeriodKey, IReadOnlyList<DirtyCell> Cells, long DocumentId = 0);
 
 /// <summary>Змінена комірка в завданні перерахунку.</summary>
 /// <param name="RowId">Рядок документа.</param>
 /// <param name="ColumnDefId">Колонка.</param>
-public sealed record DirtyCell(long RowId, int ColumnDefId);
+/// <param name="TableDefId">
+/// WW-03: заповнене лише в елементі «у ІНШОМУ періоді змінилась ця колонка таблиці» (<c>RowId = 0</c>).
+/// </param>
+/// <param name="SourcePeriod">WW-03: номер періоду-джерела в році для такого елемента.</param>
+/// <param name="Hops">
+/// WW-03: скільки задач-читачів уже пройшов ланцюжок; стеля (<see cref="CrossPeriodFanOut.MaxHops"/>)
+/// не дає розбіжному міжперіодному циклу ставити задачі безкінечно.
+/// </param>
+public sealed record DirtyCell(
+    long RowId, int ColumnDefId, int? TableDefId = null, int? SourcePeriod = null, int? Hops = null);

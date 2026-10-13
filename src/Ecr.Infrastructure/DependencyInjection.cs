@@ -367,6 +367,8 @@ public static class DependencyInjection
         services.AddSingleton<Jobs.RecalculationBudgetMonitor>();
         services.AddScoped<IRecalculationJob, Jobs.RecalculationJob>();
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
+        // WW-03: постановка перерахунку в періоди-читачі (міжперіодні посилання).
+        services.AddScoped<Jobs.CrossPeriodFanOut>();
 
         // ⚠ Кожна задача реєструється ПО ТИПУ: QuartzJobAdapter резолвить її
         // за повним іменем із JobDataMap. Незареєстрована задача приймалася б

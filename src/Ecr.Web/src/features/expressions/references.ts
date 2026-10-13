@@ -198,8 +198,11 @@ type Slot =
   | { readonly kind: 'column'; readonly table: TableSymbol }
   | { readonly kind: 'none' };
 
-/** Перша ланка `[Period]`, `[Period:-1]` — зсув періоду, а не частина адреси (`02b` §3.2). */
-const PeriodSegment = /^Period(\s*:\s*[+-]?\d+)?$/i;
+/**
+ * Перша ланка `[Period]`, `[Period:-1]`, `[Period:#3]` — період, а не частина адреси (`02b` §3.2).
+ * `#k` (WW-03) — абсолютний номер періоду того самого року.
+ */
+const PeriodSegment = /^Period(\s*:\s*([+-]?\d+|#\d+))?$/i;
 
 /**
  * Роль наступної ланки після `segments`.

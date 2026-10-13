@@ -320,7 +320,7 @@ public sealed class FormulaTranslator
     {
         // ⚠ Посилання на ІНШИЙ період (`PeriodOffset`) у книзі одного періоду
         // координати не має: попереднього місяця в ній немає.
-        if (reference.PeriodOffset != 0)
+        if (reference.IsCrossPeriod)
         {
             return MissingReference;
         }
