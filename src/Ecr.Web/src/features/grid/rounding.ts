@@ -193,9 +193,43 @@ function parseDecimal(text: string, locale: string): DecimalParts | null {
  * @returns Десятковий запис без експоненти; `null` — вхід не є числом.
  */
 export function decimalTextOf(text: string, locale: string = formatLocale()): string | null {
+  const quick = quickDecimalText(text);
+  if (quick !== undefined) return quick;
+
   const parts = parseDecimal(text, locale);
 
   return parts === null ? null : magnitudeOf(parts);
+}
+
+const CanonicalShape = /^(-?)(0|[1-9]\d*)(?:\.(\d+))?$/;
+
+/**
+ * Швидкий шлях для запису, який сервер і так віддає: `-?цифри[.цифри]`, без
+ * пробілів, коми, плюса й експоненти (`P2`: на 232×500 комірок розбір через
+ * `readNumber`/`parseDecimal` з'їдав сотні мілісекунд до першої видимої комірки).
+ *
+ * ⛔ Результат ТОТОЖНИЙ повільному шляху, а не «схожий»: той самий канон (ведучі
+ * нулі цілої зрізані regex-ом, хвостові нулі дробу — тут, `-0` → `0`). Єдина
+ * структурно неоднозначна форма — `1–3 цифри`.`3 цифри`, де вирішує локаль
+ * (`readNumber`, правило 4); її швидкий шлях НЕ чіпає (`undefined`). Тест
+ * `rounding.test.ts` звіряє обидва шляхи на випадкових рядках у кількох локалях.
+ *
+ * @returns `undefined` — форма не швидка, рахувати повільним шляхом.
+ */
+function quickDecimalText(text: string): string | undefined {
+  const match = CanonicalShape.exec(text);
+  if (match === null) return undefined;
+
+  const sign = match[1] ?? '';
+  const int = match[2] ?? '';
+  const rawFrac = match[3];
+
+  if (rawFrac !== undefined && rawFrac.length === 3 && int.length <= 3 && int !== '0') return undefined;
+
+  const frac = rawFrac === undefined ? '' : rawFrac.replace(/0+$/, '');
+  const magnitude = frac.length > 0 ? `${int}.${frac}` : int;
+
+  return magnitude === '0' ? '0' : sign + magnitude;
 }
 
 /** Знак і цифри в один рядок; `-0` зводиться до `0`. */

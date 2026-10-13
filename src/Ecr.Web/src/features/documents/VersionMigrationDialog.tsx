@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { useReturnFocusOnUnmount } from '@/shared/a11y/focus';
 import { Alert, Button, Group, Modal, Progress, SegmentedControl, Select, Stack, Table, Text } from '@mantine/core';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -108,6 +108,9 @@ export function VersionMigrationDialog({
   const [reportState, setReportState] = useState<{ key: string; result: VersionMigrationReport } | null>(null);
   const selectionKey = `${targetId ?? ''}|${mode}`;
   const report = reportState !== null && reportState.key === selectionKey ? reportState.result : null;
+  // ACC-OW: людина відмовилася від перезапису для цього вибору (скидається разом зі звітом).
+  const [overwriteDeclined, setOverwriteDeclined] = useState(false);
+  const overwriteAccepted = report?.guardedOverwriteAccepted === true;
 
   const targets = useQuery({
     queryKey: ['document', documentId, 'migrate-version-targets'],
@@ -118,10 +121,14 @@ export function VersionMigrationDialog({
   // без `handled` глобальна сітка додавала другий тост.
   const dryRun = useMutation({
     meta: { handled: true },
-    mutationFn: (key: string) =>
-      migrateDocumentVersion({ documentId, targetVersionId: Number(targetId), mode, dryRun: true }).then(
-        (result) => ({ key, result }),
-      ),
+    mutationFn: (args: { key: string; accept: boolean }) =>
+      migrateDocumentVersion({
+        documentId,
+        targetVersionId: Number(targetId),
+        mode,
+        dryRun: true,
+        acceptGuardedOverwrite: args.accept,
+      }).then((result) => ({ key: args.key, result })),
     onSuccess: (done) => setReportState(done),
   });
 
@@ -130,7 +137,8 @@ export function VersionMigrationDialog({
   // діалогу. Тут - лише показ стану і прогресу тією самою задачею (запит `['job', id]` спільний).
   const apply = useMutation({
     meta: { handled: true },
-    mutationFn: () => startMigrateDocumentVersion({ documentId, targetVersionId: Number(targetId), mode }),
+    mutationFn: (accept: boolean) =>
+      startMigrateDocumentVersion({ documentId, targetVersionId: Number(targetId), mode, acceptGuardedOverwrite: accept }),
     onSuccess: (accepted) => onJobChange(accepted.jobId),
   });
 
@@ -147,6 +155,7 @@ export function VersionMigrationDialog({
   // монтується й при відкритті над задачею, що ще йде, і скидання на монтуванні губило б її.
   useEffect(() => {
     setReportState(null);
+    setOverwriteDeclined(false);
     resetApply();
   }, [targetId, mode, resetApply]);
 
@@ -206,6 +215,21 @@ export function VersionMigrationDialog({
 
         {report !== null && <MigrationReport report={report} />}
 
+        {report !== null && isOverwriteOffer(report) && !overwriteDeclined && (
+          <OverwriteOffer
+            report={report}
+            busy={busy}
+            onYes={() => dryRun.mutate({ key: selectionKey, accept: true })}
+            onNo={() => setOverwriteDeclined(true)}
+          />
+        )}
+
+        {overwriteAccepted && report !== null && report.canApply && (
+          <Alert color="statusWarning" data-migrate-overwrite-accepted="">
+            {t('documents.migrateGuardedOverwriteAccepted', { count: report.guardedOverwritable ?? 0 })}
+          </Alert>
+        )}
+
         {apply.error !== null && <ErrorAlert error={apply.error} />}
 
         {job.error !== null && <ErrorAlert error={job.error} />}
@@ -236,7 +260,11 @@ export function VersionMigrationDialog({
             variant="default"
             disabled={targetId === null || busy}
             loading={dryRun.isPending}
-            onClick={() => dryRun.mutate(selectionKey)}
+            onClick={() => {
+              // «Ні» не липке: новий сухий прогін знову пропонує перезапис.
+              setOverwriteDeclined(false);
+              dryRun.mutate({ key: selectionKey, accept: false });
+            }}
             data-testid="migrate-dry-run"
           >
             {t('documents.migrateDryRun')}
@@ -244,7 +272,7 @@ export function VersionMigrationDialog({
           <Button
             disabled={report === null || !report.canApply || busy}
             loading={apply.isPending || settled.settling || jobRunning}
-            onClick={() => settled.run(() => apply.mutateAsync())}
+            onClick={() => settled.run(() => apply.mutateAsync(overwriteAccepted))}
             data-testid="migrate-apply"
           >
             {t('documents.migrateApply')}
@@ -252,6 +280,82 @@ export function VersionMigrationDialog({
         </Group>
       </Stack>
     </Modal>
+  );
+}
+
+/**
+ * ACC-OW: звіт відмовлено ЛИШЕ через `guardedWithData`, і всі такі значення - під новою комірочною формулою
+ * (`guardedOverwritable === guardedValues`): тоді людині пропонують перезапис. Інша причина або значення поза
+ * формулою (звуження, тип, одиниця...) - прапор їх не зніме, пропозиції немає.
+ */
+export function isOverwriteOffer(report: VersionMigrationReport): boolean {
+  const overwritable = report.guardedOverwritable ?? 0;
+
+  return (
+    !report.canApply
+    && report.guardedOverwriteAccepted !== true
+    && report.refusals.length === 1
+    && report.refusals[0] === 'guardedWithData'
+    && overwritable > 0
+    && overwritable === report.guardedValues
+  );
+}
+
+interface OverwriteOfferProps {
+  readonly report: VersionMigrationReport;
+  readonly busy: boolean;
+  readonly onYes: () => void;
+  readonly onNo: () => void;
+}
+
+/** Підтвердження перезапису: перелік комірок (без значень) і «Так/Ні». */
+function OverwriteOffer({ report, busy, onYes, onNo }: OverwriteOfferProps): JSX.Element {
+  const items = report.guardedOverwrittenItems ?? [];
+  const noRef = useRef<HTMLButtonElement>(null);
+
+  // Безпечна дія («Ні») - у фокусі при появі пропозиції: Enter випадково не перезапише дані.
+  useEffect(() => {
+    noRef.current?.focus();
+  }, []);
+
+  return (
+    // `role="alert"` - скрінрідер оголошує появу пропозиції (вона з'являється після дії, а не при відкритті).
+    <Alert color="statusWarning" role="alert" data-migrate-overwrite-offer="">
+      <Stack gap="xs">
+        <Text size="sm" fw={500}>
+          {t('documents.migrateGuardedOverwriteTitle', { count: report.guardedOverwritable ?? 0 })}
+        </Text>
+        <Text size="sm">{t('documents.migrateGuardedOverwriteBody')}</Text>
+        {items.length > 0 && (
+          <Stack gap="xs" data-migrate-overwrite-items="">
+            {items.map((item) => (
+              <Text size="xs" key={`${item.sheetCode}|${item.tableCode}|${item.rowKey}|${item.columnCode}`}>
+                {t('documents.migrateGuardedOverwriteItem', {
+                  sheet: item.sheetCode,
+                  table: item.tableCode,
+                  row: item.rowKey,
+                  column: item.columnCode,
+                  values: item.values,
+                })}
+              </Text>
+            ))}
+          </Stack>
+        )}
+        {report.guardedOverwrittenItemsTruncated === true && (
+          <Text size="xs" c="dimmed" data-migrate-overwrite-more="">
+            {t('documents.migrateGuardedOverwriteMore')}
+          </Text>
+        )}
+        <Group justify="flex-end">
+          <Button ref={noRef} variant="default" size="xs" disabled={busy} onClick={onNo} data-testid="migrate-overwrite-no">
+            {t('documents.migrateGuardedOverwriteCancel')}
+          </Button>
+          <Button size="xs" color="statusWarning" disabled={busy} onClick={onYes} data-testid="migrate-overwrite-yes">
+            {t('documents.migrateGuardedOverwriteConfirm')}
+          </Button>
+        </Group>
+      </Stack>
+    </Alert>
   );
 }
 
