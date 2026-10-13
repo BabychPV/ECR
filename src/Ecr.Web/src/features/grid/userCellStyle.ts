@@ -1,5 +1,7 @@
 import type { CellFormatDto, CellStyleChange, CellStyleDto, TableSliceDto } from '@/api/types';
-import { cellAppearanceOf } from './cellAppearance';
+import { DarkSurface, cellAppearanceOf } from './cellAppearance';
+import { AA, contrast } from '@/shared/theme/contrast';
+import { themeSurface } from '@/shared/theme/theme';
 import { isHexColour } from '@/shared/theme/cellPalette';
 import { withCellFormat } from './conditionalAppearance';
 import { cellKey } from './permissions';
@@ -120,6 +122,22 @@ export function withRowStyle(column: CellStyleDto | null | undefined, row: CellS
   };
 }
 
+/** Частка кольору автора в темному токені шапки (решта — поверхня темної теми). */
+const DarkHeaderTint = 0.2;
+
+/**
+ * Темний токен для СВІТЛОЇ заливки шапки: відтінок автора, змішаний з поверхнею темної теми.
+ * `null` — заливка вже темна (лишається як є) або не `#rrggbb`.
+ */
+export function darkHeaderFill(fill: string): string | null {
+  if (!isHexColour(fill) || contrast(fill, themeSurface.light.body) >= 3) return null;
+
+  const channel = (hex: string, i: number): number => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
+  const mixed = [0, 1, 2].map((i) => Math.round(channel(fill, i) * DarkHeaderTint + channel(DarkSurface, i) * (1 - DarkHeaderTint)));
+
+  return `#${mixed.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
 /** Властивості комірки заголовка за `TableSliceDto.headerStyle` (клас + змінні, як у комірок). */
 export function headerStyleProps(style: CellStyleDto | null | undefined): { class: string; style: Record<string, string> } | null {
   const appearance = cellAppearanceOf(style);
@@ -129,6 +147,13 @@ export function headerStyleProps(style: CellStyleDto | null | undefined): { clas
   const vars: Record<string, string> = {};
   for (const [name, value] of Object.entries(appearance)) {
     if (name.startsWith('--') && typeof value === 'string') vars[name] = value;
+  }
+  const darkFill = typeof vars['--ecr-cell-fill'] === 'string' ? darkHeaderFill(vars['--ecr-cell-fill']) : null;
+
+  // ⚠ Лише шапка: заливки комірок користувача (`cellStyles`) у Dark не чіпаємо.
+  if (darkFill !== null) {
+    vars['--ecr-header-fill-dark'] = darkFill;
+    vars['--ecr-header-fg-dark'] = contrast(themeSurface.dark.text, darkFill) >= AA.text ? themeSurface.dark.text : themeSurface.light.body;
   }
   if (appearance.fontWeight === 'bold') vars['--ecr-header-weight'] = 'bold';
   if (appearance.fontStyle === 'italic') vars['--ecr-header-style'] = 'italic';

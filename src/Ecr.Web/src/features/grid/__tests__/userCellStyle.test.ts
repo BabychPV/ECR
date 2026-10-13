@@ -13,6 +13,7 @@ import {
   areaOf,
   canColourCell,
   chunkPatches,
+  darkHeaderFill,
   headerStyleProps,
   scopeRange,
   withRowStyle,
@@ -229,6 +230,23 @@ describe('шар «рядок» і шапка', () => {
   it('headerStyleProps: без стилю — null, із заливкою — клас і змінні', () => {
     expect(headerStyleProps(null)).toBeNull();
     expect(headerStyleProps(style({ backgroundArgb: (0xff000000 | 0xffc000) | 0 }))).toMatchObject({ class: 'ecr-header-styled', style: { '--ecr-cell-fill': '#ffc000' } });
+  });
+});
+
+describe('Dark: шапка колонок', () => {
+  const style = (extra: Record<string, unknown>) => ({ isBold: false, isItalic: false, foregroundArgb: null, backgroundArgb: null, horizontalAlign: null, verticalAlign: null, wrapText: false, ...extra }) as never;
+  it('darkHeaderFill: світла заливка → темний токен, темна лишається', () => {
+    expect(darkHeaderFill('#ffc000')).toBe('#50431d');
+    expect(darkHeaderFill('#ffffff')).toBe('#505050');
+    expect(darkHeaderFill('#1f3864')).toBeNull();
+    expect(darkHeaderFill('red')).toBeNull();
+  });
+
+  it('headerStyleProps: змінні Dark є лише для світлої заливки', () => {
+    const light = headerStyleProps(style({ backgroundArgb: (0xff000000 | 0xffc000) | 0 }));
+    expect(light?.style['--ecr-header-fill-dark']).toBe('#50431d');
+    expect(light?.style['--ecr-header-fg-dark']).toBeDefined();
+    expect(headerStyleProps(style({ backgroundArgb: (0xff000000 | 0x1f3864) | 0 }))?.style['--ecr-header-fill-dark']).toBeUndefined();
   });
 });
 
