@@ -316,7 +316,8 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
     private static string? RegistryCodeOf(FunctionNode function)
         => function.Arguments.Count > 0
            && (RegistryForms.RowScopeNames.Contains(function.Name)
-               || string.Equals(function.Name, RegistryForms.Find, StringComparison.OrdinalIgnoreCase))
+               || string.Equals(function.Name, RegistryForms.Find, StringComparison.OrdinalIgnoreCase)
+               || string.Equals(function.Name, RegistryForms.Applicable, StringComparison.Ordinal))
             ? ReferenceResolver.RegistryCodeLiteral(function.Arguments[0])
             : null;
 

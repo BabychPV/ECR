@@ -240,6 +240,85 @@ public static class MethodologyFunctions
             ? ExpressionValue.Text(code)
             : ExpressionValue.Error(ExpressionErrors.BadReference);
 
+    /// <summary>Маркер методології в довіднику застосовності: частини ключа <c>(scope, '*', '*', '*')</c>.</summary>
+    public const string ApplicabilityMarker = "*";
+
+    /// <summary>
+    /// <c>SUBSTANCE_APPLICABLE(registry, scope, kind, value)</c> — чи застосовна речовина ПОТОЧНОГО проходу до рядка.
+    /// </summary>
+    /// <param name="args">Код довідника, методологія (scope), вид і значення селектора.</param>
+    /// <param name="context">Контекст обчислення: код речовини проходу й знімок довідників.</param>
+    /// <remarks>
+    /// ⛔ Порядок відповідей (02b «Застосовність речовини до рядка»): помилка аргументу → вона; немає речовини проходу
+    /// → <c>TRUE</c> (Row-фаза правила категорії: нічого виключати); немає знімка → <c>#REF</c>; НЕМАЄ маркера
+    /// методології → <c>TRUE</c> (правило не діє, як до появи довідника); порожнє значення селектора → <c>FALSE</c>;
+    /// далі пошук запису за первинним ключем <c>(scope, kind, value, код речовини)</c>.
+    ///
+    /// ⚠ Маркер, а не «довідник порожній»: довідник спільний для методологій, і методологія без записів не повинна
+    /// мовчки втратити всі речовини лише тому, що чужі записи є.
+    /// </remarks>
+    internal static ExpressionValue SubstanceApplicable(IReadOnlyList<ExpressionValue> args, IEvaluationContext context)
+    {
+        if (args.Count != 4)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadValue);
+        }
+
+        foreach (var value in args)
+        {
+            if (value.IsError)
+            {
+                return value;
+            }
+        }
+
+        if (context.CurrentSubstanceCode is not { Length: > 0 } substanceCode)
+        {
+            return ExpressionValue.Boolean(true);
+        }
+
+        if (args[0].Value is not string registry || string.IsNullOrWhiteSpace(registry)
+            || args[1].Value is not string scope || string.IsNullOrWhiteSpace(scope)
+            || context.Registries is not { } snapshot)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadReference);
+        }
+
+        var marker = snapshot.FindByPrimaryKey(
+            registry,
+            [
+                ExpressionValue.Text(scope),
+                ExpressionValue.Text(ApplicabilityMarker),
+                ExpressionValue.Text(ApplicabilityMarker),
+                ExpressionValue.Text(ApplicabilityMarker),
+            ]);
+
+        // `null` — довідника немає або ключ іншої арності: опис змінили після публікації.
+        if (marker is null)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadReference);
+        }
+
+        if (marker.Count == 0)
+        {
+            return ExpressionValue.Boolean(true);
+        }
+
+        if (args[2].Value is not string kind || string.IsNullOrWhiteSpace(kind)
+            || args[3].Value is not string selector || string.IsNullOrWhiteSpace(selector))
+        {
+            return ExpressionValue.Boolean(false);
+        }
+
+        var found = snapshot.FindByPrimaryKey(
+            registry,
+            [ExpressionValue.Text(scope), ExpressionValue.Text(kind), ExpressionValue.Text(selector), ExpressionValue.Text(substanceCode)]);
+
+        return found is null
+            ? ExpressionValue.Error(ExpressionErrors.BadReference)
+            : ExpressionValue.Boolean(found.Count > 0);
+    }
+
     /// <summary>
     /// Помилка або <c>null</c> серед аргументів, які треба віддати як є.
     /// </summary>
