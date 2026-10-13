@@ -64,6 +64,9 @@ public sealed class ConstantResolver(IConstantStore constants)
     /// <param name="category">Категорія; <c>null</c> — без категорії.</param>
     /// <param name="substanceEntryId">Речовина; <c>null</c> — спільна константа.</param>
     /// <param name="onDate">Дата періоду для темпорального вибору.</param>
+    /// <param name="substanceCode">
+    /// Код запису довідника речовини ітерації (форма B: категорія <c>{ключ}_{код}</c>); <c>null</c> — немає.
+    /// </param>
     /// <returns>Значення константи; <c>null</c> — кандидата немає.</returns>
     /// <remarks>
     /// ⛔ Саме цим шляхом іде прогін (аудит P1). Константи версії читаються
@@ -79,7 +82,7 @@ public sealed class ConstantResolver(IConstantStore constants)
         Justification = "Модуль отримує резолвер залежністю; статичний метод лишив би її непрочитаною (CS9113).")]
     public ResolvedConstant? Resolve(
         IReadOnlyList<MethodologyConstant> candidates, int methodologyVersionId, string code,
-        string? category, long? substanceEntryId, DateOnly onDate)
+        string? category, long? substanceEntryId, DateOnly onDate, string? substanceCode = null)
     {
         ArgumentNullException.ThrowIfNull(candidates);
 
@@ -134,7 +137,13 @@ public sealed class ConstantResolver(IConstantStore constants)
         //    `Category = "Common"` (k1…k5 вибору категорії, межі), тож за заданої
         //    категорії кандидатами «без звуження» є і вони. Точний збіг виграє; заповнювачів
         //    для категорій, яких у AF немає, не створюється — немає значення = `#REF`.
-        var byCategory = category is null
+        // ✎ LP-07, ФОРМА B: старий HSE складає ключ як `{група/NAE}_{код речовини}` (цикл по кодах у класі
+        //    методології). Код речовини ітерації дописується до ключа правила: `{ключ}_{код}` має
+        //    ПРІОРИТЕТ над `{ключ}`; немає такої — далі як було (форма A, `Common`). Підміни немає:
+        //    суфікс іншої речовини не береться, відсутня константа лишається `#REF`.
+        var bySuffix = category is null ? null : NarrowBySubstanceCode(bySubstance, category, substanceCode);
+
+        var byCategory = bySuffix ?? (category is null
             ? bySubstance
             : Narrow(bySubstance, c => string.Equals(c.Category, category, StringComparison.Ordinal))
               // ✎ LP-07: старий HSE-сервіс будує ключ із NAE як `Trim().Replace(" ", "")`, а категорії
@@ -143,7 +152,7 @@ public sealed class ConstantResolver(IConstantStore constants)
               ?? Narrow(bySubstance, c => c.Category is not null
                   && string.Equals(StripSpaces(c.Category), StripSpaces(category), StringComparison.Ordinal))
               ?? Narrow(bySubstance, c => c.Category is null
-                  || string.Equals(c.Category, MethodologyConstant.CommonCategory, StringComparison.Ordinal));
+                  || string.Equals(c.Category, MethodologyConstant.CommonCategory, StringComparison.Ordinal)));
 
         if (byCategory is null)
         {
@@ -217,6 +226,48 @@ public sealed class ConstantResolver(IConstantStore constants)
 
     private static string StripSpaces(string value)
         => string.Concat(value.Where(ch => !char.IsWhiteSpace(ch)));
+
+    /// <summary>
+    /// Кандидати з категорією <c>{ключ}_{код}</c>: точний збіг, далі без пробілів; код пробується як є й без
+    /// провідних нулів (RoK <c>0301</c> ↔ суфікс AF <c>301</c>). <c>null</c> — таких немає.
+    /// </summary>
+    private static List<MethodologyConstant>? NarrowBySubstanceCode(
+        List<MethodologyConstant> candidates, string category, string? substanceCode)
+    {
+        if (string.IsNullOrWhiteSpace(substanceCode))
+        {
+            return null;
+        }
+
+        var trimmed = substanceCode.Trim();
+        var codes = new[] { trimmed, trimmed.TrimStart('0') }
+            .Where(c => c.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        static string Strip(string value) => string.Concat(value.Where(ch => !char.IsWhiteSpace(ch)));
+
+        foreach (var code in codes)
+        {
+            var key = category + "_" + code;
+            if (Narrow(candidates, c => string.Equals(c.Category, key, StringComparison.Ordinal)) is { } exact)
+            {
+                return exact;
+            }
+        }
+
+        foreach (var code in codes)
+        {
+            var key = Strip(category + "_" + code);
+            if (Narrow(candidates, c => c.Category is not null
+                    && string.Equals(Strip(c.Category), key, StringComparison.Ordinal)) is { } loose)
+            {
+                return loose;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>Звуження, яке не робиться, якщо нічого не залишає.</summary>
     /// <remarks>
