@@ -88,6 +88,71 @@ public sealed class NaeGroupBridgesTests
         Assert.NotEqual(Canon("0788(001)"), Canon("07 88(001)"));
     }
 
+    /// <summary>
+    /// RCN-1: старий код (ECW_C11_11_02) знімає з NAE усі пробіли, тож будь-який з 8 розташувань одного пробілу навколо
+    /// дужок, а також регістр, NBSP, таб і довгі послідовності пробілів, мають давати ту саму групу на справжньому рушії
+    /// з довідником із моделі. Мутація: повернути в <c>nae_group_bridges.py</c> лише два написання - червоніє.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [InlineData("0788(001)")]
+    [InlineData("0788 (001)")]
+    [InlineData("0788( 001)")]
+    [InlineData("0788(001 )")]
+    [InlineData("0788 ( 001)")]
+    [InlineData("0788 (001 )")]
+    [InlineData("0788( 001 )")]
+    [InlineData("0788 ( 001 )")]
+    [InlineData("0791 ( 001 )")]
+    public void NAE_з_будь_яким_одним_пробілом_навколо_дужок_знаходить_групу(string nae)
+    {
+        var snapshot = Arrange();
+        var expression = Bridge("T9_01", "Category1");
+
+        Assert.Equal("0788", Eval(expression, snapshot, nae).Value);
+    }
+
+    /// <summary>
+    /// Брудні написання (краї, послідовності, NBSP, таб, регістр) зводить до запису довідника сам
+    /// <see cref="RegistryKeyNormalizer"/> (знімок прода шукає за канонічним ключем): канон брудного написання мусить
+    /// збігатися з каноном одного з ключів довідника моделі.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [InlineData("  0788   (001)  ")]
+    [InlineData("0788 (001)")]
+    [InlineData("0788\t(001)")]
+    [InlineData("0788 ( 001 )")]
+    public void Брудне_написання_NAE_має_канон_ключа_довідника(string nae)
+    {
+        string? Canon(string s) => RegistryKeyNormalizer.Canonical([new RegistryKeyPart(CellDataType.String, s)]);
+
+        using var model = LoadModel();
+        var keys = model.RootElement.GetProperty("registries").EnumerateArray()
+            .Single(r => r.GetProperty("code").GetString() == "LAND_NAE_GROUP")
+            .GetProperty("entries").EnumerateArray()
+            .Where(e => e.GetProperty("fields").TryGetProperty("CATEGORY1", out var c) && c.GetString() == "0788")
+            .Select(e => Canon(e.GetProperty("fields").GetProperty("NAE_NORMALIZED").GetString()!))
+            .ToHashSet();
+
+        Assert.Contains(Canon(nae), keys);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Недоведене_написання_NAE_дає_NA_а_не_хибну_групу()
+    {
+        var snapshot = Arrange();
+        var expression = Bridge("T9_01", "Category1");
+
+        // Пробіл усередині 4-значного коду рушій не знімає (стара система знімає): #N/A, рядок без результату.
+        Assert.Equal(ExpressionErrors.NotAvailable, Eval(expression, snapshot, "07 88").ErrorCode);
+        Assert.Equal(ExpressionErrors.NotAvailable, Eval(expression, snapshot, "0788 (0 01)").ErrorCode);
+
+        // Інший код у дужках - не з довідника.
+        Assert.Equal(ExpressionErrors.NotAvailable, Eval(expression, snapshot, "0788 ( 002 )").ErrorCode);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public void Фрагмент_Land_MassFraction_вибирає_аргумент_за_речовиною_проходу()
