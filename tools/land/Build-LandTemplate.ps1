@@ -1425,8 +1425,7 @@ function Bind-ResultColumns($mid) {
 # Лише явно: -Stage LandParity (в 'All' не входить). Для чернеток методологій, що вже є на стенді (імпорт AF-пакета
 # tools/Ecr.MethodologyImport) і мають правило у docs/.../af-land-category-rules.json:
 #   1. PUT .../category-rule  (вираз із файлу);
-#   2. склад речовин версії = суфікси `_(\d{3,4})$` категорій її констант, зіставлені із записами LAND_AIR_SUBSTANCE
-#      (код запису E<код>; довідник заводить Import-LandAirSubstances.ps1);
+#   2. склад речовин версії = суфікси `_(\d{3,4})$` категорій її констант (форма B) або, коли суфіксів немає (форма A),\n#      об'єднання кодів land-substance-applicability.json; зіставляються із записами LAND_AIR_SUBSTANCE\n#      (код запису E<код>; довідник заводить Import-LandAirSubstances.ps1);
 #   3. тест-кейс PARITY_1: додаються аргументи, які читає правило (@Land_NAE, @Land_TypeFuelOrStream, @Land_Streams,
 #      @Land_InvNumEqp ...); наявні аргументи, очікуване й допуск не змінюються. Кандидати NAE пробуються по черзі
 #      до першого зеленого simulate.
@@ -1484,16 +1483,23 @@ function Stage-LandParity {
         # 2. склад речовин з суфіксів категорій констант
         $consts = @((Api GET "/api/v1/methodologies/$m/versions/$vid/constants").Json)
         $cats = @($consts | ForEach-Object { [string]$_.category } | Where-Object { $_ } | Sort-Object -Unique)
-        $codes = Get-LandSubstanceCodes -Categories $cats
-        # ✎ 2026-10-13: правило з `substancesFromApplicability` (ECW_C12_03) - склад = об'єднання кодів словника
-        # застосовності, а не лише суфікси констант (константи можуть не покривати всі 15 кодів).
+        $suffixCodes = Get-LandSubstanceCodes -Categories $cats
+        # ✎ 2026-10-13: склад речовин - суфікси категорій констант (форма B), а де їх немає (форма A: C11_10, C11_11_05,
+        # константи за категорією без `_{код}`) або правило має `substancesFromApplicability` (ECW_C12_03) - об'єднання
+        # кодів land-substance-applicability.json цієї методології. Методології із суфіксами - без змін.
         $fromApplicability = $r.PSObject.Properties['substancesFromApplicability']
-        if ($null -ne $fromApplicability -and [bool]$fromApplicability.Value) {
-            $saFile = Join-Path $repo 'docs\delivery\reference-data\land-template\land-substance-applicability.json'
-            $saDoc = Get-Content -LiteralPath $saFile -Raw -Encoding UTF8 | ConvertFrom-Json
-            $saEntry = $saDoc.methodologies.PSObject.Properties[$name]
-            $codes = Get-LandApplicabilityCodeUnion -Codes $(if ($null -ne $saEntry) { $saEntry.Value.codes } else { $null })
-            if ($codes.Count -eq 0) { Log "  ! ${name}: у land-substance-applicability.json немає кодів - склад речовин не задається" }
+        $saFile = Join-Path $repo 'docs\delivery\reference-data\land-template\land-substance-applicability.json'
+        $saDoc = Get-Content -LiteralPath $saFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $saEntry = $saDoc.methodologies.PSObject.Properties[$name]
+        $resolved = Resolve-LandMethodologySubstanceCodes -SuffixCodes $suffixCodes `
+            -ApplicabilityCodes $(if ($null -ne $saEntry) { $saEntry.Value.codes } else { $null }) `
+            -FromApplicability ($null -ne $fromApplicability -and [bool]$fromApplicability.Value)
+        $codes = @($resolved.Codes)
+        if ($resolved.Source -eq 'ApplicabilityFallback') {
+            Log "  ${name}: у категоріях констант немає суфікса речовини (форма A) - склад речовин зі словника застосовності ($($codes.Count) кодів)"
+        }
+        elseif ($resolved.Source -eq 'Applicability' -and $codes.Count -eq 0) {
+            Log "  ! ${name}: у land-substance-applicability.json немає кодів - склад речовин не задається"
         }
         if ($codes.Count -gt 0 -and $air.Count -gt 0) {
             $ids = @(); $missing = @()

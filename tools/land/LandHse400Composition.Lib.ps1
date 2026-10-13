@@ -16,6 +16,13 @@ $script:LandHse400BasePrefixes = [ordered]@{
     'LPG (Internal)'      = 'LPG_Internal'
 }
 
+# Показники, які стара система читає з колонки БЕЗ суфікса `_mass` у властивість `…_mass`
+# (Q_Air_HSE400.Get_DataFromHSE400: `FG_Internal_C1_C5_mass = reader["FG_Internal_C1_C5"]`; те саме C6_C10, C12_C19
+# для FG_Internal і LPG_Internal та C1_C5 для FG_Export). Формула шукає показник `PollutionCodeService.GetMassName`
+# (`C1_C5_mass`, `C6_C10_mass`, `C12_C19_mass`), тож без псевдоніма 415/2754 не знаходять складу, а 416 бере
+# запасну `C6_1_mass` (чистий гексан) замість справжнього C6-C10.
+$script:LandHse400MassAliases = @('C1_C5', 'C6_C10', 'C12_C19')
+
 function Get-LandHse400Prefixes { return @($script:LandHse400Prefixes) }
 
 function Get-LandHse400StreamPrefix {
@@ -90,6 +97,8 @@ function ConvertTo-LandHse400CompositionPlan {
         - потік = префікс колонки з шести відомих; колонки без префікса (EFID, ID, DateTime ...) пропускаються;
         - показник = канонічний суфікс (ConvertTo-LandHse400Indicator); значення null/нечислове пропускається;
         - HMB: EMercaptan_mass береться з колонки EMercaptanV2_mass (як F_Air_GetPropertyValueFromHSE400);
+        - колонка `C1_C5` / `C6_C10` / `C12_C19` без `_mass` (FG_Export, FG_Internal, LPG_Internal) -> показник з
+          `_mass` (псевдонім старої системи, Aliased = true); робиться ДО запасної;
         - запасна: C6_C10_mass порожній -> береться C6_1_mass (ECW_C11_01/02, ECW_C12_01);
         - дубль (рік, місяць, потік, показник) - береться перший, решта рахується.
         Значення віддаються рядком у інваріантній культурі; нічого не друкується.
@@ -105,6 +114,7 @@ function ConvertTo-LandHse400CompositionPlan {
     $duplicates = 0
     $fallbacks = 0
     $overrides = 0
+    $aliases = 0
 
     foreach ($row in $Rows) {
         $year = [int]$row.Year
@@ -113,6 +123,7 @@ function ConvertTo-LandHse400CompositionPlan {
 
         # потік -> (канонічний показник -> значення)
         $byStream = @{}
+        $aliased = @{}
         foreach ($name in @($row.Columns.Keys)) {
             $prefix = $script:LandHse400Prefixes | Where-Object { ([string]$name).StartsWith($_ + '_', [StringComparison]::Ordinal) } | Select-Object -First 1
             if ($null -eq $prefix) { continue }
@@ -121,9 +132,17 @@ function ConvertTo-LandHse400CompositionPlan {
             $number = [decimal]0
             if (-not [decimal]::TryParse([string]::Format($inv, '{0}', $value), [System.Globalization.NumberStyles]::Float, $inv, [ref]$number)) { $skipped++; continue }
             $indicator = ConvertTo-LandHse400Indicator -Suffix ([string]$name).Substring($prefix.Length + 1)
+            $isAlias = $false
+            if ($script:LandHse400MassAliases -contains $indicator) {
+                # Власна колонка `…_mass` (якщо є) старша за псевдонім: не перекриваємо.
+                if ($row.Columns.ContainsKey($name + '_mass')) { continue }
+                $indicator = $indicator + '_mass'
+                $isAlias = $true
+            }
             if (-not $byStream.ContainsKey($prefix)) { $byStream[$prefix] = @{} }
             if ($byStream[$prefix].ContainsKey($indicator)) { $duplicates++; continue }
             $byStream[$prefix][$indicator] = $number
+            if ($isAlias) { $aliased["$prefix|$indicator"] = $true; $aliases++ }
         }
 
         foreach ($prefix in @($byStream.Keys)) {
@@ -155,6 +174,7 @@ function ConvertTo-LandHse400CompositionPlan {
                         Indicator = $indicator
                         Value     = [string]::Format($inv, '{0}', $ind[$indicator])
                         EntryCode = $code
+                        Aliased   = $aliased.ContainsKey("$prefix|$indicator")
                     })
             }
         }
@@ -166,6 +186,7 @@ function ConvertTo-LandHse400CompositionPlan {
         Duplicates = $duplicates
         Fallbacks  = $fallbacks
         Overrides  = $overrides
+        Aliases    = $aliases
     }
 }
 

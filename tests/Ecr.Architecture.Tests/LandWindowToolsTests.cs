@@ -170,7 +170,7 @@ public sealed class LandWindowToolsTests
         Assert.True(parity > 0 && next > parity);
         var stage = build[parity..next];
         Assert.Contains("substancesFromApplicability", stage, StringComparison.Ordinal);
-        Assert.Contains("Get-LandApplicabilityCodeUnion", stage, StringComparison.Ordinal);
+        Assert.Contains("Resolve-LandMethodologySubstanceCodes", stage, StringComparison.Ordinal);
 
         // NumericMode=Strict - у етапі CompositionMass; C12_03 є в його моделі (фрагмент складу).
         using var model = JsonDocument.Parse(File.ReadAllText(Path.Combine(Dir, "land-template.model.json")));

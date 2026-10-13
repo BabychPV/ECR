@@ -188,3 +188,48 @@ function Get-LandApplicabilityCodeUnion {
     }
     return , @($union.Keys | Sort-Object { [int]$_ })
 }
+
+function Resolve-LandMethodologySubstanceCodes {
+    <#
+    .SYNOPSIS
+        Склад речовин версії методології для етапу LandParity: суфікси категорій констант (форма B) або словник
+        застосовності (форма A: константи за категорією без `_{код}`).
+    .DESCRIPTION
+        Правило вибору (✎ 2026-10-13, C11_10 / C11_11_05):
+          1. `-FromApplicability` (правило з `substancesFromApplicability: true`) - завжди об'єднання кодів словника;
+          2. інакше, якщо в категоріях констант є суфікси `_(\d{3,4})$` (`-SuffixCodes` не порожній), - вони, незмінно;
+          3. інакше (форма A: суфіксів немає) - об'єднання кодів словника застосовності цієї методології, якщо воно є;
+          4. інакше порожньо (склад не задається).
+        Пункти 1-3 нічого не вигадують: у форми A старий код ітерує коди речовин зі словника (`pollutionCodeByFuelType`
+        у ECW_C11_10, `codeGroup` у ECW_C11_11_05), а константи шукає за категорією-ключем без коду; рушій
+        (`ConstantResolver`) спершу пробує `{ключ}_{код}`, далі `{ключ}`, тож константи без суфікса знаходяться.
+    .PARAMETER SuffixCodes
+        Результат `Get-LandSubstanceCodes` по категоріях констант чернетки.
+    .PARAMETER ApplicabilityCodes
+        Об'єкт `methodologies.<код>.codes` з land-substance-applicability.json або `$null`.
+    .PARAMETER FromApplicability
+        Правило явно просить склад зі словника.
+    .OUTPUTS
+        pscustomobject: Codes (string[], за зростанням), Source = 'Applicability' | 'Suffix' | 'ApplicabilityFallback' | 'None'.
+    #>
+    param(
+        [AllowNull()][AllowEmptyCollection()][string[]]$SuffixCodes,
+        [AllowNull()]$ApplicabilityCodes,
+        [bool]$FromApplicability = $false
+    )
+
+    # Get-LandApplicabilityCodeUnion повертає `,@(...)`: прямий вираз-присвоєння знімає обгортку, `@(f)` лишив би вкладений масив.
+    $union = [string[]](Get-LandApplicabilityCodeUnion -Codes $ApplicabilityCodes)
+    if ($null -eq $union) { $union = [string[]]@() }
+    $suffix = @($SuffixCodes | Where-Object { $_ })
+    if ($FromApplicability) {
+        return [pscustomobject]@{ Codes = [string[]]$union; Source = 'Applicability' }
+    }
+    if ($suffix.Count -gt 0) {
+        return [pscustomobject]@{ Codes = [string[]]$suffix; Source = 'Suffix' }
+    }
+    if ($union.Count -gt 0) {
+        return [pscustomobject]@{ Codes = [string[]]$union; Source = 'ApplicabilityFallback' }
+    }
+    return [pscustomobject]@{ Codes = [string[]]@(); Source = 'None' }
+}

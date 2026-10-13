@@ -153,4 +153,93 @@ public sealed class LandParityRuleArgsTests
         Assert.Contains("if ($Stage -contains 'LandParity') { Stage-LandParity }", text, StringComparison.Ordinal);
         Assert.DoesNotContain("Want 'LandParity'", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Склад_речовин_форми_A_береться_зі_словника_а_з_суфіксами_лишається_незмінним()
+    {
+        const string script = """
+            $ErrorActionPreference = 'Stop'
+            . $args[0]
+            . $args[1]
+            $sa = Get-Content -LiteralPath $args[2] -Raw -Encoding UTF8 | ConvertFrom-Json
+            function Show($tag, $cats, $name, $force) {
+              $suffix = Get-LandSubstanceCodes -Categories $cats
+              $e = $sa.methodologies.PSObject.Properties[$name]
+              $codes = if ($null -ne $e) { $e.Value.codes } else { $null }
+              $r = Resolve-LandMethodologySubstanceCodes -SuffixCodes $suffix -ApplicabilityCodes $codes -FromApplicability $force
+              "$tag=$($r.Source):" + ($r.Codes -join ',')
+            }
+            # форма A: категорії без суфікса (ключ-група або NAE) -> словник застосовності методології
+            Show 'C1110' @('0220', '0340', '0647', '0884', '0960', '0970', 'Common') 'ECW_C11_10' $false
+            Show 'C111105' @('0480', '0481', '6482(001)') 'ECW_C11_11_05' $false
+            # форма B із суфіксами: склад - суфікси, словник не підмішується
+            Show 'B_C111103' @('0782(001)_333', '0782(001)_415', '0804_1702', 'Common') 'ECW_C11_11_03' $false
+            Show 'B_C1201' @('FuelGas_1702', 'Diesel_333') 'ECW_C12_01' $false
+            # явна позначка правила - завжди словник, навіть із суфіксами (C12_03)
+            Show 'FLAG' @('0026_333') 'ECW_C12_03' $true
+            # форма A, але словника немає - склад не задається
+            Show 'NODICT' @('0647') 'ECW_C11_04' $false
+            Show 'NOCATS' @() 'ECW_C11_10' $false
+            """;
+
+        var (exit, output) = RunPowerShell(
+            script,
+            LandFile("LandParityRuleArgs.Lib.ps1"),
+            LandFile("LandSubstanceApplicability.Lib.ps1"),
+            Path.Combine(SourceTree.Root, "docs", "delivery", "reference-data", "land-template", "land-substance-applicability.json"));
+
+        Assert.True(exit == 0, output);
+        const string all15 = "333,334,370,415,416,602,616,621,627,1702,1707,1715,1720,1728,2754";
+        Assert.Contains("C1110=ApplicabilityFallback:" + all15, output, StringComparison.Ordinal);
+        Assert.Contains("C111105=ApplicabilityFallback:330,333", output, StringComparison.Ordinal);
+        Assert.Contains("B_C111103=Suffix:333,415,1702", output, StringComparison.Ordinal);
+        Assert.Contains("B_C1201=Suffix:333,1702", output, StringComparison.Ordinal);
+        Assert.Contains("FLAG=Applicability:" + all15, output, StringComparison.Ordinal);
+        Assert.Contains("NODICT=None:", output, StringComparison.Ordinal);
+        Assert.Contains("NOCATS=ApplicabilityFallback:" + all15, output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Форма_A_у_файлах_моделі_це_рівно_C11_10_і_C11_11_05_а_решта_словникових_методологій_мають_суфікс()
+    {
+        // Методологія зі словником застосовності й правилом категорії без позначки «form B» у note - форма A:
+        // константи за ключем без коду. Перелік зафіксовано: нова методологія форми A мусить бути названа свідомо
+        // (і мати склад із словника), а не випасти з складу речовин мовчки.
+        var dir = Path.Combine(SourceTree.Root, "docs", "delivery", "reference-data", "land-template");
+        using var rules = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(dir, "af-land-category-rules.json")));
+        using var dictionary = System.Text.Json.JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(dir, "land-substance-applicability.json")));
+        var withDictionary = dictionary.RootElement.GetProperty("methodologies").EnumerateObject()
+            .Where(m => m.Value.GetProperty("codes").EnumerateObject()
+                .Any(k => k.Value.EnumerateArray().Any()))
+            .Select(m => m.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var formA = rules.RootElement.GetProperty("rules").EnumerateArray()
+            .Where(r => withDictionary.Contains(r.GetProperty("methodology").GetString()!))
+            .Where(r => !r.GetProperty("note").GetString()!.Contains("form B", StringComparison.Ordinal)
+                        && !(r.TryGetProperty("substancesFromApplicability", out var flag) && flag.GetBoolean()))
+            .Select(r => r.GetProperty("methodology").GetString()!)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(["ECW_C11_10", "ECW_C11_11_05"], formA);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Етап_LandParity_бере_склад_через_Resolve_LandMethodologySubstanceCodes()
+    {
+        var build = File.ReadAllText(LandFile("Build-LandTemplate.ps1"));
+        var parity = build.IndexOf("function Stage-LandParity", StringComparison.Ordinal);
+        var next = build.IndexOf("function Stage-MassFraction", parity, StringComparison.Ordinal);
+        Assert.True(parity > 0 && next > parity);
+        var stage = build[parity..next];
+
+        Assert.Contains("Resolve-LandMethodologySubstanceCodes", stage, StringComparison.Ordinal);
+        Assert.Contains("Get-LandSubstanceCodes -Categories $cats", stage, StringComparison.Ordinal);
+        Assert.Contains("substancesFromApplicability", stage, StringComparison.Ordinal);
+    }
 }
