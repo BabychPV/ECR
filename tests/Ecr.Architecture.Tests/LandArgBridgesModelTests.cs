@@ -48,7 +48,15 @@ public sealed class LandArgBridgesModelTests
                 foreach (Match m in Regex.Matches(expr, @"\[([^\]]+)\]"))
                 {
                     var token = m.Groups[1].Value;
-                    if (token.StartsWith("Period", StringComparison.Ordinal))
+
+                    // GTU-мости (2026-10-13): [T10_03].[WHERE [Колонка] = [Period].Sequence].[Колонка] - таблиця й
+                    // предикат того ж рядка; регулярний вираз бачить «WHERE [Колонка» як один токен
+                    if (token.StartsWith("WHERE [", StringComparison.Ordinal))
+                    {
+                        token = token["WHERE [".Length..];
+                    }
+
+                    if (token.StartsWith("Period", StringComparison.Ordinal) || token == table.Name)
                     {
                         continue;
                     }

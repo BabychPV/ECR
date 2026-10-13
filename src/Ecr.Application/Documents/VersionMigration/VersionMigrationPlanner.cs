@@ -66,8 +66,17 @@ public sealed record VersionMigrationPlan(
     long TransferredValues,
     long LostValues,
     long GuardedValues,
-    IReadOnlyList<string>? RenameConflicts = null)
+    IReadOnlyList<string>? RenameConflicts = null,
+    IReadOnlySet<int>? TouchedSourceSheetIds = null)
 {
+    /// <summary>
+    /// LP-32: аркуші вихідної версії, які план ЗАЧІПАЄ так, що подане/затверджене на них переносити не можна: втрата чи
+    /// видалення (аркуш, таблиця, колонка, рядок), зміна тлумачення (клас Guarded і вище), перейменування таблиці чи
+    /// колонки, нові рядки фіксованої таблиці. Додані колонки/таблиці/аркуші, розширення Precision/Scale, презентація
+    /// й формули не зачіпають. <c>null</c> — не обчислювалось (як порожній).
+    /// </summary>
+    public IReadOnlySet<int> TouchedSheets => TouchedSourceSheetIds ?? new HashSet<int>();
+
     /// <summary>Скільки пунктів мапи перейменувань суперечать цій парі версій (<c>renameConflict</c>).</summary>
     public int RenameConflictCount => RenameConflicts?.Count ?? 0;
 
@@ -163,12 +172,18 @@ public static class VersionMigrationPlanner
         var targetSheets = Live(target.Sheets).ToDictionary(s => s.Code, StringComparer.Ordinal);
         var sourceSheets = Live(source.Sheets).ToList();
 
+        var touched = new HashSet<int>();
+
         foreach (var sheet in sourceSheets)
         {
+            var itemsBefore = items.Count;
+            var newRowsBefore = newRows.Count;
+
             if (!targetSheets.TryGetValue(sheet.Code, out var otherSheet))
             {
                 var sheetValues = Live(sheet.Tables).SelectMany(t => Live(t.Columns)).Sum(c => Count(valuesByColumn, c.Id));
                 items.Add(Removal(sheet.Code, sheetValues));
+                touched.Add(sheet.Id);
                 continue;
             }
 
@@ -241,6 +256,12 @@ public static class VersionMigrationPlanner
             {
                 items.Add(new($"{sheet.Code}.{added.Code}", "Added", ChangeClass.Safe, 0));
             }
+
+            // LP-32: усе, що додано до списку під час розбору цього аркуша, належить йому.
+            if (newRows.Count > newRowsBefore || items.Skip(itemsBefore).Any(TouchesLockedSheet))
+            {
+                touched.Add(sheet.Id);
+            }
         }
 
         foreach (var added in targetSheets.Values.Where(t => sourceSheets.All(s => s.Code != t.Code)))
@@ -276,8 +297,16 @@ public static class VersionMigrationPlanner
 
         return new VersionMigrationPlan(
             sheets, tables, columns, rows, headerFields, newRows, items, transferred, lost, guarded,
-            conflicts.Count == 0 ? null : conflicts);
+            conflicts.Count == 0 ? null : conflicts, touched);
     }
+
+    /// <summary>
+    /// LP-32: чи не можна переносити подане/затверджене на аркуші з такою відмінністю. Клас Guarded і вище — втрата,
+    /// видалення, зміна тлумачення; <c>Renamed</c> — код таблиці/колонки змінюється (клас Safe, але адреса інша).
+    /// <c>Added</c>/<c>Widened</c>/<c>Presentation</c> (клас Safe і нижче) дані подання не міняють.
+    /// </summary>
+    private static bool TouchesLockedSheet(VersionMigrationItem item)
+        => item.ChangeClass >= ChangeClass.Guarded || string.Equals(item.Kind, "Renamed", StringComparison.Ordinal);
 
     /// <summary>
     /// Запис мапи для таблиці: з вказаним аркушем має перевагу над записом «на будь-якому аркуші».

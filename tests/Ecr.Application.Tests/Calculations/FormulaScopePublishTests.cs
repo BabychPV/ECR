@@ -130,6 +130,7 @@ public sealed class FormulaScopePublishTests
     [InlineData("SUBSTANCE('T') * 2", "SUBSTANCE()")]
     [InlineData("if(1 > 0, 1, !T)", "!T")]
     [InlineData("if(CURRENT_SUBSTANCE() = '301', 1, 2)", "CURRENT_SUBSTANCE()")]
+    [InlineData("if(SUBSTANCE_APPLICABLE('APPL', 'M1', 'Stream', 'S1'), 1, 2)", "SUBSTANCE_APPLICABLE()")]
     public async Task Row_формула_з_посиланням_лише_для_речовини_відхиляється(string expression, string reference)
     {
         Formulas(

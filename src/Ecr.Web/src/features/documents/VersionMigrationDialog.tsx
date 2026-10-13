@@ -282,6 +282,12 @@ function MigrationReport({ report }: { readonly report: VersionMigrationReport }
         </Alert>
       )}
 
+      {(report.lockedSheetsCarried ?? 0) > 0 && (
+        <Alert color="statusWarning" data-migrate-locked-carried="">
+          {t('documents.migrateLockedCarried', { count: report.lockedSheetsCarried ?? 0 })}
+        </Alert>
+      )}
+
       {report.canApply ? (
         <Alert color="statusSuccess" data-migrate-can-apply="">
           {t('documents.migrateCanApply')}
@@ -294,6 +300,23 @@ function MigrationReport({ report }: { readonly report: VersionMigrationReport }
                 {refusalText(reason)}
               </Text>
             ))}
+            {(report.lockedSheetsAffected ?? 0) > 0 && (
+              <Stack gap="xs" data-migrate-locked-affected="">
+                <Text size="sm">{t('documents.migrateLockedAffected', { count: report.lockedSheetsAffected ?? 0 })}</Text>
+                {(report.lockedSheetItems ?? [])
+                  .filter((item) => item.affected)
+                  .slice(0, ShownItems)
+                  .map((item) => (
+                    <Text size="xs" key={`${String(item.documentId)}|${item.sheetCode}|${String(item.periodKey)}`}>
+                      {t('documents.migrateLockedItem', {
+                        sheet: item.sheetCode,
+                        period: item.periodKey,
+                        status: item.status,
+                      })}
+                    </Text>
+                  ))}
+              </Stack>
+            )}
             {report.blockedGrantCount !== null && report.blockedGrantCount !== undefined && report.blockedGrantCount > 0 && (
               <Text size="sm" data-migrate-blocked-grants="">
                 {t('documents.migrateGrantsNotMappedCount', { count: report.blockedGrantCount })}

@@ -66,6 +66,9 @@ function report(overrides: Partial<VersionMigrationReport>): VersionMigrationRep
     lostValues: 0,
     guardedValues: 0,
     lockedSheets: 0,
+    lockedSheetsCarried: 0,
+    lockedSheetsAffected: 0,
+    lockedSheetItemsTruncated: false,
     items: [{ path: 'GEN.T1.C4', kind: 'Added', changeClass: 'Safe', values: 0 }],
     itemsTruncated: false,
     mappingsRemapped: 0,
@@ -320,6 +323,53 @@ describe('useVersionMigrationAction', () => {
     fireEvent.click(screen.getByTestId('migrate-dry-run'));
 
     await screen.findByText('⟦documents.migrateRefusalDataLoss⟧');
+    expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('LP-32: подані аркуші, перенесені без змін, — повідомлення, не блок; перенос дозволено', async () => {
+    show(
+      ['Template.Edit'],
+      report({
+        lockedSheets: 2,
+        lockedSheetsCarried: 2,
+        lockedSheetsAffected: 0,
+        lockedSheetItems: [
+          { documentId: 1, sheetCode: 'GEN', periodKey: 202601, status: 'Submitted', affected: false },
+        ],
+      }),
+    );
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+    await waitFor(() => expect(document.querySelector('[data-migrate-locked-carried]')).not.toBeNull());
+    expect(document.querySelector('[data-migrate-can-apply]')).not.toBeNull();
+    expect(document.querySelector('[data-migrate-locked-affected]')).toBeNull();
+  });
+
+  it('LP-32: зачеплені подані аркуші — перелік із кодом, періодом і статусом; перенос вимкнено', async () => {
+    show(
+      ['Template.Edit'],
+      report({
+        canApply: false,
+        refusals: ['sheetsLocked'],
+        lockedSheets: 1,
+        lockedSheetsCarried: 0,
+        lockedSheetsAffected: 1,
+        lockedSheetItems: [
+          { documentId: 1, sheetCode: 'GEN', periodKey: 202601, status: 'Approved', affected: true },
+        ],
+      }),
+    );
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+    await screen.findByText('⟦documents.migrateLockedAffected (count=1)⟧');
+    expect(document.querySelector('[data-migrate-locked-affected]')).not.toBeNull();
+    expect(
+      screen.getByText('⟦documents.migrateLockedItem (sheet=GEN, period=202601, status=Approved)⟧'),
+    ).toBeDefined();
     expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(true);
   });
 

@@ -216,15 +216,17 @@ public sealed class LandAfAttributeBridgesModelTests
         Assert.StartsWith("[конфлікт]", Unresolved(model, "T9a_27", "Land_Measure_OperatingTime"), StringComparison.Ordinal);
         // AF-таблиця 9_02 не має OperatingTime: старий код не передає аргумент
         Assert.StartsWith("[AF-немає]", Unresolved(model, "T9_02", "Land_Measure_OperatingTime"), StringComparison.Ordinal);
-        // компоненти GTU беруться з іншого рядка таблиці
-        Assert.StartsWith("[GTU]", Unresolved(model, "T10_03", "Land_Measure_Component_301"), StringComparison.Ordinal);
-        // Land_Power і Category1 виводяться з груп NAE у коді
-        Assert.StartsWith("[похідне]", Unresolved(model, "T9a_17", "Land_Power"), StringComparison.Ordinal);
-        Assert.StartsWith("[похідне]", Unresolved(model, "T9_01", "Category1"), StringComparison.Ordinal);
+        // компоненти GTU беруться з іншого рядка таблиці: з 2026-10-13 це предикатні мости (LandGtuBridgesModelTests)
+        Assert.Null(Unresolved(model, "T10_03", "Land_Measure_Component_301"));
+        // Land_Power і Category1 виводяться з груп NAE у коді: тепер мости через довідник LAND_NAE_GROUP
+        // (LandNaeGroupBridgesModelTests); у unresolved їх немає.
+        Assert.Null(Unresolved(model, "T9a_17", "Land_Power"));
+        Assert.Null(Unresolved(model, "T9_01", "Category1"));
+        Assert.Contains("LAND_NAE_GROUP", Expression(model, "T9a_17", "Land_Power"), StringComparison.Ordinal);
         // вхід, названий в unresolved, не має колонки-мосту
         var tables = Tables(model);
         Assert.DoesNotContain("Land_Measure_OperatingTime", Columns(tables["T9a_27"]).Keys);
-        Assert.DoesNotContain("Land_Measure_Component_301", Columns(tables["T10_03"]).Keys);
+        Assert.Contains("Land_Measure_Component_301", Columns(tables["T10_03"]).Keys);
     }
 
     [Fact]
@@ -292,7 +294,7 @@ public sealed class LandAfAttributeBridgesModelTests
         [
             "ECW_C11_04", "ECW_C11_05", "ECW_C11_06", "ECW_C11_07", "ECW_C11_11_01", "ECW_C11_11_05", "ECW_C11_12_01",
             "ECW_C11_12_03", "ECW_C11_13", "ECW_C11_14", "ECW_C11_15", "ECW_C11_17", "ECW_C11_18", "ECW_C11_19",
-            "ECW_C11_20_01", "ECW_C11_20_02", "ECW_C12_04_01", "ECW_C12_04_02", "ECW_C12_05",
+            "ECW_C11_20_01", "ECW_C11_20_02", "ECW_C12_02", "ECW_C12_04_01", "ECW_C12_04_02", "ECW_C12_05",
         ];
 
         foreach (var name in expectedGreen)
@@ -302,9 +304,9 @@ public sealed class LandAfAttributeBridgesModelTests
                 $"{name}: немає колонок для {string.Join(", ", open ?? [])}.");
         }
 
-        // і є що закривати далі: CompositionMass, GTU, конфлікти й відсутні атрибути ще відкриті
+        // і є що закривати далі: CompositionMass, конфлікти й відсутні атрибути ще відкриті
+        // (GTU/C12_02 закрито 2026-10-13 предикатними мостами, див. LandGtuBridgesModelTests)
         Assert.Contains("ECW_C12_01", openByMethodology.Keys);
-        Assert.Contains("ECW_C12_02", openByMethodology.Keys);
     }
 
     [Fact]
