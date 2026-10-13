@@ -152,10 +152,10 @@
                   },
                   {
                       "methodology":  "ECW_C11_10",
-                      "expression":  "if(in(@Land_NAE,'0960','0961','0962','0963'),'0960',if(in(@Land_NAE,'0340','0341','0344','0345'),'0340',if(in(@Land_NAE,'0342','0343','0346','0347'),'0342',if(in(@Land_NAE,'0362','0364','0366','0368'),'0362',if(in(@Land_NAE,'0363','0365','0367','0369'),'0363',if(in(@Land_NAE,'0647','0648','0649','0650','0651','0652'),'0647',if(in(@Land_NAE,'0884','0886','0888','0890','0892','0894'),'0884',if(in(@Land_NAE,'0885','0887','0889','0891','0893','0895'),'0885',if(in(@Land_NAE,'0220','0221','0222','0280','0281'),'0220',@Land_NAE)))))))))",
+                      "expression":  "if(in(@Land_NAE,'0960','0961','0962','0963'),'0960',if(in(@Land_NAE,'0340','0341','0344','0345'),'0340',if(in(@Land_NAE,'0342','0343','0346','0347'),'0342',if(in(@Land_NAE,'0362','0364','0366','0368'),'0362',if(in(@Land_NAE,'0363','0365','0367','0369'),'0363',if(in(@Land_NAE,'0647','0648','0649','0650','0651','0652','0647 (001-002)','0647(001-002)','0648 (001-002)','0648(001-002)','0649 (001-002)','0649(001-002)','0650 (001-002)','0650(001-002)','0651 (001-002)','0651(001-002)','0652 (001-002)','0652(001-002)'),'0647',if(in(@Land_NAE,'0884','0886','0888','0890','0892','0894'),'0884',if(in(@Land_NAE,'0885','0887','0889','0891','0893','0895'),'0885',if(in(@Land_NAE,'0220','0221','0222','0280','0281'),'0220',@Land_NAE)))))))))",
                       "normalizesNae":  true,
                       "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_10.cs:75-100,320-339",
-                      "note":  "key = group(codeGroupConstants) else NAE; formula type (type1/2/3) is chosen by NAE separately in C#"
+                      "note":  "key = group(codeGroupConstants) else NAE; formula type (type1/2/3) is chosen by NAE separately in C#. Form A: constants are keyed by the category alone (no _{code} suffix), the substance set comes from land-substance-applicability.json (Stage LandParity fallback). T9_04 NAE values carry a tail \u0027 (001-002)\u0027 (AF rules Rule_002..007 of ECW_C11_10 V1: 0647..0652 + \u0027 (001-002)\u0027); C# cuts the NAE at \u0027(\u0027 (ECW_C11_10.cs:133-141), the dialect has no string function, so both spellings of the six values are listed in the group-0647 branch"
                   },
                   {
                       "methodology":  "ECW_C11_11_02",
