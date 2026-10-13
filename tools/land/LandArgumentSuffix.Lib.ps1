@@ -1,0 +1,154 @@
+﻿# tools/land/LandArgumentSuffix.Lib.ps1
+# K1 (D-8, клас K - конфлікт джерел аргументів): методологія читає аргумент під ІМЕНЕМ ІЗ СУФІКСОМ методології
+# (`Land_Measure_OperatingTime` -> `Land_Measure_OperatingTime__ECW_C11_01`). Чиста логіка без звернень до API;
+# значень прода тут немає.
+#
+# Навіщо. На T9a_17/T9a_27/T9_07 методології однієї таблиці беруть один аргумент з РІЗНИХ атрибутів AF (старий код
+# перейменовує ключ у своєму словнику): колонка з кодом аргументу не може бути двома джерелами. Model-gen
+# (af_attr_bridges.py, ARGUMENT_SUFFIXES) будує для методології власну колонку-міст з суфіксом, а цей модуль підміняє
+# токен у ЧЕРНЕТЦІ: у виразі `@Name` (не префікс довшого імені) і в елементі списку аргументів (з `@` чи без, зберігаючи
+# кінцевий `?`). Решту елементів списку не чіпає. Повтор - 0 змін: суфіксоване ім'я продовжується `_`, а межа імені
+# `(?![A-Za-z0-9_])` його не збігає.
+#
+# Перелік - з моделі (argumentBridges.argumentSuffixes), його складає model-gen.
+
+function ConvertTo-LandArgumentSuffixKey {
+    <# Ключ порівняння імені аргументу: як ArgumentDeclarationChecker.NormalizeName (без `@`, без кінцевого `?`, `.`->`_`). #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Token)
+
+    $x = $Token.Trim()
+    if ($x.StartsWith('@')) { $x = $x.Substring(1) }
+    if ($x.EndsWith('?')) { $x = $x.Substring(0, $x.Length - 1).TrimEnd() }
+    return $x.Replace('.', '_').ToLowerInvariant()
+}
+
+function Get-LandArgumentSuffixes {
+    <#
+    .SYNOPSIS
+        Словник «методологія -> масив {Argument, Column}» з моделі (argumentBridges.argumentSuffixes.methodologies).
+    .PARAMETER Model
+        Розібрана land-template.model.json (ConvertFrom-Json).
+    #>
+    param([Parameter(Mandatory)]$Model)
+
+    $result = [ordered]@{}
+    $section = $Model.argumentBridges.argumentSuffixes
+    if ($null -eq $section) { return $result }
+    foreach ($m in $section.methodologies.PSObject.Properties) {
+        $items = New-Object System.Collections.Generic.List[object]
+        foreach ($a in $m.Value.PSObject.Properties) {
+            $items.Add([pscustomobject]@{ Argument = [string]$a.Name; Column = [string]$a.Value.column })
+        }
+        $result[[string]$m.Name] = $items.ToArray()
+    }
+    return $result
+}
+
+function Convert-LandArgumentSuffixFormula {
+    <#
+    .SYNOPSIS
+        Підміняє аргументи з -Suffixes на суфіксовані колонки у виразі й у списку аргументів однієї формули.
+    .DESCRIPTION
+        Вираз: `@<Argument>` з межею імені -> `@<Column>`. Список: елемент, чиє ім'я (без `@`, без `?`, без регістру,
+        `.` = `_`) збігається з Argument, отримує ім'я Column із збереженням `@` і кінцевого `?`; чужі елементи й порожні
+        лишаються. $null у списку лишається $null (формула без списку); порожній рядок не вводиться (ECR-CALC-0432).
+        Дубль, що виник би після підміни (суфіксоване ім'я вже є в списку), не додається. Повтор - Changed = $false.
+    .PARAMETER Suffixes
+        Масив {Argument, Column} (Get-LandArgumentSuffixes).
+    .OUTPUTS
+        pscustomobject: Changed, Expression, ArgumentsCsv, Replaced (імена Argument, що підмінено).
+    #>
+    param(
+        [AllowNull()][AllowEmptyString()]$Expression = $null,
+        [AllowNull()][AllowEmptyString()]$ArgumentsCsv = $null,
+        [Parameter(Mandatory)][object[]]$Suffixes
+    )
+
+    $newExpr = $Expression
+    $replaced = New-Object System.Collections.Generic.HashSet[string]
+    if ($null -ne $Expression) {
+        foreach ($s in $Suffixes) {
+            $rx = '@' + [regex]::Escape([string]$s.Argument) + '(?![A-Za-z0-9_])'
+            if ([regex]::IsMatch([string]$newExpr, $rx, 'IgnoreCase')) {
+                $newExpr = [regex]::Replace([string]$newExpr, $rx, ('@' + [string]$s.Column).Replace('$', '$$'), 'IgnoreCase')
+                [void]$replaced.Add([string]$s.Argument)
+            }
+        }
+    }
+
+    $newCsv = $ArgumentsCsv
+    if ($null -ne $ArgumentsCsv) {
+        $map = @{}
+        foreach ($s in $Suffixes) { $map[(ConvertTo-LandArgumentSuffixKey -Token ([string]$s.Argument))] = $s }
+        $tokens = New-Object System.Collections.Generic.List[string]
+        $seen = @{}
+        $listChanged = $false
+        foreach ($t in ([string]$ArgumentsCsv -split ';')) {
+            $x = $t.Trim()
+            if ($x.Length -eq 0) { continue }
+            $key = ConvertTo-LandArgumentSuffixKey -Token $x
+            if ($map.ContainsKey($key)) {
+                $s = $map[$key]
+                $x = $(if ($x.StartsWith('@')) { '@' } else { '' }) + [string]$s.Column + $(if ($x.EndsWith('?')) { '?' } else { '' })
+                $key = ConvertTo-LandArgumentSuffixKey -Token $x
+                $listChanged = $true
+                [void]$replaced.Add([string]$s.Argument)
+            }
+            if ($seen.ContainsKey($key)) { $listChanged = $true; continue }
+            $seen[$key] = $true
+            $tokens.Add($x)
+        }
+        if ($listChanged) { $newCsv = (($tokens -join ';') + ';') }
+    }
+
+    $changed = ($newExpr -cne $Expression) -or ($newCsv -cne $ArgumentsCsv)
+    return [pscustomobject]@{
+        Changed      = $changed
+        Expression   = $newExpr
+        ArgumentsCsv = $newCsv
+        Replaced     = @($replaced)
+    }
+}
+
+function Add-LandArgumentSuffixTestArguments {
+    <#
+    .SYNOPSIS
+        Додає до аргументів тест-кейсу суфіксований аргумент з ТИМ САМИМ значенням, що й оригінал (PARITY_1).
+    .DESCRIPTION
+        Без цього simulate дає #ARG (аргумент формули не передано). Оригінал лишається (зайві аргументи тест-кейса рушій
+        приймає). Суфіксований, що вже є, не перезаписується. Оригіналу в тест-кейсі немає - нічого не вигадуємо
+        (Missing). Копіюються всі поля запису (value, valueString, unitId, entryId), міняється лише argumentCode.
+    .PARAMETER Existing  Масив {argumentCode, value, valueString, unitId[, entryId]} з inputJson.arguments.
+    .PARAMETER Suffixes  Масив {Argument, Column}.
+    .OUTPUTS
+        pscustomobject: Arguments (злитий масив), Added (коди колонок), Missing (аргументи без оригіналу в тест-кейсі).
+    #>
+    param(
+        [AllowEmptyCollection()][AllowNull()][object[]]$Existing,
+        [Parameter(Mandatory)][object[]]$Suffixes
+    )
+
+    $byCode = @{}
+    $list = New-Object System.Collections.Generic.List[object]
+    foreach ($a in @($Existing)) {
+        if ($null -eq $a) { continue }
+        $byCode[(ConvertTo-LandArgumentSuffixKey -Token ([string]$a.argumentCode))] = $a
+        $list.Add($a)
+    }
+    $added = New-Object System.Collections.Generic.List[string]
+    $missing = New-Object System.Collections.Generic.List[string]
+    foreach ($s in $Suffixes) {
+        $colKey = ConvertTo-LandArgumentSuffixKey -Token ([string]$s.Column)
+        if ($byCode.ContainsKey($colKey)) { continue }
+        $orig = $byCode[(ConvertTo-LandArgumentSuffixKey -Token ([string]$s.Argument))]
+        if ($null -eq $orig) { $missing.Add([string]$s.Argument); continue }
+        $copy = [ordered]@{}
+        if ($orig -is [System.Collections.IDictionary]) { foreach ($k in $orig.Keys) { $copy[[string]$k] = $orig[$k] } }
+        else { foreach ($p in $orig.PSObject.Properties) { $copy[[string]$p.Name] = $p.Value } }
+        $copy['argumentCode'] = [string]$s.Column
+        $list.Add($copy)
+        $byCode[$colKey] = $copy
+        $added.Add([string]$s.Column)
+    }
+    return [pscustomobject]@{ Arguments = $list.ToArray(); Added = $added.ToArray(); Missing = $missing.ToArray() }
+}

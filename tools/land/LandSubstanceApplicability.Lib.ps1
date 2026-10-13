@@ -161,3 +161,30 @@ function Get-LandSubstanceApplicabilitySampleArguments {
     if ($m.Success) { $picked[$m.Groups[1].Value] = $m.Groups[2].Value }
     return $picked
 }
+
+function Get-LandApplicabilityCodeUnion {
+    <#
+    .SYNOPSIS
+        Склад речовин методології = об'єднання кодів усіх ключів `codes` з land-substance-applicability.json
+        (для правил із `substancesFromApplicability: true` у af-land-category-rules.json).
+    .DESCRIPTION
+        Константи чернетки можуть не покривати всі коди (напр. 1707 лише у FG_Internal), а старий C# рахує їх за
+        словником застосовності: склад версії має бути його об'єднанням, інакше речовина випаде з розрахунку.
+    .PARAMETER Codes
+        Об'єкт `methodologies.<код>.codes` (ключ рядка -> масив кодів).
+    .OUTPUTS
+        string[] - числові коди без провідних нулів, за зростанням (порожній, якщо `Codes` немає).
+    #>
+    param([AllowNull()]$Codes)
+
+    $union = @{}
+    if ($null -ne $Codes) {
+        foreach ($key in $Codes.PSObject.Properties) {
+            foreach ($c in @($key.Value)) {
+                $s = ([string]$c).Trim()
+                if ($s -match '^[0-9]{3,4}$') { $union[[string]([int]$s)] = $true }
+            }
+        }
+    }
+    return , @($union.Keys | Sort-Object { [int]$_ })
+}

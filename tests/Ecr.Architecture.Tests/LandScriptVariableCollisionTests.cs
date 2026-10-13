@@ -18,6 +18,7 @@ public sealed class LandScriptVariableCollisionTests
     {
         "Apply-ContractHeader.ps1:DataDir", "Apply-ContractHeader.ps1:NewVersion",
         "Import-ContractDictionaries.ps1:DataDir", "EcrApi.ps1:User",
+        "Build-LandTemplate.ps1:AccountsFile",
     };
 
     private const string Scan = """

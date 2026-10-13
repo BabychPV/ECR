@@ -256,14 +256,30 @@ C05 / C06_01 / C07_*; для методології з кількома табл
 лише чернетки, не публікує; запускати ОСТАННІМ - після `Methodologies`, `CompositionMass`, `ParityBranch`) ставить у
 `;`-списку аргументів формул методологій з моделі (`argumentBridges.optionalArguments`) маркер `?` на елементі:
 `@Land_Measure_OperatingTime?`. Маркер знімає вимогу колонки (0438) для всієї версії, а відсутня комірка в рантаймі стає
-null (як порожня). Перелік (8 пар методологія/таблиця): C11_10 - `Land_Measure_OperatingTime` (T9_02, T9_11, T9a_24, T9a_26),
-`Land_Measure_SubstanceConsumption` (T9a_27, T9a_28); C11_11_03 - `Land_Measure_MaterialResidence` (T9_06); C11_16 -
+null (як порожня). Перелік (9 пар методологія/таблиця): C11_10 - `Land_Measure_OperatingTime` (T9_02, T9_11, T9a_24, T9a_26),
+`Land_Measure_SubstanceConsumption` (T9_07 - після K1, T9a_27, T9a_28); C11_11_03 - `Land_Measure_MaterialResidence` (T9_06); C11_16 -
 `Land_Measure_FlowRateSulfur` (T9a_23). Класи K (конфлікт джерел) і Q (C11_03 `RunningHours` на T9_05/T9_14, рішення
 замовника Q-D8-2) НЕ входять. Попередження публікації `publish.warning.optionalArgumentNoColumn` називає позначений
 аргумент, якого немає в жодній прив'язаній таблиці (описка). Чиста логіка - `LandOptionalArguments.Lib.ps1` (тест
 `LandOptionalArgumentsTests`); перелік веде `af_attr_bridges.py` (`OPTIONAL_ARGUMENTS`), повтор - 0 змін.
 ⚠ Маркер per-версія: на таблицях, де колонка є (напр. T9_07, T9a_27 для OperatingTime), відсутня комірка стає null
 замість `#ARG`; перевірка паритету на стенді після «відбою» - PARITY_1 і `Compare-LandParityFull`.
+
+#### ArgumentSuffix: суфіксовані аргументи C11_01 / C11_02 / C11_11_02 (K1)
+
+Клас K з D-8: на T9a_17, T9a_27 і T9_07 методології однієї таблиці беруть один аргумент з РІЗНИХ атрибутів AF (старий
+код перейменовує ключ у власному словнику), а колонка з кодом аргументу не може бути двома джерелами. K1: методологія-
+«меншість» читає власну колонку-міст `<аргумент>__<код методології>` (`Land_Measure_OperatingTime__ECW_C11_01`,
+`..._ECW_C11_02`, `Land_Measure_SubstanceConsumption__ECW_C11_11_02`), решта - незмінне ім'я. Model-gen (`af_attr_bridges.py`,
+`ARGUMENT_SUFFIXES`, розділ моделі `argumentBridges.argumentSuffixes`) додає 16 Formula-колонок (14 суфіксованих по одній у
+кожній таблиці методології + звичайні `Land_Measure_OperatingTime` на T9a_17/T9a_27); нічого не видаляє й не змінює.
+`-Stage ArgumentSuffix` (лише явно, в `All` не входить, лише чернетки, не публікує; запускати ПІСЛЯ `Methodologies`,
+`CompositionMass`, `SubstanceApplicability`, `ParityBranch` і ПЕРЕД `OptionalArguments`) підміняє `@<аргумент>` у виразах і
+елемент у списках аргументів (кінцевий `?` і чужі елементи зберігаються) і додає суфіксований аргумент у PARITY_1 з тим
+самим значенням; повтор - 0 змін. Чиста логіка - `LandArgumentSuffix.Lib.ps1`; тести `LandArgumentSuffixStageTests`,
+`LandArgumentSuffixModelTests`. ⚠ Нові колонки існують лише в НОВІЙ версії шаблону (клон -> `-Stage Template` -> migrate),
+а 0438 перевіряє прив'язки методології на всіх версіях шаблону: перед видачею перевірте (read-only), чи є прив'язки на
+старих версіях (рішення K-eng-lite залежить від цього).
 
 ### Стелі динамічних рядків наявних таблиць клону (D-UPG-1)
 
@@ -425,3 +441,51 @@ $pw = Read-Host 'Пароль ECR' -AsSecureString
   комірки й вікно доступу діють як для людини (відхилені рядки рахуються в «відхилено», код виходу 1).
 - Тест: `LandStaleValuesTests` (Ecr.Architecture.Tests; функції бібліотеки `LandStaleValues.Lib.ps1` виконує справжній
   PowerShell з підробленим Api).
+
+## Вікно паритету: точкові інструменти (2026-10-13)
+
+Раніше це були скрипти поза репозиторієм із шляхами, портом і базою репетицій. Тепер вони тут, без значень прода,
+без секретів; тест — `LandWindowToolsTests` (Ecr.Architecture.Tests).
+
+Спільні правила: `-BaseUrl` і `-ConfirmStand` **обов'язкові без дефолтів**; за замовчуванням (і з `-DryRun`) інструмент
+нічого не пише; запис — лише `-Execute` разом з явним `-SqlConnection` (локальний сервер, база `EcrLand*`; потрібен для
+назви бази в підтвердженні) і `-ConfirmStand <адреса>/<база>`; лише локальний API; облікові дані — `-User`/`-Password`
+або `ECR_USER`/`ECR_PASSWORD`; `EcrApi.ps1` підключається через каталог скрипта.
+
+| Інструмент | Що робить |
+|---|---|
+| `Load-LandInputCells.ps1 -Kind TypeFuel\|Gtu -SourcePath <каталог JSON> -DocMap '{"<ім'я>":<id>}'` | `Land_TypeFuel` і `ReleaseOnColdVentYesNo_M<мм>` (T10_01/03/04, T11_01) або GTU-входи (T10_03/T11_03) із JSON повного набору в документи. Документ береться з `-DocMap` (ім'я → id), не за назвою на стенді. JSON з прод-даними лишається поза git (`-SourcePath` — локальний шлях). |
+| `Invoke-LandRecalc.ps1 -DocMap … -PeriodKey 202601,202602` | послідовний перерахунок документів із очікуванням задач; 429 чекає `Retry-After`. |
+| `New-LandMethodologyDraft.ps1 -Methodology ECW_C12_03 -VersionNumber V2` | чернетка як клон останньої опублікованої (етапи Build працюють лише по чернетках); повтор — 0 змін. |
+
+`Load-LandInputCells.ps1` перед записом робить **передперегляд** (потрібен `-User`): для кожного документа/періоду/таблиці
+читає колонки й рядки та друкує `NO_DOC`, `NO_TABLE`, `ROW_MISSING`, лічильник комірок, пропущених через відсутню колонку
+(`skipped-missing-column cells`), `lookupMiss` і **перелік відсутніх колонок** `таблиця/колонка` (без значень) — його
+звіряють з мостами моделі. Код виходу 1 за будь-якого з них; `-Execute` у цьому разі зупиняється до першого PATCH.
+Відсутні колонки пропускає лише явний `-AllowMissingColumns` (пишуться комірки наявних колонок, решта лишається в звіті).
+Перелік GTU-колонок береться **по-таблично з моделі** (`T10_03`: Month + GTU1..GTU4 = 21; `T11_03`: Month + GTU1..GTU5 = 26),
+а не зашитим списком. GTU-колонка файла, якої в моделі таблиці немає (GTU5 на T10_03), лічиться окремо як
+`WARN source-without-target-column` (таблиця/колонка=кількість, без значень), не вантажиться й код виходу не змінює.
+Колонка, яка є в моделі, але відсутня на стенді, як і раніше дає код 1. Ім'я документа з `GET /api/v1/documents/{id}`
+(`nameL10n.values.en`) звіряється з ключем `-DocMap`: розбіжність — `NAME_MISMATCH`, код 1 (обхід — `-AllowNameMismatch`).
+Так само в `Invoke-LandRecalc.ps1`. `Build-LandTemplate.ps1`: `-AccountsFile` без дефолту; без параметра береться
+`<корінь репозиторію>\.sync-local\land-accounts.local.txt`.
+Без `-User` друкується лише план за файлами (мережі немає), перевірки стенда не виконуються.
+
+### ECW_C12_03 стає звичайним етапом Build
+
+Правило категорії ECW_C12_03 тепер у `af-land-category-rules.json`
+(`if(in(@IDCodeNAEProject,'0026','0030','0036','0038','0040','0042'),'0026','')`: на T10_01/T11_01 немає `Land_NAE`,
+джерело його мосту — `IDCodeNAEProject`). Позначка `substancesFromApplicability` робить складом речовин версії
+об'єднання кодів `land-substance-applicability.json` (15 кодів), а не суфікси констант. Порядок для чернетки:
+
+```powershell
+.\New-LandMethodologyDraft.ps1 -Methodology ECW_C12_03 -VersionNumber V2 -BaseUrl … -ConfirmStand … -Execute …   # чернетка
+.\Build-LandTemplate.ps1 -Stage LandParity,SubstanceApplicability,CompositionMass -OnlyMethodology ECW_C12_03 `
+    -BaseUrl … -ConfirmStand <адреса>/<база> -SqlConnection …                                                     # правило, 15 речовин, обгортка, фрагмент складу, Strict
+```
+
+`-OnlyMethodology` (етапи LandParity, CompositionMass, SubstanceApplicability) обмежує обробку заданими кодами;
+без нього етапи, як і раніше, обходять усі методології. Вручну лишається аргумент `Land_TypeFuel` (запис довідника з
+`entryId`) у PARITY_1: обгортка `REGFIELD(@Land_TypeFuel,'NAME')` читає Lookup, а підібрати запис довідника без
+стенда етап не може. Публікація (роль-рецензент, `effectiveFrom`) — окреме рішення людини, інструменти її не виконують.

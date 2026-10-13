@@ -441,9 +441,10 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         Assert.Equal(1, first.StaleResultsMineCount);
         Assert.Equal(first, second);
 
-        // Перший виклик: агрегат + два лічильники = 3 запити; другий - лише агрегат (1), лічильники з кешу.
-        Assert.Equal(3, afterFirst);
-        Assert.Equal(1, afterSecond - afterFirst);
+        // Перший виклик: агрегат + відбиток + дві карти (усі / мої) + два підрахунки видимих = 6 запитів; другий -
+        // агрегат + відбиток + два підрахунки (4): карти періоду з кешу, журнал правок не чіпається.
+        Assert.Equal(6, afterFirst);
+        Assert.Equal(4, afterSecond - afterFirst);
     }
 
     [Fact]
@@ -509,17 +510,19 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
 
         await EditAsync(s.Fresh, s.Period, s.Chain.ColumnDefIds[1], Now.AddHours(1), user: Me);
 
+        // LP-45 етап 2: карта періоду не залежить від projectId - обидва виклики ділять ОДИН запис, тож
+        // розбіжності «0 з projectId / 1 без нього» більше немає навіть у межах TTL (обидва бачать 2).
         var coldKey = await cached.SummarizeAsync(
             null, s.Period, [s.Chain.ProjectId], null, Me, CancellationToken.None);
         var warmKey = await cached.SummarizeAsync(
             s.Chain.ProjectId, s.Period, [s.Chain.ProjectId], null, Me, CancellationToken.None);
-        Assert.Equal(3, coldKey.StaleResultsCount);
-        Assert.Equal(2, warmKey.StaleResultsCount);
+        Assert.Equal(2, coldKey.StaleResultsCount);
+        Assert.Equal(coldKey.StaleResultsCount, warmKey.StaleResultsCount);
 
         clock.Advance(DocumentListSummaryStore.StaleCountsTtl + TimeSpan.FromSeconds(1));
         var after = await cached.SummarizeAsync(
             s.Chain.ProjectId, s.Period, [s.Chain.ProjectId], null, Me, CancellationToken.None);
-        Assert.Equal(coldKey.StaleResultsCount, after.StaleResultsCount);
+        Assert.Equal(3, after.StaleResultsCount);
     }
 
     [Fact]
@@ -544,12 +547,13 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         Assert.Equal(0, closed.StaleResultsCount);
         Assert.Equal(0, closed.StaleResultsMineCount);
 
-        // Інший набір схованого аркуша без звуження проєкту - власний запис (промах кешу: агрегат + 2 лічильники).
+        // Інший набір схованого аркуша без звуження проєкту: карта періоду спільна (вона без читача), а ЧИСЛО
+        // рахується щоразу по видимих документах - агрегат + відбиток + 2 підрахунки, журнал правок не чіпається.
         var otherHidden = new SummaryRestrictions([(s.Chain.ProjectId, "OTHER")], []);
         var before = counter.Tally.Snapshot().Total;
         var partial = await SummaryAsync(store, s, otherHidden, Me);
         Assert.Equal(2, partial.StaleResultsCount);
-        Assert.Equal(3, counter.Tally.Snapshot().Total - before);
+        Assert.Equal(4, counter.Tally.Snapshot().Total - before);
 
         // Кожен читає своє й з теплого кешу.
         Assert.Equal(0, (await SummaryAsync(store, s, narrowed, Me)).StaleResultsCount);
@@ -648,8 +652,8 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         var queriesBefore = counter.Tally.Snapshot().Total;
         Assert.Equal(2, (await SummaryAsync(store, s, null, Me)).StaleResultsCount);
 
-        // Лише агрегат смуги: лічильники з кешу (було б 3 запити).
-        Assert.Equal(1, counter.Tally.Snapshot().Total - queriesBefore);
+        // Агрегат + відбиток + 2 підрахунки (4): карти з кешу (промах дав би 6).
+        Assert.Equal(4, counter.Tally.Snapshot().Total - queriesBefore);
     }
 
     [Fact]
@@ -776,14 +780,361 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         var queriesBefore = counter.Tally.Snapshot().Total;
         Assert.Equal(2, (await SummaryAsync(store, s, null, Me)).StaleResultsCount);
 
-        // Лише агрегат смуги: лічильники з кешу.
-        Assert.Equal(1, counter.Tally.Snapshot().Total - queriesBefore);
+        // Агрегат + відбиток + 2 підрахунки (4): карти з кешу.
+        Assert.Equal(4, counter.Tally.Snapshot().Total - queriesBefore);
 
         // Глобальний підйом (невідомий період) скидає і цей.
         epoch.Invalidate(db);
         Assert.True(epoch.ValueFor(s.Period) > own);
     }
 
+    // ── LP-45, етап 2: карта застарілості періоду в кеші; по ТЕСТУ НА КОЖНУ ПОДІЮ інвалідації ──────────
+    //
+    // Мутаційні докази (detached-worktree): прибрати `staleEpoch?.Invalidate` у AuditWriter - червоний
+    // `Подія_запис_комірок...`; прибрати `hit.Fingerprint == fingerprint` у StaleResultsMapCache - червоні
+    // `Подія_прогін_завершено_іншим_процесом...`, `Подія_правка_довідника...`, `Подія_нове_ребро...`.
+
+    private sealed record MapRig(
+        TestDocumentBuilder Builder, TestDocument Chain, int Period, long A, long B, long Fresh, int Version,
+        Microsoft.Extensions.Caching.Memory.MemoryCache Cache, TestTimeSource Clock, StaleCountsEpoch Epoch);
+
+    /// <summary>Годинник кешу: фіксований, не рухається (інвалідація має спрацьовувати БЕЗ TTL).</summary>
+    private sealed class TestTimeSource(DateTime now) : Ecr.Domain.Abstractions.IClock
+    {
+        public DateTime UtcNow { get; } = now;
+    }
+
+    /// <summary>Два застарілі документи (A, B), один свіжий; спільні кеш, годинник і епоха процесу.</summary>
+    private async Task<MapRig> RigAsync()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        var period = chain.PeriodKey.Value;
+        await using var db = builder.CreateContext();
+
+        var a = await AddDocumentAsync(db, chain, "MP-A");
+        var b = await AddDocumentAsync(db, chain, "MP-B");
+        var fresh = await AddDocumentAsync(db, chain, "MP-FRESH");
+        var version = await VersionAsync(db);
+        await RunAsync(db, chain, version, Now, [a, b, fresh]);
+        await EditAsync(a, period, chain.ColumnDefIds[1], Now.AddHours(1), user: Me);
+        await EditAsync(b, period, chain.ColumnDefIds[1], Now.AddHours(1), user: 62);
+
+        return new MapRig(builder, chain, period, a, b, fresh, version, NewCache(), new TestTimeSource(Now.AddHours(2)), new StaleCountsEpoch());
+    }
+
+    private DocumentStore CachedStore(MapRig r, EcrDbContext db)
+        => new(db, r.Cache, r.Clock, r.Epoch);
+
+    private static async Task<HashSet<long>> StaleOnPageAsync(DocumentStore store, MapRig r, IReadOnlyCollection<int>? visible = null)
+    {
+        var page = await store.ListAsync(
+            projectId: null, new PeriodKeyFilter(r.Period), new DocumentListFilter(null, null, ResultsStale: true),
+            new CursorRequest(Limit: 200), visible ?? [r.Chain.ProjectId], CancellationToken.None);
+        return [.. page.Items.Select(d => d.Id)];
+    }
+
+    private static async Task<bool?> FlagAsync(DocumentStore store, MapRig r, long documentId)
+    {
+        var page = await store.ListAsync(
+            r.Chain.ProjectId, new PeriodKeyFilter(r.Period), default, new CursorRequest(Limit: 200),
+            [r.Chain.ProjectId], CancellationToken.None);
+        return page.Items.Single(d => d.Id == documentId).ResultsStale;
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Подія_запис_комірок_PATCH_видимий_наступному_запиту_без_TTL_і_не_раніше_коміту()
+    {
+        var r = await RigAsync();
+        using var _ = r.Cache;
+        await using var db = EpochContext(r.Epoch);
+        var store = CachedStore(r, db);
+        var audit = new AuditWriter(db, r.Epoch);
+
+        Assert.Equal([r.A, r.B], (await StaleOnPageAsync(store, r)).Order());
+        Assert.False(await FlagAsync(store, r, r.Fresh));
+
+        await using (var transaction = await db.Database.BeginTransactionAsync())
+        {
+            await audit.WriteCellChangesAsync([EditRecord(new CacheScenario(r.Builder, r.Chain, r.Fresh, r.Period), r.Fresh)], CancellationToken.None);
+
+            // До коміту іншим читачам правки не видно, і кеш лишається чинним.
+            Assert.False(await FlagAsync(store, r, r.Fresh));
+            await transaction.CommitAsync();
+        }
+
+        Assert.True(await FlagAsync(store, r, r.Fresh));
+        Assert.Contains(r.Fresh, await StaleOnPageAsync(store, r));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Подія_перемикання_актуального_прогону_знімає_застарілість_у_наступному_запиті()
+    {
+        var r = await RigAsync();
+        using var _ = r.Cache;
+        await using var db = EpochContext(r.Epoch);
+        var store = CachedStore(r, db);
+
+        Assert.True(await FlagAsync(store, r, r.A));
+
+        var run = await PendingRunAsync(db, r.Chain, r.Version, Now.AddHours(2), [r.A]);
+        await using (var transaction = await db.Database.BeginTransactionAsync())
+        {
+            await new CalculationResultStore(db, new TestClock(Now), r.Epoch)
+                .SwitchCurrentRunAsync(run.Id, "{}", CancellationToken.None);
+            await db.SaveChangesAsync(CancellationToken.None);
+            await transaction.CommitAsync();
+        }
+
+        // Новий прогін стартував після правок, а старий знято (прогін проєкту): жоден документ не застарілий.
+        Assert.False(await FlagAsync(store, r, r.A));
+        Assert.False(await FlagAsync(store, r, r.B));
+        Assert.Empty(await StaleOnPageAsync(store, r));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Подія_прогін_завершено_іншим_процесом_видно_без_епохи_цього_процесу()
+    {
+        var r = await RigAsync();
+        using var _ = r.Cache;
+        await using var reader = EpochContext(r.Epoch);
+        var store = CachedStore(r, reader);
+        Assert.True(await FlagAsync(store, r, r.A));
+        var epochBefore = r.Epoch.ValueFor(r.Period);
+
+        // «Worker»: своя епоха, свій контекст, кеш читача про це не знає.
+        var workerEpoch = new StaleCountsEpoch();
+        await using var worker = EpochContext(workerEpoch);
+        var run = await PendingRunAsync(worker, r.Chain, r.Version, Now.AddHours(2), [r.A]);
+        await using (var transaction = await worker.Database.BeginTransactionAsync())
+        {
+            await new CalculationResultStore(worker, new TestClock(Now), workerEpoch)
+                .SwitchCurrentRunAsync(run.Id, "{}", CancellationToken.None);
+            await worker.SaveChangesAsync(CancellationToken.None);
+            await transaction.CommitAsync();
+        }
+
+        Assert.Equal(epochBefore, r.Epoch.ValueFor(r.Period));
+        Assert.False(await FlagAsync(store, r, r.A));
+    }
+
+    private async Task<(int RegistryId, MapRig Rig)> RegistryRigAsync(DateTime? changedAt, bool withEdge)
+    {
+        var r = await RigAsync();
+        await using var db = r.Builder.CreateContext();
+        var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        var registry = new RegistryDef(EcrCode.Create($"MR{tag}"), Name("Registry"), isTemporal: false);
+        if (changedAt is { } at)
+        {
+            registry.MarkDataChanged(at);
+        }
+
+        db.RegistryDefs.Add(registry);
+        await db.SaveChangesAsync(CancellationToken.None);
+        if (withEdge)
+        {
+            db.RegistryUses.Add(RegistryUse.ForMethodologyFormula(r.Version, "F1", registry.Id, "X"));
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        return (registry.Id, r);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Подія_правка_довідника_у_базі_видна_наступному_запиту_без_TTL()
+    {
+        // Документ Fresh читає довідник через методологію; довідник змінено ДО прогону - не застарів.
+        var (registryId, r) = await RegistryRigAsync(Now.AddHours(-1), withEdge: true);
+        using var _ = r.Cache;
+        await using var db = EpochContext(r.Epoch);
+        var store = CachedStore(r, db);
+        Assert.False(await FlagAsync(store, r, r.Fresh));
+
+        // Інший процес міняє довідник ПІСЛЯ початку прогону (так робить UnitOfWork.RestampRegistryDataChanges).
+        await using (var other = r.Builder.CreateContext())
+        {
+            await other.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE cfg.RegistryDef SET DataChangedAt = {Now.AddHours(1)} WHERE Id = {registryId}");
+        }
+
+        Assert.True(await FlagAsync(store, r, r.Fresh));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Подія_нове_ребро_використання_довідника_видне_наступному_запиту_без_TTL()
+    {
+        // Довідник змінено після прогону, але методологія його ще не читає - документ не застарів.
+        var (registryId, r) = await RegistryRigAsync(Now.AddHours(1), withEdge: false);
+        using var _ = r.Cache;
+        await using var db = EpochContext(r.Epoch);
+        var store = CachedStore(r, db);
+        Assert.False(await FlagAsync(store, r, r.Fresh));
+
+        await using (var other = r.Builder.CreateContext())
+        {
+            other.RegistryUses.Add(RegistryUse.ForMethodologyFormula(r.Version, "F1", registryId, "X"));
+            await other.SaveChangesAsync(CancellationToken.None);
+        }
+
+        Assert.True(await FlagAsync(store, r, r.Fresh));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Подія_видалення_документа_і_прогонів_не_лишає_його_у_відповіді_і_лічильнику()
+    {
+        var r = await RigAsync();
+        using var _ = r.Cache;
+        await using var db = EpochContext(r.Epoch);
+        var store = CachedStore(r, db);
+        var summaries = new DocumentListSummaryStore(db, r.Cache, r.Clock, r.Epoch);
+
+        Assert.Equal(2, (await summaries.SummarizeAsync(
+            r.Chain.ProjectId, r.Period, [r.Chain.ProjectId], null, Me, CancellationToken.None)).StaleResultsCount);
+        Assert.Contains(r.A, await StaleOnPageAsync(store, r));
+
+        await using (var transaction = await db.Database.BeginTransactionAsync())
+        {
+            await new DocumentDeletionStore(db).DeleteAsync(r.A, CancellationToken.None);
+            await transaction.CommitAsync();
+        }
+
+        Assert.DoesNotContain(r.A, await StaleOnPageAsync(store, r));
+        var after = await summaries.SummarizeAsync(
+            r.Chain.ProjectId, r.Period, [r.Chain.ProjectId], null, Me, CancellationToken.None);
+        Assert.Equal(1, after.StaleResultsCount);
+        Assert.Equal(0, after.StaleResultsMineCount);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Подія_створення_документа_нового_без_результатів_не_застарілий_а_лічильник_той_самий()
+    {
+        var r = await RigAsync();
+        using var _ = r.Cache;
+        await using var db = EpochContext(r.Epoch);
+        var store = CachedStore(r, db);
+        var summaries = new DocumentListSummaryStore(db, r.Cache, r.Clock, r.Epoch);
+
+        Assert.Equal(2, (await summaries.SummarizeAsync(
+            r.Chain.ProjectId, r.Period, [r.Chain.ProjectId], null, Me, CancellationToken.None)).StaleResultsCount);
+
+        var created = await AddDocumentAsync(db, r.Chain, "MP-NEW");
+
+        Assert.False(await FlagAsync(store, r, created));
+        Assert.Equal(2, (await summaries.SummarizeAsync(
+            r.Chain.ProjectId, r.Period, [r.Chain.ProjectId], null, Me, CancellationToken.None)).StaleResultsCount);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Подія_зміна_доступу_між_запитами_кеш_карти_не_віддає_чужих_документів()
+    {
+        var r = await RigAsync();
+        using var _ = r.Cache;
+        var foreign = await r.Builder.BuildAsync(ct: CancellationToken.None);
+        await using var db = EpochContext(r.Epoch);
+        var store = CachedStore(r, db);
+        var summaries = new DocumentListSummaryStore(db, r.Cache, r.Clock, r.Epoch);
+
+        // Читач із доступом до проєкту прогріває карту.
+        Assert.Equal([r.A, r.B], (await StaleOnPageAsync(store, r)).Order());
+        Assert.Equal(2, (await summaries.SummarizeAsync(
+            null, r.Period, [r.Chain.ProjectId], null, Me, CancellationToken.None)).StaleResultsCount);
+
+        // Той самий період, ТЕПЛА карта, але доступ лише до чужого проєкту: жодного документа першого.
+        var narrowedPage = await store.ListAsync(
+            null, new PeriodKeyFilter(r.Period), new DocumentListFilter(null, null, ResultsStale: true),
+            new CursorRequest(Limit: 200), [foreign.ProjectId], CancellationToken.None);
+        Assert.DoesNotContain(narrowedPage.Items, d => d.Id == r.A || d.Id == r.B);
+        Assert.Equal(0, (await summaries.SummarizeAsync(
+            null, r.Period, [foreign.ProjectId], null, Me, CancellationToken.None)).StaleResultsCount);
+
+        // Доступ без проєктів (порожня межа): порожньо, а не «усе з кешу».
+        var none = await store.ListAsync(
+            null, new PeriodKeyFilter(r.Period), new DocumentListFilter(null, null, ResultsStale: true),
+            new CursorRequest(Limit: 200), Array.Empty<int>(), CancellationToken.None);
+        Assert.Empty(none.Items);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Кеш_карти_дає_ті_самі_прапорці_що_без_кешу_і_запитів_не_більше_ніж_документів_немає()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        var period = chain.PeriodKey.Value;
+        await using var db = builder.CreateContext();
+
+        var tag = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var documents = new List<long>();
+        for (var i = 0; i < 55; i++)
+        {
+            documents.Add(await AddDocumentAsync(db, chain, $"STM{tag}-{i:00}"));
+        }
+
+        var version = await VersionAsync(db);
+        await RunAsync(db, chain, version, Now, [.. documents]);
+        for (var i = 0; i < documents.Count; i += 2)
+        {
+            await EditAsync(documents[i], period, chain.ColumnDefIds[1], Now.AddMinutes(10 + i));
+        }
+
+        var filter = new DocumentListFilter(null, null, Query: $"STM{tag}");
+        var plain = (await new DocumentStore(db).ListAsync(
+            chain.ProjectId, new PeriodKeyFilter(period), filter, new CursorRequest(Limit: 50), null, CancellationToken.None)).Items;
+
+        using var cache = NewCache();
+        var clock = new TestTimeSource(Now.AddHours(2));
+        var counter = new DbCommandCounter();
+        await using var counted = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString).AddInterceptors(counter).Options);
+        var cached = new DocumentStore(counted, cache, clock, new StaleCountsEpoch());
+
+        var cold = (await cached.ListAsync(
+            chain.ProjectId, new PeriodKeyFilter(period), filter, new CursorRequest(Limit: 50), null, CancellationToken.None)).Items;
+        var coldTotal = counter.Tally.Snapshot().Total;
+        var warm = (await cached.ListAsync(
+            chain.ProjectId, new PeriodKeyFilter(period), filter, new CursorRequest(Limit: 50), null, CancellationToken.None)).Items;
+        var warmTotal = counter.Tally.Snapshot().Total - coldTotal;
+
+        foreach (var rows in new[] { cold, warm })
+        {
+            Assert.Equal(plain.Count, rows.Count);
+            for (var i = 0; i < plain.Count; i++)
+            {
+                Assert.Equal(plain[i].Id, rows[i].Id);
+                Assert.Equal(plain[i].ResultsStale, rows[i].ResultsStale);
+                Assert.Equal(plain[i].ResultsStaleSince, rows[i].ResultsStaleSince);
+            }
+        }
+
+        // Запит сторінки не робить запитів на документ: на теплому кеші - рівно на один (відбиток) менше, ніж на
+        // холодному, а холодний не залежить від числа документів (50 рядків - те саме число команд, що й 5).
+        Assert.Equal(coldTotal - 1, warmTotal);
+
+        var counterSmall = new DbCommandCounter();
+        await using var small = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString).AddInterceptors(counterSmall).Options);
+        using var smallCache = NewCache();
+        await new DocumentStore(small, smallCache, clock, new StaleCountsEpoch()).ListAsync(
+            chain.ProjectId, new PeriodKeyFilter(period), filter, new CursorRequest(Limit: 5), null, CancellationToken.None);
+        Assert.Equal(coldTotal, counterSmall.Tally.Snapshot().Total);
+    }
     // ── допоміжне ────────────────────────────────────────────────────────────────────────
 
     private static async Task<DocumentSummary> CardAsync(EcrDbContext db, TestDocument chain, int period)
@@ -795,6 +1146,27 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
             chain.ProjectId, new PeriodKeyFilter(period), filter, new CursorRequest(Limit: 200),
             visibleProjectIds: null, CancellationToken.None)).Items;
 
+    /// <summary>Прогін, що ще НЕ актуальний (стан «Running»), з числами для документів.</summary>
+    private static async Task<CalculationRun> PendingRunAsync(
+        EcrDbContext db, TestDocument chain, int versionId, DateTime startedAt, long[] documents)
+    {
+        var run = new CalculationRun(chain.ProjectId, chain.PeriodKey.Value, triggeredByUserId: null, startedAt, null);
+        db.CalculationRuns.Add(run);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var unitId = await db.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync(CancellationToken.None);
+        foreach (var documentId in documents)
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO calc.CalculationResult
+                    (Id, CalculationRunId, MethodologyVersionId, PeriodKey, DocumentId, SourceRowKey, OutputCode, Value, UnitId)
+                VALUES (NEXT VALUE FOR calc.CalculationResultSeq, {run.Id}, {versionId},
+                        {chain.PeriodKey.Value}, {documentId}, N'row-1', N'E_CO2', CAST(1 AS decimal(34,16)), {unitId})
+                """);
+        }
+
+        return run;
+    }
     private static async Task<long> AddDocumentAsync(EcrDbContext db, TestDocument chain, string key)
     {
         var document = new Document(chain.ProjectId, $"{key}-{chain.ProjectId}", 1, Now);
