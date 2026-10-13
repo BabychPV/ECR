@@ -149,7 +149,12 @@ public sealed class TestEvaluationContext : IBudgetedEvaluationContext
     {
         ArgumentNullException.ThrowIfNull(reference);
 
-        if (!AvailablePeriodOffsets.Contains(reference.PeriodOffset))
+        // WW-03: `[Period:#k]` - абсолютний період року; відносно поточного це зсув k - Sequence.
+        var periodOffset = reference.AbsolutePeriod is { } absolute
+            ? absolute - Period.Sequence
+            : reference.PeriodOffset;
+
+        if (!AvailablePeriodOffsets.Contains(periodOffset))
         {
             // Вихід за межі проєкту — це null, а НЕ помилка.
             return [ExpressionValue.Null];
@@ -170,7 +175,7 @@ public sealed class TestEvaluationContext : IBudgetedEvaluationContext
         var values = new List<ExpressionValue>(keys.Count);
         foreach (var rowKey in keys)
         {
-            values.Add(ReadOne(sheet, table, rowKey, column, reference.PeriodOffset));
+            values.Add(ReadOne(sheet, table, rowKey, column, periodOffset));
         }
 
         return values;
