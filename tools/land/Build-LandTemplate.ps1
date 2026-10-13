@@ -66,6 +66,7 @@
 .PARAMETER ModelPath          land-template.model.json.
 .PARAMETER AfPackage          Пакет методологій AF (JSON ecr-methodology-package).
 .PARAMETER AccountsFile       Файл «користувач<TAB>пароль<TAB>роль» (створюється/доповнюється; поза репозиторієм).
+                              Без параметра - `<корінь репозиторію>\.sync-local\land-accounts.local.txt` (каталог у .gitignore).
 .PARAMETER BootstrapPassword  Пароль bootstrap, якщо його ще немає в -AccountsFile (SecureString).
 .PARAMETER GoldenDir          Каталог golden-*.csv (локальні, поза репозиторієм); без нього тести беруться зі спеки (P1..P5).
 .PARAMETER Stage              Етапи.
@@ -85,7 +86,7 @@ param(
     [string]$BaseUrl = $(if ($env:ECR_BASE_URL) { $env:ECR_BASE_URL } else { 'http://localhost:5094' }),
     [string]$ModelPath,
     [string]$AfPackage,
-    [string]$AccountsFile = 'F:\ecr-backup\land-ui\accounts.local.txt',
+    [string]$AccountsFile,
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
     [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
@@ -107,6 +108,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $repo = (Resolve-Path (Join-Path $here '..\..')).Path
+# Файл акаунтів: дефолту на конкретний диск/стенд немає; без параметра - лише .sync-local у корені репозиторію.
+if ([string]::IsNullOrWhiteSpace($AccountsFile)) { $AccountsFile = Join-Path $repo '.sync-local\land-accounts.local.txt' }
 $modelFile = $ModelPath
 if (-not $modelFile) { $modelFile = Join-Path $repo 'docs\delivery\reference-data\land-template\land-template.model.json' }
 $afFile = $AfPackage
