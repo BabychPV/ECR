@@ -150,6 +150,41 @@ public sealed class ArgumentDeclarationCheckerTests
         Assert.Equal("Total", audit.Undeclared[0].Name);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Маркер_необовязковості_знімається_з_імені_і_не_змінює_порівняння()
+    {
+        // D-OA: `Name?` у списку — той самий аргумент `Name`.
+        Assert.Equal(
+            ArgumentDeclarationChecker.NormalizeName("A"),
+            ArgumentDeclarationChecker.NormalizeName("A?"));
+        Assert.Equal("c_d", ArgumentDeclarationChecker.NormalizeName(" c.d? "));
+
+        var optional = ArgumentDeclarationChecker.OptionalNames(["A?", "B", "c.d?", "?", " @E? "]);
+        Assert.Equal(["A", "E", "c_d"], optional.OrderBy(x => x, StringComparer.Ordinal));
+        Assert.Contains("a", optional);
+        Assert.Empty(ArgumentDeclarationChecker.OptionalNamesFromCsv(null));
+        Assert.Empty(ArgumentDeclarationChecker.OptionalNamesFromCsv("A;B"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Необовязковий_аргумент_у_списку_не_дає_ні_Undeclared_ні_UnusedDeclared()
+    {
+        var used = Audit("@Total * @OperatingTime", "Total;OperatingTime?");
+        Assert.Empty(used.Undeclared);
+        Assert.Empty(used.UnusedDeclared);
+
+        // Оголошено `A?`, у виразі немає: попередження називає `A` без `?`.
+        var unused = Audit("@Total * 2", "Total;Density?");
+        Assert.Empty(unused.Undeclared);
+        Assert.Equal(["Density"], unused.UnusedDeclared);
+
+        // Контроль: без маркера `@A` у виразі й без `A` у списку лишається помилкою.
+        var missing = Audit("@Total * @OperatingTime", "Total");
+        Assert.Single(missing.Undeclared);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     private static ArgumentAudit Audit(string expression, string declaration, params string[] contextual)

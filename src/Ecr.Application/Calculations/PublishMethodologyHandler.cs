@@ -123,7 +123,7 @@ public sealed class PublishMethodologyHandler(
         // Diff рахується ДО публікації: після неї попередня версія вже не та,
         // що була чинною, і порівнювати стало б нема з чим.
         var previous = methodology.VersionOn(from.AddDays(-1));
-        RejectBackdatedStrict(version, previous, from);
+        await RejectBackdatedStrictAsync(methodology, version, previous, from, ct).ConfigureAwait(false);
 
         // ⛔ RC14 (L2-4): статичні перевірки формул і довідників (REGFIELD/REGFIND → ECR-TMPL-4222 з
         // позицією) — ДО золотого прогону. Інакше описка в правилі категорії падала на golden як
@@ -332,7 +332,7 @@ public sealed class PublishMethodologyHandler(
         // ✎ L-2: і `@`-аргументи правила категорії — воно читає той самий рядок.
         ParsedFormula[] ruleFormulas = categoryRule.Rule is { } rule ? [rule] : [];
         await CheckArgumentColumnsAsync(
-                methodology.Id, [.. parsed, .. LibraryFormulas(libraries)], ruleFormulas, ct)
+                methodology.Id, [.. parsed, .. LibraryFormulas(libraries)], ruleFormulas, warnings, strings, ct)
             .ConfigureAwait(false);
 
         // ⛔ V-18: невідома константа — іменна відмова, а не рядок у «N проблем».
@@ -562,13 +562,17 @@ public sealed class PublishMethodologyHandler(
 
     /// <summary>
     /// ФВ-9.9: перехід у <c>Strict</c> — лише явним рішенням з нової дати дії,
-    /// ніколи заднім числом (<c>ECR-CALC-0422</c>, <c>strictBackdated</c>).
+    /// не заднім числом по вже порахованому (<c>ECR-CALC-0422</c>, <c>strictBackdated</c>).
     /// </summary>
     /// <remarks>
     /// Перша версія без попередньої не зачіпається: переходу немає. «Сьогодні» — за
     /// <see cref="IClock"/>, не за системним годинником.
+    /// ✎ C12-03: заднє число допускається, якщо жодна з версій, чинних у вікні нової, не має
+    /// рядка результату (<see cref="IMethodologyStore.AnyCalculationResultsAsync"/>).
     /// </remarks>
-    private void RejectBackdatedStrict(MethodologyVersion version, MethodologyVersion? previous, DateOnly from)
+    private async Task RejectBackdatedStrictAsync(
+        Methodology methodology, MethodologyVersion version, MethodologyVersion? previous, DateOnly from,
+        CancellationToken ct)
     {
         if (previous is null
             || version.NumericMode != NumericMode.Strict
@@ -579,6 +583,16 @@ public sealed class PublishMethodologyHandler(
 
         var today = DateOnly.FromDateTime(clock.UtcNow);
         if (from > today)
+        {
+            return;
+        }
+
+        // ✎ C12-03: заднє число небезпечне, лише якщо воно змінює вже порахований результат.
+        // Версії, чий діапазон чинності перекривається з [from, наступна дата дії), мусять
+        // не мати жодного рядка результату (calc/arc, будь-який статус). Зрізи подання версій
+        // не фіксують (Q-155), тож слід використання — лише результати.
+        var affected = AffectedVersionIds(methodology, version, previous, from);
+        if (!await methodologies.AnyCalculationResultsAsync(affected, ct).ConfigureAwait(false))
         {
             return;
         }
@@ -594,6 +608,45 @@ public sealed class PublishMethodologyHandler(
                 ["effectiveFrom"] = from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 ["today"] = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             });
+    }
+
+    /// <summary>
+    /// Версії, що були чинними хоч на частині вікна <c>[from, наступна дата дії)</c>, яке
+    /// займе нова версія, і тому їхні результати вона змінила б заднім числом.
+    /// </summary>
+    private static List<int> AffectedVersionIds(
+        Methodology methodology, MethodologyVersion version, MethodologyVersion previous, DateOnly from)
+    {
+        var dated = methodology.Versions
+            .Where(v => !ReferenceEquals(v, version)
+                        && (v.Status == TemplateVersionStatus.Published
+                            || v.Status == TemplateVersionStatus.Deprecated)
+                        && v.EffectiveFrom is not null)
+            .ToList();
+
+        DateOnly? windowEnd = dated
+            .Where(v => v.EffectiveFrom > from)
+            .Select(v => v.EffectiveFrom)
+            .Min();
+
+        var ids = new List<int> { previous.Id };
+        foreach (var v in dated)
+        {
+            var start = v.EffectiveFrom!.Value;
+            var successor = dated
+                .Where(o => o.EffectiveFrom > start)
+                .Select(o => o.EffectiveFrom)
+                .Min();
+
+            var startsBeforeWindowEnds = windowEnd is null || start < windowEnd;
+            var endsAfterWindowStarts = successor is null || successor > from;
+            if (startsBeforeWindowEnds && endsAfterWindowStarts && !ids.Contains(v.Id))
+            {
+                ids.Add(v.Id);
+            }
+        }
+
+        return ids;
     }
 
     /// <summary>
@@ -757,6 +810,8 @@ public sealed class PublishMethodologyHandler(
     /// <param name="categoryRule">
     /// Розібране правило категорії (порожньо — правила немає): його відмова — <c>ECR-CALC-0422</c>, не 0438.
     /// </param>
+    /// <param name="warnings">Попередження публікації (D-OA: необов'язковий аргумент без колонки).</param>
+    /// <param name="strings">Каталог текстів мовою публікуючого; <c>null</c> — англійський запас.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⚠ Методологія без жодної прив'язки перевірку пропускає мовчки: це не
@@ -769,6 +824,8 @@ public sealed class PublishMethodologyHandler(
         int methodologyId,
         IReadOnlyList<ParsedFormula> formulas,
         IReadOnlyList<ParsedFormula> categoryRule,
+        ICollection<string> warnings,
+        UiStringCatalog? strings,
         CancellationToken ct)
     {
         var methodologyBindings = await bindings.ListAsync(methodologyId, ct).ConfigureAwait(false);
@@ -786,9 +843,15 @@ public sealed class PublishMethodologyHandler(
 
         // R16-4: правило категорії - окремо й тим самим кодом, що й при збереженні (`PUT category-rule`):
         // ECR-CALC-0422 / categoryRuleUnknownArgument, а не 0438 формул.
+        // D-OA (Q-OA-3): правило категорії успадковує необов'язкові аргументи формул версії.
+        var optionalArguments = MethodologyPublishChecks.OptionalArguments(formulas);
+
+        // D-OA (Q-OA-5): описка в імені необов'язкового аргументу не мусить ховатись — лише попередження.
+        MethodologyPublishChecks.WarnOptionalWithoutColumn(optionalArguments, columnCodesByTable, warnings, strings);
+
         foreach (var rule in categoryRule)
         {
-            MethodologyCategoryRuleChecks.CheckArgumentColumns(rule, columnCodesByTable);
+            MethodologyCategoryRuleChecks.CheckArgumentColumns(rule, columnCodesByTable, optionalArguments);
         }
     }
 
@@ -1294,7 +1357,9 @@ public sealed class PublishMethodologyHandler(
                .Select(f => new ParsedFormula(
                    f.Code,
                    f.ResultType,
-                   formulaEngine.Parse(f.Expression, ExpressionDialect.Methodology).Expression?.Root))
+                   formulaEngine.Parse(f.Expression, ExpressionDialect.Methodology).Expression?.Root,
+                   // D-OA: лише для 0438 — маркер `Name?` бібліотечної формули звільняє аргумент викликача.
+                   Ecr.Expressions.Binding.ArgumentDeclarationChecker.Declared(f.ArgumentsCsv)))
            ?? [];
 
     /// <summary>

@@ -313,6 +313,48 @@ def stream_sources(out, af_attrs):
     return res
 
 
+# D-397 (D-8, клас O): аргументи, яких старий код НЕ передає для частини таблиць методології: колонки в AF-таблиці немає,
+# `requiredFields` її не містить, ключа в словнику немає - формула лишається нерозв'язаною, результат не пишеться.
+# Мосту (в т.ч. NULL-мосту) не будуємо: етап Build ставить у списку аргументів чернетки маркер `?` (необов'язковий
+# аргумент), і ECR-CALC-0438 колонки не вимагає. Лише явний перелік (методологія, аргумент, таблиці, посилання на код);
+# клас K (конфлікт джерел) і клас Q (C11_03 RunningHours на T9_05/T9_14, рішення замовника Q-D8-2) сюди НЕ входять.
+OPTIONAL_ARGUMENTS = [
+    ('ECW_C11_10', 'Land_Measure_OperatingTime', ['T9_02', 'T9_11', 'T9a_24', 'T9a_26'],
+     'ECW_C11_10.cs:48-51 (requiredFields OperatingTime лише на T9_07); AF-атрибута немає'),
+    ('ECW_C11_10', 'Land_Measure_SubstanceConsumption', ['T9a_27', 'T9a_28'],
+     'ECW_C11_10.cs:143-153 (SubstanceConsumption лише з ReleaseColdVen на 9a_24..26); AF-атрибута немає'),
+    ('ECW_C11_11_03', 'Land_Measure_MaterialResidence', ['T9_06'],
+     'ECW_C11_11_03.cs:41-42 (requiredFields MaterialResidence лише на 9a_17); AF-атрибута немає'),
+    ('ECW_C11_16', 'Land_Measure_FlowRateSulfur', ['T9a_23'],
+     'ECW_C11_16.cs:42-43 (requiredFields FlowRateSulfur лише на 9a_22); AF-атрибута немає'),
+]
+
+
+def build_optional_arguments(unresolved, tab_meth):
+    """argumentBridges.optionalArguments з явного переліку OPTIONAL_ARGUMENTS.
+
+    Кожна пара (методологія, аргумент, таблиця) мусить бути в unresolved як `[AF-немає]` і методологія мусить бути
+    прив'язана до таблиці: інакше перелік застарів - зупиняємось, а не вгадуємо.
+    """
+    methodologies = {}
+    for meth, arg, tables, ref in OPTIONAL_ARGUMENTS:
+        for t in tables:
+            reason = unresolved.get(t, {}).get(arg)
+            if not (isinstance(reason, str) and reason.startswith('[AF-немає]')) or meth not in tab_meth.get(t, []):
+                raise SystemExit('af_attr_bridges: optional %s/%s на %s: немає в unresolved як [AF-немає] або методологія '
+                                 'не прив\'язана до таблиці - перелік D-397 застарів' % (meth, arg, t))
+        e = methodologies.setdefault(meth, {'arguments': [], 'tables': {}, 'evidence': {}})
+        e['arguments'] = sorted(set(e['arguments']) | {arg})
+        e['tables'][arg] = sorted(tables)
+        e['evidence'][arg] = ref
+    return {
+        'decision': 'D-397',
+        'source': 'LAND-D8-ARGS-2026-10-13 (клас O); маркер ? у ArgumentsCsv формул чернетки (етап Build OptionalArguments)',
+        'rule': 'only [AF-немає] pairs of an explicit list; NULL bridges are not built (they would give #ARG)',
+        'methodologies': dict(sorted(methodologies.items())),
+    }
+
+
 def apply(out, ro_all, rules, af_attrs, calc_tables):
     by_code = {}
     for s_ in out['sheets']:
@@ -469,5 +511,6 @@ def apply(out, ro_all, rules, af_attrs, calc_tables):
         'calendarDays': CAL_DAYS_METHODOLOGIES,
         'rule': 'bridge only if every methodology of the table that uses the argument yields the same source',
     }
+    ab['optionalArguments'] = build_optional_arguments(unresolved, tab_meth)
     print('af attribute bridges: columns %d, tables %d' % (added, len(evidences)))
     return added

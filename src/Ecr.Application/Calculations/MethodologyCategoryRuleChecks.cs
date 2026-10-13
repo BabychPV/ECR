@@ -176,6 +176,10 @@ public static class MethodologyCategoryRuleChecks
     /// </summary>
     /// <param name="rule">Розібране правило (<see cref="Outcome.Rule"/>).</param>
     /// <param name="columnCodesByTable">Коди колонок прив'язаних таблиць.</param>
+    /// <param name="optionalArguments">
+    /// D-OA: необов'язкові аргументи версії (маркер <c>Name?</c> у списку будь-якої її формули) — правило
+    /// читає той самий рядок і не вимагає для них колонки.
+    /// </param>
     /// <exception cref="Ecr.Application.Errors.BusinessRuleException">
     /// <c>ECR-CALC-0422</c> — аргумент без колонки у прив'язаній таблиці.
     /// </exception>
@@ -184,13 +188,16 @@ public static class MethodologyCategoryRuleChecks
     /// правило категорії — окремий предмет з трьома однотипними відмовами під одним кодом.
     /// </remarks>
     public static void CheckArgumentColumns(
-        ParsedFormula rule, IReadOnlyDictionary<int, IReadOnlyList<string>> columnCodesByTable)
+        ParsedFormula rule,
+        IReadOnlyDictionary<int, IReadOnlyList<string>> columnCodesByTable,
+        IReadOnlySet<string>? optionalArguments = null)
     {
         ArgumentNullException.ThrowIfNull(rule);
 
         try
         {
-            MethodologyPublishChecks.CheckArgumentTableColumns([rule], columnCodesByTable);
+            MethodologyPublishChecks.CheckArgumentTableColumns(
+                [rule], columnCodesByTable, optionalArguments: optionalArguments);
         }
         catch (Ecr.Application.Errors.BusinessRuleException error)
             when (error.ErrorCode == Ecr.Domain.Errors.ErrorCodes.MethodologyArgumentColumnMissing)

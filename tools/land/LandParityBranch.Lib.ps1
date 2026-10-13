@@ -63,11 +63,20 @@ function Test-LandParityBranchWrapped {
 function Convert-LandParityBranchFormula {
     <#
     .SYNOPSIS
-        Обгортає вираз type2: порожній результат, якщо @Land_Measure_Component_<код> має значення.
+        Обгортає вираз type2: порожній результат, якщо @Land_Measure_Component_<код> має значення; компонент-аргументи
+        формули отримують маркер необов'язковості `?` (D-397).
     .DESCRIPTION
-        Список аргументів (`;`) отримує `@Land_Measure_Component_<код>`, якщо його ще немає (тільки коли список заданий:
+        Список аргументів (`;`) отримує `@Land_Measure_Component_<код>?`, якщо його ще немає (тільки коли список заданий:
         $null лишається $null - формула без списку не перевіряється, а порожній рядок «оголошує нуль аргументів»).
-        Порожній вираз не обгортається. Повторний виклик на вже обгорнуту формулу - без змін (Changed = $false).
+        Порожній вираз не обгортається. Повторний виклик на вже обгорнуту й позначену формулу - без змін
+        (Changed = $false).
+
+        Навіщо `?`. Міст Land_Measure_Component_<код> (GTU, MAX по порожній множині) НЕ зберігає комірку, коли рядка-джерела
+        з компонентом немає: без маркера аргумент не збирається (#ARG), type2 для такого рядка не рахується, хоча старий код
+        його рахує (компонента немає -> type2). Маркер `?` робить відсутню комірку null (GenericCalculationModule,
+        OptionalArguments.Fill), а `null = NULL` - TRUE (Evaluator, 02b §6.2). Позначаються ВСІ елементи списку виду
+        `Land_Measure_Component_*` (не лише компонент обгортки); чужі елементи списку не чіпаються. Формула вже обгорнута,
+        але без `?` (чернетка до цього правила) - обгортка не повторюється, ставиться лише маркер.
     .OUTPUTS
         pscustomobject: Changed, Expression, ArgumentsCsv.
     #>
@@ -78,24 +87,34 @@ function Convert-LandParityBranchFormula {
     )
 
     $text = $Expression.Trim()
-    if ($text.Length -eq 0 -or (Test-LandParityBranchWrapped -Expression $text -Component $Component)) {
+    if ($text.Length -eq 0) {
         return [pscustomobject]@{ Changed = $false; Expression = $Expression; ArgumentsCsv = $ArgumentsCsv }
     }
 
-    $newExpression = (Get-LandParityBranchHead -Component $Component) + $text + ', NULL)'
+    $wrappedAlready = Test-LandParityBranchWrapped -Expression $text -Component $Component
+    $newExpression = if ($wrappedAlready) { $Expression } else { (Get-LandParityBranchHead -Component $Component) + $text + ', NULL)' }
 
     $newArguments = $ArgumentsCsv
+    $argsChanged = $false
     if ($null -ne $ArgumentsCsv) {
-        $token = '@Land_Measure_Component_' + $Component
+        $name = 'Land_Measure_Component_' + $Component
         $tokens = New-Object System.Collections.Generic.List[string]
-        foreach ($t in ($ArgumentsCsv -split ';')) {
+        $present = $false
+        foreach ($t in (([string]$ArgumentsCsv) -split ';')) {
             $x = $t.Trim()
-            if ($x.Length -gt 0) { $tokens.Add($x) }
+            if ($x.Length -eq 0) { continue }
+            $core = $x.TrimStart('@').TrimEnd('?').TrimEnd()
+            if ($core -ieq $name) { $present = $true }
+            # Компонент-міст може не мати комірки (порожня множина GTU): маркер `?`, інакше #ARG.
+            if ($core -like 'Land_Measure_Component_*' -and -not $x.EndsWith('?')) { $x = $x + '?'; $argsChanged = $true }
+            $tokens.Add($x)
         }
-        if (-not ($tokens | Where-Object { $_ -ieq $token })) { $tokens.Add($token) }
-        $newArguments = (($tokens -join ';') + ';')
+        if (-not $present) { $tokens.Add('@' + $name + '?'); $argsChanged = $true }
+        if ($argsChanged) { $newArguments = (($tokens -join ';') + ';') }
     }
-    return [pscustomobject]@{ Changed = $true; Expression = $newExpression; ArgumentsCsv = $newArguments }
+
+    $changed = (-not $wrappedAlready) -or $argsChanged
+    return [pscustomobject]@{ Changed = $changed; Expression = $newExpression; ArgumentsCsv = $newArguments }
 }
 
 # --- Код 415: type1 у старому коді не існує ---

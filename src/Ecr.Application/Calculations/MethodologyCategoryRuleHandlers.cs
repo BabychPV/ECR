@@ -178,7 +178,14 @@ public sealed class SaveMethodologyCategoryRuleHandler(
             .ListColumnCodesAsync([.. methodologyBindings.Select(b => b.TableDefId).Distinct()], ct)
             .ConfigureAwait(false);
 
-        MethodologyCategoryRuleChecks.CheckArgumentColumns(outcome.Rule, columnCodesByTable);
+        // D-OA (Q-OA-3): правило категорії успадковує `Name?` зі списків аргументів формул версії.
+        var optionalArguments = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var formula in formulas)
+        {
+            optionalArguments.UnionWith(Ecr.Expressions.Binding.ArgumentDeclarationChecker.OptionalNamesFromCsv(formula.ArgumentsCsv));
+        }
+
+        MethodologyCategoryRuleChecks.CheckArgumentColumns(outcome.Rule, columnCodesByTable, optionalArguments);
     }
 
     /// <summary>Вираз мусить розбиратись діалектом Methodology і не повертати число.</summary>

@@ -275,6 +275,77 @@ public sealed class ImportedFormulaReferencePublishTests
         Assert.False(_version.IsPublished);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Необовязковий_аргумент_формули_бібліотеки_звільняє_колонку_викликача()
+    {
+        // D-OA: `Flow?` у списку формули БІБЛІОТЕКИ знімає вимогу колонки у таблиці викликача.
+        Formulas([Formula(103, "Total", $"!{Shared} * 2")]);
+        var shared = Formula(301, Shared, "@Flow * 2", CommonVersionId);
+        shared.SetArguments("Flow?");
+        Library(shared);
+
+        BindTable(44, ["Volume"]);
+
+        await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
+
+        Assert.True(_version.IsPublished);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Версія_з_необовязковим_аргументом_публікується_а_без_маркера_лишається_0438()
+    {
+        BindTable(44, ["Volume"]);
+
+        // Без маркера: колонки Flow немає — ECR-CALC-0438 (регресія другого рубежу).
+        var plain = Formula(103, "Total", "@Flow * 2");
+        plain.SetArguments("Flow");
+        Formulas([plain]);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
+        Assert.Equal("ECR-CALC-0438", error.ErrorCode);
+        Assert.False(_version.IsPublished);
+
+        // З маркером: та сама версія публікується.
+        var optional = Formula(103, "Total", "@Flow * 2");
+        optional.SetArguments("Flow?");
+        Formulas([optional]);
+
+        var diff = await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
+
+        Assert.True(_version.IsPublished);
+
+        // Q-OA-5: optional без колонки в жодній прив'язаній таблиці — лише попередження, не відмова.
+        var warning = Assert.Single(diff.Warnings ?? [], w => w.Contains("Optional argument", StringComparison.Ordinal));
+        Assert.Contains("\"Flow\"", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Необовязковий_аргумент_з_колонкою_у_таблиці_не_дає_попередження()
+    {
+        BindTable(44, ["Volume", "Flow"]);
+
+        var formula = Formula(103, "Total", "@Flow * 2");
+        formula.SetArguments("Flow?");
+        Formulas([formula]);
+
+        var diff = await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
+
+        Assert.True(_version.IsPublished);
+        Assert.DoesNotContain(diff.Warnings ?? [], w => w.Contains("Optional argument", StringComparison.Ordinal));
+    }
+
+    private void BindTable(int tableDefId, string[] columns)
+    {
+        _bindings.ListAsync(OwnerId, Arg.Any<CancellationToken>())
+                 .Returns(new List<CalculationBinding> { new(tableDefId, 4401, OwnerId, "Total", "{}") });
+        _bindings.ListColumnCodesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+                 .Returns(new Dictionary<int, IReadOnlyList<string>> { [tableDefId] = columns });
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     /// <remarks>
