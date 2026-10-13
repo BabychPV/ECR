@@ -174,7 +174,7 @@ public sealed class SaveMethodologyCategoryRuleHandler(
             return;
         }
 
-        // D-399: лише таблиці «живої» версії шаблону (як при публікації).
+        // D-400: лише таблиці «живої» версії шаблону (як при публікації).
         var liveTableDefIds = await LiveBindingTables.ResolveAsync(bindings, methodologyBindings, ct).ConfigureAwait(false);
         var columnCodesByTable = await bindings
             .ListColumnCodesAsync(liveTableDefIds, ct)

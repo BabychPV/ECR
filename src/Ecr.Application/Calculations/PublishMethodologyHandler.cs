@@ -834,7 +834,7 @@ public sealed class PublishMethodologyHandler(
             return;
         }
 
-        // D-399: колонки звіряються лише з таблицями «живої» (останньої опублікованої) версії шаблону:
+        // D-400: колонки звіряються лише з таблицями «живої» (останньої опублікованої) версії шаблону:
         // клон копіює прив'язки, а колонка, додана лише в нову версію, у старих TableDef відсутня.
         var tableDefIds = await LiveBindingTables.ResolveAsync(bindings, methodologyBindings, ct).ConfigureAwait(false);
         var columnCodesByTable = await bindings

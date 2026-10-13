@@ -6,7 +6,7 @@ namespace Ecr.Application.Calculations;
 
 /// <summary>
 /// Таблиці прив'язок методології, які звіряються з аргументами формул (<c>ECR-CALC-0438</c>): «жива» версія
-/// шаблону, а не всі (D-399).
+/// шаблону, а не всі (D-400).
 /// </summary>
 internal static class LiveBindingTables
 {

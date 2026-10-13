@@ -7,7 +7,7 @@ using Xunit;
 namespace Ecr.Infrastructure.Tests.Persistence;
 
 /// <summary>
-/// D-399: <see cref="CalculationBindingStore.ListLiveTableDefIdsAsync"/> — які з таблиць прив'язок звіряє
+/// D-400: <see cref="CalculationBindingStore.ListLiveTableDefIdsAsync"/> — які з таблиць прив'язок звіряє
 /// <c>ECR-CALC-0438</c>: таблиці ОСТАННЬОЇ опублікованої версії свого шаблону; чернетки й <c>Deprecated</c> не
 /// рахуються; шаблон без прив'язок на живій версії лишається цілком (fallback).
 /// </summary>
@@ -21,7 +21,7 @@ public sealed class CalculationBindingStoreLiveTablesTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Finding", "D-399")]
+    [Trait("Finding", "D-400")]
     public async Task Жива_версія_це_остання_опублікована_чернетка_і_виведена_з_обігу_не_рахуються()
     {
         var ct = CancellationToken.None;

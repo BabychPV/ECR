@@ -18,7 +18,7 @@ using Xunit;
 namespace Ecr.Application.Tests.Calculations;
 
 /// <summary>
-/// D-399: <c>ECR-CALC-0438</c> звіряє аргументи з колонками лише «живої» (останньої опублікованої) версії
+/// D-400: <c>ECR-CALC-0438</c> звіряє аргументи з колонками лише «живої» (останньої опублікованої) версії
 /// шаблону. Колонка, додана тільки в нову версію, не блокує публікацію через TableDef старих версій, на які
 /// клон скопіював прив'язки; аргумент, якого немає й у живій версії, лишається під 0438.
 /// </summary>
@@ -211,7 +211,7 @@ public sealed class LiveTemplateVersionArgumentPublishTests
     private Task<MethodologyPublicationDiff> Publish()
         => new PublishMethodologyHandler(
             _module, _store, _formulas, _bindings, Units(), _uow, _audit, _access, _user, _clock)
-            .HandleAsync(VersionId, "D-399", From, CancellationToken.None);
+            .HandleAsync(VersionId, "D-400", From, CancellationToken.None);
 
     private static IUnitCatalog Units()
     {
