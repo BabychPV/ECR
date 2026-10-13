@@ -116,6 +116,13 @@ param(
     [switch] $SmallFiles,
     [int] $StartupTimeoutSec = 60,
 
+    # ⛔ Порт застосунку, який цей скрипт піднімає заради сіду. 0 (типово) — вільний
+    # порт із приватного діапазону 5300–5999 обирається в момент запуску. Фіксований
+    # порт (раніше зашитий в скрипті) приймав `/health/live` ЧУЖОГО `Ecr.Api` за свій і хибно
+    # звітував «seed виконано» (інцидент 13.10). Зайнятий порт — відмова з PID власника.
+    [ValidateRange(0, 65535)]
+    [int] $AppPort = 0,
+
     # L10-13: див. `.PARAMETER Force`. Без нього наявна база без позначки `Ecr_DevDb` не видаляється.
     [switch] $Force
 )
@@ -502,6 +509,83 @@ END;
 # ЖИВИХ даних (MERGE прав і ролей, «Змінені тексти», одноразові виправлення).
 # Саме цей шлях свіжа база не перевіряє ніколи.
 if ($Documents -gt 0 -or $Upgrade) {
+    # ⛔ Порт застосунку: вільний, обраний у момент запуску, або явний -AppPort,
+    # але лише вільний. Чужий слухач — відмова з PID, а не «його /health — наш».
+    function Get-PortListeners {
+        param([int] $Port)
+        if (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
+            return @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
+                    Select-Object -ExpandProperty OwningProcess -Unique)
+        }
+        return @()
+    }
+
+    function Test-PortFree {
+        param([int] $Port)
+        if (@(Get-PortListeners -Port $Port).Count -gt 0) { return $false }
+        # Прямий біндинг ловить і слухачів, яких Get-NetTCPConnection не показує (Linux, інші сесії).
+        foreach ($address in @([System.Net.IPAddress]::Any, [System.Net.IPAddress]::Loopback)) {
+            $probe = $null
+            try {
+                $probe = New-Object System.Net.Sockets.TcpListener($address, $Port)
+                $probe.Start()
+            }
+            catch { return $false }
+            finally { if ($probe) { $probe.Stop() } }
+        }
+        return $true
+    }
+
+    function Get-DescendantPids {
+        param([int] $RootPid)
+        $pairs = @()
+        if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) {
+            $pairs = @(Get-CimInstance Win32_Process | ForEach-Object { , @([int] $_.ProcessId, [int] $_.ParentProcessId) })
+        }
+        else {
+            $pairs = @(& ps -eo 'pid=,ppid=' | ForEach-Object {
+                    $p = $_.Trim() -split '\s+'
+                    , @([int] $p[0], [int] $p[1])
+                })
+        }
+        $found = New-Object System.Collections.Generic.HashSet[int]
+        [void] $found.Add($RootPid)
+        $grew = $true
+        while ($grew) {
+            $grew = $false
+            foreach ($pair in $pairs) {
+                if ($found.Contains($pair[1]) -and $found.Add($pair[0])) { $grew = $true }
+            }
+        }
+        return @($found)
+    }
+
+    if ($AppPort -gt 0) {
+        if (-not (Test-PortFree -Port $AppPort)) {
+            $owners = @(Get-PortListeners -Port $AppPort)
+            $who = if ($owners.Count -gt 0) {
+                ($owners | ForEach-Object {
+                        $pr = Get-Process -Id $_ -ErrorAction SilentlyContinue
+                        "PID $_ ($(if ($pr) { $pr.ProcessName } else { '?' }))"
+                    }) -join ', '
+            }
+            else { 'власник невідомий' }
+            throw "Порт застосунку $AppPort зайнятий ($who). Чужий процес не приймається за свій: вкажіть інший -AppPort або не задавайте його."
+        }
+        $appPortChosen = $AppPort
+    }
+    else {
+        $appPortChosen = 0
+        $startAt = Get-Random -Minimum 5300 -Maximum 5900
+        foreach ($offset in 0..599) {
+            $candidate = 5300 + (($startAt - 5300 + $offset) % 700)
+            if (Test-PortFree -Port $candidate) { $appPortChosen = $candidate; break }
+        }
+        if ($appPortChosen -eq 0) { throw 'Немає вільного порту 5300–5999 для застосунку; задайте -AppPort.' }
+    }
+    $appBase = "http://localhost:$appPortChosen"
+    Write-Host "  порт застосунку: $appPortChosen"
+
     # ⛔ Складання ЯВНО і один раз. Нижче обидва `dotnet run` ідуть із
     # `--no-build` — і без цього кроку вони виконують ПОПЕРЕДНЮ збірку, а не
     # дерево. Скрипт, чия мета «чисте середовище з поточного дерева», мовчки
@@ -522,7 +606,7 @@ if ($Documents -gt 0 -or $Upgrade) {
 
     $env:ECR_ConnectionStrings__Ecr = $connection
     $env:ECR_Bootstrap__Password = $BootstrapPassword
-    $env:ASPNETCORE_URLS = 'http://localhost:5099'
+    $env:ASPNETCORE_URLS = $appBase
 
     # ⛔ S11: без launch-профілю це Production, а там без сертифіката Data
     # Protection застосунок не стартує. Стенд розробника — явна згода на
@@ -560,7 +644,7 @@ if ($Documents -gt 0 -or $Upgrade) {
             }
 
             try {
-                $code = (Invoke-WebRequest -Uri 'http://localhost:5099/health/live' `
+                $code = (Invoke-WebRequest -Uri "$appBase/health/live" `
                             -UseBasicParsing -TimeoutSec 2).StatusCode
                 if ($code -eq 200) { $ready = $true; break }
             }
@@ -568,13 +652,28 @@ if ($Documents -gt 0 -or $Upgrade) {
         }
 
         if (-not $ready) { throw "Застосунок не піднявся за $StartupTimeoutSec с. Лог: $log" }
+
+        # ⛔ Відповідь має дати САМЕ наш дочірній процес (дерево `dotnet run` →
+        # `Ecr.Api`), а не чужий слухач на тому ж порту: інакше «seed виконано» —
+        # неправда, а наслідок — порожні довідники й падіння DataGen далі.
+        $owners = @(Get-PortListeners -Port $appPortChosen)
+        if ($owners.Count -gt 0) {
+            $mine = @(Get-DescendantPids -RootPid $api.Id)
+            $foreign = @($owners | Where-Object { $mine -notcontains $_ })
+            if ($foreign.Count -gt 0) {
+                throw "Порт $appPortChosen слухає чужий процес (PID $($foreign -join ', ')), а не наш застосунок (PID $($api.Id)); seed не підтверджено. Лог: $log"
+            }
+        }
+        else {
+            Write-Warning "Власника порту $appPortChosen не визначено (немає Get-NetTCPConnection); перевірку PID пропущено."
+        }
         if ($Upgrade) { Write-Host '  seed виконано поверх наявних даних' }
         else { Write-Host '  seed виконано, bootstrap створено' }
     }
     finally {
         if (-not $api.HasExited) {
             # ⚠ Дерево процесів (.NET Core): інакше `Ecr.Api` під `dotnet run`
-            # переживає скрипт і тримає порт 5099. Windows PowerShell 5.1 на
+            # переживає скрипт і тримає порт застосунку. Windows PowerShell 5.1 на
             # .NET Framework перевантаження з деревом не має.
             if ($PSVersionTable.PSEdition -eq 'Desktop') { $api.Kill() } else { $api.Kill($true) }
             $api.WaitForExit()
