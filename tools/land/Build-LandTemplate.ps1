@@ -428,10 +428,39 @@ function Fill-StructureSql([int]$vid) {
         # --- колонки
         $have = @{}
         $haveInfo = @{}
-        foreach ($r in (Sql-Query $cn 'SELECT c.Id, c.TableDefId, c.Code, c.DataType FROM cfg.ColumnDef c JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v' @{ v = $vid }).Rows) {
+        foreach ($r in (Sql-Query $cn 'SELECT c.Id, c.TableDefId, c.Code, c.DataType, c.Precision, c.Scale FROM cfg.ColumnDef c JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v' @{ v = $vid }).Rows) {
             $have["$($r.TableDefId)/$($r.Code)"] = $true
-            $haveInfo["$($r.TableDefId)/$($r.Code)"] = @{ id = [int]$r.Id; type = [int]$r.DataType }
+            $pr = $null; if ($r.Precision -isnot [DBNull]) { $pr = [int]$r.Precision }
+            $sc = $null; if ($r.Scale -isnot [DBNull]) { $sc = [int]$r.Scale }
+            $haveInfo["$($r.TableDefId)/$($r.Code)"] = @{ id = [int]$r.Id; type = [int]$r.DataType; precision = $pr; scale = $sc }
         }
+        # LP-29: Precision/Scale НАЯВНИХ колонок чернетки-клону підтягуються до значень моделі, але лише РОЗШИРЕННЯМ
+        # (Precision не менша, Scale не менша, цілих розрядів Precision-Scale не менше): значення в decimal(34,16) від цього не
+        # залежать, а migrate-version саме так і класифікує Widened (без відмови guardedWithData). Звуження й «було без межі»
+        # не чіпаються. Правило те саме, що VersionMigrationPlanner.IsWidening.
+        $widen = 0
+        foreach ($sh in @($Mdl.sheets)) {
+            foreach ($tb in @($sh.tables)) {
+                $tidW = $tableIds["$($sh.code)/$($tb.code)"]
+                foreach ($c in @($tb.columns | Where-Object { $_.precision })) {
+                    $hi = $haveInfo["$tidW/$($c.code)"]
+                    if ($null -eq $hi) { continue }
+                    $p1 = [int]$c.precision; $s1 = $null; if ($c.scale) { $s1 = [int]$c.scale }
+                    if ($hi.precision -eq $p1 -and $hi.scale -eq $s1) { continue }
+                    if ($null -eq $hi.precision) { continue }                              # було без межі - стало б звуження
+                    if ($p1 -lt $hi.precision) { continue }
+                    if ($null -ne $s1) {
+                        if ($null -eq $hi.scale -or $s1 -lt $hi.scale) { continue }
+                        if (($p1 - $s1) -lt ($hi.precision - $hi.scale)) { continue }     # цілих розрядів меншає
+                    }
+                    elseif ($null -ne $hi.scale) { continue }                              # Scale була, у моделі її немає
+                    $newScale = [DBNull]::Value; if ($null -ne $s1) { $newScale = [byte]$s1 }
+                    $null = Sql-Exec $cn 'UPDATE cfg.ColumnDef SET Precision=@p, Scale=@s WHERE Id=@i' @{ p = [byte]$p1; s = $newScale; i = $hi.id }
+                    $widen++
+                }
+            }
+        }
+        if ($widen -gt 0) { Log "  колонок розширено за Precision/Scale (чернетка-клон): $widen" }
         # Колонка чернетки-клону, яку модель тепер веде як Formula/Calculated (7.0: місячні колонки з формулами комірок), а в
         # клоні вона ще Decimal: тип змінюється лише в чернетці (опубліковану версію захищає тригер), інакше PUT formulas/cell
         # дає ECR-TMPL-4227. Лише перехід у обчислюваний тип; решта розбіжностей типів не чіпається.
