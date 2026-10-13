@@ -21,6 +21,11 @@
       Documents     документи з даними (синтетика + -GoldenDir)
       LandParity    (лише явно, в All не входить) правила категорії C11/C12 з af-land-category-rules.json, склад речовин
                     версії з суфіксів категорій констант, аргументи тест-кейсу PARITY_1 для правила категорії
+                    ⚠ Порядок: LandParity виконується ПЕРЕД Methodologies (у одному запуску скрипт сам ставить його
+                    першим). Methodologies створює прив'язки колонок результатів LP-08 (вимкнені теж), а перевірка
+                    правила категорії звіряє @-аргументи з колонками ВСІХ прив'язок: після Methodologies усі
+                    PUT category-rule дають 422 ECR-CALC-0422 categoryRuleUnknownArgument (D1, RC E).
+                    Схема: імпорт C11/C12 -> -Stage LandParity -> -Stage Methodologies (повторно, створює прив'язки).
 
     ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє. Прод-БД старої системи тут
     НЕ читається (набір із прода — окремий локальний скрипт, не в репозиторії).
@@ -75,15 +80,38 @@ $childStand = if ($ConfirmStand -and $ConfirmStand.LastIndexOf('/') -gt 0) { $Co
 
 # Тимчасові 503 (ECR-SYS-0503 databaseBusy) і 429 повторюємо: стенд ділить SQL Server з іншими сесіями.
 ${function:Invoke-EcrOnce} = ${function:Invoke-Ecr}
+# 429: чекаємо рівно Retry-After (ціле число секунд, мін. 1); без заголовка - паузи 2/4/6/8/10 с. Бюджет очікування
+# на один виклик - 180 с (вікно квоти перерахунку 60 с, DocumentRecalculateQuota).
+function Get-RetryAfterSeconds($Response) {
+    $raw = $null
+    if ($Response -and $Response.Headers) {
+        foreach ($k in @($Response.Headers.Keys)) { if ([string]$k -ieq 'Retry-After') { $raw = [string]$Response.Headers[$k] } }
+    }
+    $n = 0
+    if ($raw -and [int]::TryParse($raw.Trim(), [ref]$n)) { return [Math]::Max(1, $n) }
+    return 0
+}
 function Invoke-Ecr {
     param([Parameter(Mandatory)][string]$Method, [Parameter(Mandatory)][string]$Path, [Alias('Body')]$Payload = $null, [hashtable]$Headers = @{})
     $r = $null
-    foreach ($try in 1..5) {
+    $waited = 0
+    foreach ($try in 1..6) {
         $r = Invoke-EcrOnce -Method $Method -Path $Path -Body $Payload -Headers $Headers
         if ($r.Status -ne 503 -and $r.Status -ne 429) { return $r }
-        Start-Sleep -Seconds (2 * $try)
+        $pause = 2 * $try
+        if ($r.Status -eq 429) { $ra = Get-RetryAfterSeconds $r; if ($ra -gt 0) { $pause = $ra } }
+        if ($waited + $pause -gt 180) { break }
+        $waited += $pause
+        Start-Sleep -Seconds $pause
     }
     return $r
+}
+# Пейсинг масового перерахунку: не частіше 1 виклику на 2.2 с (< 30/хв, межа користувача).
+$script:RecalcLastCall = [DateTime]::MinValue
+function Wait-RecalcPace {
+    $gap = 2.2 - ([DateTime]::UtcNow - $script:RecalcLastCall).TotalSeconds
+    if ($gap -gt 0) { Start-Sleep -Milliseconds ([int][Math]::Ceiling($gap * 1000)) }
+    $script:RecalcLastCall = [DateTime]::UtcNow
 }
 
 function Want([string]$s) { return ($Stage -contains 'All') -or ($Stage -contains $s) }
@@ -1186,7 +1214,14 @@ function Stage-LandParity {
         }
         else {
             $p = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/category-rule" -Body @{ expression = $expr }
-            if ($p.Status -ne 200) { Log "  ! ${name}: category-rule HTTP $($p.Status) $(Get-EcrErrorCode $p)"; continue }
+            if ($p.Status -ne 200) {
+                Log "  ! ${name}: category-rule HTTP $($p.Status) $(Get-EcrErrorCode $p)"
+                if (([string]$p.Text) -match 'categoryRuleUnknownArgument') {
+                    # D1 (RC E): перевірка R16-4 звіряє @-аргументи з колонками ВСІХ прив'язок методології, і вимкнених теж.
+                    Log "    ! прив'язки колонок результатів (LP-08) уже створено: -Stage Methodologies виконано після імпорту ${name}. Порядок: LandParity ДО повторного -Stage Methodologies (див. tools/land/README.md, «Порядок етапів»)."
+                }
+                continue
+            }
             Log "  ${name}: правило категорії задано"
         }
 
@@ -1224,7 +1259,7 @@ function Stage-LandParity {
             $body = @{ inputJson = ($newInput | ConvertTo-Json -Depth 8 -Compress); expectedJson = [string]$t.expectedJson; tolerance = [string]$t.tolerance }
             $pt = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/tests/PARITY_1" -Body $body
             if ($pt.Status -ne 200) { Log "  ! ${name}: PARITY_1 HTTP $($pt.Status) $(Get-EcrErrorCode $pt)"; break }
-            $sim = Invoke-Ecr -Method POST -Path "/api/v1/methodologies/$m/simulate" -Body @{ methodologyVersionId = $vid; periodKey = @{ value = ($Year * 100 + 6) } }
+            $sim = Invoke-Ecr -Method POST -Path "/api/v1/methodologies/$m/simulate" -Body @{ methodologyVersionId = $vid; periodKey = ($Year * 100 + 6) }
             if ($sim.Status -eq 200 -and $sim.Json.isGreen) { $green = $true; break }
         }
         Log ("  {0}: PARITY_1 аргументи {1}; simulate {2}" -f $name, (($merged.Added) -join ','), $(if ($green) { 'зелений' } else { 'НЕ зелений (див. категорію/константи)' }))
@@ -1275,9 +1310,13 @@ function Stage-Data {
     Fill-GoldenDocument $byName['LAND-GOLDEN']
     Fill-FullDocument $byName['LAND-FULL']
     # перерахунок золотого документа по місяцях з даними
+    # період-мажорний порядок (спершу всі документи періоду) + пейсинг: межа 6/хв на пару користувач+документ не досягається
     foreach ($p in 202603, 202604, 202605, 202606) {
-        $r = Invoke-Ecr -Method POST -Path "/api/v1/documents/$($byName['LAND-GOLDEN'])/recalculate" -Body @{ periodKey = $p }
-        Log ("  перерахунок LAND-GOLDEN ${p}: HTTP $($r.Status)")
+        foreach ($dn in 'LAND-GOLDEN') {
+            Wait-RecalcPace
+            $r = Invoke-Ecr -Method POST -Path "/api/v1/documents/$($byName[$dn])/recalculate" -Body @{ periodKey = $p }
+            Log ("  перерахунок ${dn} ${p}: HTTP $($r.Status)")
+        }
     }
     # стани: аркуші LAND-FULL — Approved / Rejected / Submitted
     $full = $byName['LAND-FULL']
@@ -1501,9 +1540,13 @@ function Fill-FullDocument([int]$docId) {
     if (Want 'Template') { Stage-Template }
     if (Want 'Project') { Stage-Project }
     if (Want 'Documents') { Stage-Documents }
+    # D1: LandParity ПЕРЕД Methodologies (див. нижче).
+    if ($Stage -contains 'LandParity') { Stage-LandParity }
     if (Want 'Methodologies') { Stage-Methodologies }
     if (Want 'Data') { Stage-Data }
-    # LP-07: лише явно (-Stage LandParity); у 'All' не входить, бо потребує імпортованих C11/C12 і LAND_AIR_SUBSTANCE.
-    if ($Stage -contains 'LandParity') { Stage-LandParity }
+    # LP-07: LandParity лише явно (-Stage LandParity); у 'All' не входить, бо потребує імпортованих C11/C12 і LAND_AIR_SUBSTANCE.
+    # ⚠ D1 (RC E): LandParity виконується ПЕРЕД Methodologies. Methodologies створює прив'язки колонок результатів (LP-08,
+    # у т.ч. вимкнені), а перевірка правила категорії (R16-4) звіряє @-аргументи з колонками ВСІХ прив'язок методології:
+    # після них PUT category-rule дає 422 ECR-CALC-0422 categoryRuleUnknownArgument.
 }
 Log 'Готово.'

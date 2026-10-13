@@ -114,6 +114,44 @@ MISSING_NO_BINDING (немає прив'язки до колонки резул�
 рядки зі спільним NAE (і тим самим паливом) позначаються AMBIGUOUS_KEY і не порівнюються.
 Сторожі: LandParityHarnessTests (Architecture).
 
+### Повний паритет (усі документи, усі періоди, кілька EFID)
+
+Для повного набору (документи `LAND-PROD-n.json` із кількома періодами, кілька EFID прода) — окремі скрипти, наявні
+сигнатури вище не змінено. Усе локально, поза репозиторієм; у виході (summary / cells) значень немає.
+
+1. `Export-LandParityOracleFull.ps1 -OutFile <поза репо>.tsv [-Year 2026] [-Months 3]` — усі збережені результати
+   `CalcResult_Emissions_Air_Land*` року в TSV (efid, місяць, таблиця, NAE, компонент, фаза, tons, gsec, методологія,
+   час, джерело). Лише `SELECT ... WITH (NOLOCK)`, локальний сервер, БД `ECR`. **Файл зі значеннями - не комітити.**
+2. Перерахувати документи стенда (Current-прогони за всі періоди).
+3. `Compare-LandParityFull.ps1 -JsonDir <каталог> -OracleTsv <...> -SqlConnection <EcrLand*> -OutPrefix <поза репо>`
+   → `<OutPrefix>.summary.json` (класи загалом `classes`, по методологіях `byMethodology`, групи
+   методологія/таблиця/клас з медіаною, p95, max відносної похибки) і `<OutPrefix>.cells.tsv` (не-MATCH клітинки:
+   документ, період, таблиця, rowKey, кількість рядків, EFID, методологія, вихід, клас, відносна похибка).
+   Офлайн (тести) замість SQL: `-StateFile` (JSON `methodologies` / `tables` / `results`).
+
+Що відрізняє від harness зразка: (1) рядки вирівнюються **за позицією** `p<doc>-<seq>` (той самий JSON — вхід
+завантажувача), а не за підписом входів; (2) мапа методологія → таблиця береться з `cfg.CalculationBinding`,
+`-MethodologyTable '<regex>=<Т>[+<Т>]'` доповнює методології без прив'язки (C08 / C11 / C12), далі вбудована мапа
+C05 / C06_01 / C07_*; для методології з кількома таблицями результат приписується тим, де рядок існує, а
+невирішені випадки лічить `multiTableResults` у summary (ключ рядка результату таблиці не містить); (3) нові
+класи `ROW_NOT_LOADED_CAPPED` (рядок прода є, у документі ECR його немає, а таблиця вже має `MaxDynamicRows`
+рядків - ліміт шаблону) і `ROW_NOT_LOADED_NO_CELLS`; суфікс `_ZERO` - результат старої 0; допуски й решта
+класів ті самі (MATCH ≤ 5e-13 abs; MATCH_ROUNDING_LOSS при rel > 1e-9; NEAR ≤ 1e-9).
+
+Параметри: `-Months 3` (лише ці місяці; дефолт - усі), `-Documents LAND-PROD-5,...` / `-MinDocument` / `-MaxDocs`,
+`-GroupBy '<Т>=<Кол>[+<Кол>]'` (ключ групи NAE замість авто-колонки фази; для C12_01; перша колонка - ще й фільтр
+`Component_Phase` старої), `-AggregateBy NaePhase`, `-ValidateOnly` (лише розібрати й надрукувати параметри).
+
+**`-AggregateBy NaePhase`** (для AMBIGUOUS_KEY): результат старої не має Land_No, тож клітинку старої за
+(EFID, NAE, фаза) порівнюють із **сумою** значень ECR за рядками групи; одна клітинка на (група, методологія,
+вихід). Класи з префіксом `AGG_`: `AGG_MATCH`, `AGG_MATCH_ROUNDING_LOSS`, `AGG_NEAR`, `AGG_MISMATCH*`,
+`AGG_MISSING_*`, `AGG_ROW_NOT_LOADED_*`; сума, що не збіглась при частково не завантажених рядках групи, -
+`INCOMPLETE_ROW_NOT_LOADED_*` (не дефект виразу). Допуск зберігання множиться на кількість доданків. Без
+`-AggregateBy` ключі лишаються `AMBIGUOUS_KEY` (порахований так само, як у harness зразка).
+
+Сторожі: LandParityFullHarnessTests (Architecture): експортер лише читає, вихід не в репо, розбір параметрів,
+класи на синтетичній фікстурі без даних прода, у файлах виходу значень немає.
+
 ## Довідник повітряних речовин (LP-07, форма B константи)
 
 `Import-LandAirSubstances.ps1` завантажує LAND_AIR_SUBSTANCE з **локальної копії** прода (`AF_PermitConstant`,
@@ -127,6 +165,24 @@ MISSING_NO_BINDING (немає прив'язки до колонки резул�
 констант (записи `E<код>` довідника LAND_AIR_SUBSTANCE) і додає в тест-кейс `PARITY_1` аргументи, які читає правило
 (`@Land_NAE`, `@Land_TypeFuelOrStream`, `@Land_Streams`, `@Land_InvNumEqp`, `@Land_TypeStoredMaterial`); наявні
 аргументи, очікуване й допуск не змінюються. Чиста логіка — `LandParityRuleArgs.Lib.ps1` (тест у Architecture).
+
+### Порядок етапів: LandParity ДО Methodologies
+
+`-Stage Methodologies` створює прив'язки колонок результатів C08/C09/C11/C12 (LP-08; до чернеток - вимкнені), а серверна
+перевірка правила категорії (R16-4) звіряє `@`-аргументи з колонками таблиць УСІХ прив'язок методології, вимкнених
+теж. Тому після `Methodologies` кожен `PUT .../category-rule` дає `422 ECR-CALC-0422 categoryRuleUnknownArgument`
+(колонки названі `TypeOfFuel`, `IDCodeNAEProject`, а правило читає `@Land_*`). Порядок для стенда:
+
+1. імпорт C11/C12 (`tools/Ecr.MethodologyImport`);
+2. `-Stage LandParity` - правила, склад речовин, аргументи PARITY_1;
+3. `-Stage Methodologies` (повторно) - створює прив'язки.
+
+У одному запуску (`-Stage LandParity,Methodologies`) скрипт сам виконує LandParity першим. Етап друкує підказку,
+якщо побачив `categoryRuleUnknownArgument`: прив'язки вже створено, API їх не видаляє - беріть стенд, де LandParity
+виконано до повторного Methodologies. Симуляція PARITY_1 шле `periodKey` числом (`{year}06`), як `SimulateMethodologyRequest`.
+Попередження для наступних етапів: правило з `@Land_*`, не знайденими в колонках прив'язаної таблиці, так само не
+пройде публікацію (`PublishMethodologyHandler`, той самий код) - узгодження імен аргументів і колонок потрібне до
+активації C11/C12.
 
 ## Склад газу HSE400 для методологій C11/C12 (LP-10)
 
