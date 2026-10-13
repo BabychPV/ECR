@@ -268,42 +268,36 @@ public sealed class FormulaDefTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "D1")]
-    public async Task Формула_комірки_на_НЕобчислюваній_колонці_відхиляється()
+    [Trait("Requirement", "WW-02")]
+    public async Task Формула_комірки_на_колонці_ручного_вводу_приймається_у_звичайному_рядку_вводу()
     {
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Save().HandleAsync(
-            1, _table.Id, FormulaScope.Cell, _row.RowKeyValue, Command(),
-            CancellationToken.None, ColumnTarget(_manualColumn)));
+        // WW-02 (замінює D1): змішана колонка (Water Report, 7a/7b, Waste: елементи вводить людина, підсумок чи
+        // баланс у своєму рядку рахує формула). Захист від затирання введеного - на рівні КОМІРКИ (рушій:
+        // CellIsComputed -> CalculatedCell), тож ворота 4227 для Cell колонку вводу пропускають, а рядок не
+        // мусить бути «лише для читання».
+        Assert.False(_row.IsReadOnly);
 
-        Assert.Equal(ErrorCodes.ComputationOnManualColumn, error.ErrorCode);
-        Assert.Empty(_table.Formulas);
+        var saved = await Save().HandleAsync(
+            1, _table.Id, FormulaScope.Cell, _row.RowKeyValue, Command("[Jan] + [Feb]"),
+            CancellationToken.None, ColumnTarget(_manualColumn));
+
+        Assert.Equal(FormulaScope.Cell, saved.Scope);
+        Assert.Equal(_row.Id, saved.RowDefId);
+        Assert.Equal(_manualColumn.Id, saved.ColumnDefId);
+        Assert.Single(_table.Formulas);
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "WW-02")]
-    public async Task Формула_комірки_на_колонці_ручного_вводу_приймається_лише_в_рядку_лише_для_читання()
+    public async Task Формула_колонки_на_колонці_ручного_вводу_лишається_4227_навіть_після_WW_02()
     {
-        // Змішана колонка (Water Report: елементи вводить людина, групи/баланси рахує формула): вимога
-        // «обчислювана колонка» перенесена на рядок — людина його не редагує, тож перерахунок нічого не затре.
-        var summary = new RowDef(_table.Id, RowKey.Create("7001000"), 1, Text("7001000"), RowKind.Group);
-        SetId(summary, 201);
-        summary.SetReadOnly(true);
-        _table.AddRow(summary);
-
-        var saved = await Save().HandleAsync(
-            1, _table.Id, FormulaScope.Cell, summary.RowKeyValue, Command("[Jan] + [Feb]"),
-            CancellationToken.None, ColumnTarget(_manualColumn));
-
-        Assert.Equal(FormulaScope.Cell, saved.Scope);
-        Assert.Equal(summary.Id, saved.RowDefId);
-        Assert.Equal(_manualColumn.Id, saved.ColumnDefId);
-
-        // Той самий стовпець, але рядок для вводу — як і раніше ECR-TMPL-4227.
+        // Column пише в КОЖЕН рядок колонки, тож вимога обчислюваної колонки лишилась для цієї області.
         var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Save().HandleAsync(
-            1, _table.Id, FormulaScope.Cell, _row.RowKeyValue, Command(),
-            CancellationToken.None, ColumnTarget(_manualColumn)));
+            1, _table.Id, FormulaScope.Column, ColumnTarget(_manualColumn), Command(), CancellationToken.None));
+
         Assert.Equal(ErrorCodes.ComputationOnManualColumn, error.ErrorCode);
+        Assert.Empty(_table.Formulas);
     }
 
     [Fact]

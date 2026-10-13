@@ -177,6 +177,12 @@ public static class VersionMigrationPlanner
             .GroupBy(c => c.RowDefId!.Value)
             .ToDictionary(g => g.Key, g => g.Sum(c => c.Values));
 
+        // WW-02: скільки непорожніх значень лежить у КОМІРЦІ (колонка × опис рядка) вихідної версії.
+        var valuesByCell = cells
+            .Where(c => c.RowDefId is not null)
+            .GroupBy(c => (c.ColumnDefId, RowDefId: c.RowDefId!.Value))
+            .ToDictionary(g => g.Key, g => g.Sum(c => c.Values));
+
         var targetSheets = Live(target.Sheets).ToDictionary(s => s.Code, StringComparer.Ordinal);
         var sourceSheets = Live(source.Sheets).ToList();
 
@@ -251,6 +257,7 @@ public static class VersionMigrationPlanner
                 CompareColumns(items, columns, conflicts, tablePath, table, otherTable, valuesByColumn, columnRenames);
                 CompareRows(items, rows, newRows, tablePath, table, otherTable, valuesByRow);
                 CompareFormulas(formulaChanges, tablePath, table, otherTable, columns, rows);
+                CompareCellFormulas(items, tablePath, table, otherTable, valuesByCell);
 
                 if (renamedFrom is not null)
                 {
@@ -546,12 +553,100 @@ public static class VersionMigrationPlanner
             map[row.Id] = other.Id;
             PresentationDiff(items, path, nameof(RowDef.LabelL10n), row.LabelL10n, other.LabelL10n);
             PresentationDiff(items, path, nameof(RowDef.Ordinal), row.Ordinal, other.Ordinal);
+
+            // WW-02: рядок став «лише читання» — людина більше не редагує його, а введене лишається: зміна
+            // тлумачення, тому Guarded зі значеннями рядка (як і IsRequired). Зняття «лише читання» лише
+            // розширює права й нічого не ламає (клас Safe, Kind не «Modified», тож у guarded не рахується).
+            if (!row.IsReadOnly && other.IsReadOnly)
+            {
+                items.Add(new(path, "Modified", ChangeClass.Guarded, Count(valuesByRow, row.Id),
+                    nameof(RowDef.IsReadOnly), "editable", "readOnly"));
+            }
+            else if (row.IsReadOnly && !other.IsReadOnly)
+            {
+                items.Add(new(path, "Relaxed", ChangeClass.Safe, 0,
+                    nameof(RowDef.IsReadOnly), "readOnly", "editable"));
+            }
         }
 
         foreach (var added in targetRows.Values.Where(r => !sourceKeys.Contains(r.RowKeyValue)))
         {
             items.Add(new($"{tablePath}#{added.RowKeyValue}", "Added", ChangeClass.Safe, 0));
             newRows.Add(new VersionMigrationNewRow(to.Id, added.Id, added.RowKeyValue, added.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// WW-02: комірочні формули цільової таблиці, яких у вихідній версії не було. Така комірка стає обчислюваною:
+    /// перший перерахунок перезапише введене, а редагування закрите. Тому нова комірочна формула на комірці з
+    /// непорожнім значенням — <c>Modified</c>/Guarded зі скількістю значень (відмова <c>guardedWithData</c>, аркуш
+    /// «зачеплений» для LP-32); на порожній — безпечне додавання (одним підсумковим рядком на таблицю).
+    /// </summary>
+    /// <remarks>
+    /// Комірка, яку вихідна версія й так рахувала (обчислювана колонка, формула колонки/рядка/комірки), нової
+    /// відмінності не дає — ні відмови, ні пункту. Відповідність — за кодом колонки й ключем рядка.
+    /// </remarks>
+    private static void CompareCellFormulas(
+        List<VersionMigrationItem> items, string tablePath, TableDef from, TableDef to,
+        IReadOnlyDictionary<(int ColumnDefId, int RowDefId), long> valuesByCell)
+    {
+        var targetFormulas = to.Formulas
+            .Where(f => !f.IsDeleted && f.Scope == FormulaScope.Cell && f.RowDefId is not null && f.ColumnDefId is not null)
+            .ToList();
+
+        if (targetFormulas.Count == 0)
+        {
+            return;
+        }
+
+        var targetRows = Live(to.Rows).ToDictionary(r => r.Id);
+        var targetColumns = Live(to.Columns).ToDictionary(c => c.Id);
+        var sourceRows = Live(from.Rows).ToDictionary(r => r.RowKeyValue, StringComparer.Ordinal);
+        var sourceColumns = Live(from.Columns).ToDictionary(c => c.Code, StringComparer.Ordinal);
+        var sourceFormulas = from.Formulas.Where(f => !f.IsDeleted).ToList();
+
+        var added = 0;
+        foreach (var formula in targetFormulas)
+        {
+            if (!targetRows.TryGetValue(formula.RowDefId!.Value, out var targetRow)
+                || !targetColumns.TryGetValue(formula.ColumnDefId!.Value, out var targetColumn))
+            {
+                continue;
+            }
+
+            if (!sourceRows.TryGetValue(targetRow.RowKeyValue, out var sourceRow)
+                || !sourceColumns.TryGetValue(targetColumn.Code, out var sourceColumn))
+            {
+                // Комірки у вихідній версії не було — значень там бути не може.
+                added++;
+                continue;
+            }
+
+            var alreadyComputed = sourceColumn.IsComputed
+                || sourceFormulas.Any(f =>
+                    (f.Scope == FormulaScope.Column && f.ColumnDefId == sourceColumn.Id)
+                    || (f.Scope == FormulaScope.Cell && f.RowDefId == sourceRow.Id && f.ColumnDefId == sourceColumn.Id)
+                    || (f.Scope == FormulaScope.Row && f.RowDefId == sourceRow.Id
+                        && (f.ColumnDefId is null || f.ColumnDefId == sourceColumn.Id)));
+
+            if (alreadyComputed)
+            {
+                continue;
+            }
+
+            added++;
+            var values = valuesByCell.GetValueOrDefault((sourceColumn.Id, sourceRow.Id));
+            if (values > 0)
+            {
+                items.Add(new($"{tablePath}#{targetRow.RowKeyValue}.{targetColumn.Code}", "Modified",
+                    ChangeClass.Guarded, values, "CellFormula", "input", "formula"));
+            }
+        }
+
+        if (added > 0)
+        {
+            items.Add(new(tablePath, "Added", ChangeClass.Safe, 0, "CellFormulas", null, added.ToString(
+                System.Globalization.CultureInfo.InvariantCulture)));
         }
     }
 

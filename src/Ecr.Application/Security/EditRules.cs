@@ -86,6 +86,14 @@ public readonly record struct CellAccessContext(
     /// дозволів не додає й не знімає (RC20 D-3).
     /// </summary>
     public bool IsAssignmentExecutor { get; init; }
+
+    /// <summary>
+    /// Саму КОМІРКУ рахує комірочна формула шаблону (<c>FormulaScope.Cell</c>, WW-02). Ознака рівня комірки,
+    /// а не колонки: колонка лишається колонкою вводу (<see cref="ColumnIsComputed"/> хибне), тож сусідні
+    /// комірки рядка й колонки редагуються, а ця — ні (<see cref="EditDenyReason.CalculatedCell"/>):
+    /// перерахунок затер би введене без жодного слова.
+    /// </summary>
+    public bool CellIsComputed { get; init; }
 }
 
 /// <summary>
@@ -172,7 +180,7 @@ public static class EditRules
                 break;
         }
 
-        if (context.ColumnIsComputed)
+        if (context.ColumnIsComputed || context.CellIsComputed)
         {
             return EditDecision.Deny(EditDenyReason.CalculatedCell);
         }
