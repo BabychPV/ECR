@@ -126,6 +126,9 @@ public sealed class TestEvaluationContext : IBudgetedEvaluationContext
     /// <inheritdoc />
     public PeriodContext Period { get; set; }
 
+    /// <inheritdoc />
+    public string? CurrentSubstanceCode { get; set; }
+
     /// <summary>Ключ комірки.</summary>
     public static string Key(string sheet, string table, string row, string column)
         => $"{sheet}|{table}|{row}|{column}";

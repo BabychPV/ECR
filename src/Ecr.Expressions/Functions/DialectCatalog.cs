@@ -40,8 +40,8 @@ public enum FunctionTier : byte
 /// <item><description><b>22 Core</b> — підтверджені заміром;</description></item>
 /// <item><description><b>2 Extension</b> — <c>Ln</c>, <c>ifs</c>: є в каталозі
 /// редактора, немає в рушії;</description></item>
-/// <item><description><b>2 Extension</b> — <c>CONVERT</c>, <c>SUBSTANCE</c>:
-/// наші, потрібні для одиниць і речовин;</description></item>
+/// <item><description><b>3 Extension</b> — <c>CONVERT</c>, <c>SUBSTANCE</c>,
+/// <c>CURRENT_SUBSTANCE</c>: наші, потрібні для одиниць і речовин;</description></item>
 /// <item><description><b>8 Extension</b> — <c>REGFIND</c>, <c>REGONE</c>,
 /// <c>REGFIELD</c> (RT-20a) і <c>REGSUM</c>, <c>REGAVG</c>, <c>REGMIN</c>,
 /// <c>REGMAX</c>, <c>REGCOUNT</c> (RT-20b): наші, функції довідників.</description></item>
@@ -94,7 +94,7 @@ public static class DialectCatalog
     ];
 
     /// <summary>
-    /// Дванадцять функцій, яких чинний рушій не обчислює.
+    /// Тринадцять функцій, яких чинний рушій не обчислює.
     /// </summary>
     /// <remarks>
     /// ⛔ <c>Ln</c> і <c>ifs</c> потрапили сюди **за заміром**, а не за
@@ -112,6 +112,12 @@ public static class DialectCatalog
         new("ifs", 2, null, false, ExpressionValueType.Null),
         new("CONVERT", 3, 3, false, ExpressionValueType.Number),
         new("SUBSTANCE", 1, 1, false, ExpressionValueType.Number),
+
+        // ✎ 2026-10-13 (LP-10/CompositionMass): символ «поточна речовина» — код речовини ЦЬОГО
+        // проходу рахунку (поле SUBSTANCE_CODE запису довідника, інакше код запису). Без аргументів,
+        // повертає ТЕКСТ, тож `CURRENT_SUBSTANCE() + '_mass'` будує ключ показника у вкладеному
+        // REGFIND. Наш за походженням: чинний рушій адресації речовини аргументом не мав.
+        new("CURRENT_SUBSTANCE", 0, 0, false, ExpressionValueType.Text),
 
         // ⚠ Функції довідників (RT-20a, `D-159`): чинний рушій довідників не
         // бачив зовсім, тож у `Legacy`-версії їм нічого відтворювати —

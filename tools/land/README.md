@@ -121,3 +121,31 @@ MISSING_NO_BINDING (немає прив'язки до колонки резул�
 (3-4 цифри, без провідного нуля); повтор - 0 змін. Параметри: `-SourceDatabase`/`-ConfirmSource` (локальна копія),
 `-ConfirmStand`; `-AttachMethodologyId/-AttachVersionId/-AttachCodes` додає речовини до складу версії-чернетки
 (`PUT /api/v1/methodologies/{id}/versions/{vid}/substances`). Спершу `-DryRun`.
+
+Етап `Build-LandTemplate.ps1 -Stage LandParity` (лише явно, в `All` не входить) для імпортованих C11/C12-чернеток:
+задає правило категорії з `af-land-category-rules.json`, склад речовин версії з суфіксів `_(\d{3,4})$` категорій її
+констант (записи `E<код>` довідника LAND_AIR_SUBSTANCE) і додає в тест-кейс `PARITY_1` аргументи, які читає правило
+(`@Land_NAE`, `@Land_TypeFuelOrStream`, `@Land_Streams`, `@Land_InvNumEqp`, `@Land_TypeStoredMaterial`); наявні
+аргументи, очікуване й допуск не змінюються. Чиста логіка — `LandParityRuleArgs.Lib.ps1` (тест у Architecture).
+
+## Склад газу HSE400 для методологій C11/C12 (LP-10)
+
+Стара система бере склад із `dbo.CalcResult_AirGasCompositions_HSE400` (рядок = місяць, колонка = `{префікс потоку}_{показник}`),
+а потік вибирає значення Land-поля типу палива/потоку через словник префіксів. У ECR це два довідники без міграції й
+без нових функцій рушія: `LAND_HSE400_STREAM` (текст палива -> префікс) і `LAND_HSE400_COMPOSITION` (нормалізований:
+`YEAR, MONTH, STREAM, INDICATOR` -> `VALUE`, складений первинний ключ). Аргумент методології (Density20, Vddg ...) - це
+міст-колонка шаблону на `REGFIND`/`REGFIELD` (генерується `model-gen/hse400_bridges.py`).
+
+`Import-LandHse400Composition.ps1` одноразово завантажує значення з **локальної копії** прода (лише `SELECT … WITH (NOLOCK)`;
+значень у git немає, у вивід - лише кількості) у стенд через REST (`entries/batch`): показник = канонічний суфікс колонки
+(`_20` -> `20`, `_0` -> `0`); HMB: `EMercaptan_mass` береться з `EMercaptanV2_mass`; запасна: порожній `C6_C10_mass` -> `C6_1_mass`.
+`-DiscoverStreams` додає до словника потоків тексти Land-полів, що збігаються з правилом старої системи (підрядок, без
+регістру, в обидва боки). Повтор - 0 змін; наявні записи не чіпаються. Параметри як у `Import-LandAirSubstances.ps1`
+(`-SourceDatabase`/`-ConfirmSource`, `-ConfirmStand`); спершу `-DryRun`.
+
+Немає запису за (рік, місяць, потік, показник) -> `REGFIND` дає `#N/A` -> аргумент не обчислено -> рядок без результатів
+(стара система: `continue`, мовчки). Це одне правило, а не помилка даних: склад є лише за місяці, які мала стара система.
+Не мостяться (див. `argumentBridges.unresolved` моделі): `CompositionMass` (по речовині), таблиці 9a, 10_03, 11_xx без
+однозначної колонки-джерела потоку. Сторожі: LandHse400CompositionScriptTests, LandHse400BridgesModelTests (Architecture),
+LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
+

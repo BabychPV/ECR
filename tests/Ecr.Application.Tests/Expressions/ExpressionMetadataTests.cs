@@ -106,13 +106,14 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
         var result = await Handler(db)
             .HandleAsync(ExpressionDialect.Methodology, null, null, CancellationToken.None);
 
-        // ⚠ 22 ядра + 12 розширень: Ln, ifs, CONVERT, SUBSTANCE, з RT-20a
-        // REGFIND, REGONE, REGFIELD і з RT-20b REGSUM, REGAVG, REGMIN, REGMAX,
+        // ⚠ 22 ядра + 13 розширень: Ln, ifs, CONVERT, SUBSTANCE, CURRENT_SUBSTANCE (2026-10-13),
+        // з RT-20a REGFIND, REGONE, REGFIELD і з RT-20b REGSUM, REGAVG, REGMIN, REGMAX,
         // REGCOUNT (функції довідників, ярус Extension).
-        Assert.Equal(34, result.Functions.Count);
+        Assert.Equal(35, result.Functions.Count);
         Assert.Equal(22, result.Functions.Count(f => f.Tier == "Core"));
 
         Assert.Contains(result.Functions, f => f.Name == "SUBSTANCE");
+        Assert.Contains(result.Functions, f => f.Name == "CURRENT_SUBSTANCE");
         Assert.Contains(result.Functions, f => f.Name == "Pow");
         Assert.Contains(result.Functions, f => f.Name == "if");
 
@@ -158,7 +159,7 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
         var strict = await Handler(db)
             .HandleAsync(ExpressionDialect.Methodology, null, strictVersion.VersionId, CancellationToken.None);
 
-        Assert.Equal(34, strict.Functions.Count);
+        Assert.Equal(35, strict.Functions.Count);
         Assert.DoesNotContain(legacy.Functions, f => f.Name == "REGFIND");
         Assert.DoesNotContain(legacy.Functions, f => f.Name == "REGSUM");
         Assert.Equal("Extension", Assert.Single(strict.Functions, f => f.Name == "Ln").Tier);

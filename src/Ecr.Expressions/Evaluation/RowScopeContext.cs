@@ -36,6 +36,9 @@ internal sealed class RegistryRowScope(IEvaluationContext inner, long entryId) :
     public PeriodContext Period => inner.Period;
 
     /// <inheritdoc />
+    public string? CurrentSubstanceCode => inner.CurrentSubstanceCode;
+
+    /// <inheritdoc />
     public IReadOnlyList<ExpressionValue> Read(CellReferenceNode reference) => inner.Read(reference);
 
     /// <inheritdoc />

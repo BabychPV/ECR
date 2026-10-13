@@ -1,7 +1,7 @@
 {
     "format":  "ecr-land-category-rules",
     "version":  1,
-    "note":  "Row-level category rules reproduced from the legacy HSE C# classes. No constant values. Per-pollutant-code keys ({nae}_{code}) are NOT here: see LP-07 analysis.",
+    "note":  "Row-level category rules reproduced from the legacy HSE C# classes. No constant values. Form B keys ({key}_{substance code}): the rule gives {key}, the engine appends _{code} (LP-07 form B + methodology substances).",
     "rules":  [
                   {
                       "methodology":  "ECW_C11_04",
@@ -163,6 +163,41 @@
                       "normalizesNae":  true,
                       "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_11_02.cs:98-150",
                       "note":  "key = group(groupNAE) else row skipped (empty key); Category1 (sum components) is a separate argument, not a constant key"
+                  },
+                  {
+                      "methodology":  "ECW_C11_01",
+                      "expression":  "if(in(@Land_TypeFuelOrStream,'LPG (HMB) - СУГ (МТБ)','LPG (Internal) - СУГ (Внутренний)'),@Land_NAE+'_LPG',if(in(@Land_TypeFuelOrStream,'Makat gas - Макатский газ','Fuel gas (Makat) - Топливный газ (Makat)','Fuel gas (HMB) - Топливный газ (МТБ)','Fuel gas (Export) - Топливный газ (Товарный)','Fuel Gas (Internal) - Топливный газ (Внутренний)','Fuel gas (Internal) - Топливный газ (Внутренний)'),@Land_NAE+'_FG',if(in(@Land_TypeFuelOrStream,'1-204 sludge - 1-204 шлам'),@Land_NAE+'_sludge',if(in(@Land_TypeFuelOrStream,'spent caustic - отработанный каустик'),@Land_NAE+'_caustic',if(in(@Land_TypeFuelOrStream,'Waste water'),@Land_NAE+'_Wwater',if(in(@Land_TypeFuelOrStream,'401'),@Land_NAE+'_401',if(in(@Land_TypeFuelOrStream,'14'),@Land_NAE+'_14',if(in(@Land_TypeFuelOrStream,'452'),@Land_NAE+'_452',if(in(@Land_TypeFuelOrStream,'Diesel - Дизель','Diesel - Дизельное топливо'),@Land_NAE+'_Diesel','')))))))))",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_01.cs:105-117,276-331",
+                      "note":  "form B: C# key is {nae}_FG|LPG (no code) for gas/LPG and {nae}_{stream}_{code} otherwise; this rule gives the prefix, the engine appends _{substance code} first and falls back to the prefix itself. Stream tokens in C# come from fuel.Contains(...) chain; here they are listed values of the stream field (gas/LPG/sludge/caustic from PrefixProvider.cs and prod dictionary; Waste water/401/14/452 are the row labels of the RDS template, values of the field were not seen in the prod copy: 9a tables are empty). Unlisted value -> empty key, row rejected (C# would throw KeyNotFound)."
+                  },
+                  {
+                      "methodology":  "ECW_C11_02",
+                      "expression":  "if(in(@Land_TypeFuelOrStream,'1-204 sludge - 1-204 шлам'),if(in(@Land_NAE,'6640','6641','6642','6643','6644','6645'),'6640_sludge',if(in(@Land_NAE,'6789(001)','6789 (001)'),'6789_sludge',if(in(@Land_NAE,'6586(002)','6586 (002)','6586(003)','6586 (003)'),'6586_sludge',if(in(@Land_NAE,'6783(001)','6783 (001)','6786(001)','6786 (001)','6787(001)','6787 (001)'),'6783_sludge',@Land_NAE)))),if(in(@Land_TypeFuelOrStream,'spent caustic - отработанный каустик'),if(in(@Land_NAE,'6640','6641','6642','6643','6644','6645'),'6640_caustic',if(in(@Land_NAE,'6789(001)','6789 (001)'),'6789_caustic',if(in(@Land_NAE,'6586(002)','6586 (002)','6586(003)','6586 (003)'),'6586_caustic',if(in(@Land_NAE,'6783(001)','6783 (001)','6786(001)','6786 (001)','6787(001)','6787 (001)'),'6783_caustic',@Land_NAE)))),if(in(@Land_TypeFuelOrStream,'Makat gas - Макатский газ','Fuel gas (Makat) - Топливный газ (Makat)','Fuel gas (HMB) - Топливный газ (МТБ)','Fuel gas (Export) - Топливный газ (Товарный)','Fuel Gas (Internal) - Топливный газ (Внутренний)','Fuel gas (Internal) - Топливный газ (Внутренний)','LPG (HMB) - СУГ (МТБ)','LPG (Internal) - СУГ (Внутренний)'),if(in(@Land_NAE,'6640','6641','6642','6643','6644','6645'),'6640',if(in(@Land_NAE,'6789(001)','6789 (001)'),'6789',if(in(@Land_NAE,'6586(002)','6586 (002)','6586(003)','6586 (003)'),'6586',if(in(@Land_NAE,'6783(001)','6783 (001)','6786(001)','6786 (001)','6787(001)','6787 (001)'),'6783',@Land_NAE)))),'')))",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_02.cs:106-250,382-390",
+                      "note":  "key = group(NAE) [6640 / 6789 / 6586 / 6783] else NAE; sludge and caustic streams add _sludge/_caustic; form B appends _{code}. Value outside the 8 stream strings of PrefixProvider -> empty key (C# prefix==null skips the row). Formula set type1/type2 per NAE is a separate matter."
+                  },
+                  {
+                      "methodology":  "ECW_C12_01",
+                      "expression":  "if(in(@Land_Streams,'Fuel gas'),'FuelGas',if(in(@Land_Streams,'1-D1','1D-1'),'1D-1',if(in(@Land_Streams,'Diesel/arctic diesel','Diesel'),'Diesel',if(in(@Land_Streams,'1D-114'),'1D-114',if(in(@Land_Streams,'Lube oil'),'LubeOil',if(in(@Land_Streams,'Hydraulic oil','Hydraulic Oil'),'HydraulicOil',if(in(@Land_Streams,'Seal oil'),'SealOil',if(in(@Land_Streams,'TEGlycol'),'TEGlycol',if(in(@Land_Streams,'Antifoam'),'Antifoam',if(in(@Land_Streams,'Corrosion inhibitor'),'CorrosionInhibitor',if(in(@Land_Streams,'Methanol/Метанол'),'Methanol',if(in(@Land_Streams,'Scale inhibitor'),'ScaleInhibitor',if(in(@Land_Streams,'TEGAntifoam'),'TEGAntifoam',if(in(@Land_Streams,'TEG pH Adjuster/'),'TEGpHAdjuster',if(in(@Land_Streams,'Wax inhibitor'),'WaxInhibitor','')))))))))))))))",
+                      "normalizesNae":  false,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C12_OFFSHORE_OPERATIONAL/ECW_C12_01.cs:49-70,120-132,201",
+                      "note":  "form B: key {typeOfStream}_{code}; exact match of Land_Streams against the 19 dictionary keys of typeOfStreamsInRDS (15 stream tokens). AsphalteneInhibitor is not listed: C# has no code list for it (commented out) and throws. Unknown stream -> empty key, row rejected (C#: Error typeOfStream, continue)."
+                  },
+                  {
+                      "methodology":  "ECW_C12_04_01",
+                      "expression":  "if(in(@Land_InvNumEqp,'B4-120-TA-101','B4-120-TА-101','B4-120-ТA-101','B4-120-ТА-101'),'B4-120-TA-101',if(in(@Land_InvNumEqp,'B4-120-TA-201','B4-120-TА-201','B4-120-ТA-201','B4-120-ТА-201'),'B4-120-TA-201',if(in(@Land_InvNumEqp,'B4-120-TA-301','B4-120-TА-301','B4-120-ТA-301','B4-120-ТА-301'),'B4-120-TA-301',if(in(@Land_InvNumEqp,'B4-120-TC-401','B4-120-ТC-401'),'B4-120-TC-401',if(in(@Land_InvNumEqp,'B4-120-TC-501','B4-120-ТC-501'),'B4-120-TC-501',if(in(@Land_InvNumEqp,'B4-380-TA-001','B4-380-TА-001','B4-380-ТA-001','B4-380-ТА-001'),'B4-380-TA-001',if(in(@Land_InvNumEqp,'B4-380-VA-105','B4-380-VА-105'),'B4-380-VA-105',if(in(@Land_InvNumEqp,'B4-380-VA-106','B4-380-VА-106'),'B4-380-VA-106',if(in(@Land_InvNumEqp,'B4-380-VA-205','B4-380-VА-205'),'B4-380-VA-205',if(in(@Land_InvNumEqp,'B4-380-VA-206','B4-380-VА-206'),'B4-380-VA-206',if(in(@Land_InvNumEqp,'B4-380-VA-305','B4-380-VА-305'),'B4-380-VA-305',if(in(@Land_InvNumEqp,'B4-380-VA-306','B4-380-VА-306'),'B4-380-VA-306',''))))))))))))",
+                      "normalizesNae":  false,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C12_OFFSHORE_OPERATIONAL/ECW_C12_04_01.cs:43-57,80-106",
+                      "note":  "form B: key {invNumNorm}_{code}; C# replaces Cyrillic T and A with Latin ones (each occurrence) and requires an exact match of the 12 dictionary keys; here every Cyrillic/Latin spelling of the 12 keys is listed (32 literals). Unknown InvNum -> empty key, row rejected (C#: Error invNum, continue)."
+                  },
+                  {
+                      "methodology":  "ECW_C12_04_02",
+                      "expression":  "if(in(@Land_TypeStoredMaterial,'Diesel - Дизель','Diesel - Дизельное топливо'),'diesel','oil')",
+                      "normalizesNae":  false,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C12_OFFSHORE_OPERATIONAL/ECW_C12_04_02.cs:74-87",
+                      "note":  "form B: key {diesel|oil}_{code}; C# fuelType.Contains(Diesel). Values of the stored-material field that contain Diesel: the two dictionary entries (prod copy + template registries); any other value is oil as in C#."
                   }
               ]
 }

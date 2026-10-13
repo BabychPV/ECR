@@ -718,6 +718,12 @@ public sealed class PublishMethodologyHandler(
                 when string.Equals(function.Name, "SUBSTANCE", StringComparison.OrdinalIgnoreCase):
                 return "SUBSTANCE()";
 
+            // ✎ 2026-10-13: символ «поточна речовина» — той самий клас, що й SUBSTANCE(…): Row-формула
+            // рахується без речовини, і CURRENT_SUBSTANCE() там давав би #REF на кожному рядку.
+            case Ecr.Expressions.Ast.FunctionNode function
+                when string.Equals(function.Name, "CURRENT_SUBSTANCE", StringComparison.Ordinal):
+                return "CURRENT_SUBSTANCE()";
+
             default:
                 break;
         }

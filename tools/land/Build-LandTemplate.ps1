@@ -19,6 +19,8 @@
       Project       політика періодів, проєкт, ролі-гранти, маршрут погодження, відкриття періодів
       Methodologies імпорт пакета AF, рули, прив'язки виходів, golden-тести, публікація другою особою
       Documents     документи з даними (синтетика + -GoldenDir)
+      LandParity    (лише явно, в All не входить) правила категорії C11/C12 з af-land-category-rules.json, склад речовин
+                    версії з суфіксів категорій констант, аргументи тест-кейсу PARITY_1 для правила категорії
 
     ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє. Прод-БД старої системи тут
     НЕ читається (набір із прода — окремий локальний скрипт, не в репозиторії).
@@ -40,7 +42,7 @@ param(
     [string]$AccountsFile = 'F:\ecr-backup\land-ui\accounts.local.txt',
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'Data', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'Data', 'LandParity', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection = 'Server=localhost;Database=EcrLandUi;Integrated Security=true;TrustServerCertificate=true',
@@ -221,7 +223,20 @@ function Ensure-Registry($reg) {
     $has = @($d.fields) | Where-Object { $_.code -eq 'NAME' -or ($reg.fieldNames -and $reg.fieldNames -contains $_.code) }
     if (-not $has) {
         $fields = @()
-        if ($reg.fieldNames) {
+        $keys = @()
+        if ($reg.fieldSpecs) {
+            # LP-10: довідник із типізованими полями й складеним ключем (LAND_HSE400_*): fieldSpecs + keys із моделі.
+            $o = 1
+            foreach ($f in @($reg.fieldSpecs)) {
+                $fields += @{ id = $null; code = [string]$f.code; nameL10n = @{ values = @{ en = [string]$f.code } }; dataType = [string]$f.dataType; ordinal = $o++
+                    isRequired = [bool]$f.isKey; isKey = [bool]$f.isKey; lookupRegistryDefId = $null; unitId = $null }
+            }
+            foreach ($k in @($reg.keys)) {
+                $keys += @{ id = $null; code = [string]$k.code; nameL10n = @{ values = @{ en = [string]$k.code } }; fieldCodes = @($k.fields | ForEach-Object { [string]$_ })
+                    isPrimary = [bool]$k.isPrimary; ignoreCase = [bool]$k.ignoreCase; isActive = $true }
+            }
+        }
+        elseif ($reg.fieldNames) {
             $o = 1
             foreach ($f in @($reg.fieldNames)) {
                 $fields += @{ id = $null; code = [string]$f; nameL10n = @{ values = @{ en = [string]$f } }; dataType = 'String'; ordinal = $o++
@@ -232,7 +247,7 @@ function Ensure-Registry($reg) {
             $fields = @(@{ id = $null; code = 'NAME'; nameL10n = @{ values = @{ en = 'Name'; ru = 'Название' } }; dataType = 'String'; ordinal = 1
                     isRequired = $true; isKey = $true; lookupRegistryDefId = $null; unitId = $null })
         }
-        $null = Api PUT "/api/v1/registries/$code/definition" @{ codeMode = $d.codeMode; fields = $fields; keys = @(); rules = @(); reason = 'Land template build' } @{ 'If-Match' = [string]$d.definitionVersion }
+        $null = Api PUT "/api/v1/registries/$code/definition" @{ codeMode = $d.codeMode; fields = $fields; keys = $keys; rules = @(); reason = 'Land template build' } @{ 'If-Match' = [string]$d.definitionVersion }
         $d = (Api GET "/api/v1/registries/$code/definition").Json
     }
     $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
@@ -1125,6 +1140,99 @@ function Bind-ResultColumns($mid) {
     Log ("  колонки результатів (LP-08): прив'язок {0} активних, {1} вимкнених (чернетки); методологій на сервері немає: {2}; виходів без формули: {3}; без колонки: {4}" -f $bound, $off, $noMeth.Count, $noOut, $noCol)
 }
 
+# ==================== LandParity (LP-07: правила категорії C11/C12, склад речовин, аргументи тест-кейсу) ====================
+# Лише явно: -Stage LandParity (в 'All' не входить). Для чернеток методологій, що вже є на стенді (імпорт AF-пакета
+# tools/Ecr.MethodologyImport) і мають правило у docs/.../af-land-category-rules.json:
+#   1. PUT .../category-rule  (вираз із файлу);
+#   2. склад речовин версії = суфікси `_(\d{3,4})$` категорій її констант, зіставлені із записами LAND_AIR_SUBSTANCE
+#      (код запису E<код>; довідник заводить Import-LandAirSubstances.ps1);
+#   3. тест-кейс PARITY_1: додаються аргументи, які читає правило (@Land_NAE, @Land_TypeFuelOrStream, @Land_Streams,
+#      @Land_InvNumEqp ...); наявні аргументи, очікуване й допуск не змінюються. Кандидати NAE пробуються по черзі
+#      до першого зеленого simulate.
+function Stage-LandParity {
+    Log '== LandParity =='
+    . (Join-Path $here 'LandParityRuleArgs.Lib.ps1')
+    LoginAs 'land-owner'
+    $rulesFile = Join-Path $repo 'docs\delivery\reference-data\land-template\af-land-category-rules.json'
+    $rules = @((Get-Content -LiteralPath $rulesFile -Raw -Encoding UTF8 | ConvertFrom-Json).rules)
+    $ms = Items (Api GET '/api/v1/methodologies').Json
+    $mid = @{}
+    foreach ($m in $ms) { $mid[[string]$m.code] = [int]$m.id }
+
+    $air = @{}
+    $airReg = 'LAND_AIR_SUBSTANCE'
+    $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+    $airResp = Invoke-Ecr -Method GET -Path "/api/v1/registries/$airReg/entries?asOf=$today"
+    if ($airResp.Status -eq 200) {
+        foreach ($e in @($airResp.Json)) { $air[[string]$e.code] = [int64]$e.id }
+    }
+    else { Log "  ! довідника $airReg немає (спершу Import-LandAirSubstances.ps1): склад речовин не задається" }
+
+    $done = 0
+    foreach ($r in $rules) {
+        $name = [string]$r.methodology
+        $expr = [string]$r.expression
+        $m = $mid[$name]
+        if (-not $m) { continue }
+        $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
+        $v = $vers | Sort-Object id -Descending | Select-Object -First 1
+        if ([string]$v.status -eq 'Published') { Log "  $name вже опублікована"; continue }
+        $vid = [int]$v.id
+
+        # 1. правило категорії
+        $g = Invoke-Ecr -Method GET -Path "/api/v1/methodologies/$m/versions/$vid/category-rule"
+        if ($g.Status -eq 200 -and [string]$g.Json.expression -ceq $expr) {
+            Log "  ${name}: правило категорії вже задане"
+        }
+        else {
+            $p = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/category-rule" -Body @{ expression = $expr }
+            if ($p.Status -ne 200) { Log "  ! ${name}: category-rule HTTP $($p.Status) $(Get-EcrErrorCode $p)"; continue }
+            Log "  ${name}: правило категорії задано"
+        }
+
+        # 2. склад речовин з суфіксів категорій констант
+        $consts = @((Api GET "/api/v1/methodologies/$m/versions/$vid/constants").Json)
+        $cats = @($consts | ForEach-Object { [string]$_.category } | Where-Object { $_ } | Sort-Object -Unique)
+        $codes = Get-LandSubstanceCodes -Categories $cats
+        if ($codes.Count -gt 0 -and $air.Count -gt 0) {
+            $ids = @(); $missing = @()
+            foreach ($c in $codes) {
+                if ($air.ContainsKey("E$c")) { $ids += $air["E$c"] } else { $missing += $c }
+            }
+            if ($missing.Count -gt 0) { Log "  ! ${name}: у довіднику $airReg немає кодів: $($missing -join ',')" }
+            $cur = @((Api GET "/api/v1/methodologies/$m/versions/$vid/substances").Json.items | ForEach-Object { [int64]$_.substanceEntryId })
+            $same = ($cur.Count -eq $ids.Count) -and (@($ids | Where-Object { $cur -notcontains $_ }).Count -eq 0)
+            if ($ids.Count -gt 0 -and -not $same) {
+                $null = Api PUT "/api/v1/methodologies/$m/versions/$vid/substances" @{ substanceEntryIds = @($ids) }
+                Log "  ${name}: склад речовин = $($ids.Count) ($($codes -join ','))"
+            }
+        }
+
+        # 3. аргументи тест-кейсу PARITY_1
+        $tests = @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/tests").Json)
+        $t = $tests | Where-Object { [string]$_.code -eq 'PARITY_1' } | Select-Object -First 1
+        if (-not $t) { Log "  ${name}: тест-кейсу PARITY_1 немає — аргументи не додано"; continue }
+        $inp = [string]$t.inputJson | ConvertFrom-Json
+        $cands = Get-LandNaeCandidates -Categories $cats
+        if ($cands.Count -eq 0) { $cands = @('') }
+        $green = $false
+        foreach ($cand in $cands) {
+            $needed = Get-LandRuleSampleArguments -Expression $expr -NaeCandidate $cand
+            $merged = Merge-LandParityArguments -Existing @($inp.arguments) -Needed $needed
+            if ($merged.Added.Count -eq 0 -and $green) { break }
+            $newInput = [ordered]@{ documentId = $inp.documentId; periodKey = $inp.periodKey; arguments = @($merged.Arguments) }
+            $body = @{ inputJson = ($newInput | ConvertTo-Json -Depth 8 -Compress); expectedJson = [string]$t.expectedJson; tolerance = [string]$t.tolerance }
+            $pt = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/tests/PARITY_1" -Body $body
+            if ($pt.Status -ne 200) { Log "  ! ${name}: PARITY_1 HTTP $($pt.Status) $(Get-EcrErrorCode $pt)"; break }
+            $sim = Invoke-Ecr -Method POST -Path "/api/v1/methodologies/$m/simulate" -Body @{ methodologyVersionId = $vid; periodKey = @{ value = ($Year * 100 + 6) } }
+            if ($sim.Status -eq 200 -and $sim.Json.isGreen) { $green = $true; break }
+        }
+        Log ("  {0}: PARITY_1 аргументи {1}; simulate {2}" -f $name, (($merged.Added) -join ','), $(if ($green) { 'зелений' } else { 'НЕ зелений (див. категорію/константи)' }))
+        $done++
+    }
+    Log "  оброблено методологій: $done"
+}
+
 function Stage-Documents {
     Log '== Documents =='
     LoginAs 'land-owner'
@@ -1395,5 +1503,7 @@ function Fill-FullDocument([int]$docId) {
     if (Want 'Documents') { Stage-Documents }
     if (Want 'Methodologies') { Stage-Methodologies }
     if (Want 'Data') { Stage-Data }
+    # LP-07: лише явно (-Stage LandParity); у 'All' не входить, бо потребує імпортованих C11/C12 і LAND_AIR_SUBSTANCE.
+    if ($Stage -contains 'LandParity') { Stage-LandParity }
 }
 Log 'Готово.'

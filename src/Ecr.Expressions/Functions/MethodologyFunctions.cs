@@ -98,6 +98,11 @@ public static class MethodologyFunctions
             return Substance(args, context);
         }
 
+        if (string.Equals(name, "CURRENT_SUBSTANCE", StringComparison.Ordinal))
+        {
+            return CurrentSubstance(context);
+        }
+
         if (Propagate(args) is { } propagated)
         {
             return propagated;
@@ -219,6 +224,21 @@ public static class MethodologyFunctions
 
         return value.IsNull ? ExpressionValue.Error(ExpressionErrors.BadReference) : value;
     }
+
+    /// <summary><c>CURRENT_SUBSTANCE()</c> — код речовини поточного проходу рахунку.</summary>
+    /// <param name="context">Контекст обчислення.</param>
+    /// <remarks>
+    /// ⛔ Немає речовини — це <c>#REF</c>, а не порожній рядок: порожній ключ
+    /// (<c>'' + '_mass'</c>) знайшов би чужий показник або мовчки не знайшов би нічого, а
+    /// «нульовий склад» у звіті виглядав би як виміряний. Так само відмовляє
+    /// <see cref="Substance"/>. Це стається для версії БЕЗ складу речовин, для формули
+    /// рівня рядка (її публікація відхиляє, <c>rowScopeReferencesSubstance</c>) і для
+    /// речовини без коду в довіднику.
+    /// </remarks>
+    private static ExpressionValue CurrentSubstance(IEvaluationContext context)
+        => context.CurrentSubstanceCode is { Length: > 0 } code
+            ? ExpressionValue.Text(code)
+            : ExpressionValue.Error(ExpressionErrors.BadReference);
 
     /// <summary>
     /// Помилка або <c>null</c> серед аргументів, які треба віддати як є.
