@@ -147,7 +147,83 @@ $script:LandParityDefaultMethodologyTable = @(
     @{ Regex = '^ECW_C07_16'; Tables = @('T5_22') }
     @{ Regex = '^ECW_C07_08'; Tables = @('T5_09') }
     @{ Regex = '^ECW_C07_21'; Tables = @('T5_27') }
+    # C12_02 (газові турбіни; GTU) і C12_03 (холодний вентиль): таблиці з land-result-outputs.json. Кілька таблиць -
+    # результат належить таблиці, чий рядок завантажено (Resolve-LandParityResultTables).
+    @{ Regex = '^ECW_C12_02$'; Tables = @('T10_03', 'T11_03') }
+    @{ Regex = '^ECW_C12_03$'; Tables = @('T10_01', 'T11_01') }
 )
+
+# Нормалізація імен виходів ECR до ключа старої системи (`ECW_EC_<tons|gsec>_<код>`; старий код складає вихід із
+# префікса й коду речовини, а гілку type1/type2 знімає: C12_02 `Replace("{type}", type)`, C12_03 `XXX -> code`).
+#   * `ECW_EC_tons_XXX` + речовина запису довідника (SUBSTANCE_CODE) -> `ECW_EC_tons_<код речовини>`;
+#   * `ECW_EC_tons_<код>_type1|_type2` у методології зі списку TypeFold -> `ECW_EC_tons_<код>`; обидві гілки разом
+#     для одного ключа - BRANCH_BOTH_PRESENT (старий код пише лише одну; ParityBranch мав лишити одну);
+#   * type1 коду зі списку NullType1 (415: у старому коді не існує) лишається ПОВНИМ іменем -> ECR_ONLY.
+# Значень тут немає: лише імена.
+$script:LandParityTypeFoldDefault = @('^ECW_C12_02$')
+$script:LandParityNullType1Default = @{ 'ECW_C12_02' = @('415') }
+
+function Get-LandParityTypeFoldDefault { return @($script:LandParityTypeFoldDefault) }
+
+function Get-LandParityNullType1Default {
+    $copy = @{}
+    foreach ($k in $script:LandParityNullType1Default.Keys) { $copy[$k] = @($script:LandParityNullType1Default[$k]) }
+    return $copy
+}
+
+function ConvertTo-LandParityCanonicalOutput {
+    <#
+    .OUTPUTS  @{ Code; Variant; Ignore } - Code: ключ виходу (як у старої системи, якщо перетворення можливе); Variant: 'type1'|'type2'|''
+              (лише якщо гілку знято); Ignore: результат речовини, чужої для виходу з кодом у імені (не порівнюється).
+    #>
+    param([hashtable]$StateObject, [string]$MethodologyCode, [string]$OutputCode, [string]$SubstanceCode = '')
+    $m = [regex]::Match($OutputCode, '^ECW_EC_(?<metric>tons|gsec)_(?<id>XXX|[0-9]+)(?:_(?<variant>type[0-9]+(?:_[0-9]+)?))?$')
+    $raw = @{ Code = $OutputCode; Variant = ''; Ignore = $false }
+    if (-not $m.Success) { return $raw }
+    $metric = $m.Groups['metric'].Value
+    $codeId = $m.Groups['id'].Value
+    $branch = $m.Groups['variant'].Value
+    if ($codeId -eq 'XXX') {
+        if ([string]::IsNullOrWhiteSpace($SubstanceCode)) { return $raw }   # речовини немає: ім'я лишається XXX
+        $codeId = $SubstanceCode.Trim()
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($SubstanceCode) -and $SubstanceCode.Trim() -ne $codeId) {
+        # Вихід із кодом у імені, порахований у проході ІНШОЇ речовини: значення того ж проходу, що й власна речовина.
+        $raw.Ignore = $true
+        return $raw
+    }
+    if ($branch -eq '') { return @{ Code = "ECW_EC_${metric}_$codeId"; Variant = ''; Ignore = $false } }
+
+    $fold = $false
+    foreach ($rx in @($StateObject.TypeFold)) { if ($MethodologyCode -match $rx) { $fold = $true; break } }
+    if (-not $fold) { return @{ Code = "ECW_EC_${metric}_${codeId}_$branch"; Variant = ''; Ignore = $false } }
+    if ($branch -eq 'type1' -and $StateObject.NullType1.ContainsKey($MethodologyCode) -and @($StateObject.NullType1[$MethodologyCode]) -contains $codeId) {
+        return @{ Code = "ECW_EC_${metric}_${codeId}_$branch"; Variant = ''; Ignore = $false }
+    }
+    return @{ Code = "ECW_EC_${metric}_$codeId"; Variant = $branch; Ignore = $false }
+}
+
+function Get-LandParityBucket {
+    <#
+    .SYNOPSIS  Клас комірки -> одна з груп звіту: MATCHED | MISMATCH | ECR_ONLY | ORACLE_ONLY | OTHER.
+    .DESCRIPTION
+        MATCHED: MATCH, MATCH_ROUNDING_LOSS, а також NEAR і MISMATCH* з відносною похибкою не більшою за поріг
+        (Within = TRUE: збіг лише завдяки порогу). ORACLE_ONLY: у старій системі є, в ECR немає (MISSING_*, ROW_NOT_LOADED_*,
+        LEGACY_STATUS_SKIP, METHODOLOGY_DIFF). OTHER: невизначеність ключа/гілки (AMBIGUOUS_KEY, LEGACY_DUP_CONFLICT,
+        INCOMPLETE_*, BRANCH_BOTH_PRESENT) - значення не порівнювалось.
+    #>
+    param([string]$ClassName, [double]$RelErr, [double]$Threshold)
+    $core = $ClassName -replace '^AGG_', '' -replace '_ZERO$', ''
+    $zero = ($ClassName -match '_ZERO$') -and ($ClassName -notlike '*MISMATCH*')
+    $group = 'OTHER'; $within = $false
+    if ($core -eq 'MATCH' -or $core -eq 'MATCH_ROUNDING_LOSS') { $group = 'MATCHED' }
+    elseif ($core -eq 'NEAR' -or $core -like 'MISMATCH*') {
+        if ($RelErr -le $Threshold) { $group = 'MATCHED'; $within = $true } else { $group = 'MISMATCH' }
+    }
+    elseif ($core -like 'ECR_ONLY*') { $group = 'ECR_ONLY' }
+    elseif ($core -like 'MISSING_*' -or $core -like 'ROW_NOT_LOADED*' -or $core -eq 'LEGACY_STATUS_SKIP' -or $core -eq 'METHODOLOGY_DIFF') { $group = 'ORACLE_ONLY' }
+    return @{ Group = $group; Within = $within; Zero = $zero }
+}
 
 function New-LandParityState {
     return @{
@@ -162,6 +238,12 @@ function New-LandParityState {
         MethodologyTable = @()   # overrides (ConvertTo-LandParityMethodologyTableMap)
         MultiTable = @{}     # methodology -> results attributed to several candidate tables
         ResultCount = 0
+        TypeFold = @(Get-LandParityTypeFoldDefault)         # regex методологій, де гілку type1/type2 знімають
+        NullType1 = (Get-LandParityNullType1Default)        # методологія -> коди, чий type1 у старому коді не існує
+        Variants = @{}       # "doc|period|table|rowKey|meth|output" -> @{ type1 = 1; type2 = 1 }
+        BranchBoth = @{}     # той самий ключ -> 1: обидві гілки мають результат
+        NoSubstance = @{}    # methodology -> результати ECW_EC_*_XXX без коду речовини
+        ForeignSubstance = @{}   # methodology -> результати з кодом у імені, порахованими в проході чужої речовини
     }
 }
 
@@ -189,16 +271,33 @@ function Resolve-LandParityResultTables {
 }
 
 function Add-LandParityEcrResult {
-    param([hashtable]$StateObject, [string]$DocumentName, [int]$PeriodKey, [string]$MethodologyCode, [string]$RowKey, [string]$OutputCode, [double]$Value)
+    param([hashtable]$StateObject, [string]$DocumentName, [int]$PeriodKey, [string]$MethodologyCode, [string]$RowKey, [string]$OutputCode, [double]$Value, [string]$SubstanceCode = '')
     $st = $StateObject
+    $cn = ConvertTo-LandParityCanonicalOutput $st $MethodologyCode $OutputCode $SubstanceCode
+    $mname = $MethodologyCode   # alias: LandScriptVariableCollisionTests does not allow assigning an element keyed by a parameter
+    if ($cn.Ignore) {
+        if (-not $st.ForeignSubstance.ContainsKey($mname)) { $st.ForeignSubstance[$mname] = 0 }
+        $st.ForeignSubstance[$mname]++
+        return
+    }
+    if ($OutputCode -match '_XXX(_|$)' -and $cn.Code -eq $OutputCode) {
+        if (-not $st.NoSubstance.ContainsKey($mname)) { $st.NoSubstance[$mname] = 0 }
+        $st.NoSubstance[$mname]++
+    }
     foreach ($tc in (Resolve-LandParityResultTables $st $DocumentName $PeriodKey $MethodologyCode $RowKey)) {
         $mkey = "$DocumentName|$PeriodKey|$tc|$MethodologyCode"
         $st.EcrMeth[$mkey] = 1
         $k = "$DocumentName|$PeriodKey|$tc|$RowKey"
-        $outKey = "$MethodologyCode|$OutputCode"
+        $outKey = "$MethodologyCode|$($cn.Code)"
         if (-not $st.Ecr.ContainsKey($k)) { $st.Ecr[$k] = @{} }
         $st.Ecr[$k][$outKey] = $Value
         $st.RowAny[$k] = 1
+        if ($cn.Variant -ne '') {
+            $vk = "$k|$outKey"
+            if (-not $st.Variants.ContainsKey($vk)) { $st.Variants[$vk] = @{} }
+            $st.Variants[$vk][$cn.Variant] = 1
+            if ($st.Variants[$vk].Count -gt 1) { $st.BranchBoth[$vk] = 1 }
+        }
     }
     $st.ResultCount++
 }
@@ -228,7 +327,7 @@ function Import-LandParityStateFile {
     foreach ($res in @(Get-LandParityV $j 'results')) {
         Add-LandParityEcrResult $st ([string](Get-LandParityV $res 'document')) ([int](Get-LandParityV $res 'period')) `
             ([string](Get-LandParityV $res 'methodology')) ([string](Get-LandParityV $res 'rowKey')) ([string](Get-LandParityV $res 'outputCode')) `
-            ([double]::Parse([string](Get-LandParityV $res 'value'), $inv))
+            ([double]::Parse([string](Get-LandParityV $res 'value'), $inv)) ([string](Get-LandParityV $res 'substanceCode'))
     }
 }
 
@@ -264,9 +363,11 @@ function Import-LandParityStateSql {
         $tcode = [string]$rec[2]
         if (-not $rec.IsDBNull(4)) { $st.MaxRows[$tcode] = [int]$rec[4] }
     }
-    & $rd "SELECT JSON_VALUE(d.NameL10n, '$.en'), cr.PeriodKey, m.Code, cr.SourceRowKey, cr.OutputCode, cr.Value FROM calc.CalculationResult cr JOIN calc.CalculationRun r ON r.Id = cr.CalculationRunId AND r.Status = 'Current' JOIN calc.MethodologyVersion mv ON mv.Id = cr.MethodologyVersionId JOIN calc.Methodology m ON m.Id = mv.MethodologyId JOIN doc.Document d ON d.Id = cr.DocumentId" {
+    # Код речовини результату: поле SUBSTANCE_CODE запису довідника (як MethodologyStore.GetSubstanceCodesAsync), інакше код запису.
+    $substanceSql = "COALESCE((SELECT TOP 1 COALESCE(NULLIF(LTRIM(RTRIM(v.ValueString)), ''), FORMAT(v.ValueNumeric, '0.#########')) FROM dic.RegistryValue v JOIN cfg.RegistryFieldDef f ON f.Id = v.RegistryFieldDefId AND f.Code = 'SUBSTANCE_CODE' WHERE v.RegistryEntryId = cr.SubstanceEntryId), se.Code)"
+    & $rd "SELECT JSON_VALUE(d.NameL10n, '$.en'), cr.PeriodKey, m.Code, cr.SourceRowKey, cr.OutputCode, cr.Value, $substanceSql FROM calc.CalculationResult cr JOIN calc.CalculationRun r ON r.Id = cr.CalculationRunId AND r.Status = 'Current' JOIN calc.MethodologyVersion mv ON mv.Id = cr.MethodologyVersionId JOIN calc.Methodology m ON m.Id = mv.MethodologyId JOIN doc.Document d ON d.Id = cr.DocumentId LEFT JOIN dic.RegistryEntry se ON se.Id = cr.SubstanceEntryId" {
         param($rec)
-        Add-LandParityEcrResult $st ([string]$rec[0]) ([int]$rec[1]) ([string]$rec[2]) ([string]$rec[3]) ([string]$rec[4]) ([double]::Parse([string]$rec[5], $inv))
+        Add-LandParityEcrResult $st ([string]$rec[0]) ([int]$rec[1]) ([string]$rec[2]) ([string]$rec[3]) ([string]$rec[4]) ([double]::Parse([string]$rec[5], $inv)) ([string]$rec[6])
     }
 }
 
@@ -290,7 +391,10 @@ function Import-LandParityOracleTsv {
 }
 
 function New-LandParityAccumulator {
+    param([double]$RelThreshold = 1e-9)
     return @{
+        RelThreshold = $RelThreshold
+        Bucket = @{}                                # "meth|substance" -> счётчики груп звіту (matched/mismatch/...)
         Agg = @{}                                   # "meth|table|class" -> counters
         Rels = @{}                                  # same key -> List[double]
         Detail = New-Object 'System.Collections.Generic.List[string]'
@@ -311,6 +415,24 @@ function Add-LandParityCell {
     $dn = $DocumentName; $pks = [string]$PeriodKey
     $a.Cells++; $a.Rows += $RowCount; $a.Docs[$dn] = 1; $a.Periods[$pks] = 1
     $ac.Docs[$dn] = 1; $ac.Periods[$pks] = 1
+    # Зведення за групами звіту (по методології і речовині; лише кількості й відносні похибки).
+    $bk = Get-LandParityBucket $ClassName $RelErr $ac.RelThreshold
+    $subst = '-'
+    if ($OutputLabel -match '^(?:tons|gsec)_([0-9]+)') { $subst = $Matches[1] }
+    $bkey = "$MethodologyCode|$subst"
+    if (-not $ac.Bucket.ContainsKey($bkey)) {
+        $ac.Bucket[$bkey] = @{ Methodology = $MethodologyCode; Substance = $subst; Matched = 0; Within = 0; Mismatch = 0; EcrOnly = 0; OracleOnly = 0; Other = 0; Zero = 0
+            Rels = New-Object 'System.Collections.Generic.List[double]' }
+    }
+    $b = $ac.Bucket[$bkey]
+    switch ($bk.Group) {
+        'MATCHED' { $b.Matched++; if ($bk.Within) { $b.Within++ }; $b.Rels.Add($RelErr) }
+        'MISMATCH' { $b.Mismatch++; $b.Rels.Add($RelErr) }
+        'ECR_ONLY' { $b.EcrOnly++ }
+        'ORACLE_ONLY' { $b.OracleOnly++ }
+        default { $b.Other++ }
+    }
+    if ($bk.Zero -or $ClassName -like '*ECR_ONLY_ZERO') { $b.Zero++ }
     $isMatch = ($ClassName -eq 'MATCH' -or $ClassName -eq 'AGG_MATCH')
     if ($null -eq $a.Sample -and $ClassName -notmatch '^(AGG_)?MATCH') { $a.Sample = "$DocumentName/$PeriodKey/$TableCode/$RowKey" }
     if ($ClassName -match '^(AGG_)?(MATCH|MISMATCH|NEAR)') {
@@ -451,6 +573,14 @@ function Invoke-LandParityCompare {
                             }
                             if ($null -eq $oldV) { continue }
                             $ek = "$meth|$outCode"
+                            # Обидві гілки type1/type2 мають результат (після зняття гілки ключ один): старий код пише одну.
+                            $bothHit = $false
+                            foreach ($mk in $rowKeys) { if ($st.BranchBoth.ContainsKey("$tk|$mk|$ek")) { $bothHit = $true; break } }
+                            if ($bothHit) {
+                                $seen[$ek] = 1
+                                Add-LandParityCell $ac $docName $pk $tbl $rk $nRows $efid $meth $lab ($pre + 'BRANCH_BOTH_PRESENT')
+                                continue
+                            }
                             # ECR side: the row value, or the SUM over the group
                             $sum = 0.0; $have = 0; $diffCount = 0
                             foreach ($er in $ecrRows) {
@@ -545,7 +675,43 @@ function Get-LandParitySummary {
         })
     $multi = @()
     if ($null -ne $StateObject) { $multi = @($StateObject.MultiTable.Keys | Sort-Object | ForEach-Object { [ordered]@{ methodology = $_; results = [int]$StateObject.MultiTable[$_] } }) }
+    $noSub = @(); $foreign = @()
+    if ($null -ne $StateObject) {
+        $noSub = @($StateObject.NoSubstance.Keys | Sort-Object | ForEach-Object { [ordered]@{ methodology = $_; results = [int]$StateObject.NoSubstance[$_] } })
+        $foreign = @($StateObject.ForeignSubstance.Keys | Sort-Object | ForEach-Object { [ordered]@{ methodology = $_; results = [int]$StateObject.ForeignSubstance[$_] } })
+    }
+    $bySubstance = @(foreach ($bk in $ac.Bucket.Keys) {
+            $b = $ac.Bucket[$bk]
+            [ordered]@{
+                methodology = $b.Methodology; substance = $b.Substance; matched = [int]$b.Matched; withinThreshold = [int]$b.Within
+                mismatch = [int]$b.Mismatch; ecrOnly = [int]$b.EcrOnly; oracleOnly = [int]$b.OracleOnly; other = [int]$b.Other; zero = [int]$b.Zero
+                relP95 = $(if ($b.Rels.Count -gt 0) { Get-LandParityPercentile $b.Rels 0.95 } else { $null })
+                relMax = $(if ($b.Rels.Count -gt 0) { Get-LandParityPercentile $b.Rels 1.0 } else { $null })
+            }
+        })
+    $bySubstance = @($bySubstance | Sort-Object { $_.methodology }, { $_.substance })
+    $buckets = @(foreach ($mn in @($bySubstance | ForEach-Object { $_.methodology } | Sort-Object -Unique)) {
+            $rowsOfM = @($bySubstance | Where-Object { $_.methodology -eq $mn })
+            $relMaxM = $null
+            foreach ($x in $rowsOfM) { if ($null -ne $x.relMax -and ($null -eq $relMaxM -or $x.relMax -gt $relMaxM)) { $relMaxM = $x.relMax } }
+            [ordered]@{
+                methodology = $mn
+                matched = [int](($rowsOfM | ForEach-Object { $_.matched } | Measure-Object -Sum).Sum)
+                withinThreshold = [int](($rowsOfM | ForEach-Object { $_.withinThreshold } | Measure-Object -Sum).Sum)
+                mismatch = [int](($rowsOfM | ForEach-Object { $_.mismatch } | Measure-Object -Sum).Sum)
+                ecrOnly = [int](($rowsOfM | ForEach-Object { $_.ecrOnly } | Measure-Object -Sum).Sum)
+                oracleOnly = [int](($rowsOfM | ForEach-Object { $_.oracleOnly } | Measure-Object -Sum).Sum)
+                other = [int](($rowsOfM | ForEach-Object { $_.other } | Measure-Object -Sum).Sum)
+                zero = [int](($rowsOfM | ForEach-Object { $_.zero } | Measure-Object -Sum).Sum)
+                relMax = $relMaxM
+            }
+        })
     return [ordered]@{
+        relThreshold = $ac.RelThreshold
+        buckets = $buckets
+        bySubstance = $bySubstance
+        outputsWithoutSubstance = $noSub
+        foreignSubstanceIgnored = $foreign
         totalCells = [int](($classes | ForEach-Object { $_.cells } | Measure-Object -Sum).Sum)
         classes = $classes
         byMethodology = $byMethodology

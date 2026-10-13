@@ -1,4 +1,4 @@
-﻿# tools/land: завантаження вкладки «2. Contract» шаблону Land
+# tools/land: завантаження вкладки «2. Contract» шаблону Land
 
 Скрипти PowerShell (Windows PowerShell 5.1 і PowerShell 7) працюють через REST API ECR.
 Нічого не видаляють. Не запускати проти робочої бази замовника без рішення людини.
@@ -159,6 +159,33 @@ C05 / C06_01 / C07_*; для методології з кількома табл
 Сторожі: LandParityFullHarnessTests (Architecture): експортер лише читає, вихід не в репо, розбір параметрів,
 класи на синтетичній фікстурі без даних прода, у файлах виходу значень немає.
 
+### C12_02 / C12_03: зіставлення імен виходів (репетиція вікна 13.10, B4)
+
+Стара система зберігає результат ключем `(методологія, компонент = код)`, тобто `ECW_EC_tons_<код>`. ECR називає виходи
+інакше, тож без нормалізації C12_02/C12_03 давали лише `MISSING_OUTPUT`/`ECR_ONLY`/`LEGACY_STATUS_SKIP`. Тепер
+`Add-LandParityEcrResult` зводить імена (`ConvertTo-LandParityCanonicalOutput`):
+
+| Вихід ECR | Умова | Ключ старої системи |
+|---|---|---|
+| `ECW_EC_tons\|gsec_XXX` | у результата є речовина (SUBSTANCE_CODE запису довідника, інакше код запису) | `ECW_EC_tons\|gsec_<код речовини>` (C12_03) |
+| `ECW_EC_tons\|gsec_XXX` | речовини немає | лишається `XXX` -> `ECR_ONLY`; кількість - `outputsWithoutSubstance` у summary |
+| `ECW_EC_tons\|gsec_<код>_type1\|_type2` | методологія зі списку TypeFold (за замовчуванням `^ECW_C12_02$`, збігається з етапом ParityBranch) | `ECW_EC_tons\|gsec_<код>` |
+| обидві гілки одного ключа | TypeFold | клас `BRANCH_BOTH_PRESENT` (значення не порівнюється: старий код пише одну гілку) |
+| `ECW_EC_*_415_type1` | NullType1 (C12_02: код 415) | лишається повним іменем -> `ECR_ONLY` (type1 для 415 у старому коді немає; ParityBranch ставить йому `NULL`) |
+| `ECW_EC_*_<код>*` з речовиною проходу, відмінною від `<код>` | будь-яка | пропускається, лічильник `foreignSubstanceIgnored` |
+
+Таблиці за замовчуванням (коли немає прив'язки): `^ECW_C12_02$` -> `T10_03+T11_03`, `^ECW_C12_03$` -> `T10_01+T11_01`.
+Фаза/групування C12_*: колонка `Land_TypeFuel` знаходиться сама; для `Land_TypeStream` (T11_03) задайте
+`-GroupBy 'T11_03=Land_TypeStream'`. Інші методології з гілками - `-TypeFoldMethodology '<regex>[;<regex>]'`.
+
+Звіт (без значень): у `summary.json` - `buckets` (по методології) і `bySubstance` (методологія x речовина), у
+`<OutPrefix>.buckets.tsv` - ті самі рядки: `matched`, `withinThreshold` (збіг лише завдяки порогу `-RelThreshold`,
+за замовчуванням `1e-9`; NEAR/MISMATCH* з відносною похибкою ≤ порога), `mismatch`, `ecrOnly`, `oracleOnly`
+(MISSING_*, ROW_NOT_LOADED_*, LEGACY_STATUS_SKIP, METHODOLOGY_DIFF), `other` (AMBIGUOUS_KEY, LEGACY_DUP_CONFLICT,
+INCOMPLETE_*, BRANCH_BOTH_PRESENT), `zero` (комірки з нульовою старою), `relP95`, `relMax`. Сторож -
+LandParityC12CompareTests (Architecture; синтетика, мутаційні докази: гілка не знімається, речовина не підставляється,
+обидві гілки не виявляються).
+
 ## Довідник повітряних речовин (LP-07, форма B константи)
 
 `Import-LandAirSubstances.ps1` завантажує LAND_AIR_SUBSTANCE з **локальної копії** прода (`AF_PermitConstant`,
@@ -247,7 +274,7 @@ C05 / C06_01 / C07_*; для методології з кількома табл
 пишеться; список аргументів, прив'язка виходу і `415_type2` не змінюються; повтор - 0 змін; у лозі окремий рядок
 `type1 без числа`). Функції `Get-LandParityBranchNullType1Component`, `Convert-LandParityBranchNullFormula`.
 
-#### OptionalArguments: необов'язкові аргументи C11_10 / C11_11_03 / C11_16 (D-397)
+#### OptionalArguments: необов'язкові аргументи C11_03 / C11_10 / C11_11_03 / C11_16 (D-397)
 
 Клас O з D-8: старий код НЕ передає аргумент для частини таблиць методології (атрибута AF-таблиці немає, `requiredFields`
 його не містить) - ключа немає, формула лишається нерозв'язаною, результат не пишеться. Без колонки з таким кодом
@@ -256,10 +283,9 @@ C05 / C06_01 / C07_*; для методології з кількома табл
 лише чернетки, не публікує; запускати ОСТАННІМ - після `Methodologies`, `CompositionMass`, `ParityBranch`) ставить у
 `;`-списку аргументів формул методологій з моделі (`argumentBridges.optionalArguments`) маркер `?` на елементі:
 `@Land_Measure_OperatingTime?`. Маркер знімає вимогу колонки (0438) для всієї версії, а відсутня комірка в рантаймі стає
-null (як порожня). Перелік (9 пар методологія/таблиця): C11_10 - `Land_Measure_OperatingTime` (T9_02, T9_11, T9a_24, T9a_26),
+null (як порожня). Перелік (11 пар методологія/таблиця): C11_03 - `Land_Measure_RunningHours` (T9_05, T9_14; Q-D8-2, дефолт «паритет зі старим кодом»: rename OperatingTime -> RunningHours старий код робить лише на 9a_17/9_06/9_09/9_13, тож на T9_05/T9_14 аргумент = null без нової версії шаблону); C11_10 - `Land_Measure_OperatingTime` (T9_02, T9_11, T9a_24, T9a_26),
 `Land_Measure_SubstanceConsumption` (T9_07 - після K1, T9a_27, T9a_28); C11_11_03 - `Land_Measure_MaterialResidence` (T9_06); C11_16 -
-`Land_Measure_FlowRateSulfur` (T9a_23). Класи K (конфлікт джерел) і Q (C11_03 `RunningHours` на T9_05/T9_14, рішення
-замовника Q-D8-2) НЕ входять. Попередження публікації `publish.warning.optionalArgumentNoColumn` називає позначений
+`Land_Measure_FlowRateSulfur` (T9a_23). Клас K (конфлікт джерел) НЕ входить. Попередження публікації `publish.warning.optionalArgumentNoColumn` називає позначений
 аргумент, якого немає в жодній прив'язаній таблиці (описка). Чиста логіка - `LandOptionalArguments.Lib.ps1` (тест
 `LandOptionalArgumentsTests`); перелік веде `af_attr_bridges.py` (`OPTIONAL_ARGUMENTS`), повтор - 0 змін.
 ⚠ Маркер per-версія: на таблицях, де колонка є (напр. T9_07, T9a_27 для OperatingTime), відсутня комірка стає null
@@ -472,6 +498,34 @@ $pw = Read-Host 'Пароль ECR' -AsSecureString
 `<корінь репозиторію>\.sync-local\land-accounts.local.txt`.
 Без `-User` друкується лише план за файлами (мережі немає), перевірки стенда не виконуються.
 
+### Склад речовин для форми A
+
+Форма B: категорії констант `{ключ}_{код речовини}` - склад версії виводиться з суфіксів `_(\d{3,4})$`. Форма A: старий
+код шукає константу за категорією-ключем **без коду** (`ECW_C11_10`: 23 категорії `0220…0970`; `ECW_C11_11_05`: NAE), а
+коди речовин ітерує зі своїх словників; суфіксів немає - склад з категорій порожній, `CURRENT_SUBSTANCE()` у формулах
+дає `#REF`, результатів 0. `-Stage LandParity` тепер: (1) правило з `substancesFromApplicability: true` - завжди
+об'єднання кодів `land-substance-applicability.json` (C12_03); (2) інакше, є суфікси - вони, без змін; (3) інакше -
+об'єднання кодів словника застосовності цієї методології (`Resolve-LandMethodologySubstanceCodes`,
+`LandSubstanceApplicability.Lib.ps1`). У журналі етапу - рядок «форма A … зі словника застосовності». Константи per-речовина
+не потрібні: `ConstantResolver` пробує `{ключ}_{код}`, далі `{ключ}`. Методології без суфіксів і зі словником: C11_10
+(15 кодів), C11_11_05 (330, 333). C11_01 - змішана (газ/LPG без коду, решта `_{код}`): береться суфіксна гілка; перевірте
+склад на стенді (`calc.MethodologySubstance`) і, якщо коди газу відсутні, додайте правилу `substancesFromApplicability`.
+
+NAE з хвостом у дужках на T9_04 (`0647 (001-002)` … `0652 (001-002)`): діалект не має рядкових функцій, тому правило
+C11_10 перелічує обидва написання (з пробілом і без) у гілці групи `0647`, як C11_07/C11_11_02.
+
+Порядок для чернетки форми A (методологія вже імпортована, константи є):
+
+```powershell
+# 1. правило категорії + склад речовин зі словника + аргументи PARITY_1
+.\Build-LandTemplate.ps1 -Stage LandParity -OnlyMethodology ECW_C11_10 -BaseUrl … -ConfirmStand <адреса>/<база> -SqlConnection …
+# 2. перевірити склад: GET /api/v1/methodologies/{id}/versions/{vid}/substances  (очікується 15 записів для C11_10)
+# 3. PUT …/substances  (робить сам етап LandParity; вручну - лише коли довідника LAND_AIR_SUBSTANCE ще не було)
+# 4. publish версії (роль-рецензент, effectiveFrom - рішення людини)
+# 5. recalc документів: Invoke-LandRecalc.ps1 -DocMap … -PeriodKey …
+```
+
+Скорочено: «Stage LandParity → PUT substances → publish → recalc».
 ### ECW_C12_03 стає звичайним етапом Build
 
 Правило категорії ECW_C12_03 тепер у `af-land-category-rules.json`

@@ -110,6 +110,181 @@ public sealed class LandHse400CompositionScriptTests
         Assert.Contains("EMPTY=0", output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// C12_03 (паритет 415/416/2754): стара система читає `FG_Internal_C1_C5` у властивість `FG_Internal_C1_C5_mass`
+    /// (Q_Air_HSE400.Get_DataFromHSE400). Без псевдоніма довідник мав `C1_C5`/`C12_C19` (415/2754 без складу) і
+    /// `C6_C10_mass` = запасна C6_1_mass (416 хибний, коли справжній C6_C10 непорожній).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Колонки_C1_C5_C6_C10_C12_C19_без_mass_стають_показником_з_mass_до_запасної_гексану()
+    {
+        const string script = """
+            $ErrorActionPreference = 'Stop'
+            . $args[0]
+            $rows = @(
+              [pscustomobject]@{ Year = 2026; Month = 1; Columns = @{
+                  'FG_Internal_C1_C5' = 0.11; 'FG_Internal_C6_C10' = 0.22; 'FG_Internal_C12_C19' = 0.33; 'FG_Internal_C6_1_mass' = 0.44
+                  'FG_Export_C1_C5' = 0.55; 'FG_Export_C6_1_mass' = 0.66
+                  'LPG_HMB_C1_C5_mass' = 0.77
+                  'FG_Makat_C6_1_mass' = 0.88 } },
+              [pscustomobject]@{ Year = 2026; Month = 2; Columns = @{ 'FG_Internal_C6_C10' = $null; 'FG_Internal_C6_1_mass' = 0.5 } },
+              [pscustomobject]@{ Year = 2026; Month = 3; Columns = @{ 'FG_Internal_C1_C5' = 1.5; 'FG_Internal_C1_C5_mass' = 2.5 } }
+            )
+            $plan = ConvertTo-LandHse400CompositionPlan -Rows $rows
+            function V($m, $s, $i) { (@($plan.Items | Where-Object { $_.Month -eq $m -and $_.Stream -eq $s -and $_.Indicator -eq $i } | ForEach-Object { $_.Value }) -join ';') }
+            function A($m, $s, $i) { (@($plan.Items | Where-Object { $_.Month -eq $m -and $_.Stream -eq $s -and $_.Indicator -eq $i } | ForEach-Object { $_.Aliased }) -join ';') }
+            'C1C5=' + (V 1 'FG_Internal' 'C1_C5_mass')
+            'C6C10_OWN=' + (V 1 'FG_Internal' 'C6_C10_mass')
+            'C12C19=' + (V 1 'FG_Internal' 'C12_C19_mass')
+            'C1C5_RAW=' + @($plan.Items | Where-Object { $_.Indicator -eq 'C1_C5' -or $_.Indicator -eq 'C6_C10' -or $_.Indicator -eq 'C12_C19' }).Count
+            'EXPORT_C1C5=' + (V 1 'FG_Export' 'C1_C5_mass')
+            'EXPORT_C6_FALLBACK=' + (V 1 'FG_Export' 'C6_C10_mass')
+            'ALIASED=' + (A 1 'FG_Internal' 'C6_C10_mass')
+            'FALLBACK_NOT_ALIASED=' + (A 1 'FG_Export' 'C6_C10_mass')
+            'HMB_OWN_ALIASED=' + (A 1 'LPG_HMB' 'C1_C5_mass')
+            'FEB_FALLBACK=' + (V 2 'FG_Internal' 'C6_C10_mass')
+            'OWN_MASS_WINS=' + (V 3 'FG_Internal' 'C1_C5_mass')
+            'ALIASES=' + $plan.Aliases
+            'FALLBACKS=' + $plan.Fallbacks
+            """;
+
+        var (exit, output) = RunPowerShell(script, LandFile("LandHse400Composition.Lib.ps1"));
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("C1C5=0.11", output, StringComparison.Ordinal);
+        Assert.Contains("C6C10_OWN=0.22", output, StringComparison.Ordinal);      // справжній C6_C10, не C6_1_mass (0.44)
+        Assert.Contains("C12C19=0.33", output, StringComparison.Ordinal);
+        Assert.Contains("C1C5_RAW=0", output, StringComparison.Ordinal);          // показника без _mass у довіднику не лишається
+        Assert.Contains("EXPORT_C1C5=0.55", output, StringComparison.Ordinal);
+        Assert.Contains("EXPORT_C6_FALLBACK=0.66", output, StringComparison.Ordinal); // Export не має C6_C10: запасна, як у старій
+        Assert.Contains("ALIASED=True", output, StringComparison.Ordinal);
+        Assert.Contains("FALLBACK_NOT_ALIASED=False", output, StringComparison.Ordinal);
+        Assert.Contains("HMB_OWN_ALIASED=False", output, StringComparison.Ordinal);
+        Assert.Contains("FEB_FALLBACK=0.5", output, StringComparison.Ordinal);    // C6_C10 порожній -> C6_1_mass
+        Assert.Contains("OWN_MASS_WINS=2.5", output, StringComparison.Ordinal);   // власна `_mass` старша за псевдонім
+        Assert.Contains("ALIASES=4", output, StringComparison.Ordinal);           // C1_C5, C6_C10, C12_C19 (FGI) + FG_Export C1_C5
+        Assert.Contains("FALLBACKS=3", output, StringComparison.Ordinal);         // FG_Export і FG_Makat (січень), FG_Internal (лютий)
+    }
+
+    /// <summary>
+    /// Зміна наявного запису - batch upsert за <c>id</c> БЕЗ code/name (код наявного запису = ECR-REG-0409
+    /// entryCodeTaken, баг першого -RewriteAliased на :5094). Функції беруться з самого скрипта (AST) із підставним
+    /// Invoke-Ecr: перевіряється форма запиту, відмова (Rejected > 0 -> код виходу скрипта 1) і ідемпотентність.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Перезапис_наявного_запису_йде_за_id_без_code_відмова_лічиться_повтор_без_змін()
+    {
+        const string script = """
+            $ErrorActionPreference = 'Stop'
+            # EcrApi.ps1 вмикає StrictMode - так було на :5094: доступ до відсутньої властивості рядка кидає виняток.
+            Set-StrictMode -Version Latest
+            $text = Get-Content -Raw -LiteralPath $args[0]
+            $ast = [System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$null)
+            $fns = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and ($n.Name -eq 'Add-HseEntries' -or $n.Name -eq 'New-HseCompositionValues' -or $n.Name -eq 'Get-HseProp') }, $true)
+            foreach ($f in $fns) { Invoke-Expression $f.Extent.Text }
+            $BatchSize = 200
+            $script:calls = New-Object System.Collections.Generic.List[object]
+            $script:mode = 'ok'
+            function Assert-EcrOk($r, $what) { }
+            function Invoke-Ecr {
+                param($Method, $Path, $Body, $Headers)
+                $script:calls.Add([pscustomobject]@{ Path = $Path; Items = @($Body.items) })
+                $n = @($Body.items).Count
+                if ($script:mode -eq 'conflict') {
+                    return [pscustomobject]@{ Json = [pscustomobject]@{ applied = $false; added = 0; updated = 0; unchanged = 0
+                            rows = @([pscustomobject]@{ status = 'error'; errors = @([pscustomobject]@{ errorCode = 'ECR-REG-0409' }) }) } }
+                }
+                $up = if ($script:mode -eq 'repeat') { 0 } else { 1 }
+                return [pscustomobject]@{ Json = [pscustomobject]@{ applied = $true; added = 0; updated = $up; unchanged = $n - $up; rows = @() } }
+            }
+            $item = [pscustomobject]@{ Year = 2026; Month = 1; Stream = 'FG_Internal'; Indicator = 'C6_C10_mass'; Value = '0.22' }
+            $vals = New-HseCompositionValues $item
+            $rows = @(
+                [pscustomobject]@{ ClientRowId = 'A'; Id = 4711; Values = $vals },
+                [pscustomobject]@{ ClientRowId = 'B'; Id = 4712; Values = $vals })
+
+            $r = Add-HseEntries 'LAND_HSE400_COMPOSITION' $rows
+            $first = $script:calls[0]
+            'PATH_DRY_FALSE=' + $first.Path.EndsWith('dryRun=false')
+            'HAS_ID=' + $first.Items[0].ContainsKey('id')
+            'ID=' + $first.Items[0]['id']
+            'HAS_CODE=' + $first.Items[0].ContainsKey('code')
+            'HAS_NAME=' + $first.Items[0].ContainsKey('name')
+            'VALUE=' + $first.Items[0]['values']['VALUE']
+            'UPDATED=' + $r.Updated
+            'REJECTED=' + $r.Rejected
+
+            $script:mode = 'repeat'
+            $r2 = Add-HseEntries 'LAND_HSE400_COMPOSITION' $rows
+            'REPEAT_UPDATED=' + $r2.Updated
+            'REPEAT_UNCHANGED=' + $r2.Unchanged
+            'REPEAT_REJECTED=' + $r2.Rejected
+
+            $script:mode = 'conflict'
+            $r3 = Add-HseEntries 'LAND_HSE400_COMPOSITION' $rows 3>$null
+            'CONFLICT_REJECTED=' + $r3.Rejected
+
+            $script:mode = 'ok'
+            $newRows = @([pscustomobject]@{ ClientRowId = 'N'; Code = 'H202601_X'; Display = 'H202601_X'; Values = $vals })
+            $null = Add-HseEntries 'LAND_HSE400_COMPOSITION' $newRows
+            $last = $script:calls[$script:calls.Count - 1]
+            'NEW_HAS_CODE=' + $last.Items[0].ContainsKey('code')
+            'NEW_HAS_ID=' + $last.Items[0].ContainsKey('id')
+
+            # Змішаний вхід під StrictMode: нові (без Id) і наявні (без Code/Display) в одному виклику.
+            $mixed = @($newRows[0], $rows[0])
+            $null = Add-HseEntries 'LAND_HSE400_COMPOSITION' $mixed
+            $mi = $script:calls[$script:calls.Count - 1].Items
+            'MIXED_COUNT=' + $mi.Count
+            'MIXED_NEW_CODE=' + $mi[0].ContainsKey('code')
+            'MIXED_EXISTING_ID=' + $mi[1]['id']
+            'MIXED_EXISTING_HAS_CODE=' + $mi[1].ContainsKey('code')
+
+            $null = Add-HseEntries 'LAND_HSE400_COMPOSITION' $rows -ServerDryRun
+            'DRY_PATH=' + $script:calls[$script:calls.Count - 1].Path.EndsWith('dryRun=true')
+            """;
+
+        var (exit, output) = RunPowerShell(script, LandFile("Import-LandHse400Composition.ps1"));
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("PATH_DRY_FALSE=True", output, StringComparison.Ordinal);
+        Assert.Contains("HAS_ID=True", output, StringComparison.Ordinal);
+        Assert.Contains("ID=4711", output, StringComparison.Ordinal);
+        Assert.Contains("HAS_CODE=False", output, StringComparison.Ordinal);   // код наявного запису = 409 entryCodeTaken
+        Assert.Contains("HAS_NAME=False", output, StringComparison.Ordinal);   // назву/вікно наявному не задають
+        Assert.Contains("VALUE=0.22", output, StringComparison.Ordinal);
+        Assert.Contains("UPDATED=1", output, StringComparison.Ordinal);
+        Assert.Contains("REJECTED=0", output, StringComparison.Ordinal);
+        Assert.Contains("REPEAT_UPDATED=0", output, StringComparison.Ordinal);  // повтор - 0 змін
+        Assert.Contains("REPEAT_UNCHANGED=2", output, StringComparison.Ordinal);
+        Assert.Contains("REPEAT_REJECTED=0", output, StringComparison.Ordinal);
+        Assert.Contains("CONFLICT_REJECTED=2", output, StringComparison.Ordinal); // відмова пакета -> exit 1 скрипта
+        Assert.Contains("NEW_HAS_CODE=True", output, StringComparison.Ordinal);
+        Assert.Contains("NEW_HAS_ID=False", output, StringComparison.Ordinal);
+        Assert.Contains("MIXED_COUNT=2", output, StringComparison.Ordinal);
+        Assert.Contains("MIXED_NEW_CODE=True", output, StringComparison.Ordinal);
+        Assert.Contains("MIXED_EXISTING_ID=4711", output, StringComparison.Ordinal);
+        Assert.Contains("MIXED_EXISTING_HAS_CODE=False", output, StringComparison.Ordinal);
+        Assert.Contains("DRY_PATH=True", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Скрипт_має_RewriteAliased_який_перезаписує_лише_псевдоніми_і_лише_за_підтвердженням_стенда()
+    {
+        var text = File.ReadAllText(LandFile("Import-LandHse400Composition.ps1"));
+
+        Assert.Contains("[switch]$RewriteAliased", text, StringComparison.Ordinal);
+        Assert.Contains("$_.Aliased -and $haveComp.ContainsKey(", text, StringComparison.Ordinal);
+        Assert.Contains("if ($failed) { exit 1 }", text, StringComparison.Ordinal);
+        // Мутація (як і решта) - після Set-EcrStandConfirmation; сам перезапис - лише за прапорцем.
+        var confirm = text.IndexOf("Set-EcrStandConfirmation", StringComparison.Ordinal);
+        var rewrite = text.IndexOf("$rewriteComp = if ($RewriteAliased)", StringComparison.Ordinal);
+        Assert.True(confirm >= 0 && confirm < rewrite, "Підтвердження стенда - до планування перезапису.");
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Потік_за_текстом_Land_поля_за_правилом_старої_системи_без_регістру_в_обидва_боки()

@@ -20,8 +20,8 @@ namespace Ecr.Architecture.Tests;
 /// </summary>
 /// <remarks>
 /// Мутаційний доказ (лише цей клас): у <c>Convert-LandOptionalArgumentsCsv</c> прибрати додавання <c>?</c> - червоніють
-/// тести бібліотеки й етапу; у <c>OPTIONAL_ARGUMENTS</c> додати пару C11_03/RunningHours - червоніє
-/// <see cref="Перелік_моделі_лише_клас_O_без_Q_і_K_і_без_NULL_мостів"/>.
+/// тести бібліотеки й етапу; з <c>OPTIONAL_ARGUMENTS</c> прибрати пару C11_03/RunningHours (і перегенерувати модель) - червоніє
+/// <see cref="Перелік_моделі_клас_O_і_C11_03_за_паритетом_без_K_і_без_NULL_мостів"/>.
 /// </remarks>
 public sealed class LandOptionalArgumentsTests
 {
@@ -72,7 +72,14 @@ public sealed class LandOptionalArgumentsTests
                 $st = if ($mode -eq 'published') { 'Published' } else { 'Draft' }
                 return @{ Json = @(@{ id = 70; status = $st }) }
             }
-            if ($Path -like '*/methodologies/9/versions') { throw 'C11_03 не з переліку: не мав читатися' }
+            if ($Path -like '*/methodologies/9/versions') {
+                $st9 = if ($mode -eq 'published') { 'Published' } else { 'Draft' }
+                return @{ Json = @(@{ id = 90; status = $st9 }) }
+            }
+            if ($Path -like '*/versions/90/formulas') {
+                $m9 = if ($mode -eq 'marked') { '@Land_Measure_RunningHours?;@Density20;' } else { '@Land_Measure_RunningHours;@Density20;' }
+                return @{ Json = @((Formula 'ECW_EC_tons_303' '@Land_Measure_RunningHours * @Density20' $m9)) }
+            }
             if ($Path -like '*/versions/70/formulas') {
                 $marked = if ($mode -eq 'marked') { '@Land_Measure_OperatingTime?;@Land_Measure_SubstanceConsumption?;@Density20;' } else { '@Land_Measure_OperatingTime;@Land_Measure_SubstanceConsumption;@Density20;' }
                 return @{ Json = @(
@@ -84,7 +91,7 @@ public sealed class LandOptionalArgumentsTests
         }
         function Invoke-Ecr {
             param([string]$Method, [string]$Path, $Body = $null)
-            if ($Method -eq 'PUT' -and $Path -like '*/versions/70/formulas/*') {
+            if ($Method -eq 'PUT' -and $Path -match '/versions/(70|90)/formulas/') {
                 Write-Host ('PUT=' + $Path + '|' + ($Body | ConvertTo-Json -Compress))
                 return @{ Status = 200; Text = ''; Json = $null }
             }
@@ -219,7 +226,7 @@ public sealed class LandOptionalArgumentsTests
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void Перелік_моделі_лише_клас_O_без_Q_і_K_і_без_NULL_мостів()
+    public void Перелік_моделі_клас_O_і_C11_03_за_паритетом_без_K_і_без_NULL_мостів()
     {
         using var model = JsonDocument.Parse(File.ReadAllText(Path.Combine(Dir, "land-template.model.json")));
         var bridges = model.RootElement.GetProperty("argumentBridges");
@@ -237,10 +244,14 @@ public sealed class LandOptionalArgumentsTests
             }
         }
 
-        // Рівно клас O з LAND-D8-ARGS (#9-#16) + C11_10/T9_07 (після K1 суфікс C11_11_02 лишив пару [AF-немає]);
-        // #17-#18 (C11_03 RunningHours, Q-D8-2) і решта класу K - не тут.
+        // Рівно клас O з LAND-D8-ARGS (#9-#16) + C11_10/T9_07 (після K1 суфікс C11_11_02 лишив пару [AF-немає])
+        // + #17-#18 (C11_03 RunningHours на T9_05/T9_14): раніше їх тут не було (клас Q, питання Q-D8-2), тепер входять
+        // за дефолтом Q-D8-2 «паритет зі старим кодом» - старий код передає RunningHours лише на 9a_17/9_06/9_09/9_13,
+        // на T9_05/T9_14 ключа немає, тож null (D-397, нової версії шаблону не треба). Клас K - як і раніше не тут.
         Assert.Equal(
             [
+                "ECW_C11_03|T9_05|Land_Measure_RunningHours",
+                "ECW_C11_03|T9_14|Land_Measure_RunningHours",
                 "ECW_C11_10|T9_02|Land_Measure_OperatingTime",
                 "ECW_C11_10|T9_07|Land_Measure_SubstanceConsumption",
                 "ECW_C11_10|T9_11|Land_Measure_OperatingTime",
@@ -252,7 +263,7 @@ public sealed class LandOptionalArgumentsTests
                 "ECW_C11_16|T9a_23|Land_Measure_FlowRateSulfur",
             ],
             pairs.ToArray());
-        Assert.False(optional.TryGetProperty("ECW_C11_03", out _));
+        Assert.False(optional.TryGetProperty("ECW_C11_01", out _));
 
         var unresolved = bridges.GetProperty("unresolved");
         var tables = model.RootElement.GetProperty("sheets").EnumerateArray()
@@ -288,16 +299,18 @@ public sealed class LandOptionalArgumentsTests
     {
         var (puts, output) = Stage("fresh");
 
-        // Лише формула, що оголошує аргументи з переліку; ECW_Category (без списку) і ECW_Other не чіпаються.
-        var put = Assert.Single(puts);
-        Assert.EndsWith("/formulas/ECW_EC_tons_301", put.Path, StringComparison.Ordinal);
+        // Лише формули, що оголошують аргументи з переліку; ECW_Category (без списку) і ECW_Other не чіпаються.
+        Assert.Equal(2, puts.Count);
+        var put = Assert.Single(puts, p => p.Path.EndsWith("/formulas/ECW_EC_tons_301", StringComparison.Ordinal));
         Assert.Equal(
             "@Land_Measure_OperatingTime?;@Land_Measure_SubstanceConsumption?;@Density20;",
             put.Body.GetProperty("argumentsCsv").GetString());
         Assert.Equal(
             "@Land_Measure_OperatingTime * @Land_Measure_SubstanceConsumption * @Density20",
             put.Body.GetProperty("expression").GetString());
-        Assert.DoesNotContain("ECW_C11_03", output, StringComparison.Ordinal);
+        var put9 = Assert.Single(puts, p => p.Path.EndsWith("/formulas/ECW_EC_tons_303", StringComparison.Ordinal));
+        Assert.Contains("/methodologies/9/versions/90/", put9.Path, StringComparison.Ordinal);
+        Assert.Equal("@Land_Measure_RunningHours?;@Density20;", put9.Body.GetProperty("argumentsCsv").GetString());
 
         // Повторний запуск на вже позначеній чернетці - 0 змін.
         Assert.Empty(Stage("marked").Puts);
