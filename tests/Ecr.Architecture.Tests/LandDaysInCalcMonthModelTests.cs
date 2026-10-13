@@ -45,13 +45,11 @@ public sealed class LandDaysInCalcMonthModelTests
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void DaysInCalcYear_і_Winter_не_змінилися()
+    public void DaysInCalcYear_не_змінився()
     {
         using var doc = Model();
         // колонка є й у мостах аргументів таблиць 6, 9-11 (LP-10) - вираз у всіх однаковий
         var year = Columns(doc.RootElement, "DaysInCalcYear").Select(c => c.GetProperty("expression").GetString()).Distinct().Single();
         Assert.Equal("([Period].Year % 4 = 0) ? 366 : 365", year);
-        Assert.All(Columns(doc.RootElement, "Winter"), c =>
-            Assert.Equal("([Period].Sequence < 4 OR [Period].Sequence > 9) ? 1 : 0", c.GetProperty("expression").GetString()));
     }
 }

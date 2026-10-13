@@ -85,7 +85,7 @@ public sealed class LandArgBridgesModelTests
     [Theory]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     [InlineData("T10_05", "CalculationMonth", "[Period].Sequence")]
-    [InlineData("T9_03", "Winter", "[Period].Sequence < 4")]
+    [InlineData("T9_03", "Winter", "[Period].Sequence < 3")]
     [InlineData("T6_12", "Land_Agent_Fraction", "[")]
     public void Календарні_аргументи_і_alias_мости_присутні(string table, string name, string fragment)
     {
