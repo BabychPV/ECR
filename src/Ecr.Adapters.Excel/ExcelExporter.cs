@@ -849,6 +849,12 @@ public sealed class ExcelExporter(
                 var rowId = rowIds[rowKey];
                 values.TryGetValue((rowId, column.Id), out var value);
 
+                // LP-30: власне значення колонки-довідника для текстових правил — КОД запису, а не Id (як у сітці).
+                if (column.LookupRegistryDefId is { } ownRegistry && lookups.TryGetValue(ownRegistry, out var ownEntries))
+                {
+                    value = Ecr.Application.Templates.ConditionalFormatEvaluator.WithEntryCode(value, ownEntries);
+                }
+
                 var context = new Ecr.Application.Templates.RuleCellContext(
                     tableCode,
                     rowKey,
@@ -863,12 +869,9 @@ public sealed class ExcelExporter(
                         values.TryGetValue((rowId, source.Id), out found);
 
                         // Довідник — КОД запису (як у книзі), а не Id.
-                        if (found is long entryId
-                            && source.LookupRegistryDefId is { } registryId
-                            && lookups.TryGetValue(registryId, out var entries)
-                            && entries.TryGetValue(entryId, out var entryCode))
+                        if (source.LookupRegistryDefId is { } registryId && lookups.TryGetValue(registryId, out var entries))
                         {
-                            found = entryCode;
+                            found = Ecr.Application.Templates.ConditionalFormatEvaluator.WithEntryCode(found, entries);
                         }
 
                         return true;

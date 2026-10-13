@@ -105,12 +105,13 @@ public sealed class LandArgBridgesModelTests
         var bridges = model.RootElement.GetProperty("argumentBridges");
         var unresolved = bridges.GetProperty("unresolved");
 
-        // склад газу (HSE400) і DaysInCalcMonth (правило 7.7 доведено лише для 3-5) - без мостів
+        // склад газу по речовині (CompositionMass) - без мосту: потрібне рішення про адресацію речовини
         Assert.True(unresolved.GetProperty("T9_04").TryGetProperty("CompositionMass", out _));
-        Assert.True(unresolved.GetProperty("T9_03").TryGetProperty("DaysInCalcMonth", out var why));
-        Assert.Contains("7.7", why.GetString());
-        Assert.DoesNotContain("DaysInCalcMonth", Columns(tables["T9_03"]).Keys);
         Assert.DoesNotContain("CompositionMass", Columns(tables["T9_04"]).Keys);
+
+        // DaysInCalcMonth на 9_03: C11_11_01 бере календарні дні (DateTime.DaysInMonth), а не відпрацьовані (7.7 лише 3-5)
+        Assert.Equal("[Period].Days", Columns(tables["T9_03"])["DaysInCalcMonth"].GetProperty("expression").GetString());
+        Assert.False(unresolved.TryGetProperty("T9_03", out var t903) && t903.TryGetProperty("DaysInCalcMonth", out _));
     }
 
     [Fact]

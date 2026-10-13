@@ -16,7 +16,9 @@ param(
     [securestring]$Password,
     [string]$ModelPath,
     [string]$ExcelModelPath,
-    [string]$TemplateCode = 'LAND_UI'
+    [string]$TemplateCode = 'LAND_UI',
+    [string[]]$KnownStaleTables = @(),
+    [int]$PrecisionChecksPerTable = 0
 )
 $ErrorActionPreference = 'Stop'
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
@@ -24,6 +26,7 @@ $repo = (Resolve-Path (Join-Path $here '..\..')).Path
 $modelFile = $ModelPath
 if (-not $modelFile) { $modelFile = Join-Path $repo 'docs\delivery\reference-data\land-template\land-template.model.json' }
 . (Join-Path $here 'EcrApi.ps1')
+. (Join-Path $here 'LandTemplateDiff.Lib.ps1')
 Set-StrictMode -Off
 Connect-Ecr -BaseUrl $BaseUrl -User $User -Password $Password
 
@@ -35,7 +38,7 @@ $ver = $vers | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Desc
 $st = (Invoke-Ecr -Method GET -Path "/api/v1/template-versions/$($ver.id)/structure").Json
 $hf = @((Invoke-Ecr -Method GET -Path "/api/v1/template-versions/$($ver.id)/header-fields").Json)
 
-$bad = @(); $monthTotal = 0; $calcChecked = 0
+$bad = @(); $monthTotal = 0; $calcChecked = 0; $precChecked = 0; $precBad = 0
 $pres = @{ checked = 0; width = 0; format = 0 }
 $rows = @()
 $sheetByCode = @{}
@@ -70,6 +73,21 @@ foreach ($sh in @($mdl.sheets)) {
             if ($mcol.widthPx -and [int]$ecol.widthPx -ne [int]$mcol.widthPx) { $pres.width++ }
             if ($mcol.displayFormat -and [string]$ecol.displayFormat -ne [string]$mcol.displayFormat) { $pres.format++ }
         }
+        # LP-29: Precision/Scale колонки мають збігатися з моделлю. Структура версії їх не носить, тому - GET колонки
+        # (ліміт на таблицю: -PrecisionChecksPerTable, 0 = усі колонки з precision у моделі).
+        $precCols = @($tb.columns | Where-Object { $_.precision })
+        if ($PrecisionChecksPerTable -gt 0) { $precCols = @($precCols | Select-Object -First $PrecisionChecksPerTable) }
+        foreach ($mcol in $precCols) {
+            if (@($etb.columns | Where-Object { $_.code -eq $mcol.code }).Count -eq 0) { continue }
+            $pc = (Invoke-Ecr -Method GET -Path "/api/v1/template-versions/$($ver.id)/tables/$($etb.id)/columns/$([string]$mcol.code)").Json
+            $precChecked++
+            $wantScale = if ($mcol.scale) { [int]$mcol.scale } else { $null }
+            $gotScale = if ($null -ne $pc.scale) { [int]$pc.scale } else { $null }
+            if ([int]$pc.precision -ne [int]$mcol.precision -or $gotScale -ne $wantScale) {
+                $precBad++
+                if ($precBad -le 20) { $bad += "$($sh.code)/$($tb.code): колонка $($mcol.code) Precision/Scale $($pc.precision)/$($pc.scale) vs модель $($mcol.precision)/$($mcol.scale)" }
+            }
+        }
         $xr += @($tb.rows).Count; $er += @($etb.rows).Count
         if (@($tb.rows).Count -ne @($etb.rows).Count) { $bad += "$($sh.code)/$($tb.code): рядків $(@($tb.rows).Count) vs $(@($etb.rows).Count)" }
         if ([string]$etb.layoutKind -ne [string]$tb.layout) { $bad += "$($sh.code)/$($tb.code): layout $($etb.layoutKind) vs $($tb.layout)" }
@@ -85,8 +103,19 @@ foreach ($sh in @($mdl.sheets)) {
     $rows += [pscustomobject]@{ Sheet = $sh.excelName; XlTables = $xt; EcrTables = $et; ModelCols = $xc; EcrCols = $ec; ModelRows = $xr; EcrRows = $er }
     $tot.xt += $xt; $tot.et += $et; $tot.xc += $xc; $tot.ec += $ec; $tot.xr += $xr; $tot.er += $er
 }
+# D-YE-1: вираз формули колонки (Formula/Calculated) і readOnly зі структури версії проти моделі. Значень не друкуємо:
+# лише таблиця: колонки. Раніше розбіжний вираз клону (T5_08/T5_09 Winter) Verify не ловив.
+$fm = @(Get-LandFormulaMismatches $st $mdl)
+foreach ($m in $fm) { $bad += $m }
+Write-Host ("Формули колонок і readOnly перевірено: розбіжних таблиць {0}" -f $fm.Count)
+# LP-28: таблиця є у версії, а в моделі її немає (застарілі T9a_03/06/07 клону) - розбіжність, окрім явного -KnownStaleTables.
+$stale = @(Get-LandStaleTables $st $mdl $KnownStaleTables)
+if ($stale.Count) { $bad += ("зайві таблиці (є у версії, немає в моделі): {0}: {1}" -f $stale.Count, (($stale | ForEach-Object { $_.Key }) -join ', ')) }
+Write-Host ("Зайвих таблиць (є у версії, немає в моделі): {0}" -f $stale.Count)
 $rows | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
 Write-Host "Колонок результатів (Calculated) перевірено: $calcChecked"
+if ($precBad -gt 0) { $bad += "Precision/Scale: розбіжностей з моделлю $precBad з $precChecked перевірених колонок" }
+Write-Host "Колонок перевірено за Precision/Scale: $precChecked (розбіжностей $precBad)"
 Write-Host ("Разом: таблиць {0}/{1}, колонок {2}/{3}, рядків Fixed {4}/{5}; місячних колонок у моделі {9}; версія {6} ({7}); полів шапки {8}" -f $tot.xt, $tot.et, $tot.xc, $tot.ec, $tot.xr, $tot.er, $ver.version, $ver.status, $hf.Count, $monthTotal)
 
 # довідники

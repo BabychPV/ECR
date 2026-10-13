@@ -26,8 +26,14 @@
                     правила категорії звіряє @-аргументи з колонками ВСІХ прив'язок: після Methodologies усі
                     PUT category-rule дають 422 ECR-CALC-0422 categoryRuleUnknownArgument (D1, RC E).
                     Схема: імпорт C11/C12 -> -Stage LandParity -> -Stage Methodologies (повторно, створює прив'язки).
+      CompositionMass (лише явно, в All не входить) у формулах ЧЕРНЕТОК C11_01/02/10, C12_01/03 токен @CompositionMass
+                    замінюється фрагментом складу по речовині (довідники LAND_HSE400_COMPOSITION/_STREAM/_SUBSTANCE,
+                    CURRENT_SUBSTANCE()); потребує довідника LAND_HSE400_SUBSTANCE (Registries або
+                    Import-LandHse400Substance.ps1) і версії вище за Legacy
 
-    ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє. Прод-БД старої системи тут
+    ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє, окрім явного
+    -PruneStaleTables (м'яке видалення таблиць чернетки, яких немає в моделі; без прапора - лише попередження).
+    Формули колонок наявної чернетки-клону порівнюються з моделлю й оновлюються (D-YE-1). Прод-БД старої системи тут
     НЕ читається (набір із прода — окремий локальний скрипт, не в репозиторії).
 
 .PARAMETER BaseUrl            Адреса API (за замовчуванням http://localhost:5094).
@@ -37,6 +43,9 @@
 .PARAMETER BootstrapPassword  Пароль bootstrap, якщо його ще немає в -AccountsFile (SecureString).
 .PARAMETER GoldenDir          Каталог golden-*.csv (локальні, поза репозиторієм); без нього тести беруться зі спеки (P1..P5).
 .PARAMETER Stage              Етапи.
+.PARAMETER PruneStaleTables   LP-28: м'яко видалити з чернетки таблиці, яких немає в моделі (DELETE sheets/{аркуш}/tables/{код};
+                              сервер відмовляє, коли у версії є документи). Без прапора - лише попередження зі списком кодів.
+.PARAMETER KnownStaleTables   Коди "АРКУШ/ТАБЛИЦЯ" (або лише код таблиці), які не вважати застарілими.
 .PARAMETER DryRun             Лише читання й підрахунок.
 #>
 [CmdletBinding()]
@@ -47,7 +56,7 @@ param(
     [string]$AccountsFile = 'F:\ecr-backup\land-ui\accounts.local.txt',
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'Data', 'LandParity', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'Data', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection = 'Server=localhost;Database=EcrLandUi;Integrated Security=true;TrustServerCertificate=true',
@@ -56,6 +65,8 @@ param(
     [int]$Year = 2026,
     [string]$ConfirmStand,
     [switch]$FillData,
+    [switch]$PruneStaleTables,
+    [string[]]$KnownStaleTables = @(),
     [switch]$DryRun
 )
 
@@ -68,6 +79,7 @@ $afFile = $AfPackage
 if (-not $afFile) { $afFile = Join-Path $repo 'docs\delivery\reference-data\land-template\af-land-package.json' }
 . (Join-Path $here 'EcrApi.ps1')
 . (Join-Path $here 'Land-CfRules.ps1')
+. (Join-Path $here 'LandTemplateDiff.Lib.ps1')
 Set-StrictMode -Off
 
 # Безпека стенда: лише локальні API і SQL (база з іменем EcrLand*); мутації лише з явним
@@ -416,10 +428,39 @@ function Fill-StructureSql([int]$vid) {
         # --- колонки
         $have = @{}
         $haveInfo = @{}
-        foreach ($r in (Sql-Query $cn 'SELECT c.Id, c.TableDefId, c.Code, c.DataType FROM cfg.ColumnDef c JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v' @{ v = $vid }).Rows) {
+        foreach ($r in (Sql-Query $cn 'SELECT c.Id, c.TableDefId, c.Code, c.DataType, c.Precision, c.Scale FROM cfg.ColumnDef c JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v' @{ v = $vid }).Rows) {
             $have["$($r.TableDefId)/$($r.Code)"] = $true
-            $haveInfo["$($r.TableDefId)/$($r.Code)"] = @{ id = [int]$r.Id; type = [int]$r.DataType }
+            $pr = $null; if ($r.Precision -isnot [DBNull]) { $pr = [int]$r.Precision }
+            $sc = $null; if ($r.Scale -isnot [DBNull]) { $sc = [int]$r.Scale }
+            $haveInfo["$($r.TableDefId)/$($r.Code)"] = @{ id = [int]$r.Id; type = [int]$r.DataType; precision = $pr; scale = $sc }
         }
+        # LP-29: Precision/Scale НАЯВНИХ колонок чернетки-клону підтягуються до значень моделі, але лише РОЗШИРЕННЯМ
+        # (Precision не менша, Scale не менша, цілих розрядів Precision-Scale не менше): значення в decimal(34,16) від цього не
+        # залежать, а migrate-version саме так і класифікує Widened (без відмови guardedWithData). Звуження й «було без межі»
+        # не чіпаються. Правило те саме, що VersionMigrationPlanner.IsWidening.
+        $widen = 0
+        foreach ($sh in @($Mdl.sheets)) {
+            foreach ($tb in @($sh.tables)) {
+                $tidW = $tableIds["$($sh.code)/$($tb.code)"]
+                foreach ($c in @($tb.columns | Where-Object { $_.precision })) {
+                    $hi = $haveInfo["$tidW/$($c.code)"]
+                    if ($null -eq $hi) { continue }
+                    $p1 = [int]$c.precision; $s1 = $null; if ($c.scale) { $s1 = [int]$c.scale }
+                    if ($hi.precision -eq $p1 -and $hi.scale -eq $s1) { continue }
+                    if ($null -eq $hi.precision) { continue }                              # було без межі - стало б звуження
+                    if ($p1 -lt $hi.precision) { continue }
+                    if ($null -ne $s1) {
+                        if ($null -eq $hi.scale -or $s1 -lt $hi.scale) { continue }
+                        if (($p1 - $s1) -lt ($hi.precision - $hi.scale)) { continue }     # цілих розрядів меншає
+                    }
+                    elseif ($null -ne $hi.scale) { continue }                              # Scale була, у моделі її немає
+                    $newScale = [DBNull]::Value; if ($null -ne $s1) { $newScale = [byte]$s1 }
+                    $null = Sql-Exec $cn 'UPDATE cfg.ColumnDef SET Precision=@p, Scale=@s WHERE Id=@i' @{ p = [byte]$p1; s = $newScale; i = $hi.id }
+                    $widen++
+                }
+            }
+        }
+        if ($widen -gt 0) { Log "  колонок розширено за Precision/Scale (чернетка-клон): $widen" }
         # Колонка чернетки-клону, яку модель тепер веде як Formula/Calculated (7.0: місячні колонки з формулами комірок), а в
         # клоні вона ще Decimal: тип змінюється лише в чернетці (опубліковану версію захищає тригер), інакше PUT formulas/cell
         # дає ECR-TMPL-4227. Лише перехід у обчислюваний тип; решта розбіжностей типів не чіпається.
@@ -568,9 +609,12 @@ function Fill-StructureSql([int]$vid) {
             }
         }
         # --- формули колонок
+        # D-YE-1: наявні формули читаються з виразом і діалектом - вираз колонки клону порівнюється з моделлю й оновлюється
+        # (раніше відсутні лише вставлялися, і старий вираз клону лишався: T5_08/T5_09 Winter `< 4 OR > 9`).
         $haveF = @{}
-        foreach ($r in (Sql-Query $cn 'SELECT f.TableDefId, f.ColumnDefId FROM cfg.FormulaDef f JOIN cfg.TableDef t ON t.Id=f.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v AND f.IsDeleted=0' @{ v = $vid }).Rows) {
-            $haveF["$($r.TableDefId)/$($r.ColumnDefId)"] = $true
+        foreach ($r in (Sql-Query $cn 'SELECT f.Id, f.TableDefId, f.ColumnDefId, f.Dialect, f.Expression FROM cfg.FormulaDef f JOIN cfg.TableDef t ON t.Id=f.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v AND f.IsDeleted=0 AND f.Scope=0 AND f.ColumnDefId IS NOT NULL ORDER BY f.Id' @{ v = $vid }).Rows) {
+            $fk = "$($r.TableDefId)/$($r.ColumnDefId)"
+            if (-not $haveF.ContainsKey($fk)) { $haveF[$fk] = @{ Id = [int]$r.Id; Dialect = [int]$r.Dialect; Expression = [string]$r.Expression } }
         }
         $df = New-Object System.Data.DataTable
         foreach ($n in 'TableDefId:int', 'Scope:byte', 'ColumnDefId:int', 'Dialect:byte', 'Expression:string', 'EvaluationOrder:int', 'IsCrossSheet:bool', 'IsSnapshot:bool', 'IsDeleted:bool') {
@@ -579,21 +623,61 @@ function Fill-StructureSql([int]$vid) {
             [void]$df.Columns.Add($p[0], $t)
         }
         $nf = 0
+        $wantF = @(); $fCodes = @{}
         foreach ($sh in @($Mdl.sheets)) {
             foreach ($tb in @($sh.tables)) {
                 $tid = $tableIds["$($sh.code)/$($tb.code)"]
                 foreach ($c in @($tb.columns | Where-Object { $_.expression })) {
                     $cid = $colId["$tid/$($c.code)"]
-                    if ($haveF.ContainsKey("$tid/$cid")) { continue }
-                    $row = $df.NewRow()
-                    $row['TableDefId'] = $tid; $row['Scope'] = 0; $row['ColumnDefId'] = $cid; $row['Dialect'] = 0; $row['Expression'] = [string]$c.expression
-                    $row['EvaluationOrder'] = 0; $row['IsCrossSheet'] = [bool]([string]$c.expression -match '\]\.\[.*\]\.\[');  $row['IsSnapshot'] = $false; $row['IsDeleted'] = $false
-                    $df.Rows.Add($row); $nf++
+                    $fk = "$tid/$cid"
+                    $wantF += [pscustomobject]@{ Key = $fk; Expression = [string]$c.expression; Table = [int]$tid; Column = [int]$cid }
+                    $fCodes[$fk] = "$($sh.code)/$($tb.code).$($c.code)"
                 }
             }
         }
+        $fPlan = Get-LandFormulaPlan $wantF $haveF
+        foreach ($w in @($fPlan.Insert)) {
+            $row = $df.NewRow()
+            $row['TableDefId'] = $w.Table; $row['Scope'] = 0; $row['ColumnDefId'] = $w.Column; $row['Dialect'] = 0; $row['Expression'] = [string]$w.Expression
+            $row['EvaluationOrder'] = 0; $row['IsCrossSheet'] = [bool]([string]$w.Expression -match '\]\.\[.*\]\.\[');  $row['IsSnapshot'] = $false; $row['IsDeleted'] = $false
+            $df.Rows.Add($row); $nf++
+        }
         Bulk-Insert $cn 'cfg.FormulaDef' $df
         Log "  формул колонок вставлено: $nf"
+        # Оновлення виразу/діалекту наявних формул чернетки порціями по 200 (тригери cfg.TR_*_Immutable порівнюють
+        # inserted x deleted без індексів: масове UPDATE одним запитом - O(n^2), урок land-build-clone-fixes).
+        $nfu = 0
+        $fUpd = @($fPlan.Update)
+        if ($fUpd.Count -gt 0) {
+            $du = New-Object System.Data.DataTable
+            [void]$du.Columns.Add('Id', [int]); [void]$du.Columns.Add('Expression', [string]); [void]$du.Columns.Add('IsCrossSheet', [bool])
+            foreach ($u in $fUpd) { [void]$du.Rows.Add([int]$u.Id, [string]$u.Expression, [bool]([string]$u.Expression -match '\]\.\[.*\]\.\[')) }
+            $null = Sql-Exec $cn 'CREATE TABLE #FU (N int IDENTITY(1,1) PRIMARY KEY, Id int, Expression nvarchar(max), IsCrossSheet bit)'
+            Assert-EcrMutationAllowed 'SQL-запис (SqlBulkCopy у #FU)'
+            $bc = New-Object System.Data.SqlClient.SqlBulkCopy($cn); $bc.DestinationTableName = '#FU'
+            foreach ($n in 'Id', 'Expression', 'IsCrossSheet') { [void]$bc.ColumnMappings.Add($n, $n) }
+            $bc.WriteToServer($du); $bc.Close()
+            for ($lo = 0; $lo -lt $du.Rows.Count; $lo += 200) {
+                $nfu += Sql-Exec $cn 'UPDATE f SET Expression = p.Expression, Dialect = 0, IsCrossSheet = p.IsCrossSheet FROM cfg.FormulaDef f JOIN #FU p ON p.Id = f.Id WHERE p.N > @lo AND p.N <= @hi' @{ lo = $lo; hi = ($lo + 200) }
+            }
+            $null = Sql-Exec $cn 'DROP TABLE #FU'
+            $names = @($fUpd | ForEach-Object { $fCodes[[string]$_.Key] } | Select-Object -First 30)
+            Log ("  формул колонок оновлено (вираз/діалект відрізнявся від моделі): {0}; колонки: {1}{2}" -f $nfu, ($names -join ', '), $(if ($fUpd.Count -gt 30) { ' ...' } else { '' }))
+        }
+        else { Log '  формул колонок оновлено: 0' }
+        # readOnly: колонка моделі Formula/Calculated (або readOnly) у клоні мусить бути лише для читання.
+        $nro = 0
+        foreach ($sh in @($Mdl.sheets)) {
+            foreach ($tb in @($sh.tables)) {
+                $tid = $tableIds["$($sh.code)/$($tb.code)"]
+                foreach ($c in @($tb.columns | Where-Object { $_.readOnly -or [string]$_.dataType -in 'Formula', 'Calculated' })) {
+                    $cid = $colId["$tid/$($c.code)"]
+                    if (-not $cid) { continue }
+                    $nro += Sql-Exec $cn 'UPDATE cfg.ColumnDef SET IsReadOnly=1 WHERE Id=@i AND IsReadOnly=0' @{ i = [int]$cid }
+                }
+            }
+        }
+        if ($nro -gt 0) { Log "  колонок позначено лише для читання (за моделлю): $nro" }
         # --- правила валідації
         $haveV = @{}
         foreach ($r in (Sql-Query $cn 'SELECT v.TableDefId, v.Code FROM cfg.ValidationRule v JOIN cfg.TableDef t ON t.Id=v.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v' @{ v = $vid }).Rows) {
@@ -632,6 +716,27 @@ function Fill-StructureSql([int]$vid) {
 # виду (a+b+c)/1000 з аркуша 7. Water Report (багато-до-багатьох: коди 7009016/17/18 живлять кілька цілей).
 # Працює в обох режимах -StructureMode (Sql і Api): ідентифікатори таблиць/колонок беруться зі структури версії.
 # Ідемпотентно: PUT за адресою комірки змінює наявну формулу, а не заводить другу.
+# LP-28: таблиці чернетки-клону, яких немає в моделі (T9a_03/06/07 після переходу на T9a_17a/21a/21b). Без прапора
+# -PruneStaleTables - лише попередження зі списком кодів (нічого не видаляється). З прапором - DELETE
+# /template-versions/{vid}/sheets/{аркуш}/tables/{код} (м'яке видалення в чернетці; сервер відмовляє, коли у версії є
+# документи - тоді таблиця лишається й про це буде рядок у журналі). Опублікована версія не змінюється: сюди
+# потрапляє лише чернетка. Таблиці з кодами моделі й -KnownStaleTables не чіпаються.
+function Invoke-StaleTables([int]$vid) {
+    $st = (Api GET "/api/v1/template-versions/$vid/structure").Json
+    $stale = @(Get-LandStaleTables $st $Mdl $KnownStaleTables)
+    if ($stale.Count -eq 0) { Log '  таблиць, яких немає в моделі: 0'; return 0 }
+    Log ("  ПОПЕРЕДЖЕННЯ: таблиць у чернетці, яких немає в моделі: {0}: {1}" -f $stale.Count, (($stale | ForEach-Object { $_.Key }) -join ', '))
+    if (-not $PruneStaleTables) { Log '  Нічого не видалено; для м''якого видалення запустіть з -PruneStaleTables (або додайте код у -KnownStaleTables).'; return 0 }
+    $done = 0
+    foreach ($s in $stale) {
+        $r = Invoke-Ecr -Method DELETE -Path "/api/v1/template-versions/$vid/sheets/$($s.Sheet)/tables/$($s.Table)"
+        if ($r.Status -in 200, 204) { $done++; Log "  таблицю $($s.Key) видалено (м'яко)"; continue }
+        Log ("  таблицю {0} НЕ видалено: HTTP {1} {2}" -f $s.Key, $r.Status, (Get-EcrErrorCode $r))
+    }
+    Log "  застарілих таблиць видалено: $done із $($stale.Count)"
+    return $done
+}
+
 function Put-CellFormulas([int]$vid) {
     $planned = @()
     foreach ($sh in @($Mdl.sheets)) {
@@ -819,6 +924,7 @@ function Stage-Template {
     }
     Log "  колонок $nCols, формул $nF, рядків $nRows, правил $nRules"
     $nCell = Put-CellFormulas $vid
+    $nStale = Invoke-StaleTables $vid
 
     # умовне форматування: колонкові правила моделі + правила з областю (L6: scope row / tableCode, textEq/textNe) - одним PUT на версію.
     # Правила з областю потребують lane cellstyle-l6-3: сервер без неї міг би проігнорувати поля області й зробити правило колонковим
@@ -1268,6 +1374,52 @@ function Stage-LandParity {
     Log "  оброблено методологій: $done"
 }
 
+# ==================== CompositionMass (LP-10: склад газу HSE400 по речовині) ====================
+# Лише явно: -Stage CompositionMass. Для методологій з моделі (argumentBridges.hse400.compositionMass.methodologies)
+# в ЧЕРНЕТКАХ (опубліковану версію не чіпаємо) токен @CompositionMass у виразах формул замінюється фрагментом, а
+# аргументи формули доповнюються аргументом потоку. Повторний запуск - 0 змін. Нову версію чи публікацію етап
+# не робить: це окреме рішення власника методології.
+function Stage-CompositionMass {
+    Log '== CompositionMass =='
+    . (Join-Path $here 'LandHse400Composition.Lib.ps1')
+    LoginAs 'land-owner'
+    $cm = $Mdl.argumentBridges.hse400.compositionMass
+    if ($null -eq $cm) { throw 'У моделі немає argumentBridges.hse400.compositionMass: перегенеруйте модель (model-gen).' }
+    $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+    $reg = Invoke-Ecr -Method GET -Path "/api/v1/registries/$($cm.substanceRegistry)/entries?asOf=$today"
+    if ($reg.Status -ne 200 -or @($reg.Json).Count -eq 0) {
+        Log "  ! довідника $($cm.substanceRegistry) немає або він порожній (спершу -Stage Registries чи Import-LandHse400Substance.ps1): нічого не змінено"
+        return
+    }
+    $ms = Items (Api GET '/api/v1/methodologies').Json
+    $mid = @{}
+    foreach ($m in $ms) { $mid[[string]$m.code] = [int]$m.id }
+    $changed = 0
+    foreach ($p in $cm.methodologies.PSObject.Properties) {
+        $name = $p.Name
+        $m = $mid[$name]
+        if (-not $m) { Log "  ${name}: методології на сервері немає - пропущено"; continue }
+        $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
+        $v = $vers | Sort-Object id -Descending | Select-Object -First 1
+        if ([string]$v.status -eq 'Published') { Log "  ${name}: остання версія опублікована - не чіпаю"; continue }
+        $vid = [int]$v.id
+        if ([string]$v.level -eq 'Legacy') { Log "  ! ${name}: версія $vid рівня Legacy - CURRENT_SUBSTANCE() не опублікується (ECR-CALC-0433)" }
+        $n = 0
+        foreach ($f in @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/formulas").Json)) {
+            $r = Convert-LandHse400CompositionMassFormula -Expression ([string]$f.expression) -ArgumentsCsv $f.argumentsCsv `
+                -Fragment ([string]$p.Value.fragment) -StreamArguments @($p.Value.arguments)
+            if (-not $r.Changed) { continue }
+            $body = @{ expression = $r.Expression; resultType = $f.resultType; outputUnitId = $f.outputUnitId; argumentsCsv = $r.ArgumentsCsv }
+            if ($null -ne $f.scope) { $body.scope = $f.scope }
+            $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/formulas/$($f.code)" -Body $body
+            if ($put.Status -eq 200) { $n++ } else { Log "  ! ${name}/$($f.code): HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
+        }
+        $changed += $n
+        Log "  ${name}: формул із фрагментом складу - $n"
+    }
+    Log "  змінено формул: $changed"
+}
+
 function Stage-Documents {
     Log '== Documents =='
     LoginAs 'land-owner'
@@ -1548,5 +1700,7 @@ function Fill-FullDocument([int]$docId) {
     # ⚠ D1 (RC E): LandParity виконується ПЕРЕД Methodologies. Methodologies створює прив'язки колонок результатів (LP-08,
     # у т.ч. вимкнені), а перевірка правила категорії (R16-4) звіряє @-аргументи з колонками ВСІХ прив'язок методології:
     # після них PUT category-rule дає 422 ECR-CALC-0422 categoryRuleUnknownArgument.
+    # LP-10: лише явно (-Stage CompositionMass); у 'All' не входить, бо потребує імпортованих C11/C12.
+    if ($Stage -contains 'CompositionMass') { Stage-CompositionMass }
 }
 Log 'Готово.'

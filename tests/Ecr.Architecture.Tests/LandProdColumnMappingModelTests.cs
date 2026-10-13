@@ -189,8 +189,9 @@ public sealed class LandProdColumnMappingModelTests
         // 5147 колонок до prodColumnMapping + 55 колонок введення + 570 колонок результатів C08/C09/C11/C12 (LP-08: 544;
         // ще 26 у таблицях 9a_17a/21a/21b, які LP-09 повернув у модель під правильними кодами; ще 1 - ECW_EC_tons у T7b_00)
         // + 44 мости аргументів для таблиць 6, 9-11 (LP-10, argumentBridges)
-        // + 19 мостів складу газу HSE400 (LP-10, argumentBridges.hse400: Density20, Vddg ... на REGFIND/REGFIELD)
-        const int resultColumns = 571 + 44 + 19;
+        // + 37 мостів складу газу HSE400 (LP-10, argumentBridges.hse400: Density20, Vddg ... на REGFIND/REGFIELD)
+        // + 177 мостів за атрибутами AF-таблиць (LP-10, af_attr_bridges.py: 168 за атрибутами AF + 9 календарних днів)
+        const int resultColumns = 571 + 44 + 37 + 177;
         Assert.Equal(55, model.RootElement.GetProperty("stats").GetProperty("columns").GetInt32() - 5147 - resultColumns);
     }
 

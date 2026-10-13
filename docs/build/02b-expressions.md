@@ -920,6 +920,12 @@ REGFIELD(
   'VALUE')
 ```
 
+⚠ ✎ 2026-10-13 (LP-10, D4 верифікації RC «Е»): `CURRENT_SUBSTANCE() + '_mass'` у фрагменті вище дає `#N/A` для
+числових кодів, бо колонки складу HSE400 названі ХІМІЧНО (`H2S_mass`, `C1_C5_mass`), а не за кодом речовини. Для Land
+показник береться зі словника: `REGFIELD(REGFIND('LAND_HSE400_SUBSTANCE', CURRENT_SUBSTANCE()), 'INDICATOR')` замість
+`CURRENT_SUBSTANCE() + '_mass'` (15 кодів `PollutionCodeService.GetMassName`; ключ `SUBSTANCE_CODE`; готові фрагменти —
+`argumentBridges.hse400.compositionMass` моделі Land, `tools/land/README.md`).
+
 `+` на двох текстах конкатенує (`&` у діалекті методологій немає). Символ видимий і всередині
 аргументів `REGFIND`, предикатів агрегатів (`REGCOUNT(…, ROW.X = CURRENT_SUBSTANCE() + '_mass')`)
 і формул імпортованих бібліотек (вони рахуються в контексті речовини викликача).

@@ -86,6 +86,23 @@ public sealed class ExcelExporterConditionalFormatTests
         Assert.NotEqual(XLFillPatternValues.LightTrellis, sheet.Cell(4, 1).Style.Fill.PatternType);
     }
 
+    [Fact]
+    public async Task Text_rule_on_the_reference_column_itself_compares_the_entry_code()
+    {
+        // LP-30: без RefColumnCode правило «= REMOVED» на колонці ST читає код запису (Id 901), а не Id.
+        using var workbook = await ExportAsync(
+            includeStyles: true,
+            extraRules:
+            [
+                new ConditionalFormatRule(
+                    TemplateVersionId, "ST", 1, "textEq", "REMOVED", null, "#ff9900", null, false, "column", "T1"),
+            ]);
+        var sheet = workbook.Worksheet("Sheet");
+
+        Assert.Equal("FF9900", Hex(sheet.Cell(4, 2).Style.Fill.BackgroundColor));
+        Assert.NotEqual("FF9900", Hex(sheet.Cell(3, 2).Style.Fill.BackgroundColor));
+    }
+
     private static async Task<XLWorkbook> ExportAsync(
         bool includeStyles, IReadOnlyList<ConditionalFormatRule>? extraRules = null)
     {

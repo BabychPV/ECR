@@ -201,7 +201,26 @@ C05 / C06_01 / C07_*; для методології з кількома табл
 
 Немає запису за (рік, місяць, потік, показник) -> `REGFIND` дає `#N/A` -> аргумент не обчислено -> рядок без результатів
 (стара система: `continue`, мовчки). Це одне правило, а не помилка даних: склад є лише за місяці, які мала стара система.
-Не мостяться (див. `argumentBridges.unresolved` моделі): `CompositionMass` (по речовині), таблиці 9a, 10_03, 11_xx без
-однозначної колонки-джерела потоку. Сторожі: LandHse400CompositionScriptTests, LandHse400BridgesModelTests (Architecture),
+Не мостяться (див. `argumentBridges.unresolved` моделі): `CompositionMass` - не міст, а підстановка у формулу (нижче); таблиці без атрибута
+типу палива/потоку в AF-класі (9a_17a, 9a_19, 9a_21..23). Для 9a, 10_03 і 11_03 колонка-джерело потоку береться з
+атрибута AF, який читає старий код (`af_attr_bridges.stream_sources`; мости атрибутів AF - розділ README шаблону
+«Мости за атрибутами AF-таблиць»). Сторожі: LandHse400CompositionScriptTests, LandHse400BridgesModelTests (Architecture),
 LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
+
+### CompositionMass: склад по речовині
+
+`{код}` у `{код}_mass` - числовий код забруднювальної речовини (`SUBSTANCE_CODE` довідника `LAND_AIR_SUBSTANCE`,
+`AF_PermitConstant.Substance_Code`), а колонки прода названі ХІМІЧНО (`H2S_mass`, `C1_C5_mass`, `EMercaptan_mass`), тож
+стара система зіставляє жорсткою таблицею `PollutionCodeService.GetMassName` (15 кодів; решта -> `Unknown_mass` -> колонки
+немає). У ECR це довідник `LAND_HSE400_SUBSTANCE` (ключ `SUBSTANCE_CODE`, поле `INDICATOR`; значень прода немає - це
+відповідність «код -> ім'я колонки», береться з моделі). ⚠ REGFIND по `LAND_AIR_SUBSTANCE` за номером речовини не працює:
+код запису там `E333` (EcrCode вимагає літери), а SUBSTANCE_CODE = `333`, первинного ключа в описі немає.
+
+У шаблоні колонки-моста бути не може (діалект без `CURRENT_SUBSTANCE()`), тому в формулі ЧЕРНЕТКИ версії методології
+(`ECW_C11_01/02/10`, `ECW_C12_01/03`) токен `@CompositionMass` замінюється фрагментом з
+`argumentBridges.hse400.compositionMass.methodologies.<ім'я>.fragment`: `Build-LandTemplate.ps1 -Stage CompositionMass`
+(лише явно; опубліковані версії не чіпає; повтор - 0 змін; версія має бути вище за Legacy, інакше публікація дасть
+ECR-CALC-0433). Довідник `LAND_HSE400_SUBSTANCE` на стендах, побудованих до цієї зміни, заводить
+`Import-LandHse400Substance.ps1` (`-DryRun`, `-ConfirmStand`; прод не читає). Сторожі: LandHse400SubstanceMapTests
+(Architecture), CompositionMassBySubstanceTests (Expressions), LandHse400SubstanceRegistryTests (Infrastructure, реальний SQL).
 

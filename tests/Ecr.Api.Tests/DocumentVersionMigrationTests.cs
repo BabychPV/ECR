@@ -388,7 +388,15 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
 
         /// <summary>Інший код таблиці (<c>…_NEW</c>) і інший код колонки C2 (<c>C2X_…</c>).</summary>
         TableAndColumnRenamed,
+
+        /// <summary>LP-29: C2 була Decimal 28/12, у цілі — 34/16 (розширення).</summary>
+        C2PrecisionWidened,
+
+        /// <summary>LP-29: C2 була Decimal 28/12, у цілі — 28/10 (звуження Scale).</summary>
+        C2ScaleNarrowed,
     }
+
+    private static bool ChangesNumericFormat(Target target) => target is Target.C2PrecisionWidened or Target.C2ScaleNarrowed;
 
     private static bool RenamesTable(Target target) => target is Target.TableRenamed or Target.TableAndColumnRenamed;
 
@@ -460,6 +468,14 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         var document = await db.Documents.Include(d => d.Sheets).SingleAsync(d => d.Id == doc.DocumentId).ConfigureAwait(false);
         document.IncludeSheet(doc.SheetDefId);
 
+        if (ChangesNumericFormat(target))
+        {
+            // Джерело — Decimal 28/12 (як у шаблоні Land до розширення); значення 42 у ньому проходить.
+            var sourceC2 = await db.ColumnDefs.SingleAsync(c => c.Id == doc.ColumnDefIds[1]).ConfigureAwait(false);
+            sourceC2.SetNumericFormat(28, 12);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+        }
+
         var key = doc.PeriodKey;
         db.CellValues.Add(new CellValue(
             new CellAddress(key, doc.RowIds[0], doc.ColumnDefIds[0]), doc.TableDefId, new CellValueData { ValueString = "a" }));
@@ -510,6 +526,11 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         if (target != Target.DropsC2)
         {
             Column("C2", 2, target == Target.C2BecomesText ? CellDataType.String : CellDataType.Decimal);
+            if (ChangesNumericFormat(target))
+            {
+                columns["C2"].SetNumericFormat(target == Target.C2PrecisionWidened ? (byte)34 : (byte)28,
+                    target == Target.C2PrecisionWidened ? (byte)16 : (byte)10);
+            }
         }
 
         if (target != Target.DropsC3AddsC4AndRow)
