@@ -618,7 +618,7 @@ function Fill-StructureSql([int]$vid) {
                     $row = $dr.NewRow()
                     $row['TableDefId'] = $tid; $row['RowKey'] = [string]$rw.key; $row['Ordinal'] = $o
                     $lab = [string]$rw.en; if ($lab.Length -gt 400) { $lab = $lab.Substring(0, 400) }
-                    $row['LabelL10n'] = (Json-L10n $lab $rw.ru); $row['RowKind'] = [byte]$RowKindCode[[string]$rw.kind]; $row['IsReadOnly'] = [bool]$rw.readOnly; $row['IsDeleted'] = $false
+                    $row['LabelL10n'] = (Json-L10n $lab $rw.ru); $row['RowKind'] = [byte]$RowKindCode[[string]$rw.kind]; $row['IsReadOnly'] = $false; $row['IsDeleted'] = $false
                     $dr.Rows.Add($row); $nr++
                 }
             }
@@ -717,18 +717,6 @@ function Fill-StructureSql([int]$vid) {
             }
         }
         if ($nro -gt 0) { Log "  колонок позначено лише для читання (за моделлю): $nro" }
-        # WW-02: рядок моделі з readOnly (групові підсумки, баланси, «Volume», 8001002, Input/Output/Balance) у клоні мусить
-        # бути лише для читання: комірочна формула на колонці ручного вводу дозволена лише в такому рядку (ECR-TMPL-4227).
-        $nrr = 0
-        foreach ($sh in @($Mdl.sheets)) {
-            foreach ($tb in @($sh.tables)) {
-                $tid = $tableIds["$($sh.code)/$($tb.code)"]
-                foreach ($rw in @(@($tb.rows) | Where-Object { $_.readOnly })) {
-                    $nrr += Sql-Exec $cn 'UPDATE cfg.RowDef SET IsReadOnly=1 WHERE TableDefId=@t AND RowKey=@k AND IsReadOnly=0' @{ t = [int]$tid; k = [string]$rw.key }
-                }
-            }
-        }
-        if ($nrr -gt 0) { Log "  рядків позначено лише для читання (за моделлю): $nrr" }
         # --- правила валідації
         $haveV = @{}
         foreach ($r in (Sql-Query $cn 'SELECT v.TableDefId, v.Code FROM cfg.ValidationRule v JOIN cfg.TableDef t ON t.Id=v.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v' @{ v = $vid }).Rows) {
@@ -790,7 +778,8 @@ function Invoke-StaleTables([int]$vid) {
 
 # Формули комірок SQL-масово (Scope=2: RowDefId + ColumnDefId, діалект Template). Ідемпотентно: наявні (за ключем
 # таблиця/рядок/колонка) із тим самим виразом не чіпаються, з іншим - оновлюються порціями по 200, відсутні - вставляються.
-# Дзеркало API-воріт ECR-TMPL-4227: колонка мусить бути обчислюваною (Formula/Calculated) АБО рядок - лише для читання.
+# Дзеркало API-воріт ECR-TMPL-4227 для Cell: колонка НЕ мусить бути обчислюваною (комірка з формулою не редагується на рівні
+# комірки: EditRules CellIsComputed -> CalculatedCell); вимога лишилась лише для формул колонки.
 # IsCrossSheet лишається 0, як у формул, створених через API (домен не виставляє його; відкладений rollup не потрібен).
 function Put-CellFormulasSql([int]$vid, $planned) {
     Assert-EcrMutationAllowed 'масовий SQL-запис формул комірок'
@@ -825,9 +814,6 @@ function Put-CellFormulasSql([int]$vid, $planned) {
             if ($null -eq $c) { throw "Формула комірки $($p.Row)/$($p.Column): немає колонки в $($p.Sheet)/$($p.Table)." }
             $r = $rows["$t/$($p.Row)"]
             if ($null -eq $r) { throw "Формула комірки $($p.Row)/$($p.Column): немає рядка в $($p.Sheet)/$($p.Table)." }
-            if (-not $c.Computed -and -not $r.ReadOnly) {
-                throw "Формула комірки $($p.Sheet)/$($p.Table) $($p.Row)/$($p.Column): колонка ручного вводу і рядок не лише для читання (ECR-TMPL-4227): формула мовчки затирала б введене."
-            }
             $k = "$t/$($r.Id)/$($c.Id)"
             if ($seen.ContainsKey($k)) { throw "Формула комірки $($p.Row)/$($p.Column) в $($p.Sheet)/$($p.Table) задана двічі." }
             $seen[$k] = $true
@@ -1037,7 +1023,7 @@ function Stage-Template {
             foreach ($rw in @($tb.rows)) {
                 $ro++
                 $null = Api PUT "/api/v1/template-versions/$vid/tables/$tid/rows/$($rw.key)" @{
-                    labelL10n = (L10n ([string]$rw.en) $rw.ru); ordinal = $ro; rowKind = [string]$rw.kind; parentRowKey = $(if ($rw.parent) { [string]$rw.parent } else { $null }); isReadOnly = [bool]$rw.readOnly }
+                    labelL10n = (L10n ([string]$rw.en) $rw.ru); ordinal = $ro; rowKind = [string]$rw.kind; parentRowKey = $(if ($rw.parent) { [string]$rw.parent } else { $null }); isReadOnly = $false }
                 $nRows++
             }
             foreach ($ru in @($tb.rules)) {

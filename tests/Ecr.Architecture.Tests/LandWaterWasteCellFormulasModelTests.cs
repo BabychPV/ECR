@@ -157,13 +157,12 @@ public sealed partial class LandWaterWasteCellFormulasModelTests
 
                 Assert.Equal(body, expression);
 
-                // Ціль: колонка обчислювана АБО рядок лише для читання (ECR-TMPL-4227 для Cell); без колонкової формули.
+                // Ціль: рядок НЕ лише для читання (захист - на рівні комірки, рушій: CellIsComputed); без колонкової формули.
                 var row = table.GetProperty("rows").EnumerateArray()
                     .Single(r => r.GetProperty("key").GetString() == f.GetProperty("row").GetString());
                 var target = targetColumns[column];
-                var rowReadOnly = row.TryGetProperty("readOnly", out var ro) && ro.GetBoolean();
-                Assert.True(rowReadOnly || target.GetProperty("dataType").GetString() == "Formula",
-                    $"{Code(table)} {f.GetProperty("row").GetString()}/{column}: рядок не лише для читання на колонці ручного вводу");
+                Assert.False(row.TryGetProperty("readOnly", out var ro) && ro.GetBoolean(),
+                    $"{Code(table)} {f.GetProperty("row").GetString()}: рядок цілком лише для читання закрив би комірки вводу");
                 Assert.False(target.TryGetProperty("expression", out _), "колонкова формула + комірочна на одній колонці = конфлікт");
                 Assert.True(expression.Length <= 2000, "ліміт FormulaDef.MaxExpressionLength");
                 checkedCount++;
@@ -262,20 +261,62 @@ public sealed partial class LandWaterWasteCellFormulasModelTests
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     [Trait("Requirement", "WW-02")]
-    public void Build_LandTemplate_ставить_IsReadOnly_рядкам_моделі_і_кладе_формули_комірок_масово_у_Sql_режимі()
+    public void Build_LandTemplate_не_ставить_IsReadOnly_рядкам_і_кладе_формули_комірок_масово_у_Sql_режимі()
     {
         var script = File.ReadAllText(Path.Combine(SourceTree.Root, "tools", "land", "Build-LandTemplate.ps1"));
 
-        Assert.Contains("[bool]$rw.readOnly", script, StringComparison.Ordinal);
-        Assert.Contains("UPDATE cfg.RowDef SET IsReadOnly=1", script, StringComparison.Ordinal);
+        // Рядки не стають «лише для читання» цілком: захист комірки з формулою - на рівні комірки (рушій).
+        Assert.DoesNotContain("$rw.readOnly", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("UPDATE cfg.RowDef SET IsReadOnly=1", script, StringComparison.Ordinal);
         Assert.Contains("function Put-CellFormulasSql", script, StringComparison.Ordinal);
         Assert.Contains("if ($StructureMode -eq 'Sql') { return (Put-CellFormulasSql $vid $planned) }", script, StringComparison.Ordinal);
 
-        // Дзеркало воріт ECR-TMPL-4227: колонка ручного вводу + рядок не лише для читання = відмова скрипта.
-        Assert.Contains("ECR-TMPL-4227", script, StringComparison.Ordinal);
-        Assert.Contains("if (-not $c.Computed -and -not $r.ReadOnly)", script, StringComparison.Ordinal);
+        // Ворота ECR-TMPL-4227 для Cell більше не вимагають обчислюваної колонки чи рядка лише для читання.
+        Assert.DoesNotContain("-not $c.Computed -and -not $r.ReadOnly", script, StringComparison.Ordinal);
 
         // Старий шлях (PUT …/formulas/cell/…) лишається для Api-режиму.
         Assert.Contains("/formulas/cell/", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [Trait("Requirement", "WW-02")]
+    public void Жоден_рядок_моделі_не_лише_для_читання_а_комірки_вводу_у_рядках_з_формулами_лишаються()
+    {
+        using var doc = Model();
+        var rowsWithFormulas = 0;
+        var inputCellsInFormulaRows = 0;
+
+        foreach (var (sheet, table) in Tables(doc.RootElement).Where(x => ReportSheets.Contains(Code(x.Sheet))))
+        {
+            Assert.DoesNotContain(table.GetProperty("rows").EnumerateArray(),
+                r => r.TryGetProperty("readOnly", out var ro) && ro.GetBoolean());
+
+            var numericColumns = table.GetProperty("columns").EnumerateArray()
+                .Where(c => NumericTypes.Contains(c.GetProperty("dataType").GetString()))
+                .Select(Code)
+                .ToList();
+
+            foreach (var byRow in Formulas(table).GroupBy(f => f.GetProperty("row").GetString()!))
+            {
+                rowsWithFormulas++;
+                var formulaColumns = byRow.Select(f => f.GetProperty("column").GetString()!).ToHashSet();
+                inputCellsInFormulaRows += numericColumns.Count(c => !formulaColumns.Contains(c));
+            }
+        }
+
+        Assert.True(rowsWithFormulas > 0);
+
+        // Раніше такий рядок був readOnly цілком і закривав ці комірки: Water Report групи (OpeningBalance, Site*),
+        // 7a/7b AnnualLimit, Waste Site* Int. Тепер вони доступні для вводу.
+        Assert.True(inputCellsInFormulaRows > 0, "у рядках з формулами немає жодної числової комірки вводу");
+
+        var waste = Tables(doc.RootElement).Single(x => Code(x.Sheet) == "S08_WASTE_REPORT" && Code(x.Table) == "T8_00").Table;
+        var wasteColumns = waste.GetProperty("columns").EnumerateArray().ToDictionary(Code, c => c.GetProperty("dataType").GetString());
+        var siteInt = wasteColumns.Where(kv => kv.Value == "Int").Select(kv => kv.Key).ToList();
+        Assert.NotEmpty(siteInt);
+        var formulaCells = Formulas(waste)
+            .Select(f => (f.GetProperty("row").GetString()!, f.GetProperty("column").GetString()!)).ToHashSet();
+        Assert.DoesNotContain(siteInt, c => formulaCells.Any(x => x.Item2 == c)); // Int Site*: формул немає - лише ввід
     }
 }
