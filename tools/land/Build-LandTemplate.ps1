@@ -46,7 +46,11 @@
                     if(@Land_Measure_Component_<код> = NULL, <вираз>, NULL): за наявного значення компонента виходить лише
                     type1 (як у старому коді), інакше лише type2; код 415 і type1 не чіпаються; аргумент додається до
                     списку формули. Публікації не робить; повтор - 0 змін
-
+      OptionalArguments (лише явно, в All не входить; запускати ПІСЛЯ Methodologies, CompositionMass, ParityBranch) у
+                    ЧЕРНЕТКАХ методологій з моделі (argumentBridges.optionalArguments: C11_10, C11_11_03, C11_16, D-397) у
+                    списку аргументів формул елемент аргументу, якого старий код не передає для частини таблиць, отримує
+                    маркер `?` (`@Land_Measure_OperatingTime?`): ECR-CALC-0438 колонки не вимагає, відсутня комірка = null.
+                    NULL-мости не будуються. Публікації не робить; повтор - 0 змін
     ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє, окрім явного
     -PruneStaleTables (м'яке видалення таблиць чернетки, яких немає в моделі; без прапора - лише попередження).
     Формули колонок наявної чернетки-клону порівнюються з моделлю й оновлюються (D-YE-1). Прод-БД старої системи тут
@@ -76,7 +80,7 @@ param(
     [string]$AccountsFile = 'F:\ecr-backup\land-ui\accounts.local.txt',
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'SubstanceApplicability', 'ParityBranch', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection,
@@ -1668,6 +1672,48 @@ function Stage-SubstanceApplicability {
     Log "  змінено правил: $changed"
 }
 
+# ==================== OptionalArguments (D-397: маркер `?` необов'язкових аргументів, клас O з D-8) ====================
+# Лише явно: -Stage OptionalArguments. Для методологій з моделі (argumentBridges.optionalArguments.methodologies:
+# ECW_C11_10, ECW_C11_11_03, ECW_C11_16) в ЧЕРНЕТЦІ елементи `;`-списку аргументів формул, чиє ім'я є в переліку,
+# отримують кінцевий `?` (LandOptionalArguments.Lib.ps1). Аргумент, якого старий код не передає для частини таблиць:
+# колонки-моста немає й не буде (NULL-міст не будується), ECR-CALC-0438 її не вимагає, відсутня комірка = null.
+# Опубліковану версію не чіпаємо; нову версію чи публікацію етап не робить. Повторний запуск - 0 змін.
+function Stage-OptionalArguments {
+    Log '== OptionalArguments =='
+    . (Join-Path $here 'LandOptionalArguments.Lib.ps1')
+    LoginAs 'land-owner'
+    $plan = Get-LandOptionalArguments -Model $Mdl
+    if ($plan.Count -eq 0) { throw 'У моделі немає argumentBridges.optionalArguments: перегенеруйте модель (model-gen).' }
+    $ms = Items (Api GET '/api/v1/methodologies').Json
+    $mid = @{}
+    foreach ($m in $ms) { $mid[[string]$m.code] = [int]$m.id }
+    $changed = 0
+    foreach ($name in $plan.Keys) {
+        $m = $mid[$name]
+        if (-not $m) { Log "  ${name}: методології на сервері немає - пропущено"; continue }
+        $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
+        $v = $vers | Sort-Object id -Descending | Select-Object -First 1
+        if ([string]$v.status -eq 'Published') { Log "  ${name}: остання версія опублікована - не чіпаю"; continue }
+        $vid = [int]$v.id
+        $n = 0
+        $declared = @{}
+        foreach ($f in @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/formulas").Json)) {
+            $r = Convert-LandOptionalArgumentsCsv -ArgumentsCsv $f.argumentsCsv -Arguments @($plan[$name])
+            foreach ($a in @($plan[$name])) { if ($r.Missing -notcontains $a) { $declared[$a] = $true } }
+            if (-not $r.Changed) { continue }
+            $body = @{ expression = $f.expression; resultType = $f.resultType; outputUnitId = $f.outputUnitId; argumentsCsv = $r.ArgumentsCsv }
+            if ($null -ne $f.scope) { $body.scope = $f.scope }
+            $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/formulas/$($f.code)" -Body $body
+            if ($put.Status -eq 200) { $n++ } else { Log "  ! ${name}/$($f.code): HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
+        }
+        $changed += $n
+        $absent = @($plan[$name] | Where-Object { -not $declared.ContainsKey($_) })
+        if ($absent.Count -gt 0) { Log "  ! ${name}: аргументи з переліку не оголошено в жодній формулі версії $vid (перевірте модель/AF-пакет): $($absent -join ', ')" }
+        Log "  ${name}: формул із маркером ? - $n"
+    }
+    Log "  змінено формул: $changed"
+}
+
 # ==================== ParityBranch (C12_02: вибір type1/type2 за наявністю компонента) ====================
 # Лише явно: -Stage ParityBranch. У ЧЕРНЕТЦІ методології з LandParityBranch.Lib.ps1 формули type2 компонентів
 # обгортаються `if(@Land_Measure_Component_<код> = NULL, <вираз>, NULL)`: старий код C12_02 рахує для компонента лише
@@ -2011,5 +2057,8 @@ if ($Stage -contains 'SubstanceApplicability') { Stage-SubstanceApplicability }
     if ($Stage -contains 'MassFraction' -or $Stage -contains 'CompositionMass') { Stage-MassFraction }
     # C12_02: вибір type1/type2 - лише явно (-Stage ParityBranch); у 'All' не входить; ПІСЛЯ Methodologies (створює формули).
     if ($Stage -contains 'ParityBranch') { Stage-ParityBranch }
+    # D-397: маркер `?` необов'язкових аргументів - лише явно (-Stage OptionalArguments); ОСТАННІМ: попередні етапи
+    # переписують списки аргументів і зберігають чужі елементи як є, тож маркер ставиться на готовий список.
+    if ($Stage -contains 'OptionalArguments') { Stage-OptionalArguments }
 }
 Log 'Готово.'
