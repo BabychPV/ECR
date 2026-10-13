@@ -383,8 +383,7 @@ public static class VersionMigrationPlanner
             map.Add(new VersionMigrationColumn(column.Id, other.Id, to.Id));
 
             Guarded(items, path, values, nameof(ColumnDef.DataType), column.DataType, other.DataType);
-            Guarded(items, path, values, nameof(ColumnDef.Precision), column.Precision, other.Precision);
-            Guarded(items, path, values, nameof(ColumnDef.Scale), column.Scale, other.Scale);
+            NumericFormat(items, path, values, column, other);
             Guarded(items, path, values, nameof(ColumnDef.UnitId), column.UnitId, other.UnitId);
             Guarded(items, path, values, nameof(ColumnDef.LookupRegistryDefId), column.LookupRegistryDefId, other.LookupRegistryDefId);
 
@@ -474,6 +473,63 @@ public static class VersionMigrationPlanner
         }
 
         return map;
+    }
+
+    /// <summary>
+    /// Precision/Scale колонки: РОЗШИРЕННЯ (<c>Widened</c>, клас Safe) переносить значення без перетворення;
+    /// будь-що інше — <c>Modified</c> (Guarded), як і раніше.
+    /// </summary>
+    /// <remarks>
+    /// Значення завжди лежать у <c>decimal(34,16)</c> (<c>CellValue.ValueNumeric</c>) і від Precision/Scale
+    /// колонки не залежать — змінюється лише обмеження валідації. Тому розширення нічого не перетворює й не
+    /// округлює: кожне значення, що проходило в старій колонці, проходить і в новій. <c>null</c> — «без межі».
+    /// </remarks>
+    private static void NumericFormat(
+        List<VersionMigrationItem> items, string path, long values, ColumnDef from, ColumnDef to)
+    {
+        if (from.Precision == to.Precision && from.Scale == to.Scale)
+        {
+            return;
+        }
+
+        var widened = IsWidening(from.Precision, from.Scale, to.Precision, to.Scale);
+        void Report(string field, byte? before, byte? after)
+        {
+            if (before == after)
+            {
+                return;
+            }
+
+            items.Add(new(path, widened ? "Widened" : "Modified", widened ? ChangeClass.Safe : ChangeClass.Guarded, values,
+                field, Text(before), Text(after)));
+        }
+
+        Report(nameof(ColumnDef.Precision), from.Precision, to.Precision);
+        Report(nameof(ColumnDef.Scale), from.Scale, to.Scale);
+    }
+
+    /// <summary>
+    /// Нова пара не звужує стару: Precision не менша, Scale не менша і цілих розрядів
+    /// (<c>Precision − Scale</c>) не менше. <c>null</c> = без межі: «стало null» завжди розширення,
+    /// «було null, стало число» — звуження.
+    /// </summary>
+    private static bool IsWidening(byte? precisionBefore, byte? scaleBefore, byte? precisionAfter, byte? scaleAfter)
+    {
+        var precisionOk = precisionAfter is null || (precisionBefore is { } pb && precisionAfter >= pb);
+        var scaleOk = scaleAfter is null || (scaleBefore is { } sb && scaleAfter >= sb);
+        if (!precisionOk || !scaleOk)
+        {
+            return false;
+        }
+
+        // Є межа Scale в новій колонці (отже й у старій): цілих розрядів не меншає.
+        // Precision у новій без межі, а Scale з межею — довільно багато цілих розрядів, також ок.
+        if (precisionAfter is { } pa && scaleAfter is { } sa)
+        {
+            return precisionBefore is { } p0 && scaleBefore is { } s0 && pa - sa >= p0 - s0;
+        }
+
+        return true;
     }
 
     private static void Guarded<T>(
