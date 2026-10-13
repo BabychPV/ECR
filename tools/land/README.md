@@ -441,3 +441,44 @@ $pw = Read-Host 'Пароль ECR' -AsSecureString
   комірки й вікно доступу діють як для людини (відхилені рядки рахуються в «відхилено», код виходу 1).
 - Тест: `LandStaleValuesTests` (Ecr.Architecture.Tests; функції бібліотеки `LandStaleValues.Lib.ps1` виконує справжній
   PowerShell з підробленим Api).
+
+## Вікно паритету: точкові інструменти (2026-10-13)
+
+Раніше це були скрипти поза репозиторієм із шляхами, портом і базою репетицій. Тепер вони тут, без значень прода,
+без секретів; тест — `LandWindowToolsTests` (Ecr.Architecture.Tests).
+
+Спільні правила: `-BaseUrl` і `-ConfirmStand` **обов'язкові без дефолтів**; за замовчуванням (і з `-DryRun`) інструмент
+нічого не пише; запис — лише `-Execute` разом з явним `-SqlConnection` (локальний сервер, база `EcrLand*`; потрібен для
+назви бази в підтвердженні) і `-ConfirmStand <адреса>/<база>`; лише локальний API; облікові дані — `-User`/`-Password`
+або `ECR_USER`/`ECR_PASSWORD`; `EcrApi.ps1` підключається через каталог скрипта.
+
+| Інструмент | Що робить |
+|---|---|
+| `Load-LandInputCells.ps1 -Kind TypeFuel\|Gtu -SourcePath <каталог JSON> -DocMap '{"<ім'я>":<id>}'` | `Land_TypeFuel` і `ReleaseOnColdVentYesNo_M<мм>` (T10_01/03/04, T11_01) або GTU-входи (T10_03/T11_03) із JSON повного набору в документи. Документ береться з `-DocMap` (ім'я → id), не за назвою на стенді. JSON з прод-даними лишається поза git (`-SourcePath` — локальний шлях). |
+| `Invoke-LandRecalc.ps1 -DocMap … -PeriodKey 202601,202602` | послідовний перерахунок документів із очікуванням задач; 429 чекає `Retry-After`. |
+| `New-LandMethodologyDraft.ps1 -Methodology ECW_C12_03 -VersionNumber V2` | чернетка як клон останньої опублікованої (етапи Build працюють лише по чернетках); повтор — 0 змін. |
+
+`Load-LandInputCells.ps1` перед записом робить **передперегляд** (потрібен `-User`): для кожного документа/періоду/таблиці
+читає колонки й рядки та друкує `NO_DOC`, `NO_TABLE`, `ROW_MISSING`, лічильник комірок, пропущених через відсутню колонку
+(`skipped-missing-column cells`), `lookupMiss` і **перелік відсутніх колонок** `таблиця/колонка` (без значень) — його
+звіряють з мостами моделі. Код виходу 1 за будь-якого з них; `-Execute` у цьому разі зупиняється до першого PATCH.
+Відсутні колонки пропускає лише явний `-AllowMissingColumns` (пишуться комірки наявних колонок, решта лишається в звіті).
+Без `-User` друкується лише план за файлами (мережі немає), перевірки стенда не виконуються.
+
+### ECW_C12_03 стає звичайним етапом Build
+
+Правило категорії ECW_C12_03 тепер у `af-land-category-rules.json`
+(`if(in(@IDCodeNAEProject,'0026','0030','0036','0038','0040','0042'),'0026','')`: на T10_01/T11_01 немає `Land_NAE`,
+джерело його мосту — `IDCodeNAEProject`). Позначка `substancesFromApplicability` робить складом речовин версії
+об'єднання кодів `land-substance-applicability.json` (15 кодів), а не суфікси констант. Порядок для чернетки:
+
+```powershell
+.\New-LandMethodologyDraft.ps1 -Methodology ECW_C12_03 -VersionNumber V2 -BaseUrl … -ConfirmStand … -Execute …   # чернетка
+.\Build-LandTemplate.ps1 -Stage LandParity,SubstanceApplicability,CompositionMass -OnlyMethodology ECW_C12_03 `
+    -BaseUrl … -ConfirmStand <адреса>/<база> -SqlConnection …                                                     # правило, 15 речовин, обгортка, фрагмент складу, Strict
+```
+
+`-OnlyMethodology` (етапи LandParity, CompositionMass, SubstanceApplicability) обмежує обробку заданими кодами;
+без нього етапи, як і раніше, обходять усі методології. Вручну лишається аргумент `Land_TypeFuel` (запис довідника з
+`entryId`) у PARITY_1: обгортка `REGFIELD(@Land_TypeFuel,'NAME')` читає Lookup, а підібрати запис довідника без
+стенда етап не може. Публікація (роль-рецензент, `effectiveFrom`) — окреме рішення людини, інструменти її не виконують.
