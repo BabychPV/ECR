@@ -972,6 +972,9 @@ for sh in X['sheets']:
 # Excel: D..O = (сума конкретних рядків аркуша 7 у тій самій місячній колонці) / 1000. Формула лишається в діалекті
 # шаблону: адреси A1 переписуються на [Аркуш].[Таблиця].[RowKey].[Колонка]; діапазонів немає. Усе, що не
 # розв'язується (рядок/колонка поза моделлю, інший аркуш), НЕ мовчить — потрапляє в cellFormulasUnresolved.
+SUM_FORM = re.compile(r"^\(?(?P<ops>\[[^\]]+\](?:\.\[[^\]]+\]){3}(?:\+\[[^\]]+\](?:\.\[[^\]]+\]){3})*)\)?/1000$")
+
+
 def _cell_formulas_7_0():
     s70 = next((s for s in out['sheets'] if s['excelName'].startswith('7.0')), None)
     s7 = next((s for s in out['sheets'] if s['excelName'].startswith('7. ')), None)
@@ -1011,6 +1014,14 @@ def _cell_formulas_7_0():
             if problems or not mcode:
                 bad.append({'cell': '%s%d' % (L, r), 'formula': f, 'why': 'unresolved: ' + ', '.join(problems or ['target column'])})
                 continue
+            # LP-31: порожня клітинка в Excel = 0, а в ECR `a+b` з відсутнім операндом дає null (ТЗ 05-engines «Семантика
+            # null»). Тому `(a+b+c)/1000` і `a/1000` пишемо як `SUM(a,b,c)/1000` / `SUM(a)/1000`: SUM поглинає null,
+            # порожня множина = 0 (02b §6.1) — як Excel. Форма, яку не впізнано, НЕ лишається мовчки: unresolved.
+            m_sum = SUM_FORM.match(expr)
+            if not m_sum:
+                bad.append({'cell': '%s%d' % (L, r), 'formula': f, 'why': 'unexpected form (not (a+b+..)/1000): ' + expr})
+                continue
+            expr = 'SUM(%s)/1000' % ','.join(m_sum.group('ops').split('+'))
             res.append({'row': rkey, 'column': mcode, 'expression': expr, 'excelCell': '%s%d' % (L, r), 'excelFormula': f})
     # Колонка з комірочною формулою мусить бути обчислюваною (ECR-TMPL-4227), інакше PUT …/formulas/cell відхиляється.
     covered = {x['column'] for x in res}
@@ -1120,7 +1131,7 @@ import af_attr_bridges  # noqa: E402
 _af_attrs = json.load(open('af-land-table-attributes.json', encoding='utf-8'))['tables']
 _cat_rules = json.load(open('af-land-category-rules.json', encoding='utf-8'))['rules']
 # джерело тексту потоку для таблиць 9a/10_03/11_03 - за атрибутом AF, який читає старий код (af_attr_bridges.stream_sources)
-stat_cols += hse400_bridges.apply(out, registries, af_attr_bridges.stream_sources(out, _af_attrs))
+stat_cols += hse400_bridges.apply(out, registries, af_attr_bridges.stream_sources(out, _af_attrs), _af_attrs)
 
 # ---- мости за атрибутами AF-таблиць (LP-10, прив'язки C11/C12 -> ECR-CALC-0438/0422): af_attr_bridges.py.
 stat_cols += af_attr_bridges.apply(out, _ro_all, _cat_rules, _af_attrs, set(CALC))

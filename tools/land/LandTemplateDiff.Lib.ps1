@@ -81,3 +81,45 @@ function Get-LandFormulaMismatches($Structure, $Mdl) {
     }
     return @($out)
 }
+
+# D-UPG-1: стеля динамічних рядків (TableDef.MaxDynamicRows) НАЯВНОЇ таблиці клону. Build раніше лише ВСТАВЛЯВ нові
+# таблиці зі стелею моделі, а в наявних лишав стару (T3_00=498, T9_04=184, T9_07=100) - сервер відхиляв рядки понад
+# стелю (ECR-ROW-0409). Правило - лише РОЗШИРЕННЯ: стеля піднімається, коли в моделі вона БІЛЬША; нижча чи рівна, а також
+# «без стелі» (NULL) у клоні не чіпаються (зменшення стелі могло б урізати дані документів).
+# Wanted: масив { Key; MaxRows } (Key = "SHEET/TABLE"; MaxRows - maxRows моделі, 0/null = без вимоги);
+# Existing: hashtable Key -> { Id; MaxRows } (MaxRows = $null, якщо стелі немає).
+# Повертає @{ Raise = @({ Id; Key; From; To }...); Same = n }.
+function Get-LandMaxRowsPlan($Wanted, [hashtable]$Existing) {
+    $raise = @(); $same = 0
+    foreach ($w in @($Wanted)) {
+        if ($null -eq $w -or -not $w.MaxRows) { continue }
+        if (-not $Existing.ContainsKey([string]$w.Key)) { continue }
+        $e = $Existing[[string]$w.Key]
+        if ($null -eq $e.MaxRows) { $same++; continue }
+        if ([int]$e.MaxRows -lt [int]$w.MaxRows) {
+            $raise += [pscustomobject]@{ Id = [int]$e.Id; Key = [string]$w.Key; From = [int]$e.MaxRows; To = [int]$w.MaxRows }
+        }
+        else { $same++ }
+    }
+    return @{ Raise = $raise; Same = $same }
+}
+
+# Розбіжності стелі динамічних рядків між структурою версії (tables[].maxDynamicRows) і моделлю (tables[].maxRows):
+# рядки виду "SHEET/TABLE: стеля динамічних рядків було -> має бути". Розбіжність - лише стеля НИЖЧА за модель
+# (стеля вища за модель чи відсутня - розширення, Build її не зменшує). Значень документів тут немає.
+function Get-LandMaxRowsMismatches($Structure, $Mdl) {
+    $byTable = @{}
+    foreach ($s in @($Structure.sheets)) { foreach ($t in @($s.tables)) { $byTable["$($s.code)/$($t.code)"] = $t } }
+    $out = @()
+    foreach ($sh in @($Mdl.sheets)) {
+        foreach ($tb in @($sh.tables)) {
+            if (-not $tb.maxRows) { continue }
+            $etb = $byTable["$($sh.code)/$($tb.code)"]
+            if ($null -eq $etb -or $null -eq $etb.maxDynamicRows) { continue }
+            if ([int]$etb.maxDynamicRows -lt [int]$tb.maxRows) {
+                $out += ("{0}/{1}: стеля динамічних рядків {2} -> {3}" -f $sh.code, $tb.code, [int]$etb.maxDynamicRows, [int]$tb.maxRows)
+            }
+        }
+    }
+    return @($out)
+}

@@ -107,6 +107,11 @@ foreach ($sh in @($mdl.sheets)) {
 # лише таблиця: колонки. Раніше розбіжний вираз клону (T5_08/T5_09 Winter) Verify не ловив.
 $fm = @(Get-LandFormulaMismatches $st $mdl)
 foreach ($m in $fm) { $bad += $m }
+# D-UPG-1: стеля динамічних рядків наявних таблиць проти моделі (клон зі старими T3_00/T9_04/T9_07 раніше проходив Verify
+# і відхиляв рядки завантаження ECR-ROW-0409). Розбіжність - стеля нижча за модель.
+$mr = @(Get-LandMaxRowsMismatches $st $mdl)
+foreach ($m in $mr) { $bad += $m }
+Write-Host ("Стелі динамічних рядків перевірено: таблиць нижче моделі {0}" -f $mr.Count)
 Write-Host ("Формули колонок і readOnly перевірено: розбіжних таблиць {0}" -f $fm.Count)
 # LP-28: таблиця є у версії, а в моделі її немає (застарілі T9a_03/06/07 клону) - розбіжність, окрім явного -KnownStaleTables.
 $stale = @(Get-LandStaleTables $st $mdl $KnownStaleTables)

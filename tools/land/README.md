@@ -184,6 +184,26 @@ C05 / C06_01 / C07_*; для методології з кількома табл
 пройде публікацію (`PublishMethodologyHandler`, той самий код) - узгодження імен аргументів і колонок потрібне до
 активації C11/C12.
 
+### Після publish прив'язки вимкнені, поки повторно не запущено `-Stage Methodologies`
+
+Прив'язки колонок результатів методологій C08/C09/C11/C12 лишаються ВИМКНЕНИМИ після публікації версії методології
+(`publish`), доки не запущено `-Stage Methodologies` ще раз. Порядок для стенда з уже імпортованими C11/C12:
+
+1. `publish` версій методологій (імпорт C11/C12 лишає чернетки);
+2. `-Stage Methodologies` (повторно) - активує прив'язки опублікованих версій;
+3. `-Stage CompositionMass` - за потреби (мапа складу газу, LP-10).
+
+Без кроку 2 колонки результатів порожні, хоча версії опубліковано (перевірено на клоні 1.0.9.0, звіт верифікації 13.10).
+
+### Стелі динамічних рядків наявних таблиць клону (D-UPG-1)
+
+`-StructureMode Sql` на клоні підтягує `MaxDynamicRows` НАЯВНИХ таблиць чернетки до `maxRows` моделі, але лише
+розширенням (стеля нижча за модель піднімається; рівна, вища чи відсутня - не чіпається). Дія ідемпотентна, у лозі:
+`таблиць MaxDynamicRows піднято: N` (повторний запуск - 0). `Verify-LandTemplate.ps1` порівнює стелі структури версії з
+моделлю й видає рядки `SHEET/TABLE: стеля динамічних рядків було -> має бути` (код виходу 1). Без цього клон лишав
+стелі зі старої версії, і завантаження відхиляло рядки `ECR-ROW-0409`. Чиста логіка - `LandTemplateDiff.Lib.ps1`
+(`Get-LandMaxRowsPlan`, `Get-LandMaxRowsMismatches`; тест `LandMaxRowsUpdateTests`).
+
 ## Склад газу HSE400 для методологій C11/C12 (LP-10)
 
 Стара система бере склад із `dbo.CalcResult_AirGasCompositions_HSE400` (рядок = місяць, колонка = `{префікс потоку}_{показник}`),
@@ -219,8 +239,15 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 У шаблоні колонки-моста бути не може (діалект без `CURRENT_SUBSTANCE()`), тому в формулі ЧЕРНЕТКИ версії методології
 (`ECW_C11_01/02/10`, `ECW_C12_01/03`) токен `@CompositionMass` замінюється фрагментом з
 `argumentBridges.hse400.compositionMass.methodologies.<ім'я>.fragment`: `Build-LandTemplate.ps1 -Stage CompositionMass`
-(лише явно; опубліковані версії не чіпає; повтор - 0 змін; версія має бути вище за Legacy, інакше публікація дасть
-ECR-CALC-0433). Довідник `LAND_HSE400_SUBSTANCE` на стендах, побудованих до цієї зміни, заводить
+(лише явно; опубліковані версії не чіпає; повтор - 0 змін). Фрагмент вживає `CURRENT_SUBSTANCE()` і `REGFIND`/`REGFIELD`
+(ярус Extension): у версії `NumericMode = Legacy` публікація дає ECR-CALC-0433, тому етап **сам переводить чернетку з
+фрагментом у `Strict`** (`PUT /methodologies/{id}/versions/{vid}/modes`, календарний режим і журнал не чіпає;
+`-KeepNumericMode` вимикає). ⚠ `Strict` змінює арифметику версії: `decimal` замість `double` NCalc 1.3.8, ділення на нуль -
+`#DIV/0` замість `+∞`, `Round` - AwayFromZero; у формулах C11_01/02/10, C12_01/03 дільники - лише константи `CST.k*`
+(змінних знаменників немає), `Pow`/`Sqrt` - лише в C11_02 (константні аргументи), а `if(@X = 0, 0, …)` не залежить від
+режиму. Аргумент потоку фрагмента (`@Land_TypeFuelOrStream` у C11_10) має бути колонкою на КОЖНІЙ таблиці методології:
+де старий код читає `Land_TypeFuel` (T9_02, T9_07, T9_11, T9a_24..26, T9a_28), модель дає міст до тієї самої колонки
+джерела потоку (`hse400_bridges.STREAM_ARGUMENT_ALIASES`). Довідник `LAND_HSE400_SUBSTANCE` на стендах, побудованих до цієї зміни, заводить
 `Import-LandHse400Substance.ps1` (`-DryRun`, `-ConfirmStand`; прод не читає). Сторожі: LandHse400SubstanceMapTests
 (Architecture), CompositionMassBySubstanceTests (Expressions), LandHse400SubstanceRegistryTests (Infrastructure, реальний SQL).
 
