@@ -495,7 +495,20 @@ public sealed class GetTableSliceHandler(
         var codeByColumn = new Dictionary<string, IReadOnlyDictionary<long, string>>(StringComparer.Ordinal);
         if (registries is not null)
         {
-            foreach (var reference in all.Select(r => r.RefColumnCode).OfType<string>().Distinct(StringComparer.Ordinal))
+            // LP-30: колонка-довідник, чиє ВЛАСНЕ значення порівнює текстове правило (без RefColumnCode), теж
+            // читається за кодом запису; інакше «textEq REMOVED» на самій колонці-статусі порівнювало б Id.
+            var needCodes = new HashSet<string>(
+                all.Select(r => r.RefColumnCode).OfType<string>(), StringComparer.Ordinal);
+            foreach (var column in columns)
+            {
+                if (Templates.ConditionalFormatEvaluator.RulesFor(byColumn, column.Code)
+                        .Any(r => r.RefColumnCode is null && Templates.ConditionalFormatEvaluator.IsTextOperator(r.Operator)))
+                {
+                    needCodes.Add(column.Code);
+                }
+            }
+
+            foreach (var reference in needCodes.Order(StringComparer.Ordinal))
             {
                 if (visible.TryGetValue(reference, out var source) && source.LookupRegistryDefId is { } registryId)
                 {
@@ -518,6 +531,8 @@ public sealed class GetTableSliceHandler(
             foreach (var row in rows)
             {
                 row.Cells.TryGetValue(column.Code, out var value);
+                codeByColumn.TryGetValue(column.Code, out var ownCodes);
+                value = Templates.ConditionalFormatEvaluator.WithEntryCode(value, ownCodes);
 
                 var context = new Templates.RuleCellContext(tableCode, row.RowKey, (string code, out object? found) =>
                 {
@@ -529,11 +544,8 @@ public sealed class GetTableSliceHandler(
 
                     row.Cells.TryGetValue(code, out found);
 
-                    if (found is long entryId && codeByColumn.TryGetValue(code, out var codes)
-                        && codes.TryGetValue(entryId, out var entryCode))
-                    {
-                        found = entryCode;
-                    }
+                    codeByColumn.TryGetValue(code, out var codes);
+                    found = Templates.ConditionalFormatEvaluator.WithEntryCode(found, codes);
 
                     return true;
                 });

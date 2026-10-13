@@ -43,6 +43,11 @@ public sealed record RuleCellContext(string TableCode, string RowKey, RefValueRe
 /// <c>ne</c>: «не дорівнює 5» для тексту «abc» — не привід фарбувати. Порожнім
 /// вважається <c>null</c> або рядок із самих пробілів. Перше правило за
 /// <see cref="ConditionalFormatRule.Ordinal"/>, що спрацювало, виграє.
+/// <para>
+/// Колонка-довідник: текстові оператори (<c>textEq</c>/<c>textNe</c>) порівнюють КОД запису довідника — і для
+/// значення самої колонки, і для <see cref="ConditionalFormatRule.RefColumnCode"/> (одна семантика, LP-30);
+/// викликач розгортає Id → код через <see cref="WithEntryCode"/>. Числові оператори Id не задовольняє.
+/// </para>
 /// </remarks>
 public static class ConditionalFormatEvaluator
 {
@@ -74,6 +79,26 @@ public static class ConditionalFormatEvaluator
 
         return any.Count == 0 ? own : own.Count == 0 ? any : [.. own, .. any];
     }
+
+    /// <summary>Текстові оператори (порівняння з рядком) — вони читають КОД запису довідника, а не його Id.</summary>
+    public static bool IsTextOperator(string? @operator) => @operator is "textEq" or "textNe";
+
+    /// <summary>
+    /// Значення комірки-довідника для правил: Id запису → його <b>код</b> (рядок), як у книзі Excel й у
+    /// <see cref="ConditionalFormatRule.RefColumnCode"/>. Решта значень (і Id, коду якого немає в довіднику, або
+    /// порожнього коду) лишаються як є — числові оператори Id й так не задовольняє (див. <c>TryNumber</c>).
+    /// ⚠ L6/LP-30: без цього «textEq REMOVED» на САМІЙ колонці-довіднику порівнював Id (<c>long</c> — не текст) і
+    /// не спрацьовував ніколи, хоча через <c>RefColumnCode</c> ту саму колонку правило читало за кодом.
+    /// </summary>
+    /// <param name="value">Значення як у сітці (<c>CellValueMapping.ToRuleValue</c>).</param>
+    /// <param name="entryCodes">Код за Id для довідника колонки; <c>null</c> — колонка не довідникова.</param>
+    public static object? WithEntryCode(object? value, IReadOnlyDictionary<long, string>? entryCodes)
+        => value is long id
+           && entryCodes is not null
+           && entryCodes.TryGetValue(id, out var code)
+           && !string.IsNullOrWhiteSpace(code)
+            ? code
+            : value;
 
     /// <summary>
     /// Формат комірки зі значенням <paramref name="value"/> БЕЗ контексту рядка; <c>null</c> — жодне правило не спрацювало.

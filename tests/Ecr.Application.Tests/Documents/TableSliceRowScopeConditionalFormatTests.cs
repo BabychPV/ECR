@@ -30,6 +30,7 @@ public sealed class TableSliceRowScopeConditionalFormatTests
     private const int StatusRegistry = 55;
     private const long RemovedEntry = 901;
     private const long RunningEntry = 902;
+    private const long NumericCodeEntry = 77;
 
     private readonly IRowStore _rows = Substitute.For<IRowStore>();
     private readonly ICellStore _cells = Substitute.For<ICellStore>();
@@ -74,6 +75,8 @@ public sealed class TableSliceRowScopeConditionalFormatTests
             Cell(2, VolumeId, new CellValueData { ValueNumeric = 5m }),
             Cell(2, StatusId, new CellValueData { ValueRegistryEntryId = RunningEntry }),
             Cell(3, VolumeId, new CellValueData { ValueNumeric = 7m }),
+            // LP-30: запис Id 77 має КОД «E901»; Id запису REMOVED — 901: правило «901» — не про Id.
+            Cell(3, StatusId, new CellValueData { ValueRegistryEntryId = NumericCodeEntry }),
             // Прихована колонка: у R3 її значення «Removed», у R1 — «Running».
             Cell(1, SecretId, new CellValueData { ValueString = "Running" }),
             Cell(3, SecretId, new CellValueData { ValueString = "Removed" }),
@@ -95,8 +98,10 @@ public sealed class TableSliceRowScopeConditionalFormatTests
         SetId(removed, RemovedEntry);
         var running = new RegistryEntry(StatusRegistry, EcrCode.Create("RUNNING"), Text("Running"));
         SetId(running, RunningEntry);
+        var numeric = new RegistryEntry(StatusRegistry, EcrCode.Create("E901"), Text("Numeric"));
+        SetId(numeric, NumericCodeEntry);
         _registries.ListEntriesAsync(StatusRegistry, Arg.Any<CancellationToken>())
-                   .Returns(Task.FromResult<IReadOnlyList<RegistryEntry>>([removed, running]));
+                   .Returns(Task.FromResult<IReadOnlyList<RegistryEntry>>([removed, running, numeric]));
     }
 
     private void Rules(params ConditionalFormatRule[] rules)
@@ -124,6 +129,93 @@ public sealed class TableSliceRowScopeConditionalFormatTests
         // Прихована колонка не отримує формату — її немає в зрізі.
         Assert.DoesNotContain(slice.CellFormats.Keys, k => k.EndsWith(":Secret", StringComparison.Ordinal));
         await _registries.Received(1).ListEntriesAsync(StatusRegistry, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Text_rule_on_the_reference_column_itself_compares_the_entry_code_not_the_id()
+    {
+        // LP-30: «Removed» (FF9900) на САМІЙ колонці-довіднику без RefColumnCode: у комірці лежить Id 901,
+        // правило порівнює код «REMOVED» — раніше long вважався «не текстом» і правило не спрацьовувало ніколи.
+        Rules(new ConditionalFormatRule(
+            2, "Land_Status", 1, "textEq", "REMOVED", null, "#ff9900", null, false, "column", "Main"));
+
+        var slice = await Slice();
+
+        Assert.Equal(["R1:Land_Status"], slice.CellFormats!.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal("#ff9900", slice.CellFormats["R1:Land_Status"].BackgroundHex);
+    }
+
+    [Fact]
+    public async Task Text_rule_never_matches_the_entry_id_written_as_a_string_and_matches_by_code()
+    {
+        // Запис REMOVED має Id 901: правило «= 901» — про КОД, тож не збігається (Id.ToString() не порівнюється).
+        Rules(new ConditionalFormatRule(
+            2, "Land_Status", 1, "textEq", "901", null, "#112233", null, false, "column", "Main"));
+
+        Assert.Empty((await Slice()).CellFormats!);
+
+        // Запис Id 77 має код «E901»: за кодом збігається лише він.
+        Rules(new ConditionalFormatRule(
+            2, "Land_Status", 1, "textEq", "E901", null, "#112233", null, false, "column", "Main"));
+
+        Assert.Equal(["R3:Land_Status"], (await Slice()).CellFormats!.Keys.Order(StringComparer.Ordinal));
+    }
+    [Fact]
+    public async Task TextNe_on_the_reference_column_paints_the_other_entries_not_the_matching_one()
+    {
+        Rules(new ConditionalFormatRule(
+            2, "Land_Status", 1, "textNe", "removed", null, "#00ff00", null, false, "column", "Main"));
+
+        var slice = await Slice();
+
+        Assert.Equal(["R2:Land_Status", "R3:Land_Status"], slice.CellFormats!.Keys.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task All_columns_text_rule_without_ref_column_reads_the_code_of_reference_cells_only()
+    {
+        Rules(new ConditionalFormatRule(
+            2, "*", 1, "textEq", "RUNNING", null, "#0000ff", null, false, "column", "Main"));
+
+        var slice = await Slice();
+
+        // Decimal-колонка Volume текстового правила не задовольняє; Id довідника в Volume не потрапляє.
+        Assert.Equal(["R2:Land_Status"], slice.CellFormats!.Keys.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task Row_scope_text_rule_on_the_reference_column_compares_the_code()
+    {
+        Rules(new ConditionalFormatRule(
+            2, "Land_Status", 1, "textEq", "REMOVED", null, "#ff9900", null, false, "row", "Main", ["R2", "R3"]));
+
+        var slice = await Slice();
+
+        // R1 — REMOVED, але поза областю рядків; R2/R3 в області, але не REMOVED.
+        Assert.Empty(slice.CellFormats!);
+    }
+
+    [Fact]
+    public async Task Numeric_operator_never_treats_a_registry_id_as_a_number()
+    {
+        Rules(new ConditionalFormatRule(
+            2, "Land_Status", 1, "gt", "0", null, "#ff0000", null, false, "column", "Main"));
+
+        var slice = await Slice();
+
+        Assert.Empty(slice.CellFormats!);
+    }
+
+    [Fact]
+    public async Task Ref_column_text_rule_still_matches_by_code_after_the_own_value_change()
+    {
+        // Регресія Inactive: колонка-джерело — довідник; клітинки рядка — Volume.
+        Rules(new ConditionalFormatRule(
+            2, "Volume", 1, "textEq", "RUNNING", null, "#cccccc", null, false, "column", "Main", null, "Land_Status"));
+
+        var slice = await Slice();
+
+        Assert.Equal(["R2:Volume"], slice.CellFormats!.Keys.Order(StringComparer.Ordinal));
     }
 
     [Fact]
