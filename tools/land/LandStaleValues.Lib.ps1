@@ -192,6 +192,11 @@ function Wait-LandStale {
     if ($Seconds -gt 0) { Start-Sleep -Milliseconds ([int][Math]::Ceiling($Seconds * 1000)) }
 }
 
+function Get-LandStaleUtcNow {
+    <# Годинник пейсингу окремою функцією: тест підміняє його керованим часом (без залежності від реального wall-clock). #>
+    return [DateTime]::UtcNow
+}
+
 $script:LandStaleLastCall = [DateTime]::MinValue
 
 function Invoke-LandStaleCall {
@@ -204,9 +209,9 @@ function Invoke-LandStaleCall {
     )
     $r = $null
     foreach ($try in 1..6) {
-        $gap = $PaceSeconds - ([DateTime]::UtcNow - $script:LandStaleLastCall).TotalSeconds
+        $gap = $PaceSeconds - ((Get-LandStaleUtcNow) - $script:LandStaleLastCall).TotalSeconds
         if ($gap -gt 0) { Wait-LandStale $gap }
-        $script:LandStaleLastCall = [DateTime]::UtcNow
+        $script:LandStaleLastCall = Get-LandStaleUtcNow
         $r = Invoke-Ecr -Method $Method -Path $Path -Body $Body
         if ($r.Status -ne 429 -and $r.Status -ne 503) { break }
         $ra = Get-LandRetryAfter $r
