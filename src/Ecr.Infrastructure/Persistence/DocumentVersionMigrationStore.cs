@@ -95,15 +95,21 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
         var locked = await db.ApprovalStates
             .AsNoTracking()
             .Where(a => a.Status == DocumentStatus.Submitted || a.Status == DocumentStatus.Approved)
-            .Join(db.Documents.Where(d => d.ProjectId == projectId), a => a.DocumentId, d => d.Id, (a, _) => a.Id)
-            .CountAsync(ct)
+            .Join(
+                db.Documents.Where(d => d.ProjectId == projectId),
+                a => a.DocumentId,
+                d => d.Id,
+                (a, _) => new { a.DocumentId, a.SheetDefId, a.PeriodKey, a.Status })
+            .OrderBy(a => a.DocumentId).ThenBy(a => a.SheetDefId).ThenBy(a => a.PeriodKey)
+            .ToListAsync(ct)
             .ConfigureAwait(false);
 
         return new VersionMigrationScope(
             documentIds,
             [.. cells.Select(c => new VersionMigrationCellUsage(c.ColumnDefId, c.RowDefId, c.Values))],
             header.ToDictionary(h => h.HeaderFieldDefId, h => h.Values),
-            locked);
+            locked.Count,
+            [.. locked.Select(a => new VersionMigrationLockedSheet(a.DocumentId, a.SheetDefId, a.PeriodKey, a.Status.ToString()))]);
     }
 
     /// <inheritdoc />

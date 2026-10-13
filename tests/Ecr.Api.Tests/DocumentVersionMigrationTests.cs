@@ -196,9 +196,11 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-7.5")]
-    public async Task Поданий_аркуш_дає_409_і_нічого_не_змінює()
+    public async Task Поданий_аркуш_якого_зачіпає_перенос_дає_409_і_нічого_не_змінює()
     {
-        var s = await ArrangeAsync(Target.OnlyLabels, submitted: true).ConfigureAwait(true);
+        // LP-32: 409 лише тоді, коли план ЗАЧІПАЄ поданий аркуш (тут прибрана C3 і доданий рядок R3);
+        // «лише підписи» чи нова колонка поданий аркуш переносять без змін (DocumentVersionMigrationTests.LockedSafe).
+        var s = await ArrangeAsync(Target.DropsC3AddsC4AndRow, submitted: true).ConfigureAwait(true);
         var before = await SnapshotAsync(s).ConfigureAwait(true);
 
         using var app = new EcrApiFactory(sql);
@@ -394,6 +396,12 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
 
         /// <summary>LP-29: C2 була Decimal 28/12, у цілі — 28/10 (звуження Scale).</summary>
         C2ScaleNarrowed,
+
+        /// <summary>LP-32: усі колонки й рядки ті самі, додана лише нова колонка C4 (план нічого не зачіпає).</summary>
+        AddsC4Only,
+
+        /// <summary>LP-32: колонки ті самі, додано лише рядок R3 фіксованої таблиці (склад рядків поданого міняється).</summary>
+        AddsRowOnly,
     }
 
     private static bool ChangesNumericFormat(Target target) => target is Target.C2PrecisionWidened or Target.C2ScaleNarrowed;
@@ -456,7 +464,7 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         Target target, bool submitted = false, bool publishTarget = true,
         string permission = MigrateDocumentVersionHandler.Permission,
         GrantLevel grant = GrantLevel.Manage, string? extraPermission = null,
-        int periodKey = 202601)
+        int periodKey = 202601, bool approved = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(periodKey, columnCount: 3, rowCount: 2).ConfigureAwait(false);
@@ -488,6 +496,17 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         {
             var state = new ApprovalState(doc.DocumentId, doc.SheetDefId, key.Value);
             state.Submit(1, now);
+            db.ApprovalEvents.Add(new ApprovalEvent(
+                doc.DocumentId, doc.SheetDefId, key.Value, DocumentStatus.Draft, DocumentStatus.Submitted,
+                ApprovalAction.Submit, 1, now));
+            if (approved)
+            {
+                state.Approve(1, now.AddMinutes(5));
+                db.ApprovalEvents.Add(new ApprovalEvent(
+                    doc.DocumentId, doc.SheetDefId, key.Value, DocumentStatus.Submitted, DocumentStatus.Approved,
+                    ApprovalAction.Approve, 1, now.AddMinutes(5)));
+            }
+
             db.ApprovalStates.Add(state);
         }
 
@@ -542,7 +561,12 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
             Column("C4", 4, CellDataType.Decimal);
         }
 
-        var rowKeys = target == Target.DropsC3AddsC4AndRow ? new[] { 1, 2, 3 } : [1, 2];
+        if (target == Target.AddsC4Only)
+        {
+            Column("C4", 4, CellDataType.Decimal);
+        }
+
+        var rowKeys = target is Target.DropsC3AddsC4AndRow or Target.AddsRowOnly ? new[] { 1, 2, 3 } : [1, 2];
         var rowDefs = rowKeys
             .Select(i => new RowDef(table.Id, RowKey.Create($"R{i}_{tag}"), i, Name($"Row {i}"), RowKind.Item))
             .ToList();

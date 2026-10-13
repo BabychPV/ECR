@@ -180,6 +180,9 @@ public sealed class MigrateDocumentVersionHandler(
     /// <summary>Стеля переліку відмінностей у звіті.</summary>
     public const int MaxItems = 500;
 
+    /// <summary>LP-32: стеля переліку поданих/затверджених пар у звіті й у тілі <c>409</c>.</summary>
+    public const int MaxLockedItems = 200;
+
     /// <summary>Скільки ключів методологій на чужі колонки називає відмова (<c>methodologyKeys</c>).</summary>
     public const int MaxMethodologyKeysListed = 20;
 
@@ -219,7 +222,8 @@ public sealed class MigrateDocumentVersionHandler(
     /// змінене тлумачення значень, структура в режимі <c>Presentation</c>).
     /// </exception>
     /// <exception cref="ConcurrencyConflictException">
-    /// <c>ECR-DOC-0409</c> — є подані чи затверджені аркуші, або проєкт архівовано.
+    /// <c>ECR-DOC-0409</c> — перенос зачепив би подані чи затверджені аркуші (LP-32; решта поданих переноситься без
+    /// змін), або проєкт архівовано.
     /// </exception>
     public Task<DocumentVersionMigrationDto> HandleAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode, bool dryRun, CancellationToken ct)
@@ -659,6 +663,11 @@ public sealed class MigrateDocumentVersionHandler(
                         transferredValues = result.TransferredValues,
                         mappingsRemapped = result.MappingsRemapped,
                         renames = plan.Items.Count(i => i.Kind == "Renamed"),
+
+                        // LP-32: подані/затверджені пари «аркуш × період», перенесені без змін; «зачеплених» при
+                        // застосуванні немає (вони були б відмовою), поле лишається для єдиної форми запису.
+                        lockedSheetsCarried = result.LockedSheetsCarried,
+                        lockedSheetsAffected = result.LockedSheetsAffected,
                     }),
                     profile.UserId, currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
@@ -713,7 +722,15 @@ public sealed class MigrateDocumentVersionHandler(
         var plan = VersionMigrationPlanner.Plan(from, to, scope.Cells, scope.HeaderValues, renames);
 
         var refusals = plan.RefusalsFor(mode).ToList();
-        if (scope.LockedSheets > 0)
+
+        // ⛔ LP-32 (locked-safe): подані/затверджені аркуші самі по собі перенос не блокують. Відмова — лише коли план
+        // ЗАЧІПАЄ такий аркуш (див. `VersionMigrationPlan.TouchedSheets`): подане стосується СТАРОЇ структури, і
+        // видати його за затвердження нової не можна. Решта лишається як є: `WorkflowSql` перемапує стани й журнал на
+        // нові `SheetDefId`, значення переїжджають за кодами, перерахунок Submitted/Approved не пише.
+        // ⚠ Аркуш, якого немає серед живих вихідної версії (не потрапив у `plan.Sheets`), `WorkflowSql` ВИДАЛИВ би
+        // разом зі станом, тому рахується зачепленим.
+        var locked = ClassifyLocked(scope, plan, from);
+        if (locked.Affected > 0)
         {
             refusals.Add("sheetsLocked");
         }
@@ -826,9 +843,57 @@ public sealed class MigrateDocumentVersionHandler(
                     .Order(StringComparer.Ordinal)
                     .Take(MaxMappingKeysListed)],
             others.Projects,
-            others.Documents);
+            others.Documents,
+            locked.Carried,
+            locked.Affected,
+            locked.Items.Count == 0 ? null : locked.Items,
+            locked.Truncated);
 
         return (dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds });
+    }
+
+    /// <summary>Розподіл поданих/затверджених пар «аркуш × період» на перенесені без змін і зачеплені планом.</summary>
+    private sealed record LockedClassification(
+        int Carried, int Affected, IReadOnlyList<LockedSheetItem> Items, bool Truncated);
+
+    private static LockedClassification ClassifyLocked(
+        VersionMigrationScope scope, VersionMigrationPlan plan, TemplateVersionSnapshot from)
+    {
+        if (scope.LockedSheets == 0)
+        {
+            return new LockedClassification(0, 0, [], Truncated: false);
+        }
+
+        // Сховище без переліку (обгортка в тесті): кількість відома, а що саме — ні, тож усе вважається зачепленим
+        // і перенос відмовляє, як до LP-32.
+        if (scope.LockedSheetRefs is null)
+        {
+            return new LockedClassification(0, scope.LockedSheets, [], Truncated: false);
+        }
+
+        var codes = from.Sheets.ToDictionary(s => s.Id, s => s.Code.ToString());
+        var touched = plan.TouchedSheets;
+        var items = scope.LockedSheetRefs
+            .Select(l => new LockedSheetItem(
+                l.DocumentId,
+                codes.GetValueOrDefault(l.SheetDefId) ?? string.Create(CultureInfo.InvariantCulture, $"#{l.SheetDefId}"),
+                l.PeriodKey,
+                l.Status,
+                Affected: !plan.Sheets.ContainsKey(l.SheetDefId) || touched.Contains(l.SheetDefId)))
+            .ToList();
+
+        var affected = items.Count(i => i.Affected);
+
+        // Спершу зачеплені (вони — причина відмови), далі решта; стеля — щоб звіт на тисячах пар не роздувався.
+        var listed = items
+            .OrderByDescending(i => i.Affected)
+            .ThenBy(i => i.SheetCode, StringComparer.Ordinal)
+            .ThenBy(i => i.PeriodKey)
+            .ThenBy(i => i.DocumentId)
+            .Take(MaxLockedItems)
+            .ToList();
+
+        return new LockedClassification(items.Count - affected, affected, listed, items.Count > MaxLockedItems);
     }
 
     private async Task<TemplateVersion> RequireTargetAsync(
@@ -895,20 +960,33 @@ public sealed class MigrateDocumentVersionHandler(
     {
         if (dto.Refusals.Contains("projectArchived") || dto.Refusals.Contains("sheetsLocked"))
         {
-            // Стан, а не зміст: подане чи затверджене стосувалося СТАРОЇ
-            // структури, і переносити його мовчки означало б видати чуже
-            // затвердження за нове. Спершу повернути аркуші в роботу.
+            // Подане чи затверджене стосувалося СТАРОЇ структури, і зачепити його
+            // переносом означало б видати чуже затвердження за нове. Спершу
+            // повернути аркуші в роботу. (LP-32: незачеплені переносяться без змін.)
             throw new ConcurrencyConflictException(
                 ErrorCodes.DocumentSubmitted,
                 dto.Refusals.Contains("projectArchived")
                     ? "Проєкт архівовано: документи архівного проєкту не переносяться."
-                    : $"Подано або затверджено аркушів: {dto.LockedSheets}. Спершу поверніть їх у роботу.",
+                    : $"Перенос зачепив би подані або затверджені аркуші: {dto.LockedSheetsAffected}. Спершу поверніть їх у роботу.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = dto.Refusals.Contains("projectArchived")
                         ? "err.ECR-DOC-0409.migrateProjectArchived"
                         : "err.ECR-DOC-0409.migrateSheetsLocked",
-                    ["lockedSheets"] = dto.LockedSheets.ToString(CultureInfo.InvariantCulture),
+
+                    // ⚠ `lockedSheets` — параметр тексту повідомлення: з LP-32 це кількість ЗАЧЕПЛЕНИХ аркушів
+                    // (раніше — усіх поданих); перенесені без змін у відмову не входять.
+                    ["lockedSheets"] = (dto.Refusals.Contains("projectArchived") ? dto.LockedSheets : dto.LockedSheetsAffected)
+                        .ToString(CultureInfo.InvariantCulture),
+                    ["lockedSheetsAffected"] = dto.LockedSheetsAffected.ToString(CultureInfo.InvariantCulture),
+                    ["lockedSheetsCarried"] = dto.LockedSheetsCarried.ToString(CultureInfo.InvariantCulture),
+
+                    // ⚠ Лише коди аркушів, періоди й статуси: без імен користувачів і значень.
+                    ["lockedSheetItems"] = dto.LockedSheetItems is { Count: > 0 } lockedItems
+                        ? lockedItems.Where(i => i.Affected).Take(MaxLockedItems)
+                            .Select(i => string.Create(CultureInfo.InvariantCulture, $"{i.SheetCode}|{i.PeriodKey}|{i.Status}"))
+                            .ToList()
+                        : null,
                     ["refusals"] = dto.Refusals,
                 });
         }
