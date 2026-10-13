@@ -1,0 +1,372 @@
+using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using Ecr.TestKit;
+using Xunit;
+
+namespace Ecr.Architecture.Tests;
+
+/// <summary>
+/// Паритет Land на ПОВНОМУ наборі: tools/land/Compare-LandParityFull.ps1 + LandParity.Lib.ps1 +
+/// Export-LandParityOracleFull.ps1. Сторожі: (а) експортер лише читає, (б) вихід і еталон не в репозиторії,
+/// (в) розбір параметрів, (г) класи на СИНТЕТИЧНІЙ фікстурі без даних прода (MATCH, MATCH_ROUNDING_LOSS,
+/// MISMATCH_LEGACY_ZERO, ROW_NOT_LOADED_CAPPED, MISSING_NOT_PUBLISHED, AMBIGUOUS_KEY і його агрегатне
+/// порівняння), (д) у файлах виходу значень немає.
+/// </summary>
+public sealed class LandParityFullHarnessTests
+{
+    private static readonly string[] PowerShellPrefix = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"];
+
+    private static string LandFile(string name) => Path.Combine(SourceTree.Root, "tools", "land", name);
+
+    private static (int Exit, string Output) RunPowerShell(params string[] args)
+    {
+        var start = new ProcessStartInfo(DeployScriptHarness.FindPowerShell())
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+        foreach (var a in PowerShellPrefix.Concat(args))
+        {
+            start.ArgumentList.Add(a);
+        }
+
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("PowerShell не запустився");
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(120_000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new TimeoutException("PowerShell не завершився за 120 с.");
+        }
+
+        return (process.ExitCode, stdoutTask.Result + stderrTask.Result);
+    }
+
+    private static string StripComments(string script)
+    {
+        var noBlock = Regex.Replace(script, @"<#.*?#>", string.Empty, RegexOptions.Singleline);
+        return Regex.Replace(noBlock, @"(?m)^\s*#.*$", string.Empty);
+    }
+
+    private const string Table = "AF_Air_Land_Stationary_Equipment";
+    private const string Doc = "LAND-PROD-9";
+
+    // Сентинели «значень»: не повинні з'явитися у файлах виходу.
+    private const string SentinelCapped = "0.987654321";
+    private const string SentinelMismatch = "0.7777777";
+
+    private static Dictionary<string, object> Row(int no, string nae, string efid, string status = "Running") =>
+        new() { ["_efid"] = efid, ["Land_No"] = no, ["Land_NAE"] = nae, ["Land_Status"] = status, ["Land_TypeFuel"] = "Diesel" };
+
+    private static string TsvLine(string efid, int month, string nae, string tons, string methodology) =>
+        string.Join('\t', efid, month, Table, nae, "301", "Diesel", tons, string.Empty, methodology, "2026-01-01T00:00:00", "CalcResult_Emissions_Air_Land_X");
+
+    private sealed class Fixture : IDisposable
+    {
+        public DirectoryInfo Dir { get; } = Directory.CreateTempSubdirectory("ecr-parity-full-");
+
+        public string Json => Dir.FullName;
+
+        public string Oracle => Path.Combine(Dir.FullName, "oracle.local.tsv");
+
+        public string State => Path.Combine(Dir.FullName, "state.json");
+
+        public string Prefix(string name) => Path.Combine(Dir.FullName, name);
+
+        public void Dispose() => Dir.Delete(recursive: true);
+    }
+
+    private static Fixture BuildFixture()
+    {
+        var f = new Fixture();
+        var columns = new[] { "Land_No", "Land_NAE", "Land_Status", "Land_TypeFuel" };
+        var sample = new
+        {
+            doc = Doc,
+            periods = new Dictionary<string, object>
+            {
+                ["2026-01"] = new Dictionary<string, object>
+                {
+                    [Table] = new
+                    {
+                        columns,
+                        rows = new[]
+                        {
+                            Row(1, "N1", "E1"),   // збіг
+                            Row(2, "N2", "E1"),   // збіг з втратою точності зберігання
+                            Row(3, "N6", "E1"),   // стара = 0, ECR != 0
+                            Row(4, "N3", "E1"),   // рядок не завантажено (ліміт шаблону)
+                            Row(5, "N9", "E1"),   // методологія не опублікована
+                            Row(6, "N10", "E1"),  // методологія без прив'язки до таблиці: потрібен -MethodologyTable
+                        },
+                    },
+                },
+                ["2026-02"] = new Dictionary<string, object>
+                {
+                    [Table] = new
+                    {
+                        columns,
+                        rows = new[]
+                        {
+                            Row(1, "N7", "E2"), Row(2, "N7", "E2"),   // двозначний ключ: сума 1.0 = результат старої
+                            Row(3, "N8", "E2"), Row(4, "N8", "E2"),   // двозначний ключ: сума не збігається
+                        },
+                    },
+                },
+            },
+        };
+        File.WriteAllText(Path.Combine(f.Dir.FullName, Doc + ".json"), JsonSerializer.Serialize(sample));
+
+        File.WriteAllLines(f.Oracle,
+        [
+            TsvLine("E1", 1, "N1", "0.001", "ECW_C05_02"),
+            TsvLine("E1", 1, "N2", "0.0000000100003", "ECW_C05_02"),
+            TsvLine("E1", 1, "N6", "0", "ECW_C05_02"),
+            TsvLine("E1", 1, "N3", SentinelCapped, "ECW_C05_02"),
+            TsvLine("E1", 1, "N9", "3", "ECW_C11_01"),
+            TsvLine("E1", 1, "N10", "2", "ECW_C99_01"),
+            TsvLine("E2", 2, "N7", "1", "ECW_C05_02"),
+            TsvLine("E2", 2, "N8", "1", "ECW_C05_02"),
+        ]);
+
+        static object Res(int period, string meth, string row, string output, string value) =>
+            new { document = Doc, period, methodology = meth, rowKey = row, outputCode = output, value };
+        var state = new
+        {
+            methodologies = new object[]
+            {
+                new { code = "ECW_C05_02", published = 1, bound = 1, tables = new[] { "T3_00" } },
+                new { code = "ECW_C11_01", published = 0, bound = 0, tables = Array.Empty<string>() },
+                new { code = "ECW_C99_01", published = 1, bound = 1, tables = Array.Empty<string>() },
+            },
+            tables = new object[]
+            {
+                new { document = Doc, period = 202601, table = "T3_00", rowKeys = new[] { "p9-0001", "p9-0002", "p9-0003", "p9-0005", "p9-0006" }, maxRows = 5 },
+                new { document = Doc, period = 202602, table = "T3_00", rowKeys = new[] { "p9-0001", "p9-0002", "p9-0003", "p9-0004" }, maxRows = 5 },
+            },
+            results = new[]
+            {
+                Res(202601, "ECW_C05_02", "p9-0001", "ECW_EC_tons_301", "0.001"),
+                Res(202601, "ECW_C05_02", "p9-0001", "ECW_EC_tons_NOx", "0.002"),
+                Res(202601, "ECW_C05_02", "p9-0002", "ECW_EC_tons_301", "0.00000001"),
+                Res(202601, "ECW_C05_02", "p9-0003", "ECW_EC_tons_301", SentinelMismatch),
+                Res(202601, "ECW_C99_01", "p9-0006", "ECW_EC_tons_301", "2"),
+                Res(202602, "ECW_C05_02", "p9-0001", "ECW_EC_tons_301", "0.4"),
+                Res(202602, "ECW_C05_02", "p9-0002", "ECW_EC_tons_301", "0.6"),
+                Res(202602, "ECW_C05_02", "p9-0003", "ECW_EC_tons_301", "0.1"),
+                Res(202602, "ECW_C05_02", "p9-0004", "ECW_EC_tons_301", "0.1"),
+            },
+        };
+        File.WriteAllText(f.State, JsonSerializer.Serialize(state));
+        return f;
+    }
+
+    private static (JsonElement Root, string SummaryText, string CellsText) RunCompare(Fixture f, string name, params string[] extra)
+    {
+        var prefix = f.Prefix(name);
+        var args = new List<string>
+        {
+            LandFile("Compare-LandParityFull.ps1"), "-JsonDir", f.Json, "-OracleTsv", f.Oracle, "-StateFile", f.State,
+            "-OutPrefix", prefix,
+        };
+        args.AddRange(extra);
+        var (exit, output) = RunPowerShell([.. args]);
+        Assert.True(exit == 0, output);
+        var summary = File.ReadAllText(prefix + ".summary.json");
+        var cells = File.ReadAllText(prefix + ".cells.tsv");
+        return (JsonDocument.Parse(summary).RootElement.Clone(), summary, cells);
+    }
+
+    private static Dictionary<string, int> Classes(JsonElement root) =>
+        root.GetProperty("classes").EnumerateArray()
+            .ToDictionary(e => e.GetProperty("class").GetString()!, e => e.GetProperty("cells").GetInt32());
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Повний_експортер_еталона_лише_читає_і_не_пише_у_репозиторій()
+    {
+        var code = StripComments(File.ReadAllText(LandFile("Export-LandParityOracleFull.ps1")));
+
+        Assert.Contains("READ UNCOMMITTED", code, StringComparison.Ordinal);
+        Assert.Matches(@"if \(\$sql -notmatch '\^\\s\*SELECT\\b'\)", code);
+        Assert.Contains("is not local", code, StringComparison.Ordinal);
+        Assert.Contains("inside the repository", code, StringComparison.Ordinal);
+        foreach (var m in Regex.Matches(code, "\"(?<s>[^\"]*)\"").Cast<Match>())
+        {
+            Assert.DoesNotMatch(@"(?i)\b(INSERT\s+INTO|UPDATE\s+\S+\s+SET|DELETE\s+FROM|DROP\s|TRUNCATE\s|ALTER\s|CREATE\s|EXEC(UTE)?\s|MERGE\s)", m.Groups["s"].Value);
+        }
+
+        var selects = Regex.Count(code, @"FROM dbo\.\[\$\w+\]");
+        var nolock = Regex.Count(code, @"FROM dbo\.\[\$\w+\] WITH \(NOLOCK\)");
+        Assert.True(selects > 0 && selects == nolock, "Кожен SELECT із dbo має бути WITH (NOLOCK).");
+
+        var inside = Path.Combine(SourceTree.Root, "parity-oracle-full.tsv");
+        var (exit, output) = RunPowerShell(LandFile("Export-LandParityOracleFull.ps1"), "-OutFile", inside);
+        Assert.NotEqual(0, exit);
+        Assert.Contains("inside the repository", output, StringComparison.Ordinal);
+        Assert.False(File.Exists(inside));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Повний_компаратор_відмовляє_писати_вихід_у_репозиторій()
+    {
+        using var f = BuildFixture();
+        var inside = Path.Combine(SourceTree.Root, "parity-full-guard");
+        var (exit, output) = RunPowerShell(
+            LandFile("Compare-LandParityFull.ps1"), "-JsonDir", f.Json, "-OracleTsv", f.Oracle, "-StateFile", f.State, "-OutPrefix", inside);
+        Assert.NotEqual(0, exit);
+        Assert.Contains("inside the repository", output, StringComparison.Ordinal);
+        Assert.False(File.Exists(inside + ".summary.json"));
+        Assert.False(File.Exists(inside + ".cells.tsv"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Розбір_параметрів_GroupBy_MethodologyTable_AggregateBy()
+    {
+        var (exit, output) = RunPowerShell(
+            LandFile("Compare-LandParityFull.ps1"), "-ValidateOnly",
+            "-AggregateBy", "NaePhase", "-Months", "3,4", "-GroupBy", "T11_02=Land_TypeFuel+Land_Grp;Land_Alt",
+            "-MethodologyTable", "^ECW_C12_01$=T11_02+T11a_01;^ECW_C08_04=T6_11");
+        Assert.True(exit == 0, output);
+        var json = output.Split('\n').Select(l => l.Trim()).Last(l => l.StartsWith('{'));
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        Assert.Equal("NaePhase", root.GetProperty("aggregateBy").GetString());
+        Assert.Equal([3, 4], root.GetProperty("months").EnumerateArray().Select(m => m.GetInt32()).ToArray());   // "3,4" - два місяці, не 34
+        var groupBy = root.GetProperty("groupBy").EnumerateArray()
+            .ToDictionary(e => e.GetProperty("table").GetString()!, e => e.GetProperty("columns").EnumerateArray().Select(c => c.GetString()!).ToArray());
+        Assert.Equal(["Land_TypeFuel", "Land_Grp"], groupBy["T11_02"]);
+        Assert.Equal(["Land_Alt"], groupBy["*"]);
+        var map = root.GetProperty("methodologyTable").EnumerateArray().ToList();
+        Assert.Equal(2, map.Count);
+        Assert.Equal("^ECW_C12_01$", map[0].GetProperty("regex").GetString());
+        Assert.Equal(["T11_02", "T11a_01"], map[0].GetProperty("tables").EnumerateArray().Select(t => t.GetString()!).ToArray());
+
+        foreach (var bad in new[]
+        {
+            new[] { "-MethodologyTable", "no-equals-sign" },
+            new[] { "-MethodologyTable", "^ECW_C12_01$=NotATable" },
+            new[] { "-GroupBy", "T11_02=bad column" },
+            new[] { "-AggregateBy", "Bogus" },
+            new[] { "-Months", "13" },
+        })
+        {
+            var (e2, o2) = RunPowerShell([LandFile("Compare-LandParityFull.ps1"), "-ValidateOnly", .. bad]);
+            Assert.NotEqual(0, e2);
+            Assert.False(string.IsNullOrWhiteSpace(o2));
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Повний_компаратор_на_синтетичній_фікстурі_дає_очікувані_класи()
+    {
+        using var f = BuildFixture();
+        var (root, summary, cells) = RunCompare(f, "default", "-MethodologyTable", "^ECW_C99_01$=T3_00");
+        var classes = Classes(root);
+
+        Assert.Equal(2, classes["MATCH"]);                     // N1 + N10 (через -MethodologyTable)
+        Assert.Equal(1, classes["MATCH_ROUNDING_LOSS"]);       // N2
+        Assert.Equal(1, classes["MISMATCH_LEGACY_ZERO"]);      // N6
+        Assert.Equal(1, classes["ROW_NOT_LOADED_CAPPED"]);     // N3
+        Assert.Equal(1, classes["MISSING_NOT_PUBLISHED"]);     // N9
+        Assert.Equal(1, classes["ECR_ONLY_INTERMEDIATE"]);
+        Assert.Equal(12, classes["AMBIGUOUS_KEY"]);            // 4 рядки x (tons + gsec старої + вихід ECR) - як у harness зразка
+        Assert.Equal(0, root.GetProperty("aggregateGroups").GetInt32());
+
+        // Зведення по методологіях і загальне — без значень.
+        Assert.Equal(classes.Values.Sum(), root.GetProperty("totalCells").GetInt32());
+        var byMeth = root.GetProperty("byMethodology").EnumerateArray()
+            .ToDictionary(e => e.GetProperty("methodology").GetString()!, e => e);
+        Assert.True(byMeth.ContainsKey("ECW_C05_02") && byMeth.ContainsKey("ECW_C11_01") && byMeth.ContainsKey("ECW_C99_01"));
+
+        // Значення прода не потрапляють у вихід.
+        foreach (var text in new[] { summary, cells })
+        {
+            Assert.DoesNotContain(SentinelCapped, text, StringComparison.Ordinal);
+            Assert.DoesNotContain(SentinelMismatch, text, StringComparison.Ordinal);
+            Assert.DoesNotContain("0.0000000100003", text, StringComparison.Ordinal);
+        }
+
+        Assert.StartsWith("doc\tperiod\ttable\trowKey\trows\tefid\tmethodology\toutput\tclass\trel", cells, StringComparison.Ordinal);
+        Assert.Contains("p9-0004\t", cells, StringComparison.Ordinal);       // рядок не завантажено
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Агрегатне_порівняння_двозначного_ключа_сумує_групу()
+    {
+        using var f = BuildFixture();
+        var (root, _, _) = RunCompare(f, "agg", "-AggregateBy", "NaePhase", "-MethodologyTable", "^ECW_C99_01$=T3_00");
+        var classes = Classes(root);
+
+        Assert.False(classes.ContainsKey("AMBIGUOUS_KEY"));
+        Assert.Equal(1, classes["AGG_MATCH"]);       // 0.4 + 0.6 = результат старої
+        Assert.Equal(1, classes["AGG_MISMATCH"]);    // 0.1 + 0.1 != результат старої
+        Assert.Equal(2, root.GetProperty("aggregateGroups").GetInt32());
+        // Рядкові класи не змінилися.
+        Assert.Equal(2, classes["MATCH"]);
+        Assert.Equal(1, classes["ROW_NOT_LOADED_CAPPED"]);
+
+        // Без -MethodologyTable методологія без прив'язки не має таблиці: N10 уже не збіг.
+        var (root2, _, _) = RunCompare(f, "nomap");
+        var classes2 = Classes(root2);
+        Assert.Equal(1, classes2["MATCH"]);
+        Assert.Equal(1, classes2["MISSING_BOUND_NO_RESULT"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Місяці_фільтрують_періоди_документів()
+    {
+        using var f = BuildFixture();
+        var (root, _, _) = RunCompare(f, "m2", "-Months", "2", "-GroupBy", "Land_TypeFuel");
+        var classes = Classes(root);
+        Assert.Equal(12, classes["AMBIGUOUS_KEY"]);
+        Assert.False(classes.ContainsKey("MATCH"));
+        Assert.False(classes.ContainsKey("ROW_NOT_LOADED_CAPPED"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Репозиторій_не_містить_прод_вивантажень_повного_паритету()
+    {
+        var forbiddenFiles = new[]
+        {
+            "parity-oracle*.tsv", "parity-full*.summary.json", "parity-full*.cells.tsv", "*.local.tsv", "LAND-PROD-*.json",
+        };
+        var skip = new[] { Path.DirectorySeparatorChar + "node_modules" + Path.DirectorySeparatorChar, Path.DirectorySeparatorChar + ".git" + Path.DirectorySeparatorChar };
+        foreach (var pattern in forbiddenFiles)
+        {
+            var hits = Directory.EnumerateFiles(SourceTree.Root, pattern, SearchOption.AllDirectories)
+                .Where(f => !skip.Any(s => f.Contains(s, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            Assert.True(hits.Count == 0, $"Файли виду {pattern} не мають бути в репозиторії: {string.Join(", ", hits.Take(3))}");
+        }
+
+        foreach (var name in new[] { "Compare-LandParityFull.ps1", "LandParity.Lib.ps1", "Export-LandParityOracleFull.ps1" })
+        {
+            var text = File.ReadAllText(LandFile(name));
+            Assert.DoesNotContain("ecr-backup", text, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("prod-sample", text, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("pseudonyms", text, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Бібліотека не пише на диск і не виконує записуючих SQL (лише SELECT під READ UNCOMMITTED).
+        var lib = StripComments(File.ReadAllText(LandFile("LandParity.Lib.ps1")));
+        foreach (var m in Regex.Matches(lib, "\"(?<s>[^\"]*)\"").Cast<Match>())
+        {
+            Assert.DoesNotMatch(@"(?i)\b(INSERT\s+INTO|UPDATE\s+\S+\s+SET|DELETE\s+FROM|DROP\s|TRUNCATE\s|ALTER\s|EXEC(UTE)?\s|MERGE\s)", m.Groups["s"].Value);
+        }
+
+        Assert.DoesNotContain("WriteAllText", lib, StringComparison.Ordinal);
+        Assert.Contains("READ UNCOMMITTED", lib, StringComparison.Ordinal);
+    }
+}
