@@ -106,6 +106,59 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// «Остання опублікована» — за <c>PublishedAt</c> (далі <c>Id</c>), а не за рядком <c>Version</c>
+    /// («1.0.10.0» &lt; «1.0.9.0» лексикографічно) і не за <c>Id</c> самим: клон-чернетка, створена раніше, може
+    /// опублікуватися пізніше.
+    /// </remarks>
+    public async Task<IReadOnlyList<int>> ListLiveTableDefIdsAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+    {
+        if (tableDefIds.Count == 0)
+        {
+            return [];
+        }
+
+        var rows = await (
+                from table in db.TableDefs.AsNoTracking()
+                where tableDefIds.Contains(table.Id)
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                join version in db.TemplateVersions.AsNoTracking() on sheet.TemplateVersionId equals version.Id
+                orderby table.Id
+                select new { TableDefId = table.Id, VersionId = version.Id, version.TemplateId })
+            .Take(MaxBindings)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var templateIds = rows.Select(r => r.TemplateId).Distinct().ToList();
+        var published = await db.TemplateVersions
+            .AsNoTracking()
+            .Where(v => templateIds.Contains(v.TemplateId) && v.Status == TemplateVersionStatus.Published)
+            .Select(v => new { v.Id, v.TemplateId, v.PublishedAt })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var latestByTemplate = published
+            .GroupBy(v => v.TemplateId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(v => v.PublishedAt).ThenByDescending(v => v.Id).First().Id);
+
+        var result = new List<int>();
+        foreach (var group in rows.GroupBy(r => r.TemplateId))
+        {
+            var onLive = latestByTemplate.TryGetValue(group.Key, out var liveVersionId)
+                ? group.Where(r => r.VersionId == liveVersionId).ToList()
+                : [];
+
+            result.AddRange((onLive.Count > 0 ? onLive : [.. group]).Select(r => r.TableDefId));
+        }
+
+        result.Sort();
+        return result.Distinct().ToList();
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<string>>> ListColumnCodesAsync(
         IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
     {
