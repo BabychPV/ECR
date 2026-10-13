@@ -256,14 +256,30 @@ C05 / C06_01 / C07_*; для методології з кількома табл
 лише чернетки, не публікує; запускати ОСТАННІМ - після `Methodologies`, `CompositionMass`, `ParityBranch`) ставить у
 `;`-списку аргументів формул методологій з моделі (`argumentBridges.optionalArguments`) маркер `?` на елементі:
 `@Land_Measure_OperatingTime?`. Маркер знімає вимогу колонки (0438) для всієї версії, а відсутня комірка в рантаймі стає
-null (як порожня). Перелік (8 пар методологія/таблиця): C11_10 - `Land_Measure_OperatingTime` (T9_02, T9_11, T9a_24, T9a_26),
-`Land_Measure_SubstanceConsumption` (T9a_27, T9a_28); C11_11_03 - `Land_Measure_MaterialResidence` (T9_06); C11_16 -
+null (як порожня). Перелік (9 пар методологія/таблиця): C11_10 - `Land_Measure_OperatingTime` (T9_02, T9_11, T9a_24, T9a_26),
+`Land_Measure_SubstanceConsumption` (T9_07 - після K1, T9a_27, T9a_28); C11_11_03 - `Land_Measure_MaterialResidence` (T9_06); C11_16 -
 `Land_Measure_FlowRateSulfur` (T9a_23). Класи K (конфлікт джерел) і Q (C11_03 `RunningHours` на T9_05/T9_14, рішення
 замовника Q-D8-2) НЕ входять. Попередження публікації `publish.warning.optionalArgumentNoColumn` називає позначений
 аргумент, якого немає в жодній прив'язаній таблиці (описка). Чиста логіка - `LandOptionalArguments.Lib.ps1` (тест
 `LandOptionalArgumentsTests`); перелік веде `af_attr_bridges.py` (`OPTIONAL_ARGUMENTS`), повтор - 0 змін.
 ⚠ Маркер per-версія: на таблицях, де колонка є (напр. T9_07, T9a_27 для OperatingTime), відсутня комірка стає null
 замість `#ARG`; перевірка паритету на стенді після «відбою» - PARITY_1 і `Compare-LandParityFull`.
+
+#### ArgumentSuffix: суфіксовані аргументи C11_01 / C11_02 / C11_11_02 (K1)
+
+Клас K з D-8: на T9a_17, T9a_27 і T9_07 методології однієї таблиці беруть один аргумент з РІЗНИХ атрибутів AF (старий
+код перейменовує ключ у власному словнику), а колонка з кодом аргументу не може бути двома джерелами. K1: методологія-
+«меншість» читає власну колонку-міст `<аргумент>__<код методології>` (`Land_Measure_OperatingTime__ECW_C11_01`,
+`..._ECW_C11_02`, `Land_Measure_SubstanceConsumption__ECW_C11_11_02`), решта - незмінне ім'я. Model-gen (`af_attr_bridges.py`,
+`ARGUMENT_SUFFIXES`, розділ моделі `argumentBridges.argumentSuffixes`) додає 16 Formula-колонок (14 суфіксованих по одній у
+кожній таблиці методології + звичайні `Land_Measure_OperatingTime` на T9a_17/T9a_27); нічого не видаляє й не змінює.
+`-Stage ArgumentSuffix` (лише явно, в `All` не входить, лише чернетки, не публікує; запускати ПІСЛЯ `Methodologies`,
+`CompositionMass`, `SubstanceApplicability`, `ParityBranch` і ПЕРЕД `OptionalArguments`) підміняє `@<аргумент>` у виразах і
+елемент у списках аргументів (кінцевий `?` і чужі елементи зберігаються) і додає суфіксований аргумент у PARITY_1 з тим
+самим значенням; повтор - 0 змін. Чиста логіка - `LandArgumentSuffix.Lib.ps1`; тести `LandArgumentSuffixStageTests`,
+`LandArgumentSuffixModelTests`. ⚠ Нові колонки існують лише в НОВІЙ версії шаблону (клон -> `-Stage Template` -> migrate),
+а 0438 перевіряє прив'язки методології на всіх версіях шаблону: перед видачею перевірте (read-only), чи є прив'язки на
+старих версіях (рішення K-eng-lite залежить від цього).
 
 ### Стелі динамічних рядків наявних таблиць клону (D-UPG-1)
 

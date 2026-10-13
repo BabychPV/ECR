@@ -51,6 +51,12 @@
                     списку аргументів формул елемент аргументу, якого старий код не передає для частини таблиць, отримує
                     маркер `?` (`@Land_Measure_OperatingTime?`): ECR-CALC-0438 колонки не вимагає, відсутня комірка = null.
                     NULL-мости не будуються. Публікації не робить; повтор - 0 змін
+      ArgumentSuffix (лише явно, в All не входить; запускати ПІСЛЯ Methodologies, CompositionMass, ParityBranch і ПЕРЕД
+                    OptionalArguments) K1: у ЧЕРНЕТКАХ методологій з моделі (argumentBridges.argumentSuffixes: C11_01,
+                    C11_02, C11_11_02) токен аргументу (`@Land_Measure_OperatingTime`) у виразі й списку аргументів формул
+                    замінюється суфіксованим (`@Land_Measure_OperatingTime__ECW_C11_01`), кінцевий `?` і чужі елементи
+                    списку зберігаються; у PARITY_1 додається суфіксований аргумент з тим самим значенням. Публікації
+                    не робить; повтор - 0 змін
     ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє, окрім явного
     -PruneStaleTables (м'яке видалення таблиць чернетки, яких немає в моделі; без прапора - лише попередження).
     Формули колонок наявної чернетки-клону порівнюються з моделлю й оновлюються (D-YE-1). Прод-БД старої системи тут
@@ -80,7 +86,7 @@ param(
     [string]$AccountsFile = 'F:\ecr-backup\land-ui\accounts.local.txt',
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection,
@@ -1735,6 +1741,59 @@ function Stage-OptionalArguments {
     Log "  змінено формул: $changed"
 }
 
+# ==================== ArgumentSuffix (K1: аргументи з суфіксом методології, клас K з D-8) ====================
+# Лише явно: -Stage ArgumentSuffix. Для методологій з моделі (argumentBridges.argumentSuffixes.methodologies:
+# ECW_C11_01, ECW_C11_02, ECW_C11_11_02) в ЧЕРНЕТЦІ токен аргументу у виразах і списках аргументів формул замінюється
+# суфіксованим (LandArgumentSuffix.Lib.ps1): колонки-мости з такими кодами будує model-gen. PARITY_1 отримує
+# суфіксований аргумент з тим самим значенням (без нього simulate дає #ARG). Правило категорії й константи не чіпаються
+# (вони цих аргументів не читають). Опубліковану версію не чіпаємо; повтор - 0 змін.
+function Stage-ArgumentSuffix {
+    Log '== ArgumentSuffix =='
+    . (Join-Path $here 'LandArgumentSuffix.Lib.ps1')
+    LoginAs 'land-owner'
+    $plan = Get-LandArgumentSuffixes -Model $Mdl
+    if ($plan.Count -eq 0) { throw 'У моделі немає argumentBridges.argumentSuffixes: перегенеруйте модель (model-gen).' }
+    $ms = Items (Api GET '/api/v1/methodologies').Json
+    $mid = @{}
+    foreach ($m in $ms) { $mid[[string]$m.code] = [int]$m.id }
+    $changed = 0
+    foreach ($name in $plan.Keys) {
+        $m = $mid[$name]
+        if (-not $m) { Log "  ${name}: методології на сервері немає - пропущено"; continue }
+        $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
+        $v = $vers | Sort-Object id -Descending | Select-Object -First 1
+        if ([string]$v.status -eq 'Published') { Log "  ${name}: остання версія опублікована - не чіпаю"; continue }
+        $vid = [int]$v.id
+        $n = 0
+        $suffixes = @($plan[$name])
+        foreach ($f in @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/formulas").Json)) {
+            $r = Convert-LandArgumentSuffixFormula -Expression $f.expression -ArgumentsCsv $f.argumentsCsv -Suffixes $suffixes
+            if (-not $r.Changed) { continue }
+            $body = @{ expression = $r.Expression; resultType = $f.resultType; outputUnitId = $f.outputUnitId; argumentsCsv = $r.ArgumentsCsv }
+            if ($null -ne $f.scope) { $body.scope = $f.scope }
+            $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/formulas/$($f.code)" -Body $body
+            if ($put.Status -eq 200) { $n++ } else { Log "  ! ${name}/$($f.code): HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
+        }
+        $changed += $n
+        Log "  ${name}: формул із суфіксованим аргументом - $n"
+
+        # PARITY_1: суфіксований аргумент зі значенням оригіналу (повтор - 0 змін).
+        $tests = @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/tests").Json)
+        $t = $tests | Where-Object { [string]$_.code -eq 'PARITY_1' } | Select-Object -First 1
+        if (-not $t) { Log "  ${name}: тест-кейсу PARITY_1 немає - суфіксовані аргументи не додано"; continue }
+        $inp = [string]$t.inputJson | ConvertFrom-Json
+        $merged = Add-LandArgumentSuffixTestArguments -Existing @($inp.arguments) -Suffixes $suffixes
+        if ($merged.Missing.Count -gt 0) { Log "  ! ${name}: у PARITY_1 немає оригіналів аргументів: $($merged.Missing -join ', ')" }
+        if ($merged.Added.Count -eq 0) { continue }
+        $newInput = [ordered]@{ documentId = $inp.documentId; periodKey = $inp.periodKey; arguments = @($merged.Arguments) }
+        $body = @{ inputJson = ($newInput | ConvertTo-Json -Depth 8 -Compress); expectedJson = [string]$t.expectedJson; tolerance = [string]$t.tolerance }
+        $pt = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/tests/PARITY_1" -Body $body
+        if ($pt.Status -eq 200) { $changed++; Log "  ${name}: PARITY_1 + суфіксовані аргументи: $($merged.Added -join ',')" }
+        else { Log "  ! ${name}: PARITY_1 HTTP $($pt.Status) $(Get-EcrErrorCode $pt)" }
+    }
+    Log "  змінено: $changed"
+}
+
 # ==================== ParityBranch (C12_02: вибір type1/type2 за наявністю компонента) ====================
 # Лише явно: -Stage ParityBranch. У ЧЕРНЕТЦІ методології з LandParityBranch.Lib.ps1 формули type2 компонентів
 # обгортаються `if(@Land_Measure_Component_<код> = NULL, <вираз>, NULL)`: старий код C12_02 рахує для компонента лише
@@ -2080,6 +2139,9 @@ if ($Stage -contains 'SubstanceApplicability') { Stage-SubstanceApplicability }
     if ($Stage -contains 'MassFraction' -or $Stage -contains 'CompositionMass') { Stage-MassFraction }
     # C12_02: вибір type1/type2 - лише явно (-Stage ParityBranch); у 'All' не входить; ПІСЛЯ Methodologies (створює формули).
     if ($Stage -contains 'ParityBranch') { Stage-ParityBranch }
+    # K1: аргументи з суфіксом методології - лише явно (-Stage ArgumentSuffix); ПЕРЕД OptionalArguments (той лишається
+    # останнім), після CompositionMass/SubstanceApplicability/ParityBranch (токени цих етапів з K1 не перетинаються).
+    if ($Stage -contains 'ArgumentSuffix') { Stage-ArgumentSuffix }
     # D-397: маркер `?` необов'язкових аргументів - лише явно (-Stage OptionalArguments); ОСТАННІМ: попередні етапи
     # переписують списки аргументів і зберігають чужі елементи як є, тож маркер ставиться на готовий список.
     if ($Stage -contains 'OptionalArguments') { Stage-OptionalArguments }
