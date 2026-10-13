@@ -332,7 +332,7 @@ public sealed class PublishMethodologyHandler(
         // ✎ L-2: і `@`-аргументи правила категорії — воно читає той самий рядок.
         ParsedFormula[] ruleFormulas = categoryRule.Rule is { } rule ? [rule] : [];
         await CheckArgumentColumnsAsync(
-                methodology.Id, [.. parsed, .. LibraryFormulas(libraries)], ruleFormulas, ct)
+                methodology.Id, [.. parsed, .. LibraryFormulas(libraries)], ruleFormulas, warnings, strings, ct)
             .ConfigureAwait(false);
 
         // ⛔ V-18: невідома константа — іменна відмова, а не рядок у «N проблем».
@@ -757,6 +757,8 @@ public sealed class PublishMethodologyHandler(
     /// <param name="categoryRule">
     /// Розібране правило категорії (порожньо — правила немає): його відмова — <c>ECR-CALC-0422</c>, не 0438.
     /// </param>
+    /// <param name="warnings">Попередження публікації (D-OA: необов'язковий аргумент без колонки).</param>
+    /// <param name="strings">Каталог текстів мовою публікуючого; <c>null</c> — англійський запас.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⚠ Методологія без жодної прив'язки перевірку пропускає мовчки: це не
@@ -769,6 +771,8 @@ public sealed class PublishMethodologyHandler(
         int methodologyId,
         IReadOnlyList<ParsedFormula> formulas,
         IReadOnlyList<ParsedFormula> categoryRule,
+        ICollection<string> warnings,
+        UiStringCatalog? strings,
         CancellationToken ct)
     {
         var methodologyBindings = await bindings.ListAsync(methodologyId, ct).ConfigureAwait(false);
@@ -788,6 +792,10 @@ public sealed class PublishMethodologyHandler(
         // ECR-CALC-0422 / categoryRuleUnknownArgument, а не 0438 формул.
         // D-OA (Q-OA-3): правило категорії успадковує необов'язкові аргументи формул версії.
         var optionalArguments = MethodologyPublishChecks.OptionalArguments(formulas);
+
+        // D-OA (Q-OA-5): описка в імені необов'язкового аргументу не мусить ховатись — лише попередження.
+        MethodologyPublishChecks.WarnOptionalWithoutColumn(optionalArguments, columnCodesByTable, warnings, strings);
+
         foreach (var rule in categoryRule)
         {
             MethodologyCategoryRuleChecks.CheckArgumentColumns(rule, columnCodesByTable, optionalArguments);

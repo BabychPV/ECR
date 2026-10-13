@@ -313,9 +313,29 @@ public sealed class ImportedFormulaReferencePublishTests
         optional.SetArguments("Flow?");
         Formulas([optional]);
 
-        await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
+        var diff = await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
 
         Assert.True(_version.IsPublished);
+
+        // Q-OA-5: optional без колонки в жодній прив'язаній таблиці — лише попередження, не відмова.
+        var warning = Assert.Single(diff.Warnings ?? [], w => w.Contains("Optional argument", StringComparison.Ordinal));
+        Assert.Contains("\"Flow\"", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Необовязковий_аргумент_з_колонкою_у_таблиці_не_дає_попередження()
+    {
+        BindTable(44, ["Volume", "Flow"]);
+
+        var formula = Formula(103, "Total", "@Flow * 2");
+        formula.SetArguments("Flow?");
+        Formulas([formula]);
+
+        var diff = await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
+
+        Assert.True(_version.IsPublished);
+        Assert.DoesNotContain(diff.Warnings ?? [], w => w.Contains("Optional argument", StringComparison.Ordinal));
     }
 
     private void BindTable(int tableDefId, string[] columns)

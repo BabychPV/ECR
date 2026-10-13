@@ -8048,6 +8048,9 @@ USING (VALUES
     -- COLL:ww03-period-absolute ── WW-03: [Period:#k] — абсолютний період року (номер поза 1..99); ru/kz — порцією COLL:ww03-period-absolute нижче ──
     ,(N'expr.periodAbsoluteRange', N'en', N'An absolute period "[Period:#k]" must be a number from 1 to 99.', 1)
     -- COLL:ww03-period-absolute ── кінець секції ──
+    -- COLL:optional-argument ── D-OA: необов'язковий аргумент `Name?`, попередження публікації; ru/kz — порцією COLL:optional-argument нижче ──
+    ,(N'publish.warning.optionalArgumentNoColumn', N'en', N'Optional argument {name} has no column in any bound table ({tables}) - it is always null. Most often a typo in the argument name.', 1)
+    -- COLL:optional-argument ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -20231,6 +20234,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ww03-period-absolute ── кінець секції ──
+-- COLL:optional-argument ── ru/kz: D-OA, необязательный аргумент `Name?`; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'publish.warning.optionalArgumentNoColumn', N'ru', N'Необязательный аргумент {name} не имеет столбца ни в одной привязанной таблице ({tables}) — он всегда null. Чаще всего это опечатка в имени аргумента.'),
+    (N'publish.warning.optionalArgumentNoColumn', N'kz', N'{name} міндетті емес аргументінің байланысқан кестелердің ешқайсысында бағаны жоқ ({tables}) — ол әрдайым null. Көбінесе бұл аргумент атауындағы қате.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:optional-argument ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

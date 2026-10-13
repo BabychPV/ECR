@@ -330,6 +330,60 @@ public static class MethodologyPublishChecks
     }
 
     /// <summary>
+    /// D-OA (R2, Q-OA-5): попередження — необов'язковий аргумент, якого немає в ЖОДНІЙ прив'язаній таблиці.
+    /// Не блокує публікацію (початково порожня прив'язка законна), але описка в імені не ховається мовчки.
+    /// </summary>
+    /// <param name="optional">Необов'язкові імена (<see cref="OptionalArguments"/>).</param>
+    /// <param name="columnCodesByTable">Коди колонок прив'язаних таблиць.</param>
+    /// <param name="warnings">Куди додати попередження.</param>
+    /// <param name="strings">Каталог текстів; <c>null</c> — англійський запас.</param>
+    /// <returns>Імена без колонки (для тестів), у порядку без урахування регістру.</returns>
+    public static IReadOnlyList<string> WarnOptionalWithoutColumn(
+        IReadOnlySet<string> optional,
+        IReadOnlyDictionary<int, IReadOnlyList<string>> columnCodesByTable,
+        ICollection<string> warnings,
+        UiStringCatalog? strings)
+    {
+        ArgumentNullException.ThrowIfNull(optional);
+        ArgumentNullException.ThrowIfNull(columnCodesByTable);
+        ArgumentNullException.ThrowIfNull(warnings);
+
+        if (optional.Count == 0 || columnCodesByTable.Count == 0)
+        {
+            return [];
+        }
+
+        var known = new HashSet<string>(
+            columnCodesByTable.Values.SelectMany(codes => codes), StringComparer.OrdinalIgnoreCase);
+        var tables = string.Join(
+            ", ",
+            columnCodesByTable.Keys.Order().Select(id => id.ToString(CultureInfo.InvariantCulture)));
+
+        var orphans = optional
+            .Where(name => !known.Contains(name))
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var name in orphans)
+        {
+            const string Key = "publish.warning.optionalArgumentNoColumn";
+            var args = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["name"] = name,
+                ["tables"] = tables,
+            };
+
+            warnings.Add(strings is null
+                ? $"Optional argument \"{name}\" has no column in any bound table ({tables}) - it is always null. "
+                  + "Most often a typo in the argument name."
+                : Ecr.Application.Localization.UiStringResolver.Format(
+                    Ecr.Application.Localization.UiStringResolver.Resolve(strings, Key), args));
+        }
+
+        return orphans;
+    }
+
+    /// <summary>
     /// Звіряє аргументи, які формули версії РЕАЛЬНО вживають, з кодами колонок
     /// таблиць, куди <c>CalculationBinding</c> цю методологію прив'язує
     /// (директива «структурна перевірка аргументів методології при
