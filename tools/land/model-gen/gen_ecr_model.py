@@ -397,8 +397,8 @@ EXTRA = {
               'MercaptanSulphurContent': ('Decimal', None, 'one', 'Mercaptan sulphur content (HSE400; manual input here)')},
     'T5_08': {'DaysInCalcMonth': ('Formula', '[Period].Days', 'one', 'Days in calculation month'),
               'DaysInCalcYear': ('Formula', '([Period].Year % 4 = 0) ? 366 : 365', 'one', 'Days in calculation year'),
-              'Winter': ('Formula', '([Period].Sequence < 4 OR [Period].Sequence > 9) ? 1 : 0', 'one', 'Winter flag')},
-    'T5_09': {'Winter': ('Formula', '([Period].Sequence < 4 OR [Period].Sequence > 9) ? 1 : 0', 'one', 'Winter flag')},
+              'Winter': ('Formula', '([Period].Sequence < 3 OR [Period].Sequence > 8) ? 1 : 0', 'one', 'Winter flag')},
+    'T5_09': {'Winter': ('Formula', '([Period].Sequence < 3 OR [Period].Sequence > 8) ? 1 : 0', 'one', 'Winter flag')},
     'T5_22': {'CalculationMonth': ('Formula', '[Period].Sequence', 'one', 'Calculation month')},
     'T5_27': {'Con_Region': ('String', None, None, 'Contract region (header Region; manual input here)')},
 }
