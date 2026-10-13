@@ -167,6 +167,94 @@ public sealed class LandHse400CompositionScriptTests
         Assert.Contains("FALLBACKS=3", output, StringComparison.Ordinal);         // FG_Export і FG_Makat (січень), FG_Internal (лютий)
     }
 
+    /// <summary>
+    /// Зміна наявного запису - batch upsert за <c>id</c> БЕЗ code/name (код наявного запису = ECR-REG-0409
+    /// entryCodeTaken, баг першого -RewriteAliased на :5094). Функції беруться з самого скрипта (AST) із підставним
+    /// Invoke-Ecr: перевіряється форма запиту, відмова (Rejected > 0 -> код виходу скрипта 1) і ідемпотентність.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Перезапис_наявного_запису_йде_за_id_без_code_відмова_лічиться_повтор_без_змін()
+    {
+        const string script = """
+            $ErrorActionPreference = 'Stop'
+            $text = Get-Content -Raw -LiteralPath $args[0]
+            $ast = [System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$null)
+            $fns = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and ($n.Name -eq 'Add-HseEntries' -or $n.Name -eq 'New-HseCompositionValues') }, $true)
+            foreach ($f in $fns) { Invoke-Expression $f.Extent.Text }
+            $BatchSize = 200
+            $script:calls = New-Object System.Collections.Generic.List[object]
+            $script:mode = 'ok'
+            function Assert-EcrOk($r, $what) { }
+            function Invoke-Ecr {
+                param($Method, $Path, $Body, $Headers)
+                $script:calls.Add([pscustomobject]@{ Path = $Path; Items = @($Body.items) })
+                $n = @($Body.items).Count
+                if ($script:mode -eq 'conflict') {
+                    return [pscustomobject]@{ Json = [pscustomobject]@{ applied = $false; added = 0; updated = 0; unchanged = 0
+                            rows = @([pscustomobject]@{ status = 'error'; errors = @([pscustomobject]@{ errorCode = 'ECR-REG-0409' }) }) } }
+                }
+                $up = if ($script:mode -eq 'repeat') { 0 } else { 1 }
+                return [pscustomobject]@{ Json = [pscustomobject]@{ applied = $true; added = 0; updated = $up; unchanged = $n - $up; rows = @() } }
+            }
+            $item = [pscustomobject]@{ Year = 2026; Month = 1; Stream = 'FG_Internal'; Indicator = 'C6_C10_mass'; Value = '0.22' }
+            $vals = New-HseCompositionValues $item
+            $rows = @(
+                [pscustomobject]@{ ClientRowId = 'A'; Id = 4711; Values = $vals },
+                [pscustomobject]@{ ClientRowId = 'B'; Id = 4712; Values = $vals })
+
+            $r = Add-HseEntries 'LAND_HSE400_COMPOSITION' $rows
+            $first = $script:calls[0]
+            'PATH_DRY_FALSE=' + $first.Path.EndsWith('dryRun=false')
+            'HAS_ID=' + $first.Items[0].ContainsKey('id')
+            'ID=' + $first.Items[0]['id']
+            'HAS_CODE=' + $first.Items[0].ContainsKey('code')
+            'HAS_NAME=' + $first.Items[0].ContainsKey('name')
+            'VALUE=' + $first.Items[0]['values']['VALUE']
+            'UPDATED=' + $r.Updated
+            'REJECTED=' + $r.Rejected
+
+            $script:mode = 'repeat'
+            $r2 = Add-HseEntries 'LAND_HSE400_COMPOSITION' $rows
+            'REPEAT_UPDATED=' + $r2.Updated
+            'REPEAT_UNCHANGED=' + $r2.Unchanged
+            'REPEAT_REJECTED=' + $r2.Rejected
+
+            $script:mode = 'conflict'
+            $r3 = Add-HseEntries 'LAND_HSE400_COMPOSITION' $rows 3>$null
+            'CONFLICT_REJECTED=' + $r3.Rejected
+
+            $script:mode = 'ok'
+            $newRows = @([pscustomobject]@{ ClientRowId = 'N'; Code = 'H202601_X'; Display = 'H202601_X'; Values = $vals })
+            $null = Add-HseEntries 'LAND_HSE400_COMPOSITION' $newRows
+            $last = $script:calls[$script:calls.Count - 1]
+            'NEW_HAS_CODE=' + $last.Items[0].ContainsKey('code')
+            'NEW_HAS_ID=' + $last.Items[0].ContainsKey('id')
+
+            $null = Add-HseEntries 'LAND_HSE400_COMPOSITION' $rows -ServerDryRun
+            'DRY_PATH=' + $script:calls[$script:calls.Count - 1].Path.EndsWith('dryRun=true')
+            """;
+
+        var (exit, output) = RunPowerShell(script, LandFile("Import-LandHse400Composition.ps1"));
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("PATH_DRY_FALSE=True", output, StringComparison.Ordinal);
+        Assert.Contains("HAS_ID=True", output, StringComparison.Ordinal);
+        Assert.Contains("ID=4711", output, StringComparison.Ordinal);
+        Assert.Contains("HAS_CODE=False", output, StringComparison.Ordinal);   // код наявного запису = 409 entryCodeTaken
+        Assert.Contains("HAS_NAME=False", output, StringComparison.Ordinal);   // назву/вікно наявному не задають
+        Assert.Contains("VALUE=0.22", output, StringComparison.Ordinal);
+        Assert.Contains("UPDATED=1", output, StringComparison.Ordinal);
+        Assert.Contains("REJECTED=0", output, StringComparison.Ordinal);
+        Assert.Contains("REPEAT_UPDATED=0", output, StringComparison.Ordinal);  // повтор - 0 змін
+        Assert.Contains("REPEAT_UNCHANGED=2", output, StringComparison.Ordinal);
+        Assert.Contains("REPEAT_REJECTED=0", output, StringComparison.Ordinal);
+        Assert.Contains("CONFLICT_REJECTED=2", output, StringComparison.Ordinal); // відмова пакета -> exit 1 скрипта
+        Assert.Contains("NEW_HAS_CODE=True", output, StringComparison.Ordinal);
+        Assert.Contains("NEW_HAS_ID=False", output, StringComparison.Ordinal);
+        Assert.Contains("DRY_PATH=True", output, StringComparison.Ordinal);
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Скрипт_має_RewriteAliased_який_перезаписує_лише_псевдоніми_і_лише_за_підтвердженням_стенда()
@@ -175,6 +263,7 @@ public sealed class LandHse400CompositionScriptTests
 
         Assert.Contains("[switch]$RewriteAliased", text, StringComparison.Ordinal);
         Assert.Contains("$_.Aliased -and $haveComp.ContainsKey(", text, StringComparison.Ordinal);
+        Assert.Contains("if ($failed) { exit 1 }", text, StringComparison.Ordinal);
         // Мутація (як і решта) - після Set-EcrStandConfirmation; сам перезапис - лише за прапорцем.
         var confirm = text.IndexOf("Set-EcrStandConfirmation", StringComparison.Ordinal);
         var rewrite = text.IndexOf("$rewriteComp = if ($RewriteAliased)", StringComparison.Ordinal);

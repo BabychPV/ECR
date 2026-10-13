@@ -70,7 +70,8 @@ if ($BatchSize -lt 1 -or $BatchSize -gt 500) { throw '-BatchSize має бути
 # Лише локальний стенд і лише підтверджене локальне джерело - ДО будь-якого читання чи виклику.
 Assert-LocalBaseUrl $BaseUrl
 Assert-LocalSourceDatabase -Server $SourceServer -Database $SourceDatabase -ConfirmSource $ConfirmSource
-if (-not $dry) { Set-EcrStandConfirmation -Stand $ConfirmStand -Url $BaseUrl }
+# -DryRun з -ConfirmStand: підтвердження потрібне лише для серверного dryRun=true перезапису псевдонімів (відкат).
+if (-not $dry -or $ConfirmStand) { Set-EcrStandConfirmation -Stand $ConfirmStand -Url $BaseUrl }
 
 # 1. Джерело: лише SELECT … WITH (NOLOCK); значення не друкуються.
 # Сервер і база вже перевірені Assert-LocalSourceDatabase (без ;/=), тож рядок складається без ризику ін'єкції.
@@ -191,26 +192,38 @@ function Get-HseEntryCodes([string]$code) {
     $set = @{}
     $e = Invoke-Ecr -Method GET -Path "/api/v1/registries/$code/entries?asOf=$today"
     Assert-EcrOk $e "GET entries ($code)"
-    foreach ($x in @($e.Json)) { $set[([string]$x.code).ToUpperInvariant()] = $true }
+    # Значення - Id запису (для зміни наявного запису: batch upsert за `id`, а не за кодом - код наявного = 409).
+    foreach ($x in @($e.Json)) { $set[([string]$x.code).ToUpperInvariant()] = [long]$x.id }
     return $set
 }
 
-function Add-HseEntries([string]$code, [object[]]$rows) {
-    # rows: @{ clientRowId; code; display; values }. Повертає (додано, відхилено).
-    $added = 0; $rejected = 0
+function Add-HseEntries([string]$code, [object[]]$rows, [switch]$ServerDryRun) {
+    # rows: @{ clientRowId; code; display; values } - новий запис; @{ clientRowId; id; values } - зміна наявного
+    # (batch upsert за id без code/name: ECR-REG-0409 entryCodeTaken стосується лише НОВОГО рядка з кодом).
+    # Повертає (додано, відхилено, змінено, без змін).
+    $added = 0; $rejected = 0; $updated = 0; $unchanged = 0
+    $dryText = if ($ServerDryRun) { 'true' } else { 'false' }
     for ($i = 0; $i -lt $rows.Count; $i += $BatchSize) {
         $chunk = @($rows[$i..([Math]::Min($i + $BatchSize, $rows.Count) - 1)])
-        $items = @($chunk | ForEach-Object { @{ clientRowId = $_.ClientRowId; op = 'upsert'; code = $_.Code; name = $_.Display; values = $_.Values } })
-        $r = Invoke-Ecr -Method POST -Path "/api/v1/registries/$code/entries/batch?dryRun=false" -Body @{ items = $items }
+        $items = @($chunk | ForEach-Object {
+                if ($null -ne $_.Id) { @{ clientRowId = $_.ClientRowId; op = 'upsert'; id = [long]$_.Id; values = $_.Values } }
+                else { @{ clientRowId = $_.ClientRowId; op = 'upsert'; code = $_.Code; name = $_.Display; values = $_.Values } }
+            })
+        $r = Invoke-Ecr -Method POST -Path "/api/v1/registries/$code/entries/batch?dryRun=$dryText" -Body @{ items = $items }
         Assert-EcrOk $r "POST entries/batch ($code)"
-        if ($r.Json.applied) { $added += $chunk.Count; continue }
+        $updated += [int]$r.Json.updated; $unchanged += [int]$r.Json.unchanged
+        $errRows = @($r.Json.rows | Where-Object { $_.status -eq 'error' })
+        if ($ServerDryRun) {
+            if ($errRows.Count -eq 0) { $added += [int]$r.Json.added; continue }
+        }
+        elseif ($r.Json.applied) { $added += $chunk.Count; continue }
         # Пачка відхилена повністю: рахуємо за кодами помилок, без значень.
         $bad = @($r.Json.rows | Where-Object { $_.status -eq 'error' })
         $rejected += $chunk.Count
         $codes = @($bad | ForEach-Object { @($_.errors) | ForEach-Object { [string]$_.errorCode } } | Group-Object | ForEach-Object { "$($_.Name)×$($_.Count)" })
         Write-Warning "Пачка $code [$i..]: відхилено ($($codes -join ', '))."
     }
-    return [pscustomobject]@{ Added = $added; Rejected = $rejected }
+    return [pscustomobject]@{ Added = $added; Rejected = $rejected; Updated = $updated; Unchanged = $unchanged }
 }
 
 # 2. Довідники й записи.
@@ -226,25 +239,48 @@ $newComp = @($plan.Items | Where-Object { -not $haveComp.ContainsKey($_.EntryCod
 # -RewriteAliased: наявні записи-псевдоніми теж йдуть upsert-ом (виправлення значення, що лягло як запасна).
 $rewriteComp = if ($RewriteAliased) { @($plan.Items | Where-Object { $_.Aliased -and $haveComp.ContainsKey($_.EntryCode.ToUpperInvariant()) }) } else { @() }
 
+function New-HseCompositionValues($item) {
+    # Числа йдуть JSON-числами: рядок «1,234» сервер читає за мовою користувача (неоднозначно).
+    return @{ YEAR = [int]$item.Year; MONTH = [int]$item.Month; STREAM = $item.Stream; INDICATOR = $item.Indicator
+        VALUE = [decimal]::Parse($item.Value, [System.Globalization.CultureInfo]::InvariantCulture) }
+}
+
 $failed = $false
-$streamAdded = 0; $compAdded = 0
+$streamAdded = 0; $compAdded = 0; $rewriteUpdated = 0; $rewriteUnchanged = 0
 if ($dry -or $null -eq $stream.Definition -or $null -eq $comp.Definition) {
-    $streamAdded = $newStream.Count; $compAdded = $newComp.Count + $rewriteComp.Count
+    $streamAdded = $newStream.Count; $compAdded = $newComp.Count
+    # Перезапис псевдонімів у dry-run: серверний dryRun=true (транзакція відкочується) - показує, що змінилось би.
+    if ($rewriteComp.Count -gt 0 -and $null -ne $comp.Definition -and $ConfirmStand) {
+        $rrows = @($rewriteComp | ForEach-Object {
+                [pscustomobject]@{ ClientRowId = $_.EntryCode; Id = $haveComp[$_.EntryCode.ToUpperInvariant()]; Values = (New-HseCompositionValues $_) } })
+        $d = Add-HseEntries $defs.Composition.Code $rrows -ServerDryRun
+        $rewriteUpdated = $d.Updated; $rewriteUnchanged = $d.Unchanged
+        if ($d.Rejected) { $failed = $true }
+    }
 }
 else {
     $rows = @($newStream | ForEach-Object { [pscustomobject]@{ ClientRowId = $_.EntryCode; Code = $_.EntryCode; Display = $_.Display; Values = @{ TEXT = $_.Text; PREFIX = $_.Prefix } } })
     if ($rows.Count) { $s = Add-HseEntries $defs.Stream.Code $rows; $streamAdded = $s.Added; if ($s.Rejected) { $failed = $true } }
     if (-not $failed) {
-        $rows = @(@($newComp) + @($rewriteComp) | ForEach-Object {
-                [pscustomobject]@{ ClientRowId = $_.EntryCode; Code = $_.EntryCode; Display = $_.EntryCode
-                    # Числа йдуть JSON-числами: рядок «1,234» сервер читає за мовою користувача (неоднозначно).
-                    Values = @{ YEAR = [int]$_.Year; MONTH = [int]$_.Month; STREAM = $_.Stream; INDICATOR = $_.Indicator
-                        VALUE = [decimal]::Parse($_.Value, [System.Globalization.CultureInfo]::InvariantCulture) } } })
+        $rows = @($newComp | ForEach-Object {
+                [pscustomobject]@{ ClientRowId = $_.EntryCode; Code = $_.EntryCode; Display = $_.EntryCode; Values = (New-HseCompositionValues $_) } })
         if ($rows.Count) { $c = Add-HseEntries $defs.Composition.Code $rows; $compAdded = $c.Added; if ($c.Rejected) { $failed = $true } }
+    }
+    # Зміна наявних записів-псевдонімів: окремий пакет, за Id запису (без code/name); повтор -> «без змін».
+    if (-not $failed -and $rewriteComp.Count -gt 0) {
+        $rrows = @($rewriteComp | ForEach-Object {
+                [pscustomobject]@{ ClientRowId = $_.EntryCode; Id = $haveComp[$_.EntryCode.ToUpperInvariant()]; Values = (New-HseCompositionValues $_) } })
+        $w = Add-HseEntries $defs.Composition.Code $rrows
+        $rewriteUpdated = $w.Updated; $rewriteUnchanged = $w.Unchanged
+        if ($w.Rejected) { $failed = $true }
     }
 }
 
 Write-Host "Словник $($defs.Stream.Code): додано $streamAdded, наявних $(@($streamPlan.Items).Count - $newStream.Count)."
-Write-Host "Склад $($defs.Composition.Code): додано/перезаписано $compAdded (з них перезаписано псевдонімів: $($rewriteComp.Count)), наявних $(@($plan.Items).Count - $newComp.Count)."
-Write-Host "Змін: $($changes + $streamAdded + $compAdded)$(if ($dry) { ' (dry-run, нічого не записано)' })."
+Write-Host "Склад $($defs.Composition.Code): додано $compAdded, наявних $(@($plan.Items).Count - $newComp.Count)."
+if ($RewriteAliased) {
+    if ($dry -and -not $ConfirmStand) { Write-Host "Псевдоніми наявних записів: до перезапису $($rewriteComp.Count); скільки з них зміниться - покаже -DryRun з -ConfirmStand (серверний dryRun=true)." }
+    else { Write-Host "Псевдоніми наявних записів: до перезапису $($rewriteComp.Count); змінено $rewriteUpdated; без змін $rewriteUnchanged$(if ($dry) { ' (серверний dryRun, відкат)' })." }
+}
+Write-Host "Змін: $($changes + $streamAdded + $compAdded + $rewriteUpdated)$(if ($dry) { ' (dry-run, нічого не записано)' })."
 if ($failed) { exit 1 }
