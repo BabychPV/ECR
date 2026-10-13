@@ -41,8 +41,19 @@ public sealed class RecalculationService(
     // ФВ-0.2: куди писати попередження про діапазон, розкритий за поточним порядком попри збережений
     // граф (`SliceEvaluationContext`). Необов'язковий: без нього лишається лічильник
     // `ecr.recalc.range_fallback`; DI підставляє `ILogger<RecalculationService>`.
-    Microsoft.Extensions.Logging.ILogger<RecalculationService>? logger = null) : ISubmitRecalculation
+    Microsoft.Extensions.Logging.ILogger<RecalculationService>? logger = null,
+
+    // LP-40: знімок довідників для форм REG* у формулах шаблону (REGFIND/REGONE/агрегати). Необов'язковий:
+    // прямі `new RecalculationService(...)` у тестах його не передають (REG* тоді #REF, як і раніше);
+    // DI підставляє `RegistrySnapshotLoader`.
+    IRegistrySnapshotLoader? registrySnapshots = null) : ISubmitRecalculation
 {
+    /// <summary>
+    /// LP-40: джерела знімків довідників цього екземпляра сервісу (скоуп = один прогін задачі чи запит):
+    /// читання БД — раз на набір довідників, знімок на дату — у пам'яті раз на (набір, бізнес-дата).
+    /// </summary>
+    private readonly TemplateRegistrySnapshots _templateSnapshots = new();
+
     /// <summary>Автор обчислених значень: їх ставить система, а не людина.</summary>
     /// <remarks>
     /// ⚠ Нуль тут не «невідомо хто», а «не людина». Підставити сюди того, хто
@@ -498,12 +509,23 @@ public sealed class RecalculationService(
         // зайвим походом у базу там, де достатньо одного.
         var headerValues = await headers.GetExpressionValuesAsync(instance.DocumentId, ct).ConfigureAwait(false);
 
+        var periodContext = await PeriodOf(instance.DocumentId, periodKey, ct).ConfigureAwait(false);
+
+        // ⛔ LP-40: знімок довідників для REG*-форм формул-ЦІЛЕЙ. Коди — з літералів розібраних цілей
+        // (як `GenericCalculationModule.RegistryCodes`); нуль REG*-форм — нуль звернень до БД.
+        var templateRegistries = await _templateSnapshots
+            .GetAsync(
+                parsed.Values.Select(p => p.Root), periodContext.End,
+                registrySnapshots, registryStore, ct)
+            .ConfigureAwait(false);
+
         var context = new SliceEvaluationContext(
             snapshot, values, headerValues,
-            await PeriodOf(instance.DocumentId, periodKey, ct).ConfigureAwait(false),
+            periodContext,
             catalogue, rowIdsByTable, registryFields,
             formulaDependencies: dependencies,
-            logger: logger);
+            logger: logger,
+            registries: templateRegistries);
 
         // Результати групуються за екземпляром: кожна таблиця пишеться
         // своїм набором змін, бо `CellChangeSet` адресує один екземпляр.

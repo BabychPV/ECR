@@ -100,6 +100,11 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
     /// Куди писати попередження про діапазон, розкритий за поточним порядком попри збережений граф
     /// (ФВ-0.2); <c>null</c> — лише лічильник <c>ecr.recalc.range_fallback</c>.
     /// </param>
+    /// <param name="registries">
+    /// LP-40: знімок довідників на бізнес-дату періоду для форм <c>REG*</c> у формулах шаблону
+    /// (<c>REGFIND</c>, <c>REGONE</c>, агрегати). Контекст віддає його лише формулам, які ці форми
+    /// містять (<see cref="Registries"/>); <c>null</c> — знімка немає, <c>REG*</c> дає <c>#REF</c>.
+    /// </param>
     public SliceEvaluationContext(
         TemplateVersionSnapshot snapshot,
         IReadOnlyDictionary<CellKey, ExpressionValue> values,
@@ -109,11 +114,13 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
         IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> rowsByTable,
         IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null,
         IReadOnlyList<FormulaDependency>? formulaDependencies = null,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        IRegistrySnapshot? registries = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         _formulaDependencies = formulaDependencies;
         _logger = logger;
+        _registryView = registries is null ? null : new LookupFallbackSnapshot(registries, this);
         _templateVersionId = snapshot.TemplateVersionId;
 
         _resolver = new ReferenceResolver(snapshot);
@@ -149,6 +156,49 @@ public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
     {
         _formula = formula;
         _formulaRoot = root;
+        _formulaUsesRegistries = _registryView is not null && root is not null && TemplateRegistryUse.Scan(root, null);
+    }
+
+    private readonly IRegistrySnapshot? _registryView;
+    private bool _formulaUsesRegistries;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ LP-40. Знімок віддається ЛИШЕ формулі, що містить форму <c>REG*</c>: тоді <c>REGFIND</c> знаходить
+    /// запис, а зовнішній <c>REGFIELD(id, 'F')</c> читає його поле з того самого знімка
+    /// (<c>RegistryForms.FieldPath</c>). Формула без <c>REG*</c> (<c>REGFIELD([Lookup], 'F')</c>) далі
+    /// читає вузький словник полів Lookup-комірок: знімок дав би <c>#REF</c> на запис, довідника якого
+    /// в ньому немає. Для змішаної формули невідомий знімку запис добирається з того ж словника
+    /// (<see cref="LookupFallbackSnapshot"/>).
+    /// </remarks>
+    public IRegistrySnapshot? Registries => _formulaUsesRegistries ? _registryView : null;
+
+    /// <summary>
+    /// Знімок для формули зі змішаним читанням: поле запису, якого знімок не бачить (<c>#REF</c>),
+    /// береться зі словника Lookup-комірок — як було до LP-40.
+    /// </summary>
+    private sealed class LookupFallbackSnapshot(IRegistrySnapshot inner, SliceEvaluationContext owner) : IRegistrySnapshot
+    {
+        public IReadOnlyList<long>? GetEntries(string registryCode) => inner.GetEntries(registryCode);
+
+        public IReadOnlyList<long>? FindByPrimaryKey(string registryCode, IReadOnlyList<ExpressionValue> keyParts)
+            => inner.FindByPrimaryKey(registryCode, keyParts);
+
+        public IReadOnlyList<long>? FindReferencing(string registryCode, string lookupFieldCode, long targetEntryId)
+            => inner.FindReferencing(registryCode, lookupFieldCode, targetEntryId);
+
+        public ExpressionValue GetField(long entryId, string fieldCode)
+        {
+            var value = inner.GetField(entryId, fieldCode);
+            if (value.IsError
+                && owner._registryFields.TryGetValue(entryId, out var byField)
+                && byField.TryGetValue(fieldCode, out var stored))
+            {
+                return stored;
+            }
+
+            return value;
+        }
     }
 
     /// <summary>
