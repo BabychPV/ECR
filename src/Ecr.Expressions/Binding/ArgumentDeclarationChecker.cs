@@ -1,4 +1,4 @@
-﻿// src/Ecr.Expressions/Binding/ArgumentDeclarationChecker.cs
+// src/Ecr.Expressions/Binding/ArgumentDeclarationChecker.cs
 using System.Runtime.CompilerServices;
 using Ecr.Expressions.Ast;
 
@@ -147,6 +147,7 @@ public static class ArgumentDeclarationChecker
         var unused = declared
             .Where(name => !usedKeys.Contains(NormalizeName(name))
                            && !contextualKeys.Contains(NormalizeName(name)))
+            .Select(StripMarker)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -185,7 +186,72 @@ public static class ArgumentDeclarationChecker
             trimmed = trimmed[1..];
         }
 
+        // D-OA: кінцевий `?` — маркер «необов'язковий», а не частина імені.
+        if (trimmed.EndsWith(OptionalMarker))
+        {
+            trimmed = trimmed[..^1].TrimEnd();
+        }
+
         return trimmed.Replace('.', '_');
+    }
+
+    /// <summary>Маркер необов'язкового аргументу в <c>;</c>-списку: <c>Name?</c>.</summary>
+    public const char OptionalMarker = '?';
+
+    /// <summary>Чи елемент списку позначено як необов'язковий (<c>Name?</c>).</summary>
+    /// <param name="declaredItem">Сирий елемент списку.</param>
+    /// <returns><c>true</c> — один кінцевий <c>?</c> після trim і непорожнє ім'я перед ним.</returns>
+    public static bool IsOptionalMarker(string? declaredItem)
+    {
+        if (declaredItem is null)
+        {
+            return false;
+        }
+
+        var trimmed = declaredItem.Trim();
+        return trimmed.Length > 1 && trimmed.EndsWith(OptionalMarker) && trimmed[..^1].Trim().Length > 0;
+    }
+
+    /// <summary>
+    /// Нормалізовані імена необов'язкових аргументів (елементи з кінцевим <c>?</c>).
+    /// </summary>
+    /// <param name="declaredItems">Сирі елементи списку (можуть бути <c>null</c>).</param>
+    /// <returns>Множина без урахування регістру; порожня, якщо маркерів немає.</returns>
+    public static IReadOnlySet<string> OptionalNames(IEnumerable<string>? declaredItems)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (declaredItems is null)
+        {
+            return result;
+        }
+
+        foreach (var item in declaredItems)
+        {
+            if (IsOptionalMarker(item))
+            {
+                var name = NormalizeName(item);
+                if (name.Length > 0)
+                {
+                    result.Add(name);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Необов'язкові імена з одного сирого <c>;</c>-списку (<c>ArgumentsCsv</c>); <c>null</c> — порожня множина.
+    /// </summary>
+    /// <param name="argumentsCsv">Значення <c>ArgumentsCsv</c> формули.</param>
+    /// <returns>Нормалізовані імена без урахування регістру.</returns>
+    public static IReadOnlySet<string> OptionalNamesFromCsv(string? argumentsCsv)
+        => OptionalNames(ParseDeclaration(argumentsCsv));
+
+    private static string StripMarker(string item)
+    {
+        var trimmed = item.Trim();
+        return IsOptionalMarker(trimmed) ? trimmed[..^1].TrimEnd() : item;
     }
 
     /// <summary>Імена констант <c>CST.X</c>, на які посилається вираз (без префікса).</summary>
