@@ -178,3 +178,47 @@ jobs:
             artifacts/setup-dev-db.api.log*
           retention-days: 14
           if-no-files-found: ignore
+
+  # ✎ 2026-10-13 (ретро #8): прогін без споживача. GitHub НЕ скасовує вже запущений
+  # run, коли PR змержено/закрито, а e2e іде 23-38 хв. Тому паралельний легкий
+  # спостерігач раз на 60 с питає стан PR і, якщо він не `open`, скасовує цей run.
+  # Не обов'язковий, до required-перевірок `main` не входить; на `e2e-stand (linux)`
+  # не впливає (лише скасовує run, коли PR уже закрито). Припиняється, щойно
+  # завершилось завдання `e2e-stand (linux)`.
+  # ⚠ Лише PR із цього ж репозиторію: токен форків read-only (`actions: write` нема),
+  # там скасування і так неможливе. Збій скасування не валить run (`|| true`).
+  cancel-when-closed:
+    name: e2e-cancel-when-closed
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (startsWith(github.head_ref, 'rc/') || startsWith(github.base_ref, 'rc/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 155
+    permissions:
+      actions: write
+      pull-requests: read
+      contents: read
+    steps:
+      - name: Скасувати run, якщо PR закрито
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          for _ in $(seq 1 150); do
+            state="$(gh api "repos/$REPO/pulls/$PR" --jq .state 2>/dev/null || true)"
+            if [ -n "$state" ] && [ "$state" != "open" ]; then
+              echo "PR #$PR: стан '$state' - скасовую run $RUN_ID."
+              gh run cancel "$RUN_ID" -R "$REPO" || true
+              exit 0
+            fi
+            e2e="$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+              --jq '.jobs[] | select(.name == "e2e-stand (linux)") | .status' 2>/dev/null || true)"
+            if [ "$e2e" = "completed" ]; then
+              echo "e2e-stand (linux) завершено - спостерігач не потрібен."
+              exit 0
+            fi
+            sleep 60
+          done
