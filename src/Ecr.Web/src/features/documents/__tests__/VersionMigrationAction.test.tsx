@@ -531,6 +531,20 @@ describe('useVersionMigrationAction', () => {
       expect(document.querySelector('[data-migrate-refused]')).not.toBeNull();
       expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(true);
       expect(sent).toHaveLength(1);
+
+      // «Ні» не липке: повторний сухий прогін знову пропонує перезапис.
+      fireEvent.click(screen.getByTestId('migrate-dry-run'));
+      await screen.findByTestId('migrate-overwrite-yes');
+    });
+
+    it('пропозиція - role=alert, фокус на безпечній дії «Ні»', async () => {
+      show(['Template.Edit'], refused, 'Manage', accepted);
+      await openAndPickTarget();
+      fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+      const no = await screen.findByTestId('migrate-overwrite-no');
+      expect(document.querySelector('[data-migrate-overwrite-offer]')?.getAttribute('role')).toBe('alert');
+      await waitFor(() => expect(document.activeElement).toBe(no));
     });
 
     it('є інші причини або guarded поза формулою - пропозиції немає', async () => {

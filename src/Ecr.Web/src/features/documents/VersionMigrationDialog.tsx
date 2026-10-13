@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { useReturnFocusOnUnmount } from '@/shared/a11y/focus';
 import { Alert, Button, Group, Modal, Progress, SegmentedControl, Select, Stack, Table, Text } from '@mantine/core';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -260,7 +260,11 @@ export function VersionMigrationDialog({
             variant="default"
             disabled={targetId === null || busy}
             loading={dryRun.isPending}
-            onClick={() => dryRun.mutate({ key: selectionKey, accept: false })}
+            onClick={() => {
+              // «Ні» не липке: новий сухий прогін знову пропонує перезапис.
+              setOverwriteDeclined(false);
+              dryRun.mutate({ key: selectionKey, accept: false });
+            }}
             data-testid="migrate-dry-run"
           >
             {t('documents.migrateDryRun')}
@@ -307,9 +311,16 @@ interface OverwriteOfferProps {
 /** Підтвердження перезапису: перелік комірок (без значень) і «Так/Ні». */
 function OverwriteOffer({ report, busy, onYes, onNo }: OverwriteOfferProps): JSX.Element {
   const items = report.guardedOverwrittenItems ?? [];
+  const noRef = useRef<HTMLButtonElement>(null);
+
+  // Безпечна дія («Ні») - у фокусі при появі пропозиції: Enter випадково не перезапише дані.
+  useEffect(() => {
+    noRef.current?.focus();
+  }, []);
 
   return (
-    <Alert color="statusWarning" role="group" aria-label={t('documents.migrateGuardedOverwriteTitle', { count: report.guardedOverwritable ?? 0 })} data-migrate-overwrite-offer="">
+    // `role="alert"` - скрінрідер оголошує появу пропозиції (вона з'являється після дії, а не при відкритті).
+    <Alert color="statusWarning" role="alert" data-migrate-overwrite-offer="">
       <Stack gap="xs">
         <Text size="sm" fw={500}>
           {t('documents.migrateGuardedOverwriteTitle', { count: report.guardedOverwritable ?? 0 })}
@@ -336,7 +347,7 @@ function OverwriteOffer({ report, busy, onYes, onNo }: OverwriteOfferProps): JSX
           </Text>
         )}
         <Group justify="flex-end">
-          <Button variant="default" size="xs" disabled={busy} onClick={onNo} data-testid="migrate-overwrite-no">
+          <Button ref={noRef} variant="default" size="xs" disabled={busy} onClick={onNo} data-testid="migrate-overwrite-no">
             {t('documents.migrateGuardedOverwriteCancel')}
           </Button>
           <Button size="xs" color="statusWarning" disabled={busy} onClick={onYes} data-testid="migrate-overwrite-yes">
