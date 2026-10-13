@@ -233,6 +233,81 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         Assert.Empty(nobody);
     }
 
+    /// <summary>
+    /// LP-45: сторінка в 50+ документів дає ті самі прапорці й «з якого моменту», що й кожен документ окремо
+    /// (контрольний результат рахується в тесті, не запитом). Мутація: у <c>StaleResultsQuery</c> замінити
+    /// <c>MIN(t.At)</c> на <c>MAX</c> або прибрати <c>ChangedAt &gt; r.StartedAt</c> — червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Сторінка_з_п_ятдесяти_документів_дає_ті_самі_прапорці_і_моменти_що_очікувані()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        var period = chain.PeriodKey.Value;
+        await using var db = builder.CreateContext();
+
+        var tag = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var documents = new List<long>();
+        for (var i = 0; i < 55; i++)
+        {
+            documents.Add(await AddDocumentAsync(db, chain, $"STP{tag}-{i:00}"));
+        }
+
+        var version = await VersionAsync(db);
+        await RunAsync(db, chain, version, Now, [.. documents]);
+
+        // i % 5: 0 - дві правки після прогону (потрібна найраніша), 1 - лише до прогону, 2 - лише Recalculation,
+        // 3 - правка в іншому періоді, 4 - без правок.
+        var expected = new Dictionary<long, DateTime?>();
+        for (var i = 0; i < documents.Count; i++)
+        {
+            var id = documents[i];
+            var column = chain.ColumnDefIds[1];
+            switch (i % 5)
+            {
+                case 0:
+                    await EditAsync(id, period, column, Now.AddHours(3));
+                    await EditAsync(id, period, column, Now.AddMinutes(10 + i));
+                    expected[id] = Now.AddMinutes(10 + i);
+                    break;
+                case 1:
+                    await EditAsync(id, period, column, Now.AddHours(-2));
+                    break;
+                case 2:
+                    await EditAsync(id, period, column, Now.AddHours(1), origin: "Recalculation");
+                    break;
+                case 3:
+                    await EditAsync(id, period + 1, column, Now.AddHours(1));
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        var page = (await new DocumentStore(db).ListAsync(
+            chain.ProjectId, new PeriodKeyFilter(period), new DocumentListFilter(null, null, Query: $"STP{tag}"),
+            new CursorRequest(Limit: 50), visibleProjectIds: null, CancellationToken.None)).Items;
+
+        Assert.Equal(50, page.Count);
+        foreach (var item in page)
+        {
+            var isStale = expected.TryGetValue(item.Id, out var since);
+            Assert.Equal(isStale, item.ResultsStale);
+            if (isStale)
+            {
+                Assert.True(
+                    Math.Abs((item.ResultsStaleSince!.Value - since!.Value).TotalSeconds) < 1,
+                    $"{item.Id}: {item.ResultsStaleSince:O} != {since:O}");
+            }
+            else
+            {
+                Assert.Null(item.ResultsStaleSince);
+            }
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
