@@ -879,7 +879,7 @@ export function MethodologyVersionsPage(): JSX.Element {
                 покрита тестами й недосяжна. */}
             <TextInput
               label={t('methodologies.arguments')}
-              description={t('methodologies.argumentsHint')}
+              description={`${t('methodologies.argumentsHint')} ${t('methodologies.argumentsOptionalHint')}`}
               value={editing.argumentsCsv}
               onChange={(event) =>
                 setEditing({ ...editing, argumentsCsv: event.currentTarget.value })
