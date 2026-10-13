@@ -112,10 +112,10 @@ public sealed record DocumentVersionMigrationDto(
     int LockedSheetsAffected = 0,
     IReadOnlyList<LockedSheetItem>? LockedSheetItems = null,
     bool LockedSheetItemsTruncated = false,
-    long GuardedOverwritable = 0,
-    bool GuardedOverwriteAccepted = false,
+    long? GuardedOverwritable = null,
+    bool? GuardedOverwriteAccepted = null,
     IReadOnlyList<GuardedOverwriteItem>? GuardedOverwrittenItems = null,
-    bool GuardedOverwrittenItemsTruncated = false);
+    bool? GuardedOverwrittenItemsTruncated = null);
 
 /// <summary>Комірка, значення якої перезапише нова комірочна формула (ACC-OW).</summary>
 /// <param name="SheetCode">Код аркуша вихідної версії.</param>
@@ -1067,7 +1067,7 @@ public sealed class MigrateDocumentVersionHandler(
         bool acceptGuardedOverwrite = false)
     {
         // ACC-OW: значення під новою формулою за згодою не «змінюють тлумачення» — у відмові лишається решта.
-        var guardedValues = acceptGuardedOverwrite ? dto.GuardedValues - dto.GuardedOverwritable : dto.GuardedValues;
+        var guardedValues = acceptGuardedOverwrite ? dto.GuardedValues - (dto.GuardedOverwritable ?? 0L) : dto.GuardedValues;
 
         if (dto.Refusals.Contains("projectArchived") || dto.Refusals.Contains("sheetsLocked"))
         {

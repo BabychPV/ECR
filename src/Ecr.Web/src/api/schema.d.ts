@@ -21883,23 +21883,16 @@ export interface components {
              *     лише їх) дозволяє перезаписати прапор `acceptGuardedOverwrite`; решта `guardedWithData` (звуження,
              *     зміна типу, одиниці, довідника, обов'язковості, режиму рядків) прапором НЕ знімається. Рахується завжди (також
              *     без прапора), щоб діалог показав кількість ДО згоди.
-             * @default 0
              */
-            guardedOverwritable: number;
-            /**
-             * @description Запит ніс `acceptGuardedOverwrite = true`.
-             * @default false
-             */
-            guardedOverwriteAccepted: boolean;
+            guardedOverwritable?: null | number;
+            /** @description Запит ніс `acceptGuardedOverwrite = true`. */
+            guardedOverwriteAccepted?: null | boolean;
             /** @description Перелік комірок шаблону, значення яких перезапише формула (за зростанням шляху), не більше
              *     `MaxGuardedOverwriteItems`; `null` — таких немає. ⛔ Без значень: лише адреса комірки й кількість
              *     введених значень у ній (по всіх документах і періодах проєкту). */
             guardedOverwrittenItems?: null | components["schemas"]["GuardedOverwriteItem"][];
-            /**
-             * @description ACC-OW: перелік обрізано стелею.
-             * @default false
-             */
-            guardedOverwrittenItemsTruncated: boolean;
+            /** @description ACC-OW: перелік обрізано стелею. */
+            guardedOverwrittenItemsTruncated?: null | boolean;
             /**
              * Format: int64
              * @description Скільки введених значень змінили б тлумачення.
@@ -23714,16 +23707,13 @@ export interface components {
         };
         /** @description Запит на перенос документа на нову версію шаблону (ФВ-7.5). */
         MigrateDocumentVersionRequest: {
-            /**
-             * @description ACC-OW: `true` — не відмовляти `guardedWithData` там, де «змінене тлумачення» — це лише НОВА комірочна
+            /** @description ACC-OW (необов'язкове; відсутнє або `null` = `false`): `true` — не відмовляти `guardedWithData` там, де «змінене тлумачення» — це лише НОВА комірочна
              *     формула цільової версії на комірці з уже введеним значенням (поле `CellFormula` у звіті): значення
              *     переїздить, а перерахунок після переносу замінює його результатом формули. Типово `false` (поведінка без
              *     прапора незмінна). Інші класи `guardedWithData` (звуження, тип, одиниця, довідник, обов'язковість, режим
              *     рядків) і подані/затверджені аркуші (`409 sheetsLocked`) прапор НЕ знімає. Те, що буде перезаписано,
-             *     сухий прогін показує до згоди: `guardedOverwritable`, `guardedOverwrittenItems`.
-             * @default false
-             */
-            acceptGuardedOverwrite: boolean;
+             *     сухий прогін показує до згоди: `guardedOverwritable`, `guardedOverwrittenItems`. */
+            acceptGuardedOverwrite?: null | boolean;
             /**
              * @description `true` — перенос (не сухий прогін) іде ФОНОВОЮ задачею: відповідь `202` з `jobId`, стан —
              *     `GET /jobs/{jobId}`. Типово `false` — як і раніше, синхронно з `200` і звітом

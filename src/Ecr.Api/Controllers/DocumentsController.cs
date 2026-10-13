@@ -384,14 +384,14 @@ public sealed class DocumentsController(
         if (request.Async && !request.DryRun)
         {
             var jobId = await migrateVersion
-                .EnqueueAsync(id, request.TargetVersionId, mode, request.TableRenames, request.AcceptGuardedOverwrite, ct)
+                .EnqueueAsync(id, request.TargetVersionId, mode, request.TableRenames, request.AcceptGuardedOverwrite ?? false, ct)
                 .ConfigureAwait(false);
 
             return Accepted(new Contracts.MigrationAcceptedResponse(jobId, id));
         }
 
         return Ok(await migrateVersion
-            .HandleAsync(id, request.TargetVersionId, mode, request.DryRun, request.TableRenames, request.AcceptGuardedOverwrite, ct)
+            .HandleAsync(id, request.TargetVersionId, mode, request.DryRun, request.TableRenames, request.AcceptGuardedOverwrite ?? false, ct)
             .ConfigureAwait(false));
     }
 
@@ -722,7 +722,7 @@ public sealed record ChangeDocumentKeyRequest(string? BusinessKey, string? Expec
 /// версій — <c>422 ECR-SCHM-0422</c> (<c>renameConflict</c>). Права ті самі, що й у переносу.
 /// </param>
 /// <param name="AcceptGuardedOverwrite">
-/// ACC-OW: <c>true</c> — не відмовляти <c>guardedWithData</c> там, де «змінене тлумачення» — це лише НОВА комірочна
+/// ACC-OW (необов'язкове; відсутнє або <c>null</c> = <c>false</c>): <c>true</c> — не відмовляти <c>guardedWithData</c> там, де «змінене тлумачення» — це лише НОВА комірочна
 /// формула цільової версії на комірці з уже введеним значенням (поле <c>CellFormula</c> у звіті): значення
 /// переїздить, а перерахунок після переносу замінює його результатом формули. Типово <c>false</c> (поведінка без
 /// прапора незмінна). Інші класи <c>guardedWithData</c> (звуження, тип, одиниця, довідник, обов'язковість, режим
@@ -735,7 +735,7 @@ public sealed record MigrateDocumentVersionRequest(
     bool DryRun,
     bool Async = false,
     IReadOnlyList<Application.Documents.VersionMigration.VersionMigrationTableRename>? TableRenames = null,
-    bool AcceptGuardedOverwrite = false);
+    bool? AcceptGuardedOverwrite = null);
 
 /// <summary>Запит на експорт.</summary>
 /// <param name="IncludeFormulas">
