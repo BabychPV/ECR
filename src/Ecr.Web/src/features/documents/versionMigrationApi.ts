@@ -34,6 +34,8 @@ interface MigrateDocumentVersionParams {
   readonly mode: VersionMigrationMode;
   /** `true` — лише звіт, сервер нічого не змінює. */
   readonly dryRun: boolean;
+  /** ACC-OW: `true` - згода людини перезаписати введені значення новою комірочною формулою (діалог «Перезаписати N значень»). */
+  readonly acceptGuardedOverwrite?: boolean;
 }
 
 /**
@@ -51,6 +53,7 @@ export function migrateDocumentVersion(params: MigrateDocumentVersionParams): Pr
       targetVersionId: params.targetVersionId,
       mode: params.mode,
       dryRun: params.dryRun,
+      ...(params.acceptGuardedOverwrite === true ? { acceptGuardedOverwrite: true } : {}),
       // Синхронний шлях (сухий прогін завжди синхронний; apply у фоні йде через `startMigrateDocumentVersion`).
       async: false,
     } satisfies components['schemas']['MigrateDocumentVersionRequest']),
@@ -74,6 +77,7 @@ export function startMigrateDocumentVersion(
       targetVersionId: params.targetVersionId,
       mode: params.mode,
       dryRun: false,
+      ...(params.acceptGuardedOverwrite === true ? { acceptGuardedOverwrite: true } : {}),
       async: true,
     } satisfies components['schemas']['MigrateDocumentVersionRequest']),
   });

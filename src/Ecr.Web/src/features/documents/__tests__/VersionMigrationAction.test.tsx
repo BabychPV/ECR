@@ -81,7 +81,7 @@ function report(overrides: Partial<VersionMigrationReport>): VersionMigrationRep
 
 interface Sent {
   readonly method: string;
-  readonly body: { targetVersionId: number; mode: string; dryRun: boolean; async?: boolean } | undefined;
+  readonly body: { targetVersionId: number; mode: string; dryRun: boolean; async?: boolean; acceptGuardedOverwrite?: boolean } | undefined;
 }
 
 const sent: Sent[] = [];
@@ -101,7 +101,12 @@ function jobStatus(overrides: Record<string, unknown>): unknown {
   };
 }
 
-function mockServer(permissions: string[], dryRunReport: VersionMigrationReport, grant = 'Manage'): void {
+function mockServer(
+  permissions: string[],
+  dryRunReport: VersionMigrationReport,
+  grant = 'Manage',
+  acceptedReport?: VersionMigrationReport,
+): void {
   sent.length = 0;
   jobRequests = 0;
   jobStates = [jobStatus({})];
@@ -130,7 +135,9 @@ function mockServer(permissions: string[], dryRunReport: VersionMigrationReport,
       if (url.includes('/migrate-version') && method === 'POST') {
         const body = JSON.parse(String(init?.body)) as Sent['body'];
         sent.push({ method, body });
-        if (body?.dryRun === true) return json(dryRunReport);
+        if (body?.dryRun === true) {
+          return json(body.acceptGuardedOverwrite === true && acceptedReport !== undefined ? acceptedReport : dryRunReport);
+        }
 
         // Перенос (не сухий прогін) іде фоном: 202 з `jobId`, а не звіт.
         return new Response(JSON.stringify({ jobId: 'IMigrateDocumentVersionJob-abc', documentId: DocumentId }), {
@@ -167,8 +174,13 @@ function Harness(): JSX.Element {
   );
 }
 
-function show(permissions: string[], dryRunReport: VersionMigrationReport, grant = 'Manage'): QueryClient {
-  mockServer(permissions, dryRunReport, grant);
+function show(
+  permissions: string[],
+  dryRunReport: VersionMigrationReport,
+  grant = 'Manage',
+  acceptedReport?: VersionMigrationReport,
+): QueryClient {
+  mockServer(permissions, dryRunReport, grant, acceptedReport);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
@@ -474,5 +486,80 @@ describe('useVersionMigrationAction', () => {
 
     await waitFor(() => expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(true));
     expect(screen.queryByText('⟦documents.migrateCanApply⟧')).toBeNull();
+  });
+  describe('ACC-OW: діалог «Перезаписати N значень»', () => {
+    const refused = report({
+      canApply: false,
+      refusals: ['guardedWithData'],
+      guardedValues: 221,
+      guardedOverwritable: 221,
+      guardedOverwriteAccepted: false,
+      guardedOverwrittenItems: [{ sheetCode: 'GEN', tableCode: 'T1', rowKey: 'R1', columnCode: 'C4', values: 221 }],
+      guardedOverwrittenItemsTruncated: true,
+    });
+    const accepted = report({ ...refused, canApply: true, refusals: [], guardedOverwriteAccepted: true });
+
+    it('«Так»: сухий прогін із прапором, потім apply async із тим самим прапором', async () => {
+      show(['Template.Edit'], refused, 'Manage', accepted);
+      await openAndPickTarget();
+      fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+      await screen.findByText('⟦documents.migrateGuardedOverwriteTitle (count=221)⟧');
+      expect(screen.getByText('⟦documents.migrateGuardedOverwriteItem (sheet=GEN, table=T1, row=R1, column=C4, values=221)⟧')).toBeDefined();
+      expect(document.querySelector('[data-migrate-overwrite-more]')).not.toBeNull();
+      expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(true);
+
+      fireEvent.click(screen.getByTestId('migrate-overwrite-yes'));
+      await waitFor(() => expect(document.querySelector('[data-migrate-overwrite-accepted]')).not.toBeNull());
+      expect(sent[1]?.body).toEqual({ targetVersionId: 2, mode: 'Safe', dryRun: true, acceptGuardedOverwrite: true, async: false });
+      expect(document.querySelector('[data-migrate-overwrite-offer]')).toBeNull();
+
+      await waitFor(() => expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(false));
+      fireEvent.click(screen.getByTestId('migrate-apply'));
+      await waitFor(() => expect(sent).toHaveLength(3));
+      expect(sent[2]?.body).toEqual({ targetVersionId: 2, mode: 'Safe', dryRun: false, acceptGuardedOverwrite: true, async: true });
+    });
+
+    it('«Ні»: пропозиція зникає, відмова лишається, запиту з прапором немає', async () => {
+      show(['Template.Edit'], refused, 'Manage', accepted);
+      await openAndPickTarget();
+      fireEvent.click(screen.getByTestId('migrate-dry-run'));
+      await screen.findByTestId('migrate-overwrite-no');
+
+      fireEvent.click(screen.getByTestId('migrate-overwrite-no'));
+      await waitFor(() => expect(document.querySelector('[data-migrate-overwrite-offer]')).toBeNull());
+      expect(document.querySelector('[data-migrate-refused]')).not.toBeNull();
+      expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(true);
+      expect(sent).toHaveLength(1);
+
+      // «Ні» не липке: повторний сухий прогін знову пропонує перезапис.
+      fireEvent.click(screen.getByTestId('migrate-dry-run'));
+      await screen.findByTestId('migrate-overwrite-yes');
+    });
+
+    it('пропозиція - role=alert, фокус на безпечній дії «Ні»', async () => {
+      show(['Template.Edit'], refused, 'Manage', accepted);
+      await openAndPickTarget();
+      fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+      const no = await screen.findByTestId('migrate-overwrite-no');
+      expect(document.querySelector('[data-migrate-overwrite-offer]')?.getAttribute('role')).toBe('alert');
+      await waitFor(() => expect(document.activeElement).toBe(no));
+    });
+
+    it('є інші причини або guarded поза формулою - пропозиції немає', async () => {
+      show(['Template.Edit'], { ...refused, guardedOverwritable: 100 });
+      await openAndPickTarget();
+      fireEvent.click(screen.getByTestId('migrate-dry-run'));
+      await screen.findByText('⟦documents.migrateRefusalGuarded⟧');
+      expect(document.querySelector('[data-migrate-overwrite-offer]')).toBeNull();
+      cleanup();
+
+      show(['Template.Edit'], { ...refused, refusals: ['guardedWithData', 'dataLoss'] });
+      await openAndPickTarget();
+      fireEvent.click(screen.getByTestId('migrate-dry-run'));
+      await screen.findByText('⟦documents.migrateRefusalDataLoss⟧');
+      expect(document.querySelector('[data-migrate-overwrite-offer]')).toBeNull();
+    });
   });
 });

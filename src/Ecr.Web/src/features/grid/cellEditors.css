@@ -166,3 +166,9 @@
   font-weight: var(--ecr-header-weight, inherit);
   font-style: var(--ecr-header-style, inherit);
 }
+
+/* Dark: світла заливка шапки → токен `--ecr-sunken` (макет D15-01); темна лишається. Колір тексту автора не затираємо. */
+:root[data-mantine-color-scheme='dark'] revo-grid[theme] revogr-header .rgHeaderCell.ecr-header-styled.ecr-header-fill-light {
+  background-color: var(--ecr-sunken);
+  color: var(--ecr-cell-fg-dark, var(--ecr-grid-text));
+}

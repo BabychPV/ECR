@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Group, Modal, NumberInput, Select, TextInput } from '@mantine/core';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
@@ -63,6 +63,29 @@ export function createProjectBody(form: {
     // старим значенням із попереднього вибору `Custom` у тій самій формі.
     customPeriodCount: form.periodKind === 'Custom' ? (form.customPeriodCount ?? null) : null,
   };
+}
+
+/**
+ * Версія шаблону за замовчуванням — остання ОПУБЛІКОВАНА (`ФВ-1.2`).
+ *
+ * ⚠ Це лише початкове значення форми: проєкт фіксує версію, слідування за
+ * новими версіями немає, перенос — явним migrate-version. «Остання» — за
+ * `publishedAt` (за рівності чи відсутності дати — більший `id`); непубліковані
+ * ігноруються. Порожній перелік → `null`.
+ */
+export function latestPublishedVersionId(
+  versions: ReadonlyArray<{ id: number; status: string; publishedAt: string | null }>,
+): string | null {
+  let best: { id: number; at: number } | null = null;
+  for (const version of versions) {
+    if (version.status !== 'Published') continue;
+    const parsed = version.publishedAt === null ? Number.NaN : Date.parse(version.publishedAt);
+    const at = Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+    if (best === null || at > best.at || (at === best.at && version.id > best.id)) {
+      best = { id: version.id, at };
+    }
+  }
+  return best === null ? null : String(best.id);
 }
 
 /** Поле форми створення проєкту, якого може бракувати для надсилання. */
@@ -224,6 +247,16 @@ export function CreateProjectModal({
       })),
   );
 
+  // Початкове значення — остання опублікована версія; щойно людина сама
+  // торкнулася поля (чи вже отримала значення), форма його більше не чіпає.
+  const versionTouched = useRef(false);
+  const defaultVersionId = latestPublishedVersionId(
+    versionQueries.flatMap((query) => query.data?.items ?? []),
+  );
+  useEffect(() => {
+    if (!versionTouched.current && defaultVersionId !== null) setVersionId(defaultVersionId);
+  }, [defaultVersionId]);
+
   const create = useMutation({
     mutationFn: () =>
       apiFetch<ProjectIdResponse>('/api/v1/projects', {
@@ -241,6 +274,7 @@ export function CreateProjectModal({
       setName({});
       setTimeZoneId(null);
       setVersionId(null);
+      versionTouched.current = false;
       setPolicyId(null);
       setCustomPeriodCount(null);
       onClose();
@@ -380,7 +414,10 @@ export function CreateProjectModal({
         description={t('periods.templateVersionHint')}
         data={publishedVersions}
         value={versionId}
-        onChange={setVersionId}
+        onChange={(value) => {
+          versionTouched.current = true;
+          setVersionId(value);
+        }}
       />
 
       <Select

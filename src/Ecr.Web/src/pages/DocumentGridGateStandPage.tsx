@@ -76,8 +76,21 @@ function column(code: string, ordinal: number, dataType: string, isReadOnly: boo
   };
 }
 
+/** `?headerFill=c6d9f1` — стиль шапки таблиці (`TableSliceDto.headerStyle`) для e2e шапки в Dark. */
+function headerStyle(): Record<string, unknown> | undefined {
+  const fill = /^[0-9a-f]{6}$/i.exec(new URLSearchParams(window.location.search).get('headerFill') ?? '')?.[0];
+
+  if (fill === undefined) return undefined;
+
+  return {
+    isBold: false, isItalic: false, wrapText: false, foregroundArgb: null, horizontalAlign: null, verticalAlign: null,
+    backgroundArgb: (0xff000000 | Number.parseInt(fill, 16)) | 0,
+  };
+}
+
 function slice(): Record<string, unknown> {
   return {
+    headerStyle: headerStyle(),
     cellConfirmations: {},
     cellPermissions: {},
     cellStyles: Object.fromEntries(styles),

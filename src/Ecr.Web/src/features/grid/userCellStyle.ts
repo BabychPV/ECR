@@ -1,5 +1,6 @@
 import type { CellFormatDto, CellStyleChange, CellStyleDto, TableSliceDto } from '@/api/types';
 import { cellAppearanceOf } from './cellAppearance';
+import { luminance } from '@/shared/theme/contrast';
 import { isHexColour } from '@/shared/theme/cellPalette';
 import { withCellFormat } from './conditionalAppearance';
 import { cellKey } from './permissions';
@@ -120,6 +121,14 @@ export function withRowStyle(column: CellStyleDto | null | undefined, row: CellS
   };
 }
 
+/** Відносна яскравість WCAG, від якої заливка шапки вважається «світлою» (рішення Аудиту: #C6D9F1 L≈0,68 — так, #FFC000 L≈0,58 — ні). */
+export const LightHeaderLuminance = 0.6;
+
+/** Світла заливка шапки: у Dark вона мапиться на токен `--ecr-sunken` (макет D15-01). */
+export function isLightHeaderFill(fill: string): boolean {
+  return isHexColour(fill) && luminance(fill) >= LightHeaderLuminance;
+}
+
 /** Властивості комірки заголовка за `TableSliceDto.headerStyle` (клас + змінні, як у комірок). */
 export function headerStyleProps(style: CellStyleDto | null | undefined): { class: string; style: Record<string, string> } | null {
   const appearance = cellAppearanceOf(style);
@@ -133,7 +142,11 @@ export function headerStyleProps(style: CellStyleDto | null | undefined): { clas
   if (appearance.fontWeight === 'bold') vars['--ecr-header-weight'] = 'bold';
   if (appearance.fontStyle === 'italic') vars['--ecr-header-style'] = 'italic';
 
-  return { class: 'ecr-header-styled', style: vars };
+  const fill = vars['--ecr-cell-fill'];
+  // ⚠ Лише шапка: заливки комірок користувача (`cellStyles`) у Dark не чіпаємо.
+  const light = typeof fill === 'string' && isLightHeaderFill(fill);
+
+  return { class: light ? 'ecr-header-styled ecr-header-fill-light' : 'ecr-header-styled', style: vars };
 }
 
 export function userStyleOf(slice: Pick<TableSliceDto, 'cellStyles'>, key: string): UserCellFormat | null {
