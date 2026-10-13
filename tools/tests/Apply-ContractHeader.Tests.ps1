@@ -102,7 +102,12 @@ function Invoke-Ecr {
                 return $r
             }
             if ($Body.dryRun) { return New-FakeResponse 200 @{ canApply = $true; refusals = @() } }
+            # LP-43: async (не сухий прогін) → 202 + jobId, як у DocumentsController.MigrateVersion.
+            if ($Body.ContainsKey('async') -and $Body.async) { return New-FakeResponse 202 @{ jobId = 'job-mig-1'; documentId = [int]$Matches[1] } }
             return New-FakeResponse 200 @{ transferredValues = 0; lostValues = 0 }
+        }
+        if ($Method -eq 'GET' -and $Path -eq '/api/v1/jobs/job-mig-1') {
+            return New-FakeResponse 200 @{ state = 'Succeeded'; percent = 100; message = 'ok' }
         }
         throw "FakeEcr: непередбачений виклик $Method $Path"
     }
@@ -316,6 +321,33 @@ Describe 'Apply-ContractHeader.ps1: міграція документів тіл
         $mig = @($global:FakeEcr.Calls | Where-Object { $_.Path -eq '/api/v1/documents/3/migrate-version' })
         $mig | Should -HaveCount 2
         foreach ($m in $mig) { $m.Body.ContainsKey('tableRenames') | Should -BeFalse }
+    }
+
+    It 'LP-43: застосування міграції за замовчуванням у фоні (async: true, 202, опитування jobs); dry-run без async' {
+        Initialize-FakeEcr @(
+            @{ id = 1; version = '1.0.0.0'; status = 'Published'; match = $true }
+        )
+        { Invoke-Header @{ MigrateDocumentId = @(3) } } | Should -Not -Throw
+
+        $mig = @($global:FakeEcr.Calls | Where-Object { $_.Path -eq '/api/v1/documents/3/migrate-version' })
+        $mig | Should -HaveCount 2
+        $mig[0].Body.dryRun | Should -BeTrue
+        $mig[0].Body.ContainsKey('async') | Should -BeFalse
+        $mig[1].Body.dryRun | Should -BeFalse
+        $mig[1].Body.async | Should -BeTrue
+        @($global:FakeEcr.Calls | Where-Object { $_.Method -eq 'GET' -and $_.Path -eq '/api/v1/jobs/job-mig-1' }) | Should -HaveCount 1
+    }
+
+    It 'LP-43: -Synchronous — застосування без async, без опитування jobs' {
+        Initialize-FakeEcr @(
+            @{ id = 1; version = '1.0.0.0'; status = 'Published'; match = $true }
+        )
+        Invoke-Header @{ MigrateDocumentId = @(3); Synchronous = $true }
+
+        $mig = @($global:FakeEcr.Calls | Where-Object { $_.Path -eq '/api/v1/documents/3/migrate-version' })
+        $mig | Should -HaveCount 2
+        foreach ($m in $mig) { $m.Body.ContainsKey('async') | Should -BeFalse }
+        @($global:FakeEcr.Calls | Where-Object { $_.Path -like '/api/v1/jobs/*' }) | Should -HaveCount 0
     }
 
     It 'готова мапа tools/land/rename-maps/land-9a-missing-tables.json описує три таблиці 9a' {
