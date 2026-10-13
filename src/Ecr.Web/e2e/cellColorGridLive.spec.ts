@@ -450,21 +450,39 @@ interface SliceBody {
 }
 
 /** Слухач ДО навігації: відповідь на зріз таблиці дає `tableInstanceId`, період і першу комірку. */
+function listenSlice(page: Page): Promise<SliceBody | null> {
+  return (
+    page
+      .waitForResponse(
+        // 200 або 304: за умовної перевірки кешу (ETag) відповідь без тіла - `ok()` для 304 хибне, і слухач
+        // до таймауту не бачив зріз (у темі dark на CI). Тіло 304 недоступне - його бере `page.request`.
+        (response) =>
+          response.request().method() === 'GET' &&
+          (response.status() === 200 || response.status() === 304) &&
+          /^\/api\/v1\/documents\/\d+\/tables\/\d+$/.test(new URL(response.url()).pathname),
+        { timeout: 45_000 },
+      )
+      // Тіло читається ОДРАЗУ, в тому ж ланцюжку: пізніше `response.json()` падає «No resource with given identifier found».
+      .then(async (response): Promise<SliceBody> => {
+        if (response.status() === 200) return (await response.json()) as SliceBody;
+
+        return (await (await page.request.get(response.url())).json()) as SliceBody;
+      })
+      .catch(() => null)
+  );
+}
+
 function watchSlice(page: Page): () => Promise<SliceRef> {
-  const pending = page
-    .waitForResponse(
-      (response) =>
-        response.request().method() === 'GET' &&
-        response.ok() &&
-        /^\/api\/v1\/documents\/\d+\/tables\/\d+$/.test(new URL(response.url()).pathname),
-      { timeout: 90_000 },
-    )
-    // Тіло читається ОДРАЗУ: після довгого очікування `response.json()` падає «No resource with given identifier found».
-    .then(async (response) => (await response.json()) as SliceBody)
-    .catch(() => null);
+  const pending = listenSlice(page);
 
   return async () => {
-    const body = await pending;
+    let body = await pending;
+    if (body === null) {
+      // Один повтор: слухач ПЕРЕД reload (а не після), без sleep; перевірки змісту не змінюються.
+      const retry = listenSlice(page);
+      await page.reload();
+      body = await retry;
+    }
     if (body === null) throw new Error('зріз таблиці не завантажився (GET …/tables/{id})');
 
     const column = body.columns?.[0]?.code;

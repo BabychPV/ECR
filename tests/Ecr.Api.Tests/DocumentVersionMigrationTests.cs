@@ -402,6 +402,9 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
 
         /// <summary>LP-32: колонки ті самі, додано лише рядок R3 фіксованої таблиці (склад рядків поданого міняється).</summary>
         AddsRowOnly,
+
+        /// <summary>LP-41: цільова версія додає колонку C4 типу Formula з формулою (2 * 21).</summary>
+        AddsFormulaColumn,
     }
 
     private static bool ChangesNumericFormat(Target target) => target is Target.C2PrecisionWidened or Target.C2ScaleNarrowed;
@@ -566,12 +569,26 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
             Column("C4", 4, CellDataType.Decimal);
         }
 
+        if (target == Target.AddsFormulaColumn)
+        {
+            Column("C4", 4, CellDataType.Formula);
+        }
+
         var rowKeys = target is Target.DropsC3AddsC4AndRow or Target.AddsRowOnly ? new[] { 1, 2, 3 } : [1, 2];
         var rowDefs = rowKeys
             .Select(i => new RowDef(table.Id, RowKey.Create($"R{i}_{tag}"), i, Name($"Row {i}"), RowKind.Item))
             .ToList();
         db.RowDefs.AddRange(rowDefs);
         await db.SaveChangesAsync().ConfigureAwait(false);
+
+        if (target == Target.AddsFormulaColumn)
+        {
+            // LP-41: константна формула — залежностей від комірок немає, тож перерахунок її рахує без публікації графа.
+            var formula = new FormulaDef(table.Id, FormulaScope.Column, "2 * 21", ExpressionDialect.Template);
+            formula.AssignColumn(columns["C4"].Id);
+            db.FormulaDefs.Add(formula);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+        }
 
         if (publishTarget)
         {

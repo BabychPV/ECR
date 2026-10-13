@@ -41,6 +41,11 @@
                     токен @Land_MassFraction замінюється фрагментом if(CURRENT_SUBSTANCE() = '415', @Land_MassFraction_0415,
                     ...) з моделі (argumentBridges.massFraction); версії рівня Legacy ставиться Strict. Довідник
                     LAND_NAE_GROUP (Land_Power, Category1) заводить етап Registries або Import-LandNaeGroup.ps1
+      ParityBranch  (лише явно, в All не входить; запускати ПІСЛЯ Methodologies і CompositionMass) у ЧЕРНЕТЦІ ECW_C12_02
+                    формули type2 компонентів 301/304/330/337 (ECW_EC_tons|gsec_<код>_type2) обгортаються
+                    if(@Land_Measure_Component_<код> = NULL, <вираз>, NULL): за наявного значення компонента виходить лише
+                    type1 (як у старому коді), інакше лише type2; код 415 і type1 не чіпаються; аргумент додається до
+                    списку формули. Публікації не робить; повтор - 0 змін
 
     ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє, окрім явного
     -PruneStaleTables (м'яке видалення таблиць чернетки, яких немає в моделі; без прапора - лише попередження).
@@ -56,6 +61,8 @@
 .PARAMETER Stage              Етапи.
 .PARAMETER PruneStaleTables   LP-28: м'яко видалити з чернетки таблиці, яких немає в моделі (DELETE sheets/{аркуш}/tables/{код};
                               сервер відмовляє, коли у версії є документи). Без прапора - лише попередження зі списком кодів.
+                              ⚠ Не на першій чернетці після publish: Prune до migrate-version (tableRenames T9a_03/06/07 -> T9a_17a/21a/21b)
+                              блокує перенос документів (dataLoss). Порядок - README, «Порядок етапів стенда» (RC32 F1/F2).
 .PARAMETER KnownStaleTables   Коди "АРКУШ/ТАБЛИЦЯ" (або лише код таблиці), які не вважати застарілими.
 .PARAMETER KeepNumericMode    -Stage CompositionMass: не переводити чернетки з фрагментом складу в NumericMode=Strict
                               (за замовчуванням переводить: REGFIND/REGFIELD/CURRENT_SUBSTANCE() у Legacy -> ECR-CALC-0433).
@@ -69,7 +76,7 @@ param(
     [string]$AccountsFile = 'F:\ecr-backup\land-ui\accounts.local.txt',
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'SubstanceApplicability', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'SubstanceApplicability', 'ParityBranch', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection = 'Server=localhost;Database=EcrLandUi;Integrated Security=true;TrustServerCertificate=true',
@@ -1576,6 +1583,61 @@ function Stage-SubstanceApplicability {
     Log "  змінено правил: $changed"
 }
 
+# ==================== ParityBranch (C12_02: вибір type1/type2 за наявністю компонента) ====================
+# Лише явно: -Stage ParityBranch. У ЧЕРНЕТЦІ методології з LandParityBranch.Lib.ps1 формули type2 компонентів
+# обгортаються `if(@Land_Measure_Component_<код> = NULL, <вираз>, NULL)`: старий код C12_02 рахує для компонента лише
+# type1, якщо значення є, інакше лише type2 (415 - завжди type2), а в ECR обидві гілки - виходи. Опубліковану версію не
+# чіпаємо; нову версію чи публікацію етап не робить. Повторний запуск - 0 змін.
+function Stage-ParityBranch {
+    Log '== ParityBranch =='
+    . (Join-Path $here 'LandParityBranch.Lib.ps1')
+    LoginAs 'land-owner'
+    $ms = Items (Api GET '/api/v1/methodologies').Json
+    $mid = @{}
+    foreach ($m in $ms) { $mid[[string]$m.code] = [int]$m.id }
+    $changed = 0
+    $plan = Get-LandParityBranchMethodologies
+    $nullPlan = Get-LandParityBranchNullType1Methodologies
+    foreach ($name in $plan.Keys) {
+        $m = $mid[$name]
+        if (-not $m) { Log "  ${name}: методології на сервері немає - пропущено"; continue }
+        $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
+        $v = $vers | Sort-Object id -Descending | Select-Object -First 1
+        if ([string]$v.status -eq 'Published') { Log "  ${name}: остання версія опублікована - не чіпаю"; continue }
+        $vid = [int]$v.id
+        $n = 0
+        $nn = 0
+        $nullCodes = if ($nullPlan.Contains($name)) { @($nullPlan[$name]) } else { @() }
+        foreach ($f in @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/formulas").Json)) {
+            # Код 415: type1 у старому коді не існує - вираз `NULL` (вихід без числа не пишеться); type2 не чіпаємо.
+            if ($nullCodes.Count -gt 0) {
+                $nullComponent = Get-LandParityBranchNullType1Component -FormulaCode ([string]$f.code) -Components $nullCodes
+                if ($null -ne $nullComponent) {
+                    $rn = Convert-LandParityBranchNullFormula -Expression ([string]$f.expression)
+                    if ($rn.Changed) {
+                        $nbody = @{ expression = $rn.Expression; resultType = $f.resultType; outputUnitId = $f.outputUnitId; argumentsCsv = $f.argumentsCsv }
+                        if ($null -ne $f.scope) { $nbody.scope = $f.scope }
+                        $nput = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/formulas/$($f.code)" -Body $nbody
+                        if ($nput.Status -eq 200) { $nn++ } else { Log "  ! ${name}/$($f.code): HTTP $($nput.Status) $(Get-EcrErrorCode $nput)" }
+                    }
+                    continue
+                }
+            }
+            $component = Get-LandParityBranchComponent -FormulaCode ([string]$f.code) -Components @($plan[$name])
+            if ($null -eq $component) { continue }
+            $r = Convert-LandParityBranchFormula -Expression ([string]$f.expression) -ArgumentsCsv $f.argumentsCsv -Component $component
+            if (-not $r.Changed) { continue }
+            $body = @{ expression = $r.Expression; resultType = $f.resultType; outputUnitId = $f.outputUnitId; argumentsCsv = $r.ArgumentsCsv }
+            if ($null -ne $f.scope) { $body.scope = $f.scope }
+            $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/formulas/$($f.code)" -Body $body
+            if ($put.Status -eq 200) { $n++ } else { Log "  ! ${name}/$($f.code): HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
+        }
+        $changed += $n + $nn
+        Log "  ${name}: type1 без числа (код 415, вираз NULL) - $nn"
+        Log "  ${name}: формул type2 обгорнуто - $n"
+    }
+    Log "  змінено формул: $changed"
+}
 function Stage-Documents {
     Log '== Documents =='
     LoginAs 'land-owner'
@@ -1862,5 +1924,7 @@ function Fill-FullDocument([int]$docId) {
 if ($Stage -contains 'SubstanceApplicability') { Stage-SubstanceApplicability }
     # LP-10: Land_MassFraction - той самий клас підстановки; лише явно (-Stage MassFraction або разом із CompositionMass).
     if ($Stage -contains 'MassFraction' -or $Stage -contains 'CompositionMass') { Stage-MassFraction }
+    # C12_02: вибір type1/type2 - лише явно (-Stage ParityBranch); у 'All' не входить; ПІСЛЯ Methodologies (створює формули).
+    if ($Stage -contains 'ParityBranch') { Stage-ParityBranch }
 }
 Log 'Готово.'

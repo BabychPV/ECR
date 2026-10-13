@@ -77,6 +77,13 @@ public sealed record VersionMigrationPlan(
     /// </summary>
     public IReadOnlySet<int> TouchedSheets => TouchedSourceSheetIds ?? new HashSet<int>();
 
+    /// <summary>
+    /// LP-41: шляхи (<c>SHEET.TABLE</c>) таблиць, де цільова версія ДОДАЄ або ЗМІНЮЄ формулу (нова формула,
+    /// змінений вираз/діалект, нова обчислювана колонка). Непорожній — після переносу значення цих формул
+    /// без перерахунку лишаться порожніми, тож обробник ставить один перерахунок проєкту.
+    /// </summary>
+    public IReadOnlyList<string> FormulaChanges { get; init; } = [];
+
     /// <summary>Скільки пунктів мапи перейменувань суперечать цій парі версій (<c>renameConflict</c>).</summary>
     public int RenameConflictCount => RenameConflicts?.Count ?? 0;
 
@@ -160,6 +167,7 @@ public static class VersionMigrationPlanner
         var rows = new Dictionary<int, int>();
         var newRows = new List<VersionMigrationNewRow>();
         var conflicts = new List<string>();
+        var formulaChanges = new List<string>();
 
         var valuesByColumn = cells
             .GroupBy(c => c.ColumnDefId)
@@ -242,6 +250,7 @@ public static class VersionMigrationPlanner
                 CompareTableShape(items, tablePath, table, otherTable, valuesByColumn);
                 CompareColumns(items, columns, conflicts, tablePath, table, otherTable, valuesByColumn, columnRenames);
                 CompareRows(items, rows, newRows, tablePath, table, otherTable, valuesByRow);
+                CompareFormulas(formulaChanges, tablePath, table, otherTable, columns, rows);
 
                 if (renamedFrom is not null)
                 {
@@ -255,6 +264,7 @@ public static class VersionMigrationPlanner
                          .Where(t => Live(sheet.Tables).All(s => s.Code != t.Code) && !renamedTargets.Contains(t.Id)))
             {
                 items.Add(new($"{sheet.Code}.{added.Code}", "Added", ChangeClass.Safe, 0));
+                AddedTableFormulas(formulaChanges, $"{sheet.Code}.{added.Code}", added);
             }
 
             // LP-32: усе, що додано до списку під час розбору цього аркуша, належить йому.
@@ -267,6 +277,10 @@ public static class VersionMigrationPlanner
         foreach (var added in targetSheets.Values.Where(t => sourceSheets.All(s => s.Code != t.Code)))
         {
             items.Add(new(added.Code, "Added", ChangeClass.Safe, 0));
+            foreach (var table in Live(added.Tables))
+            {
+                AddedTableFormulas(formulaChanges, $"{added.Code}.{table.Code}", table);
+            }
         }
 
         var headerFields = CompareHeader(items, source, target, headerValues);
@@ -297,7 +311,83 @@ public static class VersionMigrationPlanner
 
         return new VersionMigrationPlan(
             sheets, tables, columns, rows, headerFields, newRows, items, transferred, lost, guarded,
-            conflicts.Count == 0 ? null : conflicts, touched);
+            conflicts.Count == 0 ? null : conflicts, touched)
+        {
+            FormulaChanges = [.. formulaChanges.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)],
+        };
+    }
+
+    /// <summary>
+    /// LP-41: чи додає/змінює цільова таблиця формули відносно вихідної. Порівняння — за ЦІЛЬОВИМИ ідентифікаторами
+    /// колонки/рядка (вихідні проходять крізь мапу плану), тож перейменована колонка з незмінним виразом не рахується
+    /// зміною. Видалена формула зміною не вважається: перерахунок не прибере вже записане значення.
+    /// </summary>
+    private static void CompareFormulas(
+        List<string> changed, string tablePath, TableDef from, TableDef to,
+        IReadOnlyList<VersionMigrationColumn> columnMap, Dictionary<int, int> rowMap)
+    {
+        var columns = columnMap.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId);
+
+        var before = new Dictionary<(FormulaScope, int?, int?), (string Expression, ExpressionDialect Dialect)>();
+        foreach (var formula in from.Formulas.Where(f => !f.IsDeleted))
+        {
+            int? column = null;
+            int? row = null;
+            if (formula.ColumnDefId is { } sourceColumn)
+            {
+                if (!columns.TryGetValue(sourceColumn, out var mapped))
+                {
+                    continue;
+                }
+
+                column = mapped;
+            }
+
+            if (formula.RowDefId is { } sourceRow)
+            {
+                if (!rowMap.TryGetValue(sourceRow, out var mapped))
+                {
+                    continue;
+                }
+
+                row = mapped;
+            }
+
+            before[(formula.Scope, column, row)] = (formula.Expression.Trim(), formula.Dialect);
+        }
+
+        foreach (var formula in to.Formulas.Where(f => !f.IsDeleted))
+        {
+            if (!before.TryGetValue((formula.Scope, formula.ColumnDefId, formula.RowDefId), out var old)
+                || !string.Equals(old.Expression, formula.Expression.Trim(), StringComparison.Ordinal)
+                || old.Dialect != formula.Dialect)
+            {
+                changed.Add(tablePath);
+                return;
+            }
+        }
+
+        // Обчислювана колонка без формули в таблиці (методологія/Calculated) теж лишилась би порожньою:
+        // нова колонка або колонка, що стала обчислюваною.
+        var sourceComputed = Live(from.Columns).ToDictionary(c => c.Id, c => c.IsComputed);
+        var targetToSource = columnMap.ToDictionary(c => c.TargetColumnDefId, c => c.SourceColumnDefId);
+        foreach (var column in Live(to.Columns).Where(c => c.IsComputed))
+        {
+            if (!targetToSource.TryGetValue(column.Id, out var source) || !sourceComputed.GetValueOrDefault(source))
+            {
+                changed.Add(tablePath);
+                return;
+            }
+        }
+    }
+
+    /// <summary>Нова таблиця (чи аркуш): будь-яка її формула й обчислювана колонка — нова.</summary>
+    private static void AddedTableFormulas(List<string> changed, string tablePath, TableDef table)
+    {
+        if (table.Formulas.Any(f => !f.IsDeleted) || Live(table.Columns).Any(c => c.IsComputed))
+        {
+            changed.Add(tablePath);
+        }
     }
 
     /// <summary>
