@@ -1597,6 +1597,7 @@ function Stage-ParityBranch {
     foreach ($m in $ms) { $mid[[string]$m.code] = [int]$m.id }
     $changed = 0
     $plan = Get-LandParityBranchMethodologies
+    $nullPlan = Get-LandParityBranchNullType1Methodologies
     foreach ($name in $plan.Keys) {
         $m = $mid[$name]
         if (-not $m) { Log "  ${name}: методології на сервері немає - пропущено"; continue }
@@ -1605,7 +1606,23 @@ function Stage-ParityBranch {
         if ([string]$v.status -eq 'Published') { Log "  ${name}: остання версія опублікована - не чіпаю"; continue }
         $vid = [int]$v.id
         $n = 0
+        $nn = 0
+        $nullCodes = if ($nullPlan.Contains($name)) { @($nullPlan[$name]) } else { @() }
         foreach ($f in @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/formulas").Json)) {
+            # Код 415: type1 у старому коді не існує - вираз `NULL` (вихід без числа не пишеться); type2 не чіпаємо.
+            if ($nullCodes.Count -gt 0) {
+                $nullComponent = Get-LandParityBranchNullType1Component -FormulaCode ([string]$f.code) -Components $nullCodes
+                if ($null -ne $nullComponent) {
+                    $rn = Convert-LandParityBranchNullFormula -Expression ([string]$f.expression)
+                    if ($rn.Changed) {
+                        $nbody = @{ expression = $rn.Expression; resultType = $f.resultType; outputUnitId = $f.outputUnitId; argumentsCsv = $f.argumentsCsv }
+                        if ($null -ne $f.scope) { $nbody.scope = $f.scope }
+                        $nput = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/formulas/$($f.code)" -Body $nbody
+                        if ($nput.Status -eq 200) { $nn++ } else { Log "  ! ${name}/$($f.code): HTTP $($nput.Status) $(Get-EcrErrorCode $nput)" }
+                    }
+                    continue
+                }
+            }
             $component = Get-LandParityBranchComponent -FormulaCode ([string]$f.code) -Components @($plan[$name])
             if ($null -eq $component) { continue }
             $r = Convert-LandParityBranchFormula -Expression ([string]$f.expression) -ArgumentsCsv $f.argumentsCsv -Component $component
@@ -1615,7 +1632,8 @@ function Stage-ParityBranch {
             $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/formulas/$($f.code)" -Body $body
             if ($put.Status -eq 200) { $n++ } else { Log "  ! ${name}/$($f.code): HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
         }
-        $changed += $n
+        $changed += $n + $nn
+        Log "  ${name}: type1 без числа (код 415, вираз NULL) - $nn"
         Log "  ${name}: формул type2 обгорнуто - $n"
     }
     Log "  змінено формул: $changed"

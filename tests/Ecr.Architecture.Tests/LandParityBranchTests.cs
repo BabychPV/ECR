@@ -49,6 +49,12 @@ public sealed class LandParityBranchTests
         Out 'R3' $r3
         $r4 = Convert-LandParityBranchFormula -Expression '@Land_Measure_GasConsumption * 2' -ArgumentsCsv '@Land_Measure_GasConsumption;@Land_Measure_Component_330;' -Component '330'
         Out 'R4' $r4
+        Out 'N_T1' (Get-LandParityBranchNullType1Component -FormulaCode 'ECW_EC_tons_415_type1' -Components @('415'))
+        Out 'N_G1' (Get-LandParityBranchNullType1Component -FormulaCode 'ECW_EC_gsec_415_type1' -Components @('415'))
+        Out 'N_T2' (Get-LandParityBranchNullType1Component -FormulaCode 'ECW_EC_tons_415_type2' -Components @('415'))
+        Out 'N_301' (Get-LandParityBranchNullType1Component -FormulaCode 'ECW_EC_tons_301_type1' -Components @('415'))
+        Out 'N_R1' (Convert-LandParityBranchNullFormula -Expression '@Land_Measure_GasConsumption * 7')
+        Out 'N_R2' (Convert-LandParityBranchNullFormula -Expression ' null ')
         """;
 
     private const string StageHarness = """
@@ -70,6 +76,14 @@ public sealed class LandParityBranchTests
         }
         $wrapped = "if(@Land_Measure_Component_301 = NULL, @Land_Measure_GasConsumption * 2, NULL)"
         function Formula($code, $expr, $args2) { return @{ code = $code; expression = $expr; argumentsCsv = $args2; resultType = 'Number'; outputUnitId = 5; scope = $null } }
+        $extra = @()
+        if ($mode -eq 'fresh415' -or $mode -eq 'nulled415') {
+            $x415 = if ($mode -eq 'nulled415') { 'NULL' } else { '@Land_Measure_GasConsumption * 7' }
+            $extra = @(
+                (Formula 'ECW_EC_tons_415_type1' $x415 '@Land_Measure_GasConsumption;'),
+                (Formula 'ECW_EC_gsec_415_type1' $x415 '@Land_Measure_GasConsumption;'),
+                (Formula 'ECW_EC_tons_304_type1' '@Land_Measure_Component_304 * 2' '@Land_Measure_Component_304;'))
+        }
         function Api {
             param([string]$Method, [string]$Path, $Payload = $null)
             if ($Path -eq '/api/v1/methodologies') { return @{ Json = @(@{ code = 'ECW_C12_02'; id = 7 }, @{ code = 'ECW_C11_01'; id = 8 }) } }
@@ -85,7 +99,7 @@ public sealed class LandParityBranchTests
                     (Formula 'ECW_EC_tons_301_type2' $t2 $a2),
                     (Formula 'ECW_EC_gsec_337_type2' '@Land_Measure_GasConsumption / 3' '@Land_Measure_GasConsumption;'),
                     (Formula 'ECW_EC_tons_415_type2' '@Land_Measure_GasConsumption * 7' '@Land_Measure_GasConsumption;'),
-                    (Formula 'ECW_Category' "'A'" $null)) }
+                    (Formula 'ECW_Category' "'A'" $null)) + $extra }
             }
             throw "Api: неочікуваний шлях $Method $Path"
         }
@@ -296,5 +310,57 @@ public sealed class LandParityBranchTests
         Assert.DoesNotContain("/publish", body, StringComparison.Ordinal);
         Assert.DoesNotContain("-Method POST", body, StringComparison.Ordinal);
         Assert.Contains("опублікована - не чіпаю", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Type1_коду_415_стає_NULL_а_type2_і_type1_інших_кодів_не_змінюються()
+    {
+        var r = Lib();
+
+        // tons і gsec type1 коду 415 розпізнаються; type2 коду 415 і type1 іншого коду - ні.
+        Assert.Equal("415", r["N_T1"].GetString());
+        Assert.Equal("415", r["N_G1"].GetString());
+        Assert.Equal(JsonValueKind.Null, r["N_T2"].ValueKind);
+        Assert.Equal(JsonValueKind.Null, r["N_301"].ValueKind);
+
+        Assert.True(r["N_R1"].GetProperty("Changed").GetBoolean());
+        Assert.Equal("NULL", r["N_R1"].GetProperty("Expression").GetString());
+
+        // Уже NULL (будь-який регістр, з пробілами) - 0 змін.
+        Assert.False(r["N_R2"].GetProperty("Changed").GetBoolean());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Етап_ставить_NULL_лише_у_type1_коду_415_не_чіпаючи_аргументи_type2_та_інші_type1()
+    {
+        var puts = Stage("fresh415", out var output);
+
+        Assert.Equal(
+            ["ECW_EC_gsec_337_type2", "ECW_EC_gsec_415_type1", "ECW_EC_tons_301_type2", "ECW_EC_tons_415_type1"],
+            puts.Select(p => p.Path[(p.Path.LastIndexOf('/') + 1)..]).OrderBy(x => x, StringComparer.Ordinal).ToArray());
+
+        foreach (var put in puts.Where(p => p.Path.EndsWith("_415_type1", StringComparison.Ordinal)))
+        {
+            Assert.Equal("NULL", put.Body.GetProperty("expression").GetString());
+            Assert.Equal("@Land_Measure_GasConsumption;", put.Body.GetProperty("argumentsCsv").GetString());
+            Assert.Equal(5, put.Body.GetProperty("outputUnitId").GetInt32());
+        }
+
+        Assert.Contains("змінено формул: 4", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Повторний_запуск_етапу_не_пише_type1_коду_415_якщо_там_уже_NULL()
+    {
+        var puts = Stage("nulled415", out var output);
+
+        Assert.DoesNotContain(puts, p => p.Path.Contains("_415_", StringComparison.Ordinal));
+        Assert.Equal(
+            ["ECW_EC_gsec_337_type2", "ECW_EC_tons_301_type2"],
+            puts.Select(p => p.Path[(p.Path.LastIndexOf('/') + 1)..]).OrderBy(x => x, StringComparer.Ordinal).ToArray());
+        Assert.Contains("type1 без числа (код 415, вираз NULL) - 0", output, StringComparison.Ordinal);
     }
 }
