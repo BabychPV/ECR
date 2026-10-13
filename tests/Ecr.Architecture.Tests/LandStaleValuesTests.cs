@@ -140,7 +140,7 @@ public sealed class LandStaleValuesTests
             'map' {
                 Write-Host ('MAP_COUNT=' + $maps.Count)
                 foreach ($m in $maps) { Write-Host ('MAP=' + $m.From + '>' + $m.To + '|cols=' + $m.Columns.Count) }
-                $tmp = Join-Path $env:TEMP ('ecr-stale-map-' + [guid]::NewGuid().ToString('N') + '.json')
+                $tmp = Join-Path ([IO.Path]::GetTempPath()) ('ecr-stale-map-' + [guid]::NewGuid().ToString('N') + '.json')
                 [IO.File]::WriteAllText($tmp, '[{"fromTableCode":"A","toTableCode":"B","sheetCode":"S","columns":[{"fromColumnCode":"X","toColumnCode":"Y"}]}]')
                 $m2 = @(Read-LandStaleMap $tmp)
                 Remove-Item -LiteralPath $tmp
