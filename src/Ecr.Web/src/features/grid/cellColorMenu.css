@@ -76,8 +76,10 @@
   pointer-events: none;
 }
 
+/* Висота — шкала контролів (shared/theme/controls.css), як у сусідніх кнопок: фіксовані 36 px роздували рядок
+   панелі на ~7 px проти 28 px кнопок і слот змонтованої сітки виростав над TableSlotMinHeight. */
 .ecr-cell-color-scope {
-  height: 36px;
+  height: var(--ecr-ctl-height, 28px);
   padding: 0 var(--mantine-spacing-xs, 8px);
   border: 1px solid var(--ecr-border-strong, var(--mantine-color-default-border));
   border-radius: var(--mantine-radius-sm, 4px);

@@ -1123,7 +1123,7 @@ public sealed class Parser
                     "expr.calendarContextSyntax", null,
                     "The calendar context is written as \"[Period].Property\".", position, 1);
             }
-            else if (offset != 0)
+            else if (offset != 0 || segments[0].AbsolutePeriod is not null)
             {
                 // ⛔ C1-03 (аудит 2026-10-09c). `[Period:-1].Days` розбирався,
                 // а обчислювач (`Evaluator.Period`) брав ПОТОЧНИЙ період:
@@ -1142,9 +1142,11 @@ public sealed class Parser
         }
 
         var periodOffset = 0;
+        int? absolutePeriod = null;
         if (segments.Count > 0 && segments[0].Period is { } offsetValue)
         {
             periodOffset = offsetValue;
+            absolutePeriod = segments[0].AbsolutePeriod;
             segments.RemoveAt(0);
         }
 
@@ -1197,6 +1199,7 @@ public sealed class Parser
         var cell = new CellReferenceNode(sheetCode, tableCode, row, column.Text!, periodOffset)
         {
             Position = position,
+            AbsolutePeriod = absolutePeriod,
         };
 
         // Предикат `[WHERE …]` — теж піддерево, яким ідуть обходи: його висота — висота посилання.
@@ -1246,6 +1249,25 @@ public sealed class Parser
             var offset = 0;
             if (s.Match(TokenType.Colon))
             {
+                // WW-03: `[Period:#k]` — абсолютний період ТОГО Ж року (1..99, як PeriodKey.Sequence).
+                if (s.Current.Text.Length > 1 && s.Current.Text[0] == '#')
+                {
+                    var digits = s.Current.Text[1..];
+                    if (!digits.All(char.IsAsciiDigit)
+                        || !int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var absolute)
+                        || absolute is < 1 or > 99)
+                    {
+                        s.Error(
+                            "expr.periodAbsoluteRange", null,
+                            "An absolute period \"[Period:#k]\" must be a number from 1 to 99.", open, 1);
+                        throw new ParseAbort();
+                    }
+
+                    s.Advance();
+                    s.Expect(TokenType.RBracket, "expr.expectedCloseBracket", "Expected \"]\".");
+                    return new Segment(text, null, null, 0, absolute);
+                }
+
                 var sign = 1;
                 if (s.Match(TokenType.Minus))
                 {
@@ -1393,8 +1415,14 @@ public sealed class Parser
            || (right == ExpressionValueType.Text && left == ExpressionValueType.Null);
 
     /// <summary>Ланка посилання: код, діапазон, предикат або зсув періоду.</summary>
+    /// <remarks>
+    /// WW-03: <c>AbsolutePeriod</c> — номер періоду року з <c>[Period:#k]</c>; тоді
+    /// <c>Period</c> = 0 (ланка «про період», як і зсув), щоб діалект звітів і решта
+    /// перевірок «є ланка періоду» не розрізняли форм.
+    /// </remarks>
     private sealed record Segment(
-        string? Text, (string From, string To)? Range, AstNode? Predicate, int? Period);
+        string? Text, (string From, string To)? Range, AstNode? Predicate, int? Period,
+        int? AbsolutePeriod = null);
 
     /// <summary>Розбір далі неможливий; діагностики вже зібрані.</summary>
     private sealed class ParseAbort : Exception;

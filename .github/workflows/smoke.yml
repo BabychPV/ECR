@@ -53,8 +53,41 @@ env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
 
 jobs:
+  # ✎ 2026-10-13 (lane integ-ci-skip-dup): те саме `gate`, що й у ci.yml. Smoke на push у
+  # `dev/integration`, чия вершина вже в `main`, повторює прогін PR `rc/*` на тому ж дереві.
+  # PR, dispatch і rc — без змін (gate дає skip=false).
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      skip: ${{ steps.g.outputs.skip }}
+    steps:
+      - id: g
+        name: Вершина dev/integration уже в main?
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          skip=false
+          if [ "$EVENT_NAME" = "push" ] && [ "$REF" = "refs/heads/dev/integration" ]; then
+            status="$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$SHA" --jq .status || true)"
+            echo "compare main...$SHA: ${status:-<порожньо>}"
+            case "$status" in
+              identical|behind) skip=true ;;
+            esac
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+
   smoke:
     name: smoke (linux)
+    needs: gate
+    if: ${{ needs.gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:

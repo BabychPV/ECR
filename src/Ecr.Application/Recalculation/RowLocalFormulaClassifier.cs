@@ -97,7 +97,7 @@ public static class RowLocalFormulaClassifier
 
     /// <summary>Посилання <c>[Col]</c> — колонка того самого рядка тієї самої таблиці.</summary>
     private static bool IsOwnRowCell(CellReferenceNode reference)
-        => reference.PeriodOffset == 0
+        => !reference.IsCrossPeriod
            && reference.SheetCode is null
            && reference.TableCode is null
            && reference.Row is RowSelector.Current;

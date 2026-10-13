@@ -63,7 +63,8 @@ public sealed partial class RecalculationJob(
     IBackgroundJobScheduler? jobs = null,
     RecalculationBudgetMonitor? budget = null,
     ILogger<RecalculationJob>? logger = null,
-    ISheetEditGate? sheetGate = null) : IRecalculationJob
+    ISheetEditGate? sheetGate = null,
+    CrossPeriodFanOut? fanOut = null) : IRecalculationJob
 {
     [LoggerMessage(
         Level = LogLevel.Error,
@@ -702,13 +703,35 @@ public sealed partial class RecalculationJob(
         RecalculationRequest request, IReadOnlyList<int> periods, CancellationToken ct)
     {
         var written = 0;
+        var changedByPeriod = new Dictionary<int, HashSet<(int TableDefId, int ColumnDefId)>>();
 
         foreach (var period in periods)
         {
+            var changed = new HashSet<(int TableDefId, int ColumnDefId)>();
+            changedByPeriod[period] = changed;
+
             written += await formulas
                 .RecalculateAllAsync(
-                    request.DocumentId, new PeriodKey(period), ct, request.SheetDefId)
+                    request.DocumentId, new PeriodKey(period), ct, request.SheetDefId, changed)
                 .ConfigureAwait(false);
+        }
+
+        // ⛔ WW-03: прохід за зростанням коректний для читачів ПІЗНІШЕ за джерело (`[Period:-1]`,
+        // `[Period:#k]` з k раніше). Читач РАНІШЕ за джерело (`[Period:#k]`, k пізніше) порахований
+        // від ще не оновленого джерела — другий, цільовий прохід: coalesced-задача періоду-читача
+        // лише на формули з міжперіодним ребром. Рахується один раз після всіх періодів.
+        if (fanOut is not null)
+        {
+            foreach (var (period, changed) in changedByPeriod)
+            {
+                if (changed.Count > 0)
+                {
+                    await fanOut
+                        .EnqueueReadersAsync(
+                            request.DocumentId, new PeriodKey(period), changed, onlyEarlierReaders: true, hops: 1, ct)
+                        .ConfigureAwait(false);
+                }
+            }
         }
 
         return written;

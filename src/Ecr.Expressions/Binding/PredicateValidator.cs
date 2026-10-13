@@ -99,7 +99,7 @@ public static class PredicateValidator
 
             case CellReferenceNode reference:
             {
-                if (reference.PeriodOffset != 0)
+                if (reference.IsCrossPeriod)
                 {
                     Report(diagnostics, node,
                         "expr.predicate.crossPeriod", null,

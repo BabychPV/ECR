@@ -109,7 +109,7 @@ public static class RuleExpressionChecks
         switch (node)
         {
             case CellReferenceNode cell:
-                if (cell.SheetCode is not null || cell.TableCode is not null || cell.PeriodOffset != 0)
+                if (cell.SheetCode is not null || cell.TableCode is not null || cell.IsCrossPeriod)
                 {
                     var reference = Describe(cell);
                     diagnostics.Add(new ExpressionDiagnostic(
@@ -173,7 +173,11 @@ public static class RuleExpressionChecks
     {
         var parts = new List<string>();
 
-        if (cell.PeriodOffset != 0)
+        if (cell.AbsolutePeriod is { } absolute)
+        {
+            parts.Add($"[Period:#{absolute.ToString(CultureInfo.InvariantCulture)}]");
+        }
+        else if (cell.PeriodOffset != 0)
         {
             parts.Add($"[Period:{cell.PeriodOffset.ToString(CultureInfo.InvariantCulture)}]");
         }

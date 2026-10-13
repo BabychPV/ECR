@@ -203,6 +203,8 @@ describe('`[` — посилання на структуру шаблону', ()
     expect(slotAfter(structure, ['R1'], 185).kind).toBe('column');
     expect(slotAfter(structure, ['FT1'], 185).kind).toBe('row');
     expect(slotAfter(structure, ['Period:-1', 'FT1'], 185).kind).toBe('row');
+    // WW-03: абсолютний період року — теж ланка періоду, а не частина адреси.
+    expect(slotAfter(structure, ['Period:#3', 'FT1'], 185).kind).toBe('row');
     expect(slotAfter(structure, ['NOPE'], 185).kind).toBe('none');
   });
 });

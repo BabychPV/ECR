@@ -79,6 +79,70 @@ public sealed record RecalculationReadScope(IReadOnlySet<int>? TableDefIds, bool
         };
     }
 
+    /// <summary>
+    /// Які ІНШІ періоди читають вирази: відносні зсуви (<c>[Period:-2]</c>) і абсолютні
+    /// номери року (<c>[Period:#3]</c>) — WW-03, закриття G1.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До цього читався лише зсув −1 (<c>LoadValuesAsync</c>), і <c>[Period:-2]</c> /
+    /// <c>[Period:+1]</c> мовчки давали <c>null</c>. Множина береться з AST цілей, а не з графа:
+    /// граф може бути порожнім (чернетка), а AST завжди є.
+    /// </remarks>
+    public static (HashSet<int> Offsets, HashSet<int> Absolutes) PeriodReferences(IEnumerable<AstNode> roots)
+    {
+        ArgumentNullException.ThrowIfNull(roots);
+
+        var offsets = new HashSet<int>();
+        var absolutes = new HashSet<int>();
+        var pending = new Stack<AstNode>(roots);
+
+        while (pending.TryPop(out var node))
+        {
+            switch (node)
+            {
+                case CellReferenceNode reference:
+                    if (reference.AbsolutePeriod is { } absolute)
+                    {
+                        absolutes.Add(absolute);
+                    }
+                    else if (reference.PeriodOffset != 0)
+                    {
+                        offsets.Add(reference.PeriodOffset);
+                    }
+
+                    break;
+
+                case UnaryNode unary:
+                    pending.Push(unary.Operand);
+                    break;
+
+                case BinaryNode binary:
+                    pending.Push(binary.Right);
+                    pending.Push(binary.Left);
+                    break;
+
+                case ConditionalNode conditional:
+                    pending.Push(conditional.WhenFalse);
+                    pending.Push(conditional.WhenTrue);
+                    pending.Push(conditional.Condition);
+                    break;
+
+                case FunctionNode function:
+                    foreach (var argument in function.Arguments)
+                    {
+                        pending.Push(argument);
+                    }
+
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        return (offsets, absolutes);
+    }
+
     /// <summary>Рахує замикання читання для набору цілей.</summary>
     /// <param name="dependencies">Розкриті залежності формул версії шаблону.</param>
     /// <param name="targets">Формули, які цей прогін обчислює.</param>

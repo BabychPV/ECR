@@ -126,7 +126,12 @@ public static class AstPrinter
 
     private static void WriteReference(CellReferenceNode reference, StringBuilder text)
     {
-        if (reference.PeriodOffset != 0)
+        if (reference.AbsolutePeriod is { } absolute)
+        {
+            text.Append("[Period:#").Append(absolute.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .Append("].");
+        }
+        else if (reference.PeriodOffset != 0)
         {
             text.Append(Period(reference.PeriodOffset)).Append('.');
         }

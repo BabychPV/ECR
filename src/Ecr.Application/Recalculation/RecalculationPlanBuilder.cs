@@ -22,6 +22,9 @@ public static class RecalculationPlanBuilder
     /// <summary>Вид залежності «комірка» (<c>cfg.FormulaDependency.DependsOnKind</c> = 0).</summary>
     private const byte CellKind = 0;
 
+    /// <summary>Вид залежності «абсолютний період року» (<c>[Period:#k]</c>, WW-03).</summary>
+    private const byte AbsoluteKind = 5;
+
     /// <summary>Будує план для одного екземпляра таблиці за період.</summary>
     /// <param name="snapshot">Структура версії шаблону.</param>
     /// <param name="dependencies">Розкриті залежності формул версії.</param>
@@ -66,7 +69,14 @@ public static class RecalculationPlanBuilder
             // адресуються коміркою цього зрізу, тож у зворотний індекс не
             // входять. Це не пропуск: правка шапки не є правкою комірки, і
             // перерахунок від неї запускається іншим шляхом.
-            if (dependency.DependsOnKind != CellKind)
+            //
+            // ⚠ WW-03: виняток — `[Period:#k]` (вид 5), коли k збігається з номером ЦЬОГО періоду:
+            // формула читає свій власний період, і для плану це звичайне ребро на комірку. Решта
+            // абсолютних посилань (k ≠ поточного) — міжперіодні й обслуговуються fan-out-ом
+            // (`CrossPeriodReaders`), як і відносні.
+            var ownPeriodAbsolute = dependency.DependsOnKind == AbsoluteKind
+                                    && dependency.PeriodOffset == periodKey.Sequence;
+            if (dependency.DependsOnKind != CellKind && !ownPeriodAbsolute)
             {
                 continue;
             }
@@ -75,7 +85,7 @@ public static class RecalculationPlanBuilder
             // періоду не робить формулу брудною від правки в поточному, а
             // правка в минулому періоді перераховує його власний зріз —
             // де ця ж залежність має зсув 0.
-            if (dependency.PeriodOffset is { } offset && offset != 0)
+            if (!ownPeriodAbsolute && dependency.PeriodOffset is { } offset && offset != 0)
             {
                 continue;
             }

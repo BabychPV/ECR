@@ -119,6 +119,7 @@ public static class ColumnExpressionVisibility
             case DependencyExtractor.KindRegistry:
             case DependencyExtractor.KindCell:
             case DependencyExtractor.KindCrossPeriod:
+            case DependencyExtractor.KindCrossPeriodAbsolute:
                 // `!Formula` — ребро без таблиці: посилання на іншу формулу, не на комірку аркуша.
                 if (dependency.TableDefId is not { } tableId)
                 {

@@ -8045,6 +8045,9 @@ USING (VALUES
     ,(N'documents.migrateLockedAffected', N'en', N'The move would change submitted or approved sheets: {count}. Return them to work first, or choose a version that does not change them.', 1)
     ,(N'documents.migrateLockedItem', N'en', N'Sheet {sheet}, period {period}: {status}', 1)
     -- COLL:lp32-locked-safe ── кінець секції ──
+    -- COLL:ww03-period-absolute ── WW-03: [Period:#k] — абсолютний період року (номер поза 1..99); ru/kz — порцією COLL:ww03-period-absolute нижче ──
+    ,(N'expr.periodAbsoluteRange', N'en', N'An absolute period "[Period:#k]" must be a number from 1 to 99.', 1)
+    -- COLL:ww03-period-absolute ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -20218,6 +20221,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:lp32-locked-safe ── кінець секції ──
+-- COLL:ww03-period-absolute ── ru/kz: WW-03: [Period:#k] — абсолютний період року; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'expr.periodAbsoluteRange', N'ru', N'Абсолютный период «[Period:#k]» — число от 1 до 99.'),
+    (N'expr.periodAbsoluteRange', N'kz', N'«[Period:#k]» абсолютті кезеңі — 1-ден 99-ға дейінгі сан болуы тиіс.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ww03-period-absolute ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

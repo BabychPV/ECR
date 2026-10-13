@@ -26,7 +26,8 @@ public sealed partial class LandCellFormulasModelTests
         => model.GetProperty("sheets").EnumerateArray()
             .Single(s => s.GetProperty("excelName").GetString()!.StartsWith(excelNamePrefix, StringComparison.Ordinal));
 
-    [GeneratedRegex(@"\[(?<s>[^\]]+)\]\.\[(?<t>[^\]]+)\]\.\[(?<r>[^\]]+)\]\.\[(?<c>[^\]]+)\]")]
+    // WW-03: операнд - `[Period:#k].[Аркуш].[Таблиця].[Рядок].[Колонка]`: колонка місяця k з ПЕРІОДУ k того ж документа.
+    [GeneratedRegex(@"(?:\[Period:#(?<k>\d+)\]\.)?\[(?<s>[^\]]+)\]\.\[(?<t>[^\]]+)\]\.\[(?<r>[^\]]+)\]\.\[(?<c>[^\]]+)\]")]
     private static partial Regex Reference();
 
     [Fact]
@@ -87,6 +88,11 @@ public sealed partial class LandCellFormulasModelTests
                 Assert.Contains(reference.Groups["c"].Value, sourceColumns);
                 Assert.Equal(month, reference.Groups["c"].Value);
 
+                // WW-03: номер періоду k збігається з номером місяця колонки (січень - 1 ... грудень - 12) і
+                // є в КОЖНОМУ операнді; без нього 7.0 періоду m бачила б лише власний екземпляр Water Report.
+                Assert.True(reference.Groups["k"].Success, $"{f.GetProperty("excelCell").GetString()}: немає [Period:#k]");
+                Assert.Equal(Array.IndexOf(Months, month) + 1, int.Parse(reference.Groups["k"].Value, System.Globalization.CultureInfo.InvariantCulture));
+
                 if (!feeds.TryGetValue(reference.Groups["r"].Value, out var targets))
                 {
                     feeds[reference.Groups["r"].Value] = targets = [];
@@ -97,7 +103,7 @@ public sealed partial class LandCellFormulasModelTests
 
             // LP-31: Excel (a+b+c)/1000 (порожня клітинка = 0) -> SUM(a,b,c)/1000: SUM поглинає null (02b §6.1), а голий
             // `+` поширював би null, і формула давала б «немає значення» за одного порожнього операнда.
-            Assert.Matches(@"^SUM\(\[[^\]]+\](\.\[[^\]]+\]){3}(,\[[^\]]+\](\.\[[^\]]+\]){3})*\)/1000$", expression);
+            Assert.Matches(@"^SUM\(\[Period:#\d+\](\.\[[^\]]+\]){4}(,\[Period:#\d+\](\.\[[^\]]+\]){4})*\)/1000$", expression);
 
             // Скільки джерельних клітинок в Excel — стільки посилань у виразі.
             Assert.Equal(Regex.Count(excel, "'7\\. Water Report'!"), references.Count);
