@@ -407,8 +407,11 @@ function Fill-StructureSql([int]$vid) {
             }
         }
         $tableIds = @{}
-        foreach ($r in (Sql-Query $cn 'SELECT t.Id, s.Code AS S, t.Code AS T FROM cfg.TableDef t JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v AND t.IsDeleted=0' @{ v = $vid }).Rows) {
+        $haveMax = @{}
+        foreach ($r in (Sql-Query $cn 'SELECT t.Id, s.Code AS S, t.Code AS T, t.MaxDynamicRows AS Mx FROM cfg.TableDef t JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v AND t.IsDeleted=0' @{ v = $vid }).Rows) {
             $tableIds["$($r.S)/$($r.T)"] = [int]$r.Id
+            $mxv = $null; if ($r.Mx -isnot [DBNull]) { $mxv = [int]$r.Mx }
+            $haveMax["$($r.S)/$($r.T)"] = @{ Id = [int]$r.Id; MaxRows = $mxv }
         }
         foreach ($sh in @($Mdl.sheets)) {
             $to = 0
@@ -429,6 +432,19 @@ function Fill-StructureSql([int]$vid) {
                 }
             }
         }
+        # D-UPG-1: стеля динамічних рядків НАЯВНИХ таблиць клону підтягується до моделі (лише збільшення; Get-LandMaxRowsPlan).
+        # Без цього клон 1.0.7.0 лишав T3_00=498/T9_04=184/T9_07=100, і сервер відхиляв рядки понад стелю (ECR-ROW-0409).
+        # По одній таблиці, за Id, з тією самою умовою MaxDynamicRows<@m у SQL (ідемпотентно: повтор - 0 змін).
+        $wantMax = @()
+        foreach ($sh in @($Mdl.sheets)) {
+            foreach ($tb in @($sh.tables)) { $wantMax += [pscustomobject]@{ Key = "$($sh.code)/$($tb.code)"; MaxRows = $tb.maxRows } }
+        }
+        $maxPlan = Get-LandMaxRowsPlan $wantMax $haveMax
+        $maxRaised = 0
+        foreach ($u in @($maxPlan.Raise)) {
+            $maxRaised += [int](Sql-Exec $cn 'UPDATE cfg.TableDef SET MaxDynamicRows=@m WHERE Id=@t AND MaxDynamicRows IS NOT NULL AND MaxDynamicRows<@m' @{ m = [int]$u.To; t = [int]$u.Id })
+        }
+        Log ("  таблиць MaxDynamicRows піднято: {0}" -f $maxRaised)
         # --- колонки
         $have = @{}
         $haveInfo = @{}
