@@ -21,6 +21,11 @@
       Documents     документи з даними (синтетика + -GoldenDir)
       LandParity    (лише явно, в All не входить) правила категорії C11/C12 з af-land-category-rules.json, склад речовин
                     версії з суфіксів категорій констант, аргументи тест-кейсу PARITY_1 для правила категорії
+                    ⚠ Порядок: LandParity виконується ПЕРЕД Methodologies (у одному запуску скрипт сам ставить його
+                    першим). Methodologies створює прив'язки колонок результатів LP-08 (вимкнені теж), а перевірка
+                    правила категорії звіряє @-аргументи з колонками ВСІХ прив'язок: після Methodologies усі
+                    PUT category-rule дають 422 ECR-CALC-0422 categoryRuleUnknownArgument (D1, RC E).
+                    Схема: імпорт C11/C12 -> -Stage LandParity -> -Stage Methodologies (повторно, створює прив'язки).
 
     ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє. Прод-БД старої системи тут
     НЕ читається (набір із прода — окремий локальний скрипт, не в репозиторії).
@@ -1209,7 +1214,14 @@ function Stage-LandParity {
         }
         else {
             $p = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/category-rule" -Body @{ expression = $expr }
-            if ($p.Status -ne 200) { Log "  ! ${name}: category-rule HTTP $($p.Status) $(Get-EcrErrorCode $p)"; continue }
+            if ($p.Status -ne 200) {
+                Log "  ! ${name}: category-rule HTTP $($p.Status) $(Get-EcrErrorCode $p)"
+                if (([string]$p.Text) -match 'categoryRuleUnknownArgument') {
+                    # D1 (RC E): перевірка R16-4 звіряє @-аргументи з колонками ВСІХ прив'язок методології, і вимкнених теж.
+                    Log "    ! прив'язки колонок результатів (LP-08) уже створено: -Stage Methodologies виконано після імпорту ${name}. Порядок: LandParity ДО повторного -Stage Methodologies (див. tools/land/README.md, «Порядок етапів»)."
+                }
+                continue
+            }
             Log "  ${name}: правило категорії задано"
         }
 
@@ -1247,7 +1259,7 @@ function Stage-LandParity {
             $body = @{ inputJson = ($newInput | ConvertTo-Json -Depth 8 -Compress); expectedJson = [string]$t.expectedJson; tolerance = [string]$t.tolerance }
             $pt = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/tests/PARITY_1" -Body $body
             if ($pt.Status -ne 200) { Log "  ! ${name}: PARITY_1 HTTP $($pt.Status) $(Get-EcrErrorCode $pt)"; break }
-            $sim = Invoke-Ecr -Method POST -Path "/api/v1/methodologies/$m/simulate" -Body @{ methodologyVersionId = $vid; periodKey = @{ value = ($Year * 100 + 6) } }
+            $sim = Invoke-Ecr -Method POST -Path "/api/v1/methodologies/$m/simulate" -Body @{ methodologyVersionId = $vid; periodKey = ($Year * 100 + 6) }
             if ($sim.Status -eq 200 -and $sim.Json.isGreen) { $green = $true; break }
         }
         Log ("  {0}: PARITY_1 аргументи {1}; simulate {2}" -f $name, (($merged.Added) -join ','), $(if ($green) { 'зелений' } else { 'НЕ зелений (див. категорію/константи)' }))
@@ -1528,9 +1540,13 @@ function Fill-FullDocument([int]$docId) {
     if (Want 'Template') { Stage-Template }
     if (Want 'Project') { Stage-Project }
     if (Want 'Documents') { Stage-Documents }
+    # D1: LandParity ПЕРЕД Methodologies (див. нижче).
+    if ($Stage -contains 'LandParity') { Stage-LandParity }
     if (Want 'Methodologies') { Stage-Methodologies }
     if (Want 'Data') { Stage-Data }
-    # LP-07: лише явно (-Stage LandParity); у 'All' не входить, бо потребує імпортованих C11/C12 і LAND_AIR_SUBSTANCE.
-    if ($Stage -contains 'LandParity') { Stage-LandParity }
+    # LP-07: LandParity лише явно (-Stage LandParity); у 'All' не входить, бо потребує імпортованих C11/C12 і LAND_AIR_SUBSTANCE.
+    # ⚠ D1 (RC E): LandParity виконується ПЕРЕД Methodologies. Methodologies створює прив'язки колонок результатів (LP-08,
+    # у т.ч. вимкнені), а перевірка правила категорії (R16-4) звіряє @-аргументи з колонками ВСІХ прив'язок методології:
+    # після них PUT category-rule дає 422 ECR-CALC-0422 categoryRuleUnknownArgument.
 }
 Log 'Готово.'
