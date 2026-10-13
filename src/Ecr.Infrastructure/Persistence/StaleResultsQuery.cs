@@ -35,6 +35,12 @@ public sealed record StaleDocumentRow(long DocumentId, DateTime? Since);
 /// значення взагалі (<c>null</c>, поза фільтром і лічильником), бо «застаріло за видимими входами» не
 /// доводить, що застарів видимий вихід — це оракул про схований аркуш. Викликач виключає такі проєкти.
 ///
+/// ⛔ LP-45 (P1, перелік 25–60 с → 503): форма запиту — ДВА ПЛОСКІ JOIN + GROUP BY, а не <c>CROSS APPLY</c> із
+/// <c>UNION ALL</c> на документ. Корельований варіант оптимізатор виконував вкладеними циклами зі спулом
+/// (≈15 млн логічних читань робочої таблиці на 91 документ; 17–18 с на 192 тис. результатів і 4,5 млн правок;
+/// 0,6–1,7 с у плоскій формі, ті самі рядки). Семантика не змінена: <c>MIN</c> по тому самому об'єднанні («правки
+/// після прогону» + «довідник після входів прогону»). Сторож — <c>DocumentStaleResultsStoreTests</c>.
+///
 /// ⚠ Сирий SQL: <c>aud.*</c> поза моделлю EF. Результат лишається <c>IQueryable</c> — компонується в
 /// підзапит <c>IN</c> до <c>Take</c> (фільтр) або звужується до сторінки (позначка).
 /// </remarks>
@@ -53,38 +59,46 @@ internal static class StaleResultsQuery
 
         return db.Database
             .SqlQuery<StaleDocumentRow>($"""
-                SELECT x.DocumentId AS DocumentId, MIN(t.At) AS Since
-                  FROM (SELECT cr.DocumentId AS DocumentId, MAX(r0.Id) AS RunId
-                          FROM calc.CalculationResult AS cr
-                          JOIN calc.CalculationRun AS r0 ON r0.Id = cr.CalculationRunId
-                         WHERE cr.PeriodKey = {periodKey}
-                           AND r0.PeriodKey = {periodKey}
-                           AND r0.Status = N'Current'
-                         GROUP BY cr.DocumentId) AS x
-                  JOIN calc.CalculationRun AS r ON r.Id = x.RunId
-                 CROSS APPLY (
-                       SELECT c.ChangedAt AS At
-                         FROM aud.CellChange AS c
-                        WHERE c.DocumentId = x.DocumentId
-                          AND c.PeriodKey = {periodKey}
-                          AND c.ChangedAt > r.StartedAt
-                          AND c.Origin <> N'Recalculation'
-                          AND ({hasBy} = 0 OR c.ChangedByUserId = {by})
-                       UNION ALL
-                       SELECT rd.DataChangedAt AS At
-                         FROM cfg.RegistryDef AS rd
-                        WHERE {hasBy} = 0
-                          AND rd.DataChangedAt > COALESCE(r.InputsAsOfUtc, r.StartedAt)
-                          AND EXISTS (SELECT 1
-                                        FROM cfg.RegistryUse AS u
-                                        JOIN calc.CalculationResult AS cr2 ON cr2.MethodologyVersionId = u.SourceId
-                                       WHERE u.RegistryDefId = rd.Id
-                                         AND u.SourceKind = 1
-                                         AND cr2.CalculationRunId = x.RunId
-                                         AND cr2.PeriodKey = {periodKey}
-                                         AND cr2.DocumentId = x.DocumentId)
+                SELECT t.DocumentId AS DocumentId, MIN(t.At) AS Since
+                  FROM (
+                        SELECT x.DocumentId AS DocumentId, c.ChangedAt AS At
+                          FROM (SELECT cr.DocumentId AS DocumentId, MAX(r0.Id) AS RunId
+                                  FROM calc.CalculationResult AS cr
+                                  JOIN calc.CalculationRun AS r0 ON r0.Id = cr.CalculationRunId
+                                 WHERE cr.PeriodKey = {periodKey}
+                                   AND r0.PeriodKey = {periodKey}
+                                   AND r0.Status = N'Current'
+                                 GROUP BY cr.DocumentId) AS x
+                          JOIN calc.CalculationRun AS r ON r.Id = x.RunId
+                          JOIN aud.CellChange AS c
+                            ON c.DocumentId = x.DocumentId
+                           AND c.PeriodKey = {periodKey}
+                           AND c.ChangedAt > r.StartedAt
+                           AND c.Origin <> N'Recalculation'
+                           AND ({hasBy} = 0 OR c.ChangedByUserId = {by})
+                        UNION ALL
+                        SELECT x.DocumentId AS DocumentId, rd.DataChangedAt AS At
+                          FROM (SELECT cr.DocumentId AS DocumentId, MAX(r0.Id) AS RunId
+                                  FROM calc.CalculationResult AS cr
+                                  JOIN calc.CalculationRun AS r0 ON r0.Id = cr.CalculationRunId
+                                 WHERE cr.PeriodKey = {periodKey}
+                                   AND r0.PeriodKey = {periodKey}
+                                   AND r0.Status = N'Current'
+                                 GROUP BY cr.DocumentId) AS x
+                          JOIN calc.CalculationRun AS r ON r.Id = x.RunId
+                          JOIN cfg.RegistryDef AS rd
+                            ON rd.DataChangedAt > COALESCE(r.InputsAsOfUtc, r.StartedAt)
+                         WHERE {hasBy} = 0
+                           AND EXISTS (SELECT 1
+                                         FROM cfg.RegistryUse AS u
+                                         JOIN calc.CalculationResult AS cr2 ON cr2.MethodologyVersionId = u.SourceId
+                                        WHERE u.RegistryDefId = rd.Id
+                                          AND u.SourceKind = 1
+                                          AND cr2.CalculationRunId = x.RunId
+                                          AND cr2.PeriodKey = {periodKey}
+                                          AND cr2.DocumentId = x.DocumentId)
                        ) AS t
-                 GROUP BY x.DocumentId
+                 GROUP BY t.DocumentId
                 """);
     }
 }
