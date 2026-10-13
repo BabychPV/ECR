@@ -38,7 +38,7 @@ param(
     [string]$JsonDir,
     [string]$OracleTsv,
     [string]$OutPrefix,
-    [string]$SqlConnection = 'Server=localhost;Database=EcrLandUi;Integrated Security=true;TrustServerCertificate=true',
+    [string]$SqlConnection,
     [string]$StateFile,
     [string[]]$Documents = @(),
     [int]$MinDocument = 1,
@@ -87,6 +87,7 @@ foreach ($p in @($OutPrefix, $OracleTsv)) {
         throw "Path '$p' is inside the repository. Refused."
     }
 }
+if ([string]::IsNullOrWhiteSpace($StateFile) -and [string]::IsNullOrWhiteSpace($SqlConnection)) { throw "-SqlConnection is required in SQL mode (no default stand): give a connection string to a local EcrLand* database, or -StateFile (offline). Refused." }
 if ([string]::IsNullOrWhiteSpace($StateFile)) { [void](Assert-LocalSqlConnection $SqlConnection) }
 
 # --- documents ---

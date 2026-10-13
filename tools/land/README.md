@@ -35,7 +35,8 @@
   і на базу з іменем `EcrLand*`: локальний прод-інстанс старої системи не проходить. ⚠ `-SqlConnection` **не має
   значення за замовчуванням** (раніше цілив у живий `EcrLandUi`): задайте його явно або дайте `-ConfirmStand
   <адреса>/<база>` — база `EcrLand*` береться з нього (`localhost:5101/EcrLandAccP` → `EcrLandAccP`, сервер
-  `localhost`); без жодного з двох (навіть із `-DryRun`) скрипт відмовляє. Іменований екземпляр — лише явним `-SqlConnection`.
+  `localhost`); без жодного з двох (навіть із `-DryRun`) скрипт відмовляє. Іменований екземпляр — лише явним `-SqlConnection`. Те саме для `Compare-LandParity.ps1` і
+  `Compare-LandParityFull.ps1`: `-SqlConnection` без дефолту, обов'язковий у SQL-режимі (без `-EcrResultsFile` / `-StateFile`).
   Рядок підключення розбирається `SqlConnectionStringBuilder` (при дублі ключів перемагає останнє, як у SqlClient).
   Чужа адреса (в т.ч. https) - відмова ще до входу.
 - Мутації — лише з явним `-ConfirmStand`. Apply-ContractHeader/Import-ContractDictionaries: адреса API (`localhost:5094`,

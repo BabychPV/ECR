@@ -5,7 +5,7 @@
     READ-ONLY (no API call, no write). Inputs:
       -JsonDir     sample documents LAND-PROD-n.json (inputs; the sample exporter output, local, outside the repo)
       -OracleFile  stored legacy results from Export-LandParityOracle.ps1 (local, outside the repo)
-      -SqlConnection  local stand database EcrLand* (default localhost / EcrLandUi): calc.CalculationResult of the
+      -SqlConnection  local stand database EcrLand* (REQUIRED in SQL mode, no default stand): calc.CalculationResult of the
                       CURRENT calculation run (calc.CalculationRun.Status = 'Current') of each document/period.
                       Recalculate the documents first (loader does it; or POST /api/v1/documents/{id}/recalculate).
     For every sample row the legacy results are aligned to the ECR rowKey pN-<seq:0000> through an input
@@ -40,7 +40,7 @@ param(
     [Parameter(Mandatory)][string]$JsonDir,
     [string]$EcrResultsFile,
     [Parameter(Mandatory)][string]$OracleFile,
-    [string]$SqlConnection = 'Server=localhost;Database=EcrLandUi;Integrated Security=true;TrustServerCertificate=true',
+    [string]$SqlConnection,
     [string[]]$Documents = @('LAND-PROD-1', 'LAND-PROD-2', 'LAND-PROD-3', 'LAND-PROD-4'),
     [double]$TolAbs = 1e-9,
     [double]$TolRel = 1e-12,
@@ -59,6 +59,7 @@ foreach ($p in @($OutFile)) {
         throw "OutFile '$p' is inside the repository. Refused."
     }
 }
+if ([string]::IsNullOrWhiteSpace($EcrResultsFile) -and [string]::IsNullOrWhiteSpace($SqlConnection)) { throw "-SqlConnection is required in SQL mode (no default stand): give a connection string to a local EcrLand* database, or -EcrResultsFile (offline). Refused." }
 if ([string]::IsNullOrWhiteSpace($EcrResultsFile)) { $dbName = Assert-LocalSqlConnection $SqlConnection }
 
 # ECR methodology -> legacy input table (the ECR result row key carries no table).
