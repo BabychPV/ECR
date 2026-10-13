@@ -151,13 +151,82 @@ public sealed class VersionMigrationCellFormulaTests
         Assert.Contains("structural", plan.RefusalsFor(VersionMigrationMode.Presentation));
     }
 
+    // ── ACC-OW: прапор acceptGuardedOverwrite знімає guardedWithData ЛИШЕ для нової комірочної формули ──
+
+    [Fact]
+    [Trait("Requirement", "ACC-OW")]
+    public void Прапор_знімає_guardedWithData_для_нової_формули_комірки_зі_значенням()
+    {
+        var plan = Plan(
+            source: Version(1, cellFormula: false),
+            target: Version(2, cellFormula: true),
+            values: [new VersionMigrationCellUsage(SourceColumn, SourceRow, 5)]);
+
+        Assert.Equal(5, plan.GuardedValues);
+        Assert.Equal(5, plan.GuardedOverwritableValues);
+        Assert.Contains("guardedWithData", plan.RefusalsFor(VersionMigrationMode.Safe));
+        Assert.Contains("guardedWithData", plan.RefusalsFor(VersionMigrationMode.Safe, acceptGuardedOverwrite: false));
+        Assert.Empty(plan.RefusalsFor(VersionMigrationMode.Safe, acceptGuardedOverwrite: true));
+
+        // Перелік — адреса комірки шаблону і кількість значень, без самих значень.
+        var item = Assert.Single(plan.GuardedOverwrites);
+        Assert.Equal((Sheet, "T02", "R1", "A", 5L), (item.SheetCode, item.TableCode, item.RowKey, item.ColumnCode, item.Values));
+    }
+
+    [Fact]
+    [Trait("Requirement", "ACC-OW")]
+    public void Прапор_не_знімає_інші_класи_guarded_навіть_поруч_із_формулою_комірки()
+    {
+        // Формула комірки R1×A (5 значень) + звуження Scale колонки B (3 значення).
+        var plan = Plan(
+            source: Version(1, cellFormula: false, columnBScale: 12),
+            target: Version(2, cellFormula: true, columnBScale: 10),
+            values:
+            [
+                new VersionMigrationCellUsage(SourceColumn, SourceRow, 5),
+                new VersionMigrationCellUsage(102, SourceRow, 3),
+            ]);
+
+        Assert.Equal(8, plan.GuardedValues);
+        Assert.Equal(5, plan.GuardedOverwritableValues);
+        Assert.Contains("guardedWithData", plan.RefusalsFor(VersionMigrationMode.Safe, acceptGuardedOverwrite: true));
+    }
+
+    [Fact]
+    [Trait("Requirement", "ACC-OW")]
+    public void Прапор_не_знімає_guarded_рядка_лише_для_читання()
+    {
+        var plan = Plan(
+            source: Version(1, cellFormula: false),
+            target: Version(2, cellFormula: false, rowReadOnly: true),
+            values: [new VersionMigrationCellUsage(SourceColumn, SourceRow, 3)]);
+
+        Assert.Equal(0, plan.GuardedOverwritableValues);
+        Assert.Contains("guardedWithData", plan.RefusalsFor(VersionMigrationMode.Safe, acceptGuardedOverwrite: true));
+    }
+
+    [Fact]
+    [Trait("Requirement", "ACC-OW")]
+    public void Прапор_без_формули_комірки_нічого_не_міняє_і_Presentation_лишається_structural()
+    {
+        var plain = Plan(source: Version(1, cellFormula: false), target: Version(2, cellFormula: false), values: []);
+        Assert.Empty(plain.RefusalsFor(VersionMigrationMode.Safe, acceptGuardedOverwrite: true));
+        Assert.Equal(0, plain.GuardedOverwritableValues);
+        Assert.Empty(plain.GuardedOverwrites);
+
+        var formula = Plan(source: Version(1, cellFormula: false), target: Version(2, cellFormula: true), values: []);
+        Assert.Contains(
+            "structural", formula.RefusalsFor(VersionMigrationMode.Presentation, acceptGuardedOverwrite: true));
+    }
+
     private static VersionMigrationPlan Plan(
         TemplateVersionSnapshot source, TemplateVersionSnapshot target, IReadOnlyList<VersionMigrationCellUsage> values)
         => VersionMigrationPlanner.Plan(source, target, values, new Dictionary<int, long>());
 
     /// <summary>Версія: аркуш S02 → таблиця T02 → колонки A (інпут) і B; рядки R1 і R2; опційно формула комірки R1×A.</summary>
     private static TemplateVersionSnapshot Version(
-        int versionId, bool cellFormula, bool rowReadOnly = false, CellDataType sourceColumnType = CellDataType.Decimal)
+        int versionId, bool cellFormula, bool rowReadOnly = false, CellDataType sourceColumnType = CellDataType.Decimal,
+        byte? columnBScale = null)
     {
         var baseId = versionId * 100;
         var sheet = new SheetDef(versionId, EcrCode.Create(Sheet), Name("Sheet"), 1);
@@ -171,6 +240,11 @@ public sealed class VersionMigrationCellFormulaTests
         SetId(columnA, baseId + 1);
         var columnB = new ColumnDef(table.Id, EcrCode.Create("B"), Name("B"), 2, CellDataType.Decimal);
         SetId(columnB, baseId + 2);
+        if (columnBScale is { } scale)
+        {
+            columnB.SetNumericFormat(28, scale);
+        }
+
         table.AddColumn(columnA);
         table.AddColumn(columnB);
 

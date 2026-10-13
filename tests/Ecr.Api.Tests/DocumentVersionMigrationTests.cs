@@ -405,9 +405,16 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
 
         /// <summary>LP-41: цільова версія додає колонку C4 типу Formula з формулою (2 * 21).</summary>
         AddsFormulaColumn,
+
+        /// <summary>ACC-OW: у цілі — комірочна формула R1 × C2 (<c>2 * 50</c>), а в C2/R1 уже введено 42.</summary>
+        AddsCellFormulaOnInput,
+
+        /// <summary>ACC-OW: те саме, що й <see cref="AddsCellFormulaOnInput"/>, і ще звуження Scale C2 (12 → 10).</summary>
+        AddsCellFormulaAndNarrowsScale,
     }
 
-    private static bool ChangesNumericFormat(Target target) => target is Target.C2PrecisionWidened or Target.C2ScaleNarrowed;
+    private static bool ChangesNumericFormat(Target target)
+        => target is Target.C2PrecisionWidened or Target.C2ScaleNarrowed or Target.AddsCellFormulaAndNarrowsScale;
 
     private static bool RenamesTable(Target target) => target is Target.TableRenamed or Target.TableAndColumnRenamed;
 
@@ -494,6 +501,22 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
             new CellAddress(key, doc.RowIds[0], doc.ColumnDefIds[1]), doc.TableDefId, new CellValueData { ValueNumeric = 42m }));
         db.CellValues.Add(new CellValue(
             new CellAddress(key, doc.RowIds[0], doc.ColumnDefIds[2]), doc.TableDefId, new CellValueData { IsEmpty = true }));
+
+        if (target is Target.AddsCellFormulaOnInput or Target.AddsCellFormulaAndNarrowsScale)
+        {
+            // ACC-OW: у бойовій фіксованій таблиці рядок документа посилається на RowDef шаблону; фабрика цього
+            // не робить, а без цього план не знає, яку комірку (колонка × RowDef) займає введене значення.
+            await db.SaveChangesAsync().ConfigureAwait(false);
+            for (var i = 0; i < doc.RowIds.Count; i++)
+            {
+                var rowId = doc.RowIds[i];
+                var rowDefId = doc.RowDefIds[i];
+                var periodKey2 = key.Value;
+                await db.Database
+                    .ExecuteSqlAsync($"UPDATE doc.TableRow SET RowDefId = {rowDefId} WHERE PeriodKey = {periodKey2} AND Id = {rowId}")
+                    .ConfigureAwait(false);
+            }
+        }
 
         if (submitted)
         {
@@ -587,6 +610,15 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
             var formula = new FormulaDef(table.Id, FormulaScope.Column, "2 * 21", ExpressionDialect.Template);
             formula.AssignColumn(columns["C4"].Id);
             db.FormulaDefs.Add(formula);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+        }
+
+        if (target is Target.AddsCellFormulaOnInput or Target.AddsCellFormulaAndNarrowsScale)
+        {
+            // ACC-OW: комірочна формула на комірці, де вихідна версія тримала введене значення (42).
+            var cellFormula = new FormulaDef(table.Id, FormulaScope.Cell, "2 * 50", ExpressionDialect.Template);
+            cellFormula.AssignCell(rowDefs[0].Id, columns["C2"].Id);
+            db.FormulaDefs.Add(cellFormula);
             await db.SaveChangesAsync().ConfigureAwait(false);
         }
 
