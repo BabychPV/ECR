@@ -124,3 +124,20 @@ Methodologies) PUT-ить `/methodologies/{m}/bindings/{colId}/{output}` для 
 `LAND_HSE400_SUBSTANCE` (ключ SUBSTANCE_CODE; код запису `C<код>`, не `E<код>` довідника речовин). У формулі версії
 методології `@CompositionMass` замінюється фрагментом `argumentBridges.hse400.compositionMass.methodologies.<ім'я>.fragment`
 (`Build-LandTemplate.ps1 -Stage CompositionMass`; довідник - `-Stage Registries` або `Import-LandHse400Substance.ps1`).
+
+### Мости за атрибутами AF-таблиць (D3: публікація C11/C12 після прив'язок)
+
+Після `-Stage Methodologies` публікація чернеток C11/C12 давала 0 з 27: `ECR-CALC-0438` (аргумент формули без колонки з
+тим самим кодом у КОЖНІЙ прив'язаній таблиці, включно з вимкненими прив'язками) і `ECR-CALC-0422` (аргумент правила
+категорії: `@Land_NAE`, `@Land_TypeFuelOrStream` ...). `model-gen/af_attr_bridges.py` додає Formula-мости за **атрибутами
+AF-таблиць**: `af-land-table-attributes.json` (структура: імена й порядок полів класів `T_Air_P*` старої системи; складає
+`model-gen/extract_af_table_attributes.py`; значень немає). Колонка Excel для атрибута - за заголовком і порядком у
+межах сім'ї величини (operating time, running hours, consumption ...; кількості мусять збігатись, підказки одиниць не
+суперечити); перейменування за таблицею, прямо написані в коді методологій (`RENAMES` у скрипті, з посиланням файл:рядки);
+`DaysInCalcMonth` у C11_11_01 і C12_04_02 - календарні дні (`[Period].Days`, `DateTime.DaysInMonth`), а не відпрацьовані
+(правило 7.7 - лише C07_07). Міст створюється лише якщо ВСІ методології таблиці, що вживають аргумент, дають одне
+джерело. Недоведене - `argumentBridges.unresolved` з тегом причини: `[AF-немає]` (AF-таблиця не має атрибута; старий код
+аргумент не передає), `[конфлікт]` (дві методології однієї таблиці беруть аргумент з різних колонок), `[GTU]`
+(значення з іншого рядка), `[похідне]` (виводиться в коді зі словника груп NAE), `[на-речовину]`, `[Excel]`.
+Текст потоку для HSE400 на 9a/10_03/11_03 береться з атрибута, який читає старий код (`stream_sources`).
+`land-result-outputs.json` має ключ `categoryInputs` (аргументи `@Category<N>` формул).

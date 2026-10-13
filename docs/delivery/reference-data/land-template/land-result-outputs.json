@@ -324,6 +324,9 @@
    ],
    "inputs": [
     "Land_Measure_SubstanceConsumption"
+   ],
+   "categoryInputs": [
+    "Category1"
    ]
   },
   "ECW_C11_11_03": {

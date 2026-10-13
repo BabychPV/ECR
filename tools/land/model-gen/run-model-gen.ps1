@@ -31,6 +31,11 @@ Copy-Item -LiteralPath $AfPackage (Join-Path $Work 'af-land-package.json') -Forc
 $resultOutputs = Join-Path $refDir 'land-result-outputs.json'
 Remove-Item -LiteralPath (Join-Path $Work 'land-result-outputs.json') -Force -ErrorAction SilentlyContinue
 if (Test-Path -LiteralPath $resultOutputs) { Copy-Item -LiteralPath $resultOutputs (Join-Path $Work 'land-result-outputs.json') -Force }
+# атрибути AF-таблиць (extract_af_table_attributes.py) і правила категорії (LP-07): мости аргументів af_attr_bridges.py
+foreach ($n in 'af-land-table-attributes.json', 'af-land-category-rules.json') {
+    Remove-Item -LiteralPath (Join-Path $Work $n) -Force -ErrorAction SilentlyContinue
+    Copy-Item -LiteralPath (Join-Path $refDir $n) (Join-Path $Work $n) -Force
+}
 $env:PYTHONIOENCODING = 'utf-8'
 Push-Location $Work
 try {

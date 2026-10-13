@@ -1,0 +1,4089 @@
+{
+ "formatVersion": 1,
+ "source": "tools/land/model-gen/extract_af_table_attributes.py: DllProject/Types/Air/Land/T_Air_P*.cs (імена й порядок полів AF-таблиць; значень немає)",
+ "tables": {
+  "T10_01": {
+   "class": "T_Air_P10_Off_Utility_DI_01",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Area",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuel",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv2",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_ReleaseColdVent",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_NumberOperations",
+     "type": "int?"
+    }
+   ]
+  },
+  "T10_03": {
+   "class": "T_Air_P10_Off_Utility_DI_03",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Area",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuel",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv2",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_RunningHours",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GasConsumption",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_MaximumConsumption",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU_Month",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_GTU1_301",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU1_304",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU1_330",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU1_337",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU1_O2",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU2_301",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU2_304",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU2_330",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU2_337",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU2_O2",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU3_301",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU3_304",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU3_330",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU3_337",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU3_O2",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU4_301",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU4_304",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU4_330",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU4_337",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU4_O2",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T10_04": {
+   "class": "T_Air_P10_Off_Utility_DI_04",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Area",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuel",
+     "type": "string"
+    },
+    {
+     "name": "Land_Power",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_RunningHours",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_FuelConsumption",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_Reserv1",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T10_05": {
+   "class": "T_Air_P10_Off_Utility_DI_05",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Area",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_ProcessUnits",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeStoredMaterial",
+     "type": "string"
+    },
+    {
+     "name": "Land_TankVolume",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_PumpingCapacity",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_QuantityLiquid",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Kpmax",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Gxp",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Vhmax",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T10a_01": {
+   "class": "T_Air_P10a_Off_Utility_AI_01",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Area",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeStream",
+     "type": "string"
+    },
+    {
+     "name": "Land_Power",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_RunningHours",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_FuelConsumption",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T10a_02": {
+   "class": "T_Air_P10a_Off_Utility_AI_02",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Area",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_ProcessUnits",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeStoredMaterial",
+     "type": "string"
+    },
+    {
+     "name": "Land_TankVolume",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_QuantityLiquid",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Kpmax",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Gxp",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Vhmax",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T11_01": {
+   "class": "T_Air_P11_Off_Process_DI_01",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Area",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuel",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv2",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_ReleaseColdVent",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_NumOperations",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T11_02": {
+   "class": "T_Air_P11_Off_Process_DI_02",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Area",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_Streams",
+     "type": "string"
+    },
+    {
+     "name": "Land_ProcessTrain",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeStreams",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_MaterialResidence",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_DMSpump",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_Pump",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_Flanges",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_Valves",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_SafValves",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T11_03": {
+   "class": "T_Air_P11_Off_Process_DI_03",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Area",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeStream",
+     "type": "string"
+    },
+    {
+     "name": "Land_ProcessTrain",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_RunningHours",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GasConsumption",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_MaximumConsumption",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU_Month",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_GTU1_301",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU1_304",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU1_330",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU1_337",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU1_O2",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU2_301",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU2_304",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU2_330",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU2_337",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU2_O2",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU3_301",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU3_304",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU3_330",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU3_337",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU3_O2",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU4_301",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU4_304",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU4_330",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU4_337",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU4_O2",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU5_301",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU5_304",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU5_330",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU5_337",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GTU5_O2",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T11_04": {
+   "class": "T_Air_P11_Off_Process_DI_04",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Area",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_ProcessUnits",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeStoredMaterial",
+     "type": "string"
+    },
+    {
+     "name": "Land_TankVolume",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_PumpingCapacity",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_QuantityLiquid",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Kpmax",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Gxp",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Vhmax",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T11_05": {
+   "class": "T_Air_P11_Off_Process_DI_05",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv2",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv3",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv4",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_Amount",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T11a_01": {
+   "class": "T_Air_P11a_Off_Process_AI",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Area",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_Streams",
+     "type": "string"
+    },
+    {
+     "name": "Land_ProcessTrain",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeStreams",
+     "type": "string"
+    },
+    {
+     "name": "Land_RemarksIDCode",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_MaterialResidence",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_DMSpump",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_Pump",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_Flanges",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_Valves",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_SafValves",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T11b_01": {
+   "class": "T_Air_P11b_Off_Process_EPC2",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Area",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_Streams",
+     "type": "string"
+    },
+    {
+     "name": "Land_ProcessTrain",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeStreams",
+     "type": "string"
+    },
+    {
+     "name": "Land_RemarksIDCode",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_MaterialResidence",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_DMSpump",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_Pump",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_Flanges",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_Valves",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_SafValves",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T11c_01": {
+   "class": "T_Air_P11c_Off_Process_EPC3",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Area",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_Streams",
+     "type": "string"
+    },
+    {
+     "name": "Land_ProcessTrain",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeStreams",
+     "type": "string"
+    },
+    {
+     "name": "Land_RemarksIDCode",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_MaterialResidence",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_DMSpump",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_Pump",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_Flanges",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_Valves",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_SafValves",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T11d_01": {
+   "class": "T_Air_P11d_Off_Process_EPC4",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Area",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_Streams",
+     "type": "string"
+    },
+    {
+     "name": "Land_ProcessTrain",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeStreams",
+     "type": "string"
+    },
+    {
+     "name": "Land_RemarksIDCode",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_MaterialResidence",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_DMSpump",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_Pump",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_Flanges",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_Valves",
+     "type": "decimal?"
+    },
+    {
+     "name": "No_SafValves",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T6_01": {
+   "class": "T_Air_P06_Dust_Producing_Activities_01",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeMater",
+     "type": "string"
+    },
+    {
+     "name": "Land_TrapTechnique",
+     "type": "string"
+    },
+    {
+     "name": "Land_TrapEfficiency",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_QuantLoadMater",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_EmissionSourceType",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_CoefGravSetting",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv2",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv3",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv4",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv5",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv6",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv7",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv8",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv9",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv10",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv11",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv12",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv13",
+     "type": "string"
+    }
+   ]
+  },
+  "T6_02": {
+   "class": "T_Air_P06_Dust_Producing_Activities_02",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeMater",
+     "type": "string"
+    },
+    {
+     "name": "Land_TrapTechnique",
+     "type": "string"
+    },
+    {
+     "name": "Land_TrapEfficiency",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_QuantLoadMater",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_EmissionSourceType",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv2",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv3",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv4",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv5",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv6",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv7",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv8",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv9",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv10",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv11",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv12",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv13",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv14",
+     "type": "string"
+    }
+   ]
+  },
+  "T6_05": {
+   "class": "T_Air_P06_Dust_Producing_Activities_05",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_NameArea",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeMater",
+     "type": "string"
+    },
+    {
+     "name": "Land_TrapEfficiency",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_QuantLoadMater",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_EmissionSourceType",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Fraction",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Transforming",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_LocalMeteorologicalConditions",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_LocalConditions",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_MoistureMaterial",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_CoarsenessMaterial",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_MaterialsGrabber",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_SalvoEmission",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_AccountLoading",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv2",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv3",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv4",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv5",
+     "type": "string"
+    }
+   ]
+  },
+  "T6_06": {
+   "class": "T_Air_P06_Dust_Producing_Activities_06",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_StorageAreaSize",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_TypeMater",
+     "type": "string"
+    },
+    {
+     "name": "Land_TrapEfficiency",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_NumDaysStorage",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_EmissionSourceType",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_LocalMeteorologicalConditions",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_LocalConditions",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_MoistureMaterial",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_SurfaceContour",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_CoarsenessMaterial",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_SurfaceMaterial",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv2",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv3",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv4",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv5",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv6",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv7",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_PercentageSunnyDays",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T6_10": {
+   "class": "T_Air_P06_Dust_Producing_Activities_10",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_NameArea",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeMater",
+     "type": "string"
+    },
+    {
+     "name": "Land_TrapEfficiency",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_QuantLoadMater",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_EmissionSourceType",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Fraction",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Transforming",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_LocalMeteorologicalConditions",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_LocalConditions",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_MoistureMaterial",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_CoarsenessMaterial",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_MaterialsGrabber",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_SalvoEmission",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_AccountLoading",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_GranulationFactor",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv2",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv3",
+     "type": "string"
+    }
+   ]
+  },
+  "T6_11": {
+   "class": "T_Air_P06_Dust_Producing_Activities_11",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypEmissioSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_Stream",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_FlowRateSulfur",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_EmissionSourceType",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Reserv1",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv2",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv3",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv4",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv5",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv6",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv7",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv8",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv9",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv10",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv11",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv12",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv13",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv14",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T6_12": {
+   "class": "T_Air_P06_Dust_Producing_Activities_12",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_NameArea",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeMaterial",
+     "type": "string"
+    },
+    {
+     "name": "Land_TrappingEfficienty",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_FlowRateSulfur",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_EmissionSourceType",
+     "type": "string"
+    },
+    {
+     "name": "Land_Agent_Fraction",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Transforming",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_LocalMeteorologicalConditions",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_LocalConditions",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_MoistureMaterial",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_CoarsenessMaterial",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_MaterialsGrabber",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_SalvoEmission",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_AccountLoading",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_LocalMeteorologicalConditionsMax",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv1",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv2",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv3",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Agent_Reserv4",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_01": {
+   "class": "T_Air_P09_Utility_01",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_SubstanceConsumption",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_02": {
+   "class": "T_Air_P09_Utility_02",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuel",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_SubstanceConsumption",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_03": {
+   "class": "T_Air_P09_Utility_03",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Power",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_FuelSubstanceConsumptionOrPumpedVolume",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_RunningHours",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_OperTimeDays",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_04": {
+   "class": "T_Air_P09_Utility_04",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuelOrStream",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_SubstanceConsumptionKgH",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_SubstanceConsumptionKg",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_SubstanceConsumption",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_05": {
+   "class": "T_Air_P09_Utility_05",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Power",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_OperTimeDays",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_FuelSubstanceConsumptionOrPumpedVolume",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_06": {
+   "class": "T_Air_P09_Utility_06",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Power",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_FuelSubstanceConsumptionOrPumpedVolume",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_07": {
+   "class": "T_Air_P09_Utility_07",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuel",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_SubstanceConsumptionSm3H",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_SubstanceConsumptionSm3",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_08": {
+   "class": "T_Air_P09_Utility_08",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuelOrStream",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_SubstanceConsumption",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GasConsumption",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_09": {
+   "class": "T_Air_P09_Utility_09",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Power",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_OperTimeDays",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_FuelSubstanceConsumptionOrPumpedVolume",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_10": {
+   "class": "T_Air_P09_Utility_10",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuelOrStream",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_SubstanceConsumption",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GasConsumption",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_11": {
+   "class": "T_Air_P09_Utility_11",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuel",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_SubstanceConsumption",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_12": {
+   "class": "T_Air_P09_Utility_12",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_FuelSubstanceConsumptionOrPumpedVolume",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_OperTimeDays",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_13": {
+   "class": "T_Air_P09_Utility_13",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Power",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_FuelSubstanceConsumptionOrPumpedVolume",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_OperTimeDays",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_14": {
+   "class": "T_Air_P09_Utility_14",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Power",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_FuelSubstanceConsumptionOrPumpedVolume",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_OperTimeDays",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_15": {
+   "class": "T_Air_P09_Utility_15",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_Stream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_OperTimeDays",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9_16": {
+   "class": "T_Air_P09_Utility_16",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_Stream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_MaterialResidenceTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_SubstanceConsumption",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_16": {
+   "class": "T_Air_P09a_ProcessUnits_16",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuelOrStream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_SubstanceConsumption",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_TypeStream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NumFlanges",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumPumps",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumValves",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumReliefValves",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumOther",
+     "type": "int?"
+    },
+    {
+     "name": "Land_MassFraction_0303",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0330",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0333",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0334",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0337",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0370",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0415",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0416",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0602",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0616",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0621",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0627",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1052",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1702",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1707",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1715",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1720",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1728",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1852",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_2754",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_17": {
+   "class": "T_Air_P09a_ProcessUnits_17",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuelOrStream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_MaterialResidence",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_FuelSubstanceConsumptionOrPumpedVolume",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_GasConsumption",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_TypeStream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NumFlanges",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumPumps",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumValves",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumReliefValves",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumOther",
+     "type": "int?"
+    },
+    {
+     "name": "Land_MassFraction_0303",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0330",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0333",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0334",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0337",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0370",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0415",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0416",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0602",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0616",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0621",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0627",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1052",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1702",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1707",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1715",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1720",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1728",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1852",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_2754",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_17a": {
+   "class": "T_Air_P09a_ProcessUnits_17a",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_Stream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_SubstanceConsumption",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_18": {
+   "class": "T_Air_P09a_ProcessUnits_18",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_Stream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_Reserv1",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_Reserv2",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_Reserv3",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_Reserv4",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_19": {
+   "class": "T_Air_P09a_ProcessUnits_19",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_Stream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_Density20",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_ReidVapourPressure",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_HydrogenSulfide",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_SumMethylEthylMercaptans",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_AmountOil",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0303",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0330",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0333",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0334",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0337",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0370",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0415",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0416",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0602",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0616",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0621",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0627",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1052",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1702",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1707",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1715",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1720",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1728",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1852",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_2754",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_21": {
+   "class": "T_Air_P09a_ProcessUnits_21",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_Stream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTimeDays",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_FlowRateSulfur",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_21a": {
+   "class": "T_Air_P09a_ProcessUnits_21a",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_Stream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_NumberFilledSulfurBlocks",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_AmountSulfurPlacement",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_DurationSulfurPlacement",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_21b": {
+   "class": "T_Air_P09a_ProcessUnits_21b",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_Stream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_FlowRateSulfur",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_22": {
+   "class": "T_Air_P09a_ProcessUnits_22",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_Stream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_FlowRateSulfur",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_23": {
+   "class": "T_Air_P09a_ProcessUnits_23",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_Stream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_OperatingTimeDays",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_24": {
+   "class": "T_Air_P09a_ProcessUnits_24",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuel",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_ReleaseColdVen",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_25": {
+   "class": "T_Air_P09a_ProcessUnits_25",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuel",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_ReleaseColdVen",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_SubstanceConsumptionKgH",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_SubstanceConsumptionKg",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_26": {
+   "class": "T_Air_P09a_ProcessUnits_26",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuel",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_ReleaseColdVen",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_27": {
+   "class": "T_Air_P09a_ProcessUnits_27",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuelOrStream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_Measure_OperTimeDays",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_TypeStream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NumFlanges",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumPumps",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumValves",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumReliefValves",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumOther",
+     "type": "int?"
+    },
+    {
+     "name": "Land_MassFraction_0303",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0330",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0333",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0334",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0337",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0370",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0415",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0416",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0602",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0616",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0621",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0627",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1052",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1702",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1707",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1715",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1720",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1728",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1852",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_2754",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_28": {
+   "class": "T_Air_P09a_ProcessUnits_28",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeEmissionSource",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuel",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_TypeStream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NumFlanges",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumPumps",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumValves",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumReliefValves",
+     "type": "int?"
+    },
+    {
+     "name": "Land_NumOther",
+     "type": "int?"
+    },
+    {
+     "name": "Land_MassFraction_0303",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0330",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0333",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0334",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0337",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0370",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0415",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0416",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0602",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0616",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0621",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_0627",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1052",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1702",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1707",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1715",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1720",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1728",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_1852",
+     "type": "decimal?"
+    },
+    {
+     "name": "Land_MassFraction_2754",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_29": {
+   "class": "T_Air_P09a_ProcessUnits_29",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv2",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_Amount",
+     "type": "decimal?"
+    }
+   ]
+  },
+  "T9a_30": {
+   "class": "T_Air_P09a_ProcessUnits_30",
+   "attributes": [
+    {
+     "name": "Land_Status",
+     "type": "string"
+    },
+    {
+     "name": "Land_No",
+     "type": "int?"
+    },
+    {
+     "name": "Land_Subcontractor",
+     "type": "string"
+    },
+    {
+     "name": "Land_InvNumEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_DescEqp",
+     "type": "string"
+    },
+    {
+     "name": "Land_Reserv1",
+     "type": "string"
+    },
+    {
+     "name": "Land_Remarks",
+     "type": "string"
+    },
+    {
+     "name": "Land_TypeFuelOrStream",
+     "type": "string"
+    },
+    {
+     "name": "Land_NAE",
+     "type": "string"
+    },
+    {
+     "name": "Land_Measure_OperatingTime",
+     "type": "decimal?"
+    }
+   ]
+  }
+ }
+}

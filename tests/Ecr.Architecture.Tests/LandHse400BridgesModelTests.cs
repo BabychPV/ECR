@@ -128,8 +128,9 @@ public sealed class LandHse400BridgesModelTests
             }
         }
 
-        // 19 мостів: T9_02 1, T9_04 4, T9_07 3, T9_08 4, T9_10 4, T9_11 1, T10_01 1, T11_01 1.
-        Assert.Equal(19, total);
+        // 37 мостів: T9_02 1, T9_04 4, T9_07 3, T9_08 4, T9_10 4, T9_11 1, T10_01 1, T11_01 1 (джерело потоку з рядків аркуша 9)
+        // + T9a_17 4, T9a_24 1, T9a_25 4, T9a_26 1, T9a_27 1, T9a_28 1, T10_03 3, T11_03 3 (джерело - атрибут AF).
+        Assert.Equal(37, total);
     }
 
     [Fact]
@@ -149,13 +150,14 @@ public sealed class LandHse400BridgesModelTests
             Assert.DoesNotContain("CompositionMass", Columns(tables[table]).Keys);
         }
 
-        // 9a: і Stream, і TypeOfStream - джерело потоку не доведене, нічого не вгадуємо.
-        var t9a = unresolved.GetProperty("T9a_25");
-        Assert.Contains("Stream", t9a.GetProperty("Density20").GetString()!, StringComparison.Ordinal);
-        Assert.DoesNotContain("Density20", Columns(tables["T9a_25"]).Keys);
+        // 9a: колонка «Stream» доведена атрибутом AF (Land_TypeFuel/Land_TypeFuelOrStream стоїть у класі на її місці;
+        // «Type of stream» = Land_TypeStream - окремий атрибут): af_attr_bridges.stream_sources.
+        Assert.Contains("[Stream]", Columns(tables["T9a_25"])["Density20"].GetProperty("expression").GetString()!, StringComparison.Ordinal);
+        Assert.False(unresolved.TryGetProperty("T9a_25", out var t9a) && t9a.TryGetProperty("Density20", out _));
 
-        // C12_02: селектор «Land_TypeStream, інакше Land_TypeFuel».
-        Assert.Contains("C12_02", unresolved.GetProperty("T10_03").GetProperty("Vddg").GetString()!, StringComparison.Ordinal);
+        // C12_02: на 10_03 потік = Land_TypeFuel (ECW_C12_02.cs:233), на 11_03 - Land_TypeStream (колонка «Type of streams»).
+        Assert.Contains("REGFIELD([Land_TypeFuel], 'NAME')", Expression(model, "T10_03", "Vddg"), StringComparison.Ordinal);
+        Assert.Contains("[TypeOfStreams]", Expression(model, "T11_03", "Vddg"), StringComparison.Ordinal);
 
         // Правило «немає запису» - одне, записане в моделі.
         Assert.Contains(

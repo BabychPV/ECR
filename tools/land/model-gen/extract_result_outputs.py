@@ -61,12 +61,14 @@ def main():
         n = m['name']
         if ALREADY_IN_CALC.match(n) or n not in tables:
             continue
-        outs, skip, ins = set(), set(), set()
+        outs, skip, ins, cats = set(), set(), set(), set()
         for v in m['versions']:
             for f in v['formulas']:
                 nm = f['name']
                 # входи формули: @Имя у тексті й аргументи без префіксів CST. (константа) і ! (результат іншої формули)
                 ins.update(INPUT_RX.findall(f.get('text') or ''))
+                # @Category1.. (не Category): аргумент, який вимагає колонку при публікації (ECR-CALC-0438)
+                cats.update(x for x in INPUT_RX.findall(f.get('text') or '') if re.match(r'^Category\d+$', x))
                 for arg in re.split(r'[;\n]', f.get('arguments') or ''):
                     arg = arg.strip().lstrip('@')
                     if arg and not arg.startswith(('CST.', '!')):
@@ -79,6 +81,8 @@ def main():
             # inputs: імена аргументів (без Category*), для мостів аргументів таблиць (gen_ecr_model.py, LP-10); значень немає
             res[n] = {'tables': sorted(tables[n]), 'outputs': sorted(outs),
                       'inputs': sorted(i for i in ins if not i.startswith('Category'))}
+            if cats:
+                res[n]['categoryInputs'] = sorted(cats)
         if skip:
             excluded[n] = sorted(skip)
     out = {'formatVersion': 1,
