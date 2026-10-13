@@ -32,7 +32,8 @@ $resultOutputs = Join-Path $refDir 'land-result-outputs.json'
 Remove-Item -LiteralPath (Join-Path $Work 'land-result-outputs.json') -Force -ErrorAction SilentlyContinue
 if (Test-Path -LiteralPath $resultOutputs) { Copy-Item -LiteralPath $resultOutputs (Join-Path $Work 'land-result-outputs.json') -Force }
 # атрибути AF-таблиць (extract_af_table_attributes.py) і правила категорії (LP-07): мости аргументів af_attr_bridges.py
-foreach ($n in 'af-land-table-attributes.json', 'af-land-category-rules.json') {
+# застосовність речовин на рядок (extract_substance_applicability.py: словники старого C#): substance_applicability.py
+foreach ($n in 'af-land-table-attributes.json', 'af-land-category-rules.json', 'land-substance-applicability.json') {
     Remove-Item -LiteralPath (Join-Path $Work $n) -Force -ErrorAction SilentlyContinue
     Copy-Item -LiteralPath (Join-Path $refDir $n) (Join-Path $Work $n) -Force
 }

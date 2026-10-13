@@ -1133,6 +1133,11 @@ _cat_rules = json.load(open('af-land-category-rules.json', encoding='utf-8'))['r
 # джерело тексту потоку для таблиць 9a/10_03/11_03 - за атрибутом AF, який читає старий код (af_attr_bridges.stream_sources)
 stat_cols += hse400_bridges.apply(out, registries, af_attr_bridges.stream_sources(out, _af_attrs), _af_attrs)
 
+# ---- застосовність речовин на рядок (рішення людини 13.10): довідник LAND_SUBSTANCE_APPLICABILITY зі словників
+# старого C# (land-substance-applicability.json). Без міграції; значень прода немає; див. substance_applicability.py.
+import substance_applicability  # noqa: E402
+substance_applicability.apply(out, registries, _cat_rules)
+
 # ---- мости за атрибутами AF-таблиць (LP-10, прив'язки C11/C12 -> ECR-CALC-0438/0422): af_attr_bridges.py.
 stat_cols += af_attr_bridges.apply(out, _ro_all, _cat_rules, _af_attrs, set(CALC))
 
