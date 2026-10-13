@@ -300,3 +300,25 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 
 Сторожі: LandNaeGroupBridgesModelTests (Architecture), NaeGroupBridgesTests (Expressions, справжній рушій).
 
+
+## Формат відображення Decimal-колонок (LP-21)
+
+Рішення людини 12.10: «Decimal 16 зберігаємо до 16 знаків, показуємо за `DisplayFormat` колонки». Модель
+(`land-template.model.json`) несе `displayFormat` лише там, де xlsm має числовий формат домінантного стилю даних
+колонки (ширше за 80 % рядків; порожні колонки й «General» формату не мають): 595 із 2304 Decimal-колонок.
+Решта (1709: 1255 без заповнених рядків, з них 49 доданих ECR-колонок-аргументів без стовпця Excel; 454 із
+рядками, але «General» або без домінантного стилю) отримує формат із правила `Resolve-LandDisplayFormat` (`LandTemplateDiff.Lib.ps1`), без зміни моделі:
+
+| Колонка | `DisplayFormat` |
+|---|---|
+| має `displayFormat` у моделі (Excel) | він сам, без змін |
+| Decimal без формату Excel, Scale ≥ 1 | `0.` + `0` × min(Scale, 6); для Scale 16 це `0.000000` |
+| Decimal без формату Excel, Scale = 0 | `0` |
+| не Decimal, Scale не задано | не виводиться |
+
+`0.000000` - найчастіший формат самого Excel-шаблону (458 із 595; у 14 таблицях, де є і колонки з форматом, і без
+нього, він домінує у 13). Виводити формат за «сусідніми» колонками таблиці не стали: 1286 без форматів стоять у
+таблицях, де жодна Decimal-колонка форматів не має, а сусід-викид (`0.0`, `0.00`) переніс би чужий формат.
+Build (`Stage Template`, презентація колонок) записує результат правила в `cfg.ColumnDef.DisplayFormat`
+(ідемпотентно, `ISNULL`/порівняння), Verify-LandTemplate звіряє його з версією («презентація колонок»).
+Тест: `LandDisplayFormatRuleTests` (Ecr.Architecture.Tests).

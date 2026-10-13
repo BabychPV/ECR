@@ -571,12 +571,12 @@ function Fill-StructureSql([int]$vid) {
                 $tid = $tableIds["$($sh.code)/$($tb.code)"]
                 foreach ($c in @($tb.columns)) {
                     $sid = Style-IdOf $c.styleRole
-                    if ($null -eq $sid -and -not $c.displayFormat -and -not $c.widthPx) { continue }
+                    $dfmt = Resolve-LandDisplayFormat $c; if ($null -eq $sid -and -not $dfmt -and -not $c.widthPx) { continue }
                     $cid = $colId["$tid/$($c.code)"]
                     if (-not $cid) { continue }
                     $row = $dp.NewRow(); $row['Id'] = [int]$cid
                     if ($null -ne $sid) { $row['StyleId'] = [int]$sid }
-                    if ($c.displayFormat) { $row['DisplayFormat'] = [string]$c.displayFormat }
+                    if ($dfmt) { $row['DisplayFormat'] = [string]$dfmt }
                     if ($c.widthPx) { $row['WidthPx'] = [int]$c.widthPx }
                     $dp.Rows.Add($row)
                 }
@@ -930,7 +930,7 @@ function Stage-Template {
                     headerL10n = (L10n ([string]$c.headerEn).Substring(0, [Math]::Min(250, ([string]$c.headerEn).Length)) $c.headerRu)
                     ordinal = $ord; dataType = $type; isRequired = [bool]$c.required; isReadOnly = [bool]($c.readOnly -or $type -in 'Formula', 'Calculated')
                     isHidden = [bool]$c.hidden; precision = $(if ($c.precision) { [int]$c.precision } else { $null }); scale = $(if ($c.scale) { [int]$c.scale } else { $null })
-                    defaultValue = $(if ($c.default) { [string]$c.default } else { $null }); displayFormat = $(if ($c.displayFormat) { [string]$c.displayFormat } else { $null }); styleId = (Style-IdOf $c.styleRole)
+                    defaultValue = $(if ($c.default) { [string]$c.default } else { $null }); displayFormat = (Resolve-LandDisplayFormat $c); styleId = (Style-IdOf $c.styleRole)
                     lookupRegistryDefId = $lookup; lookupFilter = $null; unitId = (UnitId $c.unit); widthPx = $(if ($c.widthPx) { [int]$c.widthPx } else { $null })
                     isMonthColumn = $isMonth; monthNumber = $(if ($isMonth) { [int]$c.month } else { $null })
                 }
