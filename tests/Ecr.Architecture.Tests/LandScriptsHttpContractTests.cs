@@ -206,4 +206,36 @@ public sealed class LandScriptsHttpContractTests
             readme.IndexOf("2. Шапка: `Apply-ContractHeader.ps1", StringComparison.Ordinal) is var b and >= 0 && a < b,
             "Довідники мають іти перед шапкою.");
     }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Invoke_Ecr_читає_Retry_After_на_429_а_перерахунок_іде_з_пейсингом()
+    {
+        var build = File.ReadAllText(LandFile("Build-LandTemplate.ps1"));
+
+        // Invoke-Ecr на 429 бере паузу з Retry-After (мін. 1 с), інакше - наявні 2*try; бюджет очікування обмежений.
+        var invoke = Regex.Match(build, @"function Invoke-Ecr \{(?<body>.*?)\r?\n\}\r?\n", RegexOptions.Singleline);
+        Assert.True(invoke.Success, "Invoke-Ecr не знайдено.");
+        Assert.Contains("Get-RetryAfterSeconds", invoke.Groups["body"].Value);
+        Assert.Contains("$waited", invoke.Groups["body"].Value);
+
+        // Цикл перерахунку: період-мажорний порядок і пейсинг 2.2 с між викликами.
+        Assert.Contains("function Wait-RecalcPace", build);
+        Assert.Contains("2.2", build);
+        var loop = Regex.Match(build, @"foreach \(\$p in 202603.*?recalculate"" -Body", RegexOptions.Singleline);
+        Assert.True(loop.Success, "Цикл перерахунку не знайдено.");
+        Assert.Contains("Wait-RecalcPace", loop.Value);
+
+        // Поведінка розбору: ціле число секунд, мінімум 1, без заголовка - 0 (діють наявні паузи).
+        var script =
+            "$ast = [System.Management.Automation.Language.Parser]::ParseFile('" + LandFile("Build-LandTemplate.ps1").Replace("'", "''") + "', [ref]$null, [ref]$null); " +
+            "$fn = $ast.Find({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq 'Get-RetryAfterSeconds' }, $true); " +
+            ". ([scriptblock]::Create($fn.Extent.Text)); " +
+            "$a = Get-RetryAfterSeconds ([pscustomobject]@{ Headers = @{ 'Retry-After' = '17' } }); " +
+            "$b = Get-RetryAfterSeconds ([pscustomobject]@{ Headers = @{ 'retry-after' = '0' } }); " +
+            "$c = Get-RetryAfterSeconds ([pscustomobject]@{ Headers = @{} }); " +
+            "\"$a,$b,$c\"";
+
+        Assert.Equal("17,1,0", RunPowerShell(script));
+    }
 }

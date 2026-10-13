@@ -75,15 +75,38 @@ $childStand = if ($ConfirmStand -and $ConfirmStand.LastIndexOf('/') -gt 0) { $Co
 
 # Тимчасові 503 (ECR-SYS-0503 databaseBusy) і 429 повторюємо: стенд ділить SQL Server з іншими сесіями.
 ${function:Invoke-EcrOnce} = ${function:Invoke-Ecr}
+# 429: чекаємо рівно Retry-After (ціле число секунд, мін. 1); без заголовка - паузи 2/4/6/8/10 с. Бюджет очікування
+# на один виклик - 180 с (вікно квоти перерахунку 60 с, DocumentRecalculateQuota).
+function Get-RetryAfterSeconds($Response) {
+    $raw = $null
+    if ($Response -and $Response.Headers) {
+        foreach ($k in @($Response.Headers.Keys)) { if ([string]$k -ieq 'Retry-After') { $raw = [string]$Response.Headers[$k] } }
+    }
+    $n = 0
+    if ($raw -and [int]::TryParse($raw.Trim(), [ref]$n)) { return [Math]::Max(1, $n) }
+    return 0
+}
 function Invoke-Ecr {
     param([Parameter(Mandatory)][string]$Method, [Parameter(Mandatory)][string]$Path, [Alias('Body')]$Payload = $null, [hashtable]$Headers = @{})
     $r = $null
-    foreach ($try in 1..5) {
+    $waited = 0
+    foreach ($try in 1..6) {
         $r = Invoke-EcrOnce -Method $Method -Path $Path -Body $Payload -Headers $Headers
         if ($r.Status -ne 503 -and $r.Status -ne 429) { return $r }
-        Start-Sleep -Seconds (2 * $try)
+        $pause = 2 * $try
+        if ($r.Status -eq 429) { $ra = Get-RetryAfterSeconds $r; if ($ra -gt 0) { $pause = $ra } }
+        if ($waited + $pause -gt 180) { break }
+        $waited += $pause
+        Start-Sleep -Seconds $pause
     }
     return $r
+}
+# Пейсинг масового перерахунку: не частіше 1 виклику на 2.2 с (< 30/хв, межа користувача).
+$script:RecalcLastCall = [DateTime]::MinValue
+function Wait-RecalcPace {
+    $gap = 2.2 - ([DateTime]::UtcNow - $script:RecalcLastCall).TotalSeconds
+    if ($gap -gt 0) { Start-Sleep -Milliseconds ([int][Math]::Ceiling($gap * 1000)) }
+    $script:RecalcLastCall = [DateTime]::UtcNow
 }
 
 function Want([string]$s) { return ($Stage -contains 'All') -or ($Stage -contains $s) }
@@ -1275,9 +1298,13 @@ function Stage-Data {
     Fill-GoldenDocument $byName['LAND-GOLDEN']
     Fill-FullDocument $byName['LAND-FULL']
     # перерахунок золотого документа по місяцях з даними
+    # період-мажорний порядок (спершу всі документи періоду) + пейсинг: межа 6/хв на пару користувач+документ не досягається
     foreach ($p in 202603, 202604, 202605, 202606) {
-        $r = Invoke-Ecr -Method POST -Path "/api/v1/documents/$($byName['LAND-GOLDEN'])/recalculate" -Body @{ periodKey = $p }
-        Log ("  перерахунок LAND-GOLDEN ${p}: HTTP $($r.Status)")
+        foreach ($dn in 'LAND-GOLDEN') {
+            Wait-RecalcPace
+            $r = Invoke-Ecr -Method POST -Path "/api/v1/documents/$($byName[$dn])/recalculate" -Body @{ periodKey = $p }
+            Log ("  перерахунок ${dn} ${p}: HTTP $($r.Status)")
+        }
     }
     # стани: аркуші LAND-FULL — Approved / Rejected / Submitted
     $full = $byName['LAND-FULL']
