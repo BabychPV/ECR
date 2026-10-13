@@ -4632,6 +4632,38 @@
             "format": "int32",
             "type": "integer"
           },
+          "guardedOverwritable": {
+            "description": "ACC-OW: скільки з GuardedValues лежить у комірках, на які цільова версія кладе НОВУ комірочну\nформулу (`CellFormula`, WW-02): це похідні підсумки, які після переносу замінить перерахунок. Лише їх (і\nлише їх) дозволяє перезаписати прапор `acceptGuardedOverwrite`; решта `guardedWithData` (звуження,\nзміна типу, одиниці, довідника, обов'язковості, режиму рядків) прапором НЕ знімається. Рахується завжди (також\nбез прапора), щоб діалог показав кількість ДО згоди.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "guardedOverwriteAccepted": {
+            "description": "Запит ніс `acceptGuardedOverwrite = true`.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "guardedOverwrittenItems": {
+            "description": "Перелік комірок шаблону, значення яких перезапише формула (за зростанням шляху), не більше\n`MaxGuardedOverwriteItems`; `null` — таких немає. ⛔ Без значень: лише адреса комірки й кількість\nвведених значень у ній (по всіх документах і періодах проєкту).",
+            "items": {
+              "$ref": "#/components/schemas/GuardedOverwriteItem"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "guardedOverwrittenItemsTruncated": {
+            "description": "ACC-OW: перелік обрізано стелею.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "guardedValues": {
             "description": "Скільки введених значень змінили б тлумачення.",
             "format": "int64",
@@ -5987,6 +6019,40 @@
           "sid",
           "matched",
           "roleCodes"
+        ],
+        "type": "object"
+      },
+      "GuardedOverwriteItem": {
+        "description": "Комірка, значення якої перезапише нова комірочна формула (ACC-OW).",
+        "properties": {
+          "columnCode": {
+            "description": "Код колонки.",
+            "type": "string"
+          },
+          "rowKey": {
+            "description": "Ключ рядка.",
+            "type": "string"
+          },
+          "sheetCode": {
+            "description": "Код аркуша вихідної версії.",
+            "type": "string"
+          },
+          "tableCode": {
+            "description": "Код таблиці.",
+            "type": "string"
+          },
+          "values": {
+            "description": "Скільки непорожніх значень у цій комірці по документах і періодах проєкту.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sheetCode",
+          "tableCode",
+          "rowKey",
+          "columnCode",
+          "values"
         ],
         "type": "object"
       },
@@ -8530,6 +8596,13 @@
       "MigrateDocumentVersionRequest": {
         "description": "Запит на перенос документа на нову версію шаблону (ФВ-7.5).",
         "properties": {
+          "acceptGuardedOverwrite": {
+            "description": "ACC-OW (необов'язкове; відсутнє або `null` = `false`): `true` — не відмовляти `guardedWithData` там, де «змінене тлумачення» — це лише НОВА комірочна\nформула цільової версії на комірці з уже введеним значенням (поле `CellFormula` у звіті): значення\nпереїздить, а перерахунок після переносу замінює його результатом формули. Типово `false` (поведінка без\nпрапора незмінна). Інші класи `guardedWithData` (звуження, тип, одиниця, довідник, обов'язковість, режим\nрядків) і подані/затверджені аркуші (`409 sheetsLocked`) прапор НЕ знімає. Те, що буде перезаписано,\nсухий прогін показує до згоди: `guardedOverwritable`, `guardedOverwrittenItems`.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "async": {
             "default": false,
             "description": "`true` — перенос (не сухий прогін) іде ФОНОВОЮ задачею: відповідь `202` з `jobId`, стан —\n`GET /jobs/{jobId}`. Типово `false` — як і раніше, синхронно з `200` і звітом\n(зворотна сумісність зовнішніх викликачів; веб-клієнт передає `true`).",
