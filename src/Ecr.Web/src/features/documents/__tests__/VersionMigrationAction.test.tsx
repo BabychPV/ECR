@@ -66,6 +66,9 @@ function report(overrides: Partial<VersionMigrationReport>): VersionMigrationRep
     lostValues: 0,
     guardedValues: 0,
     lockedSheets: 0,
+    lockedSheetsCarried: 0,
+    lockedSheetsAffected: 0,
+    lockedSheetItemsTruncated: false,
     items: [{ path: 'GEN.T1.C4', kind: 'Added', changeClass: 'Safe', values: 0 }],
     itemsTruncated: false,
     mappingsRemapped: 0,
@@ -362,9 +365,11 @@ describe('useVersionMigrationAction', () => {
 
     fireEvent.click(screen.getByTestId('migrate-dry-run'));
 
-    await screen.findByText('⟦documents.migrateLockedAffected⟧');
+    await screen.findByText('⟦documents.migrateLockedAffected (count=1)⟧');
     expect(document.querySelector('[data-migrate-locked-affected]')).not.toBeNull();
-    expect(screen.getByText('⟦documents.migrateLockedItem⟧')).toBeDefined();
+    expect(
+      screen.getByText('⟦documents.migrateLockedItem (sheet=GEN, period=202601, status=Approved)⟧'),
+    ).toBeDefined();
     expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(true);
   });
 

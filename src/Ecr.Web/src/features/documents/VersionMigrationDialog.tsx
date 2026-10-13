@@ -301,7 +301,7 @@ function MigrationReport({ report }: { readonly report: VersionMigrationReport }
               </Text>
             ))}
             {(report.lockedSheetsAffected ?? 0) > 0 && (
-              <Stack gap={2} data-migrate-locked-affected="">
+              <Stack gap="xs" data-migrate-locked-affected="">
                 <Text size="sm">{t('documents.migrateLockedAffected', { count: report.lockedSheetsAffected ?? 0 })}</Text>
                 {(report.lockedSheetItems ?? [])
                   .filter((item) => item.affected)
