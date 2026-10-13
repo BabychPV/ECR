@@ -244,7 +244,8 @@ public static class PublishChecks
             // ⚠ Без цього рядка дві формули, що читають одна одну ЗА МИНУЛИЙ
             // період, виглядали б циклом і не публікувалися — при тому, що
             // це звичайна форма перехідного залишку.
-            if (dependency.PeriodOffset is not (null or 0))
+            if (dependency.PeriodOffset is not (null or 0)
+                && dependency.DependsOnKind != Ecr.Expressions.Binding.DependencyExtractor.KindCrossPeriodAbsolute)
             {
                 continue;
             }

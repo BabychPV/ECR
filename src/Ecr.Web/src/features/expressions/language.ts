@@ -164,8 +164,8 @@ export function buildMonarchLanguage(options: LanguageOptions): MonarchLanguage 
       reference: [
         [/[ \t\r\n]+/, 'white'],
 
-        // Зсув періоду: «Period», «Period:-1», «Period:+1» (`02b` §3.2).
-        [/(Period)(\s*:\s*)([+-]?\d+)/, ['keyword', 'delimiter', 'number']],
+        // Зсув періоду: «Period», «Period:-1», «Period:+1»; абсолютний період року «Period:#3» (`02b` §3.2).
+        [/(Period)(\s*:\s*)([+-]?\d+|#\d+)/, ['keyword', 'delimiter', 'number']],
         [/Period\b/, 'keyword'],
 
         // Підстановка поточної колонки (`02b` §1, `column_selector`).
