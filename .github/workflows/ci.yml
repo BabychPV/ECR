@@ -60,6 +60,43 @@ env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
 
 jobs:
+  # ✎ 2026-10-13 (lane integ-ci-skip-dup, ретро координатора): push у `dev/integration`, вершина
+  # якого УЖЕ в `main` (fast-forward `dev` до `main` після мержу тижневого PR), не має споживача:
+  # дерево пройшло вісім гейтів у PR, а прогін ~22+ хв займає раннери. `gate` — крихітне завдання
+  # без checkout: `compare/main...<sha>` дає `identical|behind`, коли SHA вже предок/рівний
+  # `main` (семантика `git merge-base --is-ancestor`, без завантаження історії). Лише для
+  # push у `refs/heads/dev/integration`; усе інше (lane/**, integ-*, PR, main, schedule,
+  # dispatch) дає `skip=false`. Помилка API → `skip=false` (відкрито: краще зайвий прогін,
+  # ніж пропущений). Важкі завдання мають `needs: gate` + `needs.gate.outputs.skip != 'true'`;
+  # імена завдань і атестація не змінені (`attest` — лише PR rc/**, gate йому не потрібен).
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      skip: ${{ steps.g.outputs.skip }}
+    steps:
+      - id: g
+        name: Вершина dev/integration уже в main?
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          skip=false
+          if [ "$EVENT_NAME" = "push" ] && [ "$REF" = "refs/heads/dev/integration" ]; then
+            status="$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$SHA" --jq .status || true)"
+            echo "compare main...$SHA: ${status:-<порожньо>}"
+            case "$status" in
+              identical|behind) skip=true ;;
+            esac
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+
   # ⛔ Контейнер піднімається КРОКОМ, а не через `services:`, і секрету
   # репозиторію не потребує. Перша збірка вимагала `SQL_SA_PASSWORD` — і
   # конвеєр був червоний із першого дня в того, хто його не завів, причому
@@ -103,8 +140,9 @@ jobs:
   # `src/Ecr.Web`). Повний набір — на `lane/integ-*`, `dev/integration`, `main`,
   # PR (у т.ч. `rc/*` → `main`) і вручну. Імена обов'язкових перевірок не змінено.
   server-part:
+    needs: gate
     name: server-part (${{ matrix.part }})
-    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -240,13 +278,13 @@ jobs:
   # агрегатор там теж пропускається (`skipped`), а не червоніє. На PR/dev/integration/
   # main/integ-* умова істинна й `server` рахує всі частини, як і раніше.
   server:
-    needs: server-part
+    needs: [ server-part, gate ]
     # ✎ 2026-10-12 (рев'ю атестації): на PR `rc/*` пропущене повне завдання створює check-run
     # `skipped` із ТИМ САМИМ іменем, що й атестація, і «пропущений близнюк» міг би перекрити
     # червону атестацію в обчисленні обов'язкових перевірок. Тому на rc-PR повне завдання
     # має ІНШЕ ім'я; на решті подій ім'я незмінне (його читає атестація й ruleset `main`).
     name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'server (повний, пропущено на rc)' || 'server' }}
-    if: ${{ always() && !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
+    if: ${{ always() && !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Усі частини server зелені
@@ -258,8 +296,9 @@ jobs:
           fi
 
   client:
+    needs: gate
     name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'client (повний, пропущено на rc)' || 'client' }}
-    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -288,8 +327,9 @@ jobs:
   # близько 35 с на маршрут, і одна тема іде 16-23 хвилини. У складі
   # `client` вона тримала б решту гейтів заручниками; поруч — не тримає нікого.
   a11y:
+    needs: gate
     name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'a11y (повний, пропущено на rc)' || format('a11y ({0})', matrix.theme) }}
-    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     # ⚠ W4.3 (accessibility.a11y.test.tsx, коментар над ECR_A11Y_THEME) описував
     # матрицю light/dark як чинну — вона такою не була: ця джоба досі проганяла
@@ -355,8 +395,9 @@ jobs:
   # Кроки перевірки тут не з `verify-all.ps1`, тож `CiPipelineTests` його не
   # зачіпає.
   worker-windows:
+    needs: gate
     name: worker (windows)
-    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -414,8 +455,9 @@ jobs:
   # Кроки перевірки тут не з `verify-all.ps1`, тож `CiPipelineTests` його не
   # зачіпає.
   msi-windows:
+    needs: gate
     name: msi (windows)
-    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -541,9 +583,9 @@ jobs:
   # а пропущену обов'язкову перевірку GitHub зараховує як пройдену.
   windows:
     name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'windows (повний, пропущено на rc)' || 'windows' }}
-    needs: [ worker-windows, msi-windows, msi-install ]
+    needs: [ worker-windows, msi-windows, msi-install, gate ]
     # ✎ 2026-10-12: на push у не-інтеграційну `lane/**` Windows-завдання пропущені навмисно — агрегатор теж.
-    if: ${{ always() && !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
+    if: ${{ always() && !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Усі Windows-завдання зелені

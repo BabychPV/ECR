@@ -50,9 +50,42 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
 
 jobs:
+  # ✎ 2026-10-13 (lane integ-ci-skip-dup): те саме `gate`, що й у ci.yml (пояснення там) — push у
+  # `dev/integration` із вершиною, яка вже в `main`, не дає повних `build`/`test`. `honesty-guard`
+  # не гейтиться навмисно: дешевий, а `Honesty_guard_і_pr_source_лишаються_справжніми` вимагає
+  # завдання без `if`.
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      skip: ${{ steps.g.outputs.skip }}
+    steps:
+      - id: g
+        name: Вершина dev/integration уже в main?
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          skip=false
+          if [ "$EVENT_NAME" = "push" ] && [ "$REF" = "refs/heads/dev/integration" ]; then
+            status="$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$SHA" --jq .status || true)"
+            echo "compare main...$SHA: ${status:-<порожньо>}"
+            case "$status" in
+              identical|behind) skip=true ;;
+            esac
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: gate
     name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'build (повний, пропущено на rc)' || 'build' }}
-    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
+    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -70,8 +103,9 @@ jobs:
         run: dotnet build Ecr.sln -c Release --no-incremental --no-restore
 
   test:
+    needs: gate
     name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'test (повний, пропущено на rc)' || 'test' }}
-    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
+    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
