@@ -1154,6 +1154,24 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
 
         public int FingerprintQueries => Volatile.Read(ref fingerprints);
 
+        /// <summary>Відпускає утримані запити карти вручну (режим без автоматичного випуску).</summary>
+        public void Release() => gate.TrySetResult();
+
+        /// <summary>Чекає, поки запитів карти стане не менше <paramref name="count"/> (запобіжник від зависання).</summary>
+        public async Task WaitMapQueriesAsync(int count)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(60);
+            while (MapQueries < count)
+            {
+                if (DateTime.UtcNow > deadline)
+                {
+                    throw new TimeoutException($"Запитів карти {MapQueries}, очікувалось {count}.");
+                }
+
+                await Task.Delay(10);
+            }
+        }
+
         public override async ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
             System.Data.Common.DbCommand command,
             Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
@@ -1243,6 +1261,53 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         Assert.Equal(1, gate.MapQueries);
     }
 
+    private async Task ReaderAfterChangeDoesNotJoinOldLoadAsync(Func<MapRig, Task> change)
+    {
+        var r = await RigAsync();
+        using var _ = r.Cache;
+        var gate = new MapGateInterceptor(int.MaxValue);
+
+        async Task<HashSet<long>> ReadAsync()
+        {
+            await using var db = InterceptedContext(gate, r.Epoch);
+            return await StaleOnPageAsync(CachedStore(r, db), r);
+        }
+
+        var first = Task.Run(ReadAsync);
+        await gate.WaitMapQueriesAsync(1);
+
+        // «Коміт» змінив стан, поки перше завантаження утримується: другий читач НЕ має приєднатись до нього.
+        await change(r);
+        var second = Task.Run(ReadAsync);
+        await gate.WaitMapQueriesAsync(2);
+
+        gate.Release();
+        await Task.WhenAll(first, second);
+        Assert.True(gate.MapQueries >= 2);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public Task Single_flight_читач_після_підйому_епохи_не_приєднується_до_старого_завантаження()
+        => ReaderAfterChangeDoesNotJoinOldLoadAsync(r =>
+        {
+            r.Epoch.Bump(r.Period);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public Task Single_flight_читач_після_зміни_відбитка_не_приєднується_до_старого_завантаження()
+        => ReaderAfterChangeDoesNotJoinOldLoadAsync(async r =>
+        {
+            // Інший процес додав довідник: відбиток cfg.RegistryDef змінився, епоха цього процесу - ні.
+            await using var other = r.Builder.CreateContext();
+            var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+            other.RegistryDefs.Add(new RegistryDef(EcrCode.Create($"FP{tag}"), Name("Registry"), isTemporal: false));
+            await other.SaveChangesAsync(CancellationToken.None);
+        });
     /// <summary>Мінімальний логер, що рахує попередження.</summary>
     private sealed class WarningCounter<T> : Microsoft.Extensions.Logging.ILogger<T>
     {
@@ -1290,8 +1355,12 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         Assert.Equal(2, summary.StaleResultsCount);
         Assert.Equal(1, summary.StaleResultsMineCount);
 
-        // Попередження про переповнення - не більше одного на процес (статичний прапорець), а не на запит.
-        Assert.True(log.Warnings + summaryLog.Warnings <= 1);
+        // Перше переповнення дає РІВНО одне Warning (прапорець - на кеш, тобто на процес); повторне - ще нуль.
+        Assert.Equal(1, log.Warnings + summaryLog.Warnings);
+
+        r.Epoch.Bump(r.Period);
+        Assert.Equal([r.A, r.B], (await StaleOnPageAsync(store, r)).Order());
+        Assert.Equal(1, log.Warnings + summaryLog.Warnings);
     }
     // ── допоміжне ────────────────────────────────────────────────────────────────────────
 

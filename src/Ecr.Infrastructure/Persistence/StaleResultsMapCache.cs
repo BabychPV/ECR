@@ -56,6 +56,7 @@ internal sealed partial class StaleResultsMapCache(
     public static readonly TimeSpan Ttl = TimeSpan.FromSeconds(15);
 
     private const string InFlightKey = "doc-stale-map:in-flight";
+    private const string OverflowWarnedKey = "doc-stale-map:overflow-warned";
 
     private static int overflowWarned;
 
@@ -112,9 +113,7 @@ internal sealed partial class StaleResultsMapCache(
             return hit;
         }
 
-        var inFlight = cache!.GetOrCreate(
-            InFlightKey,
-            _ => new ConcurrentDictionary<string, TaskCompletionSource<IReadOnlyDictionary<long, DateTime?>?>>())!;
+        var inFlight = InFlightRegistry();
 
         // Слідувачі приєднуються лише до завантаження В ТОМУ САМОМУ стані (епоха + відбиток).
         var flightKey = $"{key}|{epochValue}|{fingerprint}";
@@ -154,6 +153,45 @@ internal sealed partial class StaleResultsMapCache(
         }
     }
 
+    /// <summary>
+    /// Реєстр завантажень цього кешу. ⛔ `IMemoryCache.GetOrCreate` НЕ атомарний: при першому одночасному
+    /// зверненні кожен читач створив би СВІЙ словник, лідерів стало б кілька - тому створення під замком кешу.
+    /// </summary>
+    private ConcurrentDictionary<string, TaskCompletionSource<IReadOnlyDictionary<long, DateTime?>?>> InFlightRegistry()
+    {
+        lock (cache!)
+        {
+            if (!cache.TryGetValue(InFlightKey, out ConcurrentDictionary<string, TaskCompletionSource<IReadOnlyDictionary<long, DateTime?>?>>? found)
+                || found is null)
+            {
+                found = new ConcurrentDictionary<string, TaskCompletionSource<IReadOnlyDictionary<long, DateTime?>?>>();
+                cache.Set(InFlightKey, found);
+            }
+
+            return found;
+        }
+    }
+
+    /// <summary>Чи вже писали Warning про переповнення: на кеш (тобто на процес), а без кешу - статично.</summary>
+    private bool FirstOverflow()
+    {
+        if (cache is null)
+        {
+            return Interlocked.Exchange(ref overflowWarned, 1) == 0;
+        }
+
+        lock (cache)
+        {
+            if (cache.TryGetValue(OverflowWarnedKey, out _))
+            {
+                return false;
+            }
+
+            cache.Set(OverflowWarnedKey, true);
+            return true;
+        }
+    }
+
     private bool TryHit(string key, long epochValue, FingerprintRow fingerprint, out IReadOnlyDictionary<long, DateTime?>? map)
     {
         if (cache!.TryGetValue(key, out Entry? hit) && hit is not null
@@ -180,7 +218,7 @@ internal sealed partial class StaleResultsMapCache(
         // там, де вони застарілі, тож замість обрізання - сигнал «переповнено», викликач бере прямий запит.
         if (rows.Count > maxDocuments)
         {
-            if (logger is not null && Interlocked.Exchange(ref overflowWarned, 1) == 0)
+            if (logger is not null && FirstOverflow())
             {
                 LogOverflow(logger, periodKey, maxDocuments);
             }
