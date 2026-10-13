@@ -163,8 +163,14 @@ def _stream_reason(tcode):
     return REASON_STREAM['other']
 
 
-def apply(out, registries):
-    """Додає довідники й мости; повертає кількість доданих колонок."""
+def apply(out, registries, extra_stream_sources=None):
+    """Додає довідники й мости; повертає кількість доданих колонок.
+
+    extra_stream_sources: {таблиця: (колонка, тип)} - джерела потоку, доведені за атрибутами AF-таблиць
+    (af_attr_bridges.stream_sources); статичний STREAM_SOURCE має пріоритет.
+    """
+    sources = dict(extra_stream_sources or {})
+    sources.update(STREAM_SOURCE)
     registries[STREAM_REGISTRY] = _stream_registry(registries)
     registries[COMPOSITION_REGISTRY] = _composition_registry()
 
@@ -186,7 +192,7 @@ def apply(out, registries):
             continue
         t_ = by_code[tcode]
         cols = {c['code']: c for c in t_['columns']}
-        src = STREAM_SOURCE.get(tcode)
+        src = sources.get(tcode)
         stream_expr = None
         if src is not None:
             name, kind = src

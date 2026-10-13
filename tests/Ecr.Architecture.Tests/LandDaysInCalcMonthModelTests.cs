@@ -23,12 +23,25 @@ public sealed class LandDaysInCalcMonthModelTests
             .SelectMany(t => t.GetProperty("columns").EnumerateArray())
             .Where(c => c.GetProperty("code").GetString() == code);
 
+    private static IEnumerable<(string Table, JsonElement Column)> TableColumns(JsonElement root, string code)
+        => root.GetProperty("sheets").EnumerateArray()
+            .SelectMany(s => s.GetProperty("tables").EnumerateArray())
+            .SelectMany(t => t.GetProperty("columns").EnumerateArray()
+                .Where(c => c.GetProperty("code").GetString() == code)
+                .Select(c => (t.GetProperty("code").GetString()!, c)));
+
+    // Аркуші 3-5 (методологія 7.7): відпрацьовані дні. Таблиці 6, 9-11 (C11_11_01, C12_04_02): календарні дні,
+    // бо так написано в старому коді (DateTime.DaysInMonth) - див. LandAfAttributeBridgesModelTests.
+    private static bool IsWorkedDaysTable(string table) => table.StartsWith("T3_", StringComparison.Ordinal)
+        || table.StartsWith("T4_", StringComparison.Ordinal) || table.StartsWith("T5_", StringComparison.Ordinal);
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void DaysInCalcMonth_береться_з_відпрацьованих_днів_поточного_періоду_а_не_з_календаря()
     {
         using var doc = Model();
-        var columns = Columns(doc.RootElement, "DaysInCalcMonth").ToList();
+        var columns = TableColumns(doc.RootElement, "DaysInCalcMonth")
+            .Where(x => IsWorkedDaysTable(x.Table)).Select(x => x.Column).ToList();
         Assert.NotEmpty(columns);
 
         foreach (var column in columns)

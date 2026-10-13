@@ -145,7 +145,9 @@ MISSING_NO_BINDING (немає прив'язки до колонки резул�
 
 Немає запису за (рік, місяць, потік, показник) -> `REGFIND` дає `#N/A` -> аргумент не обчислено -> рядок без результатів
 (стара система: `continue`, мовчки). Це одне правило, а не помилка даних: склад є лише за місяці, які мала стара система.
-Не мостяться (див. `argumentBridges.unresolved` моделі): `CompositionMass` (по речовині), таблиці 9a, 10_03, 11_xx без
-однозначної колонки-джерела потоку. Сторожі: LandHse400CompositionScriptTests, LandHse400BridgesModelTests (Architecture),
+Не мостяться (див. `argumentBridges.unresolved` моделі): `CompositionMass` (по речовині), таблиці без атрибута
+типу палива/потоку в AF-класі (9a_17a, 9a_19, 9a_21..23). Для 9a, 10_03 і 11_03 колонка-джерело потоку береться з
+атрибута AF, який читає старий код (`af_attr_bridges.stream_sources`; мости атрибутів AF - розділ README шаблону
+«Мости за атрибутами AF-таблиць»). Сторожі: LandHse400CompositionScriptTests, LandHse400BridgesModelTests (Architecture),
 LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 
