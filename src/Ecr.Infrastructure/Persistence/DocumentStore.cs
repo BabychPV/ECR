@@ -15,10 +15,14 @@ public sealed class DocumentStore(
     EcrDbContext db,
     Microsoft.Extensions.Caching.Memory.IMemoryCache? staleCache = null,
     Ecr.Domain.Abstractions.IClock? staleClock = null,
-    StaleCountsEpoch? staleEpoch = null) : IDocumentStore
+    StaleCountsEpoch? staleEpoch = null,
+    Microsoft.Extensions.Logging.ILogger<DocumentStore>? staleLog = null) : IDocumentStore
 {
-    /// <summary>Карта застарілості періоду (LP-45, етап 2): одна на запит, кеш — якщо його передано.</summary>
-    private StaleResultsMapCache StaleMap => new(db, staleCache, staleClock, staleEpoch);
+    /// <summary>Стеля карти періоду; у тестах зменшується, щоб довести деградацію без 200 тис. документів.</summary>
+    internal int StaleMapMaxDocuments { get; init; } = StaleResultsMapCache.DefaultMaxDocuments;
+
+    /// <summary>Карта застарілості періоду (LP-45, етап 2): кеш - якщо його передано.</summary>
+    private StaleResultsMapCache StaleMap => new(db, staleCache, staleClock, staleEpoch, staleLog, StaleMapMaxDocuments);
 
     /// <summary>Правило «усі аркуші групи обов'язкові».</summary>
     private const byte RequiresAll = 0;
@@ -122,7 +126,9 @@ public sealed class DocumentStore(
         var sheets = await StatesAsync(documentId, period, ct).ConfigureAwait(false);
         var late = await LateEditsBatchAsync([documentId], period, ct).ConfigureAwait(false);
         var included = await IncludedCodesBatchAsync([documentId], period, ct).ConfigureAwait(false);
-        var stale = await StaleResultsBatchAsync([documentId], period, ct).ConfigureAwait(false);
+        // ⛔ Картка одного документа - ВУЗЬКИЙ запит по одному id тією самою плоскою формою, а НЕ карта періоду:
+        // після кожного PATCH кеш карти холодний, і повний запит періоду заради одного документа - зайвий.
+        var stale = await StaleResultsDirectAsync([documentId], period, ct).ConfigureAwait(false);
 
         return new DocumentSummary(
             document.Id, document.ProjectId, document.BusinessKey, document.CreatedAt, sheetCount,
@@ -221,11 +227,22 @@ public sealed class DocumentStore(
             var narrowed = filter.NarrowedProjectIds?.ToArray() ?? [];
             // LP-45 (етап 2): ідентифікатори беруться з карти періоду (кеш), а не підзапитом по журналу правок.
             var staleMap = (await StaleMap.GetAsync(staleBy, [filter.StaleByUserId], ct).ConfigureAwait(false))[0];
-            var staleIds = staleMap.Keys.ToArray();
             documents = documents.Where(d => !narrowed.Contains(d.ProjectId));
-            documents = wantStale
-                ? documents.Where(d => staleIds.Contains(d.Id))
-                : documents.Where(d => !staleIds.Contains(d.Id));
+            if (staleMap is null)
+            {
+                // Карта переповнена: підзапитом по журналу, як у 1885c2c77 (без кешу).
+                var staleSubquery = StaleResultsQuery.Documents(db, staleBy, filter.StaleByUserId).Select(r => r.DocumentId);
+                documents = wantStale
+                    ? documents.Where(d => staleSubquery.Contains(d.Id))
+                    : documents.Where(d => !staleSubquery.Contains(d.Id));
+            }
+            else
+            {
+                var staleIds = staleMap.Keys.ToArray();
+                documents = wantStale
+                    ? documents.Where(d => staleIds.Contains(d.Id))
+                    : documents.Where(d => !staleIds.Contains(d.Id));
+            }
         }
 
         // UI-18: пошук — теж у ЗАПИТІ до `Take`, ПОРУЧ із межею проєктів вище (а не
@@ -1113,6 +1130,11 @@ public sealed class DocumentStore(
         // LP-45 (етап 2): карта ВСЬОГО періоду (кеш, один запит) - сторінка лише відбирає з неї свої документи в
         // пам'яті. Видимість уже застосована: `documentIds` прийшли з запиту документів із межею грантів.
         var map = (await StaleMap.GetAsync(periodKey, [null], ct).ConfigureAwait(false))[0];
+        if (map is null)
+        {
+            // Карта переповнена (понад стелю): прямий запит по ids сторінки, як у 1885c2c77.
+            return await StaleResultsDirectAsync(documentIds, period, ct).ConfigureAwait(false);
+        }
 
         var found = new Dictionary<long, DateTime?>();
         foreach (var id in documentIds)
@@ -1124,6 +1146,38 @@ public sealed class DocumentStore(
         }
 
         return found;
+    }
+
+    /// <summary>
+    /// Те саме, що <see cref="StaleResultsBatchAsync"/>, але вузьким запитом по ids БЕЗ карти й кешу
+    /// (плоска форма <see cref="StaleResultsQuery"/>): картка документа і деградація при переповненні карти.
+    /// </summary>
+    private async Task<Dictionary<long, DateTime?>?> StaleResultsDirectAsync(
+        IReadOnlyList<long> documentIds, PeriodKeyFilter period, CancellationToken ct)
+    {
+        if (period.Value is not { } periodKey)
+        {
+            return null;
+        }
+
+        if (documentIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = documentIds.ToArray();
+
+        var rows = await StaleResultsQuery.Documents(db, periodKey)
+            .Where(r => ids.Contains(r.DocumentId))
+            .OrderBy(r => r.DocumentId)
+            .Take(documentIds.Count)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Kind::Unspecified з datetime2 - у JSON без `Z` читався б як локальний час; журнал пише UTC (L3-01).
+        return rows.ToDictionary(
+            r => r.DocumentId,
+            r => r.Since is { } since ? (DateTime?)DateTime.SpecifyKind(since, DateTimeKind.Utc) : null);
     }
 
     /// <summary>Лічильники останньої перевірки одного документа.</summary>
