@@ -294,6 +294,42 @@ internal sealed class RuleStand
         return this;
     }
 
+    /// <summary>Третя речовина стенда (див. <see cref="WithThreeSubstances"/>).</summary>
+    public const long SubstanceC = 9003;
+
+    /// <summary>
+    /// Склад із трьох речовин і їхні коди записів (02b «Застосовність речовини до рядка»); <c>null</c> — речовина
+    /// без коду.
+    /// </summary>
+    public RuleStand WithThreeSubstances(string? codeA, string? codeB, string? codeC)
+    {
+        _store.GetSubstancesAsync(VersionId, Arg.Any<CancellationToken>())
+              .Returns([
+                  new MethodologySubstance(VersionId, SubstanceA),
+                  new MethodologySubstance(VersionId, SubstanceB),
+                  new MethodologySubstance(VersionId, SubstanceC)]);
+
+        var map = new Dictionary<long, string>();
+        if (codeA is not null)
+        {
+            map[SubstanceA] = codeA;
+        }
+
+        if (codeB is not null)
+        {
+            map[SubstanceB] = codeB;
+        }
+
+        if (codeC is not null)
+        {
+            map[SubstanceC] = codeC;
+        }
+
+        _store.GetSubstanceCodesAsync(VersionId, Arg.Any<CancellationToken>())
+              .Returns((IReadOnlyDictionary<long, string>)map);
+        return this;
+    }
+
     /// <summary>Версія БЕЗ складу речовин: один прогін із речовиною <c>null</c>.</summary>
     public RuleStand WithoutSubstances()
     {
