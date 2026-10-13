@@ -20,8 +20,8 @@ function ConvertTo-LandNaeGroupPlan {
     .SYNOPSIS
         Довідник LAND_NAE_GROUP з моделі Land -> план записів.
     .DESCRIPTION
-        Запис: код `N` + 10 hex (як генерує модель), ключ NAE_NORMALIZED (`0788(001)` або `0788 (001)` - обидва
-        написання, діалект шаблонів не має заміни тексту), POWER_GROUP (число) і/або CATEGORY1 (4 цифри). Зіпсовані
+        Запис: код `N` + 10 hex (як генерує модель), ключ NAE_NORMALIZED (`0788(001)`, `0788 (001)`, `0788( 001 )` ...
+        - усі 8 написань з одним пробілом навколо дужок, старий код знімає всі пробіли; діалект шаблонів не має заміни тексту), POWER_GROUP (число) і/або CATEGORY1 (4 цифри). Зіпсовані
         записи (код, ключ, число) і повтори ключа без урахування регістру відкидаються й рахуються в Skipped.
     .OUTPUTS
         pscustomobject: Items (Key, EntryCode, Power ([decimal] або $null), Category1 або $null, Display), Skipped.
@@ -37,7 +37,7 @@ function ConvertTo-LandNaeGroupPlan {
         $powerText = if ($e.fields.PSObject.Properties['POWER_GROUP']) { ([string]$e.fields.POWER_GROUP).Trim() } else { '' }
         $cat = if ($e.fields.PSObject.Properties['CATEGORY1']) { ([string]$e.fields.CATEGORY1).Trim() } else { '' }
         $power = $null
-        $ok = ($key -match '^[0-9]{4}( ?\([0-9]{3}\))?$') -and ($code -match '^N[0-9A-F]{10}$') -and -not $seen.ContainsKey($key.ToUpperInvariant())
+        $ok = ($key -match '^[0-9]{4}( ?\( ?[0-9]{3} ?\))?$') -and ($code -match '^N[0-9A-F]{10}$') -and -not $seen.ContainsKey($key.ToUpperInvariant())
         if ($ok -and $powerText.Length -gt 0) {
             $parsed = [decimal]0
             if ([decimal]::TryParse($powerText, [System.Globalization.NumberStyles]::Number, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$parsed) -and $parsed -gt 0) { $power = $parsed }

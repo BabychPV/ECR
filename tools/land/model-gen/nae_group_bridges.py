@@ -13,10 +13,11 @@
      `Error Power value` / `Error category1 - NAE` і `continue`).
      Нормалізація NAE. У C11_11_02 NAE береться ЗІ ЗНЯТИМИ пробілами (`.Replace(" ", "")`), у C11_03 - сирим
      (`naeNumberObj.ToString()`, без жодної нормалізації). Діалект шаблонів не має функції заміни тексту (є лише
-     CONVERT/SUM/.../IF/IFERROR/REG*), тому нормалізація виразом неможлива: у довідник пишуться ОБИДВА написання ключа -
-     без пробілів (`0788(001)`, як у словнику C#) і з одним пробілом перед дужкою (`0788 (001)`, як у шаблоні Excel;
-     те саме написання називає правило категорії C11_11_02, af-land-category-rules.json). Ключ у REGFIND нормалізує
-     сам рушій (RegistryKeyNormalizer: обрізка країв, згортання послідовності пробілів в один, без регістру), тож
+     CONVERT/SUM/.../IF/IFERROR/REG*), тому нормалізація виразом неможлива: у довідник пишуться ВСІ 8 написань ключа з дужками -
+     без пробілів (`0788(001)`, як у словнику C#), з одним пробілом перед дужкою (`0788 (001)`, як у шаблоні Excel;
+     те саме написання називає правило категорії C11_11_02, af-land-category-rules.json) і з пробілом після `(` /
+     перед `)` (RCN-1: старий код знімає ВСІ пробіли). Ключ у REGFIND нормалізує сам рушій (RegistryKeyNormalizer:
+     NFC, обрізка країв, згортання послідовності пробільних символів (NBSP, таб теж) в один, без регістру), тож
      `0788  (001)` чи ` 0788 (001) ` знаходяться. Пробіл УСЕРЕДИНІ коду (`07 88`) стара система знімає, а ключ - ні:
      такий NAE недоведений, не вгадується й дасть #N/A (рядок без результату).
 
@@ -55,9 +56,18 @@ def _flatten(groups, what):
     return mapping
 
 
-def _spaced(key):
-    """Написання з одним пробілом перед першою дужкою: `0788(001)` -> `0788 (001)`."""
-    return re.sub(r'(?<! )\(', ' (', key, count=1) if '(' in key else key
+def _spellings(key):
+    """Усі написання ключа, які старий код зводить до нього зняттям пробілів (`.Replace(" ", "")`) і які рушій (Registry-
+    KeyNormalizer: краї, послідовності пробілів, регістр) НЕ зводить: єдина структурна позиція пробілу - навколо дужок.
+    Один пробіл (послідовності й краї знімає рушій) може стояти перед `(`, після `(` і перед `)` - 2^3 написань:
+    `0788(001)`, `0788 (001)`, `0788( 001)`, `0788 ( 001)`, `0788(001 )`, `0788 (001 )`, `0788( 001 )`, `0788 ( 001 )`.
+    Ключ без дужок - одне написання (пробіл усередині коду з цифр не вгадується: див. `normalization` у моделі)."""
+    m = re.fullmatch(r'([0-9]+)\(([0-9]+)\)', key)
+    if not m:
+        return [key]
+    head, inner = m.group(1), m.group(2)
+    return [head + a + '(' + b + inner + c + ')'
+            for a in ('', ' ') for b in ('', ' ') for c in ('', ' ')]
 
 
 def entry_code(key):
@@ -65,8 +75,8 @@ def entry_code(key):
 
 
 def build_entries(power, category1):
-    """Записи LAND_NAE_GROUP. Power - сирі ключі (C11_03 не нормалізує NAE); Category1 - ключі без пробілів і з пробілом
-    перед дужкою (C11_11_02 знімає пробіли, а шаблон Excel їх містить)."""
+    """Записи LAND_NAE_GROUP. Power - сирі ключі (C11_03 не нормалізує NAE); Category1 - ключі без пробілів і всі
+    написання з одним пробілом навколо дужок (C11_11_02 знімає ВСІ пробіли, а рушій знімає лише краї/послідовності)."""
     rows = {}
 
     def put(key, field, value):
@@ -78,10 +88,8 @@ def build_entries(power, category1):
     for nae, group in power.items():
         put(nae, 'POWER_GROUP', group)
     for nae, group in category1.items():
-        put(nae, 'CATEGORY1', group)
-        sp = _spaced(nae)
-        if sp != nae:
-            put(sp, 'CATEGORY1', group)
+        for spelling in _spellings(nae):
+            put(spelling, 'CATEGORY1', group)
 
     ents, codes = [], {}
     for key in sorted(rows):
@@ -236,9 +244,10 @@ def apply(out, registries, af_attrs):
         'entries': len(entries),
         'rule': 'NAE not in LAND_NAE_GROUP (or the group field empty) -> #N/A / empty -> argument not computed -> row has '
                 'no result (legacy: Error Power value / Error category1 - NAE, continue)',
-        'normalization': 'dialect of templates has no text replace: keys are stored both without spaces and with one '
-                         'space before the parenthesis (Category1); REGFIND trims and collapses space runs itself; a '
-                         'space inside the code is not handled; Land_Power keys are raw (legacy does not normalize)',
+        'normalization': 'dialect of templates has no text replace: keys with parentheses are stored in all 8 '
+                         'spellings with at most one space before "(", after "(" and before ")" (Category1; legacy '
+                         'strips every space); REGFIND trims, collapses space runs and ignores case itself; a space '
+                         'inside the 4-digit code is not handled; Land_Power keys are raw (legacy does not normalize)',
     }
     ab['massFraction'] = {
         'token': MASSFRACTION_TOKEN,
