@@ -27,7 +27,7 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// <param name="TransferredValues">Скільки введених значень переїде.</param>
 /// <param name="LostValues">Скільки введених значень зникло б.</param>
 /// <param name="GuardedValues">Скільки введених значень змінили б тлумачення.</param>
-/// <param name="LockedSheets">Скільки пар «аркуш × період» подано або затверджено.</param>
+/// <param name="LockedSheets">Скільки пар «аркуш × період» подано або затверджено (усього в проєкті).</param>
 /// <param name="Items">Відмінності версій, спершу ті, що зачіпають дані.</param>
 /// <param name="ItemsTruncated">Перелік обрізано стелею <see cref="MigrateDocumentVersionHandler.MaxItems"/>.</param>
 /// <param name="BlockedGrantCount">
@@ -56,6 +56,19 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// <c>events SHEET.TABLE</c> для мапінгу подій і <c>window SHEET.TABLE.COLUMN</c> для прив'язки вікна (D-1b).
 /// ⛔ Лише шлях у шаблоні (його й так показує звіт відмінностей): джерело, сутність і поле джерела не розкриваються.
 /// </param>
+/// <param name="LockedSheetsCarried">
+/// LP-32: скільки поданих/затверджених пар «аркуш × період» перенесено БЕЗ змін — план їх не зачіпає: статус, значення
+/// й журнал погодження лишаються. Формульні колонки таких аркушів не перераховуються до повернення в роботу.
+/// </param>
+/// <param name="LockedSheetsAffected">
+/// LP-32: скільки поданих/затверджених пар «аркуш × період» зачіпав би перенос (звуження/втрата, видалене, нові
+/// рядки фіксованої таблиці, зміна коду, зміна типу). Більше нуля — відмова <c>sheetsLocked</c> (<c>409 ECR-DOC-0409</c>).
+/// </param>
+/// <param name="LockedSheetItems">
+/// LP-32: перелік поданих/затверджених пар (спершу зачеплені), не більше <c>MaxLockedItems</c>; <c>null</c> — таких
+/// аркушів немає. ⛔ Без імен користувачів і значень — лише код аркуша, період, статус.
+/// </param>
+/// <param name="LockedSheetItemsTruncated">LP-32: перелік <paramref name="LockedSheetItems"/> обрізано стелею.</param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
     int ProjectId,
@@ -80,7 +93,19 @@ public sealed record DocumentVersionMigrationDto(
     int MappingsUnmapped = 0,
     IReadOnlyList<string>? MappingsUnmappedKeys = null,
     int OtherProjectsOnSourceVersion = 0,
-    int OtherDocumentsOnSourceVersion = 0);
+    int OtherDocumentsOnSourceVersion = 0,
+    int LockedSheetsCarried = 0,
+    int LockedSheetsAffected = 0,
+    IReadOnlyList<LockedSheetItem>? LockedSheetItems = null,
+    bool LockedSheetItemsTruncated = false);
+
+/// <summary>Подана або затверджена пара «аркуш × період» у звіті переносу (LP-32).</summary>
+/// <param name="DocumentId">Документ проєкту.</param>
+/// <param name="SheetCode">Код аркуша вихідної версії.</param>
+/// <param name="PeriodKey">Період.</param>
+/// <param name="Status"><c>Submitted</c> або <c>Approved</c>.</param>
+/// <param name="Affected"><c>true</c> — перенос зачепив би цей аркуш (відмова); <c>false</c> — переноситься без змін.</param>
+public sealed record LockedSheetItem(long DocumentId, string SheetCode, int PeriodKey, string Status, bool Affected);
 
 /// <summary>Куди можна перенести документ: поточна версія й опубліковані версії того самого шаблону.</summary>
 /// <param name="ProjectId">Проєкт документа — переноситься весь.</param>
