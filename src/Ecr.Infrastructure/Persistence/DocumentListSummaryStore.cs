@@ -13,7 +13,7 @@ public sealed class DocumentListSummaryStore(
     : IDocumentListSummaryStore
 {
     /// <summary>Життя запису лічильників застарілих результатів (страховка до епохи й для інших вузлів API).</summary>
-    public static readonly TimeSpan StaleCountsTtl = TimeSpan.FromSeconds(45);
+    public static readonly TimeSpan StaleCountsTtl = StaleResultsMapCache.Ttl;
 
     /// <inheritdoc />
     /// <remarks>
@@ -101,23 +101,16 @@ public sealed class DocumentListSummaryStore(
             row.SheetsApproved, row.SheetsTotal, staleCount, staleMine);
     }
 
-    /// <summary>Лічильники, що лежать у кеші: лише числа, жодних ідентифікаторів документів.</summary>
-    private sealed record StaleCounts(int All, int Mine, DateTime ExpiresAt);
-
     /// <summary>
-    /// <c>staleResultsCount</c> / <c>staleResultsMineCount</c> з коротким кешем (<see cref="StaleCountsTtl"/>).
+    /// <c>staleResultsCount</c> / <c>staleResultsMineCount</c>: кількість ВИДИМИХ читачеві документів у карті
+    /// застарілості періоду (<see cref="StaleResultsMapCache"/>).
     /// </summary>
     /// <remarks>
-    /// ⛔ Кешуються ЛИШЕ ці два числа (найдорожчий запит смуги: ~1 с на 500 тис. рядків аудиту); позначка в рядку
-    /// сторінки кешу не має. Інвалідація - ЕПОХОЮ (<see cref="StaleCountsEpoch"/>) у ключі: запис комірок
-    /// (<c>AuditWriter.WriteCellChangesAsync</c>) і перемикання актуального прогону
-    /// (<c>CalculationResultStore.SwitchCurrentRunAsync</c>) піднімають її ПІСЛЯ коміту, тож власна правка
-    /// видна лічильнику одразу. ⛔ Епоха — ПО ПЕРІОДУ (AN-108 / P2-01): правка в іншому періоді запис не скидає. ⚠ Епоха живе в процесі: інший вузол API побачить зміну за ≤ TTL.
-    ///
-    /// ⛔ Безпека ключа: користувач + проєкт + період + ЕФЕКТИВНИЙ scope читача (межа грантів, пари «проєкт-схований
-    /// аркуш», проєкти зі звуженням) → SHA-256. Різні scope не діляться записом: звужений читач не отримає лічильник
-    /// незвуженого (він і так рахується без звужених проєктів), а його значення не потрапить до незвуженого.
-    /// Час життя міряє <c>IClock</c> (у тестах керований), а не годинник кешу. Кеш не задано - рахуємо щоразу.
+    /// LP-45 (етап 2): кешується КАРТА періоду (ідентифікатори й моменти, без видимості), а лічильник щоразу рахується
+    /// коротким запитом по <c>doc.Document</c> з межею грантів і звуженням читача. Тому: різні читачі не діляться
+    /// ЧИСЛОМ (воно не кешується), створення, видалення й перенесення документа між проєктами видно одразу, а
+    /// проєкти зі звуженням, як і раніше, не рахуються (<c>!narrowed.Contains</c>).
+    /// Інвалідація карти й межі — у <see cref="StaleResultsMapCache"/>.
     /// </remarks>
     private async Task<(int All, int Mine)> StaleCountsAsync(
         int? projectId, int periodKey, int[]? scope, SummaryRestrictions? restrictions, int? currentUserId,
@@ -125,58 +118,31 @@ public sealed class DocumentListSummaryStore(
     {
         var narrowed = restrictions?.NarrowedProjects.ToArray() ?? [];
 
-        string? key = null;
-        if (cache is not null && clock is not null)
-        {
-            key = StaleCountsKey(projectId, periodKey, scope, restrictions, narrowed, currentUserId, epoch?.ValueFor(periodKey) ?? 0);
-            if (cache.TryGetValue(key, out StaleCounts? hit) && hit is not null && hit.ExpiresAt > clock.UtcNow)
-            {
-                return (hit.All, hit.Mine);
-            }
-        }
-
         var visible = db.Documents
             .AsNoTracking()
             .Where(d => (scope == null || scope.Contains(d.ProjectId)) && !narrowed.Contains(d.ProjectId));
 
-        var stale = StaleResultsQuery.Documents(db, periodKey).Select(r => r.DocumentId);
-        var all = await visible.CountAsync(d => stale.Contains(d.Id), ct).ConfigureAwait(false);
+        var maps = await new StaleResultsMapCache(db, cache, clock, epoch)
+            .GetAsync(periodKey, currentUserId is { } me ? [null, me] : [null], ct)
+            .ConfigureAwait(false);
+
+        var allIds = maps[0].Keys.ToArray();
+        var all = allIds.Length == 0
+            ? 0
+            : await visible.CountAsync(d => allIds.Contains(d.Id), ct).ConfigureAwait(false);
 
         var mine = 0;
-        if (currentUserId is { } me && all > 0)
+        if (maps.Count > 1 && all > 0)
         {
-            var mineIds = StaleResultsQuery.Documents(db, periodKey, me).Select(r => r.DocumentId);
-            mine = await visible.CountAsync(d => mineIds.Contains(d.Id), ct).ConfigureAwait(false);
-        }
-
-        if (key is not null && cache is not null && clock is not null)
-        {
-            cache.Set(key, new StaleCounts(all, mine, clock.UtcNow + StaleCountsTtl), StaleCountsTtl);
+            var mineIds = maps[1].Keys.ToArray();
+            if (mineIds.Length > 0)
+            {
+                mine = await visible.CountAsync(d => mineIds.Contains(d.Id), ct).ConfigureAwait(false);
+            }
         }
 
         return (all, mine);
     }
-
-    private static string StaleCountsKey(
-        int? projectId, int periodKey, int[]? scope, SummaryRestrictions? restrictions, int[] narrowed, int? userId,
-        long epochValue)
-    {
-        var hidden = (restrictions?.HiddenSheets ?? [])
-            .Select(h => $"{h.ProjectId}:{h.SheetCode}")
-            .Order(StringComparer.Ordinal);
-        var canonical = string.Join(
-            '|',
-            $"u={userId}", $"p={projectId}", $"k={periodKey}",
-            $"v={(scope is null ? "*" : string.Join(',', scope.Order()))}",
-            $"r={(restrictions is null ? 0 : 1)}",
-            $"h={string.Join(',', hidden)}",
-            $"n={string.Join(',', narrowed.Order())}",
-            $"e={epochValue}");
-
-        return "doc-stale-counts:" + Convert.ToHexString(
-            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(canonical)));
-    }
-
     /// <inheritdoc />
     public async Task<IReadOnlyDictionary<int, long>> SampleDocumentPerProjectAsync(
         IReadOnlyCollection<int> projectIds, CancellationToken ct)

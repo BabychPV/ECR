@@ -11,8 +11,15 @@ using Microsoft.EntityFrameworkCore;
 namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>Реалізація <see cref="IDocumentStore"/> над <see cref="EcrDbContext"/>.</summary>
-public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
+public sealed class DocumentStore(
+    EcrDbContext db,
+    Microsoft.Extensions.Caching.Memory.IMemoryCache? staleCache = null,
+    Ecr.Domain.Abstractions.IClock? staleClock = null,
+    StaleCountsEpoch? staleEpoch = null) : IDocumentStore
 {
+    /// <summary>Карта застарілості періоду (LP-45, етап 2): одна на запит, кеш — якщо його передано.</summary>
+    private StaleResultsMapCache StaleMap => new(db, staleCache, staleClock, staleEpoch);
+
     /// <summary>Правило «усі аркуші групи обов'язкові».</summary>
     private const byte RequiresAll = 0;
 
@@ -212,7 +219,9 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         if (filter.ResultsStale is { } wantStale && period.Value is { } staleBy)
         {
             var narrowed = filter.NarrowedProjectIds?.ToArray() ?? [];
-            var staleIds = StaleResultsQuery.Documents(db, staleBy, filter.StaleByUserId).Select(r => r.DocumentId);
+            // LP-45 (етап 2): ідентифікатори беруться з карти періоду (кеш), а не підзапитом по журналу правок.
+            var staleMap = (await StaleMap.GetAsync(staleBy, [filter.StaleByUserId], ct).ConfigureAwait(false))[0];
+            var staleIds = staleMap.Keys.ToArray();
             documents = documents.Where(d => !narrowed.Contains(d.ProjectId));
             documents = wantStale
                 ? documents.Where(d => staleIds.Contains(d.Id))
@@ -1101,19 +1110,20 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             return [];
         }
 
-        var ids = documentIds.ToArray();
+        // LP-45 (етап 2): карта ВСЬОГО періоду (кеш, один запит) - сторінка лише відбирає з неї свої документи в
+        // пам'яті. Видимість уже застосована: `documentIds` прийшли з запиту документів із межею грантів.
+        var map = (await StaleMap.GetAsync(periodKey, [null], ct).ConfigureAwait(false))[0];
 
-        var rows = await StaleResultsQuery.Documents(db, periodKey)
-            .Where(r => ids.Contains(r.DocumentId))
-            .OrderBy(r => r.DocumentId)
-            .Take(documentIds.Count)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        var found = new Dictionary<long, DateTime?>();
+        foreach (var id in documentIds)
+        {
+            if (map.TryGetValue(id, out var since))
+            {
+                found[id] = since;
+            }
+        }
 
-        // Kind::Unspecified з datetime2 - у JSON без `Z` читався б як локальний час; журнал пише UTC.
-        return rows.ToDictionary(
-            r => r.DocumentId,
-            r => r.Since is { } since ? (DateTime?)DateTime.SpecifyKind(since, DateTimeKind.Utc) : null);
+        return found;
     }
 
     /// <summary>Лічильники останньої перевірки одного документа.</summary>
