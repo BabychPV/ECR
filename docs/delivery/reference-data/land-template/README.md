@@ -117,3 +117,10 @@ Methodologies) PUT-ить `/methodologies/{m}/bindings/{colId}/{output}` для 
 джерело потоку - лише однозначна (`TypeOfFuel` аркуша 9; `Land_TypeFuel` у 10_01/11_01): ключ `argumentBridges.hse400`.
 Немає запису за період/потік/показник - `#N/A`, рядок без результатів (стара система: `continue`). Одиниці мостів не
 задані (старі одиниці в FInfo/AIR.xml не звірено).
+
+`CompositionMass` (склад по речовині) колонкою-мостом бути не може (діалект шаблонів не має `CURRENT_SUBSTANCE()`):
+`{код}` у `{код}_mass` - числовий код речовини (SUBSTANCE_CODE), а колонка прода названа хімічно (`H2S_mass`,
+`C1_C5_mass` ...), тож зіставлення - таблиця старого `PollutionCodeService.GetMassName` (15 кодів) = довідник
+`LAND_HSE400_SUBSTANCE` (ключ SUBSTANCE_CODE; код запису `C<код>`, не `E<код>` довідника речовин). У формулі версії
+методології `@CompositionMass` замінюється фрагментом `argumentBridges.hse400.compositionMass.methodologies.<ім'я>.fragment`
+(`Build-LandTemplate.ps1 -Stage CompositionMass`; довідник - `-Stage Registries` або `Import-LandHse400Substance.ps1`).

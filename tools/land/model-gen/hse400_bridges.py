@@ -40,6 +40,49 @@ INDICATOR_OF_ARG = {
 # Склад по речовині ({код}_mass): значення залежить від речовини, а аргумент методології один на рядок.
 SUBSTANCE_ARGS = ['CompositionMass']
 
+# Код речовини -> показник складу: PollutionCodeService.GetMassName (старий бекенд, DllProject/Services,
+# словник BaseCodes із 15 кодів). «{код}» у `{код}_mass` - це числовий код забруднювальної речовини
+# (SUBSTANCE_CODE довідника LAND_AIR_SUBSTANCE, AF_PermitConstant.Substance_Code), а назва колонки прода -
+# ХІМІЧНА (H2S_mass), тож зіставлення - жорстка таблиця коду, не конкатенація. Код поза таблицею -> "Unknown_mass" ->
+# колонки немає -> склад не знайдено (у ECR - #N/A, той самий «рядок без результатів»).
+# ⚠ HMB: код 1728 у старій системі для потоку з «HMB» дає EMercaptanV2_mass; це вже зроблено в завантаженні складу
+# (Import-LandHse400Composition: EMercaptan_mass для *_HMB береться з колонки V2), тому тут показник один.
+SUBSTANCE_REGISTRY = 'LAND_HSE400_SUBSTANCE'
+SUBSTANCE_INDICATORS = [
+    ('333', 'H2S_mass'),
+    ('334', 'CS2_mass'),
+    ('370', 'COS_mass'),
+    ('415', 'C1_C5_mass'),
+    ('416', 'C6_C10_mass'),
+    ('602', 'Benzene_mass'),
+    ('616', 'pXylene_mass'),
+    ('621', 'Toluene_mass'),
+    ('627', 'EBenzene_mass'),
+    ('1702', 'nBMercaptan_mass'),
+    ('1707', 'DimethilSulfide_mass'),
+    ('1715', 'MMercaptan_mass'),
+    ('1720', 'nPMercaptan_mass'),
+    ('1728', 'EMercaptan_mass'),
+    ('2754', 'C12_C19_mass'),
+]
+
+# Аргумент потоку й вираз префікса потоку для формул методологій, що читають CompositionMass (за старим кодом:
+# ECW_C11_01/02/10 - Land_TypeFuelOrStream; ECW_C12_03 - Land_TypeFuel (Lookup); ECW_C12_01 - Land_Streams, де
+# єдиний ключ словника PrefixProvider - FuelGas -> FG_Internal, а категорія береться з тексту 'Fuel gas').
+STREAM_ARG_TEXT = "REGFIELD(REGFIND('%s', %%s), 'PREFIX')" % STREAM_REGISTRY
+COMPOSITION_MASS_METHODOLOGIES = {
+    'ECW_C11_01': {'arguments': ['Land_TypeFuelOrStream'],
+                   'prefix': STREAM_ARG_TEXT % '@Land_TypeFuelOrStream'},
+    'ECW_C11_02': {'arguments': ['Land_TypeFuelOrStream'],
+                   'prefix': STREAM_ARG_TEXT % '@Land_TypeFuelOrStream'},
+    'ECW_C11_10': {'arguments': ['Land_TypeFuelOrStream'],
+                   'prefix': STREAM_ARG_TEXT % '@Land_TypeFuelOrStream'},
+    'ECW_C12_03': {'arguments': ['Land_TypeFuel'],
+                   'prefix': STREAM_ARG_TEXT % "REGFIELD(@Land_TypeFuel, 'NAME')"},
+    'ECW_C12_01': {'arguments': ['Land_Streams'],
+                   'prefix': "if(@Land_Streams = 'Fuel gas', 'FG_Internal', @Land_Streams)"},
+}
+
 # Словник PrefixProvider.GetPrefixes(CalculatorType.Standard), порядок вставки (перший збіг виграє).
 BASE_PREFIXES = [
     ('Makat', 'FG_Makat'),
@@ -79,9 +122,11 @@ STREAM_SOURCE = {
     'T11_01': ('Land_TypeFuel', 'Lookup'),
 }
 
-REASON_SUBSTANCE = ('склад газу HSE400 по речовині ({код}_mass): дані є в довіднику ' + COMPOSITION_REGISTRY
-                    + ', але аргумент методології один на рядок, а значення залежить від речовини - потрібне рішення '
-                    'про адресацію речовини (питання координатору)')
+REASON_SUBSTANCE = ('склад газу HSE400 по речовині: колонки-моста бути не може (значення залежить від речовини '
+                    'проходу, а діалект шаблонів не має CURRENT_SUBSTANCE()); у формулі версії методології '
+                    '@CompositionMass замінюється фрагментом через довідники ' + COMPOSITION_REGISTRY + ' і '
+                    + SUBSTANCE_REGISTRY + ' (argumentBridges.hse400.compositionMass; Build-LandTemplate -Stage '
+                    'CompositionMass)')
 REASON_STREAM = {
     '9a': 'колонка-джерело потоку не доведена: таблиця має і Stream, і TypeOfStream (селектор Land_TypeFuelOrStream)',
     '10_03': 'селектор потоку C12_02: Land_TypeStream, інакше Land_TypeFuel - колонка-джерело не доведена',
@@ -110,6 +155,36 @@ def composition_expression(stream_expr, indicator):
     stream = "REGFIELD(REGFIND('%s', %s), 'PREFIX')" % (STREAM_REGISTRY, stream_expr)
     return "REGFIELD(REGFIND('%s', [Period].Year, [Period].Sequence, %s, '%s'), 'VALUE')" % (
         COMPOSITION_REGISTRY, stream, indicator)
+
+
+def composition_mass_fragment(prefix_expr):
+    """Текст, що підставляється замість @CompositionMass у формулу методології (діалект методологій).
+
+    Потік - з префікса `prefix_expr`; показник - з довідника LAND_HSE400_SUBSTANCE за кодом речовини ПОТОЧНОГО проходу
+    (CURRENT_SUBSTANCE()). Код речовини ≠ код запису довідника речовин (E333 при SUBSTANCE_CODE=333), тому ключ
+    словника - саме SUBSTANCE_CODE (первинний ключ), а не REGFIND по LAND_AIR_SUBSTANCE.
+    """
+    indicator = "REGFIELD(REGFIND('%s', CURRENT_SUBSTANCE()), 'INDICATOR')" % SUBSTANCE_REGISTRY
+    return "REGFIELD(REGFIND('%s', [Period].Year, [Period].Sequence, %s, %s), 'VALUE')" % (
+        COMPOSITION_REGISTRY, prefix_expr, indicator)
+
+
+def _substance_registry():
+    ents = []
+    for code, indicator in SUBSTANCE_INDICATORS:
+        ents.append({'code': 'C' + code, 'name': code, 'en': '%s -> %s' % (code, indicator), 'ru': '',
+                     'fields': {'SUBSTANCE_CODE': code, 'INDICATOR': indicator}})
+    return {
+        'code': SUBSTANCE_REGISTRY,
+        'nameEn': 'Land: HSE400 composition indicator by substance code (SUBSTANCE_CODE -> {indicator}_mass)',
+        'excel': 'PollutionCodeService.GetMassName (legacy backend, BaseCodes)',
+        'entries': ents, 'fieldNames': ['SUBSTANCE_CODE', 'INDICATOR'], 'keyField': 'SUBSTANCE_CODE',
+        'fieldSpecs': [
+            {'code': 'SUBSTANCE_CODE', 'dataType': 'String', 'isKey': True},
+            {'code': 'INDICATOR', 'dataType': 'String', 'isKey': False},
+        ],
+        'keys': [{'code': 'PK', 'fields': ['SUBSTANCE_CODE'], 'isPrimary': True, 'ignoreCase': True}],
+    }
 
 
 def _stream_registry(registries):
@@ -167,6 +242,7 @@ def apply(out, registries):
     """Додає довідники й мости; повертає кількість доданих колонок."""
     registries[STREAM_REGISTRY] = _stream_registry(registries)
     registries[COMPOSITION_REGISTRY] = _composition_registry()
+    registries[SUBSTANCE_REGISTRY] = _substance_registry()
 
     by_code = {}
     for s_ in out['sheets']:
@@ -222,7 +298,20 @@ def apply(out, registries):
 
     ab['bridged'] = dict(sorted(bridged.items()))
     ab['hse400'] = {
-        'registries': [STREAM_REGISTRY, COMPOSITION_REGISTRY],
+        'registries': [STREAM_REGISTRY, COMPOSITION_REGISTRY, SUBSTANCE_REGISTRY],
+        # CompositionMass - склад ПО РЕЧОВИНІ: у шаблоні (діалект без CURRENT_SUBSTANCE) колонки-моста бути не може;
+        # у формулі версії методології `@CompositionMass` замінюється фрагментом (Build-LandTemplate -Stage
+        # CompositionMass; Convert-LandHse400CompositionMassFormula). Показник береться з LAND_HSE400_SUBSTANCE.
+        'compositionMass': {
+            'substanceRegistry': SUBSTANCE_REGISTRY,
+            'substanceIndicators': dict(SUBSTANCE_INDICATORS),
+            'rule': 'substance code not in LAND_HSE400_SUBSTANCE or no composition record -> #N/A (legacy: Unknown_mass '
+                    '/ null -> no result for the row)',
+            'methodologies': {
+                name: {'arguments': spec['arguments'], 'fragment': composition_mass_fragment(spec['prefix'])}
+                for name, spec in sorted(COMPOSITION_MASS_METHODOLOGIES.items())
+            },
+        },
         'indicatorOfArgument': dict(sorted(INDICATOR_OF_ARG.items())),
         'streamSourceColumn': dict(sorted(source_used.items())),
         'rule': 'no record for (year, month, stream, indicator) -> #N/A -> row has no results (legacy: row skipped)',
