@@ -127,7 +127,9 @@ public sealed class SaveFormulaDefHandler(
         var (table, existing, resolvedId, cellColumnId) =
             FindTarget(version, tableDefId, scope, target, columnTarget);
 
-        RequireComputedColumn(table, scope, scope == FormulaScope.Cell ? cellColumnId!.Value : resolvedId);
+        RequireComputedColumn(
+            table, scope, scope == FormulaScope.Cell ? cellColumnId!.Value : resolvedId,
+            scope == FormulaScope.Cell ? resolvedId : null);
 
         // ⛔ V-19: синтаксис і посилання — ДО запису. Раніше `[CDEC] * * 2` і
         // `[NOPE] + 1` зберігалися з «saved», і автор дізнавався про помилку
@@ -284,7 +286,8 @@ public sealed class SaveFormulaDefHandler(
     /// перезаписати, ані прибрати.
     /// </remarks>
     /// <exception cref="BusinessRuleException">Колонка не обчислювана.</exception>
-    private static void RequireComputedColumn(TableDef table, FormulaScope scope, int resolvedId)
+    private static void RequireComputedColumn(
+        TableDef table, FormulaScope scope, int resolvedId, int? cellRowDefId = null)
     {
         // ⚠ D1: Cell цілить в ОДНУ колонку (як Column), тож вимога обчислюваності
         // на нього поширюється; інакше людина вводила б число в комірку, яку
@@ -296,6 +299,16 @@ public sealed class SaveFormulaDefHandler(
 
         var column = table.Columns.First(c => c.Id == resolvedId);
         if (column.IsComputed)
+        {
+            return;
+        }
+
+        // ⚠ WW-02: колонка змішана (ручний ввід у рядках-елементах + підсумок/баланс/«Volume» у своєму рядку: Water
+        // Report, 7a/7b, Waste). Комірочна формула там дозволена, коли РЯДОК цілі лише для читання: людина його не
+        // редагує (`EditRules`: `RowIsReadOnly` → `RowReadOnly`), тож перерахунок не затре введеного. Рядок, що не
+        // лише для читання, на колонці ручного вводу лишається відмовою — той самий захист, що вище.
+        if (cellRowDefId is { } rowDefId
+            && table.Rows.FirstOrDefault(r => r.Id == rowDefId) is { IsReadOnly: true })
         {
             return;
         }
