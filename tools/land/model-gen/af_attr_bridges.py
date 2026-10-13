@@ -48,6 +48,20 @@ RENAMES = [
      'ECW_C11_11_02.cs:86-95'),
 ]
 
+# K1 (D-8, клас K - конфлікт джерел): одне ім'я колонки не може бути двома джерелами на одній таблиці. Методологія-«меншість»
+# читає ВЛАСНУ колонку-міст `<аргумент>__<код методології>`, решта лишається на незмінному імені (етап Build ArgumentSuffix
+# підміняє токен у чернетці). Лише явний перелік (методологія, аргумент, посилання на код старої системи).
+ARGUMENT_SUFFIX_SEPARATOR = '__'
+ARGUMENT_SUFFIXES = [
+    ('ECW_C11_01', 'Land_Measure_OperatingTime',
+     'ECW_C11_01.cs:46-55, 93-103, 335-341: на 9a_17 MaterialResidence, на 9a_27 OperTimeDays; C11_08/C11_11_03/C11_10 '
+     'читають сам атрибут OperatingTime'),
+    ('ECW_C11_02', 'Land_Measure_OperatingTime', 'ECW_C11_02.cs:47-50, 94-104: на 9a_27 OperTimeDays; C11_10 читає OperatingTime'),
+    ('ECW_C11_11_02', 'Land_Measure_SubstanceConsumption',
+     'ECW_C11_11_02.cs:40-43, 75-85: на 9_07 SubstanceConsumptionSm3; у C11_10 джерела на 9_07 немає (клас O)'),
+]
+SUFFIX_CODE = {(m, a): a + ARGUMENT_SUFFIX_SEPARATOR + m for m, a, _ in ARGUMENT_SUFFIXES}
+
 # Колонка Excel для атрибута AF, чий заголовок не належить сім'ї атрибута (шаблон називає її інакше, ніж клас AF).
 # Лише там, де ВСІ три умови: (1) атрибут стоїть у класі AF-таблиці, а сім'я його величини в Excel колонок не має;
 # (2) у таблиці рівно ОДНА вимірювана колонка введення з таким заголовком, і жоден інший атрибут AF на неї не відображено;
@@ -321,8 +335,9 @@ def stream_sources(out, af_attrs):
 OPTIONAL_ARGUMENTS = [
     ('ECW_C11_10', 'Land_Measure_OperatingTime', ['T9_02', 'T9_11', 'T9a_24', 'T9a_26'],
      'ECW_C11_10.cs:48-51 (requiredFields OperatingTime лише на T9_07); AF-атрибута немає'),
-    ('ECW_C11_10', 'Land_Measure_SubstanceConsumption', ['T9a_27', 'T9a_28'],
-     'ECW_C11_10.cs:143-153 (SubstanceConsumption лише з ReleaseColdVen на 9a_24..26); AF-атрибута немає'),
+    ('ECW_C11_10', 'Land_Measure_SubstanceConsumption', ['T9_07', 'T9a_27', 'T9a_28'],
+     'ECW_C11_10.cs:143-153 (SubstanceConsumption лише з ReleaseColdVen на 9a_24..26); AF-атрибута немає; '
+     'на T9_07 (K1) колонку SubstanceConsumption читає лише C11_11_02 власним суфіксованим мостом'),
     ('ECW_C11_11_03', 'Land_Measure_MaterialResidence', ['T9_06'],
      'ECW_C11_11_03.cs:41-42 (requiredFields MaterialResidence лише на 9a_17); AF-атрибута немає'),
     ('ECW_C11_16', 'Land_Measure_FlowRateSulfur', ['T9a_23'],
@@ -355,6 +370,24 @@ def build_optional_arguments(unresolved, tab_meth):
     }
 
 
+def build_argument_suffixes(sfx_tables):
+    """argumentBridges.argumentSuffixes: {методологія: {аргумент: {column, tables, evidence}}} - що читає етап ArgumentSuffix.
+
+    Кожна пара з ARGUMENT_SUFFIXES мусить мати колонку принаймні в одній таблиці: інакше перелік застарів.
+    """
+    res = {}
+    for m, a, ref in ARGUMENT_SUFFIXES:
+        tables = sorted(sfx_tables.get((m, a), []))
+        if not tables:
+            raise SystemExit('af_attr_bridges: суфікс %s/%s: жодної таблиці з мостом - перелік K1 застарів' % (m, a))
+        res.setdefault(m, {})[a] = {'column': SUFFIX_CODE[(m, a)], 'tables': tables, 'evidence': ref}
+    return {
+        'decision': 'K1',
+        'rule': 'the methodology reads <argument>__<methodology code>; the draft is rewritten by Build -Stage ArgumentSuffix',
+        'methodologies': dict(sorted(res.items())),
+    }
+
+
 def apply(out, ro_all, rules, af_attrs, calc_tables):
     by_code = {}
     for s_ in out['sheets']:
@@ -368,6 +401,7 @@ def apply(out, ro_all, rules, af_attrs, calc_tables):
                  'MercaptanSulphurContent', 'FuelLowerHeating', 'H2Smass'}
     calendar = {'CalculationMonth', 'DaysInCalcYear', 'Winter'}
     added, evidences = 0, {}
+    sfx_tables = {}
 
     # методології кожної таблиці
     tab_meth = {}
@@ -387,10 +421,17 @@ def apply(out, ro_all, rules, af_attrs, calc_tables):
 
         # потреби: аргумент -> {методологія: джерело}
         need = {}
+        deferred = {}  # K1: звичайне ім'я аргумента, яке читають методології із суфіксом (будується лише без інших читачів)
         for m in sorted(tab_meth[tcode]):
             d = ro_all[m]
             args = set(d.get('inputs', [])) | rule_args.get(m, set()) | set(d.get('categoryInputs', []))
             for a in sorted(args):
+                sfx = SUFFIX_CODE.get((m, a))
+                if sfx is not None and a in cols:
+                    # звичайна колонка вже є в шаблоні: суфіксований міст її копіює
+                    if sfx not in cols:
+                        need.setdefault(sfx, {})[m] = ('column', a, None)
+                    continue
                 if a in cols or a in hse_names or a in calendar or a in DERIVED_ARGUMENTS:
                     continue
                 src, how = a, None
@@ -401,7 +442,16 @@ def apply(out, ro_all, rules, af_attrs, calc_tables):
                     if m in ms and tcode in ts and arg == a:
                         src, how = attr, ref
                         break
+                if sfx is not None:
+                    if sfx not in cols:
+                        need.setdefault(sfx, {})[m] = ('attr', src, how)
+                    deferred.setdefault(a, {})[m] = ('attr', src, how)
+                    continue
                 need.setdefault(a, {})[m] = ('attr', src, how)
+        for a, per_m in deferred.items():
+            # наявні немости не видаляються: без інших читачів звичайний міст будується, як і раніше (VersionMigrationPlanner:
+            # зникнення Formula-колонки з комірками = lostValues)
+            need.setdefault(a, per_m)
 
         left = unresolved.setdefault(tcode, {})
         for a, per_m in sorted(need.items()):
@@ -416,6 +466,15 @@ def apply(out, ro_all, rules, af_attrs, calc_tables):
                 new = {'code': a, 'dataType': 'Formula', 'headerEn': '%s (argument bridge: calendar days)' % a,
                        'unit': 'one', 'expression': '[Period].Days',
                        'ecrAdded': 'bridge: %s = calendar days of the period, as the legacy code does (%s)' % (a, kind[1])}
+            elif kind[0] == 'column':
+                _, srcattr, _how = kind
+                src_col = cols[srcattr]
+                new = {'code': a, 'dataType': 'Formula', 'headerEn': '%s (argument bridge: AF attribute column %s)' % (a, srcattr),
+                       'unit': src_col.get('unit'), 'expression': '[%s]' % srcattr,
+                       'ecrAdded': 'bridge: methodology argument %s = AF attribute column %s of the same table (K1 argument '
+                                   'suffix)' % (a, srcattr)}
+                if src_col.get('dataType') == 'String':
+                    new['textResult'] = True
             else:
                 _, srcattr, how = kind
                 if srcattr not in attr_names:
@@ -498,6 +557,9 @@ def apply(out, ro_all, rules, af_attrs, calc_tables):
                     evidences.setdefault(tcode, {})[a] = col_['ecrAdded']
                     added += 1
                 added += 1  # допоміжна колонка
+        for (m_, a_), sfx_ in SUFFIX_CODE.items():
+            if sfx_ in cols and m_ in tab_meth[tcode]:
+                sfx_tables.setdefault((m_, a_), []).append(tcode)
         if not left:
             unresolved.pop(tcode, None)
         else:
@@ -511,6 +573,7 @@ def apply(out, ro_all, rules, af_attrs, calc_tables):
         'calendarDays': CAL_DAYS_METHODOLOGIES,
         'rule': 'bridge only if every methodology of the table that uses the argument yields the same source',
     }
+    ab['argumentSuffixes'] = build_argument_suffixes(sfx_tables)
     ab['optionalArguments'] = build_optional_arguments(unresolved, tab_meth)
     print('af attribute bridges: columns %d, tables %d' % (added, len(evidences)))
     return added
