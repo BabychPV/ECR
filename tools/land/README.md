@@ -159,6 +159,33 @@ C05 / C06_01 / C07_*; для методології з кількома табл
 Сторожі: LandParityFullHarnessTests (Architecture): експортер лише читає, вихід не в репо, розбір параметрів,
 класи на синтетичній фікстурі без даних прода, у файлах виходу значень немає.
 
+### C12_02 / C12_03: зіставлення імен виходів (репетиція вікна 13.10, B4)
+
+Стара система зберігає результат ключем `(методологія, компонент = код)`, тобто `ECW_EC_tons_<код>`. ECR називає виходи
+інакше, тож без нормалізації C12_02/C12_03 давали лише `MISSING_OUTPUT`/`ECR_ONLY`/`LEGACY_STATUS_SKIP`. Тепер
+`Add-LandParityEcrResult` зводить імена (`ConvertTo-LandParityCanonicalOutput`):
+
+| Вихід ECR | Умова | Ключ старої системи |
+|---|---|---|
+| `ECW_EC_tons\|gsec_XXX` | у результата є речовина (SUBSTANCE_CODE запису довідника, інакше код запису) | `ECW_EC_tons\|gsec_<код речовини>` (C12_03) |
+| `ECW_EC_tons\|gsec_XXX` | речовини немає | лишається `XXX` -> `ECR_ONLY`; кількість - `outputsWithoutSubstance` у summary |
+| `ECW_EC_tons\|gsec_<код>_type1\|_type2` | методологія зі списку TypeFold (за замовчуванням `^ECW_C12_02$`, збігається з етапом ParityBranch) | `ECW_EC_tons\|gsec_<код>` |
+| обидві гілки одного ключа | TypeFold | клас `BRANCH_BOTH_PRESENT` (значення не порівнюється: старий код пише одну гілку) |
+| `ECW_EC_*_415_type1` | NullType1 (C12_02: код 415) | лишається повним іменем -> `ECR_ONLY` (type1 для 415 у старому коді немає; ParityBranch ставить йому `NULL`) |
+| `ECW_EC_*_<код>*` з речовиною проходу, відмінною від `<код>` | будь-яка | пропускається, лічильник `foreignSubstanceIgnored` |
+
+Таблиці за замовчуванням (коли немає прив'язки): `^ECW_C12_02$` -> `T10_03+T11_03`, `^ECW_C12_03$` -> `T10_01+T11_01`.
+Фаза/групування C12_*: колонка `Land_TypeFuel` знаходиться сама; для `Land_TypeStream` (T11_03) задайте
+`-GroupBy 'T11_03=Land_TypeStream'`. Інші методології з гілками - `-TypeFoldMethodology '<regex>[;<regex>]'`.
+
+Звіт (без значень): у `summary.json` - `buckets` (по методології) і `bySubstance` (методологія x речовина), у
+`<OutPrefix>.buckets.tsv` - ті самі рядки: `matched`, `withinThreshold` (збіг лише завдяки порогу `-RelThreshold`,
+за замовчуванням `1e-9`; NEAR/MISMATCH* з відносною похибкою ≤ порога), `mismatch`, `ecrOnly`, `oracleOnly`
+(MISSING_*, ROW_NOT_LOADED_*, LEGACY_STATUS_SKIP, METHODOLOGY_DIFF), `other` (AMBIGUOUS_KEY, LEGACY_DUP_CONFLICT,
+INCOMPLETE_*, BRANCH_BOTH_PRESENT), `zero` (комірки з нульовою старою), `relP95`, `relMax`. Сторож -
+LandParityC12CompareTests (Architecture; синтетика, мутаційні докази: гілка не знімається, речовина не підставляється,
+обидві гілки не виявляються).
+
 ## Довідник повітряних речовин (LP-07, форма B константи)
 
 `Import-LandAirSubstances.ps1` завантажує LAND_AIR_SUBSTANCE з **локальної копії** прода (`AF_PermitConstant`,

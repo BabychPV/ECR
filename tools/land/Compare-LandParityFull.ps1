@@ -30,6 +30,15 @@
 .PARAMETER MethodologyTable  '<regex>=<TableCode>[+<TableCode>]', e.g. '^ECW_C12_01$=T11_02+T11a_01'; used when the
                              methodology has no active binding. Several tables: the result is attributed to the
                              tables whose row exists (multiTableResults in the summary counts unresolved ones).
+.PARAMETER TypeFoldMethodology  regex of methodologies (besides the built-in ^ECW_C12_02$) whose outputs ECW_EC_<tons|gsec>_<code>_typeN
+                             are folded to the legacy key ECW_EC_<tons|gsec>_<code> (the legacy code writes ONE branch). Both
+                             branches present for one key -> BRANCH_BOTH_PRESENT (values are not compared). Code 415 type1 is
+                             never folded (the legacy code has no type1 for 415): ECR_ONLY.
+                             Outputs ECW_EC_<tons|gsec>_XXX are always renamed by the substance code of the result
+                             (SUBSTANCE_CODE of the register entry; C12_03 and the like).
+.PARAMETER RelThreshold      relative error up to which a NEAR/MISMATCH cell counts as matched in the report buckets
+                             (default 1e-9); the report: matched / withinThreshold / mismatch / ecrOnly / oracleOnly / other
+                             per methodology and per substance (summary.json buckets+bySubstance, <OutPrefix>.buckets.tsv).
 .PARAMETER AggregateBy       None (default) | NaePhase
 .PARAMETER ValidateOnly      parse and print the resolved parameters (JSON), do nothing else
 #>
@@ -46,6 +55,8 @@ param(
     [string[]]$Months = @(),
     [string[]]$GroupBy = @(),
     [string[]]$MethodologyTable = @(),
+    [string[]]$TypeFoldMethodology = @(),
+    [double]$RelThreshold = 1e-9,
     [ValidateSet('None', 'NaePhase')][string]$AggregateBy = 'None',
     [double]$TolAbs = 1e-9,
     [double]$TolRel = 1e-12,
@@ -59,6 +70,11 @@ Set-StrictMode -Version 2.0
 
 $groupByMap = ConvertTo-LandParityGroupByMap $GroupBy
 $methTableMap = ConvertTo-LandParityMethodologyTableMap $MethodologyTable
+[string[]]$typeFoldList = @(@($TypeFoldMethodology) | ForEach-Object { ([string]$_) -split ';' } | Where-Object { $_.Trim() -ne '' } | ForEach-Object { $_.Trim() })
+foreach ($rx in $typeFoldList) {
+    try { [void][regex]::new($rx) } catch { throw "TypeFoldMethodology '$rx': bad regex ($($_.Exception.Message))." }
+}
+if ($RelThreshold -lt 0) { throw "-RelThreshold must be >= 0." }
 # -File passes "3,4" as ONE string (an [int[]] parameter would read it as 34): split by hand.
 [int[]]$MonthList = @(@($Months) | ForEach-Object { ([string]$_) -split '[,; ]+' } | Where-Object { $_ -ne '' } | ForEach-Object {
         $m = 0
@@ -72,6 +88,8 @@ if ($ValidateOnly) {
         months = @($MonthList)
         groupBy = @($groupByMap.Keys | Sort-Object | ForEach-Object { [ordered]@{ table = $_; columns = @($groupByMap[$_]) } })
         methodologyTable = @($methTableMap | ForEach-Object { [ordered]@{ regex = $_.Regex; tables = @($_.Tables) } })
+        typeFold = @(@(Get-LandParityTypeFoldDefault) + @($typeFoldList))
+        relThreshold = $RelThreshold
     } | ConvertTo-Json -Depth 5 -Compress | Write-Host
     return
 }
@@ -101,13 +119,14 @@ if ($files.Count -eq 0) { throw "No LAND-PROD-<n>.json documents selected in '$J
 # --- state ---
 $state = New-LandParityState
 $state.MethodologyTable = $methTableMap
+$state.TypeFold = @(@($state.TypeFold) + @($typeFoldList))
 if ([string]::IsNullOrWhiteSpace($StateFile)) { Import-LandParityStateSql $SqlConnection $state }
 else { Import-LandParityStateFile $StateFile $state }
 Write-Host "ecr results: $($state.ResultCount); loaded rows: $($state.Loaded.Count)"
 $oracle = Import-LandParityOracleTsv $OracleTsv
 Write-Host "oracle keys: $($oracle.Count)"
 
-$acc = New-LandParityAccumulator
+$acc = New-LandParityAccumulator -RelThreshold $RelThreshold
 $opt = @{ Months = @($MonthList); StorageAbs = $StorageAbs; TolRel = $TolRel; TolAbs = $TolAbs; AggregateBy = $AggregateBy; GroupBy = $groupByMap }
 Invoke-LandParityCompare -DocumentFile @($files | ForEach-Object { $_.Path }) -StateObject $state -Oracle $oracle -Accumulator $acc -Option $opt -Progress {
     param($i, $n) if ($i % 10 -eq 0) { Write-Host "docs $i/$n" }
@@ -115,7 +134,7 @@ Invoke-LandParityCompare -DocumentFile @($files | ForEach-Object { $_.Path }) -S
 
 $summary = Get-LandParitySummary $acc $state
 $result = [ordered]@{
-    formatVersion = 2
+    formatVersion = 3
     tolerance = [ordered]@{ abs = $TolAbs; rel = $TolRel; storageAbs = $StorageAbs }
     aggregateBy = $AggregateBy
     months = @($MonthList)
@@ -126,14 +145,32 @@ $result = [ordered]@{
     byMethodology = $summary.byMethodology
     multiTableResults = $summary.multiTableResults
     groups = $summary.groups
+    relThreshold = $summary.relThreshold
+    buckets = $summary.buckets
+    bySubstance = $summary.bySubstance
+    outputsWithoutSubstance = $summary.outputsWithoutSubstance
+    foreignSubstanceIgnored = $summary.foreignSubstanceIgnored
 }
 $outJson = [System.IO.Path]::GetFullPath("$OutPrefix.summary.json")
 $outTsv = [System.IO.Path]::GetFullPath("$OutPrefix.cells.tsv")
 New-Item -ItemType Directory -Force (Split-Path $outJson) | Out-Null
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($outJson, ($result | ConvertTo-Json -Depth 8 -Compress), $utf8)
+$outBuckets = [System.IO.Path]::GetFullPath("$OutPrefix.buckets.tsv")
+$inv = [Globalization.CultureInfo]::InvariantCulture
+$bucketLines = @("methodology`tsubstance`tmatched`twithinThreshold`tmismatch`tecrOnly`toracleOnly`tother`tzero`trelP95`trelMax") + @(
+    $summary.bySubstance | ForEach-Object {
+        $p95 = ''; if ($null -ne $_.relP95) { $p95 = ([double]$_.relP95).ToString('R', $inv) }
+        $mx = ''; if ($null -ne $_.relMax) { $mx = ([double]$_.relMax).ToString('R', $inv) }
+        (@($_.methodology, $_.substance, $_.matched, $_.withinThreshold, $_.mismatch, $_.ecrOnly, $_.oracleOnly, $_.other, $_.zero, $p95, $mx) -join "`t")
+    })
+[System.IO.File]::WriteAllLines($outBuckets, [string[]]$bucketLines, $utf8)
 $head = "doc`tperiod`ttable`trowKey`trows`tefid`tmethodology`toutput`tclass`trel"
 [System.IO.File]::WriteAllLines($outTsv, [string[]](@($head) + $acc.Detail.ToArray()), $utf8)
 Write-Host 'classes:'
 $summary.classes | ForEach-Object { Write-Host ("  {0,-40} {1}" -f $_.class, $_.cells) }
-Write-Host "out: $outJson / $outTsv (non-MATCH cells: $($acc.Detail.Count))"
+Write-Host ("buckets (threshold {0}): methodology matched(within) mismatch ecrOnly oracleOnly other" -f $RelThreshold)
+$summary.buckets | ForEach-Object {
+    Write-Host ("  {0,-16} {1}({2}) {3} {4} {5} {6}" -f $_.methodology, $_.matched, $_.withinThreshold, $_.mismatch, $_.ecrOnly, $_.oracleOnly, $_.other)
+}
+Write-Host "out: $outJson / $outTsv / $outBuckets (non-MATCH cells: $($acc.Detail.Count))"
