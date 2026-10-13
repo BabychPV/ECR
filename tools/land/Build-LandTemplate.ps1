@@ -27,7 +27,8 @@
                     PUT category-rule дають 422 ECR-CALC-0422 categoryRuleUnknownArgument (D1, RC E).
                     Схема: імпорт C11/C12 -> -Stage LandParity -> -Stage Methodologies (повторно, створює прив'язки).
 
-    ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє.
+    ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє, окрім явного
+    -PruneStaleTables (м'яке видалення таблиць чернетки, яких немає в моделі; без прапора - лише попередження).
     Формули колонок наявної чернетки-клону порівнюються з моделлю й оновлюються (D-YE-1). Прод-БД старої системи тут
     НЕ читається (набір із прода — окремий локальний скрипт, не в репозиторії).
 
@@ -38,6 +39,9 @@
 .PARAMETER BootstrapPassword  Пароль bootstrap, якщо його ще немає в -AccountsFile (SecureString).
 .PARAMETER GoldenDir          Каталог golden-*.csv (локальні, поза репозиторієм); без нього тести беруться зі спеки (P1..P5).
 .PARAMETER Stage              Етапи.
+.PARAMETER PruneStaleTables   LP-28: м'яко видалити з чернетки таблиці, яких немає в моделі (DELETE sheets/{аркуш}/tables/{код};
+                              сервер відмовляє, коли у версії є документи). Без прапора - лише попередження зі списком кодів.
+.PARAMETER KnownStaleTables   Коди "АРКУШ/ТАБЛИЦЯ" (або лише код таблиці), які не вважати застарілими.
 .PARAMETER DryRun             Лише читання й підрахунок.
 #>
 [CmdletBinding()]
@@ -57,6 +61,8 @@ param(
     [int]$Year = 2026,
     [string]$ConfirmStand,
     [switch]$FillData,
+    [switch]$PruneStaleTables,
+    [string[]]$KnownStaleTables = @(),
     [switch]$DryRun
 )
 
@@ -677,6 +683,27 @@ function Fill-StructureSql([int]$vid) {
 # виду (a+b+c)/1000 з аркуша 7. Water Report (багато-до-багатьох: коди 7009016/17/18 живлять кілька цілей).
 # Працює в обох режимах -StructureMode (Sql і Api): ідентифікатори таблиць/колонок беруться зі структури версії.
 # Ідемпотентно: PUT за адресою комірки змінює наявну формулу, а не заводить другу.
+# LP-28: таблиці чернетки-клону, яких немає в моделі (T9a_03/06/07 після переходу на T9a_17a/21a/21b). Без прапора
+# -PruneStaleTables - лише попередження зі списком кодів (нічого не видаляється). З прапором - DELETE
+# /template-versions/{vid}/sheets/{аркуш}/tables/{код} (м'яке видалення в чернетці; сервер відмовляє, коли у версії є
+# документи - тоді таблиця лишається й про це буде рядок у журналі). Опублікована версія не змінюється: сюди
+# потрапляє лише чернетка. Таблиці з кодами моделі й -KnownStaleTables не чіпаються.
+function Invoke-StaleTables([int]$vid) {
+    $st = (Api GET "/api/v1/template-versions/$vid/structure").Json
+    $stale = @(Get-LandStaleTables $st $Mdl $KnownStaleTables)
+    if ($stale.Count -eq 0) { Log '  таблиць, яких немає в моделі: 0'; return 0 }
+    Log ("  ПОПЕРЕДЖЕННЯ: таблиць у чернетці, яких немає в моделі: {0}: {1}" -f $stale.Count, (($stale | ForEach-Object { $_.Key }) -join ', '))
+    if (-not $PruneStaleTables) { Log '  Нічого не видалено; для м''якого видалення запустіть з -PruneStaleTables (або додайте код у -KnownStaleTables).'; return 0 }
+    $done = 0
+    foreach ($s in $stale) {
+        $r = Invoke-Ecr -Method DELETE -Path "/api/v1/template-versions/$vid/sheets/$($s.Sheet)/tables/$($s.Table)"
+        if ($r.Status -in 200, 204) { $done++; Log "  таблицю $($s.Key) видалено (м'яко)"; continue }
+        Log ("  таблицю {0} НЕ видалено: HTTP {1} {2}" -f $s.Key, $r.Status, (Get-EcrErrorCode $r))
+    }
+    Log "  застарілих таблиць видалено: $done із $($stale.Count)"
+    return $done
+}
+
 function Put-CellFormulas([int]$vid) {
     $planned = @()
     foreach ($sh in @($Mdl.sheets)) {
@@ -864,6 +891,7 @@ function Stage-Template {
     }
     Log "  колонок $nCols, формул $nF, рядків $nRows, правил $nRules"
     $nCell = Put-CellFormulas $vid
+    $nStale = Invoke-StaleTables $vid
 
     # умовне форматування: колонкові правила моделі + правила з областю (L6: scope row / tableCode, textEq/textNe) - одним PUT на версію.
     # Правила з областю потребують lane cellstyle-l6-3: сервер без неї міг би проігнорувати поля області й зробити правило колонковим

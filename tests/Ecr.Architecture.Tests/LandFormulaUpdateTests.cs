@@ -142,6 +142,129 @@ public sealed class LandFormulaUpdateTests
         Assert.DoesNotContain("OR [Month]", output, StringComparison.Ordinal);
     }
 
+    private const string StaleHarness = """
+        $ErrorActionPreference = 'Stop'
+        . $args[0]
+        $script = $args[1]; $mode = $args[2]
+        $mdl = '{"sheets":[{"code":"S9","tables":[{"code":"T9a_17a","columns":[]},{"code":"T9a_21a","columns":[]}]}]}' | ConvertFrom-Json
+        $st = '{"sheets":[{"code":"S9","tables":[{"code":"T9a_03"},{"code":"T9a_06"},{"code":"T9a_17a"},{"code":"T9a_21a"}]},{"code":"SX","tables":[{"code":"TX_1"}]}]}' | ConvertFrom-Json
+        if ($mode -eq 'known') {
+            foreach ($s in @(Get-LandStaleTables $st $mdl @('S9/T9a_06', 'TX_1'))) { Write-Host ('STALE=' + $s.Key) }
+            return
+        }
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script, [ref]$null, [ref]$null)
+        $fn = $ast.Find({ param($a) $a -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq 'Invoke-StaleTables' }, $true)
+        if (-not $fn) { throw 'Invoke-StaleTables не знайдено' }
+        $Mdl = $mdl
+        $KnownStaleTables = @()
+        $PruneStaleTables = ($mode -eq 'prune')
+        function Log([string]$m) { Write-Host 'LOG' }
+        function Get-EcrErrorCode($r) { return 'ECR-TMPL-0409' }
+        function Api { param([string]$Method, [string]$Path) return @{ Json = $st } }
+        function Invoke-Ecr {
+            param([string]$Method, [string]$Path)
+            Write-Host ('CALL=' + $Method + ' ' + $Path)
+            if ($Path -like '*/T9a_06') { return @{ Status = 409; Text = '' } }
+            return @{ Status = 204; Text = '' }
+        }
+        . ([scriptblock]::Create($fn.Extent.Text))
+        $n = Invoke-StaleTables 7
+        Write-Host ('DONE=' + $n)
+        """;
+
+    private static string RunStale(string mode)
+    {
+        var start = new ProcessStartInfo(DeployScriptHarness.FindPowerShell())
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+
+        var file = Path.Combine(Path.GetTempPath(), $"ecr-land-stale-{Guid.NewGuid():N}.ps1");
+        File.WriteAllText(file, StaleHarness, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        try
+        {
+            foreach (var argument in new[]
+                     {
+                         "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file,
+                         LandFile("LandTemplateDiff.Lib.ps1"), LandFile("Build-LandTemplate.ps1"), mode,
+                     })
+            {
+                start.ArgumentList.Add(argument);
+            }
+
+            using var process = Process.Start(start) ?? throw new InvalidOperationException("PowerShell не запустився");
+            var stdout = process.StandardOutput.ReadToEnd();
+            var stderr = process.StandardError.ReadToEnd();
+            if (!process.WaitForExit(120_000))
+            {
+                process.Kill(entireProcessTree: true);
+                throw new TimeoutException("PowerShell не завершився за 120 с.");
+            }
+
+            Assert.True(process.ExitCode == 0, stdout + stderr);
+            return stdout;
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void LP28_застарілі_таблиці_знаходяться_за_моделлю_а_відомі_виключаються()
+    {
+        var all = RunStale("known");
+
+        Assert.Contains("STALE=S9/T9a_03", all, StringComparison.Ordinal);
+        Assert.DoesNotContain("STALE=S9/T9a_06", all, StringComparison.Ordinal);
+        Assert.DoesNotContain("STALE=SX/TX_1", all, StringComparison.Ordinal);
+        Assert.DoesNotContain("T9a_17a", all, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void LP28_без_прапора_Build_нічого_не_видаляє()
+    {
+        var output = RunStale("warn");
+
+        Assert.DoesNotContain("CALL=", output, StringComparison.Ordinal);
+        Assert.Contains("DONE=0", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void LP28_з_прапором_видаляє_лише_застарілі_і_переживає_відмову_сервера()
+    {
+        var output = RunStale("prune");
+
+        var calls = output.Split('\n').Select(l => l.Trim()).Where(l => l.StartsWith("CALL=", StringComparison.Ordinal)).ToList();
+        Assert.Equal(3, calls.Count);
+        Assert.Contains("CALL=DELETE /api/v1/template-versions/7/sheets/S9/tables/T9a_03", calls);
+        Assert.Contains("CALL=DELETE /api/v1/template-versions/7/sheets/S9/tables/T9a_06", calls);
+        Assert.Contains("CALL=DELETE /api/v1/template-versions/7/sheets/SX/tables/TX_1", calls);
+        Assert.DoesNotContain(calls, c => c.Contains("T9a_17a", StringComparison.Ordinal));
+        // Застарілих 3 (T9a_03, T9a_06, TX_1); на T9a_06 сервер відмовив (409) - решта оброблена, видалено 2.
+        Assert.Contains("DONE=2", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void LP28_Build_має_прапор_а_Verify_ловить_зайві_таблиці()
+    {
+        var build = File.ReadAllText(LandFile("Build-LandTemplate.ps1"));
+        var verify = File.ReadAllText(LandFile("Verify-LandTemplate.ps1"));
+
+        Assert.Contains("[switch]$PruneStaleTables", build, StringComparison.Ordinal);
+        Assert.Contains("Invoke-StaleTables $vid", build, StringComparison.Ordinal);
+        Assert.Contains("Get-LandStaleTables", verify, StringComparison.Ordinal);
+        Assert.Contains("[string[]]$KnownStaleTables", verify, StringComparison.Ordinal);
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Build_порівнює_і_оновлює_формули_порціями_а_не_лише_вставляє()
