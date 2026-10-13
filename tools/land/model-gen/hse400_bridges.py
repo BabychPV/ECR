@@ -83,6 +83,17 @@ COMPOSITION_MASS_METHODOLOGIES = {
                    'prefix': "if(@Land_Streams = 'Fuel gas', 'FG_Internal', @Land_Streams)"},
 }
 
+# Аргумент потоку фрагмента CompositionMass, якого на таблиці немає, бо старий код читає там ІНШИЙ атрибут.
+# ECW_C11_10.cs:98-102: `fuelTypeArgument = arguments["Land_TypeFuel"]`, а `Land_TypeFuelOrStream` - лише на
+# AF_Air_Land_ProcessUnits_9a_27 і AF_Air_Land_Utility_9_04. Фрагмент методології один на всі її таблиці й читає
+# @Land_TypeFuelOrStream, тому на решті 7 таблиць цей аргумент - колонка-міст до того ж джерела потоку, що й
+# Density20 (streamSourceColumn): атрибут Land_TypeFuel стоїть у класі AF-таблиці, а Land_TypeFuelOrStream - ні.
+STREAM_ARGUMENT_ALIASES = [
+    {'methodology': 'ECW_C11_10', 'argument': 'Land_TypeFuelOrStream', 'sourceAttribute': 'Land_TypeFuel',
+     'tables': ['T9_02', 'T9_07', 'T9_11', 'T9a_24', 'T9a_25', 'T9a_26', 'T9a_28'],
+     'evidence': 'ECW_C11_10.cs:98-102 (Land_TypeFuelOrStream читається лише на 9a_27 і 9_04, на решті - Land_TypeFuel)'},
+]
+
 # Словник PrefixProvider.GetPrefixes(CalculatorType.Standard), порядок вставки (перший збіг виграє).
 BASE_PREFIXES = [
     ('Makat', 'FG_Makat'),
@@ -238,11 +249,51 @@ def _stream_reason(tcode):
     return REASON_STREAM['other']
 
 
-def apply(out, registries, extra_stream_sources=None):
+def _apply_stream_aliases(out, sources, af_attrs):
+    """Мости аргументу потоку, що старий код бере з іншого атрибута (STREAM_ARGUMENT_ALIASES). Повертає кількість."""
+    by_code = {}
+    for s_ in out['sheets']:
+        for t_ in s_['tables']:
+            by_code.setdefault(t_['code'], t_)
+    bridged = out['argumentBridges']['bridged']
+    added = 0
+    for alias in STREAM_ARGUMENT_ALIASES:
+        arg, src_attr = alias['argument'], alias['sourceAttribute']
+        for tcode in alias['tables']:
+            names = [a['name'] for a in (af_attrs.get(tcode) or {}).get('attributes', [])]
+            if src_attr not in names or arg in names:
+                raise SystemExit('hse400: %s: атрибути AF таблиці не підтверджують %s <- %s' % (tcode, arg, src_attr))
+            src = sources.get(tcode)
+            if src is None:
+                raise SystemExit('hse400: %s: немає доведеного джерела потоку для %s' % (tcode, arg))
+            name, kind = src
+            t_ = by_code[tcode]
+            cols = {c['code']: c for c in t_['columns']}
+            if name not in cols or cols[name]['dataType'] != kind:
+                raise SystemExit('hse400: %s: колонка-джерело потоку %s (%s) відсутня' % (tcode, name, kind))
+            if arg in cols:
+                raise SystemExit('hse400: %s: колонка %s уже є' % (tcode, arg))
+            expr = '[%s]' % name if kind == 'String' else "REGFIELD([%s], 'NAME')" % name
+            t_['columns'].append({
+                'headerRu': '', 'hidden': False, 'readOnly': True, 'excel': None, 'month': None,
+                'precision': None, 'scale': None, 'code': arg, 'dataType': 'Formula',
+                'headerEn': '%s (argument bridge: stream of %s = AF attribute %s)' % (arg, alias['methodology'], src_attr),
+                'unit': None, 'expression': expr,
+                'ecrAdded': 'bridge: methodology argument %s = AF attribute %s of %s, stream argument of %s (%s)'
+                            % (arg, src_attr, (af_attrs.get(tcode) or {}).get('class', tcode), alias['methodology'],
+                               alias['evidence'])})
+            bridged.setdefault(tcode, [])
+            bridged[tcode] = sorted(set(bridged[tcode]) | {arg})
+            added += 1
+    return added
+
+
+def apply(out, registries, extra_stream_sources=None, af_attrs=None):
     """Додає довідники й мости; повертає кількість доданих колонок.
 
     extra_stream_sources: {таблиця: (колонка, тип)} - джерела потоку, доведені за атрибутами AF-таблиць
     (af_attr_bridges.stream_sources); статичний STREAM_SOURCE має пріоритет.
+    af_attrs: атрибути AF-таблиць (af-land-table-attributes.json) - для STREAM_ARGUMENT_ALIASES.
     """
     sources = dict(extra_stream_sources or {})
     sources.update(STREAM_SOURCE)
@@ -302,8 +353,16 @@ def apply(out, registries, extra_stream_sources=None):
         else:
             unresolved[tcode] = dict(sorted(left.items()))
 
+    alias_added = _apply_stream_aliases(out, sources, af_attrs or {})
+    added += alias_added
+    for tcode in {t for a in STREAM_ARGUMENT_ALIASES for t in a['tables']}:
+        source_used.setdefault(tcode, sources[tcode][0])
+
     ab['bridged'] = dict(sorted(bridged.items()))
     ab['hse400'] = {
+        'streamArgumentAliases': [
+            {'methodology': a['methodology'], 'argument': a['argument'], 'sourceAttribute': a['sourceAttribute'],
+             'tables': a['tables'], 'evidence': a['evidence']} for a in STREAM_ARGUMENT_ALIASES],
         'registries': [STREAM_REGISTRY, COMPOSITION_REGISTRY, SUBSTANCE_REGISTRY],
         # CompositionMass - склад ПО РЕЧОВИНІ: у шаблоні (діалект без CURRENT_SUBSTANCE) колонки-моста бути не може;
         # у формулі версії методології `@CompositionMass` замінюється фрагментом (Build-LandTemplate -Stage

@@ -219,8 +219,15 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 У шаблоні колонки-моста бути не може (діалект без `CURRENT_SUBSTANCE()`), тому в формулі ЧЕРНЕТКИ версії методології
 (`ECW_C11_01/02/10`, `ECW_C12_01/03`) токен `@CompositionMass` замінюється фрагментом з
 `argumentBridges.hse400.compositionMass.methodologies.<ім'я>.fragment`: `Build-LandTemplate.ps1 -Stage CompositionMass`
-(лише явно; опубліковані версії не чіпає; повтор - 0 змін; версія має бути вище за Legacy, інакше публікація дасть
-ECR-CALC-0433). Довідник `LAND_HSE400_SUBSTANCE` на стендах, побудованих до цієї зміни, заводить
+(лише явно; опубліковані версії не чіпає; повтор - 0 змін). Фрагмент вживає `CURRENT_SUBSTANCE()` і `REGFIND`/`REGFIELD`
+(ярус Extension): у версії `NumericMode = Legacy` публікація дає ECR-CALC-0433, тому етап **сам переводить чернетку з
+фрагментом у `Strict`** (`PUT /methodologies/{id}/versions/{vid}/modes`, календарний режим і журнал не чіпає;
+`-KeepNumericMode` вимикає). ⚠ `Strict` змінює арифметику версії: `decimal` замість `double` NCalc 1.3.8, ділення на нуль -
+`#DIV/0` замість `+∞`, `Round` - AwayFromZero; у формулах C11_01/02/10, C12_01/03 дільники - лише константи `CST.k*`
+(змінних знаменників немає), `Pow`/`Sqrt` - лише в C11_02 (константні аргументи), а `if(@X = 0, 0, …)` не залежить від
+режиму. Аргумент потоку фрагмента (`@Land_TypeFuelOrStream` у C11_10) має бути колонкою на КОЖНІЙ таблиці методології:
+де старий код читає `Land_TypeFuel` (T9_02, T9_07, T9_11, T9a_24..26, T9a_28), модель дає міст до тієї самої колонки
+джерела потоку (`hse400_bridges.STREAM_ARGUMENT_ALIASES`). Довідник `LAND_HSE400_SUBSTANCE` на стендах, побудованих до цієї зміни, заводить
 `Import-LandHse400Substance.ps1` (`-DryRun`, `-ConfirmStand`; прод не читає). Сторожі: LandHse400SubstanceMapTests
 (Architecture), CompositionMassBySubstanceTests (Expressions), LandHse400SubstanceRegistryTests (Infrastructure, реальний SQL).
 

@@ -166,6 +166,87 @@ public sealed class LandHse400BridgesModelTests
             StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Фрагмент CompositionMass (Build -Stage CompositionMass) читає аргумент потоку методології, і публікація
+    /// (ECR-CALC-0438) вимагає колонку з цим кодом на КОЖНІЙ прив'язаній таблиці. Доти ECW_C11_10 мала
+    /// <c>@Land_TypeFuelOrStream</c> лише на 9_04 і 9a_27, а старий код читає там Land_TypeFuel: ще 7 таблиць
+    /// (T9_02, T9_07, T9_11, T9a_24, T9a_25, T9a_26, T9a_28) були без колонки й без запису в unresolved.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Аргумент_потоку_фрагмента_CompositionMass_є_колонкою_на_кожній_таблиці_його_методології()
+    {
+        using var model = Load("land-template.model.json");
+        using var map = Load("land-result-outputs.json");
+        var tables = Tables(model);
+        var unresolved = model.RootElement.GetProperty("argumentBridges").GetProperty("unresolved");
+        var checkedPairs = 0;
+
+        foreach (var m in model.RootElement.GetProperty("argumentBridges").GetProperty("hse400")
+                     .GetProperty("compositionMass").GetProperty("methodologies").EnumerateObject())
+        {
+            var streamArguments = m.Value.GetProperty("arguments").EnumerateArray().Select(x => x.GetString()!).ToArray();
+            foreach (var t in map.RootElement.GetProperty("methodologies").GetProperty(m.Name).GetProperty("tables")
+                         .EnumerateArray().Select(x => x.GetString()!))
+            {
+                if (!tables.TryGetValue(t, out var table))
+                {
+                    continue;
+                }
+
+                var cols = Columns(table);
+                foreach (var arg in streamArguments)
+                {
+                    checkedPairs++;
+                    var named = unresolved.TryGetProperty(t, out var u) && u.TryGetProperty(arg, out _);
+                    Assert.True(
+                        cols.ContainsKey(arg) ^ named,
+                        $"{t}: аргумент потоку {arg} ({m.Name}) має бути колонкою або в unresolved (не обидва і не жодне).");
+                }
+            }
+        }
+
+        Assert.True(checkedPairs >= 20, $"Перевірено лише {checkedPairs} пар.");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Сім_таблиць_C11_10_де_старий_код_читає_Land_TypeFuel_мають_міст_потоку_до_колонки_джерела_потоку()
+    {
+        using var model = Load("land-template.model.json");
+        var tables = Tables(model);
+        var hse = model.RootElement.GetProperty("argumentBridges").GetProperty("hse400");
+        var streamSource = hse.GetProperty("streamSourceColumn");
+        var alias = Assert.Single(hse.GetProperty("streamArgumentAliases").EnumerateArray());
+
+        Assert.Equal("ECW_C11_10", alias.GetProperty("methodology").GetString());
+        Assert.Equal("Land_TypeFuelOrStream", alias.GetProperty("argument").GetString());
+        Assert.Equal("Land_TypeFuel", alias.GetProperty("sourceAttribute").GetString());
+
+        string[] expected = ["T9_02", "T9_07", "T9_11", "T9a_24", "T9a_25", "T9a_26", "T9a_28"];
+        Assert.Equal(
+            expected,
+            alias.GetProperty("tables").EnumerateArray().Select(x => x.GetString()!).Order(StringComparer.Ordinal)
+                .ToArray());
+
+        foreach (var t in expected)
+        {
+            var c = Columns(tables[t])["Land_TypeFuelOrStream"];
+            Assert.Equal("Formula", c.GetProperty("dataType").GetString());
+            Assert.True(c.GetProperty("readOnly").GetBoolean());
+
+            // текст потоку - та сама колонка, з якої Density20 ... будують префікс потоку
+            Assert.Equal("[" + streamSource.GetProperty(t).GetString() + "]", c.GetProperty("expression").GetString());
+            Assert.Equal(JsonValueKind.Null, c.GetProperty("precision").ValueKind);
+            Assert.Contains("ECW_C11_10.cs:98-102", c.GetProperty("ecrAdded").GetString()!, StringComparison.Ordinal);
+        }
+
+        // 9_04 і 9a_27: старий код читає сам Land_TypeFuelOrStream - міст за атрибутом AF, не аліас
+        Assert.DoesNotContain("T9_04", expected);
+        Assert.Contains("Land_TypeFuelOrStream", Columns(tables["T9_04"]).Keys);
+        Assert.Contains("Land_TypeFuelOrStream", Columns(tables["T9a_27"]).Keys);
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Колонка_джерело_потоку_існує_й_відповідає_типу_і_кожен_аргумент_HSE400_або_міст_або_unresolved()

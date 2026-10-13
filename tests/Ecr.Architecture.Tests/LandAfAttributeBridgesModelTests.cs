@@ -138,6 +138,9 @@ public sealed class LandAfAttributeBridgesModelTests
     [InlineData("T9a_24", "Land_Measure_SubstanceConsumption", "[ReleaseOnColdVent20Dgr1atm_M01]")]
     [InlineData("T9a_19", "Land_Measure_SubstanceConsumption", "[AmountOfOilPumpedIntoTheTank_M01]")]
     [InlineData("T9a_17", "Land_Measure_RunningHours", "[OperatingTime_M01]")]
+    // OperatingTime стоїть у класі AF на місці єдиної колонки «Material residence time» (EXCEL_HEADER_OVERRIDES)
+    [InlineData("T9a_16", "Land_Measure_OperatingTime", "[Period].Sequence = 1 ? [MaterialResidenceTimeInProcessUnits_M01]")]
+    [InlineData("T9a_30", "Land_Measure_OperatingTime", "[Period].Sequence = 1 ? [MaterialResidenceTimeInProcessUnits_M01]")]
     // місячні мости вибирають колонку за номером періоду
     [InlineData("T9a_21", "Land_Measure_OperatingTime", "[Period].Sequence = 1 ? [OperatingTime_M01_M]")]
     [InlineData("T9a_21", "Land_Measure_OperatingTimeDays", "[Period].Sequence = 1 ? [OperatingTime_M01]")]
