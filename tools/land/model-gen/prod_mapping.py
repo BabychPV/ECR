@@ -140,13 +140,14 @@ for _t in ('T5_08', 'T5_09', 'T5_27'):
                                  evidence='Прод має Land_ERG_EmissionSourceType поряд із Land_EmissionSourceType (текст «Organized/Non-organized»); '
                                           'у шаблоні лише одна введена колонка типу джерела — другої немає')))
 _GTU_EVIDENCE = ('Прод має Land_Measure_GTU_Month і Land_Measure_GTU<n>_<301|304|330|337|O2>; у таблиці Excel відповідних колонок введення немає '
-                 '(є лише службові компоненти «Component: Month», «301: 00xx»). Одиниця й семантика звітом НЕ доведені.')
+                 '(є лише службові компоненти «Component: Month», «301: 00xx»). Одиниці - рішення людини 2026-10-13: компоненти '
+                 '301/304/330/337 у мг/м3, O2 у % об\'єму.')
 for _t, _n in (('T10_03', 4), ('T11_03', 5)):
     NEW_COLUMNS.append((_t, dict(code='Land_Measure_GTU_Month', dataType='String', headerEn='GTU measurement month', evidence=_GTU_EVIDENCE)))
     for _g in range(1, _n + 1):
         for _c in ('301', '304', '330', '337', 'O2'):
             NEW_COLUMNS.append((_t, dict(code='Land_Measure_GTU%d_%s' % (_g, _c), dataType='Decimal', headerEn='GTU%d %s' % (_g, _c),
-                                         evidence=_GTU_EVIDENCE)))
+                                         evidence=_GTU_EVIDENCE, unit='%vol' if _c == 'O2' else 'mg/m3')))
 
 # ---------- явно недоведене ----------
 NOT_PROVEN = [
@@ -157,7 +158,8 @@ NOT_PROVEN = [
     {'prodTable': '*', 'prodColumn': 'Land_Rotation / Land_Status',
      'why': 'У проді трапляється текст «NULL» замість порожнього — це вимога до завантажувача (пропускати), не до моделі.'},
     {'prodTable': 'AF_Air_Land_Off_Utility_DI_10_03', 'prodColumn': 'Land_Measure_GTU*',
-     'why': 'Одиниця величин GTU (мг/м3? %?) і зв\'язок рядка з місяцем (Land_Measure_GTU_Month) звітом не доведені; колонки додано без unit.'},
+     'why': 'Одиниця GTU - рішення людини 2026-10-13 (301/304/330/337 мг/м3, O2 % об\'єму), у джерелах звіту не названа. '
+            'Зв\'язок рядка з місяцем: GTU_Month - блок «12 місяців» у кожному документі (а не місяць Time рядка), див. мости Component.'},
     {'prodTable': 'AF_Air_Land_Utility_9_02 / 9_11', 'prodColumn': 'Land_Measure_SubstanceConsumption',
      'why': 'Одиницю прод-колонки звіт не називає; зіставлено з єдиною колонкою споживання (Sm3 20 dgr) за принципом single-candidate.'},
     {'prodTable': '*', 'prodColumn': 'Con_*',
@@ -230,6 +232,8 @@ def apply(out):
         if spec['dataType'] == 'Decimal':
             col['precision'] = 28
             col['scale'] = 12
+            if spec.get('unit'):
+                col['unit'] = spec['unit']
         if spec['dataType'] == 'Lookup':
             col['registry'] = spec['registry']
         t['columns'].append(col)

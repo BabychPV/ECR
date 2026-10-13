@@ -191,7 +191,8 @@ public sealed class LandProdColumnMappingModelTests
         // + 44 мости аргументів для таблиць 6, 9-11 (LP-10, argumentBridges)
         // + 37 мостів складу газу HSE400 (LP-10, argumentBridges.hse400: Density20, Vddg ... на REGFIND/REGFIELD)
         // + 177 мостів за атрибутами AF-таблиць (LP-10, af_attr_bridges.py: 168 за атрибутами AF + 9 календарних днів)
-        const int resultColumns = 571 + 44 + 37 + 177;
+        // + 12 колонок GTU-мостів (2026-10-13: T10_03 і T11_03 по 6 = Land_GTU_MonthNo + 5 Land_Measure_Component_*)
+        const int resultColumns = 571 + 44 + 37 + 177 + 12;
         Assert.Equal(55, model.RootElement.GetProperty("stats").GetProperty("columns").GetInt32() - 5147 - resultColumns);
     }
 

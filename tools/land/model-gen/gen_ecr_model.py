@@ -163,6 +163,10 @@ def unit_of(*texts):
 
 UNIT_MAP['thousand_m3'] = 'thousand_m3'
 UNIT_MAP['one'] = 'one'
+# ✎ 2026-10-13 (людина, через координатора): компоненти GTU (301/304/330/337) - мг/м3, O2 - % об'єму. Обидві одиниці
+# вже є в базовому сіді (09-seed.sql: mg_per_m3 - MassConcentration, pct_vol - безрозмірна), нових одиниць не додаємо.
+UNIT_MAP['mg/m3'] = 'mg_per_m3'
+UNIT_MAP['%vol'] = 'pct_vol'
 
 # ---------- довідники ----------
 registries = {}
