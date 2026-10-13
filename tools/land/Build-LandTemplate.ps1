@@ -26,6 +26,10 @@
                     правила категорії звіряє @-аргументи з колонками ВСІХ прив'язок: після Methodologies усі
                     PUT category-rule дають 422 ECR-CALC-0422 categoryRuleUnknownArgument (D1, RC E).
                     Схема: імпорт C11/C12 -> -Stage LandParity -> -Stage Methodologies (повторно, створює прив'язки).
+      CompositionMass (лише явно, в All не входить) у формулах ЧЕРНЕТОК C11_01/02/10, C12_01/03 токен @CompositionMass
+                    замінюється фрагментом складу по речовині (довідники LAND_HSE400_COMPOSITION/_STREAM/_SUBSTANCE,
+                    CURRENT_SUBSTANCE()); потребує довідника LAND_HSE400_SUBSTANCE (Registries або
+                    Import-LandHse400Substance.ps1) і версії вище за Legacy
 
     ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє. Прод-БД старої системи тут
     НЕ читається (набір із прода — окремий локальний скрипт, не в репозиторії).
@@ -47,7 +51,7 @@ param(
     [string]$AccountsFile = 'F:\ecr-backup\land-ui\accounts.local.txt',
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'Data', 'LandParity', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'Data', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection = 'Server=localhost;Database=EcrLandUi;Integrated Security=true;TrustServerCertificate=true',
@@ -1268,6 +1272,52 @@ function Stage-LandParity {
     Log "  оброблено методологій: $done"
 }
 
+# ==================== CompositionMass (LP-10: склад газу HSE400 по речовині) ====================
+# Лише явно: -Stage CompositionMass. Для методологій з моделі (argumentBridges.hse400.compositionMass.methodologies)
+# в ЧЕРНЕТКАХ (опубліковану версію не чіпаємо) токен @CompositionMass у виразах формул замінюється фрагментом, а
+# аргументи формули доповнюються аргументом потоку. Повторний запуск - 0 змін. Нову версію чи публікацію етап
+# не робить: це окреме рішення власника методології.
+function Stage-CompositionMass {
+    Log '== CompositionMass =='
+    . (Join-Path $here 'LandHse400Composition.Lib.ps1')
+    LoginAs 'land-owner'
+    $cm = $Mdl.argumentBridges.hse400.compositionMass
+    if ($null -eq $cm) { throw 'У моделі немає argumentBridges.hse400.compositionMass: перегенеруйте модель (model-gen).' }
+    $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+    $reg = Invoke-Ecr -Method GET -Path "/api/v1/registries/$($cm.substanceRegistry)/entries?asOf=$today"
+    if ($reg.Status -ne 200 -or @($reg.Json).Count -eq 0) {
+        Log "  ! довідника $($cm.substanceRegistry) немає або він порожній (спершу -Stage Registries чи Import-LandHse400Substance.ps1): нічого не змінено"
+        return
+    }
+    $ms = Items (Api GET '/api/v1/methodologies').Json
+    $mid = @{}
+    foreach ($m in $ms) { $mid[[string]$m.code] = [int]$m.id }
+    $changed = 0
+    foreach ($p in $cm.methodologies.PSObject.Properties) {
+        $name = $p.Name
+        $m = $mid[$name]
+        if (-not $m) { Log "  ${name}: методології на сервері немає - пропущено"; continue }
+        $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
+        $v = $vers | Sort-Object id -Descending | Select-Object -First 1
+        if ([string]$v.status -eq 'Published') { Log "  ${name}: остання версія опублікована - не чіпаю"; continue }
+        $vid = [int]$v.id
+        if ([string]$v.level -eq 'Legacy') { Log "  ! ${name}: версія $vid рівня Legacy - CURRENT_SUBSTANCE() не опублікується (ECR-CALC-0433)" }
+        $n = 0
+        foreach ($f in @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/formulas").Json)) {
+            $r = Convert-LandHse400CompositionMassFormula -Expression ([string]$f.expression) -ArgumentsCsv $f.argumentsCsv `
+                -Fragment ([string]$p.Value.fragment) -StreamArguments @($p.Value.arguments)
+            if (-not $r.Changed) { continue }
+            $body = @{ expression = $r.Expression; resultType = $f.resultType; outputUnitId = $f.outputUnitId; argumentsCsv = $r.ArgumentsCsv }
+            if ($null -ne $f.scope) { $body.scope = $f.scope }
+            $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/formulas/$($f.code)" -Body $body
+            if ($put.Status -eq 200) { $n++ } else { Log "  ! ${name}/$($f.code): HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
+        }
+        $changed += $n
+        Log "  ${name}: формул із фрагментом складу - $n"
+    }
+    Log "  змінено формул: $changed"
+}
+
 function Stage-Documents {
     Log '== Documents =='
     LoginAs 'land-owner'
@@ -1548,5 +1598,7 @@ function Fill-FullDocument([int]$docId) {
     # ⚠ D1 (RC E): LandParity виконується ПЕРЕД Methodologies. Methodologies створює прив'язки колонок результатів (LP-08,
     # у т.ч. вимкнені), а перевірка правила категорії (R16-4) звіряє @-аргументи з колонками ВСІХ прив'язок методології:
     # після них PUT category-rule дає 422 ECR-CALC-0422 categoryRuleUnknownArgument.
+    # LP-10: лише явно (-Stage CompositionMass); у 'All' не входить, бо потребує імпортованих C11/C12.
+    if ($Stage -contains 'CompositionMass') { Stage-CompositionMass }
 }
 Log 'Готово.'

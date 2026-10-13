@@ -169,9 +169,88 @@ function ConvertTo-LandHse400CompositionPlan {
     }
 }
 
+function ConvertTo-LandHse400SubstancePlan {
+    <#
+    .SYNOPSIS
+        Довідник LAND_HSE400_SUBSTANCE (код речовини -> показник складу `{хімічна назва}_mass`) -> план записів.
+    .DESCRIPTION
+        Джерело - модель Land (land-template.model.json, registries[LAND_HSE400_SUBSTANCE]); її генерує
+        tools/land/model-gen/hse400_bridges.py зі словника старого бекенду PollutionCodeService.GetMassName. Значень
+        прод-даних тут немає: це довідкова відповідність «код -> ім'я колонки». Код запису - `C<код>` (EcrCode вимагає
+        літери першим символом; число лежить у ключовому полі SUBSTANCE_CODE).
+    .PARAMETER Registry
+        Об'єкт довідника з моделі (code, entries[].fields.SUBSTANCE_CODE/INDICATOR).
+    .OUTPUTS
+        pscustomobject: Items (Code, EntryCode, Indicator, Display), Skipped.
+    #>
+    param([Parameter(Mandatory)]$Registry)
+
+    $items = New-Object System.Collections.Generic.List[object]
+    $seen = @{}
+    $skipped = 0
+    foreach ($e in @($Registry.entries)) {
+        $code = ([string]$e.fields.SUBSTANCE_CODE).Trim()
+        $indicator = ([string]$e.fields.INDICATOR).Trim()
+        if ($code -notmatch '^[1-9][0-9]{2,3}$' -or $indicator -notmatch '^[A-Za-z][A-Za-z0-9_]*_mass$' -or $seen.ContainsKey($code)) { $skipped++; continue }
+        $seen[$code] = $true
+        $items.Add([pscustomobject]@{ Code = $code; EntryCode = "C$code"; Indicator = $indicator; Display = "$code -> $indicator" })
+    }
+    return [pscustomobject]@{ Items = @($items | Sort-Object { [int]$_.Code }); Skipped = $skipped }
+}
+
+function Convert-LandHse400CompositionMassFormula {
+    <#
+    .SYNOPSIS
+        Підставляє фрагмент складу по речовині замість токена `@CompositionMass` у формулі версії методології.
+    .DESCRIPTION
+        Токен - рівно `@CompositionMass` (не префікс довшого імені). Список аргументів (`;`) втрачає
+        `@CompositionMass` і отримує аргументи потоку з фрагмента, якщо їх ще немає. Повторний виклик на вже
+        замінену формулу - без змін (Changed = $false).
+    .OUTPUTS
+        pscustomobject: Changed, Expression, ArgumentsCsv.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Expression,
+        # Без типу [string]: $null мусить лишитися $null (порожній рядок «оголошує нуль аргументів», ECR-CALC-0432).
+        [AllowNull()][AllowEmptyString()]$ArgumentsCsv = $null,
+        [Parameter(Mandatory)][string]$Fragment,
+        [string[]]$StreamArguments = @()
+    )
+
+    $pattern = '@CompositionMass(?![A-Za-z0-9_])'
+    if ($Expression -notmatch $pattern) {
+        return [pscustomobject]@{ Changed = $false; Expression = $Expression; ArgumentsCsv = $ArgumentsCsv }
+    }
+    $newExpression = [regex]::Replace($Expression, $pattern, { param($m) $Fragment })
+
+    $newArguments = $ArgumentsCsv
+    if ($null -ne $ArgumentsCsv) {
+        $tokens = New-Object System.Collections.Generic.List[string]
+        foreach ($t in ($ArgumentsCsv -split ';')) {
+            $x = $t.Trim()
+            if ($x.Length -eq 0 -or $x -ieq '@CompositionMass') { continue }
+            $tokens.Add($x)
+        }
+        foreach ($a in $StreamArguments) {
+            $token = '@' + $a.TrimStart('@')
+            if (-not ($tokens | Where-Object { $_ -ieq $token })) { $tokens.Add($token) }
+        }
+        $newArguments = (($tokens -join ';') + ';')
+    }
+    return [pscustomobject]@{ Changed = $true; Expression = $newExpression; ArgumentsCsv = $newArguments }
+}
+
 function Get-LandHse400RegistryDefinitions {
-    <# Опис обох довідників: ті самі поля й складений ключ, що в моделі Land (hse400_bridges.py). #>
+    <# Опис довідників: ті самі поля й складений ключ, що в моделі Land (hse400_bridges.py). #>
     return [pscustomobject]@{
+        Substance   = [pscustomobject]@{
+            Code   = 'LAND_HSE400_SUBSTANCE'
+            NameEn = 'Land: HSE400 composition indicator by substance code (SUBSTANCE_CODE -> {indicator}_mass)'
+            Fields = @(
+                [pscustomobject]@{ Code = 'SUBSTANCE_CODE'; DataType = 'String'; IsKey = $true },
+                [pscustomobject]@{ Code = 'INDICATOR'; DataType = 'String'; IsKey = $false })
+            Keys   = @([pscustomobject]@{ Code = 'PK'; Fields = @('SUBSTANCE_CODE'); IsPrimary = $true; IgnoreCase = $true })
+        }
         Stream      = [pscustomobject]@{
             Code   = 'LAND_HSE400_STREAM'
             NameEn = 'Land: HSE400 stream dictionary (fuel/stream text -> column prefix)'
