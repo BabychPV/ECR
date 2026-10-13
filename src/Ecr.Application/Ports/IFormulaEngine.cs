@@ -102,7 +102,7 @@ public interface IFormulaEngine
 /// сюди не входять: їх проставляє той, хто зберігає залежність, а не той, хто
 /// її витягує з виразу.
 /// </remarks>
-/// <param name="DependsOnKind">0 Cell, 1 Header, 2 Registry, 3 CrossPeriod, 4 CrossProject.</param>
+/// <param name="DependsOnKind">0 Cell, 1 Header, 2 Registry, 3 CrossPeriod, 4 CrossProject, 5 CrossPeriodAbsolute (<c>[Period:#k]</c>, k у <c>PeriodOffset</c>).</param>
 /// <param name="TableDefId">Таблиця, на яку вказує залежність.</param>
 /// <param name="RowKey"><b>Конкретний</b> рядок; <c>null</c> для предиката (B03 §4).</param>
 /// <param name="ColumnDefId">Колонка.</param>

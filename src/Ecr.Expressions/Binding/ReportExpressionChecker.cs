@@ -95,7 +95,7 @@ public static class ReportExpressionChecker
     {
         ArgumentNullException.ThrowIfNull(reference);
 
-        return reference is { SheetCode: null, TableCode: null, Row: RowSelector.Current, PeriodOffset: 0 };
+        return reference is { SheetCode: null, TableCode: null, Row: RowSelector.Current, PeriodOffset: 0, AbsolutePeriod: null };
     }
 
     private static void Bind(AstNode node, ReportExpressionScope scope, List<ExpressionDiagnostic> diagnostics)
