@@ -36,14 +36,23 @@ namespace Ecr.Calculations;
 /// Повертає <c>null</c>, якщо ім'я нікуди не веде. <c>null</c> замість резолвера —
 /// лише формули своєї версії, як до кроку.
 /// </param>
+/// <param name="currentSubstanceCode">Код речовини проходу для <c>CURRENT_SUBSTANCE()</c>; <c>null</c> — немає.</param>
 public sealed class MethodologyEvaluationContext(
     PeriodContext period,
     IReadOnlyDictionary<string, ExpressionValue> arguments,
     IReadOnlyDictionary<string, ExpressionValue> constants,
     UnitTable units,
     IRegistrySnapshot? registries = null,
-    Func<string, ExpressionValue?>? resolve = null) : IEvaluationContext
+    Func<string, ExpressionValue?>? resolve = null,
+    string? currentSubstanceCode = null) : IEvaluationContext
 {
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ 2026-10-13: код речовини проходу (<c>CURRENT_SUBSTANCE()</c>); <c>null</c> — прохід без
+    /// речовини (Row-фаза, версія без складу) або речовина без коду.
+    /// </remarks>
+    public string? CurrentSubstanceCode { get; } = currentSubstanceCode;
+
     private readonly Dictionary<string, ExpressionValue> _formulaResults =
         new(StringComparer.OrdinalIgnoreCase);
 

@@ -121,11 +121,6 @@ public sealed class GenericCalculationModule(
         var categoryRule = await methodologies
             .GetCategoryRuleAsync(methodology.MethodologyVersionId, ct).ConfigureAwait(false);
 
-        // ✎ LP-07 (форма B): коди записів речовин — лише коли є правило категорії і речовини: без ключа
-        // суфікс не має до чого дописуватися, і зайвого запиту версія без правила не коштує.
-        var substanceCodes = substances.Count > 0 && !string.IsNullOrWhiteSpace(categoryRule)
-            ? await methodologies.GetSubstanceCodesAsync(methodology.MethodologyVersionId, ct).ConfigureAwait(false)
-            : null;
 
         var period = await PeriodAsync(methodology, documentId, periodKey, ct).ConfigureAwait(false);
 
@@ -139,6 +134,15 @@ public sealed class GenericCalculationModule(
                 ordered, period.End, ct)
             .ConfigureAwait(false);
 
+        // ✎ LP-07 (форма B): коди записів речовин — лише коли є правило категорії і речовини: без ключа
+        // суфікс не має до чого дописуватися, і зайвого запиту версія без правила не коштує.
+        // ✎ 2026-10-13: ті самі коди читає символ `CURRENT_SUBSTANCE()` — тож запит потрібен і версії,
+        // у чиїх формулах (або формулах бібліотек) він є; решта версій запиту не коштують.
+        var substanceCodes = substances.Count > 0
+            && (!string.IsNullOrWhiteSpace(categoryRule)
+                || UsesCurrentSubstance([.. ordered, .. libraries?.Versions.SelectMany(v => v.Formulas) ?? []]))
+            ? await methodologies.GetSubstanceCodesAsync(methodology.MethodologyVersionId, ct).ConfigureAwait(false)
+            : null;
         // ⚠ Масштаб колонок-приймачів читається ТУТ, разом зі складом версії:
         // він однаковий для всієї прив'язки, а `ExecuteAsync` кличуть на кожен
         // рядок (`CAL-06`). Питання йде за `MethodologyId`, а не за версією:
@@ -170,6 +174,14 @@ public sealed class GenericCalculationModule(
             substanceCodes);
     }
 
+    /// <summary>Чи кличе якась із формул символ <c>CURRENT_SUBSTANCE()</c>.</summary>
+    /// <param name="formulas">Формули версії й бібліотек.</param>
+    /// <remarks>
+    /// ⚠ Груба текстова перевірка (без розбору): хибне спрацювання коштує одного зайвого запиту
+    /// кодів речовин, а пропуск — #REF на кожній речовині; тому лише так, без залежності від розбору.
+    /// </remarks>
+    private static bool UsesCurrentSubstance(IEnumerable<MethodologyFormula> formulas)
+        => formulas.Any(f => f.Expression.Contains("CURRENT_SUBSTANCE", StringComparison.Ordinal));
     /// <summary>
     /// Знімок довідників, які читають формули версії, на кінець періоду.
     /// </summary>
@@ -502,7 +514,8 @@ public sealed class GenericCalculationModule(
 
             var context = new MethodologyEvaluationContext(
                 period, arguments, resolved, units, binding.Registries,
-                library is null ? null : name => library.Resolve(name, rowPhase: false));
+                library is null ? null : name => library.Resolve(name, rowPhase: false),
+                currentSubstanceCode: substanceCode);
             var scope = new TraceScope(input, formulasByCode, constantUnits, substance?.SubstanceEntryId);
 
             // Кроки цієї речовини — з її адресою: за нею крок знаходить свій результат.
@@ -1039,7 +1052,8 @@ public sealed class GenericCalculationModule(
             MethodologyEvaluationContext context = null!;
             context = new MethodologyEvaluationContext(
                 period, arguments, constants, units, registries,
-                name => ResolveIn(library, context, scope, rowPhase, name));
+                name => ResolveIn(library, context, scope, rowPhase, name),
+                currentSubstanceCode: rowPhase ? null : _substanceCode);
 
             return context;
         }

@@ -86,6 +86,17 @@ public interface IEvaluationContext
     /// </remarks>
     public IRegistrySnapshot? Registries => null;
 
+    /// <summary>
+    /// Код речовини ПОТОЧНОГО проходу методології (<c>CURRENT_SUBSTANCE()</c>);
+    /// <c>null</c> — прохід без речовини (формула рівня рядка, версія без складу речовин)
+    /// або контекст, що речовин не має.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Замовчування — <c>null</c>, як у <see cref="Registries"/>: контексти, що речовин не
+    /// знають (шаблон, звіти), символ не бачать, і функція дає <c>#REF</c>, а не виняток.
+    /// </remarks>
+    public string? CurrentSubstanceCode => null;
+
     /// <summary>Календарний контекст. Значення залежать від <c>CalendarMode</c> (D-78).</summary>
     public PeriodContext Period { get; }
 
