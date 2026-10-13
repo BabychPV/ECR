@@ -552,6 +552,7 @@ public sealed class MigrateDocumentVersionHandler(
 
         DocumentVersionMigrationDto? result = null;
         var grantedUsers = new GrantedUsers([], Overflow: false);
+        var formulaTables = 0;
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             // ⛔ План перераховується ПІД блоком рядка проєкту: між сухим
@@ -623,6 +624,7 @@ public sealed class MigrateDocumentVersionHandler(
             }
 
             await store.ApplyAsync(projectId, target.Id, plan, onStep, innerCt).ConfigureAwait(false);
+            formulaTables = plan.FormulaChanges.Count;
 
             // ⛔ D-1: мапінги збору — в ТІЙ САМІЙ транзакції, що й документи й версія проєкту: збій відкочує все,
             // і збір не опиняється між версіями. Рахується те, що справді перенесено (мапінг могли додати між
@@ -668,6 +670,8 @@ public sealed class MigrateDocumentVersionHandler(
                         // застосуванні немає (вони були б відмовою), поле лишається для єдиної форми запису.
                         lockedSheetsCarried = result.LockedSheetsCarried,
                         lockedSheetsAffected = result.LockedSheetsAffected,
+                        // LP-41: скільки таблиць додали/змінили формули; > 0 — після коміту ставиться перерахунок.
+                        formulaTables = plan.FormulaChanges.Count,
                     }),
                     profile.UserId, currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
@@ -678,6 +682,16 @@ public sealed class MigrateDocumentVersionHandler(
         // до TTL (60 хв). Скидаються ВСІ записи користувача (будь-який відбиток
         // груп); збій або переповнення переліку — скидання всього кешу, не 500.
         GrantProfileInvalidation.Run(profileCache, log, grantedUsers);
+
+        // ⛔ LP-41: нова/змінена формула без перерахунку лишається порожньою до явної дії людини (інкрементний
+        // шлях не бере формул поза зміненими комірками). Один coalesced перерахунок проєкту — лише коли план
+        // щось додав чи змінив і лише ПІСЛЯ коміту; сухий прогін і перенос без змін формул нічого не ставлять.
+        if (result is not null && formulaTables > 0)
+        {
+            await MigrationRecalculation
+                .EnqueueAsync(jobs, log, clock.UtcNow, projectId, formulaTables, ct)
+                .ConfigureAwait(false);
+        }
 
         return result!;
     }
