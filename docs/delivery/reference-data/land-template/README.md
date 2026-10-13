@@ -141,3 +141,8 @@ AF-таблиць**: `af-land-table-attributes.json` (структура: іме
 (значення з іншого рядка), `[похідне]` (виводиться в коді зі словника груп NAE), `[на-речовину]`, `[Excel]`.
 Текст потоку для HSE400 на 9a/10_03/11_03 береться з атрибута, який читає старий код (`stream_sources`).
 `land-result-outputs.json` має ключ `categoryInputs` (аргументи `@Category<N>` формул).
+
+**Застосовність речовин на рядок.** `land-substance-applicability.json` (словники старого C# «ключ рядка -> коди речовин»;
+складає `model-gen/extract_substance_applicability.py`, значень прода немає) -> довідник `LAND_SUBSTANCE_APPLICABILITY` і
+розділ `substanceApplicability` моделі (`model-gen/substance_applicability.py`). Опис, функція `SUBSTANCE_APPLICABLE` і
+етап `-Stage SubstanceApplicability` - `tools/land/README.md`, «Застосовність речовини на рядок».

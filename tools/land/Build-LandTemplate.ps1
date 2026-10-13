@@ -31,6 +31,12 @@
                     CURRENT_SUBSTANCE()); потребує довідника LAND_HSE400_SUBSTANCE (Registries або
                     Import-LandHse400Substance.ps1). Чернетку з фрагментом сам переводить у NumericMode=Strict
                     (REG*/CURRENT_SUBSTANCE() у Legacy не публікуються, ECR-CALC-0433); -KeepNumericMode вимикає
+                    цей перехід і версії вище за Legacy
+      SubstanceApplicability (лише явно, в All не входить) правило категорії ЧЕРНЕТОК із моделі
+                    (substanceApplicability.methodologies) обгортається SUBSTANCE_APPLICABLE(...): речовина, якої немає
+                    у списку кодів рядка старого C# (потік / InvNum / NAE), для рядка пропускається - кількість рядків
+                    результату збігається зі старою системою. Потребує довідника LAND_SUBSTANCE_APPLICABILITY
+                    (-Stage Registries) і версії вище за Legacy; повтор - 0 змін; LandParity обгортку не скидає
 
     ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє, окрім явного
     -PruneStaleTables (м'яке видалення таблиць чернетки, яких немає в моделі; без прапора - лише попередження).
@@ -59,7 +65,7 @@ param(
     [string]$AccountsFile = 'F:\ecr-backup\land-ui\accounts.local.txt',
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'Data', 'LandParity', 'CompositionMass', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'Data', 'SubstanceApplicability', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection = 'Server=localhost;Database=EcrLandUi;Integrated Security=true;TrustServerCertificate=true',
@@ -1306,6 +1312,7 @@ function Bind-ResultColumns($mid) {
 function Stage-LandParity {
     Log '== LandParity =='
     . (Join-Path $here 'LandParityRuleArgs.Lib.ps1')
+    . (Join-Path $here 'LandSubstanceApplicability.Lib.ps1')
     LoginAs 'land-owner'
     $rulesFile = Join-Path $repo 'docs\delivery\reference-data\land-template\af-land-category-rules.json'
     $rules = @((Get-Content -LiteralPath $rulesFile -Raw -Encoding UTF8 | ConvertFrom-Json).rules)
@@ -1335,7 +1342,8 @@ function Stage-LandParity {
 
         # 1. правило категорії
         $g = Invoke-Ecr -Method GET -Path "/api/v1/methodologies/$m/versions/$vid/category-rule"
-        if ($g.Status -eq 200 -and [string]$g.Json.expression -ceq $expr) {
+        # ✎ 2026-10-13: обгортка застосовності (етап SubstanceApplicability) - те саме правило, не відхилення від файлу.
+        if ($g.Status -eq 200 -and (Test-LandRuleMatchesBaseRule -Existing ([string]$g.Json.expression) -Base $expr)) {
             Log "  ${name}: правило категорії вже задане"
         }
         else {
@@ -1457,6 +1465,49 @@ function Stage-CompositionMass {
         }
     }
     Log "  змінено формул: $changed"
+}
+
+# ==================== SubstanceApplicability (рішення людини 13.10: застосовність речовин на рядок) ====================
+# Лише явно: -Stage SubstanceApplicability. Для методологій з моделі (substanceApplicability.methodologies) в ЧЕРНЕТКАХ
+# наявне правило категорії обгортається SUBSTANCE_APPLICABLE(<довідник>, <методологія>, <вид>, <значення селектора>):
+# речовина, якої немає в списку кодів рядка старого C#, для рядка пропускається (див. 02b). Правила, якого ще немає,
+# етап не вигадує (спершу -Stage LandParity). Опубліковану версію не чіпаємо. Повтор - 0 змін.
+function Stage-SubstanceApplicability {
+    Log '== SubstanceApplicability =='
+    . (Join-Path $here 'LandSubstanceApplicability.Lib.ps1')
+    LoginAs 'land-owner'
+    $sa = $Mdl.substanceApplicability
+    if ($null -eq $sa) { throw 'У моделі немає substanceApplicability: перегенеруйте модель (model-gen).' }
+    $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+    $reg = Invoke-Ecr -Method GET -Path "/api/v1/registries/$($sa.registry)/entries?asOf=$today"
+    if ($reg.Status -ne 200 -or @($reg.Json).Count -eq 0) {
+        Log "  ! довідника $($sa.registry) немає або він порожній (спершу -Stage Registries): нічого не змінено"
+        return
+    }
+    $ms = Items (Api GET '/api/v1/methodologies').Json
+    $mid = @{}
+    foreach ($m in $ms) { $mid[[string]$m.code] = [int]$m.id }
+    $changed = 0
+    foreach ($p in $sa.methodologies.PSObject.Properties) {
+        $name = $p.Name
+        $m = $mid[$name]
+        if (-not $m) { Log "  ${name}: методології на сервері немає - пропущено"; continue }
+        $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
+        $v = $vers | Sort-Object id -Descending | Select-Object -First 1
+        if ([string]$v.status -eq 'Published') { Log "  ${name}: остання версія опублікована - не чіпаю"; continue }
+        $vid = [int]$v.id
+        if ([string]$v.level -eq 'Legacy') { Log "  ! ${name}: версія $vid рівня Legacy - SUBSTANCE_APPLICABLE не опублікується (ECR-CALC-0433)" }
+        $g = Invoke-Ecr -Method GET -Path "/api/v1/methodologies/$m/versions/$vid/category-rule"
+        $current = if ($g.Status -eq 200) { [string]$g.Json.expression } else { '' }
+        if ([string]::IsNullOrWhiteSpace($current)) { Log "  ${name}: правила категорії ще немає - спершу -Stage LandParity"; continue }
+        if (Test-LandSubstanceApplicabilityRule -Rule $current) { Log "  ${name}: обгортка вже є"; continue }
+        $wrapped = New-LandSubstanceApplicabilityRule -Inner $current -Registry ([string]$sa.registry) `
+            -Methodology $name -Kind ([string]$p.Value.kind) -ValueExpression ([string]$p.Value.valueExpression)
+        $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/category-rule" -Body @{ expression = $wrapped }
+        if ($put.Status -eq 200) { $changed++; Log "  ${name}: правило категорії обгорнуто ($($p.Value.kind), записів $($p.Value.rows))" }
+        else { Log "  ! ${name}: category-rule HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
+    }
+    Log "  змінено правил: $changed"
 }
 
 function Stage-Documents {
@@ -1741,5 +1792,7 @@ function Fill-FullDocument([int]$docId) {
     # після них PUT category-rule дає 422 ECR-CALC-0422 categoryRuleUnknownArgument.
     # LP-10: лише явно (-Stage CompositionMass); у 'All' не входить, бо потребує імпортованих C11/C12.
     if ($Stage -contains 'CompositionMass') { Stage-CompositionMass }
+# 2026-10-13: лише явно (-Stage SubstanceApplicability); у 'All' не входить, бо потребує правил LandParity й довідника.
+if ($Stage -contains 'SubstanceApplicability') { Stage-SubstanceApplicability }
 }
 Log 'Готово.'

@@ -251,3 +251,30 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 `Import-LandHse400Substance.ps1` (`-DryRun`, `-ConfirmStand`; прод не читає). Сторожі: LandHse400SubstanceMapTests
 (Architecture), CompositionMassBySubstanceTests (Expressions), LandHse400SubstanceRegistryTests (Infrastructure, реальний SQL).
 
+
+### Застосовність речовини на рядок (LAND_SUBSTANCE_APPLICABILITY)
+
+Склад речовин версії один на ВЕРСІЮ, а старий C# перебирає список кодів ПО РЯДКУ: `pollutionCodeByFuelType[prefix]`
+(C11_01/02/10, C12_03; префікс - `PrefixProvider` за текстом палива/потоку), `polCodeList[typeOfStream]` (C12_01),
+`pollutionCodeByInvNum[InvNum з Т/А кирилицею -> латиниця]` (C12_04_01), `fuelShort` diesel|oil (C12_04_02) і списки
+`NAE -> коди` (C11_11_03, C11_11_05, C11_19). «Чужа» речовина рядка там просто не рахується, а в ECR давала б зайвий рядок
+результату (значення з фолбека `Common`) або `#REF`. Довідник `LAND_SUBSTANCE_APPLICABILITY` переносить цю таблицю в
+дані БЕЗ міграції: ключ `(METHODOLOGY, SELECTOR_KIND, SELECTOR_VALUE, SUBSTANCE_CODE)`, регістр значущий;
+`SELECTOR_KIND` = `NAE` | `InvNum` | `TypeFuel` | `Stream`; запис `(методологія, '*', '*', '*')` - маркер «методологія має
+застосовність» (без нього функція не фільтрує).
+
+- Дані: `land-substance-applicability.json` складає `model-gen/extract_substance_applicability.py` зі словників C#
+  (`--source-root <каталог docs/source основного клону>`; `--check` порівнює з файлом, код 1 при розбіжності; прод не
+  читається), довідник у моделі - `model-gen/substance_applicability.py` (домен текстів потоку: `LEGACY_TEXTS`, довідники
+  шаблону типу палива/потоків і літерали `in(@arg, ...)` правил категорії; InvNum - усі Т/А-варіанти кирилиця/латиниця;
+  NAE - канонічне написання й `NNNN (NNN)`). Опис - `substanceApplicability` моделі (`methodologies.<ім'я>.kind`,
+  `valueExpression`).
+- Рушій: `SUBSTANCE_APPLICABLE(registry, scope, kind, value)` (`docs/build/02b-expressions.md`, «Застосовність речовини до
+  рядка»). Правило категорії, що її містить, у циклі речовин обчислюється для кожної речовини; порожній ключ = речовину для
+  рядка пропущено (виходів і помилок немає, крок трейсу `SubstanceNotApplicable`).
+- Стенд: `Build-LandTemplate.ps1 -Stage Registries` (довідник) і далі `-Stage SubstanceApplicability` (лише явно; обгортає
+  правило категорії ЧЕРНЕТКИ: `if(SUBSTANCE_APPLICABLE('LAND_SUBSTANCE_APPLICABILITY','<методологія>','<вид>',<значення>),
+  <правило>,'')`; опубліковану версію не чіпає; повтор - 0 змін; `-Stage LandParity` обгортку не скидає). Версія має бути
+  вище за Legacy (ECR-CALC-0433). Сторожі: LandSubstanceApplicabilityTests (Architecture), SubstanceApplicableFunctionTests
+  (Expressions), SubstanceApplicabilityModuleTests (Calculations), SubstanceApplicabilitySqlTests (Api, реальний SQL).
+- ⚠ Модель перегенеровується ПІСЛЯ lane, що теж міняють `land-template.model.json` (`run-model-gen.ps1` на вершині).
