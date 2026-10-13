@@ -676,7 +676,7 @@ public sealed class MigrateDocumentVersionHandler(
             var (dto, plan, foreignKeys, extended) = await PlanAsync(
                 documentId, projectId, current, target, mode, archived, dryRun: false, renames,
                 acceptGuardedOverwrite, innerCt).ConfigureAwait(false);
-            ThrowIfRefused(dto, foreignKeys, plan.RenameConflicts);
+            ThrowIfRefused(dto, foreignKeys, plan.RenameConflicts, acceptGuardedOverwrite);
 
             grantedUsers = await store.ListUsersWithGrantsAsync(plan, MaxInvalidatedUsers, innerCt).ConfigureAwait(false);
 
@@ -755,6 +755,11 @@ public sealed class MigrateDocumentVersionHandler(
                         lockedSheetsAffected = result.LockedSheetsAffected,
                         // LP-41: скільки таблиць додали/змінили формули; > 0 — після коміту ставиться перерахунок.
                         formulaTables = plan.FormulaChanges.Count,
+
+                        // ACC-OW: скільки введених значень перезапише формула за згодою (0 без прапора) і в скількох
+                        // комірках шаблону. ⛔ Лише кількості: ні адрес, ні значень.
+                        guardedOverwritten = acceptGuardedOverwrite ? plan.GuardedOverwritableValues : 0L,
+                        guardedOverwrittenCells = acceptGuardedOverwrite ? plan.GuardedOverwrites.Count : 0,
                     }),
                     profile.UserId, currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
@@ -818,7 +823,8 @@ public sealed class MigrateDocumentVersionHandler(
 
         var plan = VersionMigrationPlanner.Plan(from, to, scope.Cells, scope.HeaderValues, renames);
 
-        var refusals = plan.RefusalsFor(mode).ToList();
+        // ACC-OW: прапор знімає guardedWithData лише для нової комірочної формули на комірці зі значенням.
+        var refusals = plan.RefusalsFor(mode, acceptGuardedOverwrite).ToList();
 
         // ⛔ LP-32 (locked-safe): подані/затверджені аркуші самі по собі перенос не блокують. Відмова — лише коли план
         // ЗАЧІПАЄ такий аркуш (див. `VersionMigrationPlan.TouchedSheets`): подане стосується СТАРОЇ структури, і
@@ -944,7 +950,11 @@ public sealed class MigrateDocumentVersionHandler(
             locked.Carried,
             locked.Affected,
             locked.Items.Count == 0 ? null : locked.Items,
-            locked.Truncated);
+            locked.Truncated,
+            plan.GuardedOverwritableValues,
+            acceptGuardedOverwrite,
+            plan.GuardedOverwrites.Count == 0 ? null : [.. plan.GuardedOverwrites.Take(MaxGuardedOverwriteItems)],
+            plan.GuardedOverwrites.Count > MaxGuardedOverwriteItems);
 
         return (dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds });
     }
@@ -1053,8 +1063,12 @@ public sealed class MigrateDocumentVersionHandler(
             });
 
     private static void ThrowIfRefused(
-        DocumentVersionMigrationDto dto, IReadOnlyList<string> foreignKeys, IReadOnlyList<string>? renameConflicts = null)
+        DocumentVersionMigrationDto dto, IReadOnlyList<string> foreignKeys, IReadOnlyList<string>? renameConflicts = null,
+        bool acceptGuardedOverwrite = false)
     {
+        // ACC-OW: значення під новою формулою за згодою не «змінюють тлумачення» — у відмові лишається решта.
+        var guardedValues = acceptGuardedOverwrite ? dto.GuardedValues - dto.GuardedOverwritable : dto.GuardedValues;
+
         if (dto.Refusals.Contains("projectArchived") || dto.Refusals.Contains("sheetsLocked"))
         {
             // Подане чи затверджене стосувалося СТАРОЇ структури, і зачепити його
@@ -1099,24 +1113,24 @@ public sealed class MigrateDocumentVersionHandler(
         throw new BusinessRuleException(
             ErrorCodes.GuardedChangeWithoutStrategy,
             $"Режим {dto.Mode} не переносить ці зміни: {string.Join(", ", dto.Refusals)}. " +
-            $"Втратилося б значень: {dto.LostValues}, змінило б тлумачення: {dto.GuardedValues}.",
+            $"Втратилося б значень: {dto.LostValues}, змінило б тлумачення: {guardedValues}.",
             new Dictionary<string, object?>
             {
                 ["messageKey"] = dto.Refusals.Contains("structural")
                     ? "err.ECR-SCHM-0422.migrateStructural"
                     : dto.Refusals.Contains("renameConflict")
                     ? "err.ECR-SCHM-0422.migrateRenameConflict"
-                    : dto.Refusals.Contains("grantsNotMapped") && dto.LostValues == 0 && dto.GuardedValues == 0
+                    : dto.Refusals.Contains("grantsNotMapped") && dto.LostValues == 0 && guardedValues == 0
                         ? "err.ECR-SCHM-0422.migrateGrantsNotMapped"
-                        : dto.Refusals.Contains("bindingsNotMapped") && dto.LostValues == 0 && dto.GuardedValues == 0
+                        : dto.Refusals.Contains("bindingsNotMapped") && dto.LostValues == 0 && guardedValues == 0
                             ? "err.ECR-SCHM-0422.migrateBindingsNotMapped"
-                            : dto.Refusals.Contains("methodologyKeysNotMapped") && dto.LostValues == 0 && dto.GuardedValues == 0
+                            : dto.Refusals.Contains("methodologyKeysNotMapped") && dto.LostValues == 0 && guardedValues == 0
                                 ? "err.ECR-SCHM-0422.migrateMethodologyKeysNotMapped"
-                                : dto.Refusals.Contains("mappingsNotMapped") && dto.LostValues == 0 && dto.GuardedValues == 0
+                                : dto.Refusals.Contains("mappingsNotMapped") && dto.LostValues == 0 && guardedValues == 0
                                     ? "err.ECR-SCHM-0422.migrateMappingsNotMapped"
                                     : "err.ECR-SCHM-0422.migrateDataLoss",
                 ["lostValues"] = dto.LostValues.ToString(CultureInfo.InvariantCulture),
-                ["guardedValues"] = dto.GuardedValues.ToString(CultureInfo.InvariantCulture),
+                ["guardedValues"] = guardedValues.ToString(CultureInfo.InvariantCulture),
                 ["mode"] = dto.Mode.ToString(),
                 ["refusals"] = dto.Refusals,
                 ["blockedGrantCount"] = dto.BlockedGrantCount?.ToString(CultureInfo.InvariantCulture),

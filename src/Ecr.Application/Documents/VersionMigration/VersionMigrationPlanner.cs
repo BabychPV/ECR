@@ -84,6 +84,16 @@ public sealed record VersionMigrationPlan(
     /// </summary>
     public IReadOnlyList<string> FormulaChanges { get; init; } = [];
 
+    /// <summary>
+    /// ACC-OW: комірки, на які цільова версія кладе НОВУ комірочну формулу і де вже лежать введені значення —
+    /// єдиний клас <c>guardedWithData</c>, який знімає прапор <c>acceptGuardedOverwrite</c> (їх, як похідні підсумки,
+    /// замінить перерахунок). Те саме число входить у <see cref="GuardedValues"/>.
+    /// </summary>
+    public IReadOnlyList<GuardedOverwriteItem> GuardedOverwrites { get; init; } = [];
+
+    /// <summary>ACC-OW: скільки значень лежить у <see cref="GuardedOverwrites"/>.</summary>
+    public long GuardedOverwritableValues => GuardedOverwrites.Sum(g => g.Values);
+
     /// <summary>Скільки пунктів мапи перейменувань суперечать цій парі версій (<c>renameConflict</c>).</summary>
     public int RenameConflictCount => RenameConflicts?.Count ?? 0;
 
@@ -100,6 +110,19 @@ public sealed record VersionMigrationPlan(
     /// відрізняються структурою.
     /// </remarks>
     public IReadOnlyList<string> RefusalsFor(VersionMigrationMode mode)
+        => RefusalsFor(mode, acceptGuardedOverwrite: false);
+
+    /// <summary>
+    /// Причини відмови з урахуванням згоди на перезапис похідних значень (ACC-OW).
+    /// </summary>
+    /// <param name="mode">Режим.</param>
+    /// <param name="acceptGuardedOverwrite">
+    /// <c>true</c> — з <c>guardedWithData</c> віднімаються ЛИШЕ значення під новою комірочною формулою
+    /// (<see cref="GuardedOverwritableValues"/>); решта guarded (звуження, тип, одиниця, довідник, обов'язковість,
+    /// режим рядків, рядок «лише читання») відмовляє як і раніше. <c>dataLoss</c>, <c>structural</c> і конфлікти
+    /// перейменувань прапор не торкається.
+    /// </param>
+    public IReadOnlyList<string> RefusalsFor(VersionMigrationMode mode, bool acceptGuardedOverwrite)
     {
         var reasons = new List<string>();
 
@@ -113,7 +136,8 @@ public sealed record VersionMigrationPlan(
             reasons.Add("dataLoss");
         }
 
-        if (GuardedValues > 0)
+        var blockingGuarded = acceptGuardedOverwrite ? GuardedValues - GuardedOverwritableValues : GuardedValues;
+        if (blockingGuarded > 0)
         {
             reasons.Add("guardedWithData");
         }
@@ -168,6 +192,7 @@ public static class VersionMigrationPlanner
         var newRows = new List<VersionMigrationNewRow>();
         var conflicts = new List<string>();
         var formulaChanges = new List<string>();
+        var overwrites = new List<GuardedOverwriteItem>();
 
         var valuesByColumn = cells
             .GroupBy(c => c.ColumnDefId)
@@ -257,7 +282,7 @@ public static class VersionMigrationPlanner
                 CompareColumns(items, columns, conflicts, tablePath, table, otherTable, valuesByColumn, columnRenames);
                 CompareRows(items, rows, newRows, tablePath, table, otherTable, valuesByRow);
                 CompareFormulas(formulaChanges, tablePath, table, otherTable, columns, rows);
-                CompareCellFormulas(items, tablePath, table, otherTable, valuesByCell);
+                CompareCellFormulas(items, overwrites, sheet.Code.ToString(), table.Code.ToString(), tablePath, table, otherTable, valuesByCell);
 
                 if (renamedFrom is not null)
                 {
@@ -321,6 +346,14 @@ public static class VersionMigrationPlanner
             conflicts.Count == 0 ? null : conflicts, touched)
         {
             FormulaChanges = [.. formulaChanges.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)],
+            GuardedOverwrites =
+            [
+                .. overwrites
+                    .OrderBy(o => o.SheetCode, StringComparer.Ordinal)
+                    .ThenBy(o => o.TableCode, StringComparer.Ordinal)
+                    .ThenBy(o => o.RowKey, StringComparer.Ordinal)
+                    .ThenBy(o => o.ColumnCode, StringComparer.Ordinal),
+            ],
         };
     }
 
@@ -587,7 +620,8 @@ public static class VersionMigrationPlanner
     /// відмінності не дає — ні відмови, ні пункту. Відповідність — за кодом колонки й ключем рядка.
     /// </remarks>
     private static void CompareCellFormulas(
-        List<VersionMigrationItem> items, string tablePath, TableDef from, TableDef to,
+        List<VersionMigrationItem> items, List<GuardedOverwriteItem> overwrites, string sheetCode, string tableCode,
+        string tablePath, TableDef from, TableDef to,
         IReadOnlyDictionary<(int ColumnDefId, int RowDefId), long> valuesByCell)
     {
         var targetFormulas = to.Formulas
@@ -640,6 +674,10 @@ public static class VersionMigrationPlanner
             {
                 items.Add(new($"{tablePath}#{targetRow.RowKeyValue}.{targetColumn.Code}", "Modified",
                     ChangeClass.Guarded, values, "CellFormula", "input", "formula"));
+
+                // ACC-OW: той самий пункт, але структурно — для переліку «що перезапише формула».
+                overwrites.Add(new GuardedOverwriteItem(
+                    sheetCode, tableCode, targetRow.RowKeyValue, targetColumn.Code.ToString(), values));
             }
         }
 
