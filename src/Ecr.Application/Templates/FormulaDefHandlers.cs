@@ -93,8 +93,8 @@ public sealed class SaveFormulaDefHandler(
     /// <returns>Збережена формула.</returns>
     /// <exception cref="NotFoundException">Версії, таблиці, колонки чи рядка немає.</exception>
     /// <exception cref="BusinessRuleException">
-    /// Невідома область (<c>ECR-TMPL-0422</c>) або колонка формули (Column чи
-    /// Cell) не обчислювана (<c>ECR-TMPL-4227</c>).
+    /// Невідома область (<c>ECR-TMPL-0422</c>) або колонка колонкової формули
+    /// не обчислювана (<c>ECR-TMPL-4227</c>; для Cell і Row — не перевіряється, WW-02).
     /// </exception>
     /// <exception cref="DomainException">
     /// Версія структурно заморожена (<c>ECR-TMPL-0409</c>).
@@ -286,10 +286,14 @@ public sealed class SaveFormulaDefHandler(
     /// <exception cref="BusinessRuleException">Колонка не обчислювана.</exception>
     private static void RequireComputedColumn(TableDef table, FormulaScope scope, int resolvedId)
     {
-        // ⚠ D1: Cell цілить в ОДНУ колонку (як Column), тож вимога обчислюваності
-        // на нього поширюється; інакше людина вводила б число в комірку, яку
-        // перерахунок затре (колонка Decimal лишається ручною).
-        if (scope == FormulaScope.Row)
+        // ⚠ WW-02 (замінює D1 для Cell): вимога «колонка обчислювана» лишається ЛИШЕ для Column, де формула
+        // пише в кожен рядок колонки. Cell цілить в ОДНУ явну комірку (рядок + колонка), і захист від тихого
+        // затирання введеного живе на рівні комірки: така комірка не редагується
+        // (`CellAccessContext.CellIsComputed` → `EditDenyReason.CalculatedCell`), а решта комірок колонки
+        // лишається вводом. Так змішана колонка (Water Report, 7a/7b, Waste: елементи вводить людина, підсумок
+        // чи баланс у своєму рядку рахує формула) описується без перетворення рядка цілком на «лише читання».
+        // Row цілить у рядок і ніколи не перевірявся.
+        if (scope != FormulaScope.Column)
         {
             return;
         }

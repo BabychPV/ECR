@@ -1162,6 +1162,8 @@ public sealed class AccessDecisionService(
             ColumnIsComputed = !ignoreColumnFlags && column.IsComputed,
             ColumnIsReadOnly = !ignoreColumnFlags && column.IsReadOnly,
             RowIsReadOnly = def?.IsReadOnly ?? false,
+            // WW-02: комірку рахує комірочна формула — ознака рівня КОМІРКИ, не колонки й не рядка.
+            CellIsComputed = !ignoreColumnFlags && slice.ComputedCells.Contains((rowKey, column.Id)),
         };
 
         // ⛔ EA-B: «передача місяця». Факти правила — на КОЖНУ комірку (місяць
@@ -1287,6 +1289,54 @@ public sealed class AccessDecisionService(
 
         /// <summary>У документа зрізу є передачі (ознака для повторної перевірки під гейтом).</summary>
         public bool DocumentHasAssignments { get; init; }
+
+        /// <summary>
+        /// Комірки таблиці, які рахує комірочна формула (<c>FormulaScope.Cell</c>): <c>(RowKey, ColumnDefId)</c>.
+        /// Порожньо — таких формул у таблиці немає (більшість таблиць).
+        /// </summary>
+        public IReadOnlySet<(string RowKey, int ColumnDefId)> ComputedCells { get; init; } = NoComputedCells;
+    }
+
+    private static readonly IReadOnlySet<(string RowKey, int ColumnDefId)> NoComputedCells =
+        new HashSet<(string, int)>();
+
+    /// <summary>
+    /// <c>(RowKey, ColumnDefId)</c> комірок таблиці, які рахує комірочна формула шаблону (WW-02): користувач
+    /// такі комірки не редагує (<see cref="EditDenyReason.CalculatedCell"/>), решта комірок їхнього рядка й
+    /// колонки лишається вводом.
+    /// </summary>
+    /// <remarks>
+    /// Формули беруться з уже прогрітого знімка версії (<c>MetadataCache</c> їх вантажить), тож нового звернення
+    /// до бази це не коштує. Рядок формули → ключ рядка через <c>TableDef.Rows</c>.
+    /// </remarks>
+    private static IReadOnlySet<(string RowKey, int ColumnDefId)> ComputedCellsOf(
+        TemplateVersionSnapshot snapshot, int tableDefId)
+    {
+        var table = snapshot.Sheets
+            .SelectMany(s => s.Tables)
+            .FirstOrDefault(t => t.Id == tableDefId);
+
+        if (table is null || !table.Formulas.Any(f => !f.IsDeleted && f.Scope == FormulaScope.Cell))
+        {
+            return NoComputedCells;
+        }
+
+        var keysById = table.Rows.Where(r => !r.IsDeleted).ToDictionary(r => r.Id, r => r.RowKeyValue);
+        var result = new HashSet<(string, int)>();
+
+        foreach (var formula in table.Formulas)
+        {
+            if (!formula.IsDeleted
+                && formula.Scope == FormulaScope.Cell
+                && formula.RowDefId is { } rowId
+                && formula.ColumnDefId is { } columnId
+                && keysById.TryGetValue(rowId, out var rowKey))
+            {
+                result.Add((rowKey, columnId));
+            }
+        }
+
+        return result;
     }
 
     /// <summary>Передачі документа, звужені до зрізу, і те, що потрібно правилу <see cref="EditAssignmentGuard"/>.</summary>
@@ -1432,6 +1482,7 @@ public sealed class AccessDecisionService(
                 {
                     Delegation = delegation,
                     DocumentHasAssignments = documentHasAssignments,
+                    ComputedCells = ComputedCellsOf(snapshot, instance.TableDefId),
                 };
             }
         }

@@ -70,7 +70,7 @@ public sealed class CellFormulaAuthoringApiTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Формула_комірки_на_ручній_колонці_відхиляється_а_неіснуюча_адреса_дає_404()
+    public async Task Формула_комірки_на_ручній_колонці_приймається_колонкова_лишається_4227_а_неіснуюча_адреса_дає_404()
     {
         var draft = await ArrangeAsync();
 
@@ -85,8 +85,20 @@ public sealed class CellFormulaAuthoringApiTests(SqlServerFixture sql)
                 $"/api/v1/template-versions/{draft.VersionId}/tables/{draft.TableId}/formulas/cell/R1/{draft.ManualColumnId}",
                 UriKind.Relative),
             body);
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, manual.StatusCode);
-        var problem = await manual.Content.ReadFromJsonAsync<JsonElement>();
+        // WW-02: ворота ECR-TMPL-4227 — лише для Scope=Column. Формула КОМІРКИ на колонці ручного вводу
+        // приймається (захист — на рівні комірки: CellIsComputed -> CalculatedCell), решта комірок колонки лишається вводом.
+        Assert.True(manual.StatusCode == HttpStatusCode.OK, await manual.Content.ReadAsStringAsync());
+        var manualBody = await manual.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(draft.ManualColumnId, manualBody.GetProperty("columnDefId").GetInt32());
+
+        // Колонкова формула на тій самій ручній колонці — як і раніше 422 ECR-TMPL-4227.
+        using var column = await client.PutAsJsonAsync(
+            new Uri(
+                $"/api/v1/template-versions/{draft.VersionId}/tables/{draft.TableId}/formulas/column/{draft.ManualColumnId}",
+                UriKind.Relative),
+            body);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, column.StatusCode);
+        var problem = await column.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("ECR-TMPL-4227", problem.GetProperty("errorCode").GetString());
 
         using var noRow = await client.PutAsJsonAsync(
@@ -97,7 +109,11 @@ public sealed class CellFormulaAuthoringApiTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.NotFound, noRow.StatusCode);
 
         await using var db = Context();
-        Assert.False(await db.FormulaDefs.AnyAsync(f => f.TableDefId == draft.TableId));
+        // Збережена рівно одна формула — комірочна на ручній колонці; колонкової й за адресою NOPE немає.
+        var stored = await db.FormulaDefs.Where(f => f.TableDefId == draft.TableId).ToListAsync();
+        var only = Assert.Single(stored);
+        Assert.Equal(FormulaScope.Cell, only.Scope);
+        Assert.Equal((int?)draft.ManualColumnId, only.ColumnDefId);
     }
 
     private async Task<Draft> ArrangeAsync()

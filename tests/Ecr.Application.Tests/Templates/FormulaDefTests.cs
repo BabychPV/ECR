@@ -268,12 +268,33 @@ public sealed class FormulaDefTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "D1")]
-    public async Task Формула_комірки_на_НЕобчислюваній_колонці_відхиляється()
+    [Trait("Requirement", "WW-02")]
+    public async Task Формула_комірки_на_колонці_ручного_вводу_приймається_у_звичайному_рядку_вводу()
     {
+        // WW-02 (замінює D1): змішана колонка (Water Report, 7a/7b, Waste: елементи вводить людина, підсумок чи
+        // баланс у своєму рядку рахує формула). Захист від затирання введеного - на рівні КОМІРКИ (рушій:
+        // CellIsComputed -> CalculatedCell), тож ворота 4227 для Cell колонку вводу пропускають, а рядок не
+        // мусить бути «лише для читання».
+        Assert.False(_row.IsReadOnly);
+
+        var saved = await Save().HandleAsync(
+            1, _table.Id, FormulaScope.Cell, _row.RowKeyValue, Command("[Jan] + [Feb]"),
+            CancellationToken.None, ColumnTarget(_manualColumn));
+
+        Assert.Equal(FormulaScope.Cell, saved.Scope);
+        Assert.Equal(_row.Id, saved.RowDefId);
+        Assert.Equal(_manualColumn.Id, saved.ColumnDefId);
+        Assert.Single(_table.Formulas);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "WW-02")]
+    public async Task Формула_колонки_на_колонці_ручного_вводу_лишається_4227_навіть_після_WW_02()
+    {
+        // Column пише в КОЖЕН рядок колонки, тож вимога обчислюваної колонки лишилась для цієї області.
         var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Save().HandleAsync(
-            1, _table.Id, FormulaScope.Cell, _row.RowKeyValue, Command(),
-            CancellationToken.None, ColumnTarget(_manualColumn)));
+            1, _table.Id, FormulaScope.Column, ColumnTarget(_manualColumn), Command(), CancellationToken.None));
 
         Assert.Equal(ErrorCodes.ComputationOnManualColumn, error.ErrorCode);
         Assert.Empty(_table.Formulas);

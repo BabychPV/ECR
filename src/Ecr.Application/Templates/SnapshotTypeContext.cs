@@ -29,7 +29,10 @@ public sealed class SnapshotTypeContext(TemplateVersionSnapshot snapshot) : ITyp
             return ExpressionValueType.Number;
         }
 
-        var column = PublishChecks.LiveTables(snapshot.Sheets)
+        // Код таблиці не унікальний між аркушами: `[SHEET].[TABLE]…` шукає колонку лише в аркуші SHEET.
+        var column = PublishChecks.LiveTables(snapshot.Sheets.Where(s => reference.SheetCode is null
+                                                                         || string.Equals(
+                                                                             s.Code, reference.SheetCode, StringComparison.OrdinalIgnoreCase)))
             .Where(t => reference.TableCode is null
                         || string.Equals(t.Code, reference.TableCode, StringComparison.OrdinalIgnoreCase))
             .SelectMany(t => t.Columns)
