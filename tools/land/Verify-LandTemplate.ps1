@@ -16,7 +16,8 @@ param(
     [securestring]$Password,
     [string]$ModelPath,
     [string]$ExcelModelPath,
-    [string]$TemplateCode = 'LAND_UI'
+    [string]$TemplateCode = 'LAND_UI',
+    [string[]]$KnownStaleTables = @()
 )
 $ErrorActionPreference = 'Stop'
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
@@ -91,6 +92,10 @@ foreach ($sh in @($mdl.sheets)) {
 $fm = @(Get-LandFormulaMismatches $st $mdl)
 foreach ($m in $fm) { $bad += $m }
 Write-Host ("Формули колонок і readOnly перевірено: розбіжних таблиць {0}" -f $fm.Count)
+# LP-28: таблиця є у версії, а в моделі її немає (застарілі T9a_03/06/07 клону) - розбіжність, окрім явного -KnownStaleTables.
+$stale = @(Get-LandStaleTables $st $mdl $KnownStaleTables)
+if ($stale.Count) { $bad += ("зайві таблиці (є у версії, немає в моделі): {0}: {1}" -f $stale.Count, (($stale | ForEach-Object { $_.Key }) -join ', ')) }
+Write-Host ("Зайвих таблиць (є у версії, немає в моделі): {0}" -f $stale.Count)
 $rows | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
 Write-Host "Колонок результатів (Calculated) перевірено: $calcChecked"
 Write-Host ("Разом: таблиць {0}/{1}, колонок {2}/{3}, рядків Fixed {4}/{5}; місячних колонок у моделі {9}; версія {6} ({7}); полів шапки {8}" -f $tot.xt, $tot.et, $tot.xc, $tot.ec, $tot.xr, $tot.er, $ver.version, $ver.status, $hf.Count, $monthTotal)
