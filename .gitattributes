@@ -3,3 +3,4 @@
 # найгірший можливий наслідок, бо виглядає як «усе гаразд».
 .githooks/* text eol=lf
 *.sh text eol=lf
+docs/delivery/reference-data/land-template/*.json text eol=lf
