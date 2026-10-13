@@ -19,6 +19,8 @@ public sealed partial class LandWaterWasteCellFormulasModelTests
         "July", "August", "September", "October", "November", "December",
     ];
 
+    private static readonly string[] NumericTypes = ["Decimal", "Int", "Formula"];
+
     private static JsonDocument Model()
         => JsonDocument.Parse(File.ReadAllText(Path.Combine(
             SourceTree.Root, "docs", "delivery", "reference-data", "land-template", "land-template.model.json")));
@@ -124,7 +126,7 @@ public sealed partial class LandWaterWasteCellFormulasModelTests
                         r => r.GetProperty("key").GetString() == reference.Groups["r"].Value);
                     var source = sourceTable.GetProperty("columns").EnumerateArray()
                         .Single(c => Code(c) == reference.Groups["c"].Value);
-                    Assert.Contains(source.GetProperty("dataType").GetString(), new[] { "Decimal", "Int", "Formula" });
+                    Assert.Contains(source.GetProperty("dataType").GetString(), NumericTypes);
 
                     // Колонка джерела = колонка цілі; у межах Water Report - ще попередній місяць / OpeningBalance (баланс).
                     var sourceColumn = reference.Groups["c"].Value;
