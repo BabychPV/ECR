@@ -174,8 +174,10 @@ public sealed class SaveMethodologyCategoryRuleHandler(
             return;
         }
 
+        // D-400: лише таблиці «живої» версії шаблону (як при публікації).
+        var liveTableDefIds = await LiveBindingTables.ResolveAsync(bindings, methodologyBindings, ct).ConfigureAwait(false);
         var columnCodesByTable = await bindings
-            .ListColumnCodesAsync([.. methodologyBindings.Select(b => b.TableDefId).Distinct()], ct)
+            .ListColumnCodesAsync(liveTableDefIds, ct)
             .ConfigureAwait(false);
 
         // D-OA (Q-OA-3): правило категорії успадковує `Name?` зі списків аргументів формул версії.

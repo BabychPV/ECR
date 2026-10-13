@@ -58,7 +58,7 @@ public sealed class LandSubstanceApplicabilityRuleWrapperTests
                 $"{methodology}: обгортка не розбирається: {wrapped}");
 
             // Селектор з перших записів довідника; C12_03 читає REGFIELD(@Land_TypeFuel, 'NAME') - Lookup, у цьому
-            // стенді немає записів, тому лише розбір.
+            // стенді немає записів, тому лише розбір (правило C12_03 - @IDCodeNAEProject).
             if (valueExpression.StartsWith("REGFIELD", StringComparison.Ordinal) || !baseRules.ContainsKey(methodology))
             {
                 continue;
@@ -94,7 +94,7 @@ public sealed class LandSubstanceApplicabilityRuleWrapperTests
             checkedRules++;
         }
 
-        // 9 з 10: C12_03 правила категорії у файлі правил немає (див. звіт lane) - лише розбір.
+        // 9 з 10 обчислюються: правило C12_03 тепер є у файлі (читає @IDCodeNAEProject і Lookup REGFIELD) - лише розбір.
         Assert.True(checkedRules >= 8, $"перевірено правил: {checkedRules}");
     }
 

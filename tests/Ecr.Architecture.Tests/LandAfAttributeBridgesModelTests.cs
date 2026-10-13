@@ -59,6 +59,20 @@ public sealed class LandAfAttributeBridgesModelTests
             StringComparer.Ordinal);
         var res = new Dictionary<(string, string), SortedSet<string>>();
 
+        // K1: методологія читає аргумент під суфіксованим іменем (argumentBridges.argumentSuffixes; етап Build ArgumentSuffix).
+        using var modelDoc = Load("land-template.model.json");
+        var suffixes = new Dictionary<(string Methodology, string Argument), string>();
+        if (modelDoc.RootElement.GetProperty("argumentBridges").TryGetProperty("argumentSuffixes", out var sfx))
+        {
+            foreach (var m in sfx.GetProperty("methodologies").EnumerateObject())
+            {
+                foreach (var a in m.Value.EnumerateObject())
+                {
+                    suffixes[(m.Name, a.Name)] = a.Value.GetProperty("column").GetString()!;
+                }
+            }
+        }
+
         foreach (var m in map.RootElement.GetProperty("methodologies").EnumerateObject())
         {
             if (!Regex.IsMatch(m.Name, "^ECW_C(08|09|11|12)"))
@@ -78,6 +92,14 @@ public sealed class LandAfAttributeBridgesModelTests
             }
 
             args.ExceptWith(Contextual);
+            foreach (var ((sm, sa), column) in suffixes)
+            {
+                if (sm == m.Name && args.Remove(sa))
+                {
+                    args.Add(column);
+                }
+            }
+
             foreach (var t in m.Value.GetProperty("tables").EnumerateArray().Select(x => x.GetString()!))
             {
                 if (!CalcTables.Contains(t))
@@ -212,8 +234,12 @@ public sealed class LandAfAttributeBridgesModelTests
     {
         using var model = Load("land-template.model.json");
 
-        // C11_01/C11_02 беруть OperatingTime з OperTimeDays, C11_10 - з атрибута OperatingTime: на ОДНІЙ таблиці два джерела
-        Assert.StartsWith("[конфлікт]", Unresolved(model, "T9a_27", "Land_Measure_OperatingTime"), StringComparison.Ordinal);
+        // C11_01/C11_02 беруть OperatingTime з OperTimeDays, C11_10 - з атрибута OperatingTime: з K1 (D-399) перші два читають
+        // власну колонку із суфіксом, конфлікту немає (LandArgumentSuffixModelTests); звичайна колонка - з атрибута OperatingTime
+        Assert.Null(Unresolved(model, "T9a_27", "Land_Measure_OperatingTime"));
+        Assert.Null(Unresolved(model, "T9a_17", "Land_Measure_OperatingTime"));
+        // C11_11_02 на 9_07 - суфіксований міст; у C11_10 джерела SubstanceConsumption на 9_07 немає (клас O, optionalArguments)
+        Assert.StartsWith("[AF-немає]", Unresolved(model, "T9_07", "Land_Measure_SubstanceConsumption"), StringComparison.Ordinal);
         // AF-таблиця 9_02 не має OperatingTime: старий код не передає аргумент
         Assert.StartsWith("[AF-немає]", Unresolved(model, "T9_02", "Land_Measure_OperatingTime"), StringComparison.Ordinal);
         // компоненти GTU беруться з іншого рядка таблиці: з 2026-10-13 це предикатні мости (LandGtuBridgesModelTests)
@@ -225,7 +251,7 @@ public sealed class LandAfAttributeBridgesModelTests
         Assert.Contains("LAND_NAE_GROUP", Expression(model, "T9a_17", "Land_Power"), StringComparison.Ordinal);
         // вхід, названий в unresolved, не має колонки-мосту
         var tables = Tables(model);
-        Assert.DoesNotContain("Land_Measure_OperatingTime", Columns(tables["T9a_27"]).Keys);
+        Assert.DoesNotContain("Land_Measure_SubstanceConsumption", Columns(tables["T9_07"]).Keys);
         Assert.Contains("Land_Measure_Component_301", Columns(tables["T10_03"]).Keys);
     }
 

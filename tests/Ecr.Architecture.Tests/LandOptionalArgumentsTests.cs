@@ -237,10 +237,12 @@ public sealed class LandOptionalArgumentsTests
             }
         }
 
-        // Рівно клас O з LAND-D8-ARGS (#9-#16); #17-#18 (C11_03 RunningHours, Q-D8-2) і клас K - не тут.
+        // Рівно клас O з LAND-D8-ARGS (#9-#16) + C11_10/T9_07 (після K1 суфікс C11_11_02 лишив пару [AF-немає]);
+        // #17-#18 (C11_03 RunningHours, Q-D8-2) і решта класу K - не тут.
         Assert.Equal(
             [
                 "ECW_C11_10|T9_02|Land_Measure_OperatingTime",
+                "ECW_C11_10|T9_07|Land_Measure_SubstanceConsumption",
                 "ECW_C11_10|T9_11|Land_Measure_OperatingTime",
                 "ECW_C11_10|T9a_24|Land_Measure_OperatingTime",
                 "ECW_C11_10|T9a_26|Land_Measure_OperatingTime",
