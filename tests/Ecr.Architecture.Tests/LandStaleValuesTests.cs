@@ -117,7 +117,7 @@ public sealed class LandStaleValuesTests
             return [pscustomobject]@{ Status = 404; Json = $null; Text = ''; Headers = @{} }
         }
 
-        $maps = @(Read-LandStaleMap (Join-Path $land 'rename-maps\land-9a-missing-tables.json'))
+        $maps = @(Read-LandStaleMap (Join-Path (Join-Path $land 'rename-maps') 'land-9a-missing-tables.json'))
         function Show($r) {
             foreach ($n in 'Documents', 'Pairs', 'Values', 'Moved', 'Overwritten', 'Same', 'Conflicts', 'ReadOnlyTarget', 'UnresolvedColumnValues', 'UnresolvedRowValues', 'UnresolvedTables', 'RowsWritten', 'RowsFailed', 'CellsCleared') {
                 Write-Host ("R.$n=" + $r.$n)

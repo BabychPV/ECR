@@ -70,7 +70,7 @@ $exec = ($Execute.IsPresent -and -not $DryRun.IsPresent)
 if ($exec) { Set-EcrStandConfirmation -Stand $ConfirmStand -Url $ApiBase }
 
 $mapFile = $MapPath
-if (-not $mapFile) { $mapFile = Join-Path $here 'rename-maps\land-9a-missing-tables.json' }
+if (-not $mapFile) { $mapFile = Join-Path (Join-Path $here 'rename-maps') 'land-9a-missing-tables.json' }
 $maps = @(Read-LandStaleMap -Path $mapFile)
 if ($maps.Count -eq 0) { throw "Мапа $mapFile порожня." }
 
