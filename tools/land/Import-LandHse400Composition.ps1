@@ -11,7 +11,8 @@
     Кроки:
       1. читає джерело (лише локальний SQL Server; база підтверджується -ConfirmSource); рядок = місяць (DateTime);
       2. будує план: колонка `{префікс}_{суфікс}` -> (рік, місяць, потік = префікс, показник = канонічний суфікс, значення);
-         HMB: EMercaptan_mass <- EMercaptanV2_mass; запасна: C6_C10_mass порожній -> C6_1_mass;
+         HMB: EMercaptan_mass <- EMercaptanV2_mass; колонки C1_C5/C6_C10/C12_C19 без `_mass` (FG_Export, FG_Internal,
+         LPG_Internal) -> `…_mass` (так їх читає стара система); запасна: C6_C10_mass порожній -> C6_1_mass;
       3. (-DiscoverStreams) читає з копії прода різні тексти Land-полів типу палива/потоку
          (Land_TypeFuel, Land_TypeFuelOrStream, Land_TypeStream, Land_Streams; лише SELECT DISTINCT … WITH (NOLOCK))
          і додає до словника потоків ті, що збігаються з правилом старої системи (PrefixProvider);
@@ -19,6 +20,9 @@
          складеним первинним ключем; опис, що вже є й не збігається, не змінюється (відмова);
       5. записи, ЯКИХ ще немає за кодом, - POST /api/v1/registries/{code}/entries/batch (пачками). Наявні записи НЕ
          чіпаються, повторний запуск дає 0 змін.
+         Виняток - лише з -RewriteAliased: записи, що походять з псевдоніма (C1_C5/C6_C10/C12_C19 -> `_mass`),
+         перезаписуються upsert-ом за тим самим кодом (на стендах, завантажених ДО псевдоніма, `C6_C10_mass`
+         FG_Internal лежить як запасна C6_1_mass - хибне значення; новий запис його виправляє).
 
     Немає запису за (рік, місяць, потік, показник) у довіднику -> аргумент методології не обчислюється й рядок не
     дає результатів (стара система: continue). Скрипт цього не змінює; він лише наповнює довідник.
@@ -49,6 +53,7 @@ param(
     [string]$ConfirmSource,
     [string]$ConfirmStand,
     [switch]$DiscoverStreams,
+    [switch]$RewriteAliased,
     [int]$BatchSize = 200,
     [switch]$DryRun
 )
@@ -119,7 +124,7 @@ try {
 finally { $conn.Dispose() }
 
 $plan = ConvertTo-LandHse400CompositionPlan -Rows ([object[]]$sourceRows.ToArray())
-Write-Host "Джерело: рядків (місяців) $($sourceRows.Count); значень до довідника: $(@($plan.Items).Count); пропущено: $($plan.Skipped); дублів: $($plan.Duplicates); запасна C6_1_mass: $($plan.Fallbacks); EMercaptanV2 для HMB: $($plan.Overrides)."
+Write-Host "Джерело: рядків (місяців) $($sourceRows.Count); значень до довідника: $(@($plan.Items).Count); пропущено: $($plan.Skipped); дублів: $($plan.Duplicates); запасна C6_1_mass: $($plan.Fallbacks); EMercaptanV2 для HMB: $($plan.Overrides); псевдонімів C*_mass: $($plan.Aliases)."
 if (@($plan.Items).Count -eq 0) { throw 'У джерелі немає жодного значення складу: нічого завантажувати.' }
 
 $staticTexts = @(
@@ -218,17 +223,19 @@ $haveStream = if ($null -ne $stream.Definition) { Get-HseEntryCodes $defs.Stream
 $newStream = @($streamPlan.Items | Where-Object { -not $haveStream.ContainsKey($_.EntryCode.ToUpperInvariant()) })
 $haveComp = if ($null -ne $comp.Definition) { Get-HseEntryCodes $defs.Composition.Code } else { @{} }
 $newComp = @($plan.Items | Where-Object { -not $haveComp.ContainsKey($_.EntryCode.ToUpperInvariant()) })
+# -RewriteAliased: наявні записи-псевдоніми теж йдуть upsert-ом (виправлення значення, що лягло як запасна).
+$rewriteComp = if ($RewriteAliased) { @($plan.Items | Where-Object { $_.Aliased -and $haveComp.ContainsKey($_.EntryCode.ToUpperInvariant()) }) } else { @() }
 
 $failed = $false
 $streamAdded = 0; $compAdded = 0
 if ($dry -or $null -eq $stream.Definition -or $null -eq $comp.Definition) {
-    $streamAdded = $newStream.Count; $compAdded = $newComp.Count
+    $streamAdded = $newStream.Count; $compAdded = $newComp.Count + $rewriteComp.Count
 }
 else {
     $rows = @($newStream | ForEach-Object { [pscustomobject]@{ ClientRowId = $_.EntryCode; Code = $_.EntryCode; Display = $_.Display; Values = @{ TEXT = $_.Text; PREFIX = $_.Prefix } } })
     if ($rows.Count) { $s = Add-HseEntries $defs.Stream.Code $rows; $streamAdded = $s.Added; if ($s.Rejected) { $failed = $true } }
     if (-not $failed) {
-        $rows = @($newComp | ForEach-Object {
+        $rows = @(@($newComp) + @($rewriteComp) | ForEach-Object {
                 [pscustomobject]@{ ClientRowId = $_.EntryCode; Code = $_.EntryCode; Display = $_.EntryCode
                     # Числа йдуть JSON-числами: рядок «1,234» сервер читає за мовою користувача (неоднозначно).
                     Values = @{ YEAR = [int]$_.Year; MONTH = [int]$_.Month; STREAM = $_.Stream; INDICATOR = $_.Indicator
@@ -238,6 +245,6 @@ else {
 }
 
 Write-Host "Словник $($defs.Stream.Code): додано $streamAdded, наявних $(@($streamPlan.Items).Count - $newStream.Count)."
-Write-Host "Склад $($defs.Composition.Code): додано $compAdded, наявних $(@($plan.Items).Count - $newComp.Count)."
+Write-Host "Склад $($defs.Composition.Code): додано/перезаписано $compAdded (з них перезаписано псевдонімів: $($rewriteComp.Count)), наявних $(@($plan.Items).Count - $newComp.Count)."
 Write-Host "Змін: $($changes + $streamAdded + $compAdded)$(if ($dry) { ' (dry-run, нічого не записано)' })."
 if ($failed) { exit 1 }

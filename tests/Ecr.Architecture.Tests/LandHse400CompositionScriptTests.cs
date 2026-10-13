@@ -110,6 +110,77 @@ public sealed class LandHse400CompositionScriptTests
         Assert.Contains("EMPTY=0", output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// C12_03 (паритет 415/416/2754): стара система читає `FG_Internal_C1_C5` у властивість `FG_Internal_C1_C5_mass`
+    /// (Q_Air_HSE400.Get_DataFromHSE400). Без псевдоніма довідник мав `C1_C5`/`C12_C19` (415/2754 без складу) і
+    /// `C6_C10_mass` = запасна C6_1_mass (416 хибний, коли справжній C6_C10 непорожній).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Колонки_C1_C5_C6_C10_C12_C19_без_mass_стають_показником_з_mass_до_запасної_гексану()
+    {
+        const string script = """
+            $ErrorActionPreference = 'Stop'
+            . $args[0]
+            $rows = @(
+              [pscustomobject]@{ Year = 2026; Month = 1; Columns = @{
+                  'FG_Internal_C1_C5' = 0.11; 'FG_Internal_C6_C10' = 0.22; 'FG_Internal_C12_C19' = 0.33; 'FG_Internal_C6_1_mass' = 0.44
+                  'FG_Export_C1_C5' = 0.55; 'FG_Export_C6_1_mass' = 0.66
+                  'LPG_HMB_C1_C5_mass' = 0.77
+                  'FG_Makat_C6_1_mass' = 0.88 } },
+              [pscustomobject]@{ Year = 2026; Month = 2; Columns = @{ 'FG_Internal_C6_C10' = $null; 'FG_Internal_C6_1_mass' = 0.5 } },
+              [pscustomobject]@{ Year = 2026; Month = 3; Columns = @{ 'FG_Internal_C1_C5' = 1.5; 'FG_Internal_C1_C5_mass' = 2.5 } }
+            )
+            $plan = ConvertTo-LandHse400CompositionPlan -Rows $rows
+            function V($m, $s, $i) { (@($plan.Items | Where-Object { $_.Month -eq $m -and $_.Stream -eq $s -and $_.Indicator -eq $i } | ForEach-Object { $_.Value }) -join ';') }
+            function A($m, $s, $i) { (@($plan.Items | Where-Object { $_.Month -eq $m -and $_.Stream -eq $s -and $_.Indicator -eq $i } | ForEach-Object { $_.Aliased }) -join ';') }
+            'C1C5=' + (V 1 'FG_Internal' 'C1_C5_mass')
+            'C6C10_OWN=' + (V 1 'FG_Internal' 'C6_C10_mass')
+            'C12C19=' + (V 1 'FG_Internal' 'C12_C19_mass')
+            'C1C5_RAW=' + @($plan.Items | Where-Object { $_.Indicator -eq 'C1_C5' -or $_.Indicator -eq 'C6_C10' -or $_.Indicator -eq 'C12_C19' }).Count
+            'EXPORT_C1C5=' + (V 1 'FG_Export' 'C1_C5_mass')
+            'EXPORT_C6_FALLBACK=' + (V 1 'FG_Export' 'C6_C10_mass')
+            'ALIASED=' + (A 1 'FG_Internal' 'C6_C10_mass')
+            'FALLBACK_NOT_ALIASED=' + (A 1 'FG_Export' 'C6_C10_mass')
+            'HMB_OWN_ALIASED=' + (A 1 'LPG_HMB' 'C1_C5_mass')
+            'FEB_FALLBACK=' + (V 2 'FG_Internal' 'C6_C10_mass')
+            'OWN_MASS_WINS=' + (V 3 'FG_Internal' 'C1_C5_mass')
+            'ALIASES=' + $plan.Aliases
+            'FALLBACKS=' + $plan.Fallbacks
+            """;
+
+        var (exit, output) = RunPowerShell(script, LandFile("LandHse400Composition.Lib.ps1"));
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("C1C5=0.11", output, StringComparison.Ordinal);
+        Assert.Contains("C6C10_OWN=0.22", output, StringComparison.Ordinal);      // справжній C6_C10, не C6_1_mass (0.44)
+        Assert.Contains("C12C19=0.33", output, StringComparison.Ordinal);
+        Assert.Contains("C1C5_RAW=0", output, StringComparison.Ordinal);          // показника без _mass у довіднику не лишається
+        Assert.Contains("EXPORT_C1C5=0.55", output, StringComparison.Ordinal);
+        Assert.Contains("EXPORT_C6_FALLBACK=0.66", output, StringComparison.Ordinal); // Export не має C6_C10: запасна, як у старій
+        Assert.Contains("ALIASED=True", output, StringComparison.Ordinal);
+        Assert.Contains("FALLBACK_NOT_ALIASED=False", output, StringComparison.Ordinal);
+        Assert.Contains("HMB_OWN_ALIASED=False", output, StringComparison.Ordinal);
+        Assert.Contains("FEB_FALLBACK=0.5", output, StringComparison.Ordinal);    // C6_C10 порожній -> C6_1_mass
+        Assert.Contains("OWN_MASS_WINS=2.5", output, StringComparison.Ordinal);   // власна `_mass` старша за псевдонім
+        Assert.Contains("ALIASES=4", output, StringComparison.Ordinal);           // C1_C5, C6_C10, C12_C19 (FGI) + FG_Export C1_C5
+        Assert.Contains("FALLBACKS=3", output, StringComparison.Ordinal);         // FG_Export і FG_Makat (січень), FG_Internal (лютий)
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Скрипт_має_RewriteAliased_який_перезаписує_лише_псевдоніми_і_лише_за_підтвердженням_стенда()
+    {
+        var text = File.ReadAllText(LandFile("Import-LandHse400Composition.ps1"));
+
+        Assert.Contains("[switch]$RewriteAliased", text, StringComparison.Ordinal);
+        Assert.Contains("$_.Aliased -and $haveComp.ContainsKey(", text, StringComparison.Ordinal);
+        // Мутація (як і решта) - після Set-EcrStandConfirmation; сам перезапис - лише за прапорцем.
+        var confirm = text.IndexOf("Set-EcrStandConfirmation", StringComparison.Ordinal);
+        var rewrite = text.IndexOf("$rewriteComp = if ($RewriteAliased)", StringComparison.Ordinal);
+        Assert.True(confirm >= 0 && confirm < rewrite, "Підтвердження стенда - до планування перезапису.");
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Потік_за_текстом_Land_поля_за_правилом_старої_системи_без_регістру_в_обидва_боки()
