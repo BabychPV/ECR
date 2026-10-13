@@ -95,8 +95,9 @@ public sealed partial class LandCellFormulasModelTests
                 targets.Add(row);
             }
 
-            // (a+b+c)/1000 або a/1000: без діапазонів і функцій, ділення — у формулі шаблону, як в Excel.
-            Assert.Matches(@"^\(?(\[[^\]]+\](\.\[[^\]]+\]){3}\+?)+\)?/1000$", expression);
+            // LP-31: Excel (a+b+c)/1000 (порожня клітинка = 0) -> SUM(a,b,c)/1000: SUM поглинає null (02b §6.1), а голий
+            // `+` поширював би null, і формула давала б «немає значення» за одного порожнього операнда.
+            Assert.Matches(@"^SUM\(\[[^\]]+\](\.\[[^\]]+\]){3}(,\[[^\]]+\](\.\[[^\]]+\]){3})*\)/1000$", expression);
 
             // Скільки джерельних клітинок в Excel — стільки посилань у виразі.
             Assert.Equal(Regex.Count(excel, "'7\\. Water Report'!"), references.Count);
@@ -104,6 +105,28 @@ public sealed partial class LandCellFormulasModelTests
 
         // Багато-до-багатьох: джерельний рядок живить кілька цілей (7009016/17/18 → «Sulphur Pads (разом)» і №1/№2/№3).
         Assert.Contains(feeds, kv => kv.Value.Count >= 2);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Усі_216_формул_7_0_null_безпечні_немає_голого_плюса_між_посиланнями_поза_SUM_LP_31()
+    {
+        using var doc = Model();
+        var target = Sheet(doc.RootElement, "7.0").GetProperty("tables")[0];
+
+        var formulas = target.GetProperty("cellFormulas").EnumerateArray().ToList();
+        Assert.Equal(216, formulas.Count);
+
+        foreach (var f in formulas)
+        {
+            var expression = f.GetProperty("expression").GetString()!;
+
+            // Прибираємо всі виклики SUM(...): у решті не має лишитись жодного посилання (тобто посилання під `+`
+            // поза поглинанням null) - лише «/1000».
+            var outside = Regex.Replace(expression, @"SUM\([^()]*\)", string.Empty);
+            Assert.Equal("/1000", outside);
+            Assert.DoesNotContain("+", expression, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
