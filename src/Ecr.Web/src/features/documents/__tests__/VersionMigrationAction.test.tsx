@@ -323,6 +323,51 @@ describe('useVersionMigrationAction', () => {
     expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('LP-32: подані аркуші, перенесені без змін, — повідомлення, не блок; перенос дозволено', async () => {
+    show(
+      ['Template.Edit'],
+      report({
+        lockedSheets: 2,
+        lockedSheetsCarried: 2,
+        lockedSheetsAffected: 0,
+        lockedSheetItems: [
+          { documentId: 1, sheetCode: 'GEN', periodKey: 202601, status: 'Submitted', affected: false },
+        ],
+      }),
+    );
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+    await waitFor(() => expect(document.querySelector('[data-migrate-locked-carried]')).not.toBeNull());
+    expect(document.querySelector('[data-migrate-can-apply]')).not.toBeNull();
+    expect(document.querySelector('[data-migrate-locked-affected]')).toBeNull();
+  });
+
+  it('LP-32: зачеплені подані аркуші — перелік із кодом, періодом і статусом; перенос вимкнено', async () => {
+    show(
+      ['Template.Edit'],
+      report({
+        canApply: false,
+        refusals: ['sheetsLocked'],
+        lockedSheets: 1,
+        lockedSheetsCarried: 0,
+        lockedSheetsAffected: 1,
+        lockedSheetItems: [
+          { documentId: 1, sheetCode: 'GEN', periodKey: 202601, status: 'Approved', affected: true },
+        ],
+      }),
+    );
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+    await screen.findByText('⟦documents.migrateLockedAffected⟧');
+    expect(document.querySelector('[data-migrate-locked-affected]')).not.toBeNull();
+    expect(screen.getByText('⟦documents.migrateLockedItem⟧')).toBeDefined();
+    expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('причина grantsNotMapped показується підписом каталогу, а не сирим кодом (ent7 P3-4)', async () => {
     show(['Template.Edit'], report({ canApply: false, refusals: ['grantsNotMapped'] }));
     await openAndPickTarget();
