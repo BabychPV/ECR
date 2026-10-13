@@ -1,4 +1,4 @@
-using Ecr.Application.Ports;
+﻿using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
@@ -59,6 +59,8 @@ public sealed class TemplateRegistryLookupRecalculationTests
     private int _naeId;
     private int _permitId;
     private int _resultId;
+    private string _naeText = "NAE-1";
+    private (DateOnly Start, DateOnly End) _bounds = (new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
@@ -168,6 +170,70 @@ public sealed class TemplateRegistryLookupRecalculationTests
         Assert.Equal(
             [0.84m, 1.5m],
             applied.Where(r => r.Address.ColumnDefId == _columnIds["Result"]).Select(r => r.Value.ValueNumeric!.Value).Order());
+    }
+
+    // ── Вікно чинності запису довідника (ризик 2, LP-40: .sync-local\reports\VALIDFROM-RISK-2026-10-13.md) ──
+    // Скрипти Land створюють записи БЕЗ вікна (ValidFrom/ValidTo = NULL — «чинний завжди»). Тут знімок
+    // збирається справжнім RegistrySnapshotSource/RegistrySnapshot.Create з доменними RegistryEntry, а не
+    // InMemory-заглушкою: правило видимості — те саме, що в бойовому перерахунку.
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [InlineData(2026, 1, 1, 2026, 1, 31)] // період у минулому щодо «сьогодні» (2026-10-13)
+    [InlineData(2026, 10, 1, 2026, 10, 31)] // період, що містить «сьогодні»
+    public async Task Запис_довідника_без_вікна_чинності_дає_значення_і_на_минулий_і_на_сьогоднішній_період(
+        int fromYear, int fromMonth, int fromDay, int toYear, int toMonth, int toDay)
+    {
+        _bounds = (new DateOnly(fromYear, fromMonth, fromDay), new DateOnly(toYear, toMonth, toDay));
+        _naeText = "NAE1";
+        Arrange(new Dictionary<string, string> { ["Result"] = NaeFormula }, RealNaeSnapshot(validFrom: null));
+
+        var written = await Service().RecalculateAllAsync(DocumentId, Period, CancellationToken.None);
+
+        Assert.Equal(2, written);
+        Assert.All(Applied(), r => Assert.Equal("Cat-1", r.Value.ValueString));
+        Assert.Equal([_bounds.End], _builtFor.Distinct().ToList());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Запис_довідника_з_ValidFrom_сьогодні_на_минулий_період_дає_NA_і_комірка_не_пишеться()
+    {
+        // Контроль: той самий довідник і формула, але запис має ValidFrom = «сьогодні» (2026-10-13), а період —
+        // січень 2026. Саме так «ValidFrom = дата імпорту» сховало б запис від минулих місяців.
+        _naeText = "NAE1";
+        Arrange(
+            new Dictionary<string, string> { ["Result"] = NaeFormula },
+            RealNaeSnapshot(validFrom: new DateOnly(2026, 10, 13)));
+
+        var written = await Service().RecalculateAllAsync(DocumentId, Period, CancellationToken.None);
+
+        Assert.Equal(0, written);
+        Assert.Equal([new DateOnly(2026, 1, 31)], _builtFor.Distinct().ToList());
+    }
+
+    /// <summary>Довідник <c>LAND_NAE_GROUP</c> із одним записом <c>NAE1</c> і реальним вікном чинності.</summary>
+    private static Func<DateOnly, IRegistrySnapshot> RealNaeSnapshot(DateOnly? validFrom)
+    {
+        var def = Definition("LAND_NAE_GROUP", 103);
+        var category = new RegistryFieldDef(
+            103, EcrCode.Create("CATEGORY1"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "CATEGORY1" }), CellDataType.String, ordinal: 0);
+        typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(category, 1);
+        def.AddField(category);
+
+        var entry = new RegistryEntry(
+            103, EcrCode.Create("NAE1"), new LocalizedText(new Dictionary<string, string> { ["en"] = "NAE1" }));
+        typeof(Ecr.Domain.Abstractions.Entity<long>).GetProperty("Id")!.SetValue(entry, 31L);
+        if (validFrom is not null)
+        {
+            entry.SetValidity(validFrom, null);
+        }
+
+        var value = new Ecr.Application.Registries.RegistrySnapshotValue(
+            31, category.Id, null, "Cat-1", null, null, null, null, null);
+        var source = new Ecr.Application.Registries.RegistrySnapshotSource([def], [], [entry], [value]);
+        return source.Build;
     }
 
     private static InMemoryRegistrySnapshot WithPermit(InMemoryRegistrySnapshot snapshot)
@@ -331,7 +397,7 @@ public sealed class TemplateRegistryLookupRecalculationTests
         var slice = new List<CellRecord>
         {
             Text(1001, _fuelId, "Fuel gas"), Text(1002, _fuelId, "Diesel"),
-            Text(1001, _naeId, "NAE-1"), Text(1002, _naeId, "NAE-1"),
+            Text(1001, _naeId, _naeText), Text(1002, _naeId, _naeText),
             new(new CellAddress(Period, 1001, _permitId), _table.Id, new CellValueData { ValueRegistryEntryId = 5001 }),
             new(new CellAddress(Period, 1002, _permitId), _table.Id, new CellValueData { ValueRegistryEntryId = 5001 }),
         };
@@ -393,7 +459,7 @@ public sealed class TemplateRegistryLookupRecalculationTests
 
         var periods = Substitute.For<IPeriodStore>();
         periods.FindPeriodBoundsAsync(DocumentId, Period.Value, Arg.Any<CancellationToken>())
-            .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
+            .Returns(new PeriodBounds(_bounds.Start, _bounds.End));
 
         return new(
             _cells, _rows, periods, _metadata, _versions, new RealFormulaEngine(), _units, _registry, _headers,
