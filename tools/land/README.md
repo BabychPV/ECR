@@ -224,3 +224,24 @@ ECR-CALC-0433). Довідник `LAND_HSE400_SUBSTANCE` на стендах, п
 `Import-LandHse400Substance.ps1` (`-DryRun`, `-ConfirmStand`; прод не читає). Сторожі: LandHse400SubstanceMapTests
 (Architecture), CompositionMassBySubstanceTests (Expressions), LandHse400SubstanceRegistryTests (Infrastructure, реальний SQL).
 
+## Похідні аргументи зі словників C#: групи NAE і Land_MassFraction (LP-10)
+
+Залишок 0438 після мостів за атрибутами AF мав три аргументи, які старий код виводить зі словників у C#. Рушій не
+змінено: вистачає REGFIND/REGFIELD/CURRENT_SUBSTANCE() і `if`.
+
+- **`Land_Power`** (`ECW_C11_03`, лише таблиця 9a_17) і **`Category1`** (`ECW_C11_11_02`, 9_01/9_07/9_08/9a_16/9a_17a/9a_19) -
+  довідник `LAND_NAE_GROUP` (ключ `NAE_NORMALIZED`, поля `POWER_GROUP` Decimal і `CATEGORY1`). Записи ГЕНЕРУЮТЬСЯ з C#
+  (`model-gen/extract_nae_groups.py <docs/source> af-land-nae-groups.json`, далі `run-model-gen.ps1`); прод не читається.
+  Міст: `REGFIELD(REGFIND('LAND_NAE_GROUP', [<колонка NAE>]), 'POWER_GROUP' | 'CATEGORY1')`; немає запису -> `#N/A` ->
+  рядок без результату (стара: «Error Power value» / «Error category1 - NAE», `continue`). Нормалізація NAE: у `C11_11_02`
+  пробіли знімаються, у `C11_03` - ні; діалект шаблонів не має заміни тексту, тому для Category1 є обидва написання
+  (`0788(001)` і `0788 (001)`), а краї й послідовності пробілів знімає сам REGFIND. Довідник на наявних стендах заводить
+  `Import-LandNaeGroup.ps1` (`-DryRun`, `-ConfirmStand`; повтор - 0 змін), на свіжих - `-Stage Registries`.
+- **`Land_MassFraction`** (`ECW_C11_11_04`, 9a_19) - аргумент береться з атрибута `Land_MassFraction_0<код>` за поточною
+  речовиною проходу. Речовин type1 п'ять (415, 416, 602, 616, 621), тому: п'ять мостів `Land_MassFraction_0<код>` на
+  колонки із заголовком «<код>: ...» і фрагмент `if(CURRENT_SUBSTANCE() = '415', @Land_MassFraction_0415, ...)` замість
+  `@Land_MassFraction` у формулі ЧЕРНЕТКИ: `Build-LandTemplate.ps1 -Stage MassFraction` (разом із `-Stage CompositionMass`;
+  чернетці з Legacy ставиться Strict; опубліковане не чіпає; повтор - 0 змін).
+
+Сторожі: LandNaeGroupBridgesModelTests (Architecture), NaeGroupBridgesTests (Expressions, справжній рушій).
+

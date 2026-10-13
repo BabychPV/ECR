@@ -214,10 +214,12 @@ function Convert-LandHse400CompositionMassFormula {
         # Без типу [string]: $null мусить лишитися $null (порожній рядок «оголошує нуль аргументів», ECR-CALC-0432).
         [AllowNull()][AllowEmptyString()]$ArgumentsCsv = $null,
         [Parameter(Mandatory)][string]$Fragment,
-        [string[]]$StreamArguments = @()
+        [string[]]$StreamArguments = @(),
+        # Ім'я аргументу (токен @Ім'я), який замінюється фрагментом (LP-10: CompositionMass; Land_MassFraction - етап MassFraction).
+        [string]$ArgName = 'CompositionMass'
     )
 
-    $pattern = '@CompositionMass(?![A-Za-z0-9_])'
+    $pattern = '@' + [regex]::Escape($ArgName) + '(?![A-Za-z0-9_])'
     if ($Expression -notmatch $pattern) {
         return [pscustomobject]@{ Changed = $false; Expression = $Expression; ArgumentsCsv = $ArgumentsCsv }
     }
@@ -228,7 +230,7 @@ function Convert-LandHse400CompositionMassFormula {
         $tokens = New-Object System.Collections.Generic.List[string]
         foreach ($t in ($ArgumentsCsv -split ';')) {
             $x = $t.Trim()
-            if ($x.Length -eq 0 -or $x -ieq '@CompositionMass') { continue }
+            if ($x.Length -eq 0 -or $x -ieq ('@' + $ArgName)) { continue }
             $tokens.Add($x)
         }
         foreach ($a in $StreamArguments) {

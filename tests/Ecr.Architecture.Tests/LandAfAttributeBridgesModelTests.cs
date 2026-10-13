@@ -215,9 +215,11 @@ public sealed class LandAfAttributeBridgesModelTests
         Assert.StartsWith("[AF-немає]", Unresolved(model, "T9_02", "Land_Measure_OperatingTime"), StringComparison.Ordinal);
         // компоненти GTU беруться з іншого рядка таблиці
         Assert.StartsWith("[GTU]", Unresolved(model, "T10_03", "Land_Measure_Component_301"), StringComparison.Ordinal);
-        // Land_Power і Category1 виводяться з груп NAE у коді
-        Assert.StartsWith("[похідне]", Unresolved(model, "T9a_17", "Land_Power"), StringComparison.Ordinal);
-        Assert.StartsWith("[похідне]", Unresolved(model, "T9_01", "Category1"), StringComparison.Ordinal);
+        // Land_Power і Category1 виводяться з груп NAE у коді: тепер мости через довідник LAND_NAE_GROUP
+        // (LandNaeGroupBridgesModelTests); у unresolved їх немає.
+        Assert.Null(Unresolved(model, "T9a_17", "Land_Power"));
+        Assert.Null(Unresolved(model, "T9_01", "Category1"));
+        Assert.Contains("LAND_NAE_GROUP", Expression(model, "T9a_17", "Land_Power"), StringComparison.Ordinal);
         // вхід, названий в unresolved, не має колонки-мосту
         var tables = Tables(model);
         Assert.DoesNotContain("Land_Measure_OperatingTime", Columns(tables["T9a_27"]).Keys);

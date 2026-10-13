@@ -32,7 +32,8 @@ $resultOutputs = Join-Path $refDir 'land-result-outputs.json'
 Remove-Item -LiteralPath (Join-Path $Work 'land-result-outputs.json') -Force -ErrorAction SilentlyContinue
 if (Test-Path -LiteralPath $resultOutputs) { Copy-Item -LiteralPath $resultOutputs (Join-Path $Work 'land-result-outputs.json') -Force }
 # атрибути AF-таблиць (extract_af_table_attributes.py) і правила категорії (LP-07): мости аргументів af_attr_bridges.py
-foreach ($n in 'af-land-table-attributes.json', 'af-land-category-rules.json') {
+# + словники груп NAE з C# (extract_nae_groups.py): довідник LAND_NAE_GROUP, мости Land_Power/Category1/Land_MassFraction
+foreach ($n in 'af-land-table-attributes.json', 'af-land-category-rules.json', 'af-land-nae-groups.json') {
     Remove-Item -LiteralPath (Join-Path $Work $n) -Force -ErrorAction SilentlyContinue
     Copy-Item -LiteralPath (Join-Path $refDir $n) (Join-Path $Work $n) -Force
 }
