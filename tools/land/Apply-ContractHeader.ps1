@@ -55,9 +55,14 @@
     «3,10» / «3;10» / «3 10» — через `powershell -File` кома дає один рядок, тому приймаємо обидва.
 
 .PARAMETER Async
-    Просити сервер виконати застосування міграції фоновою задачею (`async: true` → 202 + jobId).
-    За замовчуванням вимкнено: старіші сервери поля не знають. Відповідь 202 обробляється завжди,
-    незалежно від цього прапора (опитування GET /jobs/{jobId}).
+    Застарілий, нічого не змінює: фоновий режим (`async: true` → 202 + jobId, опитування GET /jobs/{jobId}
+    до завершення) з LP-43 — режим ЗА ЗАМОВЧУВАННЯМ. Прапор лишено, щоб старі виклики не ламались.
+
+.PARAMETER Synchronous
+    Застосувати міграцію синхронним запитом (без `async`): відповідь 200 зі звітом. Для малих проєктів і
+    старіших серверів; великий проєкт (мільйони значень) може впертись у таймаут HTTP-клієнта чи проксі.
+    Сухий прогін завжди синхронний. Старіший сервер поля `async` не знає й відповідає синхронно (200) —
+    скрипт це обробляє однаково.
 
 .PARAMETER TableRenameMap
     Шлях до JSON-файлу з мапою «було → стало» кодів таблиць (і колонок) для структури, перейменованої між
@@ -85,6 +90,7 @@ param(
     [switch]$NoPublish,
     [string[]]$MigrateDocumentId,
     [switch]$Async,
+    [switch]$Synchronous,
     [string]$TableRenameMap,
     [int]$MigrateTimeoutMinutes = 60,
     [string]$ConfirmStand,
@@ -234,7 +240,8 @@ function Invoke-DocumentMigration {
             continue
         }
         $body = @{ targetVersionId = $TargetVersionId; mode = 'Safe'; dryRun = $false }
-        if ($Async) { $body.async = $true }
+        # LP-43: фон за замовчуванням (сервер: async && !dryRun → 202 + jobId); -Synchronous — явний перемикач.
+        if (-not $Synchronous) { $body.async = $true }
         if ($tableRenames) { $body.tableRenames = $tableRenames }
         $apply = Invoke-Ecr -Method POST -Path $path -Body $body
         if (Test-EcrMigrateSameVersion $apply) {

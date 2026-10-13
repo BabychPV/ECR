@@ -102,9 +102,14 @@ public sealed class LandScriptsHttpContractTests
         Assert.Contains("Test-EcrTemplateUnsuitable $cl", apply);
         Assert.Contains("Stop-EcrTemplateUnsuitable", apply);
         Assert.Contains("ECR-TMPL-4228", File.ReadAllText(LandFile("EcrApi.ps1")));
-        // 202 + jobId обробляється, `async` без -Async не надсилається.
+        // LP-43: застосування за замовчуванням у фоні (`async` надсилається, якщо не -Synchronous),
+        // 202 + jobId обробляється опитуванням задачі; dry-run завжди синхронний (без `async`).
+        Assert.Contains("[switch]$Synchronous", apply);
         Assert.Contains("-Allowed @(200, 202)", apply);
-        Assert.Contains("if ($Async) { $body.async = $true }", apply);
+        Assert.Contains("if (-not $Synchronous) { $body.async = $true }", apply);
+        Assert.Contains("Wait-EcrJob -JobId ([string]$apply.Json.jobId)", apply);
+        Assert.DoesNotContain("$previewBody.async", apply);
+        Assert.DoesNotContain("if ($Async)", apply);
     }
 
     [Theory]
