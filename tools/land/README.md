@@ -1,4 +1,4 @@
-﻿# tools/land: завантаження вкладки «2. Contract» шаблону Land
+# tools/land: завантаження вкладки «2. Contract» шаблону Land
 
 Скрипти PowerShell (Windows PowerShell 5.1 і PowerShell 7) працюють через REST API ECR.
 Нічого не видаляють. Не запускати проти робочої бази замовника без рішення людини.
@@ -247,7 +247,7 @@ C05 / C06_01 / C07_*; для методології з кількома табл
 пишеться; список аргументів, прив'язка виходу і `415_type2` не змінюються; повтор - 0 змін; у лозі окремий рядок
 `type1 без числа`). Функції `Get-LandParityBranchNullType1Component`, `Convert-LandParityBranchNullFormula`.
 
-#### OptionalArguments: необов'язкові аргументи C11_10 / C11_11_03 / C11_16 (D-397)
+#### OptionalArguments: необов'язкові аргументи C11_03 / C11_10 / C11_11_03 / C11_16 (D-397)
 
 Клас O з D-8: старий код НЕ передає аргумент для частини таблиць методології (атрибута AF-таблиці немає, `requiredFields`
 його не містить) - ключа немає, формула лишається нерозв'язаною, результат не пишеться. Без колонки з таким кодом
@@ -256,10 +256,9 @@ C05 / C06_01 / C07_*; для методології з кількома табл
 лише чернетки, не публікує; запускати ОСТАННІМ - після `Methodologies`, `CompositionMass`, `ParityBranch`) ставить у
 `;`-списку аргументів формул методологій з моделі (`argumentBridges.optionalArguments`) маркер `?` на елементі:
 `@Land_Measure_OperatingTime?`. Маркер знімає вимогу колонки (0438) для всієї версії, а відсутня комірка в рантаймі стає
-null (як порожня). Перелік (9 пар методологія/таблиця): C11_10 - `Land_Measure_OperatingTime` (T9_02, T9_11, T9a_24, T9a_26),
+null (як порожня). Перелік (11 пар методологія/таблиця): C11_03 - `Land_Measure_RunningHours` (T9_05, T9_14; Q-D8-2, дефолт «паритет зі старим кодом»: rename OperatingTime -> RunningHours старий код робить лише на 9a_17/9_06/9_09/9_13, тож на T9_05/T9_14 аргумент = null без нової версії шаблону); C11_10 - `Land_Measure_OperatingTime` (T9_02, T9_11, T9a_24, T9a_26),
 `Land_Measure_SubstanceConsumption` (T9_07 - після K1, T9a_27, T9a_28); C11_11_03 - `Land_Measure_MaterialResidence` (T9_06); C11_16 -
-`Land_Measure_FlowRateSulfur` (T9a_23). Класи K (конфлікт джерел) і Q (C11_03 `RunningHours` на T9_05/T9_14, рішення
-замовника Q-D8-2) НЕ входять. Попередження публікації `publish.warning.optionalArgumentNoColumn` називає позначений
+`Land_Measure_FlowRateSulfur` (T9a_23). Клас K (конфлікт джерел) НЕ входить. Попередження публікації `publish.warning.optionalArgumentNoColumn` називає позначений
 аргумент, якого немає в жодній прив'язаній таблиці (описка). Чиста логіка - `LandOptionalArguments.Lib.ps1` (тест
 `LandOptionalArgumentsTests`); перелік веде `af_attr_bridges.py` (`OPTIONAL_ARGUMENTS`), повтор - 0 змін.
 ⚠ Маркер per-версія: на таблицях, де колонка є (напр. T9_07, T9a_27 для OperatingTime), відсутня комірка стає null
