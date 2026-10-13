@@ -152,14 +152,30 @@ public sealed class LandNaeGroupBridgesModelTests
         var expectedPower = Power.SelectMany(p => p.Value.Select(nae => (Key: nae, Group: p.Key)))
             .ToDictionary(x => x.Key, x => x.Group);
 
-        // Category1: ключ без пробілів (як у коді) і з пробілом перед дужкою (як у шаблоні Excel).
+        // Category1: ключ без пробілів (як у коді) і всі написання з одним пробілом перед "(", після "(" і перед ")"
+        // (RCN-1: старий код знімає ВСІ пробіли, а рушій - лише краї й послідовності).
         var expectedCategory = new Dictionary<string, string>();
         foreach (var (group, naes) in Category1)
         {
             foreach (var nae in naes)
             {
-                expectedCategory[nae] = group;
-                expectedCategory[nae.Replace("(", " (", StringComparison.Ordinal)] = group;
+                if (!nae.Contains('(', StringComparison.Ordinal))
+                {
+                    expectedCategory[nae] = group;
+                    continue;
+                }
+
+                foreach (var a in new[] { "", " " })
+                {
+                    foreach (var b in new[] { "", " " })
+                    {
+                        foreach (var c in new[] { "", " " })
+                        {
+                            expectedCategory[nae.Replace("(", $"{a}({b}", StringComparison.Ordinal)
+                                .Replace(")", $"{c})", StringComparison.Ordinal)] = group;
+                        }
+                    }
+                }
             }
         }
 
@@ -177,10 +193,10 @@ public sealed class LandNaeGroupBridgesModelTests
         Assert.Equal(expectedPower.OrderBy(p => p.Key, StringComparer.Ordinal), actualPower.OrderBy(p => p.Key, StringComparer.Ordinal));
         Assert.Equal(expectedCategory.OrderBy(p => p.Key, StringComparer.Ordinal), actualCategory.OrderBy(p => p.Key, StringComparer.Ordinal));
 
-        // 15 NAE потужності + 28 NAE Category1 + 4 написання з пробілом перед дужкою; групи не перетинаються.
+        // 15 NAE потужності + 24 NAE Category1 без дужок + 4 NAE з дужками x 8 написань; групи не перетинаються.
         Assert.Equal(15, actualPower.Count);
-        Assert.Equal(32, actualCategory.Count);
-        Assert.Equal(47, entries.Count);
+        Assert.Equal(56, actualCategory.Count);
+        Assert.Equal(71, entries.Count);
         Assert.Empty(actualPower.Keys.Intersect(actualCategory.Keys));
 
         // Ключі унікальні й не збігаються без урахування регістру; код запису - літера + 10 hex.
@@ -339,10 +355,10 @@ public sealed class LandNaeGroupBridgesModelTests
             script, LandFile("LandNaeGroup.Lib.ps1"), Path.Combine(Dir, "land-template.model.json"));
 
         Assert.True(exit == 0, output);
-        Assert.Contains("COUNT=47", output, StringComparison.Ordinal);
+        Assert.Contains("COUNT=71", output, StringComparison.Ordinal);
         Assert.Contains("SKIPPED=0", output, StringComparison.Ordinal);
         Assert.Contains("POWER=15", output, StringComparison.Ordinal);
-        Assert.Contains("CAT=32", output, StringComparison.Ordinal);
+        Assert.Contains("CAT=56", output, StringComparison.Ordinal);
         Assert.Contains("P0801=9.9", output, StringComparison.Ordinal);
         Assert.Contains("SPACED=0788", output, StringComparison.Ordinal);
         Assert.Contains("BAD_COUNT=1", output, StringComparison.Ordinal);
