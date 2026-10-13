@@ -70,7 +70,12 @@ public sealed class SnapshotUnitContext(
     /// проблем публікації.
     /// </remarks>
     private ColumnDef? Column(CellReferenceNode reference)
-        => PublishChecks.LiveTables(snapshot.Sheets)
+        // ⛔ Код таблиці не унікальний між аркушами (T7_00 є і в Water Report, і в 7.0): посилання
+        // `[SHEET].[TABLE]…` шукає колонку лише в аркуші SHEET, як і ReferenceResolver (інакше SUM по
+        // m3 і thousand_m3 з різних аркушів дає хибне ECR-TMPL-4223).
+        => PublishChecks.LiveTables(snapshot.Sheets.Where(s => reference.SheetCode is null
+                                                               || string.Equals(
+                                                                   s.Code, reference.SheetCode, StringComparison.OrdinalIgnoreCase)))
             .Where(t => reference.TableCode is null
                         || string.Equals(t.Code, reference.TableCode, StringComparison.OrdinalIgnoreCase))
             .SelectMany(t => t.Columns)
