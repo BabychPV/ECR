@@ -218,9 +218,9 @@ public sealed class LandStandSafetyTests
         Assert.Equal(7, noDbExit);
         Assert.Contains("EcrLandUi", noDb, StringComparison.Ordinal);
 
-        // -DryRun без підтвердження дозволений (лише читання моделі).
+        // -DryRun без підтвердження дозволений (лише читання моделі), але з явним -SqlConnection: дефолту на стенд немає.
         var (dryExit, dry) = RunPowerShell(
-            "try { & $args[0] -BaseUrl 'http://localhost:5094' -DryRun; exit 0 } catch { Write-Output $_.Exception.Message; exit 7 }",
+            "try { & $args[0] -BaseUrl 'http://localhost:5094' -SqlConnection 'Server=localhost;Database=EcrLandDryRun;Integrated Security=true' -DryRun; exit 0 } catch { Write-Output $_.Exception.Message; exit 7 }",
             build);
         Assert.True(dryExit == 0, dry);
     }
@@ -252,7 +252,7 @@ public sealed class LandStandSafetyTests
             Assert.Contains("Assert-EcrMutationAllowed", build.Substring(at, 400), StringComparison.Ordinal);
         }
 
-        Assert.Contains("Assert-LocalSqlConnection $SqlConnection", build, StringComparison.Ordinal);
+        Assert.Contains("Assert-LocalSqlConnection $effectiveSqlConnection", build, StringComparison.Ordinal);
 
         // Усі не-GET через Invoke-Ecr проходять одну точку: guard стоїть у ній, до HttpClient.
         var api = File.ReadAllText(LandFile("EcrApi.ps1"));

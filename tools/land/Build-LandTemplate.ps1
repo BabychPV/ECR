@@ -79,7 +79,7 @@ param(
     [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'SubstanceApplicability', 'ParityBranch', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
-    [string]$SqlConnection = 'Server=localhost;Database=EcrLandUi;Integrated Security=true;TrustServerCertificate=true',
+    [string]$SqlConnection,
     [string]$TemplateCode = 'LAND_UI',
     [string]$ProjectCode = 'LANDUI2026',
     [int]$Year = 2026,
@@ -106,7 +106,18 @@ Set-StrictMode -Off
 # Безпека стенда: лише локальні API і SQL (база з іменем EcrLand*); мутації лише з явним
 # -ConfirmStand <адреса>/<база> (наприклад localhost:5094/EcrLandUi).
 Assert-LocalBaseUrl $BaseUrl
-$standDatabase = Assert-LocalSqlConnection $SqlConnection
+# -SqlConnection без значення за замовчуванням: дефолт на конкретний стенд мовчки цілив би в живу базу.
+# Не задано - база виводиться з -ConfirmStand (`<адреса>/<база>`), лише EcrLand*; інакше відмова.
+$effectiveSqlConnection = $SqlConnection
+if ([string]::IsNullOrWhiteSpace($effectiveSqlConnection)) {
+    $derivedDb = $null
+    if ($ConfirmStand -and $ConfirmStand.LastIndexOf('/') -gt 0) { $derivedDb = $ConfirmStand.Substring($ConfirmStand.LastIndexOf('/') + 1).Trim() }
+    if ([string]::IsNullOrWhiteSpace($derivedDb) -or $derivedDb -notmatch '^(?i)EcrLand[A-Za-z0-9_]*$') {
+        throw "Не задано -SqlConnection, і базу не виведено з -ConfirmStand: потрібен явний -SqlConnection або -ConfirmStand у формі <адреса>/<база> (наприклад localhost:5094/EcrLandUi; база лише EcrLand*). Скрипт не має стенда за замовчуванням. Відмова."
+    }
+    $effectiveSqlConnection = "Server=localhost;Database=$derivedDb;Integrated Security=true;TrustServerCertificate=true"
+}
+$standDatabase = Assert-LocalSqlConnection $effectiveSqlConnection
 if (-not $DryRun) { Set-EcrStandConfirmation -Stand $ConfirmStand -Url $BaseUrl -Database $standDatabase }
 # Дочірні скрипти (API) отримують лише адресу стенду: база їм невідома й не потрібна.
 $childStand = if ($ConfirmStand -and $ConfirmStand.LastIndexOf('/') -gt 0) { $ConfirmStand.Substring(0, $ConfirmStand.LastIndexOf('/')) } else { $ConfirmStand }
@@ -417,9 +428,9 @@ function Bulk-Insert($cn, [string]$table, $dt) {
 # Дані ті самі, що й через API; публікація, шапка, довідники й усе решта — через API.
 function Fill-StructureSql([int]$vid) {
     Assert-EcrMutationAllowed 'масове SQL-заповнення структури'
-    $null = Assert-LocalSqlConnection $SqlConnection
+    $null = Assert-LocalSqlConnection $effectiveSqlConnection
     Log '  структура: SQL-масово (SqlBulkCopy)'
-    $cn = New-Object System.Data.SqlClient.SqlConnection($SqlConnection)
+    $cn = New-Object System.Data.SqlClient.SqlConnection($effectiveSqlConnection)
     $cn.Open()
     try {
         $now = (Get-Date).ToUniversalTime()

@@ -32,7 +32,10 @@
 
 - Лише локальний стенд: `-BaseUrl` має вести на `localhost`, `127.0.0.1` або `[::1]`, а SQL (`-SqlConnection` у
   Build-LandTemplate) — на локальний сервер (`localhost`, `.`, `(local)`, `127.0.0.1`, `::1`, ім'я цієї машини, `(localdb)`)
-  і на базу з іменем `EcrLand*` (за замовчуванням `EcrLandUi`): локальний прод-інстанс старої системи не проходить.
+  і на базу з іменем `EcrLand*`: локальний прод-інстанс старої системи не проходить. ⚠ `-SqlConnection` **не має
+  значення за замовчуванням** (раніше цілив у живий `EcrLandUi`): задайте його явно або дайте `-ConfirmStand
+  <адреса>/<база>` — база `EcrLand*` береться з нього (`localhost:5101/EcrLandAccP` → `EcrLandAccP`, сервер
+  `localhost`); без жодного з двох (навіть із `-DryRun`) скрипт відмовляє. Іменований екземпляр — лише явним `-SqlConnection`.
   Рядок підключення розбирається `SqlConnectionStringBuilder` (при дублі ключів перемагає останнє, як у SqlClient).
   Чужа адреса (в т.ч. https) - відмова ще до входу.
 - Мутації — лише з явним `-ConfirmStand`. Apply-ContractHeader/Import-ContractDictionaries: адреса API (`localhost:5094`,
