@@ -120,3 +120,44 @@ function ConvertTo-LandSubstanceApplicabilityPlan {
     }
     return [pscustomobject]@{ Items = $items.ToArray(); Markers = $markers; Skipped = $skipped }
 }
+
+function Get-LandSubstanceApplicabilitySampleArguments {
+    <#
+    .SYNOPSIS
+        Аргументи тест-кейсу PARITY_1, яких потребує ОБГОРТКА застосовності: SUBSTANCE_APPLICABLE(..., <valueExpression>)
+        читає аргумент рядка (@Land_TypeFuelOrStream ...), а правило без обгортки його може не читати - тоді simulate
+        дає 422 ECR-CALC-0422 (#ARG) і публікація блокується (D-7).
+    .DESCRIPTION
+        Значення береться з довідника застосовності (КЛЮЧ селектора, не значення прода): перший не-маркерний запис
+        методології з видом `Kind`. Для valueExpression `in(@A,'x',...)` (вид contains) - перший літерал; для
+        REGFIELD(@A,'F') значення - код запису довідника, а не селектор, тому аргумент не задається.
+    .PARAMETER Entries
+        Записи довідника з моделі (code, fields.METHODOLOGY/SELECTOR_KIND/SELECTOR_VALUE).
+    .OUTPUTS
+        hashtable: код аргументу -> текст (порожній, якщо підібрати нічого).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Methodology,
+        [Parameter(Mandatory)][string]$Kind,
+        [Parameter(Mandatory)][string]$ValueExpression,
+        [Parameter(Mandatory)][AllowEmptyCollection()][AllowNull()][object[]]$Entries
+    )
+
+    $picked = @{}
+    $expr = $ValueExpression.Trim()
+    if ($expr -cmatch '^@([A-Za-z_][A-Za-z0-9_]*)$') {
+        $arg = $Matches[1]
+        foreach ($e in @($Entries)) {
+            if ($null -eq $e) { continue }
+            $f = $e.fields
+            if (([string]$f.METHODOLOGY) -ceq $Methodology -and ([string]$f.SELECTOR_KIND) -ceq $Kind -and ([string]$f.SELECTOR_VALUE) -cne '*') {
+                $picked[$arg] = [string]$f.SELECTOR_VALUE
+                break
+            }
+        }
+        return $picked
+    }
+    $m = [regex]::Match($expr, "in\(\s*@([A-Za-z_][A-Za-z0-9_]*)\s*,\s*'([^']+)'")
+    if ($m.Success) { $picked[$m.Groups[1].Value] = $m.Groups[2].Value }
+    return $picked
+}

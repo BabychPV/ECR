@@ -1637,6 +1637,7 @@ function Stage-CompositionMass {
 function Stage-SubstanceApplicability {
     Log '== SubstanceApplicability =='
     . (Join-Path $here 'LandSubstanceApplicability.Lib.ps1')
+    . (Join-Path $here 'LandParityRuleArgs.Lib.ps1')
     LoginAs 'land-owner'
     $sa = $Mdl.substanceApplicability
     if ($null -eq $sa) { throw 'У моделі немає substanceApplicability: перегенеруйте модель (model-gen).' }
@@ -1662,12 +1663,32 @@ function Stage-SubstanceApplicability {
         $g = Invoke-Ecr -Method GET -Path "/api/v1/methodologies/$m/versions/$vid/category-rule"
         $current = if ($g.Status -eq 200) { [string]$g.Json.expression } else { '' }
         if ([string]::IsNullOrWhiteSpace($current)) { Log "  ${name}: правила категорії ще немає - спершу -Stage LandParity"; continue }
-        if (Test-LandSubstanceApplicabilityRule -Rule $current) { Log "  ${name}: обгортка вже є"; continue }
-        $wrapped = New-LandSubstanceApplicabilityRule -Inner $current -Registry ([string]$sa.registry) `
-            -Methodology $name -Kind ([string]$p.Value.kind) -ValueExpression ([string]$p.Value.valueExpression)
-        $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/category-rule" -Body @{ expression = $wrapped }
-        if ($put.Status -eq 200) { $changed++; Log "  ${name}: правило категорії обгорнуто ($($p.Value.kind), записів $($p.Value.rows))" }
-        else { Log "  ! ${name}: category-rule HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
+        if (Test-LandSubstanceApplicabilityRule -Rule $current) { Log "  ${name}: обгортка вже є" }
+        else {
+            $wrapped = New-LandSubstanceApplicabilityRule -Inner $current -Registry ([string]$sa.registry) `
+                -Methodology $name -Kind ([string]$p.Value.kind) -ValueExpression ([string]$p.Value.valueExpression)
+            $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/category-rule" -Body @{ expression = $wrapped }
+            if ($put.Status -eq 200) { $changed++; Log "  ${name}: правило категорії обгорнуто ($($p.Value.kind), записів $($p.Value.rows))" }
+            else { Log "  ! ${name}: category-rule HTTP $($put.Status) $(Get-EcrErrorCode $put)"; continue }
+        }
+
+        # D-7: обгортка читає @-аргумент селектора (напр. @Land_TypeFuelOrStream), якого правило без обгортки може не
+        # читати, - без нього в PARITY_1 simulate дає 422 ECR-CALC-0422 і публікація блокується. Повтор - 0 змін.
+        $regModel = @($Mdl.registries) | Where-Object { $_.code -eq [string]$sa.registry } | Select-Object -First 1
+        $needed = Get-LandSubstanceApplicabilitySampleArguments -Methodology $name -Kind ([string]$p.Value.kind) `
+            -ValueExpression ([string]$p.Value.valueExpression) -Entries @($regModel.entries)
+        if ($needed.Count -eq 0) { continue }
+        $tests = @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/tests").Json)
+        $t = $tests | Where-Object { [string]$_.code -eq 'PARITY_1' } | Select-Object -First 1
+        if (-not $t) { Log "  ${name}: тест-кейсу PARITY_1 немає - аргументи обгортки не додано"; continue }
+        $inp = [string]$t.inputJson | ConvertFrom-Json
+        $merged = Merge-LandParityArguments -Existing @($inp.arguments) -Needed $needed
+        if ($merged.Added.Count -eq 0) { continue }
+        $newInput = [ordered]@{ documentId = $inp.documentId; periodKey = $inp.periodKey; arguments = @($merged.Arguments) }
+        $body = @{ inputJson = ($newInput | ConvertTo-Json -Depth 8 -Compress); expectedJson = [string]$t.expectedJson; tolerance = [string]$t.tolerance }
+        $pt = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/tests/PARITY_1" -Body $body
+        if ($pt.Status -eq 200) { $changed++; Log "  ${name}: PARITY_1 + аргументи обгортки: $($merged.Added -join ',')" }
+        else { Log "  ! ${name}: PARITY_1 HTTP $($pt.Status) $(Get-EcrErrorCode $pt)" }
     }
     Log "  змінено правил: $changed"
 }
