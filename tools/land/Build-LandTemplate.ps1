@@ -29,7 +29,8 @@
       CompositionMass (лише явно, в All не входить) у формулах ЧЕРНЕТОК C11_01/02/10, C12_01/03 токен @CompositionMass
                     замінюється фрагментом складу по речовині (довідники LAND_HSE400_COMPOSITION/_STREAM/_SUBSTANCE,
                     CURRENT_SUBSTANCE()); потребує довідника LAND_HSE400_SUBSTANCE (Registries або
-                    Import-LandHse400Substance.ps1) і версії вище за Legacy
+                    Import-LandHse400Substance.ps1). Чернетку з фрагментом сам переводить у NumericMode=Strict
+                    (REG*/CURRENT_SUBSTANCE() у Legacy не публікуються, ECR-CALC-0433); -KeepNumericMode вимикає
 
     ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє, окрім явного
     -PruneStaleTables (м'яке видалення таблиць чернетки, яких немає в моделі; без прапора - лише попередження).
@@ -46,6 +47,8 @@
 .PARAMETER PruneStaleTables   LP-28: м'яко видалити з чернетки таблиці, яких немає в моделі (DELETE sheets/{аркуш}/tables/{код};
                               сервер відмовляє, коли у версії є документи). Без прапора - лише попередження зі списком кодів.
 .PARAMETER KnownStaleTables   Коди "АРКУШ/ТАБЛИЦЯ" (або лише код таблиці), які не вважати застарілими.
+.PARAMETER KeepNumericMode    -Stage CompositionMass: не переводити чернетки з фрагментом складу в NumericMode=Strict
+                              (за замовчуванням переводить: REGFIND/REGFIELD/CURRENT_SUBSTANCE() у Legacy -> ECR-CALC-0433).
 .PARAMETER DryRun             Лише читання й підрахунок.
 #>
 [CmdletBinding()]
@@ -66,6 +69,7 @@ param(
     [string]$ConfirmStand,
     [switch]$FillData,
     [switch]$PruneStaleTables,
+    [switch]$KeepNumericMode,
     [string[]]$KnownStaleTables = @(),
     [switch]$DryRun
 )
@@ -1403,19 +1407,38 @@ function Stage-CompositionMass {
         $v = $vers | Sort-Object id -Descending | Select-Object -First 1
         if ([string]$v.status -eq 'Published') { Log "  ${name}: остання версія опублікована - не чіпаю"; continue }
         $vid = [int]$v.id
-        if ([string]$v.level -eq 'Legacy') { Log "  ! ${name}: версія $vid рівня Legacy - CURRENT_SUBSTANCE() не опублікується (ECR-CALC-0433)" }
         $n = 0
-        foreach ($f in @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/formulas").Json)) {
+        $hasFragment = $false
+        $fs = @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/formulas").Json)
+        foreach ($f in $fs) {
+            if ([string]$f.expression -match 'CURRENT_SUBSTANCE\s*\(') { $hasFragment = $true }
             $r = Convert-LandHse400CompositionMassFormula -Expression ([string]$f.expression) -ArgumentsCsv $f.argumentsCsv `
                 -Fragment ([string]$p.Value.fragment) -StreamArguments @($p.Value.arguments)
             if (-not $r.Changed) { continue }
             $body = @{ expression = $r.Expression; resultType = $f.resultType; outputUnitId = $f.outputUnitId; argumentsCsv = $r.ArgumentsCsv }
             if ($null -ne $f.scope) { $body.scope = $f.scope }
             $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/formulas/$($f.code)" -Body $body
-            if ($put.Status -eq 200) { $n++ } else { Log "  ! ${name}/$($f.code): HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
+            if ($put.Status -eq 200) { $n++; $hasFragment = $true } else { Log "  ! ${name}/$($f.code): HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
         }
         $changed += $n
         Log "  ${name}: формул із фрагментом складу - $n"
+
+        # Фрагмент вживає CURRENT_SUBSTANCE() і REGFIND/REGFIELD - функції ярусу Extension: у версії з NumericMode=Legacy
+        # публікація дає ECR-CALC-0433 (RC31: C11_01/02/10, C12_01). Тому чернетка з фрагментом переводиться в Strict
+        # (PUT .../versions/{vid}/modes; календарний режим і журнал лишаються як є). Strict - явне рішення з нової дати
+        # дії, не заднім числом: перша версія методології (як тут) переходу не має. ⚠ Strict міняє арифметику версії:
+        # double(NCalc 1.3.8) -> decimal, ділення на нуль -> #DIV/0 замість +∞, округлення Round -> AwayFromZero.
+        # -KeepNumericMode лишає режим як є (тоді публікація дасть 0433 для версій із фрагментом).
+        if ($hasFragment -and -not $KeepNumericMode) {
+            if ([string]$v.numericMode -eq 'Strict') {
+                Log "  ${name}: версія $vid уже Strict"
+            } else {
+                $mb = @{ numericMode = 'Strict'; calendarMode = [string]$v.calendarMode; traceLevel = [string]$v.traceLevel }
+                $mr = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/modes" -Body $mb
+                if ($mr.Status -eq 200) { Log "  ${name}: версія $vid -> NumericMode=Strict (було $($v.numericMode))" }
+                else { Log "  ! ${name}: режим Strict не задано: HTTP $($mr.Status) $(Get-EcrErrorCode $mr)" }
+            }
+        }
     }
     Log "  змінено формул: $changed"
 }

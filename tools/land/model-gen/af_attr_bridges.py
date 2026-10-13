@@ -48,6 +48,20 @@ RENAMES = [
      'ECW_C11_11_02.cs:86-95'),
 ]
 
+# Колонка Excel для атрибута AF, чий заголовок не належить сім'ї атрибута (шаблон називає її інакше, ніж клас AF).
+# Лише там, де ВСІ три умови: (1) атрибут стоїть у класі AF-таблиці, а сім'я його величини в Excel колонок не має;
+# (2) у таблиці рівно ОДНА вимірювана колонка введення з таким заголовком, і жоден інший атрибут AF на неї не відображено;
+# (3) методологія, що читає атрибут, у старому коді бере як час роботи саме час перебування (rename MaterialResidence ->
+# OperatingTime в ECW_C11_01.cs:335-341 на 9a_17). Порядок атрибутів класу збігається з порядком колонок Excel.
+EXCEL_HEADER_OVERRIDES = {
+    ('T9a_16', 'Land_Measure_OperatingTime'): (
+        r'^material residence', 'клас AF T_Air_P09a_ProcessUnits_16: OperatingTime стоїть на місці єдиної колонки Excel '
+        '«Material residence time» (K); C11_01.cs:335-341 бере час перебування як OperatingTime'),
+    ('T9a_30', 'Land_Measure_OperatingTime'): (
+        r'^material residence', 'клас AF T_Air_P09a_ProcessUnits_30: OperatingTime - єдиний вимірюваний атрибут, а в '
+        'Excel єдина вимірювана колонка «Material residence time» (K); C11_01.cs:335-341'),
+}
+
 # Сім'ї вимірюваних атрибутів: (ім'я сім'ї, regex заголовка (нижній регістр), атрибути AF у порядку класу береться з класу).
 FAMILIES = [
     ('optime', r'^operating time',
@@ -223,6 +237,14 @@ def _map_attributes(t_, attrs):
             res[a] = (None, 'у таблиці Excel немає колонки із заголовком за шаблоном %s' % DIRECT[a])
         else:
             res[a] = (None, 'неоднозначно: %d колонок із заголовком за шаблоном %s' % (len(hits), DIRECT[a]))
+    # явні винятки (EXCEL_HEADER_OVERRIDES): лише якщо атрибут лишився без колонки, кандидат один і ще нікому не відданий
+    for (tcode, a), (rx, _why) in EXCEL_HEADER_OVERRIDES.items():
+        if tcode != t_['code'] or a not in names or res.get(a, (None,))[0] is not None:
+            continue
+        used = {id(c) for c, _ in res.values() if c is not None}
+        hits = [c for c in cands if c['kind'] == 'month' and re.search(rx, c['header']) and id(c) not in used]
+        if len(hits) == 1:
+            res[a] = (hits[0], 'excel-header-override')
     return res
 
 
@@ -338,9 +360,13 @@ def apply(out, ro_all, rules, af_attrs, calc_tables):
                     expr = ''.join('[Period].Sequence = %d ? [%s] : ' % (m_, cand['codes'][m_ - 1]) for m_ in range(1, 12)) + '[%s]' % cand['codes'][11]
                 else:
                     expr = '[%s]' % cand['codes'][0]
+                override = EXCEL_HEADER_OVERRIDES.get((tcode, srcattr))
+                if override is not None and why == 'excel-header-override':
+                    via = 'excel header override (%s)' % override[1]
+                else:
+                    via = 'header+order' if how is None else 'legacy rename (%s)' % how
                 ev = 'bridge: methodology argument %s = AF attribute %s of %s, %s%s' % (
-                    a, srcattr, attrs_info['class'], 'header+order' if how is None else 'legacy rename (%s)' % how,
-                    '' if how is None else ' ')
+                    a, srcattr, attrs_info['class'], via, '' if how is None else ' ')
                 new = {'code': a, 'dataType': 'Formula', 'headerEn': '%s (argument bridge: AF attribute %s)' % (a, srcattr),
                        'unit': cand.get('unit'), 'expression': expr, 'ecrAdded': ev}
                 if cand['dataType'] == 'String':
