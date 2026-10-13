@@ -29,7 +29,21 @@ public sealed record CellReferenceNode(
     string? TableCode,
     RowSelector Row,
     string ColumnSelector,
-    int PeriodOffset) : AstNode;
+    int PeriodOffset) : AstNode
+{
+    /// <summary>
+    /// WW-03: <c>[Period:#k]</c> — абсолютний номер періоду того самого року
+    /// (<c>PeriodKey.Sequence</c>); <c>null</c> — посилання відносне (<see cref="PeriodOffset"/>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Взаємовиключне з <see cref="PeriodOffset"/> ≠ 0: парсер завжди дає
+    /// <c>PeriodOffset = 0</c>, коли заповнене це поле.
+    /// </remarks>
+    public int? AbsolutePeriod { get; init; }
+
+    /// <summary>Чи читає посилання ІНШИЙ період (зсув або абсолютний номер).</summary>
+    public bool IsCrossPeriod => PeriodOffset != 0 || AbsolutePeriod is not null;
+}
 
 /// <summary>Посилання діалекту Methodology: <c>@Arg</c>, <c>CST.X</c>, <c>!Formula</c>, <c>HDR.Y</c>.</summary>
 public sealed record SymbolReferenceNode(SymbolKind Kind, string Name) : AstNode;

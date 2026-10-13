@@ -88,6 +88,19 @@ public sealed class Lexer(DialectSyntax syntax)
                     tokens.Add(ReadPlaceholder(expression, ref i));
                     continue;
 
+                case '#' when depth > 0 && i + 1 < expression.Length && char.IsDigit(expression[i + 1]):
+                    // WW-03: `[Period:#3]` — абсолютний період року. Лише всередині дужок і лише з
+                    // цифрами: одна лексема `#3`, яку розбирає парсер (поза `[Period:`
+                    // вона дає звичайну відмову «очікувався код»).
+                    i++;
+                    while (i < expression.Length && char.IsDigit(expression[i]))
+                    {
+                        i++;
+                    }
+
+                    tokens.Add(new Token(TokenType.Identifier, expression[start..i], start, i - start));
+                    continue;
+
                 case '@':
                     // ⛔ Ім'я параметра читається ТУТ, разом із `@`, а не
                     // загальним `ReadWord` — бо воно єдине в мові може містити

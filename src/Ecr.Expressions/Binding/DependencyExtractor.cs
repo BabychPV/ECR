@@ -21,6 +21,12 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
     public const byte KindCrossPeriod = 3;
 
     /// <summary>
+    /// WW-03: абсолютний період року <c>[Period:#k]</c>; номер k лежить у
+    /// <c>PeriodOffset</c> (не зсув!). Вид 4 — <c>CrossProject</c>.
+    /// </summary>
+    public const byte KindCrossPeriodAbsolute = 5;
+
+    /// <summary>
     /// Поле запису довідника — друге ребро <c>REGFIELD</c>, КРІМ звичайної
     /// Cell-залежності від самої Lookup-комірки (ту додає загальний обхід
     /// аргументів функції, як для будь-якого іншого посилання-аргументу).
@@ -195,8 +201,15 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
             return;
         }
 
-        var kind = reference.PeriodOffset == 0 ? KindCell : KindCrossPeriod;
-        var offset = reference.PeriodOffset == 0 ? (short?)null : (short)reference.PeriodOffset;
+        // WW-03: `[Period:#k]` — свій вид (5): у `PeriodOffset` тут НЕ зсув, а номер періоду року k.
+        // Окремий вид, а не кодування в зсуві: читачі, що дивляться лише на `PeriodOffset != 0`,
+        // не повинні сприймати k як «k періодів назад/вперед».
+        var kind = reference.AbsolutePeriod is not null
+            ? KindCrossPeriodAbsolute
+            : reference.PeriodOffset == 0 ? KindCell : KindCrossPeriod;
+        var offset = reference.AbsolutePeriod is { } absolute
+            ? (short)absolute
+            : reference.PeriodOffset == 0 ? (short?)null : (short)reference.PeriodOffset;
 
         if (reference.Row is RowSelector.Range range)
         {
@@ -286,7 +299,7 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
         // CrossPeriod ребро для самої комірки генеричний обхід додає
         // однаково — лише другого, Registry-ребра, для минулого періоду тут
         // не буде.
-        if (reference.PeriodOffset != 0)
+        if (reference.IsCrossPeriod)
         {
             return;
         }
@@ -385,12 +398,15 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
 }
 
 /// <summary>Витягнута залежність.</summary>
-/// <param name="DependsOnKind">0 Cell, 1 Header, 2 Registry, 3 CrossPeriod, 4 CrossProject.</param>
+/// <param name="DependsOnKind">0 Cell, 1 Header, 2 Registry, 3 CrossPeriod, 4 CrossProject, 5 CrossPeriodAbsolute (WW-03).</param>
 /// <param name="TableDefId">Таблиця; <c>null</c> для шапки.</param>
 /// <param name="RowKey">Конкретний рядок; <c>null</c> для предиката.</param>
 /// <param name="ColumnDefId">Колонка.</param>
 /// <param name="FilterJson">Предикат для <c>RowMode = Dynamic</c>.</param>
-/// <param name="PeriodOffset">Зсув періоду; <c>null</c> для поточного.</param>
+/// <param name="PeriodOffset">
+/// Зсув періоду; <c>null</c> для поточного. Для <see cref="DependencyExtractor.KindCrossPeriodAbsolute"/> —
+/// НОМЕР періоду року k, не зсув.
+/// </param>
 /// <param name="SortOrder">Порядковий номер у списку залежностей формули.</param>
 public sealed record ExtractedDependency(
     byte DependsOnKind, int? TableDefId, string? RowKey, int? ColumnDefId,

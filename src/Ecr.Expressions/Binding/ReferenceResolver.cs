@@ -47,7 +47,7 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
         switch (node.Row)
         {
             case RowSelector.Current:
-                return new ResolvedReference(table.Id, currentRowKey, columnId.Value, node.PeriodOffset, null);
+                return new ResolvedReference(table.Id, currentRowKey, columnId.Value, node.PeriodOffset, null, node.AbsolutePeriod);
 
             case RowSelector.Single single:
             {
@@ -72,13 +72,13 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
                     return null;
                 }
 
-                return new ResolvedReference(table.Id, single.RowKey, columnId.Value, node.PeriodOffset, null);
+                return new ResolvedReference(table.Id, single.RowKey, columnId.Value, node.PeriodOffset, null, node.AbsolutePeriod);
             }
 
             case RowSelector.Range:
                 // Діапазон резолвиться не в одне посилання, а в СПИСОК —
                 // цим займається DependencyExtractor разом із RangeExpander.
-                return new ResolvedReference(table.Id, null, columnId.Value, node.PeriodOffset, null);
+                return new ResolvedReference(table.Id, null, columnId.Value, node.PeriodOffset, null, node.AbsolutePeriod);
 
             case RowSelector.Predicate predicate:
             {
@@ -91,7 +91,7 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
                 }
 
                 return new ResolvedReference(
-                    table.Id, null, columnId.Value, node.PeriodOffset, ToFilterJson(predicate.Condition));
+                    table.Id, null, columnId.Value, node.PeriodOffset, ToFilterJson(predicate.Condition), node.AbsolutePeriod);
             }
 
             default:
@@ -360,4 +360,5 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
 
 /// <summary>Резолвлене посилання.</summary>
 public sealed record ResolvedReference(
-    int TableDefId, string? RowKey, int ColumnDefId, int PeriodOffset, string? FilterJson);
+    int TableDefId, string? RowKey, int ColumnDefId, int PeriodOffset, string? FilterJson,
+    int? AbsolutePeriod = null);

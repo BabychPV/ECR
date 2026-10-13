@@ -85,7 +85,7 @@ public sealed class FormulaDependency : Entity<long>
     public int? FormulaDefId { get; private init; }
     public int? BindingId { get; private init; }
 
-    /// <summary>0 Cell, 1 Header, 2 Registry, 3 CrossPeriod, 4 CrossProject.</summary>
+    /// <summary>0 Cell, 1 Header, 2 Registry, 3 CrossPeriod, 4 CrossProject, 5 CrossPeriodAbsolute (WW-03: k у <c>PeriodOffset</c>).</summary>
     public byte DependsOnKind { get; private set; }
 
     public int? TableDefId { get; private init; }
@@ -98,7 +98,7 @@ public sealed class FormulaDependency : Entity<long>
     /// <summary>Предикат для <c>RowMode = Dynamic</c>: списку рядків наперед не існує.</summary>
     public string? FilterJson { get; private init; }
 
-    /// <summary>Зсув періоду: <c>[Period:-1]</c> → −1.</summary>
+    /// <summary>Зсув періоду: <c>[Period:-1]</c> → −1; для виду 5 — номер періоду року k.</summary>
     public short? PeriodOffset { get; private init; }
 
     /// <summary>Позиція в розкритому діапазоні.</summary>
