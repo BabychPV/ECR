@@ -108,7 +108,7 @@
 | N-4 | Редактор M:N (`RegistryEntryLink`) | замінює «довідник-зв'язка» (`R-7`) |
 | N-5 | Автоматичний перерахунок після зміни довідника | `D-39`: закриті періоди — ніколи; відкриті — явною дією (`R-14`) |
 | N-6 | Зворотна синхронізація з `FLERT.dbo` | `D-50`: master — ECR; `R-26` |
-| N-7 | Функції довідників у версіях `Legacy` | чинний рушій їх не рахував: `ECR-CALC-0433` (`02b-expressions.md:726-731`) |
+| N-7 | Функції довідників у версіях `Legacy` | чинний рушій їх не рахував: `ECR-CALC-0433` (`02b-expressions.md:726-731`). ✎ D-426 (14.10): тепер дозволені в `Legacy` |
 | N-8 | Пошук запису на дату події (`REGFINDAT`) і зведений вигляд «компоненти в стовпцях» | наступна ітерація (§11.5, `RT-37`) |
 
 ### 2.3 Сценарії
@@ -484,7 +484,7 @@ Upsert / Batch / CSV / Import (одна точка: UpsertRegistryEntryHandler.A
   `SUBSTANCE`, `REGFIELD`. У методологіях регістр значущий (`DialectCatalog.cs:118-125`), тож
   правильне написання лише одне.
 - У методологіях функції мають ярус **`Extension`**. У версії `Legacy` це помилка публікації
-  `ECR-CALC-0433` (`DialectCatalog.cs:271-273`), бо чинний рушій таких функцій не мав. Діалект
+  `ECR-CALC-0433` (`DialectCatalog.cs:271-273`), бо чинний рушій таких функцій не мав. ✎ D-426 (14.10): для `REG*`, `CURRENT_SUBSTANCE`, `SUBSTANCE_APPLICABLE` це більше не так — дозволені в `Legacy`. Діалект
   `Report` їх не отримує: там заборонене все, крім власного рядка (`Parser.cs:595-608`).
 - **Жодного звернення до БД під час обчислення** (`02b-expressions.md:782-785`,
   `MethodologyFunctions.cs:28-32`). Знімок довідників завантажується до прогону, як це вже робить
@@ -573,7 +573,7 @@ field_path     = string ;          (* 'COMPONENT.MW' — сегменти чер
 | 18 | `ROW.` лише в області агрегата або правила, `THIS` — лише в правилі | `ECR-TMPL-4222` | `expr.rowReferenceOutsideScope`, `expr.thisOutsideRule` |
 | 19 | `EntryRef` не бере участі в арифметиці й порівняннях з числом | `ECR-TMPL-4222` | `expr.entryRefMisuse` |
 | 20 | одиниці полів беруть участь у перевірках 9–10 `02b` | `ECR-TMPL-4223` | наявні |
-| 21 | `Legacy` + функції довідників | `ECR-CALC-0433` | наявний |
+| 21 | `Legacy` + функції довідників | `ECR-CALC-0433` (✎ D-426 (14.10): крім `REG*`/`CURRENT_SUBSTANCE`/`SUBSTANCE_APPLICABLE` — дозволені) | наявний |
 | (попередження) | фільтр без індексного шляху | — | `expr.registryScanUnindexed` |
 
 ### 5.6 Приклади на формулах форми 301
@@ -1258,7 +1258,7 @@ append-only блоків).
 | RT-21 | Статична перевірка: довідники, поля, ключі, одиниці, `EntryRef`, залежності | `Binding/ReferenceResolver.cs`, `Binding/TypeChecker.cs`, `Binding/UnitChecker.cs`, `Binding/DependencyExtractor.cs`, `09-seed.sql` (блок expressions, `expr.*`), тести | RT-20b | перевірки 15–21 (§5.5) з позиціями; Д-5 закрито (описка в `REGFIELD` дає помилку публікації) | хв. 5 |
 | RT-22 | Завантажувач знімка | `Ports/IRegistrySnapshotLoader.cs`, `Application/Registries/RegistrySnapshot.cs`, `Infrastructure/Persistence/RegistrySnapshotLoader.cs`, DI (блок expressions), `02-contracts.md` (порт), `contracts/trace-exempt.md` (зняти `ФВ-8.17`), `tests/Ecr.Infrastructure.Tests/Persistence/RegistrySnapshotLoaderTests.cs` | RT-04, RT-05, RT-07 | дата: запис, закритий 15-го, невидимий на кінець місяця; `AS OF`: правка після моменту невидима; видалені й діти невидимого батька відсутні | хв. 4 |
 | RT-23a | Методологія бачить довідник + **золотий тест 301** | `Ecr.Calculations/CalculationInputBuilder.cs` (`Lookup` → `EntryRef`, лише `Strict`), `Application/Ports/ICalculationModule.cs` (`CalculationArgument` + `long? EntryId = null` у кінець), `MethodologyEvaluationContext.cs`, `GenericCalculationModule.cs` (знімок у `PrepareAsync`), `CalculationOrchestrator.cs` (`RegistryAsOfUtc`, кеш знімків на прогін), `tests/Ecr.Calculations.Tests/Registries/Hse301GoldenTests.cs`, `tests/Ecr.TestKit/Fixtures/flert-1d2-370-winter.json` (склад кейсу — за робочим припущенням RQ-1), `tests/Ecr.TestKit/Fixtures/registry-import/component-mw-hysys.csv` (новий: код, формула, `N_C`, `N_S`, M HYSYS для 33 компонентів моря, §11.4), `contracts/trace-exempt.md` (зняти `ФВ-9.18`) | RT-20b, RT-22 | AC-1 (§10); версія `Legacy` дає побітно ті самі числа, що до кроку | хв. 5 |
-| RT-23b | Публікація методології: перевірки й `RegistryUse` | `Calculations/MethodologyPublishChecks.cs`, `PublishMethodologyHandler.cs`, `Ports/IRegistryUseStore.cs`, `Infrastructure/Persistence/RegistryUseStore.cs`, тести | RT-21, RT-23a | описка в полі → 422 з позицією; `REGSUM` у `Legacy` → `ECR-CALC-0433`; `RegistryUse` переписано | хв. 6 |
+| RT-23b | Публікація методології: перевірки й `RegistryUse` | `Calculations/MethodologyPublishChecks.cs`, `PublishMethodologyHandler.cs`, `Ports/IRegistryUseStore.cs`, `Infrastructure/Persistence/RegistryUseStore.cs`, тести | RT-21, RT-23a | описка в полі → 422 з позицією; `REGSUM` у `Legacy` → `ECR-CALC-0433` (✎ D-426 (14.10): тепер дозволено); `RegistryUse` переписано | хв. 6 |
 | RT-24 | Шаблони на знімку; `REGFIELD` читає `Lookup`/`Unit`; `null` для порожнього (Д-2) | `Registries/RegistryFieldSnapshotLoader.cs` (з D16-04: → `IRegistrySnapshotLoader`), `Recalculation/RecalculationService.cs`, `Recalculation/SliceEvaluationContext.cs`, публікація шаблону (`Templates/PublishChecks.cs`: перевірки + `RegistryUse`), тести | RT-22, RT-21, **D16-04** ([DIRECTIVE-16 §2 D16-04](DIRECTIVE-16.md), виконано в `5f00b791` і `400c58b1`) | формула шаблону з `REGSUM` рахується в перерахунку; правило валідації документа з функцією довідника рахується через механізм D16-04 на «Перевірити», поданні **і збереженні** (`PatchCellsHandler`, `400c58b1`, §5.12); храповик `PatchCellsQueryCountTests` без змін; ✎ 2026-10-13 (LP-40): знімок у шаблонний перерахунок підключено лише тепер — `RecalculationService` вантажить його за літералами `REG*`-форм цілей (`Recalculation/TemplateRegistrySnapshots.cs`, один прочит БД на скоуп, знімок на останній день періоду), `SliceEvaluationContext.Registries` віддає його лише формулі з `REG*`; ⚠ зміна складу довідника шаблонні формули НЕ перераховує (зворотного індексу довідник → формула шаблону немає) — після імпорту складу потрібен recalculate проєкту | хв. 7 |
 | RT-25 | Свіжість і перерахунок зачеплених | `Infrastructure/Persistence/MethodologyStore.cs` (`GetCalculationFreshnessAsync`), `Ports/IMethodologyStore.cs` (`ChangedRegistries` у кінець), `Documents/GetCalculationResultsHandler.cs`, `Registries/Impact/RegistryImpactHandlers.cs`, `Api/Controllers/RegistryImpactController.cs`, `02-contracts.md` §9, `09-seed.sql`, `contracts/trace-exempt.md` (зняти `ФВ-9.19`), `web features/registries/impact/api.ts`; регенерація | RT-05, RT-23b, RT-24 | правка складу → результат документа «застарілий» з назвою довідника; `impact` не повертає закритих періодів; `recalculate-impacted` → 202 | хв. 8 |
 | RT-26 | Метадані мови й прев'ю | `Expressions/GetExpressionMetadataHandler.cs` (`registries[]`), `Expressions/PreviewExpressionHandler.cs`, `Api/Controllers/ExpressionsController.cs` (`POST preview`), `02-contracts.md` §9, `web features/expressions/api.ts`; регенерація | RT-22, RT-21 | прев'ю μ для (1D-2, 370 Winter) = AC-1; без `Registry.View` → 403 | хв. 6 |
@@ -1389,7 +1389,7 @@ append-only блоків).
 | AC-6 | Композиція: видалення кейсу з `Restrict` → 409; з `Cascade` → кейс і склад видалені, ключі звільнені; склад невидимий, коли кейс закритий датою | RT-12 |
 | AC-7 | Повтор прогону `AS OF RegistryAsOfUtc` після правки складу дає побітно ті самі результати, що й первинний прогін | RT-22/RT-23a |
 | AC-8 | Правка складу позначає результати документа відкритого періоду застарілими з назвою довідника; `impact` не показує закритих періодів; автоматичного перерахунку немає | RT-25 |
-| AC-9 | `REGFIND` / `REGSUM` у версії `Legacy` → `ECR-CALC-0433`; наявні версії `Legacy` рахують побітно так само, як до змін | RT-20a, RT-23a |
+| AC-9 | ✎ D-426 (14.10): ~~`REGFIND` / `REGSUM` у версії `Legacy` → `ECR-CALC-0433`~~ тепер дозволені; `Ln`/`ifs`/`CONVERT`/`SUBSTANCE` у `Legacy` → `ECR-CALC-0433`; наявні версії `Legacy` рахують побітно так само, як до змін | RT-20a, RT-23a |
 | AC-10 | Імпорт транспонованого фрагмента `streams Offshore` і плоского `Current_20250805` дає 126 потоків, 220 кейсів, рядки складу; дублі `CO`/`Carbon_Monoxide` з різними значеннями — помилка рядка; файл 2.3 МБ приймається | RT-18a/b, RT-36 |
 | AC-11 | Редактор: вставка блоку з Excel з `Lookup` за назвою; дубль ключа видно до збереження; `Ctrl+S` — один пакет; конфлікт версій показано | e2e `registryEditor.spec.ts` |
 | AC-12 | a11y обох тем зелений на нових екранах; уся робота в редакторі досяжна з клавіатури (§8.8) | гейти `a11y (dark)`/`a11y (light)`, `keyboardPath.spec.ts` |
