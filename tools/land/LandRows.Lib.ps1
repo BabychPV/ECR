@@ -1,4 +1,4 @@
-# tools/land/LandRows.Lib.ps1
+﻿# tools/land/LandRows.Lib.ps1
 # Pure logic (no network, no database) of Load-LandRows.ps1: the full-set row loader of Land documents.
 # Ported from the out-of-repo Load-Full.ps1 (F:\ecr-wt\land-full-load) with the LAND-5094 fixes:
 #   * rowKey is table-qualified: p<doc>-<TableCode>-<seq:0000> (LandRowKey.Lib.ps1), unique across the tables of a document;
@@ -14,6 +14,7 @@
 
 . (Join-Path $PSScriptRoot 'LandRowKey.Lib.ps1')
 . (Join-Path $PSScriptRoot 'LandInputCells.Lib.ps1')
+. (Join-Path $PSScriptRoot 'LandNaeType.Lib.ps1')
 
 $script:LandRowsLegacyAliases = @{
     'Land_Rotation' = 'Land_RotationRef'; 'Land_PurposeEquipment' = 'Land_Purpose'
@@ -188,7 +189,7 @@ function New-LandRowsTablePlan {
     .PARAMETER TableCode       template table code (T3_00)
     .PARAMETER LookupResolver  scriptblock($RegistryId, $Text) -> entry id | $null; absent = offline (cell counted, id 0)
     .PARAMETER RowLimit        0 = no cap
-    .OUTPUTS @{ Rows; ProdRows; Capped; LookupMiss; LookupUnresolved; Unmapped (sorted names); Mapped (names); MissingTargets; DupCells; Cells }
+    .OUTPUTS @{ Rows; ProdRows; Capped; LookupMiss; LookupUnresolved; MixedText; MixedNumber; Type3InMixed; Unmapped (sorted names); Mapped (names); MissingTargets; DupCells; Cells }
     #>
     param(
         [Parameter(Mandatory)][int]$DocNumber,
@@ -203,7 +204,7 @@ function New-LandRowsTablePlan {
     )
     $rowsOut = New-Object System.Collections.ArrayList
     $unmappedSet = @{}; $mappedSet = @{}; $missingSet = @{}
-    $plan = @{ ProdRows = 0; Capped = 0; LookupMiss = 0; LookupUnresolved = 0; DupCells = 0; Cells = 0 }
+    $plan = @{ ProdRows = 0; Capped = 0; LookupMiss = 0; LookupUnresolved = 0; DupCells = 0; Cells = 0; MixedText = 0; MixedNumber = 0; Type3InMixed = 0 }
     $seq = 0
     foreach ($srcRow in @($SourceRows)) {
         $seq++; $plan.ProdRows++
@@ -234,7 +235,14 @@ function New-LandRowsTablePlan {
                     $num = ConvertTo-LandInputNumber -Text ([string]$val)
                     if ($null -eq $num) { $unmappedSet["$col(parse)"] = 1; $skip = $true } else { $cellValue = [double][Math]::Round([decimal]$num, 10) }
                 }
-                'String' { $cellValue = [string]$val }
+                'String' {
+                    $cellValue = [string]$val
+                    # D-423: T9_04/T9_07 OperatingTimeReleaseOnColdVentYesNo_Mnn - String змішаного змісту (години АБО Yes/No):
+                    # лічильники тексту й числа, значення не змінюються.
+                    if ($def.code -like 'OperatingTimeReleaseOnColdVentYesNo*') {
+                        if ($null -eq (ConvertTo-LandInputNumber -Text ([string]$val))) { $plan.MixedText++ } else { $plan.MixedNumber++ }
+                    }
+                }
                 default { $unmappedSet["$col(type $($def.dataType))"] = 1; $skip = $true }
             }
             if ($skip) { continue }
@@ -243,6 +251,9 @@ function New-LandRowsTablePlan {
             $mappedSet[[string]$col] = 1
             [void]$cells.Add(@{ columnCode = $def.code; value = $cellValue })
         }
+        # D-423 (сторож): NAE type3 C11_10 у T9_04/T9_07 - OperatingTime тут String змішаного змісту, а type3 читає його числом
+        # (Strict: арифметика над текстом). У прод-даних таких рядків немає; лічильник робить появу видимою на завантаженні.
+        if ($TableCode -in 'T9_04', 'T9_07' -and $srcRow.Contains('Land_NAE') -and (Test-LandNaeInType -Nae ([string]$srcRow['Land_NAE']) -Methodology 'ECW_C11_10' -Type 'type3')) { $plan.Type3InMixed++ }
         if ($cells.Count -eq 0) { continue }
         $rowKey = New-LandRowKey -DocId $DocNumber -TableCode $TableCode -Index $seq -KeyFormat $KeyFormat
         [void]$rowsOut.Add(@{ rowKey = $rowKey; baseVersion = $null; cells = $cells })

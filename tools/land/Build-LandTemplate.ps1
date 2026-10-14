@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Будує в ECR повний шаблон Land (усі 20 звітних аркушів Excel-шаблону RDS_xxx_Template_Land_2026_v1.0.4.0)
     і базу для UI-приймальної: довідники, одиниці, шапка Contract, методології AF з рулами/прив'язками,
@@ -89,7 +89,7 @@ param(
     [string]$AccountsFile,
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection,
@@ -1884,6 +1884,46 @@ function Stage-LookupCompare {
     Log "  змінено: $changed"
 }
 
+# ==================== NaeType (D-423, C11_10: вибір type1/type2/type3 за NAE) ====================
+# Лише явно: -Stage NaeType. У ЧЕРНЕТЦІ методологій з LandNaeType.Lib.ps1 (ECW_C11_10) вираз кожного типу обгортається
+# `if(in(@Land_NAE, '<NAE типу>', ...), <вираз>, NULL)`: старий код рахує ЛИШЕ тип, обраний за NAE (ECW_C11_10.cs:180-184,
+# :305-311), а в ECR усі три типи - виходи, тож у T9_02/T9_11 (лише NAE type1) type2/type3 давали ненульові константи.
+# Аргумент `@Land_NAE` додається в список формули. Опубліковану версію не чіпаємо; нову версію чи публікацію етап не робить;
+# повтор - 0 змін. Порядок: після ArgumentSuffix/LookupCompare, ПЕРЕД OptionalArguments.
+function Stage-NaeType {
+    Log '== NaeType =='
+    . (Join-Path $here 'LandNaeType.Lib.ps1')
+    LoginAs 'land-owner'
+    $ntPlan = Get-LandNaeTypeGroups
+    $ntMeth = Items (Api GET '/api/v1/methodologies').Json
+    $ntChanged = 0
+    foreach ($ntItem in $ntMeth) {
+        $ntCode = [string]$ntItem.code
+        if (-not $ntPlan.Contains($ntCode)) { continue }
+        if ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains $ntCode) { continue }
+        $ntId = [int]$ntItem.id
+        $ntVers = Items (Api GET "/api/v1/methodologies/$ntId/versions").Json
+        $ntLast = $ntVers | Sort-Object id -Descending | Select-Object -First 1
+        if (-not $ntLast) { continue }
+        if ([string]$ntLast.status -eq 'Published') { Log "  ${ntCode}: остання версія опублікована - не чіпаю"; continue }
+        $ntVid = [int]$ntLast.id
+        $ntN = 0
+        foreach ($ntF in @(Items (Api GET "/api/v1/methodologies/$ntId/versions/$ntVid/formulas").Json)) {
+            $ntType = Get-LandNaeTypeOfFormula -FormulaCode ([string]$ntF.code)
+            if ($null -eq $ntType -or -not $ntPlan[$ntCode].Contains($ntType)) { continue }
+            $ntR = Convert-LandNaeTypeFormula -Expression ([string]$ntF.expression) -ArgumentsCsv $ntF.argumentsCsv -Naes @($ntPlan[$ntCode][$ntType])
+            if (-not $ntR.Changed) { continue }
+            $ntBody = @{ expression = $ntR.Expression; resultType = $ntF.resultType; outputUnitId = $ntF.outputUnitId; argumentsCsv = $ntR.ArgumentsCsv }
+            if ($null -ne $ntF.scope) { $ntBody.scope = $ntF.scope }
+            $ntPut = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$ntId/versions/$ntVid/formulas/$($ntF.code)" -Body $ntBody
+            if ($ntPut.Status -eq 200) { $ntN++ } else { Log "  ! ${ntCode}/$($ntF.code): HTTP $($ntPut.Status) $(Get-EcrErrorCode $ntPut)" }
+        }
+        $ntChanged += $ntN
+        Log "  ${ntCode}: формул, обгорнутих за NAE - $ntN"
+    }
+    Log "  змінено формул: $ntChanged"
+}
+
 # ==================== ParityBranch (C12_02: вибір type1/type2 за наявністю компонента) ====================
 # Лише явно: -Stage ParityBranch. У ЧЕРНЕТЦІ методології з LandParityBranch.Lib.ps1 формули type2 компонентів
 # обгортаються `if(@Land_Measure_Component_<код> = NULL, <вираз>, NULL)`: старий код C12_02 рахує для компонента лише
@@ -2235,6 +2275,8 @@ if ($Stage -contains 'SubstanceApplicability') { Stage-SubstanceApplicability }
     # LAND-5094 DIAG-A: порівняння Lookup-аргументу з текстом довідника - лише явно (-Stage LookupCompare); після ArgumentSuffix
     # (токени аргументів уже суфіксовані), ПЕРЕД OptionalArguments (маркер `?` ставиться на готовий список).
     if ($Stage -contains 'LookupCompare') { Stage-LookupCompare }
+    # D-423: вибір type1/type2/type3 за NAE (C11_10) - лише явно (-Stage NaeType); ПЕРЕД OptionalArguments.
+    if ($Stage -contains 'NaeType') { Stage-NaeType }
     # D-397: маркер `?` необов'язкових аргументів - лише явно (-Stage OptionalArguments); ОСТАННІМ: попередні етапи
     # переписують списки аргументів і зберігають чужі елементи як є, тож маркер ставиться на готовий список.
     if ($Stage -contains 'OptionalArguments') { Stage-OptionalArguments }
