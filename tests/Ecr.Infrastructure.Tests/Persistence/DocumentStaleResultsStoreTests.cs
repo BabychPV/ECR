@@ -441,9 +441,10 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         Assert.Equal(1, first.StaleResultsMineCount);
         Assert.Equal(first, second);
 
-        // Перший виклик: агрегат + відбиток + дві карти (усі / мої) + два підрахунки видимих = 6 запитів; другий -
-        // агрегат + відбиток + два підрахунки (4): карти періоду з кешу, журнал правок не чіпається.
-        Assert.Equal(6, afterFirst);
+        // Перший виклик: агрегат + відбиток (прогони + довідники, D-430) + дві карти (усі / мої) + два підрахунки
+        // видимих = 7 запитів; другий - агрегат + прогонова частина відбитка + два підрахунки (4): карти періоду й
+        // довідникова частина з кешу, журнал правок не чіпається.
+        Assert.Equal(7, afterFirst);
         Assert.Equal(4, afterSecond - afterFirst);
     }
 
@@ -949,13 +950,14 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Подія_правка_довідника_у_базі_видна_наступному_запиту_без_TTL()
+    public async Task Подія_правка_довідника_іншим_процесом_видна_після_TTL_відбитка_довідників_60_с()
     {
         // Документ Fresh читає довідник через методологію; довідник змінено ДО прогону - не застарів.
         var (registryId, r) = await RegistryRigAsync(Now.AddHours(-1), withEdge: true);
         using var _ = r.Cache;
         await using var db = EpochContext(r.Epoch);
-        var store = CachedStore(r, db);
+        var clock = new MovableClock(Now.AddHours(2));
+        var store = new DocumentStore(db, r.Cache, clock, r.Epoch);
         Assert.False(await FlagAsync(store, r, r.Fresh));
 
         // Інший процес міняє довідник ПІСЛЯ початку прогону (так робить UnitOfWork.RestampRegistryDataChanges).
@@ -965,19 +967,22 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
                 $"UPDATE cfg.RegistryDef SET DataChangedAt = {Now.AddHours(1)} WHERE Id = {registryId}");
         }
 
+        // D-430: чужа правка довідника видна не пізніше TTL кешу відбитка довідників (60 с), а не одразу.
+        clock.Advance(StaleResultsMapCache.RegistryFingerprintTtl + TimeSpan.FromSeconds(1));
         Assert.True(await FlagAsync(store, r, r.Fresh));
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Подія_нове_ребро_використання_довідника_видне_наступному_запиту_без_TTL()
+    public async Task Подія_нове_ребро_використання_довідника_видне_після_TTL_відбитка_довідників_60_с()
     {
         // Довідник змінено після прогону, але методологія його ще не читає - документ не застарів.
         var (registryId, r) = await RegistryRigAsync(Now.AddHours(1), withEdge: false);
         using var _ = r.Cache;
         await using var db = EpochContext(r.Epoch);
-        var store = CachedStore(r, db);
+        var clock = new MovableClock(Now.AddHours(2));
+        var store = new DocumentStore(db, r.Cache, clock, r.Epoch);
         Assert.False(await FlagAsync(store, r, r.Fresh));
 
         await using (var other = r.Builder.CreateContext())
@@ -986,6 +991,7 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
             await other.SaveChangesAsync(CancellationToken.None);
         }
 
+        clock.Advance(StaleResultsMapCache.RegistryFingerprintTtl + TimeSpan.FromSeconds(1));
         Assert.True(await FlagAsync(store, r, r.Fresh));
     }
 
@@ -1123,9 +1129,10 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
             }
         }
 
-        // Запит сторінки не робить запитів на документ: на теплому кеші - рівно на один (відбиток) менше, ніж на
-        // холодному, а холодний не залежить від числа документів (50 рядків - те саме число команд, що й 5).
-        Assert.Equal(coldTotal - 1, warmTotal);
+        // Запит сторінки не робить запитів на документ: на теплому кеші - рівно на два менше, ніж на холодному
+        // (карта + довідникова частина відбитка, D-430), а холодний не залежить від числа документів (50 рядків -
+        // те саме число команд, що й 5).
+        Assert.Equal(coldTotal - 2, warmTotal);
 
         var counterSmall = new DbCommandCounter();
         await using var small = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
@@ -1180,7 +1187,8 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         {
             Texts.Add(command.CommandText);
 
-            if (command.CommandText.Contains("CHECKSUM_AGG", StringComparison.Ordinal))
+            // Лише прогонова частина відбитка: довідникова кешується 60 с (D-430) і читається не на кожен виклик.
+            if (command.CommandText.Contains("AS RunChecksum", StringComparison.Ordinal))
             {
                 if (Interlocked.Increment(ref fingerprints) >= readers)
                 {
@@ -1351,11 +1359,16 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
     public Task Single_flight_читач_після_зміни_відбитка_не_приєднується_до_старого_завантаження()
         => ReaderAfterChangeDoesNotJoinOldLoadAsync(async r =>
         {
-            // Інший процес додав довідник: відбиток cfg.RegistryDef змінився, епоха цього процесу - ні.
-            await using var other = r.Builder.CreateContext();
-            var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
-            other.RegistryDefs.Add(new RegistryDef(EcrCode.Create($"FP{tag}"), Name("Registry"), isTemporal: false));
-            await other.SaveChangesAsync(CancellationToken.None);
+            // Інший процес («Worker») завершив прогін: відбиток прогонів періоду змінився, епоха цього процесу - ні.
+            // (Довідникова частина відбитка кешується 60 с - D-430, тож змінюємо прогонову, яку читач бачить одразу.)
+            var workerEpoch = new StaleCountsEpoch();
+            await using var worker = EpochContext(workerEpoch);
+            var run = await PendingRunAsync(worker, r.Chain, r.Version, Now.AddHours(2), [r.A]);
+            await using var transaction = await worker.Database.BeginTransactionAsync();
+            await new CalculationResultStore(worker, new TestClock(Now), workerEpoch)
+                .SwitchCurrentRunAsync(run.Id, "{}", CancellationToken.None);
+            await worker.SaveChangesAsync(CancellationToken.None);
+            await transaction.CommitAsync();
         });
     /// <summary>Мінімальний логер, що рахує попередження.</summary>
     private sealed class WarningCounter<T> : Microsoft.Extensions.Logging.ILogger<T>
