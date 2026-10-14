@@ -1,4 +1,4 @@
-// src/Ecr.Application/Ports/ICalculationModule.cs
+﻿// src/Ecr.Application/Ports/ICalculationModule.cs
 
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;

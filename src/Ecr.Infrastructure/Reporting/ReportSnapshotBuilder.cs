@@ -1276,7 +1276,8 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             // не створювало ніщо, тож до цього рядка виконання не доходило —
             // побудова відмовляла раніше, `ECR-RPT-0404` (директива №09
             // `W7`, сценарій `S-27`).
-            // ⚠ D-401/D-402: TableInstanceId лише розв'язує рівність за ключем (дублікати RowKey`n            // різних таблиць) детерміновано; склад колонок наявних версій не змінюється.
+            // ⚠ D-401/D-402: TableInstanceId лише розв'язує рівність за ключем (дублікати RowKey
+            // різних таблиць) детерміновано; склад колонок наявних версій не змінюється.
             orderby result.DocumentId, result.SourceRowKey, result.OutputCode, result.TableInstanceId
             select new ResultRow(
                 result.DocumentId, result.SourceRowKey, result.OutputCode,

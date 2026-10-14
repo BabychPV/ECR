@@ -1,4 +1,4 @@
-// src/Ecr.Domain/Entities/Calculations/CalculationTrace.cs
+﻿// src/Ecr.Domain/Entities/Calculations/CalculationTrace.cs
 using Ecr.Domain.Abstractions;
 
 namespace Ecr.Domain.Entities.Calculations;
