@@ -19,13 +19,33 @@ namespace Ecr.Infrastructure.Persistence;
 /// несе <c>PeriodKey</c> із періодів проєкту — таблиці партиціоновані
 /// (<c>WR-05</c>), і без ключа перенос читав би всі партиції бази.
 /// </remarks>
-public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVersionMigrationStore
+public sealed partial class DocumentVersionMigrationStore(
+    EcrDbContext db,
+    Microsoft.Extensions.Logging.ILogger<DocumentVersionMigrationStore>? logger = null) : IDocumentVersionMigrationStore
 {
     /// <summary>N-3: скільки рядків змінює одна команда переносу.</summary>
     public const int BatchRows = 5_000;
 
-    /// <summary>N-3: <c>CommandTimeout</c> кожної команди переносу, с (глобальний — 60).</summary>
-    public const int ApplyCommandTimeoutSeconds = 300;
+    /// <summary>
+    /// N-3: <c>CommandTimeout</c> кожної команди переносу, с (глобальний — 60). 300 с не вистачило на проєкті
+    /// ~4.5 млн комірок (Execution Timeout у фазі комірок) — 3600 с лишає запас на повільний диск/блокування.
+    /// </summary>
+    public const int ApplyCommandTimeoutSeconds = 3600;
+
+    /// <summary>Як часто (у пачках) писати «batch N, перенесено M» у журнал.</summary>
+    public const int LogEveryBatches = 100;
+
+    [Microsoft.Extensions.Logging.LoggerMessage(
+        Level = Microsoft.Extensions.Logging.LogLevel.Information,
+        Message = "Перенос версії: етап {Stage}, пачка {Batch}, перенесено {Rows} рядків, остання пачка {LastMs} мс, найповільніша {MaxMs} мс.")]
+    private static partial void LogBatchProgress(
+        Microsoft.Extensions.Logging.ILogger logger, string stage, long batch, long rows, long lastMs, long maxMs);
+
+    [Microsoft.Extensions.Logging.LoggerMessage(
+        Level = Microsoft.Extensions.Logging.LogLevel.Information,
+        Message = "Перенос версії завершено: проєкт {ProjectId}, пачок {Batches}, рядків {Rows}, {Seconds} с, найповільніша пачка {MaxMs} мс.")]
+    private static partial void LogApplyDone(
+        Microsoft.Extensions.Logging.ILogger logger, int projectId, long batches, long rows, double seconds, long maxMs);
 
     /// <inheritdoc />
     public async Task<int?> LockProjectVersionAsync(int projectId, CancellationToken ct)
@@ -171,6 +191,10 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
         var hasNewRows = plan.NewRows.Count > 0;
         var steps = CellAndRowBatches.Length + 1 + (hasNewRows ? 1 : 0) + 1 + IndexBatches.Length + 1 + 1 + 1;
         var stepsDone = 0;
+        long totalBatches = 0;
+        long totalRows = 0;
+        long slowestMs = 0;
+        var started = System.Diagnostics.Stopwatch.StartNew();
 
         // ⚠ Прогін — ПОЗА ЦІЄЮ транзакцією на рівні приймача (задача пише його окремим з'єднанням): інакше
         // клієнт не побачив би жодного кроку до коміту. Тут лише викликається.
@@ -198,9 +222,19 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
             {
                 ct.ThrowIfCancellationRequested();
                 var output = new SqlParameter("@changed", System.Data.SqlDbType.Int) { Direction = System.Data.ParameterDirection.Output };
+                var batchWatch = System.Diagnostics.Stopwatch.StartNew();
                 await db.Database.ExecuteSqlRawAsync(command, Parameters(output), ct).ConfigureAwait(false);
+                var lastMs = batchWatch.ElapsedMilliseconds;
+                slowestMs = Math.Max(slowestMs, lastMs);
                 changed = output.Value is int value ? value : 0;
                 total += changed;
+                totalBatches++;
+                totalRows += changed;
+                if (logger is not null && totalBatches % LogEveryBatches == 0)
+                {
+                    LogBatchProgress(logger, stage, totalBatches, totalRows, lastMs, slowestMs);
+                }
+
                 if (changed >= BatchRows)
                 {
                     await ReportAsync(stage, total).ConfigureAwait(false);
@@ -235,17 +269,24 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
         await SingleAsync(VersionMigrationStages.Workflow, WorkflowSql).ConfigureAwait(false);
         await BatchesAsync(VersionMigrationStages.Validation, ValidationBatchSql).ConfigureAwait(false);
         await SingleAsync(VersionMigrationStages.Finish, FinishSql).ConfigureAwait(false);
+
+        if (logger is not null)
+        {
+            var seconds = Math.Round(started.Elapsed.TotalSeconds, 1);
+            LogApplyDone(logger, projectId, totalBatches, totalRows, seconds, slowestMs);
+        }
     }
 
     // Складають команду зі СТАТИЧНИХ текстів цього класу (прелюдія + оператор) — не з вводу користувача.
     private static string SingleCommand(string body) => Prelude + body;
 
     /// <summary>
-    /// Пачкова команда: оператор, перед його <c>;</c> — <c>OPTION (RECOMPILE)</c> (табличні змінні мають відомий
-    /// розмір лише після перекомпіляції, інакше план бере їх за 1 рядок), далі <c>@changed = @@ROWCOUNT</c>.
+    /// Пачкова команда: оператор, перед його <c>;</c> — <c>OPTION (MAXDOP 1, RECOMPILE)</c> (табличні змінні мають
+    /// відомий розмір лише після перекомпіляції, інакше план бере їх за 1 рядок; MAXDOP 1 — без паралельного плану:
+    /// на пачці TOP(@batch) exchange-воркери зависали на CXSYNC_PORT), далі <c>@changed = @@ROWCOUNT</c>.
     /// </summary>
     private static string BatchCommand(string body)
-        => Prelude + body.TrimEnd().TrimEnd(';') + " OPTION (RECOMPILE);\nSET @changed = @@ROWCOUNT;";
+        => Prelude + body.TrimEnd().TrimEnd(';') + " OPTION (MAXDOP 1, RECOMPILE);\nSET @changed = @@ROWCOUNT;";
 
     /// <summary>
     /// Подовжує <c>CommandTimeout</c> контексту на час операції переносу й повертає його, коли її завершено.

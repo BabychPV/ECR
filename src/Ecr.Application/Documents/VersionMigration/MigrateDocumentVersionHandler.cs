@@ -185,7 +185,7 @@ public sealed class MigrateDocumentVersionHandler(
     /// </summary>
     /// <remarks>
     /// 15 хв: задача оновлює рядок стану на кожній стадії/пачці (≥ раз на секунду), а найдовша одинична
-    /// команда обмежена 300 с (<c>CommandTimeout</c>); оренда черги подовжується кожні 30 с.
+    /// команда обмежена 3600 с (<c>CommandTimeout</c>); оренда черги подовжується кожні 30 с.
     /// </remarks>
     public static readonly TimeSpan ActiveJobStaleAfter = TimeSpan.FromMinutes(15);
 
