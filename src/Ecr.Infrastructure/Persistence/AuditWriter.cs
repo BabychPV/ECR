@@ -186,11 +186,12 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
         // ⛔ AN-108 / P2-01: лише періоди цих правок — правка в 202608 не скидає лічильник 202609.
         // ⛔ D-432: пакет лише з `Origin = Recalculation` нічого не позначає - предикат StaleResultsQuery ці рядки
         // ігнорує, тож карта від них не змінюється (раніше кожен перерахунок формул піднімав епоху вдруге).
-        staleEpoch?.Invalidate(
+        // ⛔ D-432: правка комірки НЕ піднімає повну епоху, а позначає документ «брудним»: карту лікує вузький запит.
+        staleEpoch?.MarkDirty(
             db,
             changes
                 .Where(c => c.Origin != CellChangeOrigins.Recalculation)
-                .Select(c => c.Address.PeriodKey.Value));
+                .Select(c => (c.Address.PeriodKey.Value, c.DocumentId)));
     }
 
     /// <summary>Перекладає журнал у рядки табличного параметра.</summary>
