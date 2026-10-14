@@ -224,6 +224,7 @@ if ($DryRun) {
     $txtSrc = @(Get-LandTextBridgeSources $Mdl)
     Log ("DryRun: String-колонок-джерел текстових мостів (кандидати Decimal->String у клоні): {0}" -f $txtSrc.Count)
     foreach ($k in $txtSrc) { Log "  кандидат Decimal->String: $k" }
+    Log 'DryRun: WARN - гард ретайпу бачить лише формули колонок і комірок моделі; CalculationBinding/агрегати не перевіряються (їх відхиляє publish).'
     Log 'DryRun: лише розбір моделі; звернень до API немає.'; return
 }
 
@@ -568,7 +569,7 @@ function Fill-StructureSql([int]$vid) {
                 $tidT = $tableIds["$($sh.code)/$($tb.code)"]
                 $exT = @{}
                 foreach ($c in @($tb.columns)) { $hiT = $haveInfo["$tidT/$($c.code)"]; if ($null -ne $hiT) { $exT[[string]$c.code] = $hiT } }
-                $planT = Get-LandTextRetypePlan @($tb.columns) $exT
+                $planT = Get-LandTextRetypePlan @($tb.columns) $exT @($tb.cellFormulas | Where-Object { $_ })
                 foreach ($w in @($planT.Warn)) { $txtWarn += "$($sh.code)/$($tb.code)/$w" }
                 foreach ($u in @($planT.Retype)) {
                     $n = [int](Sql-Exec $cn ('UPDATE c SET DataType=0, Precision=NULL, Scale=NULL, DisplayFormat=NULL, UnitId=NULL FROM cfg.ColumnDef c ' +

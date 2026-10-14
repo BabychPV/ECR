@@ -155,15 +155,18 @@ function Get-LandExpressionColumnRefs([string]$Expression) {
 
 # D-423: чернетка-клон, колонка якої в моделі String, а в клоні ще Decimal (міграція типу НЕ робиться через API:
 # ECR-TMPL-0422 columnDataTypeImmutable). Правило вузьке:
-#   * лише Decimal -> String (інші розбіжності типів не чіпаються; для них - WARN);
-#   * колонку, на яку посилається ЧИСЛОВА формула моделі (Formula/Calculated із precision), не чіпаємо - WARN;
+#   * лише Decimal -> String МІСЯЧНИХ колонок моделі (month; у моделі це M01..M12 T9_04/T9_07): вибір вузький свідомо -
+#     немісячна String над Decimal-клоном може бути чужою розбіжністю, її Build не виправляє, а лише WARN-ить;
+#   * інші розбіжності типів не чіпаються (WARN);
+#   * колонку, на яку посилається ЧИСЛОВА формула моделі (Formula/Calculated із precision) або формула комірки (cellFormulas),
+#     не чіпаємо - WARN. ⚠ Межа: CalculationBinding/агрегати/правила у скрипті невидимі - їх перевіряє publish (ECR-TMPL-4227/4226);
 #   * текстові мости (Formula/Calculated, precision у моделі null, вираз посилається на МІСЯЧНУ String-колонку моделі;
 #     інші мости над String - Land_NAE тощо - не чіпаються):
 #     Precision/Scale клону скидаються в NULL (інакше Verify/migrate бачать зайве Widened/Guarded).
 # Columns - tb.columns моделі; Existing - hashtable "код колонки" -> @{ id; type; precision; scale } клону.
 # Повертає @{ Retype = @({ Id; Code; FromPrecision; FromScale }); Bridges = @({ Id; Code; FromPrecision; FromScale });
 #             Warn = @(рядки); Same = n }. Лише обчислення: SQL і запис - у виклику (Fill-StructureSql).
-function Get-LandTextRetypePlan($Columns, [hashtable]$Existing) {
+function Get-LandTextRetypePlan($Columns, [hashtable]$Existing, $CellFormulas = @()) {
     $retype = @(); $bridges = @(); $warn = @(); $same = 0
     $dt = $script:LandDataTypeCode
     $stringCodes = @{}
@@ -176,6 +179,16 @@ function Get-LandTextRetypePlan($Columns, [hashtable]$Existing) {
             $numericReaders[$r] += [string]$c.code
         }
     }
+    # формули комірок таблиці (tb.cellFormulas: { column; expression }): колонка-ціль і будь-яке посилання [Code] у виразі
+    foreach ($cf in @($CellFormulas)) {
+        if ($null -eq $cf) { continue }
+        $refs = @(Get-LandExpressionColumnRefs ([string]$cf.expression)) + @([string]$cf.column)
+        foreach ($r in $refs) {
+            if (-not $r) { continue }
+            if (-not $numericReaders.ContainsKey($r)) { $numericReaders[$r] = @() }
+            $numericReaders[$r] += 'cellFormula'
+        }
+    }
     $retypedOrText = @{}
     foreach ($c in @($Columns)) {
         if ([string]$c.dataType -ne 'String') { continue }
@@ -184,6 +197,7 @@ function Get-LandTextRetypePlan($Columns, [hashtable]$Existing) {
         $e = $Existing[$code]
         if ([int]$e.type -eq $dt.String) { $retypedOrText[$code] = $true; continue }
         if ([int]$e.type -ne $dt.Decimal) { $warn += "${code}: тип клону $($e.type), у моделі String - лише Decimal->String, не чіпаю"; continue }
+        if (-not $c.month) { $warn += "${code}: у клоні Decimal, у моделі String, але колонка не місячна - не чіпаю (ретайп лише місячних)"; continue }
         if ($numericReaders.ContainsKey($code)) { $warn += "${code}: на колонку посилається числова формула ($($numericReaders[$code] -join ',')) - тип не змінюю"; continue }
         $retype += [pscustomobject]@{ Id = [int]$e.id; Code = $code; FromPrecision = $e.precision; FromScale = $e.scale }
         $retypedOrText[$code] = $true
@@ -224,7 +238,7 @@ function Get-LandTextBridgeSources($Mdl) {
 
 # Розбіжності ТИПУ колонок між моделлю та структурою версії ("SHEET/TABLE: тип відрізняється: COL model!=ecr").
 # DTO структури несе dataType рядком (або числом) - порівнюємо за назвою.
-function Get-LandColumnTypeMismatches($Structure, $Mdl) {
+function Get-LandColumnTypeMismatches($Structure, $Mdl, [string[]]$Known = @()) {
     $names = @('String', 'Int', 'Decimal', 'Bool', 'Date', 'Lookup', 'Formula', 'Unit', 'Calculated')
     $byTable = @{}
     foreach ($s in @($Structure.sheets)) { foreach ($t in @($s.tables)) { $byTable["$($s.code)/$($t.code)"] = $t } }
@@ -239,7 +253,11 @@ function Get-LandColumnTypeMismatches($Structure, $Mdl) {
                 if ($null -eq $ecol -or $null -eq $ecol.dataType) { continue }
                 $got = [string]$ecol.dataType
                 $n = 0; if ([int]::TryParse($got, [ref]$n) -and $n -ge 0 -and $n -lt $names.Count) { $got = $names[$n] }
-                if ($got -cne [string]$c.dataType) { $diff += "$($c.code) $($c.dataType)!=$got" }
+                if ($got -cne [string]$c.dataType) {
+                    # -KnownTypeMismatches: відомі законні розбіжності "TABLE.COL" (Build їх свідомо не чіпає) - не червонять
+                    if (@($Known) -contains "$($tb.code).$($c.code)") { continue }
+                    $diff += "$($c.code) $($c.dataType)!=$got"
+                }
             }
             if ($diff.Count) { $out += "$($sh.code)/$($tb.code): тип відрізняється: $($diff -join ', ')" }
         }

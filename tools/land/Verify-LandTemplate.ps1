@@ -18,6 +18,7 @@ param(
     [string]$ExcelModelPath,
     [string]$TemplateCode = 'LAND_UI',
     [string[]]$KnownStaleTables = @(),
+    [string[]]$KnownTypeMismatches = @(),   # "TABLE.COL": законні розбіжності типу, які Build не виправляє (Int/Decimal тощо)
     [int]$PrecisionChecksPerTable = 0
 )
 $ErrorActionPreference = 'Stop'
@@ -113,7 +114,7 @@ $mr = @(Get-LandMaxRowsMismatches $st $mdl)
 foreach ($m in $mr) { $bad += $m }
 # D-423: тип колонки (DataType) структури версії проти моделі: клон із Decimal замість String проходив Verify
 # (T9_04/T9_07 OperatingTimeReleaseOnColdVentYesNo_Mnn), а migrate-version показував би 0 змін типу.
-$tm = @(Get-LandColumnTypeMismatches $st $mdl)
+$tm = @(Get-LandColumnTypeMismatches $st $mdl $KnownTypeMismatches)
 foreach ($m in $tm) { $bad += $m }
 Write-Host ("Типи колонок перевірено: таблиць із розбіжністю типу {0}" -f $tm.Count)
 # текстові мости (precision у моделі null): Precision/Scale версії мають бути NULL (структура їх не несе - GET колонки)

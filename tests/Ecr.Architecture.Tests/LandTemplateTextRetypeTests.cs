@@ -34,8 +34,11 @@ public sealed class LandTemplateTextRetypeTests
         $modelJson = '{"sheets":[{"code":"S","nameEn":"s","ordinal":1,"mandatory":true,"visible":true,"tables":[{"code":"T","columns":[
             {"code":"M01","dataType":"String","month":1},
             {"code":"M02","dataType":"String","month":2},
-            {"code":"M03","dataType":"String"},
-            {"code":"XI","dataType":"String"},
+            {"code":"M03","dataType":"String","month":3},
+            {"code":"XI","dataType":"String","month":4},
+            {"code":"NAEX","dataType":"String"},
+            {"code":"NAEX2","dataType":"String"},
+            {"code":"BRN","dataType":"Formula","precision":null,"expression":"[NAEX2]"},
             {"code":"NUM","dataType":"Formula","precision":18,"scale":2,"expression":"[M03] + 1"},
             {"code":"BR","dataType":"Formula","precision":null,"expression":"[Period].Sequence = 1 ? [M01] : [M02]"},
             {"code":"BR2","dataType":"Formula","precision":null,"expression":"[M01]"},
@@ -52,6 +55,9 @@ public sealed class LandTemplateTextRetypeTests
                 BR2 = @{ id = 7; type = 6; precision = $null; scale = $null }
                 BRNUM = @{ id = 8; type = 6; precision = 34; scale = 16 }
                 DEC = @{ id = 9; type = 2; precision = 34; scale = 16 }
+                NAEX = @{ id = 10; type = 2; precision = 34; scale = 16 }
+                NAEX2 = @{ id = 11; type = 0; precision = $null; scale = $null }
+                BRN = @{ id = 12; type = 6; precision = 34; scale = 16 }
             }
             $p = Get-LandTextRetypePlan @($mdl.sheets[0].tables[0].columns) $ex
             Write-Host ('RETYPE=' + (@($p.Retype | ForEach-Object { $_.Code }) -join ','))
@@ -59,6 +65,8 @@ public sealed class LandTemplateTextRetypeTests
             Write-Host ('WARN=' + @($p.Warn).Count)
             foreach ($w in @($p.Warn)) { Write-Host ('W=' + $w) }
             Write-Host ('SAME=' + $p.Same)
+            $pc = Get-LandTextRetypePlan @($mdl.sheets[0].tables[0].columns) $ex @(@{ column = 'Q'; expression = 'SUM([Period:#1].[S].[T].[R1].[M01])' })
+            Write-Host ('CFRETYPE=' + (@($pc.Retype | ForEach-Object { $_.Code }) -join ',') + '|')
         }
         elseif ($mode -eq 'types') {
             $mdl = '{"sheets":[{"code":"S","tables":[{"code":"T","columns":[
@@ -66,6 +74,7 @@ public sealed class LandTemplateTextRetypeTests
             $st = '{"sheets":[{"code":"S","tables":[{"code":"T","columns":[
                 {"code":"A","dataType":"Decimal"},{"code":"B","dataType":"String"},{"code":"C","dataType":"Decimal"},{"code":"D","dataType":"6"}]}]}]}' | ConvertFrom-Json
             foreach ($l in @(Get-LandColumnTypeMismatches $st $mdl)) { Write-Host ('BAD=' + $l) }
+            foreach ($l in @(Get-LandColumnTypeMismatches $st $mdl @('T.A'))) { Write-Host ('KNOWN=' + $l) }
         }
         elseif ($mode -eq 'sources') {
             $mdl = Get-Content -LiteralPath $args[3] -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -88,6 +97,9 @@ public sealed class LandTemplateTextRetypeTests
                 7 = @{ code = 'BR2'; type = 6; p = 34; s = 16 }
                 8 = @{ code = 'BRNUM'; type = 6; p = 34; s = 16 }
                 9 = @{ code = 'DEC'; type = 2; p = 34; s = 16 }
+                10 = @{ code = 'NAEX'; type = 2; p = 34; s = 16; u = $null }
+                11 = @{ code = 'NAEX2'; type = 0; p = $null; s = $null; u = $null }
+                12 = @{ code = 'BRN'; type = 6; p = 34; s = 16; u = $null }
             }
             $DataTypeCode = @{ String = 0; Int = 1; Decimal = 2; Bool = 3; Date = 4; Lookup = 5; Formula = 6; Unit = 7; Calculated = 8 }
             $effectiveSqlConnection = 'fake'
@@ -212,10 +224,13 @@ public sealed class LandTemplateTextRetypeTests
         Assert.Contains("RETYPE=M01\n", output.Replace("\r", string.Empty), StringComparison.Ordinal);   // M02 вже String, M03 читає числова формула, XI - Int
         Assert.Contains("BRIDGES=BR\n", output.Replace("\r", string.Empty), StringComparison.Ordinal);   // BR2 вже без межі, BRNUM читає не String
         Assert.Single(Lines(output, "SAME="), "SAME=1");
+        Assert.Single(Lines(output, "CFRETYPE="), "CFRETYPE=|");   // формула комірки читає [M01] - не ретайпимо
         var warn = Lines(output, "W=");
-        Assert.Equal(2, warn.Length);
+        Assert.Equal(3, warn.Length);
         Assert.Single(warn, w => w.StartsWith("W=M03:", StringComparison.Ordinal) && w.Contains("NUM", StringComparison.Ordinal));
         Assert.Single(warn, w => w.StartsWith("W=XI:", StringComparison.Ordinal));
+        Assert.Single(warn, w => w.StartsWith("W=NAEX:", StringComparison.Ordinal));   // немісячна - не ретайпиться
+        Assert.DoesNotContain("BRN", output.Split('\n').First(l => l.StartsWith("BRIDGES=", StringComparison.Ordinal)), StringComparison.Ordinal);   // міст над немісячним String не чіпається
     }
 
     [Fact]
@@ -245,6 +260,8 @@ public sealed class LandTemplateTextRetypeTests
         Assert.Contains("STATE=BR2:6::", output, StringComparison.Ordinal);
         Assert.Contains("STATE=BRNUM:6:34:16", output, StringComparison.Ordinal);
         Assert.Contains("STATE=DEC:2:34:16", output, StringComparison.Ordinal);
+        Assert.Contains("STATE=NAEX:2:34:16", output, StringComparison.Ordinal);
+        Assert.Contains("STATE=BRN:6:34:16", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -270,7 +287,8 @@ public sealed class LandTemplateTextRetypeTests
         var types = Lines(Run("types"), "BAD=");
         Assert.Single(types);
         Assert.StartsWith("BAD=S/T: тип відрізняється: A String!=Decimal", types[0], StringComparison.Ordinal);
-        Assert.DoesNotContain("D ", types[0], StringComparison.Ordinal);   // "6" розпізнано як Formula
+        Assert.DoesNotContain("D ", types[0], StringComparison.Ordinal);
+        Assert.Empty(Lines(Run("types"), "KNOWN="));   // відомий TABLE.COL не червонить; невідомий (BAD) - так   // "6" розпізнано як Formula
 
         var model = Path.Combine(
             SourceTree.Root, "docs", "delivery", "reference-data", "land-template", "land-template.model.json");
