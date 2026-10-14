@@ -832,6 +832,16 @@ public sealed class GenericCalculationModule(
             return result;
         }
 
+        // ✎ D-427 (Q-088): у `Legacy` результат КОЖНОЇ формули з NaN/±∞ стає 0 ДО того, як наступна формула
+        // прочитає його через `!Name` — як чинна система (`Utilities.cs:58-71`: перевірка на кожній формулі).
+        // Причина — крок трейсу `MaskedZeroReason`. `Strict` не зачеплено: там #DIV/0 — помилка-значення.
+        if (numeric.Mode == NumericMode.Legacy && MaskedZero.ReasonFor(result) is var maskReason
+            && maskReason != MaskedZeroReason.None)
+        {
+            trace.Masked(formula.Code, formula.Expression, 0m, maskReason);
+            result = ExpressionValue.LegacyNumber(0d);
+        }
+
         // ⚠ Входи збираються лише для кроку, який запишеться: на `ErrorsOnly` невидима
         // формула не платить за обхід і повторне читання посилань нічим.
         var detail = trace.Records(visible)
