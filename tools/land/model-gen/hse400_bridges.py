@@ -288,6 +288,65 @@ def _apply_stream_aliases(out, sources, af_attrs):
     return added
 
 
+# P1-2 (C05_05, T3_00): аргументи, які методологія читає з HSE400 завжди (ECW_C05_05.cs:73-130: Density,
+# FuelLowerHeating, MercaptanSulphurContent, H2Smass за (рік, місяць, префікс потоку з Land_TypeFuel); немає запису
+# складу -> continue). На T3_00 ці колонки вже ЄСТЬ як ручні Decimal (EXTRA у gen_ecr_model.py), тому apply() їх не бачить
+# (він працює лише зі списком unresolved). Нових колонок не додаємо - аргументи методології зв'язуються за кодом
+# колонки: наявну колонку лише перетипуємо Decimal -> Formula на тому самому місці.
+EXISTING_INPUT_BRIDGES = {
+    'T3_00': {
+        'source': ('Land_TypeFuel', 'Lookup'),
+        'args': ['Density', 'FuelLowerHeating', 'MercaptanSulphurContent', 'H2Smass'],
+        'evidence': 'ECW_C05_05.cs:73-130',
+    },
+}
+
+
+def apply_existing_inputs(out):
+    """Перетипує наявні ручні Decimal-колонки в мости HSE400 (EXISTING_INPUT_BRIDGES). Повертає кількість колонок.
+
+    Викликається ПІСЛЯ apply() (довідники LAND_HSE400_* уже в registries) і ДО округлення precision/scale 34/16.
+    """
+    by_code = {}
+    for s_ in out['sheets']:
+        for t_ in s_['tables']:
+            by_code.setdefault(t_['code'], t_)
+    bridged = out['argumentBridges']['bridged']
+    unresolved = out['argumentBridges']['unresolved']
+    changed = 0
+    for tcode, spec in sorted(EXISTING_INPUT_BRIDGES.items()):
+        cols = {c['code']: c for c in by_code[tcode]['columns']}
+        name, kind = spec['source']
+        if name not in cols or cols[name]['dataType'] != kind:
+            raise SystemExit('hse400: %s: колонка-джерело потоку %s (%s) відсутня' % (tcode, name, kind))
+        stream_expr = '[%s]' % name if kind == 'String' else "REGFIELD([%s], 'NAME')" % name
+        for arg in spec['args']:
+            c = cols.get(arg)
+            if c is None or c['dataType'] != 'Decimal':
+                raise SystemExit('hse400: %s: очікувалась ручна Decimal-колонка %s' % (tcode, arg))
+            c['dataType'] = 'Formula'
+            c['readOnly'] = True
+            c['expression'] = composition_expression(stream_expr, INDICATOR_OF_ARG[arg])
+            c['headerEn'] = '%s (argument bridge: HSE400 composition)' % arg
+            c['ecrAdded'] = ('bridge: methodology argument %s = %s[%s] by period and stream (HSE400, %s)'
+                             % (arg, COMPOSITION_REGISTRY, INDICATOR_OF_ARG[arg], spec['evidence']))
+            bridged.setdefault(tcode, [])
+            bridged[tcode] = sorted(set(bridged[tcode]) | {arg})
+            if tcode in unresolved and arg in unresolved[tcode]:
+                del unresolved[tcode][arg]
+            changed += 1
+    out['argumentBridges']['bridged'] = dict(sorted(bridged.items()))
+    hse = out['argumentBridges'].setdefault('hse400', {})
+    hse.setdefault('streamSourceColumn', {})
+    for tcode, spec in EXISTING_INPUT_BRIDGES.items():
+        hse['streamSourceColumn'][tcode] = spec['source'][0]
+    hse['streamSourceColumn'] = dict(sorted(hse['streamSourceColumn'].items()))
+    hse['existingInputBridges'] = {t: {'arguments': s['args'], 'streamSourceColumn': s['source'][0],
+                                       'evidence': s['evidence']} for t, s in sorted(EXISTING_INPUT_BRIDGES.items())}
+    print('hse400 existing-input bridges: columns %d' % changed)
+    return changed
+
+
 def apply(out, registries, extra_stream_sources=None, af_attrs=None):
     """Додає довідники й мости; повертає кількість доданих колонок.
 
