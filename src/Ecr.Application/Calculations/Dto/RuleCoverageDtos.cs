@@ -22,6 +22,10 @@ public enum RuleCoverageState
 /// <param name="Rules">Активні правила в порядку пріоритету.</param>
 /// <param name="Combinations">Комбінації: розриви → конфлікти → покриті, далі за кількістю рядків.</param>
 /// <param name="Truncated">Комбінацій більше за стелю; показано найчисленніші.</param>
+/// <param name="ExcludedRows">
+/// D-425: рядків відсіяно фільтром активності методології (статус не активний або порожній) — вони не рахуються
+/// прогоном і не є «непокритими»; <c>0</c> — фільтра немає.
+/// </param>
 public sealed record RuleCoverageDto(
     int MethodologyVersionId,
     int PeriodFrom,
@@ -30,7 +34,8 @@ public sealed record RuleCoverageDto(
     IReadOnlyList<int> ColumnDefIds,
     IReadOnlyList<RuleCoverageRuleDto> Rules,
     IReadOnlyList<RuleCoverageCombinationDto> Combinations,
-    bool Truncated);
+    bool Truncated,
+    long ExcludedRows = 0);
 
 /// <summary>Правило осі матриці.</summary>
 /// <param name="Code">Код правила.</param>

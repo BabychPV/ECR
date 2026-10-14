@@ -191,7 +191,10 @@ public sealed class PatchCellsTests
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock,
-               _gate, Units(), columnMapper: _columnMapper);
+               _gate, Units(), columnMapper: _columnMapper, rowActivity: _rowActivity);
+
+    /// <summary>D-425: фільтр активності рядків методології; <c>null</c> — фільтра немає.</summary>
+    private IRowActivityFilterSource? _rowActivity;
 
     /// <summary>C1: переклад Id колонок методології на колонки версії документа; <c>null</c> — Id локальні.</summary>
     private IColumnPathMapper? _columnMapper;
@@ -768,6 +771,79 @@ public sealed class PatchCellsTests
         Assert.Null(warning.ColumnCode);
         Assert.DoesNotContain("ECW_TEST", warning.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("Category", warning.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// D-425: методологія з фільтром активності (колонка статусу 14, «Running» = запис 77) не вимагає входів від
+    /// рядка, якого прогін не рахує. Id 14 — колонка версії документа, у знімку метаданих її немає: gate читає
+    /// її значення лише з бази (<c>ReadCellsAsync</c>).
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати перевірку <c>StatusColumnIds</c> в <c>EvaluateRequiredInputs</c> — перший і третій тести
+    /// червоніють (рядок Removed/без статусу блокує збереження через вхід, який ніхто не прочитає).
+    /// </remarks>
+    private void WithRowActivity(long? statusEntryId)
+    {
+        WithMethodology(RequiredInputSeverity.Block);
+
+        var source = Substitute.For<IRowActivityFilterSource>();
+        source.ResolveForMethodologyAsync(100, Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+              .Returns(new RowActivityFilterResolution(
+                  "77", new Dictionary<int, IReadOnlyList<int>> { [3] = [14] }));
+        _rowActivity = source;
+
+        if (statusEntryId is { } entry)
+        {
+            _cells.ReadCellsAsync(
+                      Arg.Is<IReadOnlyCollection<CellAddress>>(a => a.Any(x => x.ColumnDefId == 14)),
+                      Arg.Any<CancellationToken>())
+                  .Returns(new Dictionary<CellAddress, CellValueData>
+                  {
+                      [new CellAddress(PeriodKey.Parse(Period), 1001L, 14)] = new() { ValueRegistryEntryId = entry },
+                  });
+        }
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-425")]
+    public async Task Рядок_зі_статусом_Removed_не_блокує_збереження_через_обовязковий_вхід()
+    {
+        WithRowActivity(statusEntryId: 78);
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+        Assert.DoesNotContain(response.Validation, m => m.RuleCode == "ECR-CALC-0437");
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-425")]
+    public async Task Рядок_зі_статусом_Running_і_далі_блокується_незаповненим_входом()
+    {
+        WithRowActivity(statusEntryId: 77);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(
+                Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+                CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0437", error.ErrorCode);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-425")]
+    public async Task Рядок_без_статусу_не_рахується_і_не_блокує_збереження()
+    {
+        WithRowActivity(statusEntryId: null);
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+        Assert.DoesNotContain(response.Validation, m => m.RuleCode == "ECR-CALC-0437");
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]

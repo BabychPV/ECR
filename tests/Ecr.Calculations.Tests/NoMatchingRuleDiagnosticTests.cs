@@ -129,6 +129,43 @@ public sealed class NoMatchingRuleDiagnosticTests
         Assert.Null(ModuleProfile.ReadUnmatched(profile.ToJson(), DocumentId));
     }
 
+    /// <summary>
+    /// D-425: рядок, відсіяний фільтром активності, — «виключений», а не «непокритий»: діагностики «не підійшло
+    /// правило» на нього немає. Мутація: не додавати <c>Excluded</c> у <c>UnmatchedRowsOf</c> — діагностика на
+    /// рядок Removed повертається, тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-425")]
+    public async Task Рядок_відсіяний_фільтром_активності_не_потрапляє_в_непокриті()
+    {
+        var activity = Substitute.For<IRowActivityFilterSource>();
+        activity.ResolveForVersionAsync(71, Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns(new RowActivityFilterResolution(
+                "77", new Dictionary<int, IReadOnlyList<int>> { [3] = [StatusColumn] }));
+
+        var provider = Arrange(
+            [(Methodology: 42, Version: 71, Rule: $$"""{"{{FuelColumn}}":"Gas"}""")],
+            [
+                Cell(1000, FuelColumn, "Gas"), StatusEntry(1000, 77),
+                Cell(1001, FuelColumn, "Diesel"), StatusEntry(1001, 78),
+                Cell(1002, FuelColumn, "Coal"), StatusEntry(1002, 77),
+            ],
+            activity);
+
+        var profile = await Run(provider, [42]);
+
+        // Diesel/Removed виключено фільтром; Coal/Running — справді без правила.
+        Assert.Equal([new UnmatchedRow(TableInstance, 3, "R002", DocumentId)], profile.UnmatchedRows);
+        Assert.Equal(1, profile.Stats.Single().Rows);
+    }
+
+    private static CellRecord StatusEntry(long rowId, long entryId)
+        => new(
+            new CellAddress(new PeriodKey(Period), rowId, StatusColumn),
+            TableDefId: 3,
+            new CellValueData { ValueRegistryEntryId = entryId });
+
     private static async Task<ModuleProfile> Run(ServiceProvider provider, int[] methodologies)
     {
         var orchestrator = new CalculationOrchestrator(
@@ -148,7 +185,8 @@ public sealed class NoMatchingRuleDiagnosticTests
     /// <summary>Три рядки: Gas, Diesel, Coal у колонці палива. Кожна методологія — своє правило.</summary>
     private static ServiceProvider Arrange(
         IReadOnlyList<(int Methodology, int Version, string? Rule)> methodologies,
-        IReadOnlyList<CellRecord>? slice = null)
+        IReadOnlyList<CellRecord>? slice = null,
+        IRowActivityFilterSource? activity = null)
     {
         var store = Substitute.For<IMethodologyStore>();
         var periods = Substitute.For<IPeriodStore>();
@@ -207,6 +245,11 @@ public sealed class NoMatchingRuleDiagnosticTests
         services.AddSingleton(cells);
         services.AddSingleton(metadata);
         services.AddSingleton(units);
+        if (activity is not null)
+        {
+            services.AddSingleton(activity);
+        }
+
         services.AddSingleton(Substitute.For<IConstantStore>());
         services.AddSingleton(Substitute.For<ICalculationBindingStore>());
         services.AddSingleton(Substitute.For<ICalculationResultStore>());

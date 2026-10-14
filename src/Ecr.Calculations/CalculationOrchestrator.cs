@@ -254,7 +254,10 @@ public sealed class CalculationOrchestrator(
 
     /// <summary>Підсумок зіставлення рядків таблиці з правилами однієї прив'язки.</summary>
     private sealed record RowMatchSummary(
-        long TableInstanceId, IReadOnlyCollection<string> MatchedKeys, IReadOnlyList<string>? AllRowKeys);
+        long TableInstanceId,
+        IReadOnlyCollection<string> MatchedKeys,
+        IReadOnlyList<string>? AllRowKeys,
+        IReadOnlyCollection<string>? ExcludedKeys = null);
 
     /// <summary>
     /// Рядки, яким не підійшло жодне правило жодної прив'язки своєї таблиці (L-4).
@@ -276,7 +279,11 @@ public sealed class CalculationOrchestrator(
                 continue;
             }
 
-            var matched = table.SelectMany(s => s.MatchedKeys).ToHashSet(StringComparer.Ordinal);
+            // D-425: рядок, відсіяний фільтром активності, — «виключений», а не «непокритий»: діагностика
+            // «не підійшло правило» на нього не видається.
+            var matched = table
+                .SelectMany(s => s.MatchedKeys.Concat(s.ExcludedKeys ?? []))
+                .ToHashSet(StringComparer.Ordinal);
             for (var i = 0; i < all.Count; i++)
             {
                 if (!matched.Contains(all[i]))
@@ -336,7 +343,7 @@ public sealed class CalculationOrchestrator(
             .MatchRowsDetailedAsync(binding.Descriptor.MethodologyVersionId, binding.TableInstanceId, ct)
             .ConfigureAwait(false);
         IReadOnlyList<string> rowKeys = [.. outcome.Matches.Select(m => m.RowKey)];
-        rowMatches.Add(new RowMatchSummary(binding.TableInstanceId, rowKeys, outcome.AllRowKeys));
+        rowMatches.Add(new RowMatchSummary(binding.TableInstanceId, rowKeys, outcome.AllRowKeys, outcome.Excluded));
 
         // 4. Входи ПАКЕТНО: один запит на методологію × період, не N на рядок.
         var inputs = await scopedInputBuilder
