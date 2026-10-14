@@ -510,6 +510,10 @@ def apply(out, ro_all, rules, af_attrs, calc_tables):
                        'unit': cand.get('unit'), 'expression': expr, 'ecrAdded': ev}
                 if cand['dataType'] == 'String':
                     new['textResult'] = True
+                    # D-423: змішана колонка «години/Yes-No» (T9_04/T9_07) - міст текстовий, але одиниця 'h' лишається: без неї
+                    # міграція версій бачила б зміну UnitId (Guarded) на обчислених комірках, а споживачі C11_04/05 читають години.
+                    if not new.get('unit') and 'operating time (hours)/release on cold vent' in (cand.get('header') or ''):
+                        new['unit'] = 'h'
             if new is not None:
                 col_ = {'headerRu': '', 'hidden': False, 'readOnly': True, 'excel': None, 'month': None, 'precision': 28, 'scale': 12}
                 is_text = new.pop('textResult', False)

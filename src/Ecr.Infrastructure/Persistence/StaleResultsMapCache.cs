@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Ecr.Domain.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -32,7 +33,14 @@ namespace Ecr.Infrastructure.Persistence;
 ///
 /// ⚠ ПРОГАЛИНА, названа прямо: нові рядки <c>aud.CellChange</c>, записані ІНШИМ процесом (імпорт і збір у Worker;
 /// це не <c>Recalculation</c>, яку предикат ігнорує), відбитком не видно — дешевого відбитка стану для
-/// партиційованого журналу на мільйони рядків немає. Між-процесні правки видно ≤15 с; власні PATCH — одразу.
+/// партиційованого журналу на мільйони рядків немає. Власні PATCH — одразу.
+///
+/// ⚠ SWR (D-424, LP-45): коли епоха й відбиток ЗБІГАЮТЬСЯ, а запис протермінований за TTL не більш ніж на
+/// <see cref="StaleWhileRevalidateWindow"/> (120 с), читач одразу отримує СТАРУ карту, а оновлення йде у фоні одним
+/// завантаженням (single-flight за ключем, власний scope через <c>IServiceScopeFactory</c>, без токена запиту).
+/// Зміна епохи чи відбитка — синхронне перезавантаження, як і раніше. НОВА МЕЖА видимості: між-процесні правки
+/// журналу (імпорт, збір у Worker) видно до TTL (15 с) + час фонового завантаження (замість 15 с). Без
+/// <c>IServiceScopeFactory</c> (тести без DI) SWR вимкнено.
 ///
 /// ⛔ Single-flight: N одночасних читачів одного (період, автор) у ОДНОМУ стані (епоха + відбиток) запускають ОДИН
 /// запит; решта чекає його результат. Ключ спільного завантаження містить епоху й відбиток, тож читач ПІСЛЯ коміту
@@ -47,8 +55,15 @@ namespace Ecr.Infrastructure.Persistence;
 /// </remarks>
 internal sealed partial class StaleResultsMapCache(
     EcrDbContext db, IMemoryCache? cache, IClock? clock, StaleCountsEpoch? epoch,
-    ILogger? logger = null, int maxDocuments = StaleResultsMapCache.DefaultMaxDocuments)
+    ILogger? logger = null, int maxDocuments = StaleResultsMapCache.DefaultMaxDocuments,
+    IServiceScopeFactory? scopeFactory = null)
 {
+    /// <summary>
+    /// Вікно stale-while-revalidate (D-424): запис, протермінований за TTL не більш ніж на цей час, а епоха й відбиток
+    /// якого ЗБІГАЮТЬСЯ з поточними, віддається негайно, а оновлюється у фоні одним завантаженням.
+    /// </summary>
+    public static readonly TimeSpan StaleWhileRevalidateWindow = TimeSpan.FromSeconds(120);
+
     /// <summary>Стеля карти за замовчуванням: документів із застарілими результатами в одному періоді.</summary>
     public const int DefaultMaxDocuments = 200_000;
 
@@ -113,6 +128,14 @@ internal sealed partial class StaleResultsMapCache(
             return hit;
         }
 
+        // ⛔ SWR лише на TTL-складову (D-424): епоха й відбиток ЗБІГАЮТЬСЯ - стан не змінювався ні цим процесом, ні
+        // іншим; змінився лише вік. Інакше (власна правка, прогін, довідники) - синхронне перезавантаження нижче.
+        if (scopeFactory is not null && TryStale(key, epochValue, fingerprint, out var old))
+        {
+            StartBackgroundRefresh(key, periodKey, user, epochValue, fingerprint);
+            return old;
+        }
+
         var inFlight = InFlightRegistry();
 
         // Слідувачі приєднуються лише до завантаження В ТОМУ САМОМУ стані (епоха + відбиток).
@@ -137,7 +160,7 @@ internal sealed partial class StaleResultsMapCache(
 
             // ⚠ Токен читача сюди НЕ йде (див. remarks): лідер доводить власний контекст до кінця.
             var map = await LoadAsync(periodKey, user, CancellationToken.None).ConfigureAwait(false);
-            cache!.Set(key, new Entry(map, epochValue, fingerprint, clock!.UtcNow + Ttl), Ttl);
+            cache!.Set(key, new Entry(map, epochValue, fingerprint, clock!.UtcNow + Ttl), Ttl + StaleWhileRevalidateWindow);
             mine.SetResult(map);
             return map;
         }
@@ -204,6 +227,81 @@ internal sealed partial class StaleResultsMapCache(
         map = null;
         return false;
     }
+
+    /// <summary>Запис протермінований за TTL не більш ніж на вікно SWR, а епоха й відбиток збігаються.</summary>
+    private bool TryStale(string key, long epochValue, FingerprintRow fingerprint, out IReadOnlyDictionary<long, DateTime?>? map)
+    {
+        if (cache!.TryGetValue(key, out Entry? hit) && hit is not null
+            && hit.Epoch == epochValue && hit.Fingerprint == fingerprint
+            && hit.ExpiresAt <= clock!.UtcNow && clock.UtcNow - hit.ExpiresAt <= StaleWhileRevalidateWindow)
+        {
+            map = hit.Map;
+            return true;
+        }
+
+        map = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Фонове оновлення протермінованого запису: ОДНЕ на (ключ, епоха, відбиток) - решта читачів отримує стару карту й
+    /// нічого не запускає. Власний scope і контекст (контекст читача завершиться разом із запитом), без токена запиту.
+    /// Помилка не кешується: стара карта лишається до кінця вікна, наступний читач запускає нову спробу.
+    /// </summary>
+    private void StartBackgroundRefresh(string key, int periodKey, int? user, long epochValue, FingerprintRow fingerprint)
+    {
+        var inFlight = InFlightRegistry();
+        var flightKey = $"{key}|{epochValue}|{fingerprint}";
+        var mine = new TaskCompletionSource<IReadOnlyDictionary<long, DateTime?>?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!ReferenceEquals(inFlight.GetOrAdd(flightKey, mine), mine))
+        {
+            return;
+        }
+
+        var memory = cache!;
+        var time = clock!;
+        var factory = scopeFactory!;
+        var log = logger;
+        var max = maxDocuments;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await using var scope = factory.CreateAsyncScope();
+                var backgroundDb = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
+                var map = await new StaleResultsMapCache(backgroundDb, null, null, null, log, max)
+                    .LoadAsync(periodKey, user, CancellationToken.None).ConfigureAwait(false);
+
+                // Не затирати запис новішої епохи, що встиг покласти синхронний читач.
+                if (!(memory.TryGetValue(key, out Entry? current) && current is not null && current.Epoch > epochValue))
+                {
+                    memory.Set(key, new Entry(map, epochValue, fingerprint, time.UtcNow + Ttl), Ttl + StaleWhileRevalidateWindow);
+                }
+
+                mine.TrySetResult(map);
+            }
+            catch (Exception ex)
+            {
+                mine.TrySetException(ex);
+                _ = mine.Task.Exception;
+                if (log is not null)
+                {
+                    LogRefreshFailed(log, ex, periodKey);
+                }
+            }
+            finally
+            {
+                inFlight.TryRemove(flightKey, out _);
+            }
+        });
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Фонове оновлення карти застарілості періоду {PeriodKey} не вдалося; віддається попередня карта до кінця вікна, далі - синхронне завантаження.")]
+    private static partial void LogRefreshFailed(ILogger logger, Exception exception, int periodKey);
 
     /// <summary>Карта без кешу: ті самі рядки, що й <see cref="StaleResultsQuery"/>, для всього періоду; <c>null</c> — переповнення.</summary>
     private async Task<IReadOnlyDictionary<long, DateTime?>?> LoadAsync(int periodKey, int? byUserId, CancellationToken ct)

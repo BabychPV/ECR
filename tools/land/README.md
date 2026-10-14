@@ -307,6 +307,27 @@ null (як порожня). Перелік (11 пар методологія/т�
 а 0438 перевіряє прив'язки методології на всіх версіях шаблону: перед видачею перевірте (read-only), чи є прив'язки на
 старих версіях (рішення K-eng-lite залежить від цього).
 
+#### LookupCompare: порівняння Lookup-аргументу з текстом довідника (LAND-5094, діагноз A)
+
+`-Stage LookupCompare` (лише явно, в `All` не входить, лише чернетки, не публікує, повтор - 0 змін; реалізація - lane
+`lane/integ-land-lookup-compare`, `LandLookupCompare.Lib.ps1`). Навіщо: колонка-Lookup і колонка-міст Formula над Lookup
+(`Land_Measure_ReleaseColdVent`, T10_01/T11_01) віддають у формулу НОМЕР запису довідника (189/190), тож
+`@X = 'No - Нет'` ніколи не істинне (C12_03: 1 248 клітинок MISMATCH_LEGACY_ZERO). Етап переписує порівняння на
+`REGFIELD(@X, 'NAME') = 'No - Нет'` (також `'lit' = @X`, `<>`, `!=`, `in(@X, 'lit', ...)`), лише коли літерал - ім'я запису
+довідника цього аргументу (перелік - з колонок Lookup/Formula-над-Lookup моделі, REGFIELD-мости не чіпаються); маркер `?`
+зберігається; у PARITY_1 аргументу виставляється числове `value` (id запису). Параметри: `-OnlyMethodology <коди>`.
+
+#### NaeType: вибір type1/type2/type3 за NAE у C11_10 (D-423)
+
+`-Stage NaeType` (лише явно, в `All` не входить, лише чернетки, не публікує, повтор - 0 змін; `LandNaeType.Lib.ps1`).
+Старий код рахує лише тип, обраний за NAE (`ECW_C11_10.cs:180-184`, `:305-311`, `:328`); в ECR усі типи - виходи. Етап
+обгортає вираз кожного типу `if(in(@Land_NAE, '<NAE типу>', ...), <вираз>, NULL)` і додає `@Land_NAE` у список аргументів.
+Перелічені NAE з хвостом - лише `0647..0652` з ` (001-002)`; відрізання будь-якого хвоста після `(` (як `:133-141`) НЕ
+відтворено (словник виразу не має рядкових функцій) - звірка на стенді. Параметри: `-OnlyMethodology <коди>`.
+
+Порядок етапів: `ArgumentSuffix` -> `LookupCompare` -> `NaeType` -> `OptionalArguments` (OptionalArguments лишається
+останнім: попередні етапи переписують вирази й списки, `?` ставиться на готовий список).
+
 ### Стелі динамічних рядків наявних таблиць клону (D-UPG-1)
 
 `-StructureMode Sql` на клоні підтягує `MaxDynamicRows` НАЯВНИХ таблиць чернетки до `maxRows` моделі, але лише
@@ -338,6 +359,17 @@ null (як порожня). Перелік (11 пар методологія/т�
 атрибута AF, який читає старий код (`af_attr_bridges.stream_sources`; мости атрибутів AF - розділ README шаблону
 «Мости за атрибутами AF-таблиць»). Сторожі: LandHse400CompositionScriptTests, LandHse400BridgesModelTests (Architecture),
 LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
+
+### C05_05 / T3_00: наявні ручні колонки як мости (P1-2, без нового D-nn)
+
+`ECW_C05_05.cs:73-130` завжди бере `Density`, `FuelLowerHeating`, `MercaptanSulphurContent`, `H2Smass` зі складу HSE400
+(рік, місяць, префікс потоку з `Land_TypeFuel`; немає запису - `continue`). На T3_00 ці колонки вже були ручним `Decimal`
+(0 клітинок), тому `hse400_bridges.apply()` (працює лише зі списком `unresolved`) моста не створював і всі кроки C05_05
+мали `#ARG`. `hse400_bridges.apply_existing_inputs()` (`EXISTING_INPUT_BRIDGES`) перетипує **ті самі** колонки на місці в
+`Formula` (`readOnly`, `34/16`) з виразом `composition_expression(REGFIELD([Land_TypeFuel], 'NAME'), <показник>)`;
+нових колонок немає, аргументи методології зв'язуються за кодом. У клоні шаблону перетип робить `-Stage Template`
+(рядок «колонок переведено в обчислюваний тип», `Decimal/Int -> Formula/Calculated`); значень 0, тож `guardedWithData`
+не спрацьовує. Сторож: LandHse400BridgesModelTests (`Чотири_аргументи_C05_05_на_T3_00_…`).
 
 ### CompositionMass: склад по речовині
 

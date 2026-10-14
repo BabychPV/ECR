@@ -18,6 +18,7 @@ param(
     [string]$ExcelModelPath,
     [string]$TemplateCode = 'LAND_UI',
     [string[]]$KnownStaleTables = @(),
+    [string[]]$KnownTypeMismatches = @(),   # "TABLE.COL": законні розбіжності типу, які Build не виправляє (Int/Decimal тощо)
     [int]$PrecisionChecksPerTable = 0
 )
 $ErrorActionPreference = 'Stop'
@@ -111,6 +112,39 @@ foreach ($m in $fm) { $bad += $m }
 # і відхиляв рядки завантаження ECR-ROW-0409). Розбіжність - стеля нижча за модель.
 $mr = @(Get-LandMaxRowsMismatches $st $mdl)
 foreach ($m in $mr) { $bad += $m }
+# D-423: тип колонки (DataType) структури версії проти моделі: клон із Decimal замість String проходив Verify
+# (T9_04/T9_07 OperatingTimeReleaseOnColdVentYesNo_Mnn), а migrate-version показував би 0 змін типу.
+$tm = @(Get-LandColumnTypeMismatches $st $mdl $KnownTypeMismatches)
+foreach ($m in $tm) { $bad += $m }
+Write-Host ("Типи колонок перевірено: таблиць із розбіжністю типу {0}" -f $tm.Count)
+# текстові мости (precision у моделі null): Precision/Scale версії мають бути NULL (структура їх не несе - GET колонки)
+$bridgeBad = 0; $bridgeChecked = 0
+foreach ($b in @(Get-LandTextBridgeColumns $mdl)) {
+    $etb = @($sheetByCode[$b.Sheet].tables) | Where-Object { $_.code -eq $b.Table } | Select-Object -First 1
+    if ($null -eq $etb -or @($etb.columns | Where-Object { $_.code -eq $b.Code }).Count -eq 0) { continue }
+    $pc = (Invoke-Ecr -Method GET -Path "/api/v1/template-versions/$($ver.id)/tables/$($etb.id)/columns/$($b.Code)").Json
+    $bridgeChecked++
+    if ($null -ne $pc.precision -or $null -ne $pc.scale) {
+        $bridgeBad++
+        if ($bridgeBad -le 20) { $bad += "$($b.Sheet)/$($b.Table): текстовий міст $($b.Code) має Precision/Scale $($pc.precision)/$($pc.scale), у моделі без межі" }
+    }
+}
+if ($bridgeBad -gt 0) { $bad += "текстові мости з Precision/Scale: $bridgeBad з $bridgeChecked" }
+Write-Host ("Текстових мостів перевірено: {0} (з Precision/Scale {1})" -f $bridgeChecked, $bridgeBad)
+# D-423: String-джерела текстових мостів (колонки M, ретайпнуті з Decimal) мають бути без одиниці; сам міст (Formula, unit h) не перевіряється
+$unitBad = 0; $unitChecked = 0
+foreach ($k in @(Get-LandTextBridgeSources $mdl)) {
+    $q = $k -split '/'
+    $etb = @($sheetByCode[$q[0]].tables) | Where-Object { $_.code -eq $q[1] } | Select-Object -First 1
+    if ($null -eq $etb -or @($etb.columns | Where-Object { $_.code -eq $q[2] }).Count -eq 0) { continue }
+    $mc = @($mdl.sheets | Where-Object { $_.code -eq $q[0] }).tables | Where-Object { $_.code -eq $q[1] } | ForEach-Object { $_.columns } | Where-Object { $_.code -eq $q[2] } | Select-Object -First 1
+    if ($mc.unit) { continue }
+    $uc = (Invoke-Ecr -Method GET -Path "/api/v1/template-versions/$($ver.id)/tables/$($etb.id)/columns/$($q[2])").Json
+    $unitChecked++
+    if ($null -ne $uc.unitId) { $unitBad++; if ($unitBad -le 20) { $bad += "$($q[0])/$($q[1]): текстова колонка $($q[2]) має UnitId $($uc.unitId), у моделі без одиниці" } }
+}
+if ($unitBad -gt 0) { $bad += "текстові колонки з UnitId: $unitBad з $unitChecked" }
+Write-Host ("Текстових колонок без одиниці перевірено: {0} (з UnitId {1})" -f $unitChecked, $unitBad)
 Write-Host ("Стелі динамічних рядків перевірено: таблиць нижче моделі {0}" -f $mr.Count)
 Write-Host ("Формули колонок і readOnly перевірено: розбіжних таблиць {0}" -f $fm.Count)
 # LP-28: таблиця є у версії, а в моделі її немає (застарілі T9a_03/06/07 клону) - розбіжність, окрім явного -KnownStaleTables.

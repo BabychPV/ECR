@@ -3,13 +3,15 @@ using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>Реалізація <see cref="IDocumentListSummaryStore"/>: один агрегований запит.</summary>
 public sealed class DocumentListSummaryStore(
     EcrDbContext db, Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null, Ecr.Domain.Abstractions.IClock? clock = null,
-    StaleCountsEpoch? epoch = null, Microsoft.Extensions.Logging.ILogger<DocumentListSummaryStore>? log = null)
+    StaleCountsEpoch? epoch = null, Microsoft.Extensions.Logging.ILogger<DocumentListSummaryStore>? log = null,
+    IServiceScopeFactory? scopeFactory = null)
     : IDocumentListSummaryStore
 {
     /// <summary>Стеля карти періоду; у тестах зменшується, щоб довести деградацію без 200 тис. документів.</summary>
@@ -125,7 +127,7 @@ public sealed class DocumentListSummaryStore(
             .AsNoTracking()
             .Where(d => (scope == null || scope.Contains(d.ProjectId)) && !narrowed.Contains(d.ProjectId));
 
-        var maps = await new StaleResultsMapCache(db, cache, clock, epoch, log, StaleMapMaxDocuments)
+        var maps = await new StaleResultsMapCache(db, cache, clock, epoch, log, StaleMapMaxDocuments, scopeFactory)
             .GetAsync(periodKey, currentUserId is { } me ? [null, me] : [null], ct)
             .ConfigureAwait(false);
 
