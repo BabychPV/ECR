@@ -253,7 +253,7 @@ function New-LandRowsTablePlan {
         }
         # D-423 (сторож): NAE type3 C11_10 у T9_04/T9_07 - OperatingTime тут String змішаного змісту, а type3 читає його числом
         # (Strict: арифметика над текстом). У прод-даних таких рядків немає; лічильник робить появу видимою на завантаженні.
-        if ($TableCode -in 'T9_04', 'T9_07' -and $srcRow.Contains('Land_NAE') -and (Test-LandNaeInType -Nae ([string]$srcRow['Land_NAE']) -Methodology 'ECW_C11_10' -Type 'type3')) { $plan.Type3InMixed++ }
+        if ($TableCode -in 'T9_04', 'T9_07' -and (@($srcRow.Keys) -contains 'Land_NAE') -and (Test-LandNaeInType -Nae ([string]$srcRow['Land_NAE']) -Methodology 'ECW_C11_10' -Type 'type3')) { $plan.Type3InMixed++ }
         if ($cells.Count -eq 0) { continue }
         $rowKey = New-LandRowKey -DocId $DocNumber -TableCode $TableCode -Index $seq -KeyFormat $KeyFormat
         [void]$rowsOut.Add(@{ rowKey = $rowKey; baseVersion = $null; cells = $cells })

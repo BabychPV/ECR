@@ -295,4 +295,25 @@ public sealed class LandRowLoaderTests
             Directory.Delete(dir2, recursive: true);
         }
     }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Рядки_джерела_Dictionary_з_JavaScriptSerializer_проходять_гілку_T9_04_без_MethodCountCouldNotFindBest()
+    {
+        // Windows PowerShell 5.1 віддає рядки як Dictionary<string,object>: у ній немає .Contains(key) (hotfix integ-land-loader-fix).
+        var json = Probe("""
+            Add-Type -AssemblyName System.Web.Extensions
+            $rows = (New-Object System.Web.Script.Serialization.JavaScriptSerializer).DeserializeObject('[{"Land_No":"1","Land_NAE":"N1","OperatingTime":"5"}]')
+            $cols = @{ Land_No = (Col 'Land_No' 'String'); OperatingTime = (Col 'OperatingTime' 'String') }
+            $p = New-LandRowsTablePlan -DocNumber 7 -TableCode 'T9_04' -MonthNo 1 -SourceRows $rows -ColumnMap $cols -TableAliases @{}
+            [ordered]@{ rows = $p.Rows.Count; cells = $p.Cells } | ConvertTo-Json -Compress
+            """);
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal(1, doc.RootElement.GetProperty("rows").GetInt32());
+        Assert.Equal(2, doc.RootElement.GetProperty("cells").GetInt32());
+
+        // Кожен споживач LandRows.Lib бачить функції LandInputCells.Lib: бібліотека підключає її сама, а скрипт - явно.
+        Assert.Contains("LandInputCells.Lib.ps1", File.ReadAllText(LandRowKeyTests.LandFile("LandRows.Lib.ps1")), StringComparison.Ordinal);
+        Assert.Contains("LandInputCells.Lib.ps1", File.ReadAllText(LandRowKeyTests.LandFile("Load-LandRows.ps1")), StringComparison.Ordinal);
+    }
 }

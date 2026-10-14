@@ -59,6 +59,7 @@ $ErrorActionPreference = 'Stop'
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 . (Join-Path $here 'EcrApi.ps1')
 . (Join-Path $here 'LandStandSession.Lib.ps1')
+. (Join-Path $here 'LandInputCells.Lib.ps1')
 . (Join-Path $here 'LandRows.Lib.ps1')
 Set-StrictMode -Off
 
