@@ -114,7 +114,11 @@ function Get-LandParityMissingClass {
     $ms = $StateObject.MethState
     if (-not $ms.ContainsKey($MethodologyCode)) { return 'MISSING_NOT_IN_ECR' }
     if ($ms[$MethodologyCode][0] -eq 0) { return 'MISSING_NOT_PUBLISHED' }
-    if ($ms[$MethodologyCode][1] -eq 0) { return 'MISSING_NO_BINDING' }
+    if ($ms[$MethodologyCode][1] -eq 0) {
+        # Опублікована методологія з прив'язками, УСІ IsActive=0 - окремий клас від справжньої відсутності прив'язки (P3).
+        if ($ms[$MethodologyCode].Count -gt 2 -and [int]$ms[$MethodologyCode][2] -eq 1) { return 'MISSING_BINDING_INACTIVE' }
+        return 'MISSING_NO_BINDING'
+    }
     return 'MISSING_BOUND_NO_RESULT'
 }
 
@@ -270,6 +274,8 @@ function New-LandParityState {
         MultiWritten = @{}       # той самий ключ -> 1: значення записане під час приписування кільком таблицям
         AmbiguousByMeth = @{}    # methodology -> кількість неоднозначних ключів
         KeyFormats = @{ Table = 0; Legacy = 0; Unknown = 0 }   # результати ECR за форматом SourceRowKey
+        ResultsWithTableInstance = 0      # результати з TableInstanceId -> код таблиці (ключ порівняння: таблиця + rowKey)
+        ResultsWithoutTableInstance = 0   # TableInstanceId NULL: стара поведінка (Resolve-LandParityResultTables)
     }
 }
 
@@ -309,7 +315,7 @@ function Resolve-LandParityResultTables {
 }
 
 function Add-LandParityEcrResult {
-    param([hashtable]$StateObject, [string]$DocumentName, [int]$PeriodKey, [string]$MethodologyCode, [string]$RowKey, [string]$OutputCode, [double]$Value, [string]$SubstanceCode = '')
+    param([hashtable]$StateObject, [string]$DocumentName, [int]$PeriodKey, [string]$MethodologyCode, [string]$RowKey, [string]$OutputCode, [double]$Value, [string]$SubstanceCode = '', [string]$TableCode = '')
     $st = $StateObject
     $cn = ConvertTo-LandParityCanonicalOutput $st $MethodologyCode $OutputCode $SubstanceCode
     $mname = $MethodologyCode   # alias: LandScriptVariableCollisionTests does not allow assigning an element keyed by a parameter
@@ -324,8 +330,16 @@ function Add-LandParityEcrResult {
     }
     $fmt = (ConvertFrom-LandRowKey $RowKey).Format
     $st.KeyFormats[$fmt] = 1 + [int]$st.KeyFormats[$fmt]
-    $targets = @(Resolve-LandParityResultTables $st $DocumentName $PeriodKey $MethodologyCode $RowKey)
-    $multiTarget = ($targets.Count -gt 1)
+    # TableInstanceId результату -> код таблиці: ключ порівняння (table, rowKey); без нього легасі-ключ p<doc>-<seq>
+    # колізує між таблицями одного документа (BRANCH_BOTH_PRESENT / AMBIGUOUS_ECR_KEY).
+    if (-not [string]::IsNullOrWhiteSpace($TableCode)) {
+        $targets = @($TableCode.Trim())
+        $st.ResultsWithTableInstance++
+    }
+    else {
+        $targets = @(Resolve-LandParityResultTables $st $DocumentName $PeriodKey $MethodologyCode $RowKey)
+        $st.ResultsWithoutTableInstance++
+    }    $multiTarget = ($targets.Count -gt 1)
     foreach ($tc in $targets) {
         $mkey = "$DocumentName|$PeriodKey|$tc|$MethodologyCode"
         $st.EcrMeth[$mkey] = 1
@@ -357,15 +371,15 @@ function Add-LandParityEcrResult {
 
 function Import-LandParityStateFile {
     # Offline state (tests, archived runs). JSON:
-    #  methodologies: [{code, published, bound, tables: ["T3_00"]}], tables: [{document, period, table, rowKeys: [..], maxRows}],
-    #  results: [{document, period, methodology, rowKey, outputCode, value}]
+    #  methodologies: [{code, published, bound, anyBinding (є прив'язки, хай усі IsActive=0), tables: ["T3_00"]}], tables: [{document, period, table, rowKeys: [..], maxRows}],
+    #  results: [{document, period, methodology, rowKey, outputCode, value, substanceCode, table (код таблиці з TableInstanceId; порожньо = NULL)}]
     param([Parameter(Mandatory)][string]$Path, [hashtable]$TargetState)
     $st = $TargetState
     $j = ConvertFrom-LandParityJson ([System.IO.File]::ReadAllText($Path))
     $inv = [Globalization.CultureInfo]::InvariantCulture
     foreach ($m in @(Get-LandParityV $j 'methodologies')) {
         $code = [string](Get-LandParityV $m 'code')
-        $st.MethState[$code] = @([int](Get-LandParityV $m 'published'), [int](Get-LandParityV $m 'bound'))
+        $st.MethState[$code] = @([int](Get-LandParityV $m 'published'), [int](Get-LandParityV $m 'bound'), [int](Get-LandParityV $m 'anyBinding'))
         $names = @(Get-LandParityV $m 'tables' | ForEach-Object { [string]$_ })
         if ($names.Count -gt 0) { $st.MethTables[$code] = $names }
     }
@@ -380,7 +394,7 @@ function Import-LandParityStateFile {
     foreach ($res in @(Get-LandParityV $j 'results')) {
         Add-LandParityEcrResult $st ([string](Get-LandParityV $res 'document')) ([int](Get-LandParityV $res 'period')) `
             ([string](Get-LandParityV $res 'methodology')) ([string](Get-LandParityV $res 'rowKey')) ([string](Get-LandParityV $res 'outputCode')) `
-            ([double]::Parse([string](Get-LandParityV $res 'value'), $inv)) ([string](Get-LandParityV $res 'substanceCode'))
+            ([double]::Parse([string](Get-LandParityV $res 'value'), $inv)) ([string](Get-LandParityV $res 'substanceCode')) ([string](Get-LandParityV $res 'table'))
     }
 }
 
@@ -400,8 +414,8 @@ function Import-LandParityStateSql {
         }
         finally { $cn.Close() }
     }
-    & $rd "SELECT m.Code, CASE WHEN EXISTS (SELECT 1 FROM calc.MethodologyVersion v WHERE v.MethodologyId = m.Id AND v.Status = 1) THEN 1 ELSE 0 END, CASE WHEN EXISTS (SELECT 1 FROM cfg.CalculationBinding b WHERE b.MethodologyId = m.Id AND b.IsActive = 1) THEN 1 ELSE 0 END FROM calc.Methodology m" {
-        param($rec) $code = [string]$rec[0]; $st.MethState[$code] = @([int]$rec[1], [int]$rec[2])
+    & $rd "SELECT m.Code, CASE WHEN EXISTS (SELECT 1 FROM calc.MethodologyVersion v WHERE v.MethodologyId = m.Id AND v.Status = 1) THEN 1 ELSE 0 END, CASE WHEN EXISTS (SELECT 1 FROM cfg.CalculationBinding b WHERE b.MethodologyId = m.Id AND b.IsActive = 1) THEN 1 ELSE 0 END, CASE WHEN EXISTS (SELECT 1 FROM cfg.CalculationBinding b WHERE b.MethodologyId = m.Id) THEN 1 ELSE 0 END FROM calc.Methodology m" {
+        param($rec) $code = [string]$rec[0]; $st.MethState[$code] = @([int]$rec[1], [int]$rec[2], [int]$rec[3])
     }
     $byCode = @{}
     & $rd "SELECT DISTINCT m.Code, td.Code FROM cfg.CalculationBinding b JOIN calc.Methodology m ON m.Id = b.MethodologyId JOIN cfg.TableDef td ON td.Id = b.TableDefId WHERE b.IsActive = 1" {
@@ -418,9 +432,9 @@ function Import-LandParityStateSql {
     }
     # Код речовини результату: поле SUBSTANCE_CODE запису довідника (як MethodologyStore.GetSubstanceCodesAsync), інакше код запису.
     $substanceSql = "COALESCE((SELECT TOP 1 COALESCE(NULLIF(LTRIM(RTRIM(v.ValueString)), ''), FORMAT(v.ValueNumeric, '0.#########')) FROM dic.RegistryValue v JOIN cfg.RegistryFieldDef f ON f.Id = v.RegistryFieldDefId AND f.Code = 'SUBSTANCE_CODE' WHERE v.RegistryEntryId = cr.SubstanceEntryId), se.Code)"
-    & $rd "SELECT JSON_VALUE(d.NameL10n, '$.en'), cr.PeriodKey, m.Code, cr.SourceRowKey, cr.OutputCode, cr.Value, $substanceSql FROM calc.CalculationResult cr JOIN calc.CalculationRun r ON r.Id = cr.CalculationRunId AND r.Status = 'Current' JOIN calc.MethodologyVersion mv ON mv.Id = cr.MethodologyVersionId JOIN calc.Methodology m ON m.Id = mv.MethodologyId JOIN doc.Document d ON d.Id = cr.DocumentId LEFT JOIN dic.RegistryEntry se ON se.Id = cr.SubstanceEntryId" {
+    & $rd "SELECT JSON_VALUE(d.NameL10n, '$.en'), cr.PeriodKey, m.Code, cr.SourceRowKey, cr.OutputCode, cr.Value, $substanceSql, td.Code FROM calc.CalculationResult cr LEFT JOIN doc.TableInstance cti ON cti.Id = cr.TableInstanceId LEFT JOIN cfg.TableDef td ON td.Id = cti.TableDefId JOIN calc.CalculationRun r ON r.Id = cr.CalculationRunId AND r.Status = 'Current' JOIN calc.MethodologyVersion mv ON mv.Id = cr.MethodologyVersionId JOIN calc.Methodology m ON m.Id = mv.MethodologyId JOIN doc.Document d ON d.Id = cr.DocumentId LEFT JOIN dic.RegistryEntry se ON se.Id = cr.SubstanceEntryId" {
         param($rec)
-        Add-LandParityEcrResult $st ([string]$rec[0]) ([int]$rec[1]) ([string]$rec[2]) ([string]$rec[3]) ([string]$rec[4]) ([double]::Parse([string]$rec[5], $inv)) ([string]$rec[6])
+        Add-LandParityEcrResult $st ([string]$rec[0]) ([int]$rec[1]) ([string]$rec[2]) ([string]$rec[3]) ([string]$rec[4]) ([double]::Parse([string]$rec[5], $inv)) ([string]$rec[6]) ($(if ($rec.IsDBNull(7)) { '' } else { [string]$rec[7] }))
     }
 }
 
@@ -697,7 +711,10 @@ function Invoke-LandParityCompare {
                         # D-425: ECR порахував рядок, який легасі не рахує (статус не Running) - це регресія фільтра
                         # «лише Running», а не «ECR порахував там, де легасі не було»; індикатор має бути 0.
                         if ($cls -like 'ECR_ONLY*') {
-                            foreach ($mk in $rowKeys) { if ($nonRunningRows.ContainsKey($mk)) { $cls = 'ECR_NON_RUNNING'; break } }
+                            # Клас - лише коли на не-Running рядку Є результат ECR (не за самою наявністю не-Running члена групи).
+            foreach ($mk in $rowKeys) {
+                if ($nonRunningRows.ContainsKey($mk) -and $st.Ecr.ContainsKey("$tk|$mk") -and $st.Ecr["$tk|$mk"].ContainsKey($ck)) { $cls = 'ECR_NON_RUNNING'; break }
+            }
                         }
                         Add-LandParityCell $ac $docName $pk $tbl $rk $nRows $efid $meth $lab ($pre + $cls)
                     }
@@ -752,6 +769,8 @@ function Get-LandParitySummary {
         $ambEcr = [ordered]@{ keys = [int]$StateObject.AmbiguousEcr.Count; byMethodology = @($StateObject.AmbiguousByMeth.Keys | Sort-Object | ForEach-Object { [ordered]@{ methodology = $_; keys = [int]$StateObject.AmbiguousByMeth[$_] } }) }
         $keyFmt = [ordered]@{ table = [int]$StateObject.KeyFormats['Table']; legacy = [int]$StateObject.KeyFormats['Legacy']; unknown = [int]$StateObject.KeyFormats['Unknown'] }
     }
+    $withTi = 0; $withoutTi = 0
+    if ($null -ne $StateObject) { $withTi = [int]$StateObject.ResultsWithTableInstance; $withoutTi = [int]$StateObject.ResultsWithoutTableInstance }
     $noSub = @(); $foreign = @()
     if ($null -ne $StateObject) {
         $noSub = @($StateObject.NoSubstance.Keys | Sort-Object | ForEach-Object { [ordered]@{ methodology = $_; results = [int]$StateObject.NoSubstance[$_] } })
@@ -797,6 +816,9 @@ function Get-LandParitySummary {
         multiTableResults = $multi
         ambiguousEcrKeys = $ambEcr
         rowKeyFormats = $keyFmt
+        resultsWithTableInstance = $withTi
+        resultsWithoutTableInstance = $withoutTi
+        missingBindingInactiveCells = [int]($classes | Where-Object { $_.class -like '*MISSING_BINDING_INACTIVE*' } | ForEach-Object { $_.cells } | Measure-Object -Sum).Sum
         groups = $groups
     }
 }

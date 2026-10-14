@@ -283,3 +283,33 @@ function Get-LandTextBridgeColumns($Mdl) {
     }
     return @($out)
 }
+
+# Коди методологій, на які посилається модель (tb.calc.methodologies таблиць і sh.calc.methodologies аркушів).
+function Get-LandModelMethodologyCodes($Model) {
+    $codes = @{}
+    foreach ($sh in @($Model.sheets)) {
+        if ($sh.calc) { foreach ($n in @($sh.calc.methodologies)) { if ($n) { $codes[[string]$n] = $true } } }
+        foreach ($tb in @($sh.tables)) {
+            if ($tb.calc) { foreach ($n in @($tb.calc.methodologies)) { if ($n) { $codes[[string]$n] = $true } } }
+        }
+    }
+    return @($codes.Keys | Sort-Object)
+}
+
+# P3: методологія з опублікованою ОСТАННЬОЮ версією мусить мати хоч одну активну прив'язку (cfg.CalculationBinding.IsActive=1).
+# Build-LandTemplate (Bind-ResultColumns) ставить IsActive за статусом останньої версії НА МОМЕНТ прив'язки: публікація
+# після прив'язки лишає прив'язки вимкненими, і результат ніколи не лягає в таблицю (клас MISSING_BINDING_INACTIVE у паритеті).
+# $Info: елементи @{ Code; Published (bool, остання версія Published); Bindings (масив bool IsActive) }.
+# Повертає елементи @{ Code; Total; Reason = 'ALL_INACTIVE' | 'NO_BINDINGS' }; значень немає.
+function Get-LandInactiveBindingMethodologies($Info) {
+    $res = @()
+    foreach ($i in @($Info)) {
+        if (-not [bool]$i.Published) { continue }
+        $b = @($i.Bindings)
+        $active = @($b | Where-Object { [bool]$_ }).Count
+        if ($active -gt 0) { continue }
+        $reason = 'ALL_INACTIVE'; if ($b.Count -eq 0) { $reason = 'NO_BINDINGS' }
+        $res += [pscustomobject]@{ Code = [string]$i.Code; Total = $b.Count; Reason = $reason }
+    }
+    return @($res | Sort-Object Code)
+}

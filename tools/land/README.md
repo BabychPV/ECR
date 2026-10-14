@@ -607,6 +607,19 @@ C11_10 перелічує обидва написання (з пробілом �
   значення не порівнюється і не друкується). Формат ключів документа визначається з рядків стенда.
   `summary.json` (formatVersion 3, без змін): нові поля `ambiguousEcrKeys {keys, byMethodology[]}` і
   `rowKeyFormats {table, legacy, unknown}`.
+- **TableInstanceId у harness (K1-діагностика п.B).** SQL-вибірка результатів бере `calc.CalculationResult.TableInstanceId`
+  -> `cfg.TableDef.Code`; ключ порівняння - `(table, rowKey)`, а не голий `rowKey`. Легасі-ключ `p<doc>-<seq>`
+  без коду таблиці колізував між T9_02/T9_04/T9_07 (`BRANCH_BOTH_PRESENT`, `AMBIGUOUS_ECR_KEY`); тепер результат з
+  `TableInstanceId` належить рівно своїй таблиці. Для `TableInstanceId IS NULL` - стара поведінка
+  (`Resolve-LandParityResultTables`). У summary: `resultsWithTableInstance` / `resultsWithoutTableInstance`
+  (разом з `rowKeyFormats`). Офлайн-стан: поле результату `table`.
+- **MISSING_BINDING_INACTIVE (P3).** Методологія Published, прив'язки до таблиць є, але УСІ `IsActive=0` - окремий
+  клас від `MISSING_NO_BINDING` (справжня відсутність прив'язки); група `oracleOnly`; у summary
+  `missingBindingInactiveCells`. `Verify-LandTemplate.ps1` ловить причину: Published остання версія методології
+  моделі без активної прив'язки -> розбіжність (`-InactiveBindingsAsWarning` - лише попередження).
+- **C12_01 при порівнянні:** `-TypeFoldMethodology '^ECW_C12_01$' -GroupBy 'T11_02=Land_TypeFuel'` (і T11a..d) `-AggregateBy NaePhase`.
+  `AGG_ECR_NON_RUNNING` більше не ставиться за самою наявністю не-Running члена групи: лише коли на не-Running
+  рядку Є результат ECR (раніше 980 клітинок були артефактом).
 - Міграція тестових документів: перезавантажити рядки новим ключем і зробити один recalc (вікно K1); доки
   стенд має старі ключі, harness працює в режимі Legacy і чесно позначає колізії.
 

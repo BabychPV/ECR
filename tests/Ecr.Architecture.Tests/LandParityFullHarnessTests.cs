@@ -376,6 +376,190 @@ public sealed class LandParityFullHarnessTests
         Assert.Equal(1, classes2["MISSING_BOUND_NO_RESULT"]);
     }
 
+    private static Fixture BuildSingleRowFixture(string secondRowStatus = "Running", bool twoRows = false)
+    {
+        var f = new Fixture();
+        var columns = new[] { "Land_No", "Land_NAE", "Land_Status", "Land_TypeFuel" };
+        var rows = twoRows
+            ? new[] { Row(1, "N1", "E1"), Row(2, "N1", "E1", secondRowStatus) }
+            : new[] { Row(1, "N1", "E1") };
+        var sample = new
+        {
+            doc = Doc,
+            periods = new Dictionary<string, object>
+            {
+                ["2026-01"] = new Dictionary<string, object> { [Table] = new { columns, rows } },
+            },
+        };
+        File.WriteAllText(Path.Combine(f.Dir.FullName, Doc + ".json"), JsonSerializer.Serialize(sample));
+        return f;
+    }
+
+    /// <summary>
+    /// K1-діагностика п.B: легасі-ключ <c>p&lt;doc&gt;-&lt;seq&gt;</c> без коду таблиці колізує між таблицями документа
+    /// (обидві гілки type1/type2 з різних таблиць потрапляли в один ключ -> BRANCH_BOTH_PRESENT). Результат із
+    /// TableInstanceId (поле <c>table</c>) належить рівно своїй таблиці. Мутація: прибрати використання TableCode в
+    /// Add-LandParityEcrResult - другий випадок червоніє.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Результат_із_TableInstanceId_не_колізує_між_таблицями_з_однаковим_rowKey(bool withTableInstance)
+    {
+        using var f = BuildSingleRowFixture();
+        File.WriteAllLines(f.Oracle, [TsvLine("E1", 1, "N1", "0.001", "ECW_C12_02")]);
+
+        static object Res(string output, string value, string? table) =>
+            new { document = Doc, period = 202601, methodology = "ECW_C12_02", rowKey = "p9-0001", outputCode = output, value, table };
+        var state = new
+        {
+            methodologies = new object[] { new { code = "ECW_C12_02", published = 1, bound = 1, anyBinding = 1, tables = new[] { "T3_00", "T3_01" } } },
+            tables = new object[]
+            {
+                new { document = Doc, period = 202601, table = "T3_00", rowKeys = new[] { "p9-0001" }, maxRows = 5 },
+                new { document = Doc, period = 202601, table = "T3_01", rowKeys = new[] { "p9-0001" }, maxRows = 5 },
+            },
+            results = new[]
+            {
+                Res("ECW_EC_tons_301_type1", "0.001", withTableInstance ? "T3_00" : null),
+                Res("ECW_EC_tons_301_type2", "0.5", withTableInstance ? "T3_01" : null),
+            },
+        };
+        File.WriteAllText(f.State, JsonSerializer.Serialize(state));
+
+        var (root, _, _) = RunCompare(f, "tableinst");
+        var classes = Classes(root);
+
+        if (withTableInstance)
+        {
+            Assert.False(classes.ContainsKey("BRANCH_BOTH_PRESENT"));
+            Assert.Equal(1, classes["MATCH"]);
+            Assert.Equal(2, root.GetProperty("resultsWithTableInstance").GetInt32());
+            Assert.Equal(0, root.GetProperty("resultsWithoutTableInstance").GetInt32());
+        }
+        else
+        {
+            Assert.Equal(1, classes["BRANCH_BOTH_PRESENT"]);
+            Assert.Equal(0, root.GetProperty("resultsWithTableInstance").GetInt32());
+            Assert.Equal(2, root.GetProperty("resultsWithoutTableInstance").GetInt32());
+        }
+    }
+
+    /// <summary>
+    /// P3: Published методологія з прив'язками, усі IsActive=0 -> MISSING_BINDING_INACTIVE (а не MISSING_NO_BINDING);
+    /// справжня відсутність прив'язки лишається MISSING_NO_BINDING.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [InlineData(1, "MISSING_BINDING_INACTIVE", "MISSING_NO_BINDING", 1)]
+    [InlineData(0, "MISSING_NO_BINDING", "MISSING_BINDING_INACTIVE", 0)]
+    public void Опублікована_методологія_з_вимкненими_прив_язками_має_окремий_клас(
+        int anyBinding, string expected, string absent, int inactiveCells)
+    {
+        using var f = BuildSingleRowFixture();
+        File.WriteAllLines(f.Oracle, [TsvLine("E1", 1, "N1", "0.001", "ECW_C05_02")]);
+        var state = new
+        {
+            methodologies = new object[] { new { code = "ECW_C05_02", published = 1, bound = 0, anyBinding, tables = new[] { "T3_00" } } },
+            tables = new object[] { new { document = Doc, period = 202601, table = "T3_00", rowKeys = new[] { "p9-0001" }, maxRows = 5 } },
+            results = Array.Empty<object>(),
+        };
+        File.WriteAllText(f.State, JsonSerializer.Serialize(state));
+
+        var (root, _, _) = RunCompare(f, "inactive");
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes[expected]);
+        Assert.False(classes.ContainsKey(absent));
+        Assert.Equal(inactiveCells, root.GetProperty("missingBindingInactiveCells").GetInt32());
+    }
+
+    /// <summary>
+    /// Діагностика п.A: ECR_NON_RUNNING - лише коли результат є на не-Running рядку; групи, де не-Running рядок
+    /// результату не має, лишаються ECR_ONLY (раніше клас ставився за наявністю не-Running члена групи).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void ECR_NON_RUNNING_лише_коли_на_не_Running_рядку_є_результат()
+    {
+        using var f = BuildSingleRowFixture("Removed", twoRows: true);
+        File.WriteAllLines(f.Oracle, [TsvLine("E1", 1, "N1", "0.001", "ECW_C05_02")]);
+
+        static object Res(string row, string output, string value) =>
+            new { document = Doc, period = 202601, methodology = "ECW_C05_02", rowKey = row, outputCode = output, value };
+        var state = new
+        {
+            methodologies = new object[] { new { code = "ECW_C05_02", published = 1, bound = 1, tables = new[] { "T3_00" } } },
+            tables = new object[] { new { document = Doc, period = 202601, table = "T3_00", rowKeys = new[] { "p9-0001", "p9-0002" }, maxRows = 5 } },
+            results = new[]
+            {
+                Res("p9-0001", "ECW_EC_tons_301", "0.001"),
+                Res("p9-0001", "ECW_EC_tons_302", "0.5"),   // не-Running рядок p9-0002 результату не має
+            },
+        };
+        File.WriteAllText(f.State, JsonSerializer.Serialize(state));
+
+        var (root, _, _) = RunCompare(f, "nonrunning-empty", "-AggregateBy", "NaePhase");
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes["AGG_ECR_ONLY"]);
+        Assert.False(classes.ContainsKey("AGG_ECR_NON_RUNNING"));
+        Assert.Equal(0, root.GetProperty("ecrNonRunningCells").GetInt32());
+    }
+
+    /// <summary>
+    /// Сторож P3 (Verify-LandTemplate.ps1): чиста функція знаходить Published методологію без активної прив'язки;
+    /// чернетка й методологія з активною прив'язкою не потрапляють; сам Verify її викликає.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Verify_знаходить_опубліковані_методології_без_активної_прив_язки()
+    {
+        var script = Path.Combine(Path.GetTempPath(), $"ecr-land-inactive-{Guid.NewGuid():N}.ps1");
+        File.WriteAllText(script, """
+            $ErrorActionPreference = 'Stop'
+            . $args[0]
+            $info = @(
+                [pscustomobject]@{ Code = 'M_OK'; Published = $true; Bindings = @($true, $false) },
+                [pscustomobject]@{ Code = 'M_OFF'; Published = $true; Bindings = @($false, $false) },
+                [pscustomobject]@{ Code = 'M_NONE'; Published = $true; Bindings = @() },
+                [pscustomobject]@{ Code = 'M_DRAFT'; Published = $false; Bindings = @($false) }
+            )
+            foreach ($r in @(Get-LandInactiveBindingMethodologies $info)) { Write-Host ('INACTIVE=' + $r.Code + ':' + $r.Reason) }
+            $mdl = '{"sheets":[{"code":"S","calc":{"methodologies":["A"]},"tables":[{"code":"T","calc":{"methodologies":["B","A"]}}]}]}' | ConvertFrom-Json
+            Write-Host ('CODES=' + (@(Get-LandModelMethodologyCodes $mdl) -join ','))
+            """, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        try
+        {
+            var (exit, output) = RunPowerShell(script, LandFile("LandTemplateDiff.Lib.ps1"));
+            Assert.True(exit == 0, output);
+            Assert.Contains("INACTIVE=M_NONE:NO_BINDINGS", output, StringComparison.Ordinal);
+            Assert.Contains("INACTIVE=M_OFF:ALL_INACTIVE", output, StringComparison.Ordinal);
+            Assert.DoesNotContain("M_OK", output, StringComparison.Ordinal);
+            Assert.DoesNotContain("M_DRAFT", output, StringComparison.Ordinal);
+            Assert.Contains("CODES=A,B", output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(script);
+        }
+
+        var verify = File.ReadAllText(LandFile("Verify-LandTemplate.ps1"));
+        Assert.Contains("Get-LandInactiveBindingMethodologies", verify, StringComparison.Ordinal);
+        Assert.Contains("/bindings\"", verify, StringComparison.Ordinal);
+    }
+
+    /// <summary>Мутаційний сторож: SQL-вибірка результатів бере TableInstanceId і передає код таблиці в Add-LandParityEcrResult.</summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Вибірка_результатів_бере_TableInstanceId()
+    {
+        var lib = File.ReadAllText(LandFile("LandParity.Lib.ps1"));
+        Assert.Contains("cr.TableInstanceId", lib, StringComparison.Ordinal);
+        Assert.Contains("[string]$TableCode = ''", lib, StringComparison.Ordinal);
+        Assert.Contains("$targets = @($TableCode.Trim())", lib, StringComparison.Ordinal);
+    }
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Місяці_фільтрують_періоди_документів()

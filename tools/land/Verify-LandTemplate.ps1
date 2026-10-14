@@ -19,7 +19,8 @@ param(
     [string]$TemplateCode = 'LAND_UI',
     [string[]]$KnownStaleTables = @(),
     [string[]]$KnownTypeMismatches = @(),   # "TABLE.COL": законні розбіжності типу, які Build не виправляє (Int/Decimal тощо)
-    [int]$PrecisionChecksPerTable = 0
+    [int]$PrecisionChecksPerTable = 0,
+    [switch]$InactiveBindingsAsWarning   # P3: Published методологія без активної прив'язки - лише попередження
 )
 $ErrorActionPreference = 'Stop'
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
@@ -151,6 +152,30 @@ Write-Host ("Формули колонок і readOnly перевірено: р�
 $stale = @(Get-LandStaleTables $st $mdl $KnownStaleTables)
 if ($stale.Count) { $bad += ("зайві таблиці (є у версії, немає в моделі): {0}: {1}" -f $stale.Count, (($stale | ForEach-Object { $_.Key }) -join ', ')) }
 Write-Host ("Зайвих таблиць (є у версії, немає в моделі): {0}" -f $stale.Count)
+# P3: методологія з опублікованою останньою версією без АКТИВНОЇ прив'язки (Bind-ResultColumns зафіксував IsActive=0 до
+# публікації): паритет показує такі комірки як MISSING_BINDING_INACTIVE. Перевіряємо методології, на які посилається модель.
+$bindInfo = @()
+$allMeth = @()
+$mj = (Invoke-Ecr -Method GET -Path '/api/v1/methodologies').Json
+if ($null -ne $mj) { if ($mj -is [array]) { $allMeth = @($mj) } elseif ($mj.PSObject.Properties['items']) { $allMeth = @($mj.items) } else { $allMeth = @($mj) } }
+foreach ($code in @(Get-LandModelMethodologyCodes $mdl)) {
+    $mrec = $allMeth | Where-Object { [string]$_.code -eq $code } | Select-Object -First 1
+    if ($null -eq $mrec) { continue }   # методології немає на сервері: це не прив'язка
+    $mv = (Invoke-Ecr -Method GET -Path "/api/v1/methodologies/$([int]$mrec.id)/versions").Json
+    $mvItems = if ($mv -is [array]) { @($mv) } elseif ($mv.PSObject.Properties['items']) { @($mv.items) } else { @($mv) }
+    $lastV = $mvItems | Sort-Object { [int]$_.id } -Descending | Select-Object -First 1
+    $bj = (Invoke-Ecr -Method GET -Path "/api/v1/methodologies/$([int]$mrec.id)/bindings").Json
+    $bItems = if ($bj -is [array]) { @($bj) } elseif ($null -ne $bj -and $bj.PSObject.Properties['items']) { @($bj.items) } elseif ($null -ne $bj) { @($bj) } else { @() }
+    $bindInfo += [pscustomobject]@{ Code = $code; Published = ($null -ne $lastV -and [string]$lastV.status -eq 'Published'); Bindings = @($bItems | ForEach-Object { [bool]$_.isActive }) }
+}
+$inactive = @(Get-LandInactiveBindingMethodologies $bindInfo)
+Write-Host ("Методологій моделі перевірено на активну прив'язку: {0}; Published без активної прив'язки: {1}" -f $bindInfo.Count, $inactive.Count)
+if ($inactive.Count) {
+    $listTxt = ($inactive | ForEach-Object { "$($_.Code) [$($_.Reason), прив'язок $($_.Total)]" }) -join ', '
+    if ($InactiveBindingsAsWarning) { Write-Host "WARN: Published методологія без активної прив'язки: $listTxt" }
+    else { $bad += "Published методологія без активної прив'язки (IsActive=0): $($inactive.Count): $listTxt" }
+}
+
 $rows | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
 Write-Host "Колонок результатів (Calculated) перевірено: $calcChecked"
 if ($precBad -gt 0) { $bad += "Precision/Scale: розбіжностей з моделлю $precBad з $precChecked перевірених колонок" }
