@@ -278,6 +278,10 @@ public sealed record CalculationBindingDto(
 /// <param name="CalculatedAt">Коли завершився прогін (UTC).</param>
 /// <param name="InputsChangedAt">Остання зміна входів після прогону (UTC); <c>null</c> — не змінювались.</param>
 /// <param name="ChangedRegistries">Коди довідників, змінених після прогону й прочитаних методологією (RT-25); порожньо — не змінювались.</param>
+/// <param name="TableInstanceId">
+/// Екземпляр таблиці документа, що дав число (D-401); <c>null</c> — результат, записаний до D-401. RowKey унікальний
+/// лише в межах екземпляра, тож пара (<c>TableInstanceId</c>, <c>SourceRowKey</c>) однозначно адресує рядок.
+/// </param>
 public sealed record CalculationResultDto(
     int MethodologyVersionId,
     string? SourceRowKey,
@@ -290,4 +294,5 @@ public sealed record CalculationResultDto(
     bool IsStale = false,
     DateTime? CalculatedAt = null,
     DateTime? InputsChangedAt = null,
-    IReadOnlyList<string>? ChangedRegistries = null);
+    IReadOnlyList<string>? ChangedRegistries = null,
+    long? TableInstanceId = null);

@@ -436,12 +436,17 @@ public sealed record CalculationArgument(
 /// (HSE301 A3b, FEATURE-HSE301-VIEW §7.1), у одиниці джерела. <c>null</c> чи порожньо — входів
 /// не пишемо (<c>TraceLevel = Off</c> або жодного кроку).
 /// </param>
+/// <param name="TableInstanceId">
+/// Екземпляр таблиці документа, з якої взято рядок (D-401); <c>null</c> — невідомий. RowKey унікальний
+/// лише в межах екземпляра, тож без цього результати двох таблиць з однаковим ключем неможливо розрізнити.
+/// </param>
 public sealed record CalculationOutput(
     long DocumentId,
     string? SourceRowKey,
     IReadOnlyList<CalculationOutputValue> Values,
     IReadOnlyList<CalculationTraceStep> Trace,
-    IReadOnlyList<CalculationArgument>? Inputs = null);
+    IReadOnlyList<CalculationArgument>? Inputs = null,
+    long? TableInstanceId = null);
 
 /// <summary>Один обчислений вихід — рядок <c>calc.CalculationResult</c>.</summary>
 /// <param name="MethodologyVersionId">Версія, що дала число.</param>

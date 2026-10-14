@@ -144,6 +144,7 @@ export function CalculationResultsPanel({
             <Table striped withTableBorder>
               <Table.Thead>
                 <Table.Tr>
+                  <Table.Th>{t('documents.resultTable')}</Table.Th>
                   <Table.Th>{t('documents.rowKey')}</Table.Th>
                   <Table.Th>{t('documents.outputCode')}</Table.Th>
                   <Table.Th>{t('documents.value')}</Table.Th>
@@ -154,8 +155,10 @@ export function CalculationResultsPanel({
               <Table.Tbody>
                 {list.map((result) => (
                   <Table.Tr
-                    key={`${String(result.sourceRowKey)}:${result.outputCode}:${String(result.substanceEntryId)}`}
+                    key={`${String(result.tableInstanceId)}:${String(result.sourceRowKey)}:${result.outputCode}:${String(result.substanceEntryId)}`}
                   >
+                    {/* ⚠ D-401: екземпляр таблиці; NULL — результат, записаний до D-401. */}
+                    <Table.Td data-result-table={result.tableInstanceId ?? ''}>{result.tableInstanceId ?? '—'}</Table.Td>
                     <Table.Td>{result.sourceRowKey ?? '—'}</Table.Td>
                     <Table.Td>{result.outputCode}</Table.Td>
                     {/* ⚠ F-21: без 16 хвостових нулів сховища (`2.5000000000000000`). */}

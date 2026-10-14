@@ -2960,6 +2960,8 @@ USING (VALUES
     (N'documents.noCalculationResultsHint', N'en', N'Either the document has not been recalculated yet, or no methodology is bound to its columns.', 1),
     (N'documents.rowKey', N'en', N'Row', 1),
     (N'documents.outputCode', N'en', N'Output', 1),
+    -- COLL:result-table D-401: колонка «Таблиця» панелі результатів розрахунку.
+    (N'documents.resultTable', N'en', N'Table', 1),
     (N'documents.value', N'en', N'Value', 1),
     (N'security.title',                  N'en', N'Security', 1),
     (N'security.roles',                  N'en', N'Roles', 1),
@@ -20278,6 +20280,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:acc-ow-dialog ── кінець секції ──
+-- COLL:result-table ── ru/kz: D-401, колонка «Таблиця» панелі результатів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'documents.resultTable', N'ru', N'Таблица'),
+    (N'documents.resultTable', N'kz', N'Кесте')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:result-table ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

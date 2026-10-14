@@ -54,6 +54,13 @@ public sealed class CalculationInputRow : Entity<long>
     /// <summary>Одиниця ДЖЕРЕЛА, а не цільова (ФВ-16.10).</summary>
     public int? UnitId { get; private set; }
 
+    /// <summary>Екземпляр таблиці, чий рядок дав вхід (D-401); <c>null</c> — запис до D-401.</summary>
+    public long? TableInstanceId { get; private set; }
+
+    /// <summary>Задає екземпляр таблиці входу (D-401).</summary>
+    /// <param name="tableInstanceId">Екземпляр таблиці; <c>null</c> — невідомий.</param>
+    public void SetTable(long? tableInstanceId) => TableInstanceId = tableInstanceId;
+
     /// <summary>Записує значення аргументу.</summary>
     /// <param name="value">Числове значення.</param>
     /// <param name="valueString">Текстове значення.</param>
@@ -154,6 +161,13 @@ public sealed class CalculationStep : Entity<long>
 
     /// <summary>Речовина кроку; <c>null</c> — крок Row-формули або без речовини.</summary>
     public long? SubstanceEntryId { get; private set; }
+
+    /// <summary>Екземпляр таблиці, до рядка якої належить крок (D-401); <c>null</c> — запис до D-401.</summary>
+    public long? TableInstanceId { get; private set; }
+
+    /// <summary>Задає екземпляр таблиці кроку (D-401).</summary>
+    /// <param name="tableInstanceId">Екземпляр таблиці; <c>null</c> — невідомий.</param>
+    public void SetTable(long? tableInstanceId) => TableInstanceId = tableInstanceId;
 
     /// <summary>Задає адресу кроку: документ, рядок і речовину.</summary>
     /// <param name="documentId">Документ; <c>null</c> — адреси немає.</param>

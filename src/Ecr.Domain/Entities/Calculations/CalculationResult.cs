@@ -100,4 +100,19 @@ public sealed class CalculationResult : Entity<long>
     /// <summary>Задає речовину результату.</summary>
     /// <param name="substanceEntryId">Запис довідника речовин; <c>null</c> — вихід без речовини.</param>
     public void SetSubstance(long? substanceEntryId) => SubstanceEntryId = substanceEntryId;
+
+    /// <summary>
+    /// Екземпляр таблиці документа (<c>doc.TableInstance.Id</c>), що дав число (D-401); 
+    /// <c>null</c> — результат, записаний до D-401.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <see cref="SourceRowKey"/> унікальний лише в межах екземпляра таблиці: без цього поля рядки двох таблиць
+    /// документа з однаковим ключем неможливо розрізнити. Без FK: <c>arc.usp_ArchiveYear</c> робить 
+    /// <c>TRUNCATE doc.TableInstance</c>, а посилання лишається стабільним (Id зберігається при відновленні).
+    /// </remarks>
+    public long? TableInstanceId { get; private set; }
+
+    /// <summary>Задає екземпляр таблиці результату (D-401).</summary>
+    /// <param name="tableInstanceId">Екземпляр таблиці; <c>null</c> — невідомий.</param>
+    public void SetTable(long? tableInstanceId) => TableInstanceId = tableInstanceId;
 }
