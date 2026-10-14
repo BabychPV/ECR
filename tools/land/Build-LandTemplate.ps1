@@ -560,6 +560,7 @@ function Fill-StructureSql([int]$vid) {
         if ($retype -gt 0) { Log "  колонок переведено в обчислюваний тип (чернетка-клон): $retype" }
         # D-423: Decimal -> String у чернетці-клоні (місячні OperatingTimeReleaseOnColdVentYesNo_Mnn у T9_04/T9_07) і скидання
         # Precision/Scale текстових мостів. API цього не вміє (ECR-TMPL-0422 columnDataTypeImmutable навіть у чернетці), тож лише SQL.
+        # UnitId=NULL лише для ретайпнутих M-колонок (текст без одиниці); формульні мости (Formula, unit h) цим UPDATE не чіпаються.
         # Гарди в самому UPDATE: версія Draft (Status=0), колонка ще Decimal (повтор = 0 змін), у doc.CellValue немає значень колонки.
         $txtRetyped = @(); $txtBridges = @(); $txtWarn = @()
         foreach ($sh in @($Mdl.sheets)) {
@@ -570,7 +571,7 @@ function Fill-StructureSql([int]$vid) {
                 $planT = Get-LandTextRetypePlan @($tb.columns) $exT
                 foreach ($w in @($planT.Warn)) { $txtWarn += "$($sh.code)/$($tb.code)/$w" }
                 foreach ($u in @($planT.Retype)) {
-                    $n = [int](Sql-Exec $cn ('UPDATE c SET DataType=0, Precision=NULL, Scale=NULL, DisplayFormat=NULL FROM cfg.ColumnDef c ' +
+                    $n = [int](Sql-Exec $cn ('UPDATE c SET DataType=0, Precision=NULL, Scale=NULL, DisplayFormat=NULL, UnitId=NULL FROM cfg.ColumnDef c ' +
                             'JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId ' +
                             'WHERE c.Id=@i AND v.Id=@v AND v.Status=0 AND c.DataType=2 AND NOT EXISTS (SELECT 1 FROM doc.CellValue cv WHERE cv.ColumnDefId=c.Id)') @{ i = [int]$u.Id; v = $vid })
                     if ($n -gt 0) { $txtRetyped += "$($sh.code)/$($tb.code)/$($u.Code)" }

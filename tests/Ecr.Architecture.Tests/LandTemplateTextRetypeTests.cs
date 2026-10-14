@@ -79,12 +79,12 @@ public sealed class LandTemplateTextRetypeTests
             $script:HasValues = @{}
             if ($mode -eq 'values') { $script:HasValues[2] = $true }
             $script:State = @{
-                1 = @{ code = 'M01'; type = 2; p = 34; s = 16 }
-                2 = @{ code = 'M02'; type = 2; p = 34; s = 16 }
+                1 = @{ code = 'M01'; type = 2; p = 34; s = 16; u = 7 }
+                2 = @{ code = 'M02'; type = 2; p = 34; s = 16; u = 7 }
                 3 = @{ code = 'M03'; type = 2; p = 34; s = 16 }
                 4 = @{ code = 'XI'; type = 1; p = $null; s = $null }
                 5 = @{ code = 'NUM'; type = 6; p = 18; s = 2 }
-                6 = @{ code = 'BR'; type = 6; p = 34; s = 16 }
+                6 = @{ code = 'BR'; type = 6; p = 34; s = 16; u = 5 }
                 7 = @{ code = 'BR2'; type = 6; p = 34; s = 16 }
                 8 = @{ code = 'BRNUM'; type = 6; p = 34; s = 16 }
                 9 = @{ code = 'DEC'; type = 2; p = 34; s = 16 }
@@ -128,7 +128,7 @@ public sealed class LandTemplateTextRetypeTests
                 if ($sql -like 'UPDATE c SET DataType=0, Precision=NULL*') {
                     $c = $script:State[[int]$p.i]
                     if ($script:Status -eq 0 -and $c.type -eq 2 -and -not $script:HasValues.ContainsKey([int]$p.i)) {
-                        $c.type = 0; $c.p = $null; $c.s = $null; Write-Host ('RETYPED=' + $c.code); return 1
+                        if ($sql -notlike '*UnitId=NULL*') { return 0 }; $c.type = 0; $c.p = $null; $c.s = $null; $c.u = $null; Write-Host ('RETYPED=' + $c.code); return 1
                     }
                     return 0
                 }
@@ -148,7 +148,7 @@ public sealed class LandTemplateTextRetypeTests
                 Write-Host ('RUN=' + $run)
                 try { Fill-StructureSql 7 } catch { Write-Host ('END=' + $_) }
             }
-            foreach ($k in ($script:State.Keys | Sort-Object)) { $c = $script:State[$k]; Write-Host ('STATE=' + $c.code + ':' + $c.type + ':' + $c.p + ':' + $c.s) }
+            foreach ($k in ($script:State.Keys | Sort-Object)) { $c = $script:State[$k]; Write-Host ('STATE=' + $c.code + ':' + $c.type + ':' + $c.p + ':' + $c.s + ':u' + $c.u) }
         }
         """;
 
@@ -237,11 +237,11 @@ public sealed class LandTemplateTextRetypeTests
         Assert.Matches(@"LOG=.*Decimal->String.*: 0\s", runs[1]);
 
         // стан: M01/M02 String без меж; M03 (читає числова формула) і DEC лишились Decimal; XI - Int; BRNUM не чіпаний
-        Assert.Contains("STATE=M01:0::", output, StringComparison.Ordinal);
-        Assert.Contains("STATE=M02:0::", output, StringComparison.Ordinal);
+        Assert.Contains("STATE=M01:0:::u", output, StringComparison.Ordinal);
+        Assert.Contains("STATE=M02:0:::u", output, StringComparison.Ordinal);
         Assert.Contains("STATE=M03:2:34:16", output, StringComparison.Ordinal);
         Assert.Contains("STATE=XI:1::", output, StringComparison.Ordinal);
-        Assert.Contains("STATE=BR:6::", output, StringComparison.Ordinal);
+        Assert.Contains("STATE=BR:6:::u5", output, StringComparison.Ordinal);
         Assert.Contains("STATE=BR2:6::", output, StringComparison.Ordinal);
         Assert.Contains("STATE=BRNUM:6:34:16", output, StringComparison.Ordinal);
         Assert.Contains("STATE=DEC:2:34:16", output, StringComparison.Ordinal);
@@ -254,12 +254,12 @@ public sealed class LandTemplateTextRetypeTests
         var published = Run("published");
         Assert.Empty(Lines(published, "RETYPED="));
         Assert.Empty(Lines(published, "BRIDGE="));
-        Assert.Contains("STATE=M01:2:34:16", published, StringComparison.Ordinal);
+        Assert.Contains("STATE=M01:2:34:16:u7", published, StringComparison.Ordinal);
         Assert.Contains("LOG=  WARN тип колонки: S/T/M01: UPDATE не застосовано", published, StringComparison.Ordinal);
 
         var withValues = Run("values");
         Assert.Equal(["RETYPED=M01"], Lines(withValues.Split("RUN=2", StringSplitOptions.None)[0], "RETYPED="));
-        Assert.Contains("STATE=M02:2:34:16", withValues, StringComparison.Ordinal);   // M02 має значення - не чіпаємо
+        Assert.Contains("STATE=M02:2:34:16:u7", withValues, StringComparison.Ordinal);   // M02 має значення - не чіпаємо
         Assert.Contains("S/T/M02: UPDATE не застосовано", withValues, StringComparison.Ordinal);
     }
 
@@ -295,8 +295,10 @@ public sealed class LandTemplateTextRetypeTests
         // SQL-гарди ретайпу: лише чернетка, лише Decimal, без значень комірок
         var fill = build[build.IndexOf("function Fill-StructureSql", StringComparison.Ordinal)..];
         Assert.Contains("v.Status=0 AND c.DataType=2 AND NOT EXISTS (SELECT 1 FROM doc.CellValue", fill, StringComparison.Ordinal);
+        Assert.Contains("DisplayFormat=NULL, UnitId=NULL FROM cfg.ColumnDef c", fill, StringComparison.Ordinal);
 
         var verify = File.ReadAllText(LandFile("Verify-LandTemplate.ps1"));
+        Assert.Contains("текстова колонка", verify, StringComparison.Ordinal);
         Assert.Contains("Get-LandColumnTypeMismatches $st $mdl", verify, StringComparison.Ordinal);
         Assert.Contains("Get-LandTextBridgeColumns $mdl", verify, StringComparison.Ordinal);
 

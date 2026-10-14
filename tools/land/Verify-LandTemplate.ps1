@@ -130,6 +130,20 @@ foreach ($b in @(Get-LandTextBridgeColumns $mdl)) {
 }
 if ($bridgeBad -gt 0) { $bad += "текстові мости з Precision/Scale: $bridgeBad з $bridgeChecked" }
 Write-Host ("Текстових мостів перевірено: {0} (з Precision/Scale {1})" -f $bridgeChecked, $bridgeBad)
+# D-423: String-джерела текстових мостів (колонки M, ретайпнуті з Decimal) мають бути без одиниці; сам міст (Formula, unit h) не перевіряється
+$unitBad = 0; $unitChecked = 0
+foreach ($k in @(Get-LandTextBridgeSources $mdl)) {
+    $q = $k -split '/'
+    $etb = @($sheetByCode[$q[0]].tables) | Where-Object { $_.code -eq $q[1] } | Select-Object -First 1
+    if ($null -eq $etb -or @($etb.columns | Where-Object { $_.code -eq $q[2] }).Count -eq 0) { continue }
+    $mc = @($mdl.sheets | Where-Object { $_.code -eq $q[0] }).tables | Where-Object { $_.code -eq $q[1] } | ForEach-Object { $_.columns } | Where-Object { $_.code -eq $q[2] } | Select-Object -First 1
+    if ($mc.unit) { continue }
+    $uc = (Invoke-Ecr -Method GET -Path "/api/v1/template-versions/$($ver.id)/tables/$($etb.id)/columns/$($q[2])").Json
+    $unitChecked++
+    if ($null -ne $uc.unitId) { $unitBad++; if ($unitBad -le 20) { $bad += "$($q[0])/$($q[1]): текстова колонка $($q[2]) має UnitId $($uc.unitId), у моделі без одиниці" } }
+}
+if ($unitBad -gt 0) { $bad += "текстові колонки з UnitId: $unitBad з $unitChecked" }
+Write-Host ("Текстових колонок без одиниці перевірено: {0} (з UnitId {1})" -f $unitChecked, $unitBad)
 Write-Host ("Стелі динамічних рядків перевірено: таблиць нижче моделі {0}" -f $mr.Count)
 Write-Host ("Формули колонок і readOnly перевірено: розбіжних таблиць {0}" -f $fm.Count)
 # LP-28: таблиця є у версії, а в моделі її немає (застарілі T9a_03/06/07 клону) - розбіжність, окрім явного -KnownStaleTables.
