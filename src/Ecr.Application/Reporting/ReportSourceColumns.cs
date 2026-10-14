@@ -51,6 +51,7 @@ public static class ReportSourceColumns
         ["UnitCode"] = Text,
         ["MethodologyVersionId"] = Number,
         ["ProjectCode"] = Text,
+        ["TableInstanceId"] = Number,
     };
 
     /// <summary>Коди колонок, які джерело вміє віддати.</summary>

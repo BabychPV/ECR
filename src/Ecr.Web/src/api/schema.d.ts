@@ -20043,6 +20043,12 @@ export interface components {
              */
             substanceEntryId: null | number;
             /**
+             * Format: int64
+             * @description Екземпляр таблиці документа, що дав число (D-401); `null` — результат, записаний до D-401. RowKey унікальний
+             *     лише в межах екземпляра, тож пара (`TableInstanceId`, `SourceRowKey`) однозначно адресує рядок.
+             */
+            tableInstanceId?: null | number;
+            /**
              * Format: int32
              * @description Одиниця результату.
              */

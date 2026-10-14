@@ -782,6 +782,14 @@
               "integer"
             ]
           },
+          "tableInstanceId": {
+            "description": "Екземпляр таблиці документа, що дав число (D-401); `null` — результат, записаний до D-401. RowKey унікальний\nлише в межах екземпляра, тож пара (`TableInstanceId`, `SourceRowKey`) однозначно адресує рядок.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "unitId": {
             "description": "Одиниця результату.",
             "format": "int32",

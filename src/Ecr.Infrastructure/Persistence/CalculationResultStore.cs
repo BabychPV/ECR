@@ -132,6 +132,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
                 .SetValue(result, nextId++);
 
             result.SetSubstance(value.SubstanceEntryId);
+            result.SetTable(output.TableInstanceId);
             db.CalculationResults.Add(result);
         }
     }
@@ -201,6 +202,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
             // ⛔ HSE301 A3b (Д-5): адреса кроку — документ, рядок і речовина, як у його
             // результату. Без неї трейс знаходили лише за прогоном, тобто ніяк із комірки.
             entity.SetAddress(output.DocumentId, output.SourceRowKey, step.SubstanceEntryId);
+            entity.SetTable(output.TableInstanceId);
 
             // У колонку — `TraceJson` v1 (§7.2), коли модуль його дав; інакше голий код
             // помилки, як до кроку.
@@ -248,6 +250,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
                 : argument.ValueString;
 
             row.SetValue(argument.Value ?? argument.EntryId, text, argument.UnitId);
+            row.SetTable(output.TableInstanceId);
             db.CalculationInputs.Add(row);
         }
     }
@@ -289,13 +292,16 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
     /// ключ результату → його Id.
     /// </summary>
     /// <remarks>
+    /// ⛔ D-401: ключ містить екземпляр таблиці — RowKey унікальний лише в межах екземпляра, і без нього крок
+    /// прив'язувався б до результату ЧУЖОЇ таблиці з тим самим ключем (TryAdd лишав перший).
+    /// <para/>
     /// ⚠ Id результату відомий ДО <c>SaveChanges</c> — його резервує послідовність, — тому
     /// крок прив'язується в тому самому наборі змін, без повторного читання бази.
     /// <c>CalculationOutputWriter</c> кличе запис результатів раніше за трейс саме для цього.
     /// </remarks>
-    private Dictionary<(long, string?, int, string, long?), long> PendingResults(long calculationRunId)
+    private Dictionary<(long, long?, string?, int, string, long?), long> PendingResults(long calculationRunId)
     {
-        var found = new Dictionary<(long, string?, int, string, long?), long>();
+        var found = new Dictionary<(long, long?, string?, int, string, long?), long>();
 
         foreach (var entry in db.ChangeTracker.Entries<CalculationResult>())
         {
@@ -303,7 +309,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
             if (result.CalculationRunId == calculationRunId)
             {
                 found.TryAdd(
-                    (result.DocumentId, result.SourceRowKey, result.MethodologyVersionId,
+                    (result.DocumentId, result.TableInstanceId, result.SourceRowKey, result.MethodologyVersionId,
                      result.OutputCode.ToUpperInvariant(), result.SubstanceEntryId),
                     result.Id);
             }
@@ -319,7 +325,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
     /// порахувався) результату немає, і <c>ResultId</c> лишається <c>null</c>.
     /// </remarks>
     private static long? ResultIdOf(
-        Dictionary<(long, string?, int, string, long?), long> results,
+        Dictionary<(long, long?, string?, int, string, long?), long> results,
         CalculationOutput output,
         CalculationTraceStep step)
     {
@@ -329,7 +335,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
 
         return value is not null
                && results.TryGetValue(
-                   (output.DocumentId, output.SourceRowKey, value.MethodologyVersionId,
+                   (output.DocumentId, output.TableInstanceId, output.SourceRowKey, value.MethodologyVersionId,
                     value.OutputCode.ToUpperInvariant(), value.SubstanceEntryId),
                    out var id)
             ? id
@@ -612,6 +618,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
                 .SetValue(copy, nextId++);
 
             copy.SetSubstance(row.SubstanceEntryId);
+            copy.SetTable(row.TableInstanceId);
             db.CalculationResults.Add(copy);
         }
 
@@ -690,6 +697,8 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
                         && runIds.Contains(r.CalculationRunId))
             .OrderBy(r => r.SourceRowKey)
             .ThenBy(r => r.OutputCode)
+            .ThenBy(r => r.TableInstanceId)
+            .ThenBy(r => r.SubstanceEntryId)
             .Take(MaxResults + 1)
             .Select(r => new
             {
@@ -699,6 +708,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
                 r.Value,
                 r.UnitId,
                 r.SubstanceEntryId,
+                r.TableInstanceId,
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -718,7 +728,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
         }
 
         return rows.ConvertAll(r => new CalculationResultRow(
-            r.MethodologyVersionId, r.SourceRowKey, r.OutputCode, r.Value, r.UnitId, r.SubstanceEntryId));
+            r.MethodologyVersionId, r.SourceRowKey, r.OutputCode, r.Value, r.UnitId, r.SubstanceEntryId, r.TableInstanceId));
     }
 
     /// <inheritdoc />

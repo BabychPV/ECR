@@ -31,7 +31,8 @@ public sealed class GetCalculationResultsHandler(
     ICalculationResultStore results,
     IMethodologyStore methodologies,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IRowStore? rowStore = null)
 {
     /// <summary>Право на читання результатів розрахунку (`02-contracts.md` §9).</summary>
     public const string Permission = "Calculation.View";
@@ -83,6 +84,20 @@ public sealed class GetCalculationResultsHandler(
             }
 
             var bindings = await methodologies.GetColumnResultBindingsAsync(scope.TableIds(), ct).ConfigureAwait(false);
+
+            // ⛔ D-401: результат з екземпляром таблиці відсікається точно — прив'язки лише ТІЄЇ таблиці,
+            // що дала число (інакше однойменний вихід іншої таблиці з видимою колонкою відкривав би чуже).
+            // Результати без екземпляра (прогони до D-401) — як і раніше, за кодом виходу.
+            Dictionary<long, int>? defByInstance = null;
+            if (rowStore is not null
+                && rows.Any(r => r.TableInstanceId is not null)
+                && new Ecr.Domain.ValueObjects.PeriodKey(periodKey).IsValid)
+            {
+                var instances = await rowStore
+                    .GetTableInstancesAsync(documentId, new Ecr.Domain.ValueObjects.PeriodKey(periodKey), ct)
+                    .ConfigureAwait(false);
+                defByInstance = instances.ToDictionary(i => i.TableInstanceId, i => i.TableDefId);
+            }
             rows =
             [
                 .. rows.Where(r =>
@@ -92,7 +107,11 @@ public sealed class GetCalculationResultsHandler(
                     // такий вихід цілком; точніше відсікання за SourceRowKey -> RowDef — backlog).
                     var matching = bindings.Where(b =>
                         string.Equals(b.OutputCode, r.OutputCode, StringComparison.OrdinalIgnoreCase)
-                        && b.VersionIds.Contains(r.MethodologyVersionId)).ToList();
+                        && b.VersionIds.Contains(r.MethodologyVersionId)
+                        && (r.TableInstanceId is not { } instanceId
+                            || defByInstance is null
+                            || !defByInstance.TryGetValue(instanceId, out var tableDefId)
+                            || b.TableDefId == tableDefId)).ToList();
                     return matching.Count > 0 && matching.All(b => scope.CanReadColumn(b.ColumnDefId));
                 }),
             ];
@@ -139,7 +158,8 @@ public sealed class GetCalculationResultsHandler(
                 freshness.IsStale,
                 freshness.CalculatedAt,
                 freshness.InputsChangedAt,
-                freshness.ChangedRegistryCodes);
+                freshness.ChangedRegistryCodes,
+                r.TableInstanceId);
         })];
     }
 }

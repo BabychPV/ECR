@@ -165,13 +165,15 @@ public sealed record ResultCarryOver(long DocumentId, IReadOnlyCollection<int> M
 /// <param name="Value">Значення; <c>decimal</c>, ніколи <c>float</c> (<c>D-30</c>).</param>
 /// <param name="UnitId">Одиниця результату — обов'язкова (ФВ-16.6).</param>
 /// <param name="SubstanceEntryId">Речовина; <c>null</c> — вихід без речовини.</param>
+/// <param name="TableInstanceId">Екземпляр таблиці, що дав число (D-401); <c>null</c> — результат до D-401.</param>
 public sealed record CalculationResultRow(
     int MethodologyVersionId,
     string? SourceRowKey,
     string OutputCode,
     decimal Value,
     int UnitId,
-    long? SubstanceEntryId);
+    long? SubstanceEntryId,
+    long? TableInstanceId = null);
 
 /// <summary>Зріз, який прогін зробив застарілим (ФВ-10.5).</summary>
 /// <param name="SnapshotId">Зріз.</param>

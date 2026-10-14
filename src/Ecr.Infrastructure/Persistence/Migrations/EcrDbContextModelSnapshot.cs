@@ -53,6 +53,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<long?>("TableInstanceId")
+                        .HasColumnType("bigint");
+
                     b.Property<int?>("UnitId")
                         .HasColumnType("int");
 
@@ -102,6 +105,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.Property<int?>("SubstanceEntryId")
                         .HasColumnType("int");
+
+                    b.Property<long?>("TableInstanceId")
+                        .HasColumnType("bigint");
 
                     b.Property<int>("UnitId")
                         .HasColumnType("int");
@@ -226,6 +232,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.Property<int?>("SubstanceEntryId")
                         .HasColumnType("int");
+
+                    b.Property<long?>("TableInstanceId")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("TraceJson")
                         .HasColumnType("nvarchar(max)");

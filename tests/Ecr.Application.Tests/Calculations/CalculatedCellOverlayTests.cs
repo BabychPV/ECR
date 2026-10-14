@@ -110,6 +110,126 @@ public sealed class CalculatedCellOverlayTests
         Assert.Equal(12.5m, Emission(cells, 2));    // R2: пізніша числа не має — діє рання
     }
 
+    /// <remarks>
+    /// D-401 (тимчасовий захід): два рядки результату з тим самим <c>RowKey</c>, виходом і речовиною, але
+    /// різними значеннями — це рядки ДВОХ таблиць з однаковим ключем. Сума була б хибним числом.
+    /// Мутація: повернути <c>values.Sum</c> замість <c>TryCombine</c> — комірка = 15, а не порожня.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Два_різні_значення_однієї_речовини_не_сумуються_комірка_порожня_і_є_попередження()
+    {
+        Binding("{}", versions: [5]);
+        Results(new CalculationResultRow(5, "M01", "EMISSION", 10m, 8, null),
+                new CalculationResultRow(5, "M01", "EMISSION", 5m, 8, null),
+                new CalculationResultRow(5, "M02", "EMISSION", 7m, 8, null));
+        var log = new CapturingLogger();
+
+        var cells = await ApplyAsync([], log, "M01", "M02");
+
+        Assert.Null(Emission(cells, 1));
+        Assert.Equal(7m, Emission(cells, 2));
+        var warning = Assert.Single(log.Messages);
+        Assert.Contains("M01/EMISSION", warning, StringComparison.Ordinal);
+    }
+
+    /// <remarks>Мутація: прибрати групування за речовиною — подвоєне значення 40 замість 20.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Однакові_дублікати_однієї_речовини_дають_одне_значення_а_не_суму()
+    {
+        Binding("{}", versions: [5]);
+        Results(new CalculationResultRow(5, "R1", "EMISSION", 20m, 8, null),
+                new CalculationResultRow(5, "R1", "EMISSION", 20m, 8, null));
+
+        var cells = await ApplyAsync([]);
+
+        Assert.Equal(20m, Emission(cells, 1));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Дублікати_кожної_з_двох_речовин_збігаються_за_значенням_і_сума_речовин_лишається()
+    {
+        Binding("{}", versions: [5]);
+        Results(new CalculationResultRow(5, "R1", "EMISSION", 1m, 8, 901),
+                new CalculationResultRow(5, "R1", "EMISSION", 1m, 8, 901),
+                new CalculationResultRow(5, "R1", "EMISSION", 2m, 8, 902),
+                new CalculationResultRow(5, "R1", "EMISSION", 2m, 8, 902));
+
+        var cells = await ApplyAsync([]);
+
+        Assert.Equal(3m, Emission(cells, 1));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Колізія_однієї_речовини_робить_порожньою_всю_комірку_навіть_коли_друга_речовина_чиста()
+    {
+        Binding("{}", versions: [5]);
+        Results(new CalculationResultRow(5, "R1", "EMISSION", 1m, 8, 901),
+                new CalculationResultRow(5, "R1", "EMISSION", 4m, 8, 901),
+                new CalculationResultRow(5, "R1", "EMISSION", 2m, 8, 902));
+
+        var cells = await ApplyAsync([]);
+
+        Assert.Null(Emission(cells, 1));
+    }
+
+    /// <remarks>
+    /// T1 (D-401): дві таблиці одного документа з однаковим <c>RowKey</c> і спільною прив'язкою — кожна
+    /// отримує СВОЄ число за екземпляром. Мутація: прибрати відбір за <c>TableInstanceId</c> — 30 (сума) або порожньо.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task T1_Дві_таблиці_з_однаковим_RowKey_і_спільною_прив_язкою_кожна_бере_своє_число()
+    {
+        Binding("{}", versions: [5]);
+        Results(new CalculationResultRow(5, "R1", "EMISSION", 10m, 8, null, InstanceId),
+                new CalculationResultRow(5, "R1", "EMISSION", 20m, 8, null, InstanceId + 1));
+        var overlay = new CalculatedCellOverlay(_methodologies, _results);
+        IReadOnlySet<int> calculated = new HashSet<int> { EmissionColumnId };
+
+        var result = await overlay.ApplyAsync(
+            DocumentId, PeriodKeyValue,
+            [
+                new OverlayTable(InstanceId, TableDefId, Rows, [], calculated),
+                new OverlayTable(InstanceId + 1, TableDefId, Rows, [], calculated),
+            ],
+            CancellationToken.None);
+
+        Assert.Equal(10m, Emission(result[InstanceId], 1));
+        Assert.Equal(20m, Emission(result[InstanceId + 1], 1));
+    }
+
+    /// <remarks>Мутація: брати B разом з A — 10 + 3 = 13.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Результат_свого_екземпляра_має_перевагу_над_старим_без_екземпляра_а_чужий_ігнорується()
+    {
+        Binding("{}", versions: [5]);
+        Results(new CalculationResultRow(5, "R1", "EMISSION", 10m, 8, null, InstanceId),
+                new CalculationResultRow(5, "R1", "EMISSION", 3m, 8, null),
+                new CalculationResultRow(5, "R2", "EMISSION", 99m, 8, null, InstanceId + 7));
+
+        var cells = await ApplyAsync([]);
+
+        Assert.Equal(10m, Emission(cells, 1));  // A виграє над B
+        Assert.Null(Emission(cells, 2));        // C — чужий екземпляр
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Старий_результат_без_екземпляра_діє_за_тимчасовим_правилом()
+    {
+        Binding("{}", versions: [5]);
+        Results(new CalculationResultRow(5, "R1", "EMISSION", 4m, 8, null));
+
+        var cells = await ApplyAsync([]);
+
+        Assert.Equal(4m, Emission(cells, 1));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Таблиця_без_колонки_Calculated_не_робить_жодного_запиту()
@@ -125,16 +245,46 @@ public sealed class CalculatedCellOverlayTests
         await _results.DidNotReceiveWithAnyArgs().ReadCurrentAsync(default, default, default);
     }
 
-    private async Task<IReadOnlyList<CellRecord>> ApplyAsync(IReadOnlyList<CellRecord> cells)
+    private async Task<IReadOnlyList<CellRecord>> ApplyAsync(
+        IReadOnlyList<CellRecord> cells,
+        Microsoft.Extensions.Logging.ILogger<CalculatedCellOverlay>? log = null,
+        params string[] rowKeys)
     {
-        var overlay = new CalculatedCellOverlay(_methodologies, _results);
+        var overlay = new CalculatedCellOverlay(_methodologies, _results, log);
+        var rows = rowKeys.Length == 0
+            ? Rows
+            : rowKeys.Select((k, i) => (k, id: (long)i + 1)).ToDictionary(x => x.k, x => x.id, StringComparer.Ordinal);
 
         var result = await overlay.ApplyAsync(
             DocumentId, PeriodKeyValue,
-            [new OverlayTable(InstanceId, TableDefId, Rows, cells, new HashSet<int> { EmissionColumnId })],
+            [new OverlayTable(InstanceId, TableDefId, rows, cells, new HashSet<int> { EmissionColumnId })],
             CancellationToken.None);
 
         return result[InstanceId];
+    }
+
+    /// <summary>Збирає відформатовані повідомлення журналу (рівень Warning).</summary>
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<CalculatedCellOverlay>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel,
+            Microsoft.Extensions.Logging.EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == Microsoft.Extensions.Logging.LogLevel.Warning)
+            {
+                Messages.Add(formatter(state, exception));
+            }
+        }
     }
 
     private void Binding(string matchJson, IReadOnlyList<int> versions)

@@ -49,7 +49,24 @@ public sealed class CalculationResultsHiddenColumnTests
         Assert.Equal(["OUT_A", "OUT_B"], codes);
     }
 
-    private static (GetCalculationResultsHandler Handler, int HiddenSheetId) Arrange(bool deny)
+    /// <remarks>
+    /// D-401: однойменний вихід у двох таблицях — читач бачить число лише видимої таблиці (за екземпляром).
+    /// Мутація: прибрати фільтр за <c>TableDefId</c> екземпляра — обидва рядки зникають.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Однойменний_вихід_двох_таблиць_видимий_читачеві_лише_для_видимої_таблиці()
+    {
+        var (handler, _) = Arrange(deny: true, sameOutputTwoTables: true);
+
+        var rows = await handler.HandleAsync(Document, Period, CancellationToken.None);
+
+        var row = Assert.Single(rows);
+        Assert.Equal(11, row.TableInstanceId);
+        Assert.Equal(1m, row.Value);
+    }
+
+    private static (GetCalculationResultsHandler Handler, int HiddenSheetId) Arrange(bool deny, bool sameOutputTwoTables = false)
     {
         var template = new TemplateBuilder();
         var visibleSheet = template.Sheet("S1");
@@ -77,19 +94,35 @@ public sealed class CalculationResultsHiddenColumnTests
         access.ReadScopeAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<CancellationToken>())
               .Returns(call => DocumentReadScope.For(call.Arg<AccessProfile>(), AccessBuilder.ProjectId, snapshot));
 
+        var rowStore = Substitute.For<IRowStore>();
         var results = Substitute.For<ICalculationResultStore>();
         results.ReadCurrentAsync(Document, Period, Arg.Any<CancellationToken>())
-               .Returns([
-                   new CalculationResultRow(Version, "R1", "OUT_A", 1m, 1, null),
-                   new CalculationResultRow(Version, "R1", "OUT_B", 2m, 1, null),
-               ]);
+               .Returns(sameOutputTwoTables
+                   ? [
+                       new CalculationResultRow(Version, "R1", "OUT_X", 1m, 1, null, 11),
+                       new CalculationResultRow(Version, "R1", "OUT_X", 2m, 1, null, 12),
+                   ]
+                   : [
+                       new CalculationResultRow(Version, "R1", "OUT_A", 1m, 1, null),
+                       new CalculationResultRow(Version, "R1", "OUT_B", 2m, 1, null),
+                   ]);
+        rowStore.GetTableInstancesAsync(Document, new Ecr.Domain.ValueObjects.PeriodKey(Period), Arg.Any<CancellationToken>())
+                .Returns([
+                    new TableInstanceRef(11, Document, visibleTable.Id, 1, Period),
+                    new TableInstanceRef(12, Document, hiddenTable.Id, 1, Period),
+                ]);
 
         var methodologies = Substitute.For<IMethodologyStore>();
         methodologies.GetColumnResultBindingsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
-                     .Returns([
-                         new ColumnResultBinding(visibleTable.Id, visibleColumn.Id, 1, "OUT_A", "{}", [Version]),
-                         new ColumnResultBinding(hiddenTable.Id, hiddenColumn.Id, 1, "OUT_B", "{}", [Version]),
-                     ]);
+                     .Returns(sameOutputTwoTables
+                         ? [
+                             new ColumnResultBinding(visibleTable.Id, visibleColumn.Id, 1, "OUT_X", "{}", [Version]),
+                             new ColumnResultBinding(hiddenTable.Id, hiddenColumn.Id, 1, "OUT_X", "{}", [Version]),
+                         ]
+                         : [
+                             new ColumnResultBinding(visibleTable.Id, visibleColumn.Id, 1, "OUT_A", "{}", [Version]),
+                             new ColumnResultBinding(hiddenTable.Id, hiddenColumn.Id, 1, "OUT_B", "{}", [Version]),
+                         ]);
         methodologies.GetVersionLabelsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
                      .Returns(new Dictionary<int, MethodologyVersionLabel>());
         methodologies.GetCalculationFreshnessAsync(
@@ -99,6 +132,6 @@ public sealed class CalculationResultsHiddenColumnTests
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(9);
 
-        return (new GetCalculationResultsHandler(results, methodologies, access, user), hiddenSheet.Id);
+        return (new GetCalculationResultsHandler(results, methodologies, access, user, rowStore), hiddenSheet.Id);
     }
 }
