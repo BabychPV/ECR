@@ -360,6 +360,17 @@ null (як порожня). Перелік (11 пар методологія/т�
 «Мости за атрибутами AF-таблиць»). Сторожі: LandHse400CompositionScriptTests, LandHse400BridgesModelTests (Architecture),
 LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 
+### C05_05 / T3_00: наявні ручні колонки як мости (P1-2, без нового D-nn)
+
+`ECW_C05_05.cs:73-130` завжди бере `Density`, `FuelLowerHeating`, `MercaptanSulphurContent`, `H2Smass` зі складу HSE400
+(рік, місяць, префікс потоку з `Land_TypeFuel`; немає запису - `continue`). На T3_00 ці колонки вже були ручним `Decimal`
+(0 клітинок), тому `hse400_bridges.apply()` (працює лише зі списком `unresolved`) моста не створював і всі кроки C05_05
+мали `#ARG`. `hse400_bridges.apply_existing_inputs()` (`EXISTING_INPUT_BRIDGES`) перетипує **ті самі** колонки на місці в
+`Formula` (`readOnly`, `34/16`) з виразом `composition_expression(REGFIELD([Land_TypeFuel], 'NAME'), <показник>)`;
+нових колонок немає, аргументи методології зв'язуються за кодом. У клоні шаблону перетип робить `-Stage Template`
+(рядок «колонок переведено в обчислюваний тип», `Decimal/Int -> Formula/Calculated`); значень 0, тож `guardedWithData`
+не спрацьовує. Сторож: LandHse400BridgesModelTests (`Чотири_аргументи_C05_05_на_T3_00_…`).
+
 ### CompositionMass: склад по речовині
 
 `{код}` у `{код}_mass` - числовий код забруднювальної речовини (`SUBSTANCE_CODE` довідника `LAND_AIR_SUBSTANCE`,
