@@ -396,7 +396,13 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 (змінних знаменників немає), `Pow`/`Sqrt` - лише в C11_02 (константні аргументи), а `if(@X = 0, 0, …)` не залежить від
 режиму. Аргумент потоку фрагмента (`@Land_TypeFuelOrStream` у C11_10) має бути колонкою на КОЖНІЙ таблиці методології:
 де старий код читає `Land_TypeFuel` (T9_02, T9_07, T9_11, T9a_24..26, T9a_28), модель дає міст до тієї самої колонки
-джерела потоку (`hse400_bridges.STREAM_ARGUMENT_ALIASES`). Довідник `LAND_HSE400_SUBSTANCE` на стендах, побудованих до цієї зміни, заводить
+джерела потоку (`hse400_bridges.STREAM_ARGUMENT_ALIASES`). ✎ D-426/D-427 (2026-10-14): `REG*`/`CURRENT_SUBSTANCE()`/`SUBSTANCE_APPLICABLE` тепер ДОЗВОЛЕНІ й у `Legacy`
+(код: `DialectCatalog.IsAllowedIn`; `Ln`/`ifs`/`CONVERT`/`SUBSTANCE` - далі лише Strict), у `Legacy`-версії, що читає
+довідники, Lookup-аргументи йдуть з `EntryRef`, а NaN/±∞ маскується в 0 на КОЖНІЙ формулі (причина - `MaskedZeroReason`
+у трейсі). Тобто паритет з легасі (ділення на 0 -> 0) для C11_10/C11_11_04/C12_01/C12_03 досягається НОВОЮ Legacy-версією
+з тими самими формулами (`EffectiveFrom` за вікном стенда; опубліковані Strict-версії незмінні) - це крок вікна стенда,
+не код. Інверсію умовчання етапу CompositionMass (`-KeepNumericMode`) робить окрема правка `Build-LandTemplate.ps1`.
+Довідник `LAND_HSE400_SUBSTANCE` на стендах, побудованих до цієї зміни, заводить
 `Import-LandHse400Substance.ps1` (`-DryRun`, `-ConfirmStand`; прод не читає). Сторожі: LandHse400SubstanceMapTests
 (Architecture), CompositionMassBySubstanceTests (Expressions), LandHse400SubstanceRegistryTests (Infrastructure, реальний SQL).
 

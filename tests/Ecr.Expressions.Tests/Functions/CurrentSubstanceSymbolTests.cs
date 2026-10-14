@@ -34,8 +34,9 @@ public sealed class CurrentSubstanceSymbolTests
         Assert.Equal(ExpressionValueType.Text, signature.ResultType);
         Assert.Equal(FunctionTier.Extension, DialectCatalog.TierOf("CURRENT_SUBSTANCE"));
 
-        // Чинний рушій такого не вміє: у Legacy-версії це ECR-CALC-0433, як і для SUBSTANCE.
-        Assert.False(DialectCatalog.IsAllowedIn("CURRENT_SUBSTANCE", NumericMode.Legacy));
+        // ✎ D-426: дозволений і в Legacy (на відміну від SUBSTANCE).
+        Assert.True(DialectCatalog.IsAllowedIn("CURRENT_SUBSTANCE", NumericMode.Legacy));
+        Assert.False(DialectCatalog.IsAllowedIn("SUBSTANCE", NumericMode.Legacy));
         Assert.True(DialectCatalog.IsAllowedIn("CURRENT_SUBSTANCE", NumericMode.Strict));
 
         // Регістр значущий, як у решти каталогу.

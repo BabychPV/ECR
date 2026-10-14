@@ -115,6 +115,16 @@ public sealed class DialectCatalogTests
     [Theory]
     [InlineData("CONVERT")]
     [InlineData("SUBSTANCE")]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Наші_розширення_недоступні_в_Legacy(string name)
+    {
+        // `Legacy` існує, щоб відтворити числа чинного рушія. Вираз, якого
+        // чинний рушій обчислити не міг, за визначенням нічого не відтворює.
+        Assert.Equal(FunctionTier.Extension, DialectCatalog.TierOf(name));
+        Assert.False(DialectCatalog.IsAllowedIn(name, NumericMode.Legacy));
+    }
+
+    [Theory]
     [InlineData("REGFIND")]
     [InlineData("REGONE")]
     [InlineData("REGFIELD")]
@@ -123,13 +133,15 @@ public sealed class DialectCatalogTests
     [InlineData("REGMIN")]
     [InlineData("REGMAX")]
     [InlineData("REGCOUNT")]
+    [InlineData("CURRENT_SUBSTANCE")]
+    [InlineData("SUBSTANCE_APPLICABLE")]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Наші_розширення_недоступні_в_Legacy(string name)
+    public void Функції_довідників_дозволені_в_Legacy_D426(string name)
     {
-        // `Legacy` існує, щоб відтворити числа чинного рушія. Вираз, якого
-        // чинний рушій обчислити не міг, за визначенням нічого не відтворює.
+        // ✎ D-426: довідник читається в C#, арифметика навколо — double з маскою 0; ярус лишається Extension.
         Assert.Equal(FunctionTier.Extension, DialectCatalog.TierOf(name));
-        Assert.False(DialectCatalog.IsAllowedIn(name, NumericMode.Legacy));
+        Assert.True(DialectCatalog.IsAllowedIn(name, NumericMode.Legacy));
+        Assert.True(DialectCatalog.IsAllowedIn(name, NumericMode.Strict));
     }
 
     [Theory]

@@ -375,8 +375,12 @@ public sealed class GenericCalculationModule(
         var period = binding.Period;
 
         // ⛔ D-161: формули `Legacy` не бачать `EntryRef` (побітно як до RT-23a); `Strict` — бачать.
+        // ✎ D-426: виняток — `Legacy`-версія, що читає довідники (`binding.Registries` є лише тоді, коли
+        // формули версії/бібліотек кличуть REG*): `REGFIELD(@Lookup, 'NAME')` потребує id запису. Версії
+        // без REG* лишаються побітно як були.
+        var entryRef = numeric.Mode == NumericMode.Strict || binding.Registries is not null;
         var arguments = input.Arguments.ToDictionary(
-            a => a.ArgumentCode, a => ToValue(a, numeric.Mode == NumericMode.Strict, legacyNumericText: numeric.Mode == NumericMode.Legacy),
+            a => a.ArgumentCode, a => ToValue(a, entryRef, legacyNumericText: numeric.Mode == NumericMode.Legacy),
             StringComparer.OrdinalIgnoreCase);
 
         // ⛔ D-OA: необов'язковий аргумент (`Name?` у списку формули версії чи бібліотеки) без комірки в рядку
