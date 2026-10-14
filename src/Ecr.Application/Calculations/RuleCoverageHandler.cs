@@ -32,7 +32,8 @@ public sealed class RuleCoverageHandler(
     IClock clock,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IColumnPathMapper? columnMapper = null)
+    IColumnPathMapper? columnMapper = null,
+    IRowActivityFilterSource? rowActivity = null)
 {
     /// <summary>Право — як у симуляції: перегляд, не публікація.</summary>
     public const string Permission = "Calculation.View";
@@ -103,9 +104,19 @@ public sealed class RuleCoverageHandler(
         // включно). Немає жодного гранта — порожня матриця (200), а не 403: так само
         // поводяться перелік документів, пошук і перелік зрізів звітності.
         var projects = ListDocumentsHandler.ReadableProjects(profile);
-        IReadOnlyList<RuleCoverageCombination> read = projects.Count == 0
-            ? []
-            : await ReadLocalizedAsync(tables, columns, projects, from, to, ct).ConfigureAwait(false);
+        // ⛔ D-425: фільтр активності рядків — той самий, що в прогоні (`MethodologyResolver`): рядок, який прогін
+        // не рахує, не повинен виглядати «непокритим» тут. Відсіяне лишається у лічильнику `ExcludedRows`.
+        var activity = rowActivity is null || tables.Count == 0
+            ? null
+            : await rowActivity.ResolveForVersionAsync(methodologyVersionId, tables, ct).ConfigureAwait(false);
+
+        IReadOnlyList<RuleCoverageCombination> read = [];
+        long excludedRows = 0;
+        if (projects.Count > 0)
+        {
+            (read, excludedRows) = await ReadFilteredAsync(tables, columns, projects, from, to, activity, ct)
+                .ConfigureAwait(false);
+        }
 
         var combinations = read
             .Take(MaxCombinations)
@@ -122,7 +133,90 @@ public sealed class RuleCoverageHandler(
             columns,
             [.. rules.Select(r => new RuleCoverageRuleDto(r.Code, r.Priority))],
             combinations,
-            read.Count > MaxCombinations);
+            read.Count > MaxCombinations,
+            excludedRows);
+    }
+
+    private static string KeyOf(RuleCoverageCombination combination)
+        => string.Join(
+            '\u0001',
+            combination.Values.Select(v => v is null ? "\u0000" : MethodologyRuleMatcher.Text(v) ?? "\u0000"));
+
+    /// <summary>
+    /// Читає комбінації з урахуванням фільтра активності рядків (D-425): таблиці з колонкою статусу читаються
+    /// окремо, зі статусом на осі; комбінації не-активного статусу відкидаються й потрапляють у лічильник.
+    /// </summary>
+    private async Task<(IReadOnlyList<RuleCoverageCombination> Read, long Excluded)> ReadFilteredAsync(
+        List<int> tables,
+        List<int> columns,
+        IReadOnlyCollection<int> projects,
+        int from,
+        int to,
+        RowActivityFilterResolution? activity,
+        CancellationToken ct)
+    {
+        var filtered = activity is null ? [] : tables.Where(t => activity.ColumnsOf(t).Count > 0).ToList();
+        if (filtered.Count == 0)
+        {
+            return (await ReadLocalizedAsync(tables, columns, projects, from, to, ct).ConfigureAwait(false), 0);
+        }
+
+        var merged = new Dictionary<string, RuleCoverageCombination>(StringComparer.Ordinal);
+
+        void Merge(RuleCoverageCombination combination)
+        {
+            var key = KeyOf(combination);
+            merged[key] = merged.TryGetValue(key, out var seen)
+                ? new RuleCoverageCombination(seen.Values, seen.Rows + combination.Rows, seen.Documents + combination.Documents)
+                : combination;
+        }
+
+        var plain = tables.Except(filtered).ToList();
+        if (plain.Count > 0)
+        {
+            foreach (var combination in await ReadLocalizedAsync(plain, columns, projects, from, to, ct).ConfigureAwait(false))
+            {
+                Merge(combination);
+            }
+        }
+
+        long excluded = 0;
+        foreach (var table in filtered)
+        {
+            var statusColumns = activity!.ColumnsOf(table);
+            var local = columns;
+            if (columnMapper is not null && columns.Count > 0)
+            {
+                var versions = await columnMapper.GetTemplateVersionsOfTablesAsync([table], ct).ConfigureAwait(false);
+                if (versions.TryGetValue(table, out var version))
+                {
+                    var map = await columnMapper.MapToVersionAsync(columns, version, ct).ConfigureAwait(false);
+                    local = [.. columns.Select(id => map.TryGetValue(id, out var l) ? l : 0)];
+                }
+            }
+
+            var part = await reader
+                .ReadAsync([table], [.. local, .. statusColumns], projects, from, to, MaxCombinations, ct)
+                .ConfigureAwait(false);
+
+            foreach (var combination in part)
+            {
+                var statuses = combination.Values
+                    .Skip(columns.Count)
+                    .Select(v => v is null ? null : MethodologyRuleMatcher.Text(v))
+                    .ToList();
+
+                if (!RowActivityFilterSpec.Admits(statuses, activity.ActiveEntryIdText!))
+                {
+                    excluded += combination.Rows;
+                    continue;
+                }
+
+                Merge(new RuleCoverageCombination([.. combination.Values.Take(columns.Count)], combination.Rows, combination.Documents));
+            }
+        }
+
+        return ([.. merged.Values.OrderByDescending(m => m.Rows)], excluded);
     }
 
     /// <summary>

@@ -27,6 +27,9 @@ public sealed class MethodologyConfiguration : IEntityTypeConfiguration<Methodol
         builder.Property(x => x.Group).HasColumnName("Group").HasMaxLength(64);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
 
+        // D-425: NULL = фільтра активності рядків немає (усі наявні методології).
+        builder.Property(x => x.RowActivityFilter).HasColumnName("RowActivityFilter").HasMaxLength(200);
+
         // ⚠ Значення за замовчуванням у БАЗІ, а не в моделі: наявні рядки
         // корпусу — це 44 методології `ECW_C**`, і всі вони DataDriven. У
         // моделі default не оголошено навмисно — інакше EF пропускав би

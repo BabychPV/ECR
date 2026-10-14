@@ -89,7 +89,7 @@ param(
     [string]$AccountsFile,
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection,
@@ -1776,6 +1776,40 @@ function Stage-SubstanceApplicability {
 # отримують кінцевий `?` (LandOptionalArguments.Lib.ps1). Аргумент, якого старий код не передає для частини таблиць:
 # колонки-моста немає й не буде (NULL-міст не будується), ECR-CALC-0438 її не вимагає, відсутня комірка = null.
 # Опубліковану версію не чіпаємо; нову версію чи публікацію етап не робить. Повторний запуск - 0 змін.
+# ==================== RowFilter (D-425: «лише Running» для Land) ====================
+# Ставить на контейнер методології прапорець фільтра активності рядків (PUT /methodologies/{id}/row-activity-filter,
+# право Calculation.Publish -> акаунт land-reviewer) за переліком land-row-filter.json: runningOnly - прапорець
+# LAND_GENERIC_EQUIPSTATUS:Running; exempt - прапорець знімається (колонки статусу немає / бібліотека). Не нова версія:
+# прапорець - властивість контейнера, повтор - 0 змін. Перелік звіряє сторож LandRowActivityFilterDeclaredTests.
+# ⚠ Змінює числа опублікованих версій без нової версії: після етапу потрібен перерахунок документів.
+function Stage-RowFilter {
+    Log '== RowFilter =='
+    $file = Join-Path $here 'land-row-filter.json'
+    if (-not (Test-Path -LiteralPath $file)) { throw "Немає $file" }
+    $cfg = Get-Content -LiteralPath $file -Raw -Encoding UTF8 | ConvertFrom-Json
+    $running = @($cfg.runningOnly | ForEach-Object { [string]$_ })
+    $exempt = @($cfg.exempt.PSObject.Properties | ForEach-Object { [string]$_.Name })
+    if ($running.Count -eq 0) { throw "У $file порожній runningOnly." }
+    LoginAs 'land-reviewer'
+    $ms = Items (Api GET '/api/v1/methodologies').Json
+    $mid = @{}
+    foreach ($m in $ms) { $mid[[string]$m.code] = [int]$m.id }
+    $set = 0; $cleared = 0; $skipped = 0; $failed = 0
+    $plan = New-Object System.Collections.ArrayList
+    foreach ($c in $running) { [void]$plan.Add(@{ Code = $c; Value = [string]$cfg.filter }) }
+    foreach ($c in $exempt) { [void]$plan.Add(@{ Code = $c; Value = $null }) }
+    foreach ($item in $plan) {
+        $code = [string]$item.Code; $value = $item.Value
+        if ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains $code) { continue }
+        $id = $mid[$code]
+        if (-not $id) { Log "  ${code}: методології на сервері немає (або нема опублікованої версії) - пропущено"; $skipped++; continue }
+        $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$id/row-activity-filter" -Body @{ filter = $value }
+        if ($put.Status -eq 200) { if ($null -eq $value) { $cleared++ } else { $set++ } }
+        else { Log "  ! ${code}: HTTP $($put.Status) $(Get-EcrErrorCode $put)"; $failed++ }
+    }
+    Log "  прапорець поставлено: $set; знято (exempt): $cleared; пропущено: $skipped; помилок: $failed"
+}
+
 function Stage-OptionalArguments {
     Log '== OptionalArguments =='
     . (Join-Path $here 'LandOptionalArguments.Lib.ps1')
@@ -2296,6 +2330,8 @@ function Fill-FullDocument([int]$docId) {
     # D1: LandParity ПЕРЕД Methodologies (див. нижче).
     if ($Stage -contains 'LandParity') { Stage-LandParity }
     if (Want 'Methodologies') { Stage-Methodologies }
+    # D-425: ПІСЛЯ Methodologies (методології мають існувати й бути опублікованими); не створює версій.
+    if (Want 'RowFilter') { Stage-RowFilter }
     if (Want 'Data') { Stage-Data }
     # LP-07: LandParity лише явно (-Stage LandParity); у 'All' не входить, бо потребує імпортованих C11/C12 і LAND_AIR_SUBSTANCE.
     # ⚠ D1 (RC E): LandParity виконується ПЕРЕД Methodologies. Methodologies створює прив'язки колонок результатів (LP-08,

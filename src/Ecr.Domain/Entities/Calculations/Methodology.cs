@@ -83,6 +83,40 @@ public sealed class Methodology : Entity<int>
     /// <param name="group">Назва групи; <c>null</c> — поза групами.</param>
     public void SetGroup(string? group) => Group = group;
 
+    /// <summary>
+    /// Фільтр активності рядків (D-425): <c>КОД_ДОВІДНИКА:КОД_ЗАПИСУ</c>; <c>null</c> — фільтра немає
+    /// (усі не-Land методології і новостворені).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Не входить у <c>ContentHash</c> версії і змінюється без нової версії — як <see cref="Group"/> і
+    /// <see cref="Kind"/>: це властивість контейнера, а не формули. Ціна: результат версії змінюється без нової
+    /// версії; пом'якшення — запис у аудиті й ендпоінт під <c>Calculation.Publish</c>.
+    /// </remarks>
+    public string? RowActivityFilter { get; private set; }
+
+    /// <summary>Ставить або знімає фільтр активності рядків.</summary>
+    /// <param name="filter">Значення <c>КОД_ДОВІДНИКА:КОД_ЗАПИСУ</c>; <c>null</c> — зняти.</param>
+    /// <exception cref="DomainException">Формат значення не той — <c>ECR-CALC-0422</c>.</exception>
+    public void SetRowActivityFilter(string? filter)
+    {
+        if (filter is null)
+        {
+            RowActivityFilter = null;
+            return;
+        }
+
+        var spec = RowActivityFilterSpec.TryParse(filter)
+            ?? throw new DomainException(
+                "ECR-CALC-0422",
+                $"Фільтр активності рядків має вигляд КОД_ДОВІДНИКА:КОД_ЗАПИСУ, отримано «{filter}».",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.rowActivityFilterFormat",
+                });
+
+        RowActivityFilter = spec.Value;
+    }
+
     /// <summary>Оголошує природу методології.</summary>
     /// <param name="kind">Обирається правилом, зашита в модуль або бібліотека.</param>
     public void SetKind(MethodologyKind kind) => Kind = kind;

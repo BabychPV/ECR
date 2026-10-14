@@ -2143,6 +2143,7 @@ USING (VALUES
     (N'err.ECR-SYS-0500.contactAdmin',         N'en', N'Internal error. Contact your administrator and quote the correlation ID.', 0),
     -- FR-13.9: rule coverage matrix over real rows.
     (N'err.ECR-CALC-0422.coverageWindow',       N'en', N'The period window is empty: periodFrom {periodFrom} is after periodTo {periodTo}.', 1),
+    (N'err.ECR-CALC-0422.rowActivityFilterFormat', N'en', N'The row activity filter must look like REGISTRY_CODE:ENTRY_CODE, for example LAND_GENERIC_EQUIPSTATUS:Running.', 1),
     -- ECR-CALC-0422 has a neutral title: every reason carries its own detail.
     (N'err.ECR-CALC-0422.publishNoEffectiveDate', N'en', N'Version {version} cannot be published without an effective date: it is unclear which periods it should calculate.', 1),
     (N'err.ECR-CALC-0422.publishNoReason',      N'en', N'Version {version} cannot be published without a reason for the change.', 1),
@@ -20290,6 +20291,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:result-table ── кінець секції ──
+
+-- D425:row-activity-filter ── ru/kz: помилка формату фільтра активності рядків (en — у блоці err.ECR-CALC-0422); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.rowActivityFilterFormat', N'ru', N'Фильтр активности строк должен иметь вид КОД_СПРАВОЧНИКА:КОД_ЗАПИСИ, например LAND_GENERIC_EQUIPSTATUS:Running.'),
+    (N'err.ECR-CALC-0422.rowActivityFilterFormat', N'kz', N'Жолдардың белсенділік сүзгісі КОД_АНЫҚТАМАЛЫҚ:КОД_ЖАЗБА түрінде болуы керек, мысалы LAND_GENERIC_EQUIPSTATUS:Running.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- D425:row-activity-filter ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

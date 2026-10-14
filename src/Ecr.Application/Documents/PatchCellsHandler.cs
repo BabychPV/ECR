@@ -62,7 +62,11 @@ public sealed partial class PatchCellsHandler(
     // ⛔ EA-B: повторна перевірка передачі зрізу під блокуванням аркуша
     // (відкликання / «Заповнено» / «Валідовано» між рішенням і комітом).
     // Необов'язковий лише для прямого конструювання в тестах; контейнер передає завжди.
-    IEditAssignmentStore? assignments = null)
+    IEditAssignmentStore? assignments = null,
+
+    // ⛔ D-425: фільтр активності рядків методології («лише Running» для Land). Gate обов'язкових входів не
+    // вимагає входів від рядків, яких прогін не рахує. `null` — фільтра немає (прямий конструктор у тестах).
+    IRowActivityFilterSource? rowActivity = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -1382,7 +1386,8 @@ public sealed partial class PatchCellsHandler(
         foreach (var methodologyId in methodologyIds)
         {
             var applied = await ResolveApplicableAsync(
-                methodologyId, bounds.PeriodEnd, context.Instance.TemplateVersionId, ct).ConfigureAwait(false);
+                methodologyId, bounds.PeriodEnd, context.Instance.TemplateVersionId, context.Instance.TableDefId, ct)
+                .ConfigureAwait(false);
             if (applied is not null)
             {
                 applicable.Add(applied);
@@ -1411,6 +1416,7 @@ public sealed partial class PatchCellsHandler(
         => applicable
             .SelectMany(a => a.RequiredInputs.Where(r => r.IsMapped).Select(r => r.ColumnDefId))
             .Concat(applicable.SelectMany(a => a.Rules.SelectMany(r => MethodologyRuleMatcher.ColumnIds(r.MatchJson))))
+            .Concat(applicable.SelectMany(a => a.StatusColumnIds))
             .Distinct()
             .ToList();
 
@@ -1489,6 +1495,17 @@ public sealed partial class PatchCellsHandler(
 
             foreach (var applied in applicable)
             {
+                // ⛔ D-425: рядок, який прогін відсіює (статус не активний або порожній), не має вимог: інакше
+                // gate блокував би збереження через входи, які ніхто не прочитає.
+                if (applied.StatusColumnIds.Count > 0
+                    && !RowActivityFilterSpec.Admits(
+                        [.. applied.StatusColumnIds.Select(c => matchValues.GetValueOrDefault(
+                            c.ToString(System.Globalization.CultureInfo.InvariantCulture)))],
+                        applied.ActiveEntryIdText!))
+                {
+                    continue;
+                }
+
                 var winner = applied.Rules
                     .FirstOrDefault(rule => MethodologyRuleMatcher.Matches(rule.MatchJson, matchValues));
 
@@ -1551,7 +1568,7 @@ public sealed partial class PatchCellsHandler(
     /// перевіряти не треба (немає чинної версії, правил або вимог).
     /// </summary>
     private async Task<ApplicableMethodology?> ResolveApplicableAsync(
-        int methodologyId, DateOnly onDate, int templateVersionId, CancellationToken ct)
+        int methodologyId, DateOnly onDate, int templateVersionId, int tableDefId, CancellationToken ct)
     {
         var versions = await methodologies.GetPublishedVersionsAsync(methodologyId, ct).ConfigureAwait(false);
 
@@ -1590,15 +1607,27 @@ public sealed partial class PatchCellsHandler(
             .LocalizeAsync(columnMapper, templateVersionId, rules, requiredInputs, ct)
             .ConfigureAwait(false);
 
-        return new ApplicableMethodology(methodology?.Code ?? methodologyId.ToString(
-            System.Globalization.CultureInfo.InvariantCulture), localized.Rules, localized.RequiredInputs);
+        // D-425: колонки статусу таблиці (за довідником із прапорця методології); порожньо — фільтр не діє.
+        var activity = rowActivity is null
+            ? null
+            : await rowActivity.ResolveForMethodologyAsync(methodologyId, [tableDefId], ct).ConfigureAwait(false);
+        var statusColumns = activity?.ColumnsOf(tableDefId) ?? [];
+
+        return new ApplicableMethodology(
+            methodology?.Code ?? methodologyId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            localized.Rules,
+            localized.RequiredInputs,
+            statusColumns,
+            activity?.ActiveEntryIdText);
     }
 
     /// <summary>Методологія, чия версія на дату дійсно має що перевіряти в рядку.</summary>
     private sealed record ApplicableMethodology(
         string MethodologyCode,
         IReadOnlyList<LocalizedRule> Rules,
-        IReadOnlyList<LocalizedRequiredInput> RequiredInputs);
+        IReadOnlyList<LocalizedRequiredInput> RequiredInputs,
+        IReadOnlyList<int> StatusColumnIds,
+        string? ActiveEntryIdText);
 
     // ⚠ Колонки предиката (раніше тут `MatchJsonColumnIds`) беруться з `MethodologyRuleMatcher.ColumnIds` над уже
     // ЛОКАЛІЗОВАНИМ `MatchJson` (C1): зламаний предикат не має жодної потрібної колонки, а не валить обробник.

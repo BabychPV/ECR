@@ -6862,6 +6862,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/row-activity-filter": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Ставить або знімає фільтр активності рядків методології («лише Running» для Land, D-425).
+         *     Право `Calculation.Publish`.
+         * @description ⛔ Змінює числа опублікованих версій без нової версії (фільтр живе на контейнері й не входить у
+         *     `ContentHash`), тому право — `Calculation.Publish`. Перерахунок не запускається.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SetRowActivityFilterRequest"];
+                    "application/json": components["schemas"]["SetRowActivityFilterRequest"];
+                    "text/json": components["schemas"]["SetRowActivityFilterRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyRowActivityFilterDto"];
+                        "text/json": components["schemas"]["MethodologyRowActivityFilterDto"];
+                        "text/plain": components["schemas"]["MethodologyRowActivityFilterDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/simulate": {
         parameters: {
             query?: never;
@@ -23580,6 +23655,16 @@ export interface components {
             /** @description Випадок золотого набору. */
             testCode: string;
         };
+        /** @description Фільтр активності рядків методології (D-425). */
+        MethodologyRowActivityFilterDto: {
+            /**
+             * Format: int32
+             * @description Методологія.
+             */
+            methodologyId: number;
+            /** @description `КОД_ДОВІДНИКА:КОД_ЗАПИСУ`; `null` — фільтра немає. */
+            rowActivityFilter: null | string;
+        };
         /** @description Правило відбору рядків документа (ФВ-13.3, ФВ-13.4). */
         MethodologyRuleDto: {
             /** @description Код, унікальний у межах версії. */
@@ -26196,6 +26281,13 @@ export interface components {
             /** @description Комбінації: розриви → конфлікти → покриті, далі за кількістю рядків. */
             combinations: components["schemas"]["RuleCoverageCombinationDto"][];
             /**
+             * Format: int64
+             * @description D-425: рядків відсіяно фільтром активності методології (статус не активний або порожній) — вони не рахуються
+             *     прогоном і не є «непокритими»; `0` — фільтра немає.
+             * @default 0
+             */
+            excludedRows: number;
+            /**
              * Format: int32
              * @description Версія.
              */
@@ -26890,6 +26982,11 @@ export interface components {
             validToAttribute: null | string;
             /** @description Кінець у джерелі — останній чинний день. */
             validToInclusive: boolean;
+        };
+        /** @description Запит на фільтр активності рядків методології (D-425). */
+        SetRowActivityFilterRequest: {
+            /** @description `КОД_ДОВІДНИКА:КОД_ЗАПИСУ`, наприклад `LAND_GENERIC_EQUIPSTATUS:Running`; `null` — зняти. */
+            filter: null | string;
         };
         /** @description Запит на зміну рядка каталогу. */
         SetUiStringRequest: {

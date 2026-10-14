@@ -17,8 +17,16 @@ namespace Ecr.Calculations;
 /// C1: переклад Id колонок із правил на колонки версії шаблону документа. <c>null</c> — Id вважаються локальними
 /// (лише прямий конструктор у тестах; контейнер передає завжди).
 /// </param>
+/// <param name="rowActivity">
+/// D-425: фільтр активності рядків методології («лише Running» для Land). <c>null</c> — фільтра немає
+/// (прямий конструктор у тестах; контейнер передає завжди).
+/// </param>
 public sealed class MethodologyResolver(
-    IMethodologyStore store, ICellStore cells, IRowStore rows, IColumnPathMapper? columnMapper = null)
+    IMethodologyStore store,
+    ICellStore cells,
+    IRowStore rows,
+    IColumnPathMapper? columnMapper = null,
+    IRowActivityFilterSource? rowActivity = null)
 {
     /// <summary>Знаходить чинну версію методології на дату.</summary>
     /// <param name="methodologyId">Методологія.</param>
@@ -234,12 +242,33 @@ public sealed class MethodologyResolver(
 
         var compiled = MethodologyRuleMatcher.Compile(localized.Predicates);
         var matched = new List<RowRuleMatch>();
+        var excluded = new List<string>();
+
+        // ⛔ D-425: фільтр активності ДО правил. Рядок, статус якого не активний (або порожній), не рахується
+        // жодним правилом методології з прапорцем — так само, як у легасі (`R_Land_RuleMatcher`, `RS_Land`).
+        // Умова `Status = Running` у самому правилі лишається і нічого не подвоює: Running ∧ Running ≡ Running.
+        var activity = rowActivity is null
+            ? null
+            : await rowActivity
+                .ResolveForVersionAsync(methodologyVersionId, [instance.TableDefId], ct)
+                .ConfigureAwait(false);
+        var statusColumns = activity?.ColumnsOf(instance.TableDefId) ?? [];
 
         foreach (var (rowKey, rowId) in rowIds)
         {
             var values = byRow.TryGetValue(rowId, out var found)
                 ? found
                 : new Dictionary<string, string?>(StringComparer.Ordinal);
+
+            if (statusColumns.Count > 0
+                && !activity!.Admits(
+                    instance.TableDefId,
+                    column => values.GetValueOrDefault(
+                        column.ToString(System.Globalization.CultureInfo.InvariantCulture))))
+            {
+                excluded.Add(rowKey);
+                continue;
+            }
 
             // ⛔ ПЕРШИЙ збіг, а не «будь-який»: правила вже впорядковані
             // сховищем за `Priority`, і перебирати далі означало б
@@ -254,7 +283,11 @@ public sealed class MethodologyResolver(
             }
         }
 
-        return new RowMatchOutcome(matched, [.. rowIds.OrderBy(r => r.Value).Select(r => r.Key)]);
+        return new RowMatchOutcome(
+            matched,
+            [.. rowIds.OrderBy(r => r.Value).Select(r => r.Key)],
+            excluded,
+            FilterInert: activity is not null && statusColumns.Count == 0);
     }
 }
 
@@ -269,7 +302,22 @@ public sealed record VersionResolution(MethodologyDescriptor? Descriptor, bool N
 /// Ключі всіх живих рядків за зростанням <c>TableRow.Id</c> (номер рядка = позиція + 1);
 /// <c>null</c> — у версії немає правил.
 /// </param>
-public sealed record RowMatchOutcome(IReadOnlyList<RowRuleMatch> Matches, IReadOnlyList<string>? AllRowKeys);
+/// <param name="ExcludedRowKeys">
+/// D-425: рядки, відсіяні фільтром активності (статус не активний або порожній); у <see cref="AllRowKeys"/> вони
+/// лишаються (номер рядка = позиція + 1), але діагностикою «не підійшло правило» не вважаються.
+/// </param>
+/// <param name="FilterInert">
+/// Прапорець фільтра стоїть, але в таблиці немає жодної колонки статусу — фільтр не діє (відмітка для трейсу).
+/// </param>
+public sealed record RowMatchOutcome(
+    IReadOnlyList<RowRuleMatch> Matches,
+    IReadOnlyList<string>? AllRowKeys,
+    IReadOnlyList<string>? ExcludedRowKeys = null,
+    bool FilterInert = false)
+{
+    /// <summary>Відсіяні фільтром активності; ніколи не <c>null</c>.</summary>
+    public IReadOnlyList<string> Excluded => ExcludedRowKeys ?? [];
+}
 
 /// <summary>Рядок і правило, яке його закрило.</summary>
 /// <param name="RowKey">Ключ рядка документа.</param>
