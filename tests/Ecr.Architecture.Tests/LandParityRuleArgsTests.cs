@@ -241,5 +241,103 @@ public sealed class LandParityRuleArgsTests
         Assert.Contains("Resolve-LandMethodologySubstanceCodes", stage, StringComparison.Ordinal);
         Assert.Contains("Get-LandSubstanceCodes -Categories $cats", stage, StringComparison.Ordinal);
         Assert.Contains("substancesFromApplicability", stage, StringComparison.Ordinal);
+        // Правило 2а: розширення складу лише з обгорткою SUBSTANCE_APPLICABLE у моделі (інакше ECR_ONLY по чужих речовинах).
+        Assert.Contains("Test-LandMixedFuelStreamCategories -Categories $cats", stage, StringComparison.Ordinal);
+        Assert.Contains("$saWrapper -and", stage, StringComparison.Ordinal);
+        Assert.Contains("-MixedFuelStreamCategories $mixed", stage, StringComparison.Ordinal);
+    }
+
+    private const string Union19 = "330,333,334,370,415,416,602,616,621,627,1052,1702,1707,1715,1720,1728,1852,1880,2754";
+
+    private const string Union16 = "333,334,370,415,416,602,616,621,627,1052,1702,1707,1715,1720,1728,2754";
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Змішані_категорії_FG_LPG_без_суфікса_і_суфікси_речовин_дають_суфікси_об_єднані_зі_словником()
+    {
+        // K-п'ятірка (LAND-5094): у C11_01 суфікси давали 7 кодів, а FG/LPG-набір словника відкидався правилом 2.
+        const string script = """
+            $ErrorActionPreference = 'Stop'
+            . $args[0]
+            . $args[1]
+            $sa = Get-Content -LiteralPath $args[2] -Raw -Encoding UTF8 | ConvertFrom-Json
+            function Show($tag, $cats, $name, $wrapper) {
+              $suffix = Get-LandSubstanceCodes -Categories $cats
+              $mixed = $wrapper -and (Test-LandMixedFuelStreamCategories -Categories $cats)
+              $e = $sa.methodologies.PSObject.Properties[$name]
+              $r = Resolve-LandMethodologySubstanceCodes -SuffixCodes $suffix -ApplicabilityCodes $e.Value.codes `
+                  -FromApplicability $false -MixedFuelStreamCategories $mixed
+              "$tag=$($r.Source):" + ($r.Codes -join ',')
+            }
+            $c01 = @('Wwater_1052', '6362_452_1852', '6362_452_1880', '6362_452_330', '6362_452_333', '401_1715', 'sludge_2754',
+                     '6646_FG', '6646_LPG', '6647_FG')
+            $c02 = @('sludge_1052', 'sludge_333', 'caustic_2754', '6646_FG', '6646_LPG')
+            Show 'C01' $c01 'ECW_C11_01' $true
+            Show 'C02' $c02 'ECW_C11_02' $true
+            # без обгортки застосовності склад не розширюється (ECR_ONLY по чужих речовинах)
+            Show 'C01NOWRAP' $c01 'ECW_C11_01' $false
+            # лише суфікси / «Common» / NAE-потік без FG|LPG - без змін
+            Show 'C01PURE' @('Wwater_1052', '401_1715', 'sludge_2754') 'ECW_C11_01' $true
+            Show 'C1103' @('0782(001)_333', '0804_1702', 'Common') 'ECW_C11_11_03' $true
+            Show 'C1201' @('FuelGas_1702', 'Diesel_333', 'Common') 'ECW_C12_01' $true
+            # форма A (без суфіксів) лишається за правилом 3
+            Show 'C1110' @('0220', '0340', 'Common') 'ECW_C11_10' $true
+            # кожна методологія словника з чистими суфіксами: до/після однакові
+            $changed = @()
+            foreach ($p in $sa.methodologies.PSObject.Properties) {
+              $codes = @($p.Value.codes.PSObject.Properties | ForEach-Object { $_.Value } | ForEach-Object { $_ } | Select-Object -Unique)
+              $cats = @($codes | ForEach-Object { "grp_$_" })
+              $suffix = Get-LandSubstanceCodes -Categories $cats
+              $before = Resolve-LandMethodologySubstanceCodes -SuffixCodes $suffix -ApplicabilityCodes $p.Value.codes -MixedFuelStreamCategories $false
+              $after = Resolve-LandMethodologySubstanceCodes -SuffixCodes $suffix -ApplicabilityCodes $p.Value.codes `
+                  -MixedFuelStreamCategories (Test-LandMixedFuelStreamCategories -Categories $cats)
+              if (($before.Codes -join ',') -ne ($after.Codes -join ',') -or $before.Source -ne $after.Source) { $changed += $p.Name }
+            }
+            "CHANGEDPURE=" + ($changed -join ',')
+            "METHODS=" + (($sa.methodologies.PSObject.Properties | ForEach-Object Name) -join ',')
+            """;
+
+        var (exit, output) = RunPowerShell(
+            script,
+            LandFile("LandParityRuleArgs.Lib.ps1"),
+            LandFile("LandSubstanceApplicability.Lib.ps1"),
+            Path.Combine(SourceTree.Root, "docs", "delivery", "reference-data", "land-template", "land-substance-applicability.json"));
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("C01=SuffixUnionApplicability:" + Union19, output, StringComparison.Ordinal);
+        Assert.Contains("C02=SuffixUnionApplicability:" + Union16, output, StringComparison.Ordinal);
+        Assert.Contains("C01NOWRAP=Suffix:330,333,1052,1715,1852,1880,2754", output, StringComparison.Ordinal);
+        Assert.Contains("C01PURE=Suffix:1052,1715,2754", output, StringComparison.Ordinal);
+        Assert.Contains("C1103=Suffix:333,1702", output, StringComparison.Ordinal);
+        Assert.Contains("C1201=Suffix:333,1702", output, StringComparison.Ordinal);
+        Assert.Contains("C1110=ApplicabilityFallback:", output, StringComparison.Ordinal);
+        // до/після: чисті суфікси не змінюють склад жодної методології словника
+        Assert.Contains("CHANGEDPURE=" + Environment.NewLine, output + Environment.NewLine, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Обгортка_застосовності_для_змішаних_C11_01_і_C11_02_є_в_моделі_а_виходи_tons_описані()
+    {
+        var dir = Path.Combine(SourceTree.Root, "docs", "delivery", "reference-data", "land-template");
+        using var model = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(dir, "land-template.model.json")));
+        var wrapped = model.RootElement.GetProperty("substanceApplicability").GetProperty("methodologies");
+        foreach (var name in new[] { "ECW_C11_01", "ECW_C11_02" })
+        {
+            Assert.True(wrapped.TryGetProperty(name, out var entry), $"{name}: немає обгортки застосовності в моделі");
+            Assert.Equal("Stream", entry.GetProperty("kind").GetString());
+        }
+
+        using var outputs = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(dir, "land-result-outputs.json")));
+        foreach (var (name, expected) in new[]
+                 {
+                     ("ECW_C11_01", new[] { "ECW_EC_tons_XXX_type1_1", "ECW_EC_tons_XXX_type1_2", "ECW_EC_tons_XXX_type1_3", "ECW_EC_tons_XXX_type2" }),
+                     ("ECW_C11_02", new[] { "ECW_EC_tons_XXX_type1", "ECW_EC_tons_XXX_type2" }),
+                 })
+        {
+            var declared = outputs.RootElement.GetProperty("methodologies").GetProperty(name).GetProperty("outputs")
+                .EnumerateArray().Select(o => o.GetString()!).ToHashSet(StringComparer.Ordinal);
+            Assert.All(expected, e => Assert.Contains(e, declared));
+        }
     }
 }
