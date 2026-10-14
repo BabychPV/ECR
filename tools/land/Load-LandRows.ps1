@@ -59,6 +59,7 @@ $ErrorActionPreference = 'Stop'
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 . (Join-Path $here 'EcrApi.ps1')
 . (Join-Path $here 'LandStandSession.Lib.ps1')
+. (Join-Path $here 'LandInputCells.Lib.ps1')
 . (Join-Path $here 'LandRows.Lib.ps1')
 Set-StrictMode -Off
 
@@ -135,7 +136,7 @@ foreach ($docName in @($docIds.Keys | Sort-Object)) {
         foreach ($prodTable in @($periodsNode[$pk].Keys | Sort-Object)) {
             $row = [ordered]@{ doc = $docName; period = $periodNumber; prodTable = $prodTable; table = ''; prodRows = 0; rows = 0; cells = 0
                 capped = 0; unmapped = ''; missingColumns = ''; sourceWithoutColumn = ''; lookupMiss = 0; lookupUnresolved = 0; dupCells = 0; mixedText = 0; mixedNumber = 0; type3InMixed = 0
-                skipped = ''; rowsOk = 0; rowsRejected = 0; codes = '' }
+                skipped = ''; rowsOk = 0; rowsRejected = 0; codes = ''; rejectReasons = '' }
             $tableKey = Get-LandRowsTableKey -ProdTable $prodTable
             $srcRows = @($periodsNode[$pk][$prodTable]['rows'])
             $row.prodRows = $srcRows.Count
@@ -211,6 +212,10 @@ if ($exec) {
                 $pr = Invoke-LandEcrRetry -HttpMethod PATCH -ApiPath "/api/v1/documents/$($job.DocId)/cells" -RequestBody $body
                 if ($pr.Status -eq 200) { $job.Result.rowsOk += $slice.Count }
                 else { $job.Result.rowsRejected += $slice.Count; $job.Result.codes += ("HTTP$($pr.Status) " + (Get-EcrErrorCode $pr) + ';') }
+                if ($pr.Status -eq 422) {
+                    $rr = Get-LandRowsRejectReasons -Response $pr
+                    if ($rr) { $job.Result.rejectReasons += $rr + ';'; Write-Host ('rejected: ' + $rr) }
+                }
             }
             Write-Host ('{0} ok={1} rej={2} {3}' -f $job.Key, $job.Result.rowsOk, $job.Result.rowsRejected, $job.Result.codes)
         }

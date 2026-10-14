@@ -295,4 +295,45 @@ public sealed class LandRowLoaderTests
             Directory.Delete(dir2, recursive: true);
         }
     }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Рядки_джерела_Dictionary_проходять_гілку_T9_04_без_MethodCountCouldNotFindBest()
+    {
+        // Windows PowerShell 5.1 віддає рядки як Dictionary<string,object>: у ній немає .Contains(key) (hotfix integ-land-loader-fix).
+        var json = Probe("""
+            # Той самий тип, що віддає JavaScriptSerializer (Dictionary`2), без Windows-only збірки System.Web.Extensions.
+            $row = [System.Collections.Generic.Dictionary[string,object]]::new()
+            $row['Land_No'] = '1'; $row['Land_NAE'] = 'N1'; $row['OperatingTime'] = '5'
+            $rows = @($row)
+            $cols = @{ Land_No = (Col 'Land_No' 'String'); OperatingTime = (Col 'OperatingTime' 'String') }
+            $p = New-LandRowsTablePlan -DocNumber 7 -TableCode 'T9_04' -MonthNo 1 -SourceRows $rows -ColumnMap $cols -TableAliases @{}
+            [ordered]@{ rows = $p.Rows.Count; cells = $p.Cells } | ConvertTo-Json -Compress
+            """);
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal(1, doc.RootElement.GetProperty("rows").GetInt32());
+        Assert.Equal(2, doc.RootElement.GetProperty("cells").GetInt32());
+
+        // Кожен споживач LandRows.Lib бачить функції LandInputCells.Lib: бібліотека підключає її сама, а скрипт - явно.
+        Assert.Contains("LandInputCells.Lib.ps1", File.ReadAllText(LandRowKeyTests.LandFile("LandRows.Lib.ps1")), StringComparison.Ordinal);
+        Assert.Contains("LandInputCells.Lib.ps1", File.ReadAllText(LandRowKeyTests.LandFile("Load-LandRows.ps1")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Відхилення_422_агрегується_у_коди_ruleCode_columnCode_без_значень()
+    {
+        var json = Probe("""
+            $body = '{"messageKey":"cell.rejected","cells":[{"ruleCode":"R1","columnCode":"C1","value":"SECRET-77","rowKey":"RK-1"},{"ruleCode":"R1","columnCode":"C1","value":"SECRET-88"},{"ruleCode":"R2","columnCode":"C2","value":"SECRET-99"}]}'
+            $resp = [pscustomobject]@{ Status = 422; Json = ($body | ConvertFrom-Json); Text = $body }
+            $bad = [pscustomobject]@{ Status = 422; Json = $null; Text = 'not json' }
+            [ordered]@{ s = (Get-LandRowsRejectReasons -Response $resp); bad = (Get-LandRowsRejectReasons -Response $bad) } | ConvertTo-Json -Compress
+            """);
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal("messageKey=cell.rejected, R1 C1 x2, R2 C2 x1", doc.RootElement.GetProperty("s").GetString());
+        Assert.Equal("", doc.RootElement.GetProperty("bad").GetString());
+        Assert.DoesNotContain("SECRET", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("RK-1", json, StringComparison.Ordinal);
+        Assert.Contains("rejectReasons", File.ReadAllText(LandRowKeyTests.LandFile("Load-LandRows.ps1")), StringComparison.Ordinal);
+    }
 }
