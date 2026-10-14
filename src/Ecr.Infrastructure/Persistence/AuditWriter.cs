@@ -1,4 +1,5 @@
 using System.Data;
+using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.SqlClient.Server;
@@ -183,7 +184,13 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
         // Правка комірки змінює "застарілість результатів": кеш лічильників скидається ПІСЛЯ коміту транзакції
         // (поза транзакцією - одразу), O(1), без звернень до БД.
         // ⛔ AN-108 / P2-01: лише періоди цих правок — правка в 202608 не скидає лічильник 202609.
-        staleEpoch?.Invalidate(db, changes.Select(c => c.Address.PeriodKey.Value));
+        // ⛔ D-432: пакет лише з `Origin = Recalculation` нічого не позначає - предикат StaleResultsQuery ці рядки
+        // ігнорує, тож карта від них не змінюється (раніше кожен перерахунок формул піднімав епоху вдруге).
+        staleEpoch?.Invalidate(
+            db,
+            changes
+                .Where(c => c.Origin != CellChangeOrigins.Recalculation)
+                .Select(c => c.Address.PeriodKey.Value));
     }
 
     /// <summary>Перекладає журнал у рядки табличного параметра.</summary>
