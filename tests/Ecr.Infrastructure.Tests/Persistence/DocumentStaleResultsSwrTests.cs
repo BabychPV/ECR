@@ -37,10 +37,19 @@ public sealed partial class DocumentStaleResultsStoreTests
     {
         private TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int maps;
+        private int deltas;
+        private int authorMaps;
         private int hold;
         private int failNext;
 
+        /// <summary>Повні запити карти «*» (без вузьких запитів накладки й згрупованого запиту авторів).</summary>
         public int Maps => Volatile.Read(ref maps);
+
+        /// <summary>Вузькі запити накладки «брудних документів» (<c>StaleMap:delta</c>).</summary>
+        public int Deltas => Volatile.Read(ref deltas);
+
+        /// <summary>Повні згруповані запити карт усіх авторів (<c>StaleMap:authors</c>).</summary>
+        public int AuthorMaps => Volatile.Read(ref authorMaps);
 
         public void Hold()
         {
@@ -76,7 +85,15 @@ public sealed partial class DocumentStaleResultsStoreTests
             Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result,
             CancellationToken cancellationToken = default)
         {
-            if (command.CommandText.Contains("MIN(t.At)", StringComparison.Ordinal))
+            if (command.CommandText.Contains(StaleResultsMapCache.DeltaTag, StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref deltas);
+            }
+            else if (command.CommandText.Contains(StaleResultsMapCache.AuthorsTag, StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref authorMaps);
+            }
+            else if (command.CommandText.Contains("MIN(t.At)", StringComparison.Ordinal))
             {
                 Interlocked.Increment(ref maps);
                 if (Interlocked.Exchange(ref failNext, 0) == 1)
@@ -247,16 +264,10 @@ public sealed partial class DocumentStaleResultsStoreTests
         Assert.Equal([s.R.A, s.R.B], (await SwrPageAsync(s)).Order());
         await WaitIdleAsync(s.R.Cache);
 
-        // Перелік робить ДВА звернення до карти (фільтр і рядки): якщо збійний фоновий запит завершився між ними,
-        // друге звернення запускає ще одне оновлення. Тому лічимо відносно «після збою», а не за абсолютним числом.
+        // LP-45 / D-432: перелік бере карту «*» ОДИН раз на запит (фільтр і рядки діляться нею), тож гонки «збій
+        // завершився між двома зверненнями» немає: після збою запитів карти рівно два (перший прогрів + збійний фон).
         var afterFailure = s.Probe.Maps;
-        Assert.InRange(afterFailure, 2, 3);
-        if (afterFailure == 3)
-        {
-            // Друге звернення встигло запустити успішне оновлення: збій не отруїв, запис свіжий.
-            Assert.True(EntryExpiresAt(s) > s.Clock.UtcNow);
-            return;
-        }
+        Assert.Equal(2, afterFailure);
 
         Assert.Equal(firstExpiry, EntryExpiresAt(s));
 

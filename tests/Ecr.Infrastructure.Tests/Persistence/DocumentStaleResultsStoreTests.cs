@@ -1264,8 +1264,9 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         var pages = await Task.WhenAll(tasks);
 
         Assert.All(pages, page => Assert.Equal([r.A, r.B], page.Order()));
-        // Відбиток читається двічі на читача (фільтр і позначка рядків); карта - один раз на всіх.
-        Assert.Equal(readers * 2, gate.FingerprintQueries);
+        // LP-45 / D-432: карта береться ОДИН раз на запит переліку (фільтр і позначка рядків діляться нею), тож відбиток
+        // читається один раз на читача (раніше двічі: фільтр і рядки); карта - один раз на всіх.
+        Assert.Equal(readers, gate.FingerprintQueries);
         Assert.Equal(1, gate.MapQueries);
     }
 

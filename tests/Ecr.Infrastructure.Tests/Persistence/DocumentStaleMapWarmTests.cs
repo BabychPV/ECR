@@ -29,11 +29,20 @@ public sealed partial class DocumentStaleResultsStoreTests
     private sealed class WarmProbe : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
     {
         private int maps;
+        private int deltas;
+        private int authorMaps;
         private int registryFingerprints;
         private int failMap;
         private int failRegistry;
 
+        /// <summary>Повні запити карти «*» (без вузьких запитів накладки й згрупованого запиту авторів).</summary>
         public int Maps => Volatile.Read(ref maps);
+
+        /// <summary>Вузькі запити накладки «брудних документів» (<c>StaleMap:delta</c>).</summary>
+        public int Deltas => Volatile.Read(ref deltas);
+
+        /// <summary>Повні згруповані запити карт усіх авторів (<c>StaleMap:authors</c>).</summary>
+        public int AuthorMaps => Volatile.Read(ref authorMaps);
 
         public int RegistryFingerprints => Volatile.Read(ref registryFingerprints);
 
@@ -47,7 +56,15 @@ public sealed partial class DocumentStaleResultsStoreTests
             Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result,
             CancellationToken cancellationToken = default)
         {
-            if (command.CommandText.Contains("MIN(t.At)", StringComparison.Ordinal))
+            if (command.CommandText.Contains(StaleResultsMapCache.DeltaTag, StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref deltas);
+            }
+            else if (command.CommandText.Contains(StaleResultsMapCache.AuthorsTag, StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref authorMaps);
+            }
+            else if (command.CommandText.Contains("MIN(t.At)", StringComparison.Ordinal))
             {
                 Interlocked.Increment(ref maps);
                 if (Interlocked.Exchange(ref failMap, 0) == 1)
@@ -177,14 +194,16 @@ public sealed partial class DocumentStaleResultsStoreTests
             Assert.Empty(hidden);
         }
 
-        // Фільтр автора - власний ключ: прогрітий «*» його не обслуговує (окремий запит карти) і дає лише B.
+        // Фільтр автора - власний запис «автори» (D-432): прогрітий «*» його не обслуговує - один згрупований запит,
+        // а не повний запит «*» (Maps не росте); результат - лише B.
         await using var db2 = InterceptedContext(w.Probe, w.R.Epoch);
         var byUser = await WarmStore(w, db2).ListAsync(
             projectId: null, new PeriodKeyFilter(w.R.Period),
             new DocumentListFilter(null, null, ResultsStale: true, StaleByUserId: 62),
             new CursorRequest(Limit: 200), [w.R.Chain.ProjectId], CancellationToken.None);
         Assert.Equal([w.R.B], byUser.Items.Select(d => d.Id));
-        Assert.Equal(mapsAfterWarm + 1, w.Probe.Maps);
+        Assert.Equal(mapsAfterWarm, w.Probe.Maps);
+        Assert.Equal(1, w.Probe.AuthorMaps);
     }
 
     [Fact]
