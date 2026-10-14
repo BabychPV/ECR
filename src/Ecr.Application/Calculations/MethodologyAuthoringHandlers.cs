@@ -880,6 +880,61 @@ public sealed class SetMethodologyModesHandler(
     }
 }
 
+/// <summary>
+/// Ставить або знімає фільтр активності рядків методології — «лише Running» для Land (D-425).
+/// </summary>
+/// <remarks>
+/// ⛔ Право — <c>Calculation.Publish</c>, а не <c>EditFormula</c>: дія змінює числа вже опублікованих версій БЕЗ
+/// нової версії (фільтр — властивість контейнера, не входить у <c>ContentHash</c>). Зміна фільтра сама перерахунок
+/// не запускає: числа оновить наступний перерахунок документа.
+///
+/// ⚠ Формат значення — <c>КОД_ДОВІДНИКА:КОД_ЗАПИСУ</c>. Невідомий довідник чи запис не відмовляє: фільтр тоді
+/// просто не діє (так само, як таблиця без колонки статусу), а прогін це не ламає.
+/// </remarks>
+public sealed class SetMethodologyRowActivityFilterHandler(
+    IMethodologyDraftStore drafts,
+    IUnitOfWork uow,
+    IAccessDecisionService access,
+    ICurrentUser currentUser)
+{
+    /// <summary>Право на публікацію методологій (`02-contracts.md` §9).</summary>
+    public const string Permission = "Calculation.Publish";
+
+    /// <summary>Записує фільтр на контейнер методології.</summary>
+    /// <param name="methodologyId">Методологія.</param>
+    /// <param name="filter"><c>КОД_ДОВІДНИКА:КОД_ЗАПИСУ</c>; <c>null</c> — зняти фільтр.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Методологію з її поточним фільтром.</returns>
+    /// <exception cref="NotFoundException">Методології немає — <c>ECR-CALC-0404</c>.</exception>
+    /// <exception cref="DomainException">Формат не той — <c>ECR-CALC-0422</c>.</exception>
+    public async Task<MethodologyRowActivityFilterDto> HandleAsync(
+        int methodologyId, string? filter, CancellationToken ct)
+    {
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        var methodology = await drafts.FindAsync(methodologyId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException(
+                "ECR-CALC-0404",
+                $"Методології {methodologyId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.methodology",
+                    ["methodologyId"] = methodologyId.ToString(CultureInfo.InvariantCulture),
+                });
+
+        methodology.SetRowActivityFilter(string.IsNullOrWhiteSpace(filter) ? null : filter.Trim());
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return new MethodologyRowActivityFilterDto(methodology.Id, methodology.RowActivityFilter);
+    }
+}
+
+/// <summary>Фільтр активності рядків методології (D-425).</summary>
+/// <param name="MethodologyId">Методологія.</param>
+/// <param name="RowActivityFilter"><c>КОД_ДОВІДНИКА:КОД_ЗАПИСУ</c>; <c>null</c> — фільтра немає.</param>
+public sealed record MethodologyRowActivityFilterDto(int MethodologyId, string? RowActivityFilter);
+
 /// <summary>Прив'язки методології до колонок документів (<c>D-69</c>).</summary>
 public sealed class ListCalculationBindingsHandler(
     ICalculationBindingStore bindings,

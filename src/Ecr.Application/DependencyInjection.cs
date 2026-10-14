@@ -332,6 +332,7 @@ public static class DependencyInjection
         services.AddScoped<Calculations.ListMethodologyTestCasesHandler>();
         services.AddScoped<Calculations.SaveMethodologyTestCaseHandler>();
         services.AddScoped<Calculations.SetMethodologyModesHandler>();
+        services.AddScoped<Calculations.SetMethodologyRowActivityFilterHandler>();
         services.AddScoped<Calculations.ListCalculationBindingsHandler>();
         services.AddScoped<Calculations.SaveCalculationBindingHandler>();
         services.AddScoped<Calculations.DeleteMethodologyVersionHandler>();
