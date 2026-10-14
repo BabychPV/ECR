@@ -11,7 +11,7 @@ namespace Ecr.Api.Tests;
 
 /// <summary>
 /// Hotfix «integ-migrate-batch»: перенос 4.5 млн комірок падав по Execution Timeout 300 с. Сторож: вартість пачки
-/// комірок не повинна рости з кількістю вже перенесених (на 210 тис. комірок ранні й пізні пачки читають однаково).
+/// комірок не повинна рости з кількістю вже перенесених (на 30 тис. комірок ранні й пізні пачки читають однаково).
 /// </summary>
 /// <remarks>
 /// ⚠ Тест не міряє секунди: він порівнює ЛОГІЧНІ ЧИТАННЯ (sys.dm_exec_sessions.logical_reads) пізніх і
@@ -19,7 +19,7 @@ namespace Ecr.Api.Tests;
 /// </remarks>
 public sealed partial class DocumentVersionMigrationTests
 {
-    private const int CostVolumeRows = 70_000;   // 70 тис. рядків × 3 = 210 тис. комірок = 42+ пачок
+    private const int CostVolumeRows = 10_000;   // 10 тис. рядків × 3 = 30 тис. комірок = 6+ пачок (менше — щоб не перетнути стелю 192 МБ колекції)
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
@@ -55,9 +55,9 @@ public sealed partial class DocumentVersionMigrationTests
 
         // Пачки UPDATE комірок (без останньої — вона неповна, лише дочищає хвіст).
         var reads = recorder.CellUpdateReads;
-        Assert.True(reads.Count >= 20, $"Замало пачок для висновку: {reads.Count}.");
+        Assert.True(reads.Count >= 5, $"Замало пачок для висновку: {reads.Count}.");
         var full = reads.Take(reads.Count - 1).ToList();
-        var quarter = Math.Max(3, full.Count / 4);
+        var quarter = Math.Max(1, full.Count / 4);
         var early = full.Take(quarter).Average();
         var late = full.Skip(full.Count - quarter).Average();
         Console.WriteLine(FormattableString.Invariant(

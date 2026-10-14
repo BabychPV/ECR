@@ -281,11 +281,12 @@ public sealed partial class DocumentVersionMigrationStore(
     private static string SingleCommand(string body) => Prelude + body;
 
     /// <summary>
-    /// Пачкова команда: оператор, перед його <c>;</c> — <c>OPTION (RECOMPILE)</c> (табличні змінні мають відомий
-    /// розмір лише після перекомпіляції, інакше план бере їх за 1 рядок), далі <c>@changed = @@ROWCOUNT</c>.
+    /// Пачкова команда: оператор, перед його <c>;</c> — <c>OPTION (MAXDOP 1, RECOMPILE)</c> (табличні змінні мають
+    /// відомий розмір лише після перекомпіляції, інакше план бере їх за 1 рядок; MAXDOP 1 — без паралельного плану:
+    /// на пачці TOP(@batch) exchange-воркери зависали на CXSYNC_PORT), далі <c>@changed = @@ROWCOUNT</c>.
     /// </summary>
     private static string BatchCommand(string body)
-        => Prelude + body.TrimEnd().TrimEnd(';') + " OPTION (RECOMPILE);\nSET @changed = @@ROWCOUNT;";
+        => Prelude + body.TrimEnd().TrimEnd(';') + " OPTION (MAXDOP 1, RECOMPILE);\nSET @changed = @@ROWCOUNT;";
 
     /// <summary>
     /// Подовжує <c>CommandTimeout</c> контексту на час операції переносу й повертає його, коли її завершено.
