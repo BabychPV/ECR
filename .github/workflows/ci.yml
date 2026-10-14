@@ -245,7 +245,7 @@ jobs:
       # зламані міграції.
       - name: dotnet ef
         run: |
-          dotnet tool install --global dotnet-ef --version 10.0.11
+          dotnet tool install --global dotnet-ef --version 10.0.13
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
       # ⛔ Три гейти — ОДИН виклик спільного скрипта. Кликати
