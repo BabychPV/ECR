@@ -89,7 +89,7 @@ param(
     [string]$AccountsFile,
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection,
@@ -1823,6 +1823,65 @@ function Stage-ArgumentSuffix {
     Log "  змінено: $changed"
 }
 
+# ==================== LookupCompare (LAND-5094 DIAG-A: порівняння Lookup-аргументу з текстом довідника) ====================
+# Лише явно: -Stage LookupCompare. Колонка-Lookup і колонка-міст Formula над Lookup віддають у формулу НОМЕР запису
+# довідника, тож `@Land_Measure_ReleaseColdVent = 'No - Нет'` ніколи не істинне (C12_03: 1 248 клітинок). У ЧЕРНЕТЦІ
+# вираз переписується на `REGFIELD(@X, 'NAME') = 'No - Нет'` (LandLookupCompare.Lib.ps1; перелік аргументів - з моделі,
+# літерал має бути ім'ям запису довідника цього аргументу). PARITY_1 отримує числове value (id запису) для аргументів,
+# які читає REGFIELD. Опубліковану версію не чіпаємо; нову версію чи публікацію етап не робить; повтор - 0 змін;
+# маркер `?` у списку аргументів не змінюється. -OnlyMethodology обмежує перелік методологій.
+function Stage-LookupCompare {
+    Log '== LookupCompare =='
+    . (Join-Path $here 'LandLookupCompare.Lib.ps1')
+    LoginAs 'land-owner'
+    Load-Registries
+    $lcPlan = Get-LandLookupCompareArguments -Model $Mdl
+    if ($lcPlan.Count -eq 0) { throw 'У моделі немає Lookup-колонок: перегенеруйте модель (model-gen).' }
+    $resolve = { param($resReg, $resName) RegEntryId $resReg $resName }
+    $ms = Items (Api GET '/api/v1/methodologies').Json
+    $changed = 0
+    foreach ($lcMeth in $ms) {
+        $lcCode = [string]$lcMeth.code
+        if ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains $lcCode) { continue }
+        $m = [int]$lcMeth.id
+        $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
+        $v = $vers | Sort-Object id -Descending | Select-Object -First 1
+        if (-not $v) { continue }
+        $vid = [int]$v.id
+        $n = 0
+        $replaced = New-Object System.Collections.Generic.HashSet[string]
+        $formulas = @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/formulas").Json)
+        $hits = @($formulas | Where-Object { (Convert-LandLookupCompareExpression -Expression $_.expression -Plan $lcPlan).Changed })
+        if ($hits.Count -eq 0) { continue }
+        if ([string]$v.status -eq 'Published') { Log "  ${lcCode}: остання версія опублікована - не чіпаю (формул із порівнянням: $($hits.Count)); потрібна нова чернетка"; continue }
+        foreach ($f in $hits) {
+            $r = Convert-LandLookupCompareExpression -Expression $f.expression -Plan $lcPlan
+            foreach ($c in $r.Replaced) { [void]$replaced.Add($c) }
+            $body = @{ expression = $r.Expression; resultType = $f.resultType; outputUnitId = $f.outputUnitId; argumentsCsv = $f.argumentsCsv }
+            if ($null -ne $f.scope) { $body.scope = $f.scope }
+            $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/formulas/$($f.code)" -Body $body
+            if ($put.Status -eq 200) { $n++ } else { Log "  ! ${lcCode}/$($f.code): HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
+        }
+        $changed += $n
+        Log "  ${lcCode}: формул із REGFIELD(@X,'NAME') - $n"
+
+        # PARITY_1: числове value (id запису) для аргументів, які тепер читає REGFIELD.
+        $tests = @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/tests").Json)
+        $t = $tests | Where-Object { [string]$_.code -eq 'PARITY_1' } | Select-Object -First 1
+        if (-not $t) { Log "  ${lcCode}: тест-кейсу PARITY_1 немає - value аргументів не виставлено"; continue }
+        $inp = [string]$t.inputJson | ConvertFrom-Json
+        $merged = Set-LandLookupCompareTestArguments -Existing @($inp.arguments) -Codes @($replaced) -Plan $lcPlan -Resolve $resolve
+        if ($merged.Missing.Count -gt 0) { Log "  ! ${lcCode}: у PARITY_1 немає числового значення (id запису) для: $($merged.Missing -join ', ')" }
+        if ($merged.Updated.Count -eq 0) { continue }
+        $newInput = [ordered]@{ documentId = $inp.documentId; periodKey = $inp.periodKey; arguments = @($merged.Arguments) }
+        $body = @{ inputJson = ($newInput | ConvertTo-Json -Depth 8 -Compress); expectedJson = [string]$t.expectedJson; tolerance = [string]$t.tolerance }
+        $pt = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/tests/PARITY_1" -Body $body
+        if ($pt.Status -eq 200) { $changed++; Log "  ${lcCode}: PARITY_1 value id запису: $($merged.Updated -join ',')" }
+        else { Log "  ! ${lcCode}: PARITY_1 HTTP $($pt.Status) $(Get-EcrErrorCode $pt)" }
+    }
+    Log "  змінено: $changed"
+}
+
 # ==================== ParityBranch (C12_02: вибір type1/type2 за наявністю компонента) ====================
 # Лише явно: -Stage ParityBranch. У ЧЕРНЕТЦІ методології з LandParityBranch.Lib.ps1 формули type2 компонентів
 # обгортаються `if(@Land_Measure_Component_<код> = NULL, <вираз>, NULL)`: старий код C12_02 рахує для компонента лише
@@ -2171,6 +2230,7 @@ if ($Stage -contains 'SubstanceApplicability') { Stage-SubstanceApplicability }
     # K1: аргументи з суфіксом методології - лише явно (-Stage ArgumentSuffix); ПЕРЕД OptionalArguments (той лишається
     # останнім), після CompositionMass/SubstanceApplicability/ParityBranch (токени цих етапів з K1 не перетинаються).
     if ($Stage -contains 'ArgumentSuffix') { Stage-ArgumentSuffix }
+    # LAND-5094 DIAG-A: порівняння Lookup-аргументу з текстом довідника - лише явно (-Stage LookupCompare); після ArgumentSuffix\n    # (токени аргументів уже суфіксовані), ПЕРЕД OptionalArguments (маркер `?` ставиться на готовий список).\n    if ($Stage -contains 'LookupCompare') { Stage-LookupCompare }
     # D-397: маркер `?` необов'язкових аргументів - лише явно (-Stage OptionalArguments); ОСТАННІМ: попередні етапи
     # переписують списки аргументів і зберігають чужі елементи як є, тож маркер ставиться на готовий список.
     if ($Stage -contains 'OptionalArguments') { Stage-OptionalArguments }
