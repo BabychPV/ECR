@@ -470,6 +470,12 @@ M_CODES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct',
 def special(name, c, en, ru):
     L = c['letter']
     mo = c.get('month')
+    # C11_10 (D-423): у T9_04/T9_07 атрибут AF Land_Measure_OperatingTime змішаного змісту - години АБО текст 'No - Нет'/'Yes - Да'
+    # (ECW_C11_10.cs:48-51, :180-184; type2 порівнює з текстом). Колонка Decimal не зберігала текст (комірки не створювались),
+    # тому місячна колонка - String; мости Formula над нею (af_attr_bridges) стають текстовими (textResult), а Legacy-формули
+    # розбирають числовий текст самі (ToValue legacyNumericText).
+    if name.startswith('9. ') and mo and re.search(r'operating time \(hours\)\s*/\s*release on cold vent\s*\(yes/no\)', (en or '').lower()):
+        return {'type': 'String'}
     if name.startswith('7. '):
         if L == 'F':
             return {'code': 'PermitNumber', 'type': 'Lookup', 'registry': 'LAND_PERMITNUMBERS'}
