@@ -76,12 +76,13 @@ public sealed partial class StaleMapWarmer(
         var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
         var withRuns = await db.Database
             .SqlQuery<int>($"""
-                SELECT TOP ({LatestRunPeriods}) PeriodKey AS [Value]
+                SELECT PeriodKey AS [Value]
                 FROM calc.CalculationRun
                 WHERE Status = N'Current' AND PeriodKey IS NOT NULL
                 GROUP BY PeriodKey
-                ORDER BY PeriodKey DESC
                 """)
+            .OrderByDescending(period => period)
+            .Take(LatestRunPeriods)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
