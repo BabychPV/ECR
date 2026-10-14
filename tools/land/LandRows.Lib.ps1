@@ -291,3 +291,27 @@ function Get-LandRowsDocBlock {
     if ($NameState -eq 'NAME_MISMATCH' -and -not $AllowNameMismatch) { return 'NAME_MISMATCH' }
     return ''
 }
+function Get-LandRowsRejectReasons {
+    <#
+    .SYNOPSIS
+        Із тіла HTTP 422 бере ЛИШЕ коди: messageKey і лічильник "ruleCode columnCode xN" по cells[]. Значень і rowKey не читає.
+    #>
+    param($Response)
+    try {
+        $j = $Response.Json
+        if ($null -eq $j -and $Response.Text) { $j = $Response.Text | ConvertFrom-Json }
+        if ($null -eq $j) { return '' }
+        $counts = @{}
+        foreach ($c in @($j.cells)) {
+            if ($null -eq $c) { continue }
+            $k = ('{0} {1}' -f [string]$c.ruleCode, [string]$c.columnCode).Trim()
+            if ($counts.ContainsKey($k)) { $counts[$k]++ } else { $counts[$k] = 1 }
+        }
+        $parts = @($counts.Keys | Sort-Object | ForEach-Object { '{0} x{1}' -f $_, $counts[$_] })
+        $mk = ''
+        if ($j.PSObject.Properties.Match('messageKey').Count -gt 0) { $mk = [string]$j.messageKey }
+        if ($mk) { $parts = @("messageKey=$mk") + $parts }
+        return ($parts -join ', ')
+    }
+    catch { return '' }
+}

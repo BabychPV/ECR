@@ -316,4 +316,22 @@ public sealed class LandRowLoaderTests
         Assert.Contains("LandInputCells.Lib.ps1", File.ReadAllText(LandRowKeyTests.LandFile("LandRows.Lib.ps1")), StringComparison.Ordinal);
         Assert.Contains("LandInputCells.Lib.ps1", File.ReadAllText(LandRowKeyTests.LandFile("Load-LandRows.ps1")), StringComparison.Ordinal);
     }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Відхилення_422_агрегується_у_коди_ruleCode_columnCode_без_значень()
+    {
+        var json = Probe("""
+            $body = '{"messageKey":"cell.rejected","cells":[{"ruleCode":"R1","columnCode":"C1","value":"SECRET-77","rowKey":"RK-1"},{"ruleCode":"R1","columnCode":"C1","value":"SECRET-88"},{"ruleCode":"R2","columnCode":"C2","value":"SECRET-99"}]}'
+            $resp = [pscustomobject]@{ Status = 422; Json = ($body | ConvertFrom-Json); Text = $body }
+            $bad = [pscustomobject]@{ Status = 422; Json = $null; Text = 'not json' }
+            [ordered]@{ s = (Get-LandRowsRejectReasons -Response $resp); bad = (Get-LandRowsRejectReasons -Response $bad) } | ConvertTo-Json -Compress
+            """);
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal("messageKey=cell.rejected, R1 C1 x2, R2 C2 x1", doc.RootElement.GetProperty("s").GetString());
+        Assert.Equal("", doc.RootElement.GetProperty("bad").GetString());
+        Assert.DoesNotContain("SECRET", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("RK-1", json, StringComparison.Ordinal);
+        Assert.Contains("rejectReasons", File.ReadAllText(LandRowKeyTests.LandFile("Load-LandRows.ps1")), StringComparison.Ordinal);
+    }
 }
