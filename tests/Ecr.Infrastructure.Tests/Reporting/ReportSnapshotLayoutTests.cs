@@ -61,6 +61,68 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
         Assert.Equal(["Value", "UnitCode", "DocumentId"], page!.Columns.Select(c => c.Code));
     }
 
+    /// <summary>
+    /// D-402: результат з екземпляром таблиці не змінює вміст і суму зрізу за описом IEC (п'ять колонок) —
+    /// `TableInstanceId` з'являється лише за явного опису в версії. Мутація: додати колонку в `LegacyColumns`.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task D402_Екземпляр_таблиці_в_результаті_не_змінює_суму_зрізу_наявного_опису_а_колонка_opt_in()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        await using var db = chain.CreateContext();
+        var seeded = await SeedResultsAsync(chain, db);
+        var runId = await db.CalculationRuns.AsNoTracking()
+            .Where(r => r.ProjectId == seeded.ProjectId).Select(r => r.Id).SingleAsync();
+        var versionId = await db.MethodologyVersions.AsNoTracking().OrderByDescending(v => v.Id).Select(v => v.Id).FirstAsync();
+        var unit = await db.Units.AsNoTracking().OrderBy(u => u.Id).FirstAsync();
+
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO calc.CalculationResult
+                (Id, CalculationRunId, MethodologyVersionId, PeriodKey, DocumentId, SourceRowKey, OutputCode, Value, UnitId, TableInstanceId)
+            VALUES (NEXT VALUE FOR calc.CalculationResultSeq, {runId}, {versionId},
+                    {seeded.PeriodKey.Value}, {seeded.DocumentId}, N'row-3', N'E_SO2',
+                    CAST(N'7' AS decimal(34,16)), {unit.Id}, 4242)
+            """);
+
+        var iec = await (
+            from def in db.ReportDefs
+            join version in db.ReportVersions on def.Id equals version.ReportDefId
+            where def.Code == "IEC"
+            select version.Id).SingleAsync();
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
+        var snapshotId = await builder.BuildAsync(iec, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
+
+        var expected = new List<ReportRow>();
+        var rowNo = 0;
+        foreach (var (rowKey, output, value) in seeded.Results.Append(("row-3", "E_SO2", 7m)))
+        {
+            rowNo++;
+            expected.Add(Cell(snapshotId, rowNo, "DocumentId", null, seeded.DocumentId));
+            expected.Add(Cell(snapshotId, rowNo, "RowKey", rowKey, null));
+            expected.Add(Cell(snapshotId, rowNo, "OutputCode", output, null));
+            expected.Add(Cell(snapshotId, rowNo, "Value", null, value));
+            expected.Add(Cell(snapshotId, rowNo, "SubstanceEntryId", null, null));
+        }
+
+        var stored = await db.ReportSnapshots.AsNoTracking()
+            .Where(s => s.Id == snapshotId).Select(s => s.ContentHash).SingleAsync();
+        Assert.Equal(Convert.ToHexString(OldHash(expected)), Convert.ToHexString(stored!));
+        Assert.DoesNotContain(
+            await db.ReportRows.AsNoTracking().Where(r => r.SnapshotId == snapshotId).Select(r => r.ColumnCode).Distinct().ToListAsync(),
+            code => code == "TableInstanceId");
+
+        // opt-in: явний опис колонки дає її значення (NULL — для результатів до D-401).
+        var version2 = await PublishedAsync(
+            db, """[{"code":"RowKey","kind":"text"},{"code":"TableInstanceId","kind":"number"}]""");
+        var optIn = await builder.BuildAsync(version2.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
+        var cells = await db.ReportRows.AsNoTracking()
+            .Where(r => r.SnapshotId == optIn && r.ColumnCode == "TableInstanceId")
+            .OrderBy(r => r.RowNo).ToListAsync();
+        Assert.Equal([null, null, 4242m], cells.Select(c => c.ValueNumeric));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

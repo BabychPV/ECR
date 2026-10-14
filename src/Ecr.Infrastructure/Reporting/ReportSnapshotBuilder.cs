@@ -1276,11 +1276,13 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             // не створювало ніщо, тож до цього рядка виконання не доходило —
             // побудова відмовляла раніше, `ECR-RPT-0404` (директива №09
             // `W7`, сценарій `S-27`).
-            orderby result.DocumentId, result.SourceRowKey, result.OutputCode
+            // ⚠ D-401/D-402: TableInstanceId лише розв'язує рівність за ключем (дублікати RowKey`n            // різних таблиць) детерміновано; склад колонок наявних версій не змінюється.
+            orderby result.DocumentId, result.SourceRowKey, result.OutputCode, result.TableInstanceId
             select new ResultRow(
                 result.DocumentId, result.SourceRowKey, result.OutputCode,
                 result.Value, result.SubstanceEntryId,
-                result.PeriodKey, result.UnitId, unit.Code, result.MethodologyVersionId, project.Code);
+                result.PeriodKey, result.UnitId, unit.Code, result.MethodologyVersionId, project.Code,
+                result.TableInstanceId);
 
         // ⛔ AN-120 / L1-01: джерело читається ПОВНІСТЮ, потоком, без `Take`.
         // Правила відбору (`R5`) бачать кожен рядок джерела, а стеля стоїть на
@@ -1363,6 +1365,8 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
         ["UnitCode"] = r => r.UnitCode,
         ["MethodologyVersionId"] = r => (decimal)r.MethodologyVersionId,
         ["ProjectCode"] = r => r.ProjectCode,
+        // ⛔ D-402: колонка лише за явним описом у ColumnsJson версії; у LegacyColumns її немає.
+        ["TableInstanceId"] = r => (decimal?)r.TableInstanceId,
     };
 
     /// <summary>Коди колонок, які будівник уміє прочитати з джерела.</summary>
@@ -1577,7 +1581,8 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// </remarks>
     private sealed record ResultRow(
         long DocumentId, string? SourceRowKey, string OutputCode, decimal Value, long? SubstanceEntryId,
-        int PeriodKey, int UnitId, string UnitCode, int MethodologyVersionId, string ProjectCode);
+        int PeriodKey, int UnitId, string UnitCode, int MethodologyVersionId, string ProjectCode,
+        long? TableInstanceId);
 }
 
 /// <summary>Опис колонок звіту, що зберігається у <c>ReportVersion.ColumnsJson</c>.</summary>
