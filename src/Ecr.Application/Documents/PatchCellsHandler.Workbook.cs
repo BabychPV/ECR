@@ -368,7 +368,8 @@ public sealed partial class PatchCellsHandler
         }
 
         // C1: ключ — (методологія, версія шаблону): локалізація ключів залежить від версії шаблону екземпляра.
-        var resolved = new Dictionary<(int MethodologyId, int TemplateVersionId), ApplicableMethodology?>();
+        // D-425: колонки статусу залежать і від таблиці — вона частина ключа.
+        var resolved = new Dictionary<(int MethodologyId, int TemplateVersionId, int TableDefId), ApplicableMethodology?>();
         foreach (var item in touched)
         {
             var methodologyIds = bindings
@@ -380,11 +381,12 @@ public sealed partial class PatchCellsHandler
             foreach (var methodologyId in methodologyIds)
             {
                 var templateVersionId = item.Context.Instance.TemplateVersionId;
-                if (!resolved.TryGetValue((methodologyId, templateVersionId), out var applied))
+                var tableDefId = item.Context.Instance.TableDefId;
+                if (!resolved.TryGetValue((methodologyId, templateVersionId, tableDefId), out var applied))
                 {
                     applied = await ResolveApplicableAsync(
-                        methodologyId, periodBounds.PeriodEnd, templateVersionId, ct).ConfigureAwait(false);
-                    resolved[(methodologyId, templateVersionId)] = applied;
+                        methodologyId, periodBounds.PeriodEnd, templateVersionId, tableDefId, ct).ConfigureAwait(false);
+                    resolved[(methodologyId, templateVersionId, tableDefId)] = applied;
                 }
 
                 if (applied is not null)

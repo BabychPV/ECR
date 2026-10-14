@@ -46,6 +46,7 @@ public sealed class MethodologiesController(
     ListMethodologyTestCasesHandler listTests,
     SaveMethodologyTestCaseHandler saveTest,
     SetMethodologyModesHandler setModes,
+    SetMethodologyRowActivityFilterHandler setRowActivityFilter,
     ListCalculationBindingsHandler listBindings,
     SaveCalculationBindingHandler saveBinding,
     ListMethodologySubstancesHandler listSubstances,
@@ -609,6 +610,29 @@ public sealed class MethodologiesController(
             .ConfigureAwait(false));
     }
 
+    /// <summary>
+    /// Ставить або знімає фільтр активності рядків методології («лише Running» для Land, D-425).
+    /// Право <c>Calculation.Publish</c>.
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="request">Фільтр <c>КОД_ДОВІДНИКА:КОД_ЗАПИСУ</c> або <c>null</c>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Змінює числа опублікованих версій без нової версії (фільтр живе на контейнері й не входить у
+    /// <c>ContentHash</c>), тому право — <c>Calculation.Publish</c>. Перерахунок не запускається.
+    /// </remarks>
+    [HttpPut("{id:int}/row-activity-filter")]
+    [ProducesResponseType<MethodologyRowActivityFilterDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<MethodologyRowActivityFilterDto>> SetRowActivityFilter(
+        int id, [FromBody] SetRowActivityFilterRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await setRowActivityFilter.HandleAsync(id, request.Filter, ct).ConfigureAwait(false));
+    }
+
     /// <summary>Прив'язки методології до колонок. Право <c>Calculation.View</c>.</summary>
     /// <param name="id">Методологія.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -899,6 +923,10 @@ public sealed record SaveMethodologyTestCaseRequest(
 /// <param name="TraceLevel">Обсяг журналу обчислення (ФВ-9.13).</param>
 public sealed record SetMethodologyModesRequest(
     NumericMode NumericMode, CalendarMode CalendarMode, TraceLevel TraceLevel);
+
+/// <summary>Запит на фільтр активності рядків методології (D-425).</summary>
+/// <param name="Filter"><c>КОД_ДОВІДНИКА:КОД_ЗАПИСУ</c>, наприклад <c>LAND_GENERIC_EQUIPSTATUS:Running</c>; <c>null</c> — зняти.</param>
+public sealed record SetRowActivityFilterRequest(string? Filter);
 
 /// <summary>Запит на прив'язку виходу методології до колонки документа.</summary>
 /// <param name="MatchJson">

@@ -8347,6 +8347,28 @@
         ],
         "type": "object"
       },
+      "MethodologyRowActivityFilterDto": {
+        "description": "Фільтр активності рядків методології (D-425).",
+        "properties": {
+          "methodologyId": {
+            "description": "Методологія.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rowActivityFilter": {
+            "description": "`КОД_ДОВІДНИКА:КОД_ЗАПИСУ`; `null` — фільтра немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "methodologyId",
+          "rowActivityFilter"
+        ],
+        "type": "object"
+      },
       "MethodologyRuleDto": {
         "description": "Правило відбору рядків документа (ФВ-13.3, ФВ-13.4).",
         "properties": {
@@ -13922,6 +13944,12 @@
             },
             "type": "array"
           },
+          "excludedRows": {
+            "default": 0,
+            "description": "D-425: рядків відсіяно фільтром активності методології (статус не активний або порожній) — вони не рахуються\nпрогоном і не є «непокритими»; `0` — фільтра немає.",
+            "format": "int64",
+            "type": "integer"
+          },
           "methodologyVersionId": {
             "description": "Версія.",
             "format": "int32",
@@ -15481,6 +15509,22 @@
           "validFromAttribute",
           "validToAttribute",
           "validToInclusive"
+        ],
+        "type": "object"
+      },
+      "SetRowActivityFilterRequest": {
+        "description": "Запит на фільтр активності рядків методології (D-425).",
+        "properties": {
+          "filter": {
+            "description": "`КОД_ДОВІДНИКА:КОД_ЗАПИСУ`, наприклад `LAND_GENERIC_EQUIPSTATUS:Running`; `null` — зняти.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "filter"
         ],
         "type": "object"
       },
@@ -29390,6 +29434,111 @@
         "summary": "Публікації версій методології, найновіші першими. Право `Calculation.View`.",
         "tags": [
           "MethodologyPublications"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/row-activity-filter": {
+      "put": {
+        "description": "⛔ Змінює числа опублікованих версій без нової версії (фільтр живе на контейнері й не входить у\n`ContentHash`), тому право — `Calculation.Publish`. Перерахунок не запускається.",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRowActivityFilterRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRowActivityFilterRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRowActivityFilterRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyRowActivityFilterDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyRowActivityFilterDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyRowActivityFilterDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Ставить або знімає фільтр активності рядків методології («лише Running» для Land, D-425).\nПраво `Calculation.Publish`.",
+        "tags": [
+          "Methodologies"
         ]
       }
     },

@@ -75,6 +75,7 @@ function matrix(overrides: Partial<RuleCoverageDto>): RuleCoverageDto {
     ],
     combinations: [],
     truncated: false,
+    excludedRows: 0,
     ...overrides,
   };
 }

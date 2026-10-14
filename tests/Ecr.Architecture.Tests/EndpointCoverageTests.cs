@@ -1371,6 +1371,12 @@ public sealed partial class EndpointCoverageTests
         "GET /api/v1/methodologies/{p}/versions/{p}/substances",
         "PUT /api/v1/methodologies/{p}/versions/{p}/substances",
 
+        // D-425 (Land «лише Running»): прапорець фільтра активності рядків ставить скрипт розгортання шаблону
+        // (`tools/land/Build-LandTemplate.ps1`, етап RowFilter) за переліком `tools/land/land-row-filter.json`;
+        // екрана налаштувань методології для цього прапорця ще немає — це рідкісна адмін-дія, що змінює числа.
+        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/methodologies`.
+        "PUT /api/v1/methodologies/{p}/row-activity-filter",
+
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було
         // НЕПРАВДОЮ: жодне місце клієнта нічого не конвертувало.

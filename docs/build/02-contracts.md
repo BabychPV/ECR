@@ -2998,6 +2998,26 @@ public interface IRuleCoverageReader
 }
 ```
 
+#### `IRowActivityFilterSource`
+
+Фільтр активності рядків методології (D-425, «лише Running» для Land): прапорець
+`calc.Methodology.RowActivityFilter` (`КОД_ДОВІДНИКА:КОД_ЗАПИСУ`), розв'язаний до Id запису й
+колонок статусу таблиць. Колонки знаходяться за довідником (`LookupRegistryDefId`), а не за
+кодом колонки; нуль колонок або невідомий запис — фільтр не діє. Споживачі: прогін
+(`MethodologyResolver`), матриця покриття (`RuleCoverageHandler`), gate обов'язкових входів
+(`PatchCellsHandler`). Поставити прапорець — `PUT /api/v1/methodologies/{id}/row-activity-filter`.
+
+```csharp
+public interface IRowActivityFilterSource
+{
+    public Task<RowActivityFilterResolution?> ResolveForMethodologyAsync(
+        int methodologyId, IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
+
+    public Task<RowActivityFilterResolution?> ResolveForVersionAsync(
+        int methodologyVersionId, IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
+}
+```
+
 #### `ISecretProvider`
 
 Значення секрету за його іменем.
@@ -4071,6 +4091,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/tests` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/tests/{code}` | `Calculation.EditFormula` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/modes` | `Calculation.EditFormula` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/row-activity-filter` | `Calculation.Publish` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/coverage` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/rule-coverage` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/diff` | `Calculation.View` | 7 |

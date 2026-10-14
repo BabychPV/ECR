@@ -34,6 +34,25 @@ function Get-LandParityV {
     return $null
 }
 
+function Test-LandParityHasKey {
+    # D-425: чи є в рядку колонка (ключ) - відрізняє «таблиця без колонки статусу» від «статус порожній».
+    param($Source, [string]$PropName)
+    if ($null -eq $Source) { return $false }
+    if ($Source -is [System.Collections.IDictionary]) {
+        if ($null -ne $Source.PSObject.Methods['ContainsKey']) { return $Source.ContainsKey($PropName) }
+        return $Source.Contains($PropName)
+    }
+    return ($null -ne $Source.PSObject.Properties[$PropName])
+}
+
+function Test-LandParityNonRunning {
+    # D-425: рядок має колонку статусу, і значення не 'Running' (порожнє - теж: легасі такий рядок не рахує ніде).
+    param($Row)
+    if (-not (Test-LandParityHasKey $Row 'Land_Status')) { return $false }
+    $v = Get-LandParityV $Row 'Land_Status'
+    return ($null -eq $v -or [string]$v -ne 'Running')
+}
+
 function ConvertFrom-LandParityJson {
     # Windows PowerShell 5.1: JavaScriptSerializer (fast on big files). pwsh 6+/Linux: ConvertFrom-Json -AsHashtable.
     param([Parameter(Mandatory)][string]$JsonText)
@@ -222,7 +241,7 @@ function Get-LandParityBucket {
     elseif ($core -eq 'NEAR' -or $core -like 'MISMATCH*') {
         if ($RelErr -le $Threshold) { $group = 'MATCHED'; $within = $true } else { $group = 'MISMATCH' }
     }
-    elseif ($core -like 'ECR_ONLY*') { $group = 'ECR_ONLY' }
+    elseif ($core -like 'ECR_ONLY*' -or $core -eq 'ECR_NON_RUNNING') { $group = 'ECR_ONLY' }
     elseif ($core -like 'MISSING_*' -or $core -like 'ROW_NOT_LOADED*' -or $core -eq 'LEGACY_STATUS_SKIP' -or $core -eq 'METHODOLOGY_DIFF') { $group = 'ORACLE_ONLY' }
     return @{ Group = $group; Within = $within; Zero = $zero }
 }
@@ -551,6 +570,9 @@ function Invoke-LandParityCompare {
                     [void]$infos.Add(@{ Row = $r; Efid = $efid; Nae = $nae; Ph = $ph; Key = $gkey; RowKey = $rk })
                 }
                 $groupDone = @{}
+                # D-425: рядки груп, які легасі не рахує (статус не Running) - для класу ECR_NON_RUNNING замість ECR_ONLY.
+                $nonRunningRows = @{}
+                foreach ($inf in $infos) { if (Test-LandParityNonRunning $inf.Row) { $nonRunningRows[$inf.RowKey] = 1 } }
 
                 foreach ($info in $infos) {
                     $nae = $info.Nae; $efid = $info.Efid; $rk = $info.RowKey; $ph = $info.Ph
@@ -672,6 +694,11 @@ function Invoke-LandParityCompare {
                         if ($lab -match '_NOx$') { $cls = 'ECR_ONLY_INTERMEDIATE' } elseif ($onlySum[$ck] -eq 0) { $cls = 'ECR_ONLY_ZERO' } else { $cls = 'ECR_ONLY' }
                         if ($amb -and -not $grouped) { $cls = 'AMBIGUOUS_KEY' }
                         foreach ($mk in $rowKeys) { if ($st.AmbiguousEcr.ContainsKey("$tk|$mk|$ck")) { $cls = 'AMBIGUOUS_ECR_KEY'; break } }
+                        # D-425: ECR порахував рядок, який легасі не рахує (статус не Running) - це регресія фільтра
+                        # «лише Running», а не «ECR порахував там, де легасі не було»; індикатор має бути 0.
+                        if ($cls -like 'ECR_ONLY*') {
+                            foreach ($mk in $rowKeys) { if ($nonRunningRows.ContainsKey($mk)) { $cls = 'ECR_NON_RUNNING'; break } }
+                        }
                         Add-LandParityCell $ac $docName $pk $tbl $rk $nRows $efid $meth $lab ($pre + $cls)
                     }
                 }
@@ -763,6 +790,8 @@ function Get-LandParitySummary {
         outputsWithoutSubstance = $noSub
         foreignSubstanceIgnored = $foreign
         totalCells = [int](($classes | ForEach-Object { $_.cells } | Measure-Object -Sum).Sum)
+        # D-425: індикатор регресії фільтра «лише Running»: ECR порахував рядок, якого легасі не рахує. Має бути 0.
+        ecrNonRunningCells = [int](($classes | Where-Object { $_.class -like '*ECR_NON_RUNNING' } | ForEach-Object { $_.cells } | Measure-Object -Sum).Sum)
         classes = $classes
         byMethodology = $byMethodology
         multiTableResults = $multi
