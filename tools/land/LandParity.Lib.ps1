@@ -18,6 +18,8 @@
     aliased to short locals ($st, $ac).
 #>
 
+. (Join-Path $PSScriptRoot 'LandRowKey.Lib.ps1')
+
 function Get-LandParityV {
     # Dictionary-agnostic read (Hashtable and Dictionary[string,object]): null when the key is absent.
     param($Source, [string]$PropName)
@@ -210,7 +212,7 @@ function Get-LandParityBucket {
         MATCHED: MATCH, MATCH_ROUNDING_LOSS, а також NEAR і MISMATCH* з відносною похибкою не більшою за поріг
         (Within = TRUE: збіг лише завдяки порогу). ORACLE_ONLY: у старій системі є, в ECR немає (MISSING_*, ROW_NOT_LOADED_*,
         LEGACY_STATUS_SKIP, METHODOLOGY_DIFF). OTHER: невизначеність ключа/гілки (AMBIGUOUS_KEY, LEGACY_DUP_CONFLICT,
-        INCOMPLETE_*, BRANCH_BOTH_PRESENT) - значення не порівнювалось.
+        INCOMPLETE_*, BRANCH_BOTH_PRESENT, AMBIGUOUS_ECR_KEY) - значення не порівнювалось.
     #>
     param([string]$ClassName, [double]$RelErr, [double]$Threshold)
     $core = $ClassName -replace '^AGG_', '' -replace '_ZERO$', ''
@@ -244,7 +246,21 @@ function New-LandParityState {
         BranchBoth = @{}     # той самий ключ -> 1: обидві гілки мають результат
         NoSubstance = @{}    # methodology -> результати ECW_EC_*_XXX без коду речовини
         ForeignSubstance = @{}   # methodology -> результати з кодом у імені, порахованими в проході чужої речовини
+        TableKeyDocs = @{}       # документ -> 1: у ньому є рядки з ключем формату Table (p<doc>-<TableCode>-<seq>)
+        AmbiguousEcr = @{}       # "doc|period|table|rowKey|meth|output" -> 1: старий ключ, кілька таблиць, РІЗНІ значення (AMBIGUOUS_ECR_KEY)
+        MultiWritten = @{}       # той самий ключ -> 1: значення записане під час приписування кільком таблицям
+        AmbiguousByMeth = @{}    # methodology -> кількість неоднозначних ключів
+        KeyFormats = @{ Table = 0; Legacy = 0; Unknown = 0 }   # результати ECR за форматом SourceRowKey
     }
+}
+
+function Add-LandParityLoadedRow {
+    # The only way to register a loaded document row: also remembers which documents use table-qualified keys.
+    param([hashtable]$StateObject, [string]$DocumentName, [int]$PeriodKey, [string]$TableCode, [string]$RowKey)
+    $stl = $StateObject
+    [void]$stl.Loaded.Add("$DocumentName|$PeriodKey|$TableCode|$RowKey")
+    $docAlias = $DocumentName   # alias: LandScriptVariableCollisionTests does not allow an element keyed by a parameter on the left
+    if ((ConvertFrom-LandRowKey $RowKey).Format -eq 'Table') { $stl.TableKeyDocs[$docAlias] = 1 }
 }
 
 function Resolve-LandParityResultTables {
@@ -256,9 +272,12 @@ function Resolve-LandParityResultTables {
             if ($MethodologyCode -match $m.Regex) { $cands = @($m.Tables); break }
         }
     }
+    # Table-qualified key (p<doc>-<TableCode>-<seq>): the result belongs to exactly that table, no guessing.
+    $pk = ConvertFrom-LandRowKey $RowKey
+    if ($pk.Format -eq 'Table') { return @($pk.Table) }
     if ($cands.Count -eq 0) { return @('(unmapped)') }
     if ($cands.Count -eq 1) { return $cands }
-    # The result row key carries no table: keep the candidates whose document row exists.
+    # Legacy key p<doc>-<seq> carries no table: keep the candidates whose document row exists.
     $hit = @($cands | Where-Object { $StateObject.Loaded.Contains("$DocumentName|$PeriodKey|$_|$RowKey") })
     if ($hit.Count -eq 0) { $hit = $cands }
     if ($hit.Count -gt 1) {
@@ -284,12 +303,27 @@ function Add-LandParityEcrResult {
         if (-not $st.NoSubstance.ContainsKey($mname)) { $st.NoSubstance[$mname] = 0 }
         $st.NoSubstance[$mname]++
     }
-    foreach ($tc in (Resolve-LandParityResultTables $st $DocumentName $PeriodKey $MethodologyCode $RowKey)) {
+    $fmt = (ConvertFrom-LandRowKey $RowKey).Format
+    $st.KeyFormats[$fmt] = 1 + [int]$st.KeyFormats[$fmt]
+    $targets = @(Resolve-LandParityResultTables $st $DocumentName $PeriodKey $MethodologyCode $RowKey)
+    $multiTarget = ($targets.Count -gt 1)
+    foreach ($tc in $targets) {
         $mkey = "$DocumentName|$PeriodKey|$tc|$MethodologyCode"
         $st.EcrMeth[$mkey] = 1
         $k = "$DocumentName|$PeriodKey|$tc|$RowKey"
         $outKey = "$MethodologyCode|$($cn.Code)"
         if (-not $st.Ecr.ContainsKey($k)) { $st.Ecr[$k] = @{} }
+        # Legacy key shared by several candidate tables: a second DIFFERENT value for the same cell is a key collision,
+        # not an update. Flag it (AMBIGUOUS_ECR_KEY) instead of "last wins". Values are never printed.
+        $ak = "$k|$outKey"
+        if ($fmt -ne 'Table' -and $st.Ecr[$k].ContainsKey($outKey) -and ($multiTarget -or $st.MultiWritten.ContainsKey($ak)) -and
+            [double]$st.Ecr[$k][$outKey] -ne $Value) {
+            if (-not $st.AmbiguousEcr.ContainsKey($ak)) {
+                $st.AmbiguousEcr[$ak] = 1
+                $st.AmbiguousByMeth[$mname] = 1 + [int]$st.AmbiguousByMeth[$mname]
+            }
+        }
+        if ($multiTarget) { $st.MultiWritten[$ak] = 1 }
         $st.Ecr[$k][$outKey] = $Value
         $st.RowAny[$k] = 1
         if ($cn.Variant -ne '') {
@@ -319,7 +353,7 @@ function Import-LandParityStateFile {
     foreach ($t in @(Get-LandParityV $j 'tables')) {
         $dn = [string](Get-LandParityV $t 'document'); $pk = [int](Get-LandParityV $t 'period'); $tc = [string](Get-LandParityV $t 'table')
         $cnt = 0
-        foreach ($rk in @(Get-LandParityV $t 'rowKeys')) { [void]$st.Loaded.Add("$dn|$pk|$tc|$rk"); $cnt++ }
+        foreach ($rk in @(Get-LandParityV $t 'rowKeys')) { Add-LandParityLoadedRow $st $dn $pk $tc ([string]$rk); $cnt++ }
         $st.LoadedCnt["$dn|$pk|$tc"] = $cnt
         $mx = Get-LandParityV $t 'maxRows'
         if ($null -ne $mx) { $st.MaxRows[$tc] = [int]$mx }
@@ -358,7 +392,7 @@ function Import-LandParityStateSql {
     & $rd "SELECT JSON_VALUE(d.NameL10n, '$.en'), tr.PeriodKey, td.Code, tr.RowKey, td.MaxDynamicRows FROM doc.TableRow tr JOIN doc.TableInstance ti ON ti.Id = tr.TableInstanceId AND ti.PeriodKey = tr.PeriodKey JOIN doc.Document d ON d.Id = ti.DocumentId JOIN cfg.TableDef td ON td.Id = ti.TableDefId WHERE tr.IsDeleted = 0" {
         param($rec)
         $tk = "$([string]$rec[0])|$([int]$rec[1])|$([string]$rec[2])"
-        [void]$st.Loaded.Add("$tk|$([string]$rec[3])")
+        Add-LandParityLoadedRow $st ([string]$rec[0]) ([int]$rec[1]) ([string]$rec[2]) ([string]$rec[3])
         $st.LoadedCnt[$tk] = 1 + [int]$st.LoadedCnt[$tk]
         $tcode = [string]$rec[2]
         if (-not $rec.IsDBNull(4)) { $st.MaxRows[$tcode] = [int]$rec[4] }
@@ -510,7 +544,9 @@ function Invoke-LandParityCompare {
                     $ln = "#$i"; if ($hasNo) { $ln = [string](Get-LandParityV $r 'Land_No') }
                     if (-not $members.ContainsKey($gkey)) { $members[$gkey] = @{ Nos = @{}; Rows = New-Object System.Collections.ArrayList } }
                     $members[$gkey].Nos[$ln] = 1
-                    $rk = 'p{0}-{1:0000}' -f $n, $i
+                    # The stand's key format decides: table-qualified once the document has such rows, else legacy p<doc>-<seq>.
+                    $rkFormat = 'Legacy'; if ($st.TableKeyDocs.ContainsKey($docName)) { $rkFormat = 'Table' }
+                    $rk = New-LandRowKey -DocId $n -TableCode $tbl -Index $i -KeyFormat $rkFormat
                     [void]$members[$gkey].Rows.Add($rk)
                     [void]$infos.Add(@{ Row = $r; Efid = $efid; Nae = $nae; Ph = $ph; Key = $gkey; RowKey = $rk })
                 }
@@ -581,6 +617,14 @@ function Invoke-LandParityCompare {
                                 Add-LandParityCell $ac $docName $pk $tbl $rk $nRows $efid $meth $lab ($pre + 'BRANCH_BOTH_PRESENT')
                                 continue
                             }
+                            # Legacy key shared by several tables with different values: not comparable (values never printed).
+                            $ecrAmb = $false
+                            foreach ($mk in $rowKeys) { if ($st.AmbiguousEcr.ContainsKey("$tk|$mk|$ek")) { $ecrAmb = $true; break } }
+                            if ($ecrAmb) {
+                                $seen[$ek] = 1
+                                Add-LandParityCell $ac $docName $pk $tbl $rk $nRows $efid $meth $lab ($pre + 'AMBIGUOUS_ECR_KEY')
+                                continue
+                            }
                             # ECR side: the row value, or the SUM over the group
                             $sum = 0.0; $have = 0; $diffCount = 0
                             foreach ($er in $ecrRows) {
@@ -627,6 +671,7 @@ function Invoke-LandParityCompare {
                         $lab = $outCode -replace '^ECW_EC_', ''
                         if ($lab -match '_NOx$') { $cls = 'ECR_ONLY_INTERMEDIATE' } elseif ($onlySum[$ck] -eq 0) { $cls = 'ECR_ONLY_ZERO' } else { $cls = 'ECR_ONLY' }
                         if ($amb -and -not $grouped) { $cls = 'AMBIGUOUS_KEY' }
+                        foreach ($mk in $rowKeys) { if ($st.AmbiguousEcr.ContainsKey("$tk|$mk|$ck")) { $cls = 'AMBIGUOUS_ECR_KEY'; break } }
                         Add-LandParityCell $ac $docName $pk $tbl $rk $nRows $efid $meth $lab ($pre + $cls)
                     }
                 }
@@ -675,6 +720,11 @@ function Get-LandParitySummary {
         })
     $multi = @()
     if ($null -ne $StateObject) { $multi = @($StateObject.MultiTable.Keys | Sort-Object | ForEach-Object { [ordered]@{ methodology = $_; results = [int]$StateObject.MultiTable[$_] } }) }
+    $ambEcr = [ordered]@{ keys = 0; byMethodology = @() }; $keyFmt = [ordered]@{ table = 0; legacy = 0; unknown = 0 }
+    if ($null -ne $StateObject) {
+        $ambEcr = [ordered]@{ keys = [int]$StateObject.AmbiguousEcr.Count; byMethodology = @($StateObject.AmbiguousByMeth.Keys | Sort-Object | ForEach-Object { [ordered]@{ methodology = $_; keys = [int]$StateObject.AmbiguousByMeth[$_] } }) }
+        $keyFmt = [ordered]@{ table = [int]$StateObject.KeyFormats['Table']; legacy = [int]$StateObject.KeyFormats['Legacy']; unknown = [int]$StateObject.KeyFormats['Unknown'] }
+    }
     $noSub = @(); $foreign = @()
     if ($null -ne $StateObject) {
         $noSub = @($StateObject.NoSubstance.Keys | Sort-Object | ForEach-Object { [ordered]@{ methodology = $_; results = [int]$StateObject.NoSubstance[$_] } })
@@ -716,6 +766,8 @@ function Get-LandParitySummary {
         classes = $classes
         byMethodology = $byMethodology
         multiTableResults = $multi
+        ambiguousEcrKeys = $ambEcr
+        rowKeyFormats = $keyFmt
         groups = $groups
     }
 }
