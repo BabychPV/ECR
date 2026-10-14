@@ -253,7 +253,7 @@ function New-LandRowsTablePlan {
         }
         # D-423 (сторож): NAE type3 C11_10 у T9_04/T9_07 - OperatingTime тут String змішаного змісту, а type3 читає його числом
         # (Strict: арифметика над текстом). У прод-даних таких рядків немає; лічильник робить появу видимою на завантаженні.
-        if ($TableCode -in 'T9_04', 'T9_07' -and $srcRow.Contains('Land_NAE') -and (Test-LandNaeInType -Nae ([string]$srcRow['Land_NAE']) -Methodology 'ECW_C11_10' -Type 'type3')) { $plan.Type3InMixed++ }
+        if ($TableCode -in 'T9_04', 'T9_07' -and (@($srcRow.Keys) -contains 'Land_NAE') -and (Test-LandNaeInType -Nae ([string]$srcRow['Land_NAE']) -Methodology 'ECW_C11_10' -Type 'type3')) { $plan.Type3InMixed++ }
         if ($cells.Count -eq 0) { continue }
         $rowKey = New-LandRowKey -DocId $DocNumber -TableCode $TableCode -Index $seq -KeyFormat $KeyFormat
         [void]$rowsOut.Add(@{ rowKey = $rowKey; baseVersion = $null; cells = $cells })
@@ -290,4 +290,28 @@ function Get-LandRowsDocBlock {
     if ($NameState -eq 'NO_DOC') { return 'NO_DOC' }
     if ($NameState -eq 'NAME_MISMATCH' -and -not $AllowNameMismatch) { return 'NAME_MISMATCH' }
     return ''
+}
+function Get-LandRowsRejectReasons {
+    <#
+    .SYNOPSIS
+        Із тіла HTTP 422 бере ЛИШЕ коди: messageKey і лічильник "ruleCode columnCode xN" по cells[]. Значень і rowKey не читає.
+    #>
+    param($Response)
+    try {
+        $j = $Response.Json
+        if ($null -eq $j -and $Response.Text) { $j = $Response.Text | ConvertFrom-Json }
+        if ($null -eq $j) { return '' }
+        $counts = @{}
+        foreach ($c in @($j.cells)) {
+            if ($null -eq $c) { continue }
+            $k = ('{0} {1}' -f [string]$c.ruleCode, [string]$c.columnCode).Trim()
+            if ($counts.ContainsKey($k)) { $counts[$k]++ } else { $counts[$k] = 1 }
+        }
+        $parts = @($counts.Keys | Sort-Object | ForEach-Object { '{0} x{1}' -f $_, $counts[$_] })
+        $mk = ''
+        if ($j.PSObject.Properties.Match('messageKey').Count -gt 0) { $mk = [string]$j.messageKey }
+        if ($mk) { $parts = @("messageKey=$mk") + $parts }
+        return ($parts -join ', ')
+    }
+    catch { return '' }
 }
