@@ -88,7 +88,7 @@ internal sealed partial class StaleResultsMapCache(
 
     /// <summary><c>Map = null</c> - переповнення: кешується й воно, щоб не повторювати величезний запит щоразу.</summary>
     private sealed record Entry(
-        IReadOnlyDictionary<long, DateTime?>? Map, long Epoch, FingerprintRow Fingerprint, DateTime ExpiresAt);
+        IReadOnlyDictionary<long, DateTime?>? Map, long Epoch, FingerprintRow Fingerprint, DateTime ExpiresAt, TimeSpan Window);
 
     /// <summary>
     /// Карти періоду для кількох фільтрів автора за ОДНЕ читання відбитка: <c>null</c> — будь-який автор,
@@ -98,8 +98,9 @@ internal sealed partial class StaleResultsMapCache(
     /// <param name="periodKey">Період.</param>
     /// <param name="byUserIds">Фільтри автора.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="window">Власне вікно SWR запису, що кладеться (прогрів кільця: 15 хв); <c>null</c> - <see cref="StaleWhileRevalidateWindow"/>.</param>
     public async Task<IReadOnlyList<IReadOnlyDictionary<long, DateTime?>?>> GetAsync(
-        int periodKey, IReadOnlyList<int?> byUserIds, CancellationToken ct)
+        int periodKey, IReadOnlyList<int?> byUserIds, CancellationToken ct, TimeSpan? window = null)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -119,14 +120,14 @@ internal sealed partial class StaleResultsMapCache(
 
         for (var i = 0; i < byUserIds.Count; i++)
         {
-            result[i] = await GetOneAsync(periodKey, byUserIds[i], epochValue, fingerprint, ct).ConfigureAwait(false);
+            result[i] = await GetOneAsync(periodKey, byUserIds[i], epochValue, fingerprint, ct, window).ConfigureAwait(false);
         }
 
         return result;
     }
 
     private async Task<IReadOnlyDictionary<long, DateTime?>?> GetOneAsync(
-        int periodKey, int? user, long epochValue, FingerprintRow fingerprint, CancellationToken ct)
+        int periodKey, int? user, long epochValue, FingerprintRow fingerprint, CancellationToken ct, TimeSpan? window = null)
     {
         var key = $"doc-stale-map:{periodKey}:{(user is { } u ? u.ToString(System.Globalization.CultureInfo.InvariantCulture) : "*")}";
 
@@ -137,9 +138,9 @@ internal sealed partial class StaleResultsMapCache(
 
         // ⛔ SWR лише на TTL-складову (D-424): епоха й відбиток ЗБІГАЮТЬСЯ - стан не змінювався ні цим процесом, ні
         // іншим; змінився лише вік. Інакше (власна правка, прогін, довідники) - синхронне перезавантаження нижче.
-        if (scopeFactory is not null && TryStale(key, epochValue, fingerprint, out var old))
+        if (scopeFactory is not null && TryStale(key, epochValue, fingerprint, out var old, out var oldWindow))
         {
-            StartBackgroundRefresh(key, periodKey, user, epochValue, fingerprint);
+            StartBackgroundRefresh(key, periodKey, user, epochValue, fingerprint, oldWindow);
             return old;
         }
 
@@ -167,7 +168,8 @@ internal sealed partial class StaleResultsMapCache(
 
             // ⚠ Токен читача сюди НЕ йде (див. remarks): лідер доводить власний контекст до кінця.
             var map = await LoadAsync(periodKey, user, CancellationToken.None).ConfigureAwait(false);
-            cache!.Set(key, new Entry(map, epochValue, fingerprint, clock!.UtcNow + Ttl), Ttl + StaleWhileRevalidateWindow);
+            var keep = window ?? StaleWhileRevalidateWindow;
+            cache!.Set(key, new Entry(map, epochValue, fingerprint, clock!.UtcNow + Ttl, keep), Ttl + keep);
             mine.SetResult(map);
             return map;
         }
@@ -236,17 +238,20 @@ internal sealed partial class StaleResultsMapCache(
     }
 
     /// <summary>Запис протермінований за TTL не більш ніж на вікно SWR, а епоха й відбиток збігаються.</summary>
-    private bool TryStale(string key, long epochValue, FingerprintRow fingerprint, out IReadOnlyDictionary<long, DateTime?>? map)
+    private bool TryStale(
+        string key, long epochValue, FingerprintRow fingerprint, out IReadOnlyDictionary<long, DateTime?>? map, out TimeSpan window)
     {
         if (cache!.TryGetValue(key, out Entry? hit) && hit is not null
             && hit.Epoch == epochValue && hit.Fingerprint == fingerprint
-            && hit.ExpiresAt <= clock!.UtcNow && clock.UtcNow - hit.ExpiresAt <= StaleWhileRevalidateWindow)
+            && hit.ExpiresAt <= clock!.UtcNow && clock.UtcNow - hit.ExpiresAt <= hit.Window)
         {
             map = hit.Map;
+            window = hit.Window;
             return true;
         }
 
         map = null;
+        window = StaleWhileRevalidateWindow;
         return false;
     }
 
@@ -255,7 +260,8 @@ internal sealed partial class StaleResultsMapCache(
     /// нічого не запускає. Власний scope і контекст (контекст читача завершиться разом із запитом), без токена запиту.
     /// Помилка не кешується: стара карта лишається до кінця вікна, наступний читач запускає нову спробу.
     /// </summary>
-    private void StartBackgroundRefresh(string key, int periodKey, int? user, long epochValue, FingerprintRow fingerprint)
+    private void StartBackgroundRefresh(
+        string key, int periodKey, int? user, long epochValue, FingerprintRow fingerprint, TimeSpan window)
     {
         var inFlight = InFlightRegistry();
         var flightKey = $"{key}|{epochValue}|{fingerprint}";
@@ -284,7 +290,7 @@ internal sealed partial class StaleResultsMapCache(
                 // Не затирати запис новішої епохи, що встиг покласти синхронний читач.
                 if (!(memory.TryGetValue(key, out Entry? current) && current is not null && current.Epoch > epochValue))
                 {
-                    memory.Set(key, new Entry(map, epochValue, fingerprint, time.UtcNow + Ttl), Ttl + StaleWhileRevalidateWindow);
+                    memory.Set(key, new Entry(map, epochValue, fingerprint, time.UtcNow + Ttl, window), Ttl + window);
                 }
 
                 mine.TrySetResult(map);
@@ -462,9 +468,10 @@ internal sealed partial class StaleResultsMapCache(
     /// </summary>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
-    internal async Task<int?> WarmAsync(int periodKey, CancellationToken ct)
+    /// <param name="window">Вікно SWR запису (кільце - 15 хв, щоб запис не зникав через 135 с).</param>
+    internal async Task<int?> WarmAsync(int periodKey, CancellationToken ct, TimeSpan? window = null)
     {
-        var maps = await GetAsync(periodKey, [null], ct).ConfigureAwait(false);
+        var maps = await GetAsync(periodKey, [null], ct, window).ConfigureAwait(false);
         return maps[0]?.Count;
     }
 }

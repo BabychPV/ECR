@@ -246,14 +246,25 @@ public sealed partial class DocumentStaleResultsStoreTests
         // Читач збою не бачить: стара карта віддана.
         Assert.Equal([s.R.A, s.R.B], (await SwrPageAsync(s)).Order());
         await WaitIdleAsync(s.R.Cache);
-        Assert.Equal(2, s.Probe.Maps);
+
+        // Перелік робить ДВА звернення до карти (фільтр і рядки): якщо збійний фоновий запит завершився між ними,
+        // друге звернення запускає ще одне оновлення. Тому лічимо відносно «після збою», а не за абсолютним числом.
+        var afterFailure = s.Probe.Maps;
+        Assert.InRange(afterFailure, 2, 3);
+        if (afterFailure == 3)
+        {
+            // Друге звернення встигло запустити успішне оновлення: збій не отруїв, запис свіжий.
+            Assert.True(EntryExpiresAt(s) > s.Clock.UtcNow);
+            return;
+        }
+
         Assert.Equal(firstExpiry, EntryExpiresAt(s));
 
         // Наступний читач запускає нове фонове завантаження, і воно вдається.
         Assert.Equal([s.R.A, s.R.B], (await SwrPageAsync(s)).Order());
-        await s.Probe.WaitMapsAsync(3);
+        await s.Probe.WaitMapsAsync(afterFailure + 1);
         await WaitIdleAsync(s.R.Cache);
-        Assert.Equal(3, s.Probe.Maps);
+        Assert.Equal(afterFailure + 1, s.Probe.Maps);
         Assert.True(EntryExpiresAt(s) > s.Clock.UtcNow);
     }
 
