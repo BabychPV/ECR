@@ -284,6 +284,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("RowActivityFilter")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("RowActivityFilter");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Code")

@@ -2998,6 +2998,26 @@ public interface IRuleCoverageReader
 }
 ```
 
+#### `IRowActivityFilterSource`
+
+Фільтр активності рядків методології (D-425, «лише Running» для Land): прапорець
+`calc.Methodology.RowActivityFilter` (`КОД_ДОВІДНИКА:КОД_ЗАПИСУ`), розв'язаний до Id запису й
+колонок статусу таблиць. Колонки знаходяться за довідником (`LookupRegistryDefId`), а не за
+кодом колонки; нуль колонок або невідомий запис — фільтр не діє. Споживачі: прогін
+(`MethodologyResolver`), матриця покриття (`RuleCoverageHandler`), gate обов'язкових входів
+(`PatchCellsHandler`). Поставити прапорець — `PUT /api/v1/methodologies/{id}/row-activity-filter`.
+
+```csharp
+public interface IRowActivityFilterSource
+{
+    public Task<RowActivityFilterResolution?> ResolveForMethodologyAsync(
+        int methodologyId, IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
+
+    public Task<RowActivityFilterResolution?> ResolveForVersionAsync(
+        int methodologyVersionId, IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
+}
+```
+
 #### `ISecretProvider`
 
 Значення секрету за його іменем.
