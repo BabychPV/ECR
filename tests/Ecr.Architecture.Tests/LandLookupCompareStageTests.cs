@@ -318,12 +318,16 @@ public sealed class LandLookupCompareStageTests
         Assert.Contains("опублікована", output, StringComparison.Ordinal);
 
         var source = File.ReadAllText(BuildScript);
-        Assert.Matches(@"if \(\$Stage -contains 'LookupCompare'\) \{ Stage-LookupCompare \}", source);
-        Assert.DoesNotMatch(@"Want 'LookupCompare'", source);
-        Assert.Matches(@"ValidateSet\([^)]*'LookupCompare'", source);
+        // диспетчеризація - по AST (IfStatementAst + CommandAst), а не по тексту: текстовий regex збігався і тоді,
+        // коли `if` через літерал \n опинявся всередині коментаря (LAND-5094) і етап тихо не виконувався
+        var offsets = LandStageDispatchGuardTests.DispatchOffsets();
+        Assert.True(offsets.ContainsKey("LookupCompare"), "LookupCompare немає в ValidateSet параметра -Stage");
+        Assert.True(offsets["LookupCompare"] >= 0, "немає IfStatementAst з викликом Stage-LookupCompare (диспетчер у коментарі?)");
+        Assert.True(offsets["OptionalArguments"] >= 0, "немає диспетчера OptionalArguments");
         Assert.True(
-            source.IndexOf("Stage-LookupCompare }", StringComparison.Ordinal)
-            < source.IndexOf("Stage-OptionalArguments }", StringComparison.Ordinal),
+            offsets["LookupCompare"] < offsets["OptionalArguments"],
             "LookupCompare має виконуватися перед OptionalArguments");
+        // у 'All' не входить: умова `$Stage -contains`, а не `Want` (Want повертає true для All)
+        Assert.DoesNotMatch(@"Want 'LookupCompare'", source);
     }
 }

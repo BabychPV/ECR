@@ -1429,7 +1429,9 @@ function Bind-ResultColumns($mid) {
 # Лише явно: -Stage LandParity (в 'All' не входить). Для чернеток методологій, що вже є на стенді (імпорт AF-пакета
 # tools/Ecr.MethodologyImport) і мають правило у docs/.../af-land-category-rules.json:
 #   1. PUT .../category-rule  (вираз із файлу);
-#   2. склад речовин версії = суфікси `_(\d{3,4})$` категорій її констант (форма B) або, коли суфіксів немає (форма A),\n#      об'єднання кодів land-substance-applicability.json; зіставляються із записами LAND_AIR_SUBSTANCE\n#      (код запису E<код>; довідник заводить Import-LandAirSubstances.ps1);
+#   2. склад речовин версії = суфікси `_(\d{3,4})$` категорій її констант (форма B) або, коли суфіксів немає (форма A),
+#      об'єднання кодів land-substance-applicability.json; зіставляються із записами LAND_AIR_SUBSTANCE
+#      (код запису E<код>; довідник заводить Import-LandAirSubstances.ps1);
 #   3. тест-кейс PARITY_1: додаються аргументи, які читає правило (@Land_NAE, @Land_TypeFuelOrStream, @Land_Streams,
 #      @Land_InvNumEqp ...); наявні аргументи, очікуване й допуск не змінюються. Кандидати NAE пробуються по черзі
 #      до першого зеленого simulate.
@@ -2230,7 +2232,9 @@ if ($Stage -contains 'SubstanceApplicability') { Stage-SubstanceApplicability }
     # K1: аргументи з суфіксом методології - лише явно (-Stage ArgumentSuffix); ПЕРЕД OptionalArguments (той лишається
     # останнім), після CompositionMass/SubstanceApplicability/ParityBranch (токени цих етапів з K1 не перетинаються).
     if ($Stage -contains 'ArgumentSuffix') { Stage-ArgumentSuffix }
-    # LAND-5094 DIAG-A: порівняння Lookup-аргументу з текстом довідника - лише явно (-Stage LookupCompare); після ArgumentSuffix\n    # (токени аргументів уже суфіксовані), ПЕРЕД OptionalArguments (маркер `?` ставиться на готовий список).\n    if ($Stage -contains 'LookupCompare') { Stage-LookupCompare }
+    # LAND-5094 DIAG-A: порівняння Lookup-аргументу з текстом довідника - лише явно (-Stage LookupCompare); після ArgumentSuffix
+    # (токени аргументів уже суфіксовані), ПЕРЕД OptionalArguments (маркер `?` ставиться на готовий список).
+    if ($Stage -contains 'LookupCompare') { Stage-LookupCompare }
     # D-397: маркер `?` необов'язкових аргументів - лише явно (-Stage OptionalArguments); ОСТАННІМ: попередні етапи
     # переписують списки аргументів і зберігають чужі елементи як є, тож маркер ставиться на готовий список.
     if ($Stage -contains 'OptionalArguments') { Stage-OptionalArguments }
