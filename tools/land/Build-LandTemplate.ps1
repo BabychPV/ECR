@@ -218,7 +218,14 @@ Log ("Аркушів {0}, таблиць {1}, колонок {2}, довідни
 $cellFormulaCount = 0
 foreach ($sh in @($Mdl.sheets)) { foreach ($tb in @($sh.tables)) { $cellFormulaCount += @($tb.cellFormulas | Where-Object { $_ }).Count } }
 Log ("Формул комірок (Cell, PUT formulas/cell): {0}" -f $cellFormulaCount)
-if ($DryRun) { Log 'DryRun: лише розбір моделі; звернень до API немає.'; return }
+if ($DryRun) {
+    # D-423: перелік String-колонок моделі, що читаються текстовими мостами, - кандидати Decimal->String у клоні (сам клон
+    # у DryRun не читається; точний перелік змін типу друкує Stage Template у звичайному прогоні).
+    $txtSrc = @(Get-LandTextBridgeSources $Mdl)
+    Log ("DryRun: String-колонок-джерел текстових мостів (кандидати Decimal->String у клоні): {0}" -f $txtSrc.Count)
+    foreach ($k in $txtSrc) { Log "  кандидат Decimal->String: $k" }
+    Log 'DryRun: лише розбір моделі; звернень до API немає.'; return
+}
 
 $S = @{ Registries = @{}; RegEntries = @{}; Units = @{}; TemplateId = $null; VersionId = $null; Tables = @{}; Cols = @{} }
 
@@ -551,6 +558,37 @@ function Fill-StructureSql([int]$vid) {
             }
         }
         if ($retype -gt 0) { Log "  колонок переведено в обчислюваний тип (чернетка-клон): $retype" }
+        # D-423: Decimal -> String у чернетці-клоні (місячні OperatingTimeReleaseOnColdVentYesNo_Mnn у T9_04/T9_07) і скидання
+        # Precision/Scale текстових мостів. API цього не вміє (ECR-TMPL-0422 columnDataTypeImmutable навіть у чернетці), тож лише SQL.
+        # Гарди в самому UPDATE: версія Draft (Status=0), колонка ще Decimal (повтор = 0 змін), у doc.CellValue немає значень колонки.
+        $txtRetyped = @(); $txtBridges = @(); $txtWarn = @()
+        foreach ($sh in @($Mdl.sheets)) {
+            foreach ($tb in @($sh.tables)) {
+                $tidT = $tableIds["$($sh.code)/$($tb.code)"]
+                $exT = @{}
+                foreach ($c in @($tb.columns)) { $hiT = $haveInfo["$tidT/$($c.code)"]; if ($null -ne $hiT) { $exT[[string]$c.code] = $hiT } }
+                $planT = Get-LandTextRetypePlan @($tb.columns) $exT
+                foreach ($w in @($planT.Warn)) { $txtWarn += "$($sh.code)/$($tb.code)/$w" }
+                foreach ($u in @($planT.Retype)) {
+                    $n = [int](Sql-Exec $cn ('UPDATE c SET DataType=0, Precision=NULL, Scale=NULL, DisplayFormat=NULL FROM cfg.ColumnDef c ' +
+                            'JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId ' +
+                            'WHERE c.Id=@i AND v.Id=@v AND v.Status=0 AND c.DataType=2 AND NOT EXISTS (SELECT 1 FROM doc.CellValue cv WHERE cv.ColumnDefId=c.Id)') @{ i = [int]$u.Id; v = $vid })
+                    if ($n -gt 0) { $txtRetyped += "$($sh.code)/$($tb.code)/$($u.Code)" }
+                    else { $txtWarn += "$($sh.code)/$($tb.code)/$($u.Code): UPDATE не застосовано (не чернетка або є значення комірок)" }
+                }
+                foreach ($u in @($planT.Bridges)) {
+                    $n = [int](Sql-Exec $cn ('UPDATE c SET Precision=NULL, Scale=NULL FROM cfg.ColumnDef c ' +
+                            'JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId ' +
+                            'WHERE c.Id=@i AND v.Id=@v AND v.Status=0 AND c.DataType IN (6,8) AND (c.Precision IS NOT NULL OR c.Scale IS NOT NULL)') @{ i = [int]$u.Id; v = $vid })
+                    if ($n -gt 0) { $txtBridges += "$($sh.code)/$($tb.code)/$($u.Code)" }
+                }
+            }
+        }
+        Log ("  колонок Decimal->String (чернетка-клон): {0}" -f $txtRetyped.Count)
+        foreach ($k in $txtRetyped) { Log "    Decimal->String: $k" }
+        Log ("  мостів з Precision/Scale скинуто в NULL: {0}" -f $txtBridges.Count)
+        foreach ($k in $txtBridges) { Log "    міст precision=NULL: $k" }
+        foreach ($k in $txtWarn) { Log "  WARN тип колонки: $k" }
         $dt = New-Object System.Data.DataTable
         foreach ($n in 'TableDefId:int', 'Code:string', 'HeaderL10n:string', 'Ordinal:int', 'DataType:byte', 'Precision:byte', 'Scale:byte', 'IsReadOnly:bool', 'IsRequired:bool',
             'IsHidden:bool', 'IsMonthColumn:bool', 'MonthNumber:byte', 'DefaultValue:string', 'LookupRegistryDefId:int', 'UnitId:int', 'IsBusinessKey:bool', 'IsScopeField:bool', 'IsIndexed:bool', 'IsDeleted:bool') {

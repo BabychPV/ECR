@@ -141,3 +141,127 @@ function Resolve-LandDisplayFormat($Column) {
     if ($digits -eq 0) { return '0' }
     return '0.' + ('0' * $digits)
 }
+
+# D-423 (Stage Template): коди cfg.ColumnDef.DataType (Ecr.Domain CellDataType).
+$script:LandDataTypeCode = @{ String = 0; Int = 1; Decimal = 2; Bool = 3; Date = 4; Lookup = 5; Formula = 6; Unit = 7; Calculated = 8 }
+
+# Коди колонок, на які посилається вираз у квадратних дужках: [Code]. Регістр значущий (колонки ECR - case-sensitive).
+function Get-LandExpressionColumnRefs([string]$Expression) {
+    if ([string]::IsNullOrEmpty($Expression)) { return @() }
+    $refs = @{}
+    foreach ($m in [regex]::Matches($Expression, '\[([A-Za-z_][A-Za-z0-9_]*)\]')) { $refs[$m.Groups[1].Value] = $true }
+    return @($refs.Keys)
+}
+
+# D-423: чернетка-клон, колонка якої в моделі String, а в клоні ще Decimal (міграція типу НЕ робиться через API:
+# ECR-TMPL-0422 columnDataTypeImmutable). Правило вузьке:
+#   * лише Decimal -> String (інші розбіжності типів не чіпаються; для них - WARN);
+#   * колонку, на яку посилається ЧИСЛОВА формула моделі (Formula/Calculated із precision), не чіпаємо - WARN;
+#   * текстові мости (Formula/Calculated, precision у моделі null, вираз посилається на МІСЯЧНУ String-колонку моделі;
+#     інші мости над String - Land_NAE тощо - не чіпаються):
+#     Precision/Scale клону скидаються в NULL (інакше Verify/migrate бачать зайве Widened/Guarded).
+# Columns - tb.columns моделі; Existing - hashtable "код колонки" -> @{ id; type; precision; scale } клону.
+# Повертає @{ Retype = @({ Id; Code; FromPrecision; FromScale }); Bridges = @({ Id; Code; FromPrecision; FromScale });
+#             Warn = @(рядки); Same = n }. Лише обчислення: SQL і запис - у виклику (Fill-StructureSql).
+function Get-LandTextRetypePlan($Columns, [hashtable]$Existing) {
+    $retype = @(); $bridges = @(); $warn = @(); $same = 0
+    $dt = $script:LandDataTypeCode
+    $stringCodes = @{}
+    foreach ($c in @($Columns)) { if ([string]$c.dataType -eq 'String' -and $c.month) { $stringCodes[[string]$c.code] = $true } }   # лише місячні String-колонки
+    $numericReaders = @{}   # код колонки -> коди числових формул моделі, що її читають
+    foreach ($c in @($Columns)) {
+        if ([string]$c.dataType -notin 'Formula', 'Calculated' -or -not $c.precision) { continue }
+        foreach ($r in (Get-LandExpressionColumnRefs ([string]$c.expression))) {
+            if (-not $numericReaders.ContainsKey($r)) { $numericReaders[$r] = @() }
+            $numericReaders[$r] += [string]$c.code
+        }
+    }
+    $retypedOrText = @{}
+    foreach ($c in @($Columns)) {
+        if ([string]$c.dataType -ne 'String') { continue }
+        $code = [string]$c.code
+        if (-not $Existing.ContainsKey($code)) { continue }
+        $e = $Existing[$code]
+        if ([int]$e.type -eq $dt.String) { $retypedOrText[$code] = $true; continue }
+        if ([int]$e.type -ne $dt.Decimal) { $warn += "${code}: тип клону $($e.type), у моделі String - лише Decimal->String, не чіпаю"; continue }
+        if ($numericReaders.ContainsKey($code)) { $warn += "${code}: на колонку посилається числова формула ($($numericReaders[$code] -join ',')) - тип не змінюю"; continue }
+        $retype += [pscustomobject]@{ Id = [int]$e.id; Code = $code; FromPrecision = $e.precision; FromScale = $e.scale }
+        $retypedOrText[$code] = $true
+    }
+    foreach ($c in @($Columns)) {
+        if ([string]$c.dataType -notin 'Formula', 'Calculated' -or $c.precision) { continue }
+        $code = [string]$c.code
+        if (-not $Existing.ContainsKey($code)) { continue }
+        $src = @(Get-LandExpressionColumnRefs ([string]$c.expression) | Where-Object { $stringCodes.ContainsKey($_) })
+        if ($src.Count -eq 0) { continue }
+        if (@($src | Where-Object { -not $retypedOrText.ContainsKey($_) }).Count -gt 0) { continue }   # джерело лишилось Decimal
+        $e = $Existing[$code]
+        if ($null -eq $e.precision -and $null -eq $e.scale) { $same++; continue }
+        $bridges += [pscustomobject]@{ Id = [int]$e.id; Code = $code; FromPrecision = $e.precision; FromScale = $e.scale }
+    }
+    return @{ Retype = $retype; Bridges = $bridges; Warn = $warn; Same = $same }
+}
+
+# Кандидати Decimal->String, відомі лише з моделі (для DryRun, де клону немає): String-колонки, які читає текстовий міст
+# (Formula/Calculated без precision) і є місячною (month). Повертає рядки "SHEET/TABLE/COLUMN".
+function Get-LandTextBridgeSources($Mdl) {
+    $out = @()
+    foreach ($sh in @($Mdl.sheets)) {
+        foreach ($tb in @($sh.tables)) {
+            $str = @{}
+            foreach ($c in @($tb.columns)) { if ([string]$c.dataType -eq 'String' -and $c.month) { $str[[string]$c.code] = $true } }
+            $seen = @{}
+            foreach ($c in @($tb.columns)) {
+                if ([string]$c.dataType -notin 'Formula', 'Calculated' -or $c.precision) { continue }
+                foreach ($r in (Get-LandExpressionColumnRefs ([string]$c.expression))) {
+                    if ($str.ContainsKey($r) -and -not $seen.ContainsKey($r)) { $seen[$r] = $true; $out += "$($sh.code)/$($tb.code)/$r" }
+                }
+            }
+        }
+    }
+    return @($out)
+}
+
+# Розбіжності ТИПУ колонок між моделлю та структурою версії ("SHEET/TABLE: тип відрізняється: COL model!=ecr").
+# DTO структури несе dataType рядком (або числом) - порівнюємо за назвою.
+function Get-LandColumnTypeMismatches($Structure, $Mdl) {
+    $names = @('String', 'Int', 'Decimal', 'Bool', 'Date', 'Lookup', 'Formula', 'Unit', 'Calculated')
+    $byTable = @{}
+    foreach ($s in @($Structure.sheets)) { foreach ($t in @($s.tables)) { $byTable["$($s.code)/$($t.code)"] = $t } }
+    $out = @()
+    foreach ($sh in @($Mdl.sheets)) {
+        foreach ($tb in @($sh.tables)) {
+            $etb = $byTable["$($sh.code)/$($tb.code)"]
+            if ($null -eq $etb) { continue }
+            $diff = @()
+            foreach ($c in @($tb.columns)) {
+                $ecol = @($etb.columns) | Where-Object { [string]$_.code -eq [string]$c.code } | Select-Object -First 1
+                if ($null -eq $ecol -or $null -eq $ecol.dataType) { continue }
+                $got = [string]$ecol.dataType
+                $n = 0; if ([int]::TryParse($got, [ref]$n) -and $n -ge 0 -and $n -lt $names.Count) { $got = $names[$n] }
+                if ($got -cne [string]$c.dataType) { $diff += "$($c.code) $($c.dataType)!=$got" }
+            }
+            if ($diff.Count) { $out += "$($sh.code)/$($tb.code): тип відрізняється: $($diff -join ', ')" }
+        }
+    }
+    return @($out)
+}
+
+# Текстові мости моделі: Formula/Calculated без precision, вираз яких читає МІСЯЧНУ String-колонку тієї ж таблиці.
+# Повертає @{ Sheet; Table; Code } - Verify по них звіряє Precision/Scale (мають бути NULL).
+function Get-LandTextBridgeColumns($Mdl) {
+    $out = @()
+    foreach ($sh in @($Mdl.sheets)) {
+        foreach ($tb in @($sh.tables)) {
+            $str = @{}
+            foreach ($c in @($tb.columns)) { if ([string]$c.dataType -eq 'String' -and $c.month) { $str[[string]$c.code] = $true } }
+            foreach ($c in @($tb.columns)) {
+                if ([string]$c.dataType -notin 'Formula', 'Calculated' -or $c.precision) { continue }
+                if (@(Get-LandExpressionColumnRefs ([string]$c.expression) | Where-Object { $str.ContainsKey($_) }).Count -gt 0) {
+                    $out += [pscustomobject]@{ Sheet = [string]$sh.code; Table = [string]$tb.code; Code = [string]$c.code }
+                }
+            }
+        }
+    }
+    return @($out)
+}
