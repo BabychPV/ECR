@@ -1135,6 +1135,282 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
             chain.ProjectId, new PeriodKeyFilter(period), filter, new CursorRequest(Limit: 5), null, CancellationToken.None);
         Assert.Equal(coldTotal, counterSmall.Tally.Snapshot().Total);
     }
+    // ── LP-45 етап 2 (R2/R3): картка без карти, single-flight, деградація при переповненні ──────────────────
+    //
+    // Мутації: у StaleResultsMapCache.GetOneAsync прибрати приєднання слідувачів (завжди лідер) - червоний
+    // Single_flight...; у DocumentStore.FindAsync повернути StaleResultsBatchAsync - червоний Картка...;
+    // у LoadAsync прибрати `return null` при переповненні (кинути) - червоний Переповнення...
+
+    /// <summary>Записує тексти команд і (опційно) тримає запит карти, доки всі читачі не пройшли відбиток.</summary>
+    private sealed class MapGateInterceptor(int readers = 0) : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        private readonly TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int fingerprints;
+        private int maps;
+
+        public System.Collections.Concurrent.ConcurrentBag<string> Texts { get; } = [];
+
+        public int MapQueries => Volatile.Read(ref maps);
+
+        public int FingerprintQueries => Volatile.Read(ref fingerprints);
+
+        /// <summary>Відпускає утримані запити карти вручну (режим без автоматичного випуску).</summary>
+        public void Release() => gate.TrySetResult();
+
+        /// <summary>Чекає, поки запитів карти стане не менше <paramref name="count"/> (запобіжник від зависання).</summary>
+        public async Task WaitMapQueriesAsync(int count)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(60);
+            while (MapQueries < count)
+            {
+                if (DateTime.UtcNow > deadline)
+                {
+                    throw new TimeoutException($"Запитів карти {MapQueries}, очікувалось {count}.");
+                }
+
+                await Task.Delay(10);
+            }
+        }
+
+        public override async ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Texts.Add(command.CommandText);
+
+            if (command.CommandText.Contains("CHECKSUM_AGG", StringComparison.Ordinal))
+            {
+                if (Interlocked.Increment(ref fingerprints) >= readers)
+                {
+                    gate.TrySetResult();
+                }
+            }
+            else if (command.CommandText.Contains("MIN(t.At)", StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref maps);
+                if (readers > 0)
+                {
+                    // Не таймінг-асерт: лише запобіжник від зависання, якщо відбитки не набралися.
+                    await gate.Task.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+                }
+            }
+
+            return result;
+        }
+    }
+
+    private EcrDbContext InterceptedContext(Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor interceptor, StaleCountsEpoch? epoch = null)
+    {
+        var options = new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).AddInterceptors(interceptor);
+        if (epoch is not null)
+        {
+            options.AddInterceptors(epoch);
+        }
+
+        return new EcrDbContext(options.Options);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Картка_документа_ходить_вузьким_запитом_по_id_а_не_картою_періоду()
+    {
+        var r = await RigAsync();
+        using var _ = r.Cache;
+        var recorder = new MapGateInterceptor();
+        await using var db = InterceptedContext(recorder, r.Epoch);
+        var store = CachedStore(r, db);
+
+        var card = await store.FindAsync(r.A, new PeriodKeyFilter(r.Period), CancellationToken.None);
+
+        Assert.True(card!.ResultsStale);
+
+        // Жодного відбитка (карта не зачіпалась), а запит застарілості - один, і з фільтром по id.
+        Assert.DoesNotContain(recorder.Texts, x => x.Contains("CHECKSUM_AGG", StringComparison.Ordinal));
+        var stale = recorder.Texts.Where(x => x.Contains("MIN(t.At)", StringComparison.Ordinal)).ToList();
+        Assert.Single(stale);
+        Assert.True(
+            stale[0].Contains("OPENJSON", StringComparison.OrdinalIgnoreCase) || stale[0].Contains(" IN ", StringComparison.Ordinal)
+            || stale[0].Contains("DocumentId] =", StringComparison.Ordinal) || stale[0].Contains("DocumentId =", StringComparison.Ordinal),
+            stale[0]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Single_flight_N_одночасних_читачів_одного_ключа_запускають_один_запит_карти()
+    {
+        const int readers = 6;
+        var r = await RigAsync();
+        using var _ = r.Cache;
+        var gate = new MapGateInterceptor(readers);
+
+        var tasks = Enumerable.Range(0, readers).Select(_ => Task.Run(async () =>
+        {
+            await using var db = InterceptedContext(gate, r.Epoch);
+            return await StaleOnPageAsync(CachedStore(r, db), r);
+        })).ToArray();
+
+        var pages = await Task.WhenAll(tasks);
+
+        Assert.All(pages, page => Assert.Equal([r.A, r.B], page.Order()));
+        // Відбиток читається двічі на читача (фільтр і позначка рядків); карта - один раз на всіх.
+        Assert.Equal(readers * 2, gate.FingerprintQueries);
+        Assert.Equal(1, gate.MapQueries);
+    }
+
+    /// <summary>
+    /// Кеш-обгортка: усі читачі, що ПРОМАХНУЛИСЬ повз реєстр завантажень, чекають одне одного на бар'єрі, тож без
+    /// замка навколо створення реєстру кожен створює свій словник (детерміновано, а не «як пощастить»).
+    /// З замком промах бачить лише перший, решта знаходить готовий реєстр - бар'єр спрацьовує за тайм-аутом-запобіжником.
+    /// </summary>
+    private sealed class RegistryRacingCache(Microsoft.Extensions.Caching.Memory.IMemoryCache inner, int readers)
+        : Microsoft.Extensions.Caching.Memory.IMemoryCache
+    {
+        private readonly Barrier barrier = new(readers);
+
+        public bool TryGetValue(object key, out object? value)
+        {
+            var found = inner.TryGetValue(key, out value);
+            if (!found && key is "doc-stale-map:in-flight")
+            {
+                barrier.SignalAndWait(TimeSpan.FromSeconds(2));
+            }
+
+            return found;
+        }
+
+        public Microsoft.Extensions.Caching.Memory.ICacheEntry CreateEntry(object key) => inner.CreateEntry(key);
+
+        public void Remove(object key) => inner.Remove(key);
+
+        public void Dispose() => inner.Dispose();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Single_flight_перше_одночасне_створення_реєстру_завантажень_не_дає_кількох_лідерів()
+    {
+        const int readers = 6;
+        var r = await RigAsync();
+        using var racing = new RegistryRacingCache(r.Cache, readers);
+        var gate = new MapGateInterceptor(readers);
+
+        var tasks = Enumerable.Range(0, readers).Select(_ => Task.Run(async () =>
+        {
+            await using var db = InterceptedContext(gate, r.Epoch);
+            return await StaleOnPageAsync(new DocumentStore(db, racing, r.Clock, r.Epoch), r);
+        })).ToArray();
+
+        var pages = await Task.WhenAll(tasks);
+
+        Assert.All(pages, page => Assert.Equal([r.A, r.B], page.Order()));
+        Assert.Equal(1, gate.MapQueries);
+    }
+    private async Task ReaderAfterChangeDoesNotJoinOldLoadAsync(Func<MapRig, Task> change)
+    {
+        var r = await RigAsync();
+        using var _ = r.Cache;
+        var gate = new MapGateInterceptor(int.MaxValue);
+
+        async Task<HashSet<long>> ReadAsync()
+        {
+            await using var db = InterceptedContext(gate, r.Epoch);
+            return await StaleOnPageAsync(CachedStore(r, db), r);
+        }
+
+        var first = Task.Run(ReadAsync);
+        await gate.WaitMapQueriesAsync(1);
+
+        // «Коміт» змінив стан, поки перше завантаження утримується: другий читач НЕ має приєднатись до нього.
+        await change(r);
+        var second = Task.Run(ReadAsync);
+        await gate.WaitMapQueriesAsync(2);
+
+        gate.Release();
+        await Task.WhenAll(first, second);
+        Assert.True(gate.MapQueries >= 2);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public Task Single_flight_читач_після_підйому_епохи_не_приєднується_до_старого_завантаження()
+        => ReaderAfterChangeDoesNotJoinOldLoadAsync(r =>
+        {
+            r.Epoch.Bump(r.Period);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public Task Single_flight_читач_після_зміни_відбитка_не_приєднується_до_старого_завантаження()
+        => ReaderAfterChangeDoesNotJoinOldLoadAsync(async r =>
+        {
+            // Інший процес додав довідник: відбиток cfg.RegistryDef змінився, епоха цього процесу - ні.
+            await using var other = r.Builder.CreateContext();
+            var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+            other.RegistryDefs.Add(new RegistryDef(EcrCode.Create($"FP{tag}"), Name("Registry"), isTemporal: false));
+            await other.SaveChangesAsync(CancellationToken.None);
+        });
+    /// <summary>Мінімальний логер, що рахує попередження.</summary>
+    private sealed class WarningCounter<T> : Microsoft.Extensions.Logging.ILogger<T>
+    {
+        public int Warnings;
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == Microsoft.Extensions.Logging.LogLevel.Warning)
+            {
+                Interlocked.Increment(ref Warnings);
+            }
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Переповнення_карти_не_кидає_а_деградує_до_прямого_запиту_з_тим_самим_результатом()
+    {
+        var r = await RigAsync();
+        using var _ = r.Cache;
+        await using var db = EpochContext(r.Epoch);
+        var log = new WarningCounter<DocumentStore>();
+        var summaryLog = new WarningCounter<DocumentListSummaryStore>();
+
+        // Стеля 1 при двох застарілих документах: карта «переповнена».
+        var store = new DocumentStore(db, r.Cache, r.Clock, r.Epoch, log) { StaleMapMaxDocuments = 1 };
+        var summaries = new DocumentListSummaryStore(db, r.Cache, r.Clock, r.Epoch, summaryLog) { StaleMapMaxDocuments = 1 };
+
+        // Фільтр і позначка рядка - прямий запит, результат той самий.
+        Assert.Equal([r.A, r.B], (await StaleOnPageAsync(store, r)).Order());
+        Assert.True(await FlagAsync(store, r, r.A));
+        Assert.False(await FlagAsync(store, r, r.Fresh));
+
+        // Зведення - як було: 2 застарілі, 1 «мій».
+        var summary = await summaries.SummarizeAsync(
+            r.Chain.ProjectId, r.Period, [r.Chain.ProjectId], null, Me, CancellationToken.None);
+        Assert.Equal(2, summary.StaleResultsCount);
+        Assert.Equal(1, summary.StaleResultsMineCount);
+
+        // Перше переповнення дає РІВНО одне Warning (прапорець - на кеш, тобто на процес); повторне - ще нуль.
+        Assert.Equal(1, log.Warnings + summaryLog.Warnings);
+
+        r.Epoch.Bump(r.Period);
+        Assert.Equal([r.A, r.B], (await StaleOnPageAsync(store, r)).Order());
+        Assert.Equal(1, log.Warnings + summaryLog.Warnings);
+    }
     // ── допоміжне ────────────────────────────────────────────────────────────────────────
 
     private static async Task<DocumentSummary> CardAsync(EcrDbContext db, TestDocument chain, int period)

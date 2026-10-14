@@ -4,6 +4,8 @@
 # (Land_Measure_GTU_Month, Land_Measure_GTU<1..5>_<301|304|330|337|O2> на T10_03/T11_03). Використовує
 # Load-LandInputCells.ps1; тестується на синтетичних даних. Значень прода тут немає: лише коди таблиць/колонок.
 
+. (Join-Path $PSScriptRoot 'LandRowKey.Lib.ps1')
+
 function Get-LandInputCellKind {
     <#
     .SYNOPSIS
@@ -70,6 +72,8 @@ function New-LandInputCellPlan {
     .PARAMETER DocumentName Ім'я документа (з нього береться префікс ключа рядка).
     .PARAMETER Document    Розібраний JSON (IDictionary): periods['YYYY-MM'][<таблиця AF>].rows[].
     .PARAMETER Periods     Обмеження періодів (Рік*100+Місяць); порожньо - усі періоди файла.
+    .PARAMETER RowKeyFormat Legacy (за замовчуванням) = p<doc>-<seq:0000>; Table = p<doc>-<TableCode>-<seq:0000> (унікальний у документі;
+                           див. LandRowKey.Lib.ps1). Має збігатися з форматом ключів рядків на стенді.
     .PARAMETER ModelColumns Код таблиці -> колонки GTU з моделі (Get-LandModelTableColumns). Вид Gtu бере з файла лише їх;
                            GTU-колонка файла, якої в моделі цієї таблиці немає (T10_03 не має GTU5), не йде в план, а
                            лічиться в -SourceWithoutTarget ("таблиця/колонка" -> кількість непорожніх комірок).
@@ -80,7 +84,8 @@ function New-LandInputCellPlan {
         [Parameter(Mandatory)]$Document,
         [int[]]$Periods = @(),
         [hashtable]$ModelColumns,
-        [hashtable]$SourceWithoutTarget
+        [hashtable]$SourceWithoutTarget,
+        [ValidateSet('Legacy', 'Table')][string]$RowKeyFormat = 'Legacy'
     )
 
     $def = Get-LandInputCellKind -Name $KindName
@@ -101,6 +106,7 @@ function New-LandInputCellPlan {
             foreach ($row in @($tablesNode[$afTable]['rows'])) {
                 $seq++
                 $rowKey = '{0}-{1:0000}' -f $prefix, $seq
+                if ($RowKeyFormat -eq 'Table') { $rowKey = New-LandRowKey -DocId ([int]$prefix.Substring(1)) -TableCode $tableCode -Index $seq -KeyFormat Table }
                 $cells = New-Object System.Collections.ArrayList
                 if ($KindName -eq 'TypeFuel') {
                     if ($row.ContainsKey('Land_TypeFuel') -and -not (Test-LandInputCellEmpty $row['Land_TypeFuel'])) {

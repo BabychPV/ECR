@@ -1276,13 +1276,17 @@ function Stage-Methodologies {
     }
     $fd = NameOf 'LAND_STATIONARY_TYPE_OF_FUEL' 'Diesel'; $fk = NameOf 'LAND_STATIONARY_TYPE_OF_FUEL' 'Kerosene'
     $mfd = NameOf 'LAND_GENERIC_TYPE_OF_FUEL' 'Diesel'; $mfg = NameOf 'LAND_GENERIC_TYPE_OF_FUEL' 'Gasoline'
-    $sm = @{}; foreach ($n in 'Diesel', 'Gasoline', 'Bilge water', 'Lubricant', 'Recovered oil') { $sm[$n] = NameOf 'LAND_OTHER_TANKFARM' $n }
+    # ✎ 2026-10-14 (LAND-5094, діагноз Е): 'Jet fuel' і 'Solvent' -> Kerosene (ECW_C07_07.cs:104-114); 'Fuel oil' -> Fuel
+    # (:140-144) лише коли такий запис є в довіднику (у LAND_OTHER_TANKFARM його немає - гілку не додаємо).
+    $sm = @{}; foreach ($n in 'Diesel', 'Gasoline', 'Bilge water', 'Lubricant', 'Recovered oil', 'Jet fuel', 'Solvent') { $sm[$n] = NameOf 'LAND_OTHER_TANKFARM' $n }
+    $smFuelTail = "''"
+    try { $smFuel = NameOf 'LAND_OTHER_TANKFARM' 'Fuel oil'; $smFuelTail = "if(REGFIELD(@Land_TypeStorMaterial,'NAME') = '$smFuel', 'Fuel', '')" } catch { }
     $pl = @{}; foreach ($n in 'Diesel', 'Gasoline', 'Jet fuel', 'Lubricant') { $pl[$n] = NameOf 'LAND_OTHER_PETROLSTATION' $n }
     $CAT = @{
         ECW_C05_02 = '!ECW_Category'
         ECW_C05_04 = "if(REGFIELD(@Land_TypeFuel,'NAME') = '$fd', 'Diesel', if(REGFIELD(@Land_TypeFuel,'NAME') = '$fk', 'Kerosene', ''))"
         ECW_C06_01 = "if(REGFIELD(@Land_TypeFuel,'NAME') = '$mfd', 'Diesel', if(REGFIELD(@Land_TypeFuel,'NAME') = '$mfg', 'Gasoline', ''))"
-        ECW_C07_07 = "if(REGFIELD(@Land_TypeStorMaterial,'NAME') = '$($sm.Diesel)', 'Diesel', if(REGFIELD(@Land_TypeStorMaterial,'NAME') = '$($sm.Gasoline)', 'Gasoline', if(REGFIELD(@Land_TypeStorMaterial,'NAME') = '$($sm['Bilge water'])' or REGFIELD(@Land_TypeStorMaterial,'NAME') = '$($sm.Lubricant)', 'Base', if(REGFIELD(@Land_TypeStorMaterial,'NAME') = '$($sm['Recovered oil'])', 'Recovered', ''))))"
+        ECW_C07_07 = "if(REGFIELD(@Land_TypeStorMaterial,'NAME') = '$($sm.Diesel)', 'Diesel', if(REGFIELD(@Land_TypeStorMaterial,'NAME') = '$($sm.Gasoline)', 'Gasoline', if(REGFIELD(@Land_TypeStorMaterial,'NAME') = '$($sm['Bilge water'])' or REGFIELD(@Land_TypeStorMaterial,'NAME') = '$($sm.Lubricant)', 'Base', if(REGFIELD(@Land_TypeStorMaterial,'NAME') = '$($sm['Recovered oil'])', 'Recovered', if(REGFIELD(@Land_TypeStorMaterial,'NAME') = '$($sm['Jet fuel'])' or REGFIELD(@Land_TypeStorMaterial,'NAME') = '$($sm.Solvent)', 'Kerosene', $smFuelTail)))))"
         ECW_C07_08 = "if(REGFIELD(@Land_TypePumpedLiquid,'NAME') = '$($pl.Diesel)', 'Diesel', if(REGFIELD(@Land_TypePumpedLiquid,'NAME') = '$($pl.Gasoline)', 'Gasoline', if(REGFIELD(@Land_TypePumpedLiquid,'NAME') = '$($pl['Jet fuel'])', 'Kerosene', if(REGFIELD(@Land_TypePumpedLiquid,'NAME') = '$($pl.Lubricant)', 'MineralOil', ''))))"
         ECW_C07_21 = '!ECW_Category'
     }
