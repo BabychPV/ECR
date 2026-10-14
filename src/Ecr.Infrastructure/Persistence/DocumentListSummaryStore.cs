@@ -9,9 +9,12 @@ namespace Ecr.Infrastructure.Persistence;
 /// <summary>Реалізація <see cref="IDocumentListSummaryStore"/>: один агрегований запит.</summary>
 public sealed class DocumentListSummaryStore(
     EcrDbContext db, Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null, Ecr.Domain.Abstractions.IClock? clock = null,
-    StaleCountsEpoch? epoch = null)
+    StaleCountsEpoch? epoch = null, Microsoft.Extensions.Logging.ILogger<DocumentListSummaryStore>? log = null)
     : IDocumentListSummaryStore
 {
+    /// <summary>Стеля карти періоду; у тестах зменшується, щоб довести деградацію без 200 тис. документів.</summary>
+    internal int StaleMapMaxDocuments { get; init; } = StaleResultsMapCache.DefaultMaxDocuments;
+
     /// <summary>Життя запису лічильників застарілих результатів (страховка до епохи й для інших вузлів API).</summary>
     public static readonly TimeSpan StaleCountsTtl = StaleResultsMapCache.Ttl;
 
@@ -122,11 +125,27 @@ public sealed class DocumentListSummaryStore(
             .AsNoTracking()
             .Where(d => (scope == null || scope.Contains(d.ProjectId)) && !narrowed.Contains(d.ProjectId));
 
-        var maps = await new StaleResultsMapCache(db, cache, clock, epoch)
+        var maps = await new StaleResultsMapCache(db, cache, clock, epoch, log, StaleMapMaxDocuments)
             .GetAsync(periodKey, currentUserId is { } me ? [null, me] : [null], ct)
             .ConfigureAwait(false);
 
-        var allIds = maps[0].Keys.ToArray();
+        // Карта переповнена (понад стелю): прямий запит, як було (1885c2c77) - без кешу.
+        if (maps.Any(m => m is null))
+        {
+            var stale = StaleResultsQuery.Documents(db, periodKey).Select(r => r.DocumentId);
+            var directAll = await visible.CountAsync(d => stale.Contains(d.Id), ct).ConfigureAwait(false);
+
+            var directMine = 0;
+            if (currentUserId is { } user && directAll > 0)
+            {
+                var mineIds = StaleResultsQuery.Documents(db, periodKey, user).Select(r => r.DocumentId);
+                directMine = await visible.CountAsync(d => mineIds.Contains(d.Id), ct).ConfigureAwait(false);
+            }
+
+            return (directAll, directMine);
+        }
+
+        var allIds = maps[0]!.Keys.ToArray();
         var all = allIds.Length == 0
             ? 0
             : await visible.CountAsync(d => allIds.Contains(d.Id), ct).ConfigureAwait(false);
@@ -134,13 +153,12 @@ public sealed class DocumentListSummaryStore(
         var mine = 0;
         if (maps.Count > 1 && all > 0)
         {
-            var mineIds = maps[1].Keys.ToArray();
+            var mineIds = maps[1]!.Keys.ToArray();
             if (mineIds.Length > 0)
             {
                 mine = await visible.CountAsync(d => mineIds.Contains(d.Id), ct).ConfigureAwait(false);
             }
         }
-
         return (all, mine);
     }
     /// <inheritdoc />
