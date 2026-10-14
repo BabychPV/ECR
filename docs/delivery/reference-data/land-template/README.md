@@ -115,6 +115,9 @@ Methodologies) PUT-ить `/methodologies/{m}/bindings/{colId}/{output}` для 
 `tools/land/Import-LandHse400Composition.ps1` з локальної копії прода) і Formula-міст
 `REGFIELD(REGFIND('LAND_HSE400_COMPOSITION', [Period].Year, [Period].Sequence, <потік>, '<показник>'), 'VALUE')`. Колонка-
 джерело потоку - лише однозначна (`TypeOfFuel` аркуша 9; `Land_TypeFuel` у 10_01/11_01): ключ `argumentBridges.hse400`.
+На T3_00 (C05_05, `ECW_C05_05.cs:73-130`) чотири наявні ручні колонки `Density`, `FuelLowerHeating`,
+`MercaptanSulphurContent`, `H2Smass` перетипуються на місці `Decimal` -> `Formula` з тим самим мостом
+(`hse400_bridges.apply_existing_inputs`, потік `REGFIELD([Land_TypeFuel], 'NAME')`); нових колонок немає.
 Немає запису за період/потік/показник - `#N/A`, рядок без результатів (стара система: `continue`). Одиниці мостів не
 задані (старі одиниці в FInfo/AIR.xml не звірено).
 

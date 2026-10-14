@@ -128,9 +128,58 @@ public sealed class LandHse400BridgesModelTests
             }
         }
 
-        // 37 мостів: T9_02 1, T9_04 4, T9_07 3, T9_08 4, T9_10 4, T9_11 1, T10_01 1, T11_01 1 (джерело потоку з рядків аркуша 9)
-        // + T9a_17 4, T9a_24 1, T9a_25 4, T9a_26 1, T9a_27 1, T9a_28 1, T10_03 3, T11_03 3 (джерело - атрибут AF).
-        Assert.Equal(37, total);
+        // 41 міст: T9_02 1, T9_04 4, T9_07 3, T9_08 4, T9_10 4, T9_11 1, T10_01 1, T11_01 1 (джерело потоку з рядків аркуша 9)
+        // + T9a_17 4, T9a_24 1, T9a_25 4, T9a_26 1, T9a_27 1, T9a_28 1, T10_03 3, T11_03 3 (джерело - атрибут AF)
+        // + T3_00 4 (P1-2: C05_05 читає склад завжди; наявні ручні колонки перетипувані, нових немає).
+        Assert.Equal(41, total);
+    }
+
+    /// <summary>
+    /// P1-2: ECW_C05_05.cs:73-130 завжди бере Density/FuelLowerHeating/MercaptanSulphurContent/H2Smass зі складу HSE400
+    /// за (рік, місяць, префікс потоку з Land_TypeFuel). Доти ці 4 колонки T3_00 були ручним Decimal (0 клітинок), міст
+    /// не створювався, і всі кроки C05_05 мали #ARG. Колонки лишаються тими самими (аргументи методології зв'язуються за
+    /// кодом), лише стають Formula.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Чотири_аргументи_C05_05_на_T3_00_це_мости_HSE400_а_не_ручний_Decimal()
+    {
+        using var model = Load("land-template.model.json");
+        var cols = Columns(Tables(model)["T3_00"]);
+        var bridges = model.RootElement.GetProperty("argumentBridges");
+
+        Assert.Equal("Lookup", cols["Land_TypeFuel"].GetProperty("dataType").GetString());
+
+        var expectedIndicator = new Dictionary<string, string>
+        {
+            ["Density"] = "Density20",
+            ["FuelLowerHeating"] = "FuelLowerHeating20",
+            ["MercaptanSulphurContent"] = "MercaptanSulphurContent",
+            ["H2Smass"] = "H2S_mass",
+        };
+
+        foreach (var (arg, indicator) in expectedIndicator)
+        {
+            var c = cols[arg];
+            Assert.Equal("Formula", c.GetProperty("dataType").GetString());
+            Assert.True(c.GetProperty("readOnly").GetBoolean(), arg);
+            Assert.Equal(
+                "REGFIELD(REGFIND('LAND_HSE400_COMPOSITION', [Period].Year, [Period].Sequence, "
+                + "REGFIELD(REGFIND('LAND_HSE400_STREAM', REGFIELD([Land_TypeFuel], 'NAME')), 'PREFIX'), '"
+                + indicator + "'), 'VALUE')",
+                c.GetProperty("expression").GetString());
+            Assert.Equal(34, c.GetProperty("precision").GetInt32());
+            Assert.Equal(16, c.GetProperty("scale").GetInt32());
+            Assert.Contains(
+                bridges.GetProperty("bridged").GetProperty("T3_00").EnumerateArray().Select(x => x.GetString()),
+                x => x == arg);
+        }
+
+        // нових колонок немає: жодної *_HSE400 і жодного аргументу, що вже мав би бути в таблиці під іншим іменем
+        Assert.DoesNotContain(cols.Keys, k => k.EndsWith("_HSE400", StringComparison.Ordinal) || k == "Density20");
+        Assert.Equal(
+            "Land_TypeFuel",
+            bridges.GetProperty("hse400").GetProperty("streamSourceColumn").GetProperty("T3_00").GetString());
     }
 
     [Fact]

@@ -26,7 +26,7 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// прибрати <c>c.ChangedByUserId = by</c> → <see cref="Фільтр_за_автором_правки_бачить_лише_його_правки"/> червоний.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
+public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 5, 1, 8, 0, 0, DateTimeKind.Utc);
 

@@ -89,7 +89,7 @@ param(
     [string]$AccountsFile,
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection,
@@ -218,7 +218,15 @@ Log ("Аркушів {0}, таблиць {1}, колонок {2}, довідни
 $cellFormulaCount = 0
 foreach ($sh in @($Mdl.sheets)) { foreach ($tb in @($sh.tables)) { $cellFormulaCount += @($tb.cellFormulas | Where-Object { $_ }).Count } }
 Log ("Формул комірок (Cell, PUT formulas/cell): {0}" -f $cellFormulaCount)
-if ($DryRun) { Log 'DryRun: лише розбір моделі; звернень до API немає.'; return }
+if ($DryRun) {
+    # D-423: перелік String-колонок моделі, що читаються текстовими мостами, - кандидати Decimal->String у клоні (сам клон
+    # у DryRun не читається; точний перелік змін типу друкує Stage Template у звичайному прогоні).
+    $txtSrc = @(Get-LandTextBridgeSources $Mdl)
+    Log ("DryRun: String-колонок-джерел текстових мостів (кандидати Decimal->String у клоні): {0}" -f $txtSrc.Count)
+    foreach ($k in $txtSrc) { Log "  кандидат Decimal->String: $k" }
+    Log 'DryRun: WARN - гард ретайпу бачить лише формули колонок і комірок моделі; CalculationBinding/агрегати не перевіряються (їх відхиляє publish).'
+    Log 'DryRun: лише розбір моделі; звернень до API немає.'; return
+}
 
 $S = @{ Registries = @{}; RegEntries = @{}; Units = @{}; TemplateId = $null; VersionId = $null; Tables = @{}; Cols = @{} }
 
@@ -551,6 +559,38 @@ function Fill-StructureSql([int]$vid) {
             }
         }
         if ($retype -gt 0) { Log "  колонок переведено в обчислюваний тип (чернетка-клон): $retype" }
+        # D-423: Decimal -> String у чернетці-клоні (місячні OperatingTimeReleaseOnColdVentYesNo_Mnn у T9_04/T9_07) і скидання
+        # Precision/Scale текстових мостів. API цього не вміє (ECR-TMPL-0422 columnDataTypeImmutable навіть у чернетці), тож лише SQL.
+        # UnitId=NULL лише для ретайпнутих M-колонок (текст без одиниці); формульні мости (Formula, unit h) цим UPDATE не чіпаються.
+        # Гарди в самому UPDATE: версія Draft (Status=0), колонка ще Decimal (повтор = 0 змін), у doc.CellValue немає значень колонки.
+        $txtRetyped = @(); $txtBridges = @(); $txtWarn = @()
+        foreach ($sh in @($Mdl.sheets)) {
+            foreach ($tb in @($sh.tables)) {
+                $tidT = $tableIds["$($sh.code)/$($tb.code)"]
+                $exT = @{}
+                foreach ($c in @($tb.columns)) { $hiT = $haveInfo["$tidT/$($c.code)"]; if ($null -ne $hiT) { $exT[[string]$c.code] = $hiT } }
+                $planT = Get-LandTextRetypePlan @($tb.columns) $exT @($tb.cellFormulas | Where-Object { $_ })
+                foreach ($w in @($planT.Warn)) { $txtWarn += "$($sh.code)/$($tb.code)/$w" }
+                foreach ($u in @($planT.Retype)) {
+                    $n = [int](Sql-Exec $cn ('UPDATE c SET DataType=0, Precision=NULL, Scale=NULL, DisplayFormat=NULL, UnitId=NULL FROM cfg.ColumnDef c ' +
+                            'JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId ' +
+                            'WHERE c.Id=@i AND v.Id=@v AND v.Status=0 AND c.DataType=2 AND NOT EXISTS (SELECT 1 FROM doc.CellValue cv WHERE cv.ColumnDefId=c.Id)') @{ i = [int]$u.Id; v = $vid })
+                    if ($n -gt 0) { $txtRetyped += "$($sh.code)/$($tb.code)/$($u.Code)" }
+                    else { $txtWarn += "$($sh.code)/$($tb.code)/$($u.Code): UPDATE не застосовано (не чернетка або є значення комірок)" }
+                }
+                foreach ($u in @($planT.Bridges)) {
+                    $n = [int](Sql-Exec $cn ('UPDATE c SET Precision=NULL, Scale=NULL FROM cfg.ColumnDef c ' +
+                            'JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId ' +
+                            'WHERE c.Id=@i AND v.Id=@v AND v.Status=0 AND c.DataType IN (6,8) AND (c.Precision IS NOT NULL OR c.Scale IS NOT NULL)') @{ i = [int]$u.Id; v = $vid })
+                    if ($n -gt 0) { $txtBridges += "$($sh.code)/$($tb.code)/$($u.Code)" }
+                }
+            }
+        }
+        Log ("  колонок Decimal->String (чернетка-клон): {0}" -f $txtRetyped.Count)
+        foreach ($k in $txtRetyped) { Log "    Decimal->String: $k" }
+        Log ("  мостів з Precision/Scale скинуто в NULL: {0}" -f $txtBridges.Count)
+        foreach ($k in $txtBridges) { Log "    міст precision=NULL: $k" }
+        foreach ($k in $txtWarn) { Log "  WARN тип колонки: $k" }
         $dt = New-Object System.Data.DataTable
         foreach ($n in 'TableDefId:int', 'Code:string', 'HeaderL10n:string', 'Ordinal:int', 'DataType:byte', 'Precision:byte', 'Scale:byte', 'IsReadOnly:bool', 'IsRequired:bool',
             'IsHidden:bool', 'IsMonthColumn:bool', 'MonthNumber:byte', 'DefaultValue:string', 'LookupRegistryDefId:int', 'UnitId:int', 'IsBusinessKey:bool', 'IsScopeField:bool', 'IsIndexed:bool', 'IsDeleted:bool') {
@@ -1429,7 +1469,9 @@ function Bind-ResultColumns($mid) {
 # Лише явно: -Stage LandParity (в 'All' не входить). Для чернеток методологій, що вже є на стенді (імпорт AF-пакета
 # tools/Ecr.MethodologyImport) і мають правило у docs/.../af-land-category-rules.json:
 #   1. PUT .../category-rule  (вираз із файлу);
-#   2. склад речовин версії = суфікси `_(\d{3,4})$` категорій її констант (форма B) або, коли суфіксів немає (форма A),\n#      об'єднання кодів land-substance-applicability.json; зіставляються із записами LAND_AIR_SUBSTANCE\n#      (код запису E<код>; довідник заводить Import-LandAirSubstances.ps1);
+#   2. склад речовин версії = суфікси `_(\d{3,4})$` категорій її констант (форма B) або, коли суфіксів немає (форма A),
+#      об'єднання кодів land-substance-applicability.json; зіставляються із записами LAND_AIR_SUBSTANCE
+#      (код запису E<код>; довідник заводить Import-LandAirSubstances.ps1);
 #   3. тест-кейс PARITY_1: додаються аргументи, які читає правило (@Land_NAE, @Land_TypeFuelOrStream, @Land_Streams,
 #      @Land_InvNumEqp ...); наявні аргументи, очікуване й допуск не змінюються. Кандидати NAE пробуються по черзі
 #      до першого зеленого simulate.
@@ -1823,6 +1865,105 @@ function Stage-ArgumentSuffix {
     Log "  змінено: $changed"
 }
 
+# ==================== LookupCompare (LAND-5094 DIAG-A: порівняння Lookup-аргументу з текстом довідника) ====================
+# Лише явно: -Stage LookupCompare. Колонка-Lookup і колонка-міст Formula над Lookup віддають у формулу НОМЕР запису
+# довідника, тож `@Land_Measure_ReleaseColdVent = 'No - Нет'` ніколи не істинне (C12_03: 1 248 клітинок). У ЧЕРНЕТЦІ
+# вираз переписується на `REGFIELD(@X, 'NAME') = 'No - Нет'` (LandLookupCompare.Lib.ps1; перелік аргументів - з моделі,
+# літерал має бути ім'ям запису довідника цього аргументу). PARITY_1 отримує числове value (id запису) для аргументів,
+# які читає REGFIELD. Опубліковану версію не чіпаємо; нову версію чи публікацію етап не робить; повтор - 0 змін;
+# маркер `?` у списку аргументів не змінюється. -OnlyMethodology обмежує перелік методологій.
+function Stage-LookupCompare {
+    Log '== LookupCompare =='
+    . (Join-Path $here 'LandLookupCompare.Lib.ps1')
+    LoginAs 'land-owner'
+    Load-Registries
+    $lcPlan = Get-LandLookupCompareArguments -Model $Mdl
+    if ($lcPlan.Count -eq 0) { throw 'У моделі немає Lookup-колонок: перегенеруйте модель (model-gen).' }
+    $resolve = { param($resReg, $resName) RegEntryId $resReg $resName }
+    $ms = Items (Api GET '/api/v1/methodologies').Json
+    $changed = 0
+    foreach ($lcMeth in $ms) {
+        $lcCode = [string]$lcMeth.code
+        if ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains $lcCode) { continue }
+        $m = [int]$lcMeth.id
+        $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
+        $v = $vers | Sort-Object id -Descending | Select-Object -First 1
+        if (-not $v) { continue }
+        $vid = [int]$v.id
+        $n = 0
+        $replaced = New-Object System.Collections.Generic.HashSet[string]
+        $formulas = @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/formulas").Json)
+        $hits = @($formulas | Where-Object { (Convert-LandLookupCompareExpression -Expression $_.expression -Plan $lcPlan).Changed })
+        if ($hits.Count -eq 0) { continue }
+        if ([string]$v.status -eq 'Published') { Log "  ${lcCode}: остання версія опублікована - не чіпаю (формул із порівнянням: $($hits.Count)); потрібна нова чернетка"; continue }
+        foreach ($f in $hits) {
+            $r = Convert-LandLookupCompareExpression -Expression $f.expression -Plan $lcPlan
+            foreach ($c in $r.Replaced) { [void]$replaced.Add($c) }
+            $body = @{ expression = $r.Expression; resultType = $f.resultType; outputUnitId = $f.outputUnitId; argumentsCsv = $f.argumentsCsv }
+            if ($null -ne $f.scope) { $body.scope = $f.scope }
+            $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/formulas/$($f.code)" -Body $body
+            if ($put.Status -eq 200) { $n++ } else { Log "  ! ${lcCode}/$($f.code): HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
+        }
+        $changed += $n
+        Log "  ${lcCode}: формул із REGFIELD(@X,'NAME') - $n"
+
+        # PARITY_1: числове value (id запису) для аргументів, які тепер читає REGFIELD.
+        $tests = @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/tests").Json)
+        $t = $tests | Where-Object { [string]$_.code -eq 'PARITY_1' } | Select-Object -First 1
+        if (-not $t) { Log "  ${lcCode}: тест-кейсу PARITY_1 немає - value аргументів не виставлено"; continue }
+        $inp = [string]$t.inputJson | ConvertFrom-Json
+        $merged = Set-LandLookupCompareTestArguments -Existing @($inp.arguments) -Codes @($replaced) -Plan $lcPlan -Resolve $resolve
+        if ($merged.Missing.Count -gt 0) { Log "  ! ${lcCode}: у PARITY_1 немає числового значення (id запису) для: $($merged.Missing -join ', ')" }
+        if ($merged.Updated.Count -eq 0) { continue }
+        $newInput = [ordered]@{ documentId = $inp.documentId; periodKey = $inp.periodKey; arguments = @($merged.Arguments) }
+        $body = @{ inputJson = ($newInput | ConvertTo-Json -Depth 8 -Compress); expectedJson = [string]$t.expectedJson; tolerance = [string]$t.tolerance }
+        $pt = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/tests/PARITY_1" -Body $body
+        if ($pt.Status -eq 200) { $changed++; Log "  ${lcCode}: PARITY_1 value id запису: $($merged.Updated -join ',')" }
+        else { Log "  ! ${lcCode}: PARITY_1 HTTP $($pt.Status) $(Get-EcrErrorCode $pt)" }
+    }
+    Log "  змінено: $changed"
+}
+
+# ==================== NaeType (D-423, C11_10: вибір type1/type2/type3 за NAE) ====================
+# Лише явно: -Stage NaeType. У ЧЕРНЕТЦІ методологій з LandNaeType.Lib.ps1 (ECW_C11_10) вираз кожного типу обгортається
+# `if(in(@Land_NAE, '<NAE типу>', ...), <вираз>, NULL)`: старий код рахує ЛИШЕ тип, обраний за NAE (ECW_C11_10.cs:180-184,
+# :305-311), а в ECR усі три типи - виходи, тож у T9_02/T9_11 (лише NAE type1) type2/type3 давали ненульові константи.
+# Аргумент `@Land_NAE` додається в список формули. Опубліковану версію не чіпаємо; нову версію чи публікацію етап не робить;
+# повтор - 0 змін. Порядок: після ArgumentSuffix/LookupCompare, ПЕРЕД OptionalArguments.
+function Stage-NaeType {
+    Log '== NaeType =='
+    . (Join-Path $here 'LandNaeType.Lib.ps1')
+    LoginAs 'land-owner'
+    $ntPlan = Get-LandNaeTypeGroups
+    $ntMeth = Items (Api GET '/api/v1/methodologies').Json
+    $ntChanged = 0
+    foreach ($ntItem in $ntMeth) {
+        $ntCode = [string]$ntItem.code
+        if (-not $ntPlan.Contains($ntCode)) { continue }
+        if ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains $ntCode) { continue }
+        $ntId = [int]$ntItem.id
+        $ntVers = Items (Api GET "/api/v1/methodologies/$ntId/versions").Json
+        $ntLast = $ntVers | Sort-Object id -Descending | Select-Object -First 1
+        if (-not $ntLast) { continue }
+        if ([string]$ntLast.status -eq 'Published') { Log "  ${ntCode}: остання версія опублікована - не чіпаю"; continue }
+        $ntVid = [int]$ntLast.id
+        $ntN = 0
+        foreach ($ntF in @(Items (Api GET "/api/v1/methodologies/$ntId/versions/$ntVid/formulas").Json)) {
+            $ntType = Get-LandNaeTypeOfFormula -FormulaCode ([string]$ntF.code)
+            if ($null -eq $ntType -or -not $ntPlan[$ntCode].Contains($ntType)) { continue }
+            $ntR = Convert-LandNaeTypeFormula -Expression ([string]$ntF.expression) -ArgumentsCsv $ntF.argumentsCsv -Naes @($ntPlan[$ntCode][$ntType])
+            if (-not $ntR.Changed) { continue }
+            $ntBody = @{ expression = $ntR.Expression; resultType = $ntF.resultType; outputUnitId = $ntF.outputUnitId; argumentsCsv = $ntR.ArgumentsCsv }
+            if ($null -ne $ntF.scope) { $ntBody.scope = $ntF.scope }
+            $ntPut = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$ntId/versions/$ntVid/formulas/$($ntF.code)" -Body $ntBody
+            if ($ntPut.Status -eq 200) { $ntN++ } else { Log "  ! ${ntCode}/$($ntF.code): HTTP $($ntPut.Status) $(Get-EcrErrorCode $ntPut)" }
+        }
+        $ntChanged += $ntN
+        Log "  ${ntCode}: формул, обгорнутих за NAE - $ntN"
+    }
+    Log "  змінено формул: $ntChanged"
+}
+
 # ==================== ParityBranch (C12_02: вибір type1/type2 за наявністю компонента) ====================
 # Лише явно: -Stage ParityBranch. У ЧЕРНЕТЦІ методології з LandParityBranch.Lib.ps1 формули type2 компонентів
 # обгортаються `if(@Land_Measure_Component_<код> = NULL, <вираз>, NULL)`: старий код C12_02 рахує для компонента лише
@@ -2171,6 +2312,11 @@ if ($Stage -contains 'SubstanceApplicability') { Stage-SubstanceApplicability }
     # K1: аргументи з суфіксом методології - лише явно (-Stage ArgumentSuffix); ПЕРЕД OptionalArguments (той лишається
     # останнім), після CompositionMass/SubstanceApplicability/ParityBranch (токени цих етапів з K1 не перетинаються).
     if ($Stage -contains 'ArgumentSuffix') { Stage-ArgumentSuffix }
+    # LAND-5094 DIAG-A: порівняння Lookup-аргументу з текстом довідника - лише явно (-Stage LookupCompare); після ArgumentSuffix
+    # (токени аргументів уже суфіксовані), ПЕРЕД OptionalArguments (маркер `?` ставиться на готовий список).
+    if ($Stage -contains 'LookupCompare') { Stage-LookupCompare }
+    # D-423: вибір type1/type2/type3 за NAE (C11_10) - лише явно (-Stage NaeType); ПЕРЕД OptionalArguments.
+    if ($Stage -contains 'NaeType') { Stage-NaeType }
     # D-397: маркер `?` необов'язкових аргументів - лише явно (-Stage OptionalArguments); ОСТАННІМ: попередні етапи
     # переписують списки аргументів і зберігають чужі елементи як є, тож маркер ставиться на готовий список.
     if ($Stage -contains 'OptionalArguments') { Stage-OptionalArguments }

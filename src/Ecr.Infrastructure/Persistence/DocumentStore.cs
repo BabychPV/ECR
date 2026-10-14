@@ -16,13 +16,14 @@ public sealed class DocumentStore(
     Microsoft.Extensions.Caching.Memory.IMemoryCache? staleCache = null,
     Ecr.Domain.Abstractions.IClock? staleClock = null,
     StaleCountsEpoch? staleEpoch = null,
-    Microsoft.Extensions.Logging.ILogger<DocumentStore>? staleLog = null) : IDocumentStore
+    Microsoft.Extensions.Logging.ILogger<DocumentStore>? staleLog = null,
+    Microsoft.Extensions.DependencyInjection.IServiceScopeFactory? staleScopeFactory = null) : IDocumentStore
 {
     /// <summary>Стеля карти періоду; у тестах зменшується, щоб довести деградацію без 200 тис. документів.</summary>
     internal int StaleMapMaxDocuments { get; init; } = StaleResultsMapCache.DefaultMaxDocuments;
 
     /// <summary>Карта застарілості періоду (LP-45, етап 2): кеш - якщо його передано.</summary>
-    private StaleResultsMapCache StaleMap => new(db, staleCache, staleClock, staleEpoch, staleLog, StaleMapMaxDocuments);
+    private StaleResultsMapCache StaleMap => new(db, staleCache, staleClock, staleEpoch, staleLog, StaleMapMaxDocuments, staleScopeFactory);
 
     /// <summary>Правило «усі аркуші групи обов'язкові».</summary>
     private const byte RequiresAll = 0;

@@ -260,6 +260,7 @@
 | e2e `keyCommitGateLive` | e2e `keyCommitGateLive` «інтервал 0 мс» — розібрати падіння на 2-му проході (`page.goto` + клік + Enter без паузи); 7 з 20 у живому прогоні | уточнити | беклог |
 | Беклог «Аналізу» | A1-07 Null-тиша, ~~A1-05 `pickerForbidden`~~ (done в lane `lane/analiz/a1-05-picker-forbidden`, 07.10: `grants.pickerForbidden` en/ru/kz + admin-guide), Warning/Info з PATCH у гріді, правила періоду при клоні, D-277, L4-05, L4-08(б), L8-17/L8-20 | «Аналіз» | беклог |
 | D-296 | D-296: створення документа в закритому періоді НЕ блокується сервером (рішення людини 06.10); лише клієнтське попередження (UI-31/A2-05); питання К6 Owner/Approver, К8 модель груп таблиць, К9 лишаються з дефолтами | координатор | беклог |
+| AN-125 (P2) | Експорт Formula-string: текстовий результат Formula/Calculated-колонки (міст, напр. `Land_Measure_OperatingTime` «No - Нет») віддається у CSV/JSON/Excel (`DocumentDataExporter.FormatValue`, CSV-захист поля, `ExcelExporter.WriteValue`); число/порожнє без змін; `lane/integ-export-formula-text` | «Аналіз» | done `b07e52e15` |
 
 **Release notes наступного RC мають містити:** AN-29 (записи з порожнім обов'язковим полем не оновлюються); T4-09 — зміна API; loopback SMTP заборонений (D-275) проти Sql-джерела дозволений (D-279); Deny не застосовується до регуляторних зрізів і Rollup (D-276); AN-33 — побічні примітки; AN-40b — суворіший парсинг дат (2026-02-30 → null; рік до 4 цифр); L7-08 влито в dev (660523df), у кандидаті №2; AN-36c L6-02 — вплив на PATCH під час переносу версії (409 ECR-DOC-4091).
 

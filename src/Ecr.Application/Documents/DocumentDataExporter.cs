@@ -205,6 +205,10 @@ public sealed class DocumentDataExporter(
 
         return column.DataType switch
         {
+            // Formula/Calculated: число — як раніше; текстовий результат (міст, «No - Нет») — ValueString.
+            CellDataType.Formula or CellDataType.Calculated => value.ValueNumeric is { } fn
+                ? Number(fn, column.Scale)
+                : value.ValueString,
             _ when IsNumeric(column) => value.ValueNumeric is { } n ? Number(n, column.Scale) : null,
             CellDataType.Bool => value.ValueBool is { } b ? (b ? "true" : "false") : null,
             CellDataType.Date => value.ValueDate?.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture),
@@ -384,7 +388,11 @@ public sealed class DocumentDataExporter(
                 // ⚠ Число пишеться як є: захист від формул дописав би «'» до «-5»
                 // і зіпсував би від'ємне число. Число в інваріантній культурі
                 // формулою бути не може.
-                text.Append(',').Append(IsNumeric(column) ? value : CsvFormat.Field(value));
+                // Текстовий результат Formula/Calculated не парситься як число — іде через захист поля.
+                var raw = IsNumeric(column)
+                    && (value is null || decimal.TryParse(
+                        value, NumberStyles.Number, CultureInfo.InvariantCulture, out _));
+                text.Append(',').Append(raw ? value : CsvFormat.Field(value));
             }
 
             text.Append(CsvFormat.NewLine);
