@@ -1261,6 +1261,55 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         Assert.Equal(1, gate.MapQueries);
     }
 
+    /// <summary>
+    /// Кеш-обгортка: усі читачі, що ПРОМАХНУЛИСЬ повз реєстр завантажень, чекають одне одного на бар'єрі, тож без
+    /// замка навколо створення реєстру кожен створює свій словник (детерміновано, а не «як пощастить»).
+    /// З замком промах бачить лише перший, решта знаходить готовий реєстр - бар'єр спрацьовує за тайм-аутом-запобіжником.
+    /// </summary>
+    private sealed class RegistryRacingCache(Microsoft.Extensions.Caching.Memory.IMemoryCache inner, int readers)
+        : Microsoft.Extensions.Caching.Memory.IMemoryCache
+    {
+        private readonly Barrier barrier = new(readers);
+
+        public bool TryGetValue(object key, out object? value)
+        {
+            var found = inner.TryGetValue(key, out value);
+            if (!found && key is "doc-stale-map:in-flight")
+            {
+                barrier.SignalAndWait(TimeSpan.FromSeconds(2));
+            }
+
+            return found;
+        }
+
+        public Microsoft.Extensions.Caching.Memory.ICacheEntry CreateEntry(object key) => inner.CreateEntry(key);
+
+        public void Remove(object key) => inner.Remove(key);
+
+        public void Dispose() => inner.Dispose();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Single_flight_перше_одночасне_створення_реєстру_завантажень_не_дає_кількох_лідерів()
+    {
+        const int readers = 6;
+        var r = await RigAsync();
+        using var racing = new RegistryRacingCache(r.Cache, readers);
+        var gate = new MapGateInterceptor(readers);
+
+        var tasks = Enumerable.Range(0, readers).Select(_ => Task.Run(async () =>
+        {
+            await using var db = InterceptedContext(gate, r.Epoch);
+            return await StaleOnPageAsync(new DocumentStore(db, racing, r.Clock, r.Epoch), r);
+        })).ToArray();
+
+        var pages = await Task.WhenAll(tasks);
+
+        Assert.All(pages, page => Assert.Equal([r.A, r.B], page.Order()));
+        Assert.Equal(1, gate.MapQueries);
+    }
     private async Task ReaderAfterChangeDoesNotJoinOldLoadAsync(Func<MapRig, Task> change)
     {
         var r = await RigAsync();
