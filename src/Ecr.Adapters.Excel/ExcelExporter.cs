@@ -910,6 +910,12 @@ public sealed class ExcelExporter(
                 {
                     cell.Value = number;
                 }
+                else if (column.DataType is CellDataType.Formula or CellDataType.Calculated
+                    && value.ValueString is { } formulaText)
+                {
+                    // Текстовий результат (міст, «No - Нет») — рядкова клітинка.
+                    cell.Value = formulaText;
+                }
 
                 break;
 
