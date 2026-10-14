@@ -180,6 +180,16 @@ IF COL_LENGTH(N'arc.CalculationStep', N'SubstanceEntryId') IS NULL
     ALTER TABLE arc.CalculationStep ADD SubstanceEntryId int NULL;
 GO
 
+-- D-401: екземпляр таблиці результату/кроку (`doc.TableInstance.Id`); NULL — запис до D-401.
+-- ⚠ `calc.CalculationInput` дзеркала не має — додається лише для результату й кроку.
+IF COL_LENGTH(N'arc.CalculationResult', N'TableInstanceId') IS NULL
+    ALTER TABLE arc.CalculationResult ADD TableInstanceId bigint NULL;
+GO
+
+IF COL_LENGTH(N'arc.CalculationStep', N'TableInstanceId') IS NULL
+    ALTER TABLE arc.CalculationStep ADD TableInstanceId bigint NULL;
+GO
+
 -- D4 аудиту: позначка осиротілого рядка (`doc.TableRow.IsOrphaned`). Без неї
 -- архівування+відновлення скидало прапорець у 0, і осиротілі рядки переставали
 -- блокувати подання (ECR-SUB-4221). Копіюють `usp_ArchiveYear`/`usp_RestoreYear`.
