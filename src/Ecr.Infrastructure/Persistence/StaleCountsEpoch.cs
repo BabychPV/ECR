@@ -43,12 +43,33 @@ public sealed class StaleCountsEpoch : DbTransactionInterceptor
     public long Value => Interlocked.Read(ref _value);
 
     /// <summary>
+    /// Лише ГЛОБАЛЬНА складова (правка без відомого періоду: довідник, повний прогін). Не рухається від правок
+    /// комірок одного періоду - за нею скидається кеш відбитка довідників (D-430).
+    /// </summary>
+    public long GlobalValue => Interlocked.Read(ref _global);
+
+    /// <summary>
     /// Епоха періоду для ключа кешу: глобальна складова + складова періоду. Обидві лише ростуть, тож будь-який
     /// підйом дає значення, якого цей період ще не мав.
     /// </summary>
     /// <param name="periodKey">Період лічильника.</param>
     public long ValueFor(int periodKey)
         => Interlocked.Read(ref _global) + (_periods.TryGetValue(periodKey, out var own) ? own : 0);
+
+    /// <summary>
+    /// Епоха процесу, підключена до цього контексту як перехоплювач (<c>null</c> — контекст без неї, тести без DI).
+    /// Дає змогу <c>UnitOfWork</c> позначити зміну довідника, не змінюючи його конструктор.
+    /// </summary>
+    /// <param name="db">Контекст запису.</param>
+    public static StaleCountsEpoch? Find(DbContext? db)
+        => db is null
+            ? null
+            : ((Microsoft.EntityFrameworkCore.Infrastructure.IInfrastructure<IServiceProvider>)db).Instance
+                .GetService(typeof(Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptions))
+                is Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptions options
+                ? options.FindExtension<Microsoft.EntityFrameworkCore.Infrastructure.CoreOptionsExtension>()?
+                    .Interceptors?.OfType<StaleCountsEpoch>().FirstOrDefault()
+                : null;
 
     /// <summary>Піднімає ГЛОБАЛЬНУ епоху — всі періоди (O(1), без блокувань).</summary>
     public void Bump()
