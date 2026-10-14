@@ -286,6 +286,10 @@ WHERE cr.DocumentId = @d AND cr.PeriodKey = @p
                     $meth, $out = $ck -split '\|', 2
                     $label = ($out -replace '^ECW_EC_', '')
                     $class = if ($label -match '_NOx$') { 'ECR_ONLY_INTERMEDIATE' } elseif ($ecrRow[$ck] -eq 0) { 'ECR_ONLY_ZERO' } else { 'ECR_ONLY' }
+                    # D-425: рядок із колонкою статусу, де статус не Running (чи порожній), легасі не рахує: ECR його порахував -
+                    # регресія фільтра «лише Running», а не «ECR порахував там, де легасі не було».
+                    $nrProp = $srow.PSObject.Properties['Land_Status']
+                    if ($class -like 'ECR_ONLY*' -and $null -ne $nrProp -and ($null -eq $nrProp.Value -or [string]$nrProp.Value -ne 'Running')) { $class = 'ECR_NON_RUNNING' }
                     if ($orow.naeAmbiguous) { $class = 'AMBIGUOUS_KEY' }
                     Add-Class $docName $table $rowKey $meth $label $class 0 0 $null $ecrRow[$ck]
                 }

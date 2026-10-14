@@ -143,6 +143,7 @@ $result = [ordered]@{
     documents = [int]$files.Count
     aggregateGroups = [int]$acc.AggregateGroups
     totalCells = $summary.totalCells
+    ecrNonRunningCells = $summary.ecrNonRunningCells
     classes = $summary.classes
     byMethodology = $summary.byMethodology
     multiTableResults = $summary.multiTableResults

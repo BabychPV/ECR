@@ -299,6 +299,60 @@ public sealed class LandParityFullHarnessTests
         Assert.Contains("p9-0004\t", cells, StringComparison.Ordinal);       // рядок не завантажено
     }
 
+    /// <summary>
+    /// D-425: вихід, якого немає в легасі, у групі з рядком не-Running — це <c>ECR_NON_RUNNING</c> (регресія фільтра
+    /// «лише Running», індикатор має бути 0), а не <c>ECR_ONLY</c>; для групи з одних Running — як і раніше
+    /// <c>ECR_ONLY</c>. Мутація: прибрати підміну класу в LandParity.Lib.ps1 — перший випадок червоніє.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [InlineData("Removed", "AGG_ECR_NON_RUNNING", "AGG_ECR_ONLY", 1)]
+    [InlineData("Running", "AGG_ECR_ONLY", "AGG_ECR_NON_RUNNING", 0)]
+    public void Вихід_ECR_у_групі_з_рядком_не_Running_має_клас_ECR_NON_RUNNING(
+        string secondRowStatus, string expected, string absent, int nonRunningCells)
+    {
+        using var f = new Fixture();
+        var columns = new[] { "Land_No", "Land_NAE", "Land_Status", "Land_TypeFuel" };
+        var sample = new
+        {
+            doc = Doc,
+            periods = new Dictionary<string, object>
+            {
+                ["2026-01"] = new Dictionary<string, object>
+                {
+                    [Table] = new { columns, rows = new[] { Row(1, "N1", "E1"), Row(2, "N1", "E1", secondRowStatus) } },
+                },
+            },
+        };
+        File.WriteAllText(Path.Combine(f.Dir.FullName, Doc + ".json"), JsonSerializer.Serialize(sample));
+        File.WriteAllLines(f.Oracle, [TsvLine("E1", 1, "N1", "0.001", "ECW_C05_02")]);
+
+        static object Res(string row, string output, string value) =>
+            new { document = Doc, period = 202601, methodology = "ECW_C05_02", rowKey = row, outputCode = output, value };
+        var state = new
+        {
+            methodologies = new object[] { new { code = "ECW_C05_02", published = 1, bound = 1, tables = new[] { "T3_00" } } },
+            tables = new object[]
+            {
+                new { document = Doc, period = 202601, table = "T3_00", rowKeys = new[] { "p9-0001", "p9-0002" }, maxRows = 5 },
+            },
+            results = new[]
+            {
+                Res("p9-0001", "ECW_EC_tons_301", "0.0006"),
+                Res("p9-0002", "ECW_EC_tons_301", "0.0004"),
+                Res("p9-0002", "ECW_EC_tons_302", "0.5"),
+            },
+        };
+        File.WriteAllText(f.State, JsonSerializer.Serialize(state));
+
+        var (root, _, _) = RunCompare(f, "nonrunning", "-AggregateBy", "NaePhase");
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes[expected]);
+        Assert.False(classes.ContainsKey(absent));
+        Assert.Equal(nonRunningCells, root.GetProperty("ecrNonRunningCells").GetInt32());
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Агрегатне_порівняння_двозначного_ключа_сумує_групу()
