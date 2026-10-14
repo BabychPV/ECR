@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Row loader of the FULL Land sample (all air tables of all documents and periods) into documents of a LOCAL stand.
     Rows get table-qualified keys p<doc>-<TableCode>-<seq:0000> (unique across the tables of a document, LAND-5094).
@@ -192,8 +192,10 @@ $totMiss = [int](($results | Measure-Object lookupMiss -Sum).Sum)
 $totMixedText = [int](($results | Measure-Object mixedText -Sum).Sum)
 $totMixedNumber = [int](($results | Measure-Object mixedNumber -Sum).Sum)
 $totType3 = [int](($results | Measure-Object type3InMixed -Sum).Sum)
-if ($totType3 -gt 0) { Write-Warning "NAE type3 C11_10 у T9_04/T9_07: $totType3 рядків - OperatingTime є String, type3 читає його числом (D-423)." }
+if ($totType3 -gt 0) { Write-Warning "NAE type3 of C11_10 in T9_04/T9_07: $totType3 rows - OperatingTime is a String column, type3 reads it as a number (D-423)." }
 $modeText = if ($haveCredentials) { 'stand read' } else { 'files+model only (no -User: NO_DOC / lookups NOT checked)' }
+Write-Host "PREVIEW ($modeText): table-periods $($results.Count), rows $totRows, cells $totCells, capped $totCapped, NO_DOC $($counters.NO_DOC), NO_TABLE $($counters.NO_TABLE), NAME_MISMATCH $($counters.NAME_MISMATCH), MISSING_COLUMN $($counters.MISSING_COLUMN), SKIPPED_WATER_WASTE $($counters.SKIPPED_WATER_WASTE), SKIPPED_UNKNOWN $($counters.SKIPPED_UNKNOWN), NOT_INCLUDED $($counters.NOT_INCLUDED), lookupMiss $totMiss, operatingTimeText $totMixedText, operatingTimeNumber $totMixedNumber, naeType3InMixed $totType3, rowKeyFormat $RowKeyFormat, maxRowsPerTable $MaxRowsPerTable."
+if ($counters.SKIPPED_UNKNOWN -gt 0) { Write-Host "WARN -SkipUnknownTables: $($counters.SKIPPED_UNKNOWN) table-periods of unknown prod tables were NOT loaded." }
 if ($unmappedAll.Count -gt 0) { Write-Host ('SOURCE WITHOUT TARGET (table/column, no values): ' + ((@($unmappedAll.Keys) | Sort-Object) -join ', ')) }
 
 $blocked = ($counters.NO_DOC + $counters.NO_TABLE + $counters.MISSING_COLUMN + $counters.NAME_MISMATCH) -gt 0
