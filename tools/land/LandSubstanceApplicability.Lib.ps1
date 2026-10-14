@@ -189,6 +189,29 @@ function Get-LandApplicabilityCodeUnion {
     return , @($union.Keys | Sort-Object { [int]$_ })
 }
 
+function Test-LandMixedFuelStreamCategories {
+    <#
+    .SYNOPSIS
+        TRUE, якщо категорії констант змішані: є суфікси речовин `_(\d{3,4})$` І є категорії потоку FG/LPG без такого суфікса.
+    .DESCRIPTION
+        Ознака форми A у «змішаній» методології (C11_01: `6646_FG`, `6646_LPG`, `6647_FG` ... поряд із `..._1052`, `..._1715`).
+        Категорія «Common», NAE без потоку тощо ознакою не є: склад методологій із чистими суфіксами не змінюється.
+    .OUTPUTS
+        bool
+    #>
+    param([AllowNull()][AllowEmptyCollection()][AllowEmptyString()][string[]]$Categories)
+
+    $hasSuffix = $false
+    $hasStream = $false
+    foreach ($c in @($Categories)) {
+        if ([string]::IsNullOrWhiteSpace($c)) { continue }
+        $t = $c.Trim()
+        if ($t -match '_(\d{3,4})$') { $hasSuffix = $true; continue }
+        if ($t -match '(?i)(^|_)(FG|LPG)(_|$)') { $hasStream = $true }
+    }
+    return ($hasSuffix -and $hasStream)
+}
+
 function Resolve-LandMethodologySubstanceCodes {
     <#
     .SYNOPSIS
@@ -197,6 +220,8 @@ function Resolve-LandMethodologySubstanceCodes {
     .DESCRIPTION
         Правило вибору (✎ 2026-10-13, C11_10 / C11_11_05):
           1. `-FromApplicability` (правило з `substancesFromApplicability: true`) - завжди об'єднання кодів словника;
+          2а. (✎ 2026-10-14) категорії змішані (суфікси речовин + потоки FG/LPG без суфікса, `-MixedFuelStreamCategories`) -
+              суфікси ∪ словник застосовності: речовини FG/LPG-набору не відкидаються;
           2. інакше, якщо в категоріях констант є суфікси `_(\d{3,4})$` (`-SuffixCodes` не порожній), - вони, незмінно;
           3. інакше (форма A: суфіксів немає) - об'єднання кодів словника застосовності цієї методології, якщо воно є;
           4. інакше порожньо (склад не задається).
@@ -210,12 +235,17 @@ function Resolve-LandMethodologySubstanceCodes {
     .PARAMETER FromApplicability
         Правило явно просить склад зі словника.
     .OUTPUTS
-        pscustomobject: Codes (string[], за зростанням), Source = 'Applicability' | 'Suffix' | 'ApplicabilityFallback' | 'None'.
+        pscustomobject: Codes (string[], за зростанням), Source = 'Applicability' | 'Suffix' | 'SuffixUnionApplicability' |
+        'ApplicabilityFallback' | 'None'.
+    .PARAMETER MixedFuelStreamCategories
+        Результат Test-LandMixedFuelStreamCategories: суфікси речовин і потоки FG/LPG без суфікса разом (правило 2а, див. вище;
+        викликач передає TRUE лише коли для методології є обгортка SUBSTANCE_APPLICABLE).
     #>
     param(
         [AllowNull()][AllowEmptyCollection()][string[]]$SuffixCodes,
         [AllowNull()]$ApplicabilityCodes,
-        [bool]$FromApplicability = $false
+        [bool]$FromApplicability = $false,
+        [bool]$MixedFuelStreamCategories = $false
     )
 
     # Get-LandApplicabilityCodeUnion повертає `,@(...)`: прямий вираз-присвоєння знімає обгортку, `@(f)` лишив би вкладений масив.
@@ -224,6 +254,15 @@ function Resolve-LandMethodologySubstanceCodes {
     $suffix = @($SuffixCodes | Where-Object { $_ })
     if ($FromApplicability) {
         return [pscustomobject]@{ Codes = [string[]]$union; Source = 'Applicability' }
+    }
+    if ($suffix.Count -gt 0 -and $MixedFuelStreamCategories -and $union.Count -gt 0) {
+        # Правило 2а (✎ 2026-10-14, LAND-5094 K-п'ятірка): категорії змішані - форма B із суфіксами речовин і форма A
+        # потоків FG/LPG без суфікса (C11_01: `..._Wwater_1052` поряд із `6646_FG`). Старий код ітерує коди словника
+        # застосовності, тож склад = суфікси ∪ словник; зайві речовини рядка відсікає SUBSTANCE_APPLICABLE
+        # (етап SubstanceApplicability у тій самій чернетці).
+        $all = @{}
+        foreach ($c in @($suffix) + @($union)) { $all[[string]([int]$c)] = $true }
+        return [pscustomobject]@{ Codes = [string[]]@($all.Keys | Sort-Object { [int]$_ }); Source = 'SuffixUnionApplicability' }
     }
     if ($suffix.Count -gt 0) {
         return [pscustomobject]@{ Codes = [string[]]$suffix; Source = 'Suffix' }

@@ -447,6 +447,274 @@ public sealed class LandParityFullHarnessTests
     }
 
     /// <summary>
+    /// Селектор гілки (C11_01): легасі рахує ОДНУ гілку за NAE/потоком (ECW_C11_01.cs:183-208), ECR - усі чотири на одному
+    /// ключі. З селектором вибрана гілка порівнюється (MATCH), решта - ECR_ONLY_NOT_SELECTED; без селектора
+    /// (-NoBranchSelector) - BRANCH_BOTH_PRESENT. Мутація: вимкнути селектор (BranchSelector = @()) - перший вимір
+    /// червоніє (замість MATCH - BRANCH_BOTH_PRESENT); підмінити вибір гілки - MISMATCH.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [InlineData("6648", "type2", false)]
+    [InlineData("0100", "type1_2", false)]
+    [InlineData("6648", "type2", true)]
+    public void Селектор_гілки_C11_01_порівнює_лише_обрану_гілку(string nae, string selected, bool noSelector)
+    {
+        using var f = BuildSingleRowFixture();
+        // Рядок фікстури має Land_NAE = N1; для селектора потрібен власний NAE.
+        var sample = new
+        {
+            doc = Doc,
+            periods = new Dictionary<string, object>
+            {
+                ["2026-01"] = new Dictionary<string, object>
+                {
+                    [Table] = new { columns = new[] { "Land_No", "Land_NAE", "Land_Status", "Land_TypeFuel" }, rows = new[] { Row(1, nae, "E1") } },
+                },
+            },
+        };
+        File.WriteAllText(Path.Combine(f.Dir.FullName, Doc + ".json"), JsonSerializer.Serialize(sample));
+
+        var values = new Dictionary<string, string> { ["type1_1"] = "0.1", ["type1_2"] = "0.2", ["type1_3"] = "0.3", ["type2"] = "0.5" };
+        File.WriteAllLines(f.Oracle, [TsvLine("E1", 1, nae, values[selected], "ECW_C11_01")]);
+
+        var state = new
+        {
+            methodologies = new object[] { new { code = "ECW_C11_01", published = 1, bound = 1, anyBinding = 1, tables = new[] { "T3_00" } } },
+            tables = new object[] { new { document = Doc, period = 202601, table = "T3_00", rowKeys = new[] { "p9-0001" }, maxRows = 5 } },
+            results = values.Select(kv => new
+            {
+                document = Doc,
+                period = 202601,
+                methodology = "ECW_C11_01",
+                rowKey = "p9-0001",
+                outputCode = "ECW_EC_tons_301_" + kv.Key,
+                value = kv.Value,
+            }).ToArray(),
+        };
+        File.WriteAllText(f.State, JsonSerializer.Serialize(state));
+
+        var (root, _, _) = noSelector ? RunCompare(f, "branch", "-NoBranchSelector", "-TypeFoldMethodology", "^ECW_C11_01$") : RunCompare(f, "branch");
+        var classes = Classes(root);
+
+        if (noSelector)
+        {
+            Assert.Equal(1, classes["BRANCH_BOTH_PRESENT"]);
+            Assert.False(classes.ContainsKey("ECR_ONLY_NOT_SELECTED"));
+            Assert.Equal(0, root.GetProperty("branchSelectedCells").GetInt32());
+        }
+        else
+        {
+            Assert.Equal(1, classes["MATCH"]);
+            Assert.Equal(3, classes["ECR_ONLY_NOT_SELECTED"]);
+            Assert.False(classes.ContainsKey("BRANCH_BOTH_PRESENT"));
+            Assert.False(classes.ContainsKey("ECR_ONLY"));
+            Assert.Equal(1, root.GetProperty("branchSelectedCells").GetInt32());
+            Assert.Equal(3, root.GetProperty("notSelectedCells").GetInt32());
+        }
+    }
+
+    private static Dictionary<string, object> BranchRow(int no, string nae, string stream = "") =>
+        new()
+        {
+            ["_efid"] = "E1",
+            ["Land_No"] = no,
+            ["Land_NAE"] = nae,
+            ["Land_Status"] = "Running",
+            ["Land_TypeFuel"] = "Diesel",
+            ["Land_TypeFuelOrStream"] = stream,
+        };
+
+    private static string BranchOracle(string nae, string tons, string gsec, string methodology, string comp = "301") =>
+        string.Join('\t', "E1", 1, Table, nae, comp, "Diesel", tons, gsec, methodology, "2026-01-01T00:00:00", "CalcResult_Emissions_Air_Land_X");
+
+    /// <summary>Один прогін селектора: рядки (rowKey p9-000i за порядком), еталон, результати ECR (рядок, вихід, значення).</summary>
+    private static (JsonElement Root, string Cells) RunBranchCase(
+        string methodology, Dictionary<string, object>[] rows, string[] oracle, (int Row, string Output, string Value)[] results, params string[] extra)
+    {
+        using var f = new Fixture();
+        var columns = new[] { "Land_No", "Land_NAE", "Land_Status", "Land_TypeFuel", "Land_TypeFuelOrStream" };
+        var sample = new
+        {
+            doc = Doc,
+            periods = new Dictionary<string, object> { ["2026-01"] = new Dictionary<string, object> { [Table] = new { columns, rows } } },
+        };
+        File.WriteAllText(Path.Combine(f.Dir.FullName, Doc + ".json"), JsonSerializer.Serialize(sample));
+        File.WriteAllLines(f.Oracle, oracle);
+        var state = new
+        {
+            methodologies = new object[] { new { code = methodology, published = 1, bound = 1, anyBinding = 1, tables = new[] { "T3_00" } } },
+            tables = new object[]
+            {
+                new { document = Doc, period = 202601, table = "T3_00", rowKeys = Enumerable.Range(1, rows.Length).Select(i => $"p9-{i:D4}").ToArray(), maxRows = 20 },
+            },
+            results = results.Select(r => new
+            {
+                document = Doc,
+                period = 202601,
+                methodology,
+                rowKey = $"p9-{r.Row:D4}",
+                outputCode = r.Output,
+                value = r.Value,
+            }).ToArray(),
+        };
+        File.WriteAllText(f.State, JsonSerializer.Serialize(state));
+        var (root, _, cells) = RunCompare(f, "branchcase", extra);
+        return (root, cells);
+    }
+
+    /// <summary>C11_02: вибір лише за NAE (точний збіг без пробілів); NAE поза списком (у т.ч. «6583 (002)») - результату легасі немає.</summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Селектор_C11_02_обирає_гілку_за_NAE_а_невідомий_NAE_дає_MISSING_OUTPUT()
+    {
+        var (root, _) = RunBranchCase("ECW_C11_02",
+            [BranchRow(1, "6640"), BranchRow(2, "6783(001)"), BranchRow(3, "6583 (002)"), BranchRow(4, "9999")],
+            [
+                BranchOracle("6640", "1", "", "ECW_C11_02"),
+                BranchOracle("6783(001)", "2", "", "ECW_C11_02"),
+                BranchOracle("6583 (002)", "1", "", "ECW_C11_02"),
+                BranchOracle("9999", "1", "", "ECW_C11_02"),
+            ],
+            Enumerable.Range(1, 4).SelectMany(i => new[] { (i, "ECW_EC_tons_301_type1", "1"), (i, "ECW_EC_tons_301_type2", "2") }).ToArray());
+        var classes = Classes(root);
+
+        Assert.Equal(2, classes["MATCH"]);
+        Assert.Equal(2, classes["MISSING_OUTPUT"]);
+        Assert.False(classes.ContainsKey("ECR_ONLY"));
+        Assert.DoesNotContain(classes.Keys, k => k.Contains("MISMATCH", StringComparison.Ordinal));
+        Assert.Equal(2, root.GetProperty("branchSelectedCells").GetInt32());
+        Assert.Equal(6, root.GetProperty("notSelectedCells").GetInt32());
+    }
+
+    /// <summary>C11_11_03: на одному рядку tons і gsec мають різні групи: NAE 0804 - tons=type3, gsec=type2.</summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Селектор_C11_11_03_NAE_0804_дає_tons_type3_і_gsec_type2_на_одному_рядку()
+    {
+        var (root, _) = RunBranchCase("ECW_C11_11_03",
+            [BranchRow(1, "0804")],
+            [BranchOracle("0804", "3", "20", "ECW_C11_11_03")],
+            [
+                (1, "ECW_EC_tons_301_type1", "1"), (1, "ECW_EC_tons_301_type2", "2"), (1, "ECW_EC_tons_301_type3", "3"),
+                (1, "ECW_EC_gsec_301_type1", "10"), (1, "ECW_EC_gsec_301_type2", "20"), (1, "ECW_EC_gsec_301_type3", "30"),
+            ]);
+        var classes = Classes(root);
+
+        Assert.Equal(2, classes["MATCH"]);
+        Assert.False(classes.ContainsKey("ECR_ONLY"));
+        Assert.DoesNotContain(classes.Keys, k => k.Contains("MISMATCH", StringComparison.Ordinal));
+        Assert.Equal(2, root.GetProperty("branchSelectedCells").GetInt32());
+        Assert.Equal(4, root.GetProperty("notSelectedCells").GetInt32());
+    }
+
+    /// <summary>C11_11_02: 6976 і 0883 - type2, 0560 - type1 (NAE має бути в groupNAE).</summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Селектор_C11_11_02_6976_і_0883_type2_а_0560_type1()
+    {
+        var (root, _) = RunBranchCase("ECW_C11_11_02",
+            [BranchRow(1, "6976"), BranchRow(2, "0883"), BranchRow(3, "0560")],
+            [
+                BranchOracle("6976", "2", "", "ECW_C11_11_02"),
+                BranchOracle("0883", "2", "", "ECW_C11_11_02"),
+                BranchOracle("0560", "1", "", "ECW_C11_11_02"),
+            ],
+            Enumerable.Range(1, 3).SelectMany(i => new[] { (i, "ECW_EC_tons_301_type1", "1"), (i, "ECW_EC_tons_301_type2", "2") }).ToArray());
+        var classes = Classes(root);
+
+        Assert.Equal(3, classes["MATCH"]);
+        Assert.DoesNotContain(classes.Keys, k => k.Contains("MISMATCH", StringComparison.Ordinal));
+        Assert.Equal(3, root.GetProperty("branchSelectedCells").GetInt32());
+        Assert.Equal(3, root.GetProperty("notSelectedCells").GetInt32());
+    }
+
+    /// <summary>C11_01: ECR віддав лише НЕобрану гілку (NAE 6648 -> type2, а є type1_3): MISSING_OUTPUT + ECR_ONLY_NOT_SELECTED, не ECR_ONLY.</summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Селектор_C11_01_лише_невибрана_гілка_ECR_дає_MISSING_OUTPUT()
+    {
+        var (root, _) = RunBranchCase("ECW_C11_01",
+            [BranchRow(1, "6648", "Diesel")],
+            [BranchOracle("6648", "0.5", "", "ECW_C11_01")],
+            [(1, "ECW_EC_tons_301_type1_3", "0.3")]);
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes["MISSING_OUTPUT"]);
+        Assert.Equal(1, classes["ECR_ONLY_NOT_SELECTED"]);
+        Assert.False(classes.ContainsKey("ECR_ONLY"));
+        Assert.False(classes.ContainsKey("BRANCH_BOTH_PRESENT"));
+        Assert.Equal(0, root.GetProperty("branchSelectedCells").GetInt32());
+    }
+
+    /// <summary>
+    /// P2: у групі efid|NAE|phase (-AggregateBy NaePhase) гілку обирає КОЖЕН член за власним потоком: gas -> type1_1,
+    /// Diesel -> type1_2; сума вибраних = результат легасі. Мутація: брати гілку з першого члена групи
+    /// (Row = $info.Row замість $rowByKey[$mk]) - тест червоніє (AGG_MISMATCH).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Селектор_C11_01_у_групі_обирає_гілку_по_кожному_члену()
+    {
+        var (root, _) = RunBranchCase("ECW_C11_01",
+            [BranchRow(1, "0100", "gas"), BranchRow(2, "0100", "Diesel")],
+            [BranchOracle("0100", "0.3", "", "ECW_C11_01")],
+            [
+                (1, "ECW_EC_tons_301_type1_1", "0.1"), (1, "ECW_EC_tons_301_type1_2", "9"),
+                (2, "ECW_EC_tons_301_type1_1", "9"), (2, "ECW_EC_tons_301_type1_2", "0.2"),
+            ],
+            "-AggregateBy", "NaePhase");
+        var classes = Classes(root);
+
+        Assert.Equal(1, root.GetProperty("aggregateGroups").GetInt32());
+        Assert.Equal(1, classes["AGG_MATCH"]);
+        Assert.DoesNotContain(classes.Keys, k => k.Contains("MISMATCH", StringComparison.Ordinal));
+    }
+
+    /// <summary>C11_01: потік «gas, Diesel» - пізніший збіг (Diesel) перемагає -> type1_2; ECR-only вибрана гілка не рахується як порівняна.</summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Селектор_C11_01_потік_gas_і_Diesel_дає_type1_2_а_ECR_only_не_рахується_порівняною()
+    {
+        var (root, _) = RunBranchCase("ECW_C11_01",
+            [BranchRow(1, "0100", "gas, Diesel")],
+            [BranchOracle("0100", "0.2", "", "ECW_C11_01")],
+            [
+                (1, "ECW_EC_tons_301_type1_1", "0.1"), (1, "ECW_EC_tons_301_type1_2", "0.2"),
+                (1, "ECW_EC_tons_302_type1_2", "0.5"),   // вибрана гілка, але легасі виходу 302 не має
+            ]);
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes["MATCH"]);
+        Assert.Equal(1, classes["ECR_ONLY"]);
+        Assert.Equal(1, root.GetProperty("branchSelectedCells").GetInt32());   // лише порівняна клітинка
+    }
+    /// <summary>
+    /// Проміжні виходи SumXiDiv* (C11_11_02) - не вихід легасі: ECR_ONLY_INTERMEDIATE, а не ECR_ONLY.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Проміжний_вихід_SumXiDiv_має_клас_ECR_ONLY_INTERMEDIATE()
+    {
+        using var f = BuildSingleRowFixture();
+        File.WriteAllLines(f.Oracle, [TsvLine("E1", 1, "N1", "0.001", "ECW_C05_02")]);
+        static object Res(string output, string value) =>
+            new { document = Doc, period = 202601, methodology = "ECW_C05_02", rowKey = "p9-0001", outputCode = output, value };
+        var state = new
+        {
+            methodologies = new object[] { new { code = "ECW_C05_02", published = 1, bound = 1, anyBinding = 1, tables = new[] { "T3_00" } } },
+            tables = new object[] { new { document = Doc, period = 202601, table = "T3_00", rowKeys = new[] { "p9-0001" }, maxRows = 5 } },
+            results = new[] { Res("ECW_EC_tons_301", "0.001"), Res("ECW_EC_tons_SumXiDivMi", "0.7") },
+        };
+        File.WriteAllText(f.State, JsonSerializer.Serialize(state));
+
+        var classes = Classes(RunCompare(f, "interm").Root);
+
+        Assert.Equal(1, classes["MATCH"]);
+        Assert.Equal(1, classes["ECR_ONLY_INTERMEDIATE"]);
+        Assert.False(classes.ContainsKey("ECR_ONLY"));
+    }
+
+    /// <summary>
     /// P3: Published методологія з прив'язками, усі IsActive=0 -> MISSING_BINDING_INACTIVE (а не MISSING_NO_BINDING);
     /// справжня відсутність прив'язки лишається MISSING_NO_BINDING.
     /// </summary>

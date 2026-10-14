@@ -1537,10 +1537,19 @@ function Stage-LandParity {
         $saFile = Join-Path $repo 'docs\delivery\reference-data\land-template\land-substance-applicability.json'
         $saDoc = Get-Content -LiteralPath $saFile -Raw -Encoding UTF8 | ConvertFrom-Json
         $saEntry = $saDoc.methodologies.PSObject.Properties[$name]
+        # ✎ 2026-10-14 (правило 2а): категорії змішані (суфікси речовин + потоки FG/LPG без суфікса, C11_01/C11_02) -
+        # склад = суфікси ∪ словник, але лише коли для методології є обгортка SUBSTANCE_APPLICABLE (substanceApplicability
+        # у моделі): без неї розширений склад дав би ECR_ONLY по чужих речовинах рядка.
+        $saWrapper = ($null -ne $Mdl.substanceApplicability) -and ($null -ne $Mdl.substanceApplicability.methodologies.PSObject.Properties[$name])
+        $mixed = $saWrapper -and (Test-LandMixedFuelStreamCategories -Categories $cats)
         $resolved = Resolve-LandMethodologySubstanceCodes -SuffixCodes $suffixCodes `
             -ApplicabilityCodes $(if ($null -ne $saEntry) { $saEntry.Value.codes } else { $null }) `
-            -FromApplicability ($null -ne $fromApplicability -and [bool]$fromApplicability.Value)
+            -FromApplicability ($null -ne $fromApplicability -and [bool]$fromApplicability.Value) `
+            -MixedFuelStreamCategories $mixed
         $codes = @($resolved.Codes)
+        if ($resolved.Source -eq 'SuffixUnionApplicability') {
+            Log "  ${name}: категорії змішані (суфікси речовин + потоки FG/LPG) - склад = суфікси ∪ словник застосовності ($($codes.Count) кодів, суфіксів $(@($suffixCodes).Count)); ОБОВ'ЯЗКОВО далі -Stage SubstanceApplicability у цій самій чернетці ДО публікації (інакше ECR_ONLY по чужих речовинах)"
+        }
         if ($resolved.Source -eq 'ApplicabilityFallback') {
             Log "  ${name}: у категоріях констант немає суфікса речовини (форма A) - склад речовин зі словника застосовності ($($codes.Count) кодів)"
         }
