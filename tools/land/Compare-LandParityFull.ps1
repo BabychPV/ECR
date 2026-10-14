@@ -8,7 +8,9 @@
                    rows carry _efid and the input columns (the same files are the loader input)
       -OracleTsv   legacy stored results from Export-LandParityOracleFull.ps1 (holds values: never commit)
       -SqlConnection  local stand database EcrLand* (Current calculation runs); or -StateFile (offline JSON, tests)
-    Rows are aligned BY POSITION: sample row i of a table <-> ECR rowKey p<doc>-<i:0000>. The methodology -> table map
+    Rows are aligned BY POSITION: sample row i of a table <-> ECR rowKey p<doc>-<TableCode>-<i:0000> (table-qualified;
+    the legacy p<doc>-<i:0000> is read when the document has no such rows; several candidate tables + different values
+    -> AMBIGUOUS_ECR_KEY). The methodology -> table map
     is taken from cfg.CalculationBinding; -MethodologyTable adds entries for methodologies that have no binding yet
     (C08 / C11 / C12). Classes and tolerances are those of Compare-LandParity.ps1 (MATCH, MATCH_ROUNDING_LOSS, NEAR,
     MISMATCH_*, MISSING_*, MISSING_ROW, MISSING_OUTPUT, ECR_ONLY*, METHODOLOGY_DIFF, LEGACY_DUP_CONFLICT,
@@ -144,6 +146,8 @@ $result = [ordered]@{
     classes = $summary.classes
     byMethodology = $summary.byMethodology
     multiTableResults = $summary.multiTableResults
+    ambiguousEcrKeys = $summary.ambiguousEcrKeys
+    rowKeyFormats = $summary.rowKeyFormats
     groups = $summary.groups
     relThreshold = $summary.relThreshold
     buckets = $summary.buckets

@@ -30,6 +30,7 @@
 .PARAMETER Password        Пароль SecureString (або $env:ECR_PASSWORD).
 .PARAMETER PeriodKey       Обмеження періодів Рік*100+Місяць (202601 або 202601,202602); без нього - усі з файла.
 .PARAMETER Out             Файл звіту JSON (за бажання; без значень комірок).
+.PARAMETER RowKeyFormat    Legacy (за замовчуванням) | Table: формат ключів рядків документа на стенді (p<doc>-<seq> або p<doc>-<TableCode>-<seq>).
 .PARAMETER BatchRows       Рядків в одному PATCH (за замовчуванням 25).
 .PARAMETER ModelPath        Модель Land (land-template.model.json); за замовчуванням з репозиторію. З неї береться перелік GTU-колонок
                            ПО-ТАБЛИЧНО (T10_03: Month + GTU1..4 = 21; T11_03: Month + GTU1..5 = 26).
@@ -60,6 +61,7 @@ param(
     [securestring]$Password,
     $PeriodKey,
     [string]$Out,
+    [ValidateSet('Legacy', 'Table')][string]$RowKeyFormat = 'Legacy',
     [int]$BatchRows = 25,
     [string]$ModelPath,
     [switch]$AllowMissingColumns,
@@ -99,7 +101,7 @@ foreach ($docName in @($docIds.Keys)) {
     $file = Join-Path $SourcePath "$docName.json"
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "У каталозі -SourcePath немає файла '$docName.json'." }
     $parsed = ConvertFrom-LandLargeJson -Text ([IO.File]::ReadAllText((Resolve-Path -LiteralPath $file).ProviderPath))
-    $part = New-LandInputCellPlan -KindName $Kind -DocumentName $docName -Document $parsed -Periods $periods -ModelColumns $modelColumns -SourceWithoutTarget $orphans
+    $part = New-LandInputCellPlan -KindName $Kind -DocumentName $docName -Document $parsed -Periods $periods -ModelColumns $modelColumns -SourceWithoutTarget $orphans -RowKeyFormat $RowKeyFormat
     foreach ($k in $part.Keys) { $plan[$k] = $part[$k] }
 }
 

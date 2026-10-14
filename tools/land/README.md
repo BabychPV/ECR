@@ -1,4 +1,4 @@
-# tools/land: завантаження вкладки «2. Contract» шаблону Land
+﻿# tools/land: завантаження вкладки «2. Contract» шаблону Land
 
 Скрипти PowerShell (Windows PowerShell 5.1 і PowerShell 7) працюють через REST API ECR.
 Нічого не видаляють. Не запускати проти робочої бази замовника без рішення людини.
@@ -543,3 +543,54 @@ C11_10 перелічує обидва написання (з пробілом �
 без нього етапи, як і раніше, обходять усі методології. Вручну лишається аргумент `Land_TypeFuel` (запис довідника з
 `entryId`) у PARITY_1: обгортка `REGFIELD(@Land_TypeFuel,'NAME')` читає Lookup, а підібрати запис довідника без
 стенда етап не може. Публікація (роль-рецензент, `effectiveFrom`) — окреме рішення людини, інструменти її не виконують.
+
+## Ключ рядка документа Land: `p<doc>-<TableCode>-<seq>` (LAND-5094, діагноз Б)
+
+Старий ключ `p<doc>-<seq:0000>` повторювався в кожній таблиці документа, а `calc.CalculationResult` має лише
+`DocumentId` + `SourceRowKey` (без таблиці), тому harness не міг сказати, якій таблиці належить результат, і писав
+його всім таблицям-кандидатам («останній виграє»). Тепер ключ має код таблиці: `p10-T3_00-0001`.
+
+- Генерація й розбір обох форматів: `LandRowKey.Lib.ps1` (`New-LandRowKey`, `ConvertFrom-LandRowKey`).
+- Loader вхідних комірок: `Load-LandInputCells.ps1 -RowKeyFormat Table` (за замовчуванням `Legacy`; формат
+  має збігатися з ключами рядків на стенді, інакше `ROW_MISSING`).
+- Harness `Compare-LandParityFull.ps1` читає обидва формати. Ключ з кодом таблиці - результат ЛИШЕ цієї таблиці.
+  Старий ключ при кількох таблицях-кандидатах із різними значеннями -> клас `AMBIGUOUS_ECR_KEY` (група `other`,
+  значення не порівнюється і не друкується). Формат ключів документа визначається з рядків стенда.
+  `summary.json` (formatVersion 3, без змін): нові поля `ambiguousEcrKeys {keys, byMethodology[]}` і
+  `rowKeyFormats {table, legacy, unknown}`.
+- Міграція тестових документів: перезавантажити рядки новим ключем і зробити один recalc (вікно K1); доки
+  стенд має старі ключі, harness працює в режимі Legacy і чесно позначає колізії.
+
+## Loader рядків: `Load-LandRows.ps1` (LAND-5094)
+
+Завантажує рядки ПОВНОГО набору (`LAND-PROD-<n>.json`, поза репозиторієм) у документи локального стенда; замінює
+позарепозиторний `Load-Full.ps1`. Значень прода в git немає, вихід - лише лічильники й коди.
+
+```powershell
+# Передперегляд лише з файлів і моделі (без -User стенд не читається):
+.\Load-LandRows.ps1 -SourcePath <каталог JSON> -DocMap '{"LAND-PROD-7":12}' -BaseUrl http://localhost:5094 -ConfirmStand localhost:5094
+# Передперегляд зі читанням стенда (NO_DOC / NO_TABLE / колонки / довідники) і запис:
+.\Load-LandRows.ps1 ... -User land-owner -Password $pw -SqlConnection 'Server=localhost;Database=EcrLandUi;Integrated Security=true' `
+    -ConfirmStand localhost:5094/EcrLandUi -Execute
+```
+
+- Прапорці: `-BaseUrl`, `-ConfirmStand` обов'язкові без дефолтів; без `-Execute` (або з `-DryRun`) нічого не пишеться;
+  запис вимагає `-User` і явного `-SqlConnection`; `-PeriodKey`, `-BatchRows`, `-Out`, `-ModelPath`,
+  `-RowKeyFormat Table|Legacy` (дефолт `Table`).
+- rowKey: `p<doc>-<TableCode>-<seq:0000>` - унікальний між таблицями документа (див. розділ про ключ рядка вище).
+- Кап: за замовчуванням НЕМАЄ (`-MaxRowsPerTable 0`). Старий кап (498 із 788 у T3_00, 184 із 368 у T9_04) був числом
+  рядків Excel-шаблону (`excel.rowCount`), а не `MaxDynamicRows` (1000 / 500); явний `-MaxRowsPerTable N` лічиться як `capped`.
+- Мапінг колонок: спершу `prodColumnMapping` моделі (аліаси, місячні колонки з нерегулярними кодами: T9_04
+  `SubstanceConsumptionKg/KgH`, T11c/d `No_*` -> `FB_*No`), далі вбудовані аліаси
+  (`Land_Measure_ReleaseColdVent`->`ReleaseOnColdVentYesNo`, `Land_Measure_NumberOperations`->`NumberOfOperationsN`,
+  `Land_NAE`->`IDCodeNAEProject|IDCodeMPEProject` (T6_12), `Land_Agent_*`/`Land_TrappingEfficienty`->довгі `K1…/B1…/DustTrappingEfficiency`,
+  `Land_TypeFuel`->`TypeOfFuel|FuelType`), далі те саме ім'я, `_M<mm>`, `…Ref`. Формульні (readOnly) колонки ціллю не бувають.
+- Лічильники: `unmapped` (колонка джерела без цілі), `sourceWithoutColumn` (вхідна колонка шаблону без джерела: нічого
+  не вигадується), `missingColumns` (аліас моделі веде на колонку, якої немає в таблиці), `lookupMiss`, `capped`.
+- Код виходу 1: `NO_DOC`, `NO_TABLE` (невідома таблиця прода / таблиці немає в документі), `MISSING_COLUMN`, `NAME_MISMATCH`,
+  відхилені рядки; запис зупиняється до першого PATCH, якщо передперегляд має знахідки.
+- Не завантажуються вода/відходи (`AF_Water_Land_07/07a`, `AF_Waste_Land_08`): ключі за елементами шаблону;
+  лічаться як `SKIPPED_WATER_WASTE`. Заголовок документа й створення документа теж не портовано (id беруться з `-DocMap`).
+- Перезавантаження після зміни ключа/мапінгу (LAND-PROD-6, T6_12) - у K1-вікні, одним recalc.
+- Стан NAME_MISMATCH (ім'я документа на стенді інше, ніж ключ -DocMap) блокує документ і дає exit 1; обхід лише явним `-AllowNameMismatch`.
+- Невідомі таблиці прода дають NO_TABLE (exit 1) і блокують -Execute. Явно й не за замовчуванням: `-SkipUnknownTables` (пропуск із WARN і лічильником SKIPPED_UNKNOWN) та `-IncludeTables 'T9_04,T9_07'` (лише ці коди таблиць; решта NOT_INCLUDED).
