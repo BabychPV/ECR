@@ -498,10 +498,10 @@ public sealed class RegistryAggregateFunctionTests
     [InlineData("REGMAX")]
     [InlineData("REGCOUNT")]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Агрегати_це_розширення_недоступні_в_Legacy(string name)
+    public void Агрегати_це_розширення_дозволені_в_Legacy_D426(string name)
     {
         Assert.Equal(FunctionTier.Extension, DialectCatalog.TierOf(name));
-        Assert.False(DialectCatalog.IsAllowedIn(name, NumericMode.Legacy));
+        Assert.True(DialectCatalog.IsAllowedIn(name, NumericMode.Legacy));
         Assert.True(DialectCatalog.IsAllowedIn(name, NumericMode.Strict));
         Assert.True(RegistryForms.Handles(name, ExpressionDialect.Methodology));
         Assert.True(RegistryForms.Handles(name.ToLowerInvariant(), ExpressionDialect.Template));

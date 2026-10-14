@@ -263,10 +263,11 @@ public sealed class MethodologyRegistryPublishTests
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-9.18")]
-    [InlineData("REGSUM('GAS_COMPOSITION', ROW.CASE = !CASE, ROW.MOL_PCT) / 100")]
-    [InlineData("REGFIND('STREAM_CASE', @Stream, @HmbCase)")]
-    public async Task Legacy_з_функцією_довідника_ECR_CALC_0433(string expression)
+    [InlineData("Ln(REGSUM('GAS_COMPOSITION', ROW.CASE = !CASE, ROW.MOL_PCT) / 100)")]
+    [InlineData("Ln(REGFIND('STREAM_CASE', @Stream, @HmbCase))")]
+    public async Task Legacy_з_Ln_навіть_разом_з_довідником_ECR_CALC_0433(string expression)
     {
+        // ✎ D-426: REG* у Legacy дозволені; відмова лишається для Ln/ifs/CONVERT/SUBSTANCE.
         _version.SetModes(NumericMode.Legacy, CalendarMode.Actual, TraceLevel.ErrorsOnly);
         Formulas(Hse301(("MU", expression)));
 
@@ -274,7 +275,26 @@ public sealed class MethodologyRegistryPublishTests
 
         Assert.Equal("ECR-CALC-0433", error.ErrorCode);
         Assert.Equal("err.ECR-CALC-0433.legacyExtensionFunction", error.Details!["messageKey"]);
+        Assert.Contains("Ln", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("REGSUM", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("REGFIND", error.Message, StringComparison.Ordinal);
         Assert.False(_version.IsPublished);
+    }
+
+    /// <summary>✎ D-426: функція довідника у Legacy публікується (раніше — ECR-CALC-0433).</summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.18")]
+    [InlineData("REGSUM('GAS_COMPOSITION', ROW.CASE = !CASE, ROW.MOL_PCT) / 100")]
+    [InlineData("REGFIELD(REGFIND('STREAM_CASE', @Stream, @HmbCase), 'T_C')")]
+    public async Task Legacy_з_функцією_довідника_публікується_D426(string expression)
+    {
+        _version.SetModes(NumericMode.Legacy, CalendarMode.Actual, TraceLevel.ErrorsOnly);
+        Formulas(Hse301(("MU", expression)));
+
+        await Publish();
+
+        Assert.True(_version.IsPublished);
     }
 
     /// <summary>

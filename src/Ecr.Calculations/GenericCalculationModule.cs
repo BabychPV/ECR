@@ -375,8 +375,12 @@ public sealed class GenericCalculationModule(
         var period = binding.Period;
 
         // ⛔ D-161: формули `Legacy` не бачать `EntryRef` (побітно як до RT-23a); `Strict` — бачать.
+        // ✎ D-426: виняток — `Legacy`-версія, що читає довідники (`binding.Registries` є лише тоді, коли
+        // формули версії/бібліотек кличуть REG*): `REGFIELD(@Lookup, 'NAME')` потребує id запису. Версії
+        // без REG* лишаються побітно як були.
+        var entryRef = numeric.Mode == NumericMode.Strict || binding.Registries is not null;
         var arguments = input.Arguments.ToDictionary(
-            a => a.ArgumentCode, a => ToValue(a, numeric.Mode == NumericMode.Strict, legacyNumericText: numeric.Mode == NumericMode.Legacy),
+            a => a.ArgumentCode, a => ToValue(a, entryRef, legacyNumericText: numeric.Mode == NumericMode.Legacy),
             StringComparer.OrdinalIgnoreCase);
 
         // ⛔ D-OA: необов'язковий аргумент (`Name?` у списку формули версії чи бібліотеки) без комірки в рядку
@@ -826,6 +830,16 @@ public sealed class GenericCalculationModule(
                 trace.RecordsFailures ? Describe(formula, parsed.Expression, context, numeric, scope) : null,
                 source);
             return result;
+        }
+
+        // ✎ D-427 (Q-088): у `Legacy` результат КОЖНОЇ формули з NaN/±∞ стає 0 ДО того, як наступна формула
+        // прочитає його через `!Name` — як чинна система (`Utilities.cs:58-71`: перевірка на кожній формулі).
+        // Причина — крок трейсу `MaskedZeroReason`. `Strict` не зачеплено: там #DIV/0 — помилка-значення.
+        if (numeric.Mode == NumericMode.Legacy && MaskedZero.ReasonFor(result) is var maskReason
+            && maskReason != MaskedZeroReason.None)
+        {
+            trace.Masked(formula.Code, formula.Expression, 0m, maskReason);
+            result = ExpressionValue.LegacyNumber(0d);
         }
 
         // ⚠ Входи збираються лише для кроку, який запишеться: на `ErrorsOnly` невидима
