@@ -38,7 +38,12 @@
                              never folded (the legacy code has no type1 for 415): ECR_ONLY.
                              Outputs ECW_EC_<tons|gsec>_XXX are always renamed by the substance code of the result
                              (SUBSTANCE_CODE of the register entry; C12_03 and the like).
-.PARAMETER RelThreshold      relative error up to which a NEAR/MISMATCH cell counts as matched in the report buckets
+.PARAMETER NoBranchSelector  disable the branch selector (ECW_C11_01 / C11_02 / C11_11_02 / C11_11_03): the legacy code
+                             computes ONE branch per (row, output) chosen by NAE/stream, ECR emits all of them. By default only
+                             the legacy-selected branch is compared; the other branches are ECR_ONLY_NOT_SELECTED (summary:
+                             branchSelectedCells / notSelectedCells). With the switch the branches are folded and several
+                             present -> BRANCH_BOTH_PRESENT.
+.PARAMETER RelThreshold     relative error up to which a NEAR/MISMATCH cell counts as matched in the report buckets
                              (default 1e-9); the report: matched / withinThreshold / mismatch / ecrOnly / oracleOnly / other
                              per methodology and per substance (summary.json buckets+bySubstance, <OutPrefix>.buckets.tsv).
 .PARAMETER AggregateBy       None (default) | NaePhase
@@ -63,6 +68,7 @@ param(
     [double]$TolAbs = 1e-9,
     [double]$TolRel = 1e-12,
     [double]$StorageAbs = 5e-13,
+    [switch]$NoBranchSelector,
     [switch]$ValidateOnly
 )
 $ErrorActionPreference = 'Stop'
@@ -122,6 +128,7 @@ if ($files.Count -eq 0) { throw "No LAND-PROD-<n>.json documents selected in '$J
 $state = New-LandParityState
 $state.MethodologyTable = $methTableMap
 $state.TypeFold = @(@($state.TypeFold) + @($typeFoldList))
+if ($NoBranchSelector) { $state.BranchSelector = @() }
 if ([string]::IsNullOrWhiteSpace($StateFile)) { Import-LandParityStateSql $SqlConnection $state }
 else { Import-LandParityStateFile $StateFile $state }
 Write-Host "ecr results: $($state.ResultCount); loaded rows: $($state.Loaded.Count)"
@@ -144,6 +151,8 @@ $result = [ordered]@{
     aggregateGroups = [int]$acc.AggregateGroups
     totalCells = $summary.totalCells
     ecrNonRunningCells = $summary.ecrNonRunningCells
+    branchSelectedCells = $summary.branchSelectedCells
+    notSelectedCells = $summary.notSelectedCells
     classes = $summary.classes
     byMethodology = $summary.byMethodology
     multiTableResults = $summary.multiTableResults

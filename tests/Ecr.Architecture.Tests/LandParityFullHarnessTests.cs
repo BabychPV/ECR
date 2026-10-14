@@ -447,6 +447,99 @@ public sealed class LandParityFullHarnessTests
     }
 
     /// <summary>
+    /// Селектор гілки (C11_01): легасі рахує ОДНУ гілку за NAE/потоком (ECW_C11_01.cs:183-208), ECR - усі чотири на одному
+    /// ключі. З селектором вибрана гілка порівнюється (MATCH), решта - ECR_ONLY_NOT_SELECTED; без селектора
+    /// (-NoBranchSelector) - BRANCH_BOTH_PRESENT. Мутація: вимкнути селектор (BranchSelector = @()) - перший вимір
+    /// червоніє (замість MATCH - BRANCH_BOTH_PRESENT); підмінити вибір гілки - MISMATCH.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [InlineData("6648", "type2", false)]
+    [InlineData("0100", "type1_2", false)]
+    [InlineData("6648", "type2", true)]
+    public void Селектор_гілки_C11_01_порівнює_лише_обрану_гілку(string nae, string selected, bool noSelector)
+    {
+        using var f = BuildSingleRowFixture();
+        // Рядок фікстури має Land_NAE = N1; для селектора потрібен власний NAE.
+        var sample = new
+        {
+            doc = Doc,
+            periods = new Dictionary<string, object>
+            {
+                ["2026-01"] = new Dictionary<string, object>
+                {
+                    [Table] = new { columns = new[] { "Land_No", "Land_NAE", "Land_Status", "Land_TypeFuel" }, rows = new[] { Row(1, nae, "E1") } },
+                },
+            },
+        };
+        File.WriteAllText(Path.Combine(f.Dir.FullName, Doc + ".json"), JsonSerializer.Serialize(sample));
+
+        var values = new Dictionary<string, string> { ["type1_1"] = "0.1", ["type1_2"] = "0.2", ["type1_3"] = "0.3", ["type2"] = "0.5" };
+        File.WriteAllLines(f.Oracle, [TsvLine("E1", 1, nae, values[selected], "ECW_C11_01")]);
+
+        var state = new
+        {
+            methodologies = new object[] { new { code = "ECW_C11_01", published = 1, bound = 1, anyBinding = 1, tables = new[] { "T3_00" } } },
+            tables = new object[] { new { document = Doc, period = 202601, table = "T3_00", rowKeys = new[] { "p9-0001" }, maxRows = 5 } },
+            results = values.Select(kv => new
+            {
+                document = Doc,
+                period = 202601,
+                methodology = "ECW_C11_01",
+                rowKey = "p9-0001",
+                outputCode = "ECW_EC_tons_301_" + kv.Key,
+                value = kv.Value,
+            }).ToArray(),
+        };
+        File.WriteAllText(f.State, JsonSerializer.Serialize(state));
+
+        var (root, _, _) = noSelector ? RunCompare(f, "branch", "-NoBranchSelector", "-TypeFoldMethodology", "^ECW_C11_01$") : RunCompare(f, "branch");
+        var classes = Classes(root);
+
+        if (noSelector)
+        {
+            Assert.Equal(1, classes["BRANCH_BOTH_PRESENT"]);
+            Assert.False(classes.ContainsKey("ECR_ONLY_NOT_SELECTED"));
+            Assert.Equal(0, root.GetProperty("branchSelectedCells").GetInt32());
+        }
+        else
+        {
+            Assert.Equal(1, classes["MATCH"]);
+            Assert.Equal(3, classes["ECR_ONLY_NOT_SELECTED"]);
+            Assert.False(classes.ContainsKey("BRANCH_BOTH_PRESENT"));
+            Assert.False(classes.ContainsKey("ECR_ONLY"));
+            Assert.Equal(1, root.GetProperty("branchSelectedCells").GetInt32());
+            Assert.Equal(3, root.GetProperty("notSelectedCells").GetInt32());
+        }
+    }
+
+    /// <summary>
+    /// Проміжні виходи SumXiDiv* (C11_11_02) - не вихід легасі: ECR_ONLY_INTERMEDIATE, а не ECR_ONLY.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Проміжний_вихід_SumXiDiv_має_клас_ECR_ONLY_INTERMEDIATE()
+    {
+        using var f = BuildSingleRowFixture();
+        File.WriteAllLines(f.Oracle, [TsvLine("E1", 1, "N1", "0.001", "ECW_C05_02")]);
+        static object Res(string output, string value) =>
+            new { document = Doc, period = 202601, methodology = "ECW_C05_02", rowKey = "p9-0001", outputCode = output, value };
+        var state = new
+        {
+            methodologies = new object[] { new { code = "ECW_C05_02", published = 1, bound = 1, anyBinding = 1, tables = new[] { "T3_00" } } },
+            tables = new object[] { new { document = Doc, period = 202601, table = "T3_00", rowKeys = new[] { "p9-0001" }, maxRows = 5 } },
+            results = new[] { Res("ECW_EC_tons_301", "0.001"), Res("ECW_EC_tons_SumXiDivMi", "0.7") },
+        };
+        File.WriteAllText(f.State, JsonSerializer.Serialize(state));
+
+        var classes = Classes(RunCompare(f, "interm").Root);
+
+        Assert.Equal(1, classes["MATCH"]);
+        Assert.Equal(1, classes["ECR_ONLY_INTERMEDIATE"]);
+        Assert.False(classes.ContainsKey("ECR_ONLY"));
+    }
+
+    /// <summary>
     /// P3: Published методологія з прив'язками, усі IsActive=0 -> MISSING_BINDING_INACTIVE (а не MISSING_NO_BINDING);
     /// справжня відсутність прив'язки лишається MISSING_NO_BINDING.
     /// </summary>
