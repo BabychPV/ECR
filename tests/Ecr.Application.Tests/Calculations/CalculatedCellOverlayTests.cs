@@ -176,6 +176,60 @@ public sealed class CalculatedCellOverlayTests
         Assert.Null(Emission(cells, 1));
     }
 
+    /// <remarks>
+    /// T1 (D-401): дві таблиці одного документа з однаковим <c>RowKey</c> і спільною прив'язкою — кожна
+    /// отримує СВОЄ число за екземпляром. Мутація: прибрати відбір за <c>TableInstanceId</c> — 30 (сума) або порожньо.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task T1_Дві_таблиці_з_однаковим_RowKey_і_спільною_прив_язкою_кожна_бере_своє_число()
+    {
+        Binding("{}", versions: [5]);
+        Results(new CalculationResultRow(5, "R1", "EMISSION", 10m, 8, null, InstanceId),
+                new CalculationResultRow(5, "R1", "EMISSION", 20m, 8, null, InstanceId + 1));
+        var overlay = new CalculatedCellOverlay(_methodologies, _results);
+        IReadOnlySet<int> calculated = new HashSet<int> { EmissionColumnId };
+
+        var result = await overlay.ApplyAsync(
+            DocumentId, PeriodKeyValue,
+            [
+                new OverlayTable(InstanceId, TableDefId, Rows, [], calculated),
+                new OverlayTable(InstanceId + 1, TableDefId, Rows, [], calculated),
+            ],
+            CancellationToken.None);
+
+        Assert.Equal(10m, Emission(result[InstanceId], 1));
+        Assert.Equal(20m, Emission(result[InstanceId + 1], 1));
+    }
+
+    /// <remarks>Мутація: брати B разом з A — 10 + 3 = 13.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Результат_свого_екземпляра_має_перевагу_над_старим_без_екземпляра_а_чужий_ігнорується()
+    {
+        Binding("{}", versions: [5]);
+        Results(new CalculationResultRow(5, "R1", "EMISSION", 10m, 8, null, InstanceId),
+                new CalculationResultRow(5, "R1", "EMISSION", 3m, 8, null),
+                new CalculationResultRow(5, "R2", "EMISSION", 99m, 8, null, InstanceId + 7));
+
+        var cells = await ApplyAsync([]);
+
+        Assert.Equal(10m, Emission(cells, 1));  // A виграє над B
+        Assert.Null(Emission(cells, 2));        // C — чужий екземпляр
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Старий_результат_без_екземпляра_діє_за_тимчасовим_правилом()
+    {
+        Binding("{}", versions: [5]);
+        Results(new CalculationResultRow(5, "R1", "EMISSION", 4m, 8, null));
+
+        var cells = await ApplyAsync([]);
+
+        Assert.Equal(4m, Emission(cells, 1));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Таблиця_без_колонки_Calculated_не_робить_жодного_запиту()

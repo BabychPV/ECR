@@ -137,9 +137,18 @@ public sealed partial class CalculatedCellOverlay(
                         continue;
                     }
 
-                    var values = byRow[(rowKey, binding.OutputCode.ToUpperInvariant())]
+                    // ⛔ D-401, правило відбору: A — результат ЦЬОГО екземпляра таблиці;
+                    // B — без екземпляра (прогони до D-401) → тимчасове правило нижче;
+                    // C — чужий екземпляр → ігноруємо. Є хоч одне A — B не береться: прогін
+                    // з екземпляром точніший за застарілий.
+                    var candidates = byRow[(rowKey, binding.OutputCode.ToUpperInvariant())]
                         .Where(r => binding.VersionIds.Contains(r.MethodologyVersionId))
                         .ToList();
+                    var values = candidates.Where(r => r.TableInstanceId == table.TableInstanceId).ToList();
+                    if (values.Count == 0)
+                    {
+                        values = [.. candidates.Where(r => r.TableInstanceId is null)];
+                    }
 
                     if (values.Count == 0)
                     {

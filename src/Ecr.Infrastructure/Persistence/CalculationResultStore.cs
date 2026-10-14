@@ -697,6 +697,8 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
                         && runIds.Contains(r.CalculationRunId))
             .OrderBy(r => r.SourceRowKey)
             .ThenBy(r => r.OutputCode)
+            .ThenBy(r => r.TableInstanceId)
+            .ThenBy(r => r.SubstanceEntryId)
             .Take(MaxResults + 1)
             .Select(r => new
             {
