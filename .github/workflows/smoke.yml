@@ -143,7 +143,7 @@ jobs:
 
       - name: dotnet ef
         run: |
-          dotnet tool install --global dotnet-ef --version 10.0.11
+          dotnet tool install --global dotnet-ef --version 10.0.13
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
       # ⚠ Без restore `dotnet ef migrations script` у `setup-dev-db.ps1` падає з
