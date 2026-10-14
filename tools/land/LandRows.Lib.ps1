@@ -272,3 +272,11 @@ function Get-LandRowsSourceWithoutColumn {
     }
     return @($absent.Keys | Sort-Object)
 }
+
+function Get-LandRowsDocBlock {
+    <# Document-level stop reason from the stand name state: NO_DOC | NAME_MISMATCH (unless allowed) | '' (go on). #>
+    param([AllowEmptyString()][string]$NameState, [switch]$AllowNameMismatch)
+    if ($NameState -eq 'NO_DOC') { return 'NO_DOC' }
+    if ($NameState -eq 'NAME_MISMATCH' -and -not $AllowNameMismatch) { return 'NAME_MISMATCH' }
+    return ''
+}

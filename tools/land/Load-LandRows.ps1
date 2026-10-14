@@ -24,6 +24,9 @@
 .PARAMETER PeriodKey        only these periods (YYYYMM, list)
 .PARAMETER MaxRowsPerTable  0 (default) = NO cap; > 0 = explicit cap per table-period (counted as capped)
 .PARAMETER RowKeyFormat     Table (default) = p<doc>-<TableCode>-<seq>; Legacy = p<doc>-<seq> (diagnostics only)
+.PARAMETER AllowNameMismatch  do not stop on NAME_MISMATCH (document name on the stand differs from the -DocMap key)
+.PARAMETER SkipUnknownTables  unknown prod tables are skipped with a WARN and counted (SKIPPED_UNKNOWN) instead of NO_TABLE (exit 1); NOT the default
+.PARAMETER IncludeTables     only these template table codes (T9_04,T9_07); others are counted NOT_INCLUDED
 .PARAMETER BatchRows        rows per PATCH (default 25)
 .PARAMETER ModelPath        land-template.model.json (default: the repository one)
 .PARAMETER Out              JSON report (counters, no values)
@@ -43,6 +46,9 @@ param(
     [int]$MaxRowsPerTable = 0,
     [ValidateSet('Table', 'Legacy')][string]$RowKeyFormat = 'Table',
     [int]$BatchRows = 25,
+    [string]$IncludeTables,
+    [switch]$AllowNameMismatch,
+    [switch]$SkipUnknownTables,
     [string]$ModelPath,
     [string]$Out,
     [switch]$Execute,
@@ -97,7 +103,9 @@ if ($haveCredentials) {
 $results = New-Object System.Collections.ArrayList
 $prepared = New-Object System.Collections.ArrayList
 $nameState = @{}
-$counters = @{ NO_DOC = 0; NO_TABLE = 0; NAME_MISMATCH = 0; SKIPPED_WATER_WASTE = 0; MISSING_COLUMN = 0 }
+$counters = @{ NO_DOC = 0; NO_TABLE = 0; NAME_MISMATCH = 0; SKIPPED_WATER_WASTE = 0; MISSING_COLUMN = 0; SKIPPED_UNKNOWN = 0; NOT_INCLUDED = 0 }
+$includeList = @()
+if (-not [string]::IsNullOrWhiteSpace($IncludeTables)) { $includeList = @(ConvertTo-LandStringList $IncludeTables) }
 $unmappedAll = @{}
 
 foreach ($docName in @($docIds.Keys | Sort-Object)) {
@@ -113,8 +121,7 @@ foreach ($docName in @($docIds.Keys | Sort-Object)) {
     if ($haveCredentials -and -not $nameState.ContainsKey($docName)) {
         $nameState[$docName] = Get-LandDocumentNameState -DocumentId $docId -ExpectedName $docName
     }
-    $docBlocked = ''
-    if ($nameState.ContainsKey($docName) -and $nameState[$docName] -eq 'NO_DOC') { $docBlocked = 'NO_DOC' }
+    $docBlocked = Get-LandRowsDocBlock -NameState $(if ($nameState.ContainsKey($docName)) { $nameState[$docName] } else { '' }) -AllowNameMismatch:$AllowNameMismatch
 
     foreach ($pk in @($periodsNode.Keys | Sort-Object)) {
         $periodNumber = [int]($pk.Replace('-', ''))
@@ -133,6 +140,8 @@ foreach ($docName in @($docIds.Keys | Sort-Object)) {
             $srcRows = @($periodsNode[$pk][$prodTable]['rows'])
             $row.prodRows = $srcRows.Count
             if ($docBlocked) { $row.skipped = $docBlocked; $counters[$docBlocked]++; [void]$results.Add([pscustomobject]$row); continue }
+            if (-not $tableKey -and $SkipUnknownTables) { $row.skipped = 'SKIPPED_UNKNOWN'; $counters.SKIPPED_UNKNOWN++; [void]$results.Add([pscustomobject]$row); continue }
+            if ($tableKey -and $includeList.Count -gt 0 -and $includeList -notcontains ($tableKey -split '\|')[1]) { $row.skipped = 'NOT_INCLUDED'; $counters.NOT_INCLUDED++; [void]$results.Add([pscustomobject]$row); continue }
             if (-not $tableKey) { $row.skipped = 'NO_TABLE'; $row.codes = 'UNKNOWN_PROD_TABLE;'; $counters.NO_TABLE++; [void]$results.Add([pscustomobject]$row); continue }
             if (Test-LandRowsSpecialTable -TableKey $tableKey) { $row.skipped = 'SKIPPED_WATER_WASTE'; $counters.SKIPPED_WATER_WASTE++; [void]$results.Add([pscustomobject]$row); continue }
             $tableCode = ($tableKey -split '\|')[1]
@@ -181,7 +190,8 @@ $totCells = [int](($results | Measure-Object cells -Sum).Sum)
 $totCapped = [int](($results | Measure-Object capped -Sum).Sum)
 $totMiss = [int](($results | Measure-Object lookupMiss -Sum).Sum)
 $modeText = if ($haveCredentials) { 'stand read' } else { 'files+model only (no -User: NO_DOC / lookups NOT checked)' }
-Write-Host "PREVIEW ($modeText): table-periods $($results.Count), rows $totRows, cells $totCells, capped $totCapped, NO_DOC $($counters.NO_DOC), NO_TABLE $($counters.NO_TABLE), NAME_MISMATCH $($counters.NAME_MISMATCH), MISSING_COLUMN $($counters.MISSING_COLUMN), SKIPPED_WATER_WASTE $($counters.SKIPPED_WATER_WASTE), lookupMiss $totMiss, rowKeyFormat $RowKeyFormat, maxRowsPerTable $MaxRowsPerTable."
+Write-Host "PREVIEW ($modeText): table-periods $($results.Count), rows $totRows, cells $totCells, capped $totCapped, NO_DOC $($counters.NO_DOC), NO_TABLE $($counters.NO_TABLE), NAME_MISMATCH $($counters.NAME_MISMATCH), MISSING_COLUMN $($counters.MISSING_COLUMN), SKIPPED_WATER_WASTE $($counters.SKIPPED_WATER_WASTE), SKIPPED_UNKNOWN $($counters.SKIPPED_UNKNOWN), NOT_INCLUDED $($counters.NOT_INCLUDED), lookupMiss $totMiss, rowKeyFormat $RowKeyFormat, maxRowsPerTable $MaxRowsPerTable."
+if ($counters.SKIPPED_UNKNOWN -gt 0) { Write-Host "WARN -SkipUnknownTables: $($counters.SKIPPED_UNKNOWN) table-periods of unknown prod tables were NOT loaded." }
 if ($unmappedAll.Count -gt 0) { Write-Host ('SOURCE WITHOUT TARGET (table/column, no values): ' + ((@($unmappedAll.Keys) | Sort-Object) -join ', ')) }
 
 $blocked = ($counters.NO_DOC + $counters.NO_TABLE + $counters.MISSING_COLUMN + $counters.NAME_MISMATCH) -gt 0

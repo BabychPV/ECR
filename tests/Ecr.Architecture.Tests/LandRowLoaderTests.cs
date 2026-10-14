@@ -12,7 +12,7 @@ namespace Ecr.Architecture.Tests;
 /// </summary>
 public sealed class LandRowLoaderTests
 {
-    private static string Probe(string body)
+    private static string Probe(string body, string lib = "LandRows.Lib.ps1")
     {
         var dir = Directory.CreateTempSubdirectory("ecr-rows-");
         try
@@ -21,7 +21,7 @@ public sealed class LandRowLoaderTests
             File.WriteAllText(
                 script,
                 "$ErrorActionPreference = 'Stop'\n" +
-                $". '{LandRowKeyTests.LandFile("LandRows.Lib.ps1").Replace("'", "''")}'\n" +
+                $". '{LandRowKeyTests.LandFile(lib).Replace("'", "''")}'\n" +
                 """
                 function Col($code, $type = 'Decimal', [bool]$ro = $false) { @{ code = $code; dataType = $type; readOnly = $ro; expr = $null; reg = $null } }
                 """ + "\n" + body);
@@ -201,6 +201,98 @@ public sealed class LandRowLoaderTests
         finally
         {
             Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void NAME_MISMATCH_блокує_документ_якщо_явно_не_дозволено()
+    {
+        var json = Probe("""
+            [ordered]@{
+              noDoc = Get-LandRowsDocBlock -NameState 'NO_DOC'
+              mismatch = Get-LandRowsDocBlock -NameState 'NAME_MISMATCH'
+              allowed = Get-LandRowsDocBlock -NameState 'NAME_MISMATCH' -AllowNameMismatch
+              ok = Get-LandRowsDocBlock -NameState 'OK'
+              empty = Get-LandRowsDocBlock -NameState ''
+            } | ConvertTo-Json -Compress
+            """);
+        using var doc = JsonDocument.Parse(json);
+        var r = doc.RootElement;
+        Assert.Equal("NO_DOC", r.GetProperty("noDoc").GetString());
+        Assert.Equal("NAME_MISMATCH", r.GetProperty("mismatch").GetString());
+        Assert.Equal(string.Empty, r.GetProperty("allowed").GetString());
+        Assert.Equal(string.Empty, r.GetProperty("ok").GetString());
+        Assert.Equal(string.Empty, r.GetProperty("empty").GetString());
+
+        // Скрипт справді користується цим рішенням і має явну опцію.
+        var script = File.ReadAllText(LandRowKeyTests.LandFile("Load-LandRows.ps1"));
+        Assert.Contains("Get-LandRowsDocBlock", script, StringComparison.Ordinal);
+        Assert.Contains("[switch]$AllowNameMismatch", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Ключ_з_таблицею_виграє_навіть_коли_рядка_немає_у_Loaded_і_кандидатів_кілька()
+    {
+        var json = Probe("""
+            $st = New-LandParityState
+            $st.MethTables['ECW_C05_02'] = @('T3_00', 'T4_01')
+            # Loaded is EMPTY: the legacy fallback would attribute the result to BOTH candidate tables.
+            Add-LandParityEcrResult $st 'LAND-PROD-7' 202601 'ECW_C05_02' 'p7-T3_00-0001' 'ECW_EC_tons_301' 1.5
+            [ordered]@{
+              keys = @($st.Ecr.Keys | Sort-Object)
+              multi = $st.MultiTable.Count
+            } | ConvertTo-Json -Compress
+            """, "LandParity.Lib.ps1");
+        using var doc = JsonDocument.Parse(json);
+        var keys = doc.RootElement.GetProperty("keys").EnumerateArray().Select(e => e.GetString()!).ToArray();
+
+        Assert.Equal(["LAND-PROD-7|202601|T3_00|p7-T3_00-0001"], keys);
+        Assert.Equal(0, doc.RootElement.GetProperty("multi").GetInt32());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void SkipUnknownTables_і_IncludeTables_лічаться_а_за_замовчуванням_невідома_таблиця_блокує()
+    {
+        var (dir, _) = Sample("AF_Air_Land_Bogus_Table", "Land_Whatever", "SENTINEL-2");
+        try
+        {
+            string[] common =
+            [
+                LandRowKeyTests.LandFile("Load-LandRows.ps1"), "-SourcePath", dir, "-DocMap", "{\"LAND-PROD-7\":12}",
+                "-BaseUrl", "http://localhost:5094", "-ConfirmStand", "localhost:5094",
+            ];
+            var (e0, _) = LandRowKeyTests.RunPowerShell(common);
+            Assert.Equal(1, e0);
+
+            var (exit, output) = LandRowKeyTests.RunPowerShell([.. common, "-SkipUnknownTables"]);
+            Assert.True(exit == 0, output);
+            Assert.Contains("SKIPPED_UNKNOWN 1", output, StringComparison.Ordinal);
+            Assert.Contains("WARN -SkipUnknownTables", output, StringComparison.Ordinal);
+
+            var (e2, o2) = LandRowKeyTests.RunPowerShell([.. common, "-SkipUnknownTables", "-IncludeTables", "T9_04,T9_07"]);
+            Assert.True(e2 == 0, o2);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+
+        var column = FirstStringColumn("T3_00");
+        var (dir2, _) = Sample("AF_Air_Land_Stationary_Equipment", column, "SENTINEL-3");
+        try
+        {
+            var (exit, output) = LandRowKeyTests.RunPowerShell(
+                LandRowKeyTests.LandFile("Load-LandRows.ps1"), "-SourcePath", dir2, "-DocMap", "{\"LAND-PROD-7\":12}",
+                "-BaseUrl", "http://localhost:5094", "-ConfirmStand", "localhost:5094", "-IncludeTables", "T9_04");
+            Assert.True(exit == 0, output);
+            Assert.Contains("NOT_INCLUDED 1", output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(dir2, recursive: true);
         }
     }
 }
