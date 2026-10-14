@@ -16,9 +16,9 @@ public sealed class LandRowKeyTests
 {
     private static readonly string[] PowerShellPrefix = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"];
 
-    private static string LandFile(string name) => Path.Combine(SourceTree.Root, "tools", "land", name);
+    internal static string LandFile(string name) => Path.Combine(SourceTree.Root, "tools", "land", name);
 
-    private static (int Exit, string Output) RunPowerShell(params string[] args)
+    internal static (int Exit, string Output) RunPowerShell(params string[] args)
     {
         var start = new ProcessStartInfo(DeployScriptHarness.FindPowerShell())
         {
