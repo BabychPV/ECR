@@ -70,6 +70,13 @@ internal sealed partial class StaleResultsMapCache(
     /// <summary>Життя запису (страховка): між-процесні правки видно ≤15 с; власні PATCH - одразу.</summary>
     public static readonly TimeSpan Ttl = TimeSpan.FromSeconds(15);
 
+    /// <summary>
+    /// Життя кешу відбитка довідників (D-430): довідники міняються рідко, а відбиток був запитом на КОЖЕН виклик
+    /// переліку. Власна правка довідника скидає кеш одразу (епоха), чужий процес - до 60 с.
+    /// </summary>
+    public static readonly TimeSpan RegistryFingerprintTtl = TimeSpan.FromSeconds(60);
+
+    private const string RegistryFingerprintKey = "doc-stale-map:registry-fingerprint";
     private const string InFlightKey = "doc-stale-map:in-flight";
     private const string OverflowWarnedKey = "doc-stale-map:overflow-warned";
 
@@ -335,20 +342,129 @@ internal sealed partial class StaleResultsMapCache(
         Message = "Карта застарілості періоду {PeriodKey} перевищила {Max} документів: кеш карти вимкнено для цих запитів, перелік і зведення беруть прямий запит. Перегляньте стелю.")]
     private static partial void LogOverflow(ILogger logger, int periodKey, int max);
 
+    /// <summary>Частина відбитка по довідниках: глобальна, не залежить від періоду (кешується <see cref="RegistryFingerprintTtl"/>).</summary>
+    private sealed record RegistryPart(long RegistryCount, int RegistryChecksum, long UseCount, long UseIdSum);
+
+    private sealed record RunPart(long RunCount, long RunIdSum, int RunChecksum);
+
+    /// <summary>Запис кешу довідників: значення, момент завантаження, епоха процесу на момент завантаження.</summary>
+    private sealed record RegistryEntry(RegistryPart Part, DateTime LoadedAt, long Epoch);
+
+    /// <summary>Тримач запису й замка single-flight; живе в <see cref="IMemoryCache"/> під <see cref="RegistryFingerprintKey"/>.</summary>
+    private sealed class RegistryHolder : IDisposable
+    {
+        public readonly SemaphoreSlim Gate = new(1, 1);
+        public volatile RegistryEntry? Entry;
+
+        public void Dispose() => Gate.Dispose();
+    }
+
     private async Task<FingerprintRow> FingerprintAsync(int periodKey, CancellationToken ct)
     {
-        return await db.Database
-            .SqlQuery<FingerprintRow>($"""
+        // Прогонова частина - на кожен виклик (міжпроцесна подія «Worker завершив прогін» видна одразу);
+        // довідникова - з кешу на RegistryFingerprintTtl.
+        var run = await db.Database
+            .SqlQuery<RunPart>($"""
                 SELECT
                     (SELECT COUNT_BIG(*) FROM calc.CalculationRun WHERE Status = N'Current' AND PeriodKey = {periodKey}) AS RunCount,
                     (SELECT COALESCE(SUM(CAST(Id AS bigint)), 0) FROM calc.CalculationRun WHERE Status = N'Current' AND PeriodKey = {periodKey}) AS RunIdSum,
-                    (SELECT COALESCE(CHECKSUM_AGG(CHECKSUM(Id)), 0) FROM calc.CalculationRun WHERE Status = N'Current' AND PeriodKey = {periodKey}) AS RunChecksum,
-                    (SELECT COUNT_BIG(*) FROM cfg.RegistryDef) AS RegistryCount,
-                    (SELECT COALESCE(CHECKSUM_AGG(CHECKSUM(Id, DataChangedAt)), 0) FROM cfg.RegistryDef) AS RegistryChecksum,
-                    (SELECT COUNT_BIG(*) FROM cfg.RegistryUse WHERE SourceKind = 1) AS UseCount,
-                    (SELECT COALESCE(SUM(CAST(Id AS bigint)), 0) FROM cfg.RegistryUse WHERE SourceKind = 1) AS UseIdSum
+                    (SELECT COALESCE(CHECKSUM_AGG(CHECKSUM(Id)), 0) FROM calc.CalculationRun WHERE Status = N'Current' AND PeriodKey = {periodKey}) AS RunChecksum
                 """)
             .SingleAsync(ct)
             .ConfigureAwait(false);
+
+        var registry = await RegistryPartAsync(ct).ConfigureAwait(false);
+        return new FingerprintRow(
+            run.RunCount, run.RunIdSum, run.RunChecksum,
+            registry.RegistryCount, registry.RegistryChecksum, registry.UseCount, registry.UseIdSum);
+    }
+
+    /// <summary>
+    /// Відбиток довідників з кешем 60 с (D-430). Чинний, поки: вік &lt; <see cref="RegistryFingerprintTtl"/> І епоха
+    /// процесу не рухалась (власна правка довідника піднімає її на коміті - <c>UnitOfWork</c>). Single-flight за
+    /// семафором: слідувачі чекають лідера й перечитують запис. Збій читання: запис до 2xTTL віддається як є,
+    /// старіший - помилка йде вгору, як і до кешу.
+    /// </summary>
+    private async Task<RegistryPart> RegistryPartAsync(CancellationToken ct)
+    {
+        var holder = RegistryHolderFor();
+        var epochNow = epoch?.GlobalValue ?? 0;
+        if (RegistryFresh(holder, epochNow, out var fresh))
+        {
+            return fresh;
+        }
+
+        await holder.Gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (RegistryFresh(holder, epochNow, out fresh))
+            {
+                return fresh;
+            }
+
+            try
+            {
+                var part = await db.Database
+                    .SqlQuery<RegistryPart>($"""
+                        SELECT
+                            (SELECT COUNT_BIG(*) FROM cfg.RegistryDef) AS RegistryCount,
+                            (SELECT COALESCE(CHECKSUM_AGG(CHECKSUM(Id, DataChangedAt)), 0) FROM cfg.RegistryDef) AS RegistryChecksum,
+                            (SELECT COUNT_BIG(*) FROM cfg.RegistryUse WHERE SourceKind = 1) AS UseCount,
+                            (SELECT COALESCE(SUM(CAST(Id AS bigint)), 0) FROM cfg.RegistryUse WHERE SourceKind = 1) AS UseIdSum
+                        """)
+                    .SingleAsync(ct)
+                    .ConfigureAwait(false);
+                holder.Entry = new RegistryEntry(part, clock!.UtcNow, epochNow);
+                return part;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && holder.Entry is { } old
+                && old.Epoch == epochNow && clock!.UtcNow - old.LoadedAt < RegistryFingerprintTtl * 2)
+            {
+                return old.Part;
+            }
+        }
+        finally
+        {
+            holder.Gate.Release();
+        }
+    }
+
+    private bool RegistryFresh(RegistryHolder holder, long epochNow, out RegistryPart part)
+    {
+        if (holder.Entry is { } e && e.Epoch == epochNow && clock!.UtcNow - e.LoadedAt < RegistryFingerprintTtl)
+        {
+            part = e.Part;
+            return true;
+        }
+
+        part = null!;
+        return false;
+    }
+
+    private RegistryHolder RegistryHolderFor()
+    {
+        lock (cache!)
+        {
+            if (!cache.TryGetValue(RegistryFingerprintKey, out RegistryHolder? found) || found is null)
+            {
+                found = new RegistryHolder();
+                cache.Set(RegistryFingerprintKey, found);
+            }
+
+            return found;
+        }
+    }
+
+    /// <summary>
+    /// Прогрів карти періоду для будь-якого автора («*»; ключ - той самий, що в запиті переліку): синхронне
+    /// завантаження з single-flight, без SWR. Повертає кількість застарілих документів або <c>null</c> -
+    /// переповнення. Для служби прогріву (<see cref="StaleMapWarmer"/>).
+    /// </summary>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<int?> WarmAsync(int periodKey, CancellationToken ct)
+    {
+        var maps = await GetAsync(periodKey, [null], ct).ConfigureAwait(false);
+        return maps[0]?.Count;
     }
 }

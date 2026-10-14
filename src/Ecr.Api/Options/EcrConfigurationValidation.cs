@@ -68,6 +68,9 @@ public static partial class EcrConfigurationValidation
         (Ecr.Api.Security.ImportPreviewRateLimitPolicy.PermitKey, 1),
         (Ecr.Api.Security.ImportPreviewRateLimitPolicy.QueueLimitKey, 0),
         ("Jobs:ShutdownTimeoutSeconds", 1),
+
+        // D-430: частіше за 10 с повний запит карти лише навантажує SQL.
+        (Ecr.Api.Startup.StaleMapWarmService.IntervalKey, Ecr.Api.Startup.StaleMapWarmService.MinIntervalSeconds),
         ("Jobs:QueueDepth:RefreshSeconds", 5),
 
         // AN-116: нуль задач Excel одночасно — не «без межі», а книги, яких не бере ніхто.
@@ -113,6 +116,7 @@ public static partial class EcrConfigurationValidation
         "Security:Csp:ReportOnly",
         "Security:Csp:Enforce",
         "Health:WarmupOnStart",
+        Ecr.Api.Startup.StaleMapWarmService.EnabledKey,
         "Jobs:NightlyRecalculation:Enabled",
         "Logging:File:Json",
         Ecr.Api.Observability.TelemetrySetup.EnabledKey,

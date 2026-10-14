@@ -145,6 +145,9 @@ builder.Services.ConfigureHttpJsonOptions(
 builder.Services.AddHostedService<Ecr.Api.Startup.RecurringScheduleService>();
 // Фоновий прогрів знімка /health/facts після старту (не блокує; Health:WarmupOnStart=false вимикає).
 builder.Services.AddHostedService<Ecr.Api.Startup.HealthFactsWarmupService>();
+// D-430 (LP-45): прогрів і фоновий рефреш карти застарілості гарячих періодів; Documents:StaleMapWarm:Enabled=false вимикає.
+builder.Services.AddScoped<Ecr.Infrastructure.Persistence.StaleMapWarmer>();
+builder.Services.AddHostedService<Ecr.Api.Startup.StaleMapWarmService>();
 // ⛔ U8: стандартні 30 с зупинки хоста обривали перерахунок, імпорт чи збір
 // посеред роботи. Тепер задачі отримують скасування на зупинці
 // (`RecurringScheduleService.StopAsync`, до Quartz), а хост чекає, поки вони запишуть `Cancelled`
