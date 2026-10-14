@@ -298,12 +298,14 @@ public sealed class LandRowLoaderTests
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void Рядки_джерела_Dictionary_з_JavaScriptSerializer_проходять_гілку_T9_04_без_MethodCountCouldNotFindBest()
+    public void Рядки_джерела_Dictionary_проходять_гілку_T9_04_без_MethodCountCouldNotFindBest()
     {
         // Windows PowerShell 5.1 віддає рядки як Dictionary<string,object>: у ній немає .Contains(key) (hotfix integ-land-loader-fix).
         var json = Probe("""
-            Add-Type -AssemblyName System.Web.Extensions
-            $rows = (New-Object System.Web.Script.Serialization.JavaScriptSerializer).DeserializeObject('[{"Land_No":"1","Land_NAE":"N1","OperatingTime":"5"}]')
+            # Той самий тип, що віддає JavaScriptSerializer (Dictionary`2), без Windows-only збірки System.Web.Extensions.
+            $row = [System.Collections.Generic.Dictionary[string,object]]::new()
+            $row['Land_No'] = '1'; $row['Land_NAE'] = 'N1'; $row['OperatingTime'] = '5'
+            $rows = @($row)
             $cols = @{ Land_No = (Col 'Land_No' 'String'); OperatingTime = (Col 'OperatingTime' 'String') }
             $p = New-LandRowsTablePlan -DocNumber 7 -TableCode 'T9_04' -MonthNo 1 -SourceRows $rows -ColumnMap $cols -TableAliases @{}
             [ordered]@{ rows = $p.Rows.Count; cells = $p.Cells } | ConvertTo-Json -Compress
