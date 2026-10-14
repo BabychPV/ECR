@@ -43,7 +43,7 @@
                              the legacy-selected branch is compared; the other branches are ECR_ONLY_NOT_SELECTED (summary:
                              branchSelectedCells / notSelectedCells). With the switch the branches are folded and several
                              present -> BRANCH_BOTH_PRESENT.
-.PARAMETER RelThreshold     relative error up to which a NEAR/MISMATCH cell counts as matched in the report buckets
+.PARAMETER RelThreshold      relative error up to which a NEAR/MISMATCH cell counts as matched in the report buckets
                              (default 1e-9); the report: matched / withinThreshold / mismatch / ecrOnly / oracleOnly / other
                              per methodology and per substance (summary.json buckets+bySubstance, <OutPrefix>.buckets.tsv).
 .PARAMETER AggregateBy       None (default) | NaePhase

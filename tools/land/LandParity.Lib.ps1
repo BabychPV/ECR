@@ -240,6 +240,7 @@ function Get-LandParitySelectedBranch {
         'ECW_C11_01' {
             foreach ($n in 6646..6657) { if ($nae.Contains([string]$n)) { return 'type2' } }
             $arg = [string](Get-LandParityV $Row 'Land_TypeFuelOrStream')
+            # Фолбек на Land_TypeFuel - НЕ з легасі (там лише потік): евристика harness для рядків без Land_TypeFuelOrStream.
             if ($arg -eq '') { $arg = [string](Get-LandParityV $Row 'Land_TypeFuel') }
             $s = ''
             if ($arg.Contains('gas') -or $arg.Contains('Gas')) { $s = 'FG' }
@@ -677,6 +678,8 @@ function Invoke-LandParityCompare {
                     [void]$members[$gkey].Rows.Add($rk)
                     [void]$infos.Add(@{ Row = $r; Efid = $efid; Nae = $nae; Ph = $ph; Key = $gkey; RowKey = $rk })
                 }
+                $rowByKey = @{}   # RowKey -> рядок джерела: гілку селектор бере з рядка КОЖНОГО члена групи
+                foreach ($inf in $infos) { $rowByKey[$inf.RowKey] = $inf.Row }
                 $groupDone = @{}
                 # D-425: рядки груп, які легасі не рахує (статус не Running) - для класу ECR_NON_RUNNING замість ECR_ONLY.
                 $nonRunningRows = @{}
@@ -741,10 +744,9 @@ function Invoke-LandParityCompare {
                             $ek = "$meth|$outCode"
                             # Селектор гілки: легасі пише одну гілку за NAE/потоком; порівнюється лише вона, решта -
                             # ECR_ONLY_NOT_SELECTED. Діє, лише якщо в ECR є значення з гілками для цього виходу.
-                            $selPath = $false; $selBranch = $null
+                            $selPath = $false
                             if (@($st.BranchSelector) -contains $meth) {
                                 foreach ($mk in $rowKeys) { if ($st.EcrVar.ContainsKey("$tk|$mk|$ek")) { $selPath = $true; break } }
-                                if ($selPath) { $selBranch = Get-LandParitySelectedBranch -MethodologyCode $meth -MetricName $metric -Row $info.Row }
                             }
                             $useRows = $ecrRows
                             if ($selPath) {
@@ -752,6 +754,8 @@ function Invoke-LandParityCompare {
                                 $notSel = @{}
                                 foreach ($mk in $rowKeys) {
                                     $hv = @{}
+                                    $mRow = $rowByKey[$mk]; if ($null -eq $mRow) { $mRow = $info.Row }
+                                    $selBranch = Get-LandParitySelectedBranch -MethodologyCode $meth -MetricName $metric -Row $mRow
                                     $vv = $null; if ($st.EcrVar.ContainsKey("$tk|$mk|$ek")) { $vv = $st.EcrVar["$tk|$mk|$ek"] }
                                     if ($null -ne $vv) {
                                         foreach ($bn in @($vv.Keys)) {
@@ -830,12 +834,12 @@ function Invoke-LandParityCompare {
                             $ckMeth = ($ck -split '\|', 2)[0]
                             if ($null -ne $vv -and @($st.BranchSelector) -contains $ckMeth) {
                                 $ckMetric = ''; if ($ck -match 'ECW_EC_(tons|gsec)_') { $ckMetric = $Matches[1] }
-                                $sb = Get-LandParitySelectedBranch -MethodologyCode $ckMeth -MetricName $ckMetric -Row $info.Row
+                                $mRow = $rowByKey[$mk]; if ($null -eq $mRow) { $mRow = $info.Row }
+                                $sb = Get-LandParitySelectedBranch -MethodologyCode $ckMeth -MetricName $ckMetric -Row $mRow
                                 foreach ($bn in @($vv.Keys)) {
                                     if ($null -ne $sb -and $bn -eq $sb) {
                                         if (-not $onlySum.ContainsKey($ck)) { $onlySum[$ck] = 0.0 }
                                         $onlySum[$ck] += [double]$vv[$bn]
-                                        $ac.BranchSelected++
                                     }
                                     else {
                                         if (-not $onlyNotSel.ContainsKey($ck)) { $onlyNotSel[$ck] = @{} }
