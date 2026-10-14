@@ -545,6 +545,31 @@ def special(name, c, en, ru):
     return None
 
 
+# D-429: calendar/hour upper bounds in the legacy xlsm DV cover contiguous ranges, which captured
+# non-time columns (kg/h, Sm3, t, ppm, density). Such a bound is dropped when the column unit is
+# not h and not d. Hidden service columns (unnamed helper cells) are not touched; a column with
+# an empty unit whose header says days is a days column and keeps its rule.
+TIME_BOUNDS = {28.0, 29.0, 30.0, 31.0, 672.0, 696.0, 720.0, 744.0}
+
+
+def is_foreign_time_bound(col, dv):
+    if dv.get('op') != 'lessThanOrEqual':
+        return False
+    try:
+        f1 = float(dv.get('f1'))
+    except (TypeError, ValueError):
+        return False
+    if f1 not in TIME_BOUNDS:
+        return False
+    if col.get('unit') in ('h', 'd'):
+        return False
+    if col.get('hidden'):
+        return False
+    if re.search(r'\bdays?\b', col.get('headerEn') or '', re.I):
+        return False
+    return True
+
+
 def op_expr(code, v):
     # v: validation entry
     op = v.get('op') or 'between'
@@ -938,6 +963,9 @@ for sh in X['sheets']:
         for col in t_out['columns']:
             if col.get('dv') and col['dataType'] in ('Decimal', 'Int'):
                 dv = col['dv']
+                if is_foreign_time_bound(col, dv):
+                    col.pop('dv', None)
+                    continue
                 expr = op_expr(col['code'], dv)
                 if expr:
                     rc = ('DV_' + col['code'])[:64]
