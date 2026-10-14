@@ -600,7 +600,10 @@ public sealed class GenericCalculationModule(
                 .Select(s => new CalculationTraceStep(
                     s.Order, s.Code, s.Expression, s.Value, s.Error, s.Masked, s.ToJson(), s.SubstanceEntryId))
                 .ToList(),
-            ReadArguments(input, trace));
+            ReadArguments(input, trace),
+
+            // D-401: екземпляр таблиці йде в результат; невалідний (0 — золоті набори без екземпляра) = невідомий.
+            input.TableInstanceId > 0 ? input.TableInstanceId : (long?)null);
     }
 
     /// <summary>
