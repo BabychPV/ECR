@@ -34,7 +34,7 @@ public sealed class SubstanceApplicableFunctionTests
         Assert.Equal(4, signature.MaxArgs);
         Assert.Equal(ExpressionValueType.Boolean, signature.ResultType);
         Assert.Equal(FunctionTier.Extension, DialectCatalog.TierOf("SUBSTANCE_APPLICABLE"));
-        Assert.False(DialectCatalog.IsAllowedIn("SUBSTANCE_APPLICABLE", NumericMode.Legacy));
+        Assert.True(DialectCatalog.IsAllowedIn("SUBSTANCE_APPLICABLE", NumericMode.Legacy)); // D-426
         Assert.True(DialectCatalog.IsAllowedIn("SUBSTANCE_APPLICABLE", NumericMode.Strict));
 
         Assert.True(Expr.Parse("SUBSTANCE_APPLICABLE('APPL', 'M', 'InvNum', @X)", ExpressionDialect.Methodology).IsSuccess);

@@ -148,10 +148,13 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
         var legacy = await Handler(db)
             .HandleAsync(ExpressionDialect.Methodology, null, legacyVersion.VersionId, CancellationToken.None);
 
-        Assert.Equal(22, legacy.Functions.Count);
-        Assert.All(legacy.Functions, f => Assert.Equal("Core", f.Tier));
+        // ✎ D-426: 22 ядра + 10 функцій довідників/речовини (REG*, CURRENT_SUBSTANCE, SUBSTANCE_APPLICABLE).
+        Assert.Equal(32, legacy.Functions.Count);
+        Assert.Equal(22, legacy.Functions.Count(f => f.Tier == "Core"));
         Assert.DoesNotContain(legacy.Functions, f => f.Name == "CONVERT");
+        Assert.DoesNotContain(legacy.Functions, f => f.Name == "SUBSTANCE");
         Assert.DoesNotContain(legacy.Functions, f => f.Name == "Ln");
+        Assert.DoesNotContain(legacy.Functions, f => f.Name == "ifs");
 
         // А в `Strict` вони законні — і приходять із позначкою ярусу, щоб
         // редактор міг сказати, що це поза набором чинної системи.
@@ -161,8 +164,8 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
             .HandleAsync(ExpressionDialect.Methodology, null, strictVersion.VersionId, CancellationToken.None);
 
         Assert.Equal(36, strict.Functions.Count);
-        Assert.DoesNotContain(legacy.Functions, f => f.Name == "REGFIND");
-        Assert.DoesNotContain(legacy.Functions, f => f.Name == "REGSUM");
+        Assert.Contains(legacy.Functions, f => f.Name == "REGFIND");
+        Assert.Contains(legacy.Functions, f => f.Name == "REGSUM");
         Assert.Equal("Extension", Assert.Single(strict.Functions, f => f.Name == "Ln").Tier);
         Assert.Equal("Core", Assert.Single(strict.Functions, f => f.Name == "Pow").Tier);
     }

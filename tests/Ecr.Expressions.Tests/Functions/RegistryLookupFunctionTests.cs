@@ -346,12 +346,11 @@ public sealed class RegistryLookupFunctionTests
     [InlineData("REGONE")]
     [InlineData("REGFIELD")]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void REGFIND_у_Legacy_недозволена(string name)
+    public void REGFIND_у_Legacy_дозволена_D426(string name)
     {
-        // Чинний рушій довідників не бачив: у Legacy-версії відтворювати нічого
-        // (ECR-CALC-0433, перевірка 21 02b §12).
+        // ✎ D-426: довідник читається в C#, у Legacy функції дозволені (ярус лишається Extension).
         Assert.Equal(FunctionTier.Extension, DialectCatalog.TierOf(name));
-        Assert.False(DialectCatalog.IsAllowedIn(name, NumericMode.Legacy));
+        Assert.True(DialectCatalog.IsAllowedIn(name, NumericMode.Legacy));
         Assert.True(DialectCatalog.IsAllowedIn(name, NumericMode.Strict));
     }
 

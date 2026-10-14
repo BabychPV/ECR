@@ -302,5 +302,21 @@ public static class DialectCatalog
     /// </remarks>
     public static bool IsAllowedIn(string name, NumericMode mode)
         => Find(name) is not null
-           && (TierOf(name) == FunctionTier.Core || mode == NumericMode.Strict);
+           && (TierOf(name) == FunctionTier.Core
+               || mode == NumericMode.Strict
+               || LegacyCompatibleRegistryFunctions.Contains(name));
+
+    /// <summary>
+    /// ✎ 2026-10-14 (D-426): функції довідників і «поточної речовини», дозволені й у <c>Legacy</c>.
+    /// </summary>
+    /// <remarks>
+    /// Вони не залежать від <c>decimal</c>: довідник читається в C#, арифметика навколо — <c>double</c>,
+    /// ділення на 0 маскується в 0 (D-427). <c>Ln</c>/<c>ifs</c>/<c>CONVERT</c>/<c>SUBSTANCE</c> лишаються
+    /// лише Strict (<c>ECR-CALC-0433</c>). Скасовує частину D-159/RT-20a.
+    /// </remarks>
+    private static readonly HashSet<string> LegacyCompatibleRegistryFunctions = new(StringComparer.Ordinal)
+    {
+        "REGFIND", "REGONE", "REGFIELD", "REGSUM", "REGAVG", "REGMIN", "REGMAX", "REGCOUNT",
+        "CURRENT_SUBSTANCE", "SUBSTANCE_APPLICABLE",
+    };
 }
