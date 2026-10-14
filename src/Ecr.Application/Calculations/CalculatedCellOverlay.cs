@@ -2,6 +2,7 @@
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.ValueObjects;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Application.Calculations;
 
@@ -39,8 +40,14 @@ namespace Ecr.Application.Calculations;
 /// найгарячіше читання системи (бюджет 1.5 с), і більшість таблиць методологій
 /// не мають.
 /// </remarks>
-public sealed class CalculatedCellOverlay(IMethodologyStore methodologies, ICalculationResultStore results)
+public sealed partial class CalculatedCellOverlay(
+    IMethodologyStore methodologies,
+    ICalculationResultStore results,
+    ILogger<CalculatedCellOverlay>? log = null)
 {
+    /// <summary>Скільки прикладів неоднозначних комірок потрапляє в один запис журналу.</summary>
+    private const int AmbiguousSamples = 5;
+
     /// <summary>Накладає результати на комірки кількох екземплярів таблиць одного документа й періоду.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
@@ -84,6 +91,8 @@ public sealed class CalculatedCellOverlay(IMethodologyStore methodologies, ICalc
             .ToLookup(r => (Row: r.SourceRowKey!, Output: r.OutputCode.ToUpperInvariant()));
 
         var key = new PeriodKey(periodKey);
+        var ambiguous = 0;
+        var samples = new List<string>(AmbiguousSamples);
 
         foreach (var table in withCalculated)
         {
@@ -151,13 +160,31 @@ public sealed class CalculatedCellOverlay(IMethodologyStore methodologies, ICalc
                     }
 
                     filled.Add(binding.ColumnDefId);
+
+                    // ⛔ D-401 (тимчасовий захід до `TableInstanceId` в результаті): `RowKey`
+                    // унікальний лише в межах екземпляра таблиці, а результат ключується без
+                    // таблиці — рядки двох таблиць з однаковим ключем потрапляли в одну
+                    // комірку й сумувалися. Для ОДНІЄЇ речовини в рядку законне значення
+                    // рівно одне: збіг — одне значення (не подвоєне), розбіжність — комірку
+                    // не формуємо (хибне число гірше за відсутнє) і пишемо попередження.
+                    if (!TryCombine(values, out var total, out var unitId))
+                    {
+                        ambiguous++;
+                        if (samples.Count < AmbiguousSamples)
+                        {
+                            samples.Add($"{rowKey}/{binding.OutputCode}");
+                        }
+
+                        continue;
+                    }
+
                     overlaid.Add(new CellRecord(
                         new CellAddress(key, rowId, binding.ColumnDefId),
                         table.TableDefId,
                         new CellValueData
                         {
-                            ValueNumeric = values.Sum(v => v.Value),
-                            ValueUnitId = values[0].UnitId,
+                            ValueNumeric = total,
+                            ValueUnitId = unitId,
                             IsCalculated = true,
                         }));
                 }
@@ -166,7 +193,38 @@ public sealed class CalculatedCellOverlay(IMethodologyStore methodologies, ICalc
             output[table.TableInstanceId] = overlaid;
         }
 
+        if (ambiguous > 0)
+        {
+            if (log is not null)
+            {
+                LogAmbiguous(log, documentId, periodKey, ambiguous, string.Join(", ", samples));
+            }
+        }
+
         return output;
+    }
+
+    /// <summary>
+    /// Зводить значення комірки: різні речовини сумуються (одиниця виходу одна), а кілька
+    /// різних значень ОДНІЄЇ речовини — колізія рядків двох таблиць, тоді <c>false</c>.
+    /// </summary>
+    private static bool TryCombine(List<CalculationResultRow> values, out decimal total, out int unitId)
+    {
+        total = 0m;
+        unitId = values[0].UnitId;
+
+        foreach (var group in values.GroupBy(v => v.SubstanceEntryId))
+        {
+            var first = group.First();
+            if (group.Any(v => v.Value != first.Value || v.UnitId != first.UnitId))
+            {
+                return false;
+            }
+
+            total += first.Value;
+        }
+
+        return true;
     }
 
     /// <summary>Те саме для всього документа — шлях експорту (xlsx, csv, json).</summary>
@@ -211,6 +269,11 @@ public sealed class CalculatedCellOverlay(IMethodologyStore methodologies, ICalc
                 calculatedByTable.GetValueOrDefault(i.TableDefId) ?? none))],
             ct);
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Неоднозначні результати розрахунку не накладено (D-401): документ {DocumentId}, період {PeriodKey}, комірок {Count}, приклади (рядок/вихід): {Samples}")]
+    private static partial void LogAmbiguous(ILogger logger, long documentId, int periodKey, int count, string samples);
 
     /// <summary>Чи предикат — «уся таблиця» (<c>{}</c>): тоді значення рядка не потрібні.</summary>
     private static bool IsCatchAll(string matchJson)

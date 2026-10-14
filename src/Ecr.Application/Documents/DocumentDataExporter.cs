@@ -77,7 +77,8 @@ public sealed class DocumentDataExporter(
     IMethodologyStore? methodologies = null,
     ICalculationResultStore? results = null,
     IDocumentHeaderStore? headers = null,
-    IFormulaEngine? formulaEngine = null)
+    IFormulaEngine? formulaEngine = null,
+    Microsoft.Extensions.Logging.ILogger<Calculations.CalculatedCellOverlay>? overlayLog = null)
 {
     private const string RowKeyHeader = "rowKey";
 
@@ -158,7 +159,7 @@ public sealed class DocumentDataExporter(
         // (`CalculatedCellOverlay`). Порти необов'язкові лише заради тестів.
         if (methodologies is not null && results is not null)
         {
-            slices = await new Calculations.CalculatedCellOverlay(methodologies, results)
+            slices = await new Calculations.CalculatedCellOverlay(methodologies, results, overlayLog)
                 .ApplyAsync(documentId, periodKey, snapshot, instances, rowIds, slices, ct)
                 .ConfigureAwait(false);
         }

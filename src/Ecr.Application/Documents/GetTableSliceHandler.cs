@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Calculations;
+using Ecr.Application.Calculations;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -54,6 +54,10 @@ namespace Ecr.Application.Documents;
 /// Користувацьке оформлення комірок (CELL-STYLE L3b); один запит на зріз. Необов'язковий лише заради
 /// тестів, що конструюють обробник вручну.
 /// </param>
+/// <param name="overlayLog">
+/// Журнал накладення результатів методологій (D-401: попередження про неоднозначні комірки).
+/// Необов'язковий лише заради тестів.
+/// </param>
 public sealed class GetTableSliceHandler(
     IRowStore rowStore,
     ICellStore cellStore,
@@ -70,7 +74,8 @@ public sealed class GetTableSliceHandler(
     IFormulaEngine? formulaEngine = null,
     IColumnPathMapper? columnMapper = null,
     ICellStyleStore? cellStyles = null,
-    IRegistryStore? registries = null)
+    IRegistryStore? registries = null,
+    Microsoft.Extensions.Logging.ILogger<Calculations.CalculatedCellOverlay>? overlayLog = null)
 {
     private readonly MethodologyRequiredColumnsCache _required = new(memory);
 
@@ -193,7 +198,7 @@ public sealed class GetTableSliceHandler(
 
         if (results is not null && calculated.Count > 0)
         {
-            var overlaid = await new Calculations.CalculatedCellOverlay(methodologies, results)
+            var overlaid = await new Calculations.CalculatedCellOverlay(methodologies, results, overlayLog)
                 .ApplyAsync(
                     documentId,
                     instance.PeriodKey,
