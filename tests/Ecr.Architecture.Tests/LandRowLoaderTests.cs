@@ -336,4 +336,18 @@ public sealed class LandRowLoaderTests
         Assert.DoesNotContain("RK-1", json, StringComparison.Ordinal);
         Assert.Contains("rejectReasons", File.ReadAllText(LandRowKeyTests.LandFile("Load-LandRows.ps1")), StringComparison.Ordinal);
     }
+
+    // Дефект 15.10 (вікно 7): `{ ... }.GetNewClosure()` у Load-LandRows.ps1 ховав від блоку функції dot-sourced Lib
+    // (New-LandLookupMap / Resolve-LandLookupId -> CommandNotFound). Closure у tools/land заборонено.
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Скрипти_tools_land_не_використовують_GetNewClosure_бо_closure_не_бачить_функцій_Lib()
+    {
+        var dir = Path.Combine(SourceTree.Root, "tools", "land");
+        var offenders = Directory.EnumerateFiles(dir, "*.ps1", SearchOption.AllDirectories)
+            .Where(p => File.ReadAllText(p).Contains("GetNewClosure", StringComparison.OrdinalIgnoreCase))
+            .Select(p => Path.GetRelativePath(dir, p))
+            .ToArray();
+        Assert.True(offenders.Length == 0, "GetNewClosure у: " + string.Join(", ", offenders));
+    }
 }

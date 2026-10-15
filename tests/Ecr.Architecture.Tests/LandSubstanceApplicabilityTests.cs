@@ -478,4 +478,70 @@ public sealed class LandSubstanceApplicabilityTests
         Assert.Contains("Get-LandSubstanceApplicabilitySampleArguments", stage, StringComparison.Ordinal);
         Assert.Contains("/tests/PARITY_1", stage, StringComparison.Ordinal);
     }
+
+    // Нечутливі до регістру «пари» ключа навмисні: старий C# тримає обидва написання (ординальні словники), ключ довідника
+    // ignoreCase=false, тож це РІЗНІ ключі з однаковим складом. Фіксуємо перелік і однаковість наборів кодів між написаннями.
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Регістро_нечутливі_пари_ключа_очікувані_з_однаковими_наборами_кодів_а_точних_дублів_немає()
+    {
+        using var model = LoadModel();
+        var registry = model.RootElement.GetProperty("registries").EnumerateArray()
+            .Single(r => r.GetProperty("code").GetString() == "LAND_SUBSTANCE_APPLICABILITY");
+        var entries = registry.GetProperty("entries").EnumerateArray()
+            .Select(e => KeyFields.Select(n => e.GetProperty("fields").GetProperty(n).GetString()!).ToArray())
+            .Where(k => k[1] != "*")
+            .ToList();
+
+        // Точних (ординальних) дублів ключа немає.
+        Assert.Equal(entries.Count, entries.Select(k => string.Join('|', k)).Distinct(StringComparer.Ordinal).Count());
+
+        var groups = entries
+            .GroupBy(k => string.Join('|', k[0], k[1], k[2].ToUpperInvariant(), k[3]), StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .ToList();
+
+        // Кожна група - рівно два написання одного значення селектора.
+        Assert.All(groups, g => Assert.Equal(2, g.Count()));
+        Assert.Equal(61, groups.Count);
+        Assert.Equal(122, groups.Sum(g => g.Count()));
+
+        var byMethodology = groups.GroupBy(g => g.First()[0]).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        Assert.Equal(
+            new Dictionary<string, int>
+            {
+                ["ECW_C11_01"] = 17, ["ECW_C11_02"] = 17, ["ECW_C11_10"] = 13, ["ECW_C12_01"] = 1, ["ECW_C12_03"] = 13,
+            },
+            byMethodology);
+
+        var spellingSets = entries
+            .GroupBy(k => (Methodology: k[0], Kind: k[1], Value: k[2].ToUpperInvariant()))
+            .Where(p => p.Select(k => k[2]).Distinct(StringComparer.Ordinal).Count() > 1)
+            .ToList();
+        var pairs = spellingSets
+            .Select(p => $"{p.Key.Methodology}|{p.Key.Kind}|" + string.Join(" / ", p.Select(k => k[2]).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(
+            [
+                "ECW_C11_01|Stream|Fuel Gas (Internal) - Топливный газ (Внутренний) / Fuel gas (Internal) - Топливный газ (Внутренний)",
+                "ECW_C11_01|Stream|Makat Gas - Макатский газ / Makat gas - Макатский газ",
+                "ECW_C11_02|Stream|Fuel Gas (Internal) - Топливный газ (Внутренний) / Fuel gas (Internal) - Топливный газ (Внутренний)",
+                "ECW_C11_02|Stream|Makat Gas - Макатский газ / Makat gas - Макатский газ",
+                "ECW_C11_10|Stream|Fuel Gas (Internal) - Топливный газ (Внутренний) / Fuel gas (Internal) - Топливный газ (Внутренний)",
+                "ECW_C12_01|Stream|Hydraulic Oil / Hydraulic oil",
+                "ECW_C12_03|TypeFuel|Fuel Gas (Internal) - Топливный газ (Внутренний) / Fuel gas (Internal) - Топливный газ (Внутренний)",
+            ],
+            pairs);
+
+        // Набір кодів речовин однаковий у обох написань кожної пари.
+        foreach (var pair in spellingSets)
+        {
+            var sets = pair.GroupBy(k => k[2], StringComparer.Ordinal)
+                .Select(s => string.Join(',', s.Select(k => k[3]).Order(StringComparer.Ordinal)))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            Assert.True(sets.Count == 1, $"{pair.Key}: набори кодів різняться між написаннями.");
+        }
+    }
 }
