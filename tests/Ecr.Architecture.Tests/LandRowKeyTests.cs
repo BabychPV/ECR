@@ -209,7 +209,7 @@ public sealed class LandRowKeyTests
         var formats = root.GetProperty("rowKeyFormats");
         Assert.Equal(2, formats.GetProperty("table").GetInt32());
         Assert.Equal(0, formats.GetProperty("legacy").GetInt32());
-        Assert.Equal(5, root.GetProperty("formatVersion").GetInt32());
+        Assert.Equal(6, root.GetProperty("formatVersion").GetInt32());
         Assert.DoesNotContain(SentinelA, summary + cells, StringComparison.Ordinal);
         Assert.DoesNotContain(SentinelB, summary + cells, StringComparison.Ordinal);
     }

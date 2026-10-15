@@ -194,7 +194,7 @@ function Get-LandParityTypeFoldDefault { return @($script:LandParityTypeFoldDefa
 # Для методологій зі списку значення гілок зберігаються окремо (EcrVar), порівнюється лише гілка, яку обрав би легасі,
 # решта гілок - клас ECR_ONLY_NOT_SELECTED (не ECR_ONLY і не BRANCH_BOTH_PRESENT). Методологія зі списку знімає гілку
 # (fold) без -TypeFoldMethodology. Правила - у Get-LandParitySelectedBranch (джерела ECW_C11_*.cs у docs/source).
-$script:LandParityBranchSelectorDefault = @('ECW_C11_01', 'ECW_C11_02', 'ECW_C11_11_02', 'ECW_C11_11_03', 'ECW_C12_01')
+$script:LandParityBranchSelectorDefault = @('ECW_C11_01', 'ECW_C11_02', 'ECW_C11_11_02', 'ECW_C11_11_03', 'ECW_C12_01', 'ECW_C11_13')
 
 function Get-LandParityBranchSelectorDefault { return @($script:LandParityBranchSelectorDefault) }
 
@@ -219,6 +219,11 @@ $script:LandParityC111102Known = @('0788', '0789', '0790', '0791', '0788(001)', 
     '6975', '6981', '6982', '6983', '6984', '6985', '6986', '6976', '0560', '0562', '0563', '0561', '0564', '0565', '0903', '0905',
     '6904', '0793', '0883', '0524')
 $script:LandParityC111102Type2 = @('6975', '6981', '6982', '6983', '6984', '6985', '6986', '6976', '0883')
+# ECW_C11_13.cs:94-96 catTons (точне List.Contains по NAE без пробілів; category = Land_NAE.Trim().Replace(' ', '')).
+# NAE поза обома списками: легасі «No type for NAE», результату немає.
+$script:LandParityC1113Type1 = @('6567', '6568', '6574', '6575', '0500(003)', '0501(003)', '0502(003)', '0503(003)',
+    '0520(003)', '0521(003)', '0522(003)', '0523(003)')
+$script:LandParityC1113Type2 = @('6669', '6671', '6673', '6670', '6672', '6674')
 
 function Get-LandParitySelectedBranch {
     <#
@@ -233,6 +238,7 @@ function Get-LandParitySelectedBranch {
         ECW_C11_11_02.cs:221-239: NAE 0883 або група 6975 -> type2, інакше type1 (NAE має бути в groupNAE).
         ECW_C11_11_03.cs:81-112: окремі групи для tons і gsec (MetricName).
         ECW_C12_01.cs:140-153: Land_Streams = 'Fuel gas' -> type2, інакше type1.
+        ECW_C11_13.cs:94-96: лише за NAE (catTons: type1 6567.., type2 6669..); NAE поза списками - результату немає.
     #>
     param([string]$MethodologyCode, [string]$MetricName, $Row)
     $nae = [string](Get-LandParityV $Row 'Land_NAE')
@@ -273,8 +279,13 @@ function Get-LandParitySelectedBranch {
             if ([string](Get-LandParityV $Row 'Land_Streams') -ceq 'Fuel gas') { return 'type2' }
             return 'type1'
         }
+        'ECW_C11_13' {
+            if ($script:LandParityC1113Type1 -ccontains $nae) { return 'type1' }
+            if ($script:LandParityC1113Type2 -ccontains $nae) { return 'type2' }
+            return $null
+        }
         'ECW_C11_11_03' {
-            $groups = $script:LandParityC111103Gsec
+            $groups =$script:LandParityC111103Gsec
             if ($MetricName -eq 'tons') { $groups = $script:LandParityC111103Tons }
             foreach ($t in $groups.Keys) { if (@($groups[$t]) -ccontains $nae) { return $t } }
             return $null
@@ -727,10 +738,14 @@ function Invoke-LandParityCompare {
                     }
                     $rs = @($Oracle[$ok])
                     $noPhaseLegacy = $false
+                    $phaseMatched = $true   # false: фаза групи в еталоні не знайдена, $rs - копії ІНШИХ фаз того ж (efid, NAE)
                     if ($ph -ne '') {
                         $nr = @($rs | Where-Object { $_.phase.Trim() -eq $ph.Trim() })
                         if ($nr.Count -gt 0) { $rs = $nr }
-                        elseif ($explicitGroupBy) { $rs = @(); $noPhaseLegacy = $true }   # явний -GroupBy: фази в легасі немає -> групи без легасі
+                        else {
+                            $phaseMatched = $false
+                            if ($explicitGroupBy) { $rs = @(); $noPhaseLegacy = $true }   # явний -GroupBy: фази в легасі немає -> групи без легасі
+                        }
                     }
                     $legacy = @{}
                     foreach ($lr in $rs) {
@@ -780,7 +795,12 @@ function Invoke-LandParityCompare {
                                 # значення групи = сума ВСІХ копій ключа; кількість копій має збігатися з кількістю Running-рядків.
                                 if ($allVals.Count -eq 0) { continue }
                                 if ($copies.Count -ne $expCopies) {
-                                    Add-LandParityCell $ac $docName $pk $tbl $rk $nRows $efid $meth $lab ($pre + 'LEGACY_COPY_COUNT_DIFF')
+                                    # Група без Running-рядків (expCopies = 0) і без власної фази в еталоні: копії - ЧУЖОЇ фази того ж
+                                    # (efid, NAE); легасі не-Running рядок не рахує -> це пропуск за статусом, не розбіжність кількості.
+                                    # Running-група (expCopies > 0) з іншою кількістю копій лишається LEGACY_COPY_COUNT_DIFF.
+                                    $ccClass = 'LEGACY_COPY_COUNT_DIFF'
+                                    if ($expCopies -le 0 -and -not $phaseMatched) { $ccClass = 'LEGACY_STATUS_SKIP' }
+                                    Add-LandParityCell $ac $docName $pk $tbl $rk $nRows $efid $meth $lab ($pre + $ccClass)
                                     continue
                                 }
                                 $oldSum = 0.0
