@@ -153,6 +153,7 @@ public sealed class LandHse400CompositionScriptTests
         Assert.Contains("ALIASED=0", output, StringComparison.Ordinal);        // не C*_mass-псевдонім: -RewriteAliased не зачіпає
         Assert.Contains("MERC_ALIASES=2", output, StringComparison.Ordinal);
     }
+
     /// <summary>
     /// C12_03 (паритет 415/416/2754): стара система читає `FG_Internal_C1_C5` у властивість `FG_Internal_C1_C5_mass`
     /// (Q_Air_HSE400.Get_DataFromHSE400). Без псевдоніма довідник мав `C1_C5`/`C12_C19` (415/2754 без складу) і

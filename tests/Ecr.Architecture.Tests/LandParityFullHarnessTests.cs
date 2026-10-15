@@ -548,6 +548,7 @@ public sealed class LandParityFullHarnessTests
         Assert.False(classes.ContainsKey("ECR_ONLY"));
         Assert.False(classes.ContainsKey("MISSING_OUTPUT"));
     }
+
     /// <summary>
     /// Селектор гілки (C11_01): легасі рахує ОДНУ гілку за NAE/потоком (ECW_C11_01.cs:183-208), ECR - усі чотири на одному
     /// ключі. З селектором вибрана гілка порівнюється (MATCH), решта - ECR_ONLY_NOT_SELECTED; без селектора

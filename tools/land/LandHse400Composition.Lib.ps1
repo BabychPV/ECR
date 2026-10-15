@@ -1,4 +1,4 @@
-# tools/land/LandHse400Composition.Lib.ps1
+﻿# tools/land/LandHse400Composition.Lib.ps1
 # Чисті функції для Import-LandHse400Composition.ps1 (без мережі й без БД) - щоб їх можна було перевірити тестом
 # на синтетичних рядках. Значень прод-даних тут немає і бути не може.
 #
