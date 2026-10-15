@@ -33,6 +33,15 @@ FIELDS = ['METHODOLOGY', 'SELECTOR_KIND', 'SELECTOR_VALUE', 'SUBSTANCE_CODE']
 # Довідники шаблону, значення яких є «типом палива/потоку» у випадних списках таблиць 9-11.
 FUEL_REGISTRY_RX = re.compile(r'(TYPE_?OF_?FUEL|TYPE_?OF_?STREAMS)$')
 
+# Написання селектора, яке старий C# приймає через `ToLower().Contains` (PrefixProvider), але яке не потрапляє в домен
+# автоматично: ключ довідника порівнюється ординально (ignoreCase=false), тож без запису рядок мовчки втрачає речовини.
+# ECW_C11_10: у даних LAND-PROD (TypeOfFuel) усі Makat-рядки пишуться `Makat gas - Макатский газ` (мала g); у правилі
+# C11_10 такого літерала немає (він є лише в C11_01/C11_02), а в LEGACY_TEXTS лише `Makat Gas` (LAND-K8-MAKAT-VERIFY).
+# Додавати лише там, де правило методології й дані це підтверджують (не «навмання» для всіх префіксних методологій).
+EXTRA_SELECTOR_TEXTS = {
+    'ECW_C11_10': ['Makat gas - Макатский газ'],
+}
+
 IN_RX = re.compile(r"in\(\s*@(\w+)\s*,((?:\s*'[^']*'\s*,?)+)\)")
 LITERAL_RX = re.compile(r"'([^']*)'")
 
@@ -133,6 +142,7 @@ def _rows(name, spec, domain, cat_rules):
         raws = list(domain)
         raws += [k for k, _ in entries]
         raws += _rule_literals(cat_rules, name, spec['argument'])
+        raws += [t for t in EXTRA_SELECTOR_TEXTS.get(name, []) if t not in raws]
         seen = set()
         for raw in raws:
             if raw in seen:
