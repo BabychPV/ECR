@@ -577,6 +577,8 @@ public sealed class LandSubstanceApplicabilityTests
     {
         const string script = """
             $ErrorActionPreference = 'Stop'
+            Set-StrictMode -Version 2.0
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
             . $args[0]
             $spec = Get-Content -LiteralPath $args[1] -Raw -Encoding UTF8 | ConvertFrom-Json
             $m = Get-Content -LiteralPath $args[2] -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -586,13 +588,26 @@ public sealed class LandSubstanceApplicabilityTests
               [pscustomobject]@{ Value = 'Makat gas - Макатский газ'; Rows = 7 },
               [pscustomobject]@{ Value = 'MAKAT GAS - Макатский газ'; Rows = 2 },
               [pscustomobject]@{ Value = 'Diesel - Дизель'; Rows = 5 })
+            # Виклик - рівно як у Verify-LandSubstanceApplicability.ps1: @(Get-...) без зайвих обгорток.
             # Поточна модель: мала g покрита, а вигаданий верхній регістр - ні (ordinal), Diesel легасі не приймає.
             $g = @(Get-LandSelectorCoverageGaps -Observed $obs -Methodologies $c10 -Entries @($reg.entries))
-            'GAPS=' + (($g | ForEach-Object { $_.Value + ':' + $_.Rows + ':' + ($_.MissingCodes -join '/') }) -join ';')
-            # Синтетичний довідник без запису `Makat gas`: прогалина з усіма чотирма кодами.
+            # Маркери ASCII-безпечні: Value друкується у вигляді \uXXXX-екранування (не залежить від кодування stdout).
+            $esc = { param($t) -join ($t.ToCharArray() | ForEach-Object { if ([int]$_ -gt 127) { '\u{0:x4}' -f [int]$_ } else { [string]$_ } }) }
+            'GAPS=' + (($g | ForEach-Object { (& $esc $_.Value) + ':' + $_.Rows + ':' + ($_.MissingCodes -join '/') }) -join ';')
+            # 0 прогалин: нічого не спостерігається, і спостерігається лише покрите написання.
+            $z1 = @(Get-LandSelectorCoverageGaps -Observed @() -Methodologies $c10 -Entries @($reg.entries))
+            $z2 = @(Get-LandSelectorCoverageGaps -Observed @($obs[0]) -Methodologies $c10 -Entries @($reg.entries))
+            'ZERO=' + $z1.Count + ',' + $z2.Count
+            # 1 прогалина: синтетичний довідник без запису `Makat gas`, усі чотири коди.
             $syn = @($reg.entries | Where-Object { -not ($_.fields.METHODOLOGY -ceq 'ECW_C11_10' -and $_.fields.SELECTOR_VALUE -ceq 'Makat gas - Макатский газ') })
             $g2 = @(Get-LandSelectorCoverageGaps -Observed @($obs[0]) -Methodologies $c10 -Entries $syn)
             'SYN=' + $g2.Count + ':' + ($g2[0].MissingCodes -join '/')
+            # 2+ прогалин: два різні непокриті написання -> Count=2 (і елементи - окремі об'єкти, не вкладений масив).
+            $obs2 = @(
+              [pscustomobject]@{ Value = 'MAKAT GAS - Макатский газ'; Rows = 2 },
+              [pscustomobject]@{ Value = 'Makat GAS - Макатский газ'; Rows = 3 })
+            $g3 = @(Get-LandSelectorCoverageGaps -Observed $obs2 -Methodologies $c10 -Entries @($reg.entries))
+            'MANY=' + $g3.Count + ':' + $g3[0].Rows + ',' + $g3[1].Rows
             'PREFIX=' + (Test-LandLegacyPrefixAccepts -Text 'Makat gas - Макатский газ' -ProviderEntries @($spec.methodologies.ECW_C11_10.providerEntries))
             'NOPREFIX=' + ($null -eq (Test-LandLegacyPrefixAccepts -Text 'Diesel - Дизель' -ProviderEntries @($spec.methodologies.ECW_C11_10.providerEntries)))
             """;
@@ -604,9 +619,11 @@ public sealed class LandSubstanceApplicabilityTests
             Path.Combine(Dir, "land-template.model.json"));
 
         Assert.True(exit == 0, output);
-        Assert.Contains("GAPS=MAKAT GAS - Макатский газ:2:333/415/416/1728", output, StringComparison.Ordinal);
-        Assert.DoesNotContain("Makat gas - Макатский газ:7", output, StringComparison.Ordinal);
+        Assert.Contains("GAPS=MAKAT GAS - \\u041c\\u0430\\u043a\\u0430\\u0442\\u0441\\u043a\\u0438\\u0439 \\u0433\\u0430\\u0437:2:333/415/416/1728", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Makat gas - \\u041c\\u0430\\u043a\\u0430\\u0442\\u0441\\u043a\\u0438\\u0439 \\u0433\\u0430\\u0437:7", output, StringComparison.Ordinal);
+        Assert.Contains("ZERO=0,0", output, StringComparison.Ordinal);
         Assert.Contains("SYN=1:333/415/416/1728", output, StringComparison.Ordinal);
+        Assert.Contains("MANY=2:2,3", output, StringComparison.Ordinal);
         Assert.Contains("PREFIX=FG_Makat", output, StringComparison.Ordinal);
         Assert.Contains("NOPREFIX=True", output, StringComparison.Ordinal);
     }

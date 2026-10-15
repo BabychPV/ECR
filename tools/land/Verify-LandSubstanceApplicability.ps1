@@ -68,7 +68,9 @@ if ($Methodology) {
     $one | Add-Member -NotePropertyName $Methodology -NotePropertyValue $methods.$Methodology
     $methods = $one
 }
-$gaps = @(Get-LandSelectorCoverageGaps -Observed $observed -Methodologies $methods -Entries @($reg.entries))
+# Робастно до форми повернення: функція віддає елементи потоком (0 -> нічого, 1 -> об'єкт, N -> N об'єктів);
+# конвеєр `ForEach-Object { $_ }` розгортає і випадковий вкладений масив, а зовнішнє `@()` дає масив (Count 0/1/N, StrictMode-безпечно).
+$gaps = @(Get-LandSelectorCoverageGaps -Observed $observed -Methodologies $methods -Entries @($reg.entries) | ForEach-Object { $_ })
 Write-Host ("Distinct selector texts in data: {0}" -f $observed.Count)
 foreach ($g in ($gaps | Sort-Object Methodology, Value)) {
     Write-Host ("GAP {0} {1} '{2}' rows={3} prefix={4} missingCodes={5}" -f $g.Methodology, $g.Kind, $g.Value, $g.Rows, $g.Prefix, ($g.MissingCodes -join ','))
