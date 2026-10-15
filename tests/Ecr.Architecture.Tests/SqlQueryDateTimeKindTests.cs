@@ -41,6 +41,9 @@ public sealed class SqlQueryDateTimeKindTests
             [("src/Ecr.Infrastructure/Persistence/StaleResultsQuery.cs", "StaleDocumentRow")] =
                 "результат лишається IQueryable і компонується в підзапити; Kind ставить споживач "
                 + "DocumentStore.StaleResultsBatchAsync, де значення матеріалізується",
+            [("src/Ecr.Infrastructure/Persistence/StaleResultsQuery.cs", "StaleAuthorRow")] =
+                "те саме, що StaleDocumentRow: IQueryable компонується в вузький запит накладки; Kind ставить "
+                + "StaleResultsMapCache.LoadAuthorsAsync, де значення матеріалізується (SpecifyKind)",
             [("src/Ecr.Infrastructure/Persistence/DocumentVersionMigrationStore.cs", "DateTime")] =
                 "SYSUTCDATETIME() лише повертається в SQL параметром того самого переносу, у відповідь не йде",
         };

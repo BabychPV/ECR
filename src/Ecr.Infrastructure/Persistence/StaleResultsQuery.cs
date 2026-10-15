@@ -101,4 +101,42 @@ internal static class StaleResultsQuery
                  GROUP BY t.DocumentId
                 """);
     }
+
+    /// <summary>
+    /// Карти ВСІХ авторів періоду одним проходом (LP-45, D-432): рівно «перша гілка» <see cref="Documents"/> з
+    /// додатковим ключем групування <c>ChangedByUserId</c>. Для автора <c>u</c> рядки з <c>UserId = u</c> дорівнюють
+    /// <c>Documents(db, period, u)</c> (ті самі ключі й <c>Since</c>); довідникова гілка сюди НЕ входить (її немає й
+    /// у карті автора).
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="periodKey">Період.</param>
+    public static IQueryable<StaleAuthorRow> AuthorDocuments(EcrDbContext db, int periodKey)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        return db.Database
+            .SqlQuery<StaleAuthorRow>($"""
+                SELECT c.ChangedByUserId AS UserId, x.DocumentId AS DocumentId, MIN(c.ChangedAt) AS Since
+                  FROM (SELECT cr.DocumentId AS DocumentId, MAX(r0.Id) AS RunId
+                          FROM calc.CalculationResult AS cr
+                          JOIN calc.CalculationRun AS r0 ON r0.Id = cr.CalculationRunId
+                         WHERE cr.PeriodKey = {periodKey}
+                           AND r0.PeriodKey = {periodKey}
+                           AND r0.Status = N'Current'
+                         GROUP BY cr.DocumentId) AS x
+                  JOIN calc.CalculationRun AS r ON r.Id = x.RunId
+                  JOIN aud.CellChange AS c
+                    ON c.DocumentId = x.DocumentId
+                   AND c.PeriodKey = {periodKey}
+                   AND c.ChangedAt > r.StartedAt
+                   AND c.Origin <> N'Recalculation'
+                 GROUP BY c.ChangedByUserId, x.DocumentId
+                """);
+    }
 }
+
+/// <summary>Документ, застарілий за правками автора, і момент найранішої з них.</summary>
+/// <param name="UserId">Автор правки.</param>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="Since">Найраніша правка автора після початку актуального прогону (UTC, без <c>Kind</c> - як <see cref="StaleDocumentRow"/>).</param>
+public sealed record StaleAuthorRow(int UserId, long DocumentId, DateTime? Since);
