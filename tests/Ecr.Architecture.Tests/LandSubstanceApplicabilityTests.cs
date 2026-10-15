@@ -503,14 +503,15 @@ public sealed class LandSubstanceApplicabilityTests
 
         // Кожна група - рівно два написання одного значення селектора.
         Assert.All(groups, g => Assert.Equal(2, g.Count()));
-        Assert.Equal(61, groups.Count);
-        Assert.Equal(122, groups.Sum(g => g.Count()));
+        // 61 -> 65: ECW_C11_10 дістав `Makat gas - Макатский газ` (мала g; LAND-K8-MAKAT-VERIFY) - ще чотири пари за кодами речовин.
+        Assert.Equal(65, groups.Count);
+        Assert.Equal(130, groups.Sum(g => g.Count()));
 
         var byMethodology = groups.GroupBy(g => g.First()[0]).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
         Assert.Equal(
             new Dictionary<string, int>
             {
-                ["ECW_C11_01"] = 17, ["ECW_C11_02"] = 17, ["ECW_C11_10"] = 13, ["ECW_C12_01"] = 1, ["ECW_C12_03"] = 13,
+                ["ECW_C11_01"] = 17, ["ECW_C11_02"] = 17, ["ECW_C11_10"] = 17, ["ECW_C12_01"] = 1, ["ECW_C12_03"] = 13,
             },
             byMethodology);
 
@@ -529,6 +530,7 @@ public sealed class LandSubstanceApplicabilityTests
                 "ECW_C11_02|Stream|Fuel Gas (Internal) - Топливный газ (Внутренний) / Fuel gas (Internal) - Топливный газ (Внутренний)",
                 "ECW_C11_02|Stream|Makat Gas - Макатский газ / Makat gas - Макатский газ",
                 "ECW_C11_10|Stream|Fuel Gas (Internal) - Топливный газ (Внутренний) / Fuel gas (Internal) - Топливный газ (Внутренний)",
+                "ECW_C11_10|Stream|Makat Gas - Макатский газ / Makat gas - Макатский газ",
                 "ECW_C12_01|Stream|Hydraulic Oil / Hydraulic oil",
                 "ECW_C12_03|TypeFuel|Fuel Gas (Internal) - Топливный газ (Внутренний) / Fuel gas (Internal) - Топливный газ (Внутренний)",
             ],
@@ -543,5 +545,151 @@ public sealed class LandSubstanceApplicabilityTests
                 .ToList();
             Assert.True(sets.Count == 1, $"{pair.Key}: набори кодів різняться між написаннями.");
         }
+    }
+
+    // LAND-K8-MAKAT-VERIFY: у даних прод-вибірки потік Makat пишеться `Makat gas - Макатский газ` (мала g); ключ довідника
+    // порівнюється ординально, тож без запису C11_10 мовчки втрачав усі 4 речовини. Мутаційний доказ: прибрати
+    // EXTRA_SELECTOR_TEXTS['ECW_C11_10'] у substance_applicability.py і перегенерувати модель - тест червоніє.
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void C11_10_має_усі_чотири_написання_потоку_Makat_з_однаковими_кодами()
+    {
+        using var model = LoadModel();
+        var rows = Rows(model, out _);
+
+        string[] spellings =
+        [
+            "Makat",
+            "Makat Gas - Макатский газ",
+            "Makat gas - Макатский газ",
+            "Fuel gas (Makat) - Топливный газ (Makat)",
+        ];
+
+        foreach (var spelling in spellings)
+        {
+            Assert.Equal(Sorted(FgMakat), Codes(rows, "ECW_C11_10", spelling));
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Прогалини_покриття_селектора_знаходяться_порівнянням_ordinal_проти_ToLower_Contains()
+    {
+        const string script = """
+            $ErrorActionPreference = 'Stop'
+            Set-StrictMode -Version 2.0
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+            . $args[0]
+            $spec = Get-Content -LiteralPath $args[1] -Raw -Encoding UTF8 | ConvertFrom-Json
+            $m = Get-Content -LiteralPath $args[2] -Raw -Encoding UTF8 | ConvertFrom-Json
+            $reg = @($m.registries) | Where-Object { $_.code -eq 'LAND_SUBSTANCE_APPLICABILITY' } | Select-Object -First 1
+            $c10 = [pscustomobject]@{ ECW_C11_10 = $spec.methodologies.ECW_C11_10 }
+            $obs = @(
+              [pscustomobject]@{ Value = 'Makat gas - Макатский газ'; Rows = 7 },
+              [pscustomobject]@{ Value = 'MAKAT GAS - Макатский газ'; Rows = 2 },
+              [pscustomobject]@{ Value = 'Diesel - Дизель'; Rows = 5 })
+            # Виклик - рівно як у Verify-LandSubstanceApplicability.ps1: @(Get-...) без зайвих обгорток.
+            # Поточна модель: мала g покрита, а вигаданий верхній регістр - ні (ordinal), Diesel легасі не приймає.
+            $g = @(Get-LandSelectorCoverageGaps -Observed $obs -Methodologies $c10 -Entries @($reg.entries))
+            # Маркери ASCII-безпечні: Value друкується у вигляді \uXXXX-екранування (не залежить від кодування stdout).
+            $esc = { param($t) -join ($t.ToCharArray() | ForEach-Object { if ([int]$_ -gt 127) { '\u{0:x4}' -f [int]$_ } else { [string]$_ } }) }
+            'GAPS=' + (($g | ForEach-Object { (& $esc $_.Value) + ':' + $_.Rows + ':' + ($_.MissingCodes -join '/') }) -join ';')
+            # 0 прогалин: нічого не спостерігається, і спостерігається лише покрите написання.
+            $z1 = @(Get-LandSelectorCoverageGaps -Observed @() -Methodologies $c10 -Entries @($reg.entries))
+            $z2 = @(Get-LandSelectorCoverageGaps -Observed @($obs[0]) -Methodologies $c10 -Entries @($reg.entries))
+            'ZERO=' + $z1.Count + ',' + $z2.Count
+            # 1 прогалина: синтетичний довідник без запису `Makat gas`, усі чотири коди.
+            $syn = @($reg.entries | Where-Object { -not ($_.fields.METHODOLOGY -ceq 'ECW_C11_10' -and $_.fields.SELECTOR_VALUE -ceq 'Makat gas - Макатский газ') })
+            $g2 = @(Get-LandSelectorCoverageGaps -Observed @($obs[0]) -Methodologies $c10 -Entries $syn)
+            'SYN=' + $g2.Count + ':' + ($g2[0].MissingCodes -join '/')
+            # 2+ прогалин: два різні непокриті написання -> Count=2 (і елементи - окремі об'єкти, не вкладений масив).
+            $obs2 = @(
+              [pscustomobject]@{ Value = 'MAKAT GAS - Макатский газ'; Rows = 2 },
+              [pscustomobject]@{ Value = 'Makat GAS - Макатский газ'; Rows = 3 })
+            $g3 = @(Get-LandSelectorCoverageGaps -Observed $obs2 -Methodologies $c10 -Entries @($reg.entries))
+            'MANY=' + $g3.Count + ':' + $g3[0].Rows + ',' + $g3[1].Rows
+            'PREFIX=' + (Test-LandLegacyPrefixAccepts -Text 'Makat gas - Макатский газ' -ProviderEntries @($spec.methodologies.ECW_C11_10.providerEntries))
+            'NOPREFIX=' + ($null -eq (Test-LandLegacyPrefixAccepts -Text 'Diesel - Дизель' -ProviderEntries @($spec.methodologies.ECW_C11_10.providerEntries)))
+            """;
+
+        var (exit, output) = RunPowerShell(
+            script,
+            LandFile("LandSubstanceApplicability.Lib.ps1"),
+            Path.Combine(Dir, "land-substance-applicability.json"),
+            Path.Combine(Dir, "land-template.model.json"));
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("GAPS=MAKAT GAS - \\u041c\\u0430\\u043a\\u0430\\u0442\\u0441\\u043a\\u0438\\u0439 \\u0433\\u0430\\u0437:2:333/415/416/1728", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Makat gas - \\u041c\\u0430\\u043a\\u0430\\u0442\\u0441\\u043a\\u0438\\u0439 \\u0433\\u0430\\u0437:7", output, StringComparison.Ordinal);
+        Assert.Contains("ZERO=0,0", output, StringComparison.Ordinal);
+        Assert.Contains("SYN=1:333/415/416/1728", output, StringComparison.Ordinal);
+        Assert.Contains("MANY=2:2,3", output, StringComparison.Ordinal);
+        Assert.Contains("PREFIX=FG_Makat", output, StringComparison.Ordinal);
+        Assert.Contains("NOPREFIX=True", output, StringComparison.Ordinal);
+    }
+    // LAND-SA-VERIFY-BINDING: GAP лише для таблиці з активною прив'язкою методології і колонки-аргументу; решта - INFO.
+    // Мутаційний доказ: у Get-LandSelectorCoverageClassified ігнорувати прив'язку ($isBound = $true) - непривязана
+    // таблиця стає GAP, UNBOUND/MANY червоніють.
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Прогалина_є_GAP_лише_для_прив_язаної_таблиці_й_колонки_аргументу_решта_INFO()
+    {
+        const string script = """
+            $ErrorActionPreference = 'Stop'
+            Set-StrictMode -Version 2.0
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+            . $args[0]
+            $spec = Get-Content -LiteralPath $args[1] -Raw -Encoding UTF8 | ConvertFrom-Json
+            $m = Get-Content -LiteralPath $args[2] -Raw -Encoding UTF8 | ConvertFrom-Json
+            $reg = @($m.registries) | Where-Object { $_.code -eq 'LAND_SUBSTANCE_APPLICABILITY' } | Select-Object -First 1
+            $c10 = [pscustomobject]@{ ECW_C11_10 = $spec.methodologies.ECW_C11_10 }
+            $e = @($reg.entries)
+            $gapText = 'MAKAT GAS - Макатский газ'      # легасі приймає, ключа довідника з таким регістром немає
+            $okText = 'Makat gas - Макатский газ'        # ключ є
+            $bind = @([pscustomobject]@{ Methodology = 'ECW_C11_10'; Table = 'TB' })
+            $arg = 'Land_TypeFuelOrStream'
+            function Get-Classified($obs, $b, [switch]$Inc) {
+                @(Get-LandSelectorCoverageClassified -Observed $obs -Methodologies $c10 -Entries $e -Bindings $b -IncludeUnbound:$Inc | ForEach-Object { $_ })
+            }
+            $r1 = @(Get-Classified @([pscustomobject]@{ Table = 'TB'; Column = $arg; Value = $gapText; Rows = 4 }) $bind)
+            'BOUND=' + $r1.Count + ':' + $r1[0].Status + ':' + $r1[0].Table + ':' + $r1[0].Rows
+            $r2 = @(Get-Classified @([pscustomobject]@{ Table = 'TU'; Column = $arg; Value = $gapText; Rows = 4 }) $bind)
+            'UNBOUND=' + $r2.Count + ':' + $r2[0].Status + ':' + $r2[0].Reason
+            $r3 = @(Get-Classified @([pscustomobject]@{ Table = 'TB'; Column = 'Streams'; Value = $gapText; Rows = 4 }) $bind)
+            'OTHERARG=' + $r3.Count + ':' + $r3[0].Status + ':' + $r3[0].Reason
+            $r4 = @(Get-Classified @([pscustomobject]@{ Table = 'TB'; Column = $arg; Value = $okText; Rows = 4 }) $bind)
+            'COVERED=' + $r4.Count
+            $r5 = @(Get-Classified @([pscustomobject]@{ Table = 'TU'; Column = 'Streams'; Value = $gapText; Rows = 4 }) $bind -Inc)
+            'INCLUDE=' + $r5.Count + ':' + $r5[0].Status
+            $r6 = @(Get-Classified @() $bind)
+            'ZERO=' + $r6.Count
+            $many = @(
+              [pscustomobject]@{ Table = 'TB'; Column = $arg; Value = $gapText; Rows = 1 },
+              [pscustomobject]@{ Table = 'TB'; Column = $arg; Value = 'Makat GAS - Макатский газ'; Rows = 2 },
+              [pscustomobject]@{ Table = 'TU'; Column = $arg; Value = $gapText; Rows = 3 })
+            $r7 = @(Get-Classified $many $bind)
+            'MANY=' + $r7.Count + ':' + @($r7 | Where-Object { $_.Status -eq 'GAP' }).Count + ':' + @($r7 | Where-Object { $_.Status -eq 'INFO' }).Count
+            $r8 = @(Get-Classified @([pscustomobject]@{ Table = 'TB'; Column = 'Land_TypeFuel'; Value = $gapText; Rows = 1 }) $bind)
+            'EXTRA=' + $r8.Count + ':' + $r8[0].Status
+            $r9 = @(Get-LandSelectorCoverageClassified -Observed @([pscustomobject]@{ Table = 'TB'; Column = 'Land_TypeFuel'; Value = $gapText; Rows = 1 }) -Methodologies $c10 -Entries $e -Bindings $bind -ExtraArguments @{ ECW_C11_10 = @('Land_TypeFuel') } | ForEach-Object { $_ })
+            'EXTRAOK=' + $r9.Count + ':' + $r9[0].Status
+            """;
+
+        var (exit, output) = RunPowerShell(
+            script,
+            LandFile("LandSubstanceApplicability.Lib.ps1"),
+            Path.Combine(Dir, "land-substance-applicability.json"),
+            Path.Combine(Dir, "land-template.model.json"));
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("BOUND=1:GAP:TB:4", output, StringComparison.Ordinal);
+        Assert.Contains("UNBOUND=1:INFO:unbound-table", output, StringComparison.Ordinal);
+        Assert.Contains("OTHERARG=1:INFO:other-argument", output, StringComparison.Ordinal);
+        Assert.Contains("COVERED=0", output, StringComparison.Ordinal);
+        Assert.Contains("INCLUDE=1:GAP", output, StringComparison.Ordinal);
+        Assert.Contains("ZERO=0", output, StringComparison.Ordinal);
+        Assert.Contains("MANY=3:2:1", output, StringComparison.Ordinal);
+        Assert.Contains("EXTRA=1:INFO", output, StringComparison.Ordinal);
+        Assert.Contains("EXTRAOK=1:GAP", output, StringComparison.Ordinal);
     }
 }

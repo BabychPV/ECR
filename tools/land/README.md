@@ -461,6 +461,24 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
   вище за Legacy (ECR-CALC-0433; ✎ D-426: у Legacy дозволені REG*/CURRENT_SUBSTANCE/SUBSTANCE_APPLICABLE - перевіряй за актуальним кодом). Сторожі: LandSubstanceApplicabilityTests (Architecture), SubstanceApplicableFunctionTests
   (Expressions), SubstanceApplicabilityModuleTests (Calculations), SubstanceApplicabilitySqlTests (Api, реальний SQL).
 - ⚠ Модель перегенеровується ПІСЛЯ lane, що теж міняють `land-template.model.json` (`run-model-gen.ps1` на вершині).
+- ⚠ **Release note (прод): імпорт даних з іншим написанням потоку ламає SA мовчки.** Ключ довідника порівнюється
+  ординально (`ignoreCase=false`), а старий C# - `ToLower().Contains`. Якщо в прод-даних є написання потоку/палива, якого
+  немає в довіднику методології (приклад: `Makat gas - Макатский газ` з малою `g` у ECW_C11_10, 1130 клітинок TypeOfFuel),
+  `SUBSTANCE_APPLICABLE` дає FALSE і рядок лишається БЕЗ кроків і викидів - без помилки. Регістр у довіднику НЕ
+  нормалізуємо (61+ пар `Makat Gas`/`Makat gas` зіллються й порушать унікальність); новий текст додається в
+  `model-gen/substance_applicability.py` (`EXTRA_SELECTOR_TEXTS`, лише де це підтверджує правило методології й дані) з
+  перегенерацією моделі. Перевірка (лише читання БД, `SELECT` під NOLOCK):
+  `Verify-LandSubstanceApplicability.ps1 -Server localhost -Database EcrLandUi [-Methodology ECW_C11_10]` - друкує
+  GAP/INFO з таблицею, колонкою, методологією, написанням, кількістю рядків і кодами, яких бракує (значень викидів немає).
+  GAP - лише таблиця з АКТИВНОЮ прив'язкою методології (cfg.CalculationBinding.IsActive=1) і колонка-аргумент методології
+  (argument з довідника; для C11_10 ще Land_TypeFuel; для Lookup - поле NAME запису довідника): код виходу 1.
+  INFO (таблиця без прив'язки цієї методології або інша колонка) - довідково, код виходу не змінює. -IncludeUnbound -
+  стара поведінка (читає ще TypeOfFuel/TypeOfStreams/Streams, будь-яка прогалина = GAP). Підсумок: GAP=n INFO=m.
+  Робіть перед імпортом нових прод-даних і після кожної зміни довідника.
+- ⚠ **Verify на прод-вибірці (2026-10-15).** Перший запуск проти БД (EcrLandUi, EcrLandAccP): без прив'язки до методологій давав 30 хибних GAP
+  (Fuel gas / Export / Makat у колонках TypeOfFuel/TypeOfStreams/Streams інших таблиць). З прив'язкою: GAP=0, INFO=5 (C12_03: Makat у
+  Land_TypeFuelOrStream таблиць T9_*, не прив'язаних до C12_03; C12_03 читає Land_TypeFuel T10_01/T11_01 - покриті).
+  Додавати текст у EXTRA_SELECTOR_TEXTS лише за GAP.
 
 ## Похідні аргументи зі словників C#: групи NAE і Land_MassFraction (LP-10)
 
