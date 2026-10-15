@@ -1233,6 +1233,27 @@ public sealed class LandParityFullHarnessTests
         Assert.False(classes.ContainsKey("AGG_LEGACY_STATUS_SKIP"));
     }
 
+    /// <summary>
+    /// Група без Running-рядків (expCopies = 0), але ТОЧНА фаза є в еталоні ($phaseMatched = true): копії належать самій
+    /// групі, тож це справжня розбіжність кількості (AGG_LEGACY_COPY_COUNT_DIFF), а не пропуск за статусом.
+    /// Мутація: прибрати <c>-not $phaseMatched</c> з умови LEGACY_STATUS_SKIP - AGG_LEGACY_STATUS_SKIP = 1, тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Група_без_Running_але_з_власною_фазою_в_еталоні_лишається_AGG_LEGACY_COPY_COUNT_DIFF()
+    {
+        var (root, _) = RunRowSum("ECW_C05_02",
+            [Src(1, "N1", "X", status: "Removed"), Src(2, "N1", "X", status: "Removed")],
+            [CopyLine("N1", "X", "0.5", "ECW_C05_02", 1), CopyLine("N1", "X", "0.7", "ECW_C05_02", 2)],
+            [],
+            "-AggregateBy", "NaePhase");
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes["AGG_LEGACY_COPY_COUNT_DIFF"]);
+        Assert.False(classes.ContainsKey("AGG_LEGACY_STATUS_SKIP"));
+        Assert.False(classes.ContainsKey("LEGACY_STATUS_SKIP"));
+    }
+
     /// <summary>Змішана група: 1 Removed + 1 Running однієї фази, 1 копія легасі -> expCopies = 1, AGG_MATCH.</summary>
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
