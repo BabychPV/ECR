@@ -461,6 +461,16 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
   вище за Legacy (ECR-CALC-0433; ✎ D-426: у Legacy дозволені REG*/CURRENT_SUBSTANCE/SUBSTANCE_APPLICABLE - перевіряй за актуальним кодом). Сторожі: LandSubstanceApplicabilityTests (Architecture), SubstanceApplicableFunctionTests
   (Expressions), SubstanceApplicabilityModuleTests (Calculations), SubstanceApplicabilitySqlTests (Api, реальний SQL).
 - ⚠ Модель перегенеровується ПІСЛЯ lane, що теж міняють `land-template.model.json` (`run-model-gen.ps1` на вершині).
+- ⚠ **Release note (прод): імпорт даних з іншим написанням потоку ламає SA мовчки.** Ключ довідника порівнюється
+  ординально (`ignoreCase=false`), а старий C# - `ToLower().Contains`. Якщо в прод-даних є написання потоку/палива, якого
+  немає в довіднику методології (приклад: `Makat gas - Макатский газ` з малою `g` у ECW_C11_10, 1130 клітинок TypeOfFuel),
+  `SUBSTANCE_APPLICABLE` дає FALSE і рядок лишається БЕЗ кроків і викидів - без помилки. Регістр у довіднику НЕ
+  нормалізуємо (61+ пар `Makat Gas`/`Makat gas` зіллються й порушать унікальність); новий текст додається в
+  `model-gen/substance_applicability.py` (`EXTRA_SELECTOR_TEXTS`, лише де це підтверджує правило методології й дані) з
+  перегенерацією моделі. Перевірка (лише читання БД, `SELECT` під NOLOCK):
+  `Verify-LandSubstanceApplicability.ps1 -Server localhost -Database EcrLandUi [-Methodology ECW_C11_10]` - друкує
+  методологію, написання, кількість рядків і коди, яких бракує (значень викидів немає), код виходу 1 при прогалині.
+  Робіть перед імпортом нових прод-даних і після кожної зміни довідника.
 
 ## Похідні аргументи зі словників C#: групи NAE і Land_MassFraction (LP-10)
 

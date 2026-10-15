@@ -503,14 +503,15 @@ public sealed class LandSubstanceApplicabilityTests
 
         // Кожна група - рівно два написання одного значення селектора.
         Assert.All(groups, g => Assert.Equal(2, g.Count()));
-        Assert.Equal(61, groups.Count);
-        Assert.Equal(122, groups.Sum(g => g.Count()));
+        // 61 -> 65: ECW_C11_10 дістав `Makat gas - Макатский газ` (мала g; LAND-K8-MAKAT-VERIFY) - ще чотири пари за кодами речовин.
+        Assert.Equal(65, groups.Count);
+        Assert.Equal(130, groups.Sum(g => g.Count()));
 
         var byMethodology = groups.GroupBy(g => g.First()[0]).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
         Assert.Equal(
             new Dictionary<string, int>
             {
-                ["ECW_C11_01"] = 17, ["ECW_C11_02"] = 17, ["ECW_C11_10"] = 13, ["ECW_C12_01"] = 1, ["ECW_C12_03"] = 13,
+                ["ECW_C11_01"] = 17, ["ECW_C11_02"] = 17, ["ECW_C11_10"] = 17, ["ECW_C12_01"] = 1, ["ECW_C12_03"] = 13,
             },
             byMethodology);
 
@@ -529,6 +530,7 @@ public sealed class LandSubstanceApplicabilityTests
                 "ECW_C11_02|Stream|Fuel Gas (Internal) - Топливный газ (Внутренний) / Fuel gas (Internal) - Топливный газ (Внутренний)",
                 "ECW_C11_02|Stream|Makat Gas - Макатский газ / Makat gas - Макатский газ",
                 "ECW_C11_10|Stream|Fuel Gas (Internal) - Топливный газ (Внутренний) / Fuel gas (Internal) - Топливный газ (Внутренний)",
+                "ECW_C11_10|Stream|Makat Gas - Макатский газ / Makat gas - Макатский газ",
                 "ECW_C12_01|Stream|Hydraulic Oil / Hydraulic oil",
                 "ECW_C12_03|TypeFuel|Fuel Gas (Internal) - Топливный газ (Внутренний) / Fuel gas (Internal) - Топливный газ (Внутренний)",
             ],
@@ -543,5 +545,69 @@ public sealed class LandSubstanceApplicabilityTests
                 .ToList();
             Assert.True(sets.Count == 1, $"{pair.Key}: набори кодів різняться між написаннями.");
         }
+    }
+
+    // LAND-K8-MAKAT-VERIFY: у даних прод-вибірки потік Makat пишеться `Makat gas - Макатский газ` (мала g); ключ довідника
+    // порівнюється ординально, тож без запису C11_10 мовчки втрачав усі 4 речовини. Мутаційний доказ: прибрати
+    // EXTRA_SELECTOR_TEXTS['ECW_C11_10'] у substance_applicability.py і перегенерувати модель - тест червоніє.
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void C11_10_має_усі_чотири_написання_потоку_Makat_з_однаковими_кодами()
+    {
+        using var model = LoadModel();
+        var rows = Rows(model, out _);
+
+        string[] spellings =
+        [
+            "Makat",
+            "Makat Gas - Макатский газ",
+            "Makat gas - Макатский газ",
+            "Fuel gas (Makat) - Топливный газ (Makat)",
+        ];
+
+        foreach (var spelling in spellings)
+        {
+            Assert.Equal(Sorted(FgMakat), Codes(rows, "ECW_C11_10", spelling));
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Прогалини_покриття_селектора_знаходяться_порівнянням_ordinal_проти_ToLower_Contains()
+    {
+        const string script = """
+            $ErrorActionPreference = 'Stop'
+            . $args[0]
+            $spec = Get-Content -LiteralPath $args[1] -Raw -Encoding UTF8 | ConvertFrom-Json
+            $m = Get-Content -LiteralPath $args[2] -Raw -Encoding UTF8 | ConvertFrom-Json
+            $reg = @($m.registries) | Where-Object { $_.code -eq 'LAND_SUBSTANCE_APPLICABILITY' } | Select-Object -First 1
+            $c10 = [pscustomobject]@{ ECW_C11_10 = $spec.methodologies.ECW_C11_10 }
+            $obs = @(
+              [pscustomobject]@{ Value = 'Makat gas - Макатский газ'; Rows = 7 },
+              [pscustomobject]@{ Value = 'MAKAT GAS - Макатский газ'; Rows = 2 },
+              [pscustomobject]@{ Value = 'Diesel - Дизель'; Rows = 5 })
+            # Поточна модель: мала g покрита, а вигаданий верхній регістр - ні (ordinal), Diesel легасі не приймає.
+            $g = @(Get-LandSelectorCoverageGaps -Observed $obs -Methodologies $c10 -Entries @($reg.entries))
+            'GAPS=' + (($g | ForEach-Object { $_.Value + ':' + $_.Rows + ':' + ($_.MissingCodes -join '/') }) -join ';')
+            # Синтетичний довідник без запису `Makat gas`: прогалина з усіма чотирма кодами.
+            $syn = @($reg.entries | Where-Object { -not ($_.fields.METHODOLOGY -ceq 'ECW_C11_10' -and $_.fields.SELECTOR_VALUE -ceq 'Makat gas - Макатский газ') })
+            $g2 = @(Get-LandSelectorCoverageGaps -Observed @($obs[0]) -Methodologies $c10 -Entries $syn)
+            'SYN=' + $g2.Count + ':' + ($g2[0].MissingCodes -join '/')
+            'PREFIX=' + (Test-LandLegacyPrefixAccepts -Text 'Makat gas - Макатский газ' -ProviderEntries @($spec.methodologies.ECW_C11_10.providerEntries))
+            'NOPREFIX=' + ($null -eq (Test-LandLegacyPrefixAccepts -Text 'Diesel - Дизель' -ProviderEntries @($spec.methodologies.ECW_C11_10.providerEntries)))
+            """;
+
+        var (exit, output) = RunPowerShell(
+            script,
+            LandFile("LandSubstanceApplicability.Lib.ps1"),
+            Path.Combine(Dir, "land-substance-applicability.json"),
+            Path.Combine(Dir, "land-template.model.json"));
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("GAPS=MAKAT GAS - Макатский газ:2:333/415/416/1728", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Makat gas - Макатский газ:7", output, StringComparison.Ordinal);
+        Assert.Contains("SYN=1:333/415/416/1728", output, StringComparison.Ordinal);
+        Assert.Contains("PREFIX=FG_Makat", output, StringComparison.Ordinal);
+        Assert.Contains("NOPREFIX=True", output, StringComparison.Ordinal);
     }
 }

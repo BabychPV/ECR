@@ -272,3 +272,81 @@ function Resolve-LandMethodologySubstanceCodes {
     }
     return [pscustomobject]@{ Codes = [string[]]@(); Source = 'None' }
 }
+
+function Test-LandLegacyPrefixAccepts {
+    <#
+    .SYNOPSIS
+        Префікс, який старий C# (PrefixProvider) зіставляє з текстом потоку/палива: перший ключ, що міститься в тексті
+        або містить його, БЕЗ регістру (`ToLower().Contains` в обидва боки). `$null`, якщо жоден не підійшов.
+    .PARAMETER ProviderEntries
+        Пари [ключ, префікс] у порядку словника (`providerEntries` з land-substance-applicability.json).
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Text,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$ProviderEntries
+    )
+
+    $t = $Text.ToLowerInvariant()
+    foreach ($pair in @($ProviderEntries)) {
+        $k = ([string]$pair[0]).ToLowerInvariant()
+        if ($t.Contains($k) -or $k.Contains($t)) { return [string]$pair[1] }
+    }
+    return $null
+}
+
+function Get-LandSelectorCoverageGaps {
+    <#
+    .SYNOPSIS
+        Написання потоку/палива з даних, які легасі приймає (ToLower().Contains), але для яких у довіднику застосовності
+        методології немає ключа з ТИМИ САМИМИ ординальними символами (регістр значущий: ignoreCase=false) - рядок ECR
+        мовчки втратить речовини (SUBSTANCE_APPLICABLE -> FALSE).
+    .DESCRIPTION
+        Лише порівняння; нічого не читає з БД і не пише. Методології без providerEntries (NAE/InvNum/map/contains) і
+        ланцюг `prefix-chain` (C11_01: легасі приймає будь-що через streamfuel) тут не перевіряються.
+    .PARAMETER Observed
+        Елементи з полями Value (текст селектора) і Rows (кількість рядків даних).
+    .PARAMETER Methodologies
+        Об'єкт `methodologies` з land-substance-applicability.json (kind, selector, providerEntries, codes).
+    .PARAMETER Entries
+        Записи довідника з моделі (fields.METHODOLOGY/SELECTOR_KIND/SELECTOR_VALUE/SUBSTANCE_CODE).
+    .OUTPUTS
+        pscustomobject: Methodology, Kind, Value, Rows, Prefix, MissingCodes (string[]).
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Observed,
+        [Parameter(Mandatory)]$Methodologies,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Entries
+    )
+
+    # (методологія|вид|значення) -> HashSet кодів; ординальний словник
+    $have = New-Object 'System.Collections.Generic.Dictionary[string,System.Collections.Generic.HashSet[string]]' ([StringComparer]::Ordinal)
+    foreach ($e in @($Entries)) {
+        $f = $e.fields
+        if (([string]$f.SELECTOR_KIND) -ceq '*') { continue }
+        $k = ([string]$f.METHODOLOGY) + '|' + ([string]$f.SELECTOR_KIND) + '|' + ([string]$f.SELECTOR_VALUE)
+        if (-not $have.ContainsKey($k)) { $have[$k] = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal) }
+        [void]$have[$k].Add([string]$f.SUBSTANCE_CODE)
+    }
+
+    $gaps = New-Object System.Collections.Generic.List[object]
+    foreach ($m in $Methodologies.PSObject.Properties) {
+        $spec = $m.Value
+        if ($spec.selector -ne 'prefix-required') { continue }
+        $provider = @($spec.providerEntries)
+        foreach ($o in @($Observed)) {
+            $prefix = Test-LandLegacyPrefixAccepts -Text ([string]$o.Value) -ProviderEntries $provider
+            if ($null -eq $prefix) { continue }
+            $want = @($spec.codes.PSObject.Properties | Where-Object { $_.Name -ceq $prefix } | ForEach-Object { $_.Value } | ForEach-Object { [string]$_ })
+            if ($want.Count -eq 0) { continue }   # префікс без словника кодів: легасі KeyNotFound/пропуск
+            $k = $m.Name + '|' + [string]$spec.kind + '|' + [string]$o.Value
+            $missing = @($want | Where-Object { -not ($have.ContainsKey($k) -and $have[$k].Contains($_)) })
+            if ($missing.Count -gt 0) {
+                $gaps.Add([pscustomobject]@{
+                        Methodology = $m.Name; Kind = [string]$spec.kind; Value = [string]$o.Value
+                        Rows = [int]$o.Rows; Prefix = $prefix; MissingCodes = [string[]]$missing
+                    })
+            }
+        }
+    }
+    return , $gaps.ToArray()
+}
