@@ -223,11 +223,21 @@ public sealed class DocumentStore(
         // resultsStale: той самий предикат, що дає позначку в рядку (`StaleResultsQuery`), - підзапитом ДО `Take`.
         // ⛔ Проєкти зі звуженням виключаються в обох напрямках (`false` теж): інакше «не застарілі» = решта,
         // тобто те саме знання навиворіт. Без періоду фільтр не діє (застарілість належить періоду).
+        // LP-45 / D-432: карта «*» береться ОДИН раз на запит переліку - фільтр і позначка рядків бачать одну й ту саму
+        // карту (без другого читання відбитка й без гонки з фоновим оновленням між двома зверненнями).
+        var starFetched = false;
+        IReadOnlyDictionary<long, DateTime?>? starMap = null;
         if (filter.ResultsStale is { } wantStale && period.Value is { } staleBy)
         {
             var narrowed = filter.NarrowedProjectIds?.ToArray() ?? [];
             // LP-45 (етап 2): ідентифікатори беруться з карти періоду (кеш), а не підзапитом по журналу правок.
             var staleMap = (await StaleMap.GetAsync(staleBy, [filter.StaleByUserId], ct).ConfigureAwait(false))[0];
+            if (filter.StaleByUserId is null)
+            {
+                starFetched = true;
+                starMap = staleMap;
+            }
+
             documents = documents.Where(d => !narrowed.Contains(d.ProjectId));
             if (staleMap is null)
             {
@@ -309,7 +319,8 @@ public sealed class DocumentStore(
         var includedByDocument = await IncludedCodesBatchAsync([.. page1.Select(d => d.Id)], period, ct).ConfigureAwait(false);
 
         // І застарілість результатів - теж ОДИН запит на сторінку.
-        var staleByDocument = await StaleResultsBatchAsync([.. page1.Select(d => d.Id)], period, ct).ConfigureAwait(false);
+        var staleByDocument = await StaleResultsBatchAsync(
+            [.. page1.Select(d => d.Id)], period, starFetched, starMap, ct).ConfigureAwait(false);
 
         var items = new List<DocumentSummary>(page1.Count);
         foreach (var d in page1)
@@ -1116,7 +1127,8 @@ public sealed class DocumentStore(
     /// <c>null</c> - періоду немає, застарілість не визначена.
     /// </summary>
     private async Task<Dictionary<long, DateTime?>?> StaleResultsBatchAsync(
-        IReadOnlyList<long> documentIds, PeriodKeyFilter period, CancellationToken ct)
+        IReadOnlyList<long> documentIds, PeriodKeyFilter period,
+        bool mapFetched, IReadOnlyDictionary<long, DateTime?>? fetchedMap, CancellationToken ct)
     {
         if (period.Value is not { } periodKey)
         {
@@ -1130,7 +1142,7 @@ public sealed class DocumentStore(
 
         // LP-45 (етап 2): карта ВСЬОГО періоду (кеш, один запит) - сторінка лише відбирає з неї свої документи в
         // пам'яті. Видимість уже застосована: `documentIds` прийшли з запиту документів із межею грантів.
-        var map = (await StaleMap.GetAsync(periodKey, [null], ct).ConfigureAwait(false))[0];
+        var map = mapFetched ? fetchedMap : (await StaleMap.GetAsync(periodKey, [null], ct).ConfigureAwait(false))[0];
         if (map is null)
         {
             // Карта переповнена (понад стелю): прямий запит по ids сторінки, як у 1885c2c77.

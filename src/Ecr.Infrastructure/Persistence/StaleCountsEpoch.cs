@@ -31,11 +31,18 @@ namespace Ecr.Infrastructure.Persistence;
 /// рахується лише з правок і прогонів періоду P (<c>StaleResultsQuery</c>), а глобальна епоха за 100 редакторів
 /// росла 10–20 разів на секунду: кеш лічильників не влучав ніколи. Запис без відомого періоду (повний прогін,
 /// <c>PeriodKey = null</c>) піднімає ГЛОБАЛЬНУ складову, що входить у кожен період.
+///
+/// ⛔ LP-45 / D-432: епоха ДВОЯКА. «Повна» (<see cref="ValueFor"/>: прогін, довідники, невідоме) скидає карту
+/// застарілості синхронно. Правка комірки документа повної епохи НЕ піднімає: вона лише позначає документ
+/// «брудним» (<see cref="MarkDirty(DbContext?, IEnumerable{ValueTuple{int, long}})"/>, номер - <see cref="DirtySeq"/>), а
+/// карта лікується вузьким запитом по цих документах. Журнал обмежений (<see cref="MaxDirtyLog"/>); усічення дає
+/// повне завантаження. Позначки, як і епоха, живуть у процесі.
 /// </remarks>
 public sealed class StaleCountsEpoch : DbTransactionInterceptor
 {
     private readonly ConditionalWeakTable<DbContext, Pending> _pending = [];
     private readonly ConcurrentDictionary<int, long> _periods = new();
+    private readonly ConcurrentDictionary<int, DirtyLog> _dirty = new();
     private long _global;
     private long _value;
 
@@ -84,6 +91,91 @@ public sealed class StaleCountsEpoch : DbTransactionInterceptor
     {
         _periods.AddOrUpdate(periodKey, 1, static (_, v) => v + 1);
         Interlocked.Increment(ref _value);
+    }
+
+    /// <summary>Скільки записів «брудних документів» період тримає, перш ніж забути найстаріші (тоді - повне завантаження).</summary>
+    public const int MaxDirtyLog = 2048;
+
+    /// <summary>
+    /// Номер останньої позначки «брудних документів» періоду (LP-45, D-432). Не входить у <see cref="ValueFor"/>:
+    /// правка комірки лікує карту застарілості накладкою, а не повним скиданням.
+    /// </summary>
+    /// <param name="periodKey">Період.</param>
+    public long DirtySeq(int periodKey) => _dirty.TryGetValue(periodKey, out var log) ? log.Seq : 0;
+
+    /// <summary>
+    /// Позначає документи періоду «брудними»: їхній рядок карти застарілості змінила правка комірки. Повну епоху
+    /// НЕ піднімає (<see cref="ValueFor"/> не рухається); читач карти лікує запис вузьким запитом по цих id.
+    /// </summary>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="documentIds">Документи, чиї комірки змінено.</param>
+    public void MarkDirty(int periodKey, IEnumerable<long> documentIds)
+    {
+        ArgumentNullException.ThrowIfNull(documentIds);
+        _dirty.GetOrAdd(periodKey, static _ => new DirtyLog()).Add(documentIds);
+    }
+
+    /// <summary>
+    /// Документи періоду, брудні після номера <paramref name="sinceSeq"/>. <c>false</c> - накладку застосувати
+    /// не можна (журнал позначок усічено або документів понад <paramref name="max"/>): потрібне повне завантаження.
+    /// </summary>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sinceSeq">Номер, з яким узято поточну карту.</param>
+    /// <param name="max">Найбільша кількість документів, яку ще лікує вузький запит.</param>
+    /// <param name="documents">Брудні документи (різні).</param>
+    /// <param name="seq">Поточний номер: з ним штампується вилікувана карта.</param>
+    public bool TryDirtySince(int periodKey, long sinceSeq, int max, out IReadOnlyList<long> documents, out long seq)
+    {
+        if (!_dirty.TryGetValue(periodKey, out var log))
+        {
+            documents = [];
+            seq = 0;
+            return true;
+        }
+
+        return log.TryGetSince(sinceSeq, max, out documents, out seq);
+    }
+
+    /// <summary>
+    /// Позначає, що контекст змінив комірки названих документів: у транзакції - позначка на коміті (відкат її
+    /// знімає), поза нею - негайно. Повну епоху не піднімає.
+    /// </summary>
+    /// <param name="db">Контекст запису.</param>
+    /// <param name="dirty">Пари (період, документ).</param>
+    public void MarkDirty(DbContext? db, IEnumerable<(int PeriodKey, long DocumentId)> dirty)
+    {
+        ArgumentNullException.ThrowIfNull(dirty);
+        if (db is null)
+        {
+            return;
+        }
+
+        var groups = dirty.GroupBy(d => d.PeriodKey, d => d.DocumentId).ToList();
+        if (groups.Count == 0)
+        {
+            return;
+        }
+
+        if (db.Database.CurrentTransaction is null)
+        {
+            foreach (var group in groups)
+            {
+                MarkDirty(group.Key, group);
+            }
+
+            return;
+        }
+
+        var pending = _pending.GetValue(db, static _ => new Pending());
+        foreach (var group in groups)
+        {
+            if (!pending.Dirty.TryGetValue(group.Key, out var set))
+            {
+                pending.Dirty[group.Key] = set = [];
+            }
+
+            set.UnionWith(group);
+        }
     }
 
     /// <summary>
@@ -176,6 +268,11 @@ public sealed class StaleCountsEpoch : DbTransactionInterceptor
             return;
         }
 
+        foreach (var (period, documents) in pending.Dirty)
+        {
+            MarkDirty(period, documents);
+        }
+
         if (pending.All)
         {
             Bump();
@@ -196,5 +293,78 @@ public sealed class StaleCountsEpoch : DbTransactionInterceptor
 
         /// <summary>Періоди змін.</summary>
         public HashSet<int> Periods { get; } = [];
+
+        /// <summary>Брудні документи по періодах: повної епохи не піднімають.</summary>
+        public Dictionary<int, HashSet<long>> Dirty { get; } = [];
+    }
+
+    /// <summary>Журнал «брудних документів» одного періоду: обмежена черга (номер, документ) і нижня межа.</summary>
+    private sealed class DirtyLog
+    {
+        private readonly object gate = new();
+        private readonly Queue<(long Seq, long DocumentId)> items = new();
+        private long seq;
+        private long floor;
+
+        public long Seq
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return seq;
+                }
+            }
+        }
+
+        public void Add(IEnumerable<long> documentIds)
+        {
+            lock (gate)
+            {
+                var added = false;
+                foreach (var id in documentIds.Distinct())
+                {
+                    if (!added)
+                    {
+                        seq++;
+                        added = true;
+                    }
+
+                    items.Enqueue((seq, id));
+                }
+
+                while (items.Count > MaxDirtyLog)
+                {
+                    floor = Math.Max(floor, items.Dequeue().Seq);
+                }
+            }
+        }
+
+        public bool TryGetSince(long sinceSeq, int max, out IReadOnlyList<long> documents, out long current)
+        {
+            lock (gate)
+            {
+                current = seq;
+                documents = [];
+                if (sinceSeq >= seq)
+                {
+                    return true;
+                }
+
+                if (sinceSeq < floor)
+                {
+                    return false;
+                }
+
+                var ids = items.Where(i => i.Seq > sinceSeq).Select(i => i.DocumentId).Distinct().Take(max + 1).ToList();
+                if (ids.Count > max)
+                {
+                    return false;
+                }
+
+                documents = ids;
+                return true;
+            }
+        }
     }
 }

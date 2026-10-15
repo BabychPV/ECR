@@ -2,6 +2,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -28,11 +29,20 @@ public sealed partial class DocumentStaleResultsStoreTests
     private sealed class WarmProbe : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
     {
         private int maps;
+        private int deltas;
+        private int authorMaps;
         private int registryFingerprints;
         private int failMap;
         private int failRegistry;
 
+        /// <summary>Повні запити карти «*» (без вузьких запитів накладки й згрупованого запиту авторів).</summary>
         public int Maps => Volatile.Read(ref maps);
+
+        /// <summary>Вузькі запити накладки «брудних документів» (<c>StaleMap:delta</c>).</summary>
+        public int Deltas => Volatile.Read(ref deltas);
+
+        /// <summary>Повні згруповані запити карт усіх авторів (<c>StaleMap:authors</c>).</summary>
+        public int AuthorMaps => Volatile.Read(ref authorMaps);
 
         public int RegistryFingerprints => Volatile.Read(ref registryFingerprints);
 
@@ -46,7 +56,15 @@ public sealed partial class DocumentStaleResultsStoreTests
             Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result,
             CancellationToken cancellationToken = default)
         {
-            if (command.CommandText.Contains("MIN(t.At)", StringComparison.Ordinal))
+            if (command.CommandText.Contains(StaleResultsMapCache.DeltaTag, StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref deltas);
+            }
+            else if (command.CommandText.Contains(StaleResultsMapCache.AuthorsTag, StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref authorMaps);
+            }
+            else if (command.CommandText.Contains("MIN(t.At)", StringComparison.Ordinal))
             {
                 Interlocked.Increment(ref maps);
                 if (Interlocked.Exchange(ref failMap, 0) == 1)
@@ -176,14 +194,16 @@ public sealed partial class DocumentStaleResultsStoreTests
             Assert.Empty(hidden);
         }
 
-        // Фільтр автора - власний ключ: прогрітий «*» його не обслуговує (окремий запит карти) і дає лише B.
+        // Фільтр автора - власний запис «автори» (D-432): прогрітий «*» його не обслуговує - один згрупований запит,
+        // а не повний запит «*» (Maps не росте); результат - лише B.
         await using var db2 = InterceptedContext(w.Probe, w.R.Epoch);
         var byUser = await WarmStore(w, db2).ListAsync(
             projectId: null, new PeriodKeyFilter(w.R.Period),
             new DocumentListFilter(null, null, ResultsStale: true, StaleByUserId: 62),
             new CursorRequest(Limit: 200), [w.R.Chain.ProjectId], CancellationToken.None);
         Assert.Equal([w.R.B], byUser.Items.Select(d => d.Id));
-        Assert.Equal(mapsAfterWarm + 1, w.Probe.Maps);
+        Assert.Equal(mapsAfterWarm, w.Probe.Maps);
+        Assert.Equal(1, w.Probe.AuthorMaps);
     }
 
     [Fact]
@@ -287,5 +307,155 @@ public sealed partial class DocumentStaleResultsStoreTests
 
         w.Probe.FailRegistryQueries(false);
         _ = await WarmPageAsync(w);
+    }
+
+    // ---- LP-45, lane D: кільце (усі Current-періоди), власне вікно SWR запису кільця, HotPeriodLimit ----
+    // Мутації: у StaleResultsMapCache прибрати `Window` з Entry/вікно з TryStale (повернути const 120 с) - червоний
+    // `Кільце_запис_живе_у_вікні_SWR_15_хв...`; у StaleMapWarmer.HotPeriodsAsync `Take(ring ? 120 : hotLimit)` -> `Take(hotLimit)` -
+    // червоний `Кільце_прогріває_усі_Current_періоди...`; `Take(hotLimit)` -> `Take(2)` - червоний `HotPeriodLimit_...`.
+
+    /// <summary>Фабрика областей фонового оновлення, що падає одразу: фоновий reload у тесті вікна не ходить у БД.</summary>
+    private sealed class FailingScopes : IServiceScopeFactory
+    {
+        public IServiceScope CreateScope() => throw new InvalidOperationException("фонове оновлення вимкнено в тесті");
+    }
+
+    private static async Task<IReadOnlyList<int>> SeedCurrentPeriodsAsync(WarmRig w, int first, int count)
+    {
+        await using var db = w.R.Builder.CreateContext();
+        var periods = new List<int>();
+        for (var i = 0; i < count; i++)
+        {
+            var run = new Ecr.Domain.Entities.Calculations.CalculationRun(
+                w.R.Chain.ProjectId, first + i, triggeredByUserId: null, Now, null);
+            run.Complete("Succeeded", Now.AddMinutes(1), "{}", errorMessage: null);
+            run.MakeCurrent();
+            db.CalculationRuns.Add(run);
+            periods.Add(first + i);
+        }
+
+        await db.SaveChangesAsync(CancellationToken.None);
+        return periods;
+    }
+
+    /// <summary>Очікуваний набір: календарні (годинник 2026-05) + періоди з Current-прогоном (всі або N найновіших).</summary>
+    private async Task<HashSet<int>> ExpectedWarmAsync(bool ring, int hotLimit)
+    {
+        var current = new List<int>();
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT DISTINCT PeriodKey FROM calc.CalculationRun WHERE Status = N'Current' AND PeriodKey IS NOT NULL";
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            current.Add(reader.GetInt32(0));
+        }
+
+        var set = new HashSet<int> { 202605, 202604 };
+        set.UnionWith(ring ? current : current.OrderByDescending(p => p).Take(hotLimit));
+        return set;
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Кільце_прогріває_усі_Current_періоди_по_одному_разу_і_оновлює_їх_після_TTL()
+    {
+        var w = await WarmRigAsync();
+        using var cacheLease = w.R.Cache;
+        await using var providerLease = w.Provider;
+        _ = await SeedCurrentPeriodsAsync(w, 202501, 10);
+        var all = await ExpectedWarmAsync(ring: true, hotLimit: 2);
+        var hot = await ExpectedWarmAsync(ring: false, hotLimit: 2);
+        Assert.True(all.Count > hot.Count + 5, "дані мають розрізняти кільце й гарячі");
+
+        var warmed = await w.Warmer.WarmOnceAsync(CancellationToken.None, ring: true);
+
+        Assert.Equal(all.Order(), warmed.Order());
+        Assert.Equal(all.Count, w.Probe.Maps);
+
+        // Другий прохід у межах TTL - лише попадання; після TTL - кожен ключ оновлено рівно раз.
+        _ = await w.Warmer.WarmOnceAsync(CancellationToken.None, ring: true);
+        Assert.Equal(all.Count, w.Probe.Maps);
+        w.Clock.Advance(StaleResultsMapCache.Ttl + TimeSpan.FromSeconds(1));
+        _ = await w.Warmer.WarmOnceAsync(CancellationToken.None, ring: true);
+        Assert.Equal(all.Count * 2, w.Probe.Maps);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Кільце_запис_живе_у_вікні_SWR_15_хв_а_запис_гарячого_проходу_через_150_с_ні()
+    {
+        var w = await WarmRigAsync();
+        using var cacheLease = w.R.Cache;
+        await using var providerLease = w.Provider;
+        var scopes = new FailingScopes();
+
+        async Task<IReadOnlyDictionary<long, DateTime?>?> ReadAsync()
+        {
+            await using var db = InterceptedContext(w.Probe, w.R.Epoch);
+            var maps = await new StaleResultsMapCache(db, w.R.Cache, w.Clock, w.R.Epoch, scopeFactory: scopes)
+                .GetAsync(w.R.Period, [null], CancellationToken.None);
+            return maps[0];
+        }
+
+        // Кільце: запис за 150 с (> TTL + 120 с) ще віддається як SWR - ТОЙ САМИЙ екземпляр карти, не нове завантаження.
+        _ = await w.Warmer.WarmOnceAsync(CancellationToken.None, ring: true);
+        var ringMap = await ReadAsync();
+        Assert.NotNull(ringMap);
+        w.Clock.Advance(TimeSpan.FromSeconds(150));
+        Assert.Same(ringMap, await ReadAsync());
+
+        // Гарячий прохід (вікно 120 с): через 150 с запис уже поза вікном - синхронне перезавантаження (інший екземпляр).
+        var w2 = await WarmRigAsync();
+        using var cacheLease2 = w2.R.Cache;
+        await using var providerLease2 = w2.Provider;
+        _ = await w2.Warmer.WarmOnceAsync(CancellationToken.None);
+        var scopes2 = new FailingScopes();
+        await using var db0 = InterceptedContext(w2.Probe, w2.R.Epoch);
+        var hotMap = (await new StaleResultsMapCache(db0, w2.R.Cache, w2.Clock, w2.R.Epoch, scopeFactory: scopes2)
+            .GetAsync(w2.R.Period, [null], CancellationToken.None))[0];
+        w2.Clock.Advance(TimeSpan.FromSeconds(150));
+        await using var db1 = InterceptedContext(w2.Probe, w2.R.Epoch);
+        var after = (await new StaleResultsMapCache(db1, w2.R.Cache, w2.Clock, w2.R.Epoch, scopeFactory: scopes2)
+            .GetAsync(w2.R.Period, [null], CancellationToken.None))[0];
+        Assert.NotSame(hotMap, after);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task HotPeriodLimit_береться_з_параметра_а_не_константи_два()
+    {
+        var w = await WarmRigAsync();
+        using var cacheLease = w.R.Cache;
+        await using var providerLease = w.Provider;
+        _ = await SeedCurrentPeriodsAsync(w, 202501, 10);
+        var expected = await ExpectedWarmAsync(ring: false, hotLimit: 5);
+
+        var warmed = await w.Warmer.WarmOnceAsync(CancellationToken.None, ring: false, hotLimit: 5);
+
+        Assert.Equal(expected.Order(), warmed.Order());
+        Assert.Equal(expected.Count, w.Probe.Maps);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Кільце_помилка_одного_періоду_не_зупиняє_решту_і_йде_послідовно()
+    {
+        var w = await WarmRigAsync();
+        using var cacheLease = w.R.Cache;
+        await using var providerLease = w.Provider;
+        _ = await SeedCurrentPeriodsAsync(w, 202501, 10);
+        var all = await ExpectedWarmAsync(ring: true, hotLimit: 2);
+
+        w.Probe.FailNextMapQuery();
+        var warmed = await w.Warmer.WarmOnceAsync(CancellationToken.None, ring: true);
+
+        Assert.Equal(all.Count - 1, warmed.Count);
+        Assert.Equal(all.Count, w.Probe.Maps);
     }
 }

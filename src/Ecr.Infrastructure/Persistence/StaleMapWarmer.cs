@@ -25,15 +25,24 @@ public sealed partial class StaleMapWarmer(
     /// <summary>Скільки найновіших періодів з актуальним прогоном додається до календарних.</summary>
     private const int LatestRunPeriods = 2;
 
-    /// <summary>Один прохід: прогріває гарячі періоди послідовно; повертає перелік успішно оброблених.</summary>
+    /// <summary>Вікно SWR записів кільця (LP-45): запис не зникає між рідкими проходами кільця.</summary>
+    public static readonly TimeSpan RingWindow = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// Один прохід: прогріває гарячі (або, при <paramref name="ring"/>, ВСІ періоди з актуальним прогоном) послідовно;
+    /// повертає перелік успішно оброблених.
+    /// </summary>
     /// <param name="ct">Токен скасування (зупинка хоста).</param>
-    public async Task<IReadOnlyList<int>> WarmOnceAsync(CancellationToken ct)
+    /// <param name="ring">Прохід кільця: усі Current-періоди, записи з вікном <see cref="RingWindow"/>.</param>
+    /// <param name="hotLimit">Скільки найновіших періодів з прогоном додається до календарних (гарячі).</param>
+    public async Task<IReadOnlyList<int>> WarmOnceAsync(
+        CancellationToken ct, bool ring = false, int hotLimit = LatestRunPeriods)
     {
         var done = new List<int>();
         List<int> periods;
         try
         {
-            periods = await HotPeriodsAsync(ct).ConfigureAwait(false);
+            periods = await HotPeriodsAsync(ring, hotLimit, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -52,7 +61,7 @@ public sealed partial class StaleMapWarmer(
 
                 // Без scopeFactory: SWR вимкнено, завантаження синхронне й single-flight з читачами.
                 var rows = await new StaleResultsMapCache(db, cache, clock, epoch, logger)
-                    .WarmAsync(period, ct).ConfigureAwait(false);
+                    .WarmAsync(period, ct, ring ? RingWindow : null).ConfigureAwait(false);
                 LogWarmed(logger, period, timer.ElapsedMilliseconds, rows ?? -1);
                 done.Add(period);
             }
@@ -65,7 +74,7 @@ public sealed partial class StaleMapWarmer(
         return done;
     }
 
-    private async Task<List<int>> HotPeriodsAsync(CancellationToken ct)
+    private async Task<List<int>> HotPeriodsAsync(bool ring, int hotLimit, CancellationToken ct)
     {
         var now = clock.UtcNow;
         var current = (now.Year * 100) + now.Month;
@@ -74,6 +83,7 @@ public sealed partial class StaleMapWarmer(
 
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
+        // ⛔ Явна межа (LayerRules): кільце - не більше 120 періодів (10 років), гарячі - hotLimit.
         var withRuns = await db.Database
             .SqlQuery<int>($"""
                 SELECT PeriodKey AS [Value]
@@ -82,7 +92,7 @@ public sealed partial class StaleMapWarmer(
                 GROUP BY PeriodKey
                 """)
             .OrderByDescending(period => period)
-            .Take(LatestRunPeriods)
+            .Take(ring ? 120 : hotLimit)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 

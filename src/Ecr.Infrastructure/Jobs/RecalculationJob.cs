@@ -64,7 +64,8 @@ public sealed partial class RecalculationJob(
     RecalculationBudgetMonitor? budget = null,
     ILogger<RecalculationJob>? logger = null,
     ISheetEditGate? sheetGate = null,
-    CrossPeriodFanOut? fanOut = null) : IRecalculationJob
+    CrossPeriodFanOut? fanOut = null,
+    IRecalcCommandTimeout? commandTimeout = null) : IRecalculationJob
 {
     [LoggerMessage(
         Level = LogLevel.Error,
@@ -148,6 +149,10 @@ public sealed partial class RecalculationJob(
         // (`RecalculationJobDocumentSerializationTests`). Лок сесійний, на окремому
         // з'єднанні: задача живе кількома транзакціями, і транзакційний лок не
         // накрив би її цілком; черга й пул лишаються як є.
+        // Таймаут команд контексту ЗАДАЧІ (запис прогону, завершення/перемикання) піднімається до стелі
+        // перерахунку; гілки оркестратора піднімають свої контексти самі (`IRecalcCommandTimeout`).
+        commandTimeout?.Apply();
+
         await using var documentLock = await AcquireDocumentLockAsync(request.DocumentId, ct).ConfigureAwait(false);
 
         // ⛔ «CalculationRun ховає результати сусідніх документів» (третя
@@ -611,6 +616,21 @@ public sealed partial class RecalculationJob(
                 throw new JobDeferredException(
                     RecalculationDocumentLock.LockWaitDeferDelay(request.DocumentId),
                     "Document data is busy with a long operation; recalculation deferred.",
+                    RecalculationDocumentLock.Resource(request.DocumentId));
+            }
+
+            // ⛔ Зупинка бази (15.10, EcrLandUi): автоприріст файлу `Ecr_hot` стояв 71 с, `SqlException -2`
+            // (CommandTimeout) вистрілив у трьох прогонах одночасно, і три задачі пішли в `JobRetryPolicy`
+            // (30/60/120 с) — по собі лишились `Failed`-прогони. Таймаут команди й жертва дедлока (1205) — як і
+            // 1222 вище, стан бази, що минає, а не вердикт про дані: відкладення без спроби ретраю, слот і
+            // applock вільні. Стеля та сама — `JobDeferral.MaxDeferral` (30 хв від першого відкладення); після
+            // неї задача `Failed` з конвертом «ресурс зайнятий» (нескінченного відкладення немає), а систематичний
+            // таймаут стає видимим. Незавершені прогони вже позначено `Failed` вище, повтор створить нові.
+            if (SqlStallClassifier.IsStall(ex))
+            {
+                throw new JobDeferredException(
+                    RecalculationDocumentLock.LockWaitDeferDelay(request.DocumentId),
+                    "Database stalled (command timeout or deadlock victim); recalculation deferred.",
                     RecalculationDocumentLock.Resource(request.DocumentId));
             }
 

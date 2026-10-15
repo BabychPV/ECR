@@ -30,7 +30,7 @@
                     замінюється фрагментом складу по речовині (довідники LAND_HSE400_COMPOSITION/_STREAM/_SUBSTANCE,
                     CURRENT_SUBSTANCE()); потребує довідника LAND_HSE400_SUBSTANCE (Registries або
                     Import-LandHse400Substance.ps1). Чернетку з фрагментом сам переводить у NumericMode=Strict
-                    (REG*/CURRENT_SUBSTANCE() у Legacy не публікуються, ECR-CALC-0433); -KeepNumericMode вимикає
+                    (✎ D-426: у Legacy дозволені REG*/CURRENT_SUBSTANCE/SUBSTANCE_APPLICABLE; Strict лишається для CONVERT/Ln/ifs/SUBSTANCE і для методологій, чий склад задає Stage CompositionMass, окрім мостів над String OperatingTime - C11_01/02 лишаються Legacy); -KeepNumericMode вимикає
                     цей перехід і версії вище за Legacy
       SubstanceApplicability (лише явно, в All не входить) правило категорії ЧЕРНЕТОК із моделі
                     (substanceApplicability.methodologies) обгортається SUBSTANCE_APPLICABLE(...): речовина, якої немає
@@ -76,7 +76,7 @@
                               блокує перенос документів (dataLoss). Порядок - README, «Порядок етапів стенда» (RC32 F1/F2).
 .PARAMETER KnownStaleTables   Коди "АРКУШ/ТАБЛИЦЯ" (або лише код таблиці), які не вважати застарілими.
 .PARAMETER KeepNumericMode    -Stage CompositionMass: не переводити чернетки з фрагментом складу в NumericMode=Strict
-                              (за замовчуванням переводить: REGFIND/REGFIELD/CURRENT_SUBSTANCE() у Legacy -> ECR-CALC-0433).
+                              (за замовчуванням переводить, окрім методологій із мостом над String OperatingTime; ✎ D-426: REG*/CURRENT_SUBSTANCE/SUBSTANCE_APPLICABLE у Legacy дозволені).
 .PARAMETER OnlyMethodology    Етапи LandParity, CompositionMass, SubstanceApplicability: обробити лише ці коди методологій
                               (напр. ECW_C12_03). Порожньо - усі методології етапу (як раніше).
 .PARAMETER DryRun             Лише читання й підрахунок.
@@ -1537,10 +1537,19 @@ function Stage-LandParity {
         $saFile = Join-Path $repo 'docs\delivery\reference-data\land-template\land-substance-applicability.json'
         $saDoc = Get-Content -LiteralPath $saFile -Raw -Encoding UTF8 | ConvertFrom-Json
         $saEntry = $saDoc.methodologies.PSObject.Properties[$name]
+        # ✎ 2026-10-14 (правило 2а): категорії змішані (суфікси речовин + потоки FG/LPG без суфікса, C11_01/C11_02) -
+        # склад = суфікси ∪ словник, але лише коли для методології є обгортка SUBSTANCE_APPLICABLE (substanceApplicability
+        # у моделі): без неї розширений склад дав би ECR_ONLY по чужих речовинах рядка.
+        $saWrapper = ($null -ne $Mdl.substanceApplicability) -and ($null -ne $Mdl.substanceApplicability.methodologies.PSObject.Properties[$name])
+        $mixed = $saWrapper -and (Test-LandMixedFuelStreamCategories -Categories $cats)
         $resolved = Resolve-LandMethodologySubstanceCodes -SuffixCodes $suffixCodes `
             -ApplicabilityCodes $(if ($null -ne $saEntry) { $saEntry.Value.codes } else { $null }) `
-            -FromApplicability ($null -ne $fromApplicability -and [bool]$fromApplicability.Value)
+            -FromApplicability ($null -ne $fromApplicability -and [bool]$fromApplicability.Value) `
+            -MixedFuelStreamCategories $mixed
         $codes = @($resolved.Codes)
+        if ($resolved.Source -eq 'SuffixUnionApplicability') {
+            Log "  ${name}: категорії змішані (суфікси речовин + потоки FG/LPG) - склад = суфікси ∪ словник застосовності ($($codes.Count) кодів, суфіксів $(@($suffixCodes).Count)); ОБОВ'ЯЗКОВО далі -Stage SubstanceApplicability у цій самій чернетці ДО публікації (інакше ECR_ONLY по чужих речовинах)"
+        }
         if ($resolved.Source -eq 'ApplicabilityFallback') {
             Log "  ${name}: у категоріях констант немає суфікса речовини (форма A) - склад речовин зі словника застосовності ($($codes.Count) кодів)"
         }
@@ -1591,7 +1600,7 @@ function Stage-LandParity {
 # (argumentBridges.massFraction.methodologies: ECW_C11_11_04) в ЧЕРНЕТЦІ токен @Land_MassFraction у виразах формул
 # замінюється фрагментом if(CURRENT_SUBSTANCE() = '415', @Land_MassFraction_0415, ...), а аргументи формули
 # доповнюються Land_MassFraction_0<код> (колонки-мости на таблиці 9a_19 дає модель). Фрагмент вживає
-# CURRENT_SUBSTANCE()/REGFIND/REGFIELD - ярус Extension, у Legacy його не опублікувати (ECR-CALC-0433): чернетці з
+# CURRENT_SUBSTANCE()/REGFIND/REGFIELD - ярус Extension (✎ D-426: у Legacy дозволені REG*/CURRENT_SUBSTANCE/SUBSTANCE_APPLICABLE; Strict лишається для CONVERT/Ln/ifs/SUBSTANCE і для методологій, чий склад задає Stage CompositionMass): чернетці з
 # Legacy ставиться Strict (PUT .../modes; календар і трасування лишаються). Опубліковану версію не чіпаємо; нову
 # версію чи публікацію етап не робить. Повторний запуск - 0 змін.
 function Stage-MassFraction {
@@ -1647,6 +1656,8 @@ function Stage-MassFraction {
 function Stage-CompositionMass {
     Log '== CompositionMass =='
     . (Join-Path $here 'LandHse400Composition.Lib.ps1')
+    . (Join-Path $here 'LandArgumentSuffix.Lib.ps1')
+    $stringBridge = @(Get-LandStringBridgeSuffixMethodologies -Model $Mdl)
     LoginAs 'land-owner'
     $cm = $Mdl.argumentBridges.hse400.compositionMass
     if ($null -eq $cm) { throw 'У моделі немає argumentBridges.hse400.compositionMass: перегенеруйте модель (model-gen).' }
@@ -1685,13 +1696,15 @@ function Stage-CompositionMass {
         $changed += $n
         Log "  ${name}: формул із фрагментом складу - $n"
 
-        # Фрагмент вживає CURRENT_SUBSTANCE() і REGFIND/REGFIELD - функції ярусу Extension: у версії з NumericMode=Legacy
-        # публікація дає ECR-CALC-0433 (RC31: C11_01/02/10, C12_01). Тому чернетка з фрагментом переводиться в Strict
+        # Фрагмент вживає CURRENT_SUBSTANCE() і REGFIND/REGFIELD - функції ярусу Extension (✎ D-426: у Legacy вони вже дозволені; Strict лишається для CONVERT/Ln/ifs/SUBSTANCE і для методологій, чий склад задає Stage CompositionMass; методології з мостом над String OperatingTime - C11_01/02 - режим лишають)
+        # (історично RC31: ECR-CALC-0433 у Legacy для C11_01/02/10, C12_01). Тому чернетка з фрагментом переводиться в Strict
         # (PUT .../versions/{vid}/modes; календарний режим і журнал лишаються як є). Strict - явне рішення з нової дати
         # дії, не заднім числом: перша версія методології (як тут) переходу не має. ⚠ Strict міняє арифметику версії:
         # double(NCalc 1.3.8) -> decimal, ділення на нуль -> #DIV/0 замість +∞, округлення Round -> AwayFromZero.
         # -KeepNumericMode лишає режим як є (тоді публікація дасть 0433 для версій із фрагментом).
-        if ($hasFragment -and -not $KeepNumericMode) {
+        if ($hasFragment -and (Test-LandCompositionMassKeepsNumericMode -Methodology $name -StringBridgeMethodologies $stringBridge)) {
+            Log "  ${name}: суфіксний міст над String OperatingTime - режим $($v.numericMode) лишаю (Strict дав би Text x Number = #VALUE)"
+        } elseif ($hasFragment -and -not $KeepNumericMode) {
             if ([string]$v.numericMode -eq 'Strict') {
                 Log "  ${name}: версія $vid уже Strict"
             } else {

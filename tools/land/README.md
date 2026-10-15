@@ -395,8 +395,8 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 (`ECW_C11_01/02/10`, `ECW_C12_01/03`) токен `@CompositionMass` замінюється фрагментом з
 `argumentBridges.hse400.compositionMass.methodologies.<ім'я>.fragment`: `Build-LandTemplate.ps1 -Stage CompositionMass`
 (лише явно; опубліковані версії не чіпає; повтор - 0 змін). Фрагмент вживає `CURRENT_SUBSTANCE()` і `REGFIND`/`REGFIELD`
-(ярус Extension): у версії `NumericMode = Legacy` публікація дає ECR-CALC-0433, тому етап **сам переводить чернетку з
-фрагментом у `Strict`** (`PUT /methodologies/{id}/versions/{vid}/modes`, календарний режим і журнал не чіпає;
+(ярус Extension): у версії `NumericMode = Legacy` раніше була ECR-CALC-0433 (✎ D-426: у Legacy дозволені REG*/CURRENT_SUBSTANCE/SUBSTANCE_APPLICABLE; Strict лишається для CONVERT/Ln/ifs/SUBSTANCE і для методологій, чий склад задає Stage CompositionMass), тому етап **переводить чернетку з
+фрагментом у `Strict`**, окрім методологій із суфіксним мостом над String OperatingTime (C11_01/C11_02 лишаються Legacy: у Strict текст x число = #VALUE) (`PUT /methodologies/{id}/versions/{vid}/modes`, календарний режим і журнал не чіпає;
 `-KeepNumericMode` вимикає). ⚠ `Strict` змінює арифметику версії: `decimal` замість `double` NCalc 1.3.8, ділення на нуль -
 `#DIV/0` замість `+∞`, `Round` - AwayFromZero; у формулах C11_01/02/10, C12_01/03 дільники - лише константи `CST.k*`
 (змінних знаменників немає), `Pow`/`Sqrt` - лише в C11_02 (константні аргументи), а `if(@X = 0, 0, …)` не залежить від
@@ -436,7 +436,7 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 - Стенд: `Build-LandTemplate.ps1 -Stage Registries` (довідник) і далі `-Stage SubstanceApplicability` (лише явно; обгортає
   правило категорії ЧЕРНЕТКИ: `if(SUBSTANCE_APPLICABLE('LAND_SUBSTANCE_APPLICABILITY','<методологія>','<вид>',<значення>),
   <правило>,'')`; опубліковану версію не чіпає; повтор - 0 змін; `-Stage LandParity` обгортку не скидає). Версія має бути
-  вище за Legacy (ECR-CALC-0433). Сторожі: LandSubstanceApplicabilityTests (Architecture), SubstanceApplicableFunctionTests
+  вище за Legacy (ECR-CALC-0433; ✎ D-426: у Legacy дозволені REG*/CURRENT_SUBSTANCE/SUBSTANCE_APPLICABLE - перевіряй за актуальним кодом). Сторожі: LandSubstanceApplicabilityTests (Architecture), SubstanceApplicableFunctionTests
   (Expressions), SubstanceApplicabilityModuleTests (Calculations), SubstanceApplicabilitySqlTests (Api, реальний SQL).
 - ⚠ Модель перегенеровується ПІСЛЯ lane, що теж міняють `land-template.model.json` (`run-model-gen.ps1` на вершині).
 
@@ -656,3 +656,27 @@ C11_10 перелічує обидва написання (з пробілом �
 - Перезавантаження після зміни ключа/мапінгу (LAND-PROD-6, T6_12) - у K1-вікні, одним recalc.
 - Стан NAME_MISMATCH (ім'я документа на стенді інше, ніж ключ -DocMap) блокує документ і дає exit 1; обхід лише явним `-AllowNameMismatch`.
 - Невідомі таблиці прода дають NO_TABLE (exit 1) і блокують -Execute. Явно й не за замовчуванням: `-SkipUnknownTables` (пропуск із WARN і лічильником SKIPPED_UNKNOWN) та `-IncludeTables 'T9_04,T9_07'` (лише ці коди таблиць; решта NOT_INCLUDED).
+
+## Селектор гілки у паритеті (C11_01 / C11_02 / C11_11_02 / C11_11_03)
+
+Легасі рахує ОДНУ гілку виходу на (рядок, вихід) за NAE і потоком; ECR віддає всі. Раніше harness складав гілки в один ключ
+(«last wins») і давав `BRANCH_BOTH_PRESENT`. Тепер (`LandParity.Lib.ps1`, `Get-LandParitySelectedBranch`; продукт не змінено):
+
+- значення зберігаються по гілках (`EcrVar`); порівнюється лише гілка, яку обрав би легасі; решта гілок - клас
+  `ECR_ONLY_NOT_SELECTED` (група OTHER, не ECR_ONLY і не BRANCH_BOTH); у summary `branchSelectedCells` / `notSelectedCells`;
+- методологія з селектором знімає гілку без `-TypeFoldMethodology`; вимкнути - `-NoBranchSelector` (тоді fold лише за
+  `-TypeFoldMethodology`, кілька гілок = `BRANCH_BOTH_PRESENT`);
+- проміжні `SumXiDiv*` (C11_11_02) - `ECR_ONLY_INTERMEDIATE` (як `_NOx`).
+
+Правила вибору (джерело - docs/source, ECW_C11_OPF_Plant_Operational):
+
+| Методологія | Правило | Джерело |
+|---|---|---|
+| C11_01 | NAE (без пробілів) містить 6646..6657 -> `type2`; інакше потік FG/LPG -> `type1_1`; Diesel/452 -> `type1_2`; решта -> `type1_3`. Потік: `Land_TypeFuelOrStream` (інакше `Land_TypeFuel`) | ECW_C11_01.cs:105-119, 176-208 |
+| C11_02 | лише за NAE, точний збіг зі списком: type1 (6640..6645, 6582(002), 6585/6586/6587/6592 з хвостами), type2 (6783(001), 6786(001), 6787(001), 6789(001)); NAE поза списком - легасі результату не дає | ECW_C11_02.cs:143-146, 357-361 |
+| C11_11_02 | NAE 0883 або група 6975 (6975, 6976, 6981..6986) -> `type2`; інакше `type1`; NAE поза groupNAE - результату немає | ECW_C11_11_02.cs:109-133, 221-239 |
+| C11_11_03 | окремі групи: tons `type1/type2/type3`, gsec `type1/type2` (0804, 6801..6803 у gsec - це `type2`). Гілки tons і gsec НЕ змішувати: `type3` існує лише в tons | ECW_C11_11_03.cs:81-112 |
+
+Застереження: гілка вибирається по КОЖНОМУ члену групи окремо (за його Row; `AggregateBy NaePhase` сумує вибрані значення\nчленів, члени однієї групи можуть мати різну гілку - для C11_01 через `Land_TypeFuelOrStream`). Для C11_01 фолбек на\n`Land_TypeFuel`, коли `Land_TypeFuelOrStream` порожній, - евристика harness, не правило легасі. Для C11_11_02 category1 легасі бере з
+`naeNumberObj` - тут використано той самий NAE рядка. Модельні розбіжності (немає tons у C11_01/C11_02, tons C11_11_03 без
+`type2`) селектор не ховає: вони лишаються `MISSING_OUTPUT`.

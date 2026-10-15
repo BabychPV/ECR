@@ -152,3 +152,62 @@ function Add-LandArgumentSuffixTestArguments {
     }
     return [pscustomobject]@{ Arguments = $list.ToArray(); Added = $added.ToArray(); Missing = $missing.ToArray() }
 }
+
+function Get-LandStringBridgeSuffixMethodologies {
+    <#
+    .SYNOPSIS
+        Коди методологій із суфіксним мостом (argumentSuffixes), вираз якого читає String-колонку тієї ж таблиці.
+    .DESCRIPTION
+        Приклад: C11_01/C11_02 - `Land_Measure_OperatingTime__ECW_C11_xx` над `OperatingTimeReleaseOnColdVentYesNo_Mnn` (String:
+        години або `No - Нет`). У Strict Text x Number = #VALUE, у Legacy числовий рядок ToValue перетворює на число.
+        Тому такі методології мають лишатися Legacy (діагноз LAND-POST-K3, 2026-10-15).
+    #>
+    param([Parameter(Mandatory)]$Model)
+
+    $hit = New-Object System.Collections.Generic.HashSet[string]
+    $sfx = Get-LandArgumentSuffixes -Model $Model
+    foreach ($sheet in @($Model.sheets)) {
+        foreach ($t in @($sheet.tables)) {
+            $strCols = @(@($t.columns) | Where-Object { [string]$_.dataType -eq 'String' } | ForEach-Object { [string]$_.code })
+            if ($strCols.Count -eq 0) { continue }
+            foreach ($m in $sfx.Keys) {
+                foreach ($s in $sfx[$m]) {
+                    $b = @($t.columns) | Where-Object { [string]$_.code -eq [string]$s.Column } | Select-Object -First 1
+                    if ($null -eq $b -or [string]::IsNullOrEmpty([string]$b.expression)) { continue }
+                    foreach ($c in $strCols) {
+                        if ([regex]::IsMatch([string]$b.expression, '(?<![A-Za-z0-9_])' + [regex]::Escape($c) + '(?![A-Za-z0-9_])')) { [void]$hit.Add([string]$m); break }
+                    }
+                }
+            }
+        }
+    }
+    return @($hit | Sort-Object)
+}
+
+function Get-LandStringBridgeStrictMethodologies {
+    <#
+    .SYNOPSIS
+        Із -Methodologies (Get-LandStringBridgeSuffixMethodologies) ті, чия остання версія має NumericMode=Strict.
+    .PARAMETER Versions
+        Масив {Code, NumericMode} - остання версія кожної методології на стенді.
+    #>
+    param([string[]]$Methodologies = @(), [object[]]$Versions = @())
+
+    return @(@($Versions) | Where-Object { $null -ne $_ -and @($Methodologies) -contains [string]$_.Code -and [string]$_.NumericMode -eq 'Strict' } |
+        ForEach-Object { [string]$_.Code } | Sort-Object)
+}
+
+function Test-LandCompositionMassKeepsNumericMode {
+    <#
+    .SYNOPSIS
+        Чи лишає Stage-CompositionMass режим версії як є (true) замість примусового Strict.
+    .DESCRIPTION
+        true - методологія має суфіксний міст над String-колонкою (Get-LandStringBridgeSuffixMethodologies): у Strict
+        Text x Number = #VALUE (tons C11_01/C11_02), тому режим версії (Legacy у V3) не чіпаємо. D-426 дозволяє
+        REG*/CURRENT_SUBSTANCE/SUBSTANCE_APPLICABLE у Legacy, тож 0433 тут більше не причина Strict. Інші методології
+        (C11_10, C12_01, C12_03) - false: Strict лишається.
+    #>
+    param([Parameter(Mandatory)][string]$Methodology, [string[]]$StringBridgeMethodologies = @())
+
+    return (@($StringBridgeMethodologies) -contains $Methodology)
+}

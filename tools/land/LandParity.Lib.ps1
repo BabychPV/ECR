@@ -190,6 +190,93 @@ $script:LandParityNullType1Default = @{ 'ECW_C12_02' = @('415') }
 
 function Get-LandParityTypeFoldDefault { return @($script:LandParityTypeFoldDefault) }
 
+# Селектор гілки (тест-харнес, без зміни продукту): легасі рахує ОДНУ гілку на (рядок, вихід) за NAE/потоком, ECR - усі.
+# Для методологій зі списку значення гілок зберігаються окремо (EcrVar), порівнюється лише гілка, яку обрав би легасі,
+# решта гілок - клас ECR_ONLY_NOT_SELECTED (не ECR_ONLY і не BRANCH_BOTH_PRESENT). Методологія зі списку знімає гілку
+# (fold) без -TypeFoldMethodology. Правила - у Get-LandParitySelectedBranch (джерела ECW_C11_*.cs у docs/source).
+$script:LandParityBranchSelectorDefault = @('ECW_C11_01', 'ECW_C11_02', 'ECW_C11_11_02', 'ECW_C11_11_03')
+
+function Get-LandParityBranchSelectorDefault { return @($script:LandParityBranchSelectorDefault) }
+
+# ECW_C11_02.cs:143-146 typeCalculationGroup (точне List.Contains по NAE без пробілів: `6583 (002)` зі списку не
+# збігається ніколи - легасі так само дає «Error formula's type», результату немає).
+$script:LandParityC1102Type1 = @('6640', '6641', '6642', '6643', '6644', '6645', '6582(002)', '6583 (002)', '6585(001)', '6585(003)',
+    '6585(004)', '6586(002)', '6586(003)', '6586(004)', '6587(001)', '6587(003)', '6587(004)', '6592(002)', '6592(003)', '6592(004)')
+$script:LandParityC1102Type2 = @('6783(001)', '6786(001)', '6787(001)', '6789(001)')
+# ECW_C11_11_03.cs:81-90: окремі групи для tons і gsec (tons: type1/type2/type3; gsec: type1/type2 - type3 легасі зливає в type2).
+$script:LandParityC111103Tons = [ordered]@{
+    'type1' = @('0800(001)', '0800(002)', '0800(003)', '0800(004)', '0800(005)', '0800(006)', '0800(007)', '6800')
+    'type2' = @('0782(001)', '0782(002)', '0782(003)', '0782(004)', '0782(005)', '0782(006)', '0782(007)', '0782(008)', '6784')
+    'type3' = @('0804', '6801', '6802', '6803')
+}
+$script:LandParityC111103Gsec = [ordered]@{
+    'type1' = @('0800(001)', '0800(002)', '0800(003)', '0800(004)', '0800(005)', '0800(006)', '0800(007)', '6800')
+    'type2' = @('0782(001)', '0782(002)', '0782(003)', '0782(004)', '0782(005)', '0782(006)', '0782(007)', '0782(008)', '6784',
+        '0804', '6801', '6802', '6803')
+}
+# ECW_C11_11_02.cs:109-124 groupNAE (NAE, що взагалі обробляються) і :127-133 group1[6975] (type2).
+$script:LandParityC111102Known = @('0788', '0789', '0790', '0791', '0788(001)', '0789(001)', '0790(001)', '0791(001)',
+    '6975', '6981', '6982', '6983', '6984', '6985', '6986', '6976', '0560', '0562', '0563', '0561', '0564', '0565', '0903', '0905',
+    '6904', '0793', '0883', '0524')
+$script:LandParityC111102Type2 = @('6975', '6981', '6982', '6983', '6984', '6985', '6986', '6976', '0883')
+
+function Get-LandParitySelectedBranch {
+    <#
+    .SYNOPSIS  Гілка, яку обрав би легасі для рядка: 'type1' | 'type1_1' | 'type1_2' | 'type1_3' | 'type2' | 'type3'; $null - легасі
+               для рядка нічого не рахує (NAE поза групами) або методології немає в селекторі.
+    .DESCRIPTION
+        ECW_C11_01.cs:176-208: NAE (Trim, без пробілів) містить 6646..6657 -> type2; інакше потік FG/LPG -> type1_1,
+        Diesel/452 -> type1_2, решта -> type1_3. Потік: Land_TypeFuelOrStream (інакше Land_TypeFuel), правила :109-119
+        (gas/Gas -> FG, LPG, sludge, caustic, water -> Wwater, 401, 14, 452, Diesel; пізніший збіг перемагає; порожній потік
+        = сам рядок аргументу).
+        ECW_C11_02.cs:143-146,357-361: лише за NAE (точний збіг зі списком).
+        ECW_C11_11_02.cs:221-239: NAE 0883 або група 6975 -> type2, інакше type1 (NAE має бути в groupNAE).
+        ECW_C11_11_03.cs:81-112: окремі групи для tons і gsec (MetricName).
+    #>
+    param([string]$MethodologyCode, [string]$MetricName, $Row)
+    $nae = [string](Get-LandParityV $Row 'Land_NAE')
+    $nae = $nae.Trim().Replace(' ', '')
+    switch ($MethodologyCode) {
+        'ECW_C11_01' {
+            foreach ($n in 6646..6657) { if ($nae.Contains([string]$n)) { return 'type2' } }
+            $arg = [string](Get-LandParityV $Row 'Land_TypeFuelOrStream')
+            # Фолбек на Land_TypeFuel - НЕ з легасі (там лише потік): евристика harness для рядків без Land_TypeFuelOrStream.
+            if ($arg -eq '') { $arg = [string](Get-LandParityV $Row 'Land_TypeFuel') }
+            $s = ''
+            if ($arg.Contains('gas') -or $arg.Contains('Gas')) { $s = 'FG' }
+            if ($arg.Contains('LPG')) { $s = 'LPG' }
+            if ($arg.Contains('sludge')) { $s = 'sludge' }
+            if ($arg.Contains('caustic')) { $s = 'caustic' }
+            if ($arg.Contains('water')) { $s = 'Wwater' }
+            if ($arg.Contains('401')) { $s = '401' }
+            if ($arg.Contains('14')) { $s = '14' }
+            if ($arg.Contains('452')) { $s = '452' }
+            if ($arg.Contains('Diesel')) { $s = 'Diesel' }
+            if ($s -eq '') { $s = $arg }
+            if ($s -ceq 'FG' -or $s -ceq 'LPG') { return 'type1_1' }
+            if ($s -ceq 'Diesel' -or $s -ceq '452') { return 'type1_2' }
+            return 'type1_3'
+        }
+        'ECW_C11_02' {
+            if ($script:LandParityC1102Type1 -ccontains $nae) { return 'type1' }
+            if ($script:LandParityC1102Type2 -ccontains $nae) { return 'type2' }
+            return $null
+        }
+        'ECW_C11_11_02' {
+            if (-not ($script:LandParityC111102Known -ccontains $nae)) { return $null }
+            if ($script:LandParityC111102Type2 -ccontains $nae) { return 'type2' }
+            return 'type1'
+        }
+        'ECW_C11_11_03' {
+            $groups = $script:LandParityC111103Gsec
+            if ($MetricName -eq 'tons') { $groups = $script:LandParityC111103Tons }
+            foreach ($t in $groups.Keys) { if (@($groups[$t]) -ccontains $nae) { return $t } }
+            return $null
+        }
+    }
+    return $null
+}
+
 function Get-LandParityNullType1Default {
     $copy = @{}
     foreach ($k in $script:LandParityNullType1Default.Keys) { $copy[$k] = @($script:LandParityNullType1Default[$k]) }
@@ -221,6 +308,7 @@ function ConvertTo-LandParityCanonicalOutput {
 
     $fold = $false
     foreach ($rx in @($StateObject.TypeFold)) { if ($MethodologyCode -match $rx) { $fold = $true; break } }
+    if (@($StateObject.BranchSelector) -contains $MethodologyCode) { $fold = $true }
     if (-not $fold) { return @{ Code = "ECW_EC_${metric}_${codeId}_$branch"; Variant = ''; Ignore = $false } }
     if ($branch -eq 'type1' -and $StateObject.NullType1.ContainsKey($MethodologyCode) -and @($StateObject.NullType1[$MethodologyCode]) -contains $codeId) {
         return @{ Code = "ECW_EC_${metric}_${codeId}_$branch"; Variant = ''; Ignore = $false }
@@ -242,6 +330,7 @@ function Get-LandParityBucket {
     $zero = ($ClassName -match '_ZERO$') -and ($ClassName -notlike '*MISMATCH*')
     $group = 'OTHER'; $within = $false
     if ($core -eq 'MATCH' -or $core -eq 'MATCH_ROUNDING_LOSS') { $group = 'MATCHED' }
+    elseif ($core -eq 'ECR_ONLY_NOT_SELECTED') { $group = 'OTHER' }   # гілка, якої легасі не обирає: не ECR_ONLY і не збіг
     elseif ($core -eq 'NEAR' -or $core -like 'MISMATCH*') {
         if ($RelErr -le $Threshold) { $group = 'MATCHED'; $within = $true } else { $group = 'MISMATCH' }
     }
@@ -265,6 +354,8 @@ function New-LandParityState {
         ResultCount = 0
         TypeFold = @(Get-LandParityTypeFoldDefault)         # regex методологій, де гілку type1/type2 знімають
         NullType1 = (Get-LandParityNullType1Default)        # методологія -> коди, чий type1 у старому коді не існує
+        BranchSelector = (Get-LandParityBranchSelectorDefault)   # методології, де легасі обирає гілку за NAE/потоком ($null/@() - вимкнено)
+        EcrVar = @{}         # "doc|period|table|rowKey|meth|output" -> @{ <гілка> = double }: значення за гілками (без "last wins")
         Variants = @{}       # "doc|period|table|rowKey|meth|output" -> @{ type1 = 1; type2 = 1 }
         BranchBoth = @{}     # той самий ключ -> 1: обидві гілки мають результат
         NoSubstance = @{}    # methodology -> результати ECW_EC_*_XXX без коду речовини
@@ -363,6 +454,8 @@ function Add-LandParityEcrResult {
             $vk = "$k|$outKey"
             if (-not $st.Variants.ContainsKey($vk)) { $st.Variants[$vk] = @{} }
             $st.Variants[$vk][$cn.Variant] = 1
+            if (-not $st.EcrVar.ContainsKey($vk)) { $st.EcrVar[$vk] = @{} }
+            $st.EcrVar[$vk][$cn.Variant] = $Value
             if ($st.Variants[$vk].Count -gt 1) { $st.BranchBoth[$vk] = 1 }
         }
     }
@@ -467,6 +560,8 @@ function New-LandParityAccumulator {
         Detail = New-Object 'System.Collections.Generic.List[string]'
         Docs = @{}; Periods = @{}
         AggregateGroups = 0
+        BranchSelected = 0       # клітинки, порівняні за гілкою, яку обирає легасі (селектор гілки)
+        BranchNotSelected = 0    # клітинки ECR_ONLY_NOT_SELECTED
     }
 }
 
@@ -583,6 +678,8 @@ function Invoke-LandParityCompare {
                     [void]$members[$gkey].Rows.Add($rk)
                     [void]$infos.Add(@{ Row = $r; Efid = $efid; Nae = $nae; Ph = $ph; Key = $gkey; RowKey = $rk })
                 }
+                $rowByKey = @{}   # RowKey -> рядок джерела: гілку селектор бере з рядка КОЖНОГО члена групи
+                foreach ($inf in $infos) { $rowByKey[$inf.RowKey] = $inf.Row }
                 $groupDone = @{}
                 # D-425: рядки груп, які легасі не рахує (статус не Running) - для класу ECR_NON_RUNNING замість ECR_ONLY.
                 $nonRunningRows = @{}
@@ -645,9 +742,39 @@ function Invoke-LandParityCompare {
                             }
                             if ($null -eq $oldV) { continue }
                             $ek = "$meth|$outCode"
+                            # Селектор гілки: легасі пише одну гілку за NAE/потоком; порівнюється лише вона, решта -
+                            # ECR_ONLY_NOT_SELECTED. Діє, лише якщо в ECR є значення з гілками для цього виходу.
+                            $selPath = $false
+                            if (@($st.BranchSelector) -contains $meth) {
+                                foreach ($mk in $rowKeys) { if ($st.EcrVar.ContainsKey("$tk|$mk|$ek")) { $selPath = $true; break } }
+                            }
+                            $useRows = $ecrRows
+                            if ($selPath) {
+                                $useRows = @()
+                                $notSel = @{}
+                                foreach ($mk in $rowKeys) {
+                                    $hv = @{}
+                                    $mRow = $rowByKey[$mk]; if ($null -eq $mRow) { $mRow = $info.Row }
+                                    $selBranch = Get-LandParitySelectedBranch -MethodologyCode $meth -MetricName $metric -Row $mRow
+                                    $vv = $null; if ($st.EcrVar.ContainsKey("$tk|$mk|$ek")) { $vv = $st.EcrVar["$tk|$mk|$ek"] }
+                                    if ($null -ne $vv) {
+                                        foreach ($bn in @($vv.Keys)) {
+                                            if ($null -ne $selBranch -and $bn -eq $selBranch) { $hv[$ek] = $vv[$bn] } else { $notSel[$bn] = 1 }
+                                        }
+                                    }
+                                    $useRows += , $hv
+                                }
+                                $seen[$ek] = 1
+                                foreach ($bn in $notSel.Keys) {
+                                    $ac.BranchNotSelected++
+                                    Add-LandParityCell $ac $docName $pk $tbl $rk $nRows $efid $meth "${lab}_$bn" ($pre + 'ECR_ONLY_NOT_SELECTED')
+                                }
+                            }
                             # Обидві гілки type1/type2 мають результат (після зняття гілки ключ один): старий код пише одну.
                             $bothHit = $false
-                            foreach ($mk in $rowKeys) { if ($st.BranchBoth.ContainsKey("$tk|$mk|$ek")) { $bothHit = $true; break } }
+                            if (-not $selPath) {
+                                foreach ($mk in $rowKeys) { if ($st.BranchBoth.ContainsKey("$tk|$mk|$ek")) { $bothHit = $true; break } }
+                            }
                             if ($bothHit) {
                                 $seen[$ek] = 1
                                 Add-LandParityCell $ac $docName $pk $tbl $rk $nRows $efid $meth $lab ($pre + 'BRANCH_BOTH_PRESENT')
@@ -663,7 +790,7 @@ function Invoke-LandParityCompare {
                             }
                             # ECR side: the row value, or the SUM over the group
                             $sum = 0.0; $have = 0; $diffCount = 0
-                            foreach ($er in $ecrRows) {
+                            foreach ($er in $useRows) {
                                 if ($er.ContainsKey($ek)) { $sum += [double]$er[$ek]; $have++; $seen[$ek] = 1 }
                                 else {
                                     foreach ($ck in $er.Keys) {
@@ -686,6 +813,7 @@ function Invoke-LandParityCompare {
                                 Add-LandParityCell $ac $docName $pk $tbl $rk $nRows $efid $meth $lab $cls
                                 continue
                             }
+                            if ($selPath) { $ac.BranchSelected++ }
                             $scaled = $stAbs * [math]::Max(1, $have)
                             $vc = Get-LandParityValueClass ([double]$oldV) $sum $scaled $tolRel $tolAbs
                             $cls = $vc.Class
@@ -695,17 +823,47 @@ function Invoke-LandParityCompare {
                     }
                     # ECR outputs the legacy store does not have (aggregated over the group)
                     $onlySum = @{}
-                    foreach ($er in $ecrRows) {
+                    $onlyNotSel = @{}   # "meth|output" -> @{ гілка = 1 }: гілки, яких легасі не обирає (селектор гілки)
+                    foreach ($mk in $rowKeys) {
+                        $erKey = "$tk|$mk"
+                        if (-not $st.Ecr.ContainsKey($erKey)) { continue }
+                        $er = $st.Ecr[$erKey]
                         foreach ($ck in $er.Keys) {
                             if ($seen.ContainsKey($ck)) { continue }
+                            $vv = $null; if ($st.EcrVar.ContainsKey("$tk|$mk|$ck")) { $vv = $st.EcrVar["$tk|$mk|$ck"] }
+                            $ckMeth = ($ck -split '\|', 2)[0]
+                            if ($null -ne $vv -and @($st.BranchSelector) -contains $ckMeth) {
+                                $ckMetric = ''; if ($ck -match 'ECW_EC_(tons|gsec)_') { $ckMetric = $Matches[1] }
+                                $mRow = $rowByKey[$mk]; if ($null -eq $mRow) { $mRow = $info.Row }
+                                $sb = Get-LandParitySelectedBranch -MethodologyCode $ckMeth -MetricName $ckMetric -Row $mRow
+                                foreach ($bn in @($vv.Keys)) {
+                                    if ($null -ne $sb -and $bn -eq $sb) {
+                                        if (-not $onlySum.ContainsKey($ck)) { $onlySum[$ck] = 0.0 }
+                                        $onlySum[$ck] += [double]$vv[$bn]
+                                    }
+                                    else {
+                                        if (-not $onlyNotSel.ContainsKey($ck)) { $onlyNotSel[$ck] = @{} }
+                                        $onlyNotSel[$ck][$bn] = 1
+                                    }
+                                }
+                                continue
+                            }
                             if (-not $onlySum.ContainsKey($ck)) { $onlySum[$ck] = 0.0 }
                             $onlySum[$ck] += [double]$er[$ck]
+                        }
+                    }
+                    foreach ($ck in $onlyNotSel.Keys) {
+                        $outCodeNs = ($ck -split '\|', 2)[1]
+                        $methNs = ($ck -split '\|', 2)[0]
+                        foreach ($bn in $onlyNotSel[$ck].Keys) {
+                            $ac.BranchNotSelected++
+                            Add-LandParityCell $ac $docName $pk $tbl $rk $nRows $efid $methNs ((($outCodeNs -replace '^ECW_EC_', '') + '_' + $bn)) ($pre + 'ECR_ONLY_NOT_SELECTED')
                         }
                     }
                     foreach ($ck in $onlySum.Keys) {
                         $meth, $outCode = $ck -split '\|', 2
                         $lab = $outCode -replace '^ECW_EC_', ''
-                        if ($lab -match '_NOx$') { $cls = 'ECR_ONLY_INTERMEDIATE' } elseif ($onlySum[$ck] -eq 0) { $cls = 'ECR_ONLY_ZERO' } else { $cls = 'ECR_ONLY' }
+                        if ($lab -match '_NOx$|SumXiDiv') { $cls = 'ECR_ONLY_INTERMEDIATE' } elseif ($onlySum[$ck] -eq 0) { $cls = 'ECR_ONLY_ZERO' } else { $cls = 'ECR_ONLY' }
                         if ($amb -and -not $grouped) { $cls = 'AMBIGUOUS_KEY' }
                         foreach ($mk in $rowKeys) { if ($st.AmbiguousEcr.ContainsKey("$tk|$mk|$ck")) { $cls = 'AMBIGUOUS_ECR_KEY'; break } }
                         # D-425: ECR порахував рядок, який легасі не рахує (статус не Running) - це регресія фільтра
@@ -811,6 +969,9 @@ function Get-LandParitySummary {
         totalCells = [int](($classes | ForEach-Object { $_.cells } | Measure-Object -Sum).Sum)
         # D-425: індикатор регресії фільтра «лише Running»: ECR порахував рядок, якого легасі не рахує. Має бути 0.
         ecrNonRunningCells = [int](($classes | Where-Object { $_.class -like '*ECR_NON_RUNNING' } | ForEach-Object { $_.cells } | Measure-Object -Sum).Sum)
+        # Селектор гілки: клітинки, порівняні за гілкою легасі, і клітинки ECR_ONLY_NOT_SELECTED (решта гілок ECR).
+        branchSelectedCells = [int]$ac.BranchSelected
+        notSelectedCells = [int]$ac.BranchNotSelected
         classes = $classes
         byMethodology = $byMethodology
         multiTableResults = $multi

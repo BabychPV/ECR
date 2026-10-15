@@ -9,7 +9,8 @@ namespace Ecr.Api.Startup;
 /// <remarks>
 /// ⚠ Не блокує старт і запити: робота йде після <c>ApplicationStarted</c> окремою задачею; збій лише в журнал.
 /// Інтервал за замовчуванням 60 с свідомо МЕНШИЙ за TTL 15 с + вікно SWR 120 с карти: запис не встигає «вмерти»
-/// між проходами. Вимикається <c>Documents:StaleMapWarm:Enabled=false</c> (тестові фабрики); Worker цю службу не
+/// між проходами. Кільце (LP-45) раз на <c>RingIntervalSeconds</c> (600) обходить усі Current-періоди послідовно,
+/// записи з вікном SWR 15 хв. Вимикається <c>Documents:StaleMapWarm:Enabled=false</c> (тестові фабрики); Worker цю службу не
 /// реєструє. Старт у <c>Validate</c>/<c>Migrate</c> уже пройшов до запуску хоста (<c>StartupSequence</c>).
 /// </remarks>
 public sealed partial class StaleMapWarmService(
@@ -23,6 +24,15 @@ public sealed partial class StaleMapWarmService(
 
     /// <summary>Ключ інтервалу рефрешу, секунди.</summary>
     public const string IntervalKey = "Documents:StaleMapWarm:IntervalSeconds";
+
+    /// <summary>Ключ інтервалу проходу кільця (усі Current-періоди), секунди; дефолт 600.</summary>
+    public const string RingIntervalKey = "Documents:StaleMapWarm:RingIntervalSeconds";
+
+    /// <summary>Ключ числа гарячих періодів з прогоном (поверх календарних поточного й попереднього); дефолт 2.</summary>
+    public const string HotPeriodLimitKey = "Documents:StaleMapWarm:HotPeriodLimit";
+
+    /// <summary>Мінімальний інтервал кільця, секунди.</summary>
+    public const int MinRingIntervalSeconds = 60;
 
     /// <summary>Мінімальний інтервал, секунди.</summary>
     public const int MinIntervalSeconds = 10;
@@ -72,6 +82,10 @@ public sealed partial class StaleMapWarmService(
     private async Task RunAsync(CancellationToken ct)
     {
         var seconds = Math.Max(MinIntervalSeconds, configuration.GetValue(IntervalKey, defaultValue: 60));
+        var ringSeconds = Math.Max(MinRingIntervalSeconds, configuration.GetValue(RingIntervalKey, defaultValue: 600));
+        var ringEvery = Math.Max(1, ringSeconds / seconds);
+        var hotLimit = Math.Clamp(configuration.GetValue(HotPeriodLimitKey, defaultValue: 2), 1, 12);
+        var pass = 0;
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(seconds));
         try
         {
@@ -81,7 +95,8 @@ public sealed partial class StaleMapWarmService(
                 {
                     await using var scope = scopes.CreateAsyncScope();
                     var warmer = scope.ServiceProvider.GetRequiredService<StaleMapWarmer>();
-                    _ = await warmer.WarmOnceAsync(ct).ConfigureAwait(false);
+                    // Перший прохід (pass = 0) - кільце: старт гріє ВСІ Current-періоди послідовно, у фоні.
+                    _ = await warmer.WarmOnceAsync(ct, ring: pass++ % ringEvery == 0, hotLimit).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {

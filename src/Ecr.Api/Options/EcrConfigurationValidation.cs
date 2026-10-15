@@ -43,6 +43,7 @@ public static partial class EcrConfigurationValidation
     public static readonly IReadOnlyList<(string Key, int Min)> Integers =
     [
         ("Database:CommandTimeoutSeconds", 0),
+        ("Database:RecalcCommandTimeoutSeconds", 1),
         ("Database:BulkBatchSize", 1),
         ("Database:SheetLockTimeoutSeconds", 0),
         ("Database:MaxPoolSize", 1),
@@ -71,6 +72,8 @@ public static partial class EcrConfigurationValidation
 
         // D-430: частіше за 10 с повний запит карти лише навантажує SQL.
         (Ecr.Api.Startup.StaleMapWarmService.IntervalKey, Ecr.Api.Startup.StaleMapWarmService.MinIntervalSeconds),
+        (Ecr.Api.Startup.StaleMapWarmService.RingIntervalKey, Ecr.Api.Startup.StaleMapWarmService.MinRingIntervalSeconds),
+        (Ecr.Api.Startup.StaleMapWarmService.HotPeriodLimitKey, 1),
         ("Jobs:QueueDepth:RefreshSeconds", 5),
 
         // AN-116: нуль задач Excel одночасно — не «без межі», а книги, яких не бере ніхто.
