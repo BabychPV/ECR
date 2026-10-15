@@ -391,7 +391,7 @@ public sealed class LandParityFullHarnessTests
         var (root, _, _) = RunCompare(f, "explained");
 
         Assert.Equal(1, Classes(root)["LEGACY_STATUS_SKIP"]);
-        Assert.Equal(5, root.GetProperty("formatVersion").GetInt32());
+        Assert.Equal(6, root.GetProperty("formatVersion").GetInt32());
         var b = root.GetProperty("buckets").EnumerateArray().Single(e => e.GetProperty("methodology").GetString() == "ECW_C05_02");
         Assert.Equal(0, b.GetProperty("oracleOnly").GetInt32());
         Assert.Equal(1, b.GetProperty("explainedSkip").GetInt32());
@@ -544,7 +544,8 @@ public sealed class LandParityFullHarnessTests
         };
         File.WriteAllText(f.State, JsonSerializer.Serialize(state));
 
-        var (root, _, _) = RunCompare(f, "c1113fold");
+        // -NoBranchSelector: перевіряється саме TypeFold (селектор C11_13 теж знімає гілку, тому без прапора мутація не видна).
+        var (root, _, _) = RunCompare(f, "c1113fold", "-NoBranchSelector");
         var classes = Classes(root);
 
         Assert.Equal(1, classes["MATCH"]);
@@ -1133,6 +1134,120 @@ public sealed class LandParityFullHarnessTests
         Assert.Equal(2, root.GetProperty("notSelectedCells").GetInt32());
         Assert.False(classes.ContainsKey("BRANCH_BOTH_PRESENT"));
         Assert.DoesNotContain(classes.Keys, k => k.Contains("MISMATCH", StringComparison.Ordinal) || k.Equals("ECR_ONLY", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// LAND-POST-K8-RESIDUE: C11_13 - вибір гілки лише за NAE (ECW_C11_13.cs:94-96): 6567 -> type1, 6669 -> type2; NAE поза
+    /// списками - результату легасі немає. Обрана гілка порівнюється (MATCH), решта - ECR_ONLY_NOT_SELECTED, не
+    /// BRANCH_BOTH_PRESENT. Мутація: прибрати ECW_C11_13 із $script:LandParityBranchSelectorDefault - з'являється
+    /// BRANCH_BOTH_PRESENT (fold лишається від TypeFold), MATCH зникає; підмінити списки type1/type2 - MISMATCH.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Селектор_C11_13_обирає_гілку_за_NAE_а_невідомий_NAE_дає_MISSING_OUTPUT()
+    {
+        var (root, _) = RunBranchCase("ECW_C11_13",
+            [BranchRow(1, "6567"), BranchRow(2, "6669"), BranchRow(3, "0500(003)"), BranchRow(4, "9999")],
+            [
+                BranchOracle("6567", "1", "", "ECW_C11_13"),
+                BranchOracle("6669", "2", "", "ECW_C11_13"),
+                BranchOracle("0500(003)", "1", "", "ECW_C11_13"),
+                BranchOracle("9999", "1", "", "ECW_C11_13"),
+            ],
+            Enumerable.Range(1, 4).SelectMany(i => new[] { (i, "ECW_EC_tons_301_type1", "1"), (i, "ECW_EC_tons_301_type2", "2") }).ToArray());
+        var classes = Classes(root);
+
+        Assert.Equal(3, classes["MATCH"]);
+        Assert.Equal(1, classes["MISSING_OUTPUT"]);
+        Assert.False(classes.ContainsKey("BRANCH_BOTH_PRESENT"));
+        Assert.False(classes.ContainsKey("ECR_ONLY"));
+        Assert.DoesNotContain(classes.Keys, k => k.Contains("MISMATCH", StringComparison.Ordinal));
+        Assert.Equal(3, root.GetProperty("branchSelectedCells").GetInt32());
+        Assert.Equal(5, root.GetProperty("notSelectedCells").GetInt32());
+    }
+
+    /// <summary>
+    /// LAND-POST-K8-RESIDUE (302 групи, 5 276 комірок): група без Running-рядків (усі Removed) і без власної фази в еталоні -
+    /// fallback фази підставляє копії ІНШОЇ фази того ж (efid, NAE): це AGG_LEGACY_STATUS_SKIP (explainedSkip), а не
+    /// AGG_LEGACY_COPY_COUNT_DIFF. Сусідня Running-група тієї ж NAE порівнюється як AGG_MATCH (сума двох копій).
+    /// Мутація: прибрати <c>-not $phaseMatched</c>/гілку LEGACY_STATUS_SKIP - AGG_LEGACY_COPY_COUNT_DIFF = 1, explainedSkip = 0.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Група_без_Running_і_без_своєї_фази_дає_AGG_LEGACY_STATUS_SKIP_а_не_COPY_COUNT_DIFF()
+    {
+        var (root, _) = RunRowSum("ECW_C05_02",
+            [Src(1, "N1", "X", status: "Removed"), Src(2, "N1", "X", status: "Removed"), Src(3, "N1", "Y"), Src(4, "N1", "Y")],
+            [CopyLine("N1", "Y", "0.5", "ECW_C05_02", 1), CopyLine("N1", "Y", "0.7", "ECW_C05_02", 2)],
+            [(3, "ECW_EC_tons_301", "0.5"), (4, "ECW_EC_tons_301", "0.7")],
+            "-AggregateBy", "NaePhase");
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes["AGG_LEGACY_STATUS_SKIP"]);
+        Assert.Equal(1, classes["AGG_MATCH"]);
+        Assert.False(classes.ContainsKey("AGG_LEGACY_COPY_COUNT_DIFF"));
+        var b = root.GetProperty("buckets").EnumerateArray().Single(e => e.GetProperty("methodology").GetString() == "ECW_C05_02");
+        Assert.Equal(1, b.GetProperty("explainedSkip").GetInt32());
+        Assert.Equal(0, b.GetProperty("other").GetInt32());
+    }
+
+    /// <summary>То саме для Land_Status = NULL (не-Running за Test-LandParityNonRunning), фази групи в еталоні немає.</summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Група_зі_статусом_NULL_і_без_своєї_фази_дає_AGG_LEGACY_STATUS_SKIP()
+    {
+        var (root, _) = RunRowSum("ECW_C05_02",
+            [Src(1, "N1", "X", status: null!), Src(2, "N1", "X", status: null!)],
+            [CopyLine("N1", "Y", "0.5", "ECW_C05_02", 1), CopyLine("N1", "Y", "0.7", "ECW_C05_02", 2)],
+            [],
+            "-AggregateBy", "NaePhase");
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes["AGG_LEGACY_STATUS_SKIP"]);
+        Assert.False(classes.ContainsKey("AGG_LEGACY_COPY_COUNT_DIFF"));
+    }
+
+    /// <summary>
+    /// Захист: Running-група, фаза знайдена, копій 3 на 2 рядки - лишається AGG_LEGACY_COPY_COUNT_DIFF (справжня
+    /// невизначеність). Те саме для Running-групи БЕЗ своєї фази (expCopies = 2 > 0). Мутація: умова лише
+    /// <c>-not $phaseMatched</c> (без <c>$expCopies -le 0</c>) - другий випадок стає STATUS_SKIP; умова на $phaseMatched
+    /// прибрана в бік «завжди SKIP» - обидва.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [InlineData("Diesel")]
+    [InlineData("Other")]
+    public void Running_група_з_іншою_кількістю_копій_лишається_AGG_LEGACY_COPY_COUNT_DIFF(string oraclePhase)
+    {
+        var (root, _) = RunRowSum("ECW_C05_02",
+            [Src(1, "N1"), Src(2, "N1")],
+            [
+                CopyLine("N1", oraclePhase, "0.5", "ECW_C05_02", 1), CopyLine("N1", oraclePhase, "0.5", "ECW_C05_02", 2),
+                CopyLine("N1", oraclePhase, "0.5", "ECW_C05_02", 3),
+            ],
+            [(1, "ECW_EC_tons_301", "0.5"), (2, "ECW_EC_tons_301", "0.5")],
+            "-AggregateBy", "NaePhase");
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes["AGG_LEGACY_COPY_COUNT_DIFF"]);
+        Assert.False(classes.ContainsKey("AGG_LEGACY_STATUS_SKIP"));
+    }
+
+    /// <summary>Змішана група: 1 Removed + 1 Running однієї фази, 1 копія легасі -> expCopies = 1, AGG_MATCH.</summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Змішана_група_Removed_і_Running_однієї_фази_порівнюється_як_AGG_MATCH()
+    {
+        var (root, _) = RunRowSum("ECW_C05_02",
+            [Src(1, "N1", "Y", status: "Removed"), Src(2, "N1", "Y")],
+            [CopyLine("N1", "Y", "0.5", "ECW_C05_02", 1)],
+            [(2, "ECW_EC_tons_301", "0.5")],
+            "-AggregateBy", "NaePhase");
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes["AGG_MATCH"]);
+        Assert.False(classes.ContainsKey("AGG_LEGACY_STATUS_SKIP"));
+        Assert.False(classes.ContainsKey("AGG_LEGACY_COPY_COUNT_DIFF"));
     }
 
     [Fact]

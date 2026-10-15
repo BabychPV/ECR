@@ -204,6 +204,10 @@ NaePhase`):
 - група = усі рядки ключа (efid, NAE, фаза), навіть з одним `Land_No` (пара Hydraulic oil): `oldV = сума копій`;
 - кількість копій != кількості Running-рядків групи - `AGG_LEGACY_COPY_COUNT_DIFF` (група `other`, значення не
   порівнюється; `LEGACY_DUP_CONFLICT` лишається для негрупованих ключів);
+- LAND-POST-K8-RESIDUE (summary `formatVersion` 6): група БЕЗ Running-рядків (усі Removed/NULL, `expCopies = 0`) і без
+  власної фази в еталоні (fallback фази підставив копії ІНШИХ фаз того ж efid+NAE) - `AGG_LEGACY_STATUS_SKIP`
+  (`explainedSkip`), а не `AGG_LEGACY_COPY_COUNT_DIFF`. Running-група з іншою кількістю копій (напр. 3 копії на 2 рядки,
+  фаза знайдена) лишається `AGG_LEGACY_COPY_COUNT_DIFF`;
 - явний `-GroupBy`: якщо потрібної фази немає в еталоні, harness НЕ підставляє «усі рядки NAE» - група без легасі
   (лише `ECR_NON_RUNNING`, якщо є результат на не-Running рядку; інакше пропуск);
 - `$seen` ставиться ДО будь-якого `continue` на ключі легасі: вихід ECR того ж ключа не стає «хвостом» DUP як `ECR_ONLY`;
@@ -695,6 +699,13 @@ C11_10 перелічує обидва написання (з пробілом �
 | C11_11_02 | NAE 0883 або група 6975 (6975, 6976, 6981..6986) -> `type2`; інакше `type1`; NAE поза groupNAE - результату немає | ECW_C11_11_02.cs:109-133, 221-239 |
 | C11_11_03 | окремі групи: tons `type1/type2/type3`, gsec `type1/type2` (0804, 6801..6803 у gsec - це `type2`). Гілки tons і gsec НЕ змішувати: `type3` існує лише в tons | ECW_C11_11_03.cs:81-112 |
 | C12_01 | `Land_Streams` = `Fuel gas` -> `type2`, інакше `type1` (легасі пише type2 лише для FuelGas) | ECW_C12_01.cs:140-153 |
+| C11_13 | лише за NAE (без пробілів, точний збіг): type1 (6567, 6568, 6574, 6575, 0500(003)..0503(003), 0520(003)..0523(003)), type2 (6669, 6671, 6673, 6670, 6672, 6674); NAE поза списками - результату немає. ECR рахує обидві гілки для кожного NAE, легасі - одну (`tons_<код>` без гілки) | ECW_C11_13.cs:66-96, 116-122 |
+
+C11_13 одночасно в `TypeFold` за замовчуванням (`^ECW_C11_13$`) і в селекторі: `ConvertTo-LandParityCanonicalOutput` знімає гілку
+(fold) за ОДНІЄЮ умовою «у TypeFold або в BranchSelector», тож порядок не важливий. З активним селектором (за замовчуванням)
+гілку обирає `Get-LandParitySelectedBranch` (type1 - порівнюється, type2 - `ECR_ONLY_NOT_SELECTED`); `TypeFold`-запис
+лишається страхуванням, коли селектор вимкнено (`-NoBranchSelector`): тоді обидві гілки на ключі - `BRANCH_BOTH_PRESENT`.
+Запис у `TypeFold` потрібен і сторожу ParityBranch (`Налаштування_гілок_harness_збігаються_з_етапом_ParityBranch`), тож не прибраний.
 
 Застереження: гілка вибирається по КОЖНОМУ члену групи окремо (за його Row; `AggregateBy NaePhase` сумує вибрані значення\nчленів, члени однієї групи можуть мати різну гілку - для C11_01 через `Land_TypeFuelOrStream`). Для C11_01 фолбек на\n`Land_TypeFuel`, коли `Land_TypeFuelOrStream` порожній, - евристика harness, не правило легасі. Для C11_11_02 category1 легасі бере з
 `naeNumberObj` - тут використано той самий NAE рядка. Модельні розбіжності (немає tons у C11_01/C11_02, tons C11_11_03 без
