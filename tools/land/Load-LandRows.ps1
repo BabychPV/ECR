@@ -98,7 +98,7 @@ if ($haveCredentials) {
             if ($er.Status -eq 200) { $lookupCache[$ck] = New-LandLookupMap -Entries @($er.Json) }
         }
         return (Resolve-LandLookupId -Map $lookupCache[$ck] -Text ([string]$Text))
-    }.GetNewClosure()
+    }
 }
 
 $results = New-Object System.Collections.ArrayList
