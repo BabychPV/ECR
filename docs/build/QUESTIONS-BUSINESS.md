@@ -166,6 +166,14 @@
 |---|---|---|---|
 | Q12 «B» розширено на шапки колонок | У Dark світла заливка (luminance ≥ 0,8, `isLightFill`) → токен `--sunken` (D15-01), насичені лишаються; колір не вигадуємо (дані StyleDef не змінюються, Light-тема без змін); світла заливка комірок даних (LAND_INPUT #FFFFFF) у Dark = «без заливки» | приймальна стенда 5094, 13.10 (знімки dark-01-T7_00, dark-05-T9a_17a) | `CL-9`; бриф — `docs/build/CL-9-dark-headers-brief.md` |
 
+## 0.5. Рішення людини 15.10 (квіз)
+
+Передано координатором за квізом людини 15.10.2026 (клас B, діє як вимога).
+
+| Питання | Відповідь людини | Наслідок | Запис |
+|---|---|---|---|
+| Чи враховувати як P2 у проходах A/B (умова 04.10, `READINESS-2026-10-15` п. 5.2) відомі `keyCommitGateLive` («0 мс», T3-01/T4-01) і флейк `cellColor.spec.ts` | **НЕ враховувати як P2** — у проходах A/B це відомі межі (Known limitations), чистоту проходу не порушують | `AU-13`; `CL-14` лишається P3 | рішення людини 15.10 |
+
 ## 1. Уже з'ясовано з джерел
 
 Скорочення: `LEG` = `docs/source/ECR Current Back end`; `AIR.xml` = `LEG/PI AF/ECR_01_Air.xml`; `DB.txt` = `LEG/SQL/DB.txt`; `INSTR` = `LEG/Project Info/05052026 Emission calculation working instruction корр_2026_clean.docx`; `CLR` = `LEG/Assembly/DllProject/DllProject`.
