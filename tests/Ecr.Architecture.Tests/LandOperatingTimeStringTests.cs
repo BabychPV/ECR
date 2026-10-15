@@ -252,4 +252,44 @@ public sealed class LandOperatingTimeStringTests
         Assert.Contains("Get-LandStringBridgeStrictMethodologies", verify, StringComparison.Ordinal);
         Assert.Matches(@"\$bad \+= ""методології з суфіксним мостом над String-колонкою в NumericMode=Strict", verify);
     }
+
+    /// <summary>
+    /// Stage-CompositionMass не примушує Strict методологіям із мостом над String OperatingTime (C11_01/C11_02 лишаються
+    /// Legacy); C11_10, C12_01, C12_03 - Strict, як і раніше. Мутація: прибрати виклик винятку зі Stage-CompositionMass.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void CompositionMass_не_ставить_Strict_методологіям_із_String_мостом()
+    {
+        var modelPath = Path.Combine(
+            SourceTree.Root, "docs", "delivery", "reference-data", "land-template", "land-template.model.json");
+        var json = Run(
+            $$"""
+            $mdl = Get-Content -LiteralPath '{{modelPath.Replace("'", "''")}}' -Raw -Encoding UTF8 | ConvertFrom-Json
+            $br = @(Get-LandStringBridgeSuffixMethodologies -Model $mdl)
+            $cm = @($mdl.argumentBridges.hse400.compositionMass.methodologies.PSObject.Properties | ForEach-Object { $_.Name })
+            $keep = @($cm | Where-Object { Test-LandCompositionMassKeepsNumericMode -Methodology $_ -StringBridgeMethodologies $br })
+            $strict = @($cm | Where-Object { -not (Test-LandCompositionMassKeepsNumericMode -Methodology $_ -StringBridgeMethodologies $br) })
+            [ordered]@{ cm = $cm; keep = $keep; strict = $strict } | ConvertTo-Json -Compress -Depth 4
+            """,
+            "LandArgumentSuffix.Lib.ps1");
+        using var doc = JsonDocument.Parse(json);
+        var r = doc.RootElement;
+        string[] Arr(string n) => r.GetProperty(n).EnumerateArray().Select(e => e.GetString()!).ToArray();
+
+        Assert.Equal(["ECW_C11_01", "ECW_C11_02"], Arr("keep"));
+        Assert.Equal(["ECW_C11_10", "ECW_C12_01", "ECW_C12_03"], Arr("strict"));
+
+        var build = File.ReadAllText(LandRowKeyTests.LandFile("Build-LandTemplate.ps1"));
+        var start = build.IndexOf("function Stage-CompositionMass", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        var end = build.IndexOf("\nfunction ", start + 10, StringComparison.Ordinal);
+        var stage = build.Substring(start, end - start);
+        Assert.Contains("Get-LandStringBridgeSuffixMethodologies", stage, StringComparison.Ordinal);
+        Assert.Contains("Test-LandCompositionMassKeepsNumericMode", stage, StringComparison.Ordinal);
+        // виняток іде раніше за примусовий Strict і поважає -KeepNumericMode (елсіф)
+        Assert.True(
+            stage.IndexOf("Test-LandCompositionMassKeepsNumericMode", StringComparison.Ordinal)
+            < stage.IndexOf("-not $KeepNumericMode", StringComparison.Ordinal));
+    }
 }

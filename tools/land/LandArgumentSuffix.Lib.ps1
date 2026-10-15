@@ -196,3 +196,18 @@ function Get-LandStringBridgeStrictMethodologies {
     return @(@($Versions) | Where-Object { $null -ne $_ -and @($Methodologies) -contains [string]$_.Code -and [string]$_.NumericMode -eq 'Strict' } |
         ForEach-Object { [string]$_.Code } | Sort-Object)
 }
+
+function Test-LandCompositionMassKeepsNumericMode {
+    <#
+    .SYNOPSIS
+        Чи лишає Stage-CompositionMass режим версії як є (true) замість примусового Strict.
+    .DESCRIPTION
+        true - методологія має суфіксний міст над String-колонкою (Get-LandStringBridgeSuffixMethodologies): у Strict
+        Text x Number = #VALUE (tons C11_01/C11_02), тому режим версії (Legacy у V3) не чіпаємо. D-426 дозволяє
+        REG*/CURRENT_SUBSTANCE/SUBSTANCE_APPLICABLE у Legacy, тож 0433 тут більше не причина Strict. Інші методології
+        (C11_10, C12_01, C12_03) - false: Strict лишається.
+    #>
+    param([Parameter(Mandatory)][string]$Methodology, [string[]]$StringBridgeMethodologies = @())
+
+    return (@($StringBridgeMethodologies) -contains $Methodology)
+}

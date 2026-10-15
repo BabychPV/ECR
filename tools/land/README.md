@@ -395,8 +395,8 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 (`ECW_C11_01/02/10`, `ECW_C12_01/03`) токен `@CompositionMass` замінюється фрагментом з
 `argumentBridges.hse400.compositionMass.methodologies.<ім'я>.fragment`: `Build-LandTemplate.ps1 -Stage CompositionMass`
 (лише явно; опубліковані версії не чіпає; повтор - 0 змін). Фрагмент вживає `CURRENT_SUBSTANCE()` і `REGFIND`/`REGFIELD`
-(ярус Extension): у версії `NumericMode = Legacy` публікація дає ECR-CALC-0433, тому етап **сам переводить чернетку з
-фрагментом у `Strict`** (`PUT /methodologies/{id}/versions/{vid}/modes`, календарний режим і журнал не чіпає;
+(ярус Extension): у версії `NumericMode = Legacy` раніше була ECR-CALC-0433 (✎ D-426: у Legacy дозволені REG*/CURRENT_SUBSTANCE/SUBSTANCE_APPLICABLE; Strict лишається для CONVERT/Ln/ifs/SUBSTANCE і для методологій, чий склад задає Stage CompositionMass), тому етап **переводить чернетку з
+фрагментом у `Strict`**, окрім методологій із суфіксним мостом над String OperatingTime (C11_01/C11_02 лишаються Legacy: у Strict текст x число = #VALUE) (`PUT /methodologies/{id}/versions/{vid}/modes`, календарний режим і журнал не чіпає;
 `-KeepNumericMode` вимикає). ⚠ `Strict` змінює арифметику версії: `decimal` замість `double` NCalc 1.3.8, ділення на нуль -
 `#DIV/0` замість `+∞`, `Round` - AwayFromZero; у формулах C11_01/02/10, C12_01/03 дільники - лише константи `CST.k*`
 (змінних знаменників немає), `Pow`/`Sqrt` - лише в C11_02 (константні аргументи), а `if(@X = 0, 0, …)` не залежить від
@@ -436,7 +436,7 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 - Стенд: `Build-LandTemplate.ps1 -Stage Registries` (довідник) і далі `-Stage SubstanceApplicability` (лише явно; обгортає
   правило категорії ЧЕРНЕТКИ: `if(SUBSTANCE_APPLICABLE('LAND_SUBSTANCE_APPLICABILITY','<методологія>','<вид>',<значення>),
   <правило>,'')`; опубліковану версію не чіпає; повтор - 0 змін; `-Stage LandParity` обгортку не скидає). Версія має бути
-  вище за Legacy (ECR-CALC-0433). Сторожі: LandSubstanceApplicabilityTests (Architecture), SubstanceApplicableFunctionTests
+  вище за Legacy (ECR-CALC-0433; ✎ D-426: у Legacy дозволені REG*/CURRENT_SUBSTANCE/SUBSTANCE_APPLICABLE - перевіряй за актуальним кодом). Сторожі: LandSubstanceApplicabilityTests (Architecture), SubstanceApplicableFunctionTests
   (Expressions), SubstanceApplicabilityModuleTests (Calculations), SubstanceApplicabilitySqlTests (Api, реальний SQL).
 - ⚠ Модель перегенеровується ПІСЛЯ lane, що теж міняють `land-template.model.json` (`run-model-gen.ps1` на вершині).
 
