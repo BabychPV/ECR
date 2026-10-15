@@ -322,7 +322,7 @@ function Get-LandParityBucket {
     .DESCRIPTION
         MATCHED: MATCH, MATCH_ROUNDING_LOSS, а також NEAR і MISMATCH* з відносною похибкою не більшою за поріг
         (Within = TRUE: збіг лише завдяки порогу). ORACLE_ONLY: у старій системі є, в ECR немає (MISSING_*, ROW_NOT_LOADED_*,
-        LEGACY_STATUS_SKIP, METHODOLOGY_DIFF). OTHER: невизначеність ключа/гілки (AMBIGUOUS_KEY, LEGACY_DUP_CONFLICT,
+        METHODOLOGY_DIFF). EXPLAINED_SKIP: LEGACY_STATUS_SKIP (легасі пропускає не-Running рядок) - окремий лічильник. OTHER: невизначеність ключа/гілки (AMBIGUOUS_KEY, LEGACY_DUP_CONFLICT,
         INCOMPLETE_*, BRANCH_BOTH_PRESENT, AMBIGUOUS_ECR_KEY) - значення не порівнювалось.
     #>
     param([string]$ClassName, [double]$RelErr, [double]$Threshold)
@@ -335,7 +335,9 @@ function Get-LandParityBucket {
         if ($RelErr -le $Threshold) { $group = 'MATCHED'; $within = $true } else { $group = 'MISMATCH' }
     }
     elseif ($core -like 'ECR_ONLY*' -or $core -eq 'ECR_NON_RUNNING') { $group = 'ECR_ONLY' }
-    elseif ($core -like 'MISSING_*' -or $core -like 'ROW_NOT_LOADED*' -or $core -eq 'LEGACY_STATUS_SKIP' -or $core -eq 'METHODOLOGY_DIFF') { $group = 'ORACLE_ONLY' }
+    # EXPLAINED_SKIP: legacy behaviour 9 (non-Running row is skipped by the old engine) - explained, not a real oracle-only gap.
+    elseif ($core -eq 'LEGACY_STATUS_SKIP') { $group = 'EXPLAINED_SKIP' }
+    elseif ($core -like 'MISSING_*' -or $core -like 'ROW_NOT_LOADED*' -or $core -eq 'METHODOLOGY_DIFF') { $group = 'ORACLE_ONLY' }
     return @{ Group = $group; Within = $within; Zero = $zero }
 }
 
@@ -562,6 +564,8 @@ function New-LandParityAccumulator {
         AggregateGroups = 0
         BranchSelected = 0       # клітинки, порівняні за гілкою, яку обирає легасі (селектор гілки)
         BranchNotSelected = 0    # клітинки ECR_ONLY_NOT_SELECTED
+        Warnings = New-Object 'System.Collections.Generic.List[string]'   # напр. відсутня колонка -GroupBy
+        WarnedKeys = @{}
     }
 }
 
@@ -583,7 +587,7 @@ function Add-LandParityCell {
     if ($OutputLabel -match '^(?:tons|gsec)_([0-9]+)') { $subst = $Matches[1] }
     $bkey = "$MethodologyCode|$subst"
     if (-not $ac.Bucket.ContainsKey($bkey)) {
-        $ac.Bucket[$bkey] = @{ Methodology = $MethodologyCode; Substance = $subst; Matched = 0; Within = 0; Mismatch = 0; EcrOnly = 0; OracleOnly = 0; Other = 0; Zero = 0
+        $ac.Bucket[$bkey] = @{ Methodology = $MethodologyCode; Substance = $subst; Matched = 0; Within = 0; Mismatch = 0; EcrOnly = 0; OracleOnly = 0; ExplainedSkip = 0; Other = 0; Zero = 0
             Rels = New-Object 'System.Collections.Generic.List[double]' }
     }
     $b = $ac.Bucket[$bkey]
@@ -592,6 +596,7 @@ function Add-LandParityCell {
         'MISMATCH' { $b.Mismatch++; $b.Rels.Add($RelErr) }
         'ECR_ONLY' { $b.EcrOnly++ }
         'ORACLE_ONLY' { $b.OracleOnly++ }
+        'EXPLAINED_SKIP' { $b.ExplainedSkip++ }
         default { $b.Other++ }
     }
     if ($bk.Zero -or $ClassName -like '*ECR_ONLY_ZERO') { $b.Zero++ }
@@ -652,6 +657,20 @@ function Invoke-LandParityCompare {
                 $srcRows = @(Get-LandParityV $tdat 'rows')
                 $phaseCols = @(Get-LandParityPhaseColumns $cols $tbl $groupByOpt)
                 $hasNae = $cols -contains 'Land_NAE'; $hasNo = $cols -contains 'Land_No'
+                # -GroupBy names a column the table does not have: every row would fall into ONE group (AMBIGUOUS_KEY). Warn, never substitute.
+                if ($hasNae -and ($groupByOpt.ContainsKey($tbl) -or $groupByOpt.ContainsKey('*'))) {
+                    foreach ($gc in $phaseCols) {
+                        if ($cols -contains $gc) { continue }
+                        $wk = "$tbl|$gc"
+                        if ($ac.WarnedKeys.ContainsKey($wk)) { continue }
+                        $ac.WarnedKeys[$wk] = 1
+                        $hint = @($cols | Where-Object { $_ -match '^Land_Type' -or $_ -eq 'Land_Streams' })
+                        $msg = "GroupBy column '$gc' is missing in table $tbl (document $docName, period $pk): all rows share one phase group."
+                        if ($hint.Count -gt 0) { $msg += " Candidate columns present (hint only, NOT substituted): $($hint -join ', ')." }
+                        $ac.Warnings.Add($msg)
+                        Write-Warning $msg
+                    }
+                }
                 $tk = "$docName|$pk|$tbl"
 
                 # ambiguity per (efid, NAE, phase): several DIFFERENT Land_No share the key
@@ -938,7 +957,7 @@ function Get-LandParitySummary {
             $b = $ac.Bucket[$bk]
             [ordered]@{
                 methodology = $b.Methodology; substance = $b.Substance; matched = [int]$b.Matched; withinThreshold = [int]$b.Within
-                mismatch = [int]$b.Mismatch; ecrOnly = [int]$b.EcrOnly; oracleOnly = [int]$b.OracleOnly; other = [int]$b.Other; zero = [int]$b.Zero
+                mismatch = [int]$b.Mismatch; ecrOnly = [int]$b.EcrOnly; oracleOnly = [int]$b.OracleOnly; explainedSkip = [int]$b.ExplainedSkip; other = [int]$b.Other; zero = [int]$b.Zero
                 relP95 = $(if ($b.Rels.Count -gt 0) { Get-LandParityPercentile $b.Rels 0.95 } else { $null })
                 relMax = $(if ($b.Rels.Count -gt 0) { Get-LandParityPercentile $b.Rels 1.0 } else { $null })
             }
@@ -955,6 +974,7 @@ function Get-LandParitySummary {
                 mismatch = [int](($rowsOfM | ForEach-Object { $_.mismatch } | Measure-Object -Sum).Sum)
                 ecrOnly = [int](($rowsOfM | ForEach-Object { $_.ecrOnly } | Measure-Object -Sum).Sum)
                 oracleOnly = [int](($rowsOfM | ForEach-Object { $_.oracleOnly } | Measure-Object -Sum).Sum)
+                explainedSkip = [int](($rowsOfM | ForEach-Object { $_.explainedSkip } | Measure-Object -Sum).Sum)
                 other = [int](($rowsOfM | ForEach-Object { $_.other } | Measure-Object -Sum).Sum)
                 zero = [int](($rowsOfM | ForEach-Object { $_.zero } | Measure-Object -Sum).Sum)
                 relMax = $relMaxM
@@ -981,5 +1001,6 @@ function Get-LandParitySummary {
         resultsWithoutTableInstance = $withoutTi
         missingBindingInactiveCells = [int]($classes | Where-Object { $_.class -like '*MISSING_BINDING_INACTIVE*' } | ForEach-Object { $_.cells } | Measure-Object -Sum).Sum
         groups = $groups
+        warnings = @($ac.Warnings.ToArray())
     }
 }

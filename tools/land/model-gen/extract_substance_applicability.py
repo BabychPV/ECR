@@ -49,6 +49,10 @@ METHODOLOGIES = {
                           selector='contains', contains='Diesel'),
     'ECW_C11_11_03': dict(folder='ECW_C11_OPF_Plant_Operational', kind='NAE', argument='Land_NAE',
                           selector='nae', dict_var='EC'),
+    # C11_11_02: NAE -> група (groupNAE) -> коди EC, чий список містить групу (ECW_C11_11_02.cs:~100-187); словник EC сам по
+    # собі не покриває NAE 6981..6986 (група 6975): група береться через groupNAE.
+    'ECW_C11_11_02': dict(folder='ECW_C11_OPF_Plant_Operational', kind='NAE', argument='Land_NAE',
+                          selector='nae', dict_var='EC', group_var='groupNAE'),
     'ECW_C11_11_05': dict(folder='ECW_C11_OPF_Plant_Operational', kind='NAE', argument='Land_NAE',
                           selector='nae', dict_var='codeGroup'),
     'ECW_C11_19': dict(folder='ECW_C11_OPF_Plant_Operational', kind='NAE', argument='Land_NAE',
@@ -131,6 +135,20 @@ def invert(pairs):
     return by_nae
 
 
+def codes_via_group(groups, ec):
+    """C11_11_02: `groupNAE` (ціль -> список NAE) і `EC` (код -> список цілей): NAE -> коди, чий список містить ціль.
+
+    Старий код: `targetCategoryNAE` = ключ групи, у списку якої є NAE; код рахується, якщо `EC[код]` містить ціль.
+    NAE поза groupNAE - `Error category - NAE` (рядок пропущено), у словнику його немає.
+    """
+    out = {}
+    for target, naes in groups:
+        codes = [code for code, targets in ec if target in targets]
+        for nae in naes:
+            out[nae] = codes
+    return out
+
+
 def contains_codes(text):
     """C12_04_02: `if (fuelShort == "diesel") polCodeList = new List<string>() { "333", "2754" };`."""
     out = {}
@@ -175,7 +193,10 @@ def build(source_root):
             item['codes'] = contains_codes(text)
             item['tokens'] = {'true': 'diesel', 'false': 'oil'}
         elif sel == 'nae':
-            item['codes'] = invert(dict_of_lists(text, spec['dict_var']))
+            if 'group_var' in spec:
+                item['codes'] = codes_via_group(dict_of_lists(text, spec['group_var']), dict_of_lists(text, spec['dict_var']))
+            else:
+                item['codes'] = invert(dict_of_lists(text, spec['dict_var']))
         else:
             raise SystemExit('невідомий selector %s' % sel)
         result[name] = item

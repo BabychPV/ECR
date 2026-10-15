@@ -73,6 +73,18 @@ public sealed partial class RecalculationJob(
     private static partial void LogRecalculationFailed(ILogger logger, string correlationId, Exception exception);
 
     [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "RecalculationJob: документ {DocumentId}: зупинка бази (SqlException {SqlErrorNumber}: -2 таймаут команди, "
+                  + "1205 жертва дедлока); перерахунок відкладено на {Delay}. Кожне відкладення — один рядок; стеля — JobDeferral.MaxDeferral.")]
+    private static partial void LogSqlStallDeferred(ILogger logger, long documentId, int sqlErrorNumber, TimeSpan delay);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "RecalculationJob: документ {DocumentId}: не вдалося позначити {Runs} прогон(ів) Failed (зупинка бази); "
+                  + "початковий виняток збережено.")]
+    private static partial void LogMarkFailedFailed(ILogger logger, long documentId, int runs, Exception exception);
+
+    [LoggerMessage(
         Level = LogLevel.Information,
         Message = "RecalculationJob: документ {DocumentId}: пропущено подані/затверджені аркуші (пар аркуш×період: {Count}).")]
     private static partial void LogSkippedSheets(ILogger logger, long documentId, int count);
@@ -591,7 +603,21 @@ public sealed partial class RecalculationJob(
                     run.Complete("Failed", clock.UtcNow, profileJson: null, errorMessage: errorText);
                 }
 
-                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+                // ⛔ Маркування `Failed` — другорядне: якщо й воно впало (зупинка бази стоїть і тут: той самий
+                // `-2`/1205), початковий виняток НЕ губиться і НЕ підміняється — інакше новий `SqlException` пішов би
+                // повз `SqlStallClassifier` нижче просто в `JobRetryPolicy` (30/60/120 с), і відкладення
+                // (пріоритет) не відбулось би. Прогони лишаються `Running`: повтор/відкладення створить нові, а
+                // завислі закриє наступне очищення прогонів.
+                try
+                {
+                    await db.SaveChangesAsync(ct).ConfigureAwait(false);
+                }
+                catch (Exception markFailure) when (markFailure is not OperationCanceledException)
+                {
+                    db.ChangeTracker.Clear();
+                    LogMarkFailedFailed(
+                        logger ?? NullLogger<RecalculationJob>.Instance, request.DocumentId, started.Count, markFailure);
+                }
             }
 
             // ⛔ Y1-02: «аркуш подається» (фаза формул — `RecalculationService.EnterSheetsAsync`, або
@@ -626,10 +652,16 @@ public sealed partial class RecalculationJob(
             // applock вільні. Стеля та сама — `JobDeferral.MaxDeferral` (30 хв від першого відкладення); після
             // неї задача `Failed` з конвертом «ресурс зайнятий» (нескінченного відкладення немає), а систематичний
             // таймаут стає видимим. Незавершені прогони вже позначено `Failed` вище, повтор створить нові.
-            if (SqlStallClassifier.IsStall(ex))
+            if (SqlStallClassifier.Find(ex) is { } stall)
             {
+                var stallDelay = RecalculationDocumentLock.LockWaitDeferDelay(request.DocumentId);
+
+                // Оператор бачить SQL-таймаут (-2/1205) у журналі, а не лише «ресурс зайнятий» після стелі.
+                LogSqlStallDeferred(
+                    logger ?? NullLogger<RecalculationJob>.Instance, request.DocumentId, stall.Number, stallDelay);
+
                 throw new JobDeferredException(
-                    RecalculationDocumentLock.LockWaitDeferDelay(request.DocumentId),
+                    stallDelay,
                     "Database stalled (command timeout or deadlock victim); recalculation deferred.",
                     RecalculationDocumentLock.Resource(request.DocumentId));
             }

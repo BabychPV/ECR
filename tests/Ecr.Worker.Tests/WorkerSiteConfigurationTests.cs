@@ -79,6 +79,7 @@ public sealed class WorkerSiteConfigurationTests
     [InlineData("Database:BulkBatchSize", "0")]
     [InlineData("Database:SheetLockTimeoutSeconds", "abc")]
     [InlineData("Database:MaxPoolSize", "0")]
+    [InlineData("Database:RecalcCommandTimeoutSeconds", "29")]
     [InlineData("Calculations:MaxParallelism", "0")]
     [InlineData("Calculations:MaxParallelism", "-1")]
     [InlineData("Calculations:MaxInputCellsPerBinding", "0")]
@@ -99,6 +100,7 @@ public sealed class WorkerSiteConfigurationTests
     [Trait("Finding", "U1-07")]
     [InlineData("Database:CommandTimeoutSeconds", "0")]
     [InlineData("Database:CommandTimeoutSeconds", "")]
+    [InlineData("Database:RecalcCommandTimeoutSeconds", "30")]
     [InlineData("Calculations:MaxParallelism", " 4 ")]
     [InlineData("Database:EditionMode", "enterprise")]
     public void Дійсне_чи_порожнє_значення_приймається(string key, string value)

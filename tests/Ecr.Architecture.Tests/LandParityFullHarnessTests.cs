@@ -353,6 +353,78 @@ public sealed class LandParityFullHarnessTests
         Assert.Equal(nonRunningCells, root.GetProperty("ecrNonRunningCells").GetInt32());
     }
 
+    /// <summary>
+    /// Діагностика post-K4 C12: LEGACY_STATUS_SKIP (легасі пропускає не-Running рядок) - пояснений пропуск, а не
+    /// «oracle-only». Лічильник <c>explainedSkip</c> окремий; <c>oracleOnly</c> лишається 0. Мутація: повернути
+    /// LEGACY_STATUS_SKIP у групу ORACLE_ONLY (Get-LandParityBucket) - тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void LEGACY_STATUS_SKIP_іде_в_explainedSkip_а_не_в_oracleOnly()
+    {
+        using var f = new Fixture();
+        var columns = new[] { "Land_No", "Land_NAE", "Land_Status", "Land_TypeFuel" };
+        var sample = new
+        {
+            doc = Doc,
+            periods = new Dictionary<string, object>
+            {
+                ["2026-01"] = new Dictionary<string, object>
+                {
+                    [Table] = new { columns, rows = new[] { Row(1, "N1", "E1", "Removed"), Row(2, "N2", "E1") } },
+                },
+            },
+        };
+        File.WriteAllText(Path.Combine(f.Dir.FullName, Doc + ".json"), JsonSerializer.Serialize(sample));
+        File.WriteAllLines(f.Oracle, [TsvLine("E1", 1, "N1", "0.001", "ECW_C05_02"), TsvLine("E1", 1, "N2", "0.002", "ECW_C05_02")]);
+        var state = new
+        {
+            methodologies = new object[] { new { code = "ECW_C05_02", published = 1, bound = 1, tables = new[] { "T3_00" } } },
+            tables = new object[] { new { document = Doc, period = 202601, table = "T3_00", rowKeys = new[] { "p9-0001", "p9-0002" }, maxRows = 5 } },
+            results = new[] { new { document = Doc, period = 202601, methodology = "ECW_C05_02", rowKey = "p9-0002", outputCode = "ECW_EC_tons_301", value = "0.002" } },
+        };
+        File.WriteAllText(f.State, JsonSerializer.Serialize(state));
+
+        var (root, _, _) = RunCompare(f, "explained");
+
+        Assert.Equal(1, Classes(root)["LEGACY_STATUS_SKIP"]);
+        Assert.Equal(4, root.GetProperty("formatVersion").GetInt32());
+        var b = root.GetProperty("buckets").EnumerateArray().Single(e => e.GetProperty("methodology").GetString() == "ECW_C05_02");
+        Assert.Equal(0, b.GetProperty("oracleOnly").GetInt32());
+        Assert.Equal(1, b.GetProperty("explainedSkip").GetInt32());
+        Assert.Equal(1, b.GetProperty("matched").GetInt32());
+        var sub = root.GetProperty("bySubstance").EnumerateArray().Single(e => e.GetProperty("substance").GetString() == "301");
+        Assert.Equal(1, sub.GetProperty("explainedSkip").GetInt32());
+        var header = File.ReadLines(f.Prefix("explained") + ".buckets.tsv").First();
+        Assert.Contains("oracleOnly\texplainedSkip\tother", header, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// -GroupBy з відсутньою у таблиці колонкою: усі рядки в одній групі (AMBIGUOUS_KEY) - мовчки не можна.
+    /// Warning у summary.warnings (з підказкою кандидатів, без підміни); -StrictGroupBy - ненульовий код виходу.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Відсутня_колонка_GroupBy_дає_warning_а_StrictGroupBy_помилку()
+    {
+        using var f = BuildFixture();
+
+        var (okRoot, _, _) = RunCompare(f, "gb-ok", "-GroupBy", "T3_00=Land_TypeFuel");
+        Assert.Empty(okRoot.GetProperty("warnings").EnumerateArray());
+
+        var (root, _, _) = RunCompare(f, "gb-warn", "-GroupBy", "T3_00=Land_Streams");
+        var warnings = root.GetProperty("warnings").EnumerateArray().Select(e => e.GetString()!).ToList();
+        var w = Assert.Single(warnings);
+        Assert.Contains("Land_Streams", w, StringComparison.Ordinal);
+        Assert.Contains("T3_00", w, StringComparison.Ordinal);
+        Assert.Contains("Land_TypeFuel", w, StringComparison.Ordinal);    // підказка, не підміна
+        Assert.True(Classes(root).ContainsKey("AMBIGUOUS_KEY"));          // колонку НЕ підмінено мовчки
+
+        var (exit, _) = RunPowerShell(LandFile("Compare-LandParityFull.ps1"), "-JsonDir", f.Json, "-OracleTsv", f.Oracle,
+            "-StateFile", f.State, "-OutPrefix", f.Prefix("gb-strict"), "-GroupBy", "T3_00=Land_Streams", "-StrictGroupBy");
+        Assert.NotEqual(0, exit);
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Агрегатне_порівняння_двозначного_ключа_сумує_групу()

@@ -173,6 +173,8 @@ public sealed class LandParityRuleArgsTests
             # форма A: категорії без суфікса (ключ-група або NAE) -> словник застосовності методології
             Show 'C1110' @('0220', '0340', '0647', '0884', '0960', '0970', 'Common') 'ECW_C11_10' $false
             Show 'C111105' @('0480', '0481', '6482(001)') 'ECW_C11_11_05' $false
+            # C11_11_02: категорії констант - група groupNAE без суфікса (0788, 6975, 0560, 0793 ...) -> 5 кодів словника
+            Show 'C111102' @('0524', '0560', '0561', '0562', '0564', '0788', '0793', '0883', '0903', '0905', '6904', '6975', '6976') 'ECW_C11_11_02' $false
             # форма B із суфіксами: склад - суфікси, словник не підмішується
             Show 'B_C111103' @('0782(001)_333', '0782(001)_415', '0804_1702', 'Common') 'ECW_C11_11_03' $false
             Show 'B_C1201' @('FuelGas_1702', 'Diesel_333') 'ECW_C12_01' $false
@@ -193,6 +195,7 @@ public sealed class LandParityRuleArgsTests
         const string all15 = "333,334,370,415,416,602,616,621,627,1702,1707,1715,1720,1728,2754";
         Assert.Contains("C1110=ApplicabilityFallback:" + all15, output, StringComparison.Ordinal);
         Assert.Contains("C111105=ApplicabilityFallback:330,333", output, StringComparison.Ordinal);
+        Assert.Contains("C111102=ApplicabilityFallback:322,333,1052,1078,2754", output, StringComparison.Ordinal);
         Assert.Contains("B_C111103=Suffix:333,415,1702", output, StringComparison.Ordinal);
         Assert.Contains("B_C1201=Suffix:333,1702", output, StringComparison.Ordinal);
         Assert.Contains("FLAG=Applicability:" + all15, output, StringComparison.Ordinal);
@@ -202,7 +205,7 @@ public sealed class LandParityRuleArgsTests
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void Форма_A_у_файлах_моделі_це_рівно_C11_10_і_C11_11_05_а_решта_словникових_методологій_мають_суфікс()
+    public void Форма_A_у_файлах_моделі_це_рівно_C11_10_C11_11_02_і_C11_11_05_а_решта_словникових_методологій_мають_суфікс()
     {
         // Методологія зі словником застосовності й правилом категорії без позначки «form B» у note - форма A:
         // константи за ключем без коду. Перелік зафіксовано: нова методологія форми A мусить бути названа свідомо
@@ -225,7 +228,7 @@ public sealed class LandParityRuleArgsTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(["ECW_C11_10", "ECW_C11_11_05"], formA);
+        Assert.Equal(["ECW_C11_10", "ECW_C11_11_02", "ECW_C11_11_05"], formA);
     }
 
     [Fact]

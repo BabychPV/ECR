@@ -83,6 +83,8 @@ public sealed class RecalcCommandTimeoutConfigurationTests
     [InlineData("180s")]
     [InlineData("0")]
     [InlineData("-1")]
+    [InlineData("1")]
+    [InlineData("29")]
     public void Недійсне_значення_ключа_зупиняє_старт_з_назвою_ключа(string value)
     {
         var configuration = new ConfigurationBuilder()

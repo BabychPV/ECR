@@ -40,13 +40,26 @@ public sealed class SafeErrorTextDatabaseTreeTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    public void TimeoutException_у_ланцюгу_читається_як_помилка_бази()
+    public void TimeoutException_з_DbException_всередині_читається_як_помилка_бази()
     {
-        var error = new InvalidOperationException("outer", new TimeoutException("Execution Timeout Expired."));
+        var error = new InvalidOperationException(
+            "outer", new TimeoutException("Execution Timeout Expired.", new FakeDbException()));
 
         var text = SafeErrorText.For(error, Correlation, "the recalculation");
 
         Assert.StartsWith("A database error", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public void Голий_TimeoutException_без_БД_всередині_лишається_unexpected()
+    {
+        var error = new InvalidOperationException("outer", new TimeoutException("HTTP call timed out."));
+
+        var text = SafeErrorText.For(error, Correlation, "the recalculation");
+
+        Assert.Contains("unexpected error", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("A database error", text, StringComparison.Ordinal);
     }
 
     [Fact]

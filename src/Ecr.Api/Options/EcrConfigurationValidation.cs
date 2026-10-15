@@ -43,7 +43,7 @@ public static partial class EcrConfigurationValidation
     public static readonly IReadOnlyList<(string Key, int Min)> Integers =
     [
         ("Database:CommandTimeoutSeconds", 0),
-        ("Database:RecalcCommandTimeoutSeconds", 1),
+        ("Database:RecalcCommandTimeoutSeconds", 30),
         ("Database:BulkBatchSize", 1),
         ("Database:SheetLockTimeoutSeconds", 0),
         ("Database:MaxPoolSize", 1),

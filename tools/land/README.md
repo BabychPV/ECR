@@ -186,7 +186,9 @@ D-425, «лише Running»: вихід ECR, якого немає в легас
 Звіт (без значень): у `summary.json` - `buckets` (по методології) і `bySubstance` (методологія x речовина), у
 `<OutPrefix>.buckets.tsv` - ті самі рядки: `matched`, `withinThreshold` (збіг лише завдяки порогу `-RelThreshold`,
 за замовчуванням `1e-9`; NEAR/MISMATCH* з відносною похибкою ≤ порога), `mismatch`, `ecrOnly`, `oracleOnly`
-(MISSING_*, ROW_NOT_LOADED_*, LEGACY_STATUS_SKIP, METHODOLOGY_DIFF), `other` (AMBIGUOUS_KEY, LEGACY_DUP_CONFLICT,
+(MISSING_*, ROW_NOT_LOADED_*, METHODOLOGY_DIFF), `explainedSkip` (LEGACY_STATUS_SKIP: легасі пропускає не-Running
+рядок; summary `formatVersion` 4, стовпець після `oracleOnly`; `-GroupBy` з колонкою, якої немає в таблиці, дає
+`summary.warnings` + Warning у лозі, а `-StrictGroupBy` - ненульовий код виходу), `other` (AMBIGUOUS_KEY, LEGACY_DUP_CONFLICT,
 INCOMPLETE_*, BRANCH_BOTH_PRESENT), `zero` (комірки з нульовою старою), `relP95`, `relMax`. Сторож -
 LandParityC12CompareTests (Architecture; синтетика, мутаційні докази: гілка не знімається, речовина не підставляється,
 обидві гілки не виявляються).
@@ -418,7 +420,7 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 Склад речовин версії один на ВЕРСІЮ, а старий C# перебирає список кодів ПО РЯДКУ: `pollutionCodeByFuelType[prefix]`
 (C11_01/02/10, C12_03; префікс - `PrefixProvider` за текстом палива/потоку), `polCodeList[typeOfStream]` (C12_01),
 `pollutionCodeByInvNum[InvNum з Т/А кирилицею -> латиниця]` (C12_04_01), `fuelShort` diesel|oil (C12_04_02) і списки
-`NAE -> коди` (C11_11_03, C11_11_05, C11_19). «Чужа» речовина рядка там просто не рахується, а в ECR давала б зайвий рядок
+`NAE -> коди` (C11_11_03, C11_11_05, C11_19; C11_11_02 - NAE -> група `groupNAE` -> коди `EC`, ✎ 2026-10-15, D-433). «Чужа» речовина рядка там просто не рахується, а в ECR давала б зайвий рядок
 результату (значення з фолбека `Common`) або `#REF`. Довідник `LAND_SUBSTANCE_APPLICABILITY` переносить цю таблицю в
 дані БЕЗ міграції: ключ `(METHODOLOGY, SELECTOR_KIND, SELECTOR_VALUE, SUBSTANCE_CODE)`, регістр значущий;
 `SELECTOR_KIND` = `NAE` | `InvNum` | `TypeFuel` | `Stream`; запис `(методологія, '*', '*', '*')` - маркер «методологія має

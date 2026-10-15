@@ -91,6 +91,8 @@ ALIASES = [
     (['T9_04'], 'Land_Measure_SubstanceConsumptionKgH', r'Substance consumption \(kg/h\)$', True, 'header', 'kg/h'),
     (['T9_04'], 'Land_Measure_SubstanceConsumptionKg', r'Substance consumption \(kg\)$', True, 'header',
      'Місячні колонки з нестандартними кодами (дубль імені в Excel) — див. monthColumns'),
+    (['T9_04'], 'Land_Measure_SubstanceConsumption', r'Substance consumption \(Sm3\) \(20 dgr', True, 'header',
+     'Sm3 (20 dgr., 1atm): міст C11_10 читає SubstanceConsumption20Dgr1atm_Mnn; без запису SC=null (LAND-POST-K4 клас D)'),
     (['T9_06'], 'Land_Measure_FuelSubstanceConsumptionOrPumpedVolume', r'Substance consumption \(tonne\)$', True, 'single',
      'Єдина колонка споживання в таблиці'),
     (['T9_07'], 'Land_Measure_SubstanceConsumptionSm3H', r'Substance consumption \(Sm3/h\)$', True, 'header',
