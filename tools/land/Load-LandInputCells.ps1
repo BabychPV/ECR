@@ -18,7 +18,9 @@
     Код виходу 1: NO_DOC, NO_TABLE, ROW_MISSING, відсутня колонка (без -AllowMissingColumns), lookupMiss, відхилений
     рядок. Лише локальний API. У вивід не йде значень комірок: лише коди таблиць/колонок і кількості.
 
-.PARAMETER Kind            TypeFuel | Gtu.
+.PARAMETER Kind            TypeFuel | Gtu | ConRegion. ConRegion: комірка ручного вводу Con_Region на T5_27 (ECW_C07_21) = поле NAME
+                           запису довідника, на який посилається поле шапки Region документа стенда; порожня шапка - комірок
+                           немає (жодного дефолтного регіону). Потребує -User/-Password: шапка читається зі стенда.
 .PARAMETER SourcePath      Локальний каталог із JSON повного набору: <ім'я документа>.json (periods -> таблиці AF -> rows).
                            Дані прода лишаються поза репозиторієм; шлях - лише параметром.
 .PARAMETER DocMap          JSON {"<ім'я документа>": <id>, ...} (рядок або шлях до файла): які документи й під якими id.
@@ -51,7 +53,7 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('TypeFuel', 'Gtu')][string]$Kind,
+    [Parameter(Mandatory)][ValidateSet('TypeFuel', 'Gtu', 'ConRegion')][string]$Kind,
     [Parameter(Mandatory)][string]$SourcePath,
     [Parameter(Mandatory)][string]$DocMap,
     [Parameter(Mandatory)][string]$BaseUrl,
@@ -96,19 +98,53 @@ if ($Kind -eq 'Gtu') {
     $modelColumns = Get-LandModelTableColumns -Model $modelDoc -TableCodes @((Get-LandInputCellKind -Name 'Gtu').SheetOf.Keys)
 }
 
+# Вид ConRegion: текст Con_Region береться з поля шапки Region документа НА СТЕНДІ (читання), тому вхід потрібен
+# ДО побудови плану. Порожня шапка / немає NAME -> документ без комірок (дефолт НЕ підставляється), лічиться окремо.
+$conRegionText = @{}
+$conRegionMissing = New-Object System.Collections.ArrayList
+$connected = $false
+if ($Kind -eq 'ConRegion') {
+    $haveCred = (-not [string]::IsNullOrWhiteSpace($User)) -or (-not [string]::IsNullOrWhiteSpace($env:ECR_USER))
+    if (-not $haveCred) { throw 'Вид ConRegion читає шапку документа зі стенда: потрібні -User/-Password (або ECR_USER/ECR_PASSWORD).' }
+    Connect-Ecr -BaseUrl $BaseUrl -User $User -Password $Password
+    $connected = $true
+    $crDef = Get-LandInputCellKind -Name 'ConRegion'
+    $crRegs = Invoke-Ecr -Method GET -Path '/api/v1/registries'
+    Assert-EcrOk $crRegs 'GET registries'
+    $crCodeById = @{}
+    foreach ($rg in @($crRegs.Json)) { $crCodeById[[int]$rg.id] = [string]$rg.code }
+    foreach ($docName in @($docIds.Keys)) {
+        $docId = [int]$docIds[$docName]
+        $hdr = Invoke-LandEcrRetry -HttpMethod GET -ApiPath "/api/v1/documents/$docId/header"
+        $text = $null
+        if ($hdr.Status -eq 200) {
+            $ref = Get-LandHeaderLookupEntryRef -Header $hdr.Json -FieldCode $crDef.HeaderField
+            if ($null -ne $ref -and $ref.RegistryDefId -gt 0 -and $crCodeById.ContainsKey($ref.RegistryDefId)) {
+                $er = Invoke-LandEcrRetry -HttpMethod GET -ApiPath "/api/v1/registries/$($crCodeById[$ref.RegistryDefId])/entries/$($ref.EntryId)"
+                if ($er.Status -eq 200) { $text = Get-LandConRegionText -Entry $er.Json -NameField $crDef.EntryNameField }
+            }
+        }
+        if ($null -eq $text) { [void]$conRegionMissing.Add($docName) } else { $conRegionText[$docName] = $text }
+    }
+    if ($conRegionMissing.Count -gt 0) {
+        Write-Host ("WARN header Region empty/unresolved (no default substituted, no Con_Region cells for): " + ((@($conRegionMissing) | Sort-Object) -join ', '))
+    }
+}
+
 $plan = [ordered]@{}
 foreach ($docName in @($docIds.Keys)) {
     $file = Join-Path $SourcePath "$docName.json"
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "У каталозі -SourcePath немає файла '$docName.json'." }
     $parsed = ConvertFrom-LandLargeJson -Text ([IO.File]::ReadAllText((Resolve-Path -LiteralPath $file).ProviderPath))
-    $part = New-LandInputCellPlan -KindName $Kind -DocumentName $docName -Document $parsed -Periods $periods -ModelColumns $modelColumns -SourceWithoutTarget $orphans -RowKeyFormat $RowKeyFormat
+    $docConRegion = if ($conRegionText.ContainsKey($docName)) { [string]$conRegionText[$docName] } else { '' }
+    $part = New-LandInputCellPlan -KindName $Kind -DocumentName $docName -Document $parsed -Periods $periods -ModelColumns $modelColumns -SourceWithoutTarget $orphans -RowKeyFormat $RowKeyFormat -ConRegionText $docConRegion
     foreach ($k in $part.Keys) { $plan[$k] = $part[$k] }
 }
 
 $summary = @(Get-LandInputCellPlanSummary -Plan $plan)
 $sumRows = [int](($summary | Measure-Object Rows -Sum).Sum)
 $sumCells = [int](($summary | Measure-Object Cells -Sum).Sum)
-Write-Host "PLAN ($Kind): table-periods $($summary.Count), rows $sumRows, cells $sumCells (TypeFuel $(($summary | Measure-Object TypeFuel -Sum).Sum), ColdVent $(($summary | Measure-Object ColdVent -Sum).Sum), Gtu $(($summary | Measure-Object Gtu -Sum).Sum))."
+Write-Host "PLAN ($Kind): table-periods $($summary.Count), rows $sumRows, cells $sumCells (TypeFuel $(($summary | Measure-Object TypeFuel -Sum).Sum), ColdVent $(($summary | Measure-Object ColdVent -Sum).Sum), Gtu $(($summary | Measure-Object Gtu -Sum).Sum)$(if ($Kind -eq 'ConRegion') { ", ConRegion $(($summary | Measure-Object ConRegion -Sum).Sum)" }))."
 if ($orphans.Count -gt 0) {
     Write-Host ("WARN source-without-target-column (table/column=cells, no values; the model table has no such column, cells are not loaded): " +
         ((@($orphans.Keys | Sort-Object) | ForEach-Object { "$_=$($orphans[$_])" }) -join ', '))
@@ -123,7 +159,7 @@ if (-not $haveCredentials) {
     return
 }
 
-Connect-Ecr -BaseUrl $BaseUrl -User $User -Password $Password
+if (-not $connected) { Connect-Ecr -BaseUrl $BaseUrl -User $User -Password $Password }
 $def = Get-LandInputCellKind -Name $Kind
 
 # Довідники: id -> код і ліниві карти записів на (реєстр, дата).
@@ -181,6 +217,7 @@ foreach ($key in @($plan.Keys | Sort-Object)) {
         foreach ($c in $r.Cells) {
             $colDef = $columns[$c.Col]
             if ($null -eq $colDef) { $st.missingColumnCells++; $absent[$c.Col] = $true; $missingColumnNames["$tableCode/$($c.Col)"] = $true; continue }
+            if ($c.Kind -eq 'ConRegion') { [void]$cells.Add(@{ columnCode = $c.Col; value = [string]$c.Text }); continue }
             if ($c.Kind -eq 'Gtu') {
                 if ($c.Col -eq $def.TextColumn) { [void]$cells.Add(@{ columnCode = $c.Col; value = [string]$c.Text }); continue }
                 $num = ConvertTo-LandInputNumber -Text $c.Text
