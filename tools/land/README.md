@@ -186,7 +186,9 @@ D-425, «лише Running»: вихід ECR, якого немає в легас
 Звіт (без значень): у `summary.json` - `buckets` (по методології) і `bySubstance` (методологія x речовина), у
 `<OutPrefix>.buckets.tsv` - ті самі рядки: `matched`, `withinThreshold` (збіг лише завдяки порогу `-RelThreshold`,
 за замовчуванням `1e-9`; NEAR/MISMATCH* з відносною похибкою ≤ порога), `mismatch`, `ecrOnly`, `oracleOnly`
-(MISSING_*, ROW_NOT_LOADED_*, LEGACY_STATUS_SKIP, METHODOLOGY_DIFF), `other` (AMBIGUOUS_KEY, LEGACY_DUP_CONFLICT,
+(MISSING_*, ROW_NOT_LOADED_*, METHODOLOGY_DIFF), `explainedSkip` (LEGACY_STATUS_SKIP: легасі пропускає не-Running
+рядок; summary `formatVersion` 4, стовпець після `oracleOnly`; `-GroupBy` з колонкою, якої немає в таблиці, дає
+`summary.warnings` + Warning у лозі, а `-StrictGroupBy` - ненульовий код виходу), `other` (AMBIGUOUS_KEY, LEGACY_DUP_CONFLICT,
 INCOMPLETE_*, BRANCH_BOTH_PRESENT), `zero` (комірки з нульовою старою), `relP95`, `relMax`. Сторож -
 LandParityC12CompareTests (Architecture; синтетика, мутаційні докази: гілка не знімається, речовина не підставляється,
 обидві гілки не виявляються).
