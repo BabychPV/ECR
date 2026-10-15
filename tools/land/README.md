@@ -360,7 +360,7 @@ null (як порожня). Перелік (11 пар методологія/т�
 
 `Import-LandHse400Composition.ps1` одноразово завантажує значення з **локальної копії** прода (лише `SELECT … WITH (NOLOCK)`;
 значень у git немає, у вивід - лише кількості) у стенд через REST (`entries/batch`): показник = канонічний суфікс колонки
-(`_20` -> `20`, `_0` -> `0`); HMB: `EMercaptan_mass` береться з `EMercaptanV2_mass`; запасна: порожній `C6_C10_mass` -> `C6_1_mass`.
+(`_20` -> `20`, `_0` -> `0`); HMB: `EMercaptan_mass` береться з `EMercaptanV2_mass`; HMB: `MercaptanSulphurContent` береться з `TotalSulphurContentWithoutH2S` (як `Q_Air_HSE400.cs:127/:217`; власної колонки в прод-таблиці немає, без цього `ECW_C11_08` для HMB дає `#ARG` у `tons_330`/`gsec_330`); запасна: порожній `C6_C10_mass` -> `C6_1_mass`.
 `-DiscoverStreams` додає до словника потоків тексти Land-полів, що збігаються з правилом старої системи (підрядок, без
 регістру, в обидва боки). Повтор - 0 змін; наявні записи не чіпаються. Параметри як у `Import-LandAirSubstances.ps1`
 (`-SourceDatabase`/`-ConfirmSource`, `-ConfirmStand`); спершу `-DryRun`.

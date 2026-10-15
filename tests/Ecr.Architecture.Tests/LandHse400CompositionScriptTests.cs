@@ -111,6 +111,49 @@ public sealed class LandHse400CompositionScriptTests
     }
 
     /// <summary>
+    /// K7-діагноз (C11_08, T9_08/T9_10): легасі читає HMB-<c>MercaptanSulphurContent</c> з колонки
+    /// <c>*_TotalSulphurContentWithoutH2S</c> (Q_Air_HSE400.cs:127/:217), у довіднику показника не було (-> #ARG у tons_330).
+    /// Мутація: прибрати блок «HMB: MercaptanSulphurContent» у ConvertTo-LandHse400CompositionPlan - тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void HMB_MercaptanSulphurContent_береться_з_TotalSulphurContentWithoutH2S_і_лише_для_HMB()
+    {
+        const string script = """
+            $ErrorActionPreference = 'Stop'
+            . $args[0]
+            $rows = @(
+              [pscustomobject]@{ Year = 2026; Month = 1; Columns = @{
+                  'FG_HMB_TotalSulphurContentWithoutH2S' = 0.42; 'LPG_HMB_TotalSulphurContentWithoutH2S' = 0.17
+                  'FG_Internal_TotalSulphurContentWithoutH2S' = 0.99; 'FG_Internal_MercaptanSulphurContent' = 0.05
+                  'FG_Makat_TotalSulphurContentWithoutH2S' = 0.77 } },
+              [pscustomobject]@{ Year = 2026; Month = 2; Columns = @{ 'FG_HMB_Density20' = 0.8 } }
+            )
+            $plan = ConvertTo-LandHse400CompositionPlan -Rows $rows
+            function V($m, $s, $i) { (@($plan.Items | Where-Object { $_.Month -eq $m -and $_.Stream -eq $s -and $_.Indicator -eq $i } | ForEach-Object { $_.Value }) -join ';') }
+            'FGHMB=' + (V 1 'FG_HMB' 'MercaptanSulphurContent')
+            'LPGHMB=' + (V 1 'LPG_HMB' 'MercaptanSulphurContent')
+            'FGHMB_KEEPS=' + (V 1 'FG_HMB' 'TotalSulphurContentWithoutH2S')
+            'FGINT_OWN=' + (V 1 'FG_Internal' 'MercaptanSulphurContent')
+            'MAKAT=' + (@($plan.Items | Where-Object { $_.Stream -eq 'FG_Makat' -and $_.Indicator -eq 'MercaptanSulphurContent' }).Count)
+            'FEB=' + (@($plan.Items | Where-Object { $_.Month -eq 2 -and $_.Indicator -eq 'MercaptanSulphurContent' }).Count)
+            'ALIASED=' + (@($plan.Items | Where-Object { $_.Indicator -eq 'MercaptanSulphurContent' -and $_.Aliased }).Count)
+            'MERC_ALIASES=' + $plan.MercaptanAliases
+            """;
+
+        var (exit, output) = RunPowerShell(script, LandFile("LandHse400Composition.Lib.ps1"));
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("FGHMB=0.42", output, StringComparison.Ordinal);
+        Assert.Contains("LPGHMB=0.17", output, StringComparison.Ordinal);
+        Assert.Contains("FGHMB_KEEPS=0.42", output, StringComparison.Ordinal);
+        Assert.Contains("FGINT_OWN=0.05", output, StringComparison.Ordinal);   // не-HMB: власний показник, без псевдоніма
+        Assert.Contains("MAKAT=0", output, StringComparison.Ordinal);
+        Assert.Contains("FEB=0", output, StringComparison.Ordinal);            // немає джерела - немає запису
+        Assert.Contains("ALIASED=0", output, StringComparison.Ordinal);        // не C*_mass-псевдонім: -RewriteAliased не зачіпає
+        Assert.Contains("MERC_ALIASES=2", output, StringComparison.Ordinal);
+    }
+    /// <summary>
     /// C12_03 (паритет 415/416/2754): стара система читає `FG_Internal_C1_C5` у властивість `FG_Internal_C1_C5_mass`
     /// (Q_Air_HSE400.Get_DataFromHSE400). Без псевдоніма довідник мав `C1_C5`/`C12_C19` (415/2754 без складу) і
     /// `C6_C10_mass` = запасна C6_1_mass (416 хибний, коли справжній C6_C10 непорожній).
