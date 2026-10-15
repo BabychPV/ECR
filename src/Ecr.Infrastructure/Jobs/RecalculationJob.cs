@@ -614,6 +614,21 @@ public sealed partial class RecalculationJob(
                     RecalculationDocumentLock.Resource(request.DocumentId));
             }
 
+            // ⛔ Зупинка бази (15.10, EcrLandUi): автоприріст файлу `Ecr_hot` стояв 71 с, `SqlException -2`
+            // (CommandTimeout) вистрілив у трьох прогонах одночасно, і три задачі пішли в `JobRetryPolicy`
+            // (30/60/120 с) — по собі лишились `Failed`-прогони. Таймаут команди й жертва дедлока (1205) — як і
+            // 1222 вище, стан бази, що минає, а не вердикт про дані: відкладення без спроби ретраю, слот і
+            // applock вільні. Стеля та сама — `JobDeferral.MaxDeferral` (30 хв від першого відкладення); після
+            // неї задача `Failed` з конвертом «ресурс зайнятий» (нескінченного відкладення немає), а систематичний
+            // таймаут стає видимим. Незавершені прогони вже позначено `Failed` вище, повтор створить нові.
+            if (SqlStallClassifier.IsStall(ex))
+            {
+                throw new JobDeferredException(
+                    RecalculationDocumentLock.LockWaitDeferDelay(request.DocumentId),
+                    "Database stalled (command timeout or deadlock victim); recalculation deferred.",
+                    RecalculationDocumentLock.Resource(request.DocumentId));
+            }
+
             throw;
         }
 
