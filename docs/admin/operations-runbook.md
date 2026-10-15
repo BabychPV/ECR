@@ -111,7 +111,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Schema:StartupMode` | `Validate` | `Validate` — не стартувати, якщо є незастосовані міграції EF. `Migrate` — застосувати незастосовані міграції EF на старті (лише dev/test: у проді обліковий запис служби не має DDL-прав, `D-66`; скрипти `Sql/*.sql` цей режим не виконує) |
 | `Database:EditionMode` | `Auto` | режим редакції SQL Server (`Standard` / `Enterprise`). `Auto` — визначити самостійно на старті. `deploy-ecr.ps1` записує визначене при установці значення в `ECR_Database__EditionMode`, якщо його не задано явно (`docs/build/11-install-guide.md` §2.5) |
 | `Database:CommandTimeoutSeconds` | 60 | таймаут команди SQL, с |
-| `Database:RecalcCommandTimeoutSeconds` | 180 | таймаут команд перерахунку (задача й гілки методологій), с; допустимо 30–3600 (поза діапазоном затискається) |
+| `Database:RecalcCommandTimeoutSeconds` | 180 | таймаут команд перерахунку (задача й гілки методологій), с; допустимо 30–3600: менше 30 — старт зупиняється з назвою ключа, більше 3600 затискається до 3600 |
 | `Database:BulkBatchSize` | 50000 | розмір пачки масового запису |
 | `Cache:SchemaName` / `Cache:TableName` | `dbo` / `Cache` | таблиця розподіленого кешу |
 | `Cache:MetadataSlidingMinutes` | 240 | кеш метаданих, хв |
