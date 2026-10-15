@@ -185,7 +185,7 @@ $script:LandParityDefaultMethodologyTable = @(
 #     для одного ключа - BRANCH_BOTH_PRESENT (старий код пише лише одну; ParityBranch мав лишити одну);
 #   * type1 коду зі списку NullType1 (415: у старому коді не існує) лишається ПОВНИМ іменем -> ECR_ONLY.
 # Значень тут немає: лише імена.
-$script:LandParityTypeFoldDefault = @('^ECW_C12_02$')
+$script:LandParityTypeFoldDefault = @('^ECW_C12_02$', '^ECW_C11_13$')
 $script:LandParityNullType1Default = @{ 'ECW_C12_02' = @('415') }
 
 function Get-LandParityTypeFoldDefault { return @($script:LandParityTypeFoldDefault) }
@@ -194,7 +194,7 @@ function Get-LandParityTypeFoldDefault { return @($script:LandParityTypeFoldDefa
 # Для методологій зі списку значення гілок зберігаються окремо (EcrVar), порівнюється лише гілка, яку обрав би легасі,
 # решта гілок - клас ECR_ONLY_NOT_SELECTED (не ECR_ONLY і не BRANCH_BOTH_PRESENT). Методологія зі списку знімає гілку
 # (fold) без -TypeFoldMethodology. Правила - у Get-LandParitySelectedBranch (джерела ECW_C11_*.cs у docs/source).
-$script:LandParityBranchSelectorDefault = @('ECW_C11_01', 'ECW_C11_02', 'ECW_C11_11_02', 'ECW_C11_11_03')
+$script:LandParityBranchSelectorDefault = @('ECW_C11_01', 'ECW_C11_02', 'ECW_C11_11_02', 'ECW_C11_11_03', 'ECW_C12_01')
 
 function Get-LandParityBranchSelectorDefault { return @($script:LandParityBranchSelectorDefault) }
 
@@ -232,6 +232,7 @@ function Get-LandParitySelectedBranch {
         ECW_C11_02.cs:143-146,357-361: лише за NAE (точний збіг зі списком).
         ECW_C11_11_02.cs:221-239: NAE 0883 або група 6975 -> type2, інакше type1 (NAE має бути в groupNAE).
         ECW_C11_11_03.cs:81-112: окремі групи для tons і gsec (MetricName).
+        ECW_C12_01.cs:140-153: Land_Streams = 'Fuel gas' -> type2, інакше type1.
     #>
     param([string]$MethodologyCode, [string]$MetricName, $Row)
     $nae = [string](Get-LandParityV $Row 'Land_NAE')
@@ -265,6 +266,11 @@ function Get-LandParitySelectedBranch {
         'ECW_C11_11_02' {
             if (-not ($script:LandParityC111102Known -ccontains $nae)) { return $null }
             if ($script:LandParityC111102Type2 -ccontains $nae) { return 'type2' }
+            return 'type1'
+        }
+        'ECW_C12_01' {
+            # ECW_C12_01.cs:140-153: type2 лише для потоку Fuel gas (Land_Streams), решта - type1.
+            if ([string](Get-LandParityV $Row 'Land_Streams') -ceq 'Fuel gas') { return 'type2' }
             return 'type1'
         }
         'ECW_C11_11_03' {
@@ -323,7 +329,7 @@ function Get-LandParityBucket {
         MATCHED: MATCH, MATCH_ROUNDING_LOSS, а також NEAR і MISMATCH* з відносною похибкою не більшою за поріг
         (Within = TRUE: збіг лише завдяки порогу). ORACLE_ONLY: у старій системі є, в ECR немає (MISSING_*, ROW_NOT_LOADED_*,
         METHODOLOGY_DIFF). EXPLAINED_SKIP: LEGACY_STATUS_SKIP (легасі пропускає не-Running рядок) - окремий лічильник. OTHER: невизначеність ключа/гілки (AMBIGUOUS_KEY, LEGACY_DUP_CONFLICT,
-        INCOMPLETE_*, BRANCH_BOTH_PRESENT, AMBIGUOUS_ECR_KEY) - значення не порівнювалось.
+        LEGACY_COPY_COUNT_DIFF (кількість копій легасі != кількості Running-рядків групи), INCOMPLETE_*, BRANCH_BOTH_PRESENT, AMBIGUOUS_ECR_KEY) - значення не порівнювалось.
     #>
     param([string]$ClassName, [double]$RelErr, [double]$Threshold)
     $core = $ClassName -replace '^AGG_', '' -replace '_ZERO$', ''
@@ -672,6 +678,7 @@ function Invoke-LandParityCompare {
                     }
                 }
                 $tk = "$docName|$pk|$tbl"
+                $explicitGroupBy = ($groupByOpt.ContainsKey($tbl) -or $groupByOpt.ContainsKey('*'))
 
                 # ambiguity per (efid, NAE, phase): several DIFFERENT Land_No share the key
                 $members = @{}; $i = 0
@@ -711,14 +718,19 @@ function Invoke-LandParityCompare {
                     $amb = ($mem.Nos.Count -gt 1)
                     $ok = "$efid|$mo|$pt|$($nae.Trim())"
                     if (-not $Oracle.ContainsKey($ok)) { continue }      # no stored legacy result: nothing to compare
-                    if ($amb -and $aggMode -eq 'NaePhase') {
+                    # Група = усі рядки одного ключа (efid, NAE, фаза), навіть з ОДНИМ Land_No (пара Hydraulic oil): легасі пише
+                    # по запису на рядок-джерело, тож підсумок легасі = сума копій, а ECR - сума рядків.
+                    $multi = ($aggMode -eq 'NaePhase' -and $mem.Rows.Count -gt 1)
+                    if ($multi) {
                         if ($groupDone.ContainsKey($info.Key)) { continue }
                         $groupDone[$info.Key] = 1
                     }
                     $rs = @($Oracle[$ok])
+                    $noPhaseLegacy = $false
                     if ($ph -ne '') {
                         $nr = @($rs | Where-Object { $_.phase.Trim() -eq $ph.Trim() })
                         if ($nr.Count -gt 0) { $rs = $nr }
+                        elseif ($explicitGroupBy) { $rs = @(); $noPhaseLegacy = $true }   # явний -GroupBy: фази в легасі немає -> групи без легасі
                     }
                     $legacy = @{}
                     foreach ($lr in $rs) {
@@ -726,7 +738,7 @@ function Invoke-LandParityCompare {
                         if (-not $legacy.ContainsKey($lk)) { $legacy[$lk] = New-Object System.Collections.ArrayList }
                         [void]$legacy[$lk].Add($lr)
                     }
-                    $grouped = ($amb -and $aggMode -eq 'NaePhase')
+                    $grouped = $multi
                     if ($grouped) { $ac.AggregateGroups++ }
                     $rowKeys = @($rk)
                     if ($grouped) { $rowKeys = @($mem.Rows.ToArray()) }
@@ -746,6 +758,10 @@ function Invoke-LandParityCompare {
                     $cnt = 0; if ($st.LoadedCnt.ContainsKey($tk)) { $cnt = [int]$st.LoadedCnt[$tk] }
                     if ($mxr -and $cnt -ge $mxr) { $notLoadedClass = 'ROW_NOT_LOADED_CAPPED' }
 
+                    # Копій легасі очікується стільки, скільки Running-рядків у групі (легасі не рахує не-Running).
+                    $expCopies = $nRows
+                    foreach ($mk in $rowKeys) { if ($nonRunningRows.ContainsKey($mk)) { $expCopies-- } }
+
                     $seen = @{}
                     foreach ($lk in $legacy.Keys) {
                         $meth, $comp = $lk -split '\|', 2
@@ -754,13 +770,28 @@ function Invoke-LandParityCompare {
                         foreach ($metric in 'tons', 'gsec') {
                             $outCode = "ECW_EC_${metric}_$comp"; $lab = "${metric}_$comp"
                             $oldV = $latest[$metric]
+                            $ek = "$meth|$outCode"
+                            $allVals = @($copies | ForEach-Object { $_[$metric] } | Where-Object { $null -ne $_ })
+                            # Легасі цей вихід має: ECR-вихід того ж ключа ніколи не «хвіст» (ECR_ONLY) - навіть при DUP/AMBIGUOUS/BOTH/DIFF.
+                            if ($allVals.Count -gt 0) { $seen[$ek] = 1 }
                             if ($amb -and -not $grouped) { Add-LandParityCell $ac $docName $pk $tbl $rk 1 $efid $meth $lab 'AMBIGUOUS_KEY'; continue }
-                            if ($copies.Count -gt 1) {
-                                $vals = @($copies | ForEach-Object { $_[$metric] } | Where-Object { $null -ne $_ } | Select-Object -Unique)
+                            if ($grouped) {
+                                # LEGACY_ROW_SUM: легасі пише ОДИН запис на рядок-джерело (modified = час рядка, не запуск) -
+                                # значення групи = сума ВСІХ копій ключа; кількість копій має збігатися з кількістю Running-рядків.
+                                if ($allVals.Count -eq 0) { continue }
+                                if ($copies.Count -ne $expCopies) {
+                                    Add-LandParityCell $ac $docName $pk $tbl $rk $nRows $efid $meth $lab ($pre + 'LEGACY_COPY_COUNT_DIFF')
+                                    continue
+                                }
+                                $oldSum = 0.0
+                                foreach ($av in $allVals) { $oldSum += [double]$av }
+                                $oldV = $oldSum
+                            }
+                            elseif ($copies.Count -gt 1) {
+                                $vals = @($allVals | Select-Object -Unique)
                                 if ($vals.Count -gt 1) { Add-LandParityCell $ac $docName $pk $tbl $rk $nRows $efid $meth $lab ($pre + 'LEGACY_DUP_CONFLICT'); continue }
                             }
                             if ($null -eq $oldV) { continue }
-                            $ek = "$meth|$outCode"
                             # Селектор гілки: легасі пише одну гілку за NAE/потоком; порівнюється лише вона, решта -
                             # ECR_ONLY_NOT_SELECTED. Діє, лише якщо в ECR є значення з гілками для цього виходу.
                             $selPath = $false
@@ -871,6 +902,7 @@ function Invoke-LandParityCompare {
                             $onlySum[$ck] += [double]$er[$ck]
                         }
                     }
+                    if ($noPhaseLegacy) { $onlyNotSel = @{} }   # фази в легасі немає: гілки без легасі не звітуються
                     foreach ($ck in $onlyNotSel.Keys) {
                         $outCodeNs = ($ck -split '\|', 2)[1]
                         $methNs = ($ck -split '\|', 2)[0]
@@ -893,6 +925,8 @@ function Invoke-LandParityCompare {
                 if ($nonRunningRows.ContainsKey($mk) -and $st.Ecr.ContainsKey("$tk|$mk") -and $st.Ecr["$tk|$mk"].ContainsKey($ck)) { $cls = 'ECR_NON_RUNNING'; break }
             }
                         }
+                        # Явний -GroupBy і фази немає в легасі: це група без легасі - лише регресія фільтра Running, інакше пропуск.
+                        if ($noPhaseLegacy -and $cls -ne 'ECR_NON_RUNNING') { continue }
                         Add-LandParityCell $ac $docName $pk $tbl $rk $nRows $efid $meth $lab ($pre + $cls)
                     }
                 }
