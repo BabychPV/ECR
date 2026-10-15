@@ -130,8 +130,11 @@ public sealed class LandParityFullHarnessTests
             TsvLine("E1", 1, "N3", SentinelCapped, "ECW_C05_02"),
             TsvLine("E1", 1, "N9", "3", "ECW_C11_01"),
             TsvLine("E1", 1, "N10", "2", "ECW_C99_01"),
-            TsvLine("E2", 2, "N7", "1", "ECW_C05_02"),
-            TsvLine("E2", 2, "N8", "1", "ECW_C05_02"),
+            // легасі пише ОДИН запис на рядок-джерело: по дві копії на двозначний ключ, підсумок = сума копій
+            TsvLine("E2", 2, "N7", "0.4", "ECW_C05_02"),
+            TsvLine("E2", 2, "N7", "0.6", "ECW_C05_02"),
+            TsvLine("E2", 2, "N8", "0.5", "ECW_C05_02"),
+            TsvLine("E2", 2, "N8", "0.5", "ECW_C05_02"),
         ]);
 
         static object Res(int period, string meth, string row, string output, string value) =>
@@ -278,7 +281,7 @@ public sealed class LandParityFullHarnessTests
         Assert.Equal(1, classes["ROW_NOT_LOADED_CAPPED"]);     // N3
         Assert.Equal(1, classes["MISSING_NOT_PUBLISHED"]);     // N9
         Assert.Equal(1, classes["ECR_ONLY_INTERMEDIATE"]);
-        Assert.Equal(12, classes["AMBIGUOUS_KEY"]);            // 4 рядки x (tons + gsec старої + вихід ECR) - як у harness зразка
+        Assert.Equal(8, classes["AMBIGUOUS_KEY"]);             // 4 рядки x (tons + gsec старої); вихід ECR того ж ключа вже не дублюється ($seen до continue)
         Assert.Equal(0, root.GetProperty("aggregateGroups").GetInt32());
 
         // Зведення по методологіях і загальне — без значень.
@@ -388,7 +391,7 @@ public sealed class LandParityFullHarnessTests
         var (root, _, _) = RunCompare(f, "explained");
 
         Assert.Equal(1, Classes(root)["LEGACY_STATUS_SKIP"]);
-        Assert.Equal(4, root.GetProperty("formatVersion").GetInt32());
+        Assert.Equal(5, root.GetProperty("formatVersion").GetInt32());
         var b = root.GetProperty("buckets").EnumerateArray().Single(e => e.GetProperty("methodology").GetString() == "ECW_C05_02");
         Assert.Equal(0, b.GetProperty("oracleOnly").GetInt32());
         Assert.Equal(1, b.GetProperty("explainedSkip").GetInt32());
@@ -780,7 +783,7 @@ public sealed class LandParityFullHarnessTests
     {
         var (root, _) = RunBranchCase("ECW_C11_01",
             [BranchRow(1, "0100", "gas"), BranchRow(2, "0100", "Diesel")],
-            [BranchOracle("0100", "0.3", "", "ECW_C11_01")],
+            [BranchOracle("0100", "0.15", "", "ECW_C11_01"), BranchOracle("0100", "0.15", "", "ECW_C11_01")],   // по копії на рядок: сума 0.3
             [
                 (1, "ECW_EC_tons_301_type1_1", "0.1"), (1, "ECW_EC_tons_301_type1_2", "9"),
                 (2, "ECW_EC_tons_301_type1_1", "9"), (2, "ECW_EC_tons_301_type1_2", "0.2"),
@@ -951,6 +954,187 @@ public sealed class LandParityFullHarnessTests
         Assert.Contains("[string]$TableCode = ''", lib, StringComparison.Ordinal);
         Assert.Contains("$targets = @($TableCode.Trim())", lib, StringComparison.Ordinal);
     }
+
+    // ---- LAND-POST-K7 (C12_01): LEGACY_ROW_SUM, фаза без fallback, seen до continue, селектор гілки C12_01 ----
+
+    private static string CopyLine(string nae, string phase, string tons, string methodology, int copy) =>
+        string.Join('\t', "E1", 1, Table, nae, "301", phase, tons, string.Empty, methodology, $"2026-01-01T00:00:{copy:D2}", "CalcResult_Emissions_Air_Land_X");
+
+    /// <summary>Рядки (Land_No, NAE, фаза, потік, статус) -> еталон -> результати ECR (рядок p9-000i, вихід, значення).</summary>
+    private static (JsonElement Root, string Cells) RunRowSum(
+        string methodology, (int No, string Nae, string Phase, string Stream, string Status)[] rows, string[] oracle,
+        (int Row, string Output, string Value)[] results, params string[] extra)
+    {
+        using var f = new Fixture();
+        var columns = new[] { "Land_No", "Land_NAE", "Land_Status", "Land_TypeFuel", "Land_Streams" };
+        var sample = new
+        {
+            doc = Doc,
+            periods = new Dictionary<string, object>
+            {
+                ["2026-01"] = new Dictionary<string, object>
+                {
+                    [Table] = new
+                    {
+                        columns,
+                        rows = rows.Select(r => new Dictionary<string, object>
+                        {
+                            ["_efid"] = "E1", ["Land_No"] = r.No, ["Land_NAE"] = r.Nae, ["Land_Status"] = r.Status,
+                            ["Land_TypeFuel"] = r.Phase, ["Land_Streams"] = r.Stream,
+                        }).ToArray(),
+                    },
+                },
+            },
+        };
+        File.WriteAllText(Path.Combine(f.Dir.FullName, Doc + ".json"), JsonSerializer.Serialize(sample));
+        File.WriteAllLines(f.Oracle, oracle);
+        var state = new
+        {
+            methodologies = new object[] { new { code = methodology, published = 1, bound = 1, anyBinding = 1, tables = new[] { "T3_00" } } },
+            tables = new object[]
+            {
+                new { document = Doc, period = 202601, table = "T3_00", rowKeys = Enumerable.Range(1, rows.Length).Select(i => $"p9-{i:D4}").ToArray(), maxRows = 40 },
+            },
+            results = results.Select(r => new
+            {
+                document = Doc, period = 202601, methodology, rowKey = $"p9-{r.Row:D4}", outputCode = r.Output, value = r.Value,
+            }).ToArray(),
+        };
+        File.WriteAllText(f.State, JsonSerializer.Serialize(state));
+        var (root, _, cells) = RunCompare(f, "rowsum", extra);
+        return (root, cells);
+    }
+
+    private static (int No, string Nae, string Phase, string Stream, string Status) Src(int no, string nae, string phase = "Diesel", string stream = "", string status = "Running") =>
+        (no, nae, phase, stream, status);
+
+    /// <summary>
+    /// 12 рядків групи (efid, NAE, фаза) = 12 копій легасі (по запису на рядок): підсумок легасі = СУМА копій, ECR = сума рядків
+    /// -> AGG_MATCH. Мутація: повернути <c>latest</c> (одна копія) - rel = 11/12, AGG_MISMATCH.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void LEGACY_ROW_SUM_12_копій_легасі_і_12_рядків_ECR_дають_AGG_MATCH()
+    {
+        var rows = Enumerable.Range(1, 12).Select(i => Src(i, "N1")).ToArray();
+        var oracle = Enumerable.Range(1, 12).Select(i => CopyLine("N1", "Diesel", "0.5", "ECW_C05_02", i)).ToArray();
+        var results = Enumerable.Range(1, 12).Select(i => (i, "ECW_EC_tons_301", "0.5")).ToArray();
+
+        var (root, _) = RunRowSum("ECW_C05_02", rows, oracle, results, "-AggregateBy", "NaePhase");
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes["AGG_MATCH"]);
+        Assert.DoesNotContain(classes.Keys, k => k.Contains("MISMATCH", StringComparison.Ordinal) || k.Contains("DUP_CONFLICT", StringComparison.Ordinal));
+        Assert.False(classes.ContainsKey("AGG_ECR_ONLY"));
+    }
+
+    /// <summary>
+    /// Пара рядків ОДНОГО Land_No (Hydraulic oil) агрегується так само: 2 рядки, 2 копії -> AGG_MATCH, а не побічний
+    /// поелементний MATCH. Мутація: повернути умову групи на <c>$amb</c> - клас стає MATCH.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Пара_рядків_одного_Land_No_агрегується_як_група()
+    {
+        var (root, _) = RunRowSum("ECW_C05_02",
+            [Src(1, "N1"), Src(1, "N1")],
+            [CopyLine("N1", "Diesel", "0.5", "ECW_C05_02", 1), CopyLine("N1", "Diesel", "0.5", "ECW_C05_02", 2)],
+            [(1, "ECW_EC_tons_301", "0.5"), (2, "ECW_EC_tons_301", "0.5")],
+            "-AggregateBy", "NaePhase");
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes["AGG_MATCH"]);
+        Assert.False(classes.ContainsKey("MATCH"));
+        Assert.Equal(1, root.GetProperty("aggregateGroups").GetInt32());
+    }
+
+    /// <summary>
+    /// Кількість копій легасі != кількості Running-рядків групи: значення не порівнюється, клас
+    /// AGG_LEGACY_COPY_COUNT_DIFF (група other), а не DUP_CONFLICT/MISMATCH. Мутація: прибрати перевірку кількості - MISMATCH.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кількість_копій_не_дорівнює_кількості_рядків_дає_AGG_LEGACY_COPY_COUNT_DIFF()
+    {
+        var (root, _) = RunRowSum("ECW_C05_02",
+            [Src(1, "N1"), Src(2, "N1"), Src(3, "N1")],
+            [CopyLine("N1", "Diesel", "0.5", "ECW_C05_02", 1), CopyLine("N1", "Diesel", "0.7", "ECW_C05_02", 2)],
+            [(1, "ECW_EC_tons_301", "0.5"), (2, "ECW_EC_tons_301", "0.5"), (3, "ECW_EC_tons_301", "0.5")],
+            "-AggregateBy", "NaePhase");
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes["AGG_LEGACY_COPY_COUNT_DIFF"]);
+        Assert.False(classes.ContainsKey("AGG_LEGACY_DUP_CONFLICT"));
+        Assert.DoesNotContain(classes.Keys, k => k.Contains("MISMATCH", StringComparison.Ordinal));
+        Assert.False(classes.ContainsKey("AGG_ECR_ONLY"));
+        var b = root.GetProperty("buckets").EnumerateArray().Single(e => e.GetProperty("methodology").GetString() == "ECW_C05_02");
+        Assert.Equal(1, b.GetProperty("other").GetInt32());
+    }
+
+    /// <summary>
+    /// Явний -GroupBy: фази групи немає в еталоні - групу НЕ порівнюють із рядками інших фаз NAE (раніше LEGACY_STATUS_SKIP /
+    /// MISSING_*). Лишається лише ECR_NON_RUNNING (результат на не-Running рядку). Мутація: повернути fallback фази - з'являється
+    /// AGG_MISSING_OUTPUT (кількість копій 1 = кількості Running-рядків, тож порівняння доходить до виходу).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Явний_GroupBy_без_фази_в_еталоні_не_підставляє_усі_рядки_NAE()
+    {
+        var (root, _) = RunRowSum("ECW_C05_02",
+            [Src(1, "N1", "Gas"), Src(2, "N1", "Gas", status: "Removed")],
+            [CopyLine("N1", "Diesel", "0.5", "ECW_C05_02", 1)],
+            [(2, "ECW_EC_tons_302", "0.5")],
+            "-AggregateBy", "NaePhase", "-GroupBy", "T3_00=Land_TypeFuel");
+        var classes = Classes(root);
+
+        Assert.False(classes.ContainsKey("AGG_LEGACY_STATUS_SKIP"));
+        Assert.False(classes.ContainsKey("AGG_MISSING_OUTPUT"));
+        Assert.False(classes.ContainsKey("AGG_MISSING_ROW"));
+        Assert.Equal(1, classes["AGG_ECR_NON_RUNNING"]);
+    }
+
+    /// <summary>
+    /// Ключ легасі зі зведеним DUP_CONFLICT: ECR-вихід того ж ключа не стає «хвостом» ECR_ONLY ($seen до continue).
+    /// Мутація: повернути continue до $seen - з'являється ECR_ONLY.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void ECR_вихід_ключа_з_DUP_CONFLICT_не_дублюється_як_ECR_ONLY()
+    {
+        var (root, _) = RunRowSum("ECW_C05_02",
+            [Src(1, "N1")],
+            [CopyLine("N1", "Diesel", "1", "ECW_C05_02", 1), CopyLine("N1", "Diesel", "2", "ECW_C05_02", 2)],
+            [(1, "ECW_EC_tons_301", "1.5")]);
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes["LEGACY_DUP_CONFLICT"]);
+        Assert.DoesNotContain(classes.Keys, k => k.Contains("ECR_ONLY", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// C12_01: type2 лише для Land_Streams = 'Fuel gas', решта - type1; інша гілка - ECR_ONLY_NOT_SELECTED, а не
+    /// BRANCH_BOTH_PRESENT. Мутація: прибрати ECW_C12_01 із селектора - з'являється BRANCH_BOTH_PRESENT.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Селектор_C12_01_Fuel_gas_дає_type2_а_решта_type1()
+    {
+        var (root, _) = RunRowSum("ECW_C12_01",
+            [Src(1, "N1", stream: "Fuel gas"), Src(2, "N2", stream: "Diesel")],
+            [CopyLine("N1", "Diesel", "2", "ECW_C12_01", 1), CopyLine("N2", "Diesel", "1", "ECW_C12_01", 1)],
+            [
+                (1, "ECW_EC_tons_301_type1", "1"), (1, "ECW_EC_tons_301_type2", "2"),
+                (2, "ECW_EC_tons_301_type1", "1"), (2, "ECW_EC_tons_301_type2", "2"),
+            ]);
+        var classes = Classes(root);
+
+        Assert.Equal(2, classes["MATCH"]);
+        Assert.Equal(2, root.GetProperty("branchSelectedCells").GetInt32());
+        Assert.Equal(2, root.GetProperty("notSelectedCells").GetInt32());
+        Assert.False(classes.ContainsKey("BRANCH_BOTH_PRESENT"));
+        Assert.DoesNotContain(classes.Keys, k => k.Contains("MISMATCH", StringComparison.Ordinal) || k.Equals("ECR_ONLY", StringComparison.Ordinal));
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Місяці_фільтрують_періоди_документів()
@@ -958,7 +1142,7 @@ public sealed class LandParityFullHarnessTests
         using var f = BuildFixture();
         var (root, _, _) = RunCompare(f, "m2", "-Months", "2", "-GroupBy", "Land_TypeFuel");
         var classes = Classes(root);
-        Assert.Equal(12, classes["AMBIGUOUS_KEY"]);
+        Assert.Equal(8, classes["AMBIGUOUS_KEY"]);   // 4 рядки x (tons + gsec); ECR-вихід того ж ключа не дублюється
         Assert.False(classes.ContainsKey("MATCH"));
         Assert.False(classes.ContainsKey("ROW_NOT_LOADED_CAPPED"));
     }

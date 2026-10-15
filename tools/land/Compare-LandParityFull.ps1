@@ -24,6 +24,11 @@
     the prefix AGG_ (AGG_MATCH, AGG_MATCH_ROUNDING_LOSS, AGG_NEAR, AGG_MISMATCH*, AGG_MISSING_*, AGG_ROW_NOT_LOADED_*,
     AGG_ECR_ONLY*); a sum that does not match while some group rows are not loaded is INCOMPLETE_ROW_NOT_LOADED_*.
     The storage tolerance is multiplied by the number of summed rows.
+    LEGACY_ROW_SUM: the legacy engine writes ONE record per source row (modified = the row's ModifiedTime, not a run), so
+    the legacy value of a group is the SUM of ALL stored copies of the key (not `latest`). Every key group with more than
+    one row (also one Land_No twice) is aggregated. A copy count different from the number of Running rows of the group
+    is AGG_LEGACY_COPY_COUNT_DIFF (group `other`, values not compared). With an explicit -GroupBy a phase absent in the
+    oracle is NOT replaced by all the NAE rows: the group has no legacy (only ECR_NON_RUNNING is reported).
     Output has NO values: identifiers, classes and relative errors only (<OutPrefix>.summary.json, <OutPrefix>.cells.tsv).
 .PARAMETER Months            only these months of every document (default: all); "3" or "3,4" or "3;4"
 .PARAMETER GroupBy           '<TableCode>=<Col>[+<Col>]' (e.g. T11_02=Land_TypeFuel) or '<Col>[+<Col>]' for all tables:
@@ -38,7 +43,7 @@
                              never folded (the legacy code has no type1 for 415): ECR_ONLY.
                              Outputs ECW_EC_<tons|gsec>_XXX are always renamed by the substance code of the result
                              (SUBSTANCE_CODE of the register entry; C12_03 and the like).
-.PARAMETER NoBranchSelector  disable the branch selector (ECW_C11_01 / C11_02 / C11_11_02 / C11_11_03): the legacy code
+.PARAMETER NoBranchSelector  disable the branch selector (ECW_C11_01 / C11_02 / C11_11_02 / C11_11_03 / C12_01): the legacy code
                              computes ONE branch per (row, output) chosen by NAE/stream, ECR emits all of them. By default only
                              the legacy-selected branch is compared; the other branches are ECR_ONLY_NOT_SELECTED (summary:
                              branchSelectedCells / notSelectedCells). With the switch the branches are folded and several
@@ -145,7 +150,7 @@ Invoke-LandParityCompare -DocumentFile @($files | ForEach-Object { $_.Path }) -S
 
 $summary = Get-LandParitySummary $acc $state
 $result = [ordered]@{
-    formatVersion = 4
+    formatVersion = 5
     tolerance = [ordered]@{ abs = $TolAbs; rel = $TolRel; storageAbs = $StorageAbs }
     aggregateBy = $AggregateBy
     months = @($MonthList)
