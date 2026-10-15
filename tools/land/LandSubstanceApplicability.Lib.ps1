@@ -352,3 +352,57 @@ function Get-LandSelectorCoverageGaps {
     # Count=1 за 0 прогалин). Виклик завжди через `@(...)`: 0 -> порожній масив, 1 -> масив із 1, N -> масив із N (PS 5.1).
     return $gaps.ToArray()
 }
+
+function Get-LandSelectorCoverageClassified {
+    <#
+    .SYNOPSIS
+        Прогалини Get-LandSelectorCoverageGaps з прив'язкою до таблиць і методологій: GAP лише там, де методологію справді
+        обслуговує таблиця (активна прив'язка cfg.CalculationBinding) і значення лежить у колонці-аргументі методології.
+    .DESCRIPTION
+        Усе інше - INFO (довідково, не впливає на код виходу): таблиця без активної прив'язки цієї методології або колонка,
+        яку методологія не читає (напр. Streams/TypeOfStreams, тоді як аргумент - Land_TypeFuel). З -IncludeUnbound
+        (стара поведінка) кожна прогалина - GAP. Нічого не читає з БД.
+    .PARAMETER Observed
+        Елементи Table, Column, Value, Rows (одне написання в одній колонці таблиці).
+    .PARAMETER Bindings
+        Елементи Methodology, Table - активні прив'язки.
+    .PARAMETER ExtraArguments
+        hashtable: методологія -> додаткові коди колонок-аргументів (на додачу до `argument` з довідника).
+    .OUTPUTS
+        pscustomobject: Status (GAP|INFO), Methodology, Table, Column, Kind, Value, Rows, Prefix, MissingCodes, Reason.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Observed,
+        [Parameter(Mandatory)]$Methodologies,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Entries,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Bindings,
+        [hashtable]$ExtraArguments = @{},
+        [switch]$IncludeUnbound
+    )
+
+    $bound = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($b in @($Bindings)) { if ($null -ne $b) { [void]$bound.Add(([string]$b.Methodology) + '|' + ([string]$b.Table)) } }
+
+    $out = New-Object System.Collections.Generic.List[object]
+    foreach ($m in $Methodologies.PSObject.Properties) {
+        $argSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+        if (-not [string]::IsNullOrEmpty([string]$m.Value.argument)) { [void]$argSet.Add([string]$m.Value.argument) }
+        if ($ExtraArguments.ContainsKey($m.Name)) { foreach ($a in @($ExtraArguments[$m.Name])) { [void]$argSet.Add([string]$a) } }
+        $one = [pscustomobject]@{}
+        $one | Add-Member -NotePropertyName $m.Name -NotePropertyValue $m.Value
+        foreach ($o in @($Observed)) {
+            $gaps = @(Get-LandSelectorCoverageGaps -Observed @($o) -Methodologies $one -Entries $Entries | ForEach-Object { $_ })
+            foreach ($g in $gaps) {
+                $isArg = $argSet.Contains([string]$o.Column)
+                $isBound = $bound.Contains($m.Name + '|' + [string]$o.Table)
+                $reason = if ($isArg -and $isBound) { 'bound' } elseif (-not $isBound) { 'unbound-table' } else { 'other-argument' }
+                $status = if ($IncludeUnbound -or ($isArg -and $isBound)) { 'GAP' } else { 'INFO' }
+                $out.Add([pscustomobject]@{
+                        Status = $status; Methodology = $g.Methodology; Table = [string]$o.Table; Column = [string]$o.Column
+                        Kind = $g.Kind; Value = $g.Value; Rows = $g.Rows; Prefix = $g.Prefix; MissingCodes = $g.MissingCodes; Reason = $reason
+                    })
+            }
+        }
+    }
+    return $out.ToArray()
+}

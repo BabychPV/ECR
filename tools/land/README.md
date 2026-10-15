@@ -469,13 +469,16 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
   `model-gen/substance_applicability.py` (`EXTRA_SELECTOR_TEXTS`, лише де це підтверджує правило методології й дані) з
   перегенерацією моделі. Перевірка (лише читання БД, `SELECT` під NOLOCK):
   `Verify-LandSubstanceApplicability.ps1 -Server localhost -Database EcrLandUi [-Methodology ECW_C11_10]` - друкує
-  методологію, написання, кількість рядків і коди, яких бракує (значень викидів немає), код виходу 1 при прогалині.
+  GAP/INFO з таблицею, колонкою, методологією, написанням, кількістю рядків і кодами, яких бракує (значень викидів немає).
+  GAP - лише таблиця з АКТИВНОЮ прив'язкою методології (cfg.CalculationBinding.IsActive=1) і колонка-аргумент методології
+  (argument з довідника; для C11_10 ще Land_TypeFuel; для Lookup - поле NAME запису довідника): код виходу 1.
+  INFO (таблиця без прив'язки цієї методології або інша колонка) - довідково, код виходу не змінює. -IncludeUnbound -
+  стара поведінка (читає ще TypeOfFuel/TypeOfStreams/Streams, будь-яка прогалина = GAP). Підсумок: GAP=n INFO=m.
   Робіть перед імпортом нових прод-даних і після кожної зміни довідника.
-- ⚠ **Відомі ризики / питання до замовника (Verify).** C12_03: тип палива береться з `REGFIELD(@Land_TypeFuel,'NAME')`;
-  якщо в прод-даних є `Makat gas - Макатский газ`, `Verify-LandSubstanceApplicability.ps1` для ECW_C12_03 покаже GAP (ключ довідника
-  ординальний, а запису з малою `g` для C12_03 немає). Без діагнозу на прод-даних це НЕ фіксуємо: спершу запустити Verify на
-  стенді з імпортованою вибіркою і з'ясувати в замовника, чи таке написання допустиме для C12_03 (легасі там ToLower().Contains);
-  лише тоді додавати текст у `EXTRA_SELECTOR_TEXTS`. Скрипт у цій lane проти БД не запускався.
+- ⚠ **Verify на прод-вибірці (2026-10-15).** Перший запуск проти БД (EcrLandUi, EcrLandAccP): без прив'язки до методологій давав 30 хибних GAP
+  (Fuel gas / Export / Makat у колонках TypeOfFuel/TypeOfStreams/Streams інших таблиць). З прив'язкою: GAP=0, INFO=5 (C12_03: Makat у
+  Land_TypeFuelOrStream таблиць T9_*, не прив'язаних до C12_03; C12_03 читає Land_TypeFuel T10_01/T11_01 - покриті).
+  Додавати текст у EXTRA_SELECTOR_TEXTS лише за GAP.
 
 ## Похідні аргументи зі словників C#: групи NAE і Land_MassFraction (LP-10)
 

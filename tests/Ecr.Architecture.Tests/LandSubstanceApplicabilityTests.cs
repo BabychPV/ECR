@@ -627,4 +627,69 @@ public sealed class LandSubstanceApplicabilityTests
         Assert.Contains("PREFIX=FG_Makat", output, StringComparison.Ordinal);
         Assert.Contains("NOPREFIX=True", output, StringComparison.Ordinal);
     }
+    // LAND-SA-VERIFY-BINDING: GAP лише для таблиці з активною прив'язкою методології і колонки-аргументу; решта - INFO.
+    // Мутаційний доказ: у Get-LandSelectorCoverageClassified ігнорувати прив'язку ($isBound = $true) - непривязана
+    // таблиця стає GAP, UNBOUND/MANY червоніють.
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Прогалина_є_GAP_лише_для_прив_язаної_таблиці_й_колонки_аргументу_решта_INFO()
+    {
+        const string script = """
+            $ErrorActionPreference = 'Stop'
+            Set-StrictMode -Version 2.0
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+            . $args[0]
+            $spec = Get-Content -LiteralPath $args[1] -Raw -Encoding UTF8 | ConvertFrom-Json
+            $m = Get-Content -LiteralPath $args[2] -Raw -Encoding UTF8 | ConvertFrom-Json
+            $reg = @($m.registries) | Where-Object { $_.code -eq 'LAND_SUBSTANCE_APPLICABILITY' } | Select-Object -First 1
+            $c10 = [pscustomobject]@{ ECW_C11_10 = $spec.methodologies.ECW_C11_10 }
+            $e = @($reg.entries)
+            $gapText = 'MAKAT GAS - Макатский газ'      # легасі приймає, ключа довідника з таким регістром немає
+            $okText = 'Makat gas - Макатский газ'        # ключ є
+            $bind = @([pscustomobject]@{ Methodology = 'ECW_C11_10'; Table = 'TB' })
+            $arg = 'Land_TypeFuelOrStream'
+            function Get-Classified($obs, $b, [switch]$Inc) {
+                @(Get-LandSelectorCoverageClassified -Observed $obs -Methodologies $c10 -Entries $e -Bindings $b -IncludeUnbound:$Inc | ForEach-Object { $_ })
+            }
+            $r1 = @(Get-Classified @([pscustomobject]@{ Table = 'TB'; Column = $arg; Value = $gapText; Rows = 4 }) $bind)
+            'BOUND=' + $r1.Count + ':' + $r1[0].Status + ':' + $r1[0].Table + ':' + $r1[0].Rows
+            $r2 = @(Get-Classified @([pscustomobject]@{ Table = 'TU'; Column = $arg; Value = $gapText; Rows = 4 }) $bind)
+            'UNBOUND=' + $r2.Count + ':' + $r2[0].Status + ':' + $r2[0].Reason
+            $r3 = @(Get-Classified @([pscustomobject]@{ Table = 'TB'; Column = 'Streams'; Value = $gapText; Rows = 4 }) $bind)
+            'OTHERARG=' + $r3.Count + ':' + $r3[0].Status + ':' + $r3[0].Reason
+            $r4 = @(Get-Classified @([pscustomobject]@{ Table = 'TB'; Column = $arg; Value = $okText; Rows = 4 }) $bind)
+            'COVERED=' + $r4.Count
+            $r5 = @(Get-Classified @([pscustomobject]@{ Table = 'TU'; Column = 'Streams'; Value = $gapText; Rows = 4 }) $bind -Inc)
+            'INCLUDE=' + $r5.Count + ':' + $r5[0].Status
+            $r6 = @(Get-Classified @() $bind)
+            'ZERO=' + $r6.Count
+            $many = @(
+              [pscustomobject]@{ Table = 'TB'; Column = $arg; Value = $gapText; Rows = 1 },
+              [pscustomobject]@{ Table = 'TB'; Column = $arg; Value = 'Makat GAS - Макатский газ'; Rows = 2 },
+              [pscustomobject]@{ Table = 'TU'; Column = $arg; Value = $gapText; Rows = 3 })
+            $r7 = @(Get-Classified $many $bind)
+            'MANY=' + $r7.Count + ':' + @($r7 | Where-Object { $_.Status -eq 'GAP' }).Count + ':' + @($r7 | Where-Object { $_.Status -eq 'INFO' }).Count
+            $r8 = @(Get-Classified @([pscustomobject]@{ Table = 'TB'; Column = 'Land_TypeFuel'; Value = $gapText; Rows = 1 }) $bind)
+            'EXTRA=' + $r8.Count + ':' + $r8[0].Status
+            $r9 = @(Get-LandSelectorCoverageClassified -Observed @([pscustomobject]@{ Table = 'TB'; Column = 'Land_TypeFuel'; Value = $gapText; Rows = 1 }) -Methodologies $c10 -Entries $e -Bindings $bind -ExtraArguments @{ ECW_C11_10 = @('Land_TypeFuel') } | ForEach-Object { $_ })
+            'EXTRAOK=' + $r9.Count + ':' + $r9[0].Status
+            """;
+
+        var (exit, output) = RunPowerShell(
+            script,
+            LandFile("LandSubstanceApplicability.Lib.ps1"),
+            Path.Combine(Dir, "land-substance-applicability.json"),
+            Path.Combine(Dir, "land-template.model.json"));
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("BOUND=1:GAP:TB:4", output, StringComparison.Ordinal);
+        Assert.Contains("UNBOUND=1:INFO:unbound-table", output, StringComparison.Ordinal);
+        Assert.Contains("OTHERARG=1:INFO:other-argument", output, StringComparison.Ordinal);
+        Assert.Contains("COVERED=0", output, StringComparison.Ordinal);
+        Assert.Contains("INCLUDE=1:GAP", output, StringComparison.Ordinal);
+        Assert.Contains("ZERO=0", output, StringComparison.Ordinal);
+        Assert.Contains("MANY=3:2:1", output, StringComparison.Ordinal);
+        Assert.Contains("EXTRA=1:INFO", output, StringComparison.Ordinal);
+        Assert.Contains("EXTRAOK=1:GAP", output, StringComparison.Ordinal);
+    }
 }
