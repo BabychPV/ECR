@@ -27,6 +27,94 @@ $script:LandNaeTypeGroups = [ordered]@{
 # NAE, що в прод-даних пишуться з хвостом групи `(001-002)`; для них у списку додається друге написання.
 $script:LandNaeTypeTailed = @('0647', '0648', '0649', '0650', '0651', '0652')
 
+# D-435 (C11_13): вихід дозволений за NAE рядка, а не за типом формули. Легасі ECW_C11_13.cs:66-133: вихід
+# `ECW_EC_tons_<k>_<type>` + `ECW_EC_gsec_<k>` (gsec БЕЗ суфікса type) пишеться, коли category = Land_NAE.Trim().Replace(" ","")
+# одночасно в EC[<k>] і в catTons[<type>] (для gsec - у EC[<k>], бо кожен NAE з EC входить в один із catTons).
+# Нормалізація - ЛИШЕ Trim + без пробілів, хвіст `(003)` НЕ відрізається (на відміну від C11_10): NAE `0500(003)` лишається
+# ключем, а в `in()` перелічуються обидва написання `0500(003)` і `0500 (003)`. Порожній перелік (легасі такий вихід не пише
+# ніколи) -> вираз `NULL`.
+$script:LandNaeC1113Ec = [ordered]@{
+    '333'  = @('6670', '6672', '6674')
+    '1078' = @('6568', '6574', '6575', '6567', '6669', '6671', '6673')
+    '2754' = @('6670', '6672', '6674')
+    '2735' = @('0500(003)', '0501(003)', '0502(003)', '0503(003)', '0520(003)', '0521(003)', '0522(003)', '0523(003)')
+}
+$script:LandNaeC1113CatTons = [ordered]@{
+    'type1' = @('6567', '6568', '6574', '6575', '0500(003)', '0501(003)', '0502(003)', '0503(003)', '0520(003)', '0521(003)', '0522(003)', '0523(003)')
+    'type2' = @('6669', '6671', '6673', '6670', '6672', '6674')
+}
+
+function Get-LandNaeOutputGroups {
+    <# «методологія -> {код формули-виходу -> NAE[] (нормалізовані, як у легасі)}»: EC[k] перетин catTons[type] для tons, EC[k] для gsec. #>
+    $g = [ordered]@{}
+    $allTons = @($script:LandNaeC1113CatTons.Values | ForEach-Object { $_ })
+    foreach ($k in $script:LandNaeC1113Ec.Keys) {
+        foreach ($t in $script:LandNaeC1113CatTons.Keys) {
+            $g["ECW_EC_tons_${k}_$t"] = @($script:LandNaeC1113Ec[$k] | Where-Object { $script:LandNaeC1113CatTons[$t] -ccontains $_ })
+        }
+        $g["ECW_EC_gsec_$k"] = @($script:LandNaeC1113Ec[$k] | Where-Object { $allTons -ccontains $_ })
+    }
+    return [ordered]@{ 'ECW_C11_13' = $g }
+}
+
+function ConvertTo-LandNaeC1113Normalized {
+    <# Нормалізація NAE як у ECW_C11_13.cs:66: Trim + без пробілів; хвіст `(003)` лишається частиною ключа. #>
+    param([AllowNull()][AllowEmptyString()][string]$Nae)
+    if ([string]::IsNullOrEmpty($Nae)) { return '' }
+    return $Nae.Trim().Replace(' ', '')
+}
+
+function Get-LandNaeOutputList {
+    <# NAE з обома написаннями для кодів із хвостом `(...)`: `0500(003)` і `0500 (003)`; порядок стабільний. #>
+    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Naes)
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($n in $Naes) {
+        $out.Add($n)
+        $ix = $n.IndexOf('(')
+        if ($ix -gt 0 -and $n[$ix - 1] -ne ' ') { $out.Add($n.Substring(0, $ix) + ' ' + $n.Substring($ix)) }
+    }
+    return $out.ToArray()
+}
+
+function Convert-LandNaeOutputFormula {
+    <#
+    .SYNOPSIS
+        C11_13: обгортка виходу за переліком NAE (EC перетин type). Порожній перелік -> вираз `NULL` (аргументи не чіпаються).
+        Непорожній - як Convert-LandNaeTypeFormula, але з обома написаннями `(003)`. Повтор - Changed = $false.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Expression,
+        [AllowNull()][AllowEmptyString()]$ArgumentsCsv = $null,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Naes
+    )
+    $text = $Expression.Trim()
+    if ($text.Length -eq 0) {
+        return [pscustomobject]@{ Changed = $false; Expression = $Expression; ArgumentsCsv = $ArgumentsCsv }
+    }
+    if (@($Naes).Count -eq 0) {
+        $same = ($text -ceq 'NULL')
+        return [pscustomobject]@{ Changed = (-not $same); Expression = $(if ($same) { $Expression } else { 'NULL' }); ArgumentsCsv = $ArgumentsCsv }
+    }
+    $items = (Get-LandNaeOutputList -Naes $Naes | ForEach-Object { "'" + $_ + "'" }) -join ', '
+    $head = "if(in(@Land_NAE, $items), "
+    $wrapped = $text.StartsWith($head, [StringComparison]::Ordinal) -and $text.EndsWith(', NULL)', [StringComparison]::Ordinal)
+    $newExpression = if ($wrapped) { $Expression } else { $head + $text + ', NULL)' }
+    $newArguments = $ArgumentsCsv
+    $argsChanged = $false
+    if ($null -ne $ArgumentsCsv) {
+        $tokens = New-Object System.Collections.Generic.List[string]
+        $present = $false
+        foreach ($t in (([string]$ArgumentsCsv) -split ';')) {
+            $x = $t.Trim()
+            if ($x.Length -eq 0) { continue }
+            if (($x.TrimStart('@').TrimEnd('?').TrimEnd()) -ieq 'Land_NAE') { $present = $true }
+            $tokens.Add($x)
+        }
+        if (-not $present) { $tokens.Add('@Land_NAE'); $argsChanged = $true; $newArguments = (($tokens -join ';') + ';') }
+    }
+    return [pscustomobject]@{ Changed = ((-not $wrapped) -or $argsChanged); Expression = $newExpression; ArgumentsCsv = $newArguments }
+}
+
 function Get-LandNaeTypeGroups {
     <# Словник «методологія -> {type -> NAE[]}» (копія, щоб виклик не міняв стан модуля). #>
     $copy = [ordered]@{}
