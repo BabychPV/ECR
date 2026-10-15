@@ -29,6 +29,7 @@ $modelFile = $ModelPath
 if (-not $modelFile) { $modelFile = Join-Path $repo 'docs\delivery\reference-data\land-template\land-template.model.json' }
 . (Join-Path $here 'EcrApi.ps1')
 . (Join-Path $here 'LandTemplateDiff.Lib.ps1')
+. (Join-Path $here 'LandArgumentSuffix.Lib.ps1')
 Set-StrictMode -Off
 Connect-Ecr -BaseUrl $BaseUrl -User $User -Password $Password
 
@@ -155,6 +156,7 @@ Write-Host ("Зайвих таблиць (є у версії, немає в мо
 # P3: методологія з опублікованою останньою версією без АКТИВНОЇ прив'язки (Bind-ResultColumns зафіксував IsActive=0 до
 # публікації): паритет показує такі комірки як MISSING_BINDING_INACTIVE. Перевіряємо методології, на які посилається модель.
 $bindInfo = @()
+$lastModes = @()
 $allMeth = @()
 $mj = (Invoke-Ecr -Method GET -Path '/api/v1/methodologies').Json
 if ($null -ne $mj) { if ($mj -is [array]) { $allMeth = @($mj) } elseif ($mj.PSObject.Properties['items']) { $allMeth = @($mj.items) } else { $allMeth = @($mj) } }
@@ -164,10 +166,17 @@ foreach ($code in @(Get-LandModelMethodologyCodes $mdl)) {
     $mv = (Invoke-Ecr -Method GET -Path "/api/v1/methodologies/$([int]$mrec.id)/versions").Json
     $mvItems = if ($mv -is [array]) { @($mv) } elseif ($mv.PSObject.Properties['items']) { @($mv.items) } else { @($mv) }
     $lastV = $mvItems | Sort-Object { [int]$_.id } -Descending | Select-Object -First 1
+    if ($null -ne $lastV) { $lastModes += [pscustomobject]@{ Code = $code; NumericMode = [string]$lastV.numericMode } }
     $bj = (Invoke-Ecr -Method GET -Path "/api/v1/methodologies/$([int]$mrec.id)/bindings").Json
     $bItems = if ($bj -is [array]) { @($bj) } elseif ($null -ne $bj -and $bj.PSObject.Properties['items']) { @($bj.items) } elseif ($null -ne $bj) { @($bj) } else { @() }
     $bindInfo += [pscustomobject]@{ Code = $code; Published = ($null -ne $lastV -and [string]$lastV.status -eq 'Published'); Bindings = @($bItems | ForEach-Object { [bool]$_.isActive }) }
 }
+# LAND-POST-K3 (2026-10-15): методологія з суфіксним мостом над String-колонкою (C11_01/C11_02: OperatingTime = години АБО
+# No - Нет) мусить бути Legacy: у Strict Text x Number = #VALUE, у Legacy числовий рядок рушій розбирає у double.
+$strBridge = @(Get-LandStringBridgeSuffixMethodologies -Model $mdl)
+$strStrict = @(Get-LandStringBridgeStrictMethodologies -Methodologies $strBridge -Versions $lastModes)
+Write-Host ("Методологій із суфіксним String-мостом: {0}; з них Strict: {1}" -f $strBridge.Count, $strStrict.Count)
+if ($strStrict.Count) { $bad += "методології з суфіксним мостом над String-колонкою в NumericMode=Strict (мають бути Legacy): $($strStrict -join ', ')" }
 $inactive = @(Get-LandInactiveBindingMethodologies $bindInfo)
 Write-Host ("Методологій моделі перевірено на активну прив'язку: {0}; Published без активної прив'язки: {1}" -f $bindInfo.Count, $inactive.Count)
 if ($inactive.Count) {

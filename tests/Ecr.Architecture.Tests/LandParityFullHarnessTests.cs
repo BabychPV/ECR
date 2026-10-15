@@ -586,6 +586,26 @@ public sealed class LandParityFullHarnessTests
         Assert.Equal(6, root.GetProperty("notSelectedCells").GetInt32());
     }
 
+    /// <summary>
+    /// LAND-POST-K3 (2026-10-15): рядок T9_04 з ТЕКСТОВИМ OperatingTime (`No - Нет`): ECR дає gsec (гілка if(@OT=0,0,...) обрана),
+    /// а tons без результату (Text x Number = #VALUE) - клас MISSING_OUTPUT для tons, gsec = MATCH; жодного ECR_ONLY.
+    /// Фіксує очікувану картину як у легасі (там tons теж без результату), а не маскує її.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Текстовий_OperatingTime_gsec_є_а_tons_без_результату_дає_MISSING_OUTPUT()
+    {
+        var (root, _) = RunBranchCase("ECW_C11_02",
+            [BranchRow(1, "6783(001)")],
+            [BranchOracle("6783(001)", "2", "20", "ECW_C11_02")],
+            [(1, "ECW_EC_gsec_301_type2", "20")]);
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes["MATCH"]);
+        Assert.Equal(1, classes["MISSING_OUTPUT"]);
+        Assert.False(classes.ContainsKey("ECR_ONLY"));
+        Assert.DoesNotContain(classes.Keys, k => k.Contains("MISMATCH", StringComparison.Ordinal));
+    }
     /// <summary>C11_11_03: на одному рядку tons і gsec мають різні групи: NAE 0804 - tons=type3, gsec=type2.</summary>
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]

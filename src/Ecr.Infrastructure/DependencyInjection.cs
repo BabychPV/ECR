@@ -103,6 +103,11 @@ public static class DependencyInjection
             1, 60))));
         services.AddScoped<ITemplateVersionStore, TemplateVersionStore>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
+
+        // Стеля таймауту команд перерахунку (діапазон 30–3600 с); глобальний `Database:CommandTimeoutSeconds` — для решти.
+        services.AddSingleton(Jobs.RecalcCommandTimeoutPolicy.From(
+            ReadInt(configuration, "Database:RecalcCommandTimeoutSeconds", 180)));
+        services.AddScoped<IRecalcCommandTimeout, Jobs.RecalcCommandTimeout>();
         services.AddScoped<IAuditWriter, AuditWriter>();
         services.AddScoped<IWorkflowStore, WorkflowStore>();
         services.AddScoped<ISheetEditGate, SheetEditGate>();
