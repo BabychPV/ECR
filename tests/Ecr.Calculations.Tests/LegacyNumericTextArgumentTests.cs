@@ -69,6 +69,61 @@ public sealed class LegacyNumericTextArgumentTests
         Assert.Equal((decimal)expected, Assert.Single(output.Values).Value);
     }
 
+    /// <summary>
+    /// LAND-POST-K3 (2026-10-15), OperatingTime у String-мості C11_01/C11_02: Legacy розбирає числовий рядок до формули
+    /// (гілка gsec <c>if(@OT=0,0,...)</c> береться), нечисловий текст * число - #VALUE без винятку, Strict числовий рядок
+    /// * число - #VALUE (контроль різниці режимів).
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [InlineData(NumericMode.Legacy, "if(@OT = 0, 0, @OT * 3)", "0.000000", true, 0)]
+    [InlineData(NumericMode.Legacy, "if(@OT = 0, 0, @OT * 3)", "2.000000", true, 6)]
+    [InlineData(NumericMode.Legacy, "@OT * 3", "No - Нет", false, 0)]
+    [InlineData(NumericMode.Strict, "@OT * 3", "2.000000", false, 0)]
+    [InlineData(NumericMode.Strict, "@OT * 3", "No - Нет", false, 0)]
+    public async Task OperatingTime_текст_у_Legacy_і_Strict_як_у_діагнозі_K3(
+        NumericMode mode, string expression, string text, bool hasResult, int expected)
+    {
+        var module = new GenericCalculationModule(
+            new RealFormulaEngine(),
+            Methodologies(expression),
+            new ConstantResolver(Substitute.For<IConstantStore>()),
+            new CalendarContext(),
+            Units(),
+            Periods(),
+            Substitute.For<ICalculationBindingStore>());
+
+        var descriptor = new MethodologyDescriptor(
+            MethodologyId: 6,
+            MethodologyVersionId: VersionId,
+            Code: "OT",
+            VersionNumber: "1.0.0.0",
+            Level: CalculationLevel.Configuration,
+            NumericMode: mode,
+            CalendarMode: CalendarMode.Actual,
+            TraceLevel: TraceLevel.Off);
+
+        var input = new CalculationInput(
+            descriptor,
+            DocumentId,
+            TableInstanceId: 500,
+            PeriodKey: new PeriodKey(202601),
+            SourceRowKey: "7001001",
+            Arguments: [new CalculationArgument("OT", null, text, null)]);
+
+        var output = await module.ExecuteAsync(input, CancellationToken.None);
+
+        if (hasResult)
+        {
+            Assert.Equal((decimal)expected, Assert.Single(output.Values).Value);
+        }
+        else
+        {
+            // #VALUE: результату немає (рушій не кидає виняток)
+            Assert.Empty(output.Values);
+        }
+    }
+
     private static IMethodologyStore Methodologies(string expression)
     {
         var formula = new MethodologyFormula(VersionId, EcrCode.Create("Total"), expression);
