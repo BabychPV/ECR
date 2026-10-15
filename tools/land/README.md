@@ -213,6 +213,18 @@ NaePhase`):
 - `$seen` ставиться ДО будь-якого `continue` на ключі легасі: вихід ECR того ж ключа не стає «хвостом» DUP як `ECR_ONLY`;
 - селектор гілки `ECW_C12_01`: `Land_Streams = 'Fuel gas'` -> `type2`, інакше `type1` (ECW_C12_01.cs:140-153).
 
+**Область дії.** LEGACY_ROW_SUM - не лише C12_01: правило діє для ВСІХ методологій у режимі `-AggregateBy NaePhase`.
+Група = ключ (efid, NAE, фаза) з `Rows.Count > 1` (і пара рядків одного `Land_No`), `oldV` = сума ВСІХ копій
+легасі цього ключа. Наслідки для запуску з `-AggregateBy NaePhase` на будь-якій методології:
+
+- порівняння групи йде сумою копій, а не `latest`: комірки, що раніше були `MATCH`/`MISMATCH` на `latest`, стають
+  `AGG_MATCH`/`AGG_MISMATCH*` (старі підсумки не порівнювати напряму без -AggregateBy);
+- нові класи `AGG_*` у `summary.json` і `cells.tsv` (префікс додається до класу групи, лічильник `aggregateGroups`);
+- кількість копій легасі != кількості Running-рядків групи - `AGG_LEGACY_COPY_COUNT_DIFF` (група `other`);
+- те саме, але Running-рядків у групі немає (`expCopies = 0`) і власної фази в еталоні немає - `AGG_LEGACY_STATUS_SKIP`
+  (`explainedSkip`); якщо точна фаза в еталоні Є - лишається `AGG_LEGACY_COPY_COUNT_DIFF`;
+- `LEGACY_DUP_CONFLICT` (без префікса) лишається лише для негрупованих ключів;
+- негрупований рядок (одна копія, `Rows.Count = 1`) поводиться як і раніше.
 ## Довідник повітряних речовин (LP-07, форма B константи)
 
 `Import-LandAirSubstances.ps1` завантажує LAND_AIR_SUBSTANCE з **локальної копії** прода (`AF_PermitConstant`,
