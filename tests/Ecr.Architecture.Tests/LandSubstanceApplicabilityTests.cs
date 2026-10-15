@@ -129,7 +129,7 @@ public sealed class LandSubstanceApplicabilityTests
         var described = description.GetProperty("methodologies").EnumerateObject().ToDictionary(p => p.Name, p => p.Value);
 
         Assert.Equal(
-            ["ECW_C11_01", "ECW_C11_02", "ECW_C11_10", "ECW_C11_11_03", "ECW_C11_11_05", "ECW_C11_19",
+            ["ECW_C11_01", "ECW_C11_02", "ECW_C11_10", "ECW_C11_11_02", "ECW_C11_11_03", "ECW_C11_11_05", "ECW_C11_19",
                 "ECW_C12_01", "ECW_C12_03", "ECW_C12_04_01", "ECW_C12_04_02"],
             described.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.Equal(described.Keys.Order().ToArray(), markers.Order().ToArray());
@@ -142,6 +142,8 @@ public sealed class LandSubstanceApplicabilityTests
         Assert.Equal("TypeFuel", kinds["ECW_C12_03"]);
         Assert.Equal("TypeFuel", kinds["ECW_C12_04_02"]);
         Assert.Equal("NAE", kinds["ECW_C11_11_03"]);
+        Assert.Equal("NAE", kinds["ECW_C11_11_02"]);
+        Assert.Equal("@Land_NAE", described["ECW_C11_11_02"].GetProperty("valueExpression").GetString());
         Assert.All(kinds.Values, k => Assert.Contains(k, AllowedKinds));
 
         // Значення селектора у правилі - те саме, що читає правило категорії в Row-фазі.
@@ -226,6 +228,16 @@ public sealed class LandSubstanceApplicabilityTests
         Assert.Equal(Sorted("333", "2754"), Codes(rows, "ECW_C11_11_03", "0800 (001)"));
         Assert.Equal(Sorted("333", "1052", "2754"), Codes(rows, "ECW_C11_11_03", "0782(008)"));
         Assert.Equal(Sorted("333", "1052", "2754"), Codes(rows, "ECW_C11_11_03", "0804"));
+        // C11_11_02: NAE -> група groupNAE -> коди EC (ECW_C11_11_02.cs): група 6975 тягне 6981..6986, 0562 - 0563.
+        Assert.Equal(Sorted("333", "1052", "2754"), Codes(rows, "ECW_C11_11_02", "0788"));
+        Assert.Equal(Sorted("333", "1052", "2754"), Codes(rows, "ECW_C11_11_02", "0791(001)"));
+        Assert.Equal(Sorted("333", "1052", "2754"), Codes(rows, "ECW_C11_11_02", "0791 (001)"));
+        Assert.Equal(Sorted("333", "2754"), Codes(rows, "ECW_C11_11_02", "6981"));
+        Assert.Equal(Sorted("333", "2754"), Codes(rows, "ECW_C11_11_02", "6976"));
+        Assert.Equal(Sorted("1078"), Codes(rows, "ECW_C11_11_02", "0563"));
+        Assert.Equal(Sorted("1078"), Codes(rows, "ECW_C11_11_02", "6904"));
+        Assert.Equal(Sorted("322"), Codes(rows, "ECW_C11_11_02", "0883"));
+        Assert.Empty(Codes(rows, "ECW_C11_11_02", "0804"));   // NAE поза groupNAE: «Error category - NAE», рядок пропущено
         Assert.Equal(Sorted("330", "333"), Codes(rows, "ECW_C11_11_05", "0483"));
         Assert.Equal(Sorted("333"), Codes(rows, "ECW_C11_11_05", "0480"));
         Assert.Equal(Sorted("333"), Codes(rows, "ECW_C11_11_05", "6482 (001)"));
@@ -347,7 +359,7 @@ public sealed class LandSubstanceApplicabilityTests
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void План_довідника_з_моделі_має_десять_маркерів_і_жодного_пропущеного()
+    public void План_довідника_з_моделі_має_одинадцять_маркерів_і_жодного_пропущеного()
     {
         const string script = """
             $ErrorActionPreference = 'Stop'
@@ -374,7 +386,7 @@ public sealed class LandSubstanceApplicabilityTests
 
         Assert.True(exit == 0, output);
         Assert.Matches(@"ITEMS=\d+", output);
-        Assert.Contains("MARKERS=10", output, StringComparison.Ordinal);
+        Assert.Contains("MARKERS=11", output, StringComparison.Ordinal);
         Assert.Contains("SKIPPED=0", output, StringComparison.Ordinal);
         var items = int.Parse(Regex.Match(output, @"ITEMS=(\d+)").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
         var entries = int.Parse(Regex.Match(output, @"ENTRIES=(\d+)").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);

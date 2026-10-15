@@ -418,7 +418,7 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
 Склад речовин версії один на ВЕРСІЮ, а старий C# перебирає список кодів ПО РЯДКУ: `pollutionCodeByFuelType[prefix]`
 (C11_01/02/10, C12_03; префікс - `PrefixProvider` за текстом палива/потоку), `polCodeList[typeOfStream]` (C12_01),
 `pollutionCodeByInvNum[InvNum з Т/А кирилицею -> латиниця]` (C12_04_01), `fuelShort` diesel|oil (C12_04_02) і списки
-`NAE -> коди` (C11_11_03, C11_11_05, C11_19). «Чужа» речовина рядка там просто не рахується, а в ECR давала б зайвий рядок
+`NAE -> коди` (C11_11_03, C11_11_05, C11_19; C11_11_02 - NAE -> група `groupNAE` -> коди `EC`, ✎ 2026-10-15). «Чужа» речовина рядка там просто не рахується, а в ECR давала б зайвий рядок
 результату (значення з фолбека `Common`) або `#REF`. Довідник `LAND_SUBSTANCE_APPLICABILITY` переносить цю таблицю в
 дані БЕЗ міграції: ключ `(METHODOLOGY, SELECTOR_KIND, SELECTOR_VALUE, SUBSTANCE_CODE)`, регістр значущий;
 `SELECTOR_KIND` = `NAE` | `InvNum` | `TypeFuel` | `Stream`; запис `(методологія, '*', '*', '*')` - маркер «методологія має
