@@ -169,7 +169,7 @@ C05 / C06_01 / C07_*; для методології з кількома табл
 |---|---|---|
 | `ECW_EC_tons\|gsec_XXX` | у результата є речовина (SUBSTANCE_CODE запису довідника, інакше код запису) | `ECW_EC_tons\|gsec_<код речовини>` (C12_03) |
 | `ECW_EC_tons\|gsec_XXX` | речовини немає | лишається `XXX` -> `ECR_ONLY`; кількість - `outputsWithoutSubstance` у summary |
-| `ECW_EC_tons\|gsec_<код>_type1\|_type2` | методологія зі списку TypeFold (за замовчуванням `^ECW_C12_02$`, збігається з етапом ParityBranch) | `ECW_EC_tons\|gsec_<код>` |
+| `ECW_EC_tons\|gsec_<код>_type1\|_type2` | методологія зі списку TypeFold (за замовчуванням `^ECW_C12_02$` і `^ECW_C11_13$`, збігається з етапом ParityBranch) | `ECW_EC_tons\|gsec_<код>` |
 | обидві гілки одного ключа | TypeFold | клас `BRANCH_BOTH_PRESENT` (значення не порівнюється: старий код пише одну гілку) |
 | `ECW_EC_*_415_type1` | NullType1 (C12_02: код 415) | лишається повним іменем -> `ECR_ONLY` (type1 для 415 у старому коді немає; ParityBranch ставить йому `NULL`) |
 | `ECW_EC_*_<код>*` з речовиною проходу, відмінною від `<код>` | будь-яка | пропускається, лічильник `foreignSubstanceIgnored` |

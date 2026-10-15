@@ -185,7 +185,7 @@ $script:LandParityDefaultMethodologyTable = @(
 #     для одного ключа - BRANCH_BOTH_PRESENT (старий код пише лише одну; ParityBranch мав лишити одну);
 #   * type1 коду зі списку NullType1 (415: у старому коді не існує) лишається ПОВНИМ іменем -> ECR_ONLY.
 # Значень тут немає: лише імена.
-$script:LandParityTypeFoldDefault = @('^ECW_C12_02$')
+$script:LandParityTypeFoldDefault = @('^ECW_C12_02$', '^ECW_C11_13$')
 $script:LandParityNullType1Default = @{ 'ECW_C12_02' = @('415') }
 
 function Get-LandParityTypeFoldDefault { return @($script:LandParityTypeFoldDefault) }

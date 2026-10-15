@@ -32,7 +32,7 @@
 .PARAMETER MethodologyTable  '<regex>=<TableCode>[+<TableCode>]', e.g. '^ECW_C12_01$=T11_02+T11a_01'; used when the
                              methodology has no active binding. Several tables: the result is attributed to the
                              tables whose row exists (multiTableResults in the summary counts unresolved ones).
-.PARAMETER TypeFoldMethodology  regex of methodologies (besides the built-in ^ECW_C12_02$) whose outputs ECW_EC_<tons|gsec>_<code>_typeN
+.PARAMETER TypeFoldMethodology  regex of methodologies (besides the built-in ^ECW_C12_02$ and ^ECW_C11_13$) whose outputs ECW_EC_<tons|gsec>_<code>_typeN
                              are folded to the legacy key ECW_EC_<tons|gsec>_<code> (the legacy code writes ONE branch). Both
                              branches present for one key -> BRANCH_BOTH_PRESENT (values are not compared). Code 415 type1 is
                              never folded (the legacy code has no type1 for 415): ECR_ONLY.

@@ -519,6 +519,36 @@ public sealed class LandParityFullHarnessTests
     }
 
     /// <summary>
+    /// K7-діагноз (C11_13/T9_01, T9_05): легасі <c>ECW_C11_13</c> пише ОДИН ключ <c>tons_&lt;код&gt;</c> без гілки, ECR -
+    /// <c>tons_&lt;код&gt;_type1</c>. Без -TypeFoldMethodology імена не парувались (MISSING_OUTPUT + ECR_ONLY); тепер
+    /// <c>^ECW_C11_13$</c> у складі TypeFold за замовчуванням. Мутація: прибрати <c>^ECW_C11_13$</c> з
+    /// <c>$script:LandParityTypeFoldDefault</c> (LandParity.Lib.ps1) - тест червоніє (немає MATCH, є ECR_ONLY).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void C11_13_гілка_type1_зводиться_до_ключа_легасі_без_TypeFoldMethodology()
+    {
+        using var f = BuildSingleRowFixture();
+        File.WriteAllLines(f.Oracle, [TsvLine("E1", 1, "N1", "0.001", "ECW_C11_13")]);
+        var state = new
+        {
+            methodologies = new object[] { new { code = "ECW_C11_13", published = 1, bound = 1, anyBinding = 1, tables = new[] { "T3_00" } } },
+            tables = new object[] { new { document = Doc, period = 202601, table = "T3_00", rowKeys = new[] { "p9-0001" }, maxRows = 5 } },
+            results = new[]
+            {
+                new { document = Doc, period = 202601, methodology = "ECW_C11_13", rowKey = "p9-0001", outputCode = "ECW_EC_tons_301_type1", value = "0.001", table = (string?)"T3_00" },
+            },
+        };
+        File.WriteAllText(f.State, JsonSerializer.Serialize(state));
+
+        var (root, _, _) = RunCompare(f, "c1113fold");
+        var classes = Classes(root);
+
+        Assert.Equal(1, classes["MATCH"]);
+        Assert.False(classes.ContainsKey("ECR_ONLY"));
+        Assert.False(classes.ContainsKey("MISSING_OUTPUT"));
+    }
+    /// <summary>
     /// Селектор гілки (C11_01): легасі рахує ОДНУ гілку за NAE/потоком (ECW_C11_01.cs:183-208), ECR - усі чотири на одному
     /// ключі. З селектором вибрана гілка порівнюється (MATCH), решта - ECR_ONLY_NOT_SELECTED; без селектора
     /// (-NoBranchSelector) - BRANCH_BOTH_PRESENT. Мутація: вимкнути селектор (BranchSelector = @()) - перший вимір
