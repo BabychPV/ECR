@@ -41,20 +41,51 @@ public static class SafeErrorText
         };
     }
 
-    /// <summary>Чи є в ланцюгу винятку помилка бази даних.</summary>
+    /// <summary>Чи є в ланцюгу (дереві) винятку помилка бази даних.</summary>
+    /// <remarks>
+    /// ⛔ Раніше йшов лише по <c>InnerException</c>: <c>AggregateException</c> (паралельні гілки
+    /// оркестратора, <c>Parallel.ForEachAsync</c>) тримає причини в <c>InnerExceptions</c>, а
+    /// вичерпані повтори EF (<c>RetryLimitExceededException</c>) і клієнтський таймаут команди
+    /// (<c>TimeoutException</c>) не є <see cref="DbException"/> — такі збої БД читались
+    /// як «unexpected error». Імена типів, а не посилання: Application не залежить від EF.
+    /// </remarks>
     public static bool IsDatabaseError(Exception error)
     {
         ArgumentNullException.ThrowIfNull(error);
-        for (var current = error; current is not null; current = current.InnerException)
+        return ContainsDatabaseError(error, depth: 0);
+    }
+
+    private static bool ContainsDatabaseError(Exception? current, int depth)
+    {
+        if (current is null || depth > MaxExceptionTreeDepth)
         {
-            if (current is DbException || current.GetType().Name == "DbUpdateException")
-            {
-                return true;
-            }
+            return false;
         }
 
-        return false;
+        if (current is DbException or TimeoutException
+            || current.GetType().Name is "DbUpdateException" or "RetryLimitExceededException")
+        {
+            return true;
+        }
+
+        if (current is AggregateException aggregate)
+        {
+            foreach (var inner in aggregate.InnerExceptions)
+            {
+                if (ContainsDatabaseError(inner, depth + 1))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return ContainsDatabaseError(current.InnerException, depth + 1);
     }
+
+    /// <summary>Глибина обходу дерева винятків (захист від патологічних ланцюгів).</summary>
+    private const int MaxExceptionTreeDepth = 32;
 
     /// <summary>Нова кореляція для запису в журнал і в текст помилки.</summary>
     public static string NewCorrelationId()
