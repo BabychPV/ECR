@@ -43,6 +43,7 @@ $model = Get-Content -LiteralPath (Join-Path $refDir 'land-template.model.json')
 $reg = @($model.registries) | Where-Object { $_.code -eq 'LAND_SUBSTANCE_APPLICABILITY' } | Select-Object -First 1
 
 $extraArgs = @{ ECW_C11_10 = @('Land_TypeFuel') }   # C11_10 читає Land_TypeFuel АБО Land_TypeFuelOrStream
+$effectiveColumnCodes = @($ColumnCodes)
 if (-not $ColumnCodes) {
     $cols = New-Object System.Collections.Generic.HashSet[string]
     foreach ($m in $spec.methodologies.PSObject.Properties) {
@@ -50,11 +51,11 @@ if (-not $ColumnCodes) {
         [void]$cols.Add([string]$m.Value.argument)
         if ($extraArgs.ContainsKey($m.Name)) { foreach ($a in $extraArgs[$m.Name]) { [void]$cols.Add($a) } }
     }
-    $ColumnCodes = @($cols)
-    if ($IncludeUnbound) { $ColumnCodes = @($ColumnCodes) + @('TypeOfFuel', 'TypeOfStreams', 'Streams') }
+    $effectiveColumnCodes = @($cols)
+    if ($IncludeUnbound) { $effectiveColumnCodes = @($effectiveColumnCodes) + @('TypeOfFuel', 'TypeOfStreams', 'Streams') }
 }
-foreach ($c in $ColumnCodes) { if ($c -notmatch '^[A-Za-z0-9_]+$') { throw "Bad column code '$c'." } }
-$inList = ($ColumnCodes | ForEach-Object { "'$_'" }) -join ','
+foreach ($c in $effectiveColumnCodes) { if ($c -notmatch '^[A-Za-z0-9_]+$') { throw "Bad column code '$c'." } }
+$inList = ($effectiveColumnCodes | ForEach-Object { "'$_'" }) -join ','
 $sqlValues = @"
 SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
 SELECT td.Code AS Tbl, cd.Code AS Col, COALESCE(cv.ValueString, rn.ValueString, re.Code) AS Value,
