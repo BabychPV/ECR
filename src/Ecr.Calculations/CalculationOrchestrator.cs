@@ -197,6 +197,11 @@ public sealed class CalculationOrchestrator(
                     //     DbContext на гілку, а паралелізм пакета (заради
                     //     бюджету 10 хв, ПРД-13) лишається як є.
                     using var scope = scopeFactory.CreateScope();
+
+                    // Запис результатів гілки — у ЇЇ контексті: стеля таймауту перерахунку (180 с
+                    // замість 60), інакше зупинка I/O на хвилину валила б усі гілки -2 одночасно.
+                    scope.ServiceProvider.GetService<IRecalcCommandTimeout>()?.Apply();
+
                     var scopedResolver = scope.ServiceProvider.GetRequiredService<MethodologyResolver>();
                     var scopedInputBuilder = scope.ServiceProvider.GetRequiredService<CalculationInputBuilder>();
                     var scopedOutputWriter = scope.ServiceProvider.GetRequiredService<CalculationOutputWriter>();

@@ -1574,6 +1574,21 @@ public interface IUnitOfWork
 ```
 
 ```csharp
+// src/Ecr.Application/Ports/IRecalcCommandTimeout.cs
+namespace Ecr.Application.Ports;
+
+/// <summary>
+/// Піднімає таймаут SQL-команд поточного scope до стелі перерахунку
+/// (<c>Database:RecalcCommandTimeoutSeconds</c>, 180 с). Викликається задачею
+/// перерахунку й кожною гілкою оркестратора у власному scope.
+/// </summary>
+public interface IRecalcCommandTimeout
+{
+    public void Apply();
+}
+```
+
+```csharp
 // src/Ecr.Application/Ports/IUiStringCatalog.cs
 namespace Ecr.Application.Ports;
 

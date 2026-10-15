@@ -64,7 +64,8 @@ public sealed partial class RecalculationJob(
     RecalculationBudgetMonitor? budget = null,
     ILogger<RecalculationJob>? logger = null,
     ISheetEditGate? sheetGate = null,
-    CrossPeriodFanOut? fanOut = null) : IRecalculationJob
+    CrossPeriodFanOut? fanOut = null,
+    IRecalcCommandTimeout? commandTimeout = null) : IRecalculationJob
 {
     [LoggerMessage(
         Level = LogLevel.Error,
@@ -148,6 +149,10 @@ public sealed partial class RecalculationJob(
         // (`RecalculationJobDocumentSerializationTests`). Лок сесійний, на окремому
         // з'єднанні: задача живе кількома транзакціями, і транзакційний лок не
         // накрив би її цілком; черга й пул лишаються як є.
+        // Таймаут команд контексту ЗАДАЧІ (запис прогону, завершення/перемикання) піднімається до стелі
+        // перерахунку; гілки оркестратора піднімають свої контексти самі (`IRecalcCommandTimeout`).
+        commandTimeout?.Apply();
+
         await using var documentLock = await AcquireDocumentLockAsync(request.DocumentId, ct).ConfigureAwait(false);
 
         // ⛔ «CalculationRun ховає результати сусідніх документів» (третя

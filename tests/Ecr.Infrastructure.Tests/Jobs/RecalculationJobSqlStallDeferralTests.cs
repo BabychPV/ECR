@@ -98,6 +98,26 @@ public sealed class RecalculationJobSqlStallDeferralTests(SqlServerFixture sql)
         Assert.Same(original, thrown);
     }
 
+    /// <summary>Стеля таймауту перерахунку (<c>IRecalcCommandTimeout</c>) піднімається контекстом задачі раз на виконання.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Задача_піднімає_таймаут_команд_свого_контексту_до_стелі_перерахунку()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await builder.BuildAsync();
+        var timeout = Substitute.For<IRecalcCommandTimeout>();
+
+        await using var db = builder.CreateContext();
+        var job = new RecalculationJob(
+            db, new RecordingRunner(null), RunHandler(), FormulaService(RowsEmpty()), new TestClock(DateTime.UtcNow),
+            commandTimeout: timeout);
+
+        await job.ExecuteAsync(Request(document), NoOpProgress.Instance, CancellationToken.None);
+
+        timeout.Received(1).Apply();
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void Класифікатор_знаходить_таймаут_і_дедлок_у_дереві_і_не_чіпає_решту()
