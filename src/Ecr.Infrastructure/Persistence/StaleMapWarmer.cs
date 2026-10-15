@@ -59,6 +59,11 @@ public sealed partial class StaleMapWarmer(
                 await using var scope = scopes.CreateAsyncScope();
                 var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
 
+                // P3 (Аудит): повний запит карти на 202601 після рестарту ~60,7 с упирався в глобальний
+                // Database:CommandTimeoutSeconds (60) -> SqlException -2 в ERROR-логу. Стеля - та сама, що в перерахунку
+                // (Database:RecalcCommandTimeoutSeconds, типово 180, мін. 30); лише для цього scope, читачі лишаються на 60 с.
+                scope.ServiceProvider.GetService<Ecr.Application.Ports.IRecalcCommandTimeout>()?.Apply();
+
                 // Без scopeFactory: SWR вимкнено, завантаження синхронне й single-flight з читачами.
                 var rows = await new StaleResultsMapCache(db, cache, clock, epoch, logger)
                     .WarmAsync(period, ct, ring ? RingWindow : null).ConfigureAwait(false);
