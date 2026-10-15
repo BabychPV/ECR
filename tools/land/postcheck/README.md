@@ -51,3 +51,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\land\postcheck\Run-Pos
 `G20`/`KgH`/`Kg`/`OT`/`KEY4`/`OTHER`, правки `aud.CellChange` по `Origin`, Current-результати методологій
 `-WindowMethodologies CODE[=поріг]`, `TableInstanceId` у нових Result/Step/Input. Потрібні `-IsolationDocument`,
 за потреби `-IsolationTable`, `-IsolationPeriodFrom/To`, `-IsolationBaselineRows`.
+
+## Додаткова перевірка застосовності речовин (Verify-LandSubstanceApplicability.ps1)
+
+Окремий скрипт `tools/land/Verify-LandSubstanceApplicability.ps1` (з lane застосовності Makat; не входить до `Run-PostCheck.ps1`).
+Запуск — після вікна довідника/recalc; лише читання (`SELECT` під `READ UNCOMMITTED`), лише локальний SQL Server.
+Параметри: `-Server` (за замовчуванням `localhost`; нелокальний — відмова), `-Database` (`<БД>`, лише `[A-Za-z0-9_]`),
+`-ColumnCodes`, `-Methodology`, `-IncludeUnbound`.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\land\Verify-LandSubstanceApplicability.ps1 -Server <server> -Database <БД>
+```
+
+- Діє лише по ПРИВ'ЯЗАНИХ таблицях (`cfg.CalculationBinding` `IsActive=1`; колонки-аргументи методологій; для Lookup — `NAME`
+  запису довідника). Прогалина в непривязаній таблиці — `INFO`, у прив'язаній — `GAP`.
+- Вивід: `Status` (`GAP`|`INFO`), `tbl`, `col`, `Methodology`, `Kind`, `Value`, `rows`, `prefix`, `missingCodes`, `reason`;
+  підсумок `GAP=n INFO=m`. Код виходу `1` лише при `GAP`.
+- `-IncludeUnbound` (за замовчуванням вимкнено) — стара поведінка: додатково `TypeOfFuel`/`TypeOfStreams`/`Streams` усіх
+  таблиць, будь-яка прогалина = `GAP`.
+- `-ColumnCodes` за замовчуванням порожній: коди беруться з довідника застосовності (аргументи методологій), можна перевизначити.
+- `-Methodology <код>` звужує перевірку однією методологією.
+- Перший реальний прогін (`SELECT` з `NOLOCK`): на обох стендах `GAP=0 INFO=5` (`C12_03` Makat у непривязаних `T9_02`/`T9_04`/
+  `T9_07`/`T9_11`); з `-IncludeUnbound` — `GAP=30`.
