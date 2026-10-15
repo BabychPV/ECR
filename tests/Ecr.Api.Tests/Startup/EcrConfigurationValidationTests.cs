@@ -209,6 +209,17 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
     }
 
     [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [InlineData("Documents:StaleMapWarm:RingIntervalSeconds", "59")]
+    [InlineData("Documents:StaleMapWarm:RingIntervalSeconds", "10m")]
+    [InlineData("Documents:StaleMapWarm:HotPeriodLimit", "0")]
+    [InlineData("Documents:StaleMapWarm:HotPeriodLimit", "two")]
+    public void Недійсний_ключ_прогріву_карти_називає_ключ(string key, string value)
+    {
+        var problem = Assert.Single(EcrConfigurationValidation.Validate(Config((key, value))));
+        Assert.StartsWith(key + " = «" + value + "»", problem, StringComparison.Ordinal);
+    }
+    [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "U17")]
     [InlineData("Telemetry:Enabled", "yes")]
