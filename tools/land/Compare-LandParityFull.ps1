@@ -61,6 +61,7 @@ param(
     [int]$MaxDocs = 0,
     [string[]]$Months = @(),
     [string[]]$GroupBy = @(),
+    # (-StrictGroupBy: a GroupBy column missing in a table => exit != 0 after the report is written; default only warns.)
     [string[]]$MethodologyTable = @(),
     [string[]]$TypeFoldMethodology = @(),
     [double]$RelThreshold = 1e-9,
@@ -69,6 +70,7 @@ param(
     [double]$TolRel = 1e-12,
     [double]$StorageAbs = 5e-13,
     [switch]$NoBranchSelector,
+    [switch]$StrictGroupBy,
     [switch]$ValidateOnly
 )
 $ErrorActionPreference = 'Stop'
@@ -143,7 +145,7 @@ Invoke-LandParityCompare -DocumentFile @($files | ForEach-Object { $_.Path }) -S
 
 $summary = Get-LandParitySummary $acc $state
 $result = [ordered]@{
-    formatVersion = 3
+    formatVersion = 4
     tolerance = [ordered]@{ abs = $TolAbs; rel = $TolRel; storageAbs = $StorageAbs }
     aggregateBy = $AggregateBy
     months = @($MonthList)
@@ -167,6 +169,7 @@ $result = [ordered]@{
     bySubstance = $summary.bySubstance
     outputsWithoutSubstance = $summary.outputsWithoutSubstance
     foreignSubstanceIgnored = $summary.foreignSubstanceIgnored
+    warnings = @($summary.warnings)
 }
 $outJson = [System.IO.Path]::GetFullPath("$OutPrefix.summary.json")
 $outTsv = [System.IO.Path]::GetFullPath("$OutPrefix.cells.tsv")
@@ -175,19 +178,23 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($outJson, ($result | ConvertTo-Json -Depth 8 -Compress), $utf8)
 $outBuckets = [System.IO.Path]::GetFullPath("$OutPrefix.buckets.tsv")
 $inv = [Globalization.CultureInfo]::InvariantCulture
-$bucketLines = @("methodology`tsubstance`tmatched`twithinThreshold`tmismatch`tecrOnly`toracleOnly`tother`tzero`trelP95`trelMax") + @(
+$bucketLines = @("methodology`tsubstance`tmatched`twithinThreshold`tmismatch`tecrOnly`toracleOnly`texplainedSkip`tother`tzero`trelP95`trelMax") + @(
     $summary.bySubstance | ForEach-Object {
         $p95 = ''; if ($null -ne $_.relP95) { $p95 = ([double]$_.relP95).ToString('R', $inv) }
         $mx = ''; if ($null -ne $_.relMax) { $mx = ([double]$_.relMax).ToString('R', $inv) }
-        (@($_.methodology, $_.substance, $_.matched, $_.withinThreshold, $_.mismatch, $_.ecrOnly, $_.oracleOnly, $_.other, $_.zero, $p95, $mx) -join "`t")
+        (@($_.methodology, $_.substance, $_.matched, $_.withinThreshold, $_.mismatch, $_.ecrOnly, $_.oracleOnly, $_.explainedSkip, $_.other, $_.zero, $p95, $mx) -join "`t")
     })
 [System.IO.File]::WriteAllLines($outBuckets, [string[]]$bucketLines, $utf8)
 $head = "doc`tperiod`ttable`trowKey`trows`tefid`tmethodology`toutput`tclass`trel"
 [System.IO.File]::WriteAllLines($outTsv, [string[]](@($head) + $acc.Detail.ToArray()), $utf8)
 Write-Host 'classes:'
 $summary.classes | ForEach-Object { Write-Host ("  {0,-40} {1}" -f $_.class, $_.cells) }
-Write-Host ("buckets (threshold {0}): methodology matched(within) mismatch ecrOnly oracleOnly other" -f $RelThreshold)
+Write-Host ("buckets (threshold {0}): methodology matched(within) mismatch ecrOnly oracleOnly explainedSkip other" -f $RelThreshold)
 $summary.buckets | ForEach-Object {
-    Write-Host ("  {0,-16} {1}({2}) {3} {4} {5} {6}" -f $_.methodology, $_.matched, $_.withinThreshold, $_.mismatch, $_.ecrOnly, $_.oracleOnly, $_.other)
+    Write-Host ("  {0,-16} {1}({2}) {3} {4} {5} {6} {7}" -f $_.methodology, $_.matched, $_.withinThreshold, $_.mismatch, $_.ecrOnly, $_.oracleOnly, $_.explainedSkip, $_.other)
 }
 Write-Host "out: $outJson / $outTsv / $outBuckets (non-MATCH cells: $($acc.Detail.Count))"
+if (@($summary.warnings).Count -gt 0) {
+    Write-Host ("warnings: {0}" -f @($summary.warnings).Count)
+    if ($StrictGroupBy) { throw "-StrictGroupBy: $(@($summary.warnings).Count) GroupBy warning(s); see summary.warnings." }
+}

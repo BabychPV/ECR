@@ -139,7 +139,7 @@ public sealed class LandParityC12CompareTests
         Assert.Equal(("MISMATCH", false, false), buckets[3]);
         Assert.Equal(("ECR_ONLY", false, true), buckets[4]);
         Assert.Equal(("ORACLE_ONLY", false, true), buckets[5]);
-        Assert.Equal(("ORACLE_ONLY", false, false), buckets[6]);
+        Assert.Equal(("EXPLAINED_SKIP", false, false), buckets[6]);
         Assert.Equal("OTHER", buckets[7].Group);
         Assert.Equal("OTHER", buckets[8].Group);
         Assert.Equal("OTHER", buckets[9].Group);
@@ -329,7 +329,7 @@ public sealed class LandParityC12CompareTests
         // Відносна похибка розбіжності - число, не значення.
         Assert.True(bySub["ECW_C12_02/337"].GetProperty("relMax").GetDouble() > 0.05);
         Assert.Contains("BRANCH_BOTH_PRESENT", cells, StringComparison.Ordinal);
-        Assert.StartsWith("methodology\tsubstance\tmatched\twithinThreshold\tmismatch\tecrOnly\toracleOnly\tother\tzero\trelP95\trelMax", bucketsTsv, StringComparison.Ordinal);
+        Assert.StartsWith("methodology\tsubstance\tmatched\twithinThreshold\tmismatch\tecrOnly\toracleOnly\texplainedSkip\tother\tzero\trelP95\trelMax", bucketsTsv, StringComparison.Ordinal);
 
         // Значень (ні старої системи, ні ECR) у виході немає.
         foreach (var text in new[] { summary, cells, bucketsTsv })

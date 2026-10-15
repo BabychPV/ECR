@@ -12,6 +12,7 @@ using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Xunit;
@@ -59,6 +60,32 @@ public sealed class RecalculationJobSqlStallDeferralTests(SqlServerFixture sql)
         var run = await verify.CalculationRuns.AsNoTracking().SingleAsync(r => r.ProjectId == document.ProjectId);
         Assert.Equal("Failed", run.Status);
         Assert.StartsWith("A database error", run.ErrorMessage, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// P2-1: маркування прогонів <c>Failed</c> теж падає зі зупинкою (<c>-2</c>) — відкладення має пріоритет:
+    /// виняток маркування не підміняє початковий, задача не йде в <c>JobRetryPolicy</c> сирим <c>SqlException</c>.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Збій_маркування_прогонів_Failed_не_ховає_відкладення()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await builder.BuildAsync();
+
+        var options = new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString, o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"))
+            .AddInterceptors(new FailMarkingSave(() => Sql(-2)))
+            .Options;
+        await using var db = new EcrDbContext(options);
+        var job = Job(db, RowsThrowing(Sql(-2)), new RecordingRunner(null));
+
+        var thrown = await Record.ExceptionAsync(
+            () => job.ExecuteAsync(Request(document), NoOpProgress.Instance, CancellationToken.None));
+
+        var deferred = Assert.IsType<JobDeferredException>(thrown);
+        Assert.Equal(RecalculationDocumentLock.Resource(document.DocumentId), deferred.Resource);
     }
 
     [Fact]
@@ -232,6 +259,19 @@ public sealed class RecalculationJobSqlStallDeferralTests(SqlServerFixture sql)
         => type == typeof(string) ? "test"
             : type.IsValueType ? Activator.CreateInstance(type)
             : null;
+
+    /// <summary>Валить збереження прогону, переведеного в <c>Failed</c> (маркування в catch задачі).</summary>
+    private sealed class FailMarkingSave(Func<SqlException> error) : SaveChangesInterceptor
+    {
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            var hit = eventData.Context?.ChangeTracker.Entries<Ecr.Domain.Entities.Calculations.CalculationRun>()
+                .Any(e => e.State == EntityState.Modified && e.Entity.Status == "Failed") ?? false;
+
+            return hit ? throw error() : base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
 
     private sealed class RecordingRunner(Exception? failure) : ICalculationRunner
     {

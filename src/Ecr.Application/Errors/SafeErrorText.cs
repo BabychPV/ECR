@@ -62,7 +62,9 @@ public static class SafeErrorText
             return false;
         }
 
-        if (current is DbException or TimeoutException
+        // ⚠ «Голий» TimeoutException (HTTP-клієнт, CancellationTokenSource, Task.WaitAsync) — не збій БД:
+        // він рахується таким лише тоді, коли в його піддереві є DbException (обхід нижче піде по InnerException).
+        if (current is DbException
             || current.GetType().Name is "DbUpdateException" or "RetryLimitExceededException")
         {
             return true;
