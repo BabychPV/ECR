@@ -458,4 +458,57 @@ public sealed partial class DocumentStaleResultsStoreTests
         Assert.Equal(all.Count - 1, warmed.Count);
         Assert.Equal(all.Count, w.Probe.Maps);
     }
+
+    /// <summary>Запам'ятовує <c>CommandTimeout</c> повного запиту карти прогріву.</summary>
+    private sealed class MapTimeoutProbe : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        private int seconds = -1;
+
+        public int MapQueryTimeout => Volatile.Read(ref seconds);
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("MIN(t.At)", StringComparison.Ordinal)
+                && !command.CommandText.Contains(StaleResultsMapCache.DeltaTag, StringComparison.Ordinal)
+                && !command.CommandText.Contains(StaleResultsMapCache.AuthorsTag, StringComparison.Ordinal))
+            {
+                Volatile.Write(ref seconds, command.CommandTimeout);
+            }
+
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// P3: повний запит карти прогріву йде під стелею перерахунку (180 с), а не під глобальними 60 с.
+    /// Мутація: прибрати <c>IRecalcCommandTimeout.Apply()</c> у <c>StaleMapWarmer.WarmOnceAsync</c> - таймаут 60, тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Прогрів_виконує_запит_карти_під_стелею_таймауту_перерахунку()
+    {
+        var r = await RigAsync();
+        using var cacheLease = r.Cache;
+        var probe = new MapTimeoutProbe();
+        var services = new ServiceCollection();
+        services.AddDbContext<EcrDbContext>(o => o.UseSqlServer(sql.ConnectionString, s => s.CommandTimeout(60)).AddInterceptors(probe));
+        services.AddSingleton(Ecr.Infrastructure.Jobs.RecalcCommandTimeoutPolicy.From(180));
+        services.AddScoped<IRecalcCommandTimeout, Ecr.Infrastructure.Jobs.RecalcCommandTimeout>();
+        await using var provider = services.BuildServiceProvider();
+        var warmer = new StaleMapWarmer(
+            provider.GetRequiredService<IServiceScopeFactory>(), r.Cache, new MovableClock(Now.AddHours(2)), r.Epoch,
+            NullLogger<StaleMapWarmer>.Instance);
+
+        var warmed = await warmer.WarmOnceAsync(CancellationToken.None);
+
+        Assert.Contains(r.Period, warmed);
+        Assert.Equal(180, probe.MapQueryTimeout);
+        Assert.True(Ecr.Infrastructure.Jobs.RecalcCommandTimeoutPolicy.Default >= 180);
+        Assert.Equal(30, Ecr.Infrastructure.Jobs.RecalcCommandTimeoutPolicy.From(1).Seconds);
+    }
 }
