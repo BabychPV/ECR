@@ -97,6 +97,7 @@ function ConvertTo-LandHse400CompositionPlan {
         - потік = префікс колонки з шести відомих; колонки без префікса (EFID, ID, DateTime ...) пропускаються;
         - показник = канонічний суфікс (ConvertTo-LandHse400Indicator); значення null/нечислове пропускається;
         - HMB: EMercaptan_mass береться з колонки EMercaptanV2_mass (як F_Air_GetPropertyValueFromHSE400);
+        - HMB: MercaptanSulphurContent береться з колонки TotalSulphurContentWithoutH2S (Q_Air_HSE400.cs:127/:217);
         - колонка `C1_C5` / `C6_C10` / `C12_C19` без `_mass` (FG_Export, FG_Internal, LPG_Internal) -> показник з
           `_mass` (псевдонім старої системи, Aliased = true); робиться ДО запасної;
         - запасна: C6_C10_mass порожній -> береться C6_1_mass (ECW_C11_01/02, ECW_C12_01);
@@ -115,6 +116,7 @@ function ConvertTo-LandHse400CompositionPlan {
     $fallbacks = 0
     $overrides = 0
     $aliases = 0
+    $mercaptanAliases = 0
 
     foreach ($row in $Rows) {
         $year = [int]$row.Year
@@ -154,6 +156,14 @@ function ConvertTo-LandHse400CompositionPlan {
                 else { $null = $ind.Remove('EMercaptan_mass') }
             }
 
+            # HMB: MercaptanSulphurContent береться з колонки `{префікс}_TotalSulphurContentWithoutH2S`
+            # (Q_Air_HSE400.cs:127/:217: `FG_HMB_MercaptanSulphurContent = reader["FG_HMB_TotalSulphurContentWithoutH2S"]`;
+            # власної колонки MercaptanSulphurContent у таблиці для HMB немає). `TotalSulphurContentWithoutH2S` лишається.
+            if ($prefix -like '*HMB*' -and $ind.ContainsKey('TotalSulphurContentWithoutH2S')) {
+                $ind['MercaptanSulphurContent'] = $ind['TotalSulphurContentWithoutH2S']
+                $mercaptanAliases++
+            }
+
             # Запасна колонка гексану.
             if (-not $ind.ContainsKey('C6_C10_mass') -and $ind.ContainsKey('C6_1_mass')) {
                 $ind['C6_C10_mass'] = $ind['C6_1_mass']
@@ -187,6 +197,7 @@ function ConvertTo-LandHse400CompositionPlan {
         Fallbacks  = $fallbacks
         Overrides  = $overrides
         Aliases    = $aliases
+        MercaptanAliases = $mercaptanAliases
     }
 }
 

@@ -125,7 +125,7 @@ try {
 finally { $conn.Dispose() }
 
 $plan = ConvertTo-LandHse400CompositionPlan -Rows ([object[]]$sourceRows.ToArray())
-Write-Host "Джерело: рядків (місяців) $($sourceRows.Count); значень до довідника: $(@($plan.Items).Count); пропущено: $($plan.Skipped); дублів: $($plan.Duplicates); запасна C6_1_mass: $($plan.Fallbacks); EMercaptanV2 для HMB: $($plan.Overrides); псевдонімів C*_mass: $($plan.Aliases)."
+Write-Host "Джерело: рядків (місяців) $($sourceRows.Count); значень до довідника: $(@($plan.Items).Count); пропущено: $($plan.Skipped); дублів: $($plan.Duplicates); запасна C6_1_mass: $($plan.Fallbacks); EMercaptanV2 для HMB: $($plan.Overrides); псевдонімів C*_mass: $($plan.Aliases); HMB MercaptanSulphurContent <- TotalSulphurContentWithoutH2S: $($plan.MercaptanAliases)."
 if (@($plan.Items).Count -eq 0) { throw 'У джерелі немає жодного значення складу: нічого завантажувати.' }
 
 $staticTexts = @(

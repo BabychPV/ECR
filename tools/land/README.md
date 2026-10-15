@@ -169,7 +169,7 @@ C05 / C06_01 / C07_*; для методології з кількома табл
 |---|---|---|
 | `ECW_EC_tons\|gsec_XXX` | у результата є речовина (SUBSTANCE_CODE запису довідника, інакше код запису) | `ECW_EC_tons\|gsec_<код речовини>` (C12_03) |
 | `ECW_EC_tons\|gsec_XXX` | речовини немає | лишається `XXX` -> `ECR_ONLY`; кількість - `outputsWithoutSubstance` у summary |
-| `ECW_EC_tons\|gsec_<код>_type1\|_type2` | методологія зі списку TypeFold (за замовчуванням `^ECW_C12_02$`, збігається з етапом ParityBranch) | `ECW_EC_tons\|gsec_<код>` |
+| `ECW_EC_tons\|gsec_<код>_type1\|_type2` | методологія зі списку TypeFold (за замовчуванням `^ECW_C12_02$` і `^ECW_C11_13$`, збігається з етапом ParityBranch) | `ECW_EC_tons\|gsec_<код>` |
 | обидві гілки одного ключа | TypeFold | клас `BRANCH_BOTH_PRESENT` (значення не порівнюється: старий код пише одну гілку) |
 | `ECW_EC_*_415_type1` | NullType1 (C12_02: код 415) | лишається повним іменем -> `ECR_ONLY` (type1 для 415 у старому коді немає; ParityBranch ставить йому `NULL`) |
 | `ECW_EC_*_<код>*` з речовиною проходу, відмінною від `<код>` | будь-яка | пропускається, лічильник `foreignSubstanceIgnored` |
@@ -187,11 +187,27 @@ D-425, «лише Running»: вихід ECR, якого немає в легас
 `<OutPrefix>.buckets.tsv` - ті самі рядки: `matched`, `withinThreshold` (збіг лише завдяки порогу `-RelThreshold`,
 за замовчуванням `1e-9`; NEAR/MISMATCH* з відносною похибкою ≤ порога), `mismatch`, `ecrOnly`, `oracleOnly`
 (MISSING_*, ROW_NOT_LOADED_*, METHODOLOGY_DIFF), `explainedSkip` (LEGACY_STATUS_SKIP: легасі пропускає не-Running
-рядок; summary `formatVersion` 4, стовпець після `oracleOnly`; `-GroupBy` з колонкою, якої немає в таблиці, дає
+рядок; summary `formatVersion` 5 (було 4), стовпець після `oracleOnly`; `-GroupBy` з колонкою, якої немає в таблиці, дає
 `summary.warnings` + Warning у лозі, а `-StrictGroupBy` - ненульовий код виходу), `other` (AMBIGUOUS_KEY, LEGACY_DUP_CONFLICT,
-INCOMPLETE_*, BRANCH_BOTH_PRESENT), `zero` (комірки з нульовою старою), `relP95`, `relMax`. Сторож -
+AGG_LEGACY_COPY_COUNT_DIFF, INCOMPLETE_*, BRANCH_BOTH_PRESENT), `zero` (комірки з нульовою старою), `relP95`, `relMax`. Сторож -
 LandParityC12CompareTests (Architecture; синтетика, мутаційні докази: гілка не знімається, речовина не підставляється,
 обидві гілки не виявляються).
+
+#### LEGACY_ROW_SUM: підсумок легасі = сума всіх копій ключа (LAND-POST-K7 C12_01, `formatVersion` 5)
+
+Легасі пише ОДИН запис на рядок-джерело (R_Land_SetResult, без дедуплікації), а `modified` - це `Identity.ModifiedTime`
+рядка, не час запуску. Тому на ключ (efid, міс., таблиця, NAE, потік, речовина) копій рівно стільки, скільки Running-рядків
+у групі, а підсумок легасі - СУМА всіх копій. Harness раніше брав `latest` (одну копію) або `LEGACY_DUP_CONFLICT`; ECR-сума
+n рядків проти однієї копії давала `rel = 1 - 1/n` (11/12, 13/14) - це не дефект обчислень ECR. Тепер (`-AggregateBy
+NaePhase`):
+
+- група = усі рядки ключа (efid, NAE, фаза), навіть з одним `Land_No` (пара Hydraulic oil): `oldV = сума копій`;
+- кількість копій != кількості Running-рядків групи - `AGG_LEGACY_COPY_COUNT_DIFF` (група `other`, значення не
+  порівнюється; `LEGACY_DUP_CONFLICT` лишається для негрупованих ключів);
+- явний `-GroupBy`: якщо потрібної фази немає в еталоні, harness НЕ підставляє «усі рядки NAE» - група без легасі
+  (лише `ECR_NON_RUNNING`, якщо є результат на не-Running рядку; інакше пропуск);
+- `$seen` ставиться ДО будь-якого `continue` на ключі легасі: вихід ECR того ж ключа не стає «хвостом» DUP як `ECR_ONLY`;
+- селектор гілки `ECW_C12_01`: `Land_Streams = 'Fuel gas'` -> `type2`, інакше `type1` (ECW_C12_01.cs:140-153).
 
 ## Довідник повітряних речовин (LP-07, форма B константи)
 
@@ -360,7 +376,7 @@ null (як порожня). Перелік (11 пар методологія/т�
 
 `Import-LandHse400Composition.ps1` одноразово завантажує значення з **локальної копії** прода (лише `SELECT … WITH (NOLOCK)`;
 значень у git немає, у вивід - лише кількості) у стенд через REST (`entries/batch`): показник = канонічний суфікс колонки
-(`_20` -> `20`, `_0` -> `0`); HMB: `EMercaptan_mass` береться з `EMercaptanV2_mass`; запасна: порожній `C6_C10_mass` -> `C6_1_mass`.
+(`_20` -> `20`, `_0` -> `0`); HMB: `EMercaptan_mass` береться з `EMercaptanV2_mass`; HMB: `MercaptanSulphurContent` береться з `TotalSulphurContentWithoutH2S` (як `Q_Air_HSE400.cs:127/:217`; власної колонки в прод-таблиці немає, без цього `ECW_C11_08` для HMB дає `#ARG` у `tons_330`/`gsec_330`); запасна: порожній `C6_C10_mass` -> `C6_1_mass`.
 `-DiscoverStreams` додає до словника потоків тексти Land-полів, що збігаються з правилом старої системи (підрядок, без
 регістру, в обидва боки). Повтор - 0 змін; наявні записи не чіпаються. Параметри як у `Import-LandAirSubstances.ps1`
 (`-SourceDatabase`/`-ConfirmSource`, `-ConfirmStand`); спершу `-DryRun`.
@@ -659,7 +675,7 @@ C11_10 перелічує обидва написання (з пробілом �
 - Стан NAME_MISMATCH (ім'я документа на стенді інше, ніж ключ -DocMap) блокує документ і дає exit 1; обхід лише явним `-AllowNameMismatch`.
 - Невідомі таблиці прода дають NO_TABLE (exit 1) і блокують -Execute. Явно й не за замовчуванням: `-SkipUnknownTables` (пропуск із WARN і лічильником SKIPPED_UNKNOWN) та `-IncludeTables 'T9_04,T9_07'` (лише ці коди таблиць; решта NOT_INCLUDED).
 
-## Селектор гілки у паритеті (C11_01 / C11_02 / C11_11_02 / C11_11_03)
+## Селектор гілки у паритеті (C11_01 / C11_02 / C11_11_02 / C11_11_03 / C12_01)
 
 Легасі рахує ОДНУ гілку виходу на (рядок, вихід) за NAE і потоком; ECR віддає всі. Раніше harness складав гілки в один ключ
 («last wins») і давав `BRANCH_BOTH_PRESENT`. Тепер (`LandParity.Lib.ps1`, `Get-LandParitySelectedBranch`; продукт не змінено):
@@ -678,6 +694,7 @@ C11_10 перелічує обидва написання (з пробілом �
 | C11_02 | лише за NAE, точний збіг зі списком: type1 (6640..6645, 6582(002), 6585/6586/6587/6592 з хвостами), type2 (6783(001), 6786(001), 6787(001), 6789(001)); NAE поза списком - легасі результату не дає | ECW_C11_02.cs:143-146, 357-361 |
 | C11_11_02 | NAE 0883 або група 6975 (6975, 6976, 6981..6986) -> `type2`; інакше `type1`; NAE поза groupNAE - результату немає | ECW_C11_11_02.cs:109-133, 221-239 |
 | C11_11_03 | окремі групи: tons `type1/type2/type3`, gsec `type1/type2` (0804, 6801..6803 у gsec - це `type2`). Гілки tons і gsec НЕ змішувати: `type3` існує лише в tons | ECW_C11_11_03.cs:81-112 |
+| C12_01 | `Land_Streams` = `Fuel gas` -> `type2`, інакше `type1` (легасі пише type2 лише для FuelGas) | ECW_C12_01.cs:140-153 |
 
 Застереження: гілка вибирається по КОЖНОМУ члену групи окремо (за його Row; `AggregateBy NaePhase` сумує вибрані значення\nчленів, члени однієї групи можуть мати різну гілку - для C11_01 через `Land_TypeFuelOrStream`). Для C11_01 фолбек на\n`Land_TypeFuel`, коли `Land_TypeFuelOrStream` порожній, - евристика harness, не правило легасі. Для C11_11_02 category1 легасі бере з
 `naeNumberObj` - тут використано той самий NAE рядка. Модельні розбіжності (немає tons у C11_01/C11_02, tons C11_11_03 без

@@ -155,7 +155,9 @@ public sealed class LandParityC12CompareTests
         var methodologies = branch.GetProperty("branchMethodologies").EnumerateArray().Select(e => e.GetString()!).ToArray();
 
         // Кожна методологія з етапу ParityBranch знімається harness-ом за замовчуванням (і навпаки).
-        Assert.Equal(methodologies.Select(m => $"^{m}$").OrderBy(x => x, StringComparer.Ordinal), fold.OrderBy(x => x, StringComparer.Ordinal));
+        // Виняток - лише harness: ECW_C11_13 (K7: легасі пише ключ без гілки; етапу ParityBranch для неї немає).
+        var harnessOnly = new[] { "ECW_C11_13" };
+        Assert.Equal(methodologies.Concat(harnessOnly).Select(m => $"^{m}$").OrderBy(x => x, StringComparer.Ordinal), fold.OrderBy(x => x, StringComparer.Ordinal));
 
         var expected = branch.GetProperty("branchNullType1").EnumerateObject()
             .ToDictionary(p => p.Name, p => p.Value.EnumerateArray().Select(e => e.GetString()!).ToArray());
