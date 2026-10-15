@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using Ecr.TestKit;
 using Xunit;
@@ -255,7 +255,7 @@ public sealed class LandOperatingTimeStringTests
 
     /// <summary>
     /// Stage-CompositionMass не примушує Strict методологіям із мостом над String OperatingTime (C11_01/C11_02 лишаються
-    /// Legacy); C11_10, C12_01, C12_03 - Strict, як і раніше. Мутація: прибрати виклик винятку зі Stage-CompositionMass.
+    /// Legacy); C11_10, C12_03 - Strict, як і раніше; C12_01 - у переліку text-numeric sources, режим зберігається (D-433). Мутація: прибрати виклик винятку зі Stage-CompositionMass.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
@@ -277,8 +277,9 @@ public sealed class LandOperatingTimeStringTests
         var r = doc.RootElement;
         string[] Arr(string n) => r.GetProperty(n).EnumerateArray().Select(e => e.GetString()!).ToArray();
 
-        Assert.Equal(["ECW_C11_01", "ECW_C11_02"], Arr("keep"));
-        Assert.Equal(["ECW_C11_10", "ECW_C12_01", "ECW_C12_03"], Arr("strict"));
+        // C12_01 - у переліку 'text-numeric sources' (D-433, Get-LandTextNumericSourceMethodologies): режим V2 Legacy зберігається.
+        Assert.Equal(["ECW_C11_01", "ECW_C11_02", "ECW_C12_01"], Arr("keep"));
+        Assert.Equal(["ECW_C11_10", "ECW_C12_03"], Arr("strict"));
 
         var build = File.ReadAllText(LandRowKeyTests.LandFile("Build-LandTemplate.ps1"));
         var start = build.IndexOf("function Stage-CompositionMass", StringComparison.Ordinal);
