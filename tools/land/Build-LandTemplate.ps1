@@ -1977,16 +1977,19 @@ function Stage-LookupCompare {
 # :305-311), а в ECR усі три типи - виходи, тож у T9_02/T9_11 (лише NAE type1) type2/type3 давали ненульові константи.
 # Аргумент `@Land_NAE` додається в список формули. Опубліковану версію не чіпаємо; нову версію чи публікацію етап не робить;
 # повтор - 0 змін. Порядок: після ArgumentSuffix/LookupCompare, ПЕРЕД OptionalArguments.
+# D-435 (C11_13): методологія з Get-LandNaeOutputGroups обгортається за КОДОМ виходу (EC перетин catTons; gsec без type;
+# порожній перелік -> вираз NULL; обидва написання `(003)`), а не за регулярним виразом типу.
 function Stage-NaeType {
     Log '== NaeType =='
     . (Join-Path $here 'LandNaeType.Lib.ps1')
     LoginAs 'land-owner'
     $ntPlan = Get-LandNaeTypeGroups
+    $ntOut = Get-LandNaeOutputGroups   # D-435 (C11_13): перелік NAE за кодом виходу (EC перетин type), NULL-вираз для порожнього
     $ntMeth = Items (Api GET '/api/v1/methodologies').Json
     $ntChanged = 0
     foreach ($ntItem in $ntMeth) {
         $ntCode = [string]$ntItem.code
-        if (-not $ntPlan.Contains($ntCode)) { continue }
+        if (-not $ntPlan.Contains($ntCode) -and -not $ntOut.Contains($ntCode)) { continue }
         if ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains $ntCode) { continue }
         $ntId = [int]$ntItem.id
         $ntVers = Items (Api GET "/api/v1/methodologies/$ntId/versions").Json
@@ -1996,9 +1999,14 @@ function Stage-NaeType {
         $ntVid = [int]$ntLast.id
         $ntN = 0
         foreach ($ntF in @(Items (Api GET "/api/v1/methodologies/$ntId/versions/$ntVid/formulas").Json)) {
-            $ntType = Get-LandNaeTypeOfFormula -FormulaCode ([string]$ntF.code)
-            if ($null -eq $ntType -or -not $ntPlan[$ntCode].Contains($ntType)) { continue }
-            $ntR = Convert-LandNaeTypeFormula -Expression ([string]$ntF.expression) -ArgumentsCsv $ntF.argumentsCsv -Naes @($ntPlan[$ntCode][$ntType])
+            if ($ntOut.Contains($ntCode)) {
+                if (-not $ntOut[$ntCode].Contains([string]$ntF.code)) { continue }
+                $ntR = Convert-LandNaeOutputFormula -Expression ([string]$ntF.expression) -ArgumentsCsv $ntF.argumentsCsv -Naes @($ntOut[$ntCode][[string]$ntF.code])
+            } else {
+                $ntType = Get-LandNaeTypeOfFormula -FormulaCode ([string]$ntF.code)
+                if ($null -eq $ntType -or -not $ntPlan[$ntCode].Contains($ntType)) { continue }
+                $ntR = Convert-LandNaeTypeFormula -Expression ([string]$ntF.expression) -ArgumentsCsv $ntF.argumentsCsv -Naes @($ntPlan[$ntCode][$ntType])
+            }
             if (-not $ntR.Changed) { continue }
             $ntBody = @{ expression = $ntR.Expression; resultType = $ntF.resultType; outputUnitId = $ntF.outputUnitId; argumentsCsv = $ntR.ArgumentsCsv }
             if ($null -ne $ntF.scope) { $ntBody.scope = $ntF.scope }
