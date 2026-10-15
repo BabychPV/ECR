@@ -141,6 +141,28 @@ public sealed class LandProdColumnMappingModelTests
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Споживання_Sm3_у_9_04_мапиться_на_20Dgr1atm_а_кг_год_кг_і_9_02_не_змінені()
+    {
+        // Клас D C11_10 (LAND-POST-K4): без аліаса прод-атрибут Land_Measure_SubstanceConsumption на T9_04 не завантажується,
+        // і міст C11_10 (SubstanceConsumption20Dgr1atm_Mnn) порожній -> SC=null.
+        using var model = Model();
+        var tables = model.RootElement.GetProperty("prodColumnMapping").GetProperty("tables");
+        static List<string> Months(JsonElement e) => e.GetProperty("monthColumns").EnumerateArray().Select(m => m.GetString()!).ToList();
+        static IEnumerable<string> Codes(string prefix) => Enumerable.Range(1, 12).Select(m => $"{prefix}_M{m:00}");
+        var by04 = tables.GetProperty("S09_UTILITY|T9_04").GetProperty("aliases").EnumerateArray()
+            .ToDictionary(a => a.GetProperty("prod").GetString()!);
+
+        Assert.Equal(Codes("SubstanceConsumption20Dgr1atm"), Months(by04["Land_Measure_SubstanceConsumption"]));
+        Assert.Equal(Codes("SubstanceConsumption"), Months(by04["Land_Measure_SubstanceConsumptionKgH"]));
+        Assert.Equal(12, Months(by04["Land_Measure_SubstanceConsumptionKg"]).Count);
+
+        var by02 = tables.GetProperty("S09_UTILITY|T9_02").GetProperty("aliases").EnumerateArray()
+            .ToDictionary(a => a.GetProperty("prod").GetString()!);
+        Assert.Equal(Codes("SubstanceConsumption20Dgr1atm"), Months(by02["Land_Measure_SubstanceConsumption"]));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Нові_колонки_введення_існують_вхідні_і_не_дублюють_коди()
     {
         using var model = Model();
