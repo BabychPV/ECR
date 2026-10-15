@@ -43,7 +43,7 @@
                              never folded (the legacy code has no type1 for 415): ECR_ONLY.
                              Outputs ECW_EC_<tons|gsec>_XXX are always renamed by the substance code of the result
                              (SUBSTANCE_CODE of the register entry; C12_03 and the like).
-.PARAMETER NoBranchSelector  disable the branch selector (ECW_C11_01 / C11_02 / C11_11_02 / C11_11_03 / C12_01): the legacy code
+.PARAMETER NoBranchSelector  disable the branch selector (ECW_C11_01 / C11_02 / C11_11_02 / C11_11_03 / C12_01 / C11_13): the legacy code
                              computes ONE branch per (row, output) chosen by NAE/stream, ECR emits all of them. By default only
                              the legacy-selected branch is compared; the other branches are ECR_ONLY_NOT_SELECTED (summary:
                              branchSelectedCells / notSelectedCells). With the switch the branches are folded and several
@@ -150,7 +150,7 @@ Invoke-LandParityCompare -DocumentFile @($files | ForEach-Object { $_.Path }) -S
 
 $summary = Get-LandParitySummary $acc $state
 $result = [ordered]@{
-    formatVersion = 5
+    formatVersion = 6
     tolerance = [ordered]@{ abs = $TolAbs; rel = $TolRel; storageAbs = $StorageAbs }
     aggregateBy = $AggregateBy
     months = @($MonthList)
