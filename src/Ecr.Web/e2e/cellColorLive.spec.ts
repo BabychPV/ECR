@@ -83,11 +83,17 @@ test.describe('cellColor: колір комірки на реальному ст
 
         await expectBackground(cellAt(page, target), YellowRgb, 'заливка не застосувалась (computed)');
         await expect(cellAt(page, target)).toHaveAttribute('data-user-style', 'true');
+        // Закриваючий дропдаун «Заливки» лишається в DOM на час переходу: без цього `.first()` нижче
+        // міг би влучити в його зразок, а не у відкриту палітру тексту.
+        await expect(page.locator('.ecr-cell-color-dropdown:visible')).toHaveCount(0);
 
         // ── 2. Колір тексту теж доходить до сервера ──────────────────────
         await page.getByTestId('cell-color-text').first().click();
         const textApplied = waitForStylePatch(page);
-        await page.getByRole('button', { name: '#c00000', exact: true }).first().click();
+        await page
+          .locator('.ecr-cell-color-dropdown:visible')
+          .getByRole('button', { name: '#c00000', exact: true })
+          .click();
         expect((await textApplied).status(), 'сервер не прийняв колір тексту').toBe(200);
 
         // ── 3. Reload: джерело істини - сервер, а не клієнтський кеш ───────────

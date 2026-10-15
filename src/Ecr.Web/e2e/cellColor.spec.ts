@@ -12,11 +12,18 @@ const DocStand = '/_key-commit-gate/document';
 const cellAt = (page: Page, col: number, row: number) =>
   page.locator(`revo-grid revogr-data[type="rgRow"] .rgCell[data-rgcol="${String(col)}"][data-rgrow="${String(row)}"]`);
 
+/**
+ * Відкрита палітра. Mantine `Popover` лишає закритий дропдаун у DOM на час переходу, тож
+ * `page.getByRole('button', { name: '#c00000' })` бачив ДВА зразки (закриваюча «Заливка» і
+ * відкрита «Колір тексту») → strict-mode violation. Скоуп — лише видимий дропдаун.
+ */
+const dropdown = (page: Page) => page.locator('.ecr-cell-color-dropdown:visible');
+
 async function open(page: Page): Promise<void> {
   await page.goto(DocStand);
   await expect(cellAt(page, 1, 0)).toBeVisible({ timeout: 30_000 });
   await cellAt(page, 1, 0).click();
-  await page.waitForTimeout(300);
+  await expect(page.getByTestId('cell-color-fill')).not.toHaveAttribute('aria-disabled', 'true');
 }
 
 for (const scheme of ['light', 'dark'] as const) {
@@ -25,7 +32,8 @@ for (const scheme of ['light', 'dark'] as const) {
     await open(page);
 
     await page.getByTestId('cell-color-fill').click();
-    await page.getByRole('button', { name: '#ffff00' }).click();
+    await dropdown(page).getByRole('button', { name: '#ffff00', exact: true }).click();
+    await expect(dropdown(page)).toHaveCount(0);
     await expect(cellAt(page, 1, 0)).toHaveAttribute('data-user-style', 'true');
     await expect(cellAt(page, 1, 0)).toHaveCSS('background-color', 'rgb(255, 255, 0)');
     // Текст на жовтій заливці — темний у обох темах (≥ 4.5:1).
@@ -34,11 +42,13 @@ for (const scheme of ['light', 'dark'] as const) {
     expect(((r ?? 255) * 299 + (g ?? 255) * 587 + (b ?? 255) * 114) / 1000).toBeLessThan(110);
 
     await page.getByTestId('cell-color-text').click();
-    await page.getByRole('button', { name: '#c00000' }).click();
+    await dropdown(page).getByRole('button', { name: '#c00000', exact: true }).click();
+    await expect(dropdown(page)).toHaveCount(0);
     await expect(cellAt(page, 1, 0)).toHaveAttribute('data-user-style', 'true');
 
     await page.getByTestId('cell-color-fill').click();
     await page.getByTestId('cell-color-fill-reset').click();
+    await expect(dropdown(page)).toHaveCount(0);
     await expect(cellAt(page, 1, 0)).not.toHaveCSS('background-color', 'rgb(255, 255, 0)');
   });
 }
