@@ -11,7 +11,16 @@ const RegistryExportMenu = lazy(() => import('./RegistryExportMenu'));
  *
  * ⚠ Поки чанк вантажиться — та сама кнопка, вимкнена: місце в рядку дій не стрибає.
  */
-export function RegistryExportButton(props: RegistryExportMenuProps): JSX.Element {
+export function RegistryExportButton(props: RegistryExportMenuProps): JSX.Element | null {
+  // Керований режим (REG-UI 3/3): пункт меню «Ще» відкриває діалог; чанк вантажиться лише тоді.
+  if (props.opened !== undefined) {
+    return props.opened ? (
+      <Suspense fallback={null}>
+        <RegistryExportMenu {...props} />
+      </Suspense>
+    ) : null;
+  }
+
   return (
     <Suspense
       fallback={

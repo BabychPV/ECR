@@ -1,4 +1,4 @@
-import { useRef, useState, type JSX } from 'react';
+import { useImperativeHandle, useRef, useState, type JSX, type Ref } from 'react';
 import { Alert, Badge, Button, Group, Modal, Stack, Table, Text } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
@@ -15,6 +15,19 @@ export interface RegistryImportPanelProps {
 
   /** D-211: довідник External — записи лише синком з AF, імпорт недоступний. */
   disabled?: boolean;
+
+  /**
+   * Керований режим: власної кнопки немає, вибір файлу відкриває `handleRef.current.pick()` — для
+   * пункту в шапці сторінки (REG-UI 3/3). Звіт перегляду й «Застосувати» лишаються тут.
+   */
+  hideButton?: boolean;
+  handleRef?: Ref<RegistryImportHandle>;
+}
+
+/** Що панель віддає назовні в керованому режимі. */
+export interface RegistryImportHandle {
+  /** Відкриває діалог вибору файлу (нічого не робить, якщо імпорт вимкнено). */
+  pick: () => void;
 }
 
 /**
@@ -32,9 +45,24 @@ export interface RegistryImportPanelProps {
  * перегляду є хоч одна помилка (`blocked` нижче) — так само, як `ImportPanel`
  * блокує застосування при конфліктах чи відхиленнях.
  */
-export function RegistryImportPanel({ registryCode, disabled = false }: RegistryImportPanelProps): JSX.Element {
+export function RegistryImportPanel({
+  registryCode,
+  disabled = false,
+  hideButton = false,
+  handleRef,
+}: RegistryImportPanelProps): JSX.Element {
   const queryClient = useQueryClient();
   const picker = useRef<HTMLInputElement>(null);
+
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      pick: () => {
+        if (!disabled) picker.current?.click();
+      },
+    }),
+    [disabled],
+  );
   const [file, setFile] = useState<File | null>(null);
   const [report, setReport] = useState<RegistryEntryImportReport | null>(null);
 
@@ -134,14 +162,16 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
         }}
       />
 
-      <Button
-        variant="default"
-        disabled={disabled}
-        loading={previewLoading}
-        onClick={() => picker.current?.click()}
-      >
-        {t('registry.import.pick')}
-      </Button>
+      {!hideButton && (
+        <Button
+          variant="default"
+          disabled={disabled}
+          loading={previewLoading}
+          onClick={() => picker.current?.click()}
+        >
+          {t('registry.import.pick')}
+        </Button>
+      )}
 
       <Modal opened={reviewed !== null} onClose={close} title={t('registry.import.title')} size="lg">
         {reviewed !== null && (

@@ -229,6 +229,24 @@ describe('інспектор документа (UI-25)', () => {
     expect(location).toBe('?panel=issues');
   });
 
+  it('CL-15: нейтральна кнопка Issues (не перевіряли / немає зауважень) читає токен dimmed, а не gray.6', () => {
+    const { unmount } = render(<Harness messages={null} />);
+    const idle = document.querySelector<HTMLElement>('[data-inspector-issues="none"]');
+    expect(idle?.style.color).toBe('var(--mantine-color-dimmed)');
+    unmount();
+
+    render(<Harness messages={[]} />);
+    const clean = document.querySelector<HTMLElement>('[data-inspector-issues="0"]');
+    expect(clean?.style.color).toBe('var(--mantine-color-dimmed)');
+  });
+
+  it('CL-15: кнопка із зауваженнями лишає колір статусу (не dimmed)', () => {
+    render(<Harness />);
+    const button = document.querySelector<HTMLElement>('[data-inspector-issues="2"]');
+    expect(button).not.toBeNull();
+    expect(button?.style.color).toBe('');
+  });
+
   it('N3-09: автовідкриття після перевірки не забирає фокус у того, хто працює (редактор комірки)', async () => {
     const { rerender } = render(<Harness seq={0} />);
     const working = screen.getByRole('button', { name: 'Validate' });

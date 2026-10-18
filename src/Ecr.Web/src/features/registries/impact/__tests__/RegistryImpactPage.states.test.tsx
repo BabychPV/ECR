@@ -85,6 +85,16 @@ describe('RegistryImpactPage — стани', () => {
     expect((await recalculateAll()).disabled).toBe(true);
   });
 
+  it('є кнопка «Назад» до записів цього довідника — навіть коли перелік не приїхав', async () => {
+    // ⛔ Мутаційна проба: прибрати `back` у шапці — перевірка червоніє. Сторінка не мала виходу
+    // назад, крім кнопки браузера.
+    serve(() => problem(500, 'ECR-SYS-0500'));
+    show();
+
+    const back = await screen.findByRole('link', { name: /registries\.data\.back/ });
+    expect(back.getAttribute('href')).toBe('/admin/registries?code=COMPONENT');
+  });
+
   it('403: «немає права» з кодом, а не «зачеплених немає»', async () => {
     serve(() => problem(403, 'ECR-AUTH-0403'));
     show();

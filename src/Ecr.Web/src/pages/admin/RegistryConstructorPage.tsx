@@ -9,6 +9,7 @@ import type {
   RegistryDefinitionDto,
   RegistryHistoryEntryDto,
   SaveRegistryDefinitionDto,
+  UnitRef,
   UserPage,
 } from '@/api/types';
 import {
@@ -29,6 +30,7 @@ import {
   emptyRule,
   isComplete,
   isFieldComplete,
+  NumericFieldTypes,
   toDraft,
   type FieldDraft,
   type RuleDraft,
@@ -45,6 +47,15 @@ import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
+
+/** Короткий рядок «що показує вкладка і навіщо» над її вмістом. */
+function TabHint({ children }: { readonly children: string }): JSX.Element {
+  return (
+    <Text size="xs" c="dimmed" mb="xs">
+      {children}
+    </Text>
+  );
+}
 
 /** Чи форма досі та сама, що пішла в збереження чернетки (поля, правила, причина). */
 function sameDraft(sent: SaveRegistryDraftBody, current: SaveRegistryDefinitionDto | null): boolean {
@@ -81,6 +92,7 @@ export function RegistryConstructorPage(): JSX.Element {
   const [newFields, setNewFields] = useState<FieldDraft[]>([]);
   const [reason, setReason] = useState('');
   const [linkEdits, setLinkEdits] = useState<LinkEdits>({});
+  const [tab, setTab] = useState('fields');
 
   const definition = useQuery({
     queryKey: queryKeys.registries.definition(code),
@@ -174,6 +186,34 @@ export function RegistryConstructorPage(): JSX.Element {
     [registries.data],
   );
 
+  // Скільки живих записів у довіднику: за нулем нове поле може бути обов'язковим (сервер:
+  // `newFieldsMayBeRequired`). Невідомо (перелік ще їде чи не прочитався) — не дозволяємо.
+  const entryCount = (registries.data ?? []).find((r) => r.id === definition.data?.id)?.entryCount ?? null;
+
+  /**
+   * Одиниці виміру — для вибору одиниці числового поля і для підпису одиниць наявних полів назвою.
+   * Той самий ключ і запит, що й `templates/ColumnEditor.tsx`. ⚠ Вмикається лише коли вони потрібні,
+   * щоб сторінка без числових полів не робила зайвого запиту.
+   */
+  const needsUnits =
+    newFields.some((field) => NumericFieldTypes.includes(field.dataType)) ||
+    (definition.data?.fields ?? []).some((field) => field.unitId !== null);
+  const units = useQuery({
+    queryKey: ['units'],
+    queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
+    staleTime: 60 * 60 * 1000,
+    enabled: needsUnits,
+  });
+
+  const unitOptions = useMemo(
+    () =>
+      (units.data ?? []).map((unit) => ({
+        value: String(unit.id),
+        label: `${unit.code} (${unit.dimensionCode})`,
+      })),
+    [units.data],
+  );
+
   /** Останнє успішне збереження чернетки (тіло й версія), доки його не спожив засів форми (L9-39). */
   const sentDraft = useRef<{ body: SaveRegistryDraftBody; rowVersion: string } | null>(null);
   const latestRequest = useRef<SaveRegistryDefinitionDto | null>(null);
@@ -236,7 +276,9 @@ export function RegistryConstructorPage(): JSX.Element {
   const mayView = can(session.data, 'Registry.EditDefinition');
   const mayEdit = mayView && session.data?.isSimulation !== true;
   const ready =
-    rules.every(isComplete) && newFields.every(isFieldComplete) && reason.trim().length > 0;
+    rules.every(isComplete) &&
+    newFields.every((field) => isFieldComplete(field, entryCount === 0)) &&
+    reason.trim().length > 0;
 
   /**
    * Повний стан форми для збереження чернетки; `null` — ще не готовий.
@@ -257,10 +299,22 @@ export function RegistryConstructorPage(): JSX.Element {
   // на кожну правку.
   latestRequest.current = request;
 
+  // Вкладка «Мапінг» зникає (локальний довідник без мапінгу), «Використання» — без права:
+  // активна, що зникла, повертає на першу доступну, а не лишає Tabs із неіснуючим значенням.
+  const showMapping =
+    definition.data !== undefined &&
+    (definition.data.mappings.length > 0 || definition.data.sourceKind !== 'Local');
+  const available = new Set(['fields', 'relations', 'rules', 'history']);
+  if (showMapping) available.add('mapping');
+  if (mayView) available.add('usage');
+  const activeTab = available.has(tab) ? tab : 'fields';
+
   return (
     <>
       <PageHeader
         title={t('registries.constructor')}
+        description={t('registries.constructor.description')}
+        back={{ label: t('registries.data.back'), href: `/admin/registries?code=${encodeURIComponent(code)}` }}
         actions={
           <Group gap="xs" align="end">
             {definition.data !== undefined && (
@@ -307,12 +361,15 @@ export function RegistryConstructorPage(): JSX.Element {
               }}
             />
 
-            <Tabs defaultValue="fields" keepMounted={false}>
+            <Tabs value={activeTab} onChange={(value) => setTab(value ?? 'fields')} keepMounted={false}>
               <Tabs.List>
                 <Tabs.Tab value="fields">{t('registries.tabFields')}</Tabs.Tab>
                 <Tabs.Tab value="relations">{t('registries.tabRelations')}</Tabs.Tab>
                 <Tabs.Tab value="rules">{t('registries.tabRules')}</Tabs.Tab>
-                <Tabs.Tab value="mapping">{t('registries.tabMapping')}</Tabs.Tab>
+                {/* ⚠ Мапінг лише читається, а у локального довідника без мапінгу порожній завжди:
+                    вкладка, що веде в «нічого», лише збиває з пантелику. Зовнішній/гібридний
+                    довідник без мапінгу її лишає — порожній стан там і є відповіддю. */}
+                {showMapping && <Tabs.Tab value="mapping">{t('registries.tabMapping')}</Tabs.Tab>}
                 <Tabs.Tab value="history">{t('registries.tabHistory')}</Tabs.Tab>
                 {/* ⚠ Лише з правом `Registry.EditDefinition` — те саме право, що
                     на сервері (`GetRegistryUsageHandler`): вкладка без права
@@ -333,11 +390,17 @@ export function RegistryConstructorPage(): JSX.Element {
                   <ErrorAlert error={registries.error} onRetry={() => void registries.refetch()} />
                 )}
 
+                {units.error !== null && (
+                  <ErrorAlert error={units.error} onRetry={() => void units.refetch()} />
+                )}
+
                 <RegistryFields
                   definition={loaded}
                   canEdit={mayEdit}
                   newFields={newFields}
                   registryOptions={registryOptions}
+                  unitOptions={unitOptions}
+                  entryCount={entryCount}
                   onAddField={() => setNewFields((all) => [...all, emptyField()])}
                   onChangeField={(index, field) =>
                     setNewFields((all) => all.map((item, i) => (i === index ? field : item)))
@@ -371,11 +434,15 @@ export function RegistryConstructorPage(): JSX.Element {
                 />
               </Tabs.Panel>
 
-              <Tabs.Panel value="mapping" pt="sm">
-                <RegistryMappings definition={loaded} />
-              </Tabs.Panel>
+              {showMapping && (
+                <Tabs.Panel value="mapping" pt="sm">
+                  <TabHint>{t('registries.tabHint.mapping')}</TabHint>
+                  <RegistryMappings definition={loaded} />
+                </Tabs.Panel>
+              )}
 
               <Tabs.Panel value="history" pt="sm">
+                <TabHint>{t('registries.tabHint.history')}</TabHint>
                 {/*
                   ⛔ Найдорожче місце цієї сторінки: `history.data ?? []` при
                   відмові давало `entries.length === 0`, а `RegistryHistory`
@@ -408,6 +475,7 @@ export function RegistryConstructorPage(): JSX.Element {
 
               {mayView && (
                 <Tabs.Panel value="usage" pt="sm">
+                  <TabHint>{t('registries.tabHint.usage')}</TabHint>
                   <RegistryUsagePanel code={loaded.code} />
                 </Tabs.Panel>
               )}
@@ -418,4 +486,3 @@ export function RegistryConstructorPage(): JSX.Element {
     </>
   );
 }
-
