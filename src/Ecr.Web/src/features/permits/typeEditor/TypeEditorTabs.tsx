@@ -63,7 +63,7 @@ export function TypeEditorTabs(): JSX.Element {
           tone="info"
           title={t('permits.editor.published.title')}
           text={t('permits.editor.published.text')}
-          actions={[{ label: t('permits.editor.actions.newVersion'), onClick: actions.openNewVersion }]}
+          actions={mayEdit ? [{ label: t('permits.editor.actions.newVersion'), onClick: actions.openNewVersion }] : undefined}
         />
       )}
       <Tabs value={tab} onChange={select} keepMounted={false}>

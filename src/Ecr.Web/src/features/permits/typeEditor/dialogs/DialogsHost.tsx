@@ -1,8 +1,9 @@
-import { useMemo, useRef, type JSX } from 'react';
+import { useEffect, useMemo, useRef, type JSX } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { showApiError } from '@/shared/ui/notify';
 import type { PermitType } from '../../api/types';
+import { useMayEditPermitTypes, useMayPublishPermitTypes } from '../../permitRights';
 import { PermitsPaths } from '../../shell/permitPaths';
 import { removeTable, type TypeDraft } from '../draftModel';
 import { EditorParams, readDialog, withoutDialog } from '../editorActions';
@@ -33,6 +34,13 @@ export function DialogsHost(): JSX.Element | null {
 
   const type = useMemo(() => typeWithDraft(api.type, api.draft), [api.type, api.draft]);
   const open = readDialog(params);
+  const mayEdit = useMayEditPermitTypes();
+  const mayPublish = useMayPublishPermitTypes();
+  // «Видалити таблицю» живе тут, а не в TypeEditorDialogs: без права його теж не відкриваємо й чистимо адресу.
+  const deniedDeleteTable = open?.id === 'delete-table' && !mayEdit;
+  useEffect(() => {
+    if (deniedDeleteTable) setParams(withoutDialog(latestParams.current), { replace: true });
+  }, [deniedDeleteTable, setParams]);
 
   const settle = async (): Promise<PermitType | null> => {
     if (!(await api.flush())) return null;
@@ -40,6 +48,7 @@ export function DialogsHost(): JSX.Element | null {
   };
 
   const onChange = (change: (draft: TypeDraft) => TypeDraft): void => {
+    if (!mayEdit) return;
     api.apply((current) => {
       try {
         return change(current);
@@ -57,6 +66,8 @@ export function DialogsHost(): JSX.Element | null {
         selectedTableCode={selectedTableCode(params, api.draft)}
         onChange={onChange}
         settle={settle}
+        mayEdit={mayEdit}
+        mayPublish={mayPublish}
         onTypeReplaced={api.acceptServer}
         onReload={() => void api.reload()}
         onDeleted={() => {
@@ -72,7 +83,7 @@ export function DialogsHost(): JSX.Element | null {
           setParams(next, { replace: true });
         }}
       />
-      {open?.id === 'delete-table' && open.tableCode !== null && (
+      {open?.id === 'delete-table' && mayEdit && open.tableCode !== null && (
         <DeleteTableDialog
           type={api.type}
           draft={api.draft}

@@ -4,6 +4,7 @@ import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import { badgeLook, statusTone } from '@/shared/ui/StatusBadge';
 import { PermitEditorHead } from '../shell/PermitEditorHead';
+import { useMayEditPermitTypes, useMayPublishPermitTypes } from '../permitRights';
 import { PermitsPaths } from '../shell/permitPaths';
 import { validateDraft, validateForPublish, type DraftProblem } from './draftModel';
 import { useEditorActions } from './editorActions';
@@ -51,12 +52,16 @@ export function TypeEditorHeader(): JSX.Element {
   const actions = useEditorActions();
   const [checked, setChecked] = useState<DraftProblem[] | null>(null);
   const { type, draft, editable, save, problems } = api;
+  // `editable` — стан типу (чернетка); писати може лише той, хто має право і не в симуляції.
+  const mayEdit = useMayEditPermitTypes();
+  const mayPublish = useMayPublishPermitTypes();
+  const writable = editable && mayEdit;
 
   const title = textOf(draft.nameL10n) || type.code;
   const subtitle = secondaryTextOf(draft.nameL10n, title);
   const version = editable ? (type.draftVersion ?? type.version + 1) : type.version;
   // Видалити можна лише тип, що ніколи не публікувався (сервер: `ECR-PRM-4094` для опублікованого).
-  const deletable = editable && type.version === 0;
+  const deletable = writable && type.version === 0;
 
   const check = (): void => setChecked([...validateDraft(draft, { typeCode: type.code }), ...validateForPublish(draft)]);
 
@@ -78,16 +83,21 @@ export function TypeEditorHeader(): JSX.Element {
         }
         actions={
           <Group gap="xs">
-            {editable && (
+            {writable && (
               <Button variant="default" onClick={check}>
                 {t('permits.editor.actions.check')}
               </Button>
             )}
-            {editable ? (
-              <Button onClick={actions.openPublish}>{t('permits.editor.actions.publish')}</Button>
-            ) : (
-              <Button onClick={actions.openNewVersion}>{t('permits.editor.actions.newVersion')}</Button>
+            {writable && (
+              <Button
+                onClick={actions.openPublish}
+                disabled={!mayPublish}
+                title={mayPublish ? undefined : t('permits.editor.actions.publishNoRight')}
+              >
+                {t('permits.editor.actions.publish')}
+              </Button>
             )}
+            {!editable && mayEdit && <Button onClick={actions.openNewVersion}>{t('permits.editor.actions.newVersion')}</Button>}
             {deletable && (
               <Menu position="bottom-end" withinPortal>
                 <Menu.Target>

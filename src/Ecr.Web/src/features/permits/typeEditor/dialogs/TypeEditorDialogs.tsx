@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import type { PermitType } from '@/features/permits/api/types';
 import { t } from '@/shared/i18n';
 import { showApiError, showWarning } from '@/shared/ui/notify';
@@ -58,6 +58,15 @@ export interface TypeEditorDialogsProps {
   readonly onReload?: (() => void) | undefined;
   readonly onDeleted?: (() => void) | undefined;
   readonly onSelectTable?: ((code: string) => void) | undefined;
+
+  /**
+   * Чи має користувач право змінювати типи (і не в симуляції). `false` — жоден діалог (усі вони пишуть) не
+   * відкривається, а `?dialog=` у адресі прибирається. Типово `true`: хост сторінки передає справжнє значення.
+   */
+  readonly mayEdit?: boolean | undefined;
+
+  /** Чи має користувач право публікувати; `false` — діалог `publish-type` не відкривається. Типово `true`. */
+  readonly mayPublish?: boolean | undefined;
 }
 
 export function TypeEditorDialogs({
@@ -70,17 +79,47 @@ export function TypeEditorDialogs({
   onReload,
   onDeleted,
   onSelectTable,
+  mayEdit = true,
+  mayPublish = true,
 }: TypeEditorDialogsProps): JSX.Element | null {
   const [dialog, setDialog] = useUrlState('dialog');
   const [settling, setSettling] = useState(false);
 
-  /** Спершу зберігає чернетку (`settle`), і лише з найсвіжішим типом шле запит; не збереглась — не шле. */
-  const afterSettle = (send: (fresh: PermitType) => void): void => {
+  // Діалог, відкритий ЗАРАЗ (а не на мить старту `settle`): закритий чи покинутий під час збереження — не шлемо.
+  const openNow = useRef<string | null>(dialog);
+  useEffect(() => {
+    openNow.current = dialog;
+    return () => {
+      openNow.current = null;
+    };
+  }, [dialog]);
+
+  // `onSelectTable` іде в наступному такті; після зникнення хоста таймер не має зачепити чужу адресу.
+  const selectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (selectTimer.current !== null) clearTimeout(selectTimer.current);
+    },
+    [],
+  );
+
+  const known = (Object.values(TypeEditorDialogIds) as string[]).includes(dialog ?? '');
+  // Усі діалоги хоста пишуть у тип; публікація — ще й окреме право.
+  const denied = known &&(!mayEdit || (dialog === TypeEditorDialogIds.publish && !mayPublish));
+  useEffect(() => {
+    if (denied) setDialog(null);
+  }, [denied, setDialog]);
+
+  /**
+   * Спершу зберігає чернетку (`settle`), і лише з найсвіжішим типом шле запит; не збереглась — не шле.
+   * Закрили діалог, поки йшло збереження, — запиту теж немає (людина відмовилась).
+   */
+  const afterSettle = (id: string, send: (fresh: PermitType) => void): void => {
     setSettling(true);
     void (settle === undefined ? Promise.resolve(type) : settle())
       .then((fresh) => {
         if (fresh === null) showWarning(t('permits.editor.dialogs.unsaved'));
-        else send(fresh);
+        else if (openNow.current === id) send(fresh);
       })
       .catch((error: unknown) => {
         showApiError(error);
@@ -120,6 +159,8 @@ export function TypeEditorDialogs({
 
   const table = type.tables.find((entry) => entry.code === selectedTableCode);
 
+  if (denied) return null;
+
   switch (dialog) {
     case TypeEditorDialogIds.addTable:
       return (
@@ -132,7 +173,9 @@ export function TypeEditorDialogs({
             // губив би обидві зміни адреси.
             onChange((draft) => addTable(draft, added));
             if (onSelectTable !== undefined) {
-              setTimeout(() => {
+              if (selectTimer.current !== null) clearTimeout(selectTimer.current);
+              selectTimer.current = setTimeout(() => {
+                selectTimer.current = null;
                 onSelectTable(added.code);
               }, 0);
             }
@@ -190,7 +233,7 @@ export function TypeEditorDialogs({
           permitCount={permitCount}
           isPending={lifecycle.publish.isPending || settling}
           onSubmit={(reason) => {
-            afterSettle((fresh) => {
+            afterSettle(TypeEditorDialogIds.publish, (fresh) => {
               lifecycle.publish.mutate({ reason, rowVersion: fresh.rowVersion });
             });
           }}
@@ -208,7 +251,7 @@ export function TypeEditorDialogs({
           type={type}
           isPending={lifecycle.openVersion.isPending || settling}
           onConfirm={() => {
-            afterSettle(() => {
+            afterSettle(TypeEditorDialogIds.newVersion, () => {
               lifecycle.openVersion.mutate();
             });
           }}

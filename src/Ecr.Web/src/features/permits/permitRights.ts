@@ -18,3 +18,15 @@ export function useMayEditPermitTypes(): boolean {
   const session = useSession();
   return can(session.data, PermitTypesPermission) && session.data?.isSimulation !== true;
 }
+
+/**
+ * Право ПУБЛІКУВАТИ тип (сервер: `Registry.Publish`). ⚠ Стане `Permit.PublishType` після PM-04 — один рядок,
+ * як і {@link PermitTypesPermission}.
+ */
+export const PermitTypesPublishPermission = 'Registry.Publish';
+
+/** Чи може ПОТОЧНИЙ користувач публікувати типи: має {@link PermitTypesPublishPermission} і сеанс не є симуляцією. */
+export function useMayPublishPermitTypes(): boolean {
+  const session = useSession();
+  return can(session.data, PermitTypesPublishPermission) && session.data?.isSimulation !== true;
+}

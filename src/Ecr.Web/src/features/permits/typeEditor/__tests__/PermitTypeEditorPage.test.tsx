@@ -38,7 +38,7 @@ vi.mock('../../api/typesApi', () => ({
   openPermitTypeVersion: vi.fn(),
   deletePermitType: vi.fn(),
 }));
-const session = vi.hoisted(() => ({ permissions: ['Registry.EditDefinition'] as string[] }));
+const session = vi.hoisted(() => ({ permissions: ['Registry.EditDefinition', 'Registry.Publish'] as string[] }));
 vi.mock('@/shared/session/useSession', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/session/useSession')>()),
   useSession: () => ({ data: { permissions: session.permissions, isSimulation: false } }),

@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import type { PermitTypeColumn, PermitTypeTable } from '../api/types';
+import { useMayEditPermitTypes } from '../permitRights';
 import { ColumnsTable } from './ColumnsTable';
 import { findColumn, findTable, updateColumn, uniqueKeyParts } from './draftModel';
 import { EditorParams, HeadNode, useEditorActions } from './editorActions';
@@ -27,7 +28,10 @@ export function StructureTab(): JSX.Element {
   const units = useUnits();
   const [params, setParams] = useSearchParams();
   const [treeOpen, setTreeOpen] = useState(false);
-  const { draft, type, editable, problems } = api;
+  // Писати можна лише в чернетці, і лише з правом поза симуляцією (сервер усе одно відмовить, але UI не обіцяє).
+  const mayEdit = useMayEditPermitTypes();
+  const editable = api.editable && mayEdit;
+  const { draft, type, problems } = api;
 
   const selected = selectedNode(params, draft);
   const table: PermitTypeTable | undefined = selected === HeadNode ? undefined : findTable(draft, selected);
