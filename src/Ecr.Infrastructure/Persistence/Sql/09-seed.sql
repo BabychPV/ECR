@@ -8129,6 +8129,51 @@ USING (VALUES
     -- REG-UI:actions ── UI довідників, коміт 3: рядок дій сторінки записів (головна + 2 другорядні + «Ще»); ru/kz — порцією REG-UI:actions у блоці I18N нижче ──
     ,(N'registries.moreActions', N'en', N'More', 1)
     -- REG-UI:actions ── кінець секції ──
+    -- PERMITS: types ── en: відмови типів дозволів (ECR-PRM-*, PM-03) ──
+    ,(N'err.ECR-PRM-0404', N'en', N'Permit type not found', 1)
+    ,(N'err.ECR-PRM-0404.type', N'en', N'Permit type "{code}" does not exist.', 1)
+    ,(N'err.ECR-PRM-0422', N'en', N'Permit type definition is invalid', 1)
+    ,(N'err.ECR-PRM-0422.nameRequired', N'en', N'The name of "{item}" is required in at least one language.', 1)
+    ,(N'err.ECR-PRM-0422.categoryUnknown', N'en', N'Category "{category}" does not exist. Use Air, Water, Waste or Other.', 1)
+    ,(N'err.ECR-PRM-0422.tableCodeInvalid', N'en', N'Table code "{tableCode}" is not allowed: use Latin letters, digits and underscore, starting with a letter.', 1)
+    ,(N'err.ECR-PRM-0422.tableDuplicate', N'en', N'Table "{tableCode}" is listed twice.', 1)
+    ,(N'err.ECR-PRM-0422.registryCodeInvalid', N'en', N'The internal code "{registryCode}" is too long or not allowed. Shorten the type, table or column code.', 1)
+    ,(N'err.ECR-PRM-0422.columnCodeInvalid', N'en', N'Column code "{columnCode}" in table "{tableCode}" is not allowed: use Latin letters, digits and underscore, starting with a letter.', 1)
+    ,(N'err.ECR-PRM-0422.columnCodeReserved', N'en', N'Column code "{columnCode}" in table "{tableCode}" is reserved for the link to the permit.', 1)
+    ,(N'err.ECR-PRM-0422.columnDuplicate', N'en', N'Column "{columnCode}" is listed twice in table "{tableCode}".', 1)
+    ,(N'err.ECR-PRM-0422.columnTypeUnknown', N'en', N'Column "{columnCode}" has an unsupported type "{dataType}".', 1)
+    ,(N'err.ECR-PRM-0422.tableWithoutKey', N'en', N'Table "{tableCode}" has no key column: its rows would have no address. Mark at least one column as the key.', 1)
+    ,(N'err.ECR-PRM-0422.numericFormat', N'en', N'Precision and scale of column "{columnCode}" are not valid: only Decimal columns have them, precision is 1 to 38, scale is not larger than precision.', 1)
+    ,(N'err.ECR-PRM-0422.listInconsistent', N'en', N'The list of column "{columnCode}" is not consistent with its source: a shared list needs only a registry code, a table list only a sibling table.', 1)
+    ,(N'err.ECR-PRM-0422.listForNonLookup', N'en', N'Column "{columnCode}" is not a Lookup but has list settings.', 1)
+    ,(N'err.ECR-PRM-0422.typeOnlyNoChoices', N'en', N'Column "{columnCode}" takes values from a list for this type only, but the list has no values.', 1)
+    ,(N'err.ECR-PRM-0422.choicesInvalid', N'en', N'The values of column "{columnCode}" contain an empty or repeated value.', 1)
+    ,(N'err.ECR-PRM-0422.siblingUnknown', N'en', N'Column "{columnCode}" refers to the table "{siblingTableCode}", which is not another table of this type.', 1)
+    ,(N'err.ECR-PRM-0422.siblingCycle', N'en', N'Tables refer to each other in a circle: {chain}.', 1)
+    ,(N'err.ECR-PRM-0422.ruleCodeInvalid', N'en', N'Check code "{ruleCode}" is not allowed.', 1)
+    ,(N'err.ECR-PRM-0422.ruleDuplicate', N'en', N'Check "{ruleCode}" is listed twice.', 1)
+    ,(N'err.ECR-PRM-0422.ruleExpressionRequired', N'en', N'The expression of check "{ruleCode}" is empty.', 1)
+    ,(N'err.ECR-PRM-0422.ruleSeverityUnknown', N'en', N'Level "{severity}" of check "{ruleCode}" does not exist. Use Warn or Block.', 1)
+    ,(N'err.ECR-PRM-0422.tableRemoved', N'en', N'Table "{tableCode}" is published and cannot be removed.', 1)
+    ,(N'err.ECR-PRM-0422.columnRemoved', N'en', N'Column "{columnCode}" of table "{tableCode}" is published and cannot be removed: rows refer to its values.', 1)
+    ,(N'err.ECR-PRM-0422.columnRetyped', N'en', N'The type of published column "{columnCode}" of table "{tableCode}" cannot be changed.', 1)
+    ,(N'err.ECR-PRM-0422.keyChanged', N'en', N'The key of published table "{tableCode}" cannot be changed.', 1)
+    ,(N'err.ECR-PRM-0422.noTables', N'en', N'A permit type without tables cannot be published.', 1)
+    ,(N'err.ECR-PRM-0422.reasonTooShort', N'en', N'The reason for publishing must have at least {min} characters.', 1)
+    ,(N'err.ECR-PRM-0422.groupCodeInvalid', N'en', N'Group code "{group}" of column "{columnCode}" is not allowed: use Latin letters, digits and underscore, starting with a letter.', 1)
+    ,(N'err.ECR-PRM-0422.sharedRegistryUnknown', N'en', N'Column "{columnCode}" refers to the shared registry "{registryCode}", which does not exist.', 1)
+    ,(N'err.ECR-PRM-4091', N'en', N'Permit type code is taken', 1)
+    ,(N'err.ECR-PRM-4091.code', N'en', N'A permit type with code "{code}" already exists.', 1)
+    ,(N'err.ECR-PRM-4091.registryCode', N'en', N'The registry code "{registryCode}" needed for the permit type is already taken.', 1)
+    ,(N'err.ECR-PRM-4093', N'en', N'Permit type was changed', 1)
+    ,(N'err.ECR-PRM-4093.changed', N'en', N'The permit type "{code}" was changed or published after you opened it. Reload it and repeat your edit.', 1)
+    ,(N'err.ECR-PRM-4093.noDraft', N'en', N'The permit type "{code}" is published and has no open draft. Open a new version first.', 1)
+    ,(N'err.ECR-PRM-4093.draftExists', N'en', N'The permit type "{code}" already has an open draft of a new version.', 1)
+    ,(N'err.ECR-PRM-4093.notPublished', N'en', N'The permit type "{code}" has not been published yet, so there is no version to start from.', 1)
+    ,(N'err.ECR-PRM-4094', N'en', N'Permit type is in use', 1)
+    ,(N'err.ECR-PRM-4094.published', N'en', N'The permit type "{code}" is published and cannot be deleted.', 1)
+    ,(N'err.ECR-PRM-4094.hasPermits', N'en', N'The permit type "{code}" already has {count} permits and cannot be deleted.', 1)
+    -- PERMITS: types ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -20521,6 +20566,136 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- REG-UI:actions ── кінець секції ──
+-- PERMITS: types ── ECR-PRM-0404 ── ru/kz: тип дозволу не знайдено; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-0404', N'ru', N'Тип разрешения не найден'),
+    (N'err.ECR-PRM-0404', N'kz', N'Рұқсат түрі табылмады'),
+    (N'err.ECR-PRM-0404.type', N'ru', N'Типа разрешения «{code}» не существует.'),
+    (N'err.ECR-PRM-0404.type', N'kz', N'«{code}» рұқсат түрі жоқ.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: types ── ECR-PRM-0404 ── кінець секції ──
+
+-- PERMITS: types ── ECR-PRM-0422 ── ru/kz: визначення типу дозволу некоректне; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-0422', N'ru', N'Определение типа разрешения некорректно'),
+    (N'err.ECR-PRM-0422.nameRequired', N'ru', N'Название «{item}» обязательно хотя бы на одном языке.'),
+    (N'err.ECR-PRM-0422.categoryUnknown', N'ru', N'Категории «{category}» не существует. Используйте Air, Water, Waste или Other.'),
+    (N'err.ECR-PRM-0422.tableCodeInvalid', N'ru', N'Код таблицы «{tableCode}» недопустим: латинские буквы, цифры и подчёркивание, первым — буква.'),
+    (N'err.ECR-PRM-0422.tableDuplicate', N'ru', N'Таблица «{tableCode}» указана дважды.'),
+    (N'err.ECR-PRM-0422.registryCodeInvalid', N'ru', N'Внутренний код «{registryCode}» слишком длинный или недопустим. Сократите код типа, таблицы или столбца.'),
+    (N'err.ECR-PRM-0422.columnCodeInvalid', N'ru', N'Код столбца «{columnCode}» в таблице «{tableCode}» недопустим: латинские буквы, цифры и подчёркивание, первым — буква.'),
+    (N'err.ECR-PRM-0422.columnCodeReserved', N'ru', N'Код столбца «{columnCode}» в таблице «{tableCode}» зарезервирован за ссылкой на разрешение.'),
+    (N'err.ECR-PRM-0422.columnDuplicate', N'ru', N'Столбец «{columnCode}» указан дважды в таблице «{tableCode}».'),
+    (N'err.ECR-PRM-0422.columnTypeUnknown', N'ru', N'У столбца «{columnCode}» неподдерживаемый тип «{dataType}».'),
+    (N'err.ECR-PRM-0422.tableWithoutKey', N'ru', N'В таблице «{tableCode}» нет ключевого столбца: у строк не было бы адреса. Отметьте ключом хотя бы один столбец.'),
+    (N'err.ECR-PRM-0422.numericFormat', N'ru', N'Точность и масштаб столбца «{columnCode}» некорректны: они есть только у Decimal, точность от 1 до 38, масштаб не больше точности.'),
+    (N'err.ECR-PRM-0422.listInconsistent', N'ru', N'Список столбца «{columnCode}» не согласован с источником: общему списку нужен только код справочника, списку-таблице — только соседняя таблица.'),
+    (N'err.ECR-PRM-0422.listForNonLookup', N'ru', N'Столбец «{columnCode}» не Lookup, но имеет настройки списка.'),
+    (N'err.ECR-PRM-0422.typeOnlyNoChoices', N'ru', N'Столбец «{columnCode}» берёт значения из списка только для этого типа, но в списке нет значений.'),
+    (N'err.ECR-PRM-0422.choicesInvalid', N'ru', N'В значениях столбца «{columnCode}» есть пустое или повторяющееся значение.'),
+    (N'err.ECR-PRM-0422.siblingUnknown', N'ru', N'Столбец «{columnCode}» ссылается на таблицу «{siblingTableCode}», которой нет среди других таблиц этого типа.'),
+    (N'err.ECR-PRM-0422.siblingCycle', N'ru', N'Таблицы ссылаются друг на друга по кругу: {chain}.'),
+    (N'err.ECR-PRM-0422.ruleCodeInvalid', N'ru', N'Код проверки «{ruleCode}» недопустим.'),
+    (N'err.ECR-PRM-0422.ruleDuplicate', N'ru', N'Проверка «{ruleCode}» указана дважды.'),
+    (N'err.ECR-PRM-0422.ruleExpressionRequired', N'ru', N'Выражение проверки «{ruleCode}» пустое.'),
+    (N'err.ECR-PRM-0422.ruleSeverityUnknown', N'ru', N'Уровня «{severity}» проверки «{ruleCode}» не существует. Используйте Warn или Block.'),
+    (N'err.ECR-PRM-0422.tableRemoved', N'ru', N'Таблица «{tableCode}» опубликована и не удаляется.'),
+    (N'err.ECR-PRM-0422.columnRemoved', N'ru', N'Столбец «{columnCode}» таблицы «{tableCode}» опубликован и не удаляется: на его значения ссылаются строки.'),
+    (N'err.ECR-PRM-0422.columnRetyped', N'ru', N'Тип опубликованного столбца «{columnCode}» таблицы «{tableCode}» не меняется.'),
+    (N'err.ECR-PRM-0422.keyChanged', N'ru', N'Ключ опубликованной таблицы «{tableCode}» не меняется.'),
+    (N'err.ECR-PRM-0422.noTables', N'ru', N'Тип разрешения без таблиц не публикуется.'),
+    (N'err.ECR-PRM-0422.reasonTooShort', N'ru', N'Причина публикации должна содержать не менее {min} символов.'),
+    (N'err.ECR-PRM-0422.groupCodeInvalid', N'ru', N'Код группы «{group}» столбца «{columnCode}» недопустим: латинские буквы, цифры и подчёркивание, первым — буква.'),
+    (N'err.ECR-PRM-0422.sharedRegistryUnknown', N'ru', N'Столбец «{columnCode}» ссылается на общий справочник «{registryCode}», которого не существует.'),
+    (N'err.ECR-PRM-0422', N'kz', N'Рұқсат түрінің анықтамасы қате'),
+    (N'err.ECR-PRM-0422.nameRequired', N'kz', N'«{item}» атауы кемінде бір тілде міндетті.'),
+    (N'err.ECR-PRM-0422.categoryUnknown', N'kz', N'«{category}» санаты жоқ. Air, Water, Waste немесе Other қолданыңыз.'),
+    (N'err.ECR-PRM-0422.tableCodeInvalid', N'kz', N'«{tableCode}» кесте коды жарамсыз: латын әріптері, сандар және асты сызылған таңба, бірінші — әріп.'),
+    (N'err.ECR-PRM-0422.tableDuplicate', N'kz', N'«{tableCode}» кестесі екі рет көрсетілген.'),
+    (N'err.ECR-PRM-0422.registryCodeInvalid', N'kz', N'«{registryCode}» ішкі коды тым ұзын немесе жарамсыз. Түрдің, кестенің немесе бағанның кодын қысқартыңыз.'),
+    (N'err.ECR-PRM-0422.columnCodeInvalid', N'kz', N'«{tableCode}» кестесіндегі «{columnCode}» баған коды жарамсыз: латын әріптері, сандар және асты сызылған таңба, бірінші — әріп.'),
+    (N'err.ECR-PRM-0422.columnCodeReserved', N'kz', N'«{tableCode}» кестесіндегі «{columnCode}» баған коды рұқсатқа сілтеме үшін резервте.'),
+    (N'err.ECR-PRM-0422.columnDuplicate', N'kz', N'«{columnCode}» бағаны «{tableCode}» кестесінде екі рет көрсетілген.'),
+    (N'err.ECR-PRM-0422.columnTypeUnknown', N'kz', N'«{columnCode}» бағанының «{dataType}» түрі қолдау таппайды.'),
+    (N'err.ECR-PRM-0422.tableWithoutKey', N'kz', N'«{tableCode}» кестесінде кілттік баған жоқ: жолдардың мекенжайы болмас еді. Кемінде бір бағанды кілт етіп белгілеңіз.'),
+    (N'err.ECR-PRM-0422.numericFormat', N'kz', N'«{columnCode}» бағанының дәлдігі мен масштабы қате: олар тек Decimal үшін, дәлдік 1–38, масштаб дәлдіктен аспайды.'),
+    (N'err.ECR-PRM-0422.listInconsistent', N'kz', N'«{columnCode}» бағанының тізімі көзімен үйлеспейді: ортақ тізімге тек анықтамалық коды, кесте тізіміне тек көрші кесте керек.'),
+    (N'err.ECR-PRM-0422.listForNonLookup', N'kz', N'«{columnCode}» бағаны Lookup емес, бірақ тізім параметрлері бар.'),
+    (N'err.ECR-PRM-0422.typeOnlyNoChoices', N'kz', N'«{columnCode}» бағаны мәндерді тек осы түрге арналған тізімнен алады, бірақ тізімде мән жоқ.'),
+    (N'err.ECR-PRM-0422.choicesInvalid', N'kz', N'«{columnCode}» бағанының мәндерінде бос немесе қайталанатын мән бар.'),
+    (N'err.ECR-PRM-0422.siblingUnknown', N'kz', N'«{columnCode}» бағаны осы түрдің басқа кестелерінде жоқ «{siblingTableCode}» кестесіне сілтейді.'),
+    (N'err.ECR-PRM-0422.siblingCycle', N'kz', N'Кестелер бір-біріне шеңбер бойымен сілтейді: {chain}.'),
+    (N'err.ECR-PRM-0422.ruleCodeInvalid', N'kz', N'«{ruleCode}» тексеру коды жарамсыз.'),
+    (N'err.ECR-PRM-0422.ruleDuplicate', N'kz', N'«{ruleCode}» тексеруі екі рет көрсетілген.'),
+    (N'err.ECR-PRM-0422.ruleExpressionRequired', N'kz', N'«{ruleCode}» тексеруінің өрнегі бос.'),
+    (N'err.ECR-PRM-0422.ruleSeverityUnknown', N'kz', N'«{ruleCode}» тексеруінің «{severity}» деңгейі жоқ. Warn немесе Block қолданыңыз.'),
+    (N'err.ECR-PRM-0422.tableRemoved', N'kz', N'«{tableCode}» кестесі жарияланған және жойылмайды.'),
+    (N'err.ECR-PRM-0422.columnRemoved', N'kz', N'«{tableCode}» кестесінің «{columnCode}» бағаны жарияланған және жойылмайды: оның мәндеріне жолдар сілтейді.'),
+    (N'err.ECR-PRM-0422.columnRetyped', N'kz', N'«{tableCode}» кестесінің жарияланған «{columnCode}» бағанының түрі өзгермейді.'),
+    (N'err.ECR-PRM-0422.keyChanged', N'kz', N'Жарияланған «{tableCode}» кестесінің кілті өзгермейді.'),
+    (N'err.ECR-PRM-0422.noTables', N'kz', N'Кестесі жоқ рұқсат түрі жарияланбайды.'),
+    (N'err.ECR-PRM-0422.reasonTooShort', N'kz', N'Жариялау себебі кемінде {min} таңбадан тұруы тиіс.'),
+    (N'err.ECR-PRM-0422.groupCodeInvalid', N'kz', N'«{columnCode}» бағанының «{group}» топ коды жарамсыз: латын әріптері, сандар және асты сызылған таңба, бірінші — әріп.'),
+    (N'err.ECR-PRM-0422.sharedRegistryUnknown', N'kz', N'«{columnCode}» бағаны жоқ «{registryCode}» ортақ анықтамалығына сілтейді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: types ── ECR-PRM-0422 ── кінець секції ──
+
+-- PERMITS: types ── ECR-PRM-4091 ── ru/kz: код типу дозволу зайнятий; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-4091', N'ru', N'Код типа разрешения занят'),
+    (N'err.ECR-PRM-4091', N'kz', N'Рұқсат түрінің коды бос емес'),
+    (N'err.ECR-PRM-4091.code', N'ru', N'Тип разрешения с кодом «{code}» уже существует.'),
+    (N'err.ECR-PRM-4091.code', N'kz', N'«{code}» кодты рұқсат түрі бұрыннан бар.'),
+    (N'err.ECR-PRM-4091.registryCode', N'ru', N'Код справочника «{registryCode}», нужный типу разрешения, уже занят.'),
+    (N'err.ECR-PRM-4091.registryCode', N'kz', N'Рұқсат түріне қажет «{registryCode}» анықтамалық коды бос емес.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: types ── ECR-PRM-4091 ── кінець секції ──
+
+-- PERMITS: types ── ECR-PRM-4093 ── ru/kz: тип дозволу змінено чи стан не відповідає дії; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-4093', N'ru', N'Тип разрешения изменён'),
+    (N'err.ECR-PRM-4093', N'kz', N'Рұқсат түрі өзгертілді'),
+    (N'err.ECR-PRM-4093.changed', N'ru', N'Тип разрешения «{code}» изменили или опубликовали после того, как вы его открыли. Перечитайте его и повторите правку.'),
+    (N'err.ECR-PRM-4093.changed', N'kz', N'«{code}» рұқсат түрін сіз ашқаннан кейін өзгертті немесе жариялады. Оны қайта оқып, түзетуді қайталаңыз.'),
+    (N'err.ECR-PRM-4093.noDraft', N'ru', N'Тип разрешения «{code}» опубликован и не имеет открытого черновика. Сначала откройте новую версию.'),
+    (N'err.ECR-PRM-4093.noDraft', N'kz', N'«{code}» рұқсат түрі жарияланған және ашық жобасы жоқ. Алдымен жаңа нұсқаны ашыңыз.'),
+    (N'err.ECR-PRM-4093.draftExists', N'ru', N'У типа разрешения «{code}» уже есть черновик новой версии.'),
+    (N'err.ECR-PRM-4093.draftExists', N'kz', N'«{code}» рұқсат түрінің жаңа нұсқасының жобасы бұрыннан бар.'),
+    (N'err.ECR-PRM-4093.notPublished', N'ru', N'Тип разрешения «{code}» ещё не опубликован: новую версию не с чего открывать.'),
+    (N'err.ECR-PRM-4093.notPublished', N'kz', N'«{code}» рұқсат түрі әлі жарияланбаған: жаңа нұсқаны ашатын негіз жоқ.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: types ── ECR-PRM-4093 ── кінець секції ──
+
+-- PERMITS: types ── ECR-PRM-4094 ── ru/kz: тип дозволу використовується; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-4094', N'ru', N'Тип разрешения используется'),
+    (N'err.ECR-PRM-4094', N'kz', N'Рұқсат түрі қолданыста'),
+    (N'err.ECR-PRM-4094.published', N'ru', N'Тип разрешения «{code}» опубликован и не удаляется.'),
+    (N'err.ECR-PRM-4094.published', N'kz', N'«{code}» рұқсат түрі жарияланған және жойылмайды.'),
+    (N'err.ECR-PRM-4094.hasPermits', N'ru', N'По типу разрешения «{code}» уже есть разрешения ({count}): он не удаляется.'),
+    (N'err.ECR-PRM-4094.hasPermits', N'kz', N'«{code}» рұқсат түрі бойынша рұқсаттар бар ({count}): ол жойылмайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: types ── ECR-PRM-4094 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

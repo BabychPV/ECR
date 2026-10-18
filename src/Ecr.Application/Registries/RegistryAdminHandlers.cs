@@ -18,8 +18,16 @@ namespace Ecr.Application.Registries;
 /// на вивантаження всієї бази довідників.
 /// </remarks>
 public sealed class ListRegistriesHandler(
-    IRegistryStore registries, Security.IAccessDecisionService access, ICurrentUser currentUser, IClock clock)
+    IRegistryStore registries,
+    Security.IAccessDecisionService access,
+    ICurrentUser currentUser,
+    IClock clock,
+    IPermitTypeStore? permits = null)
 {
+    // ⚠ `permits` (Permits, PM-03) необов'язковий лише для тестів, що будують обробник руками; контейнер
+    // підставляє його завжди. Він прибирає з переліку приховані реєстри типів дозволів (шапки, таблиці,
+    // списки «лише для типу»): користувач бачить їх тільки через «Permits».
+
     /// <summary>Право на читання довідників (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.View";
 
@@ -64,7 +72,12 @@ public sealed class ListRegistriesHandler(
 
         var byId = definitions.ToDictionary(d => d.Id);
 
+        IReadOnlySet<int> hidden = permits is null
+            ? new HashSet<int>()
+            : await permits.ListHiddenRegistryIdsAsync(ct).ConfigureAwait(false);
+
         return definitions
+            .Where(d => !hidden.Contains(d.Id))
             .Where(d => !RegistryAccess.IsDenied(profile, d.Id))
             .Select(d => new RegistryDefDto(
                 d.Id,

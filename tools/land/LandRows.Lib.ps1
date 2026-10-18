@@ -49,6 +49,17 @@ $script:LandRowsLegacyAliases = @{
     'Land_Agent_EmissionSourceType' = 'EmissionSourceType'; 'Land_Remarks' = 'WriteYourRemarksHere'
 }
 
+function ConvertTo-LandNaeInputNormalized {
+    <# Вхідна нормалізація Land_NAE при завантаженні (страховка прод-даних, RCN1): NFC і зняття ВСІХ пробільних символів
+       (клас: \s у .NET (пробіл, таб, NBSP, інші Unicode-пробіли) + явно \u00A0 \u2007 \u202F \u200B \uFEFF; інші невидимі символи не знімаються) - як легасі Trim + Replace(" ", ""); дужки й регістр
+       не чіпає: '0500 (003)' -> '0500(003)'. null/порожнє - без змін. Ідемпотентна. Не плутати з ConvertTo-LandNaeNormalized (LandNaeType). #>
+    param([AllowNull()]$Nae)
+    if ($null -eq $Nae) { return $null }
+    $naeText = [string]$Nae
+    if ($naeText.Length -eq 0) { return $naeText }
+    $naeText = $naeText.Normalize([Text.NormalizationForm]::FormC)
+    return [regex]::Replace($naeText, '[\s\u00A0\u2007\u202F\u200B\uFEFF]+', '')
+}
 function Get-LandRowsTableKey {
     <# Prod AF table -> 'SHEET|TABLE' of the template, or $null (unknown table). Water/waste tables return their key too. #>
     param([Parameter(Mandatory)][string]$ProdTable)
@@ -204,7 +215,7 @@ function New-LandRowsTablePlan {
     )
     $rowsOut = New-Object System.Collections.ArrayList
     $unmappedSet = @{}; $mappedSet = @{}; $missingSet = @{}
-    $plan = @{ ProdRows = 0; Capped = 0; LookupMiss = 0; LookupUnresolved = 0; DupCells = 0; Cells = 0; MixedText = 0; MixedNumber = 0; Type3InMixed = 0 }
+    $plan = @{ NaeNormalized = 0; ProdRows = 0; Capped = 0; LookupMiss = 0; LookupUnresolved = 0; DupCells = 0; Cells = 0; MixedText = 0; MixedNumber = 0; Type3InMixed = 0 }
     $seq = 0
     foreach ($srcRow in @($SourceRows)) {
         $seq++; $plan.ProdRows++
@@ -213,6 +224,7 @@ function New-LandRowsTablePlan {
         foreach ($col in @($srcRow.Keys)) {
             if ($col -eq '_efid' -or $col -like 'Con_*') { continue }
             $val = $srcRow[$col]
+            if ($col -eq 'Land_NAE') { $naeNorm = ConvertTo-LandNaeInputNormalized -Nae $val; if ($null -ne $val -and $naeNorm -cne [string]$val) { $plan.NaeNormalized++ }; $val = $naeNorm }
             if (Test-LandInputCellEmpty $val) { continue }
             $res = Resolve-LandRowsColumn -ProdColumn ([string]$col) -MonthNo $MonthNo -ColumnMap $ColumnMap -TableAliases $TableAliases
             if ($res.MissingTarget) { $missingSet[$res.MissingTarget] = 1; $unmappedSet[[string]$col] = 1; continue }

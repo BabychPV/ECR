@@ -9602,6 +9602,434 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/permit-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Перелік типів зі сторінками. Право `Registry.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description `Air`, `Water`, `Waste` або `Other`. */
+                    category?: string;
+                    /** @description `Draft` чи `Published`. */
+                    status?: string;
+                    /** @description Підрядок коду чи назви. */
+                    q?: string;
+                    /** @description Розмір сторінки 1..500 (типово 50). */
+                    limit?: number;
+                    /** @description Код останнього типу попередньої сторінки. */
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfPermitTypeListItemDto"];
+                        "text/json": components["schemas"]["PagedResultOfPermitTypeListItemDto"];
+                        "text/plain": components["schemas"]["PagedResultOfPermitTypeListItemDto"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Заводить тип чернеткою (з копією іншого типу за потреби). Право `Registry.EditDefinition`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreatePermitTypeRequest"];
+                    "application/json": components["schemas"]["CreatePermitTypeRequest"];
+                    "text/json": components["schemas"]["CreatePermitTypeRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitTypeDto"];
+                        "text/json": components["schemas"]["PermitTypeDto"];
+                        "text/plain": components["schemas"]["PermitTypeDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permit-types/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Повне визначення типу: чернетка, якщо вона є, інакше опубліковане. Право `Registry.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код типу. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitTypeDto"];
+                        "text/json": components["schemas"]["PermitTypeDto"];
+                        "text/plain": components["schemas"]["PermitTypeDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Замінює ЧЕРНЕТКУ визначення цілком (таблиці, стовпці, списки, перевірки). Право
+         *     `Registry.EditDefinition`. Токен `rowVersion` - з останнього читання. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код типу. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ReplacePermitTypeRequest"];
+                    "application/json": components["schemas"]["ReplacePermitTypeRequest"];
+                    "text/json": components["schemas"]["ReplacePermitTypeRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitTypeDto"];
+                        "text/json": components["schemas"]["PermitTypeDto"];
+                        "text/plain": components["schemas"]["PermitTypeDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Видаляє ніколи не опублікований тип без дозволів. Право `Registry.EditDefinition`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код типу. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permit-types/{code}/new-version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Відкриває чернетку нової версії опублікованого типу. Право `Registry.EditDefinition`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код типу. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitTypeDto"];
+                        "text/json": components["schemas"]["PermitTypeDto"];
+                        "text/plain": components["schemas"]["PermitTypeDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permit-types/{code}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Публікує чернетку АТОМАРНО: шапка, усі таблиці й приховані списки - однією транзакцією. Право
+         *     `Registry.Publish`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код типу. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["PublishPermitTypeRequest"];
+                    "application/json": components["schemas"]["PublishPermitTypeRequest"];
+                    "text/json": components["schemas"]["PublishPermitTypeRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitTypeDto"];
+                        "text/json": components["schemas"]["PermitTypeDto"];
+                        "text/plain": components["schemas"]["PermitTypeDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects": {
         parameters: {
             query?: never;
@@ -21230,6 +21658,19 @@ export interface components {
              */
             yearGraceOffsetDays: number;
         };
+        /** @description Запит на заведення типу. */
+        CreatePermitTypeRequest: {
+            /** @description `Air`, `Water`, `Waste` або `Other`. */
+            category: string;
+            /** @description Код типу. */
+            code: string;
+            /** @description Код типу, склад якого скопіювати в чернетку. */
+            copyFromCode?: null | string;
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+        };
         /** @description Запит на створення проєкту. */
         CreateProjectRequest: {
             /** @description Код проєкту. */
@@ -24113,6 +24554,19 @@ export interface components {
         };
         /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
          *     перевіряється архітектурним тестом. */
+        PagedResultOfPermitTypeListItemDto: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["PermitTypeListItemDto"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
         PagedResultOfProjectSummary: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["ProjectSummary"][];
@@ -24607,6 +25061,173 @@ export interface components {
              *     за seed і видається поіменно, а не через матрицю. */
             isDangerous: boolean;
         };
+        /** @description Стовпець таблиці типу дозволу (і поле шапки) — у запиті й у відповіді (Permits, PM-03). */
+        PermitTypeColumnDto: {
+            /** @description Значення списку `TypeOnly`, по одному підпису. */
+            choices: null | string[];
+            /** @description Код стовпця в межах таблиці; після публікації не змінюється. */
+            code: string;
+            /** @description Тип: `String`, `Int`, `Decimal`, `Bool`, `Date` або `Lookup`; після публікації не змінюється. */
+            dataType: string;
+            /** @description Код групи стовпців для показу; `null` — поза групою. */
+            group: null | string;
+            /** @description Чи входить у складений первинний ключ рядка (разом із дозволом). */
+            key: boolean;
+            /** @description Код спільного довідника (`SharedRegistry`) або прихованого реєстру списку (`TypeOnly`, у відповіді). */
+            listRegistryCode: null | string;
+            /** @description Лише для `Lookup`: `SharedRegistry`, `TypeOnly` або `SamePermitTable`. */
+            listScope: null | string;
+            /** @description Підпис мовами каталогу (en/ru/kz). */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: int32
+             * @description Позиція в таблиці.
+             */
+            order: number;
+            /**
+             * Format: uint8
+             * @description Загальна кількість цифр (лише `Decimal`).
+             */
+            precision: null | number;
+            /** @description Обов'язковість; ключовий стовпець завжди обов'язковий. */
+            required: boolean;
+            /**
+             * Format: uint8
+             * @description Цифр після коми (лише разом із точністю).
+             */
+            scale: null | number;
+            /** @description Код сестринської таблиці того самого типу (`SamePermitTable`). */
+            siblingTableCode: null | string;
+            /**
+             * Format: int32
+             * @description Одиниця виміру; `null` — безрозмірне.
+             */
+            unitId: null | number;
+        };
+        /** @description Повне визначення типу: опубліковане або чернетка, якщо вона є. */
+        PermitTypeDto: {
+            /** @description Категорія. */
+            category: string;
+            /** @description Код типу. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Версія, під якою вийде чернетка; `null`, якщо чернетки немає.
+             */
+            draftVersion: null | number;
+            /** @description Чи показане визначення — чернетка. */
+            hasUnpublishedChanges: boolean;
+            /** @description Поля шапки дозволу (фіксовані системою). */
+            headerFields: components["schemas"]["PermitTypeColumnDto"][];
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: date-time
+             * @description Момент останньої публікації, UTC.
+             */
+            publishedAt: null | string;
+            /** @description Токен для наступного `PUT` чи публікації. */
+            rowVersion: string;
+            /** @description Перевірки рівня типу (над шапкою). */
+            rules: components["schemas"]["PermitTypeRuleDto"][];
+            /** @description `Draft` або `Published`. */
+            status: string;
+            /** @description Таблиці з усіма стовпцями. */
+            tables: components["schemas"]["PermitTypeTableDto"][];
+            /**
+             * Format: date-time
+             * @description Остання зміна чернетки чи публікація, UTC.
+             */
+            updatedAt: null | string;
+            /**
+             * Format: int32
+             * @description Версія опублікованого визначення (або майбутня перша для `Draft`).
+             */
+            version: number;
+        };
+        /** @description Рядок переліку типів. */
+        PermitTypeListItemDto: {
+            /** @description `Air`, `Water`, `Waste` або `Other`. */
+            category: string;
+            /** @description Код типу. */
+            code: string;
+            /** @description Є чернетка, якої немає в опублікованому. */
+            hasUnpublishedChanges: boolean;
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: int32
+             * @description Скільки екземплярів дозволів (живих записів шапки).
+             */
+            permitCount: number;
+            /** @description `Draft` (ніколи не публікувався) або `Published`. */
+            status: string;
+            /** @description Таблиці (з чернетки, якщо вона є). */
+            tables: components["schemas"]["PermitTypeTableSummaryDto"][];
+            /**
+             * Format: date-time
+             * @description Остання зміна чернетки чи публікація, UTC.
+             */
+            updatedAt: null | string;
+            /** @description Хто змінив. */
+            updatedByDisplayName: null | string;
+            /**
+             * Format: int32
+             * @description Версія: опублікована, а для ніколи не опублікованого типу — майбутня перша.
+             */
+            version: number;
+        };
+        /** @description Перевірка типу чи таблиці: вираз над стовпцями і рівень. */
+        PermitTypeRuleDto: {
+            /** @description Код перевірки (унікальний у межах реєстру). */
+            code: string;
+            /** @description Вираз діалекту правил довідників. */
+            expression: string;
+            /** @description Назва й текст порушення мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /** @description `Warn` — попередження; `Block` — запис відхиляється. */
+            severity: string;
+        };
+        /** @description Таблиця типу дозволу. */
+        PermitTypeTableDto: {
+            /** @description Код таблиці в межах типу; після публікації не змінюється. */
+            code: string;
+            /** @description Стовпці. */
+            columns: components["schemas"]["PermitTypeColumnDto"][];
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: int32
+             * @description Позиція в складі типу.
+             */
+            order: number;
+            /** @description Перевірки таблиці. */
+            rules: components["schemas"]["PermitTypeRuleDto"][];
+        };
+        /** @description Короткий опис таблиці в переліку типів. */
+        PermitTypeTableSummaryDto: {
+            /** @description Код таблиці. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Кількість стовпців.
+             */
+            columnCount: number;
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+        };
         /** @description Нова ревізія презентаційного шару. */
         PresentationRevisionResponse: {
             /**
@@ -24718,6 +25339,13 @@ export interface components {
              *     цією версією, а які — попередньою.
              */
             effectiveFrom: null | string;
+        };
+        /** @description Запит на публікацію чернетки типу. */
+        PublishPermitTypeRequest: {
+            /** @description Причина зміни, не коротша за 10 символів: іде в журнал усіх реєстрів типу. */
+            reason: string;
+            /** @description Токен чернетки, яку публікують. */
+            rowVersion: string;
         };
         /** @description Запит на публікацію чернетки опису. */
         PublishRegistryDefinitionRequest: {
@@ -25758,6 +26386,21 @@ export interface components {
         ReplaceNotificationRulesRequest: {
             /** @description Заповнені клітинки; порожній перелік прибирає всі правила. */
             rules: components["schemas"]["NotificationRuleView"][];
+        };
+        /** @description Запит на заміну чернетки визначення типу. */
+        ReplacePermitTypeRequest: {
+            /** @description Категорія. */
+            category: string;
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /** @description Токен, прочитаний разом з визначенням. */
+            rowVersion: string;
+            /** @description Повний перелік перевірок типу. */
+            rules: components["schemas"]["PermitTypeRuleDto"][];
+            /** @description Повний склад таблиць після правки. */
+            tables: components["schemas"]["PermitTypeTableDto"][];
         };
         /** @description Запит на заміну набору ролей користувача. */
         ReplaceUserRolesRequest: {
