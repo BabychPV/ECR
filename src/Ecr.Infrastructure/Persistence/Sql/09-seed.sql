@@ -8587,7 +8587,14 @@ USING (VALUES
     ,(N'err.ECR-PRM-0422.bindingPrecisionMismatch', N'en', N'Precision or scale of field "{fieldCode}" and column "{columnCode}" differ: values would have to be rounded.', 1)
     ,(N'err.ECR-PRM-0422.bindingNotReadOnly', N'en', N'Column "{columnCode}" must be read-only: its value is written by the system.', 1)
     ,(N'err.ECR-PRM-0422.bindingTooManyRows', N'en', N'The permit has {count} rows but table "{tableCode}" holds at most {max}.', 1)
+    ,(N'err.ECR-PRM-0422.bindingTypeUnknown', N'en', N'The permit type "{typeCode}" does not exist.', 1)
+    ,(N'err.ECR-PRM-0422.bindingPermitTableUnknown', N'en', N'The permit type "{typeCode}" has no table "{tableCode}".', 1)
+    ,(N'err.ECR-PRM-0422.bindingEnumUnknown', N'en', N'Value "{value}" of "{field}" is not known.', 1)
+    ,(N'err.ECR-PRM-0422.bindingIdentityChanged', N'en', N'Binding "{bindingCode}" cannot be pointed at another table or type: delete it and create a new one.', 1)
     ,(N'err.ECR-PRM-0404.binding', N'en', N'Permit binding "{bindingCode}" does not exist in this template version.', 1)
+    ,(N'err.ECR-PRM-4101', N'en', N'Permit binding already exists', 1)
+    ,(N'err.ECR-PRM-4101.sheet', N'en', N'Table {tableDefId} of this version is already bound ("{bindingCode}"): one sheet table takes one permit.', 1)
+    ,(N'err.ECR-PRM-4101.code', N'en', N'Binding code "{bindingCode}" is already taken (codes are unique across the whole system).', 1)
     -- PERMITS: bindings ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -21952,6 +21959,29 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: bindings ── ECR-PRM-0404 ── кінець секції ──
+
+-- PERMITS: bindings ── ECR-PRM-4101 ── ru/kz: прив'язка вже є, невідомі тип/таблиця/значення; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-0422.bindingTypeUnknown', N'ru', N'Типа разрешения «{typeCode}» не существует.'),
+    (N'err.ECR-PRM-0422.bindingTypeUnknown', N'kz', N'«{typeCode}» рұқсат түрі жоқ.'),
+    (N'err.ECR-PRM-0422.bindingPermitTableUnknown', N'ru', N'У типа разрешения «{typeCode}» нет таблицы «{tableCode}».'),
+    (N'err.ECR-PRM-0422.bindingPermitTableUnknown', N'kz', N'«{typeCode}» рұқсат түрінде «{tableCode}» кестесі жоқ.'),
+    (N'err.ECR-PRM-0422.bindingEnumUnknown', N'ru', N'Значение «{value}» поля «{field}» неизвестно.'),
+    (N'err.ECR-PRM-0422.bindingEnumUnknown', N'kz', N'«{field}» өрісінің «{value}» мәні белгісіз.'),
+    (N'err.ECR-PRM-0422.bindingIdentityChanged', N'ru', N'Привязку «{bindingCode}» нельзя перенацелить на другую таблицу или тип: удалите её и создайте новую.'),
+    (N'err.ECR-PRM-0422.bindingIdentityChanged', N'kz', N'«{bindingCode}» байланысын басқа кестеге не түрге бағыттауға болмайды: оны жойып, жаңасын жасаңыз.'),
+    (N'err.ECR-PRM-4101', N'ru', N'Привязка разрешения уже есть'),
+    (N'err.ECR-PRM-4101', N'kz', N'Рұқсат байланысы бұрыннан бар'),
+    (N'err.ECR-PRM-4101.sheet', N'ru', N'Таблица {tableDefId} этой версии уже привязана («{bindingCode}»): одна таблица листа — одно разрешение.'),
+    (N'err.ECR-PRM-4101.sheet', N'kz', N'Осы нұсқаның {tableDefId} кестесі байланған («{bindingCode}»): бір парақ кестесі — бір рұқсат.'),
+    (N'err.ECR-PRM-4101.code', N'ru', N'Код привязки «{bindingCode}» уже занят (коды уникальны во всей системе).'),
+    (N'err.ECR-PRM-4101.code', N'kz', N'«{bindingCode}» байланыс коды бос емес (кодтар бүкіл жүйеде бірегей).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: bindings ── ECR-PRM-4101 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

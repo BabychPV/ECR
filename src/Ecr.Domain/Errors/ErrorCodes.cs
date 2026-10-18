@@ -924,4 +924,15 @@ public static class ErrorCodes
     /// </summary>
     /// <remarks>⚠ <c>ConcurrencyConflictException</c> - 409 за типом, власного арма в middleware не потрібно.</remarks>
     public const string PermitOverlap = "ECR-PRM-4092";
+
+    // Прив'язки аркуша до дозволу (Permits, PM-09). 4095-4097 заброньовано за екземплярами дозволів (PM-04).
+    /// <summary>
+    /// Прив'язка аркуша до дозволу дублює наявну (<c>ECR-PRM-4101</c>): таблицю аркуша версії вже зайняла інша прив'язка
+    /// (<c>sheet</c>, <c>UQ_PermitSheetBinding_Sheet</c>) або код прив'язки зайнятий у системі (<c>code</c>,
+    /// <c>UQ_PermitSheetBinding_Code</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ 409 за цифрами коду: <c>BusinessRuleException</c> без власного арма в <c>ExceptionHandlingMiddleware</c> доїхав би як 422.
+    /// </remarks>
+    public const string PermitBindingDuplicate = "ECR-PRM-4101";
 }
