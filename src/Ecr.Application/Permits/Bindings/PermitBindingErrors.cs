@@ -100,6 +100,25 @@ internal static class PermitBindingErrors
                 ["bindingCode"] = code,
             });
 
+    /// <summary><c>422 ECR-PRM-0422 bindingPreviewPeriodRequired</c>: перегляд з документа без періоду.</summary>
+    internal static BusinessRuleException PreviewPeriodRequired()
+        => new(
+            ErrorCodes.PermitTypeInvalid,
+            "Перегляд з документа потребує періоду (periodKey).",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRM-0422.bindingPreviewPeriodRequired" });
+
+    /// <summary><c>422 ECR-PRM-0422 bindingPreviewPeriodUnknown</c>: у проєкті документа немає такого періоду.</summary>
+    /// <param name="periodKey">Період із запиту.</param>
+    internal static BusinessRuleException PreviewPeriodUnknown(int periodKey)
+        => new(
+            ErrorCodes.PermitTypeInvalid,
+            $"У проєкті документа немає періоду {periodKey}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-0422.bindingPreviewPeriodUnknown",
+                ["periodKey"] = periodKey.ToString(CultureInfo.InvariantCulture),
+            });
+
     /// <summary><c>409 ECR-PRM-4101 sheet</c>: таблицю аркуша вже зайняла інша прив'язка версії.</summary>
     /// <param name="sheetTableDefId">Таблиця аркуша.</param>
     /// <param name="takenBy">Код прив'язки, що її зайняла.</param>

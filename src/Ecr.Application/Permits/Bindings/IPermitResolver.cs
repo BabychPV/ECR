@@ -4,13 +4,20 @@ using Ecr.Domain.Enums;
 namespace Ecr.Application.Permits.Bindings;
 
 /// <summary>Запит на вибір дозволу для прив'язки.</summary>
-/// <param name="PermitTypeDefId">Тип дозволу прив'язки.</param>
+/// <param name="HeaderRegistryDefId">Реєстр шапок дозволів типу прив'язки (<c>PermitTypeDef.HeaderRegistryDefId</c>).</param>
 /// <param name="Rule">Правило вибору.</param>
 /// <param name="PeriodEnd">Останній день періоду документа: на нього перевіряється чинність.</param>
-/// <param name="FacilityName">Об'єкт документа (поле шапки <see cref="PermitBindingFacility.HeaderFieldCode"/>) - для <c>ByFacilityPeriodEnd</c>.</param>
-/// <param name="HeaderEntryId">Запис шапки дозволу, обраний у полі шапки - для <c>FromHeaderLookup</c>.</param>
+/// <param name="FacilityNames">
+/// Назви об'єкта документа (поле шапки <see cref="PermitBindingFacility.HeaderFieldCode"/>): для тексту - одна, для
+/// посилання - код і назви запису довідника; збіг з розташуванням дозволу - за будь-якою. Для <c>ByFacilityPeriodEnd</c>.
+/// </param>
+/// <param name="HeaderEntryId">Запис шапки дозволу, обраний у полі шапки. Для <c>FromHeaderLookup</c>.</param>
 public sealed record PermitResolveRequest(
-    int PermitTypeDefId, PermitSelectionRule Rule, DateOnly PeriodEnd, string? FacilityName, long? HeaderEntryId);
+    int HeaderRegistryDefId,
+    PermitSelectionRule Rule,
+    DateOnly PeriodEnd,
+    IReadOnlyList<string> FacilityNames,
+    long? HeaderEntryId);
 
 /// <summary>Результат вибору дозволу.</summary>
 /// <param name="EntryId">Запис-шапка дозволу; <c>null</c> - дозволу немає.</param>
