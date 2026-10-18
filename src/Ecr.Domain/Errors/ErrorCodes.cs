@@ -870,4 +870,10 @@ public static class ErrorCodes
     // Типи дозволів (Permits, PM-03). Друга цифра домену — HTTP; 4092 зарезервовано під перетин чинних дозволів (PM-04).
     /// <summary>Типу дозволу з таким кодом немає (<c>ECR-PRM-0404</c>).</summary>
     public const string PermitTypeNotFound = "ECR-PRM-0404";
+
+    /// <summary>
+    /// Визначення типу дозволу не складається (<c>ECR-PRM-0422</c>): таблиця без ключа, повторні коди, суперечливий
+    /// список, зламаний опублікований склад тощо. Випадок каже <c>messageKey</c> (<c>err.ECR-PRM-0422.{випадок}</c>).
+    /// </summary>
+    public const string PermitTypeInvalid = "ECR-PRM-0422";
 }
