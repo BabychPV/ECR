@@ -7,7 +7,13 @@ describe('dimensionLabel (UI RC9)', () => {
     expect(dimensionLabel('MassPerStdVolume')).toBe('⟦units.dim.MassPerStdVolume⟧');
   });
 
+  it('розмірності 20–23 (CL-20, B-6) мають ключі каталога, а не голий англійський код', () => {
+    for (const code of ['VolumeFlow', 'Power', 'Frequency', 'Pressure']) {
+      expect(dimensionLabel(code)).toBe(`⟦units.dim.${code}⟧`);
+    }
+  });
+
   it('невідомий код — як є, а не ⟦…⟧', () => {
-    expect(dimensionLabel('Pressure')).toBe('Pressure');
+    expect(dimensionLabel('SomethingNew')).toBe('SomethingNew');
   });
 });

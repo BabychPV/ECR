@@ -1,4 +1,4 @@
-import type { Language } from '@/shared/i18n';
+import { language, type Language } from '@/shared/i18n';
 import { formatLocale } from './locale';
 
 /**
@@ -138,5 +138,33 @@ function format(value: DateLike, options: Intl.DateTimeFormatOptions, lang?: Lan
   const at = moment(value);
   if (at === null) return Nothing;
 
-  return formatter(formatLocale(lang), options).format(at);
+  const locale = formatLocale(lang);
+
+  if (locale !== 'kk' && (lang ?? language()) === 'kz') {
+    const manual = kzNumeric(at, options);
+    if (manual !== null) return manual;
+  }
+
+  return formatter(locale, options).format(at);
+}
+
+/**
+ * CL-20 (B-6): казахська дата без ICU браузера.
+ *
+ * ⛔ Урізана ICU Chrome/Edge не має `kk` (`supportedLocalesOf('kk')` → `[]`, див. `period.ts`), тож `formatLocale()`
+ * відкочується на en і журнал/аудит у kz показували «Oct 18, 2026, 6:40 PM». Для типових опцій (`DateOptions`,
+ * `DateTimeOptions`, `TimeOptions`) складаємо рядок самі в числовому записі `kk-KZ` (`18.10.2026`, `18:40`): назв
+ * місяців у каталозі скорочених немає, а числовий запис не потребує жодного нового тексту. Опції місця виклику
+ * (довгий місяць тощо) лишаються на `Intl` — їхній kz-підпис дає `formatMonthYear` з каталогу.
+ */
+function kzNumeric(at: Date, options: Intl.DateTimeFormatOptions): string | null {
+  // ⚠ Складники дає `ru` (ICU є всюди): `dd.MM.yyyy` і `HH:mm` збігаються з `kk-KZ`, а руками час не складаємо (D15-09).
+  const date: Intl.DateTimeFormatOptions = { day: '2-digit', month: '2-digit', year: 'numeric' };
+  const time: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
+
+  if (options === DateOptions) return formatter('ru', date).format(at);
+  if (options === DateTimeOptions) return formatter('ru', { ...date, ...time }).format(at);
+  if (options === TimeOptions) return formatter('ru', time).format(at);
+
+  return null;
 }
