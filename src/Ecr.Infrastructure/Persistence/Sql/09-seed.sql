@@ -8236,6 +8236,54 @@ USING (VALUES
     ,(N'err.ECR-PRM-0422.endDateOutOfRange', N'en', N'The end date {endDate} must be after the start {from} and not later than the current end {to}.', 1)
     ,(N'err.ECR-PRM-0422.renewRowInvalid', N'en', N'Row "{rowCode}" of table "{tableCode}" could not be copied into the new draft: {reason}.', 1)
     -- PERMITS: permits ── ECR-PRM-4092 ── кінець секції ──
+    -- PERMITS: shell ── PM-06: каркас розділу Permits (меню, смуга розділів, порожні стани, широка таблиця); ru/kz — порцією PERMITS: shell нижче ──
+    ,(N'nav.permits', N'en', N'Permits', 1)
+    ,(N'nav.permits.description', N'en', N'Environmental permits with their limits, volumes and storage places. Sheets read the permit directly, so limits are never retyped.', 1)
+    ,(N'permits.nav.aria', N'en', N'Permits sections', 1)
+    ,(N'permits.types.title', N'en', N'Permit types', 1)
+    ,(N'permits.types.description', N'en', N'A type says what a permit contains: its fields and its tables with their columns.', 1)
+    ,(N'permits.lists.title', N'en', N'Lists', 1)
+    ,(N'permits.lists.description', N'en', N'The pick-lists behind permit columns: shared by many types, for one type only, or a table of the permit itself.', 1)
+    ,(N'permits.bindings.title', N'en', N'Sheet bindings', 1)
+    ,(N'permits.bindings.description', N'en', N'Tell a sheet table which permit table to read. Its rows and limits then come from the permit valid in the period.', 1)
+    ,(N'permits.typeEditor.title', N'en', N'Permit type', 1)
+    ,(N'permits.binding.title', N'en', N'Sheet binding', 1)
+    ,(N'permits.detail.title', N'en', N'Permit', 1)
+    ,(N'permits.state.Draft', N'en', N'Draft', 1)
+    ,(N'permits.state.Active', N'en', N'Active', 1)
+    ,(N'permits.state.Expired', N'en', N'Expired', 1)
+    ,(N'permits.state.aria', N'en', N'Permit state', 1)
+    ,(N'permits.empty.title', N'en', N'No permits yet', 1)
+    ,(N'permits.empty.hint', N'en', N'Add the first permit by hand or import the yearly Excel report your team keeps today.', 1)
+    ,(N'permits.empty.new', N'en', N'New permit', 1)
+    ,(N'permits.empty.import', N'en', N'Import from Excel', 1)
+    ,(N'permits.types.empty.title', N'en', N'No permit types yet', 1)
+    ,(N'permits.types.empty.hint', N'en', N'Create a type, add its tables and columns, publish it. Then permits of that type can be entered.', 1)
+    ,(N'permits.types.new', N'en', N'New type', 1)
+    ,(N'permits.lists.empty.title', N'en', N'No lists yet', 1)
+    ,(N'permits.lists.empty.hint', N'en', N'Lists appear when a permit column is set to pick from a registry or a list.', 1)
+    ,(N'permits.bindings.empty.title', N'en', N'No bindings yet', 1)
+    ,(N'permits.bindings.empty.hint', N'en', N'A binding connects a sheet table to a permit table. Create one to see limits next to the figures people enter.', 1)
+    ,(N'permits.bindings.new', N'en', N'New binding', 1)
+    ,(N'permits.unavailable', N'en', N'These actions need the permits service, which is not connected to this system yet.', 1)
+    ,(N'permits.detail.emptyTitle', N'en', N'This permit cannot be shown yet', 1)
+    ,(N'permits.detail.emptyHint', N'en', N'Permit details need the permits service, which is not connected to this system yet.', 1)
+    ,(N'permits.typeEditor.emptyTitle', N'en', N'This permit type cannot be shown yet', 1)
+    ,(N'permits.typeEditor.emptyHint', N'en', N'The type constructor needs the permits service, which is not connected to this system yet.', 1)
+    ,(N'permits.binding.emptyTitle', N'en', N'This binding cannot be shown yet', 1)
+    ,(N'permits.binding.emptyHint', N'en', N'Sheet bindings need the permits service, which is not connected to this system yet.', 1)
+    ,(N'permits.back.permits', N'en', N'Back to Permits', 1)
+    ,(N'permits.back.types', N'en', N'Back to Permit types', 1)
+    ,(N'permits.back.bindings', N'en', N'Back to Sheet bindings', 1)
+    ,(N'permits.table.columns', N'en', N'Columns', 1)
+    ,(N'permits.table.grouped', N'en', N'Grouped', 1)
+    ,(N'permits.table.allColumns', N'en', N'All columns', 1)
+    ,(N'permits.table.required', N'en', N'Required', 1)
+    ,(N'permits.table.yes', N'en', N'Yes', 1)
+    ,(N'permits.table.no', N'en', N'No', 1)
+    ,(N'permits.table.sumOf', N'en', N'Σ of {count}', 1)
+    ,(N'permits.table.groupCount', N'en', N'Columns: {count}', 1)
+    -- PERMITS: shell ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -20758,6 +20806,106 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: types ── ECR-PRM-4094 ── кінець секції ──
+-- PERMITS: shell ── ru/kz: PM-06, каркас розділу Permits; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'nav.permits', N'ru', N'Разрешения'),
+    (N'nav.permits', N'kz', N'Рұқсаттар'),
+    (N'nav.permits.description', N'ru', N'Экологические разрешения с их лимитами, объёмами и местами накопления. Листы читают разрешение напрямую, поэтому лимиты не нужно вводить повторно.'),
+    (N'nav.permits.description', N'kz', N'Лимиттері, көлемдері және жинақтау орындары бар экологиялық рұқсаттар. Парақтар рұқсатты тікелей оқиды, сондықтан лимиттерді қайта енгізудің қажеті жоқ.'),
+    (N'permits.nav.aria', N'ru', N'Разделы разрешений'),
+    (N'permits.nav.aria', N'kz', N'Рұқсат бөлімдері'),
+    (N'permits.types.title', N'ru', N'Типы разрешений'),
+    (N'permits.types.title', N'kz', N'Рұқсат түрлері'),
+    (N'permits.types.description', N'ru', N'Тип определяет, что содержит разрешение: его поля и таблицы со столбцами.'),
+    (N'permits.types.description', N'kz', N'Түр рұқсаттың құрамын анықтайды: оның өрістері мен бағандары бар кестелері.'),
+    (N'permits.lists.title', N'ru', N'Списки'),
+    (N'permits.lists.title', N'kz', N'Тізімдер'),
+    (N'permits.lists.description', N'ru', N'Списки выбора для столбцов разрешений: общие для многих типов, только для одного типа или таблица самого разрешения.'),
+    (N'permits.lists.description', N'kz', N'Рұқсат бағандарының таңдау тізімдері: көптеген түрге ортақ, тек бір түрге арналған немесе рұқсаттың өз кестесі.'),
+    (N'permits.bindings.title', N'ru', N'Привязки листов'),
+    (N'permits.bindings.title', N'kz', N'Парақ байланыстары'),
+    (N'permits.bindings.description', N'ru', N'Укажите таблице листа, какую таблицу разрешения читать. Её строки и лимиты берутся из разрешения, действующего в периоде.'),
+    (N'permits.bindings.description', N'kz', N'Парақ кестесіне рұқсаттың қай кестесін оқуды көрсетіңіз. Оның жолдары мен лимиттері кезеңде жарамды рұқсаттан алынады.'),
+    (N'permits.typeEditor.title', N'ru', N'Тип разрешения'),
+    (N'permits.typeEditor.title', N'kz', N'Рұқсат түрі'),
+    (N'permits.binding.title', N'ru', N'Привязка листа'),
+    (N'permits.binding.title', N'kz', N'Парақ байланысы'),
+    (N'permits.detail.title', N'ru', N'Разрешение'),
+    (N'permits.detail.title', N'kz', N'Рұқсат'),
+    (N'permits.state.Draft', N'ru', N'Черновик'),
+    (N'permits.state.Draft', N'kz', N'Жоба'),
+    (N'permits.state.Active', N'ru', N'Действует'),
+    (N'permits.state.Active', N'kz', N'Жарамды'),
+    (N'permits.state.Expired', N'ru', N'Истекло'),
+    (N'permits.state.Expired', N'kz', N'Мерзімі өтті'),
+    (N'permits.state.aria', N'ru', N'Состояние разрешения'),
+    (N'permits.state.aria', N'kz', N'Рұқсат күйі'),
+    (N'permits.empty.title', N'ru', N'Разрешений пока нет'),
+    (N'permits.empty.title', N'kz', N'Рұқсаттар әлі жоқ'),
+    (N'permits.empty.hint', N'ru', N'Добавьте первое разрешение вручную или импортируйте годовой отчёт Excel, который ваша команда ведёт сегодня.'),
+    (N'permits.empty.hint', N'kz', N'Алғашқы рұқсатты қолмен қосыңыз немесе тобыңыз қазір жүргізетін жылдық Excel есебін импорттаңыз.'),
+    (N'permits.empty.new', N'ru', N'Новое разрешение'),
+    (N'permits.empty.new', N'kz', N'Жаңа рұқсат'),
+    (N'permits.empty.import', N'ru', N'Импорт из Excel'),
+    (N'permits.empty.import', N'kz', N'Excel-ден импорттау'),
+    (N'permits.types.empty.title', N'ru', N'Типов разрешений пока нет'),
+    (N'permits.types.empty.title', N'kz', N'Рұқсат түрлері әлі жоқ'),
+    (N'permits.types.empty.hint', N'ru', N'Создайте тип, добавьте его таблицы и столбцы, опубликуйте. После этого можно вводить разрешения этого типа.'),
+    (N'permits.types.empty.hint', N'kz', N'Түрді жасаңыз, оның кестелері мен бағандарын қосыңыз, жариялаңыз. Содан кейін осы түрдің рұқсаттарын енгізуге болады.'),
+    (N'permits.types.new', N'ru', N'Новый тип'),
+    (N'permits.types.new', N'kz', N'Жаңа түр'),
+    (N'permits.lists.empty.title', N'ru', N'Списков пока нет'),
+    (N'permits.lists.empty.title', N'kz', N'Тізімдер әлі жоқ'),
+    (N'permits.lists.empty.hint', N'ru', N'Списки появятся, когда столбец разрешения настроен на выбор из справочника или списка.'),
+    (N'permits.lists.empty.hint', N'kz', N'Рұқсат бағаны анықтамалықтан немесе тізімнен таңдауға бапталғанда тізімдер пайда болады.'),
+    (N'permits.bindings.empty.title', N'ru', N'Привязок пока нет'),
+    (N'permits.bindings.empty.title', N'kz', N'Байланыстар әлі жоқ'),
+    (N'permits.bindings.empty.hint', N'ru', N'Привязка соединяет таблицу листа с таблицей разрешения. Создайте её, чтобы видеть лимиты рядом с вводимыми значениями.'),
+    (N'permits.bindings.empty.hint', N'kz', N'Байланыс парақ кестесін рұқсат кестесімен жалғайды. Енгізілетін мәндердің жанында лимиттерді көру үшін оны жасаңыз.'),
+    (N'permits.bindings.new', N'ru', N'Новая привязка'),
+    (N'permits.bindings.new', N'kz', N'Жаңа байланыс'),
+    (N'permits.unavailable', N'ru', N'Для этих действий нужен сервис разрешений, который к системе пока не подключён.'),
+    (N'permits.unavailable', N'kz', N'Бұл әрекеттерге рұқсаттар сервисі қажет, ол жүйеге әлі қосылмаған.'),
+    (N'permits.detail.emptyTitle', N'ru', N'Это разрешение пока нельзя показать'),
+    (N'permits.detail.emptyTitle', N'kz', N'Бұл рұқсатты әзірге көрсету мүмкін емес'),
+    (N'permits.detail.emptyHint', N'ru', N'Для данных разрешения нужен сервис разрешений, который к системе пока не подключён.'),
+    (N'permits.detail.emptyHint', N'kz', N'Рұқсат деректері үшін рұқсаттар сервисі қажет, ол жүйеге әлі қосылмаған.'),
+    (N'permits.typeEditor.emptyTitle', N'ru', N'Этот тип разрешения пока нельзя показать'),
+    (N'permits.typeEditor.emptyTitle', N'kz', N'Бұл рұқсат түрін әзірге көрсету мүмкін емес'),
+    (N'permits.typeEditor.emptyHint', N'ru', N'Для конструктора типа нужен сервис разрешений, который к системе пока не подключён.'),
+    (N'permits.typeEditor.emptyHint', N'kz', N'Түр конструкторына рұқсаттар сервисі қажет, ол жүйеге әлі қосылмаған.'),
+    (N'permits.binding.emptyTitle', N'ru', N'Эту привязку пока нельзя показать'),
+    (N'permits.binding.emptyTitle', N'kz', N'Бұл байланысты әзірге көрсету мүмкін емес'),
+    (N'permits.binding.emptyHint', N'ru', N'Для привязок листов нужен сервис разрешений, который к системе пока не подключён.'),
+    (N'permits.binding.emptyHint', N'kz', N'Парақ байланыстарына рұқсаттар сервисі қажет, ол жүйеге әлі қосылмаған.'),
+    (N'permits.back.permits', N'ru', N'Назад к разрешениям'),
+    (N'permits.back.permits', N'kz', N'Рұқсаттарға оралу'),
+    (N'permits.back.types', N'ru', N'Назад к типам разрешений'),
+    (N'permits.back.types', N'kz', N'Рұқсат түрлеріне оралу'),
+    (N'permits.back.bindings', N'ru', N'Назад к привязкам листов'),
+    (N'permits.back.bindings', N'kz', N'Парақ байланыстарына оралу'),
+    (N'permits.table.columns', N'ru', N'Столбцы'),
+    (N'permits.table.columns', N'kz', N'Бағандар'),
+    (N'permits.table.grouped', N'ru', N'По группам'),
+    (N'permits.table.grouped', N'kz', N'Топтар бойынша'),
+    (N'permits.table.allColumns', N'ru', N'Все столбцы'),
+    (N'permits.table.allColumns', N'kz', N'Барлық бағандар'),
+    (N'permits.table.required', N'ru', N'Обязательно'),
+    (N'permits.table.required', N'kz', N'Міндетті'),
+    (N'permits.table.yes', N'ru', N'Да'),
+    (N'permits.table.yes', N'kz', N'Иә'),
+    (N'permits.table.no', N'ru', N'Нет'),
+    (N'permits.table.no', N'kz', N'Жоқ'),
+    (N'permits.table.sumOf', N'ru', N'Σ от {count}'),
+    (N'permits.table.sumOf', N'kz', N'Σ {count}-нен'),
+    (N'permits.table.groupCount', N'ru', N'Столбцов: {count}'),
+    (N'permits.table.groupCount', N'kz', N'Бағандар: {count}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: shell ── кінець секції ──
 
 -- PERMITS: permits ── ECR-PRM-4095 ── ru/kz: дозвіл уже існує, випадки 0404/0422 екземплярів; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
