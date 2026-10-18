@@ -136,6 +136,20 @@ public interface IRegistryKeyStore
         => Task.CompletedTask;
 
     /// <summary>
+    /// Чи довідник — шапка типу дозволу: там вимкнений запис (чернетка дозволу, <c>IsActive = 0</c>) ключ НЕ тримає
+    /// (Permits PM-04, R2).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Свідомо вужче, ніж «неактивний запис не тримає ключ» для всіх: у решти довідників (складені ключі Land,
+    /// <c>SUBSTANCE_APPLICABLE</c>) вимкнений запис далі тримає ключ, і ця поведінка не змінюється. Типова
+    /// реалізація — <c>false</c>: підробка, що про дозволи не знає, лишається побітно як була.
+    /// </remarks>
+    /// <param name="registryDefId">Довідник.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<bool> InactiveEntriesHoldNoKeyAsync(int registryDefId, CancellationToken ct)
+        => Task.FromResult(false);
+
+    /// <summary>
     /// Забуває прочитане <see cref="PreloadAsync"/> і <see cref="LockLiveHoldersAsync"/>: далі
     /// поштучні методи знову читають базу.
     /// </summary>

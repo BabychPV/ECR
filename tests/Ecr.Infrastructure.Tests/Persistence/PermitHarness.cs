@@ -64,6 +64,11 @@ internal sealed class PermitHarness : IAsyncDisposable
             new Ecr.Application.Registries.Keys.RegistryKeyService(keys, Uow));
         Publish = new PublishPermitTypeHandler(Permits, Registries, keys, save, Uow, audit, access, user, clock);
 
+        // Запис записів реєстрів - тим самим писачем і службою ключів, що в контейнері (PM-04: шапки дозволів, R2).
+        KeyService = new Ecr.Application.Registries.Keys.RegistryKeyService(keys, Uow);
+        Writer = new RegistryEntryWriter(Registries, Uow, audit, user, clock, KeyService);
+        RowsQuery = new RegistryRowsQuery(Db);
+
         Access = access;
         User = user;
         Clock = clock;
@@ -108,6 +113,12 @@ internal sealed class PermitHarness : IAsyncDisposable
     public DeletePermitTypeHandler Delete { get; }
 
     public PublishPermitTypeHandler Publish { get; }
+
+    public Ecr.Application.Registries.Keys.RegistryKeyService KeyService { get; }
+
+    public RegistryEntryWriter Writer { get; }
+
+    public RegistryRowsQuery RowsQuery { get; }
 
     /// <summary>Нова «сесія» тієї самої особи: свій контекст, як у наступному запиті.</summary>
     public async Task<PermitHarness> NextRequestAsync() => await CreateAsync(Sql, Permissions, UserId).ConfigureAwait(false);
