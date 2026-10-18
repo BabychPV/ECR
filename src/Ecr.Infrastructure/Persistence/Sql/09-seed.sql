@@ -8595,6 +8595,7 @@ USING (VALUES
     ,(N'err.ECR-PRM-4101', N'en', N'Permit binding already exists', 1)
     ,(N'err.ECR-PRM-4101.sheet', N'en', N'Table {tableDefId} of this version is already bound ("{bindingCode}"): one sheet table takes one permit.', 1)
     ,(N'err.ECR-PRM-4101.code', N'en', N'Binding code "{bindingCode}" is already taken (codes are unique across the whole system).', 1)
+    ,(N'err.ECR-SCHM-0409.permitBindingBreaking', N'en', N'Deleting the permit binding "{bindingCode}" is a breaking change: documents are already attached to this version and their rows were created from the permit.', 1)
     -- PERMITS: bindings ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -21982,6 +21983,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: bindings ── ECR-PRM-4101 ── кінець секції ──
+
+-- PERMITS: bindings ── ECR-SCHM-0409 ── ru/kz: видалення прив'язки у версії з документами руйнівне; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-SCHM-0409.permitBindingBreaking', N'ru', N'Удаление привязки разрешения «{bindingCode}» разрушительно: к этой версии уже привязаны документы, строки которых созданы из разрешения.'),
+    (N'err.ECR-SCHM-0409.permitBindingBreaking', N'kz', N'«{bindingCode}» рұқсат байланысын жою бұзушы әрекет: осы нұсқаға құжаттар байланған, олардың жолдары рұқсаттан жасалған.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: bindings ── ECR-SCHM-0409 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
