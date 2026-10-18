@@ -4293,6 +4293,14 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/permit-types/{code}` | `Permit.EditType` | 8 |
 | `POST` | `/api/v1/permit-types/{code}/publish` | `Permit.PublishType` | 8 |
 | `POST` | `/api/v1/permit-types/{code}/new-version` | `Permit.EditType` | 8 |
+| `GET` | `/api/v1/permits?type=&status=&q=&asOf=&limit=&cursor=` | `Registry.View` | 8 |
+| `POST` | `/api/v1/permits` | `Registry.EditData` | 8 |
+| `GET` | `/api/v1/permits/{id}?asOf=` | `Registry.View` | 8 |
+| `PUT` | `/api/v1/permits/{id}` | `Registry.EditData` | 8 |
+| `DELETE` | `/api/v1/permits/{id}` | `Registry.EditData` | 8 |
+| `POST` | `/api/v1/permits/{id}/activate` | `Registry.EditData` | 8 |
+| `POST` | `/api/v1/permits/{id}/end` | `Registry.EditData` | 8 |
+| `POST` | `/api/v1/permits/{id}/renew` | `Registry.EditData` | 8 |
 | `GET` | `/api/v1/reports` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions` | `Report.EditDefinition` | 5 |
