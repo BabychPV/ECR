@@ -292,6 +292,15 @@ public static class DependencyInjection
         services.AddScoped<Registries.Rules.RegistryRuleCompiler>(); // RT-17a
         services.AddScoped<Registries.Rules.IRegistryRuleEngine, Registries.Rules.RegistryRuleEngine>(); // RT-17a
 
+        // PERMITS: types — типи дозволів над реєстрами (PM-03)
+        services.AddScoped<Permits.ListPermitTypesHandler>();
+        services.AddScoped<Permits.GetPermitTypeHandler>();
+        services.AddScoped<Permits.CreatePermitTypeHandler>();
+        services.AddScoped<Permits.ReplacePermitTypeHandler>();
+        services.AddScoped<Permits.OpenPermitTypeVersionHandler>();
+        services.AddScoped<Permits.DeletePermitTypeHandler>();
+        services.AddScoped<Permits.PublishPermitTypeHandler>();
+
         // RT: expressions
 
         // Редактор виразів (`ФВ-9.15a`): перевірка тексту і склад мови.

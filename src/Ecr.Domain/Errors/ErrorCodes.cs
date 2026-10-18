@@ -866,4 +866,38 @@ public static class ErrorCodes
     /// число). Код несе проблема в <c>problems</c> відмови <c>ECR-CALC-0422</c> (<c>publishChecksFailed</c>).
     /// </remarks>
     public const string MethodologyResultTypeMismatch = "ECR-CALC-0436";
+
+    // Типи дозволів (Permits, PM-03). Друга цифра домену — HTTP; 4092 зарезервовано під перетин чинних дозволів (PM-04).
+    /// <summary>Типу дозволу з таким кодом немає (<c>ECR-PRM-0404</c>).</summary>
+    public const string PermitTypeNotFound = "ECR-PRM-0404";
+
+    /// <summary>
+    /// Визначення типу дозволу не складається (<c>ECR-PRM-0422</c>): таблиця без ключа, повторні коди, суперечливий
+    /// список, зламаний опублікований склад тощо. Випадок каже <c>messageKey</c> (<c>err.ECR-PRM-0422.{випадок}</c>).
+    /// </summary>
+    public const string PermitTypeInvalid = "ECR-PRM-0422";
+
+    /// <summary>
+    /// Тип дозволу з таким кодом (або реєстр шапки з таким кодом) уже є (<c>ECR-PRM-4091</c>, <c>UQ_PermitTypeDef</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ 409 за цифрами коду: <c>BusinessRuleException</c> без власного арма в <c>ExceptionHandlingMiddleware</c> доїхав би як 422.
+    /// </remarks>
+    public const string PermitTypeDuplicate = "ECR-PRM-4091";
+
+    /// <summary>
+    /// Тип дозволу змінили чи опублікували після того, як його прочитали, або дія не відповідає його стану
+    /// (<c>ECR-PRM-4093</c>): немає чернетки, чернетка вже є, тип ще не опублікований.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Кидається як <c>ConcurrencyConflictException</c>, якому <c>ExceptionHandlingMiddleware</c> дає 409 за типом.
+    /// 4092 зарезервовано під перетин чинних дозволів (PM-04).
+    /// </remarks>
+    public const string PermitTypeConflict = "ECR-PRM-4093";
+
+    /// <summary>
+    /// Тип дозволу використовується й не видаляється (<c>ECR-PRM-4094</c>): він опублікований
+    /// (<c>published</c>) або має екземпляри дозволів (<c>hasPermits</c>).
+    /// </summary>
+    public const string PermitTypeInUse = "ECR-PRM-4094";
 }
