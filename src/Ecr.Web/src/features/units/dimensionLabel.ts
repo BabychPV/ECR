@@ -49,6 +49,14 @@ export function dimensionLabel(code: string): string {
       return t('units.dim.EnergyPerMass');
     case 'MassPerAmount':
       return t('units.dim.MassPerAmount');
+    case 'VolumeFlow':
+      return t('units.dim.VolumeFlow');
+    case 'Power':
+      return t('units.dim.Power');
+    case 'Frequency':
+      return t('units.dim.Frequency');
+    case 'Pressure':
+      return t('units.dim.Pressure');
     default:
       return code;
   }
