@@ -8214,6 +8214,7 @@ USING (VALUES
     -- PERMITS: permissions ── en: підписи прав типів дозволів ──
     ,(N'permission.Permit.EditType', N'en', N'Edit permit types', 1)
     ,(N'permission.Permit.PublishType', N'en', N'Publish permit types', 1)
+    ,(N'security.domain.Permit', N'en', N'Permits', 1)
     -- PERMITS: permissions ── en ── кінець секції ──
     -- PERMITS: permits ── en: читання дозволів — фільтри переліку (PM-04) ──
     ,(N'err.ECR-PRM-0422.statusUnknown', N'en', N'The status "{status}" does not exist. Use Draft, Active or Expired.', 1)
@@ -20790,7 +20791,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permission.Permit.EditType', N'ru', N'Изменение типов разрешений'),
     (N'permission.Permit.EditType', N'kz', N'Рұқсат түрлерін өңдеу'),
     (N'permission.Permit.PublishType', N'ru', N'Публикация типов разрешений'),
-    (N'permission.Permit.PublishType', N'kz', N'Рұқсат түрлерін жариялау')
+    (N'permission.Permit.PublishType', N'kz', N'Рұқсат түрлерін жариялау'),
+    (N'security.domain.Permit', N'ru', N'Разрешения'),
+    (N'security.domain.Permit', N'kz', N'Рұқсаттар')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
