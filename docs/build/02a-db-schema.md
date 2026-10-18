@@ -940,6 +940,12 @@ CREATE TABLE cfg.PermitTypeDef
     PublishedAt         datetime2(3)  NULL,
     PublishedByUserId   int           NULL,
     RowVersion          rowversion    NOT NULL,   -- If-Match
+    -- PM-03, міграція PRM02_PermitTypeDraft: чернетка визначення типу (таблиці, стовпці, списки, перевірки)
+    -- одним JSON. Окремо від чернеток довідників: поле, якого ще немає, не має ключа для PermitFieldMeta.
+    -- NULL — незавершених змін немає. Реєстри типу змінюються лише при публікації, однією транзакцією.
+    DraftJson           nvarchar(max) NULL,
+    UpdatedAt           datetime2(3)  NULL,       -- остання зміна чернетки чи публікація
+    UpdatedByUserId     int           NULL,
     CONSTRAINT PK_PermitTypeDef PRIMARY KEY (Id),
     CONSTRAINT UQ_PermitTypeDef UNIQUE (Code),
     CONSTRAINT CK_PermitType_Category CHECK (Category BETWEEN 0 AND 3),
@@ -947,7 +953,8 @@ CREATE TABLE cfg.PermitTypeDef
     CONSTRAINT CK_PermitType_Published
         CHECK (Status <> 1 OR (PublishedAt IS NOT NULL AND PublishedByUserId IS NOT NULL)),
     CONSTRAINT FK_PermitType_HeaderReg FOREIGN KEY (HeaderRegistryDefId) REFERENCES cfg.RegistryDef (Id),
-    CONSTRAINT FK_PermitType_PublishedBy FOREIGN KEY (PublishedByUserId) REFERENCES sec.[User] (Id)
+    CONSTRAINT FK_PermitType_PublishedBy FOREIGN KEY (PublishedByUserId) REFERENCES sec.[User] (Id),
+    CONSTRAINT FK_PermitType_UpdatedBy FOREIGN KEY (UpdatedByUserId) REFERENCES sec.[User] (Id)
 );
 GO
 

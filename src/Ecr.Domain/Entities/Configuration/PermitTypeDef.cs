@@ -73,6 +73,26 @@ public sealed class PermitTypeDef : Entity<int>
     /// <summary>Токен оптимістичної конкуренції (<c>If-Match</c>); ставить база.</summary>
     public byte[] RowVersion { get; private set; } = [];
 
+    /// <summary>
+    /// Чернетка визначення типу (склад таблиць, стовпців, списків і перевірок) у вигляді JSON;
+    /// <c>null</c> — незавершених змін немає (PM-03, міграція <c>PRM02</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Чернетка живе тут, а не в чернетках довідників: поле довідника, якого ще не існує, не може мати
+    /// <see cref="PermitFieldMeta"/> (ключ — саме поле), тож групу, точність і область списку для нових
+    /// стовпців тримати більше ніде. Реєстри типу змінюються лише при публікації, однією транзакцією.
+    /// </remarks>
+    public string? DraftJson { get; private set; }
+
+    /// <summary>Момент останньої зміни чернетки чи публікації в UTC.</summary>
+    public DateTime? UpdatedAt { get; private set; }
+
+    /// <summary>Хто змінив чернетку чи опублікував востаннє.</summary>
+    public int? UpdatedByUserId { get; private set; }
+
+    /// <summary>Чи є незавершені зміни.</summary>
+    public bool HasDraft => DraftJson is not null;
+
     /// <summary>Змінює назву й категорію (лише чернетка).</summary>
     /// <param name="name">Нова назва.</param>
     /// <param name="category">Нова категорія.</param>
@@ -87,6 +107,83 @@ public sealed class PermitTypeDef : Entity<int>
         Category = category;
     }
 
+    /// <summary>Зберігає чернетку визначення (перша чернетка типу чи заміна наявної).</summary>
+    /// <param name="json">Визначення типу як JSON.</param>
+    /// <param name="userId">Автор.</param>
+    /// <param name="utcNow">Момент зміни в UTC.</param>
+    public void SaveDraft(string json, int userId, DateTime utcNow)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(json);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(userId);
+        EnsureUtc(utcNow);
+
+        DraftJson = json;
+        UpdatedAt = utcNow;
+        UpdatedByUserId = userId;
+    }
+
+    /// <summary>Відкриває нову версію опублікованого типу: чернетка стартує з його поточного складу.</summary>
+    /// <param name="json">Поточне опубліковане визначення як JSON.</param>
+    /// <param name="userId">Автор.</param>
+    /// <param name="utcNow">Момент у UTC.</param>
+    /// <exception cref="InvalidOperationException">Тип ще не опубліковано або чернетка вже є.</exception>
+    public void OpenNewVersion(string json, int userId, DateTime utcNow)
+    {
+        if (Status != PermitTypeStatus.Published)
+        {
+            throw new InvalidOperationException($"Тип дозволу «{Code}» ще не опубліковано: нової версії немає з чого відкривати.");
+        }
+
+        if (HasDraft)
+        {
+            throw new InvalidOperationException($"У типу дозволу «{Code}» уже є чернетка нової версії.");
+        }
+
+        SaveDraft(json, userId, utcNow);
+    }
+
+    /// <summary>Скидає чернетку (після публікації чи скасування).</summary>
+    public void DiscardDraft() => DraftJson = null;
+
+    /// <summary>
+    /// Застосовує назву й категорію з чернетки при публікації — на відміну від <see cref="Update"/>, для типу
+    /// в будь-якому стані: нова версія опублікованого типу може змінити й підпис.
+    /// </summary>
+    /// <param name="name">Назва.</param>
+    /// <param name="category">Категорія.</param>
+    public void ApplyDetails(LocalizedText name, PermitCategory category)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        EnsureCategory(category);
+
+        NameL10n = name;
+        Category = category;
+    }
+
+    /// <summary>
+    /// Публікує нову версію вже опублікованого типу: <see cref="Version"/> зростає, чернетка зникає.
+    /// </summary>
+    /// <param name="userId">Хто публікує.</param>
+    /// <param name="utcNow">Момент публікації в UTC.</param>
+    /// <exception cref="InvalidOperationException">Тип ще не опубліковано (перша публікація — <see cref="Publish"/>).</exception>
+    public void Republish(int userId, DateTime utcNow)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(userId);
+        EnsureUtc(utcNow);
+
+        if (Status != PermitTypeStatus.Published)
+        {
+            throw new InvalidOperationException($"Тип дозволу «{Code}» ще не опубліковано: перша публікація — {nameof(Publish)}.");
+        }
+
+        Version++;
+        PublishedAt = utcNow;
+        PublishedByUserId = userId;
+        UpdatedAt = utcNow;
+        UpdatedByUserId = userId;
+        DraftJson = null;
+    }
+
     /// <summary>Публікує тип: <see cref="PermitTypeStatus.Draft"/> → <see cref="PermitTypeStatus.Published"/>.</summary>
     /// <param name="userId">Хто публікує.</param>
     /// <param name="utcNow">Момент публікації; має бути в UTC.</param>
@@ -95,11 +192,7 @@ public sealed class PermitTypeDef : Entity<int>
     public void Publish(int userId, DateTime utcNow)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(userId);
-
-        if (utcNow.Kind != DateTimeKind.Utc)
-        {
-            throw new ArgumentException("Момент публікації має бути в UTC.", nameof(utcNow));
-        }
+        EnsureUtc(utcNow);
 
         // ⛔ Перехід лише вгору: опублікований тип заморожений, бо на нього вже
         // посилаються прив'язки аркушів і документи.
@@ -108,6 +201,17 @@ public sealed class PermitTypeDef : Entity<int>
         Status = PermitTypeStatus.Published;
         PublishedAt = utcNow;
         PublishedByUserId = userId;
+        UpdatedAt = utcNow;
+        UpdatedByUserId = userId;
+        DraftJson = null;
+    }
+
+    private static void EnsureUtc(DateTime utcNow)
+    {
+        if (utcNow.Kind != DateTimeKind.Utc)
+        {
+            throw new ArgumentException("Момент має бути в UTC.", nameof(utcNow));
+        }
     }
 
     private void EnsureDraft()

@@ -34,6 +34,11 @@ public sealed class PermitTypeDefConfiguration : IEntityTypeConfiguration<Permit
         builder.Property(x => x.PublishedAt).HasColumnType("datetime2(3)");
         builder.Property(x => x.RowVersion).IsRowVersion();
 
+        // PM-03 (міграція PRM02): чернетка визначення типу й хто/коли її змінив. JSON, а не таблиці:
+        // нове поле довідника ще не має ключа, до якого прив'язати PermitFieldMeta.
+        builder.Property(x => x.DraftJson).HasColumnType("nvarchar(max)");
+        builder.Property(x => x.UpdatedAt).HasColumnType("datetime2(3)");
+
         // ⚠ `ValueGeneratedNever`: значення ЗАВЖДИ надсилається з коду, а DEFAULT
         // лишається для вставок повз EF (EnumDefaultSentinelTests: CLR-замовчування
         // переліку EF інакше вважає «незаданим» і підставляє DEFAULT схеми).
@@ -46,6 +51,8 @@ public sealed class PermitTypeDefConfiguration : IEntityTypeConfiguration<Permit
                .HasConstraintName("FK_PermitType_HeaderReg");
         builder.HasOne<User>().WithMany().HasForeignKey(x => x.PublishedByUserId)
                .HasConstraintName("FK_PermitType_PublishedBy");
+        builder.HasOne<User>().WithMany().HasForeignKey(x => x.UpdatedByUserId)
+               .HasConstraintName("FK_PermitType_UpdatedBy");
     }
 }
 
