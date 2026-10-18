@@ -2,6 +2,7 @@ import {
   lazy,
   Suspense,
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
   type JSX,
@@ -204,13 +205,39 @@ const EndSimulationButton = lazy(() =>
 /** Ідентифікатор списку пунктів меню — ціль `aria-controls` кнопки згортання. */
 const NavbarItemsId = 'app-navbar-items';
 
+/** Ідентифікатор панелі меню — ціль `aria-controls` бургера (CL-16, B-5). */
+const NavbarPanelId = 'app-navbar';
+
 export function AppLayout(): JSX.Element {
-  const [opened, { toggle }] = useDisclosure();
+  const [opened, { toggle, close }] = useDisclosure();
+  const burgerRef = useRef<HTMLButtonElement>(null);
   // ⚠ Синхронно з першого рендера (не в ефекті): інакше після F5 меню спершу
   // малювалося б широким і стрибало у вузьке — зсув усієї сторінки (CLS).
   const desktop = useMediaQuery(NavbarDesktopQuery, true, { getInitialValueInEffect: false }) === true;
   // На мобільному меню — шухляда на всю ширину; «лише іконки» там не діє.
   const iconsOnly = useNavbarCollapsed() && desktop;
+
+  // CL-16 (B-5): Esc закриває мобільне меню і повертає фокус на бургер (раніше — лише повторний клік).
+  // Не чіпаємо Esc, який уже обробив хтось інший (модалка, випадне меню, поле).
+  useEffect(() => {
+    if (!opened || desktop) {
+      return undefined;
+    }
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.defaultPrevented) {
+        return;
+      }
+
+      close();
+      burgerRef.current?.focus();
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [opened, desktop, close]);
+
   const session = useSession();
   const location = useLocation();
 
@@ -436,6 +463,9 @@ export function AppLayout(): JSX.Element {
             <Group gap="sm" wrap="nowrap" className="ecr-topbar-start">
               {!me.mustChangePassword && !desktop && (
                 <Burger
+                  ref={burgerRef}
+                  aria-expanded={opened}
+                  aria-controls={NavbarPanelId}
                   opened={opened}
                   onClick={toggle}
                   size="sm"
@@ -517,7 +547,7 @@ export function AppLayout(): JSX.Element {
           </Group>
         </AppShell.Header>
 
-        <AppShell.Navbar p="xs">
+        <AppShell.Navbar p="xs" id={NavbarPanelId}>
           <AppShell.Section grow component={ScrollArea} id={NavbarItemsId}>
             {/* T1-15 (б): пунктів меню під примусовою зміною пароля немає зовсім —
                 згорнута панель лишала б їх у дереві й у порядку Tab. */}
