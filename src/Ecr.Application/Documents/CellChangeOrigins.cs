@@ -31,6 +31,17 @@ public static class CellChangeOrigins
     /// <summary>Запис інтеграції/збору (<c>IntegrationCellPatcher</c>) — єдине МАШИННЕ походження входу (D3-A).</summary>
     public const string Integration = "Integration";
 
+    /// <summary>
+    /// Значення з дозволу (Permits, PM-10): ліміти й довідкові поля заблокованих колонок аркуша, прив'язаного до
+    /// таблиці дозволу, пише машина (<c>IPermitBindingService</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ МАШИННЕ походження: рядок із останнім значенням від дозволу ручно не видаляється
+    /// (<c>RowStore.HasMachineOriginAsync</c>). У <see cref="HumanOriginsSql"/> і <see cref="IsHuman"/> його немає
+    /// навмисно - це не рішення людини. Клієнт заявити його не може (<see cref="RequireClientOrigin"/>).
+    /// </remarks>
+    public const string Permit = "Permit";
+
     /// <summary>Перерахунок: міняє похідне, а не вхід; для визначення «хто ввів значення» пропускається.</summary>
     public const string Recalculation = "Recalculation";
 
