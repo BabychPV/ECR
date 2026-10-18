@@ -3188,11 +3188,13 @@ export function gridColumns(
           // вибір, а не випадок: `title` на елементі один, а «сервер
           // відхилив цю правку» важливіше за повтор видимого числа.
           // Повне значення такої комірки лишається доступним у рядку формули.
+          // CL-24 (B-10): стан НЕ витісняє значення — обидва в одному `title` (стан першим). Раніше число,
+          // обрізане «…», у комірці зі станом/підказкою лишалось без підказки взагалі.
           ...(hint.length === 0
             ? fullValueHint === null || fullValueHint.length === 0
               ? {}
               : { title: fullValueHint }
-            : { title: hint }),
+            : { title: fullValueHint === null || fullValueHint.length === 0 ? hint : `${hint} (${fullValueHint})` }),
 
           // ⚠ Колір і заливка тут — ЗМІННІ (`--ecr-cell-*`), не inline `color`/
           // `backgroundColor`: заливку застосовує лише комірка без стану, а

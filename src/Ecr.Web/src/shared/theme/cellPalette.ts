@@ -37,3 +37,20 @@ export const ThemeColours: readonly string[] = ThemeBase;
 export function isHexColour(value: string): boolean {
   return /^#[0-9a-f]{6}$/.test(value);
 }
+
+/** CL-23: стабільний id назви кольору (ключ каталогу grid.cellColor.name.<id>); hex-літерали живуть лише тут. */
+export type ColourNameId =
+  | 'white' | 'black' | 'lightGray' | 'blueGray' | 'blue' | 'orangeHue' | 'gray' | 'amber' | 'skyBlue' | 'mediumGreen'
+  | 'darkRed' | 'redHue' | 'yellow' | 'lightGreen' | 'green' | 'cyan' | 'strongBlue' | 'darkBlue' | 'purple';
+
+const ColourNameIds: Readonly<Record<string, ColourNameId>> = {
+  '#ffffff': 'white', '#000000': 'black', '#e7e6e6': 'lightGray', '#44546a': 'blueGray', '#4472c4': 'blue',
+  '#ed7d31': 'orangeHue', '#a5a5a5': 'gray', '#ffc000': 'amber', '#5b9bd5': 'skyBlue', '#70ad47': 'mediumGreen',
+  '#c00000': 'darkRed', '#ff0000': 'redHue', '#ffff00': 'yellow', '#92d050': 'lightGreen', '#00b050': 'green',
+  '#00b0f0': 'cyan', '#0070c0': 'strongBlue', '#002060': 'darkBlue', '#7030a0': 'purple',
+};
+
+/** Id назви базового кольору палітри; null - hex поза палітрою (назви не вигадуємо). */
+export function colourNameId(hex: string): ColourNameId | null {
+  return ColourNameIds[hex] ?? null;
+}

@@ -1,6 +1,7 @@
 import { memo, type JSX, type RefObject } from 'react';
 import { Badge, Button, Group, Table, Text, TextInput } from '@mantine/core';
 import { t } from '@/shared/i18n';
+import './uiStringsTable.css';
 
 interface UiStringsTableProps {
   /** Ключі, що намальовано зараз (уже відфільтровані й обрізані порцією). */
@@ -47,7 +48,7 @@ export const UiStringsTable = memo(function UiStringsTable({
   onSave,
 }: UiStringsTableProps): JSX.Element {
   return (
-    <Table striped className="ecr-sticky-head">
+    <Table striped className="ecr-sticky-head ecr-ui-strings-table">
       <Table.Thead>
         <Table.Tr>
           <Table.Th>{t('uiStrings.key')}</Table.Th>
