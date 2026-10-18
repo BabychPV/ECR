@@ -1,7 +1,6 @@
-import { useMemo, useState, type JSX } from 'react';
+import { useMemo, useRef, useState, type JSX } from 'react';
 import { Badge, Button, Group, List, Select, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { RegistryDefDto, RegistryEntryDto } from '@/api/types';
@@ -16,7 +15,7 @@ import {
   ValidityEditor,
   isExternalRegistry,
 } from '@/features/registries/RegistryEntryEditor';
-import { RegistryImportPanel } from '@/features/registries/RegistryImportPanel';
+import { RegistryImportPanel, type RegistryImportHandle } from '@/features/registries/RegistryImportPanel';
 import { RegistriesList } from '@/features/registries/list/RegistriesList';
 import { RegistryExportButton } from '@/features/registries/export/RegistryExportButton';
 import { EntryUsageButton } from '@/features/registries/rc814/EntryUsageButton';
@@ -110,6 +109,11 @@ function RegistryOverview(): JSX.Element {
   // Заведення довідника з нуля (директива №11, T4): доти в системі не було
   // жодного способу, доступного людині, додати довідник, якого немає в seed.
   const [creating, setCreating] = useState(false);
+
+  // Діалоги пунктів меню «Ще» і другорядних дій шапки: власних кнопок у них немає (REG-UI 3/3).
+  const [exporting, setExporting] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const importRef = useRef<RegistryImportHandle>(null);
 
   const registries = useQuery({
     queryKey: queryKeys.registries.list(),
@@ -356,9 +360,53 @@ function RegistryOverview(): JSX.Element {
 
   return (
     <>
+      {/*
+       * ⛔ Рядок дій за макетом (KIT.md): ОДНА головна дія, не більше двох другорядних, решта — у
+       * «Ще». До цього тут стояло дев'ять кнопок поспіль. Діалоги імпорту, експорту й перемикання
+       * master-набору живуть ПОЗА шапкою (нижче): шапка вантажить кластер дій лениво, і діалог із
+       * власним станом у вузлі `actions` змонтувався б двічі (запасний вузол + справжній).
+       *
+       * ⚠ Право й вимкнений стан ті самі, що були у окремих кнопок: `New entry`/`Import CSV` — за
+       * `Registry.EditData` і не для External; `New registry` — `Registry.EditDefinition`;
+       * `Switch master source` — небезпечне `Integration.Manage`.
+       */}
       <PageHeader
         title={t('registries.title')}
         back={{ label: t('registries.list.back'), href: '/admin/registries' }}
+        moreLabel={t('registries.moreActions')}
+        primary={
+          selected !== undefined && canEditData
+            ? { label: t('registries.newEntry'), disabled: externalReadOnly, onClick: () => setEditing(null) }
+            : undefined
+        }
+        secondary={[
+          // ФВ-8.12: табличний редактор даних довідника (`rc812`) — основний шлях правки.
+          ...(selected !== undefined
+            ? [{ label: t('registries.data.open'), href: `/admin/registries/${encodeURIComponent(selected.code)}/entries` }]
+            : []),
+          // BE-24: масове заведення/оновлення записів (те саме право, що ручний upsert).
+          ...(selected !== undefined && canEditData
+            ? [{ label: t('registry.import.pick'), disabled: externalReadOnly, onClick: () => importRef.current?.pick() }]
+            : []),
+        ]}
+        more={[
+          // RT-16: експорт записів, чинних на ту саму дату, що й перелік.
+          ...(selected !== undefined ? [{ label: t('registries.export.button'), onClick: () => setExporting(true) }] : []),
+          // ФВ-8.12: опис довідника — поля, зв'язки, правила, мапінг.
+          ...(selected !== undefined
+            ? [{ label: t('registries.constructor'), href: `/admin/registries/${encodeURIComponent(selected.code)}/definition` }]
+            : []),
+          // RT-25: які документи відкритих періодів зачепить правка довідника.
+          ...(selected !== undefined
+            ? [{ label: t('registries.impact.open'), href: `/admin/registries/${encodeURIComponent(selected.code)}/impact` }]
+            : []),
+          // Директива №11, T4: заведення НОВОГО довідника.
+          ...(canEditDefinition ? [{ label: t('registries.newRegistry'), onClick: () => setCreating(true) }] : []),
+          // ФВ-13.10: перемикання master набором довідників.
+          ...(can(session.data, 'Integration.Manage') && !simulation
+            ? [{ label: t('registries.sourceSwitch'), onClick: () => setSwitching(true) }]
+            : []),
+        ]}
         actions={
           <FilterRow>
             <Select
@@ -374,94 +422,35 @@ function RegistryOverview(): JSX.Element {
               }))}
             />
 
-            {/* ⛔ Заведення НОВОГО довідника не мало кнопки (директива №11,
-                T4): контролер умів лише читати перелік і правити опис
-                НАЯВНОГО довідника, а сам довідник заводив тільки офлайновий
-                seed — тобто довідника, якого там немає, не міг завести ніхто. */}
-            {canEditDefinition && (
-              <Button variant="default" onClick={() => setCreating(true)}>
-                {t('registries.newRegistry')}
-              </Button>
-            )}
-
-            {/* ⛔ Заведення запису не мало кнопки (`A7-42`). Довідник без
-                записів — це колонка типу `Lookup`, яка не пропонує нічого,
-                тобто документ, який неможливо заповнити. */}
-            {selected !== undefined && canEditData && (
-              <Button disabled={externalReadOnly} onClick={() => setEditing(null)}>
-                {t('registries.newEntry')}
-              </Button>
-            )}
-
-            {/* ⛔ Масове заведення/оновлення записів не мало в інтерфейсі
-                жодного споживача (`BE-24`): дію на сервері викликати можна
-                було лише напряму HTTP-клієнтом. Те саме право, що ручний
-                upsert запису (`Registry.EditData`) — імпорт лише пришвидшує
-                той самий шлях, не обходить його. */}
-            {selected !== undefined && canEditData && (
-              <RegistryImportPanel registryCode={selected.code} disabled={externalReadOnly} />
-            )}
-
             {/* D-211: чому кнопки правки неактивні — словами, а не лише сірим кольором. */}
             {externalReadOnly && canEditData && (
               <Text size="xs" c="dimmed" maw={260} data-registry-external="read-only">
                 {t('registries.externalReadOnly')}
               </Text>
             )}
-
-            {/* RT-16: експорт записів, чинних на ту саму дату, що й перелік (темпоральний — сьогодні). */}
-            {selected !== undefined && <RegistryExportButton registryCode={selected.code} asOf={asOf} />}
-
-            {/* ФВ-8.12: табличний редактор даних довідника (`rc812`). */}
-            {selected !== undefined && (
-              <Button
-                component={Link}
-                to={`/admin/registries/${encodeURIComponent(selected.code)}/entries`}
-                variant="default"
-              >
-                {t('registries.data.open')}
-              </Button>
-            )}
-
-            {/* ⛔ Вхід у конструктор (`ФВ-8.12`). Опис довідника — поля,
-                зв'язки, правила, мапінг — не мав в інтерфейсі жодного
-                споживача: подивитися, за яким правилом довідник перевіряє
-                свої записи, було ніде. */}
-            {selected !== undefined && (
-              <Button
-                component={Link}
-                to={`/admin/registries/${encodeURIComponent(selected.code)}/definition`}
-                variant="default"
-              >
-                {t('registries.constructor')}
-              </Button>
-            )}
-
-            {/* RT-25: які документи відкритих періодів зачепить правка довідника, і їх перерахунок. */}
-            {selected !== undefined && (
-              <Button
-                component={Link}
-                to={`/admin/registries/${encodeURIComponent(selected.code)}/impact`}
-                variant="default"
-              >
-                {t('registries.impact.open')}
-              </Button>
-            )}
-
-            {/* ⛔ Перемикання master набором (`ФВ-13.10`). Дія існувала на
-                сервері й не мала в інтерфейсі жодного споживача — тобто
-                поетапний перехід майстра (`ФВ-11.4`) був неможливий інакше,
-                як руками в базі.
-
-                ⚠ Право небезпечне (`Integration.Manage`) і в seed його не
-                має ніхто: кнопка з'явиться лише в того, кому його видали
-                поіменно. */}
-            {can(session.data, 'Integration.Manage') && !simulation && (
-              <SourceKindSwitch registries={registries.data ?? []} />
-            )}
           </FilterRow>
         }
       />
+
+      {/* Керовані діалоги пунктів «Імпорт»/«Експорт»/«Перемкнути master»: власних кнопок у них немає. */}
+      {selected !== undefined && canEditData && (
+        <RegistryImportPanel registryCode={selected.code} disabled={externalReadOnly} hideButton handleRef={importRef} />
+      )}
+      {selected !== undefined && (
+        <RegistryExportButton
+          registryCode={selected.code}
+          asOf={asOf}
+          opened={exporting}
+          onClose={() => setExporting(false)}
+        />
+      )}
+      {can(session.data, 'Integration.Manage') && !simulation && (
+        <SourceKindSwitch
+          registries={registries.data ?? []}
+          opened={switching}
+          onClose={() => setSwitching(false)}
+        />
+      )}
 
       {/*
        * ⛔ Помилка переліку довідників показується ОКРЕМО від помилки записів:

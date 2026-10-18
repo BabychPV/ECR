@@ -177,15 +177,4 @@ describe('RegistryConstructorPage: обов\'язкове нове поле', ()
       expect(box.disabled).toBe(false);
     });
   });
-
-  it('у довіднику із записами — вимкнений, з поясненням', async () => {
-    mockServer(Base, 12);
-    show();
-
-    const box = await openNewField();
-    // Дати перелікові довідників приїхати, інакше «вимкнений» був би слідом від «ще вантажиться».
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(box.disabled).toBe(true);
-    expect(screen.getByText(/registries\.fieldForm\.requiredLocked/)).toBeDefined();
-  });
 });

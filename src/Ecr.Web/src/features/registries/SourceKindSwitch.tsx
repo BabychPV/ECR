@@ -20,10 +20,29 @@ import { t } from '@/shared/i18n';
  * «немає відкритого періоду» робиться один раз на весь набір: половина блоку
  * в одному режимі, половина в іншому — гірше, ніж відмова.
  */
-export function SourceKindSwitch({ registries }: { registries: RegistryDefDto[] }): JSX.Element {
+export function SourceKindSwitch({
+  registries,
+  opened: controlledOpened,
+  onClose,
+}: {
+  registries: RegistryDefDto[];
+
+  /**
+   * Керований режим (REG-UI 3/3): `opened` задано — власної кнопки немає, діалог відкриває й
+   * закриває сторінка (пункт меню «Ще»). Без нього — кнопка й діалог разом, як було.
+   */
+  opened?: boolean;
+  onClose?: () => void;
+}): JSX.Element {
   const queryClient = useQueryClient();
 
-  const [opened, setOpened] = useState(false);
+  const controlled = controlledOpened !== undefined;
+  const [ownOpened, setOwnOpened] = useState(false);
+  const opened = controlled ? controlledOpened : ownOpened;
+  const setOpened = (next: boolean): void => {
+    setOwnOpened(next);
+    if (!next) onClose?.();
+  };
   const [codes, setCodes] = useState<string[]>([]);
   const [kind, setKind] = useState<RegistrySourceKind>('Local');
   const [reason, setReason] = useState('');
@@ -49,9 +68,11 @@ export function SourceKindSwitch({ registries }: { registries: RegistryDefDto[] 
 
   return (
     <>
-      <Button variant="default" onClick={() => setOpened(true)}>
-        {t('registries.sourceSwitch')}
-      </Button>
+      {!controlled && (
+        <Button variant="default" onClick={() => setOpened(true)}>
+          {t('registries.sourceSwitch')}
+        </Button>
+      )}
 
       <Modal
         opened={opened}

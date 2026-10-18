@@ -8093,6 +8093,9 @@ USING (VALUES
     ,(N'registries.tabHint.history', N'en', N'Who changed the description of this registry, when and why. The reason is written by the author of the change.', 1)
     ,(N'registries.tabHint.usage', N'en', N'Templates and columns that depend on this registry. Check this before changing the description.', 1)
     -- REG-UI:tabs ── кінець секції ──
+    -- REG-UI:actions ── UI довідників, коміт 3: рядок дій сторінки записів (головна + 2 другорядні + «Ще»); ru/kz — порцією REG-UI:actions у блоці I18N нижче ──
+    ,(N'registries.moreActions', N'en', N'More', 1)
+    -- REG-UI:actions ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -20399,6 +20402,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- REG-UI:tabs ── кінець секції ──
+
+-- REG-UI:actions ── ru/kz UI довідників, коміт 3: рядок дій сторінки записів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'registries.moreActions', N'ru', N'Ещё'),
+    (N'registries.moreActions', N'kz', N'Тағы')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- REG-UI:actions ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
