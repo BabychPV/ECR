@@ -8587,6 +8587,7 @@ USING (VALUES
     ,(N'err.ECR-PRM-0422.bindingPrecisionMismatch', N'en', N'Precision or scale of field "{fieldCode}" and column "{columnCode}" differ: values would have to be rounded.', 1)
     ,(N'err.ECR-PRM-0422.bindingNotReadOnly', N'en', N'Column "{columnCode}" must be read-only: its value is written by the system.', 1)
     ,(N'err.ECR-PRM-0422.bindingTooManyRows', N'en', N'The permit has {count} rows but table "{tableCode}" holds at most {max}.', 1)
+    ,(N'err.ECR-PRM-0404.binding', N'en', N'Permit binding "{bindingCode}" does not exist in this template version.', 1)
     -- PERMITS: bindings ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -21941,6 +21942,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: audit-fixes ── кінець секції ──
+-- PERMITS: bindings ── ECR-PRM-0404 ── ru/kz: прив'язку аркуша не знайдено; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-0404.binding', N'ru', N'Привязки разрешения «{bindingCode}» в этой версии шаблона нет.'),
+    (N'err.ECR-PRM-0404.binding', N'kz', N'Үлгінің осы нұсқасында «{bindingCode}» рұқсат байланысы жоқ.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: bindings ── ECR-PRM-0404 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

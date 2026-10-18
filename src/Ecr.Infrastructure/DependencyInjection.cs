@@ -530,6 +530,8 @@ public static class DependencyInjection
 
         // PERMITS: permits — екземпляри дозволів (PM-04)
         services.AddScoped<IPermitStore, PermitStore>();
+        // PERMITS: bindings — прив'язки таблиць аркуша до дозволів (PM-09)
+        services.AddScoped<IPermitBindingStore, PermitBindingStore>();
 
         // Прогрів кешу метаданих на старті (B01 §6.3, крок 7).
         services.AddScoped<MetadataWarmup>();
