@@ -36,6 +36,31 @@ export interface ColumnFieldsProps {
   readonly removeDisabled?: boolean | undefined;
 }
 
+/**
+ * Підпис типу стовпця.
+ *
+ * ⛔ Кожен ключ — літералом: сторож `EndpointCoverageTests` не пропускає ключ, складений у шаблонному
+ * рядку. Невідомий тип (сервер додав новий) показується своїм кодом, а не `⟦…⟧`.
+ */
+function typeLabel(dataType: string): string {
+  switch (dataType) {
+    case 'String':
+      return t('permits.editor.dialogs.type.String');
+    case 'Decimal':
+      return t('permits.editor.dialogs.type.Decimal');
+    case 'Int':
+      return t('permits.editor.dialogs.type.Int');
+    case 'Date':
+      return t('permits.editor.dialogs.type.Date');
+    case 'Bool':
+      return t('permits.editor.dialogs.type.Bool');
+    case 'Lookup':
+      return t('permits.editor.dialogs.type.Lookup');
+    default:
+      return dataType;
+  }
+}
+
 export function ColumnFields({
   idPrefix,
   nameLabel,
@@ -50,13 +75,10 @@ export function ColumnFields({
 }: ColumnFieldsProps): JSX.Element {
   const typeData: { value: string; label: string }[] = SimpleColumnKinds.map((kind) => ({
     value: kind,
-    label: t(`permits.editor.dialogs.type.${kind}`),
+    label: typeLabel(kind),
   }));
   if (!SimpleColumnKinds.some((kind) => kind === value.dataType)) {
-    typeData.push({
-      value: value.dataType,
-      label: t(`permits.editor.dialogs.type.${value.dataType}`),
-    });
+    typeData.push({ value: value.dataType, label: typeLabel(value.dataType) });
   }
 
   const numeric = isNumericKind(value.dataType);
