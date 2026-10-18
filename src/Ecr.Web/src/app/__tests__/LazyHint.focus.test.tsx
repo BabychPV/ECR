@@ -70,4 +70,27 @@ describe('LazyHint: фокус переживає доїзд чанка Hint', (
     expect(document.activeElement).toBe(outside);
     outside.remove();
   });
+
+  it('фокус пішов з тригера між доїздом чанка і комітом заміни — назад не віддається (AN-58)', async () => {
+    await mountWithSlowChunk();
+    const before = screen.getByRole('button', { name: 'Toggle' });
+    const outside = document.createElement('input');
+    document.body.appendChild(outside);
+    before.focus();
+
+    // Усередині act оновлення стану чекає виходу зі сфери: continuation чанка
+    // (де фіксується «тригер у фокусі») встигає, а коміт заміни — ще ні.
+    await act(async () => {
+      release();
+      // importActual — справжній ввід-вивід, не мікротаски: чекаємо його таймером.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      outside.focus();
+    });
+    await waitFor(() => {
+      expect(document.querySelector('[data-hint-text]')).not.toBeNull();
+    });
+
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
 });

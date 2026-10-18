@@ -84,6 +84,11 @@ export function LazyHint({
   useLayoutEffect(() => {
     if (!restoreFocus.current) return;
     restoreFocus.current = false;
+    // Між доїздом чанка (де прапорець виставлено) і комітом заміни проходить кадр:
+    // якщо за цей час фокус уже взяв інший елемент, назад його не віддаємо. Втрачений
+    // через перемонтування тригера фокус завжди на `body` (або відсутній).
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
     findTrigger(key)?.focus({ preventScroll: true });
   }, [Hint, key]);
 
