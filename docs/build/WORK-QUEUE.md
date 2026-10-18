@@ -202,7 +202,7 @@
 | AN-55 | Вимір на scratch-базі `EcrMeasureLate`: `late` у `/audit/cells/summary`, вартість `totalCount` — ⚠ потрібен вимір на scratch-базі | «Аналіз» | todo |
 | AN-56 | Індекс `CollectionRun` (`IX_CollectionRun_SourceEntityId_StartedAt`) — лише за виміром — ⚠ потрібен вимір на scratch-базі | «Аналіз» | todo |
 | AN-57 | Нестабільність `gridPasteAfterEditor`: діагноз без доказу, бісекція на CI-раннері | «Аналіз» | todo |
-| AN-58 | Теоретична гонка в один кадр у `LazyHint` | «Аналіз» | doing (`lane/an-analiz/an58-lazyhint-focus-race`, fc7b26da3) |
+| AN-58 | Теоретична гонка в один кадр у `LazyHint` | «Аналіз» | done (fb2ec1b2c, 1e4d57822; merge e33fd7889 #562) |
 | AN-59 | Approver, варіанти C/D (імена тих, хто МАЄ право на кроці; призначений затверджувач) — питання людині RC8+ | людина | todo |
 | AN-60 | Ім'я «хто затвердив» скидається після Reopen/Reject/Recall (за дизайном B) | — | decision: за дизайном |
 | AN-61 | Відсутній асерт «без даних» у тесті R-6 — ⚠ потрібне уточнення предмета | «Аналіз» | todo |
