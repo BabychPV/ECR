@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { CreatedPermitTypes } from './permitTypeCleanup';
 
 /**
  * Конструктор типу дозволу (Permits, PM-08b): на живому стенді.
@@ -48,13 +49,18 @@ function column(code: string, order: number, over: Record<string, unknown> = {})
 test.describe('Конструктор типу дозволу', () => {
   test.skip(PeriodKey === '', 'ECR_E2E_OPTIONAL: стенда немає. Стенд: tools/e2e-stand.ps1.');
 
+  const tracked = new CreatedPermitTypes();
+  test.afterEach(async ({ page }) => {
+    await tracked.cleanup(page);
+  });
+
   test('правка стовпця в інспекторі зберігається і переживає перезавантаження', async ({ page }) => {
     test.setTimeout(120_000);
     await page.setViewportSize({ width: 1440, height: 900 });
     await signIn(page);
 
     // Тип заводимо тим самим входом, що й людина (`page.request` ділить куки з вкладкою).
-    const code = `E2E_PRM_${Date.now()}`;
+    const code = tracked.track(`E2E_PRM_${Date.now()}`);
     const created = await page.request.post('/api/v1/permit-types', {
       data: { code, category: 'Water', nameL10n: { en: 'E2E permit type' } },
     });
@@ -107,9 +113,6 @@ test.describe('Конструктор типу дозволу', () => {
     await page.reload();
     await expect(page.getByRole('row', { name: 'Remarks' })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/unsaved changes/)).toHaveCount(0);
-
-    // Прибираємо за собою: тип ніколи не публікувався, тож видаляється.
-    const removed = await page.request.delete(`/api/v1/permit-types/${code}`);
-    expect(removed.status()).toBeLessThan(300);
+    // Тип ніколи не публікувався: його знімає `afterEach` (і тоді, коли тест упав раніше).
   });
 });

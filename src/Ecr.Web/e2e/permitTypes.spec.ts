@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { CreatedPermitTypes } from './permitTypeCleanup';
 
 /**
  * PM-08a: перелік типів пермітів і майстер «New permit type» — на живому стенді.
@@ -28,15 +29,21 @@ async function signIn(page: Page): Promise<void> {
 test.describe('Типи пермітів: перелік і майстер', () => {
   test.skip(PeriodKey === '', 'ECR_E2E_OPTIONAL: стенда немає. Стенд: tools/e2e-stand.ps1.');
 
+  const created = new CreatedPermitTypes();
+  test.afterEach(async ({ page }) => {
+    await created.cleanup(page);
+  });
+
   test('новий тип створюється майстром і з’являється в переліку', async ({ page }) => {
     test.setTimeout(120_000);
     await page.setViewportSize({ width: 1440, height: 900 });
     await signIn(page);
 
     // Назва унікальна на прогін: код береться з неї, а повторне заведення дало б 409 ECR-PRM-4091.
+    // Назва з `E2E_` (видно в переліку, чий це сміття); код з неї губить підкреслення. Код — у прибирання до майстра.
     const stamp = String(Date.now());
-    const name = `E2E noise permit ${stamp}`;
-    const code = `E2ENoisePermit${stamp}`;
+    const name = `E2E_ noise permit ${stamp}`;
+    const code = created.track(`E2ENoisePermit${stamp}`);
 
     await page.goto('/admin/permits/types');
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 30_000 });

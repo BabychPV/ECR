@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { CreatedPermitTypes } from './permitTypeCleanup';
 
 /**
  * Permits PM-08c: діалоги конструктора типу дозволу на живому стенді — майстер «Add a table»,
@@ -32,12 +33,20 @@ async function signIn(page: Page): Promise<void> {
 test.describe('Діалоги конструктора типу дозволу', () => {
   test.skip(PeriodKey === '', 'ECR_E2E_OPTIONAL: стенда немає. Стенд: tools/e2e-stand.ps1.');
 
+  // Тест у кінці ПУБЛІКУЄ тип, а опублікований сервер не видаляє (`ECR-PRM-4094`): прибирання знімає лише
+  // той тип, що не дійшов до публікації (тест упав раніше); готовий `E2E_Dialogs_*` лишається на стенді
+  // для одноразової бази (`e2e-stand` її розгортає наново).
+  const tracked = new CreatedPermitTypes();
+  test.afterEach(async ({ page }) => {
+    await tracked.cleanup(page);
+  });
+
   test('Add table → Add column → Add check → Publish', async ({ page }) => {
     test.setTimeout(180_000);
     await page.setViewportSize({ width: 1440, height: 900 });
     await signIn(page);
 
-    const code = `E2E_Dialogs_${Date.now()}`;
+    const code = tracked.track(`E2E_Dialogs_${Date.now()}`);
     const created = await page.request.post('/api/v1/permit-types', {
       data: { code, nameL10n: { en: 'E2E dialogs' }, category: 'Water' },
     });
