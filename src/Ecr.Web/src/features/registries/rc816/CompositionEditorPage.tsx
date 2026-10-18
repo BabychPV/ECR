@@ -199,7 +199,10 @@ export function CompositionEditorPage(): JSX.Element {
 
   return (
     <>
-      <PageHeader title={t('registries.rc816.title')} />
+      <PageHeader
+        title={t('registries.rc816.title')}
+        back={{ label: t('registries.data.back'), href: `/admin/registries?code=${encodeURIComponent(code)}` }}
+      />
 
       <AsyncBoundary<RegistryDefinitionDto>
         isPending={definition.isPending}

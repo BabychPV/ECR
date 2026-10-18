@@ -48,6 +48,15 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 
+/** Короткий рядок «що показує вкладка і навіщо» над її вмістом. */
+function TabHint({ children }: { readonly children: string }): JSX.Element {
+  return (
+    <Text size="xs" c="dimmed" mb="xs">
+      {children}
+    </Text>
+  );
+}
+
 /** Чи форма досі та сама, що пішла в збереження чернетки (поля, правила, причина). */
 function sameDraft(sent: SaveRegistryDraftBody, current: SaveRegistryDefinitionDto | null): boolean {
   if (current === null) return false;
@@ -293,6 +302,8 @@ export function RegistryConstructorPage(): JSX.Element {
     <>
       <PageHeader
         title={t('registries.constructor')}
+        description={t('registries.constructor.description')}
+        back={{ label: t('registries.data.back'), href: `/admin/registries?code=${encodeURIComponent(code)}` }}
         actions={
           <Group gap="xs" align="end">
             {definition.data !== undefined && (
@@ -312,7 +323,10 @@ export function RegistryConstructorPage(): JSX.Element {
         data={definition.data}
         onRetry={() => void definition.refetch()}
       >
-        {(loaded) => (
+        {(loaded) => {
+          const showMapping = loaded.mappings.length > 0 || loaded.sourceKind !== 'Local';
+
+          return (
           <>
             <Group gap="xs" mb="sm">
               <Text fw={600}>{localized(loaded.nameL10n) || loaded.code}</Text>
@@ -344,7 +358,10 @@ export function RegistryConstructorPage(): JSX.Element {
                 <Tabs.Tab value="fields">{t('registries.tabFields')}</Tabs.Tab>
                 <Tabs.Tab value="relations">{t('registries.tabRelations')}</Tabs.Tab>
                 <Tabs.Tab value="rules">{t('registries.tabRules')}</Tabs.Tab>
-                <Tabs.Tab value="mapping">{t('registries.tabMapping')}</Tabs.Tab>
+                {/* ⚠ Мапінг лише читається, а у локального довідника без мапінгу порожній завжди:
+                    вкладка, що веде в «нічого», лише збиває з пантелику. Зовнішній/гібридний
+                    довідник без мапінгу її лишає — порожній стан там і є відповіддю. */}
+                {showMapping && <Tabs.Tab value="mapping">{t('registries.tabMapping')}</Tabs.Tab>}
                 <Tabs.Tab value="history">{t('registries.tabHistory')}</Tabs.Tab>
                 {/* ⚠ Лише з правом `Registry.EditDefinition` — те саме право, що
                     на сервері (`GetRegistryUsageHandler`): вкладка без права
@@ -409,11 +426,15 @@ export function RegistryConstructorPage(): JSX.Element {
                 />
               </Tabs.Panel>
 
-              <Tabs.Panel value="mapping" pt="sm">
-                <RegistryMappings definition={loaded} />
-              </Tabs.Panel>
+              {showMapping && (
+                <Tabs.Panel value="mapping" pt="sm">
+                  <TabHint>{t('registries.tabHint.mapping')}</TabHint>
+                  <RegistryMappings definition={loaded} />
+                </Tabs.Panel>
+              )}
 
               <Tabs.Panel value="history" pt="sm">
+                <TabHint>{t('registries.tabHint.history')}</TabHint>
                 {/*
                   ⛔ Найдорожче місце цієї сторінки: `history.data ?? []` при
                   відмові давало `entries.length === 0`, а `RegistryHistory`
@@ -446,12 +467,14 @@ export function RegistryConstructorPage(): JSX.Element {
 
               {mayView && (
                 <Tabs.Panel value="usage" pt="sm">
+                  <TabHint>{t('registries.tabHint.usage')}</TabHint>
                   <RegistryUsagePanel code={loaded.code} />
                 </Tabs.Panel>
               )}
             </Tabs>
           </>
-        )}
+          );
+        }}
       </AsyncBoundary>
     </>
   );

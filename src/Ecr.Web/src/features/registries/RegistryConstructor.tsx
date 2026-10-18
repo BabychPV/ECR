@@ -225,6 +225,11 @@ export function RegistryRelations({
           {t('registries.tabRelations')}
         </Title>
         <Text c="dimmed">{t('registries.noRelations')}</Text>
+        {/* ⚠ Власної кнопки «додати зв'язок» немає навмисно: зв'язок — наслідок поля типу
+            `Lookup`. Без цього рядка порожня вкладка читалась як «функцію не доробили». */}
+        <Text size="xs" c="dimmed">
+          {t('registries.tabHint.relationsEmpty')}
+        </Text>
       </Stack>
     );
   }
@@ -411,6 +416,9 @@ export function RegistryRules({
           побачить п'ятий вид, і є той дефект, від якого стереже `H-10`. */}
       <Text size="xs" c="dimmed">
         {t('registries.rulesHint')}
+      </Text>
+      <Text size="xs" c="dimmed">
+        {t('registries.tabHint.rulesExample')}
       </Text>
 
       {rules.length === 0 && <Text c="dimmed">{t('registries.noRules')}</Text>}
