@@ -15,9 +15,16 @@ import type { PermitCellValue, PermitColumn } from './columns';
 /** Стовпець для вставки: порядок масиву = порядок клітинок. */
 export type PasteColumn = Pick<PermitColumn, 'code' | 'type'>;
 
-export type PasteIssueReason = 'number' | 'bool' | 'date';
+/** `limit` — вставлено більше за {@link MaxPastedRows}: зайві рядки відкинуто (не мовчки). */
+export type PasteIssueReason = 'number' | 'bool' | 'date' | 'limit';
 
-/** Нерозпізнана клітинка: номер рядка вставки (з 1, без порожніх), стовпець і сирий текст. */
+/** Стеля рядків за одну вставку: більший блок гальмує браузер, а один дозвіл стількох рядків не має. */
+export const MaxPastedRows = 5000;
+
+/**
+ * Нерозпізнана клітинка: номер рядка вставки (з 1, без порожніх), стовпець і сирий текст.
+ * Для `limit`: `row` — перший відкинутий рядок (`MaxPastedRows + 1`), `column` і `text` порожні.
+ */
 export interface PasteIssue {
   readonly row: number;
   readonly column: string;
@@ -138,6 +145,12 @@ export function parsePastedRows(text: string, columns: readonly PasteColumn[]): 
 
   for (const line of parseBlock(text)) {
     if (line.every((cell) => cell.trim() === '')) continue;
+
+    if (rows.length >= MaxPastedRows) {
+      // Один запис про перевищення, а не по запису на кожен зайвий рядок; решту не розбираємо.
+      issues.push({ row: MaxPastedRows + 1, column: '', text: '', reason: 'limit' });
+      break;
+    }
 
     const rowNumber = rows.length + 1;
     const values: Record<string, PermitCellValue> = {};

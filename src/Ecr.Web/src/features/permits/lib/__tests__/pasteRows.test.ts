@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseLocaleDate, parseLocaleNumber, parsePastedRows, type PasteColumn } from '../pasteRows';
+import { MaxPastedRows, parseLocaleDate, parseLocaleNumber, parsePastedRows, type PasteColumn } from '../pasteRows';
 
 /**
  * Мутаційний доказ (вручну, відновлено): `parseLocaleNumber` без заміни коми на крапку валив
@@ -145,6 +145,30 @@ describe('parsePastedRows', () => {
   it('порожній вхід і вхід лише з порожніх рядків — нуль рядків', () => {
     expect(parsePastedRows('', columns).rows).toEqual([]);
     expect(parsePastedRows('\n\t\t\n', columns).rows).toEqual([]);
+  });
+
+  describe('стеля рядків', () => {
+    const one: PasteColumn[] = [{ code: 'Note', type: 'text' }];
+    const block = (count: number): string => Array.from({ length: count }, (_, i) => `r${i + 1}`).join('\n');
+
+    it('рівно MaxPastedRows — усі рядки, без запису про перевищення', () => {
+      const result = parsePastedRows(block(MaxPastedRows), one);
+      expect(result.rows).toHaveLength(MaxPastedRows);
+      expect(result.issues).toEqual([]);
+    });
+
+    it('на один більше — рядки до стелі лишаються, а перевищення названо в issues (не мовчки)', () => {
+      const result = parsePastedRows(block(MaxPastedRows + 1), one);
+      expect(result.rows).toHaveLength(MaxPastedRows);
+      expect(result.rows[MaxPastedRows - 1]?.values.Note).toBe(`r${MaxPastedRows}`);
+      expect(result.issues).toEqual([{ row: MaxPastedRows + 1, column: '', text: '', reason: 'limit' }]);
+    });
+
+    it('багато зайвих рядків — один запис про перевищення; порожні рядки до стелі не рахуються', () => {
+      const result = parsePastedRows(`\n\n${block(MaxPastedRows + 50)}`, one);
+      expect(result.rows).toHaveLength(MaxPastedRows);
+      expect(result.issues.filter((issue) => issue.reason === 'limit')).toHaveLength(1);
+    });
   });
 
   it('без стовпців рядок усе одно створюється (порожній), а клітинки — зайві', () => {
