@@ -376,7 +376,8 @@ export const routes = {
     path: '/admin/permits/types',
     handle: {
       labelKey: 'permits.types.title',
-      permission: 'Registry.View',
+      // PM-06b: типами керують ті, хто веде довідники й шаблони; глядачу порожній розділ ні до чого.
+      permission: 'Registry.EditDefinition',
       descriptionKey: 'permits.types.description',
       crumb: { ancestorIds: ['admin-permits'] },
     },
@@ -386,7 +387,7 @@ export const routes = {
     path: '/admin/permits/types/:code',
     handle: {
       labelKey: 'permits.typeEditor.title',
-      permission: 'Registry.View',
+      permission: 'Registry.EditDefinition',
       crumb: { ancestorIds: ['admin-permits', 'admin-permit-types'] },
     },
   },

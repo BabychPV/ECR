@@ -5,6 +5,7 @@ import { matchRoutes } from 'react-router-dom';
 import { buildCrumbChain, crumbGroupLabelKey, type CrumbMatch } from '@/app/Breadcrumbs';
 import { childPath, navGroups, navRoutes, routeList, routes, type RouteEntry } from '@/app/routes';
 import { PermitsPaths } from '@/features/permits/shell/permitPaths';
+import { PermitTypesPermission } from '@/features/permits/shell/PermitsSubnav';
 import { NavIcon } from '@/shared/ui/navIcons';
 
 /**
@@ -72,8 +73,21 @@ describe('Permits: маршрути', () => {
     });
   });
 
-  it('кожен маршрут Permits охоронений правом Registry.View', () => {
-    expect(permitRoutes.map((route) => route.handle.permission)).toEqual(permitRoutes.map(() => 'Registry.View'));
+  it('читання охоронене правом Registry.View, а типи й їхній редактор — Registry.EditDefinition (PM-06b)', () => {
+    expect(permitRoutes.map((route) => [route.id, route.handle.permission])).toEqual([
+      ['admin-permits', 'Registry.View'],
+      ['admin-permit-types', 'Registry.EditDefinition'],
+      ['admin-permit-type-editor', 'Registry.EditDefinition'],
+      ['admin-permit-lists', 'Registry.View'],
+      ['admin-permit-bindings', 'Registry.View'],
+      ['admin-permit-binding', 'Registry.View'],
+      ['admin-permit', 'Registry.View'],
+    ]);
+  });
+
+  it('право посилання на типи у смузі розділів збігається з правом маршруту', () => {
+    expect(PermitTypesPermission).toBe(routes.adminPermitTypes.handle.permission);
+    expect(PermitTypesPermission).toBe(routes.adminPermitTypeEditor.handle.permission);
   });
 
   it('у меню лише «Permits», і він стоїть у Configure одразу після Registries', () => {

@@ -20,6 +20,12 @@ vi.mock('@/shared/i18n', async (importOriginal) => ({
   t: (key: string) => `text of ${key}`,
 }));
 
+const session = vi.hoisted(() => ({ permissions: ['Registry.View', 'Registry.EditDefinition'] as string[] }));
+vi.mock('@/shared/session/useSession', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/session/useSession')>()),
+  useSession: () => ({ data: { permissions: session.permissions } }),
+}));
+
 afterEach(cleanup);
 
 function show(node: ReactNode): void {
@@ -49,6 +55,34 @@ describe('PermitsSubnav', () => {
       'text of permits.lists.title',
       'text of permits.bindings.title',
     ]);
+  });
+
+  it('PM-06b: глядач (лише Registry.View) не бачить посилання на типи, але поточний розділ не зникає', () => {
+    session.permissions = ['Registry.View'];
+    try {
+      show(<PermitsSubnav current="permits" />);
+      expect(screen.getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual([
+        '/admin/permits',
+        '/admin/permits/lists',
+        '/admin/permits/bindings',
+      ]);
+      cleanup();
+
+      show(<PermitsSubnav current="types" />);
+      expect(screen.getAllByRole('link').map((a) => a.getAttribute('href'))).toContain('/admin/permits/types');
+    } finally {
+      session.permissions = ['Registry.View', 'Registry.EditDefinition'];
+    }
+  });
+
+  it('PM-06b: без жодного права (профіль ще не приїхав) посилання на типи сховане', () => {
+    session.permissions = [];
+    try {
+      show(<PermitsSubnav current="lists" />);
+      expect(screen.queryByRole('link', { name: 'text of permits.types.title' })).toBeNull();
+    } finally {
+      session.permissions = ['Registry.View', 'Registry.EditDefinition'];
+    }
   });
 
   it.each(sections)('aria-current="page" лише на поточному розділі (%s)', (current) => {
