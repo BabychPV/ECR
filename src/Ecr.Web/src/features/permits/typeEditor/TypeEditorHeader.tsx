@@ -2,11 +2,12 @@ import { useState, type JSX } from 'react';
 import { Badge, Button, Group, Menu } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
-import { badgeLook, statusKey, statusTone } from '@/shared/ui/StatusBadge';
+import { badgeLook, statusTone } from '@/shared/ui/StatusBadge';
 import { PermitEditorHead } from '../shell/PermitEditorHead';
 import { PermitsPaths } from '../shell/permitPaths';
 import { validateDraft, validateForPublish, type DraftProblem } from './draftModel';
 import { useEditorActions } from './editorActions';
+import { problemText } from './problemText';
 import { useTypeEditorApi } from './editorContext';
 import { secondaryTextOf, textOf } from './labels';
 import { SaveStatus } from './SaveStatus';
@@ -36,7 +37,7 @@ function VersionBadge({ draft, version }: { readonly draft: boolean; readonly ve
       }}
       data-version-state={state}
     >
-      {`${t(statusKey('version', state))} v${version}`}
+      {`${draft ? t('status.version.Draft') : t('status.version.Published')} v${version}`}
     </Badge>
   );
 }
@@ -112,7 +113,7 @@ export function TypeEditorHeader(): JSX.Element {
             checked.length === 0 ? undefined : (
               <ul className="pt-list">
                 {checked.map((problem, index) => (
-                  <li key={`${problem.messageKey}-${index}`}>{t(problem.messageKey, problem.params)}</li>
+                  <li key={`${problem.messageKey}-${index}`}>{problemText(problem)}</li>
                 ))}
               </ul>
             )

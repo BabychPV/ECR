@@ -5,6 +5,7 @@ import type { PermitTypeColumn, PermitTypeTable } from '../api/types';
 import { ChoicesFrom } from './ChoicesFrom';
 import { ColumnDataTypes, isValidCode, scopeKeyOf, withListScope, type ColumnDataType } from './draftModel';
 import type { DraftProblem } from './draftValidate';
+import { problemText } from './problemText';
 import { dataTypeLabel, textOf } from './labels';
 import { useUnits } from './lookups';
 import './typeEditor.css';
@@ -65,7 +66,7 @@ export function ColumnInspector({ table, column, tables, editable, problems, onC
           <Alert color="statusWarning" role="status">
             <ul className="pt-list">
               {mine.map((problem, index) => (
-                <li key={`${problem.messageKey}-${index}`}>{t(problem.messageKey, problem.params)}</li>
+                <li key={`${problem.messageKey}-${index}`}>{problemText(problem)}</li>
               ))}
             </ul>
           </Alert>

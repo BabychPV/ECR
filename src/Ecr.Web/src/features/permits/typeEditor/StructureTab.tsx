@@ -7,6 +7,7 @@ import type { PermitTypeColumn, PermitTypeTable } from '../api/types';
 import { ColumnsTable } from './ColumnsTable';
 import { findColumn, findTable, updateColumn, uniqueKeyParts } from './draftModel';
 import { EditorParams, HeadNode, useEditorActions } from './editorActions';
+import { problemText } from './problemText';
 import { useTypeEditorApi } from './editorContext';
 import { headerRegistryCode, tableRegistryCode, textOf } from './labels';
 import { useUnits } from './lookups';
@@ -72,7 +73,7 @@ export function StructureTab(): JSX.Element {
           text={
             <ul className="pt-list">
               {problems.slice(0, MaxProblemsShown).map((problem, index) => (
-                <li key={`${problem.messageKey}-${index}`}>{t(problem.messageKey, problem.params)}</li>
+                <li key={`${problem.messageKey}-${index}`}>{problemText(problem)}</li>
               ))}
               {problems.length > MaxProblemsShown && (
                 <li>{t('permits.editor.problems.more', { count: problems.length - MaxProblemsShown })}</li>
