@@ -404,6 +404,32 @@ public sealed class UnitOfWork(
                 });
         }
 
+        // ⛔ Permits PM-03/PM-04. Два одночасні `POST /permit-types` з тим самим кодом проходять `FindByCodeAsync` обидва, і
+        // другий відбивають `UQ_RegistryDef` (реєстр шапки `PRM_<код>` створюється ПЕРШИМ) або `UQ_PermitTypeDef` - голий 500
+        // на звичайну гонку. Та сама відмова, що й перевірка обробника (`409 ECR-PRM-4091`); публікація, яку випередили на
+        // реєстрі таблиці, перетворює її на 4093 сама (`PublishPermitTypeHandler`). Лише ці індекси й лише `PRM_`-реєстри.
+        if (SqlConflict.ViolatesIndex(ex, "UQ_PermitTypeDef")
+            && ex.Entries.FirstOrDefault(e => e.State == EntityState.Added && e.Entity is Domain.Entities.Configuration.PermitTypeDef)
+                is { Entity: Domain.Entities.Configuration.PermitTypeDef permitType })
+        {
+            return new BusinessRuleException(
+                ErrorCodes.PermitTypeDuplicate,
+                $"Тип дозволу «{permitType.Code}» уже існує.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRM-4091.code", ["code"] = permitType.Code });
+        }
+
+        if (SqlConflict.ViolatesIndex(ex, "UQ_RegistryDef")
+            && ex.Entries.FirstOrDefault(e =>
+                e.State == EntityState.Added
+                && e.Entity is Domain.Entities.Configuration.RegistryDef { Code: var code } && code.StartsWith("PRM_", StringComparison.Ordinal))
+                is { Entity: Domain.Entities.Configuration.RegistryDef permitRegistry })
+        {
+            return new BusinessRuleException(
+                ErrorCodes.PermitTypeDuplicate,
+                $"Код реєстру «{permitRegistry.Code}» зайнятий.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRM-4091.registryCode", ["registryCode"] = permitRegistry.Code, ["concurrent"] = "true" });
+        }
+
         foreach (var entry in ex.Entries)
         {
             switch (entry.Entity)

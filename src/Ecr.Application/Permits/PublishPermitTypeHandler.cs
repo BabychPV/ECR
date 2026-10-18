@@ -88,6 +88,12 @@ public sealed class PublishPermitTypeHandler(
         {
             throw PermitTypeErrors.Changed(type.Code, type.RowVersion);
         }
+        catch (BusinessRuleException ex) when (ex.ErrorCode == Ecr.Domain.Errors.ErrorCodes.PermitTypeDuplicate
+                                               && ex.Details?.GetValueOrDefault("concurrent") as string == "true")
+        {
+            // Паралельна публікація (або заведення) випередила нас на коді реєстру `PRM_…`: для публікації це «тип змінили».
+            throw PermitTypeErrors.Changed(type.Code, type.RowVersion);
+        }
 
         return PermitTypeAssembler.ToDto(type, content);
     }
