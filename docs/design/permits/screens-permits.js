@@ -58,6 +58,7 @@
     '.pm-role{display:inline-flex;align-items:center;gap:var(--s1);font-size:var(--fs-xs);font-weight:500}',
     '.pm-inspect{display:grid;gap:var(--s3);padding:var(--s3)}',
     '.pm-gridnote{display:flex;align-items:center;gap:var(--s2);color:var(--muted);font-size:var(--fs-xs)}',
+    '.pm-fieldwrap>.btn{align-self:flex-start}',
     '.pm-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s3)}',
     '@media (max-width:900px){.pm-two{grid-template-columns:1fr}}',
     '@media (max-width:640px){.pm-body{padding:var(--s4)}}'
@@ -344,8 +345,9 @@
       E.Wizard({ id: 'pm-new-wz', title: 'New permit', data: { type: 'AirPermit', number: '', location: '', start: '2026-01-01', end: '2026-12-31' },
         steps: [
           { id: 'kind', label: 'Type', hint: 'The type decides which tables the permit has. Types are set up in “Permit types”.', render: function (b, d) {
-              b.appendChild(h('div', { class: 'stack' }, TYPES.filter(function (t) { return t.state === 'Published'; }).map(function (t) {
-                return E.Field({ id: 'pm-nw-' + t.code, label: t.name, hint: t.tables.map(function (x) { return x.name + ' (' + x.cols.length + ' columns)'; }).join(' · '), control: h('input', { type: 'radio', name: 'pm-nw-type', id: 'pm-nw-' + t.code, value: t.code, checked: d.type === t.code, on: { change: function () { d.type = t.code; } } }) }); })));
+              b.appendChild(h('div', { class: 'stack' }, TYPES.map(function (t) {
+                var ready = t.version > 0;
+                return E.Field({ id: 'pm-nw-' + t.code, label: t.name, hint: ready ? t.tables.map(function (x) { return x.name + ' (' + x.cols.length + ' columns)'; }).join(' · ') : 'Not published yet. Publish the type first.', control: h('input', { type: 'radio', name: 'pm-nw-type', id: 'pm-nw-' + t.code, value: t.code, disabled: !ready, checked: d.type === t.code, on: { change: function () { d.type = t.code; } } }) }); })));
             } },
           { id: 'head', label: 'Details', hint: 'The same number can exist in two types — a site often holds an air and a waste permit with one number.', render: function (b, d) {
               f.num = E.Input({ id: 'pm-nw-num', label: 'Permit number', required: true, mono: true, value: d.number, onInput: function (v) { d.number = v; } });
@@ -392,7 +394,7 @@
     render: function (el, ctx) {
       var p = permit(ctx.params.id), t = type(p.type);
       var actions = h('div', { class: 'eh-actions' },
-        E.Button({ label: 'Renew…', icon: 'copy', id: 'pm-renew-btn', onClick: function () { ctx.openDialog('renew-permit', p); } }),
+        p.state === 'Draft' ? null : E.Button({ label: 'Renew…', icon: 'copy', id: 'pm-renew-btn', onClick: function () { ctx.openDialog('renew-permit', p); } }),
         p.state === 'Draft' ? E.Button({ label: 'Activate…', icon: 'check', variant: 'primary', id: 'pm-activate', onClick: function () { ctx.openDialog('activate-permit'); } }) : E.Menu({ label: 'More', id: 'pm-more', items: [{ label: 'End this permit early…', icon: 'stop', danger: true, onClick: function () { ctx.openDialog('end-permit'); } }] }));
       el.appendChild(h('div', { class: 'editor-head' },
         h('div', { class: 'eh-title' }, h('a', { class: 'ph-back', href: '#/admin/permits', 'data-back': '1' }, icon('arrowL', 14), 'Back to Permits'), h('h1', { tabindex: '-1', 'data-page-title': '1', id: 'pm-h1', class: 'mono' }, p.number), h('span', { class: 'muted' }, t.name + ' · ' + p.location)),
@@ -446,7 +448,9 @@
         var grid = DefTable(tbl, rows, { id: 'pm-grid-' + tbl.code, caption: tbl.name, collapse: wide ? groupNames.filter(function (g) { return gcount[g] >= 5; }) : [], totals: tot[1] != null ? { label: 'Σ all ' + F.int(tot[0]) + ' rows', sums: sums } : null,
           onRow: function (r) { ctx.openPanel(tbl.code + ':' + r.id); },
           warnCell: function (r, c) { return tbl.code === 'Intake' && r.id === 'i1' && (c.code === 'Annual' || c.code === 'Jan'); } });
-        panel.appendChild(grid);
+        panel.appendChild(rows.length ? grid : h('div', { class: 'mini-empty panel' }, h('b', {}, 'No rows in ' + tbl.name + ' yet'),
+          h('span', {}, p.state === 'Expired' ? 'This permit has expired and is read-only.' : 'Add the first row by hand, or paste a block of rows from Excel.'),
+          p.state === 'Expired' ? null : h('div', { class: 'row' }, E.Button({ label: 'Add row', icon: 'plus', variant: 'primary', onClick: function () { ctx.openPanel(tbl.code + ':__new'); } }), E.Button({ label: 'Paste from Excel…', icon: 'paperclip', onClick: function () { ctx.openDialog('paste-rows', tbl); } }))));
         if (tbl.rules.length) panel.appendChild(E.Collapsible({ id: 'pm-rules-' + tbl.code, title: 'Checks for this table', summary: tbl.rules.length + ' rules', content: h('div', { class: 'stack' }, tbl.rules.map(function (r) { return h('div', { class: 'row between' }, h('span', {}, r.name), h('span', { class: 'row' }, E.CodeText(r.text), h('span', { class: 'chip' }, r.mode === 'Block' ? 'Blocks saving' : 'Warns'))); })) }));
       }
       /* Введення даних: шторка рядка (новий / редагування) і вставка з Excel */
@@ -464,7 +468,7 @@
             var sc = scopeOf(c);
             ctl = E.Select({ id: idp, label: c.en, required: c.req, options: optsFor(c), value: v || '', disabled: ro, onChange: function (x) { m[c.code] = x; }, hint: sc === 'shared' ? 'From the shared registry ' + (c.ref || '').split(' ')[0] : sc === 'type' ? 'A list only for ' + t.name : 'A table of this permit: ' + (c.ref || '').split(' ')[0] });
             ctls[c.code] = ctl;
-            return h('div', { class: 'stack gap-1' }, ctl, ro ? null : E.Button({ label: sc === 'permit' ? 'Open that table' : 'Not in the list? Add a value…', icon: sc === 'permit' ? 'arrowR' : 'plus', size: 'sm', variant: 'ghost', onClick: function () {
+            return h('div', { class: 'stack gap-1 pm-fieldwrap' }, ctl, ro ? null : E.Button({ label: sc === 'permit' ? 'Open that table' : 'Not in the list? Add a value…', icon: sc === 'permit' ? 'arrowR' : 'plus', size: 'sm', variant: 'ghost', onClick: function () {
               if (sc === 'permit') { E.Toast('Add the row to the table “' + (c.ref || '').split(' ')[0] + '” of this permit first; it then appears here', 'warning'); return; }
               valueDialog('Add a value to ' + c.en, sc === 'shared' ? 'It is added to the shared registry ' + (c.ref || '').split(' ')[0] + ', so every permit type that uses it will see it.' : 'It is added to the list of this permit type only.', function (val) {
                 if (sc === 'shared') { var k = (c.ref || '').split(' ')[0]; (LISTS[k] = LISTS[k] || []).push(val); } else { c.choices = choicesOf(c).slice(); c.choices.push(val); }
@@ -579,7 +583,10 @@
     render: function (el, ctx) {
       var t = type(ctx.params.code), sel = ctx.query.t || (t.tables[0] ? t.tables[0].code : '__head'), dirty = t.state === 'Draft' ? 2 : 0;
       var actions = h('div', { class: 'eh-actions' },
-        E.Button({ label: 'Check', icon: 'checkCircle', id: 'pmt-check', onClick: function () { E.Toast('No problems found: every table has a key and every link points to a published registry', 'success'); } }),
+        E.Button({ label: 'Check', icon: 'checkCircle', id: 'pmt-check', onClick: function () {
+          var probs = []; if (!t.tables.length) probs.push('The type has no tables yet');
+          t.tables.forEach(function (x) { if (!x.cols.some(function (c) { return c.key; })) probs.push('“' + x.name + '” has no key column'); });
+          if (probs.length) E.Toast(probs.join('. '), 'warning'); else E.Toast('No problems found: every table has a key column and every list exists', 'success'); } }),
         E.Button({ label: 'Publish…', icon: 'send', variant: 'primary', id: 'pmt-publish', onClick: function () { ctx.openDialog('publish-type'); } }));
       el.appendChild(h('div', { class: 'editor-head' },
         h('div', { class: 'eh-title' }, h('a', { class: 'ph-back', href: '#/admin/permits/types', 'data-back': '1' }, icon('arrowL', 14), 'Back to Permit types'), h('h1', { tabindex: '-1', 'data-page-title': '1', id: 'pmt-h1' }, t.name), h('span', { class: 'muted' }, t.ru)),
@@ -604,7 +611,7 @@
         var aside = h('aside', { class: 'aside', 'aria-label': 'Column properties', hidden: !ctx.query.panel });
         main.appendChild(h('div', { class: 'pane-h' }, h('h2', {}, cur ? cur.name : 'Table', cur ? h('span', { class: 'muted' }, cur.cols.length + ' columns') : null),
           E.Button({ label: 'Add column', icon: 'plus', id: 'pmt-addcol', onClick: function () { ctx.openDialog('add-column'); } }),
-          E.Menu({ label: 'More', id: 'pmt-colmore', items: [{ label: 'Add months January–December…', icon: 'calendar', onClick: function () { ctx.openDialog('add-series'); } }, { label: 'Import columns from an Excel header…', icon: 'upload', onClick: function () { E.Toast('Pick a file; its header row becomes columns'); } }, { sep: true }, { label: 'Delete table…', icon: 'trash', danger: true, disabled: !!(cur && cur.head), onClick: function () { E.Toast('Deleting is blocked while permits hold rows in this table', 'warning'); } }] })));
+          E.Menu({ label: 'More', id: 'pmt-colmore', items: [{ label: 'Add months January–December…', icon: 'calendar', onClick: function () { ctx.openDialog('add-series'); } }, { sep: true }, { label: 'Delete table…', icon: 'trash', danger: true, disabled: !!(cur && cur.head), onClick: function () { ctx.openDialog('delete-table'); } }] })));
         if (cur) {
           main.appendChild(h('div', { class: 'scroll fill' }, h('div', { class: 'pm-tw', style: 'border-radius:0;border-width:0;max-height:none' }, h('table', { class: 'pm-t pm-map' }, h('thead', {}, h('tr', {}, ['Column', 'Code', 'Type', 'Unit', 'Required', 'Part of key', 'Group'].map(function (x, i) { return h('th', { class: i > 3 ? 'c' : null, scope: 'col' }, x); }))),
             h('tbody', {}, cur.cols.map(function (c) { var tr = h('tr', { tabindex: '0', 'aria-label': c.en }, h('td', { class: 'pm-first' }, E.twoLine(c.en, c.ru || '—', { mono: false })), h('td', { class: 'mono' }, c.code), h('td', {}, c.via ? 'Read from ' + c.via : (c.type === 'Link to registry' ? 'Link → ' + c.ref : c.type)), h('td', { class: 'mono' }, c.unit || ''), h('td', { class: 'c' }, c.req ? icon('check', 14) : ''), h('td', { class: 'c' }, c.key ? icon('key', 14) : ''), h('td', {}, c.group || ''));
@@ -648,7 +655,7 @@
         t.tables.forEach(function (x) { x.rules.forEach(function (r) { all.push(Object.assign({ where: x.name }, r)); }); });
         panel.appendChild(all.length ? h('div', { class: 'pm-tw' }, h('table', { class: 'pm-t' }, h('thead', {}, h('tr', {}, ['Check', 'Applies to', 'Rule', 'If it fails'].map(function (x) { return h('th', {}, x); }))), h('tbody', {}, all.map(function (r) { return h('tr', {}, h('td', {}, r.name), h('td', {}, r.where), h('td', {}, E.CodeText(r.text)), h('td', {}, r.mode === 'Block' ? 'Blocks saving' : 'Warns')); }))))
           : h('div', { class: 'mini-empty' }, 'No checks yet.'));
-        panel.appendChild(E.Button({ label: 'Add check', icon: 'plus', onClick: function () { E.Toast('The check editor is the same expression editor as in Registries'); } }));
+        panel.appendChild(E.Button({ label: 'Add check', icon: 'plus', id: 'pmt-addrule', onClick: function () { ctx.openDialog('add-rule'); } }));
       }
       function versions(panel) {
         var rows = []; for (var v = Math.max(t.version, 1); v >= 1; v--) rows.push({ v: v, state: v === t.version ? 'Published' : 'Archived', date: '2026-0' + Math.max(1, 9 - (t.version - v) * 2) + '-0' + v, by: t.by, note: ['First version', 'Added “Sub-period” columns', 'Monthly volumes grouped', 'Reporting forms moved to the header'][v % 4] });
@@ -705,7 +712,36 @@
       ctx.dialog('add-series', function () {
         E.ConfirmDialog({ id: 'pmt-series', title: 'Add 12 month columns?', consequences: ['January … December are added as number columns in a group “Estimated volume by month”.', { text: 'Unit: ' + VOL + ' — change it for the whole group afterwards.', note: true }, { text: 'A check “months add up to the annual value” can be added on the Checks tab.', note: true }], verb: 'Add 12 columns', icon: 'calendar', danger: false,
           onConfirm: function () { var cur = find(t.tables, 'code', sel) || t.tables[0]; if (cur) { cur.cols = cur.cols.concat(monthCols(VOL, 'Estimated volume by month')); t.state = 'Draft'; } reload(ctx); } }); });
+      ctx.dialog('delete-table', function () {
+        var cur = find(t.tables, 'code', sel) || t.tables[0]; if (!cur) return;
+        var rowsN = 0; PERMITS.forEach(function (p) { if (p.type === t.code) rowsN += ((p.total && p.total[cur.code]) || [(p.rows[cur.code] || []).length])[0]; });
+        var binds = BINDINGS.filter(function (b) { return b.type === t.code && b.tbl === cur.code; });
+        if (rowsN || binds.length) {
+          E.Dialog({ id: 'pmt-del-blocked', title: '“' + cur.name + '” cannot be deleted yet', alert: true, body: function (b) {
+              b.appendChild(h('ul', { class: 'conseq' }, [rowsN ? h('li', {}, icon('xCircle', 14), F.int(rowsN) + ' rows in permits of this type still use it.') : null, binds.length ? h('li', {}, icon('xCircle', 14), 'Read by ' + F.plural(binds.length, { one: 'sheet binding', other: 'sheet bindings' }) + ': ' + binds.map(function (x) { return x.target; }).join(', ') + '.') : null, h('li', { class: 'note' }, icon('info', 14), 'Nothing is lost by waiting: remove the rows and bindings first, then delete the table.')]));
+            }, footer: [{ label: 'Close', variant: 'primary' }] }); return;
+        }
+        E.ConfirmDialog({ id: 'pmt-del', title: 'Delete table “' + cur.name + '”?', consequences: ['The table and its ' + cur.cols.length + ' columns are removed from the draft of ' + t.name + '.', { text: 'No permit holds rows in it and no sheet reads it.', note: true }], verb: 'Delete table', icon: 'trash',
+          onConfirm: function () { t.tables.splice(t.tables.indexOf(cur), 1); t.state = 'Draft'; reload(ctx, { t: null }); } });
+      });
+      ctx.dialog('add-rule', function () {
+        var d = { name: '', text: '', where: '__permit', mode: 'Warn' }, f = {};
+        E.Dialog({ id: 'pmt-rule-dlg', title: 'Add a check', wide: true, body: function (b) {
+            f.name = E.Input({ id: 'pmt-rule-name', label: 'What it checks', required: true, placeholder: 'Months add up to the annual volume', onInput: function (v) { d.name = v; } });
+            f.where = E.Select({ id: 'pmt-rule-where', label: 'Applies to', options: [{ value: '__permit', label: 'The whole permit' }].concat(t.tables.map(function (x) { return { value: x.code, label: 'Table: ' + x.name }; })), value: '__permit', onChange: function (v) { d.where = v; } });
+            f.text = E.Textarea({ id: 'pmt-rule-text', label: 'Rule', rows: 3, required: true, hint: 'True means the data is fine. Use column codes, e.g. ROW.Annual >= 0. The same expression editor as in Registries.', onInput: function (v) { d.text = v; } });
+            f.mode = E.Segmented({ id: 'pmt-rule-mode', label: 'If it fails', value: 'Warn', options: [{ value: 'Warn', label: 'Warn' }, { value: 'Block', label: 'Block saving' }], onChange: function (v) { d.mode = v; } });
+            b.appendChild(h('div', { class: 'form-grid' }, h('div', { class: 'span-2' }, f.name), f.where, f.mode, h('div', { class: 'span-2' }, f.text))); },
+          footer: [{ label: 'Cancel' }, { label: 'Add check', variant: 'primary', icon: 'plus', keepOpen: true, onClick: function (ctl) {
+            f.name.setError(null); if (!d.name.trim()) { f.name.setError('Describe the check'); f.name.input.focus(); return false; }
+            if (!d.text.trim()) { E.Toast('Write the rule expression', 'warning'); return false; }
+            var rule = { name: d.name.trim(), text: d.text.trim(), mode: d.mode }; if (d.where === '__permit') t.rules.push(rule); else find(t.tables, 'code', d.where).rules.push(rule);
+            t.state = 'Draft'; ctl.close(); reload(ctx, { tab: 'rules' }); } }] }); });
       ctx.dialog('publish-type', function () {
+        if (!t.tables.length) {
+          E.Dialog({ id: 'pmt-pub-blocked', title: 'Add a table before publishing', alert: true, body: function (b) { b.appendChild(note('A permit type without tables has only the permit details, so there is nothing to fill in. Add at least one table with its columns.')); },
+            footer: [{ label: 'Cancel' }, { label: 'Add table…', variant: 'primary', icon: 'plus', onClick: function () { later(function () { ctx.openDialog('add-table'); }); } }] }); return;
+        }
         var used = PERMITS.filter(function (p) { return p.type === t.code; }).length;
         E.ReasonDialog({ id: 'pmt-publish-dlg', title: 'Publish “' + t.name + '” v' + (t.version + 1) + '?', text: used ? used + ' existing permits move to the new version. Added columns are empty in old rows; removed columns are hidden, not deleted.' : 'No permits use this type yet.', label: 'What changed', minLength: 10, verb: 'Publish', icon: 'send',
           onSubmit: function () { t.version++; t.state = 'Published'; t.updated = TODAY; reload(ctx); } }); });
@@ -755,6 +791,15 @@
     { id: 'B-04', template: 'GEN07131100 v1.1.0', sheet: 'Water use & discharge', target: 'Intake from water bodies', type: 'WaterIntake', tbl: 'Intake', mode: 'Rows from the permit', pick: 'Permit valid at period end, same location', state: 'Draft', cols: 3, sheetTables: 24 },
     { id: 'B-05', template: 'GEN07131100 v1.0.0', sheet: 'Air emissions', target: 'Permit totals', type: 'AirPermit', tbl: 'AirEmissions', mode: 'Formulas only', pick: 'Chosen in a cell on the sheet', state: 'Published', cols: 0, sheetTables: 91 }];
   function binding(id) { return find(BINDINGS, 'id', id) || BINDINGS[0]; }
+  /* Зіставлення стовпців за замовчуванням: ключі рядка + одна колонка-ліміт (за відомими кодами). */
+  var LIMIT_CODES = ['Emission_t_year', 'Permitted_t_year', 'Annual', 'Permissible_mg_dm3'];
+  function defaultMap(tb) {
+    var m = tb.cols.filter(function (c) { return c.key && !c.via; }).map(function (c) { return { col: c.code, sheet: c.en, role: 'Row key' }; });
+    var lim = tb.cols.filter(function (c) { return LIMIT_CODES.indexOf(c.code) >= 0; })[0];
+    if (lim) m.push({ col: lim.code, sheet: lim.en + ' limit', role: 'Limit' });
+    return m;
+  }
+  function mapOf(b, tb) { return b.map || (b.map = defaultMap(tb)); }
 
   E.screen('/admin/permits/bindings', { title: 'Sheet bindings', icon: 'link', navPath: '/admin/permits', render: function (el, ctx) {
     var rows = ctx.state === 'empty' ? [] : BINDINGS;
@@ -783,8 +828,9 @@
                 h('div', { class: 'span-2' }, E.Input({ id: 'pmb-t-tbl', label: 'Table on the sheet', required: true, placeholder: 'Emission sources by substance', value: dd.target, onInput: function (v) { dd.target = v; } }))));
             }, validate: function (dd) { return dd.target.trim() ? null : 'Name the sheet table.'; } },
           { id: 'src', label: 'Permit table', hint: 'Which permit type, and which of its tables.', render: function (b, dd) {
-              var tsel = E.Select({ id: 'pmb-s-tbl', label: 'Table', options: table(type(dd.type), dd.tbl) ? type(dd.type).tables.map(function (x) { return { value: x.code, label: x.name + ' (' + x.cols.length + ' columns)' }; }) : [], value: dd.tbl, onChange: function (v) { dd.tbl = v; } });
-              b.appendChild(h('div', { class: 'form-grid' }, E.Select({ id: 'pmb-s-type', label: 'Permit type', options: TYPES.filter(function (t) { return t.state === 'Published'; }).map(function (t) { return { value: t.code, label: t.name }; }), value: dd.type, onChange: function (v) { dd.type = v; dd.tbl = type(v).tables[0].code; later(function () { E.Toast('Table list updated for ' + type(v).name); }); } }), tsel,
+              var tsel = E.Select({ id: 'pmb-s-tbl', label: 'Table', options: type(dd.type).tables.map(function (x) { return { value: x.code, label: x.name + ' (' + x.cols.length + ' columns)' }; }), value: dd.tbl, onChange: function (v) { dd.tbl = v; } });
+              function refillTables() { var s = tsel.querySelector('select'); s.textContent = ''; type(dd.type).tables.forEach(function (x) { s.appendChild(h('option', { value: x.code }, x.name + ' (' + x.cols.length + ' columns)')); }); s.value = dd.tbl; }
+              b.appendChild(h('div', { class: 'form-grid' }, E.Select({ id: 'pmb-s-type', label: 'Permit type', options: TYPES.filter(function (t) { return t.version > 0; }).map(function (t) { return { value: t.code, label: t.name }; }), value: dd.type, onChange: function (v) { dd.type = v; dd.tbl = type(v).tables[0].code; refillTables(); } }), tsel,
                 h('div', { class: 'span-2' }, E.Segmented({ id: 'pmb-s-mode', label: 'How the sheet uses it', value: dd.mode, options: ['Rows from the permit', 'Formulas only'], onChange: function (v) { dd.mode = v; } })),
                 h('div', { class: 'span-2' }, note('“Rows from the permit”: the sheet table gets one row per permit row, with limits locked next to the cells people fill. “Formulas only”: no rows are added; cells use functions such as REGSUM to read the permit.'))));
             } },
@@ -793,9 +839,11 @@
                 return E.Field({ id: 'pmb-p-' + i, label: x, hint: i === 0 ? 'Takes the active permit of this type for the document’s facility; the one with the later start wins.' : 'Adds a “Permit” pick-list cell to the sheet header, for sites with several permits of one type.', control: h('input', { type: 'radio', name: 'pmb-p', id: 'pmb-p-' + i, checked: dd.pick === x, on: { change: function () { dd.pick = x; } } }) }); })));
             } },
           { id: 'map', label: 'Columns', hint: 'Match sheet columns to permit columns. Locked columns show the permit’s value and cannot be edited on the sheet.', render: function (b, dd) {
-              var t = type(dd.type), tb = table(t, dd.tbl), keys = tb.cols.filter(function (c) { return c.key || c.req; }).slice(0, 5);
+              var t = type(dd.type), tb = table(t, dd.tbl), dm = defaultMap(tb);
+              if (dd.mode === 'Formulas only') { b.appendChild(note('In “Formulas only” mode no sheet rows are added, so there is nothing to map. Cells read the permit with REGSUM, REGFIND and REGFIELD.')); return; }
+              b.appendChild(note('This is the suggested mapping; you can change it later with “Edit mapping”.'));
               b.appendChild(h('div', { class: 'pm-tw' }, h('table', { class: 'pm-t' }, h('thead', {}, h('tr', {}, ['Sheet column', '', 'Permit column', 'Role'].map(function (x) { return h('th', {}, x); }))),
-                h('tbody', {}, keys.map(function (c, i) { var role = c.type === 'Number' ? 'Limit (locked)' : 'Row key'; return h('tr', {}, h('td', {}, c.type === 'Number' ? c.en + ' limit' : c.en), h('td', {}, icon('arrowL', 14)), h('td', {}, c.en), h('td', {}, role)); }).concat([h('tr', {}, h('td', {}, 'Actual (entered by people)'), h('td', {}), h('td', { class: 'faint' }, '— not from the permit'), h('td', {}, 'Entered'))])))));
+                h('tbody', {}, dm.map(function (m) { var c = find(tb.cols, 'code', m.col); return h('tr', {}, h('td', {}, m.sheet), h('td', {}, icon('arrowL', 14)), h('td', {}, c.en), h('td', {}, m.role)); }).concat([h('tr', {}, h('td', {}, 'Actual (entered by people)'), h('td', {}), h('td', { class: 'faint' }, 'not from the permit'), h('td', {}, 'Entered'))])))));
             } }],
         summary: function (dd) { return E.KeyValue([{ label: 'Sheet table', value: dd.sheet + ' · ' + dd.target }, { label: 'Reads', value: type(dd.type).name + ' → ' + table(type(dd.type), dd.tbl).name }, { label: 'How', value: dd.mode }, { label: 'Which permit', value: dd.pick }, { label: 'Effect', value: 'Applies to the draft template; documents get it after the template is published' }], { wide: true }); },
         reviewText: 'The binding is saved in the draft template version. Existing documents are not touched.', applyLabel: 'Create binding',
@@ -808,7 +856,7 @@
   E.screen('/admin/permits/bindings/:id', { title: 'Sheet binding', icon: 'link', navPath: '/admin/permits', example: '/admin/permits/bindings/B-01',
     crumbs: function (ctx) { var b = binding(ctx.params.id); return [{ label: 'Configure' }, { label: 'Permits', href: '#/admin/permits' }, { label: 'Sheet bindings', href: '#/admin/permits/bindings' }, { label: b.target }]; },
     render: function (el, ctx) {
-      var b = binding(ctx.params.id), t = type(b.type), tb = table(t, b.tbl), p = PERMITS.filter(function (x) { return x.type === b.type && x.state !== 'Draft'; })[0] || PERMITS[0];
+      var b = binding(ctx.params.id), t = type(b.type), tb = table(t, b.tbl), p = PERMITS.filter(function (x) { return x.type === b.type && x.state === 'Active'; })[0] || PERMITS.filter(function (x) { return x.type === b.type; })[0] || PERMITS[0];
       el.appendChild(h('div', { class: 'editor-head' },
         h('div', { class: 'eh-title' }, h('a', { class: 'ph-back', href: '#/admin/permits/bindings', 'data-back': '1' }, icon('arrowL', 14), 'Back to Sheet bindings'), h('h1', { tabindex: '-1', 'data-page-title': '1', id: 'pmb-h1' }, b.target), h('span', { class: 'muted' }, b.sheet + ' · ' + b.template)),
         h('div', { class: 'eh-ctx' }, E.StatusBadge('version', b.state, { label: b.state === 'Draft' ? 'Draft template' : 'Published template' }), h('div', { class: 'eh-actions' }, E.Button({ label: 'Open the template', icon: 'external', onClick: function () { E.go('/admin/templates'); } })))));
@@ -816,28 +864,58 @@
       body.appendChild(h('div', { class: 'pm-arrow' }, E.CodeText(b.sheet + ' › ' + b.target), icon('arrowL', 16), E.CodeText(t.name + ' › ' + tb.name), h('span', { class: 'muted' }, b.mode.toLowerCase() + ' · ' + b.pick.toLowerCase())));
       if (b.mode === 'Formulas only') {
         body.appendChild(h('section', { class: 'section' }, h('div', { class: 'section-h' }, h('h2', {}, 'Formulas the sheet can use')), note('Cells of this table call the permit with the same functions used for registries. The permit that applies is picked in the header cell [Permit].'),
-          E.CodeText("REGSUM('" + tb.regCode + "', ROW.PERMIT = [Permit], ROW.EMISSION_T_YEAR)\nREGFIELD([Permit], 'END_DATE')\nREGCOUNT('" + tb.regCode + "', ROW.PERMIT = [Permit])", { block: true })));
+          E.CodeText("REGSUM('" + tb.regCode + "', ROW.PERMIT = [Permit], ROW." + ((tb.cols.filter(function (c) { return LIMIT_CODES.indexOf(c.code) >= 0; })[0] || { code: 'value' }).code.toUpperCase()) + ")\nREGFIELD([Permit], 'END_DATE')\nREGCOUNT('" + tb.regCode + "', ROW.PERMIT = [Permit])", { block: true })));
         return;
       }
-      var keys = tb.cols.filter(function (c) { return c.key || c.req; }).slice(0, 5);
-      body.appendChild(h('section', { class: 'section' }, h('div', { class: 'section-h' }, h('h2', {}, 'Column mapping'), h('span', { class: 'sp' }), E.Button({ label: 'Edit mapping', icon: 'pencil', size: 'sm', onClick: function () { E.Toast('Same step as in the wizard'); } })),
+      var map = mapOf(b, tb);
+      function colOf(code) { return find(tb.cols, 'code', code); }
+      var ROLE_NOTE = { 'Row key': 'Locked, one sheet row per permit row', 'Limit': 'Locked, actuals are compared with it', 'Info': 'Locked, shown for reference' };
+      body.appendChild(h('section', { class: 'section' }, h('div', { class: 'section-h' }, h('h2', {}, 'Column mapping'), h('span', { class: 'sp' }), E.Button({ label: 'Edit mapping', icon: 'pencil', size: 'sm', id: 'pmb-editmap', onClick: function () { ctx.openDialog('edit-mapping'); } })),
         h('div', { class: 'pm-tw' }, h('table', { class: 'pm-t' }, h('thead', {}, h('tr', {}, ['Sheet column', '', 'Permit column', 'Role', 'On the sheet'].map(function (x) { return h('th', {}, x); }))),
-          h('tbody', {}, keys.map(function (c) { var num = c.type === 'Number'; return h('tr', {}, h('td', {}, num ? c.en + ' limit' : c.en), h('td', {}, icon('arrowL', 14)), h('td', {}, c.en + (c.unit ? ' (' + c.unit + ')' : '')), h('td', {}, num ? 'Limit' : 'Row key'), h('td', {}, num ? 'Locked, shows the permit’s value' : 'Locked, one row per permit row')); })
-            .concat([h('tr', {}, h('td', {}, 'Actual'), h('td', {}), h('td', { class: 'faint' }, '— not from the permit'), h('td', {}, 'Entered'), h('td', {}, 'Typed or filled from PI')), h('tr', {}, h('td', {}, 'Used, %'), h('td', {}), h('td', { class: 'faint' }, '— calculated'), h('td', {}, 'Formula'), h('td', {}, E.CodeText('Actual / Limit * 100')))]))))));
-      /* Попередній перегляд: як це бачить користувач у документі */
-      var R = rng(77), rowsP = rowsOf(p, tb).filter(function (r) { return typeof r.Emission_t_year === 'number'; }).slice(0, 6);
-      var numCol = tb.cols.filter(function (c) { return c.type === 'Number'; })[0];
-      var nameCols = keys.filter(function (c) { return c.type !== 'Number'; });
-      var data = rowsP.map(function (r) { var lim = r[numCol.code] != null ? r[numCol.code] : 1; var used = +(lim * (0.1 + R() * 1.0)).toFixed(5); return { r: r, lim: lim, act: used, pct: used / (lim || 1) * 100 }; });
-      if (data[2]) { data[2].act = +(data[2].lim * 1.18).toFixed(5); data[2].pct = 118; }
-      var grid = h('table', { class: 'grid' }, h('thead', {}, h('tr', {}, h('th', { class: 'rh' }, nameCols.map(function (c) { return c.en; }).join(' · ')),
-        [[numCol.en + ' limit', numCol.unit, 'is-calc'], ['Actual', numCol.unit, ''], ['Used, %', '%', 'is-calc']].map(function (x) { return h('th', { class: x[2] }, h('div', { class: 'ch' }, h('span', { class: 'cn' }, x[0])), h('div', { class: 'cu' }, x[1])); }))),
-        h('tbody', {}, data.map(function (d, i) { var over = d.pct > 100; return h('tr', {}, h('th', { class: 'rh', scope: 'row' }, h('span', { class: 'cc' }, String(i + 1)), nameCols.map(function (c) { return String(d.r[c.code] || ''); }).join(' · ')),
-          h('td', { class: 'c is-locked' }, h('span', { class: 'v' }, F.number(d.lim, 5))), h('td', { class: 'c' + (over ? ' is-warn' : '') }, h('span', { class: 'v' }, F.number(d.act, 5))), h('td', { class: 'c is-calc' }, h('span', { class: 'v' }, F.number(d.pct, 1)))); })));
+          h('tbody', {}, map.map(function (m) { var c = colOf(m.col) || { en: m.col }; return h('tr', {}, h('td', {}, m.sheet), h('td', {}, icon('arrowL', 14)), h('td', {}, c.en + (c.unit ? ' (' + c.unit + ')' : '')), h('td', {}, m.role), h('td', {}, ROLE_NOTE[m.role])); })
+            .concat([h('tr', {}, h('td', {}, 'Actual'), h('td', {}), h('td', { class: 'faint' }, 'not from the permit'), h('td', {}, 'Entered'), h('td', {}, 'Typed by people or filled from PI')), h('tr', {}, h('td', {}, 'Used, %'), h('td', {}), h('td', { class: 'faint' }, 'calculated'), h('td', {}, 'Formula'), h('td', {}, E.CodeText('Actual / Limit * 100')))]))))));
+      ctx.dialog('edit-mapping', function () {
+        var draft = tb.cols.filter(function (c) { return !c.via; }).map(function (c) { var m = find(map, 'col', c.code); return { c: c, use: !!m, sheet: m ? m.sheet : c.en, role: m ? m.role : 'Info' }; });
+        E.Dialog({ id: 'pmb-map-dlg', title: 'Edit column mapping', wide: true, body: function (bd) {
+            bd.appendChild(note('Tick the permit columns the sheet table should show. Row key columns say which permit row a sheet row belongs to. The Limit column is what actuals are compared with. Everything taken from the permit is locked on the sheet.'));
+            bd.appendChild(h('div', { class: 'pm-tw', style: 'max-height:340px' }, h('table', { class: 'pm-t' }, h('thead', {}, h('tr', {}, ['Use', 'Permit column', 'Sheet column', 'Role'].map(function (x) { return h('th', {}, x); }))),
+              h('tbody', {}, draft.map(function (d, i) { return h('tr', {},
+                h('td', {}, h('input', { type: 'checkbox', id: 'pmb-m-u' + i, checked: d.use, 'aria-label': 'Use ' + d.c.en, on: { change: function (e) { d.use = e.target.checked; } } })),
+                h('td', {}, d.c.en + (d.c.unit ? ' (' + d.c.unit + ')' : '')),
+                h('td', {}, h('input', { class: 'input', id: 'pmb-m-s' + i, value: d.sheet, 'aria-label': 'Sheet column for ' + d.c.en, on: { input: function (e) { d.sheet = e.target.value; } } })),
+                h('td', {}, h('select', { class: 'select', id: 'pmb-m-r' + i, 'aria-label': 'Role of ' + d.c.en, on: { change: function (e) { d.role = e.target.value; } } }, ['Row key', 'Limit', 'Info'].map(function (r) { return h('option', { value: r, selected: d.role === r }, r); })))); })))));
+          },
+          footer: [{ label: 'Cancel' }, { label: 'Save mapping', variant: 'primary', icon: 'check', keepOpen: true, onClick: function (ctl) {
+            var used = draft.filter(function (d) { return d.use; });
+            if (!used.some(function (d) { return d.role === 'Row key'; })) { E.Toast('Mark at least one column as Row key', 'warning'); return false; }
+            if (used.filter(function (d) { return d.role === 'Limit'; }).length > 1) { E.Toast('Only one column can be the Limit', 'warning'); return false; }
+            b.map = used.map(function (d) { return { col: d.c.code, sheet: d.sheet.trim() || d.c.en, role: d.role }; }); ctl.close(); reload(ctx); E.Toast('Mapping saved in the draft template', 'success'); } }] });
+      });
+      /* Попередній перегляд: як це бачить користувач у документі (для будь-якої привʼязаної таблиці) */
+      var R = rng(77), prows = rowsOf(p, tb).slice(0, 6);
+      var keyMap = map.filter(function (m) { return m.role === 'Row key'; }), infoMap = map.filter(function (m) { return m.role === 'Info'; }), limMap = map.filter(function (m) { return m.role === 'Limit'; })[0], limCol = limMap ? colOf(limMap.col) : null;
+      function cellText(m, r) { var c = colOf(m.col); return c ? (fmtCell(c, r[c.code]) || '—') : ''; }
+      var data = prows.map(function (r, i) { var lim = limCol && typeof r[limCol.code] === 'number' ? r[limCol.code] : null; var act = lim != null ? +(lim * (i === 2 ? 1.18 : 0.1 + R() * 0.9)).toFixed(5) : null; return { r: r, lim: lim, act: act, pct: lim ? act / lim * 100 : null }; });
+      var unit = limCol && limCol.unit ? limCol.unit : '';
+      function bodyRow(d, i) {
+        var tds = [h('th', { class: 'rh', scope: 'row' }, h('span', { class: 'cc' }, String(i + 1)), keyMap.map(function (m) { return cellText(m, d.r); }).join(' · '))];
+        infoMap.forEach(function (m) { tds.push(h('td', { class: 'c is-locked' }, h('span', { class: 'v' }, cellText(m, d.r)))); });
+        if (limCol) tds.push(h('td', { class: 'c is-locked' }, h('span', { class: 'v' }, d.lim != null ? F.number(d.lim, 5) : '—')));
+        tds.push(h('td', { class: 'c' + (d.pct != null && d.pct > 100 ? ' is-warn' : '') }, h('span', { class: 'v' }, d.act != null ? F.number(d.act, 5) : '')));
+        if (limCol) tds.push(h('td', { class: 'c is-calc' }, h('span', { class: 'v' }, d.pct != null ? F.number(d.pct, 1) : '—')));
+        return h('tr', {}, tds);
+      }
+      var headCells = infoMap.map(function (m) { return h('th', {}, h('div', { class: 'ch' }, h('span', { class: 'cn' }, m.sheet))); });
+      if (limCol) headCells.push(h('th', { class: 'is-calc' }, h('div', { class: 'ch' }, h('span', { class: 'cn' }, limMap.sheet)), h('div', { class: 'cu' }, unit)));
+      headCells.push(h('th', {}, h('div', { class: 'ch' }, h('span', { class: 'cn' }, 'Actual')), h('div', { class: 'cu' }, unit)));
+      if (limCol) headCells.push(h('th', { class: 'is-calc' }, h('div', { class: 'ch' }, h('span', { class: 'cn' }, 'Used, %')), h('div', { class: 'cu' }, '%')));
+      var grid = h('table', { class: 'grid' }, h('thead', {}, h('tr', {}, [h('th', { class: 'rh' }, keyMap.map(function (m) { return m.sheet; }).join(' · '))].concat(headCells))), h('tbody', {}, data.map(bodyRow)));
       body.appendChild(h('section', { class: 'section' }, h('div', { class: 'section-h' }, h('h2', {}, 'Preview as a user sees it'), h('span', { class: 'sp' }), h('span', { class: 'muted' }, 'September 2026 · permit ' + p.number)),
-        h('div', { class: 'pm-gridnote' }, icon('info', 14), h('span', {}, 'Hatched cells come from the permit and cannot be edited. The amber cell is above its limit, so the sheet warns before it is submitted.')),
+        p.state === 'Draft' ? E.Banner({ tone: 'info', title: 'This permit is still a draft', text: 'The sheet will read it after it is activated. The preview shows how it will look.', actions: [{ label: 'Open the permit', href: E.href('/admin/permits/' + p.id) }] }) : null,
+        h('div', { class: 'pm-gridnote' }, icon('info', 14), h('span', {}, 'Hatched cells come from the permit and cannot be edited.' + (limCol ? ' The amber cell is above its limit, so the sheet warns before it is submitted.' : ' No Limit column is mapped, so nothing is compared.'))),
         h('div', { class: 'pm-tw', style: 'background:var(--ground)' }, grid)));
-      body.appendChild(E.Collapsible({ id: 'pmb-formulas', title: 'Formulas on this table', summary: 'same functions as registries', content: h('div', { class: 'stack' }, note('Row limits and totals are available to any formula in the template through the permit that applies.'), E.CodeText("REGSUM('" + tb.regCode + "', ROW.PERMIT = [Permit], ROW.EMISSION_T_YEAR)", { block: true }), E.CodeText("[Actual] <= REGFIELD(REGFIND('" + tb.regCode + "', [Permit], [Substance], [Site]), 'EMISSION_T_YEAR')", { block: true })) }));
+      var fieldCode = limCol ? limCol.code.toUpperCase() : 'VALUE';
+      body.appendChild(E.Collapsible({ id: 'pmb-formulas', title: 'Formulas on this table', summary: 'same functions as registries', content: h('div', { class: 'stack' }, note('Row limits and totals are available to any formula in the template through the permit that applies.'), E.CodeText("REGSUM('" + tb.regCode + "', ROW.PERMIT = [Permit], ROW." + fieldCode + ")", { block: true }), E.CodeText("[Actual] <= REGFIELD(REGFIND('" + tb.regCode + "', [Permit]" + keyMap.map(function (m) { return ', [' + m.sheet + ']'; }).join('') + "), '" + fieldCode + "')", { block: true })) }));
     } });
 
   /* Динамічний маршрут реєструється ПІСЛЯ статичних types/bindings, інакше :id їх перехоплює. */
@@ -845,13 +923,13 @@
 
   /* ================= потоки ================= */
   E.flow('permits-create-fill-activate', { group: 'Permits', title: 'Add a permit, fill its tables and activate it', actor: 'Environmental specialist', steps: [
-    { label: 'Permits', href: '#/admin/permits' }, { label: 'New permit (wizard)', href: '#/admin/permits?dialog=new-permit' }, { label: 'Permit overview', href: '#/admin/permits/P-0001' }, { label: 'Table “Emission limits”', href: '#/admin/permits/P-0001?tab=AirEmissions' }, { label: 'Add a row (form)', href: '#/admin/permits/P-0002?tab=WasteLimits&panel=WasteLimits:__new' }, { label: 'Paste rows from Excel', href: '#/admin/permits/P-0002?tab=WasteLimits&dialog=paste-rows' }, { label: 'Edit a row', href: '#/admin/permits/P-0002?tab=WasteLimits&panel=WasteLimits:w1' }, { label: 'Activate (draft permit)', href: '#/admin/permits/P-0004?dialog=activate-permit' }] });
+    { label: 'Permits', href: '#/admin/permits' }, { label: 'New permit (wizard)', href: '#/admin/permits?dialog=new-permit' }, { label: 'Permit overview', href: '#/admin/permits/P-0001' }, { label: 'Table “Emission limits”', href: '#/admin/permits/P-0001?tab=AirEmissions' }, { label: 'Waste permit: add a row (form)', href: '#/admin/permits/P-0002?tab=WasteLimits&panel=WasteLimits:__new' }, { label: 'Waste permit: paste rows from Excel', href: '#/admin/permits/P-0002?tab=WasteLimits&dialog=paste-rows' }, { label: 'Waste permit: edit a row', href: '#/admin/permits/P-0002?tab=WasteLimits&panel=WasteLimits:w1' }, { label: 'Activate (draft permit)', href: '#/admin/permits/P-0004?dialog=activate-permit' }] });
   E.flow('permits-import-excel', { group: 'Permits', title: 'Import the yearly Excel report', actor: 'Environmental specialist', steps: [
     { label: 'Permits', href: '#/admin/permits' }, { label: 'Import from Excel', href: '#/admin/permits?dialog=import-permit' }] });
   E.flow('permits-wide-table', { group: 'Permits', title: 'Work with a 31-column table', actor: 'Environmental specialist', steps: [
     { label: 'Water discharge permit', href: '#/admin/permits/P-0003' }, { label: 'Grouped columns', href: '#/admin/permits/P-0003?tab=Discharge' }, { label: 'Row drawer, grouped by section', href: '#/admin/permits/P-0003?tab=Discharge&panel=Discharge:d1' }] });
   E.flow('permits-renew', { group: 'Permits', title: 'Renew a permit before it ends', actor: 'Environmental specialist', steps: [
-    { label: 'Ending permits first', href: '#/admin/permits?stat=exp' }, { label: 'Renew…', href: '#/admin/permits/P-0005?dialog=renew-permit' }] });
+    { label: 'Permits (click “ending within 120 days”)', href: '#/admin/permits' }, { label: 'Permit that ends soon', href: '#/admin/permits/P-0005' }, { label: 'Renew…', href: '#/admin/permits/P-0005?dialog=renew-permit' }] });
   E.flow('permits-define-type', { group: 'Permits', title: 'Define a permit type with its own tables', actor: 'Template administrator', steps: [
     { label: 'Permit types', href: '#/admin/permits/types' }, { label: 'New type (wizard)', href: '#/admin/permits/types?dialog=new-type' }, { label: 'Structure: tables and columns', href: '#/admin/permits/types/WaterDischarge' }, { label: 'Add a table (wizard)', href: '#/admin/permits/types/WaterDischarge?dialog=add-table' }, { label: 'Add 12 month columns', href: '#/admin/permits/types/WaterDischarge?dialog=add-series' }, { label: 'Column properties', href: '#/admin/permits/types/WaterDischarge?panel=Annual' }, { label: 'Checks', href: '#/admin/permits/types/WaterDischarge?tab=rules' }, { label: 'Publish', href: '#/admin/permits/types/WaterDischarge?dialog=publish-type' }] });
   E.flow('permits-bind-sheet', { group: 'Permits', title: 'Make a sheet read its permit', actor: 'Template administrator', steps: [
