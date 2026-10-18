@@ -297,6 +297,25 @@
 | sec-a1-grants-3 | ✅ | — | done | `e9f04bce` |
 | p3-ent6a | ❌ **ПОВЕРНУТО:** S7 — обхід захисту листів через колацію `CI_AS` (ключ `Notifications.X.Subject` або з кінцевим пробілом проходить повз `ManageNotifications`) | не влито | returned | `5b1b88b6` |
 
+## 2а. «Permits» — перміти як джерело аркушів (план: `docs/build/FEATURE-PERMITS.md`, мокап: `docs/design/permits/`)
+
+Хвилі: W1 = PM-01, PM-02, PM-06; W2 = PM-03 → PM-04, PM-05 ‖ PM-07; W3 = PM-08, PM-09; W4 = PM-10 ‖ PM-11; W5 = PM-12. Міграція PRM01 — токен у сесії «Permits». Рішення плану — робочі, на ревʼю.
+
+| № | Задача | Вимога / D-запис | Розмір | Залежності | DoD (як перевіримо) | Статус | Гілка / хеш |
+|---|---|---|---|---|---|---|---|
+| PM-01 (P1) | **План і мокап у репозиторії:** `docs/design/permits/**`, `docs/build/FEATURE-PERMITS.md`, рядки черги | завдання людини 18.10; ФВ-8 | S | — | файли у `dev/integration`; код не змінено | done | `lane/permits/pm01-plan` (хеші комітів — у листі готовності) |
+| PM-02 (P1) | **Персистенція:** 5 сутностей `cfg.Permit*`, конфігурації, DbSet, міграція PRM01, `02a-db-schema.md`, доменні тести | FEATURE-PERMITS §2 | M | PM-01; токен міграцій | build + Architecture + доменні тести; міграція на чисту й оновлювану базу | doing | lane: `lane/permits/pm02-persistence` |
+| PM-06 (P1) | **Клієнтська оболонка:** маршрути, навігація, заглушки, `PermitsSubnav`, `PermitEditorHead`, хелпери, `PermitDefTable`, ключі сіду `-- PERMITS:` | FEATURE-PERMITS §4; мокап | M | PM-01 | vitest хелперів; маршрути відкриваються; a11y (dark/light) | doing | lane: `lane/permits/pm06-client-shell` |
+| PM-03 (P1) | **CRUD типів + атомарна публікація** (+ клієнт `api.ts`, контракт) | FEATURE-PERMITS §1e, §3 | M | PM-02 | тести обробників; N+1 реєстрів в одній транзакції | todo | — |
+| PM-04 (P1) | **Екземпляри й життєвий цикл** (+ `api.ts`); спершу перевірка виключення `IsActive=0` із ключа | FEATURE-PERMITS §1c, R2 | M | PM-03 | тести Draft→Active→Expired, `ECR-PRM-4092`, Renew | todo | — |
+| PM-05 (P2) | **Списки вибору, бекенд** (+ `api.ts`) | FEATURE-PERMITS §1f | M | PM-04 | три області; прихований реєстр поза «Registries» | todo | — |
+| PM-07 (P1) | **Клієнт: перелік, сторінка перміта, діалоги, майстер, форма рядка, вставка** | мокап; ФВ-8 | L | PM-04 (контракт), PM-06 | vitest + e2e на стенді екранів 1–2 | todo | — |
+| PM-08 (P2) | **Клієнт: типи, конструктор, списки** | мокап | L | PM-03, PM-05, PM-06 | vitest + e2e екранів 3–5 | todo | — |
+| PM-09 (P2) | **Привʼязки, бекенд:** CRUD, клон у `TemplateVersionStore`, перегляд (+ `api.ts`) | FEATURE-PERMITS §1i | M | PM-02, PM-04 | привʼязка клонується з версією шаблону | todo | — |
+| PM-10 (P2) | **Runtime «рядки з перміта»** у `RowStore` / `IPermitBindingService` | FEATURE-PERMITS §1i, R6, R7 | M | PM-09; R6 підтверджено | тест на живому SQL: рядки створено раз, ліміти read-only | todo | — |
+| PM-11 (P2) | **Клієнт: привʼязки** (список, майстер, деталі, перегляд) | мокап | M | PM-09, PM-06 | vitest + e2e екрана 6 | todo | — |
+| PM-12 (P2) | **Режим Formulas:** `[Permit]`-lookup + `REGSUM` на `PRM_*`, Scenarios, smoke/e2e | FEATURE-PERMITS §5 | M | PM-10, PM-11 | зелені Scenarios, smoke, e2e | todo | — |
+
 ## 3. Хмарні лінії (`lane/cloud/*`) — без міграцій і Sql-розгортання
 
 | № | Задача | Вимога / D-запис | Розмір | Залежності | DoD (як перевіримо) | Статус | Гілка / хеш |

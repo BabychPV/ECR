@@ -1,0 +1,172 @@
+# FEATURE-PERMITS — перміти як джерело для аркушів: типи з власними таблицями, екземпляри, привʼязка до аркуша
+
+| | |
+|---|---|
+| Дата | 2026-10-18 |
+| Статус | **План розробки PM-01…PM-12.** Рішення §1 — робочі, на ревʼю «Аудиту»/координатора; D-записи не заведено |
+| Підстава | завдання людини 18.10 (через координатора): універсальний механізм для пермітів і їхніх внутрішніх таблиць, усе у вебі, без коду; перміт — **джерело** аркуша, а не довідник. Мокап погоджено людиною 2026-10-18 |
+| Виконавець | сесія «Permits» (`PM-nn` у `docs/build/WORK-QUEUE.md`, розділ 2а); токен міграцій для PRM01 — у неї |
+
+## 0. Коротка відповідь і джерело істини
+
+**Джерело істини для поведінки й вигляду — погоджений мокап [`docs/design/permits/`](../design/permits/README.md):**
+`README.md` + `screens-permits.js` задають поведінку, кінцевий UI має їм відповідати (гібридний набір
+[`../design/hybrid/KIT.md`](../design/hybrid/KIT.md), D15-01). Відкрити: `node docs/design/permits/serve.js`.
+
+Шість екранів (маршрути мокапу) і діалоги:
+
+| Екран | Маршрут мокапу | Діалоги / панелі |
+|---|---|---|
+| Перелік пермітів | `#/admin/permits` | майстер «New permit» (`dialog=new-permit`), «Import from Excel» (`import-permit`), шторка |
+| Перміт | `#/admin/permits/:id` | огляд + вкладка на кожну таблицю; «Activate» (`activate-permit`), «Renew…» (`renew-permit`), форма рядка (`panel=<table>:__new`), «Paste from Excel» (`paste-rows`), шторка рядка широкої таблиці |
+| Типи пермітів | `#/admin/permits/types` | майстер «New type» (`new-type`) |
+| Конструктор типу | `#/admin/permits/types/:code` | «Add table» (3 кроки, `add-table`), «Add 12 month columns» (`add-series`), інспектор стовпця, вкладка перевірок (`tab=rules`), «Publish» (`publish-type`) |
+| Списки вибору | `#/admin/permits/lists` | шторка редагування значень |
+| Привʼязки до аркуша | `#/admin/permits/bindings`, `…/bindings/:code` | майстер із 4 кроків (`new-binding`), зіставлення стовпців, перегляд аркуша очима користувача |
+
+Механізм — **розширення довідників**, а не друга сутність: `ФВ-8` (`docs/tz/02-requirements.md`) і
+[`FEATURE-REGISTRY-TABLES.md`](FEATURE-REGISTRY-TABLES.md) (складені ключі, композиція §4.8, `REG*`
+у формулах §5.4, правила довідника). Різна кількість стовпців — просто різна кількість
+`RegistryFieldDef`; DDL під час роботи не виконується (D-13/14/66, EAV).
+
+## 1. Рішення (робоче рішення, на ревʼю)
+
+- **(a)** Перміт = реєстр-шапка + N дочірніх реєстрів, звʼязаних `Composition`; другої сутності немає.
+  Екземпляр = `RegistryEntry` шапки, рядок таблиці = `RegistryEntry` дочірнього реєстру (батько = перміт).
+- **(b)** Чинність рядків таблиць — **звичайні `Date`-стовпці**: композиція забороняє темпоральну
+  дитину (`RegistryDefinitionHandlers.cs`, `messageKey = err.ECR-REG-0422.compositionChildTemporal`).
+  Чинність перміта — `ValidFrom/ValidTo` запису-шапки, півінтервал `[from, to)` (ФВ-8.5).
+- **(c)** Життєвий цикл: **Draft** = запис-шапка з `IsActive = false`; **Active** = `IsActive` і чинний
+  на дату; **Expired** — похідний від `ValidTo` / `Actual end`. ⚠ Перевірено в коді: `RegistryKeyService`
+  не дивиться на `IsActive` — тримач ключа визначає `RegistryEntryKey.IsLive = !entry.IsDeleted`, тож
+  чернетка (`IsActive = 0`) **тримає ключ (тип + номер)** і дасть хибний `ECR-REG-4092` проти активного
+  перміта. PM-04 перевіряє це першим кроком і, якщо підтверджено, додає виключення неактивних записів
+  із конфлікту ключа (окремий коміт з тестом, що падає без виправлення).
+- **(d)** Тип перміта — пакет `PermitTypeDef` + `PermitTypeTable` (+ побічна `PermitFieldMeta` для
+  групи стовпців, точності/масштабу, області списку). Ядро реєстрів (`RegistryDef`, `RegistryFieldDef`)
+  **не розширюємо**.
+- **(e)** Атомарна публікація типу — один новий Application-обробник, що публікує N+1 чернеток
+  реєстрів в одній транзакції; частково опублікованого типу не буває.
+- **(f)** Області списків вибору: спільний реєстр / список лише для типу (прихований реєстр, власник —
+  тип) / таблиця того самого перміта (`Lookup` на дочірній реєстр, відфільтрований тим самим батьком).
+  Приховані реєстри виключаються із загального переліку «Registries» джойном із
+  `PermitTypeTable`/`PermitFieldMeta`; `RegistryDef` не змінюється.
+- **(g)** Права — наявні `Registry.View/EditData/EditDefinition/Publish` і `Template.Edit`; нових кодів
+  прав немає. Типи й привʼязки — як `TemplateAdministrator`; ведення пермітів — власники запису в реєстри.
+- **(h)** Домен кодів помилок — `ECR-PRM-*`.
+- **(i)** Привʼязка до аркуша належить **версії шаблону** (клонується `TemplateVersionStore` як
+  `TableRelationDef`). Режими `Rows | Formulas`. У режимі Rows рядки створюються **один раз** при
+  створенні екземпляра таблиці (`IRowStore.EnsureTableInstancesAsync`); стовпці ліміту/інформації —
+  `ColumnDef.IsReadOnly` із машинним записом; явна дія «оновити з перміта» — пізніше. Правило вибору
+  перміта: `ByFacilityPeriodEnd | FromHeaderLookup`.
+- **(j)** Підсумки («Total_*» джерел) **ніколи не зберігаються**: `REGSUM` у момент читання.
+- **(k)** UI — за `docs/design/permits` і гібридним KIT; широка таблиця (до 35 стовпців) — компонент
+  фічі, не `DataTable` (правило 7 стовпців).
+
+## 2. Модель даних
+
+Нове — п'ять таблиць у схемі `cfg`, **одна** EF-міграція `PRM01` (токен міграцій — «Permits»).
+
+| Таблиця | Стовпці |
+|---|---|
+| `cfg.PermitTypeDef` | `Id`, `Code` (UQ), `NameL10n`, `Category`, `HeaderRegistryDefId` FK, `Version`, `Status` (Draft/Published), `PublishedAt`, `PublishedByUserId`, `RowVersion` |
+| `cfg.PermitTypeTable` | `Id`, `PermitTypeDefId` FK, `Code`, `NameL10n`, `Ordinal`, `RegistryDefId` FK; UQ (тип, код) |
+| `cfg.PermitFieldMeta` | `RegistryFieldDefId` PK/FK, `GroupCode`, `Precision`, `Scale`, `ListScope` (0 спільний / 1 лише тип / 2 той самий перміт), `ListRegistryDefId?`, `ListSiblingTableCode?`, `PermitTypeDefId` |
+| `cfg.PermitSheetBinding` | `Id`, `Code` (UQ), `TemplateVersionId`, `SheetTableDefId`, `PermitTypeDefId`, `PermitTypeTableId`, `Mode` (Rows/Formulas), `SelectionRule`, `HeaderFieldDefId?`, `IsActive` |
+| `cfg.PermitSheetBindingColumn` | `BindingId`, `Role` (RowKey/Limit/Info), `PermitFieldCode`, `SheetColumnDefId`, `Ordinal` |
+
+Код прихованого реєстру — `PRM_<TYPE>_<TABLE>` (шапка — `PRM_<TYPE>`). Схема БД має **два джерела**
+(міграції EF + `Sql/*.sql`): PRM01 — лише міграція; опис — у `docs/build/02a-db-schema.md`.
+
+Зв'язок із наявним: `RegistryDef`/`RegistryFieldDef`/`RegistryKeyDef`/`RegistryRule` (стовпці, ключі,
+перевірки типу «сума місяців = річний обсяг ±1 %»), `TableRelationDef` (еталон клонування на версії
+шаблону), `RowStore` (створення рядків аркуша).
+
+## 3. План API (REST, `/api/v1`)
+
+| Група | Ендпоінти |
+|---|---|
+| Типи | `GET permit-types`, `POST permit-types`, `GET permit-types/{code}`, `PUT permit-types/{code}` (лише чернетка), `DELETE permit-types/{code}` (чернетка), `POST …/{code}/publish`, `POST …/{code}/new-version`, `POST …/{code}/tables` |
+| Перміти | `GET permits?type&status&q&asOf`, `POST permits`, `GET permits/{id}`, `PUT permits/{id}`, `POST permits/{id}/activate`, `/end`, `/renew`, `DELETE permits/{id}` (чернетка) |
+| Списки | `GET/PUT permit-lists` (області й значення) |
+| Привʼязки | `template-versions/{id}/permit-bindings` CRUD + `GET …/{code}/preview` |
+
+Рядки таблиць перміта **не мають нових ендпоінтів**: наявні `/registries/{PRM_code}/rows?parentEntryId=`,
+`entries/batch`, `history`, `export`, `keys/check`.
+
+Коди помилок (`ErrorCodes.cs` + арм у `ExceptionHandlingMiddleware` + `docs/build/02-contracts.md` §7):
+`ECR-PRM-0404` (не знайдено), `ECR-PRM-0422` (валідація), `ECR-PRM-4091` (дублікат коду типу),
+`ECR-PRM-4092` (перетин чинних пермітів того самого типу й номера), `ECR-PRM-4093` (публікація/зміна,
+поки тип використовується). Кожна серверна дія має клієнтського споживача **в тому ж кроці**
+(`EndpointCoverageTests`).
+
+## 4. Кроки PM-01…PM-12
+
+| # | Зміст | Область файлів | Залежить від | DoD | Режим |
+|---|---|---|---|---|---|
+| PM-01 | План + мокап у репозиторії (цей документ, рядки черги) | `docs/design/permits/**`, `docs/build/FEATURE-PERMITS.md`, `WORK-QUEUE.md` | — | `done`; жодних змін коду | docs |
+| PM-02 | Бекенд-персистенція: сутності, конфігурації, DbSet, міграція PRM01, `02a-db-schema.md`, доменні тести | `Ecr.Domain/Entities/Configuration`, `Ecr.Infrastructure/Persistence`, міграції | PM-01 | build + Architecture + доменні тести; міграція на чисту й оновлювану базу | послідовно (токен) |
+| PM-03 | CRUD типів + атомарна публікація (+ `api.ts` клієнта, регенерація контракту) | `Ecr.Application`, `Ecr.Api`, `Ecr.Web/src/features/permits/api.ts` | PM-02 | тести обробників; публікація N+1 в одній транзакції; контракт запушено | послідовно |
+| PM-04 | Екземпляри й життєвий цикл (+ `api.ts`); спершу перевірка виключення `IsActive=0` із ключа (§1c) | те саме + `RegistryKeyService` за потреби | PM-03 | тести: Draft→Active→Expired, `ECR-PRM-4092`, Renew; тест виключення падає без виправлення | послідовно |
+| PM-05 | Списки вибору, бекенд (+ `api.ts`) | `Ecr.Application`, `Ecr.Api` | PM-04 | три області; прихований реєстр не в «Registries» | ‖ з PM-07 після контракту PM-04 |
+| PM-06 | Клієнтська оболонка: маршрути, навігація, заглушки, `PermitsSubnav`, `PermitEditorHead`, чисті хелпери (`wideTable`, `pickerScope`, `pasteRows`), компонент `PermitDefTable`, ключі сіду `-- PERMITS:` | `Ecr.Web/src/features/permits`, `routes.ts`, `router.tsx`, `routePrefetch.ts`, `shared/ui/navIcons.tsx`, `Sql/09-seed.sql` | PM-01 | vitest хелперів; маршрути відкриваються; a11y (dark/light) | ‖ W1 |
+| PM-07 | Клієнт: перелік пермітів, сторінка перміта, діалоги життєвого циклу, майстер «New permit», форма рядка, вставка рядків | `features/permits/**` | PM-04 (контракт), PM-06 | vitest + **e2e на стенді** екранів 1–2 | після PM-04 |
+| PM-08 | Клієнт: перелік типів, конструктор (дерево таблиць, стовпці, інспектор, майстер «Add table», перевірки, публікація), сторінка списків | `features/permits/**` | PM-03, PM-05, PM-06 | vitest + e2e екранів 3–5 | W3 |
+| PM-09 | Бекенд привʼязок (без міграції — таблиці з PM-02): CRUD, клон у `TemplateVersionStore`, ендпоінт перегляду (+ `api.ts`) | `Ecr.Infrastructure/Persistence/TemplateVersionStore.cs`, `Ecr.Application`, `Ecr.Api` | PM-02, PM-04 | тест: привʼязка клонується з версією шаблону | W3 |
+| PM-10 | Runtime «рядки з перміта» в `RowStore` / `IPermitBindingService` | `Ecr.Infrastructure/Persistence/RowStore.cs`, `Ecr.Application/Ports` | PM-09; **R6 підтверджено** | тест на живому SQL: рядки створено один раз, ліміти read-only | W4 ‖ PM-11 |
+| PM-11 | Клієнт: список/майстер/деталі привʼязок + перегляд | `features/permits/**` | PM-09, PM-06 | vitest + e2e екрана 6 | W4 ‖ PM-10 |
+| PM-12 | Верифікація режиму Formulas (`[Permit]`-lookup + `REGSUM` на `PRM_*`), тест Scenarios, smoke/e2e | `tests/**`, `tools/**` | PM-10, PM-11 | зелені Scenarios, smoke, e2e | W5 |
+
+**Хвилі.** W1 = PM-01, PM-02, PM-06 паралельно. W2 = PM-03 → PM-04 (послідовно: спільні гарячі файли);
+PM-05 паралельно з PM-07 після пушу контракту PM-04. W3 = PM-08, PM-09. W4 = PM-10 ‖ PM-11. W5 = PM-12.
+
+**Протокол гарячих файлів** (CLAUDE.md «✎ 2026-09-27»):
+- `Sql/09-seed.sql` — лише своя секція `-- PERMITS:`, append у **кінець кожного мовного блоку**.
+- `ErrorCodes.cs` + `ExceptionHandlingMiddleware` + `02-contracts.md` §7 — один код = один коміт.
+- `routes.ts`, `router.tsx`, `routePrefetch.ts`, `navIcons.tsx` — лише PM-06 і крок хлібних крихт.
+- Файли клієнта реєстрів (`RegistryConstructor*`, `RegistryFieldForm`, `registryDraft`, `RegistriesPage`,
+  `definition.ts`) **не чіпати**, доки не влито `lane/an-analiz/registries-ui`.
+- Міграція — одна в польоті (PRM01 — єдина; інші міграції — за токеном); контракт (`openapi.snapshot.json`,
+  `schema.d.ts`) — останнім кроком після rebase, у тому ж коміті; клієнт над новим ендпоінтом стартує
+  лише від запушеного контракту (CLAUDE.md 12.10, правило 6).
+- Lane лінійна, від свіжого `origin/dev/integration`; форма — `lane/permits/<задача>`.
+
+## 5. Приймання — відповідність мокапу
+
+Чекліст e2e = потоки мокапу (`#/flows`, група **Permits**, `screens-permits.js`, кінець файлу):
+
+1. `permits-create-fill-activate` — створити перміт майстром → огляд → таблиця «Emission limits» → форма
+   рядка (відходи) → вставка рядків з Excel → редагування рядка → активувати чернетку.
+2. `permits-import-excel` — «Import from Excel» (все або нічого).
+3. `permits-wide-table` — водний перміт: згортання груп стовпців, шторка рядка за секціями.
+4. `permits-renew` — фільтр «ending within 120 days» → перміт → «Renew…».
+5. `permits-define-type` — новий тип → дерево таблиць → «Add table» → «Add 12 month columns» →
+   властивості стовпця → перевірки → публікація.
+6. `permits-bind-sheet` — новий зв'язок (майстер) → зіставлення й перегляд → привʼязка лише з формулами.
+
+Кожен UI-крок завершується e2e своїх екранів **на реальному стенді** (CLAUDE.md, правило 6 від
+2026-10-12; «UI-lane готово» — лише з прогоном e2e зачеплених екранів). Вигляд — за мокапом, світла й
+темна теми, стани дані/порожньо/помилка.
+
+## 6. Ризики
+
+- **R1. Темпоральна дитина.** Композиція її забороняє → чинність рядків — `Date`-стовпці (§1b).
+- **R2. Чернетка проти ключа.** Підтверджено в коді: `IsLive = !IsDeleted`, `IsActive` ігнорується
+  (§1c); PM-04 перевіряє й виправляє першим.
+- **R3. Атомарна публікація.** N+1 реєстрів в одній транзакції; збій посередині не лишає напівтип.
+- **R4. Приховані реєстри.** Не мають текти в «Registries», «Де використовується», експорт; виключення —
+  джойном з `PermitTypeTable`/`PermitFieldMeta`.
+- **R5. Незмінність привʼязки на версії шаблону.** Привʼязка клонується з версією; старі версії не
+  змінюються; перевірити migration-проєкту.
+- **R6. Звʼязок «об'єкт ↔ документ».** Правило `ByFacilityPeriodEnd` вимагає шляху документ → об'єкт;
+  **підтвердити до PM-10**.
+- **R7. Одноразове створення рядків.** Пізніші зміни перміта не доходять до вже створених таблиць
+  аркуша без явної дії «оновити з перміта»; закриті періоди не змінюються ніколи (D-39).
+- **R8. Майстер імпорту RT-18** відсутній: вставка рядків є в сітці rc812, CSV-імпорт реєстрів є; Excel
+  «все або нічого» — окремий крок, поза PM-01…PM-12.
+- **R9. Одна міграція в польоті.** PRM01 — єдина; чужі міграції не накладати.
+
+## 7. Відкриті питання замовнику
+
+Див. [`docs/design/permits/README.md`](../design/permits/README.md) розд. 6 (10 питань, дефолти діють
+до відповіді; блокувальних немає) і розд. 5 (припущення). Питання йдуть лише через координатора.
