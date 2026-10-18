@@ -455,7 +455,8 @@
       stats: [{ id: 'all', label: 'types', value: function (r) { return r.length; } }, { id: 'tables', label: 'tables', value: function (r) { return r.reduce(function (s, t) { return s + t.tables.length; }, 0); } }, { id: 'draft', label: 'with unpublished changes', tone: 'warning', match: function (t) { return t.state === 'Draft'; } }],
       search: { placeholder: 'Type name', text: function (t) { return t.name + ' ' + t.ru + ' ' + t.code; } },
       filters: [{ id: 'category', label: 'Categories', options: ['Air', 'Water', 'Waste'] }],
-      table: { rowKey: 'code', tall: true, onRow: function (t) { E.go('/admin/permits/types/' + t.code); }, rowLabel: function (t) { return t.name; }, columns: [
+      onRow: function (t) { E.go('/admin/permits/types/' + t.code); },
+      table: { rowKey: 'code', tall: true, rowLabel: function (t) { return t.name; }, columns: [
         { key: 'name', label: 'Type', render: function (t) { return E.twoLine(t.name, t.ru, { mono: false }); } },
         { key: 'category', label: 'Category' },
         { key: 'tables', label: 'Tables', render: function (t) { return t.tables.map(function (x) { return x.name + ' (' + x.cols.length + ')'; }).join(' · '); }, sortValue: function (t) { return t.tables.length; } },
@@ -624,7 +625,8 @@
       stats: [{ id: 'all', label: 'bindings', value: function (r) { return r.length; } }, { id: 'rows', label: 'fill rows', match: function (b) { return b.mode === 'Rows from the permit'; } }, { id: 'draft', label: 'in a draft template', tone: 'warning', match: function (b) { return b.state === 'Draft'; } }],
       search: { placeholder: 'Sheet, table or permit type', text: function (b) { return b.sheet + ' ' + b.target + ' ' + type(b.type).name; } },
       filters: [{ id: 'mode', label: 'Modes', options: ['Rows from the permit', 'Formulas only'] }],
-      table: { rowKey: 'id', tall: true, onRow: function (b) { E.go('/admin/permits/bindings/' + b.id); }, rowLabel: function (b) { return b.target; }, columns: [
+      onRow: function (b) { E.go('/admin/permits/bindings/' + b.id); },
+      table: { rowKey: 'id', tall: true, rowLabel: function (b) { return b.target; }, columns: [
         { key: 'target', label: 'Sheet table', render: function (b) { return E.twoLine(b.target, b.sheet + ' · ' + b.template, { mono: false }); } },
         { key: 'type', label: 'Reads', render: function (b) { return E.twoLine(table(type(b.type), b.tbl).name, type(b.type).name, { mono: false }); }, sortValue: function (b) { return type(b.type).name; } },
         { key: 'mode', label: 'How' }, { key: 'pick', label: 'Which permit', hideSm: true },
