@@ -126,6 +126,18 @@ internal static class PermitBindingErrors
                 ["bindingCode"] = code,
             });
 
+    /// <summary><c>409 ECR-SCHM-0409 permitBindingBreaking</c>: руйнівна зміна у версії з документами.</summary>
+    /// <param name="code">Код прив'язки.</param>
+    internal static ConcurrencyConflictException Breaking(string code)
+        => new(
+            ErrorCodes.BreakingChange,
+            $"Видалення прив'язки «{code}» руйнівне: до цієї версії вже прив'язані документи, рядки яких створено з дозволу (ФВ-7.4).",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-SCHM-0409.permitBindingBreaking",
+                ["bindingCode"] = code,
+            });
+
     /// <summary><c>404 ECR-TMPL-0404 templateVersion</c>: версії шаблону немає.</summary>
     /// <param name="templateVersionId">Версія шаблону.</param>
     internal static NotFoundException VersionNotFound(int templateVersionId)

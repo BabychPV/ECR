@@ -36,6 +36,8 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
         Save = new SavePermitBindingHandler(
             Versions, Bindings, inner.Permits, inner.Registries, Store, Classifier, MetadataCache,
             inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User);
+        Delete = new DeletePermitBindingHandler(
+            Versions, Bindings, Store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User);
     }
 
     public PermitHarness Types => _inner;
@@ -55,6 +57,8 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
     public GetPermitBindingHandler Get { get; }
 
     public SavePermitBindingHandler Save { get; }
+
+    public DeletePermitBindingHandler Delete { get; }
 
     public EcrDbContext Db => _inner.Db;
 
@@ -107,10 +111,16 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
     /// для читання), <c>C3</c> (Decimal, редагована), додана <c>C4</c> (текст, лише для читання) і поле шапки <c>Facility</c>.
     /// </summary>
     /// <param name="sql">Фікстура бази.</param>
-    public static async Task<PreparedSheet> PrepareSheetAsync(SqlServerFixture sql)
+    /// <param name="withDocument">
+    /// <c>false</c> - версія без жодного документа (структурні зміни в ній не <c>Breaking</c>); тоді в
+    /// <see cref="PreparedSheet.Doc"/> заповнені лише ідентифікатори шаблону, аркуша, таблиці й колонок.
+    /// </param>
+    public static async Task<PreparedSheet> PrepareSheetAsync(SqlServerFixture sql, bool withDocument = true)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var doc = await builder.BuildAsync(rowCount: 0, rowMode: TableRowMode.Dynamic, ct: default).ConfigureAwait(false);
+        var doc = withDocument
+            ? await builder.BuildAsync(rowCount: 0, rowMode: TableRowMode.Dynamic, ct: default).ConfigureAwait(false)
+            : await BuildWithoutDocumentAsync(builder).ConfigureAwait(false);
 
         await using var db = builder.CreateContext();
         var limit = await db.ColumnDefs.SingleAsync(c => c.Id == doc.ColumnDefIds[1]).ConfigureAwait(false);
@@ -126,6 +136,43 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         return new PreparedSheet(doc, note.Id, facility.Id);
+    }
+
+    private static async Task<TestDocument> BuildWithoutDocumentAsync(TestDocumentBuilder builder)
+    {
+        var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        var now = new DateTime(2026, 1, 15, 10, 0, 0, DateTimeKind.Utc);
+        await using var db = builder.CreateContext();
+
+        var template = new Template(EcrCode.Create($"PTP{tag}"), PermitHarness.Text($"Template {tag}"), 1, now);
+        db.Templates.Add(template);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var version = new TemplateVersion(template.Id, $"1.0.0.{tag}", 1, now);
+        db.TemplateVersions.Add(version);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var sheet = new SheetDef(version.Id, EcrCode.Create($"PSH{tag}"), PermitHarness.Text("Sheet"), 1);
+        db.SheetDefs.Add(sheet);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var table = new TableDef(
+            sheet.Id, EcrCode.Create($"PTB{tag}"), PermitHarness.Text("Table"), 1, TableLayoutKind.PerPeriodInstance, TableRowMode.Dynamic);
+        db.TableDefs.Add(table);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var columns = new[]
+        {
+            new ColumnDef(table.Id, EcrCode.Create($"C1_{tag}"), PermitHarness.Text("C1"), 1, CellDataType.String),
+            new ColumnDef(table.Id, EcrCode.Create($"C2_{tag}"), PermitHarness.Text("C2"), 2, CellDataType.Decimal),
+            new ColumnDef(table.Id, EcrCode.Create($"C3_{tag}"), PermitHarness.Text("C3"), 3, CellDataType.Decimal),
+        };
+        db.ColumnDefs.AddRange(columns);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return new TestDocument(
+            template.Id, version.Id, sheet.Id, sheet.Code, table.Id, [.. columns.Select(c => c.Id)], [],
+            ProjectId: 0, PeriodKey: new PeriodKey(202601), DocumentId: 0, TableInstanceId: 0, RowIds: []);
     }
 
     public ValueTask DisposeAsync() => _inner.DisposeAsync();
