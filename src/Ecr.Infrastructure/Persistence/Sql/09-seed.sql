@@ -119,7 +119,15 @@ USING (VALUES
   -- звужуване (`PermissionScopes.Narrowable` не містить). Не небезпечне (0):
   -- `SystemAdministrator` (`%`) отримує його цим же MERGE; роздача
   -- `DataEntry` — секція `SEC:SUBMIT` нижче, після `SEC:RPT`.
-  (N'Document.Submit',          N'Document',    0)
+  (N'Document.Submit',          N'Document',    0),
+  -- PERMITS: permissions ── права типів дозволів (PM-04, рішення «Аудиту» ч.1, варіант б) ──
+  -- Окремі глобальні права замість Registry.EditDefinition / Registry.Publish: ними керують реєстри Land, а тип
+  -- дозволу — власна сутність. Не небезпечні (0), як і Registry.EditDefinition: `SystemAdministrator` (`%`) бере їх
+  -- сам; `TemplateAdministrator` і явна пара `SystemAdministrator` — секція `PERMITS: permissions` після роздач ролей.
+  -- Рядок стоїть у єдиному каталозі (його читають сторожі). Перегляд типів лишається Registry.View.
+  (N'Permit.EditType',          N'Permit',      0),
+  (N'Permit.PublishType',       N'Permit',      0)
+  -- PERMITS: permissions ── кінець секції ──
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)
@@ -602,6 +610,25 @@ USING (
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
 GO
+
+-- PERMITS: permissions ── роздача ролям ──
+-- Поіменно й окремим MERGE (як `Approver` × `Report.EditDefinition`), щоб блок вище не міняти: обидві вбудовані ролі
+-- керують типами дозволів. Права не небезпечні, тож `SystemAdministrator` отримав би їх і шаблоном `%`; явна пара
+-- тримає роздачу незалежною від того, чи каталог прав був заповнений до першого MERGE ролей.
+MERGE sec.RolePermission AS t
+USING (
+    SELECT r.Id AS RoleId, p.Code AS PermissionCode
+    FROM (VALUES
+        (N'SystemAdministrator',   N'Permit.EditType'), (N'SystemAdministrator',   N'Permit.PublishType'),
+        (N'TemplateAdministrator', N'Permit.EditType'), (N'TemplateAdministrator', N'Permit.PublishType')
+    ) AS m (RoleCode, PermissionCode)
+    JOIN sec.Role       AS r ON r.Code = m.RoleCode AND r.IsBuiltIn = 1 -- U1-04
+    JOIN sec.Permission AS p ON p.Code = m.PermissionCode
+) AS s
+ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
+WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
+GO
+-- PERMITS: permissions ── роздача ── кінець секції ──
 
 -- ── Роль первинного налаштування ─────────────────────────────────────────
 -- ⚠ Роль лишається, а от НЕБЕЗПЕЧНІ ПРАВА їй більше не видаються (`D-121`).
@@ -8184,6 +8211,10 @@ USING (VALUES
     ,(N'err.ECR-PRM-4095', N'en', N'Permit already exists', 1)
     ,(N'err.ECR-PRM-4095.number', N'en', N'A permit "{number}" of type "{typeCode}" valid from {validFrom} already exists (id {id}).', 1)
     -- PERMITS: permits ── ECR-PRM-4095 ── кінець секції ──
+    -- PERMITS: permissions ── en: підписи прав типів дозволів ──
+    ,(N'permission.Permit.EditType', N'en', N'Edit permit types', 1)
+    ,(N'permission.Permit.PublishType', N'en', N'Publish permit types', 1)
+    -- PERMITS: permissions ── en ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -20731,6 +20762,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: permits ── ECR-PRM-4095 ── ru/kz ── кінець секції ──
+
+-- PERMITS: permissions ── ru/kz: підписи прав типів дозволів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permission.Permit.EditType', N'ru', N'Изменение типов разрешений'),
+    (N'permission.Permit.EditType', N'kz', N'Рұқсат түрлерін өңдеу'),
+    (N'permission.Permit.PublishType', N'ru', N'Публикация типов разрешений'),
+    (N'permission.Permit.PublishType', N'kz', N'Рұқсат түрлерін жариялау')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: permissions ── ru/kz ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

@@ -149,7 +149,7 @@ internal sealed class PermitHarness : IAsyncDisposable
 
     /// <summary>Усі права, потрібні для повного циклу типу.</summary>
     public static string[] Everything =>
-        ["Registry.View", "Registry.EditDefinition", "Registry.Publish"];
+        ["Registry.View", "Permit.EditType", "Permit.PublishType"];
 
     public static LocalizedText Text(string en) => new(new Dictionary<string, string> { ["en"] = en });
 

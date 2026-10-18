@@ -733,7 +733,7 @@ public sealed partial class EndpointCoverageTests
         "nav.consistency.description", "nav.uiStrings.description", "nav.health.description",
     ];
 
-    /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 43 права каталогу <c>sec.Permission</c>.</summary>
+    /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 45 прав каталогу <c>sec.Permission</c>.</summary>
     private static string[] PermissionLabelKeys =>
     [
         "permission.Template.View",
@@ -743,6 +743,8 @@ public sealed partial class EndpointCoverageTests
         "permission.Registry.EditData",
         "permission.Registry.EditDefinition",
         "permission.Registry.Publish",
+        "permission.Permit.EditType",
+        "permission.Permit.PublishType",
         "permission.Document.View",
         "permission.Document.Create",
         "permission.Document.Delete",

@@ -38,6 +38,8 @@ public static class PermissionScopes
         "Registry.EditData",
         "Registry.EditDefinition",
         "Registry.Publish",
+        "Permit.EditType",
+        "Permit.PublishType",
         "Uom.EditCatalog",
         "Integration.View",
         "Integration.Manage",

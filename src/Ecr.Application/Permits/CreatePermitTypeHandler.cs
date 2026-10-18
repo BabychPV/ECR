@@ -13,7 +13,7 @@ namespace Ecr.Application.Permits;
 
 /// <summary>
 /// Заводить тип дозволу в стані чернетки: реєстр шапки (порожній, темпоральний) і рядок типу з чернеткою складу.
-/// Право <c>Registry.EditDefinition</c> (Permits, PM-03).
+/// Право <c>Permit.EditType</c> (Permits, PM-03).
 /// </summary>
 /// <remarks>
 /// ⚠ Поля шапки й таблиці з'являються в реєстрах лише при публікації (одна транзакція): до того реєстр шапки порожній
@@ -28,8 +28,8 @@ public sealed class CreatePermitTypeHandler(
     ICurrentUser currentUser,
     IClock clock)
 {
-    /// <summary>Право на зміну опису довідників (типи — надбудова над ними).</summary>
-    public const string Permission = "Registry.EditDefinition";
+    /// <summary>Право на зміну типів дозволів.</summary>
+    public const string Permission = "Permit.EditType";
 
     /// <summary>Заводить тип.</summary>
     /// <param name="request">Код, назва, категорія, за потреби — тип, склад якого копіюється.</param>

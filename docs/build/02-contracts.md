@@ -2822,6 +2822,19 @@ public interface IPermitTypeStore
 }
 ```
 
+#### `IPermitStore`
+
+Екземпляри дозволів (Permits, PM-04): дозвіл — запис реєстру шапки типу, тож власного сховища немає; порт дає лише
+підсумки рядків таблиці дозволу (кількість і Σ головного числового стовпця) одним запитом на таблицю.
+
+```csharp
+public interface IPermitStore
+{
+    public Task<IReadOnlyDictionary<long, PermitRowStat>> RowStatsAsync(
+        int permitFieldDefId, int? totalFieldDefId, IReadOnlyCollection<long>? permitIds, CancellationToken ct);
+}
+```
+
 #### `IRegistryRowsQuery`
 
 Рядки довідника для редактора даних (RT-13, FEATURE-REGISTRY-TABLES §7.1): записи, значення полів,
@@ -4273,11 +4286,11 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/registries/{code}/export?format=&asOf=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types?category=&status=&q=&limit=&cursor=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types/{code}` | `Registry.View` | 8 |
-| `POST` | `/api/v1/permit-types` | `Registry.EditDefinition` | 8 |
-| `PUT` | `/api/v1/permit-types/{code}` | `Registry.EditDefinition` | 8 |
-| `DELETE` | `/api/v1/permit-types/{code}` | `Registry.EditDefinition` | 8 |
-| `POST` | `/api/v1/permit-types/{code}/publish` | `Registry.Publish` | 8 |
-| `POST` | `/api/v1/permit-types/{code}/new-version` | `Registry.EditDefinition` | 8 |
+| `POST` | `/api/v1/permit-types` | `Permit.EditType` | 8 |
+| `PUT` | `/api/v1/permit-types/{code}` | `Permit.EditType` | 8 |
+| `DELETE` | `/api/v1/permit-types/{code}` | `Permit.EditType` | 8 |
+| `POST` | `/api/v1/permit-types/{code}/publish` | `Permit.PublishType` | 8 |
+| `POST` | `/api/v1/permit-types/{code}/new-version` | `Permit.EditType` | 8 |
 | `GET` | `/api/v1/reports` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions` | `Report.EditDefinition` | 5 |

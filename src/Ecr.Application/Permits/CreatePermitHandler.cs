@@ -86,6 +86,9 @@ public sealed class CreatePermitHandler(
         var view = await reader.ViewAsync(type, ct).ConfigureAwait(false)
             ?? throw PermitTypeErrors.NotFound(typeCode);
 
+        // ⛔ D-211: запис External-довідника - лише синком з AF (шапка дозволу таким не буває, але гард один на всіх писачів).
+        ExternalRegistryGuard.EnsureManualEditAllowed(view.Header);
+
         var twin = (await reader.HeadersAsync(view, null, ct).ConfigureAwait(false))
             .FirstOrDefault(h => string.Equals(h.Number, number, StringComparison.OrdinalIgnoreCase) && h.Entry.ValidFrom == request.ValidFrom);
         if (twin is not null)
