@@ -18,12 +18,14 @@ beforeEach(() => {
 });
 
 async function mountWithSlowChunk(): Promise<void> {
+  // Справжній модуль вантажимо ДО монтування: далі `gate` — єдине, що тримає чанк.
+  const actual = await vi.importActual<typeof import('@/shared/ui/Hint')>('@/shared/ui/Hint');
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
   vi.doMock('@/shared/ui/Hint', async () => {
     await gate;
-    return vi.importActual<typeof import('@/shared/ui/Hint')>('@/shared/ui/Hint');
+    return actual;
   });
   const { LazyHint } = await import('../LazyHint');
   render(
@@ -62,6 +64,36 @@ describe('LazyHint: фокус переживає доїзд чанка Hint', (
 
     await act(async () => {
       release();
+    });
+    await waitFor(() => {
+      expect(document.querySelector('[data-hint-text]')).not.toBeNull();
+    });
+
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
+  it('фокус пішов з тригера між доїздом чанка і комітом заміни — назад не віддається (AN-58)', async () => {
+    await mountWithSlowChunk();
+    const before = screen.getByRole('button', { name: 'Toggle' });
+    const outside = document.createElement('input');
+    document.body.appendChild(outside);
+    before.focus();
+
+    // Усередині act оновлення стану чекає виходу зі сфери: continuation чанка
+    // (де фіксується «тригер у фокусі») встигає, а коміт заміни — ще ні.
+    await act(async () => {
+      release();
+      // Без реальних таймерів: `Hint` уже прогрітий у `mountWithSlowChunk`, тож після
+      // `release` чанк доїжджає самими мікротасками. Чекаємо завершення динамічних
+      // імпортів і зливаємо чергу мікротасок — continuation `loadHint().then` (де
+      // фіксується «тригер у фокусі») гарантовано відпрацював, а коміт заміни стану
+      // чекає виходу з `act`.
+      await vi.dynamicImportSettled();
+      for (let i = 0; i < 20; i += 1) {
+        await Promise.resolve();
+      }
+      outside.focus();
     });
     await waitFor(() => {
       expect(document.querySelector('[data-hint-text]')).not.toBeNull();
