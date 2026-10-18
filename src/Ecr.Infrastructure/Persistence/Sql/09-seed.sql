@@ -8441,6 +8441,123 @@ USING (VALUES
     ,(N'permits.editor.versions.emptyHint', N'en', N'The version history of this type is not shown on this page yet.', 1)
     ,(N'permits.editor.versions.emptyTitle', N'en', N'Versions cannot be shown yet', 1)
     -- PERMITS: editor ── кінець секції ──
+    -- PERMITS: editor-dialogs ── PM-08c: діалоги, майстер «Add a table», вкладки Checks і Versions конструктора типу; ru/kz — порцією PERMITS: editor-dialogs нижче ──
+    ,(N'permits.editor.dialogs.col.nameEn', N'en', N'Name (English)', 1)
+    ,(N'permits.editor.dialogs.col.type', N'en', N'Type', 1)
+    ,(N'permits.editor.dialogs.col.unit', N'en', N'Unit', 1)
+    ,(N'permits.editor.dialogs.col.noUnit', N'en', N'No unit', 1)
+    ,(N'permits.editor.dialogs.col.required', N'en', N'Required', 1)
+    ,(N'permits.editor.dialogs.col.key', N'en', N'Key', 1)
+    ,(N'permits.editor.dialogs.col.remove', N'en', N'Remove column', 1)
+    ,(N'permits.editor.dialogs.col.nameRequired', N'en', N'Enter a name', 1)
+    ,(N'permits.editor.dialogs.type.String', N'en', N'Text', 1)
+    ,(N'permits.editor.dialogs.type.Decimal', N'en', N'Number', 1)
+    ,(N'permits.editor.dialogs.type.Int', N'en', N'Whole number', 1)
+    ,(N'permits.editor.dialogs.type.Date', N'en', N'Date', 1)
+    ,(N'permits.editor.dialogs.type.Bool', N'en', N'Yes/No', 1)
+    ,(N'permits.editor.dialogs.type.Lookup', N'en', N'Choice list', 1)
+    ,(N'permits.editor.dialogs.wizard.back', N'en', N'Back', 1)
+    ,(N'permits.editor.dialogs.wizard.next', N'en', N'Next', 1)
+    ,(N'permits.editor.dialogs.wizard.review', N'en', N'Review', 1)
+    ,(N'permits.editor.dialogs.addColumn.title', N'en', N'Add a column', 1)
+    ,(N'permits.editor.dialogs.addColumn.intro', N'en', N'The column is added to the table "{table}".', 1)
+    ,(N'permits.editor.dialogs.addColumn.apply', N'en', N'Add column', 1)
+    ,(N'permits.editor.dialogs.addSeries.title', N'en', N'Add 12 month columns?', 1)
+    ,(N'permits.editor.dialogs.addSeries.verb', N'en', N'Add 12 columns', 1)
+    ,(N'permits.editor.dialogs.addSeries.table', N'en', N'Table: {table}', 1)
+    ,(N'permits.editor.dialogs.addSeries.months', N'en', N'January to December are added as number columns in the group "{group}".', 1)
+    ,(N'permits.editor.dialogs.addSeries.unit', N'en', N'Unit: {unit}. Change it for the whole group afterwards.', 1)
+    ,(N'permits.editor.dialogs.addSeries.noUnit', N'en', N'No unit is set because the unit catalog has no thousand cubic metres. Choose the unit for the whole group afterwards.', 1)
+    ,(N'permits.editor.dialogs.addSeries.checkHint', N'en', N'A check "months add up to the annual value" can be added on the Checks tab.', 1)
+    ,(N'permits.editor.dialogs.addRule.title', N'en', N'Add a check', 1)
+    ,(N'permits.editor.dialogs.addRule.name', N'en', N'What it checks', 1)
+    ,(N'permits.editor.dialogs.addRule.namePlaceholder', N'en', N'Months add up to the annual volume', 1)
+    ,(N'permits.editor.dialogs.addRule.nameRequired', N'en', N'Describe the check', 1)
+    ,(N'permits.editor.dialogs.addRule.where', N'en', N'Applies to', 1)
+    ,(N'permits.editor.dialogs.addRule.wholePermit', N'en', N'The whole permit', 1)
+    ,(N'permits.editor.dialogs.addRule.table', N'en', N'Table: {table}', 1)
+    ,(N'permits.editor.dialogs.addRule.expression', N'en', N'Rule', 1)
+    ,(N'permits.editor.dialogs.addRule.expressionHint', N'en', N'True means the data is fine. Use column codes, for example ROW.Annual >= 0.', 1)
+    ,(N'permits.editor.dialogs.addRule.expressionRequired', N'en', N'Write the rule expression', 1)
+    ,(N'permits.editor.dialogs.addRule.severity', N'en', N'If it fails', 1)
+    ,(N'permits.editor.dialogs.addRule.warn', N'en', N'Warn', 1)
+    ,(N'permits.editor.dialogs.addRule.block', N'en', N'Block saving', 1)
+    ,(N'permits.editor.dialogs.addRule.apply', N'en', N'Add check', 1)
+    ,(N'permits.editor.dialogs.publish.title', N'en', N'Publish "{name}" v{version}?', 1)
+    ,(N'permits.editor.dialogs.publish.reason', N'en', N'What changed', 1)
+    ,(N'permits.editor.dialogs.publish.verb', N'en', N'Publish', 1)
+    ,(N'permits.editor.dialogs.publish.usedBy', N'en', N'{count} existing permits move to the new version. Added columns are empty in old rows; removed columns are hidden, not deleted.', 1)
+    ,(N'permits.editor.dialogs.publish.unused', N'en', N'No permits use this type yet.', 1)
+    ,(N'permits.editor.dialogs.publish.blockedTitle', N'en', N'Add a table before publishing', 1)
+    ,(N'permits.editor.dialogs.publish.blockedText', N'en', N'A permit type without tables has only the permit details, so there is nothing to fill in. Add at least one table with its columns.', 1)
+    ,(N'permits.editor.dialogs.publish.addTable', N'en', N'Add table…', 1)
+    ,(N'permits.editor.dialogs.newVersion.title', N'en', N'Open a new version of "{name}"?', 1)
+    ,(N'permits.editor.dialogs.newVersion.verb', N'en', N'Open new version', 1)
+    ,(N'permits.editor.dialogs.newVersion.draft', N'en', N'A draft v{next} is created from the published v{published}.', 1)
+    ,(N'permits.editor.dialogs.newVersion.keep', N'en', N'Existing permits keep working with v{published} until you publish the draft.', 1)
+    ,(N'permits.editor.dialogs.deleteType.title', N'en', N'Delete permit type "{name}"?', 1)
+    ,(N'permits.editor.dialogs.deleteType.verb', N'en', N'Delete type', 1)
+    ,(N'permits.editor.dialogs.deleteType.removed', N'en', N'The draft and its {tables} tables are removed.', 1)
+    ,(N'permits.editor.dialogs.deleteType.unused', N'en', N'The type was never published, so no permit uses it.', 1)
+    ,(N'permits.editor.dialogs.deleteType.published', N'en', N'A published permit type cannot be deleted.', 1)
+    ,(N'permits.editor.dialogs.done.published', N'en', N'"{name}" v{version} is published.', 1)
+    ,(N'permits.editor.dialogs.done.newVersion', N'en', N'Draft v{version} of "{name}" is open.', 1)
+    ,(N'permits.editor.dialogs.done.deleted', N'en', N'Permit type "{name}" is deleted.', 1)
+    ,(N'permits.editor.dialogs.addTable.title', N'en', N'Add a table to {name}', 1)
+    ,(N'permits.editor.dialogs.addTable.stepTable', N'en', N'Table', 1)
+    ,(N'permits.editor.dialogs.addTable.stepTableHint', N'en', N'A table is one list of rows inside a permit: limits, volumes, storage places.', 1)
+    ,(N'permits.editor.dialogs.addTable.nameEn', N'en', N'Name (English)', 1)
+    ,(N'permits.editor.dialogs.addTable.namePlaceholder', N'en', N'Monitoring points', 1)
+    ,(N'permits.editor.dialogs.addTable.nameRu', N'en', N'Name (Russian)', 1)
+    ,(N'permits.editor.dialogs.addTable.from', N'en', N'Start from', 1)
+    ,(N'permits.editor.dialogs.addTable.fromBlank', N'en', N'One empty column, I add the rest', 1)
+    ,(N'permits.editor.dialogs.addTable.fromCsv', N'en', N'The header row of a CSV file (in Excel: Save as CSV)', 1)
+    ,(N'permits.editor.dialogs.addTable.fromCopy', N'en', N'A copy of another table of this type', 1)
+    ,(N'permits.editor.dialogs.addTable.copyTable', N'en', N'Table to copy', 1)
+    ,(N'permits.editor.dialogs.addTable.file', N'en', N'CSV file', 1)
+    ,(N'permits.editor.dialogs.addTable.fileHint', N'en', N'The first row is read as the column names. Types are guessed from the next rows.', 1)
+    ,(N'permits.editor.dialogs.addTable.fileRead', N'en', N'{count} header cells read from {file}.', 1)
+    ,(N'permits.editor.dialogs.addTable.csvEmpty', N'en', N'No header row found in {file}.', 1)
+    ,(N'permits.editor.dialogs.addTable.csvTitle', N'en', N'Columns read from {file}', 1)
+    ,(N'permits.editor.dialogs.addTable.csvText', N'en', N'{count} header cells found. Types were guessed from the first rows, so check them.', 1)
+    ,(N'permits.editor.dialogs.addTable.stepColumns', N'en', N'Columns', 1)
+    ,(N'permits.editor.dialogs.addTable.stepColumnsHint', N'en', N'As many as the permit needs. Mark the columns that make a row unique as Key.', 1)
+    ,(N'permits.editor.dialogs.addTable.columnN', N'en', N'Column {n}', 1)
+    ,(N'permits.editor.dialogs.addTable.defaultColumn', N'en', N'Name', 1)
+    ,(N'permits.editor.dialogs.addTable.addColumn', N'en', N'Add column', 1)
+    ,(N'permits.editor.dialogs.addTable.addMonths', N'en', N'Add months January to December', 1)
+    ,(N'permits.editor.dialogs.addTable.nameRequired', N'en', N'A table needs a name.', 1)
+    ,(N'permits.editor.dialogs.addTable.nameTaken', N'en', N'This type already has a table with this name. Choose another name.', 1)
+    ,(N'permits.editor.dialogs.addTable.fileRequired', N'en', N'Choose a CSV file with the header row.', 1)
+    ,(N'permits.editor.dialogs.addTable.columnUnnamed', N'en', N'Every column needs a name.', 1)
+    ,(N'permits.editor.dialogs.addTable.noKey', N'en', N'Mark at least one column as Key, so rows of one permit cannot repeat.', 1)
+    ,(N'permits.editor.dialogs.addTable.reviewText', N'en', N'The table is added to the draft of this type. Existing permits get it empty after you publish.', 1)
+    ,(N'permits.editor.dialogs.addTable.apply', N'en', N'Add table', 1)
+    ,(N'permits.editor.dialogs.addTable.sumTable', N'en', N'Table', 1)
+    ,(N'permits.editor.dialogs.addTable.sumColumns', N'en', N'Columns', 1)
+    ,(N'permits.editor.dialogs.addTable.sumUnique', N'en', N'Unique row', 1)
+    ,(N'permits.editor.dialogs.addTable.uniqueRow', N'en', N'Permit + {keys}', 1)
+    ,(N'permits.editor.dialogs.addTable.sumStored', N'en', N'Stored as', 1)
+    ,(N'permits.editor.dialogs.addTable.discardTitle', N'en', N'Discard this table?', 1)
+    ,(N'permits.editor.dialogs.addTable.discardText', N'en', N'The name and columns you entered will be lost.', 1)
+    ,(N'permits.editor.dialogs.addTable.discardVerb', N'en', N'Discard', 1)
+    ,(N'permits.editor.checks.intro', N'en', N'Checks run every time a row is saved or a permit is activated. "Blocks saving" stops the change; "Warns" lets it through and marks the row.', 1)
+    ,(N'permits.editor.checks.caption', N'en', N'Checks of this permit type', 1)
+    ,(N'permits.editor.checks.colCheck', N'en', N'Check', 1)
+    ,(N'permits.editor.checks.colAppliesTo', N'en', N'Applies to', 1)
+    ,(N'permits.editor.checks.colRule', N'en', N'Rule', 1)
+    ,(N'permits.editor.checks.colIfFails', N'en', N'If it fails', 1)
+    ,(N'permits.editor.checks.wholePermit', N'en', N'Whole permit', 1)
+    ,(N'permits.editor.checks.blocks', N'en', N'Blocks saving', 1)
+    ,(N'permits.editor.checks.warns', N'en', N'Warns', 1)
+    ,(N'permits.editor.checks.empty', N'en', N'No checks yet.', 1)
+    ,(N'permits.editor.checks.add', N'en', N'Add check', 1)
+    ,(N'permits.editor.versions.caption', N'en', N'Versions of this permit type', 1)
+    ,(N'permits.editor.versions.colVersion', N'en', N'Version', 1)
+    ,(N'permits.editor.versions.colState', N'en', N'State', 1)
+    ,(N'permits.editor.versions.colDate', N'en', N'Date', 1)
+    ,(N'permits.editor.versions.note', N'en', N'Published versions are never edited. A permit keeps working with the version it was created in until you move it.', 1)
+    -- PERMITS: editor-dialogs ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -21483,6 +21600,245 @@ OPTION (RECOMPILE);
 GO
 -- PERMITS: editor ── кінець секції ──
 
+
+-- PERMITS: editor-dialogs ── ru/kz: PM-08c, діалоги, майстер «Add a table», вкладки Checks і Versions конструктора типу; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.editor.dialogs.col.nameEn', N'ru', N'Название (английское)'),
+    (N'permits.editor.dialogs.col.nameEn', N'kz', N'Атауы (ағылшынша)'),
+    (N'permits.editor.dialogs.col.type', N'ru', N'Тип'),
+    (N'permits.editor.dialogs.col.type', N'kz', N'Түрі'),
+    (N'permits.editor.dialogs.col.unit', N'ru', N'Единица'),
+    (N'permits.editor.dialogs.col.unit', N'kz', N'Өлшем бірлігі'),
+    (N'permits.editor.dialogs.col.noUnit', N'ru', N'Без единицы'),
+    (N'permits.editor.dialogs.col.noUnit', N'kz', N'Бірліксіз'),
+    (N'permits.editor.dialogs.col.required', N'ru', N'Обязательный'),
+    (N'permits.editor.dialogs.col.required', N'kz', N'Міндетті'),
+    (N'permits.editor.dialogs.col.key', N'ru', N'Ключ'),
+    (N'permits.editor.dialogs.col.key', N'kz', N'Кілт'),
+    (N'permits.editor.dialogs.col.remove', N'ru', N'Удалить столбец'),
+    (N'permits.editor.dialogs.col.remove', N'kz', N'Бағанды жою'),
+    (N'permits.editor.dialogs.col.nameRequired', N'ru', N'Введите название'),
+    (N'permits.editor.dialogs.col.nameRequired', N'kz', N'Атауын енгізіңіз'),
+    (N'permits.editor.dialogs.type.String', N'ru', N'Текст'),
+    (N'permits.editor.dialogs.type.String', N'kz', N'Мәтін'),
+    (N'permits.editor.dialogs.type.Decimal', N'ru', N'Число'),
+    (N'permits.editor.dialogs.type.Decimal', N'kz', N'Сан'),
+    (N'permits.editor.dialogs.type.Int', N'ru', N'Целое число'),
+    (N'permits.editor.dialogs.type.Int', N'kz', N'Бүтін сан'),
+    (N'permits.editor.dialogs.type.Date', N'ru', N'Дата'),
+    (N'permits.editor.dialogs.type.Date', N'kz', N'Күні'),
+    (N'permits.editor.dialogs.type.Bool', N'ru', N'Да/Нет'),
+    (N'permits.editor.dialogs.type.Bool', N'kz', N'Иә/Жоқ'),
+    (N'permits.editor.dialogs.type.Lookup', N'ru', N'Список выбора'),
+    (N'permits.editor.dialogs.type.Lookup', N'kz', N'Таңдау тізімі'),
+    (N'permits.editor.dialogs.wizard.back', N'ru', N'Назад'),
+    (N'permits.editor.dialogs.wizard.back', N'kz', N'Артқа'),
+    (N'permits.editor.dialogs.wizard.next', N'ru', N'Далее'),
+    (N'permits.editor.dialogs.wizard.next', N'kz', N'Келесі'),
+    (N'permits.editor.dialogs.wizard.review', N'ru', N'Проверка'),
+    (N'permits.editor.dialogs.wizard.review', N'kz', N'Тексеру'),
+    (N'permits.editor.dialogs.addColumn.title', N'ru', N'Добавить столбец'),
+    (N'permits.editor.dialogs.addColumn.title', N'kz', N'Баған қосу'),
+    (N'permits.editor.dialogs.addColumn.intro', N'ru', N'Столбец добавляется в таблицу «{table}».'),
+    (N'permits.editor.dialogs.addColumn.intro', N'kz', N'Баған «{table}» кестесіне қосылады.'),
+    (N'permits.editor.dialogs.addColumn.apply', N'ru', N'Добавить столбец'),
+    (N'permits.editor.dialogs.addColumn.apply', N'kz', N'Баған қосу'),
+    (N'permits.editor.dialogs.addSeries.title', N'ru', N'Добавить 12 столбцов по месяцам?'),
+    (N'permits.editor.dialogs.addSeries.title', N'kz', N'12 айлық баған қосу керек пе?'),
+    (N'permits.editor.dialogs.addSeries.verb', N'ru', N'Добавить 12 столбцов'),
+    (N'permits.editor.dialogs.addSeries.verb', N'kz', N'12 баған қосу'),
+    (N'permits.editor.dialogs.addSeries.table', N'ru', N'Таблица: {table}'),
+    (N'permits.editor.dialogs.addSeries.table', N'kz', N'Кесте: {table}'),
+    (N'permits.editor.dialogs.addSeries.months', N'ru', N'С января по декабрь добавляются числовые столбцы в группе «{group}».'),
+    (N'permits.editor.dialogs.addSeries.months', N'kz', N'Қаңтардан желтоқсанға дейін «{group}» тобында сандық бағандар қосылады.'),
+    (N'permits.editor.dialogs.addSeries.unit', N'ru', N'Единица: {unit}. Позже её можно изменить для всей группы.'),
+    (N'permits.editor.dialogs.addSeries.unit', N'kz', N'Өлшем бірлігі: {unit}. Оны кейін бүкіл топ үшін өзгертуге болады.'),
+    (N'permits.editor.dialogs.addSeries.noUnit', N'ru', N'Единица не задана: в справочнике единиц нет тысяч кубических метров. Выберите единицу для всей группы позже.'),
+    (N'permits.editor.dialogs.addSeries.noUnit', N'kz', N'Өлшем бірлігі берілмеген: бірліктер анықтамалығында мың текше метр жоқ. Бірлікті кейін бүкіл топқа таңдаңыз.'),
+    (N'permits.editor.dialogs.addSeries.checkHint', N'ru', N'Проверку «месяцы в сумме дают годовое значение» можно добавить на вкладке Checks.'),
+    (N'permits.editor.dialogs.addSeries.checkHint', N'kz', N'«Айлардың қосындысы жылдық мәнге тең» тексеруін Checks қойындысында қосуға болады.'),
+    (N'permits.editor.dialogs.addRule.title', N'ru', N'Добавить проверку'),
+    (N'permits.editor.dialogs.addRule.title', N'kz', N'Тексеру қосу'),
+    (N'permits.editor.dialogs.addRule.name', N'ru', N'Что проверяет'),
+    (N'permits.editor.dialogs.addRule.name', N'kz', N'Не тексереді'),
+    (N'permits.editor.dialogs.addRule.namePlaceholder', N'ru', N'Месяцы в сумме дают годовой объём'),
+    (N'permits.editor.dialogs.addRule.namePlaceholder', N'kz', N'Айлардың қосындысы жылдық көлемге тең'),
+    (N'permits.editor.dialogs.addRule.nameRequired', N'ru', N'Опишите проверку'),
+    (N'permits.editor.dialogs.addRule.nameRequired', N'kz', N'Тексеруді сипаттаңыз'),
+    (N'permits.editor.dialogs.addRule.where', N'ru', N'Применяется к'),
+    (N'permits.editor.dialogs.addRule.where', N'kz', N'Қолданылады'),
+    (N'permits.editor.dialogs.addRule.wholePermit', N'ru', N'Ко всему разрешению'),
+    (N'permits.editor.dialogs.addRule.wholePermit', N'kz', N'Бүкіл рұқсатқа'),
+    (N'permits.editor.dialogs.addRule.table', N'ru', N'Таблица: {table}'),
+    (N'permits.editor.dialogs.addRule.table', N'kz', N'Кесте: {table}'),
+    (N'permits.editor.dialogs.addRule.expression', N'ru', N'Правило'),
+    (N'permits.editor.dialogs.addRule.expression', N'kz', N'Ереже'),
+    (N'permits.editor.dialogs.addRule.expressionHint', N'ru', N'Истина означает, что данные в порядке. Используйте коды столбцов, например ROW.Annual >= 0.'),
+    (N'permits.editor.dialogs.addRule.expressionHint', N'kz', N'Ақиқат деректердің дұрыс екенін білдіреді. Баған кодтарын қолданыңыз, мысалы ROW.Annual >= 0.'),
+    (N'permits.editor.dialogs.addRule.expressionRequired', N'ru', N'Напишите выражение правила'),
+    (N'permits.editor.dialogs.addRule.expressionRequired', N'kz', N'Ереже өрнегін жазыңыз'),
+    (N'permits.editor.dialogs.addRule.severity', N'ru', N'Если не выполнено'),
+    (N'permits.editor.dialogs.addRule.severity', N'kz', N'Орындалмаса'),
+    (N'permits.editor.dialogs.addRule.warn', N'ru', N'Предупредить'),
+    (N'permits.editor.dialogs.addRule.warn', N'kz', N'Ескерту'),
+    (N'permits.editor.dialogs.addRule.block', N'ru', N'Запретить сохранение'),
+    (N'permits.editor.dialogs.addRule.block', N'kz', N'Сақтауға тыйым салу'),
+    (N'permits.editor.dialogs.addRule.apply', N'ru', N'Добавить проверку'),
+    (N'permits.editor.dialogs.addRule.apply', N'kz', N'Тексеру қосу'),
+    (N'permits.editor.dialogs.publish.title', N'ru', N'Опубликовать «{name}» v{version}?'),
+    (N'permits.editor.dialogs.publish.title', N'kz', N'«{name}» v{version} жариялау керек пе?'),
+    (N'permits.editor.dialogs.publish.reason', N'ru', N'Что изменилось'),
+    (N'permits.editor.dialogs.publish.reason', N'kz', N'Не өзгерді'),
+    (N'permits.editor.dialogs.publish.verb', N'ru', N'Опубликовать'),
+    (N'permits.editor.dialogs.publish.verb', N'kz', N'Жариялау'),
+    (N'permits.editor.dialogs.publish.usedBy', N'ru', N'Существующие разрешения ({count}) перейдут на новую версию. Добавленные столбцы в старых строках пусты; удалённые столбцы скрываются, а не удаляются.'),
+    (N'permits.editor.dialogs.publish.usedBy', N'kz', N'Бар рұқсаттар ({count}) жаңа нұсқаға көшеді. Қосылған бағандар ескі жолдарда бос болады; жойылған бағандар жасырылады, өшірілмейді.'),
+    (N'permits.editor.dialogs.publish.unused', N'ru', N'Пока ни одно разрешение не использует этот тип.'),
+    (N'permits.editor.dialogs.publish.unused', N'kz', N'Бұл түрді әзірге ешбір рұқсат пайдаланбайды.'),
+    (N'permits.editor.dialogs.publish.blockedTitle', N'ru', N'Добавьте таблицу перед публикацией'),
+    (N'permits.editor.dialogs.publish.blockedTitle', N'kz', N'Жариялау алдында кесте қосыңыз'),
+    (N'permits.editor.dialogs.publish.blockedText', N'ru', N'У типа разрешения без таблиц есть только шапка разрешения, заполнять нечего. Добавьте хотя бы одну таблицу со столбцами.'),
+    (N'permits.editor.dialogs.publish.blockedText', N'kz', N'Кестесіз рұқсат түрінде тек рұқсат жапсырмасы бар, толтыратын ештеңе жоқ. Бағандары бар кемінде бір кесте қосыңыз.'),
+    (N'permits.editor.dialogs.publish.addTable', N'ru', N'Добавить таблицу…'),
+    (N'permits.editor.dialogs.publish.addTable', N'kz', N'Кесте қосу…'),
+    (N'permits.editor.dialogs.newVersion.title', N'ru', N'Открыть новую версию «{name}»?'),
+    (N'permits.editor.dialogs.newVersion.title', N'kz', N'«{name}» жаңа нұсқасын ашу керек пе?'),
+    (N'permits.editor.dialogs.newVersion.verb', N'ru', N'Открыть новую версию'),
+    (N'permits.editor.dialogs.newVersion.verb', N'kz', N'Жаңа нұсқаны ашу'),
+    (N'permits.editor.dialogs.newVersion.draft', N'ru', N'Из опубликованной v{published} создаётся черновик v{next}.'),
+    (N'permits.editor.dialogs.newVersion.draft', N'kz', N'Жарияланған v{published} негізінде v{next} жобасы жасалады.'),
+    (N'permits.editor.dialogs.newVersion.keep', N'ru', N'Существующие разрешения продолжают работать с v{published}, пока вы не опубликуете черновик.'),
+    (N'permits.editor.dialogs.newVersion.keep', N'kz', N'Жобаны жариялағанша, бар рұқсаттар v{published} нұсқасымен жұмыс істей береді.'),
+    (N'permits.editor.dialogs.deleteType.title', N'ru', N'Удалить тип разрешения «{name}»?'),
+    (N'permits.editor.dialogs.deleteType.title', N'kz', N'«{name}» рұқсат түрін жою керек пе?'),
+    (N'permits.editor.dialogs.deleteType.verb', N'ru', N'Удалить тип'),
+    (N'permits.editor.dialogs.deleteType.verb', N'kz', N'Түрді жою'),
+    (N'permits.editor.dialogs.deleteType.removed', N'ru', N'Черновик и его таблицы ({tables}) будут удалены.'),
+    (N'permits.editor.dialogs.deleteType.removed', N'kz', N'Жоба және оның кестелері ({tables}) жойылады.'),
+    (N'permits.editor.dialogs.deleteType.unused', N'ru', N'Тип ни разу не публиковался, поэтому ни одно разрешение его не использует.'),
+    (N'permits.editor.dialogs.deleteType.unused', N'kz', N'Түр ешқашан жарияланбаған, сондықтан оны ешбір рұқсат пайдаланбайды.'),
+    (N'permits.editor.dialogs.deleteType.published', N'ru', N'Опубликованный тип разрешения удалить нельзя.'),
+    (N'permits.editor.dialogs.deleteType.published', N'kz', N'Жарияланған рұқсат түрін жоюға болмайды.'),
+    (N'permits.editor.dialogs.done.published', N'ru', N'«{name}» v{version} опубликован.'),
+    (N'permits.editor.dialogs.done.published', N'kz', N'«{name}» v{version} жарияланды.'),
+    (N'permits.editor.dialogs.done.newVersion', N'ru', N'Черновик v{version} типа «{name}» открыт.'),
+    (N'permits.editor.dialogs.done.newVersion', N'kz', N'«{name}» түрінің v{version} жобасы ашылды.'),
+    (N'permits.editor.dialogs.done.deleted', N'ru', N'Тип разрешения «{name}» удалён.'),
+    (N'permits.editor.dialogs.done.deleted', N'kz', N'«{name}» рұқсат түрі жойылды.'),
+    (N'permits.editor.dialogs.addTable.title', N'ru', N'Добавить таблицу в {name}'),
+    (N'permits.editor.dialogs.addTable.title', N'kz', N'{name} түріне кесте қосу'),
+    (N'permits.editor.dialogs.addTable.stepTable', N'ru', N'Таблица'),
+    (N'permits.editor.dialogs.addTable.stepTable', N'kz', N'Кесте'),
+    (N'permits.editor.dialogs.addTable.stepTableHint', N'ru', N'Таблица — это один список строк внутри разрешения: лимиты, объёмы, места хранения.'),
+    (N'permits.editor.dialogs.addTable.stepTableHint', N'kz', N'Кесте — рұқсат ішіндегі жолдар тізімі: лимиттер, көлемдер, сақтау орындары.'),
+    (N'permits.editor.dialogs.addTable.nameEn', N'ru', N'Название (английское)'),
+    (N'permits.editor.dialogs.addTable.nameEn', N'kz', N'Атауы (ағылшынша)'),
+    (N'permits.editor.dialogs.addTable.namePlaceholder', N'ru', N'Monitoring points'),
+    (N'permits.editor.dialogs.addTable.namePlaceholder', N'kz', N'Monitoring points'),
+    (N'permits.editor.dialogs.addTable.nameRu', N'ru', N'Название (русское)'),
+    (N'permits.editor.dialogs.addTable.nameRu', N'kz', N'Атауы (орысша)'),
+    (N'permits.editor.dialogs.addTable.from', N'ru', N'Начать с'),
+    (N'permits.editor.dialogs.addTable.from', N'kz', N'Бастау тәсілі'),
+    (N'permits.editor.dialogs.addTable.fromBlank', N'ru', N'Один пустой столбец, остальные добавлю сам'),
+    (N'permits.editor.dialogs.addTable.fromBlank', N'kz', N'Бір бос баған, қалғанын өзім қосамын'),
+    (N'permits.editor.dialogs.addTable.fromCsv', N'ru', N'Строка заголовков CSV-файла (в Excel: «Сохранить как CSV»)'),
+    (N'permits.editor.dialogs.addTable.fromCsv', N'kz', N'CSV файлының тақырып жолы (Excel-де: «CSV ретінде сақтау»)'),
+    (N'permits.editor.dialogs.addTable.fromCopy', N'ru', N'Копия другой таблицы этого типа'),
+    (N'permits.editor.dialogs.addTable.fromCopy', N'kz', N'Осы түрдің басқа кестесінің көшірмесі'),
+    (N'permits.editor.dialogs.addTable.copyTable', N'ru', N'Копируемая таблица'),
+    (N'permits.editor.dialogs.addTable.copyTable', N'kz', N'Көшірілетін кесте'),
+    (N'permits.editor.dialogs.addTable.file', N'ru', N'Файл CSV'),
+    (N'permits.editor.dialogs.addTable.file', N'kz', N'CSV файлы'),
+    (N'permits.editor.dialogs.addTable.fileHint', N'ru', N'Первая строка читается как названия столбцов. Типы угадываются по следующим строкам.'),
+    (N'permits.editor.dialogs.addTable.fileHint', N'kz', N'Бірінші жол баған атаулары ретінде оқылады. Түрлері келесі жолдар бойынша болжанады.'),
+    (N'permits.editor.dialogs.addTable.fileRead', N'ru', N'Прочитано ячеек заголовка: {count} (файл {file}).'),
+    (N'permits.editor.dialogs.addTable.fileRead', N'kz', N'Тақырып ұяшықтары оқылды: {count} ({file} файлы).'),
+    (N'permits.editor.dialogs.addTable.csvEmpty', N'ru', N'В файле {file} не найдена строка заголовков.'),
+    (N'permits.editor.dialogs.addTable.csvEmpty', N'kz', N'{file} файлынан тақырып жолы табылмады.'),
+    (N'permits.editor.dialogs.addTable.csvTitle', N'ru', N'Столбцы прочитаны из {file}'),
+    (N'permits.editor.dialogs.addTable.csvTitle', N'kz', N'Бағандар {file} файлынан оқылды'),
+    (N'permits.editor.dialogs.addTable.csvText', N'ru', N'Найдено ячеек заголовка: {count}. Типы угаданы по первым строкам — проверьте их.'),
+    (N'permits.editor.dialogs.addTable.csvText', N'kz', N'Тақырып ұяшықтары табылды: {count}. Түрлері алғашқы жолдар бойынша болжанды — тексеріп алыңыз.'),
+    (N'permits.editor.dialogs.addTable.stepColumns', N'ru', N'Столбцы'),
+    (N'permits.editor.dialogs.addTable.stepColumns', N'kz', N'Бағандар'),
+    (N'permits.editor.dialogs.addTable.stepColumnsHint', N'ru', N'Сколько нужно разрешению. Столбцы, которые делают строку уникальной, отметьте как «Ключ».'),
+    (N'permits.editor.dialogs.addTable.stepColumnsHint', N'kz', N'Рұқсатқа қанша керек болса, сонша. Жолды бірегей ететін бағандарды «Кілт» деп белгілеңіз.'),
+    (N'permits.editor.dialogs.addTable.columnN', N'ru', N'Столбец {n}'),
+    (N'permits.editor.dialogs.addTable.columnN', N'kz', N'{n}-баған'),
+    (N'permits.editor.dialogs.addTable.defaultColumn', N'ru', N'Название'),
+    (N'permits.editor.dialogs.addTable.defaultColumn', N'kz', N'Атауы'),
+    (N'permits.editor.dialogs.addTable.addColumn', N'ru', N'Добавить столбец'),
+    (N'permits.editor.dialogs.addTable.addColumn', N'kz', N'Баған қосу'),
+    (N'permits.editor.dialogs.addTable.addMonths', N'ru', N'Добавить месяцы с января по декабрь'),
+    (N'permits.editor.dialogs.addTable.addMonths', N'kz', N'Қаңтардан желтоқсанға дейінгі айларды қосу'),
+    (N'permits.editor.dialogs.addTable.nameRequired', N'ru', N'У таблицы должно быть название.'),
+    (N'permits.editor.dialogs.addTable.nameRequired', N'kz', N'Кестенің атауы болуы керек.'),
+    (N'permits.editor.dialogs.addTable.nameTaken', N'ru', N'В этом типе уже есть таблица с таким названием. Выберите другое.'),
+    (N'permits.editor.dialogs.addTable.nameTaken', N'kz', N'Бұл түрде осындай атаулы кесте бар. Басқа атау таңдаңыз.'),
+    (N'permits.editor.dialogs.addTable.fileRequired', N'ru', N'Выберите файл CSV со строкой заголовков.'),
+    (N'permits.editor.dialogs.addTable.fileRequired', N'kz', N'Тақырып жолы бар CSV файлын таңдаңыз.'),
+    (N'permits.editor.dialogs.addTable.columnUnnamed', N'ru', N'У каждого столбца должно быть название.'),
+    (N'permits.editor.dialogs.addTable.columnUnnamed', N'kz', N'Әр бағанның атауы болуы керек.'),
+    (N'permits.editor.dialogs.addTable.noKey', N'ru', N'Отметьте хотя бы один столбец как «Ключ», чтобы строки одного разрешения не повторялись.'),
+    (N'permits.editor.dialogs.addTable.noKey', N'kz', N'Бір рұқсаттың жолдары қайталанбауы үшін кемінде бір бағанды «Кілт» деп белгілеңіз.'),
+    (N'permits.editor.dialogs.addTable.reviewText', N'ru', N'Таблица добавляется в черновик этого типа. Существующие разрешения получат её пустой после публикации.'),
+    (N'permits.editor.dialogs.addTable.reviewText', N'kz', N'Кесте осы түрдің жобасына қосылады. Бар рұқсаттарда ол жариялағаннан кейін бос болады.'),
+    (N'permits.editor.dialogs.addTable.apply', N'ru', N'Добавить таблицу'),
+    (N'permits.editor.dialogs.addTable.apply', N'kz', N'Кесте қосу'),
+    (N'permits.editor.dialogs.addTable.sumTable', N'ru', N'Таблица'),
+    (N'permits.editor.dialogs.addTable.sumTable', N'kz', N'Кесте'),
+    (N'permits.editor.dialogs.addTable.sumColumns', N'ru', N'Столбцы'),
+    (N'permits.editor.dialogs.addTable.sumColumns', N'kz', N'Бағандар'),
+    (N'permits.editor.dialogs.addTable.sumUnique', N'ru', N'Уникальная строка'),
+    (N'permits.editor.dialogs.addTable.sumUnique', N'kz', N'Бірегей жол'),
+    (N'permits.editor.dialogs.addTable.uniqueRow', N'ru', N'Разрешение + {keys}'),
+    (N'permits.editor.dialogs.addTable.uniqueRow', N'kz', N'Рұқсат + {keys}'),
+    (N'permits.editor.dialogs.addTable.sumStored', N'ru', N'Хранится как'),
+    (N'permits.editor.dialogs.addTable.sumStored', N'kz', N'Сақталатын атауы'),
+    (N'permits.editor.dialogs.addTable.discardTitle', N'ru', N'Отбросить эту таблицу?'),
+    (N'permits.editor.dialogs.addTable.discardTitle', N'kz', N'Бұл кестені тастау керек пе?'),
+    (N'permits.editor.dialogs.addTable.discardText', N'ru', N'Введённые название и столбцы будут потеряны.'),
+    (N'permits.editor.dialogs.addTable.discardText', N'kz', N'Енгізілген атау мен бағандар жоғалады.'),
+    (N'permits.editor.dialogs.addTable.discardVerb', N'ru', N'Отбросить'),
+    (N'permits.editor.dialogs.addTable.discardVerb', N'kz', N'Тастау'),
+    (N'permits.editor.checks.intro', N'ru', N'Проверки выполняются при каждом сохранении строки и активации разрешения. «Запрещает сохранение» останавливает изменение; «Предупреждает» пропускает его и помечает строку.'),
+    (N'permits.editor.checks.intro', N'kz', N'Тексерулер жол сақталған сайын және рұқсат іске қосылған сайын орындалады. «Сақтауға тыйым салады» өзгерісті тоқтатады; «Ескертеді» оны өткізіп, жолды белгілейді.'),
+    (N'permits.editor.checks.caption', N'ru', N'Проверки этого типа разрешения'),
+    (N'permits.editor.checks.caption', N'kz', N'Осы рұқсат түрінің тексерулері'),
+    (N'permits.editor.checks.colCheck', N'ru', N'Проверка'),
+    (N'permits.editor.checks.colCheck', N'kz', N'Тексеру'),
+    (N'permits.editor.checks.colAppliesTo', N'ru', N'Применяется к'),
+    (N'permits.editor.checks.colAppliesTo', N'kz', N'Қолданылады'),
+    (N'permits.editor.checks.colRule', N'ru', N'Правило'),
+    (N'permits.editor.checks.colRule', N'kz', N'Ереже'),
+    (N'permits.editor.checks.colIfFails', N'ru', N'Если не выполнено'),
+    (N'permits.editor.checks.colIfFails', N'kz', N'Орындалмаса'),
+    (N'permits.editor.checks.wholePermit', N'ru', N'Всё разрешение'),
+    (N'permits.editor.checks.wholePermit', N'kz', N'Бүкіл рұқсат'),
+    (N'permits.editor.checks.blocks', N'ru', N'Запрещает сохранение'),
+    (N'permits.editor.checks.blocks', N'kz', N'Сақтауға тыйым салады'),
+    (N'permits.editor.checks.warns', N'ru', N'Предупреждает'),
+    (N'permits.editor.checks.warns', N'kz', N'Ескертеді'),
+    (N'permits.editor.checks.empty', N'ru', N'Проверок пока нет.'),
+    (N'permits.editor.checks.empty', N'kz', N'Тексерулер әзірге жоқ.'),
+    (N'permits.editor.checks.add', N'ru', N'Добавить проверку'),
+    (N'permits.editor.checks.add', N'kz', N'Тексеру қосу'),
+    (N'permits.editor.versions.caption', N'ru', N'Версии этого типа разрешения'),
+    (N'permits.editor.versions.caption', N'kz', N'Осы рұқсат түрінің нұсқалары'),
+    (N'permits.editor.versions.colVersion', N'ru', N'Версия'),
+    (N'permits.editor.versions.colVersion', N'kz', N'Нұсқа'),
+    (N'permits.editor.versions.colState', N'ru', N'Состояние'),
+    (N'permits.editor.versions.colState', N'kz', N'Күйі'),
+    (N'permits.editor.versions.colDate', N'ru', N'Дата'),
+    (N'permits.editor.versions.colDate', N'kz', N'Күні'),
+    (N'permits.editor.versions.note', N'ru', N'Опубликованные версии не редактируются. Разрешение работает с той версией, в которой создано, пока вы его не переведёте.'),
+    (N'permits.editor.versions.note', N'kz', N'Жарияланған нұсқалар өңделмейді. Рұқсат оны көшірмегенше, жасалған нұсқасымен жұмыс істей береді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: editor-dialogs ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
