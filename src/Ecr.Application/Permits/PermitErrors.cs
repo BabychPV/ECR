@@ -100,6 +100,60 @@ internal static class PermitErrors
                 ["typeCode"] = typeCode,
             });
 
+    /// <summary><c>409 ECR-PRM-4096 changed</c>: токен дозволу чужий.</summary>
+    /// <param name="permitId">Дозвіл.</param>
+    /// <param name="rowVersion">Актуальний токен.</param>
+    internal static ConcurrencyConflictException Changed(long permitId, string rowVersion)
+        => new(
+            ErrorCodes.PermitStateConflict,
+            $"Дозвіл {permitId} змінили після того, як його прочитали.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-4096.changed",
+                ["id"] = permitId.ToString(CultureInfo.InvariantCulture),
+                ["rowVersion"] = rowVersion,
+            });
+
+    /// <summary><c>409 ECR-PRM-4096 notEditable</c>: закінчений дозвіл не змінюється.</summary>
+    /// <param name="permitId">Дозвіл.</param>
+    internal static ConcurrencyConflictException NotEditable(long permitId)
+        => new(
+            ErrorCodes.PermitStateConflict,
+            $"Дозвіл {permitId} закінчився і не змінюється.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-4096.notEditable",
+                ["id"] = permitId.ToString(CultureInfo.InvariantCulture),
+            });
+
+    /// <summary><c>409 ECR-PRM-4096 notDraft</c>: дія лише для чернетки.</summary>
+    /// <param name="permitId">Дозвіл.</param>
+    /// <param name="status">Стан дозволу.</param>
+    internal static ConcurrencyConflictException NotDraft(long permitId, string status)
+        => new(
+            ErrorCodes.PermitStateConflict,
+            $"Дозвіл {permitId} у стані {status}: дія можлива лише для чернетки.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-4096.notDraft",
+                ["id"] = permitId.ToString(CultureInfo.InvariantCulture),
+                ["status"] = status,
+            });
+
+    /// <summary><c>409 ECR-PRM-4096 inUse</c>: на дозвіл чи його рядки посилаються ззовні.</summary>
+    /// <param name="permitId">Дозвіл.</param>
+    /// <param name="count">Скільки посилань.</param>
+    internal static ConcurrencyConflictException InUse(long permitId, int count)
+        => new(
+            ErrorCodes.PermitStateConflict,
+            $"На дозвіл {permitId} або його рядки посилаються ({count}): він не видаляється.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-4096.inUse",
+                ["id"] = permitId.ToString(CultureInfo.InvariantCulture),
+                ["count"] = count.ToString(CultureInfo.InvariantCulture),
+            });
+
     /// <summary><c>409 ECR-PRM-4095 number</c>: за типом уже є дозвіл із цим номером і початком.</summary>
     /// <param name="typeCode">Код типу.</param>
     /// <param name="number">Номер.</param>

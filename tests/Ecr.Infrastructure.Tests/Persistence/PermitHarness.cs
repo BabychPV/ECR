@@ -72,6 +72,8 @@ internal sealed class PermitHarness : IAsyncDisposable
         CreatePermit = new CreatePermitHandler(Permits, Registries, RowsQuery, Stats, Writer, Uow, access, user, clock);
         GetPermit = new GetPermitHandler(Permits, Registries, RowsQuery, Stats, access, user, clock);
         ListPermits = new ListPermitsHandler(Permits, Registries, RowsQuery, Stats, access, user, clock);
+        UpdatePermit = new UpdatePermitHandler(Permits, Registries, RowsQuery, Stats, Writer, Uow, access, user, clock);
+        DeletePermit = new DeletePermitHandler(Permits, Registries, RowsQuery, Stats, KeyService, Uow, audit, access, user, clock);
 
         Access = access;
         User = user;
@@ -131,6 +133,10 @@ internal sealed class PermitHarness : IAsyncDisposable
     public GetPermitHandler GetPermit { get; }
 
     public ListPermitsHandler ListPermits { get; }
+
+    public UpdatePermitHandler UpdatePermit { get; }
+
+    public DeletePermitHandler DeletePermit { get; }
 
     /// <summary>Права, потрібні для ведення дозволів: читати й писати дані реєстрів.</summary>
     public static string[] Editor => ["Registry.View", "Registry.EditData"];

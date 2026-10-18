@@ -909,4 +909,12 @@ public static class ErrorCodes
     /// ⚠ Кидається як <c>ConcurrencyConflictException</c>: <c>ExceptionHandlingMiddleware</c> дає такому 409 за типом.
     /// </remarks>
     public const string PermitDuplicate = "ECR-PRM-4095";
+
+    /// <summary>
+    /// Дія не відповідає стану дозволу або дозвіл змінили після читання (<c>ECR-PRM-4096</c>): токен не збігся
+    /// (<c>changed</c>), не чернетка (<c>notDraft</c>), не чинний (<c>notActive</c>), закінчився (<c>notEditable</c>),
+    /// не поновлюється (<c>notRenewable</c>), на дозвіл чи його рядки посилаються (<c>inUse</c>).
+    /// </summary>
+    /// <remarks>⚠ <c>ConcurrencyConflictException</c> - 409 за типом, власного арма в middleware не потрібно.</remarks>
+    public const string PermitStateConflict = "ECR-PRM-4096";
 }

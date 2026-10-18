@@ -8219,6 +8219,13 @@ USING (VALUES
     ,(N'err.ECR-PRM-0422.statusUnknown', N'en', N'The status "{status}" does not exist. Use Draft, Active or Expired.', 1)
     ,(N'err.ECR-PRM-0422.cursorInvalid', N'en', N'The page cursor of the permit list is not valid. Start from the first page.', 1)
     -- PERMITS: permits ── читання ── кінець секції ──
+    -- PERMITS: permits ── en: ECR-PRM-4096 і зміна/видалення дозволу (PM-04) ──
+    ,(N'err.ECR-PRM-4096', N'en', N'Permit state does not allow this', 1)
+    ,(N'err.ECR-PRM-4096.changed', N'en', N'The permit {id} was changed after you opened it. Reload it and repeat your edit.', 1)
+    ,(N'err.ECR-PRM-4096.notEditable', N'en', N'The permit {id} has expired and can no longer be edited.', 1)
+    ,(N'err.ECR-PRM-4096.notDraft', N'en', N'The permit {id} is {status}: only a draft can be deleted.', 1)
+    ,(N'err.ECR-PRM-4096.inUse', N'en', N'The permit {id} or its rows are referenced from elsewhere ({count}) and cannot be deleted.', 1)
+    -- PERMITS: permits ── ECR-PRM-4096 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -20792,6 +20799,25 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: permits ── читання ── ru/kz ── кінець секції ──
+
+-- PERMITS: permits ── ECR-PRM-4096 ── ru/kz: стан дозволу не дозволяє дію; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-4096', N'ru', N'Состояние разрешения не допускает это действие'),
+    (N'err.ECR-PRM-4096', N'kz', N'Рұқсаттың күйі бұл әрекетке жол бермейді'),
+    (N'err.ECR-PRM-4096.changed', N'ru', N'Разрешение {id} изменили после того, как вы его открыли. Перечитайте его и повторите правку.'),
+    (N'err.ECR-PRM-4096.changed', N'kz', N'{id} рұқсатын сіз ашқаннан кейін өзгертті. Оны қайта оқып, өзгерісті қайталаңыз.'),
+    (N'err.ECR-PRM-4096.notEditable', N'ru', N'Разрешение {id} закончилось и больше не редактируется.'),
+    (N'err.ECR-PRM-4096.notEditable', N'kz', N'{id} рұқсатының мерзімі аяқталды, енді өңделмейді.'),
+    (N'err.ECR-PRM-4096.notDraft', N'ru', N'Разрешение {id} в состоянии {status}: удалить можно только черновик.'),
+    (N'err.ECR-PRM-4096.notDraft', N'kz', N'{id} рұқсаты {status} күйінде: тек жобаны жоюға болады.'),
+    (N'err.ECR-PRM-4096.inUse', N'ru', N'На разрешение {id} или его строки ссылаются ({count}): оно не удаляется.'),
+    (N'err.ECR-PRM-4096.inUse', N'kz', N'{id} рұқсатына немесе оның жолдарына сілтемелер бар ({count}): ол жойылмайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: permits ── ECR-PRM-4096 ── ru/kz ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

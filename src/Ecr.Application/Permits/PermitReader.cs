@@ -238,6 +238,28 @@ internal sealed class PermitReader(
         })];
     }
 
+    /// <summary>Токен запису шапки зараз; <c>null</c> - запису немає.</summary>
+    /// <param name="permitId">Дозвіл.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<string?> CurrentVersionAsync(long permitId, CancellationToken ct)
+    {
+        var slice = await rows.ReadRowsAsync([permitId], asOfUtc: null, ct).ConfigureAwait(false);
+        return slice.Versions.TryGetValue(permitId, out var version) ? RegistryRowVersion.Encode(version) : null;
+    }
+
+    /// <summary>Токен із запиту збігається з актуальним, інакше <c>409 ECR-PRM-4096 changed</c>.</summary>
+    /// <param name="permitId">Дозвіл.</param>
+    /// <param name="rowVersion">Токен з запиту.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task RequireVersionAsync(long permitId, string? rowVersion, CancellationToken ct)
+    {
+        var current = await CurrentVersionAsync(permitId, ct).ConfigureAwait(false) ?? throw PermitErrors.NotFound(permitId);
+        if (!string.Equals(current, rowVersion, StringComparison.Ordinal))
+        {
+            throw PermitErrors.Changed(permitId, current);
+        }
+    }
+
     private async Task<IReadOnlyDictionary<int, string>> UserNamesAsync(IReadOnlyCollection<PermitHeader> headers, CancellationToken ct)
         => await registries
             .GetUserDisplayNamesAsync([.. headers.Where(h => h.Entry.ChangedByUserId is not null).Select(h => h.Entry.ChangedByUserId!.Value).Distinct()], ct)

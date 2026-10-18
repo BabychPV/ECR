@@ -2,6 +2,7 @@
 using Ecr.Application.Permits.Dto;
 using Ecr.Domain.Entities.Configuration;
 using Microsoft.EntityFrameworkCore;
+using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Persistence;
 
@@ -44,6 +45,46 @@ internal static class PermitFixtures
         var type = (await h.Permits.FindByCodeAsync(typeCode, default))!;
         var table = (await h.Permits.ListTablesAsync(type.Id, default)).Single(t => t.Code == tableCode);
         return (await h.Registries.FindDefinitionByIdAsync(table.RegistryDefId, default))!;
+    }
+
+    /// <summary>Додає рядок у таблицю дозволу (наявним писачем реєстрів, як це робить клієнт через entries/batch).</summary>
+    /// <param name="h">Обробники.</param>
+    /// <param name="typeCode">Код типу.</param>
+    /// <param name="tableCode">Код таблиці.</param>
+    /// <param name="permitId">Дозвіл-батько.</param>
+    /// <param name="name">Значення ключового стовпця <c>Name</c>.</param>
+    /// <param name="annual">Значення <c>Annual</c> (лише таблиця <c>Limits</c>).</param>
+    public static async Task<long> AddRowAsync(PermitHarness h, string typeCode, string tableCode, long permitId, string name, decimal? annual = null)
+    {
+        var table = await TableDefAsync(h, typeCode, tableCode);
+        var values = new Dictionary<string, object?> { ["PERMIT"] = permitId, ["Name"] = name };
+        if (annual is { } value)
+        {
+            values["Annual"] = value;
+        }
+
+        var result = await h.Writer.WriteAsync(
+            new Ecr.Application.Registries.RegistryEntryWriteBatch(
+                table.Id, [new Ecr.Application.Registries.RegistryEntryWrite($"R{Guid.NewGuid():N}"[..12], values)]),
+            default);
+        Assert.True(result.Applied, string.Join(";", result.Errors.Select(e => e.MessageKey)));
+        return result.Rows.Single().Entry.Id;
+    }
+
+    /// <summary>Вмикає запис шапки напряму писачем реєстру (стан <c>Active</c> без обробника активації).</summary>
+    /// <param name="h">Обробники.</param>
+    /// <param name="typeCode">Код типу.</param>
+    /// <param name="permitId">Дозвіл.</param>
+    /// <param name="window">Нове вікно чинності; <c>null</c> - не міняти.</param>
+    public static async Task ActivateDirectAsync(PermitHarness h, string typeCode, long permitId, Ecr.Domain.ValueObjects.ValidityWindow? window = null)
+    {
+        var type = (await h.Permits.FindByCodeAsync(typeCode, default))!;
+        var result = await h.Writer.UpdateAsync(
+            new Ecr.Application.Registries.RegistryEntryUpdateBatch(
+                type.HeaderRegistryDefId,
+                [new Ecr.Application.Registries.RegistryEntryUpdate(permitId, new Dictionary<string, object?>()) { IsActive = true, Validity = window }]),
+            default);
+        Assert.True(result.Applied, string.Join(";", result.Errors.Select(e => e.MessageKey)));
     }
 
     /// <summary>Назва лише англійською.</summary>
