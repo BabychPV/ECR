@@ -31,7 +31,18 @@ vi.mock('@/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/client')>()),
   apiFetch: vi.fn(),
 }));
-vi.mock('../../api/typesApi', () => ({ getPermitType: vi.fn(), replacePermitType: vi.fn() }));
+vi.mock('../../api/typesApi', () => ({
+  getPermitType: vi.fn(),
+  replacePermitType: vi.fn(),
+  publishPermitType: vi.fn(),
+  openPermitTypeVersion: vi.fn(),
+  deletePermitType: vi.fn(),
+}));
+const session = vi.hoisted(() => ({ permissions: ['Registry.EditDefinition'] as string[] }));
+vi.mock('@/shared/session/useSession', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/session/useSession')>()),
+  useSession: () => ({ data: { permissions: session.permissions, isSimulation: false } }),
+}));
 
 const get = vi.mocked(typesApi.getPermitType);
 const put = vi.mocked(typesApi.replacePermitType);
@@ -114,15 +125,15 @@ describe('шапка', () => {
 });
 
 describe('вкладки та адреса', () => {
-  it('Checks → ?tab=rules зі слотом PM-08c; Structure прибирає параметр', async () => {
+  it('Checks → ?tab=rules, Versions → ?tab=versions (справжні вкладки PM-08c); Structure прибирає параметр', async () => {
     await open();
     const user = userEvent.setup();
     await user.click(screen.getByRole('tab', { name: /Checks/ }));
     expect(params().get('tab')).toBe('rules');
-    expect(await screen.findByText('Checks cannot be shown yet')).toBeTruthy();
+    expect(await screen.findByText('No checks yet.')).toBeTruthy();
     await user.click(screen.getByRole('tab', { name: 'Versions' }));
     expect(params().get('tab')).toBe('versions');
-    expect(await screen.findByText('Versions cannot be shown yet')).toBeTruthy();
+    expect(await screen.findByRole('table', { name: 'Versions of this permit type' })).toBeTruthy();
     await user.click(screen.getByRole('tab', { name: 'Structure' }));
     expect(params().has('tab')).toBe(false);
   });

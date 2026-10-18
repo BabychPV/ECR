@@ -1,43 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import {
-  allRuleCodes,
-  buildRule,
-  countRules,
-  flattenRules,
-  validateRuleInput,
-  withRule,
-} from '../../checks/ruleOps';
-import { withColumns, withTable } from '../applyOps';
-import { column, permitType, table } from './fixtures';
+import { allRuleCodes, buildRule, countRules, flattenRules, validateRuleInput } from '../ruleOps';
+import { permitType, table } from '../../dialogs/__tests__/fixtures';
 
-/** Застосування результатів діалогів до визначення типу й перевірки (PM-08c). */
-
-describe('withTable / withColumns', () => {
-  it('таблиця додається в кінець з наступним порядком; вихідний тип не змінюється', () => {
-    const type = permitType();
-    const next = withTable(type, table({ code: 'Storage', order: 99 }));
-    expect(next.tables.map((t) => [t.code, t.order])).toEqual([
-      ['Limits', 1],
-      ['Storage', 2],
-    ]);
-    expect(type.tables).toHaveLength(1);
-  });
-
-  it('стовпці додаються в кінець таблиці й перенумеровуються', () => {
-    const type = permitType();
-    const next = withColumns(type, 'Limits', [column({ code: 'Extra', order: 40 })]);
-    expect(next.tables[0]?.columns.map((c) => [c.code, c.order])).toEqual([
-      ['Name', 1],
-      ['Annual', 2],
-      ['Extra', 3],
-    ]);
-    expect(type.tables[0]?.columns).toHaveLength(2);
-  });
-
-  it('невідома таблиця — виняток, а не мовчазне ніщо', () => {
-    expect(() => withColumns(permitType(), 'Nope', [column()])).toThrow(/Nope/);
-  });
-});
+/** Перевірки типу: плоский перелік, код із назви, форма (PM-08c). Додавання в тип — `draftModel.addRule`. */
 
 describe('перевірки', () => {
   const rule = (code: string, severity = 'Warn') => ({
@@ -78,20 +43,5 @@ describe('перевірки', () => {
   it('validateRuleInput: назва й вираз обов’язкові', () => {
     expect(validateRuleInput({ name: ' ', expression: '' })).toEqual({ name: true, expression: true });
     expect(validateRuleInput({ name: 'A', expression: 'x' })).toEqual({ name: false, expression: false });
-  });
-
-  it('withRule: null — шапці типу, код таблиці — таблиці', () => {
-    const type = permitType();
-    const toType = withRule(type, rule('A'), null);
-    expect(toType.rules.map((r) => r.code)).toEqual(['A']);
-    expect(toType.tables[0]?.rules).toEqual([]);
-
-    const toTable = withRule(type, rule('B'), 'Limits');
-    expect(toTable.rules).toEqual([]);
-    expect(toTable.tables[0]?.rules.map((r) => r.code)).toEqual(['B']);
-  });
-
-  it('withRule: невідома таблиця — виняток', () => {
-    expect(() => withRule(permitType(), rule('A'), 'Nope')).toThrow(/Nope/);
   });
 });

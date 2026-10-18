@@ -24,6 +24,10 @@ vi.mock('@/api/client', async (importOriginal) => ({
   apiFetch: vi.fn(),
 }));
 vi.mock('../../api/typesApi', () => ({ getPermitType: vi.fn(), replacePermitType: vi.fn() }));
+vi.mock('@/shared/session/useSession', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/session/useSession')>()),
+  useSession: () => ({ data: { permissions: ['Registry.EditDefinition'], isSimulation: false } }),
+}));
 
 afterEach(cleanup);
 
@@ -74,10 +78,12 @@ describe('PermitTypeEditor — доступність', { timeout: 180_000 }, ()
       await scan(colorScheme, '/admin/permits/types/WaterDischarge?panel=Use_type', lookupType());
     });
 
-    it(`${colorScheme}: Permit details і вкладка-слот`, async () => {
+    it(`${colorScheme}: Permit details, вкладки Checks і Versions`, async () => {
       await scan(colorScheme, '/admin/permits/types/WaterDischarge?t=__head');
       cleanup();
       await scan(colorScheme, '/admin/permits/types/WaterDischarge?tab=rules');
+      cleanup();
+      await scan(colorScheme, '/admin/permits/types/WaterDischarge?tab=versions');
     });
 
     it(`${colorScheme}: опублікований тип зі смугою «New version…»`, async () => {

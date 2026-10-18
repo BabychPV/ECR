@@ -15,6 +15,17 @@ const root = path.resolve(process.cwd(), 'src', 'features', 'permits', 'typeEdit
 const seedPath = path.resolve(process.cwd(), '..', 'Ecr.Infrastructure', 'Persistence', 'Sql', '09-seed.sql');
 const seed = readFileSync(seedPath, 'utf8');
 
+/*
+ * Каталоги PM-08c: діалоги, вкладки Checks і Versions. Сторінка редактора (PM-08b) має власну секцію
+ * `PERMITS: editor`, а ключі зведення (видалення таблиці, відмова збереження) — секцію `ui-wiring`;
+ * тест бачить обидві з тих, що належать цим каталогам.
+ */
+const ownDirs = ['dialogs', 'checks', 'versions'].map((name) => path.join(root, name));
+const sectionMarkers = [
+  { en: '-- PERMITS: editor-dialogs ── PM-08c', rukz: '-- PERMITS: editor-dialogs ── ru/kz', end: '-- PERMITS: editor-dialogs ── кінець секції ──' },
+  { en: '-- PERMITS: ui-wiring ── зведення', rukz: '-- PERMITS: ui-wiring ── ru/kz', end: '-- PERMITS: ui-wiring ── кінець секції ──' },
+];
+
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const full = path.join(dir, name);
@@ -27,7 +38,7 @@ function sources(dir: string): string[] {
 /** Ключі, яких просить код (усі — літералами: динамічні ключі забороняє `EndpointCoverageTests`). */
 function usedKeys(): Set<string> {
   const keys = new Set<string>();
-  for (const file of sources(root)) {
+  for (const file of ownDirs.flatMap(sources)) {
     const text = readFileSync(file, 'utf8');
     for (const match of text.matchAll(/permits\.editor\.[A-Za-z.]+[A-Za-z]/g)) keys.add(match[0]);
   }
@@ -37,17 +48,17 @@ function usedKeys(): Set<string> {
 
 /** Рядки секції за мовами: ключ → текст. */
 function section(lang: 'en' | 'ru' | 'kz'): Map<string, string> {
-  const begin = lang === 'en'
-    ? seed.indexOf('-- PERMITS: editor-dialogs ── PM-08c')
-    : seed.indexOf('-- PERMITS: editor-dialogs ── ru/kz');
-  const end = seed.indexOf('-- PERMITS: editor-dialogs ── кінець секції ──', begin);
-  expect(begin, `секція ${lang} є`).toBeGreaterThan(0);
-  expect(end, `кінець секції ${lang} є`).toBeGreaterThan(begin);
-
   const rows = new Map<string, string>();
   const pattern = new RegExp(`\\(N'([^']+)', N'${lang}', N'((?:[^']|'')*)'`, 'g');
-  for (const match of seed.slice(begin, end).matchAll(pattern)) {
-    rows.set(match[1] as string, (match[2] as string).replace(/''/g, "'"));
+  for (const marker of sectionMarkers) {
+    const begin = seed.indexOf(lang === 'en' ? marker.en : marker.rukz);
+    const end = seed.indexOf(marker.end, begin);
+    expect(begin, `секція ${lang} (${marker.end}) є`).toBeGreaterThan(0);
+    expect(end, `кінець секції ${lang} (${marker.end}) є`).toBeGreaterThan(begin);
+
+    for (const match of seed.slice(begin, end).matchAll(pattern)) {
+      rows.set(match[1] as string, (match[2] as string).replace(/''/g, "'"));
+    }
   }
 
   return rows;

@@ -3,6 +3,7 @@ import {
   DraftModelError,
   ListScopes,
   addColumn,
+  addRule,
   addTable,
   appendColumns,
   countChanges,
@@ -232,6 +233,21 @@ describe('порівняння з збереженим', () => {
   it('видалення стовпця не рахується ще й як зміна порядку', () => {
     const saved = draftFixture();
     expect(countChanges(saved, removeColumn(saved, 'Discharge', 'Water_body'))).toBe(1);
+  });
+
+  it('addRule: null — шапці типу, код таблиці — таблиці; невідома таблиця — виняток', () => {
+    const saved = draftFixture();
+    const rule = { code: 'A', nameL10n: { en: 'A' }, expression: 'TRUE', severity: 'Warn' };
+
+    const toType = addRule(saved, rule, null);
+    expect(toType.rules.map((r) => r.code)).toEqual([...saved.rules.map((r) => r.code), 'A']);
+    expect(toType.tables).toBe(saved.tables);
+
+    const toTable = addRule(saved, rule, 'Discharge');
+    expect(toTable.rules).toBe(saved.rules);
+    expect(findTable(toTable, 'Discharge')?.rules.map((r) => r.code)).toContain('A');
+
+    expect(() => addRule(saved, rule, 'Nope')).toThrow(DraftModelError);
   });
 
   it('table() — стабільний помічник', () => {

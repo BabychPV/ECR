@@ -6,11 +6,12 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import type { PermitType } from '@/features/permits/api/types';
+import { draftOf, type TypeDraft } from '../../draftModel';
 import { testTheme } from '@/test/render';
 import { TypeEditorDialogs, type TypeEditorDialogsProps } from '../TypeEditorDialogs';
 import { permitType } from './fixtures';
 
-/** Хост діалогів (PM-08c): `?dialog=<id>` → діалог, результат → `onChangeType`, адреса очищується. */
+/** Хост діалогів (PM-08c): `?dialog=<id>` → діалог, результат → `onChange`, адреса очищується. */
 
 const k = (key: string): string => `⟦permits.editor.dialogs.${key}⟧`;
 
@@ -55,7 +56,7 @@ function Probe(): JSX.Element {
 }
 
 function mount(entry: string, props: Partial<TypeEditorDialogsProps> = {}) {
-  const onChangeType = vi.fn<(next: PermitType) => void>();
+  const onChange = vi.fn<(change: (draft: TypeDraft) => TypeDraft) => void>();
   const onTypeReplaced = vi.fn();
   const onDeleted = vi.fn();
   const onSelectTable = vi.fn();
@@ -67,7 +68,7 @@ function mount(entry: string, props: Partial<TypeEditorDialogsProps> = {}) {
           <TypeEditorDialogs
             type={permitType()}
             selectedTableCode="Limits"
-            onChangeType={onChangeType}
+            onChange={onChange}
             onTypeReplaced={onTypeReplaced}
             onDeleted={onDeleted}
             onSelectTable={onSelectTable}
@@ -79,7 +80,13 @@ function mount(entry: string, props: Partial<TypeEditorDialogsProps> = {}) {
     </MantineProvider>,
   );
 
-  return { onChangeType, onTypeReplaced, onDeleted, onSelectTable };
+  return { onChange, onTypeReplaced, onDeleted, onSelectTable };
+}
+
+/** Результат правки, переданої хосту, над робочою копією вихідного типу. */
+function changed(onChange: { mock: { calls: unknown[][] } }, base: PermitType = permitType()): TypeDraft | undefined {
+  const change = onChange.mock.calls[0]?.[0] as ((draft: TypeDraft) => TypeDraft) | undefined;
+  return change?.(draftOf(base));
 }
 
 describe('TypeEditorDialogs', () => {
@@ -95,13 +102,13 @@ describe('TypeEditorDialogs', () => {
 
   it('add-column: додає стовпець у вибрану таблицю й очищує ?dialog=', async () => {
     const user = userEvent.setup();
-    const { onChangeType } = mount('/types/WaterDischarge?dialog=add-column&t=Limits');
+    const { onChange } = mount('/types/WaterDischarge?dialog=add-column&t=Limits');
 
     await user.type(await screen.findByLabelText(k('col.nameEn')), 'Note');
     await user.click(screen.getByRole('button', { name: k('addColumn.apply') }));
 
-    expect(onChangeType).toHaveBeenCalledTimes(1);
-    const next = onChangeType.mock.calls[0]?.[0];
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = changed(onChange);
     expect(next?.tables[0]?.columns.map((c) => c.code)).toEqual(['Name', 'Annual', 'Note']);
     await waitFor(() => {
       expect(screen.getByTestId('search').textContent).toBe('?t=Limits');
@@ -115,11 +122,11 @@ describe('TypeEditorDialogs', () => {
 
   it('add-series: одиниця тис. м³ береться з довідника одиниць, додається 12 стовпців', async () => {
     const user = userEvent.setup();
-    const { onChangeType } = mount('/x?dialog=add-series');
+    const { onChange } = mount('/x?dialog=add-series');
 
     await user.click(await screen.findByRole('button', { name: k('addSeries.verb') }));
 
-    const next = onChangeType.mock.calls[0]?.[0];
+    const next = changed(onChange);
     const columns = next?.tables[0]?.columns ?? [];
     expect(columns).toHaveLength(14);
     expect(columns[2]).toMatchObject({ code: 'January', unitId: 3, order: 3 });
@@ -127,27 +134,27 @@ describe('TypeEditorDialogs', () => {
 
   it('add-rule: перевірка лягає в шапку типу або в таблицю', async () => {
     const user = userEvent.setup();
-    const { onChangeType } = mount('/x?dialog=add-rule', { selectedTableCode: null });
+    const { onChange } = mount('/x?dialog=add-rule', { selectedTableCode: null });
 
     await user.type(await screen.findByLabelText(new RegExp(k('addRule.name'))), 'Months add up');
     await user.type(screen.getByLabelText(new RegExp(k('addRule.expression'))), 'TRUE');
     await user.click(screen.getByRole('button', { name: k('addRule.apply') }));
 
-    const next = onChangeType.mock.calls[0]?.[0];
+    const next = changed(onChange);
     expect(next?.rules.map((r) => r.code)).toEqual(['Months_add_up']);
     expect(next?.tables[0]?.rules).toEqual([]);
   });
 
   it('add-table: таблиця додається, адреса очищується, нову таблицю пропонують вибрати', async () => {
     const user = userEvent.setup();
-    const { onChangeType, onSelectTable } = mount('/x?dialog=add-table');
+    const { onChange, onSelectTable } = mount('/x?dialog=add-table');
 
     await user.type(await screen.findByLabelText(new RegExp(k('addTable.nameEn'))), 'Storage');
     await user.click(screen.getByTestId('wizard-next'));
     await user.click(screen.getByTestId('wizard-next'));
     await user.click(screen.getByTestId('wizard-apply'));
 
-    const next = onChangeType.mock.calls[0]?.[0];
+    const next = changed(onChange);
     expect(next?.tables.map((t) => [t.code, t.order])).toEqual([
       ['Limits', 1],
       ['Storage', 2],
