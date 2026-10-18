@@ -135,7 +135,7 @@ foreach ($docName in @($docIds.Keys | Sort-Object)) {
         }
         foreach ($prodTable in @($periodsNode[$pk].Keys | Sort-Object)) {
             $row = [ordered]@{ doc = $docName; period = $periodNumber; prodTable = $prodTable; table = ''; prodRows = 0; rows = 0; cells = 0
-                capped = 0; unmapped = ''; missingColumns = ''; sourceWithoutColumn = ''; lookupMiss = 0; lookupUnresolved = 0; dupCells = 0; mixedText = 0; mixedNumber = 0; type3InMixed = 0
+                capped = 0; unmapped = ''; missingColumns = ''; sourceWithoutColumn = ''; lookupMiss = 0; lookupUnresolved = 0; dupCells = 0; mixedText = 0; mixedNumber = 0; type3InMixed = 0; naeNormalized = 0
                 skipped = ''; rowsOk = 0; rowsRejected = 0; codes = ''; rejectReasons = '' }
             $tableKey = Get-LandRowsTableKey -ProdTable $prodTable
             $srcRows = @($periodsNode[$pk][$prodTable]['rows'])
@@ -168,7 +168,7 @@ foreach ($docName in @($docIds.Keys | Sort-Object)) {
                 -TableAliases $tableAliases -LookupResolver $lookupResolver -KeyFormat $RowKeyFormat -RowLimit $MaxRowsPerTable
             foreach ($pr in $tp.Rows) { if ($versions.ContainsKey($pr.rowKey)) { $pr.baseVersion = $versions[$pr.rowKey] } }
             $row.rows = $tp.Rows.Count; $row.cells = $tp.Cells; $row.capped = $tp.Capped
-            $row.lookupMiss = $tp.LookupMiss; $row.lookupUnresolved = $tp.LookupUnresolved; $row.dupCells = $tp.DupCells; $row.mixedText = $tp.MixedText; $row.mixedNumber = $tp.MixedNumber; $row.type3InMixed = $tp.Type3InMixed
+            $row.lookupMiss = $tp.LookupMiss; $row.lookupUnresolved = $tp.LookupUnresolved; $row.dupCells = $tp.DupCells; $row.mixedText = $tp.MixedText; $row.mixedNumber = $tp.MixedNumber; $row.type3InMixed = $tp.Type3InMixed; $row.naeNormalized = $tp.NaeNormalized
             $row.unmapped = ($tp.Unmapped -join ',')
             $row.missingColumns = ($tp.MissingTargets -join ',')
             $row.sourceWithoutColumn = ((Get-LandRowsSourceWithoutColumn -ColumnMap $columnMap -FilledColumns @($tp.Rows | ForEach-Object { $_.cells | ForEach-Object { $_.columnCode } })) -join ',')
@@ -193,9 +193,10 @@ $totMiss = [int](($results | Measure-Object lookupMiss -Sum).Sum)
 $totMixedText = [int](($results | Measure-Object mixedText -Sum).Sum)
 $totMixedNumber = [int](($results | Measure-Object mixedNumber -Sum).Sum)
 $totType3 = [int](($results | Measure-Object type3InMixed -Sum).Sum)
+$totNaeNorm = [int](($results | Measure-Object naeNormalized -Sum).Sum)
 if ($totType3 -gt 0) { Write-Warning "NAE type3 of C11_10 in T9_04/T9_07: $totType3 rows - OperatingTime is a String column, type3 reads it as a number (D-423)." }
 $modeText = if ($haveCredentials) { 'stand read' } else { 'files+model only (no -User: NO_DOC / lookups NOT checked)' }
-Write-Host "PREVIEW ($modeText): table-periods $($results.Count), rows $totRows, cells $totCells, capped $totCapped, NO_DOC $($counters.NO_DOC), NO_TABLE $($counters.NO_TABLE), NAME_MISMATCH $($counters.NAME_MISMATCH), MISSING_COLUMN $($counters.MISSING_COLUMN), SKIPPED_WATER_WASTE $($counters.SKIPPED_WATER_WASTE), SKIPPED_UNKNOWN $($counters.SKIPPED_UNKNOWN), NOT_INCLUDED $($counters.NOT_INCLUDED), lookupMiss $totMiss, operatingTimeText $totMixedText, operatingTimeNumber $totMixedNumber, naeType3InMixed $totType3, rowKeyFormat $RowKeyFormat, maxRowsPerTable $MaxRowsPerTable."
+Write-Host "PREVIEW ($modeText): table-periods $($results.Count), rows $totRows, cells $totCells, capped $totCapped, NO_DOC $($counters.NO_DOC), NO_TABLE $($counters.NO_TABLE), NAME_MISMATCH $($counters.NAME_MISMATCH), MISSING_COLUMN $($counters.MISSING_COLUMN), SKIPPED_WATER_WASTE $($counters.SKIPPED_WATER_WASTE), SKIPPED_UNKNOWN $($counters.SKIPPED_UNKNOWN), NOT_INCLUDED $($counters.NOT_INCLUDED), lookupMiss $totMiss, operatingTimeText $totMixedText, operatingTimeNumber $totMixedNumber, naeType3InMixed $totType3, naeNormalized $totNaeNorm, rowKeyFormat $RowKeyFormat, maxRowsPerTable $MaxRowsPerTable."
 if ($counters.SKIPPED_UNKNOWN -gt 0) { Write-Host "WARN -SkipUnknownTables: $($counters.SKIPPED_UNKNOWN) table-periods of unknown prod tables were NOT loaded." }
 if ($unmappedAll.Count -gt 0) { Write-Host ('SOURCE WITHOUT TARGET (table/column, no values): ' + ((@($unmappedAll.Keys) | Sort-Object) -join ', ')) }
 
