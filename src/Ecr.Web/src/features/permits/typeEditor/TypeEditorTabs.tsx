@@ -1,12 +1,14 @@
-import type { JSX } from 'react';
+import { useMemo, type JSX } from 'react';
 import { Badge, Button, Group, Stack, Tabs } from '@mantine/core';
 import { useSearchParams } from 'react-router-dom';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { useMayEditPermitTypes } from '../permitRights';
 import { TypeChecksTab } from './checks';
 import { EditorParams, useEditorActions } from './editorActions';
 import { useTypeEditorApi } from './editorContext';
+import { typeWithDraft } from './selection';
 import { StructureTab } from './StructureTab';
 import { TypeVersionsTab } from './versions';
 
@@ -29,6 +31,9 @@ export function TypeEditorTabs(): JSX.Element {
   const actions = useEditorActions();
   const [params, setParams] = useSearchParams();
   const { draft, editable, save, saveError } = api;
+  // Вкладки показують тип разом із правками, яких сервер ще не бачив; право — ПОТОЧНОГО користувача.
+  const shown = useMemo(() => typeWithDraft(api.type, draft), [api.type, draft]);
+  const mayEdit = useMayEditPermitTypes();
   const tab = readTab(params);
   const rulesCount = draft.rules.length + draft.tables.reduce((sum, table) => sum + table.rules.length, 0);
 
@@ -80,10 +85,10 @@ export function TypeEditorTabs(): JSX.Element {
           <StructureTab />
         </Tabs.Panel>
         <Tabs.Panel value="rules">
-          <TypeChecksTab />
+          <TypeChecksTab type={shown} onAddCheck={actions.openAddRule} canEdit={editable && mayEdit} />
         </Tabs.Panel>
         <Tabs.Panel value="versions">
-          <TypeVersionsTab />
+          <TypeVersionsTab type={shown} />
         </Tabs.Panel>
       </Tabs>
     </Stack>

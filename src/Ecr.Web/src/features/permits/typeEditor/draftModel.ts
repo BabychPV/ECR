@@ -1,4 +1,4 @@
-import type { PermitType, PermitTypeColumn, PermitTypeTable } from '../api/types';
+import type { PermitType, PermitTypeColumn, PermitTypeRule, PermitTypeTable } from '../api/types';
 import { ListScopes, isValidCode, type ColumnDataType, type ListScopeKey, type TypeDraft } from './draftTypes';
 
 /*
@@ -151,6 +151,12 @@ export function appendColumns(draft: TypeDraft, tableCode: string, columns: read
     }
     return { ...table, columns: renumberColumns([...table.columns, ...columns]) };
   });
+}
+
+/** Додає перевірку: `tableCode === null` — шапці типу, інакше таблиці. Такої таблиці немає — `DraftModelError`. */
+export function addRule(draft: TypeDraft, rule: PermitTypeRule, tableCode: string | null): TypeDraft {
+  if (tableCode === null) return { ...draft, rules: [...draft.rules, rule] };
+  return mapTable(draft, tableCode, (table) => ({ ...table, rules: [...table.rules, rule] }));
 }
 
 /** Змінює поля стовпця. Код не міняється (після публікації він незмінний). */

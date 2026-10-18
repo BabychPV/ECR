@@ -1,7 +1,9 @@
-import type { JSX } from 'react';
+import { useState, type JSX } from 'react';
 import type { PermitType } from '@/features/permits/api/types';
-import { withRule } from '../checks/ruleOps';
+import { t } from '@/shared/i18n';
+import { showApiError, showWarning } from '@/shared/ui/notify';
 import { useUrlState } from '@/shared/ui/useUrlState';
+import { addColumn, addRule, addTable, appendColumns, type TypeDraft } from '../draftModel';
 import { AddColumnDialog } from './AddColumnDialog';
 import { AddRuleDialog } from './AddRuleDialog';
 import { AddSeriesConfirm } from './AddSeriesConfirm';
@@ -9,7 +11,6 @@ import { AddTableWizard } from './AddTableWizard';
 import { DeleteTypeConfirm } from './DeleteTypeConfirm';
 import { NewVersionConfirm } from './NewVersionConfirm';
 import { PublishTypeDialog } from './PublishTypeDialog';
-import { withColumns, withTable } from './applyOps';
 import { findMonthUnit } from './names';
 import { useTypeLifecycle } from './useTypeLifecycle';
 import { useUnitOptions } from './useUnitOptions';
@@ -30,8 +31,10 @@ export const TypeEditorDialogIds = {
  * відповідний діалог. Діалоги самодостатні; хост лише зводить їх зі станом сторінки.
  *
  * Контракт зі сторінкою редактора:
- * - `onChangeType(next)` — нове визначення ПІСЛЯ локальної правки (таблиця, стовпці, перевірка);
- *   сторінка кладе його у свою чернетку. Сервер тут не викликається.
+ * - `onChange(change)` — локальна правка (таблиця, стовпці, перевірка) як чиста функція над робочою
+ *   копією (`draftModel`); сторінка застосовує її до своєї чернетки. Сервер тут не викликається.
+ * - `settle()` — перед публікацією й новою версією: зберегти чернетку й повернути найсвіжіший тип
+ *   сервера (його `rowVersion` іде в запит) або `null`, якщо зберегти не вдалося — тоді нічого не шлемо.
  * - `onTypeReplaced(next)` — відповідь сервера після публікації / відкриття нової версії.
  * - `onReload()` — `409 ECR-PRM-4093`: визначення змінили, його треба перечитати.
  * - `onDeleted()` — тип видалено, сторінку треба покинути.
@@ -49,7 +52,8 @@ export interface TypeEditorDialogsProps {
 
   /** Кількість наявних дозволів типу, якщо сторінка її знає (рядок переліку). */
   readonly permitCount?: number | undefined;
-  readonly onChangeType: (next: PermitType) => void;
+  readonly onChange: (change: (draft: TypeDraft) => TypeDraft) => void;
+  readonly settle?: (() => Promise<PermitType | null>) | undefined;
   readonly onTypeReplaced?: ((next: PermitType) => void) | undefined;
   readonly onReload?: (() => void) | undefined;
   readonly onDeleted?: (() => void) | undefined;
@@ -60,13 +64,31 @@ export function TypeEditorDialogs({
   type,
   selectedTableCode,
   permitCount,
-  onChangeType,
+  onChange,
+  settle,
   onTypeReplaced,
   onReload,
   onDeleted,
   onSelectTable,
 }: TypeEditorDialogsProps): JSX.Element | null {
   const [dialog, setDialog] = useUrlState('dialog');
+  const [settling, setSettling] = useState(false);
+
+  /** Спершу зберігає чернетку (`settle`), і лише з найсвіжішим типом шле запит; не збереглась — не шле. */
+  const afterSettle = (send: (fresh: PermitType) => void): void => {
+    setSettling(true);
+    void (settle === undefined ? Promise.resolve(type) : settle())
+      .then((fresh) => {
+        if (fresh === null) showWarning(t('permits.editor.dialogs.unsaved'));
+        else send(fresh);
+      })
+      .catch((error: unknown) => {
+        showApiError(error);
+      })
+      .finally(() => {
+        setSettling(false);
+      });
+  };
   const close = (): void => {
     setDialog(null);
   };
@@ -108,7 +130,7 @@ export function TypeEditorDialogs({
           onApply={(added) => {
             // ⚠ Закриває сам майстер (`api.close` → `onClose`): другий `close()` у тому ж такті
             // губив би обидві зміни адреси.
-            onChangeType(withTable(type, added));
+            onChange((draft) => addTable(draft, added));
             if (onSelectTable !== undefined) {
               setTimeout(() => {
                 onSelectTable(added.code);
@@ -127,7 +149,7 @@ export function TypeEditorDialogs({
           existingCodes={table.columns.map((column) => column.code)}
           units={units}
           onApply={(column) => {
-            onChangeType(withColumns(type, table.code, [column]));
+            onChange((draft) => addColumn(draft, table.code, column));
           }}
           onClose={close}
         />
@@ -141,7 +163,7 @@ export function TypeEditorDialogs({
           existingCodes={table.columns.map((column) => column.code)}
           unit={findMonthUnit(units)}
           onApply={(columns) => {
-            onChangeType(withColumns(type, table.code, columns));
+            onChange((draft) => appendColumns(draft, table.code, columns));
           }}
           onClose={close}
         />
@@ -154,7 +176,7 @@ export function TypeEditorDialogs({
           type={type}
           defaultTableCode={selectedTableCode}
           onApply={(rule, where) => {
-            onChangeType(withRule(type, rule, where));
+            onChange((draft) => addRule(draft, rule, where));
           }}
           onClose={close}
         />
@@ -166,9 +188,11 @@ export function TypeEditorDialogs({
           opened
           type={type}
           permitCount={permitCount}
-          isPending={lifecycle.publish.isPending}
+          isPending={lifecycle.publish.isPending || settling}
           onSubmit={(reason) => {
-            lifecycle.publish.mutate({ reason, rowVersion: type.rowVersion });
+            afterSettle((fresh) => {
+              lifecycle.publish.mutate({ reason, rowVersion: fresh.rowVersion });
+            });
           }}
           onAddTable={() => {
             setDialog(TypeEditorDialogIds.addTable);
@@ -182,9 +206,11 @@ export function TypeEditorDialogs({
         <NewVersionConfirm
           opened
           type={type}
-          isPending={lifecycle.openVersion.isPending}
+          isPending={lifecycle.openVersion.isPending || settling}
           onConfirm={() => {
-            lifecycle.openVersion.mutate();
+            afterSettle(() => {
+              lifecycle.openVersion.mutate();
+            });
           }}
           onClose={close}
         />

@@ -85,23 +85,3 @@ export function buildRule(input: RuleInput, existingCodes: readonly string[]): P
 export function allRuleCodes(type: PermitType): string[] {
   return flattenRules(type).map((row) => row.rule.code);
 }
-
-/**
- * Додає перевірку до типу: `tableCode === null` — шапці, інакше таблиці.
- *
- * ⛔ Таблиці, якої немає, — виняток (див. `withColumns`).
- */
-export function withRule(type: PermitType, rule: PermitTypeRule, tableCode: string | null): PermitType {
-  if (tableCode === null) return { ...type, rules: [...type.rules, rule] };
-
-  if (!type.tables.some((table) => table.code === tableCode)) {
-    throw new Error(`Таблиці "${tableCode}" немає в типі "${type.code}".`);
-  }
-
-  return {
-    ...type,
-    tables: type.tables.map((table) =>
-      table.code === tableCode ? { ...table, rules: [...table.rules, rule] } : table,
-    ),
-  };
-}

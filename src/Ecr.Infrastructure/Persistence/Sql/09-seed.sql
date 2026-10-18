@@ -8351,8 +8351,6 @@ USING (VALUES
     ,(N'permits.editor.banner.title', N'en', N'Add a table with as many columns as the permit needs', 1)
     ,(N'permits.editor.check.dismiss', N'en', N'Close the result', 1)
     ,(N'permits.editor.check.ok', N'en', N'No problems found: every table has a key column and every list exists', 1)
-    ,(N'permits.editor.checks.emptyHint', N'en', N'The checks of this type are not shown on this page yet.', 1)
-    ,(N'permits.editor.checks.emptyTitle', N'en', N'Checks cannot be shown yet', 1)
     ,(N'permits.editor.choices.from', N'en', N'Choices come from', 1)
     ,(N'permits.editor.choices.noOtherTables', N'en', N'Add another table first: a column can pick only from a different table of the same permit.', 1)
     ,(N'permits.editor.choices.noRegistries', N'en', N'No registry found', 1)
@@ -8438,8 +8436,6 @@ USING (VALUES
     ,(N'permits.editor.type.linkTable', N'en', N'Link → {name} (this permit)', 1)
     ,(N'permits.editor.type.Lookup', N'en', N'Pick from a list', 1)
     ,(N'permits.editor.type.String', N'en', N'Text', 1)
-    ,(N'permits.editor.versions.emptyHint', N'en', N'The version history of this type is not shown on this page yet.', 1)
-    ,(N'permits.editor.versions.emptyTitle', N'en', N'Versions cannot be shown yet', 1)
     -- PERMITS: editor ── кінець секції ──
     -- PERMITS: editor-dialogs ── PM-08c: діалоги, майстер «Add a table», вкладки Checks і Versions конструктора типу; ru/kz — порцією PERMITS: editor-dialogs нижче ──
     ,(N'permits.editor.dialogs.col.nameEn', N'en', N'Name (English)', 1)
@@ -8558,6 +8554,14 @@ USING (VALUES
     ,(N'permits.editor.versions.colDate', N'en', N'Date', 1)
     ,(N'permits.editor.versions.note', N'en', N'Published versions are never edited. A permit keeps working with the version it was created in until you move it.', 1)
     -- PERMITS: editor-dialogs ── кінець секції ──
+    -- PERMITS: ui-wiring ── зведення PM-08b + PM-08c: видалення таблиці, відмова збереження перед відправкою; ru/kz — порцією PERMITS: ui-wiring нижче ──
+    ,(N'permits.editor.deleteTable.title', N'en', N'Remove table "{name}"?', 1)
+    ,(N'permits.editor.deleteTable.verb', N'en', N'Remove table', 1)
+    ,(N'permits.editor.deleteTable.confirm', N'en', N'The table "{name}", its columns and its checks leave the draft. Nothing changes for permits until you publish.', 1)
+    ,(N'permits.editor.deleteTable.published', N'en', N'Only tables added in the current draft and not saved yet can be removed in this version.', 1)
+    ,(N'permits.editor.deleteTable.referenced', N'en', N'The table "{name}" is the source of a list in {columns}. Change those columns first.', 1)
+    ,(N'permits.editor.dialogs.unsaved', N'en', N'The latest changes could not be saved, so nothing was sent. Fix the problems on the Structure tab or reload the type, then try again.', 1)
+    -- PERMITS: ui-wiring ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -21417,10 +21421,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.editor.check.dismiss', N'kz', N'Нәтижені жабу'),
     (N'permits.editor.check.ok', N'ru', N'Проблем не найдено: у каждой таблицы есть ключевой столбец и каждый список существует'),
     (N'permits.editor.check.ok', N'kz', N'Мәселе табылмады: әр кестеде кілттік баған бар және әр тізім бар'),
-    (N'permits.editor.checks.emptyHint', N'ru', N'Проверки этого типа на этой странице пока не показаны.'),
-    (N'permits.editor.checks.emptyHint', N'kz', N'Осы түрдің тексерулері бұл бетте әлі көрсетілмейді.'),
-    (N'permits.editor.checks.emptyTitle', N'ru', N'Проверки пока нельзя показать'),
-    (N'permits.editor.checks.emptyTitle', N'kz', N'Тексерулерді әзірге көрсету мүмкін емес'),
     (N'permits.editor.choices.from', N'ru', N'Значения берутся из'),
     (N'permits.editor.choices.from', N'kz', N'Мәндер қайдан алынады'),
     (N'permits.editor.choices.noOtherTables', N'ru', N'Сначала добавьте другую таблицу: столбец может выбирать только из другой таблицы того же разрешения.'),
@@ -21590,11 +21590,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.editor.type.Lookup', N'ru', N'Выбор из списка'),
     (N'permits.editor.type.Lookup', N'kz', N'Тізімнен таңдау'),
     (N'permits.editor.type.String', N'ru', N'Текст'),
-    (N'permits.editor.type.String', N'kz', N'Мәтін'),
-    (N'permits.editor.versions.emptyHint', N'ru', N'История версий этого типа на этой странице пока не показана.'),
-    (N'permits.editor.versions.emptyHint', N'kz', N'Осы түрдің нұсқалар тарихы бұл бетте әлі көрсетілмейді.'),
-    (N'permits.editor.versions.emptyTitle', N'ru', N'Версии пока нельзя показать'),
-    (N'permits.editor.versions.emptyTitle', N'kz', N'Нұсқаларды әзірге көрсету мүмкін емес')
+    (N'permits.editor.type.String', N'kz', N'Мәтін')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -21839,6 +21835,26 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: editor-dialogs ── кінець секції ──
+-- PERMITS: ui-wiring ── ru/kz: зведення PM-08b + PM-08c; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.editor.deleteTable.title', N'ru', N'Удалить таблицу «{name}»?'),
+    (N'permits.editor.deleteTable.title', N'kz', N'«{name}» кестесін жою керек пе?'),
+    (N'permits.editor.deleteTable.verb', N'ru', N'Удалить таблицу'),
+    (N'permits.editor.deleteTable.verb', N'kz', N'Кестені жою'),
+    (N'permits.editor.deleteTable.confirm', N'ru', N'Таблица «{name}», её столбцы и проверки уйдут из черновика. Для разрешений ничего не изменится, пока вы не опубликуете.'),
+    (N'permits.editor.deleteTable.confirm', N'kz', N'«{name}» кестесі, оның бағандары мен тексерулері жобадан шығады. Жарияламайынша рұқсаттар үшін ештеңе өзгермейді.'),
+    (N'permits.editor.deleteTable.published', N'ru', N'В этой версии можно удалить только таблицы, добавленные в текущем черновике и ещё не сохранённые.'),
+    (N'permits.editor.deleteTable.published', N'kz', N'Осы нұсқада тек ағымдағы жобада қосылған және әлі сақталмаған кестелерді жоюға болады.'),
+    (N'permits.editor.deleteTable.referenced', N'ru', N'Таблица «{name}» служит источником списка в {columns}. Сначала измените эти столбцы.'),
+    (N'permits.editor.deleteTable.referenced', N'kz', N'«{name}» кестесі {columns} ішіндегі тізімнің көзі. Алдымен осы бағандарды өзгертіңіз.'),
+    (N'permits.editor.dialogs.unsaved', N'ru', N'Последние изменения не удалось сохранить, поэтому ничего не отправлено. Исправьте проблемы на вкладке Structure или перечитайте тип и повторите.'),
+    (N'permits.editor.dialogs.unsaved', N'kz', N'Соңғы өзгерістер сақталмады, сондықтан ештеңе жіберілген жоқ. Structure қойындысындағы мәселелерді түзетіңіз немесе түрді қайта оқып, қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: ui-wiring ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

@@ -2,14 +2,13 @@ import { Suspense, lazy, useMemo, useState, type JSX } from 'react';
 import { Box, Button, Stack } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import { t } from '@/shared/i18n';
-import { can, useSession } from '@/shared/session/useSession';
 import { DataTable } from '@/shared/ui/DataTable';
 import { FilterBar } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatStrip } from '@/shared/ui/StatStrip';
 import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import type { PermitTypeListItem } from '@/features/permits/api/types';
-import { PermitTypesPermission } from '@/features/permits/permitRights';
+import { useMayEditPermitTypes } from '@/features/permits/permitRights';
 import { typeEditorPath } from '@/features/permits/shell/permitPaths';
 import { PermitsSubnav } from '@/features/permits/shell/PermitsSubnav';
 import { typeColumns } from '@/features/permits/types/TypesListColumns';
@@ -35,7 +34,6 @@ const NewTypeWizard = lazy(async () => ({
  * `?stat=`, ФВ-14.29).
  */
 export function PermitTypesPage(): JSX.Element {
-  const session = useSession();
   const navigate = useNavigate();
   const setParams = useUrlParamsSetter();
   const types = useAllPermitTypes();
@@ -60,7 +58,7 @@ export function PermitTypesPage(): JSX.Element {
   const columns = useMemo(() => typeColumns(), []);
 
   // ⛔ У симуляції сеанс лише читає (`isSimulation`): створення типу заблоковане, як і решта записів.
-  const mayCreate = can(session.data, PermitTypesPermission) && session.data?.isSimulation !== true;
+  const mayCreate = useMayEditPermitTypes();
   const openWizard = (): void => {
     setWizardMounted(true);
     setWizardOpen(true);

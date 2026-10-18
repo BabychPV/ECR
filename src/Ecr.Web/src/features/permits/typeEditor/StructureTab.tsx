@@ -11,6 +11,7 @@ import { problemText } from './problemText';
 import { useTypeEditorApi } from './editorContext';
 import { headerRegistryCode, tableRegistryCode, textOf } from './labels';
 import { useUnits } from './lookups';
+import { selectedNode } from './selection';
 import { StructureTree } from './StructureTree';
 import { UnderTheHood } from './UnderTheHood';
 import './typeEditor.css';
@@ -28,11 +29,7 @@ export function StructureTab(): JSX.Element {
   const [treeOpen, setTreeOpen] = useState(false);
   const { draft, type, editable, problems } = api;
 
-  const requested = params.get(EditorParams.table);
-  const selected =
-    requested === HeadNode || (requested !== null && findTable(draft, requested) !== undefined)
-      ? requested
-      : (draft.tables[0]?.code ?? HeadNode);
+  const selected = selectedNode(params, draft);
   const table: PermitTypeTable | undefined = selected === HeadNode ? undefined : findTable(draft, selected);
   const panel = params.get(EditorParams.panel);
   const column: PermitTypeColumn | undefined = table !== undefined && panel !== null ? findColumn(table, panel) : undefined;
