@@ -74,6 +74,8 @@ internal sealed class PermitHarness : IAsyncDisposable
         ListPermits = new ListPermitsHandler(Permits, Registries, RowsQuery, Stats, access, user, clock);
         UpdatePermit = new UpdatePermitHandler(Permits, Registries, RowsQuery, Stats, Writer, Uow, access, user, clock);
         DeletePermit = new DeletePermitHandler(Permits, Registries, RowsQuery, Stats, KeyService, Uow, audit, access, user, clock);
+        GetRows = new Ecr.Application.Registries.Rows.GetRegistryRowsHandler(
+            Registries, RowsQuery, new RegistryResolver(), access, user, Permits);
         ActivatePermit = new ActivatePermitHandler(Permits, Registries, RowsQuery, Stats, Writer, Uow, audit, access, user, clock);
         EndPermit = new EndPermitHandler(Permits, Registries, RowsQuery, Stats, Writer, Uow, audit, access, user, clock);
         RenewPermit = new RenewPermitHandler(Permits, Registries, RowsQuery, Stats, Writer, Uow, audit, access, user, clock);
@@ -140,6 +142,8 @@ internal sealed class PermitHarness : IAsyncDisposable
     public UpdatePermitHandler UpdatePermit { get; }
 
     public DeletePermitHandler DeletePermit { get; }
+
+    public Ecr.Application.Registries.Rows.GetRegistryRowsHandler GetRows { get; }
 
     public ActivatePermitHandler ActivatePermit { get; }
 

@@ -56,14 +56,16 @@ internal static class PermitFixtures
     /// <param name="annual">Значення <c>Annual</c> (лише таблиця <c>Limits</c>).</param>
     public static async Task<long> AddRowAsync(PermitHarness h, string typeCode, string tableCode, long permitId, string name, decimal? annual = null)
     {
-        var table = await TableDefAsync(h, typeCode, tableCode);
+        // Свій контекст на кожен запис: опис таблиці, прочитаний раніше, після попереднього запису стає «застарілим» (D1-05).
+        await using var request = await h.NextRequestAsync();
+        var table = await TableDefAsync(request, typeCode, tableCode);
         var values = new Dictionary<string, object?> { ["PERMIT"] = permitId, ["Name"] = name };
         if (annual is { } value)
         {
             values["Annual"] = value;
         }
 
-        var result = await h.Writer.WriteAsync(
+        var result = await request.Writer.WriteAsync(
             new Ecr.Application.Registries.RegistryEntryWriteBatch(
                 table.Id, [new Ecr.Application.Registries.RegistryEntryWrite($"R{Guid.NewGuid():N}"[..12], values)]),
             default);
@@ -78,8 +80,9 @@ internal static class PermitFixtures
     /// <param name="window">Нове вікно чинності; <c>null</c> - не міняти.</param>
     public static async Task ActivateDirectAsync(PermitHarness h, string typeCode, long permitId, Ecr.Domain.ValueObjects.ValidityWindow? window = null)
     {
-        var type = (await h.Permits.FindByCodeAsync(typeCode, default))!;
-        var result = await h.Writer.UpdateAsync(
+        await using var request = await h.NextRequestAsync();
+        var type = (await request.Permits.FindByCodeAsync(typeCode, default))!;
+        var result = await request.Writer.UpdateAsync(
             new Ecr.Application.Registries.RegistryEntryUpdateBatch(
                 type.HeaderRegistryDefId,
                 [new Ecr.Application.Registries.RegistryEntryUpdate(permitId, new Dictionary<string, object?>()) { IsActive = true, Validity = window }]),
