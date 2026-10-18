@@ -8169,6 +8169,9 @@ USING (VALUES
     ,(N'err.ECR-PRM-4093.noDraft', N'en', N'The permit type "{code}" is published and has no open draft. Open a new version first.', 1)
     ,(N'err.ECR-PRM-4093.draftExists', N'en', N'The permit type "{code}" already has an open draft of a new version.', 1)
     ,(N'err.ECR-PRM-4093.notPublished', N'en', N'The permit type "{code}" has not been published yet, so there is no version to start from.', 1)
+    ,(N'err.ECR-PRM-4094', N'en', N'Permit type is in use', 1)
+    ,(N'err.ECR-PRM-4094.published', N'en', N'The permit type "{code}" is published and cannot be deleted.', 1)
+    ,(N'err.ECR-PRM-4094.hasPermits', N'en', N'The permit type "{code}" already has {count} permits and cannot be deleted.', 1)
     -- PERMITS: types ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -20675,6 +20678,21 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: types ── ECR-PRM-4093 ── кінець секції ──
+
+-- PERMITS: types ── ECR-PRM-4094 ── ru/kz: тип дозволу використовується; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-4094', N'ru', N'Тип разрешения используется'),
+    (N'err.ECR-PRM-4094', N'kz', N'Рұқсат түрі қолданыста'),
+    (N'err.ECR-PRM-4094.published', N'ru', N'Тип разрешения «{code}» опубликован и не удаляется.'),
+    (N'err.ECR-PRM-4094.published', N'kz', N'«{code}» рұқсат түрі жарияланған және жойылмайды.'),
+    (N'err.ECR-PRM-4094.hasPermits', N'ru', N'По типу разрешения «{code}» уже есть разрешения ({count}): он не удаляется.'),
+    (N'err.ECR-PRM-4094.hasPermits', N'kz', N'«{code}» рұқсат түрі бойынша рұқсаттар бар ({count}): ол жойылмайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: types ── ECR-PRM-4094 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

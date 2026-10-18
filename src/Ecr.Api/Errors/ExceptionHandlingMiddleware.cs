@@ -652,6 +652,10 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.PermitTypeDuplicate =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ Permits PM-03: «тип використовується» (`ECR-PRM-4094`) — конфлікт зі станом типу, а не невірні дані.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.PermitTypeInUse =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // ⛔ RT-10a (FEATURE-REGISTRY-TABLES §7.2): «ці значення ключа вже має інший запис» —
         // конфлікт стану, а не невірні дані: повторювати запит марно, треба змінити ключ або
         // закрити вікно чинності того запису. ⚠ Правило суфікса нижче цей код теж ловить, тож

@@ -96,6 +96,32 @@ internal static class PermitTypeErrors
         }
     }
 
+    /// <summary><c>409 ECR-PRM-4094 published</c>: опублікований тип не видаляється.</summary>
+    /// <param name="code">Код типу.</param>
+    internal static BusinessRuleException InUsePublished(string code)
+        => new(
+            ErrorCodes.PermitTypeInUse,
+            $"Тип дозволу «{code}» опублікований і не видаляється.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-4094.published",
+                ["code"] = code,
+            });
+
+    /// <summary><c>409 ECR-PRM-4094 hasPermits</c>: за типом уже є дозволи.</summary>
+    /// <param name="code">Код типу.</param>
+    /// <param name="count">Скільки дозволів.</param>
+    internal static BusinessRuleException InUseByPermits(string code, int count)
+        => new(
+            ErrorCodes.PermitTypeInUse,
+            $"За типом дозволу «{code}» уже є дозволи ({count}): він не видаляється.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-4094.hasPermits",
+                ["code"] = code,
+                ["count"] = count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+
     /// <summary><c>404 ECR-PRM-0404 type</c>.</summary>
     /// <param name="code">Код типу з запиту.</param>
     internal static NotFoundException NotFound(string code)

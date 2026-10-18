@@ -894,4 +894,10 @@ public static class ErrorCodes
     /// 4092 зарезервовано під перетин чинних дозволів (PM-04).
     /// </remarks>
     public const string PermitTypeConflict = "ECR-PRM-4093";
+
+    /// <summary>
+    /// Тип дозволу використовується й не видаляється (<c>ECR-PRM-4094</c>): він опублікований
+    /// (<c>published</c>) або має екземпляри дозволів (<c>hasPermits</c>).
+    /// </summary>
+    public const string PermitTypeInUse = "ECR-PRM-4094";
 }

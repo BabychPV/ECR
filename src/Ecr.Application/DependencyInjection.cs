@@ -298,6 +298,7 @@ public static class DependencyInjection
         services.AddScoped<Permits.CreatePermitTypeHandler>();
         services.AddScoped<Permits.ReplacePermitTypeHandler>();
         services.AddScoped<Permits.OpenPermitTypeVersionHandler>();
+        services.AddScoped<Permits.DeletePermitTypeHandler>();
 
         // RT: expressions
 
