@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { queryKeys } from '@/api/queryKeys';
 import type { RegistryDefinitionDto } from '@/api/types';
 import { RegistryConstructorPage } from '@/pages/admin/RegistryConstructorPage';
 import { testTheme } from '@/test/render';
@@ -96,7 +97,7 @@ function mockServer(definition: RegistryDefinitionDto, entryCount: number): void
   );
 }
 
-function show(): void {
+function show(): QueryClient {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
@@ -110,6 +111,8 @@ function show(): void {
       </QueryClientProvider>
     </MantineProvider>,
   );
+
+  return client;
 }
 
 afterEach(() => {
@@ -158,6 +161,30 @@ describe('RegistryConstructorPage: вкладки', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /registries\.tabRules/ }));
     expect(await screen.findByText(/registries\.tabHint\.rulesExample/)).toBeDefined();
+  });
+
+  it('активна «Мапінг» зникла (довідник став локальним без мапінгу) — активною стає перша вкладка', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mockServer({ ...Base, sourceKind: 'External' }, 0);
+    const client = show();
+
+    fireEvent.click(await screen.findByRole('tab', { name: /registries\.tabMapping/ }));
+    expect((await screen.findByRole('tab', { name: /registries\.tabMapping/ })).getAttribute('aria-selected')).toBe(
+      'true',
+    );
+
+    act(() => {
+      client.setQueryData(queryKeys.registries.definition('PERMIT'), { ...Base, sourceKind: 'Local' });
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.queryByRole('tab', { name: /registries\.tabMapping/ })).toBeNull();
+      expect(screen.getByRole('tab', { name: /registries\.tabFields/ }).getAttribute('aria-selected')).toBe('true');
+    });
+    // ⚠ Попередження React про `act` від фонових запитів не рахуємо — лише справжні помилки.
+    const real = errors.mock.calls.filter((call) => !String(call[0]).includes('not wrapped in act'));
+    expect(real).toEqual([]);
+    errors.mockRestore();
   });
 });
 

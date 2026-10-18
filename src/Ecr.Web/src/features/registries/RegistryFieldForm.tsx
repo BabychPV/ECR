@@ -185,7 +185,6 @@ export function RegistryFieldForm({
           onChange={(event) => onChange({ ...draft, isRequired: event.currentTarget.checked })}
         />
 
-
         <Checkbox
           label={t('registries.keyField')}
           description={t('registries.fieldForm.keyHint')}

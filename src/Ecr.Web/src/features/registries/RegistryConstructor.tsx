@@ -117,9 +117,12 @@ export function RegistryFields({
         )}
       </Group>
 
-      <Text size="xs" c="dimmed">
-        {t('registries.fieldForm.intro')}
-      </Text>
+      {/* Вступ «що таке поле» потрібен лише порожньому довіднику; далі він лише займає місце. */}
+      {definition.fields.length === 0 && (
+        <Text size="xs" c="dimmed">
+          {t('registries.fieldForm.intro')}
+        </Text>
+      )}
 
       <Table striped highlightOnHover>
         <Table.Thead>

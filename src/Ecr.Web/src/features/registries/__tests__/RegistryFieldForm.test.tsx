@@ -211,6 +211,25 @@ describe('Таблиця полів і форма нового поля', () => 
     expect(within(limit!).getByText('t (Mass)')).toBeDefined();
     const substance = screen.getByText('Substance').closest('tr');
     expect(within(substance!).getByText('Substances (SUBSTANCE)')).toBeDefined();
+    // Вступ «що таке поле» — лише порожньому довіднику; з полями він не потрібен.
+    expect(screen.queryByText(/registries\.fieldForm\.intro/)).toBeNull();
+  });
+
+  it('довідник без полів показує вступ «що таке поле»', () => {
+    show(
+      <RegistryFields
+        definition={{ ...Definition, fields: [] }}
+        canEdit={true}
+        newFields={[]}
+        registryOptions={Registries}
+        unitOptions={Units}
+        entryCount={0}
+        onAddField={vi.fn()}
+        onChangeField={vi.fn()}
+        onRemoveField={vi.fn()}
+      />,
+    );
+
     expect(screen.getByText(/registries\.fieldForm\.intro/)).toBeDefined();
   });
 

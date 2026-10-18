@@ -290,4 +290,3 @@ export function isFieldComplete(draft: FieldDraft, mayBeRequired = true): boolea
     && (draft.dataType !== 'Lookup' || draft.lookupRegistryDefId !== null)
   );
 }
-

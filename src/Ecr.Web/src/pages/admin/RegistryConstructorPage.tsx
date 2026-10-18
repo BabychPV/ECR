@@ -92,6 +92,7 @@ export function RegistryConstructorPage(): JSX.Element {
   const [newFields, setNewFields] = useState<FieldDraft[]>([]);
   const [reason, setReason] = useState('');
   const [linkEdits, setLinkEdits] = useState<LinkEdits>({});
+  const [tab, setTab] = useState('fields');
 
   const definition = useQuery({
     queryKey: queryKeys.registries.definition(code),
@@ -298,6 +299,16 @@ export function RegistryConstructorPage(): JSX.Element {
   // на кожну правку.
   latestRequest.current = request;
 
+  // Вкладка «Мапінг» зникає (локальний довідник без мапінгу), «Використання» — без права:
+  // активна, що зникла, повертає на першу доступну, а не лишає Tabs із неіснуючим значенням.
+  const showMapping =
+    definition.data !== undefined &&
+    (definition.data.mappings.length > 0 || definition.data.sourceKind !== 'Local');
+  const available = new Set(['fields', 'relations', 'rules', 'history']);
+  if (showMapping) available.add('mapping');
+  if (mayView) available.add('usage');
+  const activeTab = available.has(tab) ? tab : 'fields';
+
   return (
     <>
       <PageHeader
@@ -323,10 +334,7 @@ export function RegistryConstructorPage(): JSX.Element {
         data={definition.data}
         onRetry={() => void definition.refetch()}
       >
-        {(loaded) => {
-          const showMapping = loaded.mappings.length > 0 || loaded.sourceKind !== 'Local';
-
-          return (
+        {(loaded) => (
           <>
             <Group gap="xs" mb="sm">
               <Text fw={600}>{localized(loaded.nameL10n) || loaded.code}</Text>
@@ -353,7 +361,7 @@ export function RegistryConstructorPage(): JSX.Element {
               }}
             />
 
-            <Tabs defaultValue="fields" keepMounted={false}>
+            <Tabs value={activeTab} onChange={(value) => setTab(value ?? 'fields')} keepMounted={false}>
               <Tabs.List>
                 <Tabs.Tab value="fields">{t('registries.tabFields')}</Tabs.Tab>
                 <Tabs.Tab value="relations">{t('registries.tabRelations')}</Tabs.Tab>
@@ -473,10 +481,8 @@ export function RegistryConstructorPage(): JSX.Element {
               )}
             </Tabs>
           </>
-          );
-        }}
+        )}
       </AsyncBoundary>
     </>
   );
 }
-
