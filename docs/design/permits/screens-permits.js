@@ -171,6 +171,14 @@
       rules: [] }];
   function type(code) { return find(TYPES, 'code', code) || TYPES[0]; }
   function table(t, code) { return find(t.tables, 'code', code) || t.tables[0]; }
+  /* Варіанти пікерів (демо): у застосунку їх дають реєстри з колонки «Pick from». */
+  var LISTS = { Substances: ['Vinyl chloride', 'Nitrogen dioxide', 'Suspended substances', 'Iron oxide', 'Xylene', 'Soot', 'Sulphur dioxide', 'Hydrogen sulphide'], Sites: ['Offshore complex expansion to 450 kbpd', 'Hangar at the process support site'], WaterBodies: ['Caspian Sea (north)', 'Ural River', 'Kigach River'], Platforms: ['Bolashak OPF (LPG)', 'Kashagan Field Facilities'], WastePlaces: ['Temporary storage site No. 1'], WasteCodes: ['20 03 01 · Domestic waste', '08 01 11* · Paint residues', '17 04 05 · Iron and steel'], WaterSubstances: ['Ammonia nitrogen', 'BOD5', 'Chlorides', 'COD', 'Nitrates', 'Sulphates', 'Total iron'], IssueNumbers: ['Outlet 1', 'Outlet 2', 'Outlet 3'], Locations: ['Central processing facility', 'Offshore complex', 'Upstream well pads'] };
+  function optsFor(c) {
+    if (c.type === 'Choice') return ['', 'ПР – production', 'ХБ – household', 'Hazardous', 'Non-hazardous'];
+    var ref = (c.ref || '').split(' ')[0];
+    if (ref === 'StoragePlaces') return [''].concat(PLACE_ROWS.map(function (x) { return x.Place + ' · ' + x.Platform; }));
+    return [''].concat(LISTS[ref] || ['Item 1', 'Item 2']);
+  }
 
   /* ================= демо-дані: екземпляри ================= */
   var AIR_SUB = { 827: ['Vinyl chloride', 'Винилхлорид'], 301: ['Nitrogen dioxide', 'Азота диоксид'], 2902: ['Suspended substances', 'Взвешенные частицы'], 123: ['Iron oxide', 'Железа оксид'], 616: ['Xylene', 'Ксилол'], 143: ['Manganese and its compounds', 'Марганец и его соединения'], 2735: ['Mineral petroleum oil', 'Масло минеральное нефтяное'], 501: ['Pentylenes', 'Пентилены (амилены)'], 2908: ['Inorganic dust, SiO2 70–20 %', 'Пыль неорганическая 70–20 % SiO2'], 328: ['Soot', 'Сажа'], 330: ['Sulphur dioxide', 'Сера диоксид'] };
@@ -408,12 +416,13 @@
         var rows = rowsOf(p, tbl), tot = (p.total && p.total[tbl.code]) || [rows.length, null];
         var wide = tbl.cols.length > 12, state = { core: wide };
         var tools = h('div', { class: 'pm-tools' },
-          E.Button({ label: 'Add row', icon: 'plus', id: 'pm-addrow-' + tbl.code, variant: 'primary', disabled: p.state === 'Expired', title: p.state === 'Expired' ? 'Expired permits are read-only' : null, onClick: function () { E.Toast('A new empty row is added at the end — fill the required columns'); } }),
-          E.Button({ label: 'Import rows from Excel…', icon: 'upload', onClick: function () { ctx.openDialog('import-permit'); } }),
+          E.Button({ label: 'Add row', icon: 'plus', id: 'pm-addrow-' + tbl.code, variant: 'primary', disabled: p.state === 'Expired', title: p.state === 'Expired' ? 'Expired permits are read-only' : null, onClick: function () { ctx.openPanel(tbl.code + ':__new'); } }),
+          E.Button({ label: 'Paste from Excel…', icon: 'paperclip', id: 'pm-paste-' + tbl.code, disabled: p.state === 'Expired', onClick: function () { ctx.openDialog('paste-rows', tbl); } }),
+          E.Button({ label: 'Import file…', icon: 'upload', onClick: function () { ctx.openDialog('import-permit'); } }),
           h('span', { class: 'sp' }),
           wide ? E.Segmented({ id: 'pm-cols-' + tbl.code, label: 'Columns', value: 'Grouped', options: ['Grouped', 'All columns'], onChange: function (v) { grid.setCollapsed(v === 'Grouped'); } }) : null);
         panel.appendChild(h('div', { class: 'stack gap-3' },
-          h('div', { class: 'pm-gridnote' }, icon('info', 14), h('span', {}, tbl.name + ' has ' + tbl.cols.length + ' columns' + (wide ? '. Related columns are grouped — click a group to open it.' : '.') + ' Showing ' + rows.length + ' of ' + F.int(tot[0]) + ' rows.')),
+          h('div', { class: 'pm-gridnote' }, icon('info', 14), h('span', {}, tbl.name + ' has ' + tbl.cols.length + ' columns' + (wide ? '. Related columns are grouped — click a group to open it.' : '.') + ' Click a row to edit it. Showing ' + rows.length + ' of ' + F.int(tot[0]) + ' rows.')),
           tools));
         var groupNames = [], gcount = {}; tbl.cols.forEach(function (c) { if (c.group) { gcount[c.group] = (gcount[c.group] || 0) + 1; if (groupNames.indexOf(c.group) < 0) groupNames.push(c.group); } });
         var sums = {}; if (tot[1] != null) { var main = tbl.cols.filter(function (c) { return c.type === 'Number'; })[0]; if (main) sums[main.code] = tot[1]; }
@@ -423,19 +432,73 @@
         panel.appendChild(grid);
         if (tbl.rules.length) panel.appendChild(E.Collapsible({ id: 'pm-rules-' + tbl.code, title: 'Checks for this table', summary: tbl.rules.length + ' rules', content: h('div', { class: 'stack' }, tbl.rules.map(function (r) { return h('div', { class: 'row between' }, h('span', {}, r.name), h('span', { class: 'row' }, E.CodeText(r.text), h('span', { class: 'chip' }, r.mode === 'Block' ? 'Blocks saving' : 'Warns'))); })) }));
       }
+      /* Введення даних: шторка рядка (новий / редагування) і вставка з Excel */
       ctx.panel('*', function (id) {
-        var parts = id.split(':'), tbl = find(t.tables, 'code', parts[0]) || t.tables[0], row = find(rowsOf(p, tbl), 'id', parts[1]) || rowsOf(p, tbl)[0];
-        E.Drawer({ id: 'pm-row', title: String(row[tbl.cols[0].code] || row.id), subtitle: tbl.name + ' · ' + p.number, wide: true,
+        var parts = id.split(':'), tbl = find(t.tables, 'code', parts[0]) || t.tables[0], list = rowsOf(p, tbl);
+        var isNew = parts[1] === '__new', row = isNew ? null : (find(list, 'id', parts[1]) || list[0]);
+        var ro = p.state === 'Expired', m = {}, ctls = {};
+        tbl.cols.forEach(function (c) { m[c.code] = row ? row[c.code] : (c.type === 'Yes / No' ? false : ''); });
+        function bump(d) { if (p.total && p.total[tbl.code]) p.total[tbl.code][0] += d; }
+        function field(c) {
+          var idp = 'pm-f-' + c.code, v = m[c.code], ctl;
+          if (c.via) ctl = E.Input({ id: idp, label: c.en, value: String(v == null ? '' : v), readOnly: true, hint: 'Read from the linked record' });
+          else if (c.type === 'Yes / No') ctl = E.Switch({ id: idp, label: c.en, checked: !!v, onChange: function (x) { m[c.code] = x; } });
+          else if (c.type === 'Link to registry' || c.type === 'Choice') ctl = E.Select({ id: idp, label: c.en, required: c.req, options: optsFor(c), value: v || '', disabled: ro, onChange: function (x) { m[c.code] = x; }, hint: c.type === 'Link to registry' ? 'Pick from ' + c.ref : null });
+          else if (c.type === 'Date') ctl = E.Input({ id: idp, label: c.en, required: c.req, type: 'date', value: v || '', readOnly: ro, onInput: function (x) { m[c.code] = x; } });
+          else if (c.type === 'Number') ctl = E.Input({ id: idp, label: c.en, required: c.req, mono: true, suffix: c.unit || undefined, value: v == null ? '' : String(v), readOnly: ro, onInput: function (x) { var n = parseFloat(String(x).replace(',', '.')); m[c.code] = isNaN(n) ? '' : n; } });
+          else ctl = E.Input({ id: idp, label: c.en, required: c.req, value: v == null ? '' : String(v), readOnly: ro, onInput: function (x) { m[c.code] = x; } });
+          ctls[c.code] = ctl; return ctl;
+        }
+        function save() {
+          var bad = tbl.cols.filter(function (c) { return c.req && !c.via && (m[c.code] === '' || m[c.code] == null); });
+          Object.keys(ctls).forEach(function (k) { if (ctls[k].setError) ctls[k].setError(null); });
+          if (bad.length) { bad.forEach(function (c) { if (ctls[c.code].setError) ctls[c.code].setError('Required'); }); if (bad[0] && ctls[bad[0].code].input) ctls[bad[0].code].input.focus(); E.Toast('Fill the required fields: ' + bad.map(function (c) { return c.en; }).join(', '), 'warning'); return false; }
+          var kc = tbl.cols.filter(function (k) { return k.key; });
+          if (kc.length && list.some(function (r) { return r !== row && kc.every(function (k) { return String(r[k.code] || '') === String(m[k.code] || ''); }); })) { E.Toast('This permit already has a row with the same ' + kc.map(function (k) { return k.en; }).join(' + '), 'warning'); return false; }
+          if (isNew) { list.push(Object.assign({ id: tbl.code + Date.now() }, m)); bump(1); } else Object.assign(row, m);
+          p.updated = TODAY; p.by = ctx.me.name; E.Toast(isNew ? 'Row added' : 'Saved', 'success'); return true;
+        }
+        E.Drawer({ id: 'pm-row', title: isNew ? 'New row' : String(row[tbl.cols[0].code] || row.id), subtitle: tbl.name + ' · ' + p.number + (ro ? ' · read-only (expired)' : ''), wide: true,
           body: function (b) {
             var groups = {}, order = [];
             tbl.cols.forEach(function (c) { var g = c.group || 'Main'; if (!groups[g]) { groups[g] = []; order.push(g); } groups[g].push(c); });
             order.forEach(function (g, gi) {
-              var content = h('div', { class: 'form-grid' }, groups[g].map(function (c) {
-                var v = row[c.code]; var disp = c.type === 'Number' ? (v == null ? '' : String(v)) : (c.type === 'Date' ? (v || '') : (c.type === 'Yes / No' ? F.bool(!!v) : (v == null ? '' : String(v))));
-                return E.Input({ id: 'pm-f-' + c.code, label: c.en + (c.unit ? ' (' + c.unit + ')' : ''), required: c.req, value: disp, readOnly: !!c.via, mono: c.type === 'Number', hint: c.via ? 'Read from the linked record' : (c.type === 'Link to registry' ? 'Pick from ' + c.ref : null) }); }));
-              b.appendChild(gi === 0 ? h('div', { class: 'stack' }, content) : E.Collapsible({ id: 'pm-g-' + gi, title: g, summary: groups[g].length + ' fields', content: content }));
+              var content = h('div', { class: 'form-grid' }, groups[g].map(field));
+              b.appendChild(gi === 0 ? h('div', { class: 'stack' }, content) : E.Collapsible({ id: 'pm-g-' + gi, title: g, summary: groups[g].length + ' fields', open: isNew && groups[g].some(function (c) { return c.req; }), content: content }));
             });
-          }, footer: [{ label: 'Delete row', danger: true, align: 'left', icon: 'trash', onClick: function () { E.Toast('Row deleted', { action: { label: 'Undo', onClick: function () {} } }); } }, { label: 'Close' }, { label: 'Save', variant: 'primary', icon: 'check', onClick: function () { E.Toast('Saved', 'success'); } }] }); });
+          },
+          footer: (ro ? [{ label: 'Close' }] : [
+            row ? { label: 'Delete row', danger: true, align: 'left', icon: 'trash', onClick: function () { var i = list.indexOf(row); list.splice(i, 1); bump(-1); E.Toast('Row deleted', { action: { label: 'Undo', onClick: function () { list.splice(i, 0, row); bump(1); ctx.refresh(); } } }); later(function () { reload(ctx); }); } } : null,
+            { label: 'Close' },
+            isNew ? { label: 'Save and add next', keepOpen: true, onClick: function (ctl) { if (!save()) return false; ctl.close(); later(function () { reload(ctx, { panel: tbl.code + ':__new' }); }); } } : null,
+            { label: 'Save', variant: 'primary', icon: 'check', keepOpen: true, onClick: function (ctl) { if (!save()) return false; ctl.close(); later(function () { reload(ctx); }); } }]).filter(Boolean) });
+      });
+      ctx.dialog('paste-rows', function (tbl) {
+        tbl = tbl || t.tables[0];
+        var cols = tbl.cols.filter(function (c) { return !c.via; }), ta, info;
+        var sample = [1, 2, 3].map(function (i) { return cols.map(function (c) { return c.type === 'Number' ? (i * 1.5).toFixed(2) : c.type === 'Date' ? '2026-01-0' + i : c.type === 'Yes / No' ? 'Yes' : (c.type === 'Link to registry' || c.type === 'Choice') ? (optsFor(c)[i] || 'Item ' + i) : c.en + ' ' + i; }).join('\t'); }).join('\n');
+        function parse() {
+          return ta.value.split(/\r?\n/).filter(function (l) { return l.trim(); }).map(function (l, k) {
+            var cells = l.split('\t'), r = { id: tbl.code + Date.now() + '-' + k };
+            cols.forEach(function (c, i) { var s = (cells[i] || '').trim(); r[c.code] = c.type === 'Number' ? (s === '' ? '' : parseFloat(s.replace(/\s/g, '').replace(',', '.'))) : c.type === 'Yes / No' ? /^(yes|true|1|так|да)$/i.test(s) : s; });
+            return r; });
+        }
+        function upd() { var n = parse().length; info.textContent = n ? n + ' rows will be added to ' + tbl.name : 'Nothing to add yet'; }
+        E.Dialog({ id: 'pm-paste', title: 'Paste rows into ' + tbl.name, wide: true,
+          body: function (b) {
+            b.appendChild(note('Copy cells in Excel and paste them here. One line is one row. Columns are expected in this order:'));
+            b.appendChild(chips(cols.map(function (c) { return c.en; })));
+            ta = E.Textarea({ id: 'pm-paste-ta', label: 'Rows', rows: 7, hint: 'Tab-separated, as Excel copies them. A decimal comma is accepted.', onInput: upd });
+            b.appendChild(ta);
+            info = h('span', { class: 'muted', role: 'status' }, 'Nothing to add yet');
+            b.appendChild(h('div', { class: 'row between' }, info, E.Button({ label: 'Fill with an example', size: 'sm', onClick: function () { ta.value = sample; upd(); } })));
+            b.appendChild(note('Rows with missing required values are still added and marked red in the table, so you can fix them there.'));
+          },
+          footer: [{ label: 'Cancel' }, { label: 'Add rows', variant: 'primary', icon: 'plus', keepOpen: true, onClick: function (ctl) {
+            var rows = parse(); if (!rows.length) { E.Toast('Paste at least one row first', 'warning'); return false; }
+            var list = rowsOf(p, tbl); rows.forEach(function (r) { list.push(r); }); if (p.total && p.total[tbl.code]) p.total[tbl.code][0] += rows.length;
+            p.updated = TODAY; ctl.close(); later(function () { reload(ctx); E.Toast(rows.length + ' rows added', 'success'); }); } }] });
+      });
       ctx.dialog('activate-permit', function () {
         E.ConfirmDialog({ id: 'pm-activate-dlg', title: 'Activate permit ' + p.number + '?', consequences: ['Sheets bound to “' + t.name + '” start reading these limits for periods inside ' + F.date(p.start) + ' – ' + F.date(p.end) + '.', { text: 'Rows can still be edited; every edit is dated and shows in the history.', note: true }, { text: 'Two active permits of one type, number and overlapping dates are not allowed.', note: true }], verb: 'Activate', icon: 'check',
           onConfirm: function () { p.state = 'Active'; reload(ctx); } }); });
@@ -705,7 +768,7 @@
 
   /* ================= потоки ================= */
   E.flow('permits-create-fill-activate', { group: 'Permits', title: 'Add a permit, fill its tables and activate it', actor: 'Environmental specialist', steps: [
-    { label: 'Permits', href: '#/admin/permits' }, { label: 'New permit (wizard)', href: '#/admin/permits?dialog=new-permit' }, { label: 'Permit overview', href: '#/admin/permits/P-0001' }, { label: 'Table “Emission limits”', href: '#/admin/permits/P-0001?tab=AirEmissions' }, { label: 'A row in the drawer', href: '#/admin/permits/P-0001?tab=AirEmissions&panel=AirEmissions:827%7CS1' }, { label: 'Activate (draft permit)', href: '#/admin/permits/P-0004?dialog=activate-permit' }] });
+    { label: 'Permits', href: '#/admin/permits' }, { label: 'New permit (wizard)', href: '#/admin/permits?dialog=new-permit' }, { label: 'Permit overview', href: '#/admin/permits/P-0001' }, { label: 'Table “Emission limits”', href: '#/admin/permits/P-0001?tab=AirEmissions' }, { label: 'Add a row (form)', href: '#/admin/permits/P-0002?tab=WasteLimits&panel=WasteLimits:__new' }, { label: 'Paste rows from Excel', href: '#/admin/permits/P-0002?tab=WasteLimits&dialog=paste-rows' }, { label: 'Edit a row', href: '#/admin/permits/P-0002?tab=WasteLimits&panel=WasteLimits:w1' }, { label: 'Activate (draft permit)', href: '#/admin/permits/P-0004?dialog=activate-permit' }] });
   E.flow('permits-import-excel', { group: 'Permits', title: 'Import the yearly Excel report', actor: 'Environmental specialist', steps: [
     { label: 'Permits', href: '#/admin/permits' }, { label: 'Import from Excel', href: '#/admin/permits?dialog=import-permit' }] });
   E.flow('permits-wide-table', { group: 'Permits', title: 'Work with a 31-column table', actor: 'Environmental specialist', steps: [
