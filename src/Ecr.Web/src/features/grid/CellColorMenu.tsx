@@ -2,6 +2,7 @@ import { useRef, useState, type JSX } from "react";
 import { Button, Popover } from "@mantine/core";
 import { t } from "@/shared/i18n";
 import "./cellColorMenu.css";
+import { colourNameId } from "@/shared/theme/cellPalette";
 import {
   isHexColour,
   StandardColours,
@@ -175,7 +176,7 @@ function ColourButton({
             aria-label={t("grid.cellColor.theme")}
           >
             {ThemeColours.map((hex) => (
-              <Swatch key={hex} hex={hex} onChoose={choose} />
+              <Swatch key={hex} hex={hex} name={colourName(hex)} onChoose={choose} />
             ))}
           </div>
           {ThemeShades.map((row, index) => (
@@ -183,8 +184,13 @@ function ColourButton({
               key={index}
               className="ecr-cell-color-grid ecr-cell-color-shades"
             >
-              {row.map((hex) => (
-                <Swatch key={hex} hex={hex} onChoose={choose} />
+              {row.map((hex, column) => (
+                <Swatch
+                  key={hex}
+                  hex={hex}
+                  name={shadeName(ThemeColours[column], index)}
+                  onChoose={choose}
+                />
               ))}
             </div>
           ))}
@@ -198,7 +204,7 @@ function ColourButton({
             aria-label={t("grid.cellColor.standard")}
           >
             {StandardColours.map((hex) => (
-              <Swatch key={hex} hex={hex} onChoose={choose} />
+              <Swatch key={hex} hex={hex} name={colourName(hex)} onChoose={choose} />
             ))}
           </div>
 
@@ -232,11 +238,58 @@ function ColourButton({
   );
 }
 
+/**
+ * CL-23 (B-9): людська назва кольору для читалки. Літерали, а не `t(`…${hex}`)` (сторож
+ * `EndpointCoverageTests`). Невідомий hex (палітра розширилась) → `null`: зразок лишається
+ * з одним `aria-label` = hex, а не з вигаданою назвою.
+ */
+function colourName(hex: string): string | null {
+  switch (colourNameId(hex)) {
+    case "white": return t("grid.cellColor.name.white");
+    case "black": return t("grid.cellColor.name.black");
+    case "lightGray": return t("grid.cellColor.name.lightGray");
+    case "blueGray": return t("grid.cellColor.name.blueGray");
+    case "blue": return t("grid.cellColor.name.blue");
+    case "orangeHue": return t("grid.cellColor.name.orangeHue");
+    case "gray": return t("grid.cellColor.name.gray");
+    case "amber": return t("grid.cellColor.name.amber");
+    case "skyBlue": return t("grid.cellColor.name.skyBlue");
+    case "mediumGreen": return t("grid.cellColor.name.mediumGreen");
+    case "darkRed": return t("grid.cellColor.name.darkRed");
+    case "redHue": return t("grid.cellColor.name.redHue");
+    case "yellow": return t("grid.cellColor.name.yellow");
+    case "lightGreen": return t("grid.cellColor.name.lightGreen");
+    case "green": return t("grid.cellColor.name.green");
+    case "cyan": return t("grid.cellColor.name.cyan");
+    case "strongBlue": return t("grid.cellColor.name.strongBlue");
+    case "darkBlue": return t("grid.cellColor.name.darkBlue");
+    case "purple": return t("grid.cellColor.name.purple");
+    default: return null;
+  }
+}
+/** Відтінок теми: «база, світліший на 80 %» — порядок рядків той самий, що в `ThemeShades`. */
+function shadeName(base: string | undefined, row: number): string | null {
+  const name = base === undefined ? null : colourName(base);
+  if (name === null) return null;
+  const shades = [
+    t("grid.cellColor.shade.lighter80"),
+    t("grid.cellColor.shade.lighter60"),
+    t("grid.cellColor.shade.lighter40"),
+    t("grid.cellColor.shade.darker25"),
+    t("grid.cellColor.shade.darker50"),
+  ];
+  const shade = shades[row];
+  return shade === undefined ? name : t("grid.cellColor.shadeName", { name, shade });
+}
+
 function Swatch({
   hex,
+  name,
   onChoose,
 }: {
   hex: string;
+  /** Людська назва для читалки; `aria-label` лишається hex (e2e і тести шукають зразок за ним). */
+  name: string | null;
   onChoose: (hex: string) => void;
 }): JSX.Element {
   return (
@@ -246,7 +299,10 @@ function Swatch({
       // ⚠ Колір зразка — дані вибору, не тема: ставиться напряму, а не `style`-пропом (ФВ-14.11).
       ref={(node) => node?.style.setProperty("background-color", hex)}
       aria-label={hex}
-      title={hex}
+      // CL-23: ім'я (accessible name) = hex, як і було; назва кольору - опис, тож
+      // `getByRole('button', { name: '#c00000' })` у e2e не ламається.
+      {...(name === null ? {} : { "aria-description": name })}
+      title={name === null ? hex : `${name} ${hex}`}
       data-hex={hex}
       onClick={() => onChoose(hex)}
     />
