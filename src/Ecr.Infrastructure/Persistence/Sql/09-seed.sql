@@ -8284,6 +8284,62 @@ USING (VALUES
     ,(N'permits.table.sumOf', N'en', N'Σ of {count}', 1)
     ,(N'permits.table.groupCount', N'en', N'Columns: {count}', 1)
     -- PERMITS: shell ── кінець секції ──
+    -- PERMITS: types-list ── PM-08a: перелік типів пермітів і майстер «New permit type»; ru/kz — порцією PERMITS: types-list нижче ──
+    ,(N'permits.types.subtitle', N'en', N'A type says what a permit contains: which fields it has and which tables, with which columns. Add a type here and permits of that type work everywhere — no code, no release.', 1)
+    ,(N'permits.types.stats.aria', N'en', N'Permit types summary', 1)
+    ,(N'permits.types.stat.all', N'en', N'types', 1)
+    ,(N'permits.types.stat.tables', N'en', N'tables', 1)
+    ,(N'permits.types.stat.draft', N'en', N'with unpublished changes', 1)
+    ,(N'permits.types.search.label', N'en', N'Search permit types', 1)
+    ,(N'permits.types.search.placeholder', N'en', N'Type name', 1)
+    ,(N'permits.types.filter.category', N'en', N'Categories', 1)
+    ,(N'permits.category.Air', N'en', N'Air', 1)
+    ,(N'permits.category.Water', N'en', N'Water', 1)
+    ,(N'permits.category.Waste', N'en', N'Waste', 1)
+    ,(N'permits.category.Other', N'en', N'Other', 1)
+    ,(N'permits.types.col.type', N'en', N'Type', 1)
+    ,(N'permits.types.col.category', N'en', N'Category', 1)
+    ,(N'permits.types.col.tables', N'en', N'Tables', 1)
+    ,(N'permits.types.col.permits', N'en', N'Permits', 1)
+    ,(N'permits.types.col.updated', N'en', N'Updated', 1)
+    ,(N'permits.types.col.state', N'en', N'State', 1)
+    ,(N'permits.types.state.published', N'en', N'v{version}', 1)
+    ,(N'permits.types.state.draft', N'en', N'Draft changes', 1)
+    ,(N'permits.types.noMatches', N'en', N'No permit types match the filters', 1)
+    ,(N'permits.types.wizard.title', N'en', N'New permit type', 1)
+    ,(N'permits.types.wizard.basics', N'en', N'Basics', 1)
+    ,(N'permits.types.wizard.basicsHint', N'en', N'Name the kind of permit the way your team says it.', 1)
+    ,(N'permits.types.wizard.name', N'en', N'Name', 1)
+    ,(N'permits.types.wizard.namePlaceholder', N'en', N'Noise permit', 1)
+    ,(N'permits.types.wizard.code', N'en', N'Code: {code}', 1)
+    ,(N'permits.types.wizard.category', N'en', N'Category', 1)
+    ,(N'permits.types.wizard.categoryHint', N'en', N'Used to group types in lists and reports.', 1)
+    ,(N'permits.types.wizard.start', N'en', N'Start from', 1)
+    ,(N'permits.types.wizard.startBlank', N'en', N'An empty type', 1)
+    ,(N'permits.types.wizard.startCopy', N'en', N'A copy of “{name}”', 1)
+    ,(N'permits.types.wizard.nameRequired', N'en', N'Enter a name', 1)
+    ,(N'permits.types.wizard.nameRequiredText', N'en', N'A type needs a name.', 1)
+    ,(N'permits.types.wizard.nameTaken', N'en', N'A type with this name exists', 1)
+    ,(N'permits.types.wizard.nameTakenText', N'en', N'Choose another name.', 1)
+    ,(N'permits.types.wizard.codeInvalid', N'en', N'Start with a Latin letter', 1)
+    ,(N'permits.types.wizard.codeInvalidText', N'en', N'The code is made from the name, so the name needs Latin letters and digits and must start with a letter.', 1)
+    ,(N'permits.types.wizard.codeTaken', N'en', N'A type with this code exists', 1)
+    ,(N'permits.types.wizard.codeTakenText', N'en', N'Another type already uses the code {code}. Change the name.', 1)
+    ,(N'permits.types.wizard.sumName', N'en', N'Name', 1)
+    ,(N'permits.types.wizard.sumCategory', N'en', N'Category', 1)
+    ,(N'permits.types.wizard.sumFields', N'en', N'Fields', 1)
+    ,(N'permits.types.wizard.sumStarts', N'en', N'Starts as', 1)
+    ,(N'permits.types.wizard.sumStartsValue', N'en', N'Draft — no permits can be entered until it is published', 1)
+    ,(N'permits.types.wizard.fieldNumber', N'en', N'Permit number', 1)
+    ,(N'permits.types.wizard.fieldLocation', N'en', N'Location', 1)
+    ,(N'permits.types.wizard.fieldIssued', N'en', N'Issue date', 1)
+    ,(N'permits.types.wizard.fieldValidFrom', N'en', N'Valid from', 1)
+    ,(N'permits.types.wizard.fieldValidTo', N'en', N'Valid to', 1)
+    ,(N'permits.types.wizard.fieldActualEnd', N'en', N'Actual end', 1)
+    ,(N'permits.types.wizard.review', N'en', N'Every type has the same permit header. Tables and extra fields are added next.', 1)
+    ,(N'permits.types.wizard.apply', N'en', N'Create type', 1)
+    ,(N'permits.types.created', N'en', N'Type created — add tables, then publish', 1)
+    -- PERMITS: types-list ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -21001,6 +21057,123 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: permits ── ECR-PRM-4092 ── ru/kz ── кінець секції ──
+
+-- PERMITS: types-list ── ru/kz: PM-08a, перелік типів пермітів і майстер; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.types.subtitle', N'ru', N'Тип описывает, что входит в разрешение: какие у него поля и какие таблицы с какими столбцами. Добавьте тип здесь — и разрешения этого типа заработают везде: без кода и без релиза.'),
+    (N'permits.types.subtitle', N'kz', N'Түр рұқсатта не бар екенін сипаттайды: қандай өрістер және қандай бағандары бар қандай кестелер. Түрді осында қосыңыз — және осы түрдегі рұқсаттар барлық жерде жұмыс істейді: кодсыз, релизсіз.'),
+    (N'permits.types.stats.aria', N'ru', N'Сводка по типам разрешений'),
+    (N'permits.types.stats.aria', N'kz', N'Рұқсат түрлерінің жиынтығы'),
+    (N'permits.types.stat.all', N'ru', N'типов'),
+    (N'permits.types.stat.all', N'kz', N'түр'),
+    (N'permits.types.stat.tables', N'ru', N'таблиц'),
+    (N'permits.types.stat.tables', N'kz', N'кесте'),
+    (N'permits.types.stat.draft', N'ru', N'с неопубликованными изменениями'),
+    (N'permits.types.stat.draft', N'kz', N'жарияланбаған өзгерістермен'),
+    (N'permits.types.search.label', N'ru', N'Поиск по типам разрешений'),
+    (N'permits.types.search.label', N'kz', N'Рұқсат түрлерін іздеу'),
+    (N'permits.types.search.placeholder', N'ru', N'Название типа'),
+    (N'permits.types.search.placeholder', N'kz', N'Түр атауы'),
+    (N'permits.types.filter.category', N'ru', N'Категории'),
+    (N'permits.types.filter.category', N'kz', N'Санаттар'),
+    (N'permits.category.Air', N'ru', N'Воздух'),
+    (N'permits.category.Air', N'kz', N'Ауа'),
+    (N'permits.category.Water', N'ru', N'Вода'),
+    (N'permits.category.Water', N'kz', N'Су'),
+    (N'permits.category.Waste', N'ru', N'Отходы'),
+    (N'permits.category.Waste', N'kz', N'Қалдықтар'),
+    (N'permits.category.Other', N'ru', N'Другое'),
+    (N'permits.category.Other', N'kz', N'Басқа'),
+    (N'permits.types.col.type', N'ru', N'Тип'),
+    (N'permits.types.col.type', N'kz', N'Түр'),
+    (N'permits.types.col.category', N'ru', N'Категория'),
+    (N'permits.types.col.category', N'kz', N'Санат'),
+    (N'permits.types.col.tables', N'ru', N'Таблицы'),
+    (N'permits.types.col.tables', N'kz', N'Кестелер'),
+    (N'permits.types.col.permits', N'ru', N'Разрешений'),
+    (N'permits.types.col.permits', N'kz', N'Рұқсаттар'),
+    (N'permits.types.col.updated', N'ru', N'Обновлено'),
+    (N'permits.types.col.updated', N'kz', N'Жаңартылған'),
+    (N'permits.types.col.state', N'ru', N'Состояние'),
+    (N'permits.types.col.state', N'kz', N'Күйі'),
+    (N'permits.types.state.published', N'ru', N'v{version}'),
+    (N'permits.types.state.published', N'kz', N'v{version}'),
+    (N'permits.types.state.draft', N'ru', N'Черновые изменения'),
+    (N'permits.types.state.draft', N'kz', N'Жоба өзгерістері'),
+    (N'permits.types.noMatches', N'ru', N'Нет типов разрешений, подходящих под фильтры'),
+    (N'permits.types.noMatches', N'kz', N'Сүзгілерге сәйкес рұқсат түрлері жоқ'),
+    (N'permits.types.wizard.title', N'ru', N'Новый тип разрешения'),
+    (N'permits.types.wizard.title', N'kz', N'Жаңа рұқсат түрі'),
+    (N'permits.types.wizard.basics', N'ru', N'Основное'),
+    (N'permits.types.wizard.basics', N'kz', N'Негізгі'),
+    (N'permits.types.wizard.basicsHint', N'ru', N'Назовите вид разрешения так, как его называет ваша команда.'),
+    (N'permits.types.wizard.basicsHint', N'kz', N'Рұқсат түрін тобыңыз атайтындай атаңыз.'),
+    (N'permits.types.wizard.name', N'ru', N'Название'),
+    (N'permits.types.wizard.name', N'kz', N'Атауы'),
+    (N'permits.types.wizard.namePlaceholder', N'ru', N'Разрешение на шум'),
+    (N'permits.types.wizard.namePlaceholder', N'kz', N'Шуға рұқсат'),
+    (N'permits.types.wizard.code', N'ru', N'Код: {code}'),
+    (N'permits.types.wizard.code', N'kz', N'Коды: {code}'),
+    (N'permits.types.wizard.category', N'ru', N'Категория'),
+    (N'permits.types.wizard.category', N'kz', N'Санат'),
+    (N'permits.types.wizard.categoryHint', N'ru', N'Нужна, чтобы группировать типы в списках и отчётах.'),
+    (N'permits.types.wizard.categoryHint', N'kz', N'Түрлерді тізімдерде және есептерде топтау үшін.'),
+    (N'permits.types.wizard.start', N'ru', N'Начать с'),
+    (N'permits.types.wizard.start', N'kz', N'Бастау нұсқасы'),
+    (N'permits.types.wizard.startBlank', N'ru', N'Пустой тип'),
+    (N'permits.types.wizard.startBlank', N'kz', N'Бос түр'),
+    (N'permits.types.wizard.startCopy', N'ru', N'Копия «{name}»'),
+    (N'permits.types.wizard.startCopy', N'kz', N'«{name}» көшірмесі'),
+    (N'permits.types.wizard.nameRequired', N'ru', N'Введите название'),
+    (N'permits.types.wizard.nameRequired', N'kz', N'Атауын енгізіңіз'),
+    (N'permits.types.wizard.nameRequiredText', N'ru', N'Типу нужно название.'),
+    (N'permits.types.wizard.nameRequiredText', N'kz', N'Түрге атау қажет.'),
+    (N'permits.types.wizard.nameTaken', N'ru', N'Тип с таким названием уже есть'),
+    (N'permits.types.wizard.nameTaken', N'kz', N'Мұндай атаулы түр бар'),
+    (N'permits.types.wizard.nameTakenText', N'ru', N'Выберите другое название.'),
+    (N'permits.types.wizard.nameTakenText', N'kz', N'Басқа атау таңдаңыз.'),
+    (N'permits.types.wizard.codeInvalid', N'ru', N'Начните с латинской буквы'),
+    (N'permits.types.wizard.codeInvalid', N'kz', N'Латын әрпінен бастаңыз'),
+    (N'permits.types.wizard.codeInvalidText', N'ru', N'Код строится из названия, поэтому в названии нужны латинские буквы и цифры, а начинаться оно должно с буквы.'),
+    (N'permits.types.wizard.codeInvalidText', N'kz', N'Код атаудан жасалады, сондықтан атауда латын әріптері мен сандар болуы керек және ол әріптен басталуы тиіс.'),
+    (N'permits.types.wizard.codeTaken', N'ru', N'Тип с таким кодом уже есть'),
+    (N'permits.types.wizard.codeTaken', N'kz', N'Мұндай кодты түр бар'),
+    (N'permits.types.wizard.codeTakenText', N'ru', N'Код {code} уже занят другим типом. Измените название.'),
+    (N'permits.types.wizard.codeTakenText', N'kz', N'{code} кодын басқа түр алған. Атауын өзгертіңіз.'),
+    (N'permits.types.wizard.sumName', N'ru', N'Название'),
+    (N'permits.types.wizard.sumName', N'kz', N'Атауы'),
+    (N'permits.types.wizard.sumCategory', N'ru', N'Категория'),
+    (N'permits.types.wizard.sumCategory', N'kz', N'Санат'),
+    (N'permits.types.wizard.sumFields', N'ru', N'Поля'),
+    (N'permits.types.wizard.sumFields', N'kz', N'Өрістер'),
+    (N'permits.types.wizard.sumStarts', N'ru', N'Начинает как'),
+    (N'permits.types.wizard.sumStarts', N'kz', N'Бастапқы күйі'),
+    (N'permits.types.wizard.sumStartsValue', N'ru', N'Черновик — разрешения вносить нельзя, пока тип не опубликован'),
+    (N'permits.types.wizard.sumStartsValue', N'kz', N'Жоба — түр жарияланғанша рұқсаттарды енгізуге болмайды'),
+    (N'permits.types.wizard.fieldNumber', N'ru', N'Номер разрешения'),
+    (N'permits.types.wizard.fieldNumber', N'kz', N'Рұқсат нөмірі'),
+    (N'permits.types.wizard.fieldLocation', N'ru', N'Местоположение'),
+    (N'permits.types.wizard.fieldLocation', N'kz', N'Орналасқан жері'),
+    (N'permits.types.wizard.fieldIssued', N'ru', N'Дата выдачи'),
+    (N'permits.types.wizard.fieldIssued', N'kz', N'Берілген күні'),
+    (N'permits.types.wizard.fieldValidFrom', N'ru', N'Действует с'),
+    (N'permits.types.wizard.fieldValidFrom', N'kz', N'Бастап жарамды'),
+    (N'permits.types.wizard.fieldValidTo', N'ru', N'Действует по'),
+    (N'permits.types.wizard.fieldValidTo', N'kz', N'Дейін жарамды'),
+    (N'permits.types.wizard.fieldActualEnd', N'ru', N'Фактическое окончание'),
+    (N'permits.types.wizard.fieldActualEnd', N'kz', N'Нақты аяқталуы'),
+    (N'permits.types.wizard.review', N'ru', N'У каждого типа одна и та же шапка разрешения. Таблицы и дополнительные поля добавляются дальше.'),
+    (N'permits.types.wizard.review', N'kz', N'Әр түрдің рұқсат тақырыбы бірдей. Кестелер мен қосымша өрістер кейін қосылады.'),
+    (N'permits.types.wizard.apply', N'ru', N'Создать тип'),
+    (N'permits.types.wizard.apply', N'kz', N'Түр жасау'),
+    (N'permits.types.created', N'ru', N'Тип создан — добавьте таблицы и опубликуйте'),
+    (N'permits.types.created', N'kz', N'Түр жасалды — кестелерді қосып, жариялаңыз')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: types-list ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
