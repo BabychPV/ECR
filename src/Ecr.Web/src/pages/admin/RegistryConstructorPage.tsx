@@ -9,6 +9,7 @@ import type {
   RegistryDefinitionDto,
   RegistryHistoryEntryDto,
   SaveRegistryDefinitionDto,
+  UnitRef,
   UserPage,
 } from '@/api/types';
 import {
@@ -29,6 +30,7 @@ import {
   emptyRule,
   isComplete,
   isFieldComplete,
+  NumericFieldTypes,
   toDraft,
   type FieldDraft,
   type RuleDraft,
@@ -174,6 +176,34 @@ export function RegistryConstructorPage(): JSX.Element {
     [registries.data],
   );
 
+  // Скільки живих записів у довіднику: за нулем нове поле може бути обов'язковим (сервер:
+  // `newFieldsMayBeRequired`). Невідомо (перелік ще їде чи не прочитався) — не дозволяємо.
+  const entryCount = (registries.data ?? []).find((r) => r.id === definition.data?.id)?.entryCount ?? null;
+
+  /**
+   * Одиниці виміру — для вибору одиниці числового поля і для підпису одиниць наявних полів назвою.
+   * Той самий ключ і запит, що й `templates/ColumnEditor.tsx`. ⚠ Вмикається лише коли вони потрібні,
+   * щоб сторінка без числових полів не робила зайвого запиту.
+   */
+  const needsUnits =
+    newFields.some((field) => NumericFieldTypes.includes(field.dataType)) ||
+    (definition.data?.fields ?? []).some((field) => field.unitId !== null);
+  const units = useQuery({
+    queryKey: ['units'],
+    queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
+    staleTime: 60 * 60 * 1000,
+    enabled: needsUnits,
+  });
+
+  const unitOptions = useMemo(
+    () =>
+      (units.data ?? []).map((unit) => ({
+        value: String(unit.id),
+        label: `${unit.code} (${unit.dimensionCode})`,
+      })),
+    [units.data],
+  );
+
   /** Останнє успішне збереження чернетки (тіло й версія), доки його не спожив засів форми (L9-39). */
   const sentDraft = useRef<{ body: SaveRegistryDraftBody; rowVersion: string } | null>(null);
   const latestRequest = useRef<SaveRegistryDefinitionDto | null>(null);
@@ -236,7 +266,9 @@ export function RegistryConstructorPage(): JSX.Element {
   const mayView = can(session.data, 'Registry.EditDefinition');
   const mayEdit = mayView && session.data?.isSimulation !== true;
   const ready =
-    rules.every(isComplete) && newFields.every(isFieldComplete) && reason.trim().length > 0;
+    rules.every(isComplete) &&
+    newFields.every((field) => isFieldComplete(field, entryCount === 0)) &&
+    reason.trim().length > 0;
 
   /**
    * Повний стан форми для збереження чернетки; `null` — ще не готовий.
@@ -333,11 +365,17 @@ export function RegistryConstructorPage(): JSX.Element {
                   <ErrorAlert error={registries.error} onRetry={() => void registries.refetch()} />
                 )}
 
+                {units.error !== null && (
+                  <ErrorAlert error={units.error} onRetry={() => void units.refetch()} />
+                )}
+
                 <RegistryFields
                   definition={loaded}
                   canEdit={mayEdit}
                   newFields={newFields}
                   registryOptions={registryOptions}
+                  unitOptions={unitOptions}
+                  entryCount={entryCount}
                   onAddField={() => setNewFields((all) => [...all, emptyField()])}
                   onChangeField={(index, field) =>
                     setNewFields((all) => all.map((item, i) => (i === index ? field : item)))

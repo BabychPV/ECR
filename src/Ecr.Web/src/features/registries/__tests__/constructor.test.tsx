@@ -520,11 +520,12 @@ describe('Збереження опису довідника', () => {
     // інакше нове поле посперечалося б за позицію з наявним.
     expect(added.ordinal).toBe(4);
 
-    // ⛔ Мутаційна проба: нове поле НІКОЛИ не йде обов'язковим — сервер це й
-    // так відхилив би (`ECR-REG-0422`, наявні записи його ще не мають), і
-    // якщо колись хтось почне брати `isRequired` із чогось іншого, ніж
-    // жорстке `false`, саме це поле в цій самій перевірці й зловить регрес.
+    // ⛔ Обов'язковість іде з чернетки, а не жорстким `false`: сервер приймає обов'язкове нове
+    // поле, коли записів немає (`newFieldsMayBeRequired`). Мутаційна проба: повернути `false`
+    // у `buildSaveRequest` — друга половина тесту (isRequired: true) падає.
     expect(added.isRequired).toBe(false);
+    const required = buildSaveRequest(Definition, [], [{ ...draft, isRequired: true }], 'нове поле', 'en');
+    expect(required.fields.at(-1)!.isRequired).toBe(true);
 
     expect(added.unitId).toBe(9);
 
@@ -571,6 +572,10 @@ describe('Збереження опису довідника', () => {
     expect(isFieldComplete(emptyField())).toBe(false);
     expect(isFieldComplete({ ...emptyField(), code: 'A' })).toBe(false);
     expect(isFieldComplete({ ...emptyField(), code: 'A', name: 'A' })).toBe(true);
+
+    // Обов'язкове нове поле при наявних записях сервер відхилить — форма не пускає збереження.
+    expect(isFieldComplete({ ...emptyField(), code: 'A', name: 'A', isRequired: true }, false)).toBe(false);
+    expect(isFieldComplete({ ...emptyField(), code: 'A', name: 'A', isRequired: true }, true)).toBe(true);
 
     expect(isFieldComplete({ ...emptyField('Lookup'), code: 'A', name: 'A' })).toBe(false);
     expect(
