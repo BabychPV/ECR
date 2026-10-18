@@ -303,6 +303,8 @@ public static class DependencyInjection
 
         // PERMITS: permits — екземпляри дозволів і життєвий цикл (PM-04)
         services.AddScoped<Permits.CreatePermitHandler>();
+        services.AddScoped<Permits.GetPermitHandler>();
+        services.AddScoped<Permits.ListPermitsHandler>();
 
         // RT: expressions
 

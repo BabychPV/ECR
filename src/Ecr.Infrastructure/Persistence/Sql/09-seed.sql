@@ -8215,6 +8215,10 @@ USING (VALUES
     ,(N'permission.Permit.EditType', N'en', N'Edit permit types', 1)
     ,(N'permission.Permit.PublishType', N'en', N'Publish permit types', 1)
     -- PERMITS: permissions ── en ── кінець секції ──
+    -- PERMITS: permits ── en: читання дозволів — фільтри переліку (PM-04) ──
+    ,(N'err.ECR-PRM-0422.statusUnknown', N'en', N'The status "{status}" does not exist. Use Draft, Active or Expired.', 1)
+    ,(N'err.ECR-PRM-0422.cursorInvalid', N'en', N'The page cursor of the permit list is not valid. Start from the first page.', 1)
+    -- PERMITS: permits ── читання ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -20775,6 +20779,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: permissions ── ru/kz ── кінець секції ──
+
+-- PERMITS: permits ── ru/kz: читання дозволів — фільтри переліку; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-0422.statusUnknown', N'ru', N'Статуса «{status}» не существует. Используйте Draft, Active или Expired.'),
+    (N'err.ECR-PRM-0422.statusUnknown', N'kz', N'«{status}» күйі жоқ. Draft, Active немесе Expired қолданыңыз.'),
+    (N'err.ECR-PRM-0422.cursorInvalid', N'ru', N'Курсор страницы списка разрешений некорректен. Начните с первой страницы.'),
+    (N'err.ECR-PRM-0422.cursorInvalid', N'kz', N'Рұқсаттар тізімі бетінің курсоры жарамсыз. Бірінші беттен бастаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: permits ── читання ── ru/kz ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

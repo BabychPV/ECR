@@ -24,6 +24,25 @@ internal static class PermitErrors
                 ["id"] = permitId.ToString(CultureInfo.InvariantCulture),
             });
 
+    /// <summary><c>422 ECR-PRM-0422 statusUnknown</c>: фільтр за станом, якого немає.</summary>
+    /// <param name="status">Стан з запиту.</param>
+    internal static BusinessRuleException StatusUnknown(string status)
+        => new(
+            ErrorCodes.PermitTypeInvalid,
+            $"Стану «{status}» немає: Draft, Active або Expired.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-0422.statusUnknown",
+                ["status"] = status,
+            });
+
+    /// <summary><c>422 ECR-PRM-0422 cursorInvalid</c>: курсор не з цього переліку.</summary>
+    internal static BusinessRuleException CursorInvalid()
+        => new(
+            ErrorCodes.PermitTypeInvalid,
+            "Курсор переліку дозволів не розібрано.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRM-0422.cursorInvalid" });
+
     /// <summary><c>422 ECR-PRM-0422 validityOrder</c>: кінець не пізніший за початок.</summary>
     /// <param name="from">Початок.</param>
     /// <param name="to">Кінець.</param>

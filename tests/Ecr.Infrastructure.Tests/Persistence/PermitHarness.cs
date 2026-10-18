@@ -70,6 +70,8 @@ internal sealed class PermitHarness : IAsyncDisposable
         RowsQuery = new RegistryRowsQuery(Db);
         Stats = new PermitStore(Db);
         CreatePermit = new CreatePermitHandler(Permits, Registries, RowsQuery, Stats, Writer, Uow, access, user, clock);
+        GetPermit = new GetPermitHandler(Permits, Registries, RowsQuery, Stats, access, user, clock);
+        ListPermits = new ListPermitsHandler(Permits, Registries, RowsQuery, Stats, access, user, clock);
 
         Access = access;
         User = user;
@@ -125,6 +127,10 @@ internal sealed class PermitHarness : IAsyncDisposable
     public PermitStore Stats { get; }
 
     public CreatePermitHandler CreatePermit { get; }
+
+    public GetPermitHandler GetPermit { get; }
+
+    public ListPermitsHandler ListPermits { get; }
 
     /// <summary>Права, потрібні для ведення дозволів: читати й писати дані реєстрів.</summary>
     public static string[] Editor => ["Registry.View", "Registry.EditData"];
