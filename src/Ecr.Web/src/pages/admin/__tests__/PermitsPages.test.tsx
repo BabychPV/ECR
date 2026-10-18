@@ -9,10 +9,10 @@ import { PermitListsPage } from '../PermitListsPage';
 import { PermitPage } from '../PermitPage';
 import { PermitsPage } from '../PermitsPage';
 import { PermitTypeEditorPage } from '../PermitTypeEditorPage';
-import { PermitTypesPage } from '../PermitTypesPage';
 import { PageDescriptionContext } from '@/shared/ui/pageDescription';
 
 /**
+ * (Перелік типів — справжня сторінка PM-08a, її тести: `features/permits/types/__tests__/PermitTypesPage.test.tsx`.)
  * Сторінки-каркаси Permits (PM-06): заголовок, смуга розділів, чесний порожній стан, недоступні дії
  * з поясненням і жодного запиту до мережі (ендпоінтів ще немає).
  */
@@ -45,7 +45,6 @@ function showAt(path: string, route: string, element: ReactElement, descriptionK
 
 const sectionPages = [
   ['/admin/permits', <PermitsPage key="a" />, 'text of nav.permits', 'text of permits.empty.title', ['text of permits.empty.new', 'text of permits.empty.import'], 0],
-  ['/admin/permits/types', <PermitTypesPage key="b" />, 'text of permits.types.title', 'text of permits.types.empty.title', ['text of permits.types.new'], 1],
   ['/admin/permits/lists', <PermitListsPage key="c" />, 'text of permits.lists.title', 'text of permits.lists.empty.title', [], 2],
   ['/admin/permits/bindings', <PermitBindingsPage key="d" />, 'text of permits.bindings.title', 'text of permits.bindings.empty.title', ['text of permits.bindings.new'], 3],
 ] as const;

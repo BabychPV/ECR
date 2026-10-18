@@ -11,3 +11,8 @@ export const PermitsPaths = {
   lists: '/admin/permits/lists',
   bindings: '/admin/permits/bindings',
 } as const;
+
+/** Адреса редактора типу за кодом (код — літери, цифри й `_`, але кодується про всяк випадок). */
+export function typeEditorPath(code: string): string {
+  return `${PermitsPaths.types}/${encodeURIComponent(code)}`;
+}
