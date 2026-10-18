@@ -6,7 +6,7 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 
 /// <summary>
 /// Зовнішні ключі таблиць Permits існують, увімкнені й без каскаду. <see cref="PermitConstraintsTests"/>
-/// вимикає 13 із 14 FK у своїй транзакції, тож самі ключі там не перевіряються.
+/// вимикає 14 із 15 FK у своїй транзакції, тож самі ключі там не перевіряються.
 /// </summary>
 [Collection("SqlServer")]
 public sealed class PermitForeignKeysTests(SqlServerFixture sql)
@@ -16,6 +16,7 @@ public sealed class PermitForeignKeysTests(SqlServerFixture sql)
     [
         ("FK_PermitType_HeaderReg", "cfg.PermitTypeDef", "cfg.RegistryDef"),
         ("FK_PermitType_PublishedBy", "cfg.PermitTypeDef", "sec.User"),
+        ("FK_PermitType_UpdatedBy", "cfg.PermitTypeDef", "sec.User"),
         ("FK_PermitTypeTable_Type", "cfg.PermitTypeTable", "cfg.PermitTypeDef"),
         ("FK_PermitTypeTable_Reg", "cfg.PermitTypeTable", "cfg.RegistryDef"),
         ("FK_PermitField_Field", "cfg.PermitFieldMeta", "cfg.RegistryFieldDef"),

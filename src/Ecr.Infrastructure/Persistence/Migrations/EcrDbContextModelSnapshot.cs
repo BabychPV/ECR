@@ -1480,6 +1480,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<string>("DraftJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int>("HeaderRegistryDefId")
                         .HasColumnType("int");
 
@@ -1502,6 +1505,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<byte>("Status")
                         .HasColumnType("tinyint")
                         .HasDefaultValueSql("0", "DF_PermitType_Status");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("int");
 
                     b.Property<int>("Version")
                         .HasColumnType("int")
@@ -6498,6 +6507,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasForeignKey("PublishedByUserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("FK_PermitType_PublishedBy");
+
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("UpdatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_PermitType_UpdatedBy");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PermitTypeTable", b =>
