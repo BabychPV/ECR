@@ -8562,6 +8562,9 @@ USING (VALUES
     ,(N'permits.editor.deleteTable.referenced', N'en', N'The table "{name}" is the source of a list in {columns}. Change those columns first.', 1)
     ,(N'permits.editor.dialogs.unsaved', N'en', N'The latest changes could not be saved, so nothing was sent. Fix the problems on the Structure tab or reload the type, then try again.', 1)
     -- PERMITS: ui-wiring ── кінець секції ──
+    -- PERMITS: audit-fixes ── аудит ч.1: причина вимкненої «Publish…» без права; ru/kz — порцією PERMITS: audit-fixes нижче ──
+    ,(N'permits.editor.actions.publishNoRight', N'en', N'Publishing permit types needs the publish right. Ask an administrator to grant it.', 1)
+    -- PERMITS: audit-fixes ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -21855,6 +21858,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: ui-wiring ── кінець секції ──
+-- PERMITS: audit-fixes ── ru/kz: аудит ч.1, причина вимкненої «Publish…» без права; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.editor.actions.publishNoRight', N'ru', N'Для публикации типов разрешений нужно право на публикацию. Попросите администратора выдать его.'),
+    (N'permits.editor.actions.publishNoRight', N'kz', N'Рұқсат түрлерін жариялау үшін жариялау құқығы қажет. Әкімшіден оны беруді сұраңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: audit-fixes ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
