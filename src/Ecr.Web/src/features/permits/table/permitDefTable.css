@@ -1,0 +1,168 @@
+/*
+ * Широка таблиця перміта (PM-06). Макет: `docs/design/permits/screens-permits.js`
+ * (`.pm-tw`, `.pm-t`, `.pm-grp`, `.pm-first`). Дві липкі смуги шапки, липкий перший стовпець,
+ * липкий підсумковий рядок. Кольори — лише токени теми (`ФВ-14.11`).
+ */
+.pm-tw {
+  position: relative;
+  overflow: auto;
+  max-height: min(70vh, 640px);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-body);
+}
+
+.pm-tw:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
+
+.pm-t {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--mantine-font-size-sm);
+}
+
+.pm-t th,
+.pm-t td {
+  padding: 6px var(--mantine-spacing-sm);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-body);
+  text-align: start;
+  white-space: nowrap;
+  font-weight: 400;
+}
+
+.pm-t .num {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Шапка: рядок груп (1) і рядок стовпців (2). Обидва липнуть до верху. */
+.pm-t thead th,
+.pm-t thead td {
+  position: sticky;
+  z-index: 2;
+  font-weight: 600;
+}
+
+.pm-t thead tr.pm-grp > * {
+  top: 0;
+  height: 30px;
+}
+
+.pm-t thead tr.pm-cols > * {
+  top: var(--pm-grp-height, 30px);
+}
+
+.pm-t thead tr.pm-cols:first-child > * {
+  top: 0;
+}
+
+.pm-gbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  padding: 2px var(--mantine-spacing-xs);
+  border: 0;
+  border-radius: var(--mantine-radius-xs);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pm-gbtn:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.pm-gbtn:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 1px;
+}
+
+.pm-gbtn svg {
+  flex: none;
+  transition: transform 120ms ease;
+}
+
+.pm-gbtn[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+
+.pm-faint {
+  color: var(--mantine-color-dimmed);
+  font-weight: 400;
+}
+
+/* Перший стовпець липне зліва; у перетині з липкою шапкою — вище за всіх. */
+.pm-t .pm-first {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  border-inline-end: 1px solid var(--mantine-color-default-border);
+  font-weight: 500;
+}
+
+.pm-t thead .pm-first {
+  z-index: 3;
+}
+
+.pm-t tbody tr[data-clickable] {
+  cursor: pointer;
+}
+
+.pm-t tbody tr[data-clickable]:hover > *,
+.pm-t tbody tr[data-clickable]:focus-visible > * {
+  background-color: var(--mantine-color-default-hover);
+}
+
+.pm-t tbody tr[data-clickable]:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
+
+/* Значення, що читається зі звʼязаного запису, а не вводиться. */
+.pm-t :is(td, th).pm-derived {
+  color: var(--mantine-color-dimmed);
+  font-style: italic;
+}
+
+/* Обовʼязкове порожнє: колір і слово «Required» (колір не єдиний носій). */
+.pm-t :is(td, th).pm-bad {
+  background: var(--ecr-danger-soft);
+  color: var(--ecr-danger);
+}
+
+/* Попередження: тло плюс повідомлення для читалки. */
+.pm-t :is(td, th).pm-warn {
+  background: var(--ecr-warning-soft);
+  box-shadow: inset 0 0 0 1px var(--ecr-warning);
+}
+
+/* Підсумки липнуть до низу. */
+.pm-t tfoot td,
+.pm-t tfoot th {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  border-top: 1px solid var(--mantine-color-default-border);
+  border-bottom: 0;
+  font-weight: 600;
+}
+
+.pm-t tfoot .pm-first {
+  z-index: 3;
+}
+
+.pm-table-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-sm);
+  margin-bottom: var(--mantine-spacing-xs);
+}
