@@ -80,6 +80,14 @@ public sealed class UpdatePermitHandler(
             throw PermitErrors.Duplicate(type.Code, number, request.ValidFrom, twin.Entry.Id);
         }
 
+        // Чинний дозвіл тримає ключ: зміна номера чи вікна не має перетнути інший чинний дозвіл того самого номера (4092).
+        // Чернетка ключ не тримає, її вікно звіряє активація.
+        if (current.Entry.IsActive
+            && PermitLifecycle.ActiveOverlap(all, permitId, number, new ValidityWindow(request.ValidFrom, request.ValidTo)) is { } other)
+        {
+            throw PermitErrors.Overlap(permitId, other.Entry.Id, number);
+        }
+
         var values = PermitInput.HeaderValues(number, location, request.IssueDate, request.ActualEnd, request.ReportingFlags, clearEmpty: true);
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
@@ -98,7 +106,16 @@ public sealed class UpdatePermitHandler(
             }
 
             entry.Rename(new LocalizedText(MergedName(entry.DisplayL10n, number)));
-            await writer.SaveEntryAsync(view.Header, entry, changes, userId, innerCt).ConfigureAwait(false);
+            try
+            {
+                await writer.SaveEntryAsync(view.Header, entry, changes, userId, innerCt).ConfigureAwait(false);
+            }
+            catch (BusinessRuleException ex) when (ex.ErrorCode == Ecr.Domain.Errors.ErrorCodes.RegistryKeyConflict)
+            {
+                // Гонка з паралельною зміною чи активацією між звіркою вище й записом ключа - та сама відмова.
+                var otherId = long.TryParse(ex.Details?.GetValueOrDefault("entryId") as string, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id) ? id : 0;
+                throw PermitErrors.Overlap(permitId, otherId, number);
+            }
 
             if (ruleEngine is not null)
             {

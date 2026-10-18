@@ -917,4 +917,11 @@ public static class ErrorCodes
     /// </summary>
     /// <remarks>⚠ <c>ConcurrencyConflictException</c> - 409 за типом, власного арма в middleware не потрібно.</remarks>
     public const string PermitStateConflict = "ECR-PRM-4096";
+
+    /// <summary>
+    /// Чинний дозвіл із тим самим типом і номером уже діє в частині цього вікна (<c>ECR-PRM-4092</c>, <c>overlap</c>):
+    /// півінтервали <c>[ValidFrom, ValidTo)</c> перетинаються. Перевіряється при активації та зміні чинного дозволу.
+    /// </summary>
+    /// <remarks>⚠ <c>ConcurrencyConflictException</c> - 409 за типом, власного арма в middleware не потрібно.</remarks>
+    public const string PermitOverlap = "ECR-PRM-4092";
 }

@@ -54,6 +54,21 @@ public static class PermitLifecycle
     /// <param name="b">Друге вікно.</param>
     public static bool Overlaps(ValidityWindow a, ValidityWindow b) => Registries.Keys.RegistryKeyService.Overlaps(a, b);
 
+    /// <summary>
+    /// Інший ЧИННИЙ (активований) дозвіл того самого номера, вікно якого перетинає <paramref name="window"/>; чернетки не
+    /// рахуються (R2).
+    /// </summary>
+    /// <param name="all">Усі шапки типу.</param>
+    /// <param name="selfId">Дозвіл, який перевіряють (його самого пропустити).</param>
+    /// <param name="number">Номер.</param>
+    /// <param name="window">Вікно, яке мало б діяти.</param>
+    internal static PermitHeader? ActiveOverlap(IReadOnlyList<PermitHeader> all, long selfId, string number, ValidityWindow window)
+        => all.FirstOrDefault(h =>
+            h.Entry.Id != selfId
+            && h.Entry.IsActive
+            && string.Equals(h.Number, number, StringComparison.OrdinalIgnoreCase)
+            && Overlaps(h.Entry.Window, window));
+
     /// <summary>Раніша з двох дат закінчення.</summary>
     private static DateOnly? EndOf(DateOnly? validTo, DateOnly? actualEnd)
         => (validTo, actualEnd) switch

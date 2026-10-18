@@ -8223,9 +8223,18 @@ USING (VALUES
     ,(N'err.ECR-PRM-4096', N'en', N'Permit state does not allow this', 1)
     ,(N'err.ECR-PRM-4096.changed', N'en', N'The permit {id} was changed after you opened it. Reload it and repeat your edit.', 1)
     ,(N'err.ECR-PRM-4096.notEditable', N'en', N'The permit {id} has expired and can no longer be edited.', 1)
-    ,(N'err.ECR-PRM-4096.notDraft', N'en', N'The permit {id} is {status}: only a draft can be deleted.', 1)
+    ,(N'err.ECR-PRM-4096.notDraft', N'en', N'The permit {id} is {status}: this is only possible for a draft.', 1)
     ,(N'err.ECR-PRM-4096.inUse', N'en', N'The permit {id} or its rows are referenced from elsewhere ({count}) and cannot be deleted.', 1)
     -- PERMITS: permits ── ECR-PRM-4096 ── кінець секції ──
+    -- PERMITS: permits ── en: ECR-PRM-4092 і життєвий цикл дозволу (PM-04) ──
+    ,(N'err.ECR-PRM-4092', N'en', N'Permit validity overlaps', 1)
+    ,(N'err.ECR-PRM-4092.overlap', N'en', N'The permit "{number}" ({id}) overlaps in time with the active permit {otherId} of the same number.', 1)
+    ,(N'err.ECR-PRM-4096.notActive', N'en', N'The permit {id} is {status}: this is only possible for an active permit.', 1)
+    ,(N'err.ECR-PRM-4096.notRenewable', N'en', N'The permit {id} is a draft: only an active or expired permit can be renewed.', 1)
+    ,(N'err.ECR-PRM-0422.endReasonTooShort', N'en', N'The reason for ending the permit early must have at least {min} characters.', 1)
+    ,(N'err.ECR-PRM-0422.endDateOutOfRange', N'en', N'The end date {endDate} must be after the start {from} and not later than the current end {to}.', 1)
+    ,(N'err.ECR-PRM-0422.renewRowInvalid', N'en', N'Row "{rowCode}" of table "{tableCode}" could not be copied into the new draft: {reason}.', 1)
+    -- PERMITS: permits ── ECR-PRM-4092 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -20810,14 +20819,37 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-PRM-4096.changed', N'kz', N'{id} рұқсатын сіз ашқаннан кейін өзгертті. Оны қайта оқып, өзгерісті қайталаңыз.'),
     (N'err.ECR-PRM-4096.notEditable', N'ru', N'Разрешение {id} закончилось и больше не редактируется.'),
     (N'err.ECR-PRM-4096.notEditable', N'kz', N'{id} рұқсатының мерзімі аяқталды, енді өңделмейді.'),
-    (N'err.ECR-PRM-4096.notDraft', N'ru', N'Разрешение {id} в состоянии {status}: удалить можно только черновик.'),
-    (N'err.ECR-PRM-4096.notDraft', N'kz', N'{id} рұқсаты {status} күйінде: тек жобаны жоюға болады.'),
+    (N'err.ECR-PRM-4096.notDraft', N'ru', N'Разрешение {id} в состоянии {status}: это возможно только для черновика.'),
+    (N'err.ECR-PRM-4096.notDraft', N'kz', N'{id} рұқсаты {status} күйінде: бұл тек жоба үшін мүмкін.'),
     (N'err.ECR-PRM-4096.inUse', N'ru', N'На разрешение {id} или его строки ссылаются ({count}): оно не удаляется.'),
     (N'err.ECR-PRM-4096.inUse', N'kz', N'{id} рұқсатына немесе оның жолдарына сілтемелер бар ({count}): ол жойылмайды.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
 -- PERMITS: permits ── ECR-PRM-4096 ── ru/kz ── кінець секції ──
+
+-- PERMITS: permits ── ECR-PRM-4092 ── ru/kz: перетин чинності, життєвий цикл дозволу; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-4092', N'ru', N'Сроки действия разрешений пересекаются'),
+    (N'err.ECR-PRM-4092', N'kz', N'Рұқсаттардың жарамдылық мерзімдері қиылысады'),
+    (N'err.ECR-PRM-4092.overlap', N'ru', N'Разрешение «{number}» ({id}) пересекается по времени с действующим разрешением {otherId} того же номера.'),
+    (N'err.ECR-PRM-4092.overlap', N'kz', N'«{number}» ({id}) рұқсаты сол нөмірдегі {otherId} жарамды рұқсатымен уақыт бойынша қиылысады.'),
+    (N'err.ECR-PRM-4096.notActive', N'ru', N'Разрешение {id} в состоянии {status}: это возможно только для действующего разрешения.'),
+    (N'err.ECR-PRM-4096.notActive', N'kz', N'{id} рұқсаты {status} күйінде: бұл тек жарамды рұқсат үшін мүмкін.'),
+    (N'err.ECR-PRM-4096.notRenewable', N'ru', N'Разрешение {id} - черновик: продлевать можно только действующее или закончившееся разрешение.'),
+    (N'err.ECR-PRM-4096.notRenewable', N'kz', N'{id} рұқсаты - жоба: тек жарамды немесе аяқталған рұқсатты ұзартуға болады.'),
+    (N'err.ECR-PRM-0422.endReasonTooShort', N'ru', N'Причина досрочного завершения разрешения должна содержать не менее {min} символов.'),
+    (N'err.ECR-PRM-0422.endReasonTooShort', N'kz', N'Рұқсатты мерзімінен бұрын аяқтау себебі кемінде {min} таңба болуы керек.'),
+    (N'err.ECR-PRM-0422.endDateOutOfRange', N'ru', N'Дата завершения {endDate} должна быть позже начала {from} и не позже текущего окончания {to}.'),
+    (N'err.ECR-PRM-0422.endDateOutOfRange', N'kz', N'Аяқталу күні {endDate} басталудан {from} кейін және ағымдағы аяқталудан {to} кеш болмауы керек.'),
+    (N'err.ECR-PRM-0422.renewRowInvalid', N'ru', N'Строку «{rowCode}» таблицы «{tableCode}» не удалось скопировать в новый черновик: {reason}.'),
+    (N'err.ECR-PRM-0422.renewRowInvalid', N'kz', N'«{tableCode}» кестесінің «{rowCode}» жолын жаңа жобаға көшіру мүмкін болмады: {reason}.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: permits ── ECR-PRM-4092 ── ru/kz ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

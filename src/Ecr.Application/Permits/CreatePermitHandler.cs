@@ -101,16 +101,8 @@ public sealed class CreatePermitHandler(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            var code = EcrCode.Create(RegistryEntryWriter.AutoCode(await registries.NextEntryCodesAsync(1, innerCt).ConfigureAwait(false)));
-            var entry = writer.AddEntry(
-                view.Header.Id, code, new LocalizedText(new Dictionary<string, string> { [UiStringResolver.DefaultLanguage] = number }), userId);
-
-            // ⛔ Вимкнений ДО першого збереження: ключ чернетки не повинен ставати живим навіть на мить.
-            entry.Deactivate();
-            entry.SetValidity(request.ValidFrom, request.ValidTo);
-
-            var changes = await writer.ApplyValuesAsync(view.Header, entry, values, prefetch: null, innerCt).ConfigureAwait(false);
-            await writer.SaveEntryAsync(view.Header, entry, changes, userId, innerCt).ConfigureAwait(false);
+            var entry = await PermitDraftWriter
+                .CreateAsync(registries, writer, view, values, number, request.ValidFrom, request.ValidTo, userId, innerCt).ConfigureAwait(false);
 
             if (ruleEngine is not null)
             {
