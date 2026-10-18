@@ -44,6 +44,52 @@ public sealed record PermitBindingDto(
 /// <param name="Items">Прив'язки в порядку коду; порожній перелік - норма (механізм опційний).</param>
 public sealed record PermitBindingsDto(bool IsEditable, IReadOnlyList<PermitBindingDto> Items);
 
+/// <summary>Дозвіл, обраний для перегляду.</summary>
+/// <param name="EntryId">Запис-шапка; <c>null</c> - дозволу немає.</param>
+/// <param name="Number">Номер дозволу.</param>
+/// <param name="ValidFrom">Початок чинності.</param>
+/// <param name="ValidTo">Кінець чинності (виключно).</param>
+/// <param name="ReasonIfNone">Чому дозволу немає: <c>noFacility</c>, <c>noPermit</c>, <c>headerEmpty</c>, <c>headerUnknown</c>.</param>
+public sealed record PermitPreviewPermitDto(
+    long? EntryId, string? Number, DateOnly? ValidFrom, DateOnly? ValidTo, string? ReasonIfNone);
+
+/// <summary>Колонка аркуша в перегляді.</summary>
+/// <param name="ColumnCode">Код колонки аркуша.</param>
+/// <param name="Header">Заголовок (мова за замовчуванням).</param>
+/// <param name="Role"><c>RowKey</c>, <c>Limit</c>, <c>Info</c> - з дозволу; <c>Fact</c> - вводить користувач; <c>Formula</c> - рахується.</param>
+/// <param name="Locked">Колонку пише машина: користувач її не править.</param>
+/// <param name="DataType">Тип даних колонки.</param>
+/// <param name="Unit">Код одиниці; <c>null</c> - безрозмірна.</param>
+public sealed record PermitPreviewColumnDto(
+    string ColumnCode, string Header, string Role, bool Locked, string DataType, string? Unit);
+
+/// <summary>Рядок аркуша в перегляді.</summary>
+/// <param name="RowKey">Ключ рядка: <c>P&lt;id запису таблиці дозволу&gt;</c>.</param>
+/// <param name="Cells">Значення за кодом колонки: з дозволу для зіставлених, з документа для фактичних (якщо документ задано).</param>
+/// <param name="Locked">Колонки, які пише машина.</param>
+public sealed record PermitPreviewRowDto(
+    string RowKey, IReadOnlyDictionary<string, object?> Cells, IReadOnlyList<string> Locked);
+
+/// <summary>Попередження перегляду.</summary>
+/// <param name="Code">Стабільний код.</param>
+/// <param name="Text">Пояснення.</param>
+public sealed record PermitPreviewWarningDto(string Code, string Text);
+
+/// <summary>
+/// Перегляд аркуша очима користувача: що створить прив'язка для обраного дозволу (Permits, PM-09).
+/// </summary>
+/// <param name="Binding">Прив'язка.</param>
+/// <param name="Permit">Обраний дозвіл.</param>
+/// <param name="Columns">Усі колонки таблиці аркуша в порядку позицій.</param>
+/// <param name="Rows">Заплановані рядки; у режимі <c>Formulas</c> порожні.</param>
+/// <param name="Warnings">Попередження.</param>
+public sealed record PermitBindingPreviewDto(
+    PermitBindingDto Binding,
+    PermitPreviewPermitDto Permit,
+    IReadOnlyList<PermitPreviewColumnDto> Columns,
+    IReadOnlyList<PermitPreviewRowDto> Rows,
+    IReadOnlyList<PermitPreviewWarningDto> Warnings);
+
 /// <summary>Зіставлена колонка в запиті.</summary>
 /// <param name="Role"><c>RowKey</c>, <c>Limit</c> або <c>Info</c>.</param>
 /// <param name="PermitFieldCode">Код поля таблиці дозволу.</param>

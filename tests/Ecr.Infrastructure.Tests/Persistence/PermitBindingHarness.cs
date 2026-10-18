@@ -5,6 +5,7 @@ using Ecr.Application.Permits.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
 using Ecr.Domain.ValueObjects;
@@ -38,6 +39,10 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
             inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User);
         Delete = new DeletePermitBindingHandler(
             Versions, Bindings, Store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User);
+        Preview = new PreviewPermitBindingHandler(
+            Versions, Bindings, inner.Permits, inner.Registries, Store, new PermitResolver(inner.Registries),
+            new RegistrySnapshotLoader(inner.Db), Documents, Headers, Periods, RowsStore, CellsStore, new UnitStore(inner.Db),
+            inner.Access, inner.User, inner.Clock);
     }
 
     public PermitHarness Types => _inner;
@@ -59,6 +64,19 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
     public SavePermitBindingHandler Save { get; }
 
     public DeletePermitBindingHandler Delete { get; }
+
+    public PreviewPermitBindingHandler Preview { get; }
+
+    /// <summary>Порти документа: у перегляді без документа не торкаються, у перегляді з документом - заглушки тесту.</summary>
+    public IDocumentStore Documents { get; } = Substitute.For<IDocumentStore>();
+
+    public IDocumentHeaderStore Headers { get; } = Substitute.For<IDocumentHeaderStore>();
+
+    public IPeriodStore Periods { get; } = Substitute.For<IPeriodStore>();
+
+    public IRowStore RowsStore { get; } = Substitute.For<IRowStore>();
+
+    public ICellStore CellsStore { get; } = Substitute.For<ICellStore>();
 
     public EcrDbContext Db => _inner.Db;
 
@@ -104,6 +122,67 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
         await using var publish = await Types.NextRequestAsync().ConfigureAwait(false);
         await publish.Publish.HandleAsync(typeCode, new PublishPermitTypeRequest("перший випуск для прив'язок", draft.RowVersion), default)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>Заводить дозвіл (шапку й рядки таблиці <c>Emissions</c>) прямо в реєстри - як це робить сторінка дозволу.</summary>
+    /// <param name="typeCode">Код опублікованого типу з <see cref="PublishEmissionsTypeAsync"/>.</param>
+    /// <param name="number">Номер дозволу (він же код запису).</param>
+    /// <param name="location">Розташування.</param>
+    /// <param name="validFrom">Перший чинний день.</param>
+    /// <param name="validTo">Перший нечинний день.</param>
+    /// <param name="isActive">Чи активний (чернетка - ні).</param>
+    /// <param name="emissions">Рядки: речовина, ліміт, примітка.</param>
+    public async Task<SeededPermit> SeedPermitAsync(
+        string typeCode,
+        string number,
+        string location,
+        DateOnly? validFrom,
+        DateOnly? validTo,
+        bool isActive,
+        params (string Substance, decimal Limit, string? Note)[] emissions)
+    {
+        var type = (await Types.Permits.FindByCodeAsync(typeCode, default).ConfigureAwait(false))!;
+        var header = (await Types.Registries.FindDefinitionByIdAsync(type.HeaderRegistryDefId, default).ConfigureAwait(false))!;
+        var table = (await Types.Permits.ListTablesAsync(type.Id, default).ConfigureAwait(false)).Single(t => t.Code == "Emissions");
+        var rows = (await Types.Registries.FindDefinitionByIdAsync(table.RegistryDefId, default).ConfigureAwait(false))!;
+
+        var entry = new RegistryEntry(header.Id, EcrCode.Create(number), PermitHarness.Text(number), 1, DateTime.UnixEpoch);
+        entry.SetValidity(validFrom, validTo);
+        if (!isActive)
+        {
+            entry.Deactivate();
+        }
+
+        Db.RegistryEntries.Add(entry);
+        await Db.SaveChangesAsync().ConfigureAwait(false);
+        Value(entry.Id, header, "Permit_Number", CellDataType.String, number);
+        Value(entry.Id, header, "Location", CellDataType.String, location);
+
+        var rowIds = new List<long>();
+        var ordinal = 0;
+        foreach (var (substance, limit, note) in emissions)
+        {
+            var row = new RegistryEntry(rows.Id, EcrCode.Create($"{number}_{++ordinal}"), PermitHarness.Text(substance), 1, DateTime.UnixEpoch);
+            row.SetOrdinal(ordinal);
+            Db.RegistryEntries.Add(row);
+            await Db.SaveChangesAsync().ConfigureAwait(false);
+            Value(row.Id, rows, "PERMIT", CellDataType.Lookup, entry.Id);
+            Value(row.Id, rows, "Substance", CellDataType.String, substance);
+            Value(row.Id, rows, "Limit", CellDataType.Decimal, limit);
+            Value(row.Id, rows, "Note", CellDataType.String, note);
+            rowIds.Add(row.Id);
+        }
+
+        await Db.SaveChangesAsync().ConfigureAwait(false);
+        return new SeededPermit(entry.Id, header.Id, rowIds);
+    }
+
+    private void Value(long entryId, RegistryDef definition, string fieldCode, CellDataType type, object? value)
+    {
+        var field = definition.Fields.Single(f => f.Code == fieldCode);
+        var stored = new RegistryValue(entryId, field.Id);
+        stored.Set(type, value, null);
+        Db.RegistryValues.Add(stored);
     }
 
     /// <summary>
@@ -177,6 +256,12 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
 
     public ValueTask DisposeAsync() => _inner.DisposeAsync();
 }
+
+/// <summary>Заведений дозвіл.</summary>
+/// <param name="EntryId">Запис-шапка.</param>
+/// <param name="HeaderRegistryDefId">Реєстр шапок типу.</param>
+/// <param name="RowEntryIds">Записи таблиці <c>Emissions</c> у порядку заведення.</param>
+internal sealed record SeededPermit(long EntryId, int HeaderRegistryDefId, IReadOnlyList<long> RowEntryIds);
 
 /// <summary>Підготовлений шаблон для тестів прив'язок.</summary>
 /// <param name="Doc">Ланцюг шаблону: <c>ColumnDefIds[0]</c> - текст, <c>[1]</c> - ліміт, <c>[2]</c> - редагована.</param>

@@ -8591,6 +8591,8 @@ USING (VALUES
     ,(N'err.ECR-PRM-0422.bindingPermitTableUnknown', N'en', N'The permit type "{typeCode}" has no table "{tableCode}".', 1)
     ,(N'err.ECR-PRM-0422.bindingEnumUnknown', N'en', N'Value "{value}" of "{field}" is not known.', 1)
     ,(N'err.ECR-PRM-0422.bindingIdentityChanged', N'en', N'Binding "{bindingCode}" cannot be pointed at another table or type: delete it and create a new one.', 1)
+    ,(N'err.ECR-PRM-0422.bindingPreviewPeriodRequired', N'en', N'Previewing from a document needs the period (periodKey).', 1)
+    ,(N'err.ECR-PRM-0422.bindingPreviewPeriodUnknown', N'en', N'The project of the document has no period {periodKey}.', 1)
     ,(N'err.ECR-PRM-0404.binding', N'en', N'Permit binding "{bindingCode}" does not exist in this template version.', 1)
     ,(N'err.ECR-PRM-4101', N'en', N'Permit binding already exists', 1)
     ,(N'err.ECR-PRM-4101.sheet', N'en', N'Table {tableDefId} of this version is already bound ("{bindingCode}"): one sheet table takes one permit.', 1)
@@ -21994,6 +21996,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: bindings ── ECR-SCHM-0409 ── кінець секції ──
+
+-- PERMITS: bindings ── preview ── ru/kz: перегляд прив'язки без періоду; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-0422.bindingPreviewPeriodRequired', N'ru', N'Просмотр из документа требует период (periodKey).'),
+    (N'err.ECR-PRM-0422.bindingPreviewPeriodRequired', N'kz', N'Құжаттан қарау кезеңді (periodKey) қажет етеді.'),
+    (N'err.ECR-PRM-0422.bindingPreviewPeriodUnknown', N'ru', N'В проекте документа нет периода {periodKey}.'),
+    (N'err.ECR-PRM-0422.bindingPreviewPeriodUnknown', N'kz', N'Құжат жобасында {periodKey} кезеңі жоқ.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: bindings ── preview ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
