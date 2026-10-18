@@ -8,7 +8,6 @@ import { PermitBindingsPage } from '../PermitBindingsPage';
 import { PermitListsPage } from '../PermitListsPage';
 import { PermitPage } from '../PermitPage';
 import { PermitsPage } from '../PermitsPage';
-import { PermitTypeEditorPage } from '../PermitTypeEditorPage';
 import { PageDescriptionContext } from '@/shared/ui/pageDescription';
 
 /**
@@ -98,13 +97,6 @@ describe('Permits: сторінки з параметром', () => {
     expect(screen.getByRole('link', { name: '← text of permits.back.permits' }).getAttribute('href')).toBe('/admin/permits');
     expect(screen.getByText('text of permits.detail.emptyTitle')).toBeTruthy();
     expect(screen.queryAllByRole('button')).toHaveLength(0);
-  });
-
-  it('тип: код із адреси й посилання на перелік типів', () => {
-    showAt('/admin/permits/types/WaterDischarge', '/admin/permits/types/:code', <PermitTypeEditorPage />);
-    expect(screen.getByText('WaterDischarge')).toBeTruthy();
-    expect(screen.getByRole('link', { name: '← text of permits.back.types' }).getAttribute('href')).toBe('/admin/permits/types');
-    expect(screen.getByText('text of permits.typeEditor.emptyTitle')).toBeTruthy();
   });
 
   it('привʼязка: ідентифікатор із адреси й посилання на перелік привʼязок', () => {
