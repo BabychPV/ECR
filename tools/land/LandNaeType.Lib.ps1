@@ -217,7 +217,8 @@ function ConvertTo-LandNaeNormalized {
     param([AllowNull()][AllowEmptyString()][string]$Nae)
 
     if ([string]::IsNullOrEmpty($Nae)) { return '' }
-    $x = $Nae.Trim().Replace(' ', '')
+    # D-423/RCN1: клас пробільних символів узгоджено з ConvertTo-LandNaeInputNormalized (LandRows.Lib): NBSP/таб/U+200B всередині теж знімаються
+    $x = [regex]::Replace($Nae, '[\s\u00A0\u2007\u202F\u200B\uFEFF]+', '')
     $ix = $x.IndexOf('(')
     if ($ix -ge 0) { $x = $x.Substring(0, $ix).Trim() }
     return $x
