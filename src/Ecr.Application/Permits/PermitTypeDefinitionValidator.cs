@@ -166,6 +166,13 @@ public static class PermitTypeDefinitionValidator
                     ("columnCode", column.Code), ("dataType", column.DataType ?? string.Empty));
             }
 
+            if (column.Group is not null && !EcrCode.TryCreate(column.Group, out _))
+            {
+                throw Invalid(
+                    $"Код групи «{column.Group}» стовпця «{column.Code}» недопустимий.", "err.ECR-PRM-0422.groupCodeInvalid",
+                    ("columnCode", column.Code), ("group", column.Group));
+            }
+
             ValidateNumeric(column);
             ValidateList(typeCode, table, column, tableCodes);
         }

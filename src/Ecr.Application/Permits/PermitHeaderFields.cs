@@ -19,7 +19,7 @@ public static class PermitHeaderFields
     public const string PrimaryKeyCode = "PK";
 
     /// <summary>Група прапорців звітних форм.</summary>
-    public const string ReportingGroup = "Reporting forms";
+    public const string ReportingGroup = "Reporting_forms";
 
     /// <summary>Усі поля шапки в порядку показу.</summary>
     public static IReadOnlyList<PermitTypeColumnDto> All { get; } =

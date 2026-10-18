@@ -8160,6 +8160,7 @@ USING (VALUES
     ,(N'err.ECR-PRM-0422.keyChanged', N'en', N'The key of published table "{tableCode}" cannot be changed.', 1)
     ,(N'err.ECR-PRM-0422.noTables', N'en', N'A permit type without tables cannot be published.', 1)
     ,(N'err.ECR-PRM-0422.reasonTooShort', N'en', N'The reason for publishing must have at least {min} characters.', 1)
+    ,(N'err.ECR-PRM-0422.groupCodeInvalid', N'en', N'Group code "{group}" of column "{columnCode}" is not allowed: use Latin letters, digits and underscore, starting with a letter.', 1)
     ,(N'err.ECR-PRM-0422.sharedRegistryUnknown', N'en', N'Column "{columnCode}" refers to the shared registry "{registryCode}", which does not exist.', 1)
     ,(N'err.ECR-PRM-4091', N'en', N'Permit type code is taken', 1)
     ,(N'err.ECR-PRM-4091.code', N'en', N'A permit type with code "{code}" already exists.', 1)
@@ -20610,6 +20611,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-PRM-0422.keyChanged', N'ru', N'Ключ опубликованной таблицы «{tableCode}» не меняется.'),
     (N'err.ECR-PRM-0422.noTables', N'ru', N'Тип разрешения без таблиц не публикуется.'),
     (N'err.ECR-PRM-0422.reasonTooShort', N'ru', N'Причина публикации должна содержать не менее {min} символов.'),
+    (N'err.ECR-PRM-0422.groupCodeInvalid', N'ru', N'Код группы «{group}» столбца «{columnCode}» недопустим: латинские буквы, цифры и подчёркивание, первым — буква.'),
     (N'err.ECR-PRM-0422.sharedRegistryUnknown', N'ru', N'Столбец «{columnCode}» ссылается на общий справочник «{registryCode}», которого не существует.'),
     (N'err.ECR-PRM-0422', N'kz', N'Рұқсат түрінің анықтамасы қате'),
     (N'err.ECR-PRM-0422.nameRequired', N'kz', N'«{item}» атауы кемінде бір тілде міндетті.'),
@@ -20639,6 +20641,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-PRM-0422.keyChanged', N'kz', N'Жарияланған «{tableCode}» кестесінің кілті өзгермейді.'),
     (N'err.ECR-PRM-0422.noTables', N'kz', N'Кестесі жоқ рұқсат түрі жарияланбайды.'),
     (N'err.ECR-PRM-0422.reasonTooShort', N'kz', N'Жариялау себебі кемінде {min} таңбадан тұруы тиіс.'),
+    (N'err.ECR-PRM-0422.groupCodeInvalid', N'kz', N'«{columnCode}» бағанының «{group}» топ коды жарамсыз: латын әріптері, сандар және асты сызылған таңба, бірінші — әріп.'),
     (N'err.ECR-PRM-0422.sharedRegistryUnknown', N'kz', N'«{columnCode}» бағаны жоқ «{registryCode}» ортақ анықтамалығына сілтейді.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);

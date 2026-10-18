@@ -59,6 +59,11 @@ internal sealed class PermitHarness : IAsyncDisposable
         OpenVersion = new OpenPermitTypeVersionHandler(Permits, Registries, Uow, access, user, clock);
         Delete = new DeletePermitTypeHandler(Permits, Uow, audit, access, user, clock);
 
+        var save = new SaveRegistryDefinitionHandler(
+            Registries, Uow, audit, access, user, clock, new UnitCatalog(Db), keys,
+            new Ecr.Application.Registries.Keys.RegistryKeyService(keys, Uow));
+        Publish = new PublishPermitTypeHandler(Permits, Registries, keys, save, Uow, audit, access, user, clock);
+
         Access = access;
         User = user;
         Clock = clock;
@@ -101,6 +106,8 @@ internal sealed class PermitHarness : IAsyncDisposable
     public OpenPermitTypeVersionHandler OpenVersion { get; }
 
     public DeletePermitTypeHandler Delete { get; }
+
+    public PublishPermitTypeHandler Publish { get; }
 
     /// <summary>Нова «сесія» тієї самої особи: свій контекст, як у наступному запиті.</summary>
     public async Task<PermitHarness> NextRequestAsync() => await CreateAsync(Sql, Permissions, UserId).ConfigureAwait(false);
