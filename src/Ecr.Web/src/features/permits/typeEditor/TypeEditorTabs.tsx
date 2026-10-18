@@ -1,16 +1,19 @@
-import { useMemo, type JSX } from 'react';
-import { Badge, Button, Group, Stack, Tabs } from '@mantine/core';
+import { lazy, Suspense, useMemo, type JSX } from 'react';
+import { Badge, Button, Group, Skeleton, Stack, Tabs } from '@mantine/core';
 import { useSearchParams } from 'react-router-dom';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { useMayEditPermitTypes } from '../permitRights';
-import { TypeChecksTab } from './checks';
 import { EditorParams, useEditorActions } from './editorActions';
 import { useTypeEditorApi } from './editorContext';
 import { typeWithDraft } from './selection';
 import { StructureTab } from './StructureTab';
-import { TypeVersionsTab } from './versions';
+
+// Тіла «Checks» і «Versions» не потрібні на першому показі (за замовчуванням — «Structure»):
+// окремі чанки, що вантажаться, лише коли вкладка активна (бюджет маршруту, D-132).
+const TypeChecksTab = lazy(() => import('./checks').then((module) => ({ default: module.TypeChecksTab })));
+const TypeVersionsTab = lazy(() => import('./versions').then((module) => ({ default: module.TypeVersionsTab })));
 
 export const EditorTabIds = ['structure', 'rules', 'versions'] as const;
 export type EditorTabId = (typeof EditorTabIds)[number];
@@ -85,10 +88,14 @@ export function TypeEditorTabs(): JSX.Element {
           <StructureTab />
         </Tabs.Panel>
         <Tabs.Panel value="rules">
-          <TypeChecksTab type={shown} onAddCheck={actions.openAddRule} canEdit={editable && mayEdit} />
+          <Suspense fallback={<Skeleton height={160} aria-label={t('common.loading')} />}>
+            <TypeChecksTab type={shown} onAddCheck={actions.openAddRule} canEdit={editable && mayEdit} />
+          </Suspense>
         </Tabs.Panel>
         <Tabs.Panel value="versions">
-          <TypeVersionsTab type={shown} />
+          <Suspense fallback={<Skeleton height={160} aria-label={t('common.loading')} />}>
+            <TypeVersionsTab type={shown} />
+          </Suspense>
         </Tabs.Panel>
       </Tabs>
     </Stack>

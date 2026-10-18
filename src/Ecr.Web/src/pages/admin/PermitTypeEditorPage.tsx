@@ -1,14 +1,20 @@
-import type { JSX } from 'react';
-import { useParams } from 'react-router-dom';
+import { lazy, Suspense, type JSX } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PermitEditorHead } from '@/features/permits/shell/PermitEditorHead';
 import { PermitsPaths } from '@/features/permits/shell/permitPaths';
-import { DialogsHost } from '@/features/permits/typeEditor/dialogs/DialogsHost';
+import { readDialog } from '@/features/permits/typeEditor/editorActions';
 import { TypeEditorContext, type TypeEditorApi } from '@/features/permits/typeEditor/editorContext';
 import { TypeEditorHeader } from '@/features/permits/typeEditor/TypeEditorHeader';
 import { TypeEditorTabs } from '@/features/permits/typeEditor/TypeEditorTabs';
 import { useTypeEditor } from '@/features/permits/typeEditor/useTypeEditor';
+
+// Діалоги та майстри — важка частина маршруту, а на першому показі їх немає (`?dialog=` порожній):
+// чанк вантажиться, лише коли адреса просить діалог (бюджет маршруту, D-132).
+const DialogsHost = lazy(() =>
+  import('@/features/permits/typeEditor/dialogs/DialogsHost').then((module) => ({ default: module.DialogsHost })),
+);
 
 /**
  * Конструктор типу дозволу (`/admin/permits/types/:code`): шапка, вкладки Structure | Checks |
@@ -17,6 +23,8 @@ import { useTypeEditor } from '@/features/permits/typeEditor/useTypeEditor';
 export function PermitTypeEditorPage(): JSX.Element {
   const { code = '' } = useParams();
   const editor = useTypeEditor(code);
+  const [params] = useSearchParams();
+  const dialogRequested = readDialog(params) !== null;
 
   return (
     <>
@@ -39,7 +47,11 @@ export function PermitTypeEditorPage(): JSX.Element {
           <TypeEditorContext.Provider value={api}>
             <TypeEditorHeader />
             <TypeEditorTabs />
-            <DialogsHost />
+            {dialogRequested && (
+              <Suspense fallback={null}>
+                <DialogsHost />
+              </Suspense>
+            )}
           </TypeEditorContext.Provider>
         )}
       </AsyncBoundary>

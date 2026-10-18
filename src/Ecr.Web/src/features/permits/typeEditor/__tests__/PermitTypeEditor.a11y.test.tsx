@@ -24,12 +24,18 @@ vi.mock('@/api/client', async (importOriginal) => ({
   apiFetch: vi.fn(),
 }));
 vi.mock('../../api/typesApi', () => ({ getPermitType: vi.fn(), replacePermitType: vi.fn() }));
+// Права сесії міняються між прогонами: без `Registry.Publish` кнопка «Publish» вимкнена, з ним — активна;
+// обидва стани мають пройти перевірку доступності.
+const session = vi.hoisted(() => ({ permissions: ['Registry.EditDefinition'] as string[] }));
 vi.mock('@/shared/session/useSession', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/session/useSession')>()),
-  useSession: () => ({ data: { permissions: ['Registry.EditDefinition'], isSimulation: false } }),
+  useSession: () => ({ data: { permissions: session.permissions, isSimulation: false } }),
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  session.permissions = ['Registry.EditDefinition'];
+});
 
 function lookupType() {
   const type = permitType();
@@ -59,6 +65,8 @@ async function scan(colorScheme: 'light' | 'dark', entry: string, type = permitT
   );
   await screen.findByRole(ready);
   if (entry.includes('panel=')) await screen.findByTestId('column-inspector');
+  // Тіла «Checks» і «Versions» — ліниві чанки: скануємо готовий вміст, а не скелет-заглушку.
+  await waitFor(() => expect(container.querySelector('.mantine-Skeleton-root')).toBeNull());
   await waitFor(() => expect(container.textContent).not.toContain('⟦'));
   const violations = await findViolations(container);
   expect(violations, describeViolations(violations)).toHaveLength(0);
@@ -84,6 +92,13 @@ describe('PermitTypeEditor — доступність', { timeout: 180_000 }, ()
       await scan(colorScheme, '/admin/permits/types/WaterDischarge?tab=rules');
       cleanup();
       await scan(colorScheme, '/admin/permits/types/WaterDischarge?tab=versions');
+    });
+
+    it(`${colorScheme}: з правом Registry.Publish (кнопка «Publish» активна)`, async () => {
+      session.permissions = ['Registry.EditDefinition', 'Registry.Publish'];
+      await scan(colorScheme, '/admin/permits/types/WaterDischarge');
+      const publish = screen.getByRole('button', { name: /^Publish/ });
+      expect((publish as HTMLButtonElement).disabled).toBe(false);
     });
 
     it(`${colorScheme}: опублікований тип зі смугою «New version…»`, async () => {
