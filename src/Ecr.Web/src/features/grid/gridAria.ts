@@ -89,6 +89,12 @@ export class GridAriaPlugin extends BasePlugin {
       if (row.getAttribute('role') !== 'row') row.setAttribute('role', 'row');
       if (row.getAttribute('aria-rowindex') !== '1') row.setAttribute('aria-rowindex', '1');
     }
+    // CL-17 (B-2): прокручувана область даних (`rgCol`; закріплені `colPinStart`/`colPinEnd` самі не прокручуються)
+    // мусить приймати фокус, інакше клавіатурний користувач не прокрутить її стрілками (WCAG 2.1.1, axe
+    // `scrollable-region-focusable`). Одна зупинка Tab; стрілки на самій області гортають нативно, а на комірці їх,
+    // як і раніше, обробляє сітка.
+    const scroller = this.revogrid.querySelector('revogr-viewport-scroll.rgCol');
+    if (scroller !== null && scroller.getAttribute('tabindex') !== '0') scroller.setAttribute('tabindex', '0');
     const attribution = this.revogrid.querySelector('revogr-attribution');
     if (attribution === null) return;
     if (attribution.getAttribute('aria-hidden') !== 'true') attribution.setAttribute('aria-hidden', 'true');
