@@ -884,4 +884,14 @@ public static class ErrorCodes
     /// ⚠ 409 за цифрами коду: <c>BusinessRuleException</c> без власного арма в <c>ExceptionHandlingMiddleware</c> доїхав би як 422.
     /// </remarks>
     public const string PermitTypeDuplicate = "ECR-PRM-4091";
+
+    /// <summary>
+    /// Тип дозволу змінили чи опублікували після того, як його прочитали, або дія не відповідає його стану
+    /// (<c>ECR-PRM-4093</c>): немає чернетки, чернетка вже є, тип ще не опублікований.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Кидається як <c>ConcurrencyConflictException</c>, якому <c>ExceptionHandlingMiddleware</c> дає 409 за типом.
+    /// 4092 зарезервовано під перетин чинних дозволів (PM-04).
+    /// </remarks>
+    public const string PermitTypeConflict = "ECR-PRM-4093";
 }

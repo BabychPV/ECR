@@ -8164,6 +8164,11 @@ USING (VALUES
     ,(N'err.ECR-PRM-4091', N'en', N'Permit type code is taken', 1)
     ,(N'err.ECR-PRM-4091.code', N'en', N'A permit type with code "{code}" already exists.', 1)
     ,(N'err.ECR-PRM-4091.registryCode', N'en', N'The registry code "{registryCode}" needed for the permit type is already taken.', 1)
+    ,(N'err.ECR-PRM-4093', N'en', N'Permit type was changed', 1)
+    ,(N'err.ECR-PRM-4093.changed', N'en', N'The permit type "{code}" was changed or published after you opened it. Reload it and repeat your edit.', 1)
+    ,(N'err.ECR-PRM-4093.noDraft', N'en', N'The permit type "{code}" is published and has no open draft. Open a new version first.', 1)
+    ,(N'err.ECR-PRM-4093.draftExists', N'en', N'The permit type "{code}" already has an open draft of a new version.', 1)
+    ,(N'err.ECR-PRM-4093.notPublished', N'en', N'The permit type "{code}" has not been published yet, so there is no version to start from.', 1)
     -- PERMITS: types ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -20651,6 +20656,25 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: types ── ECR-PRM-4091 ── кінець секції ──
+
+-- PERMITS: types ── ECR-PRM-4093 ── ru/kz: тип дозволу змінено чи стан не відповідає дії; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-4093', N'ru', N'Тип разрешения изменён'),
+    (N'err.ECR-PRM-4093', N'kz', N'Рұқсат түрі өзгертілді'),
+    (N'err.ECR-PRM-4093.changed', N'ru', N'Тип разрешения «{code}» изменили или опубликовали после того, как вы его открыли. Перечитайте его и повторите правку.'),
+    (N'err.ECR-PRM-4093.changed', N'kz', N'«{code}» рұқсат түрін сіз ашқаннан кейін өзгертті немесе жариялады. Оны қайта оқып, түзетуді қайталаңыз.'),
+    (N'err.ECR-PRM-4093.noDraft', N'ru', N'Тип разрешения «{code}» опубликован и не имеет открытого черновика. Сначала откройте новую версию.'),
+    (N'err.ECR-PRM-4093.noDraft', N'kz', N'«{code}» рұқсат түрі жарияланған және ашық жобасы жоқ. Алдымен жаңа нұсқаны ашыңыз.'),
+    (N'err.ECR-PRM-4093.draftExists', N'ru', N'У типа разрешения «{code}» уже есть черновик новой версии.'),
+    (N'err.ECR-PRM-4093.draftExists', N'kz', N'«{code}» рұқсат түрінің жаңа нұсқасының жобасы бұрыннан бар.'),
+    (N'err.ECR-PRM-4093.notPublished', N'ru', N'Тип разрешения «{code}» ещё не опубликован: новую версию не с чего открывать.'),
+    (N'err.ECR-PRM-4093.notPublished', N'kz', N'«{code}» рұқсат түрі әлі жарияланбаған: жаңа нұсқаны ашатын негіз жоқ.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: types ── ECR-PRM-4093 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

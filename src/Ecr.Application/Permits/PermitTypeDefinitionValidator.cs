@@ -442,6 +442,15 @@ public static class PermitTypeDefinitionValidator
         return new BusinessRuleException(ErrorCodes.PermitTypeInvalid, message, dictionary);
     }
 
+    /// <summary>Спільного довідника, на який посилається стовпець, немає (перевіряє той, хто має доступ до бази).</summary>
+    /// <param name="columnCode">Стовпець.</param>
+    /// <param name="registryCode">Код довідника.</param>
+    public static BusinessRuleException SharedRegistryUnknown(string columnCode, string registryCode)
+        => Invalid(
+            $"Спільного довідника «{registryCode}» для стовпця «{columnCode}» не існує.",
+            "err.ECR-PRM-0422.sharedRegistryUnknown",
+            ("columnCode", columnCode), ("registryCode", registryCode));
+
     /// <summary>Мінімальна довжина причини публікації.</summary>
     public const int MinReasonLength = 10;
 

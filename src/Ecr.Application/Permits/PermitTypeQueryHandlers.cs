@@ -42,6 +42,31 @@ internal static class PermitTypeAssembler
             type.UpdatedAt);
     }
 
+    /// <summary>
+    /// Склад, який сервер зберігає: порядок - за позицією в масиві, ключовий стовпець обов'язковий,
+    /// реєстр списку «лише для типу» призначає сервер (код у запиті ігнорується).
+    /// </summary>
+    /// <param name="content">Склад із запиту.</param>
+    internal static PermitTypeContent Normalize(PermitTypeContent content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+
+        var tables = content.Tables
+            .Select((t, tableIndex) => t with
+            {
+                Order = tableIndex + 1,
+                Columns = [.. t.Columns.Select((c, index) => c with
+                {
+                    Order = index + 1,
+                    Required = c.Required || c.Key,
+                    ListRegistryCode = c.ListScope == nameof(PermitListScope.TypeOnly) ? null : c.ListRegistryCode,
+                })],
+            })
+            .ToList();
+
+        return content with { Tables = tables };
+    }
+
     /// <summary>Склад, який бачить читач: чернетка або опублікований.</summary>
     /// <param name="type">Тип.</param>
     /// <param name="reader">Читач опублікованого складу.</param>

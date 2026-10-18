@@ -55,6 +55,8 @@ internal sealed class PermitHarness : IAsyncDisposable
         Create = new CreatePermitTypeHandler(Permits, Registries, Uow, audit, access, user, clock);
         Get = new GetPermitTypeHandler(Permits, Registries, access, user);
         List = new ListPermitTypesHandler(Permits, Registries, access, user);
+        Replace = new ReplacePermitTypeHandler(Permits, Registries, Uow, access, user, clock);
+        OpenVersion = new OpenPermitTypeVersionHandler(Permits, Registries, Uow, access, user, clock);
 
         Access = access;
         User = user;
@@ -92,6 +94,10 @@ internal sealed class PermitHarness : IAsyncDisposable
     public GetPermitTypeHandler Get { get; }
 
     public ListPermitTypesHandler List { get; }
+
+    public ReplacePermitTypeHandler Replace { get; }
+
+    public OpenPermitTypeVersionHandler OpenVersion { get; }
 
     /// <summary>Нова «сесія» тієї самої особи: свій контекст, як у наступному запиті.</summary>
     public async Task<PermitHarness> NextRequestAsync() => await CreateAsync(Sql, Permissions, UserId).ConfigureAwait(false);
