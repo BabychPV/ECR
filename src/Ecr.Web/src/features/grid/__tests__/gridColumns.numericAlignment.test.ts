@@ -171,17 +171,27 @@ describe('gridColumns — повне значення доступне, коли
     expect(title.replace(/[^\d]/g, '')).toBe(long.replace(/[^\d]/g, ''));
   });
 
-  it('⛔ підказка ПОМИЛКИ збереження не витісняється значенням', () => {
+  it('⛔ підказка ПОМИЛКИ збереження йде першою і не губить значення (CL-24, B-10)', () => {
     /*
-     * `title` на елементі один. Дві підказки на ньому означали б, що одну з
-     * них не видно ніколи, — тому причина відмови сервера має першість, а
-     * повне значення такої комірки лишається в рядку формули.
+     * `title` на елементі один, тож обидва тексти — в ньому: причина відмови
+     * сервера має першість (початок рядка), а повне значення додається в дужках.
+     * Раніше значення такої комірки не було доступне взагалі (лише в рядку формули),
+     * хоча його обрізало «…» (B-10).
      */
     const saveErrors = new Map([['R1:C1', 'Колонка «C1» очікує число.']]);
-    const columns = built(slice([column()], { C1: '1234.5' }), saveErrors);
-    const props = cellProps(columns, 'C1', { __rowKey: 'R1', C1: '1234.5' });
+    const long = '1234.1234567890123456';
+    const columns = built(slice([column({ scale: 16 })], { C1: long }), saveErrors);
+    const title = String(cellProps(columns, 'C1', { __rowKey: 'R1', C1: long })['title'] ?? '');
 
-    expect(props['title']).toBe('Колонка «C1» очікує число.');
+    expect(title.startsWith('Колонка «C1» очікує число.')).toBe(true);
+    expect(title.replace(/[^\d]/g, '').endsWith(long.replace(/[^\d]/g, ''))).toBe(true);
+  });
+
+  it('помилка без значення (порожня комірка) лишається чистим текстом помилки', () => {
+    const saveErrors = new Map([['R1:C1', 'Колонка «C1» очікує число.']]);
+    const columns = built(slice([column()], { C1: null }), saveErrors);
+
+    expect(cellProps(columns, 'C1', { __rowKey: 'R1', C1: null })['title']).toBe('Колонка «C1» очікує число.');
   });
 
   it('порожня комірка підказки не отримує', () => {
