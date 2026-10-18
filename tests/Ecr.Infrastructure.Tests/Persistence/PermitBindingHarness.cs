@@ -5,9 +5,12 @@ using Ecr.Application.Permits.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
+using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
+using Microsoft.EntityFrameworkCore;
 using NSubstitute;
 
 namespace Ecr.Infrastructure.Tests.Persistence;
@@ -30,6 +33,9 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
 
         List = new ListPermitBindingsHandler(Versions, Bindings, inner.Access, inner.User);
         Get = new GetPermitBindingHandler(Versions, Bindings, inner.Access, inner.User);
+        Save = new SavePermitBindingHandler(
+            Versions, Bindings, inner.Permits, inner.Registries, Store, Classifier, MetadataCache,
+            inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User);
     }
 
     public PermitHarness Types => _inner;
@@ -47,6 +53,8 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
     public ListPermitBindingsHandler List { get; }
 
     public GetPermitBindingHandler Get { get; }
+
+    public SavePermitBindingHandler Save { get; }
 
     public EcrDbContext Db => _inner.Db;
 
@@ -94,5 +102,37 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Шаблон-чернетка для прив'язки: таблиця з динамічними рядками, колонки <c>C1</c> (текст), <c>C2</c> (Decimal 12,3, лише
+    /// для читання), <c>C3</c> (Decimal, редагована), додана <c>C4</c> (текст, лише для читання) і поле шапки <c>Facility</c>.
+    /// </summary>
+    /// <param name="sql">Фікстура бази.</param>
+    public static async Task<PreparedSheet> PrepareSheetAsync(SqlServerFixture sql)
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(rowCount: 0, rowMode: TableRowMode.Dynamic, ct: default).ConfigureAwait(false);
+
+        await using var db = builder.CreateContext();
+        var limit = await db.ColumnDefs.SingleAsync(c => c.Id == doc.ColumnDefIds[1]).ConfigureAwait(false);
+        limit.SetReadOnly(true);
+        limit.SetNumericFormat(12, 3);
+
+        var note = new ColumnDef(doc.TableDefId, EcrCode.Create($"C4_{doc.TableDefId}"), PermitHarness.Text("Note"), 4, CellDataType.String);
+        note.SetReadOnly(true);
+        db.ColumnDefs.Add(note);
+
+        var facility = new HeaderFieldDef(doc.TemplateVersionId, EcrCode.Create("Facility"), PermitHarness.Text("Facility"), 1, CellDataType.String);
+        db.HeaderFieldDefs.Add(facility);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return new PreparedSheet(doc, note.Id, facility.Id);
+    }
+
     public ValueTask DisposeAsync() => _inner.DisposeAsync();
 }
+
+/// <summary>Підготовлений шаблон для тестів прив'язок.</summary>
+/// <param name="Doc">Ланцюг шаблону: <c>ColumnDefIds[0]</c> - текст, <c>[1]</c> - ліміт, <c>[2]</c> - редагована.</param>
+/// <param name="NoteColumnId">Колонка-примітка (текст, лише для читання).</param>
+/// <param name="FacilityHeaderId">Поле шапки <c>Facility</c>.</param>
+internal sealed record PreparedSheet(TestDocument Doc, int NoteColumnId, int FacilityHeaderId);
