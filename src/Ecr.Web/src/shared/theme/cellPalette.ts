@@ -50,8 +50,7 @@ const ColourNameIds: Readonly<Record<string, ColourNameId>> = {
   '#00b0f0': 'cyan', '#0070c0': 'strongBlue', '#002060': 'darkBlue', '#7030a0': 'purple',
 };
 
-/** Id назви базового кольору палітри; 
-ull - hex поза палітрою (назви не вигадуємо). */
+/** Id назви базового кольору палітри; null - hex поза палітрою (назви не вигадуємо). */
 export function colourNameId(hex: string): ColourNameId | null {
   return ColourNameIds[hex] ?? null;
 }

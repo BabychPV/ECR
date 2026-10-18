@@ -47,4 +47,3 @@ describe('UiStringsTable: перенос довгих ключів', () => {
     expect(css).not.toMatch(/overflow-x\s*:\s*(auto|scroll)/);
   });
 });
-
