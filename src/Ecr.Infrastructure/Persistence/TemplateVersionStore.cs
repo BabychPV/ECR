@@ -236,6 +236,10 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         // ключі таблиць джерела, а зв'язок посилається на таблиці числом.
         var relationTemplates = await ReadRelationTemplatesAsync(source, ct).ConfigureAwait(false);
 
+        // PM-09: прив'язки аркуша до дозволів теж не мають навігації з версії й посилаються на таблиці, колонки та
+        // поле шапки числом, тож читаються ДО `Prepare` і називаються кодами.
+        var bindingTemplates = await ReadBindingTemplatesAsync(source, ct).ConfigureAwait(false);
+
         // ⛔ A1-04: гранти посилаються на Id аркуша/таблиці/колонки, а `Prepare` ці Id скидає —
         // ідентичності запам'ятовуються ДО нього (аркуш, аркуш+таблиця, аркуш+таблиця+колонка за кодами).
         var grantSources = ReadGrantSources(source);
@@ -251,7 +255,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         // загубив обчислення.
         if (db.Database.CurrentTransaction is not null)
         {
-            await SaveCloneAsync(clone, links, clonedFrom, relationTemplates, grantSources, ct).ConfigureAwait(false);
+            await SaveCloneAsync(clone, links, clonedFrom, relationTemplates, bindingTemplates, grantSources, ct).ConfigureAwait(false);
             return clone.Id;
         }
 
@@ -259,7 +263,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         await strategy.ExecuteAsync(async () =>
         {
             await using var tx = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
-            await SaveCloneAsync(clone, links, clonedFrom, relationTemplates, grantSources, ct).ConfigureAwait(false);
+            await SaveCloneAsync(clone, links, clonedFrom, relationTemplates, bindingTemplates, grantSources, ct).ConfigureAwait(false);
             await tx.CommitAsync(ct).ConfigureAwait(false);
         }).ConfigureAwait(false);
 
@@ -354,6 +358,117 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
                 EcrCode.Create(ClonedRelationCode(t.Code, clone.Id)), sourceId, targetId, t.Kind, t.MatchJson);
             relation.Update(sourceId, targetId, t.Kind, t.MatchJson, t.MapJson, t.OnSourceChange, t.IsActive);
             db.TableRelations.Add(relation);
+        }
+    }
+
+    /// <summary>
+    /// Прив'язка аркуша до дозволу (PM-09), названа ідентичністю: аркуш+таблиця, аркуш+таблиця+колонка, код поля шапки.
+    /// Тип і таблиця типу дозволу від версії не залежать і переносяться ідентифікаторами.
+    /// </summary>
+    private sealed record BindingTemplate(
+        string Code,
+        (string Sheet, string Table) SheetTable,
+        int PermitTypeDefId,
+        int PermitTypeTableId,
+        PermitBindingMode Mode,
+        PermitSelectionRule SelectionRule,
+        string? HeaderFieldCode,
+        bool IsActive,
+        IReadOnlyList<(PermitColumnRole Role, string PermitFieldCode, string SheetColumnCode, int Ordinal)> Columns);
+
+    private async Task<IReadOnlyList<BindingTemplate>> ReadBindingTemplatesAsync(
+        TemplateVersion source, CancellationToken ct)
+    {
+        var bindings = await db.PermitSheetBindings
+            .AsNoTracking()
+            .Include(b => b.Columns)
+            .Where(b => b.TemplateVersionId == source.Id)
+            .OrderBy(b => b.Code)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (bindings.Count == 0)
+        {
+            return [];
+        }
+
+        var tables = source.Sheets
+            .SelectMany(s => s.Tables.Select(t => (t.Id, Key: (Sheet: s.Code, Table: t.Code))))
+            .ToDictionary(x => x.Id, x => x.Key);
+        var columns = source.Sheets
+            .SelectMany(s => s.Tables.SelectMany(t => t.Columns))
+            .ToDictionary(c => c.Id, c => c.Code);
+        var headers = source.HeaderFields.ToDictionary(h => h.Id, h => h.Code);
+
+        // Прив'язка, чия таблиця, колонка чи поле шапки лежать поза версією (старі дані), не переноситься: сенсу в ній для
+        // нової версії немає.
+        return
+        [
+            .. bindings
+                .Where(b => tables.ContainsKey(b.SheetTableDefId)
+                            && b.Columns.All(c => columns.ContainsKey(c.SheetColumnDefId))
+                            && (b.HeaderFieldDefId is null || headers.ContainsKey(b.HeaderFieldDefId.Value)))
+                .Select(b => new BindingTemplate(
+                    b.Code,
+                    tables[b.SheetTableDefId],
+                    b.PermitTypeDefId,
+                    b.PermitTypeTableId,
+                    b.Mode,
+                    b.SelectionRule,
+                    b.HeaderFieldDefId is { } h ? headers[h] : null,
+                    b.IsActive,
+                    [.. b.Columns.Select(c => (c.Role, c.PermitFieldCode, columns[c.SheetColumnDefId], c.Ordinal))])),
+        ];
+    }
+
+    /// <summary>
+    /// Переносить прив'язки на таблиці, колонки й поле шапки КЛОНУ (PM-09). Код прив'язки унікальний по всій системі
+    /// (<c>UQ_PermitSheetBinding_Code</c>), тому клон отримує той самий суфікс <c>_v&lt;id&gt;</c>, що й зв'язки таблиць.
+    /// </summary>
+    private void ClonePermitBindings(TemplateVersion clone, IReadOnlyList<BindingTemplate> templates)
+    {
+        if (templates.Count == 0)
+        {
+            return;
+        }
+
+        var tableIds = clone.Sheets
+            .SelectMany(s => s.Tables.Select(t => (t.Id, Key: (Sheet: s.Code, Table: t.Code))))
+            .ToDictionary(x => x.Key, x => x.Id);
+        var columnIds = clone.Sheets
+            .SelectMany(s => s.Tables.SelectMany(t => t.Columns.Select(c => (c.Id, Key: (Sheet: s.Code, Table: t.Code, Column: c.Code)))))
+            .ToDictionary(x => x.Key, x => x.Id);
+        var headerIds = clone.HeaderFields.ToDictionary(h => h.Code, h => h.Id, StringComparer.Ordinal);
+
+        foreach (var t in templates)
+        {
+            if (!tableIds.TryGetValue(t.SheetTable, out var tableId)
+                || (t.HeaderFieldCode is not null && !headerIds.ContainsKey(t.HeaderFieldCode)))
+            {
+                continue;
+            }
+
+            var binding = new PermitSheetBinding(
+                EcrCode.Create(ClonedRelationCode(t.Code, clone.Id)),
+                clone.Id,
+                tableId,
+                t.PermitTypeDefId,
+                t.PermitTypeTableId,
+                t.Mode,
+                t.SelectionRule,
+                t.HeaderFieldCode is null ? null : headerIds[t.HeaderFieldCode]);
+            binding.SetActive(t.IsActive);
+
+            foreach (var column in t.Columns)
+            {
+                binding.AddColumn(new PermitSheetBindingColumn(
+                    column.Role,
+                    EcrCode.Create(column.PermitFieldCode),
+                    columnIds[(t.SheetTable.Sheet, t.SheetTable.Table, column.SheetColumnCode)],
+                    column.Ordinal));
+            }
+
+            db.PermitSheetBindings.Add(binding);
         }
     }
 
@@ -627,8 +742,8 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
 
     private async Task SaveCloneAsync(
         TemplateVersion clone, TemplateVersionCloner.CloneLinks links, int clonedFrom,
-        IReadOnlyList<RelationTemplate> relationTemplates, IReadOnlyList<GrantSource> grantSources,
-        CancellationToken ct)
+        IReadOnlyList<RelationTemplate> relationTemplates, IReadOnlyList<BindingTemplate> bindingTemplates,
+        IReadOnlyList<GrantSource> grantSources, CancellationToken ct)
     {
         db.TemplateVersions.Add(clone);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -640,6 +755,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
 
         db.FormulaDefs.AddRange(TemplateVersionCloner.Relink(links));
         CloneTableRelations(clone, relationTemplates);
+        ClonePermitBindings(clone, bindingTemplates);
         await CloneResourceGrantsAsync(clone, grantSources, ct).ConfigureAwait(false);
         await CloneAccessRulesAsync(clone, clonedFrom, grantSources, ct).ConfigureAwait(false);
         await CloneCalculationBindingsAsync(clone, grantSources, ct).ConfigureAwait(false);
