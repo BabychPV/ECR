@@ -68,10 +68,7 @@ public sealed class PermitConstraintsTests(SqlServerFixture sql)
         {
             return ex;
         }
-        finally
-        {
-            try { await tx.RollbackAsync().ConfigureAwait(false); } catch (InvalidOperationException) { }
-        }
+        // Відкат — у DisposeAsync транзакції (`await using`), Commit не викликається.
     }
 
     private static async Task ExecAsync(SqlConnection c, SqlTransaction tx, string text)

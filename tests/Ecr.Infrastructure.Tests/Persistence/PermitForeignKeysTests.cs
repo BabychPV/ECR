@@ -73,19 +73,13 @@ public sealed class PermitForeignKeysTests(SqlServerFixture sql)
         await using var connection = new SqlConnection(sql.ConnectionString);
         await connection.OpenAsync();
         await using var tx = (SqlTransaction)await connection.BeginTransactionAsync();
-        try
-        {
-            // Вимикаємо лише FK на реєстр; FK_PermitTypeTable_Type лишається ввімкненим.
-            await ExecAsync(connection, tx, "ALTER TABLE cfg.PermitTypeTable NOCHECK CONSTRAINT FK_PermitTypeTable_Reg;");
-            var ex = await Assert.ThrowsAsync<SqlException>(() => ExecAsync(connection, tx,
-                "INSERT cfg.PermitTypeTable(PermitTypeDefId,Code,NameL10n,Ordinal,RegistryDefId) VALUES(-1,N'x',N'{}',1,1);"));
-            Assert.Equal(547, ex.Number);
-            Assert.Contains("FK_PermitTypeTable_Type", ex.Message, StringComparison.Ordinal);
-        }
-        finally
-        {
-            try { await tx.RollbackAsync(); } catch (InvalidOperationException) { }
-        }
+        // Вимикаємо лише FK на реєстр; FK_PermitTypeTable_Type лишається ввімкненим.
+        await ExecAsync(connection, tx, "ALTER TABLE cfg.PermitTypeTable NOCHECK CONSTRAINT FK_PermitTypeTable_Reg;");
+        var ex = await Assert.ThrowsAsync<SqlException>(() => ExecAsync(connection, tx,
+            "INSERT cfg.PermitTypeTable(PermitTypeDefId,Code,NameL10n,Ordinal,RegistryDefId) VALUES(-1,N'x',N'{}',1,1);"));
+        Assert.Equal(547, ex.Number);
+        Assert.Contains("FK_PermitTypeTable_Type", ex.Message, StringComparison.Ordinal);
+        // Відкат — у DisposeAsync транзакції (`await using`), Commit не викликається.
     }
 
     private static async Task ExecAsync(SqlConnection c, SqlTransaction tx, string text)
