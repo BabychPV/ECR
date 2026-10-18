@@ -188,11 +188,10 @@ export function buildSaveRequest(
     dataType: draft.dataType,
     ordinal: existingFields.length + index + 1,
 
-    // ⛔ Нове поле обов'язковим бути не може — сервер це й так відхилив би
-    // (`ECR-REG-0422`: наявні записи його ще не мають), форма лише не показує
-    // вибору там, де його немає (той самий принцип, що й `FieldDraft` без
-    // `isRequired` узагалі).
-    isRequired: false,
+    // ⚠ Обов'язкове нове поле сервер приймає, лише коли в довіднику немає живих записів
+    // (`newFieldsMayBeRequired`: так заводяться ключові й композиційні поля). Форма дає прапорець
+    // лише за `entryCount === 0` (`RegistryFieldForm`); тут він іде так, як його ввів автор.
+    isRequired: draft.isRequired,
     isKey: draft.isKey,
     lookupRegistryDefId: draft.dataType === 'Lookup' ? draft.lookupRegistryDefId : null,
     unitId: NumericFieldTypes.includes(draft.dataType) ? draft.unitId : null,
@@ -238,10 +237,8 @@ export function emptyRule(ruleKind: RuleKind): RuleDraft {
  * додається в ЦЬОМУ сеансі (`D2-202`: наявне поле показується, а не
  * правиться; ця чернетка того рішення не порушує, бо описує тільки нове).
  *
- * ⛔ `isRequired` немає навмисно: нове поле обов'язковим бути не може
- * (сервер відхиляє — `ECR-REG-0422`, наявні записи його ще не мають), і
- * форма, яка запропонувала б цей прапорець, дала б натиснути там, де
- * сервер однаково відмовить.
+ * ⚠ `isRequired` доступний лише поки в довіднику немає живих записів
+ * (сервер: `newFieldsMayBeRequired`); інакше `isFieldComplete(…, false)` не пускає збереження.
  *
  * ⚠ `name` — рядок ОДНІЄЮ мовою (мовою інтерфейсу), а не повний
  * `LocalizedText` — той самий спрощений підхід, що вже прийнятий тут для
@@ -254,6 +251,7 @@ export interface FieldDraft extends CompositionDraft {
   readonly code: string;
   readonly name: string;
   readonly dataType: FieldDataType;
+  readonly isRequired: boolean;
   readonly isKey: boolean;
   readonly lookupRegistryDefId: number | null;
   readonly unitId: number | null;
@@ -265,6 +263,7 @@ export function emptyField(dataType: FieldDataType = 'String'): FieldDraft {
     code: '',
     name: '',
     dataType,
+    isRequired: false,
     isKey: false,
     lookupRegistryDefId: null,
     unitId: null,
@@ -278,13 +277,16 @@ export function emptyField(dataType: FieldDataType = 'String'): FieldDraft {
  * сервер такого не забороняє напряму (`lookupRegistryDefId` для інших типів
  * просто ігнорується), але зберегти його означало б завести колонку, яка
  * ніколи не покаже жодного варіанта.
+ *
+ * ⚠ `mayBeRequired === false` (у довіднику вже є записи): обов'язкове нове поле сервер відхилить
+ * (`newFieldsMayBeRequired`), тож збереження не пускаємо — і форма пояснює причину.
  */
-export function isFieldComplete(draft: FieldDraft): boolean {
+export function isFieldComplete(draft: FieldDraft, mayBeRequired = true): boolean {
   return (
     draft.code.trim().length > 0
+    && (mayBeRequired || !draft.isRequired)
     && draft.name.trim().length > 0
     && (EditableFieldDataTypes as readonly string[]).includes(draft.dataType)
     && (draft.dataType !== 'Lookup' || draft.lookupRegistryDefId !== null)
   );
 }
-

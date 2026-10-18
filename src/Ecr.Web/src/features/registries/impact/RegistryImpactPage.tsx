@@ -262,6 +262,7 @@ export function RegistryImpactPage(): JSX.Element {
       <PageHeader
         title={t('registries.impact.title')}
         meta={code}
+        back={{ label: t('registries.data.back'), href: `/admin/registries?code=${encodeURIComponent(code)}` }}
         actions={
           canRecalculate && (
             <Button

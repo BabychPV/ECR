@@ -258,6 +258,7 @@ export function draftNewFields(draft: RegistryDraftDto, language: string): Field
       code: field.code,
       name: localizedText(field.nameL10n, language),
       dataType: fieldDataType(field.dataType),
+      isRequired: field.isRequired,
       isKey: field.isKey,
       lookupRegistryDefId: field.lookupRegistryDefId,
       unitId: field.unitId,

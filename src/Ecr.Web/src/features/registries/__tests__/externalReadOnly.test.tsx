@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -35,6 +35,7 @@ const SeededStrings: Record<string, string> = {
   'registries.search': 'Search',
   'registries.searchPlaceholder': 'Filter by code or name',
   'registries.constructor': 'Constructor',
+  'registries.moreActions': 'More',
   'registries.externalReadOnly': 'Entries of this registry are synchronized from AF and cannot be edited here.',
   'registry.import.pick': 'Import CSV',
   'common.delete': 'Delete',
@@ -153,7 +154,7 @@ describe('D-211: довідник External — записи лише для пе
     showPage();
     const row = (await screen.findByText('Kilogram')).closest('tr')!;
 
-    expect(isDisabled(screen.getByRole('button', { name: 'New entry' }))).toBe(true);
+    expect(isDisabled(await screen.findByRole('button', { name: 'New entry' }))).toBe(true);
     expect(isDisabled(screen.getByRole('button', { name: 'Import CSV' }))).toBe(true);
     expect(isDisabled(within(row).getByRole('button', { name: 'Valid' }))).toBe(true);
     expect(isDisabled(within(row).getByRole('button', { name: 'Delete' }))).toBe(true);
@@ -170,7 +171,7 @@ describe('D-211: довідник External — записи лише для пе
     showPage();
     const row = (await screen.findByText('Kilogram')).closest('tr')!;
 
-    expect(isDisabled(screen.getByRole('button', { name: 'New entry' }))).toBe(false);
+    expect(isDisabled(await screen.findByRole('button', { name: 'New entry' }))).toBe(false);
     expect(isDisabled(screen.getByRole('button', { name: 'Import CSV' }))).toBe(false);
     expect(isDisabled(within(row).getByRole('button', { name: 'Valid' }))).toBe(false);
     expect(isDisabled(within(row).getByRole('button', { name: 'Delete' }))).toBe(false);
@@ -217,16 +218,20 @@ describe('L9-18: симуляція — довідники лише для чи�
   it('під симуляцією немає створення довідника, запису й правки; перехід у конструктор лишається', async () => {
     await showSimulated(true);
 
-    expect(screen.queryByRole('button', { name: 'New registry' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'New entry' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
-    expect(screen.getByRole('link', { name: 'Constructor' })).toBeDefined();
+
+    // ✎ REG-UI 3/3: «New registry» і «Constructor» переїхали в меню «More».
+    fireEvent.click(await screen.findByRole('button', { name: 'More' }));
+    expect(await screen.findByRole('menuitem', { name: 'Constructor' })).toBeDefined();
+    expect(screen.queryByRole('menuitem', { name: 'New registry' })).toBeNull();
   });
 
   it('контроль: без симуляції ті самі кнопки є', async () => {
     await showSimulated(false);
 
-    expect(await screen.findByRole('button', { name: 'New registry' })).toBeDefined();
+    fireEvent.click(await screen.findByRole('button', { name: 'More' }));
+    expect(await screen.findByRole('menuitem', { name: 'New registry' })).toBeDefined();
     expect(screen.getByRole('button', { name: 'New entry' })).toBeDefined();
     expect(screen.getByRole('button', { name: 'Edit' })).toBeDefined();
   });

@@ -268,6 +268,10 @@ function InspectorTriggers({
         size="xs"
         variant={tab === 'issues' ? 'light' : 'subtle'}
         color={tone}
+        // CL-15 (B-1): `gray` у `subtle` — це `gray.6` (#868e96, 3,1:1 на #f6f7fa у Light): «Not validated yet»
+        // і «No issues» не проходили axe `color-contrast`. Нейтральний стан читає токен теми
+        // (`--mantine-color-dimmed` = `--ecr-muted`, ≥ 4,5:1 в обох темах — statusTextContrast.test).
+        {...(tone === 'gray' ? { c: 'dimmed' } : {})}
         aria-pressed={tab === 'issues'}
         title={
           counts === null

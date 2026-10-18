@@ -69,6 +69,15 @@ describe('CompositionEditorPage — стани', () => {
     expect(document.querySelector('[data-rc816-panel]')).toBeNull();
   });
 
+  it('є кнопка «Назад» до записів довідника — навіть коли опис не приїхав', async () => {
+    // ⛔ Мутаційна проба: прибрати `back` у шапці — перевірка червоніє.
+    serve((path) => (path.endsWith('/STREAM_CASE/definition') ? problem(500, 'ECR-SYS-0500') : null));
+    show();
+
+    const back = await screen.findByRole('link', { name: /registries\.data\.back/ });
+    expect(back.getAttribute('href')).toBe('/admin/registries?code=STREAM_CASE');
+  });
+
   it('403 опису довідника: «немає права» з кодом', async () => {
     serve((path) => (path.endsWith('/STREAM_CASE/definition') ? problem(403, 'ECR-AUTH-0403') : null));
     show();
