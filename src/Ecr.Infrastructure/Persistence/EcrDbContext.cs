@@ -56,6 +56,13 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
 
     /// <summary>Профілі імпорту довідників (FEATURE-REGISTRY-TABLES, RT-06).</summary>
     public DbSet<RegistryImportProfile> RegistryImportProfiles => Set<RegistryImportProfile>();
+
+    /// <summary>Типи дозволів, їхні таблиці, надбудова полів і прив'язки аркушів (Permits, PM-02).</summary>
+    public DbSet<PermitTypeDef> PermitTypeDefs => Set<PermitTypeDef>();
+    public DbSet<PermitTypeTable> PermitTypeTables => Set<PermitTypeTable>();
+    public DbSet<PermitFieldMeta> PermitFieldMetas => Set<PermitFieldMeta>();
+    public DbSet<PermitSheetBinding> PermitSheetBindings => Set<PermitSheetBinding>();
+    public DbSet<PermitSheetBindingColumn> PermitSheetBindingColumns => Set<PermitSheetBindingColumn>();
     public DbSet<CalculationBinding> CalculationBindings => Set<CalculationBinding>();
 
     // uom

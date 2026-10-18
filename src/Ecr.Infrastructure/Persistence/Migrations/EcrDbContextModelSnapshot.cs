@@ -1321,6 +1321,249 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PermitFieldMeta", b =>
+                {
+                    b.Property<int>("RegistryFieldDefId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("GroupCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int?>("ListRegistryDefId")
+                        .HasColumnType("int");
+
+                    b.Property<byte?>("ListScope")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("ListSiblingTableCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("PermitTypeDefId")
+                        .HasColumnType("int");
+
+                    b.Property<byte?>("Precision")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte?>("Scale")
+                        .HasColumnType("tinyint");
+
+                    b.HasKey("RegistryFieldDefId")
+                        .HasName("PK_PermitFieldMeta");
+
+                    b.HasIndex("PermitTypeDefId")
+                        .HasDatabaseName("IX_PermitFieldMeta_Type");
+
+                    b.ToTable("PermitFieldMeta", "cfg", t =>
+                        {
+                            t.HasCheckConstraint("CK_PermitField_List", "(ListScope IS NULL AND ListRegistryDefId IS NULL AND ListSiblingTableCode IS NULL) OR (ListScope IS NOT NULL AND ListScope IN (0, 1) AND ListRegistryDefId IS NOT NULL AND ListSiblingTableCode IS NULL) OR (ListScope IS NOT NULL AND ListScope = 2 AND ListSiblingTableCode IS NOT NULL AND ListRegistryDefId IS NULL)");
+
+                            t.HasCheckConstraint("CK_PermitField_Num", "(Precision IS NULL OR Precision BETWEEN 1 AND 38) AND (Scale IS NULL OR (Precision IS NOT NULL AND Scale <= Precision))");
+
+                            t.HasCheckConstraint("CK_PermitField_Scope", "ListScope IS NULL OR ListScope BETWEEN 0 AND 2");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PermitSheetBinding", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int?>("HeaderFieldDefId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true, "DF_PermitBinding_Act");
+
+                    b.Property<byte>("Mode")
+                        .HasColumnType("tinyint");
+
+                    b.Property<int>("PermitTypeDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PermitTypeTableId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<byte>("SelectionRule")
+                        .HasColumnType("tinyint");
+
+                    b.Property<int>("SheetTableDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TemplateVersionId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id")
+                        .HasName("PK_PermitSheetBinding");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_PermitSheetBinding_Code");
+
+                    b.HasIndex("PermitTypeTableId")
+                        .HasDatabaseName("IX_PermitSheetBinding_Table");
+
+                    b.HasIndex("TemplateVersionId", "SheetTableDefId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_PermitSheetBinding_Sheet");
+
+                    b.ToTable("PermitSheetBinding", "cfg", t =>
+                        {
+                            t.HasCheckConstraint("CK_PermitBinding_Header", "(SelectionRule = 1 AND HeaderFieldDefId IS NOT NULL) OR (SelectionRule <> 1 AND HeaderFieldDefId IS NULL)");
+
+                            t.HasCheckConstraint("CK_PermitBinding_Mode", "Mode BETWEEN 0 AND 1");
+
+                            t.HasCheckConstraint("CK_PermitBinding_Rule", "SelectionRule BETWEEN 0 AND 1");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PermitSheetBindingColumn", b =>
+                {
+                    b.Property<int>("BindingId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PermitFieldCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("int");
+
+                    b.Property<byte>("Role")
+                        .HasColumnType("tinyint");
+
+                    b.Property<int>("SheetColumnDefId")
+                        .HasColumnType("int");
+
+                    b.HasKey("BindingId", "PermitFieldCode")
+                        .HasName("PK_PermitSheetBindingColumn");
+
+                    b.HasIndex("BindingId", "SheetColumnDefId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_PermitBindCol_Column");
+
+                    b.ToTable("PermitSheetBindingColumn", "cfg", t =>
+                        {
+                            t.HasCheckConstraint("CK_PermitBindCol_Role", "Role BETWEEN 0 AND 2");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PermitTypeDef", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<byte>("Category")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("HeaderRegistryDefId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("NameL10n")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("PublishedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("tinyint")
+                        .HasDefaultValueSql("0", "DF_PermitType_Status");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int")
+                        .HasDefaultValue(1, "DF_PermitType_Ver");
+
+                    b.HasKey("Id")
+                        .HasName("PK_PermitTypeDef");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_PermitTypeDef");
+
+                    b.ToTable("PermitTypeDef", "cfg", t =>
+                        {
+                            t.HasCheckConstraint("CK_PermitType_Category", "Category BETWEEN 0 AND 3");
+
+                            t.HasCheckConstraint("CK_PermitType_Published", "Status <> 1 OR (PublishedAt IS NOT NULL AND PublishedByUserId IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_PermitType_Status", "Status BETWEEN 0 AND 1");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PermitTypeTable", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("NameL10n")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PermitTypeDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RegistryDefId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id")
+                        .HasName("PK_PermitTypeTable");
+
+                    b.HasIndex("RegistryDefId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_PermitTypeTable_Registry");
+
+                    b.HasIndex("PermitTypeDefId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_PermitTypeTable");
+
+                    b.ToTable("PermitTypeTable", "cfg");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryDef", b =>
                 {
                     b.Property<int>("Id")
@@ -6164,6 +6407,116 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_PAR_TV");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PermitFieldMeta", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryDef", null)
+                        .WithMany()
+                        .HasForeignKey("ListRegistryDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_PermitField_ListReg");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.PermitTypeDef", null)
+                        .WithMany()
+                        .HasForeignKey("PermitTypeDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PermitField_Type");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryFieldDef", null)
+                        .WithOne()
+                        .HasForeignKey("Ecr.Domain.Entities.Configuration.PermitFieldMeta", "RegistryFieldDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PermitField_Field");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PermitSheetBinding", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.HeaderFieldDef", null)
+                        .WithMany()
+                        .HasForeignKey("HeaderFieldDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_PermitBinding_Header");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.PermitTypeDef", null)
+                        .WithMany()
+                        .HasForeignKey("PermitTypeDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PermitBinding_Type");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.PermitTypeTable", null)
+                        .WithMany()
+                        .HasForeignKey("PermitTypeTableId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PermitBinding_Table");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.TableDef", null)
+                        .WithMany()
+                        .HasForeignKey("SheetTableDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PermitBinding_Sheet");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.TemplateVersion", null)
+                        .WithMany()
+                        .HasForeignKey("TemplateVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PermitBinding_TV");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PermitSheetBindingColumn", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.PermitSheetBinding", null)
+                        .WithMany("Columns")
+                        .HasForeignKey("BindingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PermitBindCol_Binding");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.ColumnDef", null)
+                        .WithMany()
+                        .HasForeignKey("SheetColumnDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PermitBindCol_Column");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PermitTypeDef", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryDef", null)
+                        .WithMany()
+                        .HasForeignKey("HeaderRegistryDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PermitType_HeaderReg");
+
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("PublishedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_PermitType_PublishedBy");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PermitTypeTable", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.PermitTypeDef", null)
+                        .WithMany()
+                        .HasForeignKey("PermitTypeDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PermitTypeTable_Type");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryDef", null)
+                        .WithMany()
+                        .HasForeignKey("RegistryDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PermitTypeTable_Reg");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryDefinitionDraft", b =>
                 {
                     b.HasOne("Ecr.Domain.Entities.Configuration.RegistryDef", null)
@@ -7298,6 +7651,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.Methodology", b =>
                 {
                     b.Navigation("Versions");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PermitSheetBinding", b =>
+                {
+                    b.Navigation("Columns");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryDef", b =>

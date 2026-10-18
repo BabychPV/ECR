@@ -923,6 +923,131 @@ CREATE TABLE cfg.RegistryImportProfile
 );
 GO
 
+-- Дозволи (Permits, PM-02, міграція PRM01_Permits; FEATURE-REGISTRY-TABLES §3, §4.8).
+-- Тип дозволу = реєстр шапки + упорядкований склад таблиць-реєстрів. Сам механізм
+-- реєстрів (cfg.RegistryDef / RegistryFieldDef) НЕ змінюється: усе, чого полю
+-- дозволу бракує, лежить у cfg.PermitFieldMeta. Каскад видалення в цій групі
+-- один: колонки прив'язки зникають разом із прив'язкою; решта FK — NO ACTION.
+CREATE TABLE cfg.PermitTypeDef
+(
+    Id                  int           IDENTITY(1,1) NOT NULL,
+    Code                nvarchar(64)  NOT NULL,   -- ^[A-Za-z][A-Za-z0-9_]{0,63}$, не змінюється
+    NameL10n            nvarchar(max) NOT NULL,
+    Category            tinyint       NOT NULL,   -- 0 Air, 1 Water, 2 Waste, 3 Other
+    HeaderRegistryDefId int           NOT NULL,   -- реєстр шапки дозволу
+    Version             int           NOT NULL CONSTRAINT DF_PermitType_Ver DEFAULT(1),
+    Status              tinyint       NOT NULL CONSTRAINT DF_PermitType_Status DEFAULT(0), -- 0 Draft, 1 Published; лише вгору
+    PublishedAt         datetime2(3)  NULL,
+    PublishedByUserId   int           NULL,
+    RowVersion          rowversion    NOT NULL,   -- If-Match
+    CONSTRAINT PK_PermitTypeDef PRIMARY KEY (Id),
+    CONSTRAINT UQ_PermitTypeDef UNIQUE (Code),
+    CONSTRAINT CK_PermitType_Category CHECK (Category BETWEEN 0 AND 3),
+    CONSTRAINT CK_PermitType_Status CHECK (Status BETWEEN 0 AND 1),
+    CONSTRAINT CK_PermitType_Published
+        CHECK (Status <> 1 OR (PublishedAt IS NOT NULL AND PublishedByUserId IS NOT NULL)),
+    CONSTRAINT FK_PermitType_HeaderReg FOREIGN KEY (HeaderRegistryDefId) REFERENCES cfg.RegistryDef (Id),
+    CONSTRAINT FK_PermitType_PublishedBy FOREIGN KEY (PublishedByUserId) REFERENCES sec.[User] (Id)
+);
+GO
+
+-- Таблиця типу дозволу: реєстр, що її зберігає. Реєстр належить рівно одному
+-- типу (UQ_PermitTypeTable_Registry).
+CREATE TABLE cfg.PermitTypeTable
+(
+    Id              int           IDENTITY(1,1) NOT NULL,
+    PermitTypeDefId int           NOT NULL,
+    Code            nvarchar(64)  NOT NULL,
+    NameL10n        nvarchar(max) NOT NULL,
+    Ordinal         int           NOT NULL,
+    RegistryDefId   int           NOT NULL,
+    CONSTRAINT PK_PermitTypeTable PRIMARY KEY (Id),
+    CONSTRAINT UQ_PermitTypeTable UNIQUE (PermitTypeDefId, Code),
+    CONSTRAINT UQ_PermitTypeTable_Registry UNIQUE (RegistryDefId),
+    CONSTRAINT FK_PermitTypeTable_Type FOREIGN KEY (PermitTypeDefId) REFERENCES cfg.PermitTypeDef (Id),
+    CONSTRAINT FK_PermitTypeTable_Reg  FOREIGN KEY (RegistryDefId)   REFERENCES cfg.RegistryDef (Id)
+);
+GO
+
+-- Надбудова дозволу над полем реєстру; ключ — саме поле. ListScope лише у
+-- полів-переліків (NULL — поле без переліку): 0 SharedRegistry, 1 TypeOnly —
+-- ListRegistryDefId; 2 SamePermitTable — ListSiblingTableCode.
+CREATE TABLE cfg.PermitFieldMeta
+(
+    RegistryFieldDefId   int          NOT NULL,
+    PermitTypeDefId      int          NOT NULL,
+    GroupCode            nvarchar(64) NULL,
+    Precision            tinyint      NULL,
+    Scale                tinyint      NULL,
+    ListScope            tinyint      NULL,
+    ListRegistryDefId    int          NULL,
+    ListSiblingTableCode nvarchar(64) NULL,
+    CONSTRAINT PK_PermitFieldMeta PRIMARY KEY (RegistryFieldDefId),
+    CONSTRAINT CK_PermitField_Scope CHECK (ListScope IS NULL OR ListScope BETWEEN 0 AND 2),
+    CONSTRAINT CK_PermitField_List CHECK (
+           (ListScope IS NULL AND ListRegistryDefId IS NULL AND ListSiblingTableCode IS NULL)
+        OR (ListScope IS NOT NULL AND ListScope IN (0, 1) AND ListRegistryDefId IS NOT NULL AND ListSiblingTableCode IS NULL)
+        OR (ListScope IS NOT NULL AND ListScope = 2 AND ListSiblingTableCode IS NOT NULL AND ListRegistryDefId IS NULL)),
+    CONSTRAINT CK_PermitField_Num CHECK (
+        (Precision IS NULL OR Precision BETWEEN 1 AND 38)
+        AND (Scale IS NULL OR (Precision IS NOT NULL AND Scale <= Precision))),
+    CONSTRAINT FK_PermitField_Field   FOREIGN KEY (RegistryFieldDefId) REFERENCES cfg.RegistryFieldDef (Id),
+    CONSTRAINT FK_PermitField_Type    FOREIGN KEY (PermitTypeDefId)    REFERENCES cfg.PermitTypeDef (Id),
+    CONSTRAINT FK_PermitField_ListReg FOREIGN KEY (ListRegistryDefId)  REFERENCES cfg.RegistryDef (Id)
+);
+CREATE INDEX IX_PermitFieldMeta_Type ON cfg.PermitFieldMeta (PermitTypeDefId);
+GO
+
+-- Прив'язка таблиці аркуша шаблону до таблиці типу дозволу. HeaderFieldDefId —
+-- поле шапки версії шаблону (cfg.HeaderFieldDef), обов'язкове рівно для
+-- SelectionRule = 1 (FromHeaderLookup).
+CREATE TABLE cfg.PermitSheetBinding
+(
+    Id                int          IDENTITY(1,1) NOT NULL,
+    Code              nvarchar(64) NOT NULL,
+    TemplateVersionId int          NOT NULL,
+    SheetTableDefId   int          NOT NULL,
+    PermitTypeDefId   int          NOT NULL,
+    PermitTypeTableId int          NOT NULL,
+    Mode              tinyint      NOT NULL,      -- 0 Rows, 1 Formulas
+    SelectionRule     tinyint      NOT NULL,      -- 0 ByFacilityPeriodEnd, 1 FromHeaderLookup
+    HeaderFieldDefId  int          NULL,
+    IsActive          bit          NOT NULL CONSTRAINT DF_PermitBinding_Act DEFAULT(1),
+    RowVersion        rowversion   NOT NULL,      -- If-Match
+    CONSTRAINT PK_PermitSheetBinding PRIMARY KEY (Id),
+    CONSTRAINT UQ_PermitSheetBinding_Code UNIQUE (Code),
+    CONSTRAINT UQ_PermitSheetBinding_Sheet UNIQUE (TemplateVersionId, SheetTableDefId),
+    CONSTRAINT CK_PermitBinding_Mode CHECK (Mode BETWEEN 0 AND 1),
+    CONSTRAINT CK_PermitBinding_Rule CHECK (SelectionRule BETWEEN 0 AND 1),
+    CONSTRAINT CK_PermitBinding_Header CHECK (
+        (SelectionRule = 1 AND HeaderFieldDefId IS NOT NULL)
+        OR (SelectionRule <> 1 AND HeaderFieldDefId IS NULL)),
+    CONSTRAINT FK_PermitBinding_TV     FOREIGN KEY (TemplateVersionId) REFERENCES cfg.TemplateVersion (Id),
+    CONSTRAINT FK_PermitBinding_Sheet  FOREIGN KEY (SheetTableDefId)   REFERENCES cfg.TableDef (Id),
+    CONSTRAINT FK_PermitBinding_Type   FOREIGN KEY (PermitTypeDefId)   REFERENCES cfg.PermitTypeDef (Id),
+    CONSTRAINT FK_PermitBinding_Table  FOREIGN KEY (PermitTypeTableId) REFERENCES cfg.PermitTypeTable (Id),
+    CONSTRAINT FK_PermitBinding_Header FOREIGN KEY (HeaderFieldDefId)  REFERENCES cfg.HeaderFieldDef (Id)
+);
+CREATE INDEX IX_PermitSheetBinding_Table ON cfg.PermitSheetBinding (PermitTypeTableId);
+GO
+
+-- Колонки прив'язки. Єдиний каскад групи: колонки не існують без прив'язки.
+CREATE TABLE cfg.PermitSheetBindingColumn
+(
+    BindingId        int          NOT NULL,
+    Role             tinyint      NOT NULL,      -- 0 RowKey, 1 Limit, 2 Info
+    PermitFieldCode  nvarchar(64) NOT NULL,
+    SheetColumnDefId int          NOT NULL,
+    Ordinal          int          NOT NULL,
+    CONSTRAINT PK_PermitSheetBindingColumn PRIMARY KEY (BindingId, PermitFieldCode),
+    CONSTRAINT UQ_PermitBindCol_Column UNIQUE (BindingId, SheetColumnDefId),
+    CONSTRAINT CK_PermitBindCol_Role CHECK (Role BETWEEN 0 AND 2),
+    CONSTRAINT FK_PermitBindCol_Binding FOREIGN KEY (BindingId)
+        REFERENCES cfg.PermitSheetBinding (Id) ON DELETE CASCADE,
+    CONSTRAINT FK_PermitBindCol_Column  FOREIGN KEY (SheetColumnDefId) REFERENCES cfg.ColumnDef (Id)
+);
+GO
+
 -- Результат методології → колонка документа. Значення НЕ копіюється
 -- у doc.CellValue: воно читається за посиланням (D-69, П-33).
 CREATE TABLE cfg.CalculationBinding
