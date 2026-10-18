@@ -360,6 +360,74 @@ export const routes = {
       },
     },
   },
+  // Permits (PM-06): пункт меню одразу після «Registries». Каркас без API; право читання — те саме,
+  // що в довідників (перміт — розширення механізму довідників, README макета §2).
+  adminPermits: {
+    id: 'admin-permits',
+    path: '/admin/permits',
+    handle: { labelKey: 'nav.permits', permission: 'Registry.View', icon: 'permits', descriptionKey: 'nav.permits.description' },
+    showInNav: true,
+  },
+  // ⚠ Статичні `/admin/permits/{types,lists,bindings}` оголошені ДО `/admin/permits/:id`: у реєстрі
+  // порядок не важливий (React Router ранжує статичний сегмент вище за параметр), але так читається
+  // і так його перевіряє `routeConfig.test.ts`.
+  adminPermitTypes: {
+    id: 'admin-permit-types',
+    path: '/admin/permits/types',
+    handle: {
+      labelKey: 'permits.types.title',
+      permission: 'Registry.View',
+      descriptionKey: 'permits.types.description',
+      crumb: { ancestorIds: ['admin-permits'] },
+    },
+  },
+  adminPermitTypeEditor: {
+    id: 'admin-permit-type-editor',
+    path: '/admin/permits/types/:code',
+    handle: {
+      labelKey: 'permits.typeEditor.title',
+      permission: 'Registry.View',
+      crumb: { ancestorIds: ['admin-permits', 'admin-permit-types'] },
+    },
+  },
+  adminPermitLists: {
+    id: 'admin-permit-lists',
+    path: '/admin/permits/lists',
+    handle: {
+      labelKey: 'permits.lists.title',
+      permission: 'Registry.View',
+      descriptionKey: 'permits.lists.description',
+      crumb: { ancestorIds: ['admin-permits'] },
+    },
+  },
+  adminPermitBindings: {
+    id: 'admin-permit-bindings',
+    path: '/admin/permits/bindings',
+    handle: {
+      labelKey: 'permits.bindings.title',
+      permission: 'Registry.View',
+      descriptionKey: 'permits.bindings.description',
+      crumb: { ancestorIds: ['admin-permits'] },
+    },
+  },
+  adminPermitBinding: {
+    id: 'admin-permit-binding',
+    path: '/admin/permits/bindings/:id',
+    handle: {
+      labelKey: 'permits.binding.title',
+      permission: 'Registry.View',
+      crumb: { ancestorIds: ['admin-permits', 'admin-permit-bindings'] },
+    },
+  },
+  adminPermit: {
+    id: 'admin-permit',
+    path: '/admin/permits/:id',
+    handle: {
+      labelKey: 'permits.detail.title',
+      permission: 'Registry.View',
+      crumb: { ancestorIds: ['admin-permits'] },
+    },
+  },
   adminMethodologies: {
     id: 'admin-methodologies',
     path: '/admin/methodologies',
@@ -611,6 +679,7 @@ export const navGroups: readonly NavGroup[] = [
     routes: [
       routes.adminTemplates,
       routes.adminRegistries,
+      routes.adminPermits,
       routes.adminMethodologies,
       routes.adminExpressions,
       routes.adminUnits,

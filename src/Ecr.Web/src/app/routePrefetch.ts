@@ -70,6 +70,11 @@ const RegistryConstructorPageLoader = async () => ({
 });
 export const RegistryConstructorPage = lazy(RegistryConstructorPageLoader);
 
+const PermitsPageLoader = async () => ({
+  default: (await import('@/pages/admin/PermitsPage')).PermitsPage,
+});
+export const PermitsPage = lazy(PermitsPageLoader);
+
 const MethodologiesPageLoader = async () => ({
   default: (await import('@/pages/admin/MethodologiesPage')).MethodologiesPage,
 });
@@ -163,6 +168,7 @@ const routeChunkLoaders: Partial<Record<string, () => Promise<unknown>>> = {
   [routes.adminTemplateVersionRelations.id]: TableRelationsPageLoader,
   [routes.adminRegistries.id]: RegistriesPageLoader,
   [routes.adminRegistryDefinition.id]: RegistryConstructorPageLoader,
+  [routes.adminPermits.id]: PermitsPageLoader,
   [routes.adminMethodologies.id]: MethodologiesPageLoader,
   [routes.adminMethodologyVersions.id]: MethodologyVersionsPageLoader,
   [routes.adminExpressions.id]: ExpressionsPageLoader,

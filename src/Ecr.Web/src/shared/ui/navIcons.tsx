@@ -86,6 +86,20 @@ function RegistriesIcon(): JSX.Element {
   );
 }
 
+/** Permits — дозвільний документ із печаткою (аркуш і позначка «чинний»). */
+function PermitsIcon(): JSX.Element {
+  return (
+    <Icon>
+      <path d="M6 3h8l4 4v6.5" />
+      <path d="M6 3a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h6" />
+      <path d="M14 3v4h4" />
+      <path d="M8 11.5h6M8 15h3" />
+      <circle cx="17" cy="17.5" r="2.5" />
+      <path d="M15.8 19.8 15.2 22l1.8-1 1.8 1-.6-2.2" />
+    </Icon>
+  );
+}
+
 /** Methodologies — формула (сигма). */
 function MethodologiesIcon(): JSX.Element {
   return (
@@ -270,6 +284,7 @@ const navIcons: Record<string, () => JSX.Element> = {
   documents: DocumentsIcon,
   templates: TemplatesIcon,
   registries: RegistriesIcon,
+  permits: PermitsIcon,
   methodologies: MethodologiesIcon,
   expressions: ExpressionsIcon,
   units: UnitsIcon,
