@@ -74,7 +74,7 @@
   var TODAY = D.today.slice(0, 10);
 
   function subnav(cur) {
-    var items = [['/admin/permits', 'Permits', 'file'], ['/admin/permits/types', 'Permit types', 'sliders'], ['/admin/permits/bindings', 'Sheet bindings', 'link']];
+    var items = [['/admin/permits', 'Permits', 'file'], ['/admin/permits/types', 'Permit types', 'sliders'], ['/admin/permits/lists', 'Lists', 'rows4'], ['/admin/permits/bindings', 'Sheet bindings', 'link']];
     return h('nav', { class: 'pm-nav', 'aria-label': 'Permits sections' }, items.map(function (x) {
       return h('a', { href: E.href(x[0]), 'aria-current': x[0] === cur ? 'page' : null }, icon(x[2], 14), x[1]); }));
   }
@@ -174,10 +174,33 @@
   /* Варіанти пікерів (демо): у застосунку їх дають реєстри з колонки «Pick from». */
   var LISTS = { Substances: ['Vinyl chloride', 'Nitrogen dioxide', 'Suspended substances', 'Iron oxide', 'Xylene', 'Soot', 'Sulphur dioxide', 'Hydrogen sulphide'], Sites: ['Offshore complex expansion to 450 kbpd', 'Hangar at the process support site'], WaterBodies: ['Caspian Sea (north)', 'Ural River', 'Kigach River'], Platforms: ['Bolashak OPF (LPG)', 'Kashagan Field Facilities'], WastePlaces: ['Temporary storage site No. 1'], WasteCodes: ['20 03 01 · Domestic waste', '08 01 11* · Paint residues', '17 04 05 · Iron and steel'], WaterSubstances: ['Ammonia nitrogen', 'BOD5', 'Chlorides', 'COD', 'Nitrates', 'Sulphates', 'Total iron'], IssueNumbers: ['Outlet 1', 'Outlet 2', 'Outlet 3'], Locations: ['Central processing facility', 'Offshore complex', 'Upstream well pads'] };
   function optsFor(c) {
-    if (c.type === 'Choice') return ['', 'ПР – production', 'ХБ – household', 'Hazardous', 'Non-hazardous'];
+    if (c.type === 'Choice') return [''].concat(choicesOf(c));
     var ref = (c.ref || '').split(' ')[0];
     if (ref === 'StoragePlaces') return [''].concat(PLACE_ROWS.map(function (x) { return x.Place + ' · ' + x.Platform; }));
     return [''].concat(LISTS[ref] || ['Item 1', 'Item 2']);
+  }
+  /* Три області списків вибору: спільний реєстр / список лише цього типу / таблиця того самого перміта. */
+  function scopeOf(c) { return c.type === 'Choice' ? 'type' : ((c.ref || '').indexOf('this permit') >= 0 ? 'permit' : 'shared'); }
+  function choicesOf(c) { return c.choices || { Usage_type: ['ПР – production', 'ХБ – household', 'ПТ – irrigation'], Hazard: ['Hazardous', 'Non-hazardous'] }[c.code] || ['Option 1', 'Option 2']; }
+  var SCOPE_LABEL = { shared: 'Shared registry', type: 'This permit type only', permit: 'Table of the same permit' };
+  /** Діалог «додати значення» — той самий і з форми рядка, і зі сторінки Lists. */
+  function valueDialog(title, hint, onAdd) {
+    var name = '', fld;
+    E.Dialog({ id: 'pm-addval', title: title, narrow: true,
+      body: function (b) { fld = E.Input({ id: 'pm-addval-v', label: 'New value', required: true, onInput: function (v) { name = v; } }); b.appendChild(fld); b.appendChild(note(hint)); },
+      footer: [{ label: 'Cancel' }, { label: 'Add value', variant: 'primary', icon: 'plus', keepOpen: true, onClick: function (d) { if (!name.trim()) { fld.setError('Enter a value'); fld.input.focus(); return false; } onAdd(name.trim()); d.close(); E.Toast('Value added', 'success'); } }] });
+  }
+  function listUsage(ref) {
+    var out = []; TYPES.forEach(function (t) { t.tables.forEach(function (tb) { tb.cols.forEach(function (c) { if (c.type === 'Link to registry' && (c.ref || '').split(' ')[0] === ref) out.push(t.name + ' › ' + tb.name + ' › ' + c.en); }); }); }); return out;
+  }
+  function listRows() {
+    var rows = Object.keys(LISTS).map(function (k) { return { id: 'shared-' + k, name: k, scope: 'shared', owner: 'Registries', entries: LISTS[k].length, used: listUsage(k), ref: k }; });
+    TYPES.forEach(function (t) { t.tables.forEach(function (tb) { tb.cols.forEach(function (c) {
+      if (c.via) return;
+      if (c.type === 'Choice') rows.push({ id: 'type-' + t.code + '-' + c.code, name: c.en, scope: 'type', owner: t.name, entries: choicesOf(c).length, used: [t.name + ' › ' + tb.name + ' › ' + c.en], col: c, t: t });
+      else if (scopeOf(c) === 'permit') rows.push({ id: 'permit-' + t.code + '-' + c.code, name: c.en, scope: 'permit', owner: t.name, entries: 0, used: [t.name + ' › ' + tb.name + ' › ' + c.en], col: c, t: t });
+    }); }); });
+    return rows;
   }
 
   /* ================= демо-дані: екземпляри ================= */
@@ -437,7 +460,16 @@
           var idp = 'pm-f-' + c.code, v = m[c.code], ctl;
           if (c.via) ctl = E.Input({ id: idp, label: c.en, value: String(v == null ? '' : v), readOnly: true, hint: 'Read from the linked record' });
           else if (c.type === 'Yes / No') ctl = E.Switch({ id: idp, label: c.en, checked: !!v, onChange: function (x) { m[c.code] = x; } });
-          else if (c.type === 'Link to registry' || c.type === 'Choice') ctl = E.Select({ id: idp, label: c.en, required: c.req, options: optsFor(c), value: v || '', disabled: ro, onChange: function (x) { m[c.code] = x; }, hint: c.type === 'Link to registry' ? 'Pick from ' + c.ref : null });
+          else if (c.type === 'Link to registry' || c.type === 'Choice') {
+            var sc = scopeOf(c);
+            ctl = E.Select({ id: idp, label: c.en, required: c.req, options: optsFor(c), value: v || '', disabled: ro, onChange: function (x) { m[c.code] = x; }, hint: sc === 'shared' ? 'From the shared registry ' + (c.ref || '').split(' ')[0] : sc === 'type' ? 'A list only for ' + t.name : 'A table of this permit: ' + (c.ref || '').split(' ')[0] });
+            ctls[c.code] = ctl;
+            return h('div', { class: 'stack gap-1' }, ctl, ro ? null : E.Button({ label: sc === 'permit' ? 'Open that table' : 'Not in the list? Add a value…', icon: sc === 'permit' ? 'arrowR' : 'plus', size: 'sm', variant: 'ghost', onClick: function () {
+              if (sc === 'permit') { E.Toast('Add the row to the table “' + (c.ref || '').split(' ')[0] + '” of this permit first; it then appears here', 'warning'); return; }
+              valueDialog('Add a value to ' + c.en, sc === 'shared' ? 'It is added to the shared registry ' + (c.ref || '').split(' ')[0] + ', so every permit type that uses it will see it.' : 'It is added to the list of this permit type only.', function (val) {
+                if (sc === 'shared') { var k = (c.ref || '').split(' ')[0]; (LISTS[k] = LISTS[k] || []).push(val); } else { c.choices = choicesOf(c).slice(); c.choices.push(val); }
+                var sel = ctl.querySelector('select'), o = document.createElement('option'); o.value = o.textContent = val; sel.appendChild(o); sel.value = val; m[c.code] = val; }); } }));
+          }
           else if (c.type === 'Date') ctl = E.Input({ id: idp, label: c.en, required: c.req, type: 'date', value: v || '', readOnly: ro, onInput: function (x) { m[c.code] = x; } });
           else if (c.type === 'Number') ctl = E.Input({ id: idp, label: c.en, required: c.req, mono: true, suffix: c.unit || undefined, value: v == null ? '' : String(v), readOnly: ro, onInput: function (x) { var n = parseFloat(String(x).replace(',', '.')); m[c.code] = isNaN(n) ? '' : n; } });
           else ctl = E.Input({ id: idp, label: c.en, required: c.req, value: v == null ? '' : String(v), readOnly: ro, onInput: function (x) { m[c.code] = x; } });
@@ -580,6 +612,21 @@
             cur.head ? null : h('div', { class: 'p-3 stack' }, E.CodeText('Unique rows: Permit + ' + cur.cols.filter(function (c) { return c.key; }).map(function (c) { return c.en; }).join(' + ') + (cur.cols.some(function (c) { return c.key; }) ? '' : '(no key yet)'))),
             E.Collapsible({ id: 'pmt-hood', title: 'Under the hood', summary: cur.regCode, content: h('div', { class: 'stack' }, note('This table is saved as the registry ' + cur.regCode + ', a part of ' + t.regCode + '. You can see it in Registries; you never have to touch it there.'), E.KeyValue([{ label: 'Registry', value: cur.regCode, mono: true }, { label: 'Part of', value: t.regCode, mono: true }, { label: 'Rows live', value: 'while the permit is valid' }])) })));
         }
+        function choicesBlock(c) {
+          if (c.type !== 'Link to registry' && c.type !== 'Choice') return null;
+          var sc = scopeOf(c), refCode = (c.ref || '').split(' ')[0];
+          var scope = E.Select({ id: 'pmt-p-scope', label: 'Choices come from', value: sc, options: [{ value: 'shared', label: 'A shared registry (used by many types)' }, { value: 'type', label: 'A list only for this permit type' }, { value: 'permit', label: 'A table of the same permit' }],
+            onChange: function (v) {
+              if (v === 'shared') { c.type = 'Link to registry'; c.ref = sc === 'shared' ? c.ref : 'Substances'; }
+              else if (v === 'type') { c.type = 'Choice'; c.choices = choicesOf(c); }
+              else { c.type = 'Link to registry'; c.ref = ((t.tables.filter(function (x) { return x !== cur; })[0] || { code: 'Table' }).code) + ' (this permit)'; }
+              t.state = 'Draft'; later(function () { fillAside(c); }); } });
+          var detail = sc === 'shared' ? E.Select({ id: 'pmt-p-ref', label: 'Registry', options: Object.keys(LISTS), value: refCode, hint: 'Edited in Registries. Every type that uses it sees the same values.', onChange: function (v) { c.ref = v; } })
+            : sc === 'type' ? E.Textarea({ id: 'pmt-p-choices', label: 'Values, one per line', rows: 5, hint: 'Only this type sees these values. They can also be edited on the Lists page.', onInput: function (v) { c.choices = v.split(/\r?\n/).filter(function (x) { return x.trim(); }); } })
+            : E.Select({ id: 'pmt-p-tbl', label: 'Table of this permit', options: t.tables.filter(function (x) { return x !== cur; }).map(function (x) { return { value: x.code, label: x.name }; }), value: refCode, hint: 'Users can pick only rows that this permit has in that table.', onChange: function (v) { c.ref = v + ' (this permit)'; } });
+          if (sc === 'type') detail.value = choicesOf(c).join('\n');
+          return h('div', { class: 'stack' }, scope, detail);
+        }
         function fillAside(c) {
           aside.textContent = '';
           aside.appendChild(h('div', { class: 'pane-h' }, h('h2', {}, c.en), E.Button({ label: 'Close', icon: 'x', iconOnly: true, variant: 'ghost', onClick: function () { aside.hidden = true; ctx.setQuery({ panel: null }); } })));
@@ -587,7 +634,7 @@
             E.Input({ id: 'pmt-p-en', label: 'Name (English)', required: true, value: c.en }), E.Input({ id: 'pmt-p-ru', label: 'Name (Russian)', value: c.ru, hint: 'Shown to Russian-speaking users; kk is added the same way.' }),
             E.Input({ id: 'pmt-p-code', label: 'Code', mono: true, value: c.code, readOnly: true, hint: 'Used in formulas. Fixed after publishing.' }),
             E.Select({ id: 'pmt-p-type', label: 'Type', options: TYPES_LIST, value: c.type, disabled: !!c.via }),
-            c.type === 'Link to registry' ? E.Input({ id: 'pmt-p-ref', label: 'Pick from registry', value: c.ref || '', hint: 'The list of choices a user sees' }) : null,
+            choicesBlock(c),
             c.type === 'Number' ? E.Input({ id: 'pmt-p-unit', label: 'Unit', mono: true, value: c.unit || '' }) : null,
             E.Input({ id: 'pmt-p-group', label: 'Group', value: c.group || '', hint: 'Columns with the same group fold into one when the table is wide.' }),
             E.Switch({ id: 'pmt-p-req', label: 'Required', checked: c.req }), E.Switch({ id: 'pmt-p-key', label: 'Part of the row’s unique key', checked: c.key, hint: 'Two rows of one permit cannot repeat the key columns.' })));
@@ -663,6 +710,42 @@
         E.ReasonDialog({ id: 'pmt-publish-dlg', title: 'Publish “' + t.name + '” v' + (t.version + 1) + '?', text: used ? used + ' existing permits move to the new version. Added columns are empty in old rows; removed columns are hidden, not deleted.' : 'No permits use this type yet.', label: 'What changed', minLength: 10, verb: 'Publish', icon: 'send',
           onSubmit: function () { t.version++; t.state = 'Published'; t.updated = TODAY; reload(ctx); } }); });
     } });
+
+  /* ================= 4a. Списки вибору ================= */
+  E.screen('/admin/permits/lists', { title: 'Permit lists', icon: 'rows4', navPath: '/admin/permits', render: function (el, ctx) {
+    var rows = ctx.state === 'empty' ? [] : listRows();
+    E.ListPage(el, ctx, { id: 'pml', rows: rows, banner: h('div', { class: 'pm-slot' }, subnav('/admin/permits/lists')),
+      header: { title: 'Lists', back: false,
+        subtitle: 'The pick-lists behind permit columns. A list can be shared by many permit types, belong to one type only, or be a table of the permit itself. Add values here or straight from a row form.',
+        secondary: [{ label: 'Open Registries', icon: 'database', onClick: function () { E.go('/admin/registries'); } }] },
+      stats: [{ id: 'all', label: 'lists', value: function (r) { return r.length; } }, { id: 'shared', label: 'shared', match: function (r) { return r.scope === 'shared'; } }, { id: 'type', label: 'one type only', match: function (r) { return r.scope === 'type'; } }, { id: 'permit', label: 'from a permit table', match: function (r) { return r.scope === 'permit'; } }],
+      search: { placeholder: 'List or permit type', text: function (r) { return r.name + ' ' + r.owner; } },
+      filters: [{ id: 'scope', label: 'Kinds', options: ['Shared registry', 'This permit type only', 'Table of the same permit'], match: function (r, v) { return SCOPE_LABEL[r.scope] === v; } }],
+      table: { rowKey: 'id', tall: true, rowLabel: function (r) { return r.name; }, columns: [
+        { key: 'name', label: 'List', render: function (r) { return E.twoLine(r.name, r.scope === 'shared' ? 'Kept in Registries' : 'Kept in ' + r.owner, { mono: false }); } },
+        { key: 'scope', label: 'Kind', render: function (r) { return SCOPE_LABEL[r.scope]; }, sortValue: function (r) { return r.scope; } },
+        { key: 'entries', label: 'Values', num: true, render: function (r) { return r.scope === 'permit' ? 'rows of each permit' : F.int(r.entries); } },
+        { key: 'used', label: 'Used by', hideSm: true, sortValue: function (r) { return r.used.length; }, render: function (r) { return r.used.length ? F.plural(r.used.length, { one: 'column', other: 'columns' }) : 'No column yet'; } }] },
+      empty: { icon: 'rows4', title: 'No lists yet', text: 'Lists appear when a permit column is set to pick from a registry or a list.' },
+      error: { code: 'ECR-PRM-0503' },
+      drawer: function (r) { return { title: r.name, subtitle: SCOPE_LABEL[r.scope] + (r.scope === 'shared' ? '' : ' · ' + r.owner),
+        body: function (b) {
+          b.appendChild(E.KeyValue([{ label: 'Kind', value: SCOPE_LABEL[r.scope] }, { label: 'Used by', value: r.used.length ? h('span', { class: 'stack gap-1' }, r.used.map(function (u) { return h('span', {}, u); })) : 'No column yet' }]));
+          if (r.scope === 'shared') {
+            b.appendChild(note('Shared lists are registries. Every permit type that picks from this list sees the same values, and they can be used in sheets and formulas too.'));
+            b.appendChild(chips(LISTS[r.ref].slice(0, 12)));
+          } else if (r.scope === 'type') {
+            b.appendChild(note('Only ' + r.owner + ' sees these values. One value per line.'));
+            var ta = E.Textarea({ id: 'pml-values', label: 'Values', rows: 8, onInput: function () {} }); ta.value = choicesOf(r.col).join('\n'); b.appendChild(ta); r.ta = ta;
+          } else {
+            b.appendChild(note('The choices are the rows of a table inside each permit. Each permit offers only its own rows, so the list differs from permit to permit.'));
+          }
+        },
+        footer: r.scope === 'shared' ? [{ label: 'Add value…', icon: 'plus', keepOpen: true, onClick: function () { valueDialog('Add a value to ' + r.name, 'It is added to the shared registry, so every permit type that uses it will see it.', function (v) { LISTS[r.ref].push(v); r.entries++; ctx.refresh(); }); } }, { label: 'Open in Registries', icon: 'arrowR', variant: 'primary', onClick: function () { E.go('/admin/registries'); } }]
+          : r.scope === 'type' ? [{ label: 'Close' }, { label: 'Save values', variant: 'primary', icon: 'check', onClick: function () { r.col.choices = r.ta.value.split(/\r?\n/).filter(function (x) { return x.trim(); }); r.entries = r.col.choices.length; E.Toast('Values saved', 'success'); } }]
+          : [{ label: 'Open the permit type', icon: 'arrowR', variant: 'primary', onClick: function () { E.go('/admin/permits/types/' + r.t.code); } }] }; }
+    });
+  } });
 
   /* ================= 5. Привʼязки: перелік ================= */
   var BINDINGS = [
