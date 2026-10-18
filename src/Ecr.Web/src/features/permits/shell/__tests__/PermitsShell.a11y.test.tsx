@@ -24,7 +24,7 @@ vi.mock('@/shared/i18n', async (importOriginal) => ({
 // PM-06b: смуга розділів читає права з профілю; сканується вигляд редактора типів (усі чотири посилання).
 vi.mock('@/shared/session/useSession', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/session/useSession')>()),
-  useSession: () => ({ data: { permissions: ['Registry.View', 'Registry.EditDefinition'] } }),
+  useSession: () => ({ data: { permissions: ['Registry.View', 'Permit.EditType'] } }),
 }));
 
 afterEach(cleanup);

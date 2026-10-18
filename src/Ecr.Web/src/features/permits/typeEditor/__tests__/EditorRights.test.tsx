@@ -11,8 +11,8 @@ import * as typesApi from '../../api/typesApi';
 import { permitType } from './fixtures';
 
 /**
- * Права конструктора типу (аудит ч.1, P2-1 і P2-2): запис потребує `Registry.EditDefinition` поза
- * симуляцією, публікація — ще й `Registry.Publish`; адреса `?dialog=` не відкриває діалогів без права.
+ * Права конструктора типу (аудит ч.1, P2-1 і P2-2): запис потребує `Permit.EditType` поза
+ * симуляцією, публікація — ще й `Permit.PublishType`; адреса `?dialog=` не відкриває діалогів без права.
  *
  * Мутаційний доказ (виконано вручну, відновлено): у `TypeEditorHeader` `writable = editable && mayEdit` →
  * `writable = editable` валить «без права» і «симуляція»; прибрати `disabled={!mayPublish}` валить «без права
@@ -43,8 +43,8 @@ vi.mock('@/shared/session/useSession', async (importOriginal) => ({
   useSession: () => ({ data: { permissions: session.permissions, isSimulation: session.isSimulation } }),
 }));
 
-const Edit = 'Registry.EditDefinition';
-const Publish = 'Registry.Publish';
+const Edit = 'Permit.EditType';
+const Publish = 'Permit.PublishType';
 
 beforeEach(() => {
   session.permissions = [Edit, Publish];

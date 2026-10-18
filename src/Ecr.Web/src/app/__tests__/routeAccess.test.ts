@@ -84,18 +84,18 @@ describe('canAccessRoute — «… І кожне з alsoRequires» (A2)', () => 
 });
 
 describe('canAccessRoute — Permits (PM-06b)', () => {
-  it('типи й редактор типу — лише з Registry.EditDefinition; перелік пермітів і списки — з Registry.View', () => {
+  it('типи й редактор типу — лише з Permit.EditType; перелік пермітів і списки — з Registry.View', () => {
     const viewer = meWith(['Registry.View']);
-    const editor = meWith(['Registry.View', 'Registry.EditDefinition']);
+    const editor = meWith(['Registry.View', 'Permit.EditType']);
 
     expect(canAccessRoute(viewer, routes.adminPermits.handle)).toBe(true);
     expect(canAccessRoute(viewer, routes.adminPermitLists.handle)).toBe(true);
     expect(canAccessRoute(viewer, routes.adminPermitTypes.handle)).toBe(false);
     expect(canAccessRoute(viewer, routes.adminPermitTypeEditor.handle)).toBe(false);
-    expect(missingRoutePermission(viewer, routes.adminPermitTypes.handle)).toBe('Registry.EditDefinition');
+    expect(missingRoutePermission(viewer, routes.adminPermitTypes.handle)).toBe('Permit.EditType');
 
     expect(canAccessRoute(editor, routes.adminPermitTypes.handle)).toBe(true);
     expect(canAccessRoute(editor, routes.adminPermitTypeEditor.handle)).toBe(true);
-    expect(canAccessRoute(meWith(['Registry.EditDefinition']), routes.adminPermits.handle)).toBe(false);
+    expect(canAccessRoute(meWith(['Permit.EditType']), routes.adminPermits.handle)).toBe(false);
   });
 });

@@ -20,7 +20,7 @@ vi.mock('@/shared/i18n', async (importOriginal) => ({
   t: (key: string) => `text of ${key}`,
 }));
 
-const session = vi.hoisted(() => ({ permissions: ['Registry.View', 'Registry.EditDefinition'] as string[] }));
+const session = vi.hoisted(() => ({ permissions: ['Registry.View', 'Permit.EditType'] as string[] }));
 vi.mock('@/shared/session/useSession', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/session/useSession')>()),
   useSession: () => ({ data: { permissions: session.permissions } }),
@@ -71,7 +71,7 @@ describe('PermitsSubnav', () => {
       show(<PermitsSubnav current="types" />);
       expect(screen.getAllByRole('link').map((a) => a.getAttribute('href'))).toContain('/admin/permits/types');
     } finally {
-      session.permissions = ['Registry.View', 'Registry.EditDefinition'];
+      session.permissions = ['Registry.View', 'Permit.EditType'];
     }
   });
 
@@ -81,7 +81,7 @@ describe('PermitsSubnav', () => {
       show(<PermitsSubnav current="lists" />);
       expect(screen.queryByRole('link', { name: 'text of permits.types.title' })).toBeNull();
     } finally {
-      session.permissions = ['Registry.View', 'Registry.EditDefinition'];
+      session.permissions = ['Registry.View', 'Permit.EditType'];
     }
   });
 

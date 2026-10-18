@@ -24,7 +24,7 @@ vi.mock('@/shared/i18n', async (importOriginal) => ({
 }));
 
 const session = vi.hoisted(() => ({
-  permissions: ['Registry.View', 'Registry.EditDefinition'] as string[],
+  permissions: ['Registry.View', 'Permit.EditType'] as string[],
   isSimulation: false,
 }));
 vi.mock('@/shared/session/useSession', async (importOriginal) => ({
@@ -78,7 +78,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   requests = [];
-  session.permissions = ['Registry.View', 'Registry.EditDefinition'];
+  session.permissions = ['Registry.View', 'Permit.EditType'];
   session.isSimulation = false;
   delete (globalThis as { __where?: string }).__where;
 });

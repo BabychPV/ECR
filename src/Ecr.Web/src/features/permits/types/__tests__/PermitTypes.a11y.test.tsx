@@ -19,7 +19,7 @@ vi.mock('@/shared/i18n', async (importOriginal) => ({
 }));
 vi.mock('@/shared/session/useSession', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/session/useSession')>()),
-  useSession: () => ({ data: { permissions: ['Registry.View', 'Registry.EditDefinition'], isSimulation: false } }),
+  useSession: () => ({ data: { permissions: ['Registry.View', 'Permit.EditType'], isSimulation: false } }),
 }));
 
 function stubList(items: readonly unknown[]): void {

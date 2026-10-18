@@ -24,9 +24,9 @@ vi.mock('@/api/client', async (importOriginal) => ({
   apiFetch: vi.fn(),
 }));
 vi.mock('../../api/typesApi', () => ({ getPermitType: vi.fn(), replacePermitType: vi.fn() }));
-// Права сесії міняються між прогонами: без `Registry.Publish` кнопка «Publish» вимкнена, з ним — активна;
+// Права сесії міняються між прогонами: без `Permit.PublishType` кнопка «Publish» вимкнена, з ним — активна;
 // обидва стани мають пройти перевірку доступності.
-const session = vi.hoisted(() => ({ permissions: ['Registry.EditDefinition'] as string[] }));
+const session = vi.hoisted(() => ({ permissions: ['Permit.EditType'] as string[] }));
 vi.mock('@/shared/session/useSession', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/session/useSession')>()),
   useSession: () => ({ data: { permissions: session.permissions, isSimulation: false } }),
@@ -34,7 +34,7 @@ vi.mock('@/shared/session/useSession', async (importOriginal) => ({
 
 afterEach(() => {
   cleanup();
-  session.permissions = ['Registry.EditDefinition'];
+  session.permissions = ['Permit.EditType'];
 });
 
 function lookupType() {
@@ -94,8 +94,8 @@ describe('PermitTypeEditor — доступність', { timeout: 180_000 }, ()
       await scan(colorScheme, '/admin/permits/types/WaterDischarge?tab=versions');
     });
 
-    it(`${colorScheme}: з правом Registry.Publish (кнопка «Publish» активна)`, async () => {
-      session.permissions = ['Registry.EditDefinition', 'Registry.Publish'];
+    it(`${colorScheme}: з правом Permit.PublishType (кнопка «Publish» активна)`, async () => {
+      session.permissions = ['Permit.EditType', 'Permit.PublishType'];
       await scan(colorScheme, '/admin/permits/types/WaterDischarge');
       const publish = screen.getByRole('button', { name: /^Publish/ });
       expect((publish as HTMLButtonElement).disabled).toBe(false);

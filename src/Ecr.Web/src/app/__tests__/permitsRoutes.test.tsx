@@ -73,7 +73,7 @@ describe('Permits: маршрути', () => {
     });
   });
 
-  it('читання охоронене правом Registry.View, а типи й їхній редактор — Registry.EditDefinition (PM-06b)', () => {
+  it('читання охоронене правом Registry.View, а типи й їхній редактор — Permit.EditType (PM-06b)', () => {
     expect(permitRoutes.map((route) => [route.id, route.handle.permission])).toEqual([
       ['admin-permits', 'Registry.View'],
       ['admin-permit-types', PermitTypesPermission],
