@@ -13,8 +13,19 @@ function Get-LandInputCellKind {
     .PARAMETER Name
         TypeFuel | Gtu.
     #>
-    param([Parameter(Mandatory)][ValidateSet('TypeFuel', 'Gtu')][string]$Name)
+    param([Parameter(Mandatory)][ValidateSet('TypeFuel', 'Gtu', 'ConRegion')][string]$Name)
 
+    if ($Name -eq 'ConRegion') {
+        # Міст «шапка Region -> комірка ручного вводу Con_Region» (T5_27, ECW_C07_21). Без дефолту: порожня шапка - комірки немає.
+        return [pscustomobject]@{
+            Name         = 'ConRegion'
+            TableMap     = @{ 'AF_Air_Land_Other_Equipment_5_27' = 'T5_27' }
+            SheetOf      = @{ T5_27 = 'S05_OTHER_EQUIPMENT' }
+            Column       = 'Con_Region'
+            HeaderField  = 'Region'
+            EntryNameField = 'NAME'
+        }
+    }
     if ($Name -eq 'TypeFuel') {
         return [pscustomobject]@{
             Name       = 'TypeFuel'
@@ -51,6 +62,51 @@ function Test-LandInputCellEmpty {
     return ($s -eq '' -or $s -eq 'NULL')
 }
 
+function Get-LandHeaderLookupEntryRef {
+    <#
+    .SYNOPSIS
+        Поле шапки (GET /documents/{id}/header) -> { EntryId, RegistryDefId } або $null, якщо поля немає / воно порожнє.
+        Значення lookup - id запису (число) або об'єкт з id/entryId. Нічого не вгадується.
+    #>
+    param([Parameter(Mandatory)]$Header, [Parameter(Mandatory)][string]$FieldCode)
+    $field = @($Header.fields) | Where-Object { [string]$_.code -eq $FieldCode } | Select-Object -First 1
+    if ($null -eq $field) { return $null }
+    if ($field.PSObject.Properties.Match('isEmpty').Count -gt 0 -and $field.isEmpty -eq $true) { return $null }
+    $v = $field.value
+    if ($null -eq $v) { return $null }
+    $id = 0L
+    if ($v -is [string] -or $v -is [int] -or $v -is [long] -or $v -is [double]) { [void][long]::TryParse(([string]$v).Trim(), [ref]$id) }
+    else {
+        foreach ($p in 'id', 'entryId', 'value') {
+            if ($v.PSObject.Properties.Match($p).Count -gt 0) { [void][long]::TryParse(([string]$v.$p).Trim(), [ref]$id); break }
+        }
+    }
+    if ($id -le 0) { return $null }
+    $reg = 0
+    if ($field.PSObject.Properties.Match('lookupRegistryDefId').Count -gt 0 -and $field.lookupRegistryDefId) { $reg = [int]$field.lookupRegistryDefId }
+    return [pscustomobject]@{ EntryId = $id; RegistryDefId = $reg }
+}
+
+function Get-LandConRegionText {
+    <#
+    .SYNOPSIS
+        Текст комірки Con_Region = поле NAME запису довідника шапки Region ("<EN> - <RU>", як у k1_CategorySelection_).
+        Запис без NAME або з порожнім NAME -> $null (жодного дефолтного регіону).
+    .PARAMETER Entry  GET /registries/{code}/entries/{id}: Values.NAME (PSCustomObject або словник).
+    #>
+    param($Entry, [string]$NameField = 'NAME')
+    if ($null -eq $Entry) { return $null }
+    $values = $Entry.Values
+    if ($null -eq $values) { return $null }
+    $nameText = $null
+    if ($values -is [System.Collections.IDictionary]) { if ($values.Contains($NameField)) { $nameText = $values[$NameField] } }
+    elseif ($values.PSObject.Properties.Match($NameField).Count -gt 0) { $nameText = $values.$NameField }
+    if ($null -eq $nameText) { return $null }
+    $s = ([string]$nameText).Trim()
+    if ($s.Length -eq 0) { return $null }
+    return $s
+}
+
 function Get-LandRowKeyPrefix {
     <#
     .SYNOPSIS
@@ -79,9 +135,10 @@ function New-LandInputCellPlan {
                            лічиться в -SourceWithoutTarget ("таблиця/колонка" -> кількість непорожніх комірок).
     #>
     param(
-        [Parameter(Mandatory)][ValidateSet('TypeFuel', 'Gtu')][string]$KindName,
+        [Parameter(Mandatory)][ValidateSet('TypeFuel', 'Gtu', 'ConRegion')][string]$KindName,
         [Parameter(Mandatory)][string]$DocumentName,
         [Parameter(Mandatory)]$Document,
+        [AllowNull()][AllowEmptyString()][string]$ConRegionText,
         [int[]]$Periods = @(),
         [hashtable]$ModelColumns,
         [hashtable]$SourceWithoutTarget,
@@ -108,7 +165,14 @@ function New-LandInputCellPlan {
                 $rowKey = '{0}-{1:0000}' -f $prefix, $seq
                 if ($RowKeyFormat -eq 'Table') { $rowKey = New-LandRowKey -DocId ([int]$prefix.Substring(1)) -TableCode $tableCode -Index $seq -KeyFormat Table }
                 $cells = New-Object System.Collections.ArrayList
-                if ($KindName -eq 'TypeFuel') {
+                if ($KindName -eq 'ConRegion') {
+                    # Усі рядки T5_27 документа отримують текст шапки; порожня шапка - комірок немає (не дефолт).
+                    $crText = if ($null -eq $ConRegionText) { $null } else { ([string]$ConRegionText).Trim() }
+                    if (-not (Test-LandInputCellEmpty $crText)) {
+                        [void]$cells.Add([pscustomobject]@{ Col = $def.Column; Text = $crText; Kind = 'ConRegion' })
+                    }
+                }
+                elseif ($KindName -eq 'TypeFuel') {
                     if ($row.ContainsKey('Land_TypeFuel') -and -not (Test-LandInputCellEmpty $row['Land_TypeFuel'])) {
                         [void]$cells.Add([pscustomobject]@{ Col = 'Land_TypeFuel'; Text = [string]$row['Land_TypeFuel']; Kind = 'TypeFuel' })
                     }
@@ -156,6 +220,7 @@ function Get-LandInputCellPlanSummary {
             TypeFuel = @($all | Where-Object { $_.Kind -eq 'TypeFuel' }).Count
             ColdVent = @($all | Where-Object { $_.Kind -eq 'ColdVent' }).Count
             Gtu      = @($all | Where-Object { $_.Kind -eq 'Gtu' }).Count
+            ConRegion = @($all | Where-Object { $_.Kind -eq 'ConRegion' }).Count
         }
     }
 }

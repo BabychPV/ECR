@@ -200,7 +200,7 @@ function Get-LandStringBridgeStrictMethodologies {
 function Get-LandTextNumericSourceMethodologies {
     <#
     .SYNOPSIS
-        Методології, джерела яких - числа, збережені як String (клас 'число як String', D-433; C12_01 Legacy V2).
+        Методології, джерела яких - числа, збережені як String (клас 'число як String', D-437; C12_01 Legacy V2).
     .DESCRIPTION
         Перелік тримаємо тут, не в land-template.model.json (модель не регенеруємо). Список закритий: додавати
         лише за рішенням і діагнозом (LAND-POST-K4-DIAG-C12-01-PRODUCT-2026-10-15.md, K1-WINDOW6-C1201-2026-10-15.md).
@@ -218,7 +218,7 @@ function Test-LandCompositionMassKeepsNumericMode {
         REG*/CURRENT_SUBSTANCE/SUBSTANCE_APPLICABLE у Legacy, тож 0433 тут більше не причина Strict. Інші методології
         (C11_10, C12_03) - false: Strict лишається.
         Друга гілка - явний перелік 'text-numeric sources' (Get-LandTextNumericSourceMethodologies): C12_01 (V1 id 40,
-        джерела No_* типу String, клас 'число як String', D-433) після V2 Legacy не повертаємо у Strict.
+        джерела No_* типу String, клас 'число як String', D-437) після V2 Legacy не повертаємо у Strict.
     #>
     param([Parameter(Mandatory)][string]$Methodology, [string[]]$StringBridgeMethodologies = @())
 
