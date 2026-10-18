@@ -105,7 +105,7 @@ export function TypeEditorDialogs({
 
   const known = (Object.values(TypeEditorDialogIds) as string[]).includes(dialog ?? '');
   // Усі діалоги хоста пишуть у тип; публікація — ще й окреме право.
-  const denied = known &&(!mayEdit || (dialog === TypeEditorDialogIds.publish && !mayPublish));
+  const denied = known && (!mayEdit || (dialog === TypeEditorDialogIds.publish && !mayPublish));
   useEffect(() => {
     if (denied) setDialog(null);
   }, [denied, setDialog]);

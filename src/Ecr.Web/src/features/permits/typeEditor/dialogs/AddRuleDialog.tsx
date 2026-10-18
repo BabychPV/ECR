@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type JSX } from 'react';
-import { Button, Group, Modal, Radio, Select, Stack, Textarea, TextInput } from '@mantine/core';
+import { Button, Group, Modal, SegmentedControl, Select, Stack, Text, Textarea, TextInput } from '@mantine/core';
 import type { PermitType, PermitTypeRule } from '@/features/permits/api/types';
 import { t } from '@/shared/i18n';
 import { allRuleCodes, buildRule, validateRuleInput, type RuleSeverity } from '../checks/ruleOps';
@@ -131,18 +131,23 @@ export function AddRuleDialog({
             }}
           />
 
-          <Radio.Group
-            label={t('permits.editor.dialogs.addRule.severity')}
-            value={severity}
-            onChange={(next) => {
-              setSeverity(next === 'Block' ? 'Block' : 'Warn');
-            }}
-          >
-            <Group mt="xs" gap="md">
-              <Radio value="Warn" label={t('permits.editor.dialogs.addRule.warn')} />
-              <Radio value="Block" label={t('permits.editor.dialogs.addRule.block')} />
-            </Group>
-          </Radio.Group>
+          {/* ⚠ SegmentedControl, не Radio: стилі Radio відсічені (`mantineCssPrune.ts`). */}
+          <Stack gap="xs">
+            <Text size="sm" fw={500} id="pm-rule-severity-label">
+              {t('permits.editor.dialogs.addRule.severity')}
+            </Text>
+            <SegmentedControl
+              aria-labelledby="pm-rule-severity-label"
+              value={severity}
+              onChange={(next) => {
+                setSeverity(next === 'Block' ? 'Block' : 'Warn');
+              }}
+              data={[
+                { value: 'Warn', label: t('permits.editor.dialogs.addRule.warn') },
+                { value: 'Block', label: t('permits.editor.dialogs.addRule.block') },
+              ]}
+            />
+          </Stack>
 
           <Group justify="flex-end" gap="xs">
             <Button variant="default" onClick={onClose}>

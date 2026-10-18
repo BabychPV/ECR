@@ -1,4 +1,5 @@
 import { lazy, Suspense, type JSX } from 'react';
+import { Skeleton } from '@mantine/core';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -48,7 +49,7 @@ export function PermitTypeEditorPage(): JSX.Element {
             <TypeEditorHeader />
             <TypeEditorTabs />
             {dialogRequested && (
-              <Suspense fallback={null}>
+              <Suspense fallback={<Skeleton height={160} aria-label={t('common.loading')} />}>
                 <DialogsHost />
               </Suspense>
             )}

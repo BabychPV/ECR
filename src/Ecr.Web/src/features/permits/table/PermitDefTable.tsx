@@ -1,3 +1,4 @@
+// Споживач: PM-07 (сторінки пермітів: рядок-форма, вставка з Excel, широка таблиця).
 import { useMemo, useState, type JSX, type KeyboardEvent, type ReactNode } from 'react';
 import { SegmentedControl, VisuallyHidden } from '@mantine/core';
 import { formatDate } from '@/shared/format/datetime';

@@ -1,3 +1,4 @@
+// Споживач: PM-07 (сторінки пермітів: рядок-форма, вставка з Excel, широка таблиця).
 import { isEmptyCell, type PermitCellValue, type PermitColumn } from './columns';
 
 /**

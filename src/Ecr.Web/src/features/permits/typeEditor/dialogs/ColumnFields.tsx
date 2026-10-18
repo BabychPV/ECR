@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
-import { ActionIcon, Checkbox, Grid, Group, Select, TextInput } from '@mantine/core';
+import { ActionIcon, Checkbox, Group, Select, TextInput } from '@mantine/core';
 import { t } from '@/shared/i18n';
+import './columnFields.css';
 import type { UnitOption } from './names';
 import { SimpleColumnKinds, isNumericKind, type DraftColumn } from './ops';
 
@@ -84,8 +85,8 @@ export function ColumnFields({
   const numeric = isNumericKind(value.dataType);
 
   return (
-    <Grid gutter="xs" align="flex-end">
-      <Grid.Col span={{ base: 12, sm: 5 }}>
+    <div className="pm-col-fields">
+      <div className="pm-col-fields__name">
         <TextInput
           id={`${idPrefix}-name`}
           label={nameLabel}
@@ -96,9 +97,9 @@ export function ColumnFields({
             onChange({ name: event.currentTarget.value });
           }}
         />
-      </Grid.Col>
+      </div>
 
-      <Grid.Col span={{ base: 12, sm: 4 }}>
+      <div className="pm-col-fields__type">
         <Select
           id={`${idPrefix}-type`}
           label={t('permits.editor.dialogs.col.type')}
@@ -111,9 +112,9 @@ export function ColumnFields({
             onChange(isNumericKind(next) ? { dataType: next } : { dataType: next, unitId: null });
           }}
         />
-      </Grid.Col>
+      </div>
 
-      <Grid.Col span={{ base: 12, sm: 3 }}>
+      <div className="pm-col-fields__unit">
         <Select
           id={`${idPrefix}-unit`}
           label={t('permits.editor.dialogs.col.unit')}
@@ -127,9 +128,9 @@ export function ColumnFields({
             onChange({ unitId: next === null ? null : Number(next) });
           }}
         />
-      </Grid.Col>
+      </div>
 
-      <Grid.Col span={12}>
+      <div className="pm-col-fields__full">
         <Group gap="md" wrap="wrap">
           <Checkbox
             id={`${idPrefix}-required`}
@@ -164,7 +165,7 @@ export function ColumnFields({
             </ActionIcon>
           )}
         </Group>
-      </Grid.Col>
-    </Grid>
+      </div>
+    </div>
   );
 }
