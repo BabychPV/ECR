@@ -8161,6 +8161,9 @@ USING (VALUES
     ,(N'err.ECR-PRM-0422.noTables', N'en', N'A permit type without tables cannot be published.', 1)
     ,(N'err.ECR-PRM-0422.reasonTooShort', N'en', N'The reason for publishing must have at least {min} characters.', 1)
     ,(N'err.ECR-PRM-0422.sharedRegistryUnknown', N'en', N'Column "{columnCode}" refers to the shared registry "{registryCode}", which does not exist.', 1)
+    ,(N'err.ECR-PRM-4091', N'en', N'Permit type code is taken', 1)
+    ,(N'err.ECR-PRM-4091.code', N'en', N'A permit type with code "{code}" already exists.', 1)
+    ,(N'err.ECR-PRM-4091.registryCode', N'en', N'The registry code "{registryCode}" needed for the permit type is already taken.', 1)
     -- PERMITS: types ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -20633,6 +20636,21 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: types ── ECR-PRM-0422 ── кінець секції ──
+
+-- PERMITS: types ── ECR-PRM-4091 ── ru/kz: код типу дозволу зайнятий; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-4091', N'ru', N'Код типа разрешения занят'),
+    (N'err.ECR-PRM-4091', N'kz', N'Рұқсат түрінің коды бос емес'),
+    (N'err.ECR-PRM-4091.code', N'ru', N'Тип разрешения с кодом «{code}» уже существует.'),
+    (N'err.ECR-PRM-4091.code', N'kz', N'«{code}» кодты рұқсат түрі бұрыннан бар.'),
+    (N'err.ECR-PRM-4091.registryCode', N'ru', N'Код справочника «{registryCode}», нужный типу разрешения, уже занят.'),
+    (N'err.ECR-PRM-4091.registryCode', N'kz', N'Рұқсат түріне қажет «{registryCode}» анықтамалық коды бос емес.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: types ── ECR-PRM-4091 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

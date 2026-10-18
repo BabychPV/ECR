@@ -53,9 +53,9 @@ public sealed class PermitTypeStore(EcrDbContext db) : IPermitTypeStore
     /// <inheritdoc />
     public async Task<IReadOnlySet<int>> ListHiddenRegistryIdsAsync(CancellationToken ct)
     {
-        var headers = await db.PermitTypeDefs.AsNoTracking().Select(t => t.HeaderRegistryDefId).Take(MaxRows)
+        var headers = await db.PermitTypeDefs.AsNoTracking().Select(t => t.HeaderRegistryDefId).OrderBy(id => id).Take(MaxRows)
             .ToListAsync(ct).ConfigureAwait(false);
-        var tables = await db.PermitTypeTables.AsNoTracking().Select(t => t.RegistryDefId).Take(MaxRows)
+        var tables = await db.PermitTypeTables.AsNoTracking().Select(t => t.RegistryDefId).OrderBy(id => id).Take(MaxRows)
             .ToListAsync(ct).ConfigureAwait(false);
         var lists = await db.PermitFieldMetas.AsNoTracking()
             .Where(m => m.ListScope == PermitListScope.TypeOnly && m.ListRegistryDefId != null)

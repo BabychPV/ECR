@@ -46,6 +46,20 @@ public static class PermitTypeDefinitionValidator
         return parsed;
     }
 
+    /// <summary>Код реєстру шапки типу має вміщатися в код довідника.</summary>
+    /// <param name="typeCode">Код типу.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-PRM-0422</c> <c>registryCodeInvalid</c>.</exception>
+    public static void ValidateTypeCode(string typeCode)
+    {
+        var registryCode = PermitHeaderFields.HeaderRegistryCode(typeCode);
+        if (!EcrCode.TryCreate(registryCode, out _))
+        {
+            throw Invalid(
+                $"Код реєстру шапки «{registryCode}» задовгий.", "err.ECR-PRM-0422.registryCodeInvalid",
+                ("registryCode", registryCode));
+        }
+    }
+
     /// <summary>Перевіряє склад типу; <paramref name="published"/> — опублікований склад, який не можна зламати.</summary>
     /// <param name="typeCode">Код типу.</param>
     /// <param name="content">Склад чернетки.</param>

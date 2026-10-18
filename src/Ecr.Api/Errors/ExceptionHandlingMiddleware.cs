@@ -647,6 +647,11 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.RegistryDefDuplicate =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ Permits PM-03: «тип дозволу з таким кодом уже є» (`ECR-PRM-4091`) — конфлікт стану, як `ECR-REG-4091`.
+        // ⚠ Правило суфікса нижче цей код теж ловить; арм — явна назва, а не єдина опора.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.PermitTypeDuplicate =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // ⛔ RT-10a (FEATURE-REGISTRY-TABLES §7.2): «ці значення ключа вже має інший запис» —
         // конфлікт стану, а не невірні дані: повторювати запит марно, треба змінити ключ або
         // закрити вікно чинності того запису. ⚠ Правило суфікса нижче цей код теж ловить, тож

@@ -876,4 +876,12 @@ public static class ErrorCodes
     /// список, зламаний опублікований склад тощо. Випадок каже <c>messageKey</c> (<c>err.ECR-PRM-0422.{випадок}</c>).
     /// </summary>
     public const string PermitTypeInvalid = "ECR-PRM-0422";
+
+    /// <summary>
+    /// Тип дозволу з таким кодом (або реєстр шапки з таким кодом) уже є (<c>ECR-PRM-4091</c>, <c>UQ_PermitTypeDef</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ 409 за цифрами коду: <c>BusinessRuleException</c> без власного арма в <c>ExceptionHandlingMiddleware</c> доїхав би як 422.
+    /// </remarks>
+    public const string PermitTypeDuplicate = "ECR-PRM-4091";
 }
