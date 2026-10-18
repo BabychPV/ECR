@@ -233,13 +233,13 @@ describe('PermitTypesPage: стани', () => {
       calls += 1;
 
       return calls === 1
-        ? json({ title: 'Unavailable', status: 503, detail: 'down', errorCode: 'ECR-PRM-0503', correlationId: 'c' }, 503)
+        ? json({ title: 'Unavailable', status: 503, detail: 'down', errorCode: 'ECR-SYS-0503', correlationId: 'c' }, 503)
         : page();
     });
     show();
 
     expect(await screen.findByText('Unavailable')).toBeTruthy();
-    expect(screen.getByText('ECR-PRM-0503')).toBeTruthy();
+    expect(screen.getByText('ECR-SYS-0503')).toBeTruthy();
     expect(screen.queryByText('permits.types.empty.title')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /retry/i }));

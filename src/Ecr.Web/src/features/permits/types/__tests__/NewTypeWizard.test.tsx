@@ -226,7 +226,7 @@ describe('NewTypeWizard: відмови сервера', () => {
 
   it('інша відмова (403): текст відмови в банері, поле назви без помилки', async () => {
     stubServer(() =>
-      json({ title: 'Forbidden', status: 403, detail: 'No right', errorCode: 'ECR-SEC-0403', correlationId: 'c-2' }, 403),
+      json({ title: 'Forbidden', status: 403, detail: 'No right', errorCode: 'ECR-AUTH-0403', correlationId: 'c-2' }, 403),
     );
     show();
     typeName('Noise permit');
