@@ -313,13 +313,7 @@
         { key: 'state', label: 'State', render: stateBadge }] },
       empty: { icon: 'book', title: 'No permits yet', text: 'Add the first permit by hand or import the yearly Excel report your team keeps today.', actions: [{ label: 'New permit', variant: 'primary', icon: 'plus', onClick: function () { ctx.openDialog('new-permit'); } }, { label: 'Import from Excel', onClick: function () { ctx.openDialog('import-permit'); } }] },
       error: { code: 'ECR-PRM-0503' },
-      drawer: function (p) { var t = type(p.type); return { title: p.number, subtitle: t.name, badge: inl(stateBadge(p)),
-        body: function (b) {
-          if (p.pseudo) b.appendChild(E.Banner({ tone: 'info', title: 'Placeholder permit', text: 'Emissions without a permit are booked here so that sheets and reports still add up.' }));
-          if (expiring(p)) b.appendChild(E.Banner({ tone: 'warning', title: 'Ends in ' + days(TODAY, p.end) + ' days', text: 'Renew it before the period after ' + F.date(p.end) + ' opens, or sheets will have no limits to compare with.', actions: [{ label: 'Renew…', onClick: function () { ctx.openDialog('renew-permit', p); } }] }));
-          b.appendChild(E.KeyValue([{ label: 'Location', value: p.location }, { label: 'Valid', value: F.date(p.start) + ' – ' + F.date(p.end) }, { label: 'Tables', value: t.tables.map(function (x) { return x.name; }).join(' · ') }, { label: 'Read by', value: p.bindings.length ? F.plural(p.bindings.length, { one: 'sheet table', other: 'sheet tables' }) : 'No sheet yet' }, { label: 'Updated', value: F.date(p.updated) + ' by ' + p.by }]));
-        },
-        footer: [{ label: 'Open permit', icon: 'arrowR', variant: 'primary', onClick: function () { E.go('/admin/permits/' + p.id); } }] }; }
+      onRow: function (p) { E.go('/admin/permits/' + p.id); }
     });
 
     ctx.dialog('new-permit', function () {
