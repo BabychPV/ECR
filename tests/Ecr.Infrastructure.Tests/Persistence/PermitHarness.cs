@@ -68,6 +68,8 @@ internal sealed class PermitHarness : IAsyncDisposable
         KeyService = new Ecr.Application.Registries.Keys.RegistryKeyService(keys, Uow);
         Writer = new RegistryEntryWriter(Registries, Uow, audit, user, clock, KeyService);
         RowsQuery = new RegistryRowsQuery(Db);
+        Stats = new PermitStore(Db);
+        CreatePermit = new CreatePermitHandler(Permits, Registries, RowsQuery, Stats, Writer, Uow, access, user, clock);
 
         Access = access;
         User = user;
@@ -119,6 +121,16 @@ internal sealed class PermitHarness : IAsyncDisposable
     public RegistryEntryWriter Writer { get; }
 
     public RegistryRowsQuery RowsQuery { get; }
+
+    public PermitStore Stats { get; }
+
+    public CreatePermitHandler CreatePermit { get; }
+
+    /// <summary>Права, потрібні для ведення дозволів: читати й писати дані реєстрів.</summary>
+    public static string[] Editor => ["Registry.View", "Registry.EditData"];
+
+    /// <summary>Усі права: тип + дозволи.</summary>
+    public static string[] EverythingWithData => [.. Everything, "Registry.EditData"];
 
     /// <summary>Нова «сесія» тієї самої особи: свій контекст, як у наступному запиті.</summary>
     public async Task<PermitHarness> NextRequestAsync() => await CreateAsync(Sql, Permissions, UserId).ConfigureAwait(false);

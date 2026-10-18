@@ -900,4 +900,13 @@ public static class ErrorCodes
     /// (<c>published</c>) або має екземпляри дозволів (<c>hasPermits</c>).
     /// </summary>
     public const string PermitTypeInUse = "ECR-PRM-4094";
+
+    /// <summary>
+    /// Дозвіл цього типу з таким номером і початком чинності вже є (<c>ECR-PRM-4095</c>, <c>number</c>). Номер у різних
+    /// версіях (поновлення) однаковий, тому дублем вважається збіг номера з ПОЧАТКОМ - версія дозволу.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Кидається як <c>ConcurrencyConflictException</c>: <c>ExceptionHandlingMiddleware</c> дає такому 409 за типом.
+    /// </remarks>
+    public const string PermitDuplicate = "ECR-PRM-4095";
 }

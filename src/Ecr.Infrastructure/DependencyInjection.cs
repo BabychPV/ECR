@@ -528,6 +528,9 @@ public static class DependencyInjection
         // PERMITS: types — типи дозволів над реєстрами (PM-03)
         services.AddScoped<IPermitTypeStore, PermitTypeStore>();
 
+        // PERMITS: permits — екземпляри дозволів (PM-04)
+        services.AddScoped<IPermitStore, PermitStore>();
+
         // Прогрів кешу метаданих на старті (B01 §6.3, крок 7).
         services.AddScoped<MetadataWarmup>();
 
