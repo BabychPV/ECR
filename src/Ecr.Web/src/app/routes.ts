@@ -1,3 +1,5 @@
+import { PermitTypesPermission } from '@/features/permits/permitRights';
+
 /**
  * Типізоване дерево маршрутів (`PR nav-arch #1`) — єдине джерело правди про
  * шлях, лейбл, право доступу й показ у навбарі кожного маршруту застосунку.
@@ -376,8 +378,8 @@ export const routes = {
     path: '/admin/permits/types',
     handle: {
       labelKey: 'permits.types.title',
-      // PM-06b: типами керують ті, хто веде довідники й шаблони; глядачу порожній розділ ні до чого.
-      permission: 'Registry.EditDefinition',
+      // PM-06b: глядачу розділ типів ні до чого. Значення — `features/permits/permitRights.ts`.
+      permission: PermitTypesPermission,
       descriptionKey: 'permits.types.description',
       crumb: { ancestorIds: ['admin-permits'] },
     },
@@ -387,7 +389,7 @@ export const routes = {
     path: '/admin/permits/types/:code',
     handle: {
       labelKey: 'permits.typeEditor.title',
-      permission: 'Registry.EditDefinition',
+      permission: PermitTypesPermission,
       crumb: { ancestorIds: ['admin-permits', 'admin-permit-types'] },
     },
   },

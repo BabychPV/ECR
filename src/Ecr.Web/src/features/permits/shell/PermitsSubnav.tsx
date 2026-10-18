@@ -2,17 +2,12 @@ import type { JSX } from 'react';
 import { Link } from 'react-router-dom';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
+import { PermitTypesPermission } from '../permitRights';
 import { PermitsPaths } from './permitPaths';
 import './permitsShell.css';
 
 /** Розділ Permits, на якому стоїть людина. */
 export type PermitsSection = 'permits' | 'types' | 'lists' | 'bindings';
-
-/**
- * Право на розділ типів. ⚠ Дзеркало `routes.adminPermitTypes.handle.permission` (шар `features` не
- * імпортує реєстр маршрутів); збіг стереже `app/__tests__/permitsRoutes.test.tsx`.
- */
-export const PermitTypesPermission = 'Registry.EditDefinition';
 
 interface SubnavItem {
   readonly id: PermitsSection;

@@ -5,7 +5,7 @@ import { matchRoutes } from 'react-router-dom';
 import { buildCrumbChain, crumbGroupLabelKey, type CrumbMatch } from '@/app/Breadcrumbs';
 import { childPath, navGroups, navRoutes, routeList, routes, type RouteEntry } from '@/app/routes';
 import { PermitsPaths } from '@/features/permits/shell/permitPaths';
-import { PermitTypesPermission } from '@/features/permits/shell/PermitsSubnav';
+import { PermitTypesPermission } from '@/features/permits/permitRights';
 import { NavIcon } from '@/shared/ui/navIcons';
 
 /**
@@ -76,8 +76,8 @@ describe('Permits: маршрути', () => {
   it('читання охоронене правом Registry.View, а типи й їхній редактор — Registry.EditDefinition (PM-06b)', () => {
     expect(permitRoutes.map((route) => [route.id, route.handle.permission])).toEqual([
       ['admin-permits', 'Registry.View'],
-      ['admin-permit-types', 'Registry.EditDefinition'],
-      ['admin-permit-type-editor', 'Registry.EditDefinition'],
+      ['admin-permit-types', PermitTypesPermission],
+      ['admin-permit-type-editor', PermitTypesPermission],
       ['admin-permit-lists', 'Registry.View'],
       ['admin-permit-bindings', 'Registry.View'],
       ['admin-permit-binding', 'Registry.View'],
