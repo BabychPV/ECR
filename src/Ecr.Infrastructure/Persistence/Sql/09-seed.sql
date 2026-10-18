@@ -7429,6 +7429,12 @@ USING (VALUES
     (N'units.dim.EnergyPerMass', N'en', N'Energy per mass', 1),
     (N'units.dim.MassPerAmount', N'en', N'Mass per amount of substance', 1),
     -- COLL:ui-rc9 ── кінець секції ──
+    -- A11Y-P3C:dim-names ── CL-20 (B-6): назви розмірностей 20-23 (kz/ru лишались англійськими кодами); ru/kz - порцією A11Y-P3C:dim-names нижче ──
+    (N'units.dim.VolumeFlow', N'en', N'Volumetric flow', 1),
+    (N'units.dim.Power', N'en', N'Power', 1),
+    (N'units.dim.Frequency', N'en', N'Frequency', 1),
+    (N'units.dim.Pressure', N'en', N'Pressure', 1),
+    -- A11Y-P3C:dim-names ── кінець секції ──
     -- COLL:d3efmap ── D-3 приймальної №8: другий мапінг тієї ж пари (сутність, поле) — 409, не 500; ru/kz — порцією COLL:d3efmap у блоці I18N нижче ──
     (N'err.ECR-INT-0409.fieldMapDuplicate', N'en', N'Source entity {sourceEntityId} already has a mapping for field "{sourceField}": edit it instead of creating a second one.', 1),
     -- COLL:d3efmap ── кінець секції ──
@@ -18537,6 +18543,22 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-rc9 ── кінець секції ──
+-- A11Y-P3C:dim-names ── ru/kz: CL-20 (B-6), назви розмірностей 20-23; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'units.dim.VolumeFlow', N'ru', N'Объёмный расход'),
+    (N'units.dim.VolumeFlow', N'kz', N'Көлемдік шығын'),
+    (N'units.dim.Power', N'ru', N'Мощность'),
+    (N'units.dim.Power', N'kz', N'Қуат'),
+    (N'units.dim.Frequency', N'ru', N'Частота'),
+    (N'units.dim.Frequency', N'kz', N'Жиілік'),
+    (N'units.dim.Pressure', N'ru', N'Давление'),
+    (N'units.dim.Pressure', N'kz', N'Қысым')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- A11Y-P3C:dim-names ── кінець секції ──
 -- COLL:drb2 ── ru/kz D-R2: прив'язка до методології без опублікованої версії; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
