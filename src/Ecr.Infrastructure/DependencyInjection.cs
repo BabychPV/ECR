@@ -525,6 +525,9 @@ public static class DependencyInjection
         // RT: expressions
         services.AddScoped<IRegistrySnapshotLoader, RegistrySnapshotLoader>(); // RT-22
 
+        // PERMITS: types — типи дозволів над реєстрами (PM-03)
+        services.AddScoped<IPermitTypeStore, PermitTypeStore>();
+
         // Прогрів кешу метаданих на старті (B01 §6.3, крок 7).
         services.AddScoped<MetadataWarmup>();
 
