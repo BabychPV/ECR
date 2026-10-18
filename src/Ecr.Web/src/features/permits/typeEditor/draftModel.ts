@@ -62,6 +62,7 @@ export function normalizeColumn(column: PermitTypeColumn): PermitTypeColumn {
   return {
     ...column,
     required: column.key ? true : column.required,
+    unitId: column.dataType === 'Int' || decimal ? column.unitId : null,
     group: column.group === null || column.group === '' ? null : column.group,
     precision: decimal ? column.precision : null,
     scale: decimal && column.precision !== null ? column.scale : null,
@@ -166,7 +167,9 @@ export function updateColumn(
     return {
       ...table,
       columns: table.columns.map((column) =>
-        sameCode(column.code, columnCode) ? normalizeColumn({ ...column, ...patch }) : column,
+        sameCode(column.code, columnCode)
+          ? normalizeColumn({ ...column, ...patch, code: column.code, order: column.order })
+          : column,
       ),
     };
   });
@@ -283,5 +286,5 @@ export function newColumn(code: string, nameL10n: Readonly<Record<string, string
 export { ColumnDataTypes, ListScopes, ReservedColumnCode, isValidCode } from './draftTypes';
 export type { ColumnDataType, ListScopeKey, TypeDraft } from './draftTypes';
 export { countChanges, sameDraft } from './draftDiff';
-export { validateDraft } from './draftValidate';
+export { validateDraft, validateForPublish } from './draftValidate';
 export type { DraftProblem } from './draftValidate';

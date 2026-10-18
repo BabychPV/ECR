@@ -175,6 +175,13 @@ describe('нормалізація типу й області списку', () 
     expect(normalizeColumn(column('A', { dataType: 'Decimal', precision: 9, scale: 2 }))).toMatchObject({ precision: 9, scale: 2 });
   });
 
+  it('одиниця лишається лише в Int і Decimal', () => {
+    expect(normalizeColumn(column('A', { dataType: 'Int', unitId: 3 })).unitId).toBe(3);
+    expect(normalizeColumn(column('A', { dataType: 'Decimal', unitId: 3 })).unitId).toBe(3);
+    expect(normalizeColumn(column('A', { dataType: 'String', unitId: 3 })).unitId).toBeNull();
+    expect(normalizeColumn(column('A', { dataType: 'Date', unitId: 3 })).unitId).toBeNull();
+  });
+
   it('не Lookup губить усі налаштування списку', () => {
     const next = normalizeColumn(column('A', { dataType: 'String', listScope: ListScopes.type, choices: ['x'], listRegistryCode: 'R', siblingTableCode: 'T' }));
     expect(next).toMatchObject({ listScope: null, choices: null, listRegistryCode: null, siblingTableCode: null });

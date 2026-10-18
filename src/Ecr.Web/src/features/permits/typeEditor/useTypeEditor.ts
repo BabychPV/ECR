@@ -221,6 +221,7 @@ export function useTypeEditor(code: string): TypeEditorHook {
     void runSave();
   }, [runSave]);
 
+  const problems = useMemo(() => (draft === null ? [] : problemsOf(draft)), [draft, problemsOf]);
   const dirtyCount = draft !== null && base !== null ? countChanges(base, draft) : 0;
 
   useEffect(
@@ -233,7 +234,6 @@ export function useTypeEditor(code: string): TypeEditorHook {
     [flush],
   );
 
-  const problems = useMemo(() => (draft === null ? [] : problemsOf(draft)), [draft, problemsOf]);
 
   const shownSave = useMemo<SaveState>(
     () => (save.kind === 'idle' && dirtyCount > 0 ? { kind: 'dirty', count: dirtyCount } : save),
@@ -242,8 +242,8 @@ export function useTypeEditor(code: string): TypeEditorHook {
 
   const api = useMemo<TypeEditorApi | null>(() => {
     if (serverType === undefined || draft === null) return null;
-    return { code, type: serverType, draft, editable, save: shownSave, apply, flush, acceptServer, reload };
-  }, [serverType, draft, editable, shownSave, apply, flush, acceptServer, reload, code]);
+    return { code, type: serverType, draft, editable, save: shownSave, problems, saveError, apply, flush, acceptServer, retry, reload };
+  }, [serverType, draft, editable, shownSave, problems, saveError, apply, flush, acceptServer, retry, reload, code]);
 
   return { query, api, problems, saveError, retry };
 }
