@@ -2,7 +2,7 @@ import type { JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import type { PermitType } from '@/features/permits/api/types';
@@ -61,7 +61,7 @@ function mount(entry: string, props: Partial<TypeEditorDialogsProps> = {}) {
   const onDeleted = vi.fn();
   const onSelectTable = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  const { unmount } = render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={[entry]}>
@@ -80,7 +80,7 @@ function mount(entry: string, props: Partial<TypeEditorDialogsProps> = {}) {
     </MantineProvider>,
   );
 
-  return { onChange, onTypeReplaced, onDeleted, onSelectTable };
+  return { onChange, onTypeReplaced, onDeleted, onSelectTable, unmount };
 }
 
 /** Результат правки, переданої хосту, над робочою копією вихідного типу. */
@@ -197,6 +197,121 @@ describe('TypeEditorDialogs', () => {
     });
     expect(await screen.findByTestId('wizard-next')).toBeDefined();
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/publish'))).toBe(false);
+  });
+
+  describe('закриття під час збереження перед відправкою (P3-3)', () => {
+    /** `settle`, який відповідає, коли скажемо: так можна закрити діалог, поки збереження ще йде. */
+    function deferredSettle() {
+      let finish: (value: PermitType | null) => void = () => undefined;
+      const settle = vi.fn(
+        () =>
+          new Promise<PermitType | null>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      return { settle, finish: (value: PermitType | null) => finish(value) };
+    }
+    const sent = (suffix: string): boolean => fetchMock.mock.calls.some(([url]) => String(url).endsWith(suffix));
+
+    it('publish-type: закрили (Esc) до відповіді settle — POST не йде', async () => {
+      const user = userEvent.setup();
+      const { settle, finish } = deferredSettle();
+      mount('/x?dialog=publish-type', { settle });
+
+      await user.type(await screen.findByLabelText(k('publish.reason')), 'Added the storage table');
+      await user.click(screen.getByRole('button', { name: k('publish.verb') }));
+      await waitFor(() => {
+        expect(settle).toHaveBeenCalledTimes(1);
+      });
+      await user.keyboard('{Escape}');
+      await waitFor(() => {
+        expect(screen.getByTestId('search').textContent).toBe('');
+      });
+
+      finish(permitType());
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).toBeNull();
+      });
+      expect(sent('/publish')).toBe(false);
+    });
+
+    it('publish-type: діалог лишився відкритим — POST іде з rowVersion зі settle', async () => {
+      const user = userEvent.setup();
+      const { settle, finish } = deferredSettle();
+      const { onTypeReplaced } = mount('/x?dialog=publish-type', { settle });
+
+      await user.type(await screen.findByLabelText(k('publish.reason')), 'Added the storage table');
+      await user.click(screen.getByRole('button', { name: k('publish.verb') }));
+      await waitFor(() => {
+        expect(settle).toHaveBeenCalledTimes(1);
+      });
+      finish(permitType({ rowVersion: 'AAAAAAAAB9F=' }));
+
+      await waitFor(() => {
+        expect(onTypeReplaced).toHaveBeenCalledTimes(1);
+      });
+      const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/publish'));
+      expect(JSON.parse(String((call?.[1] as RequestInit).body)).rowVersion).toBe('AAAAAAAAB9F=');
+    });
+
+    it('new-version: закрили до відповіді settle — запиту нової версії немає', async () => {
+      const user = userEvent.setup();
+      const { settle, finish } = deferredSettle();
+      mount('/x?dialog=new-version', { settle });
+
+      await user.click(await screen.findByRole('button', { name: k('newVersion.verb') }));
+      await waitFor(() => {
+        expect(settle).toHaveBeenCalledTimes(1);
+      });
+      await user.keyboard('{Escape}');
+      await waitFor(() => {
+        expect(screen.getByTestId('search').textContent).toBe('');
+      });
+
+      finish(permitType());
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).toBeNull();
+      });
+      expect(fetchMock.mock.calls.some(([url, init]) => String(url).includes('/permit-types/') && (init as RequestInit | undefined)?.method === 'POST')).toBe(false);
+    });
+  });
+
+  describe('вибір нової таблиці в наступному такті (P3-8)', () => {
+    /** Доходить до кроку «застосувати», потім вмикає фальшиві таймери: такт `setTimeout 0` лишається в черзі. */
+    async function readyToApply() {
+      const user = userEvent.setup();
+      const mounted = mount('/x?dialog=add-table');
+      await user.type(await screen.findByLabelText(new RegExp(k('addTable.nameEn'))), 'Storage');
+      await user.click(screen.getByTestId('wizard-next'));
+      await user.click(screen.getByTestId('wizard-next'));
+      vi.useFakeTimers();
+
+      return mounted;
+    }
+
+    it('контроль: хост живий — після такту onSelectTable викликано', async () => {
+      try {
+        const { onSelectTable } = await readyToApply();
+        fireEvent.click(screen.getByTestId('wizard-apply'));
+        expect(onSelectTable).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(10);
+        expect(onSelectTable).toHaveBeenCalledWith('Storage');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('хост зник до такту — таймер знято, onSelectTable не викликається', async () => {
+      try {
+        const { onSelectTable, unmount } = await readyToApply();
+        fireEvent.click(screen.getByTestId('wizard-apply'));
+        unmount();
+        vi.advanceTimersByTime(10);
+        expect(onSelectTable).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('delete-type: DELETE, onDeleted, адреса очищена', async () => {
