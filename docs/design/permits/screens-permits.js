@@ -500,14 +500,15 @@
       if (ctx.hasUnsaved) ctx.hasUnsaved(function () { return dirty > 0 && false; }, { count: function () { return dirty; }, onSave: function () {}, onDiscard: function () {} });
 
       function structure(panel) {
-        panel.appendChild(E.Banner({ tone: 'info', title: 'Add a table with as many columns as the permit needs', text: 'Each table is stored as a registry that belongs to the permit (a “part of” link), so permits can have any number of tables and every table its own columns. Nothing to install or release.' }));
-        var side = h('aside', { class: 'side', 'aria-label': 'Tables of this type' }, h('div', { class: 'pane-h' }, h('h2', {}, 'Structure'), E.Button({ label: 'Add table', icon: 'plus', iconOnly: true, variant: 'ghost', id: 'pmt-addtable', onClick: function () { ctx.openDialog('add-table'); } })), h('div', { class: 'pm-tree scroll' }));
+        panel.appendChild(E.Banner({ tone: 'info', title: 'Add a table with as many columns as the permit needs', text: 'Each table is stored as a registry that belongs to the permit (a “part of” link), so permits can have any number of tables and every table its own columns. Nothing to install or release.', actions: [{ label: 'Add table…', icon: 'plus', onClick: function () { ctx.openDialog('add-table'); } }] }));
+        var side = h('aside', { class: 'side', 'aria-label': 'Tables of this type' }, h('div', { class: 'pane-h' }, h('h2', {}, 'Structure'), E.Button({ label: 'Add table', icon: 'plus', size: 'sm', variant: 'primary', id: 'pmt-addtable', onClick: function () { ctx.openDialog('add-table'); } })), h('div', { class: 'pm-tree scroll' }));
         var tree = side.querySelector('.pm-tree');
         function node(label, code, n, sub) { return h('button', { type: 'button', class: 'pm-node' + (sub ? ' sub' : ''), 'aria-current': String(sel === code), on: { click: function () { ctx.setQuery({ t: code }); sel = code; ctx.refresh(); } } }, icon(code === '__head' ? 'file' : 'table', 14), h('span', { class: 'truncate' }, label), h('span', { class: 'n' }, String(n))); }
         tree.appendChild(node('Permit details', '__head', HEAD.length + (t.extra ? t.extra.length : 0)));
         tree.appendChild(h('div', { class: 'menu-h' }, 'Tables'));
         t.tables.forEach(function (x) { tree.appendChild(node(x.name, x.code, x.cols.length)); });
-        if (!t.tables.length) tree.appendChild(h('div', { class: 'mini-empty' }, 'No tables yet.'));
+        if (!t.tables.length) tree.appendChild(h('div', { class: 'mini-empty' }, 'No tables yet. A permit of this type will have only the details above.'));
+        tree.appendChild(h('div', { class: 'p-2' }, E.Button({ label: 'Add another table', icon: 'plus', id: 'pmt-addtable-2', onClick: function () { ctx.openDialog('add-table'); } })));
         var main = h('div', { class: 'main' });
         var cur = sel === '__head' ? { name: 'Permit details', code: '__head', cols: HEAD, regCode: t.regCode, head: true } : (find(t.tables, 'code', sel) || t.tables[0]);
         var aside = h('aside', { class: 'aside', 'aria-label': 'Column properties', hidden: !ctx.query.panel });
@@ -550,11 +551,41 @@
         panel.appendChild(note('Published versions are never edited. A permit keeps working with the version it was created in until you move it.'));
       }
       ctx.dialog('add-table', function () {
-        var f = {}, d = { name: '' };
-        E.Dialog({ id: 'pmt-addtable-dlg', title: 'Add a table', body: function (b) { f.name = E.Input({ id: 'pmt-at-name', label: 'Table name', required: true, placeholder: 'Monitoring points', onInput: function (v) { d.name = v; } }); b.appendChild(f.name); b.appendChild(note('A table starts with one text column. Add the rest, then mark the columns that make a row unique.')); },
-          footer: [{ label: 'Cancel' }, { label: 'Add table', variant: 'primary', icon: 'plus', keepOpen: true, onClick: function (ctl) { if (!d.name.trim()) { f.name.setError('Enter a name'); f.name.input.focus(); return false; }
-            var code = d.name.replace(/[^A-Za-z0-9 ]/g, '').replace(/(?:^| )(\w)/g, function (m, c) { return c.toUpperCase(); }); t.tables.push({ code: code, name: d.name.trim(), ru: '', regCode: (t.regCode + '_' + code).toUpperCase(), cols: [col('Name', 'Name', '', 'Text', { req: true, key: true })], rules: [] }); t.state = 'Draft';
-            ctl.close(); reload(ctx, { t: code }); } }] }); });
+        var f = {}, box;
+        var d = { name: '', ru: '', from: 'blank', copy: t.tables[0] ? t.tables[0].code : '', cols: [col('Name', 'Name', '', 'Text', { req: true, key: true })] };
+        function colRows() {
+          box.textContent = '';
+          d.cols.forEach(function (c, i) {
+            box.appendChild(h('div', { class: 'form-grid', style: 'grid-template-columns:minmax(0,2fr) minmax(0,1.3fr) minmax(0,1fr) auto auto auto;align-items:end' },
+              E.Input({ id: 'pmt-nt-n' + i, label: 'Column ' + (i + 1), value: c.en, onInput: function (v) { c.en = v; c.code = v.replace(/[^A-Za-z0-9]+/g, '_'); } }),
+              E.Select({ id: 'pmt-nt-t' + i, label: 'Type', options: TYPES_LIST, value: c.type, onChange: function (v) { c.type = v; } }),
+              E.Input({ id: 'pmt-nt-u' + i, label: 'Unit', mono: true, value: c.unit || '', onInput: function (v) { c.unit = v; } }),
+              E.Checkbox({ id: 'pmt-nt-r' + i, label: 'Required', checked: c.req, onChange: function (v) { c.req = v; } }),
+              E.Checkbox({ id: 'pmt-nt-k' + i, label: 'Key', checked: c.key, onChange: function (v) { c.key = v; } }),
+              E.Button({ label: 'Remove column', icon: 'trash', iconOnly: true, variant: 'ghost', disabled: d.cols.length < 2, onClick: function () { d.cols.splice(i, 1); colRows(); } })));
+          });
+        }
+        E.Wizard({ id: 'pmt-addtable-wz', title: 'Add a table to ' + t.name, wide: true, data: d,
+          steps: [
+            { id: 'basics', label: 'Table', hint: 'A table is one list of rows inside a permit: limits, volumes, storage places.', render: function (b, dd) {
+                f.name = E.Input({ id: 'pmt-nt-name', label: 'Name (English)', required: true, value: dd.name, placeholder: 'Monitoring points', onInput: function (v) { dd.name = v; } });
+                f.ru = E.Input({ id: 'pmt-nt-ru', label: 'Name (Russian)', value: dd.ru, onInput: function (v) { dd.ru = v; } });
+                var src = E.Select({ id: 'pmt-nt-from', label: 'Start from', options: [{ value: 'blank', label: 'One empty column, I add the rest' }, { value: 'excel', label: 'The header row of an Excel file' }, { value: 'copy', label: 'A copy of another table of this type' }], value: dd.from, onChange: function (v) { dd.from = v; dd.copied = false; dd.imported = false; } });
+                b.appendChild(h('div', { class: 'form-grid' }, f.name, f.ru, h('div', { class: 'span-2' }, src)));
+              }, validate: function (dd) { f.name.setError(null); if (!dd.name.trim()) { f.name.setError('Enter a name'); f.name.input.focus(); return 'A table needs a name.'; }
+                if (t.tables.some(function (x) { return x.name.toLowerCase() === dd.name.trim().toLowerCase(); })) { f.name.setError('This type already has a table with this name'); return 'Choose another name.'; } return null; } },
+            { id: 'cols', label: 'Columns', hint: 'As many as the permit needs. Mark the columns that make a row unique as Key.', render: function (b, dd) {
+                if (dd.from === 'copy' && !dd.copied) { var src = find(t.tables, 'code', dd.copy); if (src) dd.cols = JSON.parse(JSON.stringify(src.cols)); dd.copied = true; }
+                if (dd.from === 'excel' && !dd.imported) { dd.cols = ['Water body', 'Source code', 'Quality code', 'Annual volume'].map(function (n, i) { return col(n.replace(/ /g, '_'), n, '', i === 3 ? 'Number' : 'Text', { key: i === 0, req: i === 0 }); }); dd.imported = true; b.appendChild(E.Banner({ tone: 'info', title: 'Columns read from Permits_Template.xlsx', text: '4 header cells found. Types were guessed from the first rows, so check them.' })); }
+                box = h('div', { class: 'stack' }); b.appendChild(box); colRows();
+                b.appendChild(h('div', { class: 'row' }, E.Button({ label: 'Add column', icon: 'plus', id: 'pmt-nt-add', onClick: function () { d.cols.push(col('Column_' + (d.cols.length + 1), '', '', 'Text')); colRows(); } }),
+                  E.Button({ label: 'Add months January to December', icon: 'calendar', onClick: function () { d.cols = d.cols.concat(monthCols(VOL, 'Estimated volume by month')); colRows(); } })));
+              }, validate: function (dd) { if (dd.cols.some(function (c) { return !c.en.trim(); })) return 'Every column needs a name.'; if (!dd.cols.some(function (c) { return c.key; })) return 'Mark at least one column as Key, so rows of one permit cannot repeat.'; return null; } }],
+          summary: function (dd) { return E.KeyValue([{ label: 'Table', value: dd.name }, { label: 'Columns', value: dd.cols.length + ': ' + dd.cols.slice(0, 5).map(function (c) { return c.en; }).join(', ') + (dd.cols.length > 5 ? '…' : '') }, { label: 'Unique row', value: 'Permit + ' + dd.cols.filter(function (c) { return c.key; }).map(function (c) { return c.en; }).join(' + ') }, { label: 'Stored as', value: (t.regCode + '_' + dd.name.replace(/[^A-Za-z0-9]+/g, '_')).toUpperCase(), mono: true }], { wide: true }); },
+          reviewText: 'The table is added to the draft of this type. Existing permits get it empty after you publish.', applyLabel: 'Add table',
+          onApply: function (dd, api) { var code = dd.name.replace(/[^A-Za-z0-9 ]/g, '').replace(/(?:^| )(\w)/g, function (m, c) { return c.toUpperCase(); });
+            t.tables.push({ code: code, name: dd.name.trim(), ru: dd.ru, regCode: (t.regCode + '_' + code).toUpperCase(), cols: dd.cols, rules: [] }); t.state = 'Draft'; api.close(); reload(ctx, { t: code }); } });
+      });
       ctx.dialog('add-column', function () {
         var d = { en: '', type: 'Text' }, f = {};
         E.Dialog({ id: 'pmt-addcol-dlg', title: 'Add a column', body: function (b) {
@@ -680,7 +711,7 @@
   E.flow('permits-renew', { group: 'Permits', title: 'Renew a permit before it ends', actor: 'Environmental specialist', steps: [
     { label: 'Ending permits first', href: '#/admin/permits?stat=exp' }, { label: 'Renew…', href: '#/admin/permits/P-0005?dialog=renew-permit' }] });
   E.flow('permits-define-type', { group: 'Permits', title: 'Define a permit type with its own tables', actor: 'Template administrator', steps: [
-    { label: 'Permit types', href: '#/admin/permits/types' }, { label: 'New type (wizard)', href: '#/admin/permits/types?dialog=new-type' }, { label: 'Structure: tables and columns', href: '#/admin/permits/types/WaterDischarge' }, { label: 'Add 12 month columns', href: '#/admin/permits/types/WaterDischarge?dialog=add-series' }, { label: 'Column properties', href: '#/admin/permits/types/WaterDischarge?panel=Annual' }, { label: 'Checks', href: '#/admin/permits/types/WaterDischarge?tab=rules' }, { label: 'Publish', href: '#/admin/permits/types/WaterDischarge?dialog=publish-type' }] });
+    { label: 'Permit types', href: '#/admin/permits/types' }, { label: 'New type (wizard)', href: '#/admin/permits/types?dialog=new-type' }, { label: 'Structure: tables and columns', href: '#/admin/permits/types/WaterDischarge' }, { label: 'Add a table (wizard)', href: '#/admin/permits/types/WaterDischarge?dialog=add-table' }, { label: 'Add 12 month columns', href: '#/admin/permits/types/WaterDischarge?dialog=add-series' }, { label: 'Column properties', href: '#/admin/permits/types/WaterDischarge?panel=Annual' }, { label: 'Checks', href: '#/admin/permits/types/WaterDischarge?tab=rules' }, { label: 'Publish', href: '#/admin/permits/types/WaterDischarge?dialog=publish-type' }] });
   E.flow('permits-bind-sheet', { group: 'Permits', title: 'Make a sheet read its permit', actor: 'Template administrator', steps: [
     { label: 'Sheet bindings', href: '#/admin/permits/bindings' }, { label: 'New binding (wizard)', href: '#/admin/permits/bindings?dialog=new-binding' }, { label: 'Mapping and preview', href: '#/admin/permits/bindings/B-01' }, { label: 'Formulas-only binding', href: '#/admin/permits/bindings/B-05' }] });
 })(window.ECR);
