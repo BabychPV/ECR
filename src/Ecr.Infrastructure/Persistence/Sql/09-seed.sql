@@ -8388,7 +8388,7 @@ USING (VALUES
     ,(N'permits.editor.inspector.group', N'en', N'Group', 1)
     ,(N'permits.editor.inspector.groupHint', N'en', N'Columns with the same group fold into one when the table is wide. Letters, digits and underscore.', 1)
     ,(N'permits.editor.inspector.groupInvalid', N'en', N'Use Latin letters, digits and underscore, starting with a letter.', 1)
-    ,(N'permits.editor.inspector.key', N'en', N'Part of the row''s unique key', 1)
+    ,(N'permits.editor.inspector.key', N'en', N'Part of the unique key of the row', 1)
     ,(N'permits.editor.inspector.keyHint', N'en', N'Two rows of one permit cannot repeat the key columns.', 1)
     ,(N'permits.editor.inspector.nameEn', N'en', N'Name (English)', 1)
     ,(N'permits.editor.inspector.nameRu', N'en', N'Name (Russian)', 1)
