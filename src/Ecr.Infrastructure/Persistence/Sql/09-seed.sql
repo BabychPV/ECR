@@ -8129,6 +8129,10 @@ USING (VALUES
     -- REG-UI:actions ── UI довідників, коміт 3: рядок дій сторінки записів (головна + 2 другорядні + «Ще»); ru/kz — порцією REG-UI:actions у блоці I18N нижче ──
     ,(N'registries.moreActions', N'en', N'More', 1)
     -- REG-UI:actions ── кінець секції ──
+    -- PERMITS: types ── en: відмови типів дозволів (ECR-PRM-*, PM-03) ──
+    ,(N'err.ECR-PRM-0404', N'en', N'Permit type not found', 1)
+    ,(N'err.ECR-PRM-0404.type', N'en', N'Permit type "{code}" does not exist.', 1)
+    -- PERMITS: types ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -20521,6 +20525,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- REG-UI:actions ── кінець секції ──
+-- PERMITS: types ── ECR-PRM-0404 ── ru/kz: тип дозволу не знайдено; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-0404', N'ru', N'Тип разрешения не найден'),
+    (N'err.ECR-PRM-0404', N'kz', N'Рұқсат түрі табылмады'),
+    (N'err.ECR-PRM-0404.type', N'ru', N'Типа разрешения «{code}» не существует.'),
+    (N'err.ECR-PRM-0404.type', N'kz', N'«{code}» рұқсат түрі жоқ.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: types ── ECR-PRM-0404 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

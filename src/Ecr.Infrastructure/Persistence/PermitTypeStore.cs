@@ -8,13 +8,16 @@ namespace Ecr.Infrastructure.Persistence;
 /// <summary>Реалізація <see cref="IPermitTypeStore"/> над <see cref="EcrDbContext"/> (Permits, PM-03).</summary>
 public sealed class PermitTypeStore(EcrDbContext db) : IPermitTypeStore
 {
+    // Типи дозволів, їхні таблиці й поля - метадані (десятки-сотні рядків); стеля захищає від вибірки без меж.
+    private const int MaxRows = 20_000;
+
     /// <inheritdoc />
     public Task<PermitTypeDef?> FindByCodeAsync(string code, CancellationToken ct)
         => db.PermitTypeDefs.FirstOrDefaultAsync(t => t.Code == code, ct);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<PermitTypeDef>> ListAsync(CancellationToken ct)
-        => await db.PermitTypeDefs.AsNoTracking().OrderBy(t => t.Code).ToListAsync(ct).ConfigureAwait(false);
+        => await db.PermitTypeDefs.AsNoTracking().OrderBy(t => t.Code).Take(MaxRows).ToListAsync(ct).ConfigureAwait(false);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<PermitTypeTable>> ListTablesAsync(int permitTypeDefId, CancellationToken ct)
@@ -27,7 +30,7 @@ public sealed class PermitTypeStore(EcrDbContext db) : IPermitTypeStore
     public async Task<IReadOnlyList<PermitTypeTable>> ListAllTablesAsync(CancellationToken ct)
         => await db.PermitTypeTables.AsNoTracking()
             .OrderBy(t => t.PermitTypeDefId).ThenBy(t => t.Ordinal).ThenBy(t => t.Id)
-            .ToListAsync(ct).ConfigureAwait(false);
+            .Take(MaxRows).ToListAsync(ct).ConfigureAwait(false);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<PermitFieldMeta>> ListFieldMetasAsync(int permitTypeDefId, CancellationToken ct)
@@ -50,9 +53,9 @@ public sealed class PermitTypeStore(EcrDbContext db) : IPermitTypeStore
     /// <inheritdoc />
     public async Task<IReadOnlySet<int>> ListHiddenRegistryIdsAsync(CancellationToken ct)
     {
-        var headers = await db.PermitTypeDefs.AsNoTracking().Select(t => t.HeaderRegistryDefId)
+        var headers = await db.PermitTypeDefs.AsNoTracking().Select(t => t.HeaderRegistryDefId).Take(MaxRows)
             .ToListAsync(ct).ConfigureAwait(false);
-        var tables = await db.PermitTypeTables.AsNoTracking().Select(t => t.RegistryDefId)
+        var tables = await db.PermitTypeTables.AsNoTracking().Select(t => t.RegistryDefId).Take(MaxRows)
             .ToListAsync(ct).ConfigureAwait(false);
         var lists = await db.PermitFieldMetas.AsNoTracking()
             .Where(m => m.ListScope == PermitListScope.TypeOnly && m.ListRegistryDefId != null)

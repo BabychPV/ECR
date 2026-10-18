@@ -866,4 +866,8 @@ public static class ErrorCodes
     /// число). Код несе проблема в <c>problems</c> відмови <c>ECR-CALC-0422</c> (<c>publishChecksFailed</c>).
     /// </remarks>
     public const string MethodologyResultTypeMismatch = "ECR-CALC-0436";
+
+    // Типи дозволів (Permits, PM-03). Друга цифра домену — HTTP; 4092 зарезервовано під перетин чинних дозволів (PM-04).
+    /// <summary>Типу дозволу з таким кодом немає (<c>ECR-PRM-0404</c>).</summary>
+    public const string PermitTypeNotFound = "ECR-PRM-0404";
 }

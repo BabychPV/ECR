@@ -2802,6 +2802,26 @@ public interface IRegistryKeyStore
 }
 ```
 
+#### `IPermitTypeStore`
+
+Типи дозволів (Permits, PM-03; FEATURE-PERMITS.md): тип, його таблиці, надбудова полів реєстрів
+(`PermitFieldMeta`), перелік прихованих реєстрів (шапки, таблиці, списки «лише для типу»), лічильник
+екземплярів і видалення чернеткового типу. Ядро реєстрів про дозволи не знає; через цей порт їх
+виключає з переліку «Довідники» `ListRegistriesHandler`.
+
+```csharp
+public interface IPermitTypeStore
+{
+    public Task<PermitTypeDef?> FindByCodeAsync(string code, CancellationToken ct);
+    public Task<IReadOnlyList<PermitTypeDef>> ListAsync(CancellationToken ct);
+    public Task<IReadOnlyList<PermitTypeTable>> ListTablesAsync(int permitTypeDefId, CancellationToken ct);
+    public Task<IReadOnlyList<PermitFieldMeta>> ListFieldMetasAsync(int permitTypeDefId, CancellationToken ct);
+    public Task<IReadOnlySet<int>> ListHiddenRegistryIdsAsync(CancellationToken ct);
+    public Task<IReadOnlyDictionary<int, int>> CountPermitsAsync(IReadOnlyCollection<int> headerRegistryDefIds, CancellationToken ct);
+    public Task RemoveDraftTypeAsync(PermitTypeDef type, CancellationToken ct);
+}
+```
+
 #### `IRegistryRowsQuery`
 
 Рядки довідника для редактора даних (RT-13, FEATURE-REGISTRY-TABLES §7.1): записи, значення полів,
@@ -3803,6 +3823,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-RPT-0409` | 409 | зріз подано або версію звіту вже опубліковано: обидва іммутабельні, потрібен новий (ФВ-9.17) |
 | `ECR-RPT-4091` | 409 | опис звіту з таким кодом уже є (`UQ_ReportDef`); код і є адресою побудови |
 | `ECR-RPT-0422` | 422 | опис звіту не складається: порожня назва, немає колонок, невідомий тип колонки чи джерело рядків |
+| `ECR-PRM-0404` | 404 | типу дозволу з таким кодом немає (Permits, PM-03; `messageKey` `type`) |
 | `ECR-JOB-0404` | 404 | фонової задачі з таким ідентифікатором немає; **або** деталь у планувальнику не пережила перезапуск сервера (сховище черги в пам'яті, D-66) — ручний перезапуск неможливий |
 | `ECR-JOB-0409` | 409 | стан задачі не дозволяє дію: ручний перезапуск не-`Failed` задачі (директива №11, T10 #40), скасування задачі, яка вже не `Queued`/`Running` (BE-02), **або** розклад збору, змінений іншим редактором між читанням і записом — `If-Match` не збігся з `rowVersion` (BE-21b), **або** спроба завести другий розклад для сутності джерела, яка вже має свій (BE-21c), **або** прогін перевірки узгодженості, коли попередній ще `Queued`/`Running` (`consistencyCheckRunning`, BE-30), **або** видалення джерела даних, на яке ще спираються сутності чи розклади (`dataSourceInUse`), **або** тест з'єднання джерела, коли попередній ще йде (`dataSourceTestRunning`), **або** з'єднання, змінене іншим редактором — `If-Match` не збігся з `rowVersion` (`dataSourceChanged`). Константа каталогу — `ErrorCodes.JobStateConflict` |
 | `ECR-SYS-0500` | 500 | необроблена помилка; у логах — `CorrelationId` |
