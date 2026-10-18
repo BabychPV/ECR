@@ -18,12 +18,14 @@ beforeEach(() => {
 });
 
 async function mountWithSlowChunk(): Promise<void> {
+  // Справжній модуль вантажимо ДО монтування: далі `gate` — єдине, що тримає чанк.
+  const actual = await vi.importActual<typeof import('@/shared/ui/Hint')>('@/shared/ui/Hint');
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
   vi.doMock('@/shared/ui/Hint', async () => {
     await gate;
-    return vi.importActual<typeof import('@/shared/ui/Hint')>('@/shared/ui/Hint');
+    return actual;
   });
   const { LazyHint } = await import('../LazyHint');
   render(
@@ -82,8 +84,15 @@ describe('LazyHint: фокус переживає доїзд чанка Hint', (
     // (де фіксується «тригер у фокусі») встигає, а коміт заміни — ще ні.
     await act(async () => {
       release();
-      // importActual — справжній ввід-вивід, не мікротаски: чекаємо його таймером.
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Без реальних таймерів: `Hint` уже прогрітий у `mountWithSlowChunk`, тож після
+      // `release` чанк доїжджає самими мікротасками. Чекаємо завершення динамічних
+      // імпортів і зливаємо чергу мікротасок — continuation `loadHint().then` (де
+      // фіксується «тригер у фокусі») гарантовано відпрацював, а коміт заміни стану
+      // чекає виходу з `act`.
+      await vi.dynamicImportSettled();
+      for (let i = 0; i < 20; i += 1) {
+        await Promise.resolve();
+      }
       outside.focus();
     });
     await waitFor(() => {
