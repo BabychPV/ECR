@@ -2835,6 +2835,29 @@ public interface IPermitStore
 }
 ```
 
+#### `IPermitBindingStore`
+
+Прив'язки таблиць аркуша версії шаблону до таблиць типів дозволів (Permits, PM-09; `cfg.PermitSheetBinding` +
+`cfg.PermitSheetBindingColumn`): перелік і читання з кодами таблиць та колонок, відстежувані вибірки для
+зміни/видалення, перевірки унікальності (код — по всій системі, таблиця аркуша — у версії), найбільша кількість
+рядків таблиці в одному дозволі. Каскаду схема не має: колонки видаляє явно той, хто видаляє прив'язку.
+
+```csharp
+public interface IPermitBindingStore
+{
+    public Task<IReadOnlyList<PermitBindingView>> ListAsync(int templateVersionId, CancellationToken ct);
+    public Task<PermitBindingView?> GetAsync(int templateVersionId, string code, CancellationToken ct);
+    public Task<PermitSheetBinding?> FindForUpdateAsync(int templateVersionId, string code, CancellationToken ct);
+    public Task<IReadOnlyList<PermitSheetBindingColumn>> ListColumnsForUpdateAsync(int bindingId, CancellationToken ct);
+    public Task<string?> FindCodeBySheetTableAsync(int templateVersionId, int sheetTableDefId, CancellationToken ct);
+    public Task<bool> CodeExistsAsync(string code, CancellationToken ct);
+    public Task<int?> MaxPermitRowsAsync(int tableRegistryDefId, int compositionFieldDefId, CancellationToken ct);
+    public void Add(PermitSheetBinding binding);
+    public void Remove(PermitSheetBinding binding);
+    public void RemoveColumns(IEnumerable<PermitSheetBindingColumn> columns);
+}
+```
+
 #### `IRegistryRowsQuery`
 
 Рядки довідника для редактора даних (RT-13, FEATURE-REGISTRY-TABLES §7.1): записи, значення полів,
@@ -3836,7 +3859,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-RPT-0409` | 409 | зріз подано або версію звіту вже опубліковано: обидва іммутабельні, потрібен новий (ФВ-9.17) |
 | `ECR-RPT-4091` | 409 | опис звіту з таким кодом уже є (`UQ_ReportDef`); код і є адресою побудови |
 | `ECR-RPT-0422` | 422 | опис звіту не складається: порожня назва, немає колонок, невідомий тип колонки чи джерело рядків |
-| `ECR-PRM-0404` | 404 | типу дозволу з таким кодом немає (Permits, PM-03; `messageKey` `type`); або дозволу (екземпляра) з таким Id немає, запис не з шапки типу чи заборона на реєстр його шапки (PM-04; `permit`) |
+| `ECR-PRM-0404` | 404 | типу дозволу з таким кодом немає (Permits, PM-03; `messageKey` `type`); або дозволу (екземпляра) з таким Id немає, запис не з шапки типу чи заборона на реєстр його шапки (PM-04; `permit`); **або** прив'язки аркуша до дозволу з таким кодом у версії шаблону немає (PM-09; `binding`) |
 | `ECR-PRM-0422` | 422 | визначення типу дозволу не складається (PM-03): `messageKey` розрізняє випадок — таблиця без ключового стовпця (`tableWithoutKey`), повторні коди (`tableDuplicate`, `columnDuplicate`, `ruleDuplicate`), недопустимий або зарезервований код (`tableCodeInvalid`, `columnCodeInvalid`, `columnCodeReserved`, `registryCodeInvalid`, `ruleCodeInvalid`), тип і формат (`columnTypeUnknown`, `numericFormat`), суперечливий список (`listInconsistent`, `listForNonLookup`, `typeOnlyNoChoices`, `choicesInvalid`, `siblingUnknown`, `siblingCycle`), перевірки (`ruleExpressionRequired`, `ruleSeverityUnknown`), порожні назви/категорія (`nameRequired`, `categoryUnknown`), зламаний опублікований склад (`tableRemoved`, `columnRemoved`, `columnRetyped`, `keyChanged`), публікація (`noTables`, `reasonTooShort`, `sharedRegistryUnknown`, `groupCodeInvalid`); екземпляр дозволу (PM-04): порожній/задовгий номер (`numberRequired`, `numberTooLong`), задовге розташування (`locationTooLong`), кінець не пізніший за початок (`validityOrder`), тип ще не опублікований (`typeNotPublished`), невідомий фільтр стану / курсор переліку (`statusUnknown`, `cursorInvalid`), коротка причина / дата дострокового завершення (`endReasonTooShort`, `endDateOutOfRange`), рядок не скопіювався при поновленні (`renewRowInvalid`) |
 | `ECR-PRM-4092` | 409 | чинний дозвіл того самого типу й номера уже діє в частині вікна (півінтервали `[ValidFrom, ValidTo)` перетинаються) — при активації та зміні чинного дозволу (PM-04; `overlap`); чернетки ключ не тримають |
 | `ECR-PRM-4096` | 409 | стан дозволу не дозволяє дію або дозвіл змінили після читання (PM-04): токен не збігся (`changed`), закінчений дозвіл не редагується (`notEditable`), дія лише для чернетки (`notDraft`), лише для чинного (`notActive`), чернетку не поновлюють (`notRenewable`), на дозвіл чи його рядки посилаються (`inUse`) |

@@ -310,6 +310,9 @@ public static class DependencyInjection
         services.AddScoped<Permits.ActivatePermitHandler>();
         services.AddScoped<Permits.EndPermitHandler>();
         services.AddScoped<Permits.RenewPermitHandler>();
+        // PERMITS: bindings — прив'язки таблиць аркуша до дозволів (PM-09)
+        services.AddScoped<Permits.Bindings.ListPermitBindingsHandler>();
+        services.AddScoped<Permits.Bindings.GetPermitBindingHandler>();
 
         // RT: expressions
 
