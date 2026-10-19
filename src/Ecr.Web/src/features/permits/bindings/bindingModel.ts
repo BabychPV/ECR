@@ -237,6 +237,10 @@ export type WarningKind =
   | 'rowCountUnknown'
   | 'rowsClamped'
   | 'planFailed'
+  | 'valueSkipped'
+  | 'rowDeleted'
+  | 'cellNotFromPermit'
+  | 'periodUnknown'
   | 'other';
 
 /** Випадок попередження за хвостом його коду (`binding.warning.inactive` → `inactive`). */
@@ -252,6 +256,10 @@ export function warningKind(warning: PermitPreviewWarning): WarningKind {
     case 'rowCountUnknown':
     case 'rowsClamped':
     case 'planFailed':
+    case 'valueSkipped':
+    case 'rowDeleted':
+    case 'cellNotFromPermit':
+    case 'periodUnknown':
       return tail;
     case 'permitNotValidAtPeriodEnd':
       return 'notValidAtPeriodEnd';

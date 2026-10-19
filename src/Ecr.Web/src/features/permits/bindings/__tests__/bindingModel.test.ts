@@ -180,6 +180,9 @@ describe('випадки причин і попереджень', () => {
     expect(warningKind({ code: 'notRowsBinding', text: 'x' })).toBe('notRowsBinding');
     expect(warningKind({ code: 'binding.warning.permitNotValidAtPeriodEnd', text: 'x' })).toBe('notValidAtPeriodEnd');
     expect(warningKind({ code: 'noPermit', text: 'x' })).toBe('planFailed');
+    for (const kind of ['valueSkipped', 'rowDeleted', 'cellNotFromPermit', 'periodUnknown']) {
+      expect(warningKind({ code: `binding.warning.${kind}`, text: 'x' })).toBe(kind);
+    }
     expect(warningKind({ code: 'something.new', text: 'x' })).toBe('other');
   });
 });

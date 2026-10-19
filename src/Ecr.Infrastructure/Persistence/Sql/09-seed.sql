@@ -9049,6 +9049,10 @@ USING (VALUES
     ,(N'permits.sheetBinding.doc.result', N'en', N'“{name}”: {added} rows added, {updated} updated from the permit.', 1)
     ,(N'permits.sheetBinding.doc.unchanged', N'en', N'“{name}” already matches the permit.', 1)
     ,(N'permits.sheetBinding.doc.kept', N'en', N'{count} rows are no longer in the permit and were kept: {keys}.', 1)
+    ,(N'permits.sheetBinding.warning.valueSkipped', N'en', N'A column value was not written: its data type is not supported.', 1)
+    ,(N'permits.sheetBinding.warning.rowDeleted', N'en', N'A permit row was deleted in the document and its key is taken, so the row was not restored.', 1)
+    ,(N'permits.sheetBinding.warning.cellNotFromPermit', N'en', N'Some cells were not updated: their last change was not made from the permit.', 1)
+    ,(N'permits.sheetBinding.warning.periodUnknown', N'en', N'The period boundaries are unknown, so no rows were created from the permit.', 1)
     -- PERMITS: sheet-binding-ui ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -23384,7 +23388,15 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.sheetBinding.doc.unchanged', N'ru', N'«{name}» уже соответствует разрешению.'),
     (N'permits.sheetBinding.doc.unchanged', N'kz', N'«{name}» рұқсатқа сәйкес келеді.'),
     (N'permits.sheetBinding.doc.kept', N'ru', N'Строк, которых больше нет в разрешении, оставлено: {count} ({keys}).'),
-    (N'permits.sheetBinding.doc.kept', N'kz', N'Рұқсатта енді жоқ, бірақ қалдырылған жолдар: {count} ({keys}).')
+    (N'permits.sheetBinding.doc.kept', N'kz', N'Рұқсатта енді жоқ, бірақ қалдырылған жолдар: {count} ({keys}).'),
+    (N'permits.sheetBinding.warning.valueSkipped', N'ru', N'Значение столбца не записано: его тип данных не поддерживается.'),
+    (N'permits.sheetBinding.warning.valueSkipped', N'kz', N'Баған мәні жазылмады: оның деректер түрі қолдау таппайды.'),
+    (N'permits.sheetBinding.warning.rowDeleted', N'ru', N'Строка разрешения удалена в документе, её ключ занят, поэтому строка не восстановлена.'),
+    (N'permits.sheetBinding.warning.rowDeleted', N'kz', N'Рұқсат жолы құжатта жойылған, оның кілті бос емес, сондықтан жол қалпына келтірілмеді.'),
+    (N'permits.sheetBinding.warning.cellNotFromPermit', N'ru', N'Часть ячеек не обновлена: их последнее изменение сделано не из разрешения.'),
+    (N'permits.sheetBinding.warning.cellNotFromPermit', N'kz', N'Кейбір ұяшықтар жаңартылмады: олардың соңғы өзгерісі рұқсаттан жасалмаған.'),
+    (N'permits.sheetBinding.warning.periodUnknown', N'ru', N'Границы периода неизвестны, поэтому строки из разрешения не созданы.'),
+    (N'permits.sheetBinding.warning.periodUnknown', N'kz', N'Кезең шекаралары белгісіз, сондықтан рұқсаттан жолдар жасалмады.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

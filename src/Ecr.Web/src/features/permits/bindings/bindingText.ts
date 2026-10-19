@@ -43,6 +43,14 @@ export function warningText(kind: WarningKind): string {
       return t('permits.sheetBinding.warning.rowsClamped');
     case 'planFailed':
       return t('permits.sheetBinding.warning.planFailed');
+    case 'valueSkipped':
+      return t('permits.sheetBinding.warning.valueSkipped');
+    case 'rowDeleted':
+      return t('permits.sheetBinding.warning.rowDeleted');
+    case 'cellNotFromPermit':
+      return t('permits.sheetBinding.warning.cellNotFromPermit');
+    case 'periodUnknown':
+      return t('permits.sheetBinding.warning.periodUnknown');
     case 'other':
       return t('permits.sheetBinding.warning.other');
   }
