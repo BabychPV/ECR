@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PermitBinding } from '../../api/bindingsTypes';
 import type { PermitTypeTable } from '../../api/types';
-import { column, table } from '../../typeEditor/dialogs/__tests__/fixtures';
+import { airTable } from './fixtures';
 import {
   bindingCodeFor,
   completeMapping,
@@ -20,15 +20,7 @@ import {
 
 /** Модель прив'язки (PM-11): розкладка, перевірки, тіло запиту, ключі причин. */
 
-const permitTable: PermitTypeTable = table({
-  code: 'AirEmissions',
-  columns: [
-    column({ code: 'Source', nameL10n: { en: 'Source' }, key: true, order: 1 }),
-    column({ code: 'Substance', nameL10n: { en: 'Substance' }, key: true, order: 2 }),
-    column({ code: 'Permitted_t_year', nameL10n: { en: 'Limit' }, dataType: 'Decimal', key: false, required: false, order: 3 }),
-    column({ code: 'Note', nameL10n: { en: 'Note' }, key: false, required: false, order: 4 }),
-  ],
-});
+const permitTable: PermitTypeTable = airTable();
 
 const sheet: SheetTableRef = {
   id: 41,
