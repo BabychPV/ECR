@@ -76,12 +76,18 @@ public sealed class RenewPermitHandler(
         var newTo = request?.ValidTo ?? newFrom.AddYears(1);
         PermitInput.Validity(newFrom, newTo);
 
-        var twin = all.FirstOrDefault(h =>
-            string.Equals(h.Number, source.Number, StringComparison.OrdinalIgnoreCase) && h.Entry.ValidFrom == newFrom);
-        if (twin is not null)
+        void EnsureNoTwin(IReadOnlyList<PermitHeader> headers)
         {
-            throw PermitErrors.Duplicate(type.Code, source.Number, newFrom, twin.Entry.Id);
+            var twin = headers.FirstOrDefault(h =>
+                string.Equals(h.Number, source.Number, StringComparison.OrdinalIgnoreCase) && h.Entry.ValidFrom == newFrom);
+            if (twin is not null)
+            {
+                throw PermitErrors.Duplicate(type.Code, source.Number, newFrom, twin.Entry.Id);
+            }
         }
+
+        // Швидка відмова без транзакції й замка; вирішує перевірка ПІД замком нижче.
+        EnsureNoTwin(all);
 
         var values = PermitInput.HeaderValues(source.Number, source.Location, null, null, source.Flags, clearEmpty: false);
         long createdId = 0;
@@ -90,6 +96,13 @@ public sealed class RenewPermitHandler(
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             await rows.LockEntriesAsync([permitId], innerCt).ConfigureAwait(false);
+
+            // ⛔ Той самий замок (тип, номер), що в Create/Update: перевірка вище бачить лише закомічене, тож два паралельні
+            // поновлення (або поновлення й створення з тим самим номером і початком) обидва її минали й давали дві чернетки.
+            // Повторна перевірка під замком бачить чернетку переможця: решта дістає 409 ECR-PRM-4095.
+            await stats.LockNumberAsync(type.Code, source.Number, innerCt).ConfigureAwait(false);
+            EnsureNoTwin(await reader.HeadersAsync(view, null, innerCt).ConfigureAwait(false));
+
             var draft = await PermitDraftWriter
                 .CreateAsync(registries, writer, view, values, source.Number, newFrom, newTo, userId, innerCt).ConfigureAwait(false);
             createdId = draft.Id;
