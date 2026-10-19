@@ -39,6 +39,10 @@ public sealed record PermitPreviewQuery(
 /// перегляд не розійдеться з тим, що створить документ. Фактичні комірки існуючого екземпляра накладаються лише на
 /// незіставлені колонки.
 /// </para>
+/// <para>
+/// ⛔ Окрім <c>Template.View</c> потрібне право читати реєстри дозволу (<see cref="PermitRegistryReadGuard"/>): інакше
+/// перегляд став би бічним ходом повз <c>PermitQueryHandlers</c>.
+/// </para>
 /// </remarks>
 public sealed class PreviewPermitBindingHandler(
     IRepository<TemplateVersion, int> versions,
@@ -75,7 +79,7 @@ public sealed class PreviewPermitBindingHandler(
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var reader = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         _ = await versions.FindAsync(templateVersionId, ct).ConfigureAwait(false)
             ?? throw PermitBindingErrors.VersionNotFound(templateVersionId);
@@ -91,6 +95,10 @@ public sealed class PreviewPermitBindingHandler(
 
         var type = (await permits.FindByCodeAsync(view.PermitTypeCode, ct).ConfigureAwait(false))!;
         var table = (await permits.ListTablesAsync(type.Id, ct).ConfigureAwait(false)).First(t => t.Id == binding.PermitTypeTableId);
+
+        // ⛔ C4: ДО будь-якого читання дозволу. Template.View/Document.View не відкривають реєстри дозволів: без читання
+        // реєстрів шапки й таблиці відповідь не міститиме ні номерів, ні лімітів, ні рядків.
+        PermitRegistryReadGuard.Require(reader, type, table, () => PermitBindingErrors.NotFound(code, templateVersionId));
 
         var structure = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
         var sheetTable = structure.Sheets.SelectMany(s => s.Tables).First(t => t.Id == binding.SheetTableDefId);

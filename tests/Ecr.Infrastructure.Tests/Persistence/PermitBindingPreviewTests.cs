@@ -21,7 +21,9 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// <remarks>
 /// Мутаційні докази: замінити <c>&lt;</c> на <c>&lt;=</c> у вікні чинності (<c>PermitCandidate.IsLiveOn</c>) - червоний
 /// «Межі_вікна…»; прибрати відбір <c>IsActive</c> - червоний «Причини…»; прибрати фільтр незіставлених колонок в
-/// <c>OverlayFactsAsync</c> - червоний «Документ…».
+/// <c>OverlayFactsAsync</c> - червоний «Документ…». C4 (Registry.View): прибрати виклик
+/// <c>PermitRegistryReadGuard.Require</c> у <c>PreviewPermitBindingHandler</c> - червоніють «Читач_з_Template_View…» і
+/// «Ресурсний_грант…».
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class PermitBindingPreviewTests(SqlServerFixture sql)
@@ -220,6 +222,74 @@ public sealed class PermitBindingPreviewTests(SqlServerFixture sql)
         await using var read = await h.NextRequestAsync();
         await Assert.ThrowsAsync<NotFoundException>(
             () => read.Preview.HandleAsync(sheet.Doc.TemplateVersionId, "NOPE", new PermitPreviewQuery(null, null, "Site A", June30, null), default));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Читач_з_Template_View_і_Document_View_без_Registry_View_отримує_відмову_без_жодних_даних_дозволу()
+    {
+        var (h, sheet) = await ArrangeAsync();
+        await using var _ = h;
+        await h.SeedPermitAsync(Type, $"N1{_tag}", "Site A", new DateOnly(2026, 1, 1), null, true, ("NOx", 12.5m, "first"));
+
+        await using var reader = await PermitBindingHarness.CreateAsync(sql, ["Template.View", "Document.View"]);
+        var query = new PermitPreviewQuery(null, null, "Site A", June30, null);
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => reader.Preview.HandleAsync(sheet.Doc.TemplateVersionId, $"B{_tag}", query, default));
+
+        // Та сама відмова, що й у PermitQueryHandlers (Registry.View), і ніде ні номера, ні ліміту, ні рядків.
+        var listDenied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => reader.Types.ListPermits.HandleAsync(new Ecr.Application.Common.CursorRequest(10), null, null, null, null, default));
+        Assert.Equal((listDenied.ErrorCode, listDenied.Details!["messageKey"]), (denied.ErrorCode, denied.Details!["messageKey"]));
+        Assert.Equal("Registry.View", denied.Details["permission"]);
+        var shown = denied.Message + string.Join(';', denied.Details.Select(p => $"{p.Key}={p.Value}"));
+        Assert.DoesNotContain($"N1{_tag}", shown, StringComparison.Ordinal);
+        Assert.DoesNotContain("NOx", shown, StringComparison.Ordinal);
+        Assert.DoesNotContain("12.5", shown, StringComparison.Ordinal);
+
+        // Із правом - той самий запит віддає дозвіл і рядки.
+        await using var allowed = await PermitBindingHarness.CreateAsync(sql, ["Template.View", "Registry.View"]);
+        var preview = await allowed.Preview.HandleAsync(sheet.Doc.TemplateVersionId, $"B{_tag}", query, default);
+        Assert.Equal($"N1{_tag}", preview.Permit.Number);
+        Assert.Single(preview.Rows);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Ресурсний_грант_має_покривати_і_шапку_і_таблицю_а_заборона_на_реєстр_ховає_прив_язку()
+    {
+        var (h, sheet) = await ArrangeAsync();
+        await using var _ = h;
+        await h.SeedPermitAsync(Type, $"N1{_tag}", "Site A", new DateOnly(2026, 1, 1), null, true, ("NOx", 12.5m, null));
+        var type = (await h.Types.Permits.FindByCodeAsync(Type, default))!;
+        var tableRegistry = (await h.Types.Permits.ListTablesAsync(type.Id, default)).Single(t => t.Code == "Emissions").RegistryDefId;
+        var query = new PermitPreviewQuery(null, null, "Site A", June30, null);
+
+        async Task<PermitBindingPreviewDto> PreviewAs(Func<AccessBuilder, AccessBuilder> profile)
+        {
+            await using var reader = await PermitBindingHarness.CreateAsync(sql, ["Template.View"]);
+            reader.Types.Access.BuildProfileAsync(reader.Types.UserId, Arg.Any<CancellationToken>())
+                .Returns(profile(new AccessBuilder { UserId = reader.Types.UserId }.Permission("Template.View")).Build());
+            return await reader.Preview.HandleAsync(sheet.Doc.TemplateVersionId, $"B{_tag}", query, default);
+        }
+
+        // Гранти Read на обидва реєстри без глобального права - достатньо.
+        var granted = await PreviewAs(b => b
+            .Grant(ResourceKind.Registry, type.HeaderRegistryDefId, GrantLevel.Read)
+            .Grant(ResourceKind.Registry, tableRegistry, GrantLevel.Read));
+        Assert.Equal($"N1{_tag}", granted.Permit.Number);
+
+        // Грант лише на шапку: рядки з таблиці прочитати не можна - відмова, а не часткова відповідь.
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => PreviewAs(b => b.Grant(ResourceKind.Registry, type.HeaderRegistryDefId, GrantLevel.Read)));
+
+        // Явна заборона на реєстр шапки перекриває глобальне право і відповідає як неіснуюча прив'язка.
+        var hidden = await Assert.ThrowsAsync<NotFoundException>(
+            () => PreviewAs(b => b.Permission("Registry.View").Deny(ResourceKind.Registry, type.HeaderRegistryDefId)));
+        Assert.Equal("ECR-PRM-0404", hidden.ErrorCode);
     }
 
     private static string ColumnCode(PermitBindingPreviewDto preview, string role) => preview.Columns.Single(c => c.Role == role).ColumnCode;
