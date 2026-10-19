@@ -23,7 +23,7 @@ import { permitType } from './fixtures';
  */
 vi.mock('@/shared/session/useSession', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/session/useSession')>()),
-  useSession: () => ({ data: { permissions: ['Registry.EditDefinition', 'Registry.Publish'], isSimulation: false } }),
+  useSession: () => ({ data: { permissions: ['Registry.EditDefinition', 'Registry.Publish', 'Permit.EditType', 'Permit.PublishType'], isSimulation: false } }),
 }));
 
 const lag = vi.hoisted(() => ({ writes: [] as string[], commit: (): void => undefined }));
