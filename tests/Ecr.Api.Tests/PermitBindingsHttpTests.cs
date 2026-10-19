@@ -126,6 +126,80 @@ public sealed class PermitBindingsHttpTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync(url)).StatusCode);
     }
 
+    /// <summary>
+    /// PM-09b: правку структури аркуша тримає прив'язка - <c>409 ECR-PRM-4102</c> (арм у <c>ExceptionHandlingMiddleware</c>)
+    /// на <c>Fixed</c>, видалення таблиці й видалення зіставленої колонки; вільна колонка видаляється (204).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Прив_язка_тримає_правку_аркуша_Fixed_видалення_таблиці_і_зіставленої_колонки_дають_409_ECR_PRM_4102()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Registry.View", "Permit.EditType", "Permit.PublishType", "Template.View", "Template.Edit").ConfigureAwait(true);
+        await PublishTypeAsync(client).ConfigureAwait(true);
+        var open = await OpenStandAsync().ConfigureAwait(true);
+        var version = $"/api/v1/template-versions/{open.VersionId}";
+        Assert.Equal(
+            HttpStatusCode.OK,
+            (await client.PutAsJsonAsync(
+                new Uri($"{version}/permit-bindings/B{_tag}", UriKind.Relative),
+                Body(new Stand(open.VersionId, open.TableId, 0, open.KeyColumnId, open.LimitColumnId, 0), open.LimitColumnId))).StatusCode);
+
+        var fixedMode = await client.PutAsJsonAsync(
+            new Uri($"{version}/sheets/{open.SheetCode}/tables/{open.TableCode}", UriKind.Relative),
+            new { nameL10n = new { en = "T" }, ordinal = (int?)null, layoutKind = "PerPeriodInstance", rowMode = "Fixed", maxDynamicRows = (int?)null });
+        await AssertHeldAsync(fixedMode, "rowMode").ConfigureAwait(true);
+
+        await AssertHeldAsync(
+            await client.DeleteAsync(new Uri($"{version}/sheets/{open.SheetCode}/tables/{open.TableCode}", UriKind.Relative)), "table").ConfigureAwait(true);
+        await AssertHeldAsync(
+            await client.DeleteAsync(new Uri($"{version}/tables/{open.TableId}/columns/{open.KeyColumnCode}", UriKind.Relative)), "column").ConfigureAwait(true);
+
+        var free = await client.DeleteAsync(new Uri($"{version}/tables/{open.TableId}/columns/{open.FreeColumnCode}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.NoContent, free.StatusCode);
+    }
+
+    private static async Task AssertHeldAsync(HttpResponseMessage response, string kind)
+    {
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await JsonAsync(response).ConfigureAwait(false);
+        Assert.Equal(("ECR-PRM-4102", $"err.ECR-PRM-4102.{kind}"), (body.GetProperty("errorCode").GetString(), body.GetProperty("messageKey").GetString()));
+    }
+
+    /// <summary>Шаблон-чернетка БЕЗ документів (структурні зміни не <c>Breaking</c>): одна таблиця, три колонки, шапка з <c>Facility</c>.</summary>
+    private async Task<OpenStand> OpenStandAsync()
+    {
+        var name = new LocalizedText(new Dictionary<string, string> { ["en"] = "N" });
+        var now = new DateTime(2026, 1, 15, 10, 0, 0, DateTimeKind.Utc);
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+
+        var template = new Template(EcrCode.Create($"OPT{_tag}"), name, 1, now);
+        db.Templates.Add(template);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        var version = new TemplateVersion(template.Id, $"1.0.0.{_tag}", 1, now);
+        db.TemplateVersions.Add(version);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        var sheet = new SheetDef(version.Id, EcrCode.Create($"OSH{_tag}"), name, 1);
+        db.SheetDefs.Add(sheet);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        var table = new TableDef(sheet.Id, EcrCode.Create($"OTB{_tag}"), name, 1, TableLayoutKind.PerPeriodInstance, TableRowMode.Dynamic);
+        db.TableDefs.Add(table);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var key = new ColumnDef(table.Id, EcrCode.Create($"K_{_tag}"), name, 1, CellDataType.String);
+        var limit = new ColumnDef(table.Id, EcrCode.Create($"L_{_tag}"), name, 2, CellDataType.Decimal);
+        limit.SetReadOnly(true);
+        limit.SetNumericFormat(12, 3);
+        var free = new ColumnDef(table.Id, EcrCode.Create($"F_{_tag}"), name, 3, CellDataType.String);
+        db.ColumnDefs.AddRange(key, limit, free);
+        db.HeaderFieldDefs.Add(new HeaderFieldDef(version.Id, EcrCode.Create("Facility"), name, 1, CellDataType.String));
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return new OpenStand(version.Id, sheet.Code, table.Id, table.Code, key.Id, key.Code, limit.Id, free.Code);
+    }
+
     private object Body(Stand stand, int limitColumn, int? tableId = null) => new
     {
         sheetTableDefId = tableId ?? stand.TableId,
@@ -213,6 +287,9 @@ public sealed class PermitBindingsHttpTests(SqlServerFixture sql)
 
     private static async Task<JsonElement> JsonAsync(HttpResponseMessage response)
         => JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false)).RootElement;
+
+    private sealed record OpenStand(
+        int VersionId, string SheetCode, int TableId, string TableCode, int KeyColumnId, string KeyColumnCode, int LimitColumnId, string FreeColumnCode);
 
     private sealed record Stand(int VersionId, int TableId, int SecondTableId, int KeyColumnId, int LimitColumnId, int EditableColumnId);
 }
