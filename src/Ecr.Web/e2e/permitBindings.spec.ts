@@ -130,7 +130,7 @@ async function arrange(page: Page, tracked: CreatedPermitTypes): Promise<Scenari
   );
   const version = await ok<{ versionId: number }>(
     await page.request.post(`/api/v1/templates/${template.templateId}/versions`, {
-      data: { versionNumber: '1.0.0', cloneFromVersionId: null },
+      data: { versionNumber: '1.0.0.0', cloneFromVersionId: null },
     }),
     'заведення версії шаблону',
   );
