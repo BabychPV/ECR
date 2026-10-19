@@ -1,5 +1,6 @@
 // src/Ecr.Application/Templates/ColumnDefHandlers.cs
 using Ecr.Application.Errors;
+using Ecr.Application.Permits.Bindings;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
@@ -518,7 +519,8 @@ public sealed class DeleteColumnDefHandler(
     IUnitOfWork uow,
     IClock clock,
     IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IPermitBindingStore permitBindings)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
@@ -562,6 +564,9 @@ public sealed class DeleteColumnDefHandler(
         var change = classifier.ClassifyDeletion(nameof(ColumnDef), hasDocuments);
 
         SaveTableRelationHandler.RejectBreaking(change, code, hasDocuments, "Видалення");
+
+        // ⛔ PM-09b: колонку, яку зіставляє прив'язка до дозволу, не прибирають (м'яке видалення залишило б мертву ціль).
+        await PermitSheetBindingGuard.RequireColumnFreeAsync(permitBindings, templateVersionId, column, ct).ConfigureAwait(false);
 
         // ⛔ Q-244: аудит писався РАНІШЕ за `SoftDelete`/`SaveChanges` без
         // жодної спільної транзакції — збій між ними лишав журнал із записом
