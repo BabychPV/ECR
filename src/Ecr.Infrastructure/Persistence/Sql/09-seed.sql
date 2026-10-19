@@ -8605,6 +8605,48 @@ USING (VALUES
     ,(N'err.ECR-PRM-4102.table', N'en', N'Table "{tableCode}" is used by permit binding "{bindingCode}": delete the binding first.', 1)
     ,(N'err.ECR-PRM-4102.column', N'en', N'Column "{columnCode}" is mapped by permit binding "{bindingCode}": change or delete the binding first.', 1)
     -- PERMITS: sheetguard ── кінець секції ──
+    -- PERMITS: ui-lists ── PM-08d: екран «Lists» (списки вибору пермітів), варіант A без окремого ендпоінта; ru/kz — порцією PERMITS: ui-lists нижче ──
+    ,(N'permits.lists.openRegistries', N'en', N'Open Registries', 1)
+    ,(N'permits.lists.readOnly', N'en', N'This screen only shows the lists. Values kept in one permit type are edited in that type''s builder; shared lists are edited in Registries.', 1)
+    ,(N'permits.lists.registriesFailed', N'en', N'Registries could not be read, so shared lists are shown by code and without value counts.', 1)
+    ,(N'permits.lists.stats.aria', N'en', N'Pick-lists summary', 1)
+    ,(N'permits.lists.stat.all', N'en', N'lists', 1)
+    ,(N'permits.lists.stat.shared', N'en', N'shared', 1)
+    ,(N'permits.lists.stat.type', N'en', N'one type only', 1)
+    ,(N'permits.lists.stat.permit', N'en', N'from a permit table', 1)
+    ,(N'permits.lists.search.label', N'en', N'Search lists', 1)
+    ,(N'permits.lists.search.placeholder', N'en', N'List or permit type', 1)
+    ,(N'permits.lists.filter.kind', N'en', N'Kinds', 1)
+    ,(N'permits.lists.kind.shared', N'en', N'Shared registry', 1)
+    ,(N'permits.lists.kind.type', N'en', N'This permit type only', 1)
+    ,(N'permits.lists.kind.permit', N'en', N'Table of the same permit', 1)
+    ,(N'permits.lists.col.list', N'en', N'List', 1)
+    ,(N'permits.lists.col.kind', N'en', N'Kind', 1)
+    ,(N'permits.lists.col.values', N'en', N'Values', 1)
+    ,(N'permits.lists.col.used', N'en', N'Used by', 1)
+    ,(N'permits.lists.keptIn.registries', N'en', N'Kept in Registries', 1)
+    ,(N'permits.lists.keptIn.type', N'en', N'Kept in {owner}', 1)
+    ,(N'permits.lists.values.permit', N'en', N'rows of each permit', 1)
+    ,(N'permits.lists.noMatches', N'en', N'No lists match the search', 1)
+    ,(N'permits.lists.drawer.close', N'en', N'Close list details', 1)
+    ,(N'permits.lists.drawer.kind', N'en', N'Kind', 1)
+    ,(N'permits.lists.drawer.kept', N'en', N'Kept in', 1)
+    ,(N'permits.lists.drawer.usedBy', N'en', N'Used by', 1)
+    ,(N'permits.lists.drawer.values', N'en', N'Values', 1)
+    ,(N'permits.lists.drawer.noValues', N'en', N'No values yet', 1)
+    ,(N'permits.lists.drawer.more', N'en', N'and {count} more', 1)
+    ,(N'permits.lists.drawer.usedColumn', N'en', N'{type} · {table} · {column}', 1)
+    ,(N'permits.lists.drawer.usedHeader', N'en', N'{type} · permit details · {column}', 1)
+    ,(N'permits.lists.drawer.note.shared', N'en', N'Shared lists are registries. Every permit type that picks from this list sees the same values, and they can be used in sheets and formulas too.', 1)
+    ,(N'permits.lists.drawer.note.type', N'en', N'Only {owner} sees these values. They are edited in the permit type builder; here they are read-only.', 1)
+    ,(N'permits.lists.drawer.note.permit', N'en', N'The choices are the rows of a table inside each permit. Each permit offers only its own rows, so the list differs from permit to permit.', 1)
+    ,(N'permits.lists.action.registries', N'en', N'Open in Registries', 1)
+    ,(N'permits.lists.action.openType', N'en', N'Open the permit type', 1)
+    ,(N'permits.lists.used.none', N'en', N'No column yet', 1)
+    ,(N'permits.lists.used.one', N'en', N'1 column', 1)
+    ,(N'permits.lists.used.other', N'en', N'{count} columns', 1)
+    ,(N'permits.lists.typesFailed', N'en', N'{count} permit type(s) could not be read, so their lists are missing here. Reload the page to try again.', 1)
+    -- PERMITS: ui-lists ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -22015,6 +22057,94 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: bindings ── preview ── кінець секції ──
+-- PERMITS: ui-lists ── ru/kz: PM-08d, екран «Lists»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.lists.openRegistries', N'ru', N'Открыть справочники'),
+    (N'permits.lists.openRegistries', N'kz', N'Анықтамалықтарды ашу'),
+    (N'permits.lists.readOnly', N'ru', N'Этот экран только показывает списки. Значения, которые хранятся в одном типе разрешения, правятся в конструкторе этого типа; общие списки — в справочниках.'),
+    (N'permits.lists.readOnly', N'kz', N'Бұл экран тізімдерді тек көрсетеді. Бір рұқсат түрінде сақталатын мәндер сол түрдің конструкторында өңделеді; ортақ тізімдер — анықтамалықтарда.'),
+    (N'permits.lists.registriesFailed', N'ru', N'Справочники прочитать не удалось, поэтому общие списки показаны по коду и без количества значений.'),
+    (N'permits.lists.registriesFailed', N'kz', N'Анықтамалықтарды оқу мүмкін болмады, сондықтан ортақ тізімдер код бойынша және мәндер санынсыз көрсетілген.'),
+    (N'permits.lists.stats.aria', N'ru', N'Сводка списков выбора'),
+    (N'permits.lists.stats.aria', N'kz', N'Таңдау тізімдерінің қорытындысы'),
+    (N'permits.lists.stat.all', N'ru', N'списков'),
+    (N'permits.lists.stat.all', N'kz', N'тізім'),
+    (N'permits.lists.stat.shared', N'ru', N'общих'),
+    (N'permits.lists.stat.shared', N'kz', N'ортақ'),
+    (N'permits.lists.stat.type', N'ru', N'только одного типа'),
+    (N'permits.lists.stat.type', N'kz', N'тек бір түрдікі'),
+    (N'permits.lists.stat.permit', N'ru', N'из таблицы разрешения'),
+    (N'permits.lists.stat.permit', N'kz', N'рұқсат кестесінен'),
+    (N'permits.lists.search.label', N'ru', N'Поиск по спискам'),
+    (N'permits.lists.search.label', N'kz', N'Тізімдерден іздеу'),
+    (N'permits.lists.search.placeholder', N'ru', N'Список или тип разрешения'),
+    (N'permits.lists.search.placeholder', N'kz', N'Тізім немесе рұқсат түрі'),
+    (N'permits.lists.filter.kind', N'ru', N'Виды'),
+    (N'permits.lists.filter.kind', N'kz', N'Түрлері'),
+    (N'permits.lists.kind.shared', N'ru', N'Общий справочник'),
+    (N'permits.lists.kind.shared', N'kz', N'Ортақ анықтамалық'),
+    (N'permits.lists.kind.type', N'ru', N'Только этот тип разрешения'),
+    (N'permits.lists.kind.type', N'kz', N'Тек осы рұқсат түрі'),
+    (N'permits.lists.kind.permit', N'ru', N'Таблица того же разрешения'),
+    (N'permits.lists.kind.permit', N'kz', N'Сол рұқсаттың кестесі'),
+    (N'permits.lists.col.list', N'ru', N'Список'),
+    (N'permits.lists.col.list', N'kz', N'Тізім'),
+    (N'permits.lists.col.kind', N'ru', N'Вид'),
+    (N'permits.lists.col.kind', N'kz', N'Түрі'),
+    (N'permits.lists.col.values', N'ru', N'Значения'),
+    (N'permits.lists.col.values', N'kz', N'Мәндер'),
+    (N'permits.lists.col.used', N'ru', N'Используется'),
+    (N'permits.lists.col.used', N'kz', N'Қолданылады'),
+    (N'permits.lists.keptIn.registries', N'ru', N'Хранится в справочниках'),
+    (N'permits.lists.keptIn.registries', N'kz', N'Анықтамалықтарда сақталады'),
+    (N'permits.lists.keptIn.type', N'ru', N'Хранится в {owner}'),
+    (N'permits.lists.keptIn.type', N'kz', N'{owner} ішінде сақталады'),
+    (N'permits.lists.values.permit', N'ru', N'строки каждого разрешения'),
+    (N'permits.lists.values.permit', N'kz', N'әр рұқсаттың жолдары'),
+    (N'permits.lists.noMatches', N'ru', N'Нет списков по запросу'),
+    (N'permits.lists.noMatches', N'kz', N'Сұрау бойынша тізім жоқ'),
+    (N'permits.lists.drawer.close', N'ru', N'Закрыть сведения о списке'),
+    (N'permits.lists.drawer.close', N'kz', N'Тізім мәліметтерін жабу'),
+    (N'permits.lists.drawer.kind', N'ru', N'Вид'),
+    (N'permits.lists.drawer.kind', N'kz', N'Түрі'),
+    (N'permits.lists.drawer.kept', N'ru', N'Хранится'),
+    (N'permits.lists.drawer.kept', N'kz', N'Сақталатын орны'),
+    (N'permits.lists.drawer.usedBy', N'ru', N'Используется'),
+    (N'permits.lists.drawer.usedBy', N'kz', N'Қолданылады'),
+    (N'permits.lists.drawer.values', N'ru', N'Значения'),
+    (N'permits.lists.drawer.values', N'kz', N'Мәндер'),
+    (N'permits.lists.drawer.noValues', N'ru', N'Значений пока нет'),
+    (N'permits.lists.drawer.noValues', N'kz', N'Мәндер әлі жоқ'),
+    (N'permits.lists.drawer.more', N'ru', N'и ещё {count}'),
+    (N'permits.lists.drawer.more', N'kz', N'және тағы {count}'),
+    (N'permits.lists.drawer.usedColumn', N'ru', N'{type} · {table} · {column}'),
+    (N'permits.lists.drawer.usedColumn', N'kz', N'{type} · {table} · {column}'),
+    (N'permits.lists.drawer.usedHeader', N'ru', N'{type} · данные разрешения · {column}'),
+    (N'permits.lists.drawer.usedHeader', N'kz', N'{type} · рұқсат деректері · {column}'),
+    (N'permits.lists.drawer.note.shared', N'ru', N'Общие списки — это справочники. Каждый тип разрешения, который выбирает из этого списка, видит одни и те же значения; их можно использовать и в листах, и в формулах.'),
+    (N'permits.lists.drawer.note.shared', N'kz', N'Ортақ тізімдер — анықтамалықтар. Осы тізімнен таңдайтын әрбір рұқсат түрі бірдей мәндерді көреді; оларды парақтарда және формулаларда да қолдануға болады.'),
+    (N'permits.lists.drawer.note.type', N'ru', N'Эти значения видит только {owner}. Они правятся в конструкторе типа разрешения; здесь только для чтения.'),
+    (N'permits.lists.drawer.note.type', N'kz', N'Бұл мәндерді тек {owner} көреді. Олар рұқсат түрінің конструкторында өңделеді; мұнда тек оқуға арналған.'),
+    (N'permits.lists.drawer.note.permit', N'ru', N'Варианты — это строки таблицы внутри каждого разрешения. Каждое разрешение предлагает только свои строки, поэтому список отличается от разрешения к разрешению.'),
+    (N'permits.lists.drawer.note.permit', N'kz', N'Таңдау нұсқалары — әр рұқсат ішіндегі кестенің жолдары. Әр рұқсат тек өз жолдарын ұсынады, сондықтан тізім рұқсаттан рұқсатқа ерекшеленеді.'),
+    (N'permits.lists.action.registries', N'ru', N'Открыть в справочниках'),
+    (N'permits.lists.action.registries', N'kz', N'Анықтамалықтарда ашу'),
+    (N'permits.lists.action.openType', N'ru', N'Открыть тип разрешения'),
+    (N'permits.lists.used.none', N'ru', N'Пока ни одного столбца'),
+    (N'permits.lists.used.none', N'kz', N'Әзірге баған жоқ'),
+    (N'permits.lists.used.one', N'ru', N'1 столбец'),
+    (N'permits.lists.used.one', N'kz', N'1 баған'),
+    (N'permits.lists.used.other', N'ru', N'Столбцов: {count}'),
+    (N'permits.lists.used.other', N'kz', N'Бағандар: {count}'),
+    (N'permits.lists.typesFailed', N'ru', N'Не удалось прочитать типов разрешений: {count}, поэтому их списков здесь нет. Перезагрузите страницу, чтобы повторить.'),
+    (N'permits.lists.typesFailed', N'kz', N'Оқу мүмкін болмаған рұқсат түрлері: {count}, сондықтан олардың тізімдері мұнда жоқ. Қайталау үшін бетті қайта жүктеңіз.'),
+    (N'permits.lists.action.openType', N'kz', N'Рұқсат түрін ашу')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: ui-lists ── кінець секції ──
 
 -- PERMITS: sheetguard ── ECR-PRM-4102 ── ru/kz: правку аркуша тримає прив'язка (PM-09b); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
