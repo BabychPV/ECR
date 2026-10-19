@@ -1,7 +1,7 @@
 import { t } from '@/shared/i18n';
 import type { DataTableColumn } from '@/shared/ui/DataTable';
 import { TwoLine } from '@/shared/ui/TwoLine';
-import { kindLabel, type ListRow } from './listsModel';
+import { kindLabel, usedCountText, type ListRow } from './listsModel';
 
 /** Другий рядок під назвою: де лежать значення списку. */
 export function keptIn(row: ListRow): string {
@@ -38,9 +38,8 @@ export function listColumns(): readonly DataTableColumn<ListRow>[] {
     {
       key: 'used',
       label: t('permits.lists.col.used'),
-      num: true,
       sortValue: (row) => row.used.length,
-      render: (row) => String(row.used.length),
+      render: (row) => usedCountText(row.used.length),
     },
   ];
 }

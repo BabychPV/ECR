@@ -46,16 +46,18 @@ interface Backend {
   types: ReturnType<typeof makeType>[];
   registriesStatus: number;
   typeStatus: number;
+  entriesStatus: number;
 }
 
 function stub(over: Partial<Backend> = {}): string[] {
-  const backend: Backend = { types: [makeType('Air')], registriesStatus: 200, typeStatus: 200, ...over };
+  const backend: Backend = { types: [makeType('Air')], registriesStatus: 200, typeStatus: 200, entriesStatus: 200, ...over };
   const requests: string[] = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       requests.push(url);
+      if (url.includes('/entries') && backend.entriesStatus !== 200) return json({ title: 'forbidden' }, backend.entriesStatus);
       if (url.includes('/entries')) return json([{ id: 1, code: 'NOX', display: 'Nitrogen oxides', parentEntryId: null, validFrom: null, validTo: null }]);
       if (url.includes('/api/v1/registries')) {
         return backend.registriesStatus === 200
@@ -119,11 +121,50 @@ describe('Lists (PM-08d)', () => {
     expect(screen.queryByLabelText('permits.lists.stats.aria')).toBeNull();
   });
 
-  it('збій читання типу — помилка з повтором, не порожній екран', async () => {
+  it('збій читання типу не валить екран: є попередження з кількістю', async () => {
     stub({ typeStatus: 500 });
     show();
 
-    expect(await screen.findByRole('alert')).toBeTruthy();
+    await waitFor(() => expect(document.querySelector('[data-lists-types-failed]')).not.toBeNull());
+    expect(document.querySelector('[data-lists-types-failed]')?.textContent).toContain('"count":1');
+    expect(screen.getByText('permits.lists.readOnly')).toBeTruthy();
+  });
+
+  it('збій переліку типів — помилка з повтором', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ title: 'failure' }, 500)));
+    show();
+
+    expect((await screen.findAllByRole('alert')).length).toBeGreaterThan(0);
+  });
+
+  it('невідомі ?kind=, ?stat=, ?panel= ігноруються: усі списки, шторки немає', async () => {
+    stub();
+    show('/admin/permits/lists?kind=bogus&stat=nope&panel=nothing');
+
+    expect(await screen.findByText('Substances')).toBeTruthy();
+    expect(screen.getByText('Method')).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('403 на значення довідника: шторка показує помилку, екран живий', async () => {
+    stub({ entriesStatus: 403 });
+    show();
+
+    fireEvent.click(await screen.findByText('Substances'));
+    const drawer = await screen.findByRole('dialog');
+
+    expect(await within(drawer).findByRole('alert')).toBeTruthy();
+    expect(within(drawer).getByText('permits.lists.drawer.note.shared')).toBeTruthy();
+    expect(screen.getByText('Method')).toBeTruthy();
+  });
+
+  it('«Used by» словами: «1 column» у таблиці й у шторці', async () => {
+    stub();
+    show();
+
+    expect((await screen.findAllByText('permits.lists.used.one')).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByText('Method'));
+    expect(within(await screen.findByRole('dialog')).getByText('permits.lists.used.one')).toBeTruthy();
   });
 
   it('довідники недоступні — екран живий, назва — код, є пояснення', async () => {

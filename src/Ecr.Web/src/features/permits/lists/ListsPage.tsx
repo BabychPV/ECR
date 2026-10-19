@@ -59,6 +59,12 @@ export function ListsPage(): JSX.Element {
         </Alert>
       )}
 
+      {data.failedTypes.length > 0 && (
+        <Alert color="statusWarning" role="status" data-lists-types-failed="">
+          {t('permits.lists.typesFailed', { count: data.failedTypes.length })}
+        </Alert>
+      )}
+
       {hasLists && (
         <StatStrip
           label={t('permits.lists.stats.aria')}

@@ -45,6 +45,13 @@ export interface ListRow {
   readonly used: readonly ListUse[];
 }
 
+/** «Used by» словами макета: «1 column» / «N columns» / «No column yet». */
+export function usedCountText(count: number): string {
+  if (count <= 0) return t('permits.lists.used.none');
+
+  return count === 1 ? t('permits.lists.used.one') : t('permits.lists.used.other', { count });
+}
+
 /** Підпис походження словом каталогу (ключі — літерали: сторож каталогу читає їх як текст). */
 export function kindLabel(kind: ListKind): string {
   switch (kind) {

@@ -7,7 +7,7 @@ import { DetailDrawer } from '@/shared/ui/DetailDrawer';
 import { KeyValue } from '@/shared/ui/KeyValue';
 import { typeEditorPath } from '../shell/permitPaths';
 import { keptIn } from './ListsColumns';
-import { kindLabel, type ListRow, type ListUse } from './listsModel';
+import { kindLabel, usedCountText, type ListRow, type ListUse } from './listsModel';
 import { useListEntries } from './useLists';
 import type { RegistryEntryDto } from '@/api/types';
 
@@ -94,6 +94,7 @@ export function ListDrawer({ row }: { readonly row: ListRow }): JSX.Element {
           items={[
             { label: t('permits.lists.drawer.kind'), value: kindLabel(row.kind) },
             { label: t('permits.lists.drawer.kept'), value: keptIn(row) },
+            { label: t('permits.lists.col.used'), value: usedCountText(row.used.length) },
           ]}
         />
         <Text size="sm">
