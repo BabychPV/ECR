@@ -1,5 +1,7 @@
 import type { TemplateTable } from '@/features/templates/ctor/ctorModel';
 import type { PermitBinding, PermitBindingPreview } from '../../api/bindingsTypes';
+import type { PermitType, PermitTypeListItem, PermitTypeTable } from '../../api/types';
+import { column, permitType, table } from '../../typeEditor/dialogs/__tests__/fixtures';
 
 /** Заготовки для тестів прив'язок (PM-11). */
 
@@ -25,7 +27,7 @@ export function binding(over: Partial<PermitBinding> = {}): PermitBinding {
     rowVersion: 'AAAA',
     columns: [
       { ordinal: 1, permitFieldCode: 'Source', role: 'RowKey', sheetColumnCode: 'Source', sheetColumnDefId: 1 },
-      { ordinal: 2, permitFieldCode: 'Permitted_t_year', role: 'Limit', sheetColumnCode: 'Limit', sheetColumnDefId: 3 },
+      { ordinal: 2, permitFieldCode: 'Permitted_t_year', role: 'Limit', sheetColumnCode: 'Permitted_t_year', sheetColumnDefId: 3 },
     ],
     ...over,
   };
@@ -55,7 +57,7 @@ export function sheetTable(over: Partial<TemplateTable> = {}): TemplateTable {
     rowMode: 'Dynamic',
     maxDynamicRows: 200,
     rows: [],
-    columns: [column(1, 'Source', true), column(2, 'Substance', true), column(3, 'Limit', true), column(4, 'Actual', false)],
+    columns: [column(1, 'Source', true), column(2, 'Substance', true), column(3, 'Permitted_t_year', true), column(4, 'Actual', false)],
     ...over,
   } as unknown as TemplateTable;
 }
@@ -76,4 +78,40 @@ export function preview(over: Partial<PermitBindingPreview> = {}): PermitBinding
     warnings: [],
     ...over,
   };
+}
+
+/** Таблиця дозволу «Air emissions»: два ключі, ліміт і довідкове поле. */
+export function airTable(): PermitTypeTable {
+  return table({
+    code: 'AirEmissions',
+    nameL10n: { en: 'Air emissions' },
+    columns: [
+      column({ code: 'Source', nameL10n: { en: 'Source' }, key: true, order: 1 }),
+      column({ code: 'Substance', nameL10n: { en: 'Substance' }, key: true, order: 2 }),
+      column({ code: 'Permitted_t_year', nameL10n: { en: 'Limit' }, dataType: 'Decimal', key: false, required: false, order: 3 }),
+      column({ code: 'Note', nameL10n: { en: 'Note' }, key: false, required: false, order: 4 }),
+    ],
+  });
+}
+
+/** Опублікований тип у переліку (`GET /permit-types`). */
+export function airTypeItem(over: Partial<PermitTypeListItem> = {}): PermitTypeListItem {
+  return {
+    code: 'AirPermit',
+    nameL10n: { en: 'Air permit' },
+    category: 'Air',
+    status: 'Published',
+    version: 1,
+    hasUnpublishedChanges: false,
+    permitCount: 2,
+    updatedAt: null,
+    updatedByDisplayName: null,
+    tables: [{ code: 'AirEmissions', columnCount: 4, nameL10n: { en: 'Air emissions' } }],
+    ...over,
+  };
+}
+
+/** Повне визначення того самого типу (`GET /permit-types/AirPermit`). */
+export function airType(): PermitType {
+  return permitType({ code: 'AirPermit', nameL10n: { en: 'Air permit' }, status: 'Published', version: 1, tables: [airTable()] });
 }
