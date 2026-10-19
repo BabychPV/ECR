@@ -385,6 +385,9 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         /// <summary>Та сама структура, але таблиця стає змішаною (D-1b P2-1).</summary>
         RowModeBecomesMixed,
 
+        /// <summary>PM-10c: таблиця змішана і в джерелі, і в цілі (рядки шаблону + рядки з дозволу <c>P&lt;id&gt;</c>); структура та сама.</summary>
+        KeepsMixedMode,
+
         /// <summary>Таблиця отримує інший код (<c>…_NEW</c>); колонки й рядки ті самі (перейменування, як T9a_03 → T9a_17a).</summary>
         TableRenamed,
 
@@ -477,7 +480,9 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         int periodKey = 202601, bool approved = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var doc = await builder.BuildAsync(periodKey, columnCount: 3, rowCount: 2).ConfigureAwait(false);
+        var doc = await builder.BuildAsync(
+            periodKey, columnCount: 3, rowCount: 2,
+            rowMode: target == Target.KeepsMixedMode ? TableRowMode.Mixed : TableRowMode.Fixed).ConfigureAwait(false);
         var tag = doc.SheetCode["SHEET".Length..];
         var now = new DateTime(2026, 1, 16, 9, 0, 0, DateTimeKind.Utc);
 
@@ -553,7 +558,7 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         var table = new TableDef(
             sheet.Id, EcrCode.Create(targetTableCode), Name($"Table {tag} v2"), 1,
             TableLayoutKind.PerPeriodInstance,
-            target == Target.RowModeBecomesMixed ? TableRowMode.Mixed : TableRowMode.Fixed);
+            target is Target.RowModeBecomesMixed or Target.KeepsMixedMode ? TableRowMode.Mixed : TableRowMode.Fixed);
         db.TableDefs.Add(table);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
