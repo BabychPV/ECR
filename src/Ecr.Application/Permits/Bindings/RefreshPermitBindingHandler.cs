@@ -27,6 +27,10 @@ public sealed record PermitRefreshResultDto(
 /// Нових кодів помилок немає.
 /// </para>
 /// <para>
+/// ⛔ Крім права на аркуш потрібне право читати реєстри дозволу (<see cref="PermitRegistryReadGuard"/>): відповідь несе
+/// дані дозволу. Типові ролі введення даних мають <c>Registry.View</c>, тож це нічого не звужує на практиці.
+/// </para>
+/// <para>
 /// ⛔ Рядків НЕ видаляє: у них можуть бути введені факти. Зниклі з дозволу ключі повертаються в
 /// <see cref="PermitRefreshResultDto.RemovedFromPermit"/>.
 /// </para>
@@ -37,6 +41,7 @@ public sealed class RefreshPermitBindingHandler(
     IPermitBindingStore bindings,
     IPeriodStore periods,
     IPermitBindingService service,
+    IPermitTypeStore types,
     IMetadataCache metadata,
     IAccessDecisionService access,
     IUnitOfWork uow,
@@ -76,6 +81,15 @@ public sealed class RefreshPermitBindingHandler(
             return new PermitRefreshResultDto(
                 0, 0, [], [new PermitPreviewWarningDto("notRowsBinding", "Прив'язка вимкнена або працює формулами: рядків із дозволу немає.")]);
         }
+
+        // ⛔ C4: відповідь несе дані дозволу (номер у попередженнях, ключі зниклих рядків), а запис змінює ліміти в
+        // комірках, - тож потрібне те саме право читати реєстри дозволу, що й у перегляді. ДО створення екземпляра.
+        var type = await types.FindByCodeAsync(view.PermitTypeCode, ct).ConfigureAwait(false)
+            ?? throw PermitBindingErrors.NotFound(code, versionId);
+        var permitTable = (await types.ListTablesAsync(type.Id, ct).ConfigureAwait(false))
+            .FirstOrDefault(t => t.Id == view.Binding.PermitTypeTableId)
+            ?? throw PermitBindingErrors.NotFound(code, versionId);
+        PermitRegistryReadGuard.Require(profile, type, permitTable, () => PermitBindingErrors.NotFound(code, versionId));
 
         // Екземпляр створюється (разом із рядками дозволу) тим самим шляхом, що й під час відкриття документа.
         await rows.EnsureTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);

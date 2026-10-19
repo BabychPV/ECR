@@ -91,6 +91,34 @@ public sealed partial class PermitRuntimeRowsTests
         Assert.Equal(3, (await scene.RowsAsync()).Count);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Обробник_оновлення_без_Registry_View_відмовляє_до_будь_якого_запису_і_не_видає_даних_дозволу()
+    {
+        var scene = await ArrangeAsync();
+        await using var _ = scene.H;
+        var withRight = await OpenPeriodProfileAsync(scene);
+        await scene.H.SeedPermitAsync(Type, $"N3{_tag}", "Site A", new DateOnly(2026, 1, 15), null, true, ("NEW1", 1m, null));
+
+        // Той самий запис у проєкт, але без права читати реєстри дозволів.
+        var noRegistry = new AccessBuilder { UserId = withRight.UserId }
+            .Grant(ResourceKind.Project, scene.ProjectId, GrantLevel.Write)
+            .Build();
+        var jobs = Jobs();
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(() => HandleAsync(scene, noRegistry, jobs));
+
+        Assert.Equal(("ECR-AUTH-0403", "Registry.View"), (denied.ErrorCode, denied.Details!["permission"]?.ToString()));
+        Assert.DoesNotContain($"N3{_tag}", denied.Message, StringComparison.Ordinal);
+        Assert.Equal(3, (await scene.RowsAsync()).Count);
+        await jobs.DidNotReceive().EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+
+        // З правом - рядок додається (контроль, що відмова саме про реєстр, а не про проєкт).
+        Assert.Equal(1, (await HandleAsync(scene, withRight, Jobs())).Added);
+    }
+
     private async Task<PermitRefreshResultDto> HandleAsync(Scene scene, AccessProfile profile, IBackgroundJobScheduler jobs)
     {
         await using var db = scene.NewContext();
@@ -118,7 +146,7 @@ public sealed partial class PermitRuntimeRowsTests
 
         return new RefreshPermitBindingHandler(
             NewStore(db, permits: true), new DocumentStore(db), new PermitBindingStore(db), new PeriodStore(db), NewService(db),
-            new MetadataCache(memory, db), access, new UnitOfWork(db), clock, new SheetEditGate(db), jobs, new EditAssignmentStore(db));
+            new PermitTypeStore(db), new MetadataCache(memory, db), access, new UnitOfWork(db), clock, new SheetEditGate(db), jobs, new EditAssignmentStore(db));
     }
 
     /// <summary>Користувач із записом у проєкт; період відкрито, а рядки з дозволу вже заведені відкриттям документа.</summary>
@@ -137,6 +165,9 @@ public sealed partial class PermitRuntimeRowsTests
         setup.Users.Add(user);
         await setup.SaveChangesAsync();
 
-        return new AccessBuilder { UserId = user.Id }.Grant(ResourceKind.Project, scene.ProjectId, GrantLevel.Write).Build();
+        return new AccessBuilder { UserId = user.Id }
+            .Grant(ResourceKind.Project, scene.ProjectId, GrantLevel.Write)
+            .Permission("Registry.View")
+            .Build();
     }
 }

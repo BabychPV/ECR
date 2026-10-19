@@ -102,6 +102,30 @@ public sealed class PermitBindingsHttpTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.Forbidden, (await client.DeleteAsync(new Uri($"{root}/B{_tag}", UriKind.Relative))).StatusCode);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перегляд_без_Registry_View_дає_403_Registry_View_а_з_ним_200()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var admin = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Registry.View", "Permit.EditType", "Permit.PublishType", "Template.View", "Template.Edit").ConfigureAwait(true);
+        await PublishTypeAsync(admin).ConfigureAwait(true);
+        var stand = await StandAsync().ConfigureAwait(true);
+        var root = $"/api/v1/template-versions/{stand.VersionId}/permit-bindings";
+        Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync(new Uri($"{root}/B{_tag}", UriKind.Relative), Body(stand, stand.LimitColumnId))).StatusCode);
+        var url = new Uri($"{root}/B{_tag}/preview?facilityName=Nowhere&periodEnd=2026-06-30", UriKind.Relative);
+
+        using var reader = await SystemHealthControllerTests.SignedInAsync(sql, app, "Template.View", "Document.View").ConfigureAwait(true);
+        var denied = await reader.GetAsync(url);
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        var problem = await JsonAsync(denied).ConfigureAwait(true);
+        Assert.Equal("err.ECR-AUTH-0403.permission", problem.GetProperty("messageKey").GetString());
+        Assert.False(problem.TryGetProperty("rows", out _) || problem.TryGetProperty("permit", out _), "відмова не несе даних перегляду");
+
+        Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync(url)).StatusCode);
+    }
+
     private object Body(Stand stand, int limitColumn, int? tableId = null) => new
     {
         sheetTableDefId = tableId ?? stand.TableId,
