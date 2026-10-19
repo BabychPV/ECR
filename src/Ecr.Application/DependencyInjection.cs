@@ -317,6 +317,7 @@ public static class DependencyInjection
         services.AddScoped<Permits.Bindings.DeletePermitBindingHandler>();
         services.AddScoped<Permits.Bindings.IPermitResolver, Permits.Bindings.PermitResolver>();
         services.AddScoped<Permits.Bindings.PreviewPermitBindingHandler>();
+        services.AddScoped<Permits.Bindings.RefreshPermitBindingHandler>();
 
         // RT: expressions
 
