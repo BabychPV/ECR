@@ -8642,6 +8642,10 @@ USING (VALUES
     ,(N'permits.lists.drawer.note.permit', N'en', N'The choices are the rows of a table inside each permit. Each permit offers only its own rows, so the list differs from permit to permit.', 1)
     ,(N'permits.lists.action.registries', N'en', N'Open in Registries', 1)
     ,(N'permits.lists.action.openType', N'en', N'Open the permit type', 1)
+    ,(N'permits.lists.used.none', N'en', N'No column yet', 1)
+    ,(N'permits.lists.used.one', N'en', N'1 column', 1)
+    ,(N'permits.lists.used.other', N'en', N'{count} columns', 1)
+    ,(N'permits.lists.typesFailed', N'en', N'{count} permit type(s) could not be read, so their lists are missing here. Reload the page to try again.', 1)
     -- PERMITS: ui-lists ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -22128,6 +22132,14 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.lists.action.registries', N'ru', N'Открыть в справочниках'),
     (N'permits.lists.action.registries', N'kz', N'Анықтамалықтарда ашу'),
     (N'permits.lists.action.openType', N'ru', N'Открыть тип разрешения'),
+    (N'permits.lists.used.none', N'ru', N'Пока ни одного столбца'),
+    (N'permits.lists.used.none', N'kz', N'Әзірге баған жоқ'),
+    (N'permits.lists.used.one', N'ru', N'1 столбец'),
+    (N'permits.lists.used.one', N'kz', N'1 баған'),
+    (N'permits.lists.used.other', N'ru', N'Столбцов: {count}'),
+    (N'permits.lists.used.other', N'kz', N'Бағандар: {count}'),
+    (N'permits.lists.typesFailed', N'ru', N'Не удалось прочитать типов разрешений: {count}, поэтому их списков здесь нет. Перезагрузите страницу, чтобы повторить.'),
+    (N'permits.lists.typesFailed', N'kz', N'Оқу мүмкін болмаған рұқсат түрлері: {count}, сондықтан олардың тізімдері мұнда жоқ. Қайталау үшін бетті қайта жүктеңіз.'),
     (N'permits.lists.action.openType', N'kz', N'Рұқсат түрін ашу')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
