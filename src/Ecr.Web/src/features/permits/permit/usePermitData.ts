@@ -8,6 +8,7 @@ import { todayDateOnly } from '@/shared/format/dateOnly';
 import { getPermit } from '../api/permitsApi';
 import { getPermitType } from '../api/typesApi';
 import type { Permit, PermitType } from '../api/types';
+import { createLimiter, PickerConcurrency } from './readLimiter';
 import { fieldsOf, loadRow, pickerKey, unitLabels, type LoadedRow, type PermitField, type PickerData } from './model';
 
 /*
@@ -59,17 +60,27 @@ export function useUnitLabels(enabled: boolean): ReadonlyMap<number, string> {
   return useMemo(() => unitLabels(query.data ?? []), [query.data]);
 }
 
-async function readAll(code: string, parentEntryId?: number): Promise<RegistryRow[]> {
+/** Спільний пул читань пікерів: усі `usePickerData` разом тримають у польоті не більше {@link PickerConcurrency} запитів. */
+export const pickerReads = createLimiter(PickerConcurrency);
+
+async function readAll(
+  code: string,
+  parentEntryId?: number,
+  run: <T>(task: () => Promise<T>) => Promise<T> = (task) => task(),
+): Promise<RegistryRow[]> {
   const rows: RegistryRow[] = [];
   let cursor: string | null = null;
   do {
     // ⛔ `asOf` обов'язковий: реєстри темпоральні, без нього сервер відповідає `422 ECR-REQ-0422` (e2e-стенд 19.10).
-    const page: Awaited<ReturnType<typeof getRegistryRows>> = await getRegistryRows(code, {
-      asOf: todayDateOnly(),
-      ...(parentEntryId === undefined ? {} : { parentEntryId }),
-      cursor,
-      limit: PageSize,
-    });
+    const after: string | null = cursor;
+    const page: Awaited<ReturnType<typeof getRegistryRows>> = await run(() =>
+      getRegistryRows(code, {
+        asOf: todayDateOnly(),
+        ...(parentEntryId === undefined ? {} : { parentEntryId }),
+        cursor: after,
+        limit: PageSize,
+      }),
+    );
     rows.push(...page.items);
     cursor = page.nextCursor ?? null;
   } while (cursor !== null);
@@ -113,7 +124,7 @@ export function usePickerData(permit: Permit, fields: readonly PermitField[], en
   const results = useQueries({
     queries: targets.map((target) => ({
       queryKey: permitKeys.list(target.code, String(target.parent ?? 'shared')),
-      queryFn: () => readAll(target.code, target.parent),
+      queryFn: () => readAll(target.code, target.parent, pickerReads),
       enabled,
     })),
   });
