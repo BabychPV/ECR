@@ -60,10 +60,10 @@ function stub(over: Partial<Backend> = {}): string[] {
       if (url.includes('/api/v1/registries')) {
         return backend.registriesStatus === 200
           ? json([{ code: 'SUBSTANCES', nameL10n: { values: { en: 'Substances' } }, entryCount: 42, fields: [] }])
-          : json({ code: 'ECR-GEN-0500' }, backend.registriesStatus);
+          : json({ title: 'failure' }, backend.registriesStatus);
       }
       if (url.includes('/api/v1/permit-types/')) {
-        return backend.typeStatus === 200 ? json(air) : json({ code: 'ECR-GEN-0500' }, backend.typeStatus);
+        return backend.typeStatus === 200 ? json(air) : json({ title: 'failure' }, backend.typeStatus);
       }
 
       return json({ items: backend.types, nextCursor: null, totalCount: backend.types.length });
