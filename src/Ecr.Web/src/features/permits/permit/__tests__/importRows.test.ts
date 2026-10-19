@@ -172,6 +172,29 @@ describe('дублі ключа: канонічна форма (canonicalKey)', 
     expect(reasons(names(['A', 'a'], fields, false))).toEqual([]);
     expect(reasons(names(['A', 'a']))).toEqual(['duplicateKey', 'duplicateKey']);
   });
+
+  it('Decimal: «1.5», «1.50» і «1,5» - один ключ (розбір клітинки зводить їх до 1.5); 1.5 і 1.55 - різні', () => {
+    const rows = (values: readonly string[]) =>
+      planImport(values.map((value, index) => line([`N${String(index)}`, value])).join('\n'), keyedBy('Annual'), picker, 5, false);
+    const same = rows(['1.5', '1.50', '1,5']);
+    expect(same.rows.map((row) => row.item.values?.['Annual'])).toEqual(['1.5', '1.5', '1.5']);
+    expect(reasons(same)).toEqual(['duplicateKey', 'duplicateKey', 'duplicateKey']);
+    expect(isPlanClean(rows(['1.5', '1.55']))).toBe(true);
+  });
+
+  it('Lookup: два підписи одного id - дубль; різні id - ні', () => {
+    const aliased: PickerData = {
+      ...picker,
+      sources: { ...picker.sources, shared: { Substances: ['Methane', 'CH4', 'Ethane'] } },
+      ids: { ...picker.ids, Substances: new Map([['Methane', '41'], ['CH4', '41'], ['Ethane', '42']]) },
+    };
+    const rows = (values: readonly string[]) =>
+      planImport(values.map((value, index) => line([`N${String(index)}`, '1', '', '', '', '', '', value])).join('\n'), keyedBy('Substance'), aliased, 5, false);
+    const same = rows(['Methane', 'CH4']);
+    expect(same.rows.map((row) => row.item.values?.['Substance'])).toEqual(['41', '41']);
+    expect(reasons(same)).toEqual(['duplicateKey', 'duplicateKey']);
+    expect(isPlanClean(rows(['Methane', 'Ethane']))).toBe(true);
+  });
 });
 
 describe('delimitedToTabs', () => {
