@@ -37,6 +37,7 @@ const Strings = {
   'nav.myGroups': 'My groups',
   'nav.templates': 'Templates',
   'nav.registries': 'Registries',
+  'nav.permits': 'Permits',
   'nav.jobs': 'Jobs',
   'nav.consistency': 'Consistency issues',
   'nav.health': 'Health',
@@ -123,7 +124,7 @@ describe('AppLayout: групи бічного меню (UI-12)', () => {
 
     expect(groupsOnScreen()).toEqual([
       { name: 'Work', items: ['Documents', 'My groups'] },
-      { name: 'Configure', items: ['Templates', 'Registries'] },
+      { name: 'Configure', items: ['Templates', 'Registries', 'Permits'] },
       { name: 'Operate', items: ['Jobs', 'Consistency issues', 'Health'] },
     ]);
 

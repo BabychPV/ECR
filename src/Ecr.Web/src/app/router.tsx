@@ -23,6 +23,7 @@ import {
   MyGroupsPage,
   NotificationsPage,
   PeriodsPage,
+  PermitsPage,
   RegistriesPage,
   RegistryConstructorPage,
   SecurityPage,
@@ -95,6 +96,29 @@ const CompositionEditorPage = lazy(async () => ({
  */
 const RegistryImpactPage = lazy(async () => ({
   default: (await import('@/features/registries/impact/RegistryImpactPage')).RegistryImpactPage,
+}));
+
+/**
+ * Підсторінки Permits (PM-06) — ліниві чанки, як і сторінки довідника вище: заходять зі смуги
+ * посилань розділу, а не з навбару, тож реєстру прогріву вони не потрібні (у ньому лише `PermitsPage`).
+ */
+const PermitTypesPage = lazy(async () => ({
+  default: (await import('@/pages/admin/PermitTypesPage')).PermitTypesPage,
+}));
+const PermitTypeEditorPage = lazy(async () => ({
+  default: (await import('@/pages/admin/PermitTypeEditorPage')).PermitTypeEditorPage,
+}));
+const PermitListsPage = lazy(async () => ({
+  default: (await import('@/pages/admin/PermitListsPage')).PermitListsPage,
+}));
+const PermitBindingsPage = lazy(async () => ({
+  default: (await import('@/pages/admin/PermitBindingsPage')).PermitBindingsPage,
+}));
+const PermitBindingPage = lazy(async () => ({
+  default: (await import('@/pages/admin/PermitBindingPage')).PermitBindingPage,
+}));
+const PermitPage = lazy(async () => ({
+  default: (await import('@/pages/admin/PermitPage')).PermitPage,
 }));
 
 /**
@@ -380,6 +404,41 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminRegistryImpact, 'admin'),
             element: guarded(routes.adminRegistryImpact.handle, <RegistryImpactPage />),
             handle: routes.adminRegistryImpact.handle,
+          },
+          {
+            path: relativePath(routes.adminPermits, 'admin'),
+            element: guarded(routes.adminPermits.handle, <PermitsPage />),
+            handle: routes.adminPermits.handle,
+          },
+          {
+            path: relativePath(routes.adminPermitTypes, 'admin'),
+            element: guarded(routes.adminPermitTypes.handle, <PermitTypesPage />),
+            handle: routes.adminPermitTypes.handle,
+          },
+          {
+            path: relativePath(routes.adminPermitTypeEditor, 'admin'),
+            element: guarded(routes.adminPermitTypeEditor.handle, <PermitTypeEditorPage />),
+            handle: routes.adminPermitTypeEditor.handle,
+          },
+          {
+            path: relativePath(routes.adminPermitLists, 'admin'),
+            element: guarded(routes.adminPermitLists.handle, <PermitListsPage />),
+            handle: routes.adminPermitLists.handle,
+          },
+          {
+            path: relativePath(routes.adminPermitBindings, 'admin'),
+            element: guarded(routes.adminPermitBindings.handle, <PermitBindingsPage />),
+            handle: routes.adminPermitBindings.handle,
+          },
+          {
+            path: relativePath(routes.adminPermitBinding, 'admin'),
+            element: guarded(routes.adminPermitBinding.handle, <PermitBindingPage />),
+            handle: routes.adminPermitBinding.handle,
+          },
+          {
+            path: relativePath(routes.adminPermit, 'admin'),
+            element: guarded(routes.adminPermit.handle, <PermitPage />),
+            handle: routes.adminPermit.handle,
           },
           {
             path: relativePath(routes.adminMethodologies, 'admin'),

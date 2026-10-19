@@ -717,6 +717,8 @@ public sealed partial class EndpointCoverageTests
         "nav.jobs", "nav.snapshots", "nav.campaign", "nav.audit", "nav.consistency", "nav.uiStrings",
         "nav.notifications", "nav.health", "nav.myGroups", "documents.title",
         "registries.data.title",
+        "nav.permits", "permits.types.title", "permits.typeEditor.title", "permits.lists.title",
+        "permits.bindings.title", "permits.binding.title", "permits.detail.title",
     ];
 
     /// <summary>Підписи груп бічного меню (UI-12, <c>navGroups</c> у <c>routes.ts</c>).</summary>
@@ -731,6 +733,8 @@ public sealed partial class EndpointCoverageTests
         "nav.sources.description", "nav.mapping.description", "nav.periods.description",
         "nav.jobs.description", "nav.snapshots.description", "nav.audit.description",
         "nav.consistency.description", "nav.uiStrings.description", "nav.health.description",
+        "nav.permits.description", "permits.types.description", "permits.lists.description",
+        "permits.bindings.description",
     ];
 
     /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 45 прав каталогу <c>sec.Permission</c>.</summary>

@@ -1,0 +1,329 @@
+/*
+ * Конструктор типу дозволу (Permits, PM-08b). Макет: `docs/design/permits/screens-permits.js`,
+ * розділ 4 (`.split`, `.side`, `.main`, `.aside`, `.pm-node`, `.pm-inspect`). Кольори й відступи —
+ * лише токени теми, тож світла й темна теми беруться самі (`ФВ-14.11`). Брейкпойнти макета:
+ * інспектор шаром ≤ 1180px, дерево згортається ≤ 900px (у `em`, як у Mantine).
+ */
+
+.pt-structure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-md);
+}
+
+.pt-list {
+  margin: 0;
+  padding-inline-start: var(--mantine-spacing-lg);
+}
+
+.pt-flush {
+  margin: 0;
+}
+
+.pt-split {
+  display: grid;
+  grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr) auto;
+  min-height: 26rem;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  overflow: hidden;
+  background: var(--mantine-color-body);
+}
+
+.pt-side,
+.pt-main,
+.pt-aside {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pt-side {
+  border-inline-end: 1px solid var(--mantine-color-default-border);
+}
+
+.pt-aside {
+  width: 22rem;
+  border-inline-start: 1px solid var(--mantine-color-default-border);
+  overflow-y: auto;
+}
+
+.pt-aside[hidden] {
+  display: none;
+}
+
+.pt-pane-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-sm);
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.pt-pane-h h2 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--mantine-spacing-sm);
+  margin: 0;
+  font-size: var(--mantine-font-size-md);
+  font-weight: 600;
+}
+
+.pt-pane-h .pt-count {
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 400;
+}
+
+.pt-pane-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+}
+
+.pt-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--mantine-spacing-xs);
+  overflow-y: auto;
+}
+
+.pt-tree-label {
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-sm) var(--mantine-spacing-xs);
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.pt-node {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  width: 100%;
+  min-height: var(--ecr-ctl-height, 2rem);
+  padding: 0 var(--mantine-spacing-sm);
+  border: 0;
+  border-radius: var(--mantine-radius-sm);
+  background: transparent;
+  color: var(--mantine-color-text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.pt-node:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.pt-node[aria-current='true'] {
+  background: var(--mantine-primary-color-light);
+  font-weight: 600;
+}
+
+.pt-node:focus-visible,
+.pt-row:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
+
+.pt-node .pt-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pt-node .pt-n {
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.pt-empty {
+  padding: var(--mantine-spacing-sm);
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-sm);
+}
+
+.pt-tree-foot {
+  padding: var(--mantine-spacing-sm);
+}
+
+.pt-table-wrap {
+  flex: 1;
+  overflow: auto;
+}
+
+.pt-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--mantine-font-size-sm);
+}
+
+.pt-table th,
+.pt-table td {
+  padding: 6px var(--mantine-spacing-sm);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  text-align: start;
+  white-space: nowrap;
+}
+
+.pt-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--mantine-color-body);
+  font-weight: 600;
+}
+
+.pt-table .pt-c {
+  text-align: center;
+}
+
+.pt-mono {
+  font-family: var(--mantine-font-family-monospace);
+}
+
+.pt-table .pt-first {
+  min-width: 12rem;
+}
+
+.pt-two-line {
+  display: flex;
+  flex-direction: column;
+}
+
+.pt-two-line small {
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-xs);
+}
+
+.pt-row {
+  cursor: pointer;
+}
+
+.pt-row:hover td {
+  background: var(--mantine-color-default-hover);
+}
+
+.pt-row[aria-selected='true'] td {
+  background: var(--mantine-primary-color-light);
+}
+
+.pt-below {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+  padding: var(--mantine-spacing-md);
+}
+
+.pt-hood summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.pt-hood summary span {
+  margin-inline-start: var(--mantine-spacing-sm);
+  color: var(--mantine-color-dimmed);
+  font-family: var(--mantine-font-family-monospace);
+  font-weight: 400;
+}
+
+.pt-hood dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--mantine-spacing-xs) var(--mantine-spacing-md);
+  margin: var(--mantine-spacing-sm) 0 0;
+}
+
+.pt-hood dt {
+  color: var(--mantine-color-dimmed);
+}
+
+.pt-hood dd {
+  margin: 0;
+}
+
+.pt-inspect {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-md);
+  padding: var(--mantine-spacing-md);
+}
+
+.pt-tree-toggle {
+  display: none;
+}
+
+/* Інспектор шаром поверх екрана. */
+@media (max-width: 73.75em) {
+  .pt-structure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-md);
+}
+
+.pt-list {
+  margin: 0;
+  padding-inline-start: var(--mantine-spacing-lg);
+}
+
+.pt-flush {
+  margin: 0;
+}
+
+.pt-split {
+    grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
+  }
+
+  .pt-aside {
+    position: fixed;
+    inset-block: 0;
+    inset-inline-end: 0;
+    z-index: 200;
+    width: min(24rem, 100vw);
+    background: var(--mantine-color-body);
+    box-shadow: var(--mantine-shadow-md);
+  }
+}
+
+/* Дерево згортається; кнопка «Structure» відкриває його шаром. */
+@media (max-width: 56.25em) {
+  .pt-structure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-md);
+}
+
+.pt-list {
+  margin: 0;
+  padding-inline-start: var(--mantine-spacing-lg);
+}
+
+.pt-flush {
+  margin: 0;
+}
+
+.pt-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pt-tree-toggle {
+    display: inline-flex;
+  }
+
+  .pt-side {
+    display: none;
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--mantine-color-default-border);
+  }
+
+  .pt-side[data-open='true'] {
+    display: flex;
+  }
+}
