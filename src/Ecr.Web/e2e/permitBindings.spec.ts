@@ -291,7 +291,8 @@ test.describe('Permit bindings', () => {
     const policies = await ok<{ id: number; code: string }[]>(await page.request.get('/api/v1/projects/period-policies'), 'політики періодів');
     const policy = policies.find((item) => item.code === 'ECR-Standard') ?? policies[0];
     expect(policy, 'у стенда немає жодної політики періодів').toBeDefined();
-    const project = await ok<{ id: number }>(
+    // Відповіді створення - `{ projectId }` і `{ documentId }`, а не `{ id }` (e2e 39284897378: `projects/undefined/activate`).
+    const project = await ok<{ projectId: number }>(
       await page.request.post('/api/v1/projects', {
         data: {
           code: `E2EBindPrj${stamp}`,
@@ -305,23 +306,23 @@ test.describe('Permit bindings', () => {
       }),
       'проєкт',
     );
-    await ok(await page.request.post(`/api/v1/projects/${project.id}/activate`), 'активація проєкту');
+    await ok(await page.request.post(`/api/v1/projects/${project.projectId}/activate`), 'активація проєкту');
     const structure = await ok<{ sheets: { id: number }[] }>(await page.request.get(`${base}/structure`), 'структура версії');
-    const document = await ok<{ id: number }>(
+    const document = await ok<{ documentId: number }>(
       await page.request.post('/api/v1/documents', {
-        data: { projectId: project.id, sheetDefIds: structure.sheets.map((sheet) => sheet.id), templateVersionId: s.versionId },
+        data: { projectId: project.projectId, sheetDefIds: structure.sheets.map((sheet) => sheet.id), templateVersionId: s.versionId },
       }),
       'документ',
     );
     const calendar = await ok<{ periods: { periodKey: number; state: string }[] }>(
-      await page.request.get(`/api/v1/projects/${project.id}/periods`),
+      await page.request.get(`/api/v1/projects/${project.projectId}/periods`),
       'календар проєкту',
     );
     const period = calendar.periods.find((item) => item.state === 'Open') ?? calendar.periods[0];
     expect(period, 'у проєкту немає періодів').toBeDefined();
 
     // Смугу вирішує `permitBinding` у відповіді …/tables (без Template.View і без додаткових запитів).
-    await page.goto(`/documents/${document.id}?periodKey=${String(period?.periodKey)}`);
+    await page.goto(`/documents/${document.documentId}?periodKey=${String(period?.periodKey)}`);
     const strip = page.getByTestId('permit-refresh-strip');
     await expect(strip, 'смуги «З дозволу» немає: сервер не віддав permitBinding').toBeVisible({ timeout: 60_000 });
     await expect(strip.getByTestId('from-permit-badge')).toBeVisible();

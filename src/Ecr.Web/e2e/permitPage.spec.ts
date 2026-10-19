@@ -154,7 +154,7 @@ test.describe('Permit page', () => {
     const paste = page.getByRole('dialog', { name: 'Paste rows into Limits' });
     await expect(paste).toBeVisible();
     await paste.getByRole('textbox', { name: 'Rows' }).fill('Outfall 2\t7,25\nOutfall 3\t3');
-    await expect(paste.getByText('2 rows can be added to Limits; 0 need fixing first.')).toBeVisible();
+    await expect(paste.getByText('2 rows can be added to Limits; 0 need fixing before anything is added.')).toBeVisible();
     await paste.getByRole('button', { name: 'Check rows' }).click();
     await expect(paste.getByText('2 rows pass the check, 0 are rejected by the server')).toBeVisible({ timeout: 15_000 });
     await paste.getByRole('button', { name: 'Add 2 rows' }).click();
@@ -169,6 +169,6 @@ test.describe('Permit page', () => {
     await activate.getByRole('button', { name: 'Activate', exact: true }).click();
     await expect.poll(async () => (await getPermit(page, id)).status, { timeout: 15_000 }).toBe('Active');
     await expect(page.getByText('Draft - sheets do not read this permit yet')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Renew…' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Renew…' }).first()).toBeVisible();
   });
 });
