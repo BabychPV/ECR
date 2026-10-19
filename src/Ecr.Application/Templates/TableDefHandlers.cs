@@ -1,5 +1,6 @@
 // src/Ecr.Application/Templates/TableDefHandlers.cs
 using Ecr.Application.Errors;
+using Ecr.Application.Permits.Bindings;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Application.Templates.Dto;
@@ -49,7 +50,8 @@ public sealed class SaveTableDefHandler(
     IUnitOfWork uow,
     IClock clock,
     IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IPermitBindingStore permitBindings)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
@@ -146,6 +148,14 @@ public sealed class SaveTableDefHandler(
             : classifier.Classify(nameof(TableDef), nameof(TableDef.RowMode), hasDocuments);
 
         SaveTableRelationHandler.RejectBreaking(change, code, hasDocuments, "Зміна");
+
+        // ⛔ PM-09b: Dynamic → Fixed під чинною прив'язкою «рядки» - 409 ECR-PRM-4102 ДО запису, а не 422 при наступному
+        // збереженні прив'язки (рантайм режиму рядків не питає, тож без цього розбіжність жила б непомітно).
+        if (existing is not null)
+        {
+            await PermitSheetBindingGuard.RequireRowModeAllowedAsync(
+                permitBindings, templateVersionId, existing, command.RowMode, ct).ConfigureAwait(false);
+        }
 
         var oldJson = existing is null ? null : Describe(existing);
 
@@ -276,7 +286,8 @@ public sealed class DeleteTableDefHandler(
     IUnitOfWork uow,
     IClock clock,
     IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IPermitBindingStore permitBindings)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
@@ -330,6 +341,9 @@ public sealed class DeleteTableDefHandler(
         var change = classifier.ClassifyDeletion(nameof(TableDef), hasDocuments);
 
         SaveTableRelationHandler.RejectBreaking(change, code, hasDocuments, "Видалення");
+
+        // ⛔ PM-09b: м'яке видалення не зупинить зовнішній ключ - прив'язка лишилась би з мертвою таблицею.
+        await PermitSheetBindingGuard.RequireTableFreeAsync(permitBindings, templateVersionId, table, ct).ConfigureAwait(false);
 
         // ⛔ Q-244: аудит і `SoftDelete`/`SaveChanges` тепер одна транзакція.
         await uow.ExecuteInTransactionAsync(async innerCt =>

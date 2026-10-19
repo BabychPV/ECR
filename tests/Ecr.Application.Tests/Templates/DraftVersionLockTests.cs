@@ -40,6 +40,7 @@ public sealed class DraftVersionLockTests
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IUnitCatalog _units = Substitute.For<IUnitCatalog>();
+    private readonly IPermitBindingStore _permitBindings = Substitute.For<IPermitBindingStore>();
     private readonly IStyleCatalog _styles = Substitute.For<IStyleCatalog>();
     private readonly IConditionalFormatStore _rules = Substitute.For<IConditionalFormatStore>();
     private readonly IRepository<TemplateVersion, int> _versions = Substitute.For<IRepository<TemplateVersion, int>>();
@@ -88,6 +89,8 @@ public sealed class DraftVersionLockTests
         var relation = new TableRelationDef(
             EcrCode.Create("REL1"), _table.Id, other.Id,TableRelationKind.Reference, "{}");
         _store.FindTableRelationAsync(1, "REL1", Arg.Any<CancellationToken>()).Returns(relation);
+
+        _permitBindings.ListAsync(1, Arg.Any<CancellationToken>()).Returns(Array.Empty<PermitBindingView>());
 
         _units.GetAsync(Arg.Any<CancellationToken>()).Returns(new UnitCatalogSnapshot(
             new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase),
@@ -199,16 +202,16 @@ public sealed class DraftVersionLockTests
                 .HandleAsync(1, "S2", new SaveSheetDefCommand(En("S2"), null, null, false, true), ct),
             "DeleteSheet" => new DeleteSheetDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user)
                 .HandleAsync(1, "S1", ct),
-            "SaveTable" => new SaveTableDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user)
+            "SaveTable" => new SaveTableDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user, _permitBindings)
                 .HandleAsync(1, "S1", "T2", new SaveTableDefCommand(
                     En("T2"), null, TableLayoutKind.MonthsInColumns, TableRowMode.Fixed, null), ct),
-            "DeleteTable" => new DeleteTableDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user)
+            "DeleteTable" => new DeleteTableDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user, _permitBindings)
                 .HandleAsync(1, "S1", "T1", ct),
             "SaveColumn" => new SaveColumnDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user, _units)
                 .HandleAsync(1, _table.Id, "C2", new SaveColumnDefCommand(
                     En("C2"), null, CellDataType.Decimal, false, false, false,
                     null, null, null, null, null, null, null, null), ct),
-            "DeleteColumn" => new DeleteColumnDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user)
+            "DeleteColumn" => new DeleteColumnDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user, _permitBindings)
                 .HandleAsync(1, _table.Id, "C1", ct),
             "SaveRow" => new SaveRowDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user)
                 .HandleAsync(1, _table.Id, "R2", new SaveRowDefCommand(En("R2"), null, RowKind.Item, null, false), ct),

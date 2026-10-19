@@ -138,7 +138,10 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
         // пакет і ЛИШЕ для таких довідників (решта довідників, зокрема складені ключі Land, лишаються як були).
         // ⚠ Лише коли в пакеті є вимкнений запис: решта пакетів (а їх переважна більшість) не платить зайвим запитом, і
         // храповик запитів `RegistryKeyBatchQueryTests` (4 / 16 звернень) лишається точним.
+        // PM-04b: шапка типу завжди має код `PRM_<тип>` (CreatePermitTypeHandler), тож для довідника з іншим кодом запит
+        // до `cfg.PermitTypeDef` не потрібен - відповідь у нього завжди `false`.
         var inactiveHoldsNoKey = entries.Any(e => !e.IsActive)
+            && definition.Code.StartsWith(Permits.PermitHeaderFields.HeaderRegistryCode(string.Empty), StringComparison.Ordinal)
             && await store.InactiveEntriesHoldNoKeyAsync(definition.Id, ct).ConfigureAwait(false);
         try
         {
