@@ -176,8 +176,15 @@ test.describe('Діалоги конструктора типу дозволу',
     await waitForSaved(page);
 
     // 2. «Add a column» у вибраній таблиці.
-    await page.getByRole('button', { name: 'Add column' }).first().click();
+    const addColumn = page.getByRole('button', { name: 'Add column' }).first();
+    await addColumn.click();
     const column = page.getByRole('dialog');
+    // P2-F1 (фікс-пак): Esc повертає фокус на кнопку-виклик (діалог монтується відкритим з ?dialog=), не на BODY.
+    await expect(column).toBeVisible({ timeout: 15_000 });
+    await page.keyboard.press('Escape');
+    await expect(column).toBeHidden({ timeout: 15_000 });
+    await expect(addColumn).toBeFocused();
+    await addColumn.click();
     await column.getByLabel('Name (English)').fill('Note');
     await column.getByRole('button', { name: 'Add column' }).click();
     await expect(column).toBeHidden({ timeout: 15_000 });
@@ -293,6 +300,14 @@ test.describe('Діалоги конструктора типу дозволу',
     await expect(page).toHaveURL(new RegExp(`/admin/permits/types/${code}\\?dialog=delete-type`), { timeout: 30_000 });
     const confirm = page.getByRole('dialog');
     await expect(confirm).toBeVisible({ timeout: 30_000 });
+
+    // P3 (фікс-пак): кнопки-виклику на сторінці редактора немає - після Esc фокус іде на h1, а не на BODY.
+    await page.keyboard.press('Escape');
+    await expect(confirm).toBeHidden({ timeout: 15_000 });
+    await expect(page.getByRole('heading', { level: 1 })).toBeFocused();
+    await page.goto(`/admin/permits/types/${code}?dialog=delete-type`);
+    await expect(confirm).toBeVisible({ timeout: 30_000 });
+
     const removed = page.waitForResponse(
       (response) =>
         response.request().method() === 'DELETE' && response.url().includes(`/api/v1/permit-types/${code}`),

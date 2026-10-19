@@ -160,6 +160,12 @@ test.describe('Permit page', () => {
     await page.getByRole('button', { name: 'Paste from Excel…' }).click();
     const paste = page.getByRole('dialog', { name: 'Paste rows into Limits' });
     await expect(paste).toBeVisible();
+    // P2-F1 (фікс-пак): Esc повертає фокус на «Paste from Excel…», не на BODY.
+    await page.keyboard.press('Escape');
+    await expect(paste).toBeHidden({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: 'Paste from Excel…' })).toBeFocused();
+    await page.getByRole('button', { name: 'Paste from Excel…' }).click();
+    await expect(paste).toBeVisible();
     await paste.getByRole('textbox', { name: 'Rows' }).fill('Outfall 2\t7,25\nOutfall 3\t3');
     await expect(paste.getByText('2 rows can be added to Limits; 0 need fixing before anything is added.')).toBeVisible();
     await paste.getByRole('button', { name: 'Check rows' }).click();
