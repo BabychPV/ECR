@@ -155,6 +155,7 @@
 | D13 | P3 | **Ключ запиту одиниць:** `['units']` дублюється в `RegistryConstructorPage` і `templates/ColumnEditor.tsx` — винести в `queryKeys.ts` (потрібен лист про shared). | Аналіз | REG-UI |
 | D14 | P3 | **Бажане після релізу (AU-14, рішення координатора 19.10):** відхиляти `POST …/registries/{code}/entries` з порожньою назвою (`Display` без жодної мови) помилкою `422` — нова поведінка + код помилки (`ErrorCodes`, `messageKey`, 4 файли); зараз приймається мовчки, перелік показує `code` (тест `RegistryEntryDisplayTests`, TESTER-GUIDE Ж-8). | Аналіз | AU-14 |
 | D15 | P3 | **Виправити XML-doc `LocalizedText`** (`src/Ecr.Domain/ValueObjects/LocalizedText.cs`: пише `{"en":…}`, фактично обгортка `{"values":{…}}` — це стосується DTO/JSON тіла запиту; для колонки БД формат плаский `{"en":…}`, обгортка `values` лише в JSON DTO) разом з наступною зміною контракту (Permits PM-09 регенерує openapi). | Аналіз | AU-14 |
+| D16 | P3 | **Сторож `TestDatabaseSizeTests` бачить лише базу `core`** (✎ 2026-10-19, CI-split): у `server-part (core-persistence)` журнал тестової бази росте до 136 МБ (>128) від `TvpBatchWriteTests` (30000 змін), тому тест виключено з Persistence-кроку і лишено в `core` (`tools/verify-all.ps1`). Закрити: заливки порціями з CHECKPOINT (як `CollectionStoreRawPointUpsertTests`) і повернути сторожа в Persistence-крок. `DisposeAsync` фікстури (стеля 192 МБ) міряє обидві бази. | Аналіз | CI-split |
 
 > ✎ D3 (`pf_AuditByMonth` без автопродовження) — **виконано** (`8ff92b24`, D-246), прибрано.
 
