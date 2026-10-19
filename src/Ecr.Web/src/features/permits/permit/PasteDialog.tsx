@@ -9,6 +9,9 @@ import type { Permit } from '../api/types';
 import { MaxPastedRows } from '../lib/pasteRows';
 import {
   delimitedToTabs,
+  isPlanClean,
+  MaxImportFileBytes,
+  MaxImportFileMb,
   planImport,
   runImport,
   type BatchRun,
@@ -64,8 +67,9 @@ function issueText(issue: ImportIssue, labelOf: (code: string) => string): strin
  * `parsePastedRows` → перевірка сервером (`dryRun`) → запис шматками з прогресом і підсумком помилок.
  *
  * ⚠ XLSX-файл клієнт не читає (бібліотеки для цього в збірці немає, `package.json` не змінюється): Excel-таблицю
- * копіюють і вставляють, або зберігають як CSV. Рядки із нерозпізнаною клітинкою чи відмовою сервера на запис не
- * йдуть, а перелічені — це відхилення від мокапу, де такі рядки додавались і червонились у таблиці.
+ * копіюють і вставляють, або зберігають як CSV. «Все або нічого» (рішення 19.10): будь-яке зауваження розбору,
+ * понад 5000 рядків чи відмова сервера на перевірці блокують ВЕСЬ запис - проблеми перелічені, «Add N rows» недоступна.
+ * Це відхилення від мокапу, де такі рядки додавались і червонились у таблиці. CSV більший за 5 МБ не читається.
  */
 export function PasteDialog({ permit, registryCode, tableName, fields, fromFile, onClose }: PasteDialogProps): JSX.Element {
   const queryClient = useQueryClient();
@@ -73,6 +77,7 @@ export function PasteDialog({ permit, registryCode, tableName, fields, fromFile,
   const [text, setText] = useState('');
   const [skipHeader, setSkipHeader] = useState(fromFile);
   const [file, setFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [busy, setBusy] = useState<'check' | 'apply' | null>(null);
   const [checked, setChecked] = useState<{ run: BatchRun; valid: readonly ImportRow[] } | null>(null);
@@ -85,6 +90,8 @@ export function PasteDialog({ permit, registryCode, tableName, fields, fromFile,
     [text, fields, picker.data, permit.id, skipHeader],
   );
   const clean = plan.rows.filter((row) => row.clean);
+  // «Все або нічого»: будь-яке зауваження розбору блокує і перевірку, і запис.
+  const planClean = isPlanClean(plan);
   const labelOf = (code: string): string => fields.find((field) => field.column.code === code)?.column.label ?? code;
   const ready = !picker.pending && text.trim() !== '';
 
@@ -95,6 +102,12 @@ export function PasteDialog({ permit, registryCode, tableName, fields, fromFile,
   }
 
   async function loadFile(selected: File | null): Promise<void> {
+    setFileError(null);
+    if (selected !== null && selected.size > MaxImportFileBytes) {
+      setFile(null);
+      setFileError(t('permits.page.paste.fileTooBig', { max: MaxImportFileMb }));
+      return;
+    }
     setFile(selected);
     if (selected === null) return;
     try {
@@ -106,13 +119,13 @@ export function PasteDialog({ permit, registryCode, tableName, fields, fromFile,
   }
 
   async function check(): Promise<void> {
-    if (busy !== null || clean.length === 0) return;
+    if (busy !== null || !planClean) return;
     setBusy('check');
     setProgress({ done: 0, total: clean.length });
     try {
       const run = await runImport(registryCode, clean, true, (done, total) => setProgress({ done, total }));
-      const rejected = new Set(run.failures.map((failure) => failure.index));
-      setChecked({ run, valid: clean.filter((row) => !rejected.has(row.index)) });
+      // Хоч одна відмова сервера - до запису не йде жоден рядок.
+      setChecked({ run, valid: run.failures.length === 0 ? clean : [] });
     } catch (error) {
       showApiError(error);
     } finally {
@@ -127,6 +140,11 @@ export function PasteDialog({ permit, registryCode, tableName, fields, fromFile,
     setProgress({ done: 0, total: checked.valid.length });
     try {
       const run = await runImport(registryCode, checked.valid, false, (done, total) => setProgress({ done, total }));
+      if (run.refused) {
+        // Перевірка перед записом відхилила рядки: нічого не записано, показуємо причини й закриваємо «Add».
+        setChecked({ run, valid: [] });
+        return;
+      }
       void queryClient.invalidateQueries({ queryKey: permitKeys.rows(registryCode, permit.id) });
       void queryClient.invalidateQueries({ queryKey: permitKeys.item(permit.id) });
       if (run.stopped) {
@@ -144,6 +162,7 @@ export function PasteDialog({ permit, registryCode, tableName, fields, fromFile,
   }
 
   const failures = checked?.run.failures ?? applied?.failures ?? [];
+  const blocked = plan.rows.length > 0 && (!planClean || failures.length > 0);
   const sample = fields.map((field) => field.column.label);
 
   return (
@@ -159,6 +178,7 @@ export function PasteDialog({ permit, registryCode, tableName, fields, fromFile,
           accept=".csv,.tsv,.txt,text/csv,text/plain"
           value={file}
           onChange={(selected) => void loadFile(selected)}
+          error={fileError}
           clearable
           data-autofocus={fromFile ? '' : undefined}
         />
@@ -199,6 +219,7 @@ export function PasteDialog({ permit, registryCode, tableName, fields, fromFile,
             )}
           </div>
         )}
+        {blocked && <Banner tone="warning" title={t('permits.page.paste.blocked')} />}
         {progress !== null && (
           <Progress value={progress.total === 0 ? 0 : (progress.done / progress.total) * 100} aria-label={t('permits.page.paste.progress', { done: progress.done, total: progress.total })} />
         )}
@@ -222,10 +243,10 @@ export function PasteDialog({ permit, registryCode, tableName, fields, fromFile,
           <Button variant="default" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button variant="default" disabled={!ready || clean.length === 0 || busy !== null} loading={loadingCheck} onClick={() => void check()}>
+          <Button variant="default" disabled={!ready || !planClean || busy !== null} loading={loadingCheck} onClick={() => void check()}>
             {t('permits.page.paste.check')}
           </Button>
-          <Button disabled={checked === null || checked.valid.length === 0 || busy !== null} loading={loadingApply} onClick={() => void apply()}>
+          <Button disabled={checked === null || !planClean || checked.valid.length === 0 || busy !== null} loading={loadingApply} onClick={() => void apply()}>
             {t('permits.page.paste.add', { count: checked?.valid.length ?? 0 })}
           </Button>
         </Group>
