@@ -4122,7 +4122,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/me/editor-sets/{setId}` | — (лише власні набори; чужий — 404) | 8 |
 | `DELETE` | `/api/v1/me/editor-sets/{setId}` | — (лише власні набори; чужий — 404) | 8 |
 | `GET` | `/api/v1/documents/{id}/recall` | — | 3 |
-| `GET` | `/api/v1/documents/{id}/tables` | `Document.View` | 6 |
+| `GET` | `/api/v1/documents/{id}/tables` | `Document.View` (PM-11b: кожна таблиця несе `permitBinding` - `{ code, mode: Rows\|Formulas, permitTypeCode }` або `null`, за власною версією шаблону документа, лише чинні прив'язки; без даних дозволу, додаткового права немає) | 6 |
 | `GET` | `/api/v1/documents/{id}/tables/status` | `Document.View` | 6 |
 | `POST` | `/api/v1/documents/{id}/export` | `Document.Export` | 5 |
 | `GET` | `/api/v1/documents/{id}/export/{exportId}` | `Document.Export` | 5 |

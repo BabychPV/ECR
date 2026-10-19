@@ -4524,6 +4524,17 @@
               "integer"
             ]
           },
+          "permitBinding": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DocumentTablePermitBindingDto",
+                "description": "PM-11b: таблиця прив'язана до дозволу у версії шаблону ДОКУМЕНТА; `null` - ні. Лише ознака (код, режим, тип) -\nданих дозволу тут немає й бути не може (вони за `Registry.View`)."
+              }
+            ]
+          },
           "sheetCode": {
             "description": "Код аркуша; він же ключ у `DocumentSummary.SheetStates`.",
             "type": "string"
@@ -4578,6 +4589,29 @@
           "tableOrdinal",
           "allowsDynamicRows",
           "maxDynamicRows"
+        ],
+        "type": "object"
+      },
+      "DocumentTablePermitBindingDto": {
+        "description": "Ознака прив'язки таблиці документа до дозволу (PM-11b): без даних дозволу.",
+        "properties": {
+          "code": {
+            "description": "Код прив'язки.",
+            "type": "string"
+          },
+          "mode": {
+            "description": "`Rows` або `Formulas`.",
+            "type": "string"
+          },
+          "permitTypeCode": {
+            "description": "Код типу дозволу.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "mode",
+          "permitTypeCode"
         ],
         "type": "object"
       },
