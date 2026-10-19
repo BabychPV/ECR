@@ -483,6 +483,17 @@ describe('форма рядка', () => {
     await openLimits(permit({ status: 'Active' }));
     for (const name of ['Add row', 'Paste from Excel…', 'Import file…']) {
       expect(screen.getByRole('button', { name })).toHaveProperty('disabled', true);
+      // Причина читається скрінрідером: кнопка описана тим самим текстом, що й `title`.
+      const describedBy = screen.getByRole('button', { name }).getAttribute('aria-describedby');
+      expect(describedBy).toBeTruthy();
+      expect(document.getElementById(describedBy ?? '')?.textContent).toBe('This permit is read-only here');
+    }
+  });
+
+  it('користувач із правом запису: кнопки таблиці без aria-describedby', async () => {
+    await openLimits();
+    for (const name of ['Add row', 'Paste from Excel…', 'Import file…']) {
+      expect(screen.getByRole('button', { name }).hasAttribute('aria-describedby')).toBe(false);
     }
   });
 });

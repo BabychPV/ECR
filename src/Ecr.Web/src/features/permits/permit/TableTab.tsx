@@ -1,5 +1,5 @@
-import { lazy, Suspense, useMemo, useState, type JSX } from 'react';
-import { Button, Skeleton, Stack, Text } from '@mantine/core';
+import { lazy, Suspense, useId, useMemo, useState, type JSX } from 'react';
+import { Button, Skeleton, Stack, Text, VisuallyHidden } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary, EmptyState } from '@/shared/ui/AsyncBoundary';
 import { useUrlState } from '@/shared/ui/useUrlState';
@@ -56,15 +56,20 @@ export function TableTab({ permit, table, type, units, caps }: TableTabProps): J
   const readOnlyReason = caps.editRows ? undefined : t('permits.page.table.readOnlyReason');
   const tableRows: PermitRow[] = rows?.map((loaded) => loaded.row) ?? [];
 
+  // Вимкнені кнопки пов'язані з причиною через aria-describedby (а не лише `title`, якого скрінрідер не читає).
+  const reasonId = useId();
+  const describedBy = readOnlyReason === undefined ? undefined : reasonId;
+
   const tools = (
     <div className="pp-tools">
-      <Button disabled={!caps.editRows} title={readOnlyReason} onClick={() => openRow(NewRowId)}>
+      {readOnlyReason !== undefined && <VisuallyHidden id={reasonId}>{readOnlyReason}</VisuallyHidden>}
+      <Button disabled={!caps.editRows} title={readOnlyReason} aria-describedby={describedBy} onClick={() => openRow(NewRowId)}>
         {t('permits.page.table.addRow')}
       </Button>
-      <Button variant="default" disabled={!caps.editRows} title={readOnlyReason} onClick={() => setPaste('paste')}>
+      <Button variant="default" disabled={!caps.editRows} title={readOnlyReason} aria-describedby={describedBy} onClick={() => setPaste('paste')}>
         {t('permits.page.table.paste')}
       </Button>
-      <Button variant="default" disabled={!caps.editRows} title={readOnlyReason} onClick={() => setPaste('file')}>
+      <Button variant="default" disabled={!caps.editRows} title={readOnlyReason} aria-describedby={describedBy} onClick={() => setPaste('file')}>
         {t('permits.page.table.importFile')}
       </Button>
     </div>
