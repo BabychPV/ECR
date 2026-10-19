@@ -24,6 +24,7 @@ namespace Ecr.Application.Documents;
 /// </remarks>
 public sealed class GetDocumentTablesHandler(
     IRowStore rowStore,
+    IPermitBindingStore permitBindings,
     IMetadataCache metadata,
     IAccessDecisionService access,
     ICurrentUser currentUser)
@@ -86,6 +87,14 @@ public sealed class GetDocumentTablesHandler(
         // однаково дав би 404, а назва в навігації сама розповідала б про неї.
         var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(key);
 
+        // PM-11b: ознака «таблиця з дозволу» - ОДИН запит на всю відповідь, за власною версією документа (не проєкту).
+        // Лише код/режим/тип: дані дозволу (номери, ліміти, рядки) лишаються за Registry.View. Права окремо не питаємо -
+        // це та сама структура версії, що й назви таблиць вище, а читання вже вимагало Document.View.
+        var bindings = (await permitBindings
+            .ListActiveSummariesAsync(instances[0].TemplateVersionId, ct)
+            .ConfigureAwait(false))
+            .ToDictionary(b => b.SheetTableDefId);
+
         var byTableDef = instances.ToDictionary(i => i.TableDefId);
         var result = new List<DocumentTableDto>(instances.Count);
 
@@ -120,7 +129,10 @@ public sealed class GetDocumentTablesHandler(
                     // саме з собою всередині сервера, і коштувало це режиму
                     // `Mixed` цілком.
                     table.AllowsDynamicRows,
-                    table.MaxDynamicRows));
+                    table.MaxDynamicRows,
+                    bindings.TryGetValue(table.Id, out var binding)
+                        ? new DocumentTablePermitBindingDto(binding.Code, binding.Mode, binding.PermitTypeCode)
+                        : null));
             }
         }
 
@@ -140,6 +152,10 @@ public sealed class GetDocumentTablesHandler(
 /// <param name="TableOrdinal">Порядок таблиці в аркуші.</param>
 /// <param name="AllowsDynamicRows">Чи додає рядки користувач (<c>ФВ-3.2</c>).</param>
 /// <param name="MaxDynamicRows">Стеля кількості рядків; <c>null</c> — без стелі.</param>
+/// <param name="PermitBinding">
+/// PM-11b: таблиця прив'язана до дозволу у версії шаблону ДОКУМЕНТА; <c>null</c> - ні. Лише ознака (код, режим, тип) -
+/// даних дозволу тут немає й бути не може (вони за <c>Registry.View</c>).
+/// </param>
 public sealed record DocumentTableDto(
     int SheetDefId,
     string SheetCode,
@@ -151,4 +167,11 @@ public sealed record DocumentTableDto(
     Domain.ValueObjects.LocalizedText TableNameL10n,
     int TableOrdinal,
     bool AllowsDynamicRows,
-    int? MaxDynamicRows);
+    int? MaxDynamicRows,
+    DocumentTablePermitBindingDto? PermitBinding = null);
+
+/// <summary>Ознака прив'язки таблиці документа до дозволу (PM-11b): без даних дозволу.</summary>
+/// <param name="Code">Код прив'язки.</param>
+/// <param name="Mode"><c>Rows</c> або <c>Formulas</c>.</param>
+/// <param name="PermitTypeCode">Код типу дозволу.</param>
+public sealed record DocumentTablePermitBindingDto(string Code, string Mode, string PermitTypeCode);
