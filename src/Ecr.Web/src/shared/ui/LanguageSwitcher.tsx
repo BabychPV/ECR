@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type JSX } from 'react';
 import { NativeSelect, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { LanguageDto, UiStringCatalog } from '@/api/types';
 import { language, loadCatalog, setLanguage, t, type Scope } from '@/shared/i18n';
@@ -141,6 +142,7 @@ export function LanguageSwitcher(): JSX.Element | null {
   useCatalog();
 
   const languages = useLanguages();
+  const queryClient = useQueryClient();
   // ⚠ Область — `private`: перемикач живе в меню користувача, тобто після
   // входу, і людина бачить переклад саме приватного зрізу.
   const offered = useTranslatedLanguages(languages.data, 'private');
@@ -176,7 +178,7 @@ export function LanguageSwitcher(): JSX.Element | null {
           // сторінки); не вдалося - мову НЕ міняємо (перемикач лишається на поточній, тобто
           // показує правду) і кажемо, що зробити. Чистий стан - як і раніше, одразу.
           if (!hasUnsavedChanges()) {
-            applyLanguage(value);
+            applyLanguage(value, queryClient);
             return;
           }
 
@@ -186,7 +188,7 @@ export function LanguageSwitcher(): JSX.Element | null {
             .catch(() => false)
             .then((saved) => {
               if (saved) {
-                applyLanguage(value);
+                applyLanguage(value, queryClient);
                 return;
               }
 
@@ -202,9 +204,20 @@ export function LanguageSwitcher(): JSX.Element | null {
   );
 }
 
+/** Префікси ключів запитів, відповіді яких містять локалізований серверний текст (CL-29). */
+const LOCALIZED_QUERY_KEYS: readonly (readonly string[])[] = [['health'], ['jobs'], ['jobs-summary'], ['job']];
+
 /** Застосовує обрану мову: запам'ятовує вибір і тягне каталог (`D-134`). */
-function applyLanguage(value: string): void {
+function applyLanguage(value: string, queryClient: QueryClient): void {
   setLanguage(value);
+
+  // ✎ CL-29: ці серверні відповіді несуть ЛОКАЛІЗОВАНИЙ текст (Accept-Language), а ключі
+  // кешу мови не містять: без інвалідації після перемикання лишалися б відповіді старою
+  // мовою (staleTime 30 с, refetchInterval 60 с). Інвалідація, а не мова в ключі: ключі
+  // `['job', id]` спільні для ~15 споживачів (poll, followImportJob, useCellPatch), їх
+  // зміна зачепила б чужі екрани; інвалідація лише перезапитує активні й позначає
+  // неактивні застарілими - кеш решти екранів і незбережені дані не чіпаються.
+  for (const key of LOCALIZED_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey: key });
 
   // ⛔ Без цього виклику перемикач лише запам'ятовує вибір у
   // `localStorage`: `t()` і далі читає каталог, завантажений під
