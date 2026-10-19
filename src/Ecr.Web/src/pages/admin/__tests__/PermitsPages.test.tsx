@@ -5,7 +5,6 @@ import { MantineProvider } from '@mantine/core';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { PermitBindingPage } from '../PermitBindingPage';
 import { PermitBindingsPage } from '../PermitBindingsPage';
-import { PermitPage } from '../PermitPage';
 import { PageDescriptionContext } from '@/shared/ui/pageDescription';
 
 /**
@@ -87,15 +86,7 @@ describe('Permits: сторінки розділів', () => {
 });
 
 describe('Permits: сторінки з параметром', () => {
-  it('перміт: номер із адреси, посилання назад, порожній стан без дій', () => {
-    showAt('/admin/permits/P-0001', '/admin/permits/:id', <PermitPage />);
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('text of permits.detail.title');
-    expect(screen.getByText('P-0001')).toBeTruthy();
-    expect(screen.getByRole('link', { name: '← text of permits.back.permits' }).getAttribute('href')).toBe('/admin/permits');
-    expect(screen.getByText('text of permits.detail.emptyTitle')).toBeTruthy();
-    expect(screen.queryAllByRole('button')).toHaveLength(0);
-  });
-
+  // (Екран дозволу — справжня сторінка PM-07, її тести: `features/permits/permit/__tests__/PermitPage.test.tsx`.)
   it('привʼязка: ідентифікатор із адреси й посилання на перелік привʼязок', () => {
     showAt('/admin/permits/bindings/B-01', '/admin/permits/bindings/:id', <PermitBindingPage />);
     expect(screen.getByText('B-01')).toBeTruthy();
