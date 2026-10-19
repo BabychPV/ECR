@@ -353,7 +353,7 @@ public sealed partial class PermitRuntimeRowsTests(SqlServerFixture sql)
     }
 
     /// <summary>Шаблон з прив'язкою, дозвіл з трьома рядками й документ без екземплярів таблиць.</summary>
-    private async Task<Scene> ArrangeAsync(bool fromHeader = false, string facility = "Site A")
+    private async Task<Scene> ArrangeAsync(bool fromHeader = false, string facility = "Site A", int? permitRows = null)
     {
         var sheet = await PermitBindingHarness.PrepareSheetAsync(sql, withDocument: false);
         var h = await PermitBindingHarness.CreateAsync(sql, PermitBindingHarness.Everything);
@@ -372,8 +372,10 @@ public sealed partial class PermitRuntimeRowsTests(SqlServerFixture sql)
             headerFieldId = permitRef.Id;
         }
 
-        var permit = await h.SeedPermitAsync(
-            Type, $"N1{_tag}", "Site A", new DateOnly(2026, 1, 1), null, true, ("NOx", 12.5m, "first"), ("SO2", 3m, null), ("CO", 7.25m, "third"));
+        (string Substance, decimal Limit, string? Note)[] emissions = permitRows is { } many
+            ? [.. Enumerable.Range(1, many).Select(i => ($"S{i:D3}", (decimal)i, i % 2 == 0 ? $"note {i}" : null))]
+            : [("NOx", 12.5m, "first"), ("SO2", 3m, null), ("CO", 7.25m, "third")];
+        var permit = await h.SeedPermitAsync(Type, $"N1{_tag}", "Site A", new DateOnly(2026, 1, 1), null, true, emissions);
         await h.SeedPermitAsync(Type, $"N2{_tag}", "Site B", new DateOnly(2026, 1, 1), null, true, ("OTHER", 2m, null));
 
         await using (var save = await h.NextRequestAsync())
