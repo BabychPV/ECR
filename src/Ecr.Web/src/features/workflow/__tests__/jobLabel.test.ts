@@ -42,6 +42,7 @@ describe('jobKindLabel', () => {
     ['RowWindowRefetchJob', 'rowWindowRefetch'],
     ['Ecr.Infrastructure.Jobs.ArchiveJob', 'archive'],
     ['PartitionCheckJob', 'partitionCheck'],
+    ['Ecr.Infrastructure.Jobs.ConsistencyCheckJob', 'consistencyCheck'],
     ['RegistrySyncJob', 'registrySync'],
     ['ReportRetentionJob', 'reportRetention'],
     ['ReportSnapshotFormatJob', 'reportSnapshotFormat'],

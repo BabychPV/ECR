@@ -37,6 +37,9 @@ const KindKeys: Record<string, string> = {
   // класом, а не маркером-інтерфейсом (`typeof(TJob).FullName`), тож у переліку `/admin/jobs`
   // стояли `NotificationJob`, `PeriodStateJob`, `RowWindowRefetchJob` поряд з «Recalculation».
   ArchiveJob: 'jobs.kind.archive',
+  // CL-25 (B-11): перевірка узгодженості теж повторювана й реєструється конкретним класом
+  // `ConsistencyCheckJob` — без цього рядка в ru/kz лишалося англійське запасне «Consistency check».
+  ConsistencyCheckJob: 'jobs.kind.consistencyCheck',
   NotificationJob: 'jobs.kind.notification',
   PartitionCheckJob: 'jobs.kind.partitionCheck',
   PeriodStateJob: 'jobs.kind.periodState',
