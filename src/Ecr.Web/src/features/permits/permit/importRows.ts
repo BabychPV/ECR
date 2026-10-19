@@ -1,6 +1,7 @@
 import { serverMessage } from '@/features/registries/rc816/serverMessage';
 import { saveBatch, type RegistryBatchItem } from '@/features/registries/rows/api';
 import type { PermitCellValue } from '../lib/columns';
+import { canonicalKey, type KeyPart, type KeyPartType } from '@/features/registries/keys/normalizeKey';
 import { parsePastedRows } from '../lib/pasteRows';
 import { newRowItem, type PermitField, type PickerData, pickerOptions } from './model';
 
@@ -61,6 +62,7 @@ export function planImport(
   picker: PickerData,
   permitId: number,
   skipHeader: boolean,
+  ignoreCase = true,
 ): ImportPlan {
   const body = skipHeader ? text.replace(/\r\n?/g, '\n').split('\n').slice(1).join('\n') : text;
   const parsed = parsePastedRows(body, fields.map((field) => field.column));
@@ -108,7 +110,7 @@ export function planImport(
     return { index, item: newRowItem(`row-${String(index)}`, permitId, fields, form), clean: !bad.has(index) };
   });
 
-  markDuplicateKeys(rows, fields, issues, bad);
+  markDuplicateKeys(rows, fields, issues, bad, ignoreCase);
 
   return {
     rows: rows.map((row) => (bad.has(row.index) && row.clean ? { ...row, clean: false } : row)),
@@ -120,38 +122,68 @@ export function planImport(
 /**
  * Дублі складеного ключа ВСЕРЕДИНІ файлу (по всій партії, а не по шматках): `dryRun` кожного шматка бачить лише базу
  * й власний шматок, тож дубль між рядками 1 і 501 пройшов би перевірку й упав би на записі другого шматка.
- * Ключ - значення стовпців із `key` у вигляді пакета (числа інваріантні, `Lookup` - id), без крайніх пробілів і
- * без урахування регістру; поле композиції `PERMIT` в усіх рядків однакове, тож у порівнянні не бере участі.
- * ⚠ Припущення: клієнт не має дзеркала серверного нормалізатора ключа, тому порівняння - обрізаний рядок без
- * регістру (як `keyPart` у `rowForm` + нижній регістр). Рядок із порожньою частиною ключа не рахується: це «обовʼязкове
- * поле» і його називає сервер. Зауваження ставиться на ОБИДВА рядки пари (і на всі рядки групи).
+ * Ключ - значення стовпців із `key` у вигляді пакета, зведені тим самим `canonicalKey` (`registries/keys/normalizeKey.ts`,
+ * двійник серверного `RegistryKeyNormalizer` на спільній фікстурі), що й сітка довідників: типи полів ключа
+ * (число, логічне, дата, `Lookup`-id, текст з NFC, згорнутими й обрізаними пробілами), регістр - за `ignoreCase`.
+ * Поле композиції `PERMIT` в усіх рядків однакове, тож у порівнянні не бере участі.
+ * ⚠ `ignoreCase`: у даних клієнта (DTO типу дозволу) його немає. Сервер створює первинний ключ реєстру `PRM_*` при
+ * публікації типу з `IgnoreCase = true` і лишає наявний як є (`PublishPermitTypeHandler.KeysAsync`), тож дефолт `true`.
+ * Рядок із порожньою частиною ключа (`canonicalKey` = `null`) не рахується: це «обовʼязкове поле», його називає сервер.
+ * Значення, що не вкладається в тип ключа (`canonicalKey` кидає), теж не рахується: його назве перевірка комірки.
+ * Зауваження ставиться на ОБИДВА рядки пари (і на всі рядки групи).
  */
 function markDuplicateKeys(
   rows: readonly ImportRow[],
   fields: readonly PermitField[],
   issues: ImportIssue[],
   bad: Set<number>,
+  ignoreCase: boolean,
 ): void {
-  const keys = fields.filter((field) => field.column.key === true).map((field) => field.column.code);
-  if (keys.length === 0) return;
+  const keyFields = fields.filter((field) => field.column.key === true);
+  if (keyFields.length === 0) return;
+  const keys = keyFields.map((field) => field.column.code);
 
   const groups = new Map<string, number[]>();
   for (const row of rows) {
-    const parts = keys.map((code) => {
-      const value = row.item.values?.[code];
-      return typeof value === 'string' ? value.trim().toLowerCase() : '';
+    const parts = keyFields.map((field): KeyPart => {
+      const raw = row.item.values?.[field.column.code];
+      const value = typeof raw === 'string' ? raw : null;
+      const type = keyPartType(field.source.dataType);
+      return { type, value: type === 'Bool' && typeof value === 'string' ? value === 'true' : value };
     });
-    if (parts.some((part) => part === '')) continue;
-    const id = parts.join('\u0000');
-    groups.set(id, [...(groups.get(id) ?? []), row.index]);
+
+    let canonical: string | null;
+    try {
+      canonical = canonicalKey(parts, ignoreCase);
+    } catch {
+      // Значення не того типу, що ключ: це зауваження комірки (`number`/`date`...), а не дубль.
+      continue;
+    }
+    if (canonical === null) continue;
+    groups.set(canonical, [...(groups.get(canonical) ?? []), row.index]);
   }
 
-  for (const [id, indexes] of groups) {
+  for (const indexes of groups.values()) {
     if (indexes.length < 2) continue;
     for (const index of indexes) {
-      issues.push({ row: index, column: keys.join(','), text: id.split('\u0000').join(' + '), reason: 'duplicateKey' });
+      const raw = keys.map((code) => rows.find((row) => row.index === index)?.item.values?.[code] ?? '');
+      issues.push({ row: index, column: keys.join(','), text: raw.join(' + '), reason: 'duplicateKey' });
       bad.add(index);
     }
+  }
+}
+
+/** Тип стовпця дозволу → тип частини ключа; невідомий тип порівнюється як текст. */
+function keyPartType(dataType: string): KeyPartType {
+  switch (dataType) {
+    case 'Int':
+    case 'Decimal':
+    case 'Bool':
+    case 'Date':
+    case 'Lookup':
+      return dataType;
+    default:
+      return 'String';
   }
 }
 
