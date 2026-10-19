@@ -8599,6 +8599,87 @@ USING (VALUES
     ,(N'err.ECR-PRM-4101.code', N'en', N'Binding code "{bindingCode}" is already taken (codes are unique across the whole system).', 1)
     ,(N'err.ECR-SCHM-0409.permitBindingBreaking', N'en', N'Deleting the permit binding "{bindingCode}" is a breaking change: documents are already attached to this version and their rows were created from the permit.', 1)
     -- PERMITS: bindings ── кінець секції ──
+    -- PERMITS: ui-list ── PM-07: перелік дозволів, майстер «New permit» і діалоги життєвого циклу; ru/kz — порцією PERMITS: ui-list нижче ──
+    ,(N'permits.list.stats.aria', N'en', N'Permit totals', 1)
+    ,(N'permits.list.stat.all', N'en', N'permits', 1)
+    ,(N'permits.list.stat.active', N'en', N'active', 1)
+    ,(N'permits.list.stat.ending', N'en', N'ending within {days} days', 1)
+    ,(N'permits.list.stat.free', N'en', N'not read by any sheet', 1)
+    ,(N'permits.list.search.label', N'en', N'Search permits', 1)
+    ,(N'permits.list.search.placeholder', N'en', N'Permit number or location', 1)
+    ,(N'permits.list.filter.type', N'en', N'Types', 1)
+    ,(N'permits.list.filter.state', N'en', N'States', 1)
+    ,(N'permits.list.noMatches', N'en', N'No permit matches these filters.', 1)
+    ,(N'permits.list.empty.hint', N'en', N'Add the first permit by hand: choose a published type, give it a number and dates.', 1)
+    ,(N'permits.list.col.permit', N'en', N'Permit', 1)
+    ,(N'permits.list.col.type', N'en', N'Type', 1)
+    ,(N'permits.list.col.validity', N'en', N'Validity', 1)
+    ,(N'permits.list.col.rows', N'en', N'Rows', 1)
+    ,(N'permits.list.col.readBy', N'en', N'Read by', 1)
+    ,(N'permits.list.col.state', N'en', N'State', 1)
+    ,(N'permits.list.col.actions', N'en', N'Actions', 1)
+    ,(N'permits.list.endsIn', N'en', N'Ends in {days} days', 1)
+    ,(N'permits.list.endedEarly', N'en', N'Ended early {date}', 1)
+    ,(N'permits.list.rowsOne', N'en', N'{rows} in 1 table', 1)
+    ,(N'permits.list.rowsMany', N'en', N'{rows} in {tables} tables', 1)
+    ,(N'permits.list.readByOne', N'en', N'{count} sheet table', 1)
+    ,(N'permits.list.readByMany', N'en', N'{count} sheet tables', 1)
+    ,(N'permits.list.rowMenu', N'en', N'Actions for permit {number}', 1)
+    ,(N'permits.list.action.activate', N'en', N'Activate…', 1)
+    ,(N'permits.list.action.delete', N'en', N'Delete draft…', 1)
+    ,(N'permits.list.action.renew', N'en', N'Renew…', 1)
+    ,(N'permits.list.action.end', N'en', N'End early…', 1)
+    ,(N'permits.list.activate.title', N'en', N'Activate permit {number}?', 1)
+    ,(N'permits.list.activate.verb', N'en', N'Activate', 1)
+    ,(N'permits.list.activate.reads', N'en', N'Sheets bound to "{type}" start reading these limits for periods inside {from} - {to}.', 1)
+    ,(N'permits.list.activate.editable', N'en', N'Rows can still be edited; every edit is dated and shows in the history.', 1)
+    ,(N'permits.list.activate.overlap', N'en', N'Two active permits of one type, number and overlapping dates are not allowed.', 1)
+    ,(N'permits.list.end.title', N'en', N'End permit {number} early?', 1)
+    ,(N'permits.list.end.reason', N'en', N'Reason', 1)
+    ,(N'permits.list.end.text', N'en', N'Sheets stop reading it from today. Past periods keep their limits.', 1)
+    ,(N'permits.list.end.verb', N'en', N'End permit', 1)
+    ,(N'permits.list.renew.title', N'en', N'Renew permit {number}?', 1)
+    ,(N'permits.list.renew.verb', N'en', N'Create renewal', 1)
+    ,(N'permits.list.renew.copy', N'en', N'A new draft is created with the same tables and rows, valid from {from} (the day the current one ends).', 1)
+    ,(N'permits.list.renew.kept', N'en', N'This permit stays valid until then and then becomes Expired - it is kept, because old periods still read its limits.', 1)
+    ,(N'permits.list.renew.switch', N'en', N'Sheets switch to the new permit by themselves from the first day it is valid.', 1)
+    ,(N'permits.list.delete.title', N'en', N'Delete draft {number}?', 1)
+    ,(N'permits.list.delete.verb', N'en', N'Delete draft', 1)
+    ,(N'permits.list.delete.removed', N'en', N'The draft and the rows of its tables are removed for good.', 1)
+    ,(N'permits.list.delete.onlyDraft', N'en', N'Only a draft can be deleted; a permit that was activated is kept.', 1)
+    ,(N'permits.list.done.created', N'en', N'Permit created as a draft', 1)
+    ,(N'permits.list.done.activated', N'en', N'Permit {number} is active', 1)
+    ,(N'permits.list.done.ended', N'en', N'Permit {number} has ended', 1)
+    ,(N'permits.list.done.renewed', N'en', N'Renewal created as a draft', 1)
+    ,(N'permits.list.done.deleted', N'en', N'Draft {number} deleted', 1)
+    ,(N'permits.list.wizard.title', N'en', N'New permit', 1)
+    ,(N'permits.list.wizard.loading', N'en', N'Loading permit types…', 1)
+    ,(N'permits.list.wizard.stepType', N'en', N'Type', 1)
+    ,(N'permits.list.wizard.typeHint', N'en', N'The type decides which tables the permit has. Types are set up in "Permit types".', 1)
+    ,(N'permits.list.wizard.type', N'en', N'Permit type', 1)
+    ,(N'permits.list.wizard.notPublished', N'en', N'Not published yet. Publish the type first.', 1)
+    ,(N'permits.list.wizard.noTypes', N'en', N'There is no published permit type yet. Publish a type in "Permit types" first.', 1)
+    ,(N'permits.list.wizard.typeRequired', N'en', N'Choose a published permit type.', 1)
+    ,(N'permits.list.wizard.stepDetails', N'en', N'Details', 1)
+    ,(N'permits.list.wizard.detailsHint', N'en', N'The same number can exist in two types - a site often holds an air and a waste permit with one number.', 1)
+    ,(N'permits.list.wizard.number', N'en', N'Permit number', 1)
+    ,(N'permits.list.wizard.numberRequired', N'en', N'Enter the permit number', 1)
+    ,(N'permits.list.wizard.numberRequiredText', N'en', N'A permit needs a number.', 1)
+    ,(N'permits.list.wizard.location', N'en', N'Location', 1)
+    ,(N'permits.list.wizard.validFrom', N'en', N'Valid from', 1)
+    ,(N'permits.list.wizard.validTo', N'en', N'Valid to', 1)
+    ,(N'permits.list.wizard.validToHint', N'en', N'The first day the permit is no longer valid.', 1)
+    ,(N'permits.list.wizard.datesRequired', N'en', N'Enter both dates.', 1)
+    ,(N'permits.list.wizard.validityOrder', N'en', N'The end must be after the start.', 1)
+    ,(N'permits.list.wizard.review', N'en', N'The permit is created empty, with the tables of its type. Add rows next.', 1)
+    ,(N'permits.list.wizard.apply', N'en', N'Create permit', 1)
+    ,(N'permits.list.wizard.sumType', N'en', N'Type', 1)
+    ,(N'permits.list.wizard.sumNumber', N'en', N'Number', 1)
+    ,(N'permits.list.wizard.sumLocation', N'en', N'Location', 1)
+    ,(N'permits.list.wizard.sumValid', N'en', N'Valid', 1)
+    ,(N'permits.list.wizard.sumStarts', N'en', N'Starts as', 1)
+    ,(N'permits.list.wizard.sumStartsValue', N'en', N'Draft - sheets do not see it until you activate it', 1)
+    -- PERMITS: ui-list ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -22009,6 +22090,173 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: bindings ── preview ── кінець секції ──
+
+-- PERMITS: ui-list ── ru/kz: PM-07, перелік дозволів, майстер «New permit» і діалоги життєвого циклу; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.list.stats.aria', N'ru', N'Итоги по разрешениям'),
+    (N'permits.list.stats.aria', N'kz', N'Рұқсаттар бойынша қорытынды'),
+    (N'permits.list.stat.all', N'ru', N'разрешений'),
+    (N'permits.list.stat.all', N'kz', N'рұқсат'),
+    (N'permits.list.stat.active', N'ru', N'действуют'),
+    (N'permits.list.stat.active', N'kz', N'жарамды'),
+    (N'permits.list.stat.ending', N'ru', N'заканчиваются в ближайшие {days} дн.'),
+    (N'permits.list.stat.ending', N'kz', N'алдағы {days} күнде аяқталады'),
+    (N'permits.list.stat.free', N'ru', N'не читает ни один лист'),
+    (N'permits.list.stat.free', N'kz', N'ешбір парақ оқымайды'),
+    (N'permits.list.search.label', N'ru', N'Поиск разрешений'),
+    (N'permits.list.search.label', N'kz', N'Рұқсаттарды іздеу'),
+    (N'permits.list.search.placeholder', N'ru', N'Номер разрешения или расположение'),
+    (N'permits.list.search.placeholder', N'kz', N'Рұқсат нөмірі немесе орналасуы'),
+    (N'permits.list.filter.type', N'ru', N'Типы'),
+    (N'permits.list.filter.type', N'kz', N'Түрлері'),
+    (N'permits.list.filter.state', N'ru', N'Состояния'),
+    (N'permits.list.filter.state', N'kz', N'Күйлері'),
+    (N'permits.list.noMatches', N'ru', N'Ни одно разрешение не подходит под фильтры.'),
+    (N'permits.list.noMatches', N'kz', N'Сүзгілерге ешбір рұқсат сәйкес келмейді.'),
+    (N'permits.list.empty.hint', N'ru', N'Добавьте первое разрешение вручную: выберите опубликованный тип, укажите номер и даты.'),
+    (N'permits.list.empty.hint', N'kz', N'Бірінші рұқсатты қолмен қосыңыз: жарияланған түрді таңдап, нөмірі мен күндерін көрсетіңіз.'),
+    (N'permits.list.col.permit', N'ru', N'Разрешение'),
+    (N'permits.list.col.permit', N'kz', N'Рұқсат'),
+    (N'permits.list.col.type', N'ru', N'Тип'),
+    (N'permits.list.col.type', N'kz', N'Түрі'),
+    (N'permits.list.col.validity', N'ru', N'Срок действия'),
+    (N'permits.list.col.validity', N'kz', N'Жарамдылық мерзімі'),
+    (N'permits.list.col.rows', N'ru', N'Строки'),
+    (N'permits.list.col.rows', N'kz', N'Жолдар'),
+    (N'permits.list.col.readBy', N'ru', N'Читают'),
+    (N'permits.list.col.readBy', N'kz', N'Оқитындар'),
+    (N'permits.list.col.state', N'ru', N'Состояние'),
+    (N'permits.list.col.state', N'kz', N'Күйі'),
+    (N'permits.list.col.actions', N'ru', N'Действия'),
+    (N'permits.list.col.actions', N'kz', N'Әрекеттер'),
+    (N'permits.list.endsIn', N'ru', N'Заканчивается через {days} дн.'),
+    (N'permits.list.endsIn', N'kz', N'{days} күннен кейін аяқталады'),
+    (N'permits.list.endedEarly', N'ru', N'Завершено досрочно {date}'),
+    (N'permits.list.endedEarly', N'kz', N'Мерзімінен бұрын аяқталды {date}'),
+    (N'permits.list.rowsOne', N'ru', N'{rows} в 1 таблице'),
+    (N'permits.list.rowsOne', N'kz', N'{rows} 1 кестеде'),
+    (N'permits.list.rowsMany', N'ru', N'{rows} в таблицах: {tables}'),
+    (N'permits.list.rowsMany', N'kz', N'{rows} кестелерде: {tables}'),
+    (N'permits.list.readByOne', N'ru', N'{count} таблица листа'),
+    (N'permits.list.readByOne', N'kz', N'{count} парақ кестесі'),
+    (N'permits.list.readByMany', N'ru', N'Таблиц листов: {count}'),
+    (N'permits.list.readByMany', N'kz', N'Парақ кестелері: {count}'),
+    (N'permits.list.rowMenu', N'ru', N'Действия для разрешения {number}'),
+    (N'permits.list.rowMenu', N'kz', N'{number} рұқсаты үшін әрекеттер'),
+    (N'permits.list.action.activate', N'ru', N'Активировать…'),
+    (N'permits.list.action.activate', N'kz', N'Белсендіру…'),
+    (N'permits.list.action.delete', N'ru', N'Удалить черновик…'),
+    (N'permits.list.action.delete', N'kz', N'Жобаны жою…'),
+    (N'permits.list.action.renew', N'ru', N'Продлить…'),
+    (N'permits.list.action.renew', N'kz', N'Ұзарту…'),
+    (N'permits.list.action.end', N'ru', N'Завершить досрочно…'),
+    (N'permits.list.action.end', N'kz', N'Мерзімінен бұрын аяқтау…'),
+    (N'permits.list.activate.title', N'ru', N'Активировать разрешение {number}?'),
+    (N'permits.list.activate.title', N'kz', N'{number} рұқсатын белсендіру керек пе?'),
+    (N'permits.list.activate.verb', N'ru', N'Активировать'),
+    (N'permits.list.activate.verb', N'kz', N'Белсендіру'),
+    (N'permits.list.activate.reads', N'ru', N'Листы, привязанные к «{type}», начнут читать эти лимиты за периоды внутри {from} - {to}.'),
+    (N'permits.list.activate.reads', N'kz', N'«{type}» түріне байланған парақтар {from} - {to} ішіндегі кезеңдер үшін осы лимиттерді оқи бастайды.'),
+    (N'permits.list.activate.editable', N'ru', N'Строки по-прежнему можно править; каждая правка датируется и видна в истории.'),
+    (N'permits.list.activate.editable', N'kz', N'Жолдарды әлі де түзетуге болады; әр түзету күнделенеді және тарихта көрінеді.'),
+    (N'permits.list.activate.overlap', N'ru', N'Два действующих разрешения одного типа, номера и с пересекающимися датами недопустимы.'),
+    (N'permits.list.activate.overlap', N'kz', N'Бір түрдегі, бір нөмірдегі және күндері қиылысатын екі жарамды рұқсатқа жол берілмейді.'),
+    (N'permits.list.end.title', N'ru', N'Завершить разрешение {number} досрочно?'),
+    (N'permits.list.end.title', N'kz', N'{number} рұқсатын мерзімінен бұрын аяқтау керек пе?'),
+    (N'permits.list.end.reason', N'ru', N'Причина'),
+    (N'permits.list.end.reason', N'kz', N'Себебі'),
+    (N'permits.list.end.text', N'ru', N'Листы перестанут читать его с сегодняшнего дня. Прошлые периоды сохраняют свои лимиты.'),
+    (N'permits.list.end.text', N'kz', N'Парақтар оны бүгіннен бастап оқуды тоқтатады. Өткен кезеңдер өз лимиттерін сақтайды.'),
+    (N'permits.list.end.verb', N'ru', N'Завершить разрешение'),
+    (N'permits.list.end.verb', N'kz', N'Рұқсатты аяқтау'),
+    (N'permits.list.renew.title', N'ru', N'Продлить разрешение {number}?'),
+    (N'permits.list.renew.title', N'kz', N'{number} рұқсатын ұзарту керек пе?'),
+    (N'permits.list.renew.verb', N'ru', N'Создать продление'),
+    (N'permits.list.renew.verb', N'kz', N'Ұзартуды жасау'),
+    (N'permits.list.renew.copy', N'ru', N'Создаётся новый черновик с теми же таблицами и строками, действует с {from} (день окончания текущего).'),
+    (N'permits.list.renew.copy', N'kz', N'Сол кестелермен және жолдармен жаңа жоба жасалады, {from} күнінен (қазіргісінің аяқталатын күні) жарамды.'),
+    (N'permits.list.renew.kept', N'ru', N'Это разрешение действует до этой даты, затем становится истёкшим - оно сохраняется, потому что старые периоды всё ещё читают его лимиты.'),
+    (N'permits.list.renew.kept', N'kz', N'Бұл рұқсат сол күнге дейін жарамды, кейін мерзімі өтеді - ол сақталады, себебі ескі кезеңдер оның лимиттерін әлі оқиды.'),
+    (N'permits.list.renew.switch', N'ru', N'Листы сами переключатся на новое разрешение с первого дня его действия.'),
+    (N'permits.list.renew.switch', N'kz', N'Парақтар жаңа рұқсатқа оның жарамды болатын бірінші күнінен өздігінен ауысады.'),
+    (N'permits.list.delete.title', N'ru', N'Удалить черновик {number}?'),
+    (N'permits.list.delete.title', N'kz', N'{number} жобасын жою керек пе?'),
+    (N'permits.list.delete.verb', N'ru', N'Удалить черновик'),
+    (N'permits.list.delete.verb', N'kz', N'Жобаны жою'),
+    (N'permits.list.delete.removed', N'ru', N'Черновик и строки его таблиц удаляются безвозвратно.'),
+    (N'permits.list.delete.removed', N'kz', N'Жоба және оның кестелерінің жолдары біржола жойылады.'),
+    (N'permits.list.delete.onlyDraft', N'ru', N'Удалить можно только черновик; активированное разрешение сохраняется.'),
+    (N'permits.list.delete.onlyDraft', N'kz', N'Тек жобаны жоюға болады; белсендірілген рұқсат сақталады.'),
+    (N'permits.list.done.created', N'ru', N'Разрешение создано как черновик'),
+    (N'permits.list.done.created', N'kz', N'Рұқсат жоба ретінде жасалды'),
+    (N'permits.list.done.activated', N'ru', N'Разрешение {number} действует'),
+    (N'permits.list.done.activated', N'kz', N'{number} рұқсаты жарамды'),
+    (N'permits.list.done.ended', N'ru', N'Разрешение {number} завершено'),
+    (N'permits.list.done.ended', N'kz', N'{number} рұқсаты аяқталды'),
+    (N'permits.list.done.renewed', N'ru', N'Продление создано как черновик'),
+    (N'permits.list.done.renewed', N'kz', N'Ұзарту жоба ретінде жасалды'),
+    (N'permits.list.done.deleted', N'ru', N'Черновик {number} удалён'),
+    (N'permits.list.done.deleted', N'kz', N'{number} жобасы жойылды'),
+    (N'permits.list.wizard.title', N'ru', N'Новое разрешение'),
+    (N'permits.list.wizard.title', N'kz', N'Жаңа рұқсат'),
+    (N'permits.list.wizard.loading', N'ru', N'Загрузка типов разрешений…'),
+    (N'permits.list.wizard.loading', N'kz', N'Рұқсат түрлері жүктелуде…'),
+    (N'permits.list.wizard.stepType', N'ru', N'Тип'),
+    (N'permits.list.wizard.stepType', N'kz', N'Түрі'),
+    (N'permits.list.wizard.typeHint', N'ru', N'Тип определяет, какие таблицы есть у разрешения. Типы настраиваются в «Типах разрешений».'),
+    (N'permits.list.wizard.typeHint', N'kz', N'Түр рұқсатта қандай кестелер болатынын анықтайды. Түрлер «Рұқсат түрлерінде» бапталады.'),
+    (N'permits.list.wizard.type', N'ru', N'Тип разрешения'),
+    (N'permits.list.wizard.type', N'kz', N'Рұқсат түрі'),
+    (N'permits.list.wizard.notPublished', N'ru', N'Ещё не опубликован. Сначала опубликуйте тип.'),
+    (N'permits.list.wizard.notPublished', N'kz', N'Әлі жарияланбаған. Алдымен түрді жариялаңыз.'),
+    (N'permits.list.wizard.noTypes', N'ru', N'Опубликованных типов разрешений пока нет. Сначала опубликуйте тип в «Типах разрешений».'),
+    (N'permits.list.wizard.noTypes', N'kz', N'Жарияланған рұқсат түрлері әлі жоқ. Алдымен «Рұқсат түрлерінде» түрді жариялаңыз.'),
+    (N'permits.list.wizard.typeRequired', N'ru', N'Выберите опубликованный тип разрешения.'),
+    (N'permits.list.wizard.typeRequired', N'kz', N'Жарияланған рұқсат түрін таңдаңыз.'),
+    (N'permits.list.wizard.stepDetails', N'ru', N'Данные'),
+    (N'permits.list.wizard.stepDetails', N'kz', N'Деректер'),
+    (N'permits.list.wizard.detailsHint', N'ru', N'Один и тот же номер может быть у двух типов - на площадке часто есть разрешения на выбросы и на отходы с одним номером.'),
+    (N'permits.list.wizard.detailsHint', N'kz', N'Бір нөмір екі түрде болуы мүмкін - алаңда көбіне шығарындыға және қалдыққа бір нөмірлі рұқсаттар болады.'),
+    (N'permits.list.wizard.number', N'ru', N'Номер разрешения'),
+    (N'permits.list.wizard.number', N'kz', N'Рұқсат нөмірі'),
+    (N'permits.list.wizard.numberRequired', N'ru', N'Введите номер разрешения'),
+    (N'permits.list.wizard.numberRequired', N'kz', N'Рұқсат нөмірін енгізіңіз'),
+    (N'permits.list.wizard.numberRequiredText', N'ru', N'У разрешения должен быть номер.'),
+    (N'permits.list.wizard.numberRequiredText', N'kz', N'Рұқсаттың нөмірі болуы керек.'),
+    (N'permits.list.wizard.location', N'ru', N'Расположение'),
+    (N'permits.list.wizard.location', N'kz', N'Орналасуы'),
+    (N'permits.list.wizard.validFrom', N'ru', N'Действует с'),
+    (N'permits.list.wizard.validFrom', N'kz', N'Жарамды басталуы'),
+    (N'permits.list.wizard.validTo', N'ru', N'Действует до'),
+    (N'permits.list.wizard.validTo', N'kz', N'Жарамды аяқталуы'),
+    (N'permits.list.wizard.validToHint', N'ru', N'Первый день, когда разрешение уже недействительно.'),
+    (N'permits.list.wizard.validToHint', N'kz', N'Рұқсат жарамсыз болатын бірінші күн.'),
+    (N'permits.list.wizard.datesRequired', N'ru', N'Введите обе даты.'),
+    (N'permits.list.wizard.datesRequired', N'kz', N'Екі күнді де енгізіңіз.'),
+    (N'permits.list.wizard.validityOrder', N'ru', N'Окончание должно быть позже начала.'),
+    (N'permits.list.wizard.validityOrder', N'kz', N'Аяқталуы басталуынан кейін болуы керек.'),
+    (N'permits.list.wizard.review', N'ru', N'Разрешение создаётся пустым, с таблицами своего типа. Строки добавляются дальше.'),
+    (N'permits.list.wizard.review', N'kz', N'Рұқсат өз түрінің кестелерімен бос жасалады. Жолдар кейін қосылады.'),
+    (N'permits.list.wizard.apply', N'ru', N'Создать разрешение'),
+    (N'permits.list.wizard.apply', N'kz', N'Рұқсатты жасау'),
+    (N'permits.list.wizard.sumType', N'ru', N'Тип'),
+    (N'permits.list.wizard.sumType', N'kz', N'Түрі'),
+    (N'permits.list.wizard.sumNumber', N'ru', N'Номер'),
+    (N'permits.list.wizard.sumNumber', N'kz', N'Нөмірі'),
+    (N'permits.list.wizard.sumLocation', N'ru', N'Расположение'),
+    (N'permits.list.wizard.sumLocation', N'kz', N'Орналасуы'),
+    (N'permits.list.wizard.sumValid', N'ru', N'Действует'),
+    (N'permits.list.wizard.sumValid', N'kz', N'Жарамдылығы'),
+    (N'permits.list.wizard.sumStarts', N'ru', N'Начинается как'),
+    (N'permits.list.wizard.sumStarts', N'kz', N'Басталуы'),
+    (N'permits.list.wizard.sumStartsValue', N'ru', N'Черновик - листы не видят его, пока вы его не активируете'),
+    (N'permits.list.wizard.sumStartsValue', N'kz', N'Жоба - сіз белсендірмейінше парақтар оны көрмейді')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: ui-list ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
