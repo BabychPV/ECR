@@ -324,4 +324,7 @@ test.describe('Permit bindings', () => {
     await strip.getByRole('button', { name: 'Refresh from permit' }).click();
     // Об'єкт документа порожній - дозволу немає, тож рядків не додано; підсумок (або попередження) все одно показується.
     await expect(page.getByTestId('permit-refresh-result'), 'підсумок «Оновити з дозволу» не з’явився').toBeVisible({ timeout: 60_000 });
-  });});
+
+    // Одноразова база стенда: проєкт/документ не прибираються (як і опублікований тип дозволу).
+  });
+});
