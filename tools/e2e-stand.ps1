@@ -500,7 +500,13 @@ try {
             # ✎ batch-4: `Registry.EditDefinition` — `registriesList.spec` на свіжому стенді
             # заводить порожній довідник (сід довідників не має). Лише тестова роль стенда;
             # права bootstrap і ролей продукту не змінюються.
-            'Registry.View', 'Registry.EditData', 'Registry.EditDefinition',
+            # ✎ permits-ui: `Registry.Publish` — `permitTypeDialogs.spec` (діалог публікації типу
+            # дозволу): без права клієнт не відкриває `?dialog=publish-type`, а сервер відхиляє
+            # POST /permit-types/{code}/publish. Лише тестова роль стенда; ролі продукту не змінюються.
+            'Registry.View', 'Registry.EditData', 'Registry.EditDefinition', 'Registry.Publish',
+            # ✎ rc8: керування типами Permits — Permit.EditType/PublishType (rc7); без них
+            # permitTypes*.spec і screenshots(permit-types) дають 403. Лише тестова роль стенда.
+            'Permit.EditType', 'Permit.PublishType',
             'Document.View', 'Document.Create', 'Document.Export', 'Document.Import',
             'Document.Reopen',
             'Project.Manage', 'Period.Configure', 'Period.Reopen',

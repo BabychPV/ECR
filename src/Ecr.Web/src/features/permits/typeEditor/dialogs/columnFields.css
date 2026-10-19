@@ -1,0 +1,33 @@
+/* Поля одного стовпця (ColumnFields): CSS-сітка замість Mantine Grid, чиї стилі відсічені (mantineCssPrune.ts). */
+.pm-col-fields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--mantine-spacing-xs);
+  align-items: end;
+}
+
+.pm-col-fields__full {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 48em) {
+  .pm-col-fields {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .pm-col-fields__name {
+    grid-column: span 5;
+  }
+
+  .pm-col-fields__type {
+    grid-column: span 4;
+  }
+
+  .pm-col-fields__unit {
+    grid-column: span 3;
+  }
+
+  .pm-col-fields__full {
+    grid-column: span 12;
+  }
+}

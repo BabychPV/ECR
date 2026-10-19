@@ -29,6 +29,7 @@ import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
 import { useListFocus } from '@/shared/a11y/focus';
 import { RegistryFieldForm } from './RegistryFieldForm';
+import './registryConstructor.css';
 
 /**
  * Поля довідника (`ФВ-8.3`, `ФВ-8.12`).
@@ -124,7 +125,7 @@ export function RegistryFields({
         </Text>
       )}
 
-      <Table striped highlightOnHover>
+      <Table striped highlightOnHover className="ecr-registry-table">
         <Table.Thead>
           <Table.Tr>
             <Table.Th>{t('registries.code')}</Table.Th>
@@ -251,7 +252,7 @@ export function RegistryRelations({
         </Text>
       )}
 
-      <Table striped highlightOnHover>
+      <Table striped highlightOnHover className="ecr-registry-table">
         <Table.Thead>
           <Table.Tr>
             <Table.Th>{t('registries.relationKind')}</Table.Th>
@@ -524,7 +525,7 @@ export function RegistryMappings({
         {t('registries.tabMapping')}
       </Title>
 
-      <Table striped highlightOnHover>
+      <Table striped highlightOnHover className="ecr-registry-table">
         <Table.Thead>
           <Table.Tr>
             <Table.Th>{t('registries.field')}</Table.Th>
@@ -610,7 +611,7 @@ export function RegistryHistory({
         {t('registries.tabHistory')}
       </Title>
 
-      <Table striped highlightOnHover>
+      <Table striped highlightOnHover className="ecr-registry-table">
         <Table.Thead>
           <Table.Tr>
             <Table.Th>{t('registries.changedAt')}</Table.Th>
