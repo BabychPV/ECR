@@ -1,0 +1,67 @@
+/* Вибір типу в майстрі «New permit» (макет: список типів із підказкою). Локальна сітка: Mantine Radio/Grid не використовуємо. */
+.pm-typepick {
+  display: grid;
+  gap: var(--mantine-spacing-xs);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.pm-typepick legend {
+  padding: 0;
+  margin-bottom: var(--mantine-spacing-xs);
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 500;
+}
+
+.pm-typepick-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--mantine-spacing-sm);
+  align-items: start;
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  cursor: pointer;
+}
+
+.pm-typepick-item[data-checked='true'] {
+  border-color: var(--mantine-primary-color-filled);
+}
+
+.pm-typepick-item[data-disabled='true'] {
+  cursor: not-allowed;
+  color: var(--mantine-color-dimmed);
+}
+
+.pm-typepick-item input {
+  margin-top: 4px;
+}
+
+.pm-typepick-hint {
+  display: block;
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+}
+
+.pm-typepick-item:focus-within {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 1px;
+}
+
+/* Поля кроку «Details»: два стовпці, на вузькому екрані — один. */
+.pm-newpermit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--mantine-spacing-sm);
+}
+
+.pm-newpermit-grid > [data-wide] {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 36em) {
+  .pm-newpermit-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
