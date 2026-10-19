@@ -5,13 +5,12 @@ import { MantineProvider } from '@mantine/core';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { PermitBindingPage } from '../PermitBindingPage';
 import { PermitBindingsPage } from '../PermitBindingsPage';
-import { PermitListsPage } from '../PermitListsPage';
 import { PermitPage } from '../PermitPage';
 import { PermitsPage } from '../PermitsPage';
 import { PageDescriptionContext } from '@/shared/ui/pageDescription';
 
 /**
- * (Перелік типів — справжня сторінка PM-08a, її тести: `features/permits/types/__tests__/PermitTypesPage.test.tsx`.)
+ * (Перелік типів — PM-08a, її тести: `features/permits/types/__tests__/PermitTypesPage.test.tsx`; списки — PM-08d: `features/permits/lists/__tests__/PermitListsPage.test.tsx`.)
  * Сторінки-каркаси Permits (PM-06): заголовок, смуга розділів, чесний порожній стан, недоступні дії
  * з поясненням і жодного запиту до мережі (ендпоінтів ще немає).
  */
@@ -44,7 +43,6 @@ function showAt(path: string, route: string, element: ReactElement, descriptionK
 
 const sectionPages = [
   ['/admin/permits', <PermitsPage key="a" />, 'text of nav.permits', 'text of permits.empty.title', ['text of permits.empty.new', 'text of permits.empty.import'], 0],
-  ['/admin/permits/lists', <PermitListsPage key="c" />, 'text of permits.lists.title', 'text of permits.lists.empty.title', [], 2],
   ['/admin/permits/bindings', <PermitBindingsPage key="d" />, 'text of permits.bindings.title', 'text of permits.bindings.empty.title', ['text of permits.bindings.new'], 3],
 ] as const;
 
@@ -75,7 +73,7 @@ describe('Permits: сторінки розділів', () => {
       expect((button as HTMLButtonElement).disabled).toBe(true);
       expect(button.getAttribute('aria-describedby')).toBe(reason.id);
     }
-    expect(buttons.length === 0 || screen.queryAllByRole('button').length === buttons.length).toBe(true);
+    expect(screen.queryAllByRole('button')).toHaveLength(buttons.length);
   });
 
   it('пояснення маршруту показується під заголовком', () => {
