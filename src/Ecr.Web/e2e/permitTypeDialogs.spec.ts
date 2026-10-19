@@ -54,7 +54,8 @@ test.describe('Діалоги конструктора типу дозволу',
 
     // 1. Майстер «Add a table»: адреса тримає `?dialog=`, Escape без введеного закриває одразу.
     await page.goto(`/admin/permits/types/${code}?dialog=add-table`);
-    const wizard = page.getByRole('dialog');
+    // Саме майстер (за заголовком), а не будь-який діалог: інше вікно (підтвердження скасування, помилка) не маскується під нього.
+    const wizard = page.getByRole('dialog', { name: /^Add a table/ });
     await expect(wizard).toBeVisible({ timeout: 30_000 });
     await page.keyboard.press('Escape');
     await expect(wizard).toBeHidden();
@@ -69,16 +70,19 @@ test.describe('Діалоги конструктора типу дозволу',
     await wizard.getByRole('button', { name: 'Next' }).click();
     await expect(wizard.getByText('PRM_' + code + '_MonitoringPoints')).toBeVisible();
     await wizard.getByRole('button', { name: 'Add table' }).click();
-    await expect(wizard).toBeHidden();
-    await expect(page.getByText('Monitoring points').first()).toBeVisible();
+    // Спостережуваний результат, а не лише зникнення вікна: таблиця в дереві й адреса без `dialog=`.
+    await expect(page.getByText('Monitoring points').first()).toBeVisible({ timeout: 15_000 });
+    await expect(wizard).toBeHidden({ timeout: 15_000 });
+    await expect(page).not.toHaveURL(/[?&]dialog=/, { timeout: 15_000 });
 
     // 2. «Add a column» у вибраній таблиці.
     await page.getByRole('button', { name: 'Add column' }).first().click();
     const column = page.getByRole('dialog');
     await column.getByLabel('Name (English)').fill('Note');
     await column.getByRole('button', { name: 'Add column' }).click();
-    await expect(column).toBeHidden();
-    await expect(page.getByText('Note').first()).toBeVisible();
+    await expect(column).toBeHidden({ timeout: 15_000 });
+    await expect(page).not.toHaveURL(/[?&]dialog=/, { timeout: 15_000 });
+    await expect(page.getByText('Note').first()).toBeVisible({ timeout: 15_000 });
 
     // 3. «Add a check»: без виразу діалог лишається, фокус на полі.
     await page.goto(`/admin/permits/types/${code}?dialog=add-rule`);
@@ -88,7 +92,8 @@ test.describe('Діалоги конструктора типу дозволу',
     await expect(rule.getByLabel(/^Rule/)).toBeFocused();
     await rule.getByLabel(/^Rule/).fill('ROW.Annual_volume >= 0');
     await rule.getByRole('button', { name: 'Add check' }).click();
-    await expect(rule).toBeHidden();
+    await expect(rule).toBeHidden({ timeout: 15_000 });
+    await expect(page).not.toHaveURL(/[?&]dialog=/, { timeout: 15_000 });
 
     // 4. Публікація: кнопка вимкнена, доки причина коротша за 10 символів.
     await page.goto(`/admin/permits/types/${code}?dialog=publish-type`);
@@ -97,8 +102,18 @@ test.describe('Діалоги конструктора типу дозволу',
     await publish.getByLabel('What changed').fill('short');
     await expect(publish.getByRole('button', { name: 'Publish' })).toBeDisabled();
     await publish.getByLabel('What changed').fill('First version of the dialogs type');
+    // Публікація спершу зберігає чернетку (автозбереження → PUT), потім POST …/publish: чекаємо відповідь, а не таймер.
+    const published = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        response.url().includes(`/api/v1/permit-types/${code}/publish`),
+      { timeout: 60_000 },
+    );
     await publish.getByRole('button', { name: 'Publish' }).click();
+    const publishResponse = await published;
+    expect(publishResponse.ok(), `POST …/publish: ${publishResponse.status()}`).toBe(true);
     await expect(publish).toBeHidden({ timeout: 30_000 });
+    await expect(page).not.toHaveURL(/[?&]dialog=/, { timeout: 30_000 });
 
     const type = (await (await page.request.get(`/api/v1/permit-types/${code}`)).json()) as {
       status: string;

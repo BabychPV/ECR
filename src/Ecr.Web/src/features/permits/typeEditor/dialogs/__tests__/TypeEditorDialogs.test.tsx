@@ -276,42 +276,17 @@ describe('TypeEditorDialogs', () => {
     });
   });
 
-  describe('вибір нової таблиці в наступному такті (P3-8)', () => {
-    /** Доходить до кроку «застосувати», потім вмикає фальшиві таймери: такт `setTimeout 0` лишається в черзі. */
-    async function readyToApply() {
-      const user = userEvent.setup();
-      const mounted = mount('/x?dialog=add-table');
-      await user.type(await screen.findByLabelText(new RegExp(k('addTable.nameEn'))), 'Storage');
-      await user.click(screen.getByTestId('wizard-next'));
-      await user.click(screen.getByTestId('wizard-next'));
-      vi.useFakeTimers();
+  it('add-table: onSelectTable викликається синхронно слідом за onChange (без таймерів; порядок із адресою — у DialogsHost)', async () => {
+    const user = userEvent.setup();
+    const { onChange, onSelectTable } = mount('/x?dialog=add-table');
+    await user.type(await screen.findByLabelText(new RegExp(k('addTable.nameEn'))), 'Storage');
+    await user.click(screen.getByTestId('wizard-next'));
+    await user.click(screen.getByTestId('wizard-next'));
 
-      return mounted;
-    }
+    fireEvent.click(screen.getByTestId('wizard-apply'));
 
-    it('контроль: хост живий — після такту onSelectTable викликано', async () => {
-      try {
-        const { onSelectTable } = await readyToApply();
-        fireEvent.click(screen.getByTestId('wizard-apply'));
-        expect(onSelectTable).not.toHaveBeenCalled();
-        vi.advanceTimersByTime(10);
-        expect(onSelectTable).toHaveBeenCalledWith('Storage');
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it('хост зник до такту — таймер знято, onSelectTable не викликається', async () => {
-      try {
-        const { onSelectTable, unmount } = await readyToApply();
-        fireEvent.click(screen.getByTestId('wizard-apply'));
-        unmount();
-        vi.advanceTimersByTime(10);
-        expect(onSelectTable).not.toHaveBeenCalled();
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onSelectTable).toHaveBeenCalledExactlyOnceWith('Storage');
   });
 
   it('delete-type: DELETE, onDeleted, адреса очищена', async () => {

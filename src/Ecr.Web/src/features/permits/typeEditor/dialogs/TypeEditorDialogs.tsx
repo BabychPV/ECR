@@ -40,9 +40,9 @@ export const TypeEditorDialogIds = {
  * - `onDeleted()` — тип видалено, сторінку треба покинути.
  * - `onSelectTable(code)` — щойно додану таблицю варто вибрати в дереві.
  *
- * ⚠ `onSelectTable` викликається в НАСТУПНОМУ такті (`setTimeout 0`) після закриття діалогу:
- * `setSearchParams` у react-router, викликаний двічі в одному такті, губить ОБИДВІ зміни
- * (`useUrlState`: UI-аудит, lane 3), а закриття діалогу — теж зміна адреси.
+ * ⚠ `onSelectTable` викликається синхронно слідом за `onChange`, а закриває майстер сам; два записи адреси
+ * в одному такті не компонуються (`useUrlState`: UI-аудит, lane 3), тому ХОСТ сторінки не пише адресу, доки
+ * `?dialog=` ще в ній, а відкладає вибір до зникнення діалогу (`DialogsHost`, без таймерів).
  */
 export interface TypeEditorDialogsProps {
   readonly type: PermitType;
@@ -93,15 +93,6 @@ export function TypeEditorDialogs({
       openNow.current = null;
     };
   }, [dialog]);
-
-  // `onSelectTable` іде в наступному такті; після зникнення хоста таймер не має зачепити чужу адресу.
-  const selectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (selectTimer.current !== null) clearTimeout(selectTimer.current);
-    },
-    [],
-  );
 
   const known = (Object.values(TypeEditorDialogIds) as string[]).includes(dialog ?? '');
   // Усі діалоги хоста пишуть у тип; публікація — ще й окреме право.
@@ -172,13 +163,7 @@ export function TypeEditorDialogs({
             // ⚠ Закриває сам майстер (`api.close` → `onClose`): другий `close()` у тому ж такті
             // губив би обидві зміни адреси.
             onChange((draft) => addTable(draft, added));
-            if (onSelectTable !== undefined) {
-              if (selectTimer.current !== null) clearTimeout(selectTimer.current);
-              selectTimer.current = setTimeout(() => {
-                selectTimer.current = null;
-                onSelectTable(added.code);
-              }, 0);
-            }
+            onSelectTable?.(added.code);
           }}
           onClose={close}
         />

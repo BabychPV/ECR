@@ -42,6 +42,22 @@ export function DialogsHost(): JSX.Element | null {
     if (deniedDeleteTable) setParams(withoutDialog(latestParams.current), { replace: true });
   }, [deniedDeleteTable, setParams]);
 
+  // Вибір щойно доданої таблиці, що чекає зникнення `?dialog=` з адреси; зникає разом із хостом.
+  const pendingSelect = useRef<string | null>(null);
+  const applyPendingSelect = (from: URLSearchParams): void => {
+    const code = pendingSelect.current;
+    if (code === null) return;
+    pendingSelect.current = null;
+    const next = new URLSearchParams(from);
+    next.set(EditorParams.table, code);
+    next.delete(EditorParams.panel);
+    setParams(next, { replace: true });
+  };
+  useEffect(() => {
+    if (open === null) applyPendingSelect(params);
+    // Лише за зміною адреси: `applyPendingSelect` читає refs.
+  }, [params]);
+
   const settle = async (): Promise<PermitType | null> => {
     if (!(await api.flush())) return null;
     return queryClient.getQueryData<PermitType>(typeEditorKeys.detail(api.code)) ?? api.type;
@@ -76,11 +92,11 @@ export function DialogsHost(): JSX.Element | null {
           void navigate(PermitsPaths.types);
         }}
         onSelectTable={(code) => {
-          // Свіжі параметри: до цього такту діалог уже закрив себе в адресі (див. TypeEditorDialogs).
-          const next = new URLSearchParams(latestParams.current);
-          next.set(EditorParams.table, code);
-          next.delete(EditorParams.panel);
-          setParams(next, { replace: true });
+          // ⚠ Адресу НЕ пишемо тут: діалог закриває себе тим самим тактом, а `latestParams` оновлюється лише
+          // рендером (навігація react-router іде через `startTransition`) — запис із застарілих параметрів
+          // повернув би `?dialog=` назад. Вибір чекає, доки в адресі діалогу вже немає (ефект нижче).
+          pendingSelect.current = code;
+          if (readDialog(latestParams.current) === null) applyPendingSelect(latestParams.current);
         }}
       />
       {open?.id === 'delete-table' && mayEdit && open.tableCode !== null && (
