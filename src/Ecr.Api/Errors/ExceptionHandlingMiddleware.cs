@@ -656,6 +656,10 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.PermitTypeInUse =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ Permits PM-09: «прив'язка вже є» (`ECR-PRM-4101`) — конфлікт стану: таблицю аркуша вже зайнято чи код зайнятий.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.PermitBindingDuplicate =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // ⛔ RT-10a (FEATURE-REGISTRY-TABLES §7.2): «ці значення ключа вже має інший запис» —
         // конфлікт стану, а не невірні дані: повторювати запит марно, треба змінити ключ або
         // закрити вікно чинності того запису. ⚠ Правило суфікса нижче цей код теж ловить, тож
