@@ -1,0 +1,151 @@
+/*
+ * Екран дозволу (PM-07). Макет: `docs/design/permits/screens-permits.js` (`.pm-body`, `.pm-two`, `.pm-cards`, `.pm-tl`,
+ * `.pm-tools`, `.form-grid`). Кольори — токени `--mantine-*` (світла й темна теми беруться самі, `ФВ-14.11`); сітки —
+ * власний CSS grid, а не Mantine `Grid` (його забороняє плагін обрізання).
+ */
+.pp-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-lg);
+}
+
+.pp-two {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--mantine-spacing-lg);
+  align-items: start;
+}
+
+.pp-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+  min-width: 0;
+}
+
+.pp-group {
+  margin: 0;
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-md) var(--mantine-spacing-md);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+}
+
+.pp-group legend {
+  padding-inline: var(--mantine-spacing-xs);
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 600;
+}
+
+details.pp-group > summary {
+  cursor: pointer;
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 600;
+  margin-bottom: var(--mantine-spacing-sm);
+}
+
+.pp-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--mantine-spacing-sm);
+}
+
+/* Лінія чинності з позначкою «сьогодні». */
+.pp-tl {
+  position: relative;
+  height: 12px;
+  margin-block: var(--mantine-spacing-sm);
+}
+
+.pp-tl-bar,
+.pp-tl-run {
+  position: absolute;
+  top: 4px;
+  height: 4px;
+  left: 0;
+  border-radius: 2px;
+}
+
+.pp-tl-bar {
+  width: 100%;
+  background: var(--mantine-color-default-border);
+}
+
+.pp-tl-run {
+  background: var(--mantine-primary-color-filled);
+}
+
+.pp-tl-now {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 12px;
+  margin-left: -1px;
+  background: var(--mantine-color-text);
+}
+
+.pp-tl-lbl {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-sm);
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+}
+
+.pp-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--mantine-spacing-sm);
+}
+
+.pp-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-xs);
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+}
+
+.pp-card-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-sm);
+}
+
+.pp-tw {
+  overflow-x: auto;
+}
+
+.pp-t {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--mantine-font-size-sm);
+}
+
+.pp-t th,
+.pp-t td {
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  text-align: start;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+/* Панель дій над таблицею: Add row · Paste from Excel… · Import file…. */
+.pp-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+}
+
+.pp-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--mantine-spacing-sm);
+}
+
+.pp-issues {
+  margin: 0;
+  padding-inline-start: var(--mantine-spacing-lg);
+  max-height: 160px;
+  overflow-y: auto;
+}
