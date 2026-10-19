@@ -30,6 +30,100 @@ async function signIn(page: Page): Promise<void> {
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
 }
 
+/**
+ * Чекає, поки рядок стану збереження в шапці конструктора (`SaveStatus`, `role="status"`) стане «Saved …»:
+ * автозбереження чернетки йде ~1.5 с після останньої правки, а `page.goto` між кроками перезавантажує
+ * застосунок і губить ще не збережене. Викликати після КОЖНОГО кроку, що змінює тип, до будь-якого `goto`.
+ */
+async function waitForSaved(page: Page): Promise<void> {
+  const status = page.getByRole('status').filter({ hasText: /Saved|unsaved|Saving|Retry|Changed by someone/ });
+  await expect(status.first(), 'рядок стану збереження не з’явився').toBeVisible({ timeout: 20_000 });
+  await expect
+    .poll(async () => (await status.first().innerText()).trim(), {
+      message: 'автозбереження чернетки не завершилось (рядок стану не став «Saved …»)',
+      timeout: 30_000,
+    })
+    .toMatch(/^Saved/);
+}
+
+interface PermitTypeJson {
+  status: string;
+  version: number;
+  draftVersion: number | null;
+  hasUnpublishedChanges: boolean;
+  rules: { code: string; nameL10n: Record<string, string> }[];
+  tables: {
+    code: string;
+    columns: { code: string; nameL10n?: Record<string, string> }[];
+    rules: { code: string; nameL10n: Record<string, string> }[];
+  }[];
+}
+
+async function getPermitType(page: Page, code: string): Promise<PermitTypeJson> {
+  const response = await page.request.get(`/api/v1/permit-types/${code}`);
+  return (await response.json()) as PermitTypeJson;
+}
+
+function summarize(type: PermitTypeJson): string {
+  return JSON.stringify({
+    status: type.status,
+    version: type.version,
+    draftVersion: type.draftVersion,
+    hasUnpublishedChanges: type.hasUnpublishedChanges,
+    typeRules: type.rules?.map((r) => r.code),
+    tables: type.tables?.map((t) => ({
+      code: t.code,
+      columns: t.columns.map((c) => c.code),
+      rules: t.rules?.map((r) => r.code),
+    })),
+  });
+}
+
+/** Чекає на сервері: таблиця `MonitoringPoints` з доданим стовпцем «Note» і перевірка «Volume is not negative» вже збережені. */
+async function waitForServerDraft(page: Page, code: string): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const type = await getPermitType(page, code);
+        const table = type.tables?.find((t) => t.code === 'MonitoringPoints');
+        const hasNote = table?.columns.some((c) => c.nameL10n?.['en'] === 'Note') ?? false;
+        const rules = [...(type.rules ?? []), ...(type.tables ?? []).flatMap((t) => t.rules ?? [])];
+        const hasRule = rules.some((r) => r.nameL10n['en'] === 'Volume is not negative');
+        return { table: table !== undefined, hasNote, hasRule };
+      },
+      { message: 'чернетка на сервері не містить таблицю, стовпець «Note» і перевірку', timeout: 30_000 },
+    )
+    .toEqual({ table: true, hasNote: true, hasRule: true });
+}
+
+/**
+ * Заголовок діалогу з діагностикою: на таймауті кидає помилку з текстом діалогу (або «no dialog»), адресою,
+ * підсумком типу з API і знімком у звіті, щоб наступний лог CI пояснював себе сам.
+ */
+async function expectHeading(page: Page, code: string, heading: RegExp): Promise<void> {
+  const dialog = page.getByRole('dialog');
+  try {
+    await expect(dialog.first(), 'діалог не відкрився').toBeVisible({ timeout: 30_000 });
+    await expect(dialog.getByRole('heading', { name: heading }).first()).toBeVisible({ timeout: 15_000 });
+  } catch (error) {
+    const present = (await dialog.count()) > 0;
+    const text = present ? await dialog.first().innerText().catch(() => '<не прочитано>') : 'no dialog';
+    let api: string;
+    try {
+      api = summarize(await getPermitType(page, code));
+    } catch (apiError) {
+      api = `GET не вдався: ${String(apiError)}`;
+    }
+    await test
+      .info()
+      .attach('publish-dialog-failure', { body: await page.screenshot(), contentType: 'image/png' })
+      .catch(() => undefined);
+    throw new Error(
+      `Заголовок ${String(heading)} не знайдено.\nдіалог: ${text}\nURL: ${page.url()}\nтип: ${api}\nпричина: ${String(error)}`,
+    );
+  }
+}
+
 test.describe('Діалоги конструктора типу дозволу', () => {
   test.skip(PeriodKey === '', 'ECR_E2E_OPTIONAL: стенда немає. Стенд: tools/e2e-stand.ps1.');
 
@@ -74,6 +168,7 @@ test.describe('Діалоги конструктора типу дозволу',
     await expect(page.getByText('Monitoring points').first()).toBeVisible({ timeout: 15_000 });
     await expect(wizard).toBeHidden({ timeout: 15_000 });
     await expect(page).not.toHaveURL(/[?&]dialog=/, { timeout: 15_000 });
+    await waitForSaved(page);
 
     // 2. «Add a column» у вибраній таблиці.
     await page.getByRole('button', { name: 'Add column' }).first().click();
@@ -83,6 +178,7 @@ test.describe('Діалоги конструктора типу дозволу',
     await expect(column).toBeHidden({ timeout: 15_000 });
     await expect(page).not.toHaveURL(/[?&]dialog=/, { timeout: 15_000 });
     await expect(page.getByText('Note').first()).toBeVisible({ timeout: 15_000 });
+    await waitForSaved(page);
 
     // 3. «Add a check»: без виразу діалог лишається, фокус на полі.
     await page.goto(`/admin/permits/types/${code}?dialog=add-rule`);
@@ -94,11 +190,13 @@ test.describe('Діалоги конструктора типу дозволу',
     await rule.getByRole('button', { name: 'Add check' }).click();
     await expect(rule).toBeHidden({ timeout: 15_000 });
     await expect(page).not.toHaveURL(/[?&]dialog=/, { timeout: 15_000 });
+    await waitForSaved(page);
+    await waitForServerDraft(page, code);
 
     // 4. Публікація: кнопка вимкнена, доки причина коротша за 10 символів.
     await page.goto(`/admin/permits/types/${code}?dialog=publish-type`);
     const publish = page.getByRole('dialog');
-    await expect(publish.getByRole('heading', { name: /Publish .* v1\?/ })).toBeVisible();
+    await expectHeading(page, code, /Publish .* v1\?/);
     await publish.getByLabel('What changed').fill('short');
     await expect(publish.getByRole('button', { name: 'Publish' })).toBeDisabled();
     await publish.getByLabel('What changed').fill('First version of the dialogs type');
