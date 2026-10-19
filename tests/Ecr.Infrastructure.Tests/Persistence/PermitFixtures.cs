@@ -67,7 +67,7 @@ internal static class PermitFixtures
 
         var result = await request.Writer.WriteAsync(
             new Ecr.Application.Registries.RegistryEntryWriteBatch(
-                table.Id, [new Ecr.Application.Registries.RegistryEntryWrite($"R{Guid.NewGuid():N}"[..12], values)]),
+                table.Id, [new Ecr.Application.Registries.RegistryEntryWrite(string.Empty, values)]),
             default);
         Assert.True(result.Applied, string.Join(";", result.Errors.Select(e => e.MessageKey)));
         return result.Rows.Single().Entry.Id;

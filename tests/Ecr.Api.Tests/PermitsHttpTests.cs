@@ -87,6 +87,48 @@ public sealed class PermitsHttpTests(SqlServerFixture sql)
         Assert.Equal("2026-12-01", (await Json(ended)).GetProperty("actualEnd").GetString());
     }
 
+    /// <summary>
+    /// Клієнт пише рядки таблиці дозволу через <c>entries/batch</c> з <c>code = null</c> (e2e 39279368294): реєстр таблиці
+    /// створюється з <c>CodeMode = Auto</c>, тож рядок записується (<c>applied</c>), а код видає послідовність.
+    /// Мутаційний доказ: прибрати <c>UseCodeMode(Auto)</c> у <c>PublishPermitTypeHandler</c> - червоніє
+    /// (<c>applied = false</c>, <c>ECR-CFG-0422 invalidCode</c>).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Рядок_таблиці_дозволу_без_коду_записується_бо_реєстр_таблиці_в_режимі_Auto()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Registry.View", "Registry.EditData", "Permit.EditType", "Permit.PublishType");
+        var type = await PublishTypeAsync(client, app);
+        var created = await client.PostAsJsonAsync(new Uri("/api/v1/permits", UriKind.Relative), Create(type, "HT-AUTO", "2026-01-01", "2027-01-01"));
+        Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");
+        var permitId = (await Json(created)).GetProperty("id").GetInt64();
+        var registry = $"PRM_{type}_Rows";
+
+        var definition = await client.GetAsync(new Uri($"/api/v1/registries/{registry}/definition", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, definition.StatusCode);
+        Assert.Equal("Auto", (await Json(definition)).GetProperty("codeMode").GetString());
+
+        var batch = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/registries/{registry}/entries/batch?dryRun=false", UriKind.Relative),
+            new
+            {
+                items = new[]
+                {
+                    new
+                    {
+                        clientRowId = "save", op = "upsert", id = (long?)null, code = (string?)null, baseVersion = (string?)null,
+                        values = new Dictionary<string, string?> { ["PERMIT"] = permitId.ToString(System.Globalization.CultureInfo.InvariantCulture), ["Name"] = "Outfall 1" },
+                    },
+                },
+            });
+        var body = await Json(batch);
+        Assert.True(batch.StatusCode == HttpStatusCode.OK && body.GetProperty("applied").GetBoolean(), $"{batch.StatusCode}: {body}\n{app.ErrorsText}");
+        Assert.Equal(1, body.GetProperty("added").GetInt32());
+        Assert.Equal(0, body.GetProperty("rows")[0].GetProperty("errors").GetArrayLength());
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Читач_читає_але_не_змінює_дозволи_а_без_права_перегляду_403()
