@@ -6,7 +6,6 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { PermitBindingPage } from '../PermitBindingPage';
 import { PermitBindingsPage } from '../PermitBindingsPage';
 import { PermitPage } from '../PermitPage';
-import { PermitsPage } from '../PermitsPage';
 import { PageDescriptionContext } from '@/shared/ui/pageDescription';
 
 /**
@@ -42,7 +41,7 @@ function showAt(path: string, route: string, element: ReactElement, descriptionK
 }
 
 const sectionPages = [
-  ['/admin/permits', <PermitsPage key="a" />, 'text of nav.permits', 'text of permits.empty.title', ['text of permits.empty.new', 'text of permits.empty.import'], 0],
+  // (Перелік дозволів — справжня сторінка PM-07, її тести: `features/permits/list/__tests__/PermitsPage.test.tsx`.)
   ['/admin/permits/bindings', <PermitBindingsPage key="d" />, 'text of permits.bindings.title', 'text of permits.bindings.empty.title', ['text of permits.bindings.new'], 3],
 ] as const;
 
@@ -77,12 +76,12 @@ describe('Permits: сторінки розділів', () => {
   });
 
   it('пояснення маршруту показується під заголовком', () => {
-    showAt('/admin/permits', '/admin/permits', <PermitsPage />, 'nav.permits.description');
-    expect(screen.getByTestId('page-description').textContent).toBe('text of nav.permits.description');
+    showAt('/admin/permits/bindings', '/admin/permits/bindings', <PermitBindingsPage />, 'permits.bindings.description');
+    expect(screen.getByTestId('page-description').textContent).toBe('text of permits.bindings.description');
   });
 
   it('ніякого «скоро буде»: порожні стани не обіцяють майбутнього', () => {
-    showAt('/admin/permits', '/admin/permits', <PermitsPage />);
+    showAt('/admin/permits/bindings', '/admin/permits/bindings', <PermitBindingsPage />);
     expect(document.body.textContent?.toLowerCase()).not.toMatch(/coming|soon|next step/);
   });
 });
