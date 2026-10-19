@@ -139,7 +139,7 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
               {typeQuery.isError ? (
                 <ErrorAlert error={typeQuery.error} onRetry={() => void typeQuery.refetch()} />
               ) : typeQuery.data === undefined ? (
-                <Skeleton height={160} aria-label={t('common.loading')} />
+                <Skeleton height={160} role="status" aria-label={t('common.loading')} />
               ) : (
                 <TableTab permit={permit} table={table} type={typeQuery.data} units={units} caps={caps} />
               )}
@@ -148,7 +148,7 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
         </Tabs>
       </Stack>
       {dialog !== null && allowedDialog(dialog, caps) && (
-        <Suspense fallback={<Skeleton height={80} aria-label={t('common.loading')} />}>
+        <Suspense fallback={<Skeleton height={80} role="status" aria-label={t('common.loading')} />}>
           <LifecycleDialogs permit={permit} dialog={dialog} onClose={closeDialog} />
         </Suspense>
       )}

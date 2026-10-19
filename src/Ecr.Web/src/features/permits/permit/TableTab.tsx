@@ -114,7 +114,7 @@ export function TableTab({ permit, table, type, units, caps }: TableTabProps): J
       </AsyncBoundary>
 
       {drawerHere && loadedRow !== undefined && (
-        <Suspense fallback={<Skeleton height={160} aria-label={t('common.loading')} />}>
+        <Suspense fallback={<Skeleton height={160} role="status" aria-label={t('common.loading')} />}>
           <RowDrawer
             key={`${panel ?? ''}-${String(drawerSerial)}`}
             permit={permit}
@@ -133,7 +133,7 @@ export function TableTab({ permit, table, type, units, caps }: TableTabProps): J
         </Suspense>
       )}
       {paste !== null && (
-        <Suspense fallback={<Skeleton height={160} aria-label={t('common.loading')} />}>
+        <Suspense fallback={<Skeleton height={160} role="status" aria-label={t('common.loading')} />}>
           <PasteDialog
             permit={permit}
             registryCode={table.registryCode}
