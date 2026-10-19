@@ -97,7 +97,9 @@ public sealed partial class PermitBindingService(
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // ⛔ Збій читання дозволу не ламає відкриття документа: екземпляр лишається порожнім із попередженням.
+                // ⛔ Збій ПЛАНУВАННЯ (вибір дозволу, читання довідників) не ламає відкриття документа: екземпляр лишається
+                // порожнім із попередженням. Це єдиний `catch` сервісу: збій ЗАПИСУ нижче (рядки, комірки, аудит) виходить
+                // назовні й відкочує транзакцію викликача разом з екземплярами.
                 if (log is not null)
                 {
                     LogPlanFailed(log, ex, view.Binding.Code, documentId);
