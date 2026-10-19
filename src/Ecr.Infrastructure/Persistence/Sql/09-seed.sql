@@ -8866,6 +8866,65 @@ USING (VALUES
     ,(N'permits.page.done.renewed', N'en', N'Renewal created as a draft', 1)
     ,(N'permits.page.done.deleted', N'en', N'Draft {number} deleted', 1)
     -- PERMITS: ui-page ── кінець секції ──
+    -- PERMITS: ui-bindings ── en: перелік і екран прив'язок аркушів до пермітів (читання); ru/kz — порцією PERMITS: ui-bindings нижче ──
+    ,(N'permits.bindingsList.createHint', N'en', N'Bindings belong to a template version. They are created and changed on the Permit tab of the template version; this page only lists them.', 1)
+    ,(N'permits.bindingsList.stats.aria', N'en', N'Binding totals', 1)
+    ,(N'permits.bindingsList.stat.all', N'en', N'bindings', 1)
+    ,(N'permits.bindingsList.stat.rows', N'en', N'fill rows', 1)
+    ,(N'permits.bindingsList.stat.draft', N'en', N'in a draft template', 1)
+    ,(N'permits.bindingsList.search.label', N'en', N'Search bindings', 1)
+    ,(N'permits.bindingsList.search.placeholder', N'en', N'Code, sheet table, permit type or template', 1)
+    ,(N'permits.bindingsList.filter.mode', N'en', N'Modes', 1)
+    ,(N'permits.bindingsList.col.target', N'en', N'Sheet table', 1)
+    ,(N'permits.bindingsList.col.reads', N'en', N'Reads', 1)
+    ,(N'permits.bindingsList.col.how', N'en', N'How', 1)
+    ,(N'permits.bindingsList.col.pick', N'en', N'Which permit', 1)
+    ,(N'permits.bindingsList.col.template', N'en', N'Template', 1)
+    ,(N'permits.bindingsList.col.state', N'en', N'Version', 1)
+    ,(N'permits.bindingsList.mode.Rows', N'en', N'Rows from the permit', 1)
+    ,(N'permits.bindingsList.mode.Formulas', N'en', N'Formulas only', 1)
+    ,(N'permits.bindingsList.rule.ByFacilityPeriodEnd', N'en', N'Permit valid at period end, same location', 1)
+    ,(N'permits.bindingsList.rule.FromHeaderLookup', N'en', N'Chosen in a header cell on the sheet', 1)
+    ,(N'permits.bindingsList.inactive', N'en', N'Inactive', 1)
+    ,(N'permits.bindingsList.empty.title', N'en', N'No bindings yet', 1)
+    ,(N'permits.bindingsList.empty.hint', N'en', N'None of the checked template versions binds a sheet table to a permit. Open a template version and add a binding on its Permit tab.', 1)
+    ,(N'permits.bindingsList.noMatches', N'en', N'No bindings match the filters', 1)
+    ,(N'permits.bindingsList.noAccess.title', N'en', N'Bindings are not available to you', 1)
+    ,(N'permits.bindingsList.noAccess.hint', N'en', N'Reading bindings needs the Template.View permission. Ask an administrator to grant it.', 1)
+    ,(N'permits.bindingsList.scan.progress', N'en', N'Checked {checked} of {total} templates. Read {settled} of {versions} template versions so far.', 1)
+    ,(N'permits.bindingsList.scan.done', N'en', N'Checked {checked} of {total} templates ({versions} published or draft versions).', 1)
+    ,(N'permits.bindingsList.scan.truncated', N'en', N'The server lists only the first 100 templates.', 1)
+    ,(N'permits.bindingsList.scan.more', N'en', N'Check {count} more templates', 1)
+    ,(N'permits.bindingsList.failed.title', N'en', N'{count} template versions could not be read, so their bindings are missing from the list', 1)
+    ,(N'permits.bindingsList.failed.retry', N'en', N'Try again', 1)
+    ,(N'permits.bindingView.incomplete.title', N'en', N'This link is incomplete', 1)
+    ,(N'permits.bindingView.incomplete.hint', N'en', N'A binding is found by its code inside a template version. Open it from the list of sheet bindings.', 1)
+    ,(N'permits.bindingView.readOnly', N'en', N'This page only shows the binding. Change it on the Permit tab of the template version.', 1)
+    ,(N'permits.bindingView.openTemplate', N'en', N'Open the template', 1)
+    ,(N'permits.bindingView.reads', N'en', N'reads', 1)
+    ,(N'permits.bindingView.fact.template', N'en', N'Template', 1)
+    ,(N'permits.bindingView.fact.version', N'en', N'Version', 1)
+    ,(N'permits.bindingView.fact.mode', N'en', N'How', 1)
+    ,(N'permits.bindingView.fact.pick', N'en', N'Which permit', 1)
+    ,(N'permits.bindingView.fact.header', N'en', N'Header field', 1)
+    ,(N'permits.bindingView.fact.active', N'en', N'State', 1)
+    ,(N'permits.bindingView.active.true', N'en', N'Active', 1)
+    ,(N'permits.bindingView.active.false', N'en', N'Inactive', 1)
+    ,(N'permits.bindingView.mapping.title', N'en', N'Column mapping', 1)
+    ,(N'permits.bindingView.mapping.empty', N'en', N'No columns are mapped.', 1)
+    ,(N'permits.bindingView.col.sheet', N'en', N'Sheet column', 1)
+    ,(N'permits.bindingView.col.permit', N'en', N'Permit column', 1)
+    ,(N'permits.bindingView.col.role', N'en', N'Role', 1)
+    ,(N'permits.bindingView.col.onSheet', N'en', N'On the sheet', 1)
+    ,(N'permits.bindingView.role.RowKey', N'en', N'Row key', 1)
+    ,(N'permits.bindingView.role.Limit', N'en', N'Limit', 1)
+    ,(N'permits.bindingView.role.Info', N'en', N'Info', 1)
+    ,(N'permits.bindingView.roleNote.RowKey', N'en', N'Locked, one sheet row per permit row', 1)
+    ,(N'permits.bindingView.roleNote.Limit', N'en', N'Locked, actuals are compared with it', 1)
+    ,(N'permits.bindingView.roleNote.Info', N'en', N'Locked, shown for reference', 1)
+    ,(N'permits.bindingView.formulas.title', N'en', N'Formulas the sheet can use', 1)
+    ,(N'permits.bindingView.formulas.note', N'en', N'Cells of this table call the permit with the same functions used for registries. The permit that applies is chosen in a header cell of the sheet.', 1)
+    -- PERMITS: ui-bindings ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -22828,6 +22887,128 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: ui-page ── кінець секції ──
+-- PERMITS: ui-bindings ── ru/kz: перелік і екран прив'язок аркушів до пермітів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.bindingsList.createHint', N'ru', N'Привязки принадлежат версии шаблона. Их создают и меняют на вкладке Permit версии шаблона; эта страница только показывает их.'),
+    (N'permits.bindingsList.createHint', N'kz', N'Байланыстар шаблон нұсқасына тиесілі. Оларды шаблон нұсқасының Permit қойындысында жасайды және өзгертеді; бұл бет оларды тек көрсетеді.'),
+    (N'permits.bindingsList.stats.aria', N'ru', N'Итоги по привязкам'),
+    (N'permits.bindingsList.stats.aria', N'kz', N'Байланыстар бойынша қорытынды'),
+    (N'permits.bindingsList.stat.all', N'ru', N'привязок'),
+    (N'permits.bindingsList.stat.all', N'kz', N'байланыс'),
+    (N'permits.bindingsList.stat.rows', N'ru', N'заполняют строки'),
+    (N'permits.bindingsList.stat.rows', N'kz', N'жолдарды толтырады'),
+    (N'permits.bindingsList.stat.draft', N'ru', N'в черновике шаблона'),
+    (N'permits.bindingsList.stat.draft', N'kz', N'шаблон жобасында'),
+    (N'permits.bindingsList.search.label', N'ru', N'Поиск привязок'),
+    (N'permits.bindingsList.search.label', N'kz', N'Байланыстарды іздеу'),
+    (N'permits.bindingsList.search.placeholder', N'ru', N'Код, таблица листа, тип разрешения или шаблон'),
+    (N'permits.bindingsList.search.placeholder', N'kz', N'Код, парақ кестесі, рұқсат түрі немесе шаблон'),
+    (N'permits.bindingsList.filter.mode', N'ru', N'Режимы'),
+    (N'permits.bindingsList.filter.mode', N'kz', N'Режимдер'),
+    (N'permits.bindingsList.col.target', N'ru', N'Таблица листа'),
+    (N'permits.bindingsList.col.target', N'kz', N'Парақ кестесі'),
+    (N'permits.bindingsList.col.reads', N'ru', N'Читает'),
+    (N'permits.bindingsList.col.reads', N'kz', N'Оқиды'),
+    (N'permits.bindingsList.col.how', N'ru', N'Как'),
+    (N'permits.bindingsList.col.how', N'kz', N'Қалай'),
+    (N'permits.bindingsList.col.pick', N'ru', N'Какое разрешение'),
+    (N'permits.bindingsList.col.pick', N'kz', N'Қай рұқсат'),
+    (N'permits.bindingsList.col.template', N'ru', N'Шаблон'),
+    (N'permits.bindingsList.col.template', N'kz', N'Шаблон'),
+    (N'permits.bindingsList.col.state', N'ru', N'Версия'),
+    (N'permits.bindingsList.col.state', N'kz', N'Нұсқа'),
+    (N'permits.bindingsList.mode.Rows', N'ru', N'Строки из разрешения'),
+    (N'permits.bindingsList.mode.Rows', N'kz', N'Рұқсаттан алынған жолдар'),
+    (N'permits.bindingsList.mode.Formulas', N'ru', N'Только формулы'),
+    (N'permits.bindingsList.mode.Formulas', N'kz', N'Тек формулалар'),
+    (N'permits.bindingsList.rule.ByFacilityPeriodEnd', N'ru', N'Разрешение, действующее на конец периода, тот же объект'),
+    (N'permits.bindingsList.rule.ByFacilityPeriodEnd', N'kz', N'Кезең соңында қолданылатын рұқсат, сол нысан'),
+    (N'permits.bindingsList.rule.FromHeaderLookup', N'ru', N'Выбирается в ячейке шапки листа'),
+    (N'permits.bindingsList.rule.FromHeaderLookup', N'kz', N'Парақ тақырыбының ұяшығында таңдалады'),
+    (N'permits.bindingsList.inactive', N'ru', N'Не действует'),
+    (N'permits.bindingsList.inactive', N'kz', N'Қолданыста емес'),
+    (N'permits.bindingsList.empty.title', N'ru', N'Привязок пока нет'),
+    (N'permits.bindingsList.empty.title', N'kz', N'Байланыстар әлі жоқ'),
+    (N'permits.bindingsList.empty.hint', N'ru', N'Ни одна из проверенных версий шаблонов не связывает таблицу листа с разрешением. Откройте версию шаблона и добавьте привязку на вкладке Permit.'),
+    (N'permits.bindingsList.empty.hint', N'kz', N'Тексерілген шаблон нұсқаларының ешқайсысы парақ кестесін рұқсатпен байланыстырмайды. Шаблон нұсқасын ашып, Permit қойындысында байланыс қосыңыз.'),
+    (N'permits.bindingsList.noMatches', N'ru', N'Нет привязок, подходящих под фильтры'),
+    (N'permits.bindingsList.noMatches', N'kz', N'Сүзгілерге сәйкес байланыс жоқ'),
+    (N'permits.bindingsList.noAccess.title', N'ru', N'Привязки вам недоступны'),
+    (N'permits.bindingsList.noAccess.title', N'kz', N'Байланыстар сізге қолжетімсіз'),
+    (N'permits.bindingsList.noAccess.hint', N'ru', N'Чтение привязок требует права Template.View. Попросите администратора выдать его.'),
+    (N'permits.bindingsList.noAccess.hint', N'kz', N'Байланыстарды оқу үшін Template.View құқығы керек. Әкімшіден беруді сұраңыз.'),
+    (N'permits.bindingsList.scan.progress', N'ru', N'Проверено шаблонов: {checked} из {total}. Прочитано версий шаблонов: {settled} из {versions}.'),
+    (N'permits.bindingsList.scan.progress', N'kz', N'Тексерілген шаблондар: {checked} / {total}. Оқылған шаблон нұсқалары: {settled} / {versions}.'),
+    (N'permits.bindingsList.scan.done', N'ru', N'Проверено шаблонов: {checked} из {total} (опубликованных и черновых версий: {versions}).'),
+    (N'permits.bindingsList.scan.done', N'kz', N'Тексерілген шаблондар: {checked} / {total} (жарияланған және жоба нұсқалар: {versions}).'),
+    (N'permits.bindingsList.scan.truncated', N'ru', N'Сервер отдаёт только первые 100 шаблонов.'),
+    (N'permits.bindingsList.scan.truncated', N'kz', N'Сервер тек алғашқы 100 шаблонды береді.'),
+    (N'permits.bindingsList.scan.more', N'ru', N'Проверить ещё шаблонов: {count}'),
+    (N'permits.bindingsList.scan.more', N'kz', N'Тағы {count} шаблонды тексеру'),
+    (N'permits.bindingsList.failed.title', N'ru', N'Не удалось прочитать версий шаблонов: {count}, их привязок нет в списке'),
+    (N'permits.bindingsList.failed.title', N'kz', N'Шаблон нұсқаларын оқу мүмкін болмады: {count}, олардың байланыстары тізімде жоқ'),
+    (N'permits.bindingsList.failed.retry', N'ru', N'Повторить'),
+    (N'permits.bindingsList.failed.retry', N'kz', N'Қайталау'),
+    (N'permits.bindingView.incomplete.title', N'ru', N'Ссылка неполная'),
+    (N'permits.bindingView.incomplete.title', N'kz', N'Сілтеме толық емес'),
+    (N'permits.bindingView.incomplete.hint', N'ru', N'Привязка ищется по коду внутри версии шаблона. Откройте её из списка привязок листов.'),
+    (N'permits.bindingView.incomplete.hint', N'kz', N'Байланыс шаблон нұсқасының ішінде коды бойынша ізделеді. Оны парақ байланыстарының тізімінен ашыңыз.'),
+    (N'permits.bindingView.readOnly', N'ru', N'Эта страница только показывает привязку. Меняйте её на вкладке Permit версии шаблона.'),
+    (N'permits.bindingView.readOnly', N'kz', N'Бұл бет байланысты тек көрсетеді. Оны шаблон нұсқасының Permit қойындысында өзгертіңіз.'),
+    (N'permits.bindingView.openTemplate', N'ru', N'Открыть шаблон'),
+    (N'permits.bindingView.openTemplate', N'kz', N'Шаблонды ашу'),
+    (N'permits.bindingView.reads', N'ru', N'читает'),
+    (N'permits.bindingView.reads', N'kz', N'оқиды'),
+    (N'permits.bindingView.fact.template', N'ru', N'Шаблон'),
+    (N'permits.bindingView.fact.template', N'kz', N'Шаблон'),
+    (N'permits.bindingView.fact.version', N'ru', N'Версия'),
+    (N'permits.bindingView.fact.version', N'kz', N'Нұсқа'),
+    (N'permits.bindingView.fact.mode', N'ru', N'Как'),
+    (N'permits.bindingView.fact.mode', N'kz', N'Қалай'),
+    (N'permits.bindingView.fact.pick', N'ru', N'Какое разрешение'),
+    (N'permits.bindingView.fact.pick', N'kz', N'Қай рұқсат'),
+    (N'permits.bindingView.fact.header', N'ru', N'Поле шапки'),
+    (N'permits.bindingView.fact.header', N'kz', N'Тақырып өрісі'),
+    (N'permits.bindingView.fact.active', N'ru', N'Состояние'),
+    (N'permits.bindingView.fact.active', N'kz', N'Күйі'),
+    (N'permits.bindingView.active.true', N'ru', N'Действует'),
+    (N'permits.bindingView.active.true', N'kz', N'Қолданыста'),
+    (N'permits.bindingView.active.false', N'ru', N'Не действует'),
+    (N'permits.bindingView.active.false', N'kz', N'Қолданыста емес'),
+    (N'permits.bindingView.mapping.title', N'ru', N'Сопоставление колонок'),
+    (N'permits.bindingView.mapping.title', N'kz', N'Бағандарды сәйкестендіру'),
+    (N'permits.bindingView.mapping.empty', N'ru', N'Колонки не сопоставлены.'),
+    (N'permits.bindingView.mapping.empty', N'kz', N'Бағандар сәйкестендірілмеген.'),
+    (N'permits.bindingView.col.sheet', N'ru', N'Колонка листа'),
+    (N'permits.bindingView.col.sheet', N'kz', N'Парақ бағаны'),
+    (N'permits.bindingView.col.permit', N'ru', N'Колонка разрешения'),
+    (N'permits.bindingView.col.permit', N'kz', N'Рұқсат бағаны'),
+    (N'permits.bindingView.col.role', N'ru', N'Роль'),
+    (N'permits.bindingView.col.role', N'kz', N'Рөлі'),
+    (N'permits.bindingView.col.onSheet', N'ru', N'На листе'),
+    (N'permits.bindingView.col.onSheet', N'kz', N'Парақта'),
+    (N'permits.bindingView.role.RowKey', N'ru', N'Ключ строки'),
+    (N'permits.bindingView.role.RowKey', N'kz', N'Жол кілті'),
+    (N'permits.bindingView.role.Limit', N'ru', N'Лимит'),
+    (N'permits.bindingView.role.Limit', N'kz', N'Лимит'),
+    (N'permits.bindingView.role.Info', N'ru', N'Справочно'),
+    (N'permits.bindingView.role.Info', N'kz', N'Анықтама үшін'),
+    (N'permits.bindingView.roleNote.RowKey', N'ru', N'Заблокировано, одна строка листа на строку разрешения'),
+    (N'permits.bindingView.roleNote.RowKey', N'kz', N'Бұғатталған, рұқсаттың әр жолына парақтың бір жолы'),
+    (N'permits.bindingView.roleNote.Limit', N'ru', N'Заблокировано, с ним сравниваются фактические значения'),
+    (N'permits.bindingView.roleNote.Limit', N'kz', N'Бұғатталған, нақты мәндер онымен салыстырылады'),
+    (N'permits.bindingView.roleNote.Info', N'ru', N'Заблокировано, показывается для справки'),
+    (N'permits.bindingView.roleNote.Info', N'kz', N'Бұғатталған, анықтама үшін көрсетіледі'),
+    (N'permits.bindingView.formulas.title', N'ru', N'Формулы, доступные листу'),
+    (N'permits.bindingView.formulas.title', N'kz', N'Парақ қолдана алатын формулалар'),
+    (N'permits.bindingView.formulas.note', N'ru', N'Ячейки этой таблицы обращаются к разрешению теми же функциями, что и для реестров. Применяемое разрешение выбирается в ячейке шапки листа.'),
+    (N'permits.bindingView.formulas.note', N'kz', N'Бұл кестенің ұяшықтары рұқсатқа тізілімдермен бірдей функциялар арқылы жүгінеді. Қолданылатын рұқсат парақ тақырыбының ұяшығында таңдалады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: ui-bindings ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
