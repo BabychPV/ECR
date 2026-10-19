@@ -47,6 +47,10 @@ function readText(file: File): Promise<string> {
 
 function issueText(issue: ImportIssue, labelOf: (code: string) => string): string {
   if (issue.reason === 'limit') return t('permits.page.paste.issueLimit', { max: MaxPastedRows });
+  if (issue.reason === 'duplicateKey') {
+    const columns = issue.column.split(',').map(labelOf).join(' + ');
+    return `${t('permits.page.paste.issueWhere', { row: issue.row, column: columns })}: ${t('permits.page.row.duplicate', { columns })}`;
+  }
   const where = t('permits.page.paste.issueWhere', { row: issue.row, column: labelOf(issue.column) });
   switch (issue.reason) {
     case 'number':
