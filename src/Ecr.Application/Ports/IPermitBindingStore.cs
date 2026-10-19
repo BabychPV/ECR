@@ -20,6 +20,13 @@ public sealed record PermitBindingView(
     string? HeaderFieldCode,
     IReadOnlyDictionary<int, string> SheetColumnCodes);
 
+/// <summary>Легка ознака прив'язки для екрана документа (PM-11b): лише наявність, режим і коди - без даних дозволу.</summary>
+/// <param name="SheetTableDefId">Таблиця аркуша.</param>
+/// <param name="Code">Код прив'язки.</param>
+/// <param name="Mode">Режим: <c>Rows</c> або <c>Formulas</c>.</param>
+/// <param name="PermitTypeCode">Код типу дозволу.</param>
+public sealed record PermitBindingSummary(int SheetTableDefId, string Code, string Mode, string PermitTypeCode);
+
 /// <summary>Доступ до прив'язок таблиць аркуша до дозволів (Permits, PM-09).</summary>
 /// <remarks>
 /// ⚠ Каскаду від прив'язки до колонок у схемі немає (усі FK - Restrict): колонки видаляє той, хто видаляє прив'язку,
@@ -44,6 +51,14 @@ public interface IPermitBindingStore
     /// <param name="sheetTableDefIds">Таблиці аркуша.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<PermitBindingView>> ListActiveRowsAsync(IReadOnlyCollection<int> sheetTableDefIds, CancellationToken ct);
+
+    /// <summary>
+    /// Чинні (<c>IsActive</c>) прив'язки версії в порядку коду, без колонок і довідників - ОДИН запит (з'єднання з типом
+    /// дозволу заради його коду). Для переліку таблиць документа: версія - власна версія документа, не поточна версія проєкту.
+    /// </summary>
+    /// <param name="templateVersionId">Версія шаблону.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<PermitBindingSummary>> ListActiveSummariesAsync(int templateVersionId, CancellationToken ct);
 
     /// <summary>Прив'язка версії за кодом (без відстеження); <c>null</c> - немає.</summary>
     /// <param name="templateVersionId">Версія шаблону.</param>
