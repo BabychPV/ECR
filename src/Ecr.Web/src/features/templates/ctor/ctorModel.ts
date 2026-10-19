@@ -43,7 +43,7 @@ export type CtorNode =
   | { readonly kind: 'sheet'; readonly code: string }
   | { readonly kind: 'table'; readonly id: number };
 
-export const CtorTabs = ['columns', 'rows', 'formulas', 'rules', 'preview'] as const;
+export const CtorTabs = ['columns', 'rows', 'formulas', 'rules', 'preview', 'permit'] as const;
 export type CtorTab = (typeof CtorTabs)[number];
 
 export function nodeParam(node: CtorNode): string {

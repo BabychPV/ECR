@@ -55,6 +55,12 @@ public sealed class PublishPermitTypeTests(SqlServerFixture sql)
         // Таблиця Limits: композиція на шапку, ключ = PERMIT + позначені стовпці, нетемпоральна.
         var limits = await TableAsync(read, type, "Limits");
         Assert.False(limits.IsTemporal);
+
+        // Рядки таблиці пише клієнт без коду (entries/batch): код видає послідовність. Шапка лишається ручною
+        // (код запису шапки задає PermitDraftWriter), список «лише для типу» теж.
+        Assert.Equal(RegistryCodeMode.Auto, limits.CodeMode);
+        Assert.Equal(RegistryCodeMode.Auto, (await TableAsync(read, type, "Places")).CodeMode);
+        Assert.Equal(RegistryCodeMode.Manual, header.CodeMode);
         var permit = Assert.Single(limits.Fields, f => f.RelationKind == RegistryRelationKind.Composition);
         Assert.Equal((PermitTypeStatus.Published, header.Id), (type.Status, permit.RefRegistryDefId!.Value));
         Assert.Equal(["PERMIT", "Place", "Period"], await PrimaryKeyAsync(read, limits));
@@ -236,6 +242,16 @@ public sealed class PublishPermitTypeTests(SqlServerFixture sql)
             before = await FieldIdsAsync(snapshot, Code("WASTE"));
         }
 
+        // Тип, опублікований ДО появи Auto для таблиць, лишається в Manual: нова версія режим наявного реєстру не чіпає
+        // (режим ставиться лише при створенні реєстру таблиці). Емулюємо його: Limits -> Manual.
+        await using (var legacy = await h.NextRequestAsync())
+        {
+            var legacyType = (await legacy.Permits.FindByCodeAsync(Code("WASTE"), default))!;
+            Assert.Equal(RegistryCodeMode.Auto, (await TableAsync(legacy, legacyType, "Limits")).CodeMode);
+            (await TableAsync(legacy, legacyType, "Limits")).UseCodeMode(RegistryCodeMode.Manual);
+            await legacy.Uow.SaveChangesAsync(default);
+        }
+
         await using var open = await h.NextRequestAsync();
         var opened = await open.OpenVersion.HandleAsync(Code("WASTE"), default);
         Assert.Equal(("Published", 1, (int?)2, true), (opened.Status, opened.Version, opened.DraftVersion, opened.HasUnpublishedChanges));
@@ -269,6 +285,10 @@ public sealed class PublishPermitTypeTests(SqlServerFixture sql)
         Assert.True(after.Limits.ContainsKey("Notes"));
         Assert.Equal(before.ListEntryIds, after.ListEntryIds);
         Assert.Equal(before.PrimaryKey, after.PrimaryKey);
+
+        var afterType = (await read.Permits.FindByCodeAsync(Code("WASTE"), default))!;
+        Assert.Equal(RegistryCodeMode.Manual, (await TableAsync(read, afterType, "Limits")).CodeMode);
+        Assert.Equal(RegistryCodeMode.Auto, (await TableAsync(read, afterType, "Places")).CodeMode);
     }
 
     [Fact]

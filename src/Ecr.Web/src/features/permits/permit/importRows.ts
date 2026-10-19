@@ -1,0 +1,330 @@
+import { serverMessage } from '@/features/registries/rc816/serverMessage';
+import { saveBatch, type RegistryBatchItem } from '@/features/registries/rows/api';
+import type { PermitCellValue } from '../lib/columns';
+import { canonicalKey, type KeyPart, type KeyPartType } from '@/features/registries/keys/normalizeKey';
+import { parsePastedRows } from '../lib/pasteRows';
+import { newRowItem, type PermitField, type PickerData, pickerOptions } from './model';
+
+/*
+ * Вставка з Excel і імпорт файлу в таблицю дозволу (PM-07).
+ *
+ * ⚠ Окремого «пакетного» ендпоінта рядків дозволу немає: рядки пишуться наявним `entries/batch` довідника таблиці
+ * (до 2000 рядків за виклик). Тут блок розбирається `parsePastedRows` (PM-06), зіставляється з пікерами й іде
+ * шматками по {@link ImportChunk} рядків. Кожен шматок атомарний (`applied: false` = не записано нічого).
+ *
+ * ⛔ Рішення 19.10: «все або нічого». Зауваження розбору, понад 5000 рядків (`MaxPastedRows`) чи відмова сервера на
+ * перевірці блокують ВЕСЬ запис; перевірка всіх шматків йде ДО першого запису. Єдиний виняток, якого клієнт не
+ * контролює, - відмова середнього шматка під час запису через одночасну зміну іншим користувачем (реальна гонитва):
+ * це `stopped` і відома межа. Дублі ключа всередині файлу ловить `planImport` до будь-якого запису.
+ */
+
+/** Рядків за один виклик `entries/batch` (межа сервера — 2000). */
+export const ImportChunk = 500;
+
+export type ImportIssueReason = 'number' | 'bool' | 'date' | 'limit' | 'integer' | 'unknownValue' | 'duplicateKey';
+
+/** Клітинка, яку не вдалось прочитати: рядок вставки (з 1), стовпець, сирий текст. */
+export interface ImportIssue {
+  readonly row: number;
+  readonly column: string;
+  readonly text: string;
+  readonly reason: ImportIssueReason;
+}
+
+export interface ImportRow {
+  /** Номер рядка вставки (з 1, без порожніх). */
+  readonly index: number;
+  readonly item: RegistryBatchItem;
+  /** Рядок прочитано без зауважень. */
+  readonly clean: boolean;
+}
+
+export interface ImportPlan {
+  readonly rows: readonly ImportRow[];
+  readonly issues: readonly ImportIssue[];
+  /** Клітинок правіше за останній стовпець таблиці (відкинуто). */
+  readonly extraCells: number;
+}
+
+function isoText(value: PermitCellValue): string {
+  if (value === null || value === undefined) return '';
+  return typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value);
+}
+
+/**
+ * Блок тексту → пакет нових рядків. Рядок із нерозпізнаною клітинкою (`number`, `bool`, `date`, значення, якого
+ * немає у списку) НЕ додається мовчки з порожньою клітинкою: він лишається в плані як «з зауваженням» і на запис не
+ * йде, поки текст не виправлено.
+ */
+export function planImport(
+  text: string,
+  fields: readonly PermitField[],
+  picker: PickerData,
+  permitId: number,
+  skipHeader: boolean,
+  ignoreCase = true,
+): ImportPlan {
+  const body = skipHeader ? text.replace(/\r\n?/g, '\n').split('\n').slice(1).join('\n') : text;
+  const parsed = parsePastedRows(body, fields.map((field) => field.column));
+  const issues: ImportIssue[] = parsed.issues.map((issue) => ({ ...issue }));
+  const bad = new Set<number>(parsed.issues.map((issue) => issue.row));
+
+  // Підпис → id для кожного пікера, без урахування регістру й крайніх пробілів.
+  const idByLabel = new Map<string, Map<string, string>>();
+  for (const field of fields) {
+    if (field.column.type !== 'choice' && field.column.type !== 'link') continue;
+    idByLabel.set(
+      field.column.code,
+      new Map(pickerOptions(field, picker).map((option) => [option.label.trim().toLowerCase(), option.value])),
+    );
+  }
+
+  const rows: ImportRow[] = parsed.rows.map((row, position) => {
+    const index = position + 1;
+    const form: Record<string, string> = {};
+
+    for (const field of fields) {
+      const { column } = field;
+      const value = row.values[column.code];
+      let cell = isoText(value);
+
+      const labels = idByLabel.get(column.code);
+      if (labels !== undefined && cell !== '') {
+        const id = labels.get(cell.trim().toLowerCase());
+        if (id === undefined) {
+          issues.push({ row: index, column: column.code, text: cell, reason: 'unknownValue' });
+          bad.add(index);
+          cell = '';
+        } else {
+          cell = id;
+        }
+      }
+
+      if (column.type === 'number' && field.source.dataType === 'Int' && typeof value === 'number' && !Number.isInteger(value)) {
+        issues.push({ row: index, column: column.code, text: String(value), reason: 'integer' });
+        bad.add(index);
+      }
+      form[column.code] = cell;
+    }
+
+    return { index, item: newRowItem(`row-${String(index)}`, permitId, fields, form), clean: !bad.has(index) };
+  });
+
+  markDuplicateKeys(rows, fields, issues, bad, ignoreCase);
+
+  return {
+    rows: rows.map((row) => (bad.has(row.index) && row.clean ? { ...row, clean: false } : row)),
+    issues,
+    extraCells: parsed.extraCells,
+  };
+}
+
+/**
+ * Дублі складеного ключа ВСЕРЕДИНІ файлу (по всій партії, а не по шматках): `dryRun` кожного шматка бачить лише базу
+ * й власний шматок, тож дубль між рядками 1 і 501 пройшов би перевірку й упав би на записі другого шматка.
+ * Ключ - значення стовпців із `key` у вигляді пакета, зведені тим самим `canonicalKey` (`registries/keys/normalizeKey.ts`,
+ * двійник серверного `RegistryKeyNormalizer` на спільній фікстурі), що й сітка довідників: типи полів ключа
+ * (число, логічне, дата, `Lookup`-id, текст з NFC, згорнутими й обрізаними пробілами), регістр - за `ignoreCase`.
+ * Поле композиції `PERMIT` в усіх рядків однакове, тож у порівнянні не бере участі.
+ * ⚠ `ignoreCase`: у даних клієнта (DTO типу дозволу) його немає. Сервер створює первинний ключ реєстру `PRM_*` при
+ * публікації типу з `IgnoreCase = true` і лишає наявний як є (`PublishPermitTypeHandler.KeysAsync`), тож дефолт `true`.
+ * Рядок із порожньою частиною ключа (`canonicalKey` = `null`) не рахується: це «обовʼязкове поле», його називає сервер.
+ * Значення, що не вкладається в тип ключа (`canonicalKey` кидає), теж не рахується: його назве перевірка комірки.
+ * Зауваження ставиться на ОБИДВА рядки пари (і на всі рядки групи).
+ */
+function markDuplicateKeys(
+  rows: readonly ImportRow[],
+  fields: readonly PermitField[],
+  issues: ImportIssue[],
+  bad: Set<number>,
+  ignoreCase: boolean,
+): void {
+  const keyFields = fields.filter((field) => field.column.key === true);
+  if (keyFields.length === 0) return;
+  const keys = keyFields.map((field) => field.column.code);
+
+  const groups = new Map<string, number[]>();
+  for (const row of rows) {
+    const parts = keyFields.map((field): KeyPart => {
+      const raw = row.item.values?.[field.column.code];
+      const value = typeof raw === 'string' ? raw : null;
+      const type = keyPartType(field.source.dataType);
+      return { type, value: type === 'Bool' && typeof value === 'string' ? value === 'true' : value };
+    });
+
+    let canonical: string | null;
+    try {
+      canonical = canonicalKey(parts, ignoreCase);
+    } catch {
+      // Значення не того типу, що ключ: це зауваження комірки (`number`/`date`...), а не дубль.
+      continue;
+    }
+    if (canonical === null) continue;
+    groups.set(canonical, [...(groups.get(canonical) ?? []), row.index]);
+  }
+
+  for (const indexes of groups.values()) {
+    if (indexes.length < 2) continue;
+    for (const index of indexes) {
+      const raw = keys.map((code) => rows.find((row) => row.index === index)?.item.values?.[code] ?? '');
+      issues.push({ row: index, column: keys.join(','), text: raw.join(' + '), reason: 'duplicateKey' });
+      bad.add(index);
+    }
+  }
+}
+
+/** Тип стовпця дозволу → тип частини ключа; невідомий тип порівнюється як текст. */
+function keyPartType(dataType: string): KeyPartType {
+  switch (dataType) {
+    case 'Int':
+    case 'Decimal':
+    case 'Bool':
+    case 'Date':
+    case 'Lookup':
+      return dataType;
+    default:
+      return 'String';
+  }
+}
+
+/** Рядок плану, що не пройшов перевірку сервера, і чому. */
+export interface RowFailure {
+  readonly index: number;
+  readonly messages: readonly string[];
+}
+
+export interface BatchRun {
+  /** Скільки рядків записано (для прогону `dryRun` — скільки пройшло б). */
+  readonly ok: number;
+  readonly failures: readonly RowFailure[];
+  /** Прогін обірвано відмовою шматка під час запису (лише реальна гонитва: чужа зміна між перевіркою й записом; дублі всередині файлу ловить `planImport`). */
+  readonly stopped: boolean;
+  /** Скільки шматків записано до зупинки. */
+  readonly chunksWritten: number;
+  /** Перевірка ВСІХ шматків перед записом відхилила рядки: не записано нічого. */
+  readonly refused: boolean;
+}
+
+/** Межа розміру CSV-файлу, байт (5 МБ): більший не читається. */
+export const MaxImportFileMb = 5;
+export const MaxImportFileBytes = MaxImportFileMb * 1024 * 1024;
+
+/** План можна перевіряти й писати лише цілком: жодного зауваження, зайвих клітинок і хоч один рядок. */
+export function isPlanClean(plan: ImportPlan): boolean {
+  return plan.rows.length > 0 && plan.issues.length === 0 && plan.extraCells === 0;
+}
+
+/** Один прохід усіма шматками з `dryRun`: помилки рядків за номерами плану. */
+async function sweepDryRun(
+  code: string,
+  rows: readonly ImportRow[],
+  byClient: ReadonlyMap<string, number>,
+  onProgress: (done: number) => void,
+): Promise<{ ok: number; failures: RowFailure[] }> {
+  const failures: RowFailure[] = [];
+  let ok = 0;
+  for (let start = 0; start < rows.length; start += ImportChunk) {
+    const chunk = rows.slice(start, start + ImportChunk);
+    const result = await saveBatch(code, chunk.map((row) => row.item), true);
+    failures.push(
+      ...result.rows
+        .filter((row) => row.errors.length > 0)
+        .map((row) => ({
+          index: byClient.get(row.clientRowId) ?? 0,
+          messages: row.errors.map((error) => serverMessage(error.messageKey, error.params)),
+        })),
+    );
+    ok += result.rows.filter((row) => row.errors.length === 0).length;
+    onProgress(start + chunk.length);
+  }
+  return { ok, failures };
+}
+
+/**
+ * «Все або нічого» (рішення 19.10). `dryRun` проходить усі шматки й збирає помилки рядків. Справжній запис СПЕРШУ
+ * проганяє `dryRun` усіх шматків і, якщо сервер відхилив хоч один рядок, не пише нічого (`refused`); лише чиста
+ * перевірка відкриває запис шматками. Відмова середнього шматка вже під час запису (гонитва з чужою правкою) —
+ * `stopped`: попередні шматки лишаються, це відома межа (FEATURE-PERMITS.md).
+ */
+export async function runImport(
+  code: string,
+  rows: readonly ImportRow[],
+  dryRun: boolean,
+  onProgress: (done: number, total: number) => void,
+): Promise<BatchRun> {
+  const byClient = new Map(rows.map((row) => [row.item.clientRowId, row.index]));
+  const total = dryRun ? rows.length : rows.length * 2;
+
+  const verified = await sweepDryRun(code, rows, byClient, (done) => onProgress(done, total));
+  if (dryRun) return { ok: verified.ok, failures: verified.failures, stopped: false, chunksWritten: 0, refused: false };
+  if (verified.failures.length > 0) {
+    return { ok: 0, failures: verified.failures, stopped: false, chunksWritten: 0, refused: true };
+  }
+
+  let ok = 0;
+  let chunksWritten = 0;
+  for (let start = 0; start < rows.length; start += ImportChunk) {
+    const chunk = rows.slice(start, start + ImportChunk);
+    const result = await saveBatch(code, chunk.map((row) => row.item), false);
+    onProgress(rows.length + start + chunk.length, total);
+    if (!result.applied) {
+      const failures = result.rows
+        .filter((row) => row.errors.length > 0)
+        .map((row) => ({
+          index: byClient.get(row.clientRowId) ?? 0,
+          messages: row.errors.map((error) => serverMessage(error.messageKey, error.params)),
+        }));
+      return { ok, failures, stopped: true, chunksWritten, refused: false };
+    }
+    ok += chunk.length;
+    chunksWritten += 1;
+  }
+  return { ok, failures: [], stopped: false, chunksWritten, refused: false };
+}
+
+/** CSV/TSV з файлу → текст із табуляціями між клітинками (формат вставки). Роздільник — найчастіший у першому рядку. */
+export function delimitedToTabs(text: string): string {
+  const source = text.replace(/^﻿/, '');
+  const firstLine = source.split(/\r?\n/, 1)[0] ?? '';
+  const delimiter = [';', ',', '\t']
+    .map((candidate) => ({ candidate, count: firstLine.split(candidate).length }))
+    .sort((a, b) => b.count - a.count)[0]?.candidate ?? ',';
+
+  const rows: string[][] = [[]];
+  let cell = '';
+  let quoted = false;
+  const push = (): void => {
+    rows[rows.length - 1]?.push(cell);
+    cell = '';
+  };
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source.charAt(index);
+    if (quoted) {
+      if (char === '"' && source.charAt(index + 1) === '"') {
+        cell += '"';
+        index += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        cell += char === '\n' || char === '\r' || char === '\t' ? ' ' : char;
+      }
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === delimiter) {
+      push();
+    } else if (char === '\n' || char === '\r') {
+      if (char === '\r' && source.charAt(index + 1) === '\n') index += 1;
+      push();
+      rows.push([]);
+    } else {
+      cell += char;
+    }
+  }
+  push();
+
+  return rows
+    .filter((row) => row.some((value) => value.trim() !== ''))
+    .map((row) => row.map((value) => value.replace(/\t/g, ' ')).join('\t'))
+    .join('\n');
+}
