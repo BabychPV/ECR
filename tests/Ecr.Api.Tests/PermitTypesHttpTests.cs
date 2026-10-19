@@ -95,6 +95,9 @@ public sealed class PermitTypesHttpTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.Forbidden, (await registryAdmin.PostAsJsonAsync(
             new Uri($"/api/v1/permit-types/{code}/publish", UriKind.Relative), new { reason = "публікація без права", rowVersion })).StatusCode);
 
+        // Нова версія типу - теж лише з Permit.EditType (PM-04b): 403 для адміністратора реєстрів (Registry.EditDefinition/Publish).
+        Assert.Equal(HttpStatusCode.Forbidden, (await registryAdmin.PostAsync(new Uri($"/api/v1/permit-types/{code}/new-version", UriKind.Relative), null)).StatusCode);
+
         using var editor = await SystemHealthControllerTests.SignedInAsync(sql, app, "Registry.View", "Permit.EditType");
         Assert.Equal(HttpStatusCode.Forbidden, (await editor.PostAsJsonAsync(
             new Uri($"/api/v1/permit-types/{code}/publish", UriKind.Relative), new { reason = "публікація без права", rowVersion })).StatusCode);

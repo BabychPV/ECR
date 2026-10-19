@@ -108,6 +108,85 @@ public sealed class PermitsHttpTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.Forbidden, (await nobody.GetAsync(new Uri("/api/v1/permits", UriKind.Relative))).StatusCode);
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Читач_не_змінює_завершує_і_не_поновлює_дозвіл_403()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var editor = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Registry.View", "Registry.EditData", "Permit.EditType", "Permit.PublishType");
+        var type = await PublishTypeAsync(editor, app);
+        var created = await Json(await editor.PostAsJsonAsync(new Uri("/api/v1/permits", UriKind.Relative), Create(type, "HT-F", "2026-01-01", "2027-01-01")));
+        var id = created.GetProperty("id").GetInt64();
+        var rowVersion = created.GetProperty("rowVersion").GetString()!;
+        Assert.Equal(HttpStatusCode.OK, (await editor.PostAsync(new Uri($"/api/v1/permits/{id}/activate", UriKind.Relative), null)).StatusCode);
+
+        // Читач без Registry.EditData: PUT, end і renew - 403 (чинний дозвіл існує, тож це саме право, а не 404/409).
+        using var reader = await SystemHealthControllerTests.SignedInAsync(sql, app, "Registry.View");
+        var put = await reader.PutAsJsonAsync(
+            new Uri($"/api/v1/permits/{id}", UriKind.Relative),
+            new { rowVersion, number = "HT-F", location = "X", issueDate = (string?)null, validFrom = "2026-01-01", validTo = "2027-01-01", actualEnd = (string?)null, reportingFlags = (object?)null });
+        Assert.Equal(HttpStatusCode.Forbidden, put.StatusCode);
+        var end = await reader.PostAsJsonAsync(
+            new Uri($"/api/v1/permits/{id}/end", UriKind.Relative), new { reason = "об'єкт виведено з експлуатації", endDate = "2026-12-01" });
+        Assert.Equal(HttpStatusCode.Forbidden, end.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.PostAsync(new Uri($"/api/v1/permits/{id}/renew", UriKind.Relative), null)).StatusCode);
+
+        // Нічого не змінилось: дозвіл і далі чинний, без завершення.
+        var after = await Json(await editor.GetAsync(new Uri($"/api/v1/permits/{id}", UriKind.Relative)));
+        Assert.Equal("Active", after.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Дії_над_неіснуючим_дозволом_дають_404_ECR_PRM_0404()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var editor = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Registry.View", "Registry.EditData", "Permit.EditType", "Permit.PublishType");
+        const string missing = "/api/v1/permits/999999999";
+
+        await AssertErrorAsync(await editor.PostAsync(new Uri($"{missing}/activate", UriKind.Relative), null), HttpStatusCode.NotFound, "ECR-PRM-0404");
+        await AssertErrorAsync(
+            await editor.PostAsJsonAsync(new Uri($"{missing}/end", UriKind.Relative), new { reason = "об'єкт виведено з експлуатації", endDate = "2026-12-01" }),
+            HttpStatusCode.NotFound, "ECR-PRM-0404");
+        await AssertErrorAsync(await editor.PostAsync(new Uri($"{missing}/renew", UriKind.Relative), null), HttpStatusCode.NotFound, "ECR-PRM-0404");
+        await AssertErrorAsync(
+            await editor.PutAsJsonAsync(
+                new Uri(missing, UriKind.Relative),
+                new { rowVersion = "AAAAAAAAB9E=", number = "HT-0", location = (string?)null, issueDate = (string?)null, validFrom = "2026-01-01", validTo = "2027-01-01", actualEnd = (string?)null, reportingFlags = (object?)null }),
+            HttpStatusCode.NotFound, "ECR-PRM-0404");
+        await AssertErrorAsync(await editor.DeleteAsync(new Uri(missing, UriKind.Relative)), HttpStatusCode.NotFound, "ECR-PRM-0404");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Завершення_нечинного_дозволу_409_notActive_а_активація_з_перетином_409_ECR_PRM_4092()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var editor = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Registry.View", "Registry.EditData", "Permit.EditType", "Permit.PublishType");
+        var type = await PublishTypeAsync(editor, app);
+
+        // Чернетка не чинна: завершення - 409 ECR-PRM-4096 notActive.
+        var draft = await Json(await editor.PostAsJsonAsync(new Uri("/api/v1/permits", UriKind.Relative), Create(type, "HT-N", "2026-01-01", "2027-01-01")));
+        var end = await editor.PostAsJsonAsync(
+            new Uri($"/api/v1/permits/{draft.GetProperty("id").GetInt64()}/end", UriKind.Relative),
+            new { reason = "об'єкт виведено з експлуатації", endDate = "2026-12-01" });
+        await AssertErrorAsync(end, HttpStatusCode.Conflict, "ECR-PRM-4096");
+        Assert.Contains("notActive", await end.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
+        // Два дозволи одного типу й номера з вікнами, що перетинаються: другий не активується - 409 ECR-PRM-4092.
+        var first = await Json(await editor.PostAsJsonAsync(new Uri("/api/v1/permits", UriKind.Relative), Create(type, "HT-O", "2026-01-01", "2027-01-01")));
+        var second = await Json(await editor.PostAsJsonAsync(new Uri("/api/v1/permits", UriKind.Relative), Create(type, "HT-O", "2026-06-01", "2027-06-01")));
+        Assert.Equal(
+            HttpStatusCode.OK,
+            (await editor.PostAsync(new Uri($"/api/v1/permits/{first.GetProperty("id").GetInt64()}/activate", UriKind.Relative), null)).StatusCode);
+        await AssertErrorAsync(
+            await editor.PostAsync(new Uri($"/api/v1/permits/{second.GetProperty("id").GetInt64()}/activate", UriKind.Relative), null),
+            HttpStatusCode.Conflict, "ECR-PRM-4092");
+    }
+
     private async Task<string> PublishTypeAsync(HttpClient client, EcrApiFactory app)
     {
         var code = $"HP{_tag}";
