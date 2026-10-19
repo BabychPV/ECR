@@ -244,6 +244,96 @@ public sealed class PermitRuntimeRowsTests(SqlServerFixture sql)
         Assert.Equal(8, await scene.PermitAuditCountAsync());
     }
 
+    // ── Оновлення з дозволу (refresh) ───────────────────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Оновлення_перезаписує_лише_комірки_останньою_зміною_яких_є_дозвіл()
+    {
+        var scene = await ArrangeAsync();
+        await using var _ = scene.H;
+        await using (var db = scene.NewContext())
+        {
+            await NewStore(db, permits: true).EnsureTableInstancesAsync(scene.DocumentId, January, default);
+        }
+
+        var rows = await scene.RowsAsync();
+        var limitColumn = scene.Sheet.Doc.ColumnDefIds[1];
+
+        // Інтеграція пізніше перебила ліміт другого рядка - це чужа правка.
+        await scene.ExecuteAsync(
+            $"UPDATE doc.CellValue SET ValueNumeric = 555 WHERE PeriodKey = {January.Value} AND TableRowId = {rows[1].Id} AND ColumnDefId = {limitColumn}");
+        await scene.ExecuteAsync(
+            "INSERT INTO aud.CellChange (ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId, OldValue, NewValue, "
+            + "ChangedByUserId, Origin, IsLateEdit, IsOutOfWindow) VALUES "
+            + $"('2026-03-01 10:00:00', {January.Value}, {scene.DocumentId}, {rows[1].Id}, N'{rows[1].RowKey}', {limitColumn}, N'3', N'555', 0, N'Integration', 0, 0)");
+
+        // Дозвіл змінив обидва ліміти.
+        await SetPermitLimitAsync(scene, scene.Permit.RowEntryIds[0], 99m);
+        await SetPermitLimitAsync(scene, scene.Permit.RowEntryIds[1], 77m);
+
+        var result = await RefreshAsync(scene);
+
+        Assert.Equal((0, 1), (result.Added, result.Updated));
+        Assert.Empty(result.RemovedFromPermit);
+        Assert.Contains(result.Warnings, w => w.Case == "cellNotFromPermit");
+        Assert.Equal(99m, (await scene.CellsAsync(rows[0].Id))[limitColumn].Number);
+        Assert.Equal(555m, (await scene.CellsAsync(rows[1].Id))[limitColumn].Number);
+
+        // Повторне оновлення без змін у дозволі нічого не міняє.
+        var again = await RefreshAsync(scene);
+        Assert.Equal((0, 0), (again.Added, again.Updated));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Оновлення_додає_нові_рядки_і_лише_повідомляє_про_зниклі_не_видаляючи_їх()
+    {
+        var scene = await ArrangeAsync();
+        await using var _ = scene.H;
+        await using (var db = scene.NewContext())
+        {
+            await NewStore(db, permits: true).EnsureTableInstancesAsync(scene.DocumentId, January, default);
+        }
+
+        // Новий дозвіл того самого об'єкта (пізніший ValidFrom) замінює старий.
+        var replacement = await scene.H.SeedPermitAsync(
+            Type, $"N3{_tag}", "Site A", new DateOnly(2026, 1, 15), null, true, ("NEW1", 1m, null), ("NEW2", 2m, "x"));
+
+        var result = await RefreshAsync(scene);
+
+        Assert.Equal(2, result.Added);
+        Assert.Equal(scene.Permit.RowEntryIds.Select(id => $"P{id}").Order(StringComparer.Ordinal), result.RemovedFromPermit);
+
+        var keys = (await scene.RowsAsync()).Select(r => r.RowKey).ToList();
+        Assert.Equal(5, keys.Count);
+        Assert.All(scene.Permit.RowEntryIds, id => Assert.Contains($"P{id}", keys));
+        Assert.All(replacement.RowEntryIds, id => Assert.Contains($"P{id}", keys));
+    }
+
+    private async Task SetPermitLimitAsync(Scene scene, long rowEntryId, decimal limit)
+    {
+        var type = (await scene.H.Types.Permits.FindByCodeAsync(Type, default))!;
+        var table = (await scene.H.Types.Permits.ListTablesAsync(type.Id, default)).Single(t => t.Code == "Emissions");
+        var definition = (await scene.H.Types.Registries.FindDefinitionByIdAsync(table.RegistryDefId, default))!;
+        var fieldId = definition.Fields.Single(f => f.Code == "Limit").Id;
+        var value = await scene.H.Db.RegistryValues.SingleAsync(v => v.RegistryEntryId == rowEntryId && v.RegistryFieldDefId == fieldId);
+        value.Set(CellDataType.Decimal, limit, null);
+        await scene.H.Db.SaveChangesAsync();
+    }
+
+    private async Task<PermitRefreshResult> RefreshAsync(Scene scene)
+    {
+        await using var db = scene.NewContext();
+        var service = NewService(db);
+        var view = (await new PermitBindingStore(db).GetAsync(scene.Sheet.Doc.TemplateVersionId, $"B{_tag}", default))!;
+        var plan = await service.PlanAsync(view, scene.DocumentId, new DateOnly(2026, 1, 31), default);
+
+        return await service.RefreshAsync(scene.DocumentId, January, await scene.InstanceIdAsync(), view, plan, default);
+    }
+
     // ── Побудова ────────────────────────────────────────────────────────────
 
     private RowStore NewStore(EcrDbContext db, bool permits)
