@@ -90,7 +90,12 @@ beforeEach(() => {
     Promise.resolve(path === '/api/v1/units' ? [{ id: 7, code: 't/yr' }] : []) as never,
   );
   vi.mocked(typesApi.getPermitType).mockResolvedValue(permitType());
-  getRows.mockImplementation((code, query) => Promise.resolve(rowsFor(code, query?.parentEntryId)));
+  // Як сервер: реєстри темпоральні, читання без `asOf` — відмова (`422 ECR-REQ-0422`, e2e-стенд 19.10).
+  getRows.mockImplementation((code, query) =>
+    query?.asOf === undefined
+      ? Promise.reject(new Error('ECR-REQ-0422: asOf is required'))
+      : Promise.resolve(rowsFor(code, query.parentEntryId)),
+  );
   saveBatch.mockResolvedValue(applied());
 });
 afterEach(() => {
@@ -226,7 +231,10 @@ describe('вкладки', () => {
 
   it('таблиця читається з реєстру PRM_… з батьком-дозволом', async () => {
     await openLimits();
-    expect(getRows).toHaveBeenCalledWith(LimitsRegistry, expect.objectContaining({ parentEntryId: 5 }));
+    expect(getRows).toHaveBeenCalledWith(
+      LimitsRegistry,
+      expect.objectContaining({ parentEntryId: 5, asOf: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) as string }),
+    );
   });
 
   it('порожня таблиця: підказка додати рядок; для закінченого — що лише читання', async () => {
