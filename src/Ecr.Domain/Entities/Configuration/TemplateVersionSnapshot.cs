@@ -31,4 +31,13 @@ public sealed record TemplateVersionSnapshot(
     /// зв'язків нічого зв'язкового не читає.
     /// </summary>
     public bool HasActiveRollupOrCheck { get; init; }
+
+    /// <summary>
+    /// PM-11c: у версії є чинна (<c>IsActive</c>) прив'язка таблиці аркуша до дозволу. Їде проєкцією в запиті аркушів
+    /// (нового звернення до бази побудова не додає); <c>GET /documents/{id}/tables</c> без прапора не питає прив'язок
+    /// узагалі. Прив'язки міняються лише у ЧЕРНЕТЦІ, і обидва записувачі (<c>SavePermitBindingHandler</c>,
+    /// <c>DeletePermitBindingHandler</c>) скидають знімок після коміту - застарілого прапора немає (на іншому вузлі
+    /// знімок чернетки живе не довше за вікно ревізії, як і решта структури чернетки).
+    /// </summary>
+    public bool HasActivePermitBindings { get; init; }
 }
