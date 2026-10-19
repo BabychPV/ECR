@@ -116,6 +116,11 @@ const loadPeriodPicker = () => import('@/shared/ui/PeriodPicker');
 void loadPeriodPicker();
 const PeriodPicker = lazy(async () => ({ default: (await loadPeriodPicker()).PeriodPicker }));
 
+// PM-11: «З дозволу» + «Оновити з дозволу» — окремий чанк (бюджет маршруту D-132), лише з правом Template.View.
+const PermitRefreshStrip = lazy(async () => ({
+  default: (await import('@/features/permits/bindings/PermitRefreshStrip')).PermitRefreshStrip,
+}));
+
 /**
  * Пропозиція повернути загублені правки — сьома лінива панель (`D-132`).
  *
@@ -687,6 +692,20 @@ export function DocumentPage(): JSX.Element {
 
       {/* EA-5b: передача місяця - «Місяць передано вам», «Заповнено», коментар повернення. Права комірок рішає сервер. */}
       <ExecutorStrip documentId={documentId} periodKey={periodKey} />
+
+      {/* PM-11: таблиці активного аркуша, що читають дозвіл, — позначка і «Оновити з дозволу». */}
+      {active !== undefined && can(session.data, 'Template.View') && (
+        <Suspense fallback={null}>
+          <PermitRefreshStrip
+            documentId={documentId}
+            periodKey={periodKey}
+            projectId={projectId}
+            tables={active.tables}
+            readOnly={readOnly}
+            canView
+          />
+        </Suspense>
+      )}
 
       {/* `UI-42`: чому тут нічого не змінити на телефоні — тим самим місцем, що й інші блокування.
           Аркуш і так закритий (банер вище) — другий банер не потрібен. */}
