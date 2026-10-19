@@ -8877,6 +8877,131 @@ USING (VALUES
     ,(N'permits.bindingView.formulas.title', N'en', N'Formulas the sheet can use', 1)
     ,(N'permits.bindingView.formulas.note', N'en', N'Cells of this table call the permit with the same functions used for registries. The permit that applies is chosen in a header cell of the sheet.', 1)
     -- PERMITS: ui-bindings ── кінець секції ──
+    -- PERMITS: sheet-binding-ui ── PM-11: прив'язка таблиці аркуша до дозволу (вкладка конструктора, майстер, перегляд, «Оновити з дозволу»); ru/kz — порцією PERMITS: sheet-binding-ui нижче ──
+    ,(N'ctor.tab.permit', N'en', N'Permit binding', 1)
+    ,(N'ctor.permitHint', N'en', N'Tell this table which permit table to read: its rows and limits then come from the permit that is valid in the period.', 1)
+    ,(N'permits.sheetBinding.bind', N'en', N'Bind to a permit…', 1)
+    ,(N'permits.sheetBinding.edit', N'en', N'Edit binding', 1)
+    ,(N'permits.sheetBinding.remove', N'en', N'Remove binding', 1)
+    ,(N'permits.sheetBinding.inactive', N'en', N'Switched off', 1)
+    ,(N'permits.sheetBinding.empty', N'en', N'This table is not bound to a permit. A binding makes the sheet read rows and limits from the permit that is valid in the period; people only enter the actual values.', 1)
+    ,(N'permits.sheetBinding.frozen', N'en', N'This version is published and frozen: bindings cannot be changed here. Clone it to a new draft to change them.', 1)
+    ,(N'permits.sheetBinding.formulasOnly', N'en', N'Formulas only: no rows are added to this table. Its cells read the permit with functions such as REGSUM, REGFIND and REGFIELD.', 1)
+    ,(N'permits.sheetBinding.saved', N'en', N'Permit binding saved in the draft version. Existing documents are not touched.', 1)
+    ,(N'permits.sheetBinding.removed', N'en', N'Permit binding removed.', 1)
+    ,(N'permits.sheetBinding.removeTitle', N'en', N'Remove the permit binding of “{name}”?', 1)
+    ,(N'permits.sheetBinding.removeText', N'en', N'The table stops reading rows and limits from the permit.', 1)
+    ,(N'permits.sheetBinding.removeBreaking', N'en', N'If documents already use this version, removing the binding is a breaking change and the server refuses it: their rows were created from the permit.', 1)
+    ,(N'permits.sheetBinding.removeNote', N'en', N'Clone the version to a new draft first if you need to change it.', 1)
+    ,(N'permits.sheetBinding.removeVerb', N'en', N'Remove binding', 1)
+    ,(N'permits.sheetBinding.mode.rows', N'en', N'Rows from the permit', 1)
+    ,(N'permits.sheetBinding.mode.formulas', N'en', N'Formulas only', 1)
+    ,(N'permits.sheetBinding.role.rowKey', N'en', N'Row key', 1)
+    ,(N'permits.sheetBinding.role.limit', N'en', N'Limit', 1)
+    ,(N'permits.sheetBinding.role.info', N'en', N'Info', 1)
+    ,(N'permits.sheetBinding.role.fact', N'en', N'Entered', 1)
+    ,(N'permits.sheetBinding.role.formula', N'en', N'Calculated', 1)
+    ,(N'permits.sheetBinding.role.none', N'en', N'Not used', 1)
+    ,(N'permits.sheetBinding.rule.byFacility', N'en', N'Permit valid at period end, same location', 1)
+    ,(N'permits.sheetBinding.rule.byFacilityHint', N'en', N'Takes the active permit of this type for the document facility; the one with the later start wins.', 1)
+    ,(N'permits.sheetBinding.rule.fromHeader', N'en', N'Permit chosen in a header field', 1)
+    ,(N'permits.sheetBinding.rule.fromHeaderHint', N'en', N'Reads the permit from a registry field of the document header, for sites with several permits of one type.', 1)
+    ,(N'permits.sheetBinding.rule.headerField', N'en', N'Header field with the permit', 1)
+    ,(N'permits.sheetBinding.rule.noHeaderFields', N'en', N'The template header has no registry-reference fields yet.', 1)
+    ,(N'permits.sheetBinding.map.title', N'en', N'Column mapping', 1)
+    ,(N'permits.sheetBinding.map.sheetColumn', N'en', N'Sheet column', 1)
+    ,(N'permits.sheetBinding.map.permitColumn', N'en', N'Permit column', 1)
+    ,(N'permits.sheetBinding.map.role', N'en', N'Role', 1)
+    ,(N'permits.sheetBinding.map.onSheet', N'en', N'On the sheet', 1)
+    ,(N'permits.sheetBinding.map.use', N'en', N'Use', 1)
+    ,(N'permits.sheetBinding.map.noteRowKey', N'en', N'Locked, one sheet row per permit row', 1)
+    ,(N'permits.sheetBinding.map.noteLimit', N'en', N'Locked, actuals are compared with it', 1)
+    ,(N'permits.sheetBinding.map.noteInfo', N'en', N'Locked, shown for reference', 1)
+    ,(N'permits.sheetBinding.map.useColumn', N'en', N'Use “{name}”', 1)
+    ,(N'permits.sheetBinding.map.sheetColumnFor', N'en', N'Sheet column for “{name}”', 1)
+    ,(N'permits.sheetBinding.map.roleOf', N'en', N'Role of “{name}”', 1)
+    ,(N'permits.sheetBinding.preview.title', N'en', N'Preview as a user sees it', 1)
+    ,(N'permits.sheetBinding.preview.facility', N'en', N'Facility', 1)
+    ,(N'permits.sheetBinding.preview.periodEnd', N'en', N'Period end', 1)
+    ,(N'permits.sheetBinding.preview.permit', N'en', N'Permit', 1)
+    ,(N'permits.sheetBinding.preview.permitPlaceholder', N'en', N'Choose a permit', 1)
+    ,(N'permits.sheetBinding.preview.update', N'en', N'Update preview', 1)
+    ,(N'permits.sheetBinding.preview.permitLine', N'en', N'Permit {number} · valid {from} – {to}', 1)
+    ,(N'permits.sheetBinding.preview.hatched', N'en', N'Hatched cells come from the permit and cannot be edited.', 1)
+    ,(N'permits.sheetBinding.preview.more', N'en', N'Showing {shown} of {total} rows.', 1)
+    ,(N'permits.sheetBinding.preview.forbidden', N'en', N'You have no access to the registries of this permit, so the preview is not available.', 1)
+    ,(N'permits.sheetBinding.preview.noFacility', N'en', N'No facility to look the permit up: enter the facility name.', 1)
+    ,(N'permits.sheetBinding.preview.noPermit', N'en', N'No permit of this type is valid for this facility at the period end.', 1)
+    ,(N'permits.sheetBinding.preview.headerEmpty', N'en', N'The header field with the permit is empty: choose a permit.', 1)
+    ,(N'permits.sheetBinding.preview.headerUnknown', N'en', N'The permit named in the header field does not exist.', 1)
+    ,(N'permits.sheetBinding.preview.noneOther', N'en', N'No permit was found for these inputs.', 1)
+    ,(N'permits.sheetBinding.warning.inactive', N'en', N'The binding is switched off: documents do not use it.', 1)
+    ,(N'permits.sheetBinding.warning.formulasMode', N'en', N'In formulas mode no rows are created: the sheet reads the permit with formulas.', 1)
+    ,(N'permits.sheetBinding.warning.notRowsBinding', N'en', N'The binding is switched off or works by formulas: there are no rows from the permit.', 1)
+    ,(N'permits.sheetBinding.warning.documentOtherVersion', N'en', N'The document belongs to another template version: actual cells are not overlaid.', 1)
+    ,(N'permits.sheetBinding.warning.tableUnavailable', N'en', N'The permit table is not available in the snapshot: no rows.', 1)
+    ,(N'permits.sheetBinding.warning.fieldUnreadable', N'en', N'A permit field could not be read, so its column stays empty.', 1)
+    ,(N'permits.sheetBinding.warning.notValidAtPeriodEnd', N'en', N'The chosen permit is not valid at the period end.', 1)
+    ,(N'permits.sheetBinding.warning.rowCountUnknown', N'en', N'The number of permit rows is unknown; the table holds a limited number of rows.', 1)
+    ,(N'permits.sheetBinding.warning.rowsClamped', N'en', N'The permit has more rows than the table holds; the extra rows were not created.', 1)
+    ,(N'permits.sheetBinding.warning.planFailed', N'en', N'The permit could not be read now, so no rows were created.', 1)
+    ,(N'permits.sheetBinding.warning.other', N'en', N'The server reported a warning about the permit.', 1)
+    ,(N'permits.sheetBinding.problem.typeRequired', N'en', N'Choose a permit type.', 1)
+    ,(N'permits.sheetBinding.problem.tableRequired', N'en', N'Choose a permit table.', 1)
+    ,(N'permits.sheetBinding.problem.headerFieldRequired', N'en', N'Choose the header field that holds the permit.', 1)
+    ,(N'permits.sheetBinding.problem.rowsNeedDynamic', N'en', N'Table “{tableCode}” has fixed rows, so permit rows cannot be added to it. Use “Formulas only” or make the table dynamic.', 1)
+    ,(N'permits.sheetBinding.problem.noColumn', N'en', N'Choose a sheet column for “{fieldCode}”.', 1)
+    ,(N'permits.sheetBinding.problem.duplicateColumn', N'en', N'Sheet column “{columnCode}” is mapped twice.', 1)
+    ,(N'permits.sheetBinding.problem.notReadOnly', N'en', N'Column “{columnCode}” must be read-only: its value is written by the system.', 1)
+    ,(N'permits.sheetBinding.problem.noRowKey', N'en', N'Mark at least one column as the row key.', 1)
+    ,(N'permits.sheetBinding.problem.manyLimits', N'en', N'Only one column can be the limit.', 1)
+    ,(N'permits.sheetBinding.wizard.title', N'en', N'Bind “{name}” to a permit', 1)
+    ,(N'permits.sheetBinding.wizard.stepSheet', N'en', N'Sheet table', 1)
+    ,(N'permits.sheetBinding.wizard.stepSheetHint', N'en', N'The table of the template that reads the permit. A binding belongs to a template version.', 1)
+    ,(N'permits.sheetBinding.wizard.sheetTable', N'en', N'Table on the sheet', 1)
+    ,(N'permits.sheetBinding.wizard.sheetTableNote', N'en', N'The wizard was opened from this table. To bind another table, open it in the tree.', 1)
+    ,(N'permits.sheetBinding.wizard.stepSource', N'en', N'Permit table', 1)
+    ,(N'permits.sheetBinding.wizard.stepSourceHint', N'en', N'Which permit type, and which of its tables.', 1)
+    ,(N'permits.sheetBinding.wizard.type', N'en', N'Permit type', 1)
+    ,(N'permits.sheetBinding.wizard.table', N'en', N'Table', 1)
+    ,(N'permits.sheetBinding.wizard.tableOption', N'en', N'{name} ({count} columns)', 1)
+    ,(N'permits.sheetBinding.wizard.mode', N'en', N'How the sheet uses it', 1)
+    ,(N'permits.sheetBinding.wizard.modeNote', N'en', N'“Rows from the permit”: the table gets one row per permit row, with limits locked next to the cells people fill. “Formulas only”: no rows are added; cells use functions such as REGSUM to read the permit.', 1)
+    ,(N'permits.sheetBinding.wizard.stepPick', N'en', N'Which permit', 1)
+    ,(N'permits.sheetBinding.wizard.stepPickHint', N'en', N'Many permits of one type can exist. Say how the sheet finds the right one.', 1)
+    ,(N'permits.sheetBinding.wizard.stepColumns', N'en', N'Columns', 1)
+    ,(N'permits.sheetBinding.wizard.stepColumnsHint', N'en', N'Match sheet columns to permit columns. Locked columns show the permit value and cannot be edited on the sheet.', 1)
+    ,(N'permits.sheetBinding.wizard.columns', N'en', N'Columns of the permit table', 1)
+    ,(N'permits.sheetBinding.wizard.columnsNote', N'en', N'This is the suggested mapping. Tick the permit columns the sheet should show; only read-only sheet columns can take values from the permit.', 1)
+    ,(N'permits.sheetBinding.wizard.chooseColumn', N'en', N'Choose a column', 1)
+    ,(N'permits.sheetBinding.wizard.editableColumn', N'en', N'{name} (editable, cannot be used)', 1)
+    ,(N'permits.sheetBinding.wizard.formulasNoColumns', N'en', N'In “Formulas only” mode no sheet rows are added, so there is nothing to map.', 1)
+    ,(N'permits.sheetBinding.wizard.pickTableFirst', N'en', N'Choose a permit type and table first.', 1)
+    ,(N'permits.sheetBinding.wizard.reviewText', N'en', N'Check the binding before saving it.', 1)
+    ,(N'permits.sheetBinding.wizard.create', N'en', N'Create binding', 1)
+    ,(N'permits.sheetBinding.wizard.save', N'en', N'Save binding', 1)
+    ,(N'permits.sheetBinding.wizard.sumSheet', N'en', N'Sheet table', 1)
+    ,(N'permits.sheetBinding.wizard.sumReads', N'en', N'Reads', 1)
+    ,(N'permits.sheetBinding.wizard.sumHow', N'en', N'How', 1)
+    ,(N'permits.sheetBinding.wizard.sumPermit', N'en', N'Which permit', 1)
+    ,(N'permits.sheetBinding.wizard.sumColumns', N'en', N'Mapped columns', 1)
+    ,(N'permits.sheetBinding.wizard.sumCode', N'en', N'Binding code', 1)
+    ,(N'permits.sheetBinding.wizard.sumEffect', N'en', N'Effect', 1)
+    ,(N'permits.sheetBinding.wizard.effect', N'en', N'Applies to the draft template version; documents get it after the version is published.', 1)
+    ,(N'permits.sheetBinding.wizard.breakingHint', N'en', N'In a version that documents already use, removing or re-pointing a binding is a breaking change and is refused.', 1)
+    ,(N'permits.sheetBinding.wizard.discardTitle', N'en', N'Discard the binding?', 1)
+    ,(N'permits.sheetBinding.wizard.discardText', N'en', N'What you entered in the wizard will be lost.', 1)
+    ,(N'permits.sheetBinding.wizard.discardVerb', N'en', N'Discard', 1)
+    ,(N'permits.sheetBinding.doc.region', N'en', N'Permit-driven tables', 1)
+    ,(N'permits.sheetBinding.doc.fromPermit', N'en', N'From permit', 1)
+    ,(N'permits.sheetBinding.doc.tableLine', N'en', N'Rows and limits of “{name}” come from the permit.', 1)
+    ,(N'permits.sheetBinding.doc.refresh', N'en', N'Refresh from permit', 1)
+    ,(N'permits.sheetBinding.doc.readOnly', N'en', N'This document cannot be changed now.', 1)
+    ,(N'permits.sheetBinding.doc.dismiss', N'en', N'Dismiss', 1)
+    ,(N'permits.sheetBinding.doc.result', N'en', N'“{name}”: {added} rows added, {updated} updated from the permit.', 1)
+    ,(N'permits.sheetBinding.doc.unchanged', N'en', N'“{name}” already matches the permit.', 1)
+    ,(N'permits.sheetBinding.doc.kept', N'en', N'{count} rows are no longer in the permit and were kept: {keys}.', 1)
+    -- PERMITS: sheet-binding-ui ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -22856,6 +22981,261 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: ui-bindings ── кінець секції ──
+
+-- PERMITS: sheet-binding-ui ── ru/kz: прив'язка таблиці аркуша до дозволу (PM-11); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'ctor.tab.permit', N'ru', N'Привязка к разрешению'),
+    (N'ctor.tab.permit', N'kz', N'Рұқсатқа байлау'),
+    (N'ctor.permitHint', N'ru', N'Укажите таблице, какую таблицу разрешения читать: её строки и лимиты берутся из разрешения, действующего в периоде.'),
+    (N'ctor.permitHint', N'kz', N'Кестеге рұқсаттың қай кестесін оқу керектігін көрсетіңіз: оның жолдары мен лимиттері кезеңде жарамды рұқсаттан алынады.'),
+    (N'permits.sheetBinding.bind', N'ru', N'Привязать к разрешению…'),
+    (N'permits.sheetBinding.bind', N'kz', N'Рұқсатқа байлау…'),
+    (N'permits.sheetBinding.edit', N'ru', N'Изменить привязку'),
+    (N'permits.sheetBinding.edit', N'kz', N'Байлауды өзгерту'),
+    (N'permits.sheetBinding.remove', N'ru', N'Удалить привязку'),
+    (N'permits.sheetBinding.remove', N'kz', N'Байлауды жою'),
+    (N'permits.sheetBinding.inactive', N'ru', N'Выключена'),
+    (N'permits.sheetBinding.inactive', N'kz', N'Өшірулі'),
+    (N'permits.sheetBinding.empty', N'ru', N'Эта таблица не привязана к разрешению. Привязка заставляет лист брать строки и лимиты из разрешения, действующего в периоде; люди вводят только фактические значения.'),
+    (N'permits.sheetBinding.empty', N'kz', N'Бұл кесте рұқсатқа байланбаған. Байлау парақтың жолдары мен лимиттерін кезеңде жарамды рұқсаттан алуын қамтамасыз етеді; адамдар тек нақты мәндерді енгізеді.'),
+    (N'permits.sheetBinding.frozen', N'ru', N'Эта версия опубликована и заморожена: привязки здесь изменить нельзя. Создайте её копию-черновик.'),
+    (N'permits.sheetBinding.frozen', N'kz', N'Бұл нұсқа жарияланған және қатырылған: байлауларды мұнда өзгертуге болмайды. Оның жоба көшірмесін жасаңыз.'),
+    (N'permits.sheetBinding.formulasOnly', N'ru', N'Только формулы: строки в эту таблицу не добавляются. Её ячейки читают разрешение функциями REGSUM, REGFIND и REGFIELD.'),
+    (N'permits.sheetBinding.formulasOnly', N'kz', N'Тек формулалар: бұл кестеге жолдар қосылмайды. Оның ұяшықтары рұқсатты REGSUM, REGFIND және REGFIELD функцияларымен оқиды.'),
+    (N'permits.sheetBinding.saved', N'ru', N'Привязка к разрешению сохранена в черновике версии. Существующие документы не затрагиваются.'),
+    (N'permits.sheetBinding.saved', N'kz', N'Рұқсат байлауы нұсқа жобасында сақталды. Бар құжаттарға әсер етпейді.'),
+    (N'permits.sheetBinding.removed', N'ru', N'Привязка к разрешению удалена.'),
+    (N'permits.sheetBinding.removed', N'kz', N'Рұқсат байлауы жойылды.'),
+    (N'permits.sheetBinding.removeTitle', N'ru', N'Удалить привязку к разрешению таблицы «{name}»?'),
+    (N'permits.sheetBinding.removeTitle', N'kz', N'«{name}» кестесінің рұқсатқа байлауын жою керек пе?'),
+    (N'permits.sheetBinding.removeText', N'ru', N'Таблица перестаёт брать строки и лимиты из разрешения.'),
+    (N'permits.sheetBinding.removeText', N'kz', N'Кесте жолдар мен лимиттерді рұқсаттан алуды тоқтатады.'),
+    (N'permits.sheetBinding.removeBreaking', N'ru', N'Если документы уже используют эту версию, удаление привязки — разрушающее изменение, и сервер его отклонит: строки документов созданы из разрешения.'),
+    (N'permits.sheetBinding.removeBreaking', N'kz', N'Егер құжаттар бұл нұсқаны қолданса, байлауды жою бұзушы өзгеріс болып табылады және сервер оны қабылдамайды: құжаттар жолдары рұқсаттан жасалған.'),
+    (N'permits.sheetBinding.removeNote', N'ru', N'Если нужно изменить — сначала создайте копию версии как черновик.'),
+    (N'permits.sheetBinding.removeNote', N'kz', N'Өзгерту қажет болса, алдымен нұсқаның жоба көшірмесін жасаңыз.'),
+    (N'permits.sheetBinding.removeVerb', N'ru', N'Удалить привязку'),
+    (N'permits.sheetBinding.removeVerb', N'kz', N'Байлауды жою'),
+    (N'permits.sheetBinding.mode.rows', N'ru', N'Строки из разрешения'),
+    (N'permits.sheetBinding.mode.rows', N'kz', N'Рұқсаттан жолдар'),
+    (N'permits.sheetBinding.mode.formulas', N'ru', N'Только формулы'),
+    (N'permits.sheetBinding.mode.formulas', N'kz', N'Тек формулалар'),
+    (N'permits.sheetBinding.role.rowKey', N'ru', N'Ключ строки'),
+    (N'permits.sheetBinding.role.rowKey', N'kz', N'Жол кілті'),
+    (N'permits.sheetBinding.role.limit', N'ru', N'Лимит'),
+    (N'permits.sheetBinding.role.limit', N'kz', N'Лимит'),
+    (N'permits.sheetBinding.role.info', N'ru', N'Справочное'),
+    (N'permits.sheetBinding.role.info', N'kz', N'Анықтамалық'),
+    (N'permits.sheetBinding.role.fact', N'ru', N'Вводится'),
+    (N'permits.sheetBinding.role.fact', N'kz', N'Енгізіледі'),
+    (N'permits.sheetBinding.role.formula', N'ru', N'Рассчитывается'),
+    (N'permits.sheetBinding.role.formula', N'kz', N'Есептеледі'),
+    (N'permits.sheetBinding.role.none', N'ru', N'Не используется'),
+    (N'permits.sheetBinding.role.none', N'kz', N'Қолданылмайды'),
+    (N'permits.sheetBinding.rule.byFacility', N'ru', N'Разрешение, действующее на конец периода, того же объекта'),
+    (N'permits.sheetBinding.rule.byFacility', N'kz', N'Кезең соңында жарамды, сол объектінің рұқсаты'),
+    (N'permits.sheetBinding.rule.byFacilityHint', N'ru', N'Берётся действующее разрешение этого типа для объекта документа; из нескольких — с более поздним началом.'),
+    (N'permits.sheetBinding.rule.byFacilityHint', N'kz', N'Құжат объектісі үшін осы түрдің қолданыстағы рұқсаты алынады; бірнешеуінен — басталуы кейінгісі.'),
+    (N'permits.sheetBinding.rule.fromHeader', N'ru', N'Разрешение выбрано в поле шапки'),
+    (N'permits.sheetBinding.rule.fromHeader', N'kz', N'Рұқсат тақырып өрісінде таңдалады'),
+    (N'permits.sheetBinding.rule.fromHeaderHint', N'ru', N'Разрешение берётся из поля шапки документа со ссылкой на реестр — для объектов с несколькими разрешениями одного типа.'),
+    (N'permits.sheetBinding.rule.fromHeaderHint', N'kz', N'Рұқсат құжат тақырыбындағы тізілімге сілтеме өрісінен алынады — бір түрдің бірнеше рұқсаты бар объектілер үшін.'),
+    (N'permits.sheetBinding.rule.headerField', N'ru', N'Поле шапки с разрешением'),
+    (N'permits.sheetBinding.rule.headerField', N'kz', N'Рұқсат бар тақырып өрісі'),
+    (N'permits.sheetBinding.rule.noHeaderFields', N'ru', N'В шапке шаблона пока нет полей-ссылок на реестр.'),
+    (N'permits.sheetBinding.rule.noHeaderFields', N'kz', N'Үлгі тақырыбында тізілімге сілтеме өрістері әлі жоқ.'),
+    (N'permits.sheetBinding.map.title', N'ru', N'Сопоставление столбцов'),
+    (N'permits.sheetBinding.map.title', N'kz', N'Бағандарды сәйкестендіру'),
+    (N'permits.sheetBinding.map.sheetColumn', N'ru', N'Столбец листа'),
+    (N'permits.sheetBinding.map.sheetColumn', N'kz', N'Парақ бағаны'),
+    (N'permits.sheetBinding.map.permitColumn', N'ru', N'Столбец разрешения'),
+    (N'permits.sheetBinding.map.permitColumn', N'kz', N'Рұқсат бағаны'),
+    (N'permits.sheetBinding.map.role', N'ru', N'Роль'),
+    (N'permits.sheetBinding.map.role', N'kz', N'Рөл'),
+    (N'permits.sheetBinding.map.onSheet', N'ru', N'На листе'),
+    (N'permits.sheetBinding.map.onSheet', N'kz', N'Парақта'),
+    (N'permits.sheetBinding.map.use', N'ru', N'Использовать'),
+    (N'permits.sheetBinding.map.use', N'kz', N'Қолдану'),
+    (N'permits.sheetBinding.map.noteRowKey', N'ru', N'Заблокирован, одна строка листа на строку разрешения'),
+    (N'permits.sheetBinding.map.noteRowKey', N'kz', N'Бұғатталған, рұқсаттың әр жолына парақтың бір жолы'),
+    (N'permits.sheetBinding.map.noteLimit', N'ru', N'Заблокирован, с ним сравниваются факты'),
+    (N'permits.sheetBinding.map.noteLimit', N'kz', N'Бұғатталған, нақты мәндер онымен салыстырылады'),
+    (N'permits.sheetBinding.map.noteInfo', N'ru', N'Заблокирован, показан для справки'),
+    (N'permits.sheetBinding.map.noteInfo', N'kz', N'Бұғатталған, анықтама үшін көрсетіледі'),
+    (N'permits.sheetBinding.map.useColumn', N'ru', N'Использовать «{name}»'),
+    (N'permits.sheetBinding.map.useColumn', N'kz', N'«{name}» қолдану'),
+    (N'permits.sheetBinding.map.sheetColumnFor', N'ru', N'Столбец листа для «{name}»'),
+    (N'permits.sheetBinding.map.sheetColumnFor', N'kz', N'«{name}» үшін парақ бағаны'),
+    (N'permits.sheetBinding.map.roleOf', N'ru', N'Роль «{name}»'),
+    (N'permits.sheetBinding.map.roleOf', N'kz', N'«{name}» рөлі'),
+    (N'permits.sheetBinding.preview.title', N'ru', N'Предпросмотр глазами пользователя'),
+    (N'permits.sheetBinding.preview.title', N'kz', N'Пайдаланушы көзімен алдын ала қарау'),
+    (N'permits.sheetBinding.preview.facility', N'ru', N'Объект'),
+    (N'permits.sheetBinding.preview.facility', N'kz', N'Объект'),
+    (N'permits.sheetBinding.preview.periodEnd', N'ru', N'Конец периода'),
+    (N'permits.sheetBinding.preview.periodEnd', N'kz', N'Кезең соңы'),
+    (N'permits.sheetBinding.preview.permit', N'ru', N'Разрешение'),
+    (N'permits.sheetBinding.preview.permit', N'kz', N'Рұқсат'),
+    (N'permits.sheetBinding.preview.permitPlaceholder', N'ru', N'Выберите разрешение'),
+    (N'permits.sheetBinding.preview.permitPlaceholder', N'kz', N'Рұқсатты таңдаңыз'),
+    (N'permits.sheetBinding.preview.update', N'ru', N'Обновить предпросмотр'),
+    (N'permits.sheetBinding.preview.update', N'kz', N'Алдын ала қарауды жаңарту'),
+    (N'permits.sheetBinding.preview.permitLine', N'ru', N'Разрешение {number} · действует {from} – {to}'),
+    (N'permits.sheetBinding.preview.permitLine', N'kz', N'Рұқсат {number} · жарамды {from} – {to}'),
+    (N'permits.sheetBinding.preview.hatched', N'ru', N'Заштрихованные ячейки берутся из разрешения и не редактируются.'),
+    (N'permits.sheetBinding.preview.hatched', N'kz', N'Штрихталған ұяшықтар рұқсаттан алынады және өңделмейді.'),
+    (N'permits.sheetBinding.preview.more', N'ru', N'Показано строк: {shown} из {total}.'),
+    (N'permits.sheetBinding.preview.more', N'kz', N'Жолдар көрсетілді: {shown} / {total}.'),
+    (N'permits.sheetBinding.preview.forbidden', N'ru', N'У вас нет доступа к реестрам этого разрешения, поэтому предпросмотр недоступен.'),
+    (N'permits.sheetBinding.preview.forbidden', N'kz', N'Сізде осы рұқсаттың тізілімдеріне қол жеткізу құқығы жоқ, сондықтан алдын ала қарау қолжетімсіз.'),
+    (N'permits.sheetBinding.preview.noFacility', N'ru', N'Не указан объект для поиска разрешения: введите название объекта.'),
+    (N'permits.sheetBinding.preview.noFacility', N'kz', N'Рұқсатты іздейтін объект көрсетілмеген: объект атауын енгізіңіз.'),
+    (N'permits.sheetBinding.preview.noPermit', N'ru', N'Для этого объекта на конец периода нет действующего разрешения этого типа.'),
+    (N'permits.sheetBinding.preview.noPermit', N'kz', N'Бұл объект үшін кезең соңында осы түрдің жарамды рұқсаты жоқ.'),
+    (N'permits.sheetBinding.preview.headerEmpty', N'ru', N'Поле шапки с разрешением не заполнено: выберите разрешение.'),
+    (N'permits.sheetBinding.preview.headerEmpty', N'kz', N'Рұқсат бар тақырып өрісі толтырылмаған: рұқсатты таңдаңыз.'),
+    (N'permits.sheetBinding.preview.headerUnknown', N'ru', N'Разрешения, указанного в поле шапки, не существует.'),
+    (N'permits.sheetBinding.preview.headerUnknown', N'kz', N'Тақырып өрісінде көрсетілген рұқсат жоқ.'),
+    (N'permits.sheetBinding.preview.noneOther', N'ru', N'По этим данным разрешение не найдено.'),
+    (N'permits.sheetBinding.preview.noneOther', N'kz', N'Бұл деректер бойынша рұқсат табылмады.'),
+    (N'permits.sheetBinding.warning.inactive', N'ru', N'Привязка выключена: документы её не используют.'),
+    (N'permits.sheetBinding.warning.inactive', N'kz', N'Байлау өшірулі: құжаттар оны қолданбайды.'),
+    (N'permits.sheetBinding.warning.formulasMode', N'ru', N'В режиме формул строки не создаются: лист читает разрешение формулами.'),
+    (N'permits.sheetBinding.warning.formulasMode', N'kz', N'Формулалар режимінде жолдар жасалмайды: парақ рұқсатты формулалармен оқиды.'),
+    (N'permits.sheetBinding.warning.notRowsBinding', N'ru', N'Привязка выключена или работает формулами: строк из разрешения нет.'),
+    (N'permits.sheetBinding.warning.notRowsBinding', N'kz', N'Байлау өшірулі немесе формулалармен жұмыс істейді: рұқсаттан жолдар жоқ.'),
+    (N'permits.sheetBinding.warning.documentOtherVersion', N'ru', N'Документ относится к другой версии шаблона: фактические ячейки не накладываются.'),
+    (N'permits.sheetBinding.warning.documentOtherVersion', N'kz', N'Құжат үлгінің басқа нұсқасына жатады: нақты ұяшықтар қабаттастырылмайды.'),
+    (N'permits.sheetBinding.warning.tableUnavailable', N'ru', N'Таблица разрешения недоступна в срезе: строк нет.'),
+    (N'permits.sheetBinding.warning.tableUnavailable', N'kz', N'Рұқсат кестесі кесіндіде қолжетімсіз: жолдар жоқ.'),
+    (N'permits.sheetBinding.warning.fieldUnreadable', N'ru', N'Поле разрешения не удалось прочитать, поэтому его столбец остаётся пустым.'),
+    (N'permits.sheetBinding.warning.fieldUnreadable', N'kz', N'Рұқсат өрісін оқу мүмкін болмады, сондықтан оның бағаны бос қалады.'),
+    (N'permits.sheetBinding.warning.notValidAtPeriodEnd', N'ru', N'Выбранное разрешение не действует на конец периода.'),
+    (N'permits.sheetBinding.warning.notValidAtPeriodEnd', N'kz', N'Таңдалған рұқсат кезең соңында жарамсыз.'),
+    (N'permits.sheetBinding.warning.rowCountUnknown', N'ru', N'Количество строк разрешений неизвестно; таблица вмещает ограниченное число строк.'),
+    (N'permits.sheetBinding.warning.rowCountUnknown', N'kz', N'Рұқсат жолдарының саны белгісіз; кестеге жолдардың шектеулі саны сияды.'),
+    (N'permits.sheetBinding.warning.rowsClamped', N'ru', N'В разрешении больше строк, чем вмещает таблица; лишние строки не созданы.'),
+    (N'permits.sheetBinding.warning.rowsClamped', N'kz', N'Рұқсатта кестеге сыйғаннан көп жол бар; артық жолдар жасалмады.'),
+    (N'permits.sheetBinding.warning.planFailed', N'ru', N'Разрешение сейчас не удалось прочитать, поэтому строки не созданы.'),
+    (N'permits.sheetBinding.warning.planFailed', N'kz', N'Рұқсатты қазір оқу мүмкін болмады, сондықтан жолдар жасалмады.'),
+    (N'permits.sheetBinding.warning.other', N'ru', N'Сервер сообщил предупреждение о разрешении.'),
+    (N'permits.sheetBinding.warning.other', N'kz', N'Сервер рұқсат туралы ескерту хабарлады.'),
+    (N'permits.sheetBinding.problem.typeRequired', N'ru', N'Выберите тип разрешения.'),
+    (N'permits.sheetBinding.problem.typeRequired', N'kz', N'Рұқсат түрін таңдаңыз.'),
+    (N'permits.sheetBinding.problem.tableRequired', N'ru', N'Выберите таблицу разрешения.'),
+    (N'permits.sheetBinding.problem.tableRequired', N'kz', N'Рұқсат кестесін таңдаңыз.'),
+    (N'permits.sheetBinding.problem.headerFieldRequired', N'ru', N'Выберите поле шапки, в котором хранится разрешение.'),
+    (N'permits.sheetBinding.problem.headerFieldRequired', N'kz', N'Рұқсат сақталатын тақырып өрісін таңдаңыз.'),
+    (N'permits.sheetBinding.problem.rowsNeedDynamic', N'ru', N'У таблицы «{tableCode}» фиксированные строки, поэтому строки разрешения в неё добавить нельзя. Выберите «Только формулы» или сделайте таблицу динамической.'),
+    (N'permits.sheetBinding.problem.rowsNeedDynamic', N'kz', N'«{tableCode}» кестесінің жолдары тіркелген, сондықтан оған рұқсат жолдарын қосуға болмайды. «Тек формулалар» таңдаңыз немесе кестені динамикалық етіңіз.'),
+    (N'permits.sheetBinding.problem.noColumn', N'ru', N'Выберите столбец листа для «{fieldCode}».'),
+    (N'permits.sheetBinding.problem.noColumn', N'kz', N'«{fieldCode}» үшін парақ бағанын таңдаңыз.'),
+    (N'permits.sheetBinding.problem.duplicateColumn', N'ru', N'Столбец листа «{columnCode}» сопоставлен дважды.'),
+    (N'permits.sheetBinding.problem.duplicateColumn', N'kz', N'«{columnCode}» парақ бағаны екі рет сәйкестендірілген.'),
+    (N'permits.sheetBinding.problem.notReadOnly', N'ru', N'Столбец «{columnCode}» должен быть только для чтения: его значение записывает система.'),
+    (N'permits.sheetBinding.problem.notReadOnly', N'kz', N'«{columnCode}» бағаны тек оқуға арналған болуы керек: оның мәнін жүйе жазады.'),
+    (N'permits.sheetBinding.problem.noRowKey', N'ru', N'Отметьте хотя бы один столбец как ключ строки.'),
+    (N'permits.sheetBinding.problem.noRowKey', N'kz', N'Кем дегенде бір бағанды жол кілті ретінде белгілеңіз.'),
+    (N'permits.sheetBinding.problem.manyLimits', N'ru', N'Только один столбец может быть лимитом.'),
+    (N'permits.sheetBinding.problem.manyLimits', N'kz', N'Тек бір баған лимит бола алады.'),
+    (N'permits.sheetBinding.wizard.title', N'ru', N'Привязка «{name}» к разрешению'),
+    (N'permits.sheetBinding.wizard.title', N'kz', N'«{name}» кестесін рұқсатқа байлау'),
+    (N'permits.sheetBinding.wizard.stepSheet', N'ru', N'Таблица листа'),
+    (N'permits.sheetBinding.wizard.stepSheet', N'kz', N'Парақ кестесі'),
+    (N'permits.sheetBinding.wizard.stepSheetHint', N'ru', N'Таблица шаблона, которая читает разрешение. Привязка принадлежит версии шаблона.'),
+    (N'permits.sheetBinding.wizard.stepSheetHint', N'kz', N'Рұқсатты оқитын үлгі кестесі. Байлау үлгі нұсқасына тиесілі.'),
+    (N'permits.sheetBinding.wizard.sheetTable', N'ru', N'Таблица на листе'),
+    (N'permits.sheetBinding.wizard.sheetTable', N'kz', N'Парақтағы кесте'),
+    (N'permits.sheetBinding.wizard.sheetTableNote', N'ru', N'Мастер открыт из этой таблицы. Чтобы привязать другую, откройте её в дереве.'),
+    (N'permits.sheetBinding.wizard.sheetTableNote', N'kz', N'Шебер осы кестеден ашылды. Басқасын байлау үшін оны ағаштан ашыңыз.'),
+    (N'permits.sheetBinding.wizard.stepSource', N'ru', N'Таблица разрешения'),
+    (N'permits.sheetBinding.wizard.stepSource', N'kz', N'Рұқсат кестесі'),
+    (N'permits.sheetBinding.wizard.stepSourceHint', N'ru', N'Какой тип разрешения и какая его таблица.'),
+    (N'permits.sheetBinding.wizard.stepSourceHint', N'kz', N'Рұқсаттың қай түрі және оның қай кестесі.'),
+    (N'permits.sheetBinding.wizard.type', N'ru', N'Тип разрешения'),
+    (N'permits.sheetBinding.wizard.type', N'kz', N'Рұқсат түрі'),
+    (N'permits.sheetBinding.wizard.table', N'ru', N'Таблица'),
+    (N'permits.sheetBinding.wizard.table', N'kz', N'Кесте'),
+    (N'permits.sheetBinding.wizard.tableOption', N'ru', N'{name} (столбцов: {count})'),
+    (N'permits.sheetBinding.wizard.tableOption', N'kz', N'{name} (бағандар: {count})'),
+    (N'permits.sheetBinding.wizard.mode', N'ru', N'Как лист её использует'),
+    (N'permits.sheetBinding.wizard.mode', N'kz', N'Парақ оны қалай қолданады'),
+    (N'permits.sheetBinding.wizard.modeNote', N'ru', N'«Строки из разрешения»: таблица получает по строке на каждую строку разрешения, лимиты заблокированы рядом с ячейками, которые заполняют люди. «Только формулы»: строки не добавляются; ячейки читают разрешение функциями вроде REGSUM.'),
+    (N'permits.sheetBinding.wizard.modeNote', N'kz', N'«Рұқсаттан жолдар»: кесте рұқсаттың әр жолына бір жол алады, лимиттер адамдар толтыратын ұяшықтардың жанында бұғатталған. «Тек формулалар»: жолдар қосылмайды; ұяшықтар рұқсатты REGSUM сияқты функциялармен оқиды.'),
+    (N'permits.sheetBinding.wizard.stepPick', N'ru', N'Какое разрешение'),
+    (N'permits.sheetBinding.wizard.stepPick', N'kz', N'Қай рұқсат'),
+    (N'permits.sheetBinding.wizard.stepPickHint', N'ru', N'Разрешений одного типа может быть много. Укажите, как лист находит нужное.'),
+    (N'permits.sheetBinding.wizard.stepPickHint', N'kz', N'Бір түрдің рұқсаты көп болуы мүмкін. Парақ керегін қалай табатынын көрсетіңіз.'),
+    (N'permits.sheetBinding.wizard.stepColumns', N'ru', N'Столбцы'),
+    (N'permits.sheetBinding.wizard.stepColumns', N'kz', N'Бағандар'),
+    (N'permits.sheetBinding.wizard.stepColumnsHint', N'ru', N'Сопоставьте столбцы листа со столбцами разрешения. Заблокированные столбцы показывают значение разрешения и не редактируются на листе.'),
+    (N'permits.sheetBinding.wizard.stepColumnsHint', N'kz', N'Парақ бағандарын рұқсат бағандарымен сәйкестендіріңіз. Бұғатталған бағандар рұқсат мәнін көрсетеді және парақта өңделмейді.'),
+    (N'permits.sheetBinding.wizard.columns', N'ru', N'Столбцы таблицы разрешения'),
+    (N'permits.sheetBinding.wizard.columns', N'kz', N'Рұқсат кестесінің бағандары'),
+    (N'permits.sheetBinding.wizard.columnsNote', N'ru', N'Это предложенное сопоставление. Отметьте столбцы разрешения, которые должен показывать лист; значения из разрешения могут получать только столбцы листа «только для чтения».'),
+    (N'permits.sheetBinding.wizard.columnsNote', N'kz', N'Бұл ұсынылған сәйкестендіру. Парақ көрсетуі тиіс рұқсат бағандарын белгілеңіз; рұқсаттан мәнді тек «тек оқу» парақ бағандары алады.'),
+    (N'permits.sheetBinding.wizard.chooseColumn', N'ru', N'Выберите столбец'),
+    (N'permits.sheetBinding.wizard.chooseColumn', N'kz', N'Бағанды таңдаңыз'),
+    (N'permits.sheetBinding.wizard.editableColumn', N'ru', N'{name} (редактируемый, использовать нельзя)'),
+    (N'permits.sheetBinding.wizard.editableColumn', N'kz', N'{name} (өңделетін, қолдануға болмайды)'),
+    (N'permits.sheetBinding.wizard.formulasNoColumns', N'ru', N'В режиме «Только формулы» строки листа не добавляются, сопоставлять нечего.'),
+    (N'permits.sheetBinding.wizard.formulasNoColumns', N'kz', N'«Тек формулалар» режимінде парақ жолдары қосылмайды, сәйкестендіретін ештеңе жоқ.'),
+    (N'permits.sheetBinding.wizard.pickTableFirst', N'ru', N'Сначала выберите тип и таблицу разрешения.'),
+    (N'permits.sheetBinding.wizard.pickTableFirst', N'kz', N'Алдымен рұқсат түрі мен кестесін таңдаңыз.'),
+    (N'permits.sheetBinding.wizard.reviewText', N'ru', N'Проверьте привязку перед сохранением.'),
+    (N'permits.sheetBinding.wizard.reviewText', N'kz', N'Сақтамас бұрын байлауды тексеріңіз.'),
+    (N'permits.sheetBinding.wizard.create', N'ru', N'Создать привязку'),
+    (N'permits.sheetBinding.wizard.create', N'kz', N'Байлауды жасау'),
+    (N'permits.sheetBinding.wizard.save', N'ru', N'Сохранить привязку'),
+    (N'permits.sheetBinding.wizard.save', N'kz', N'Байлауды сақтау'),
+    (N'permits.sheetBinding.wizard.sumSheet', N'ru', N'Таблица листа'),
+    (N'permits.sheetBinding.wizard.sumSheet', N'kz', N'Парақ кестесі'),
+    (N'permits.sheetBinding.wizard.sumReads', N'ru', N'Читает'),
+    (N'permits.sheetBinding.wizard.sumReads', N'kz', N'Оқиды'),
+    (N'permits.sheetBinding.wizard.sumHow', N'ru', N'Как'),
+    (N'permits.sheetBinding.wizard.sumHow', N'kz', N'Қалай'),
+    (N'permits.sheetBinding.wizard.sumPermit', N'ru', N'Какое разрешение'),
+    (N'permits.sheetBinding.wizard.sumPermit', N'kz', N'Қай рұқсат'),
+    (N'permits.sheetBinding.wizard.sumColumns', N'ru', N'Сопоставлено столбцов'),
+    (N'permits.sheetBinding.wizard.sumColumns', N'kz', N'Сәйкестендірілген бағандар'),
+    (N'permits.sheetBinding.wizard.sumCode', N'ru', N'Код привязки'),
+    (N'permits.sheetBinding.wizard.sumCode', N'kz', N'Байлау коды'),
+    (N'permits.sheetBinding.wizard.sumEffect', N'ru', N'Результат'),
+    (N'permits.sheetBinding.wizard.sumEffect', N'kz', N'Нәтиже'),
+    (N'permits.sheetBinding.wizard.effect', N'ru', N'Действует в черновике версии шаблона; документы получат её после публикации версии.'),
+    (N'permits.sheetBinding.wizard.effect', N'kz', N'Үлгі нұсқасының жобасында әрекет етеді; құжаттар оны нұсқа жарияланғаннан кейін алады.'),
+    (N'permits.sheetBinding.wizard.breakingHint', N'ru', N'В версии, которую уже используют документы, удаление или переназначение привязки — разрушающее изменение, и оно отклоняется.'),
+    (N'permits.sheetBinding.wizard.breakingHint', N'kz', N'Құжаттар қолданып жатқан нұсқада байлауды жою немесе қайта бағыттау — бұзушы өзгеріс және ол қабылданбайды.'),
+    (N'permits.sheetBinding.wizard.discardTitle', N'ru', N'Отбросить привязку?'),
+    (N'permits.sheetBinding.wizard.discardTitle', N'kz', N'Байлауды қабылдамау керек пе?'),
+    (N'permits.sheetBinding.wizard.discardText', N'ru', N'Введённое в мастере будет потеряно.'),
+    (N'permits.sheetBinding.wizard.discardText', N'kz', N'Шеберде енгізілгені жоғалады.'),
+    (N'permits.sheetBinding.wizard.discardVerb', N'ru', N'Отбросить'),
+    (N'permits.sheetBinding.wizard.discardVerb', N'kz', N'Қабылдамау'),
+    (N'permits.sheetBinding.doc.region', N'ru', N'Таблицы по разрешению'),
+    (N'permits.sheetBinding.doc.region', N'kz', N'Рұқсат бойынша кестелер'),
+    (N'permits.sheetBinding.doc.fromPermit', N'ru', N'Из разрешения'),
+    (N'permits.sheetBinding.doc.fromPermit', N'kz', N'Рұқсаттан'),
+    (N'permits.sheetBinding.doc.tableLine', N'ru', N'Строки и лимиты таблицы «{name}» берутся из разрешения.'),
+    (N'permits.sheetBinding.doc.tableLine', N'kz', N'«{name}» кестесінің жолдары мен лимиттері рұқсаттан алынады.'),
+    (N'permits.sheetBinding.doc.refresh', N'ru', N'Обновить из разрешения'),
+    (N'permits.sheetBinding.doc.refresh', N'kz', N'Рұқсаттан жаңарту'),
+    (N'permits.sheetBinding.doc.readOnly', N'ru', N'Этот документ сейчас нельзя менять.'),
+    (N'permits.sheetBinding.doc.readOnly', N'kz', N'Бұл құжатты қазір өзгертуге болмайды.'),
+    (N'permits.sheetBinding.doc.dismiss', N'ru', N'Закрыть'),
+    (N'permits.sheetBinding.doc.dismiss', N'kz', N'Жабу'),
+    (N'permits.sheetBinding.doc.result', N'ru', N'«{name}»: добавлено строк — {added}, обновлено из разрешения — {updated}.'),
+    (N'permits.sheetBinding.doc.result', N'kz', N'«{name}»: қосылған жолдар — {added}, рұқсаттан жаңартылғаны — {updated}.'),
+    (N'permits.sheetBinding.doc.unchanged', N'ru', N'«{name}» уже соответствует разрешению.'),
+    (N'permits.sheetBinding.doc.unchanged', N'kz', N'«{name}» рұқсатқа сәйкес келеді.'),
+    (N'permits.sheetBinding.doc.kept', N'ru', N'Строк, которых больше нет в разрешении, оставлено: {count} ({keys}).'),
+    (N'permits.sheetBinding.doc.kept', N'kz', N'Рұқсатта енді жоқ, бірақ қалдырылған жолдар: {count} ({keys}).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: sheet-binding-ui ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
