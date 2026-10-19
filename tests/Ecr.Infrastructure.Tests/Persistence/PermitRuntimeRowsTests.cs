@@ -30,7 +30,7 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// чекають рядків; прибрати <c>catch</c> на <c>UQ_TableInstance</c> - червоніє «Два_паралельні…».
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class PermitRuntimeRowsTests(SqlServerFixture sql)
+public sealed partial class PermitRuntimeRowsTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 2, 20, 6, 0, 0, DateTimeKind.Utc);
     private static readonly PeriodKey January = new(202601);
