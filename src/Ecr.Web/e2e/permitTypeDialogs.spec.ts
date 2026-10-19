@@ -161,6 +161,11 @@ test.describe('Діалоги конструктора типу дозволу',
     // Крок «Columns»: єдиний стовпець «Name» уже ключовий; додаємо числовий.
     await wizard.getByRole('button', { name: 'Add column' }).click();
     await wizard.getByLabel('Column 2').fill('Annual volume');
+    // ⚠ Новий стовпець майстра — «Text» (`emptyDraftColumn`); перевірка `ROW.… >= 0` над текстом сервер відхиляє
+    // при публікації (422, «Comparison of incompatible types»). Тому тип — «Number» (Decimal).
+    await wizard.locator('#pm-nt-c1-type').click();
+    await page.getByRole('option', { name: 'Number', exact: true }).click();
+    await expect(wizard.locator('#pm-nt-c1-type')).toHaveValue('Number');
     await wizard.getByRole('button', { name: 'Next' }).click();
     await expect(wizard.getByText('PRM_' + code + '_MonitoringPoints')).toBeVisible();
     await wizard.getByRole('button', { name: 'Add table' }).click();
@@ -186,7 +191,12 @@ test.describe('Діалоги конструктора типу дозволу',
     await rule.getByLabel(/^What it checks/).fill('Volume is not negative');
     await rule.getByRole('button', { name: 'Add check' }).click();
     await expect(rule.getByLabel(/^Rule/)).toBeFocused();
-    await rule.getByLabel(/^Rule/).fill('ROW.Annual_volume >= 0');
+    // Реальний код стовпця — з відповіді сервера, а не з припущення про `codeFromName`.
+    const volumeCode = (await getPermitType(page, code)).tables
+      .find((t) => t.code === 'MonitoringPoints')
+      ?.columns.find((c) => c.nameL10n?.['en'] === 'Annual volume')?.code;
+    expect(volumeCode, 'стовпець «Annual volume» відсутній у відповіді сервера').toBeTruthy();
+    await rule.getByLabel(/^Rule/).fill(`ROW.${volumeCode ?? ''} >= 0`);
     await rule.getByRole('button', { name: 'Add check' }).click();
     await expect(rule).toBeHidden({ timeout: 15_000 });
     await expect(page).not.toHaveURL(/[?&]dialog=/, { timeout: 15_000 });
@@ -209,7 +219,9 @@ test.describe('Діалоги конструктора типу дозволу',
     );
     await publish.getByRole('button', { name: 'Publish' }).click();
     const publishResponse = await published;
-    expect(publishResponse.ok(), `POST …/publish: ${publishResponse.status()}`).toBe(true);
+    // Тіло відмови (messageKey, diagnostics) — у повідомленні, щоб 422 пояснював себе в логу CI.
+    const publishBody = publishResponse.ok() ? '' : await publishResponse.text().catch(() => '<тіло не прочитано>');
+    expect(publishResponse.ok(), `POST …/publish: ${publishResponse.status()} ${publishBody.slice(0, 2000)}`).toBe(true);
     await expect(publish).toBeHidden({ timeout: 30_000 });
     await expect(page).not.toHaveURL(/[?&]dialog=/, { timeout: 30_000 });
 
