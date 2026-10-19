@@ -2,6 +2,7 @@ import { Suspense, lazy, useState, type JSX } from 'react';
 import { Button, Select, Skeleton, Text, TextInput } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -74,6 +75,8 @@ export function BindingPreview({ templateVersionId, binding }: BindingPreviewPro
     retry: false,
   });
 
+  const updating = usePendingLoading(preview.isFetching && !preview.isPending);
+
   const update = (): void => {
     setApplied(
       fromHeader
@@ -115,7 +118,7 @@ export function BindingPreview({ templateVersionId, binding }: BindingPreviewPro
             </Suspense>
           </>
         )}
-        <Button variant="default" onClick={update} loading={preview.isFetching && !preview.isPending}>
+        <Button variant="default" onClick={update} loading={updating}>
           {t('permits.sheetBinding.preview.update')}
         </Button>
       </div>
