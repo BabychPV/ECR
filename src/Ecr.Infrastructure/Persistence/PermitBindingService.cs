@@ -63,9 +63,22 @@ public sealed partial class PermitBindingService(
             return PermitMaterialization.None;
         }
 
-        var views = await bindings.ListActiveRowsAsync(createdTableDefIds, ct).ConfigureAwait(false);
         var warnings = new List<PermitBindingIssue>();
+
+        // ⛔ D-39: закритий період не змінюється. Відкриття (читання) документа в закритому періоді створює порожні
+        // екземпляри, як і раніше, але рядків і лімітів з дозволу НЕ пише (отже й перерахунок не ставиться) - та сама
+        // умова ефективного стану, що в PATCH, перерахунку й тригера (`IPeriodStore.FindPeriodStateAsync`).
+        if (await periods.FindPeriodStateAsync(documentId, periodKey.Value, ct).ConfigureAwait(false)
+            == Ecr.Domain.Enums.PeriodState.Closed)
+        {
+            warnings.Add(Warning("binding.warning.periodClosed", "Період закрито: рядки з дозволу не створено."));
+            return Finish(documentId, 0, warnings);
+        }
+
+        var views = await bindings.ListActiveRowsAsync(createdTableDefIds, ct).ConfigureAwait(false);
         var created = 0;
+        var changed = new List<(long RowId, int ColumnId)>();
+        long entryInstanceId = 0;
 
         var bounds = await periods.FindPeriodBoundsAsync(documentId, periodKey.Value, ct).ConfigureAwait(false);
         if (bounds is null)
@@ -119,12 +132,17 @@ public sealed partial class PermitBindingService(
                 continue;
             }
 
+            var before = changed.Count;
             created += await InsertRowsAsync(
-                    documentId, periodKey, instanceId, view, plan.Rows, new HashSet<string>(StringComparer.Ordinal), warnings, changed: null, ct)
+                    documentId, periodKey, instanceId, view, plan.Rows, new HashSet<string>(StringComparer.Ordinal), warnings, changed, ct)
                 .ConfigureAwait(false);
+            if (entryInstanceId == 0 && changed.Count > before)
+            {
+                entryInstanceId = instanceId;
+            }
         }
 
-        return Finish(documentId, created, warnings);
+        return Finish(documentId, created, warnings, changed, entryInstanceId);
     }
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Permit binding {Code} of document {DocumentId} could not be planned.")]
@@ -133,7 +151,12 @@ public sealed partial class PermitBindingService(
     [LoggerMessage(Level = LogLevel.Warning, Message = "Permit binding warning for document {DocumentId}: {Warning}")]
     private static partial void LogWarning(ILogger logger, long documentId, string warning);
 
-    private PermitMaterialization Finish(long documentId, int created, List<PermitBindingIssue> warnings)
+    private PermitMaterialization Finish(
+        long documentId,
+        int created,
+        List<PermitBindingIssue> warnings,
+        IReadOnlyList<(long RowId, int ColumnId)>? changed = null,
+        long entryInstanceId = 0)
     {
         foreach (var warning in warnings)
         {
@@ -143,7 +166,7 @@ public sealed partial class PermitBindingService(
             }
         }
 
-        return new PermitMaterialization(created, warnings);
+        return new PermitMaterialization(created, warnings, changed is { Count: > 0 } ? changed : null, entryInstanceId);
     }
 
     /// <inheritdoc />

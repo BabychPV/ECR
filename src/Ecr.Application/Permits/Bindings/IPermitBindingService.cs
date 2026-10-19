@@ -7,7 +7,15 @@ namespace Ecr.Application.Permits.Bindings;
 /// <summary>Підсумок створення рядків документа з дозволу.</summary>
 /// <param name="Rows">Скільки рядків створено.</param>
 /// <param name="Warnings">Попередження: дозволу немає, стелю рядків урізано, поле не читається тощо.</param>
-public sealed record PermitMaterialization(int Rows, IReadOnlyList<PermitBindingIssue> Warnings)
+/// <param name="ChangedCells">
+/// PM-10b: комірки (рядок, колонка), записані з дозволу, - насіння перерахунку формул; <c>null</c> - нічого не записано.
+/// </param>
+/// <param name="EntryTableInstanceId">PM-10b: екземпляр першої зміненої комірки - точка входу задачі перерахунку (<c>0</c> - немає).</param>
+public sealed record PermitMaterialization(
+    int Rows,
+    IReadOnlyList<PermitBindingIssue> Warnings,
+    IReadOnlyList<(long RowId, int ColumnId)>? ChangedCells = null,
+    long EntryTableInstanceId = 0)
 {
     /// <summary>Нічого не створено, попереджень немає.</summary>
     public static PermitMaterialization None { get; } = new(0, []);
