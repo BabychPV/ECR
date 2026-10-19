@@ -37,15 +37,25 @@
 # Частини 1–3 — об'єднання префіксів своїх шардів; частина 4 (шард-залишок) —
 # заперечення префіксів усіх шардів частин 1–3. Сторож
 # `ApiTestShardsTests` (Architecture) звіряє це з дійсними класами в `tests/Ecr.Api.Tests`.
+#
+# ✎ 2026-10-19 (правило 5: кожна частина ≤ 20 хв): замір CI `dev/integration`, run 39289083401
+# (журнали `server-part (api-1…api-4)`): job 15.4 / 17.5 / 24.8 / 20.5 хв, «Total time» кроку
+# тестів 11.6 / 13.8 / 21.0 / 16.9 хв (накладні ≈ 3.7 хв на job). Тепер `Seconds` — стіна класу
+# за журналом (різниця часових міток сусідніх рядків «Passed», тобто разом із фікстурами),
+# сума по префіксу. Перенесено: E (шард 6 → 1), T (6 → 3), U (залишок → шард 4).
+# Стіна тестів частин за цим заміром: 936 / 950 / 955 / 950 с (≈ 19.5–19.7 хв job).
+# ⚠ Чотири частини при сумі ~63 хв тестів нижче ≈ 19.5 хв job не збалансувати — для ≤ 18 хв
+# потрібна п'ята частина. Перевіряти за першим push-CI із цим файлом і, якщо перекіс, зсувати
+# префікси за новим заміром.
 @{
-    Measured = '2026-10-12'
+    Measured = '2026-10-19'
     Shards   = @(
-        @{ Id = 1; Part = 1; Seconds = 417; Prefixes = @('R') }
-        @{ Id = 2; Part = 1; Seconds = 273; Prefixes = @('Security.D', 'F', 'I', 'O', 'V', 'W', 'B', 'G') }
-        @{ Id = 3; Part = 2; Seconds = 349; Prefixes = @('C', 'M') }
-        @{ Id = 4; Part = 2; Seconds = 377; Prefixes = @('Security.H', 'Security.S', 'J', 'L') }
-        @{ Id = 5; Part = 3; Seconds = 381; Prefixes = @('D', 'N') }
-        @{ Id = 6; Part = 3; Seconds = 296; Prefixes = @('E', 'P', 'T', 'H') }
-        @{ Id = 7; Part = 4; Seconds = 710; Rest = $true }
+        @{ Id = 1; Part = 1; Seconds = 640; Prefixes = @('R', 'E') }
+        @{ Id = 2; Part = 1; Seconds = 296; Prefixes = @('Security.D', 'F', 'I', 'O', 'V', 'W', 'B', 'G') }
+        @{ Id = 3; Part = 2; Seconds = 541; Prefixes = @('C', 'M', 'T') }
+        @{ Id = 4; Part = 2; Seconds = 409; Prefixes = @('Security.H', 'Security.S', 'J', 'L', 'U') }
+        @{ Id = 5; Part = 3; Seconds = 767; Prefixes = @('D', 'N') }
+        @{ Id = 6; Part = 3; Seconds = 188; Prefixes = @('P', 'H') }
+        @{ Id = 7; Part = 4; Seconds = 950; Rest = $true }
     )
 }
