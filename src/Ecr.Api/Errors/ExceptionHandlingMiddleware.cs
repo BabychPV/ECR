@@ -660,6 +660,10 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.PermitBindingDuplicate =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ Permits PM-09b: «правку аркуша тримає прив'язка» (`ECR-PRM-4102`) — конфлікт стану шаблону, а не невірні дані.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.PermitBindingBlocksSheetChange =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // ⛔ RT-10a (FEATURE-REGISTRY-TABLES §7.2): «ці значення ключа вже має інший запис» —
         // конфлікт стану, а не невірні дані: повторювати запит марно, треба змінити ключ або
         // закрити вікно чинності того запису. ⚠ Правило суфікса нижче цей код теж ловить, тож

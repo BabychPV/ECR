@@ -145,6 +145,48 @@ internal static class PermitBindingErrors
                 ["bindingCode"] = code,
             });
 
+    /// <summary><c>409 ECR-PRM-4102 rowMode</c>: таблицю з прив'язкою «рядки» не можна зробити <c>Fixed</c>.</summary>
+    /// <param name="tableCode">Код таблиці аркуша.</param>
+    /// <param name="bindingCode">Код прив'язки, що її тримає.</param>
+    internal static BusinessRuleException SheetRowModeHeld(string tableCode, string bindingCode)
+        => new(
+            ErrorCodes.PermitBindingBlocksSheetChange,
+            $"Таблиця «{tableCode}» прив'язана до рядків дозволу («{bindingCode}»): фіксовані рядки їх не приймають. Спершу видаліть прив'язку.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-4102.rowMode",
+                ["tableCode"] = tableCode,
+                ["bindingCode"] = bindingCode,
+            });
+
+    /// <summary><c>409 ECR-PRM-4102 table</c>: таблицю з прив'язкою не можна видалити.</summary>
+    /// <param name="tableCode">Код таблиці аркуша.</param>
+    /// <param name="bindingCode">Код прив'язки, що її тримає.</param>
+    internal static BusinessRuleException SheetTableHeld(string tableCode, string bindingCode)
+        => new(
+            ErrorCodes.PermitBindingBlocksSheetChange,
+            $"Таблиця «{tableCode}» використовується прив'язкою до дозволу «{bindingCode}»: спершу видаліть прив'язку.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-4102.table",
+                ["tableCode"] = tableCode,
+                ["bindingCode"] = bindingCode,
+            });
+
+    /// <summary><c>409 ECR-PRM-4102 column</c>: колонку, зіставлену прив'язкою, не можна видалити.</summary>
+    /// <param name="columnCode">Код колонки аркуша.</param>
+    /// <param name="bindingCode">Код прив'язки, що її зіставляє.</param>
+    internal static BusinessRuleException SheetColumnHeld(string columnCode, string bindingCode)
+        => new(
+            ErrorCodes.PermitBindingBlocksSheetChange,
+            $"Колонка «{columnCode}» зіставлена прив'язкою до дозволу «{bindingCode}»: спершу змініть або видаліть прив'язку.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-4102.column",
+                ["columnCode"] = columnCode,
+                ["bindingCode"] = bindingCode,
+            });
+
     /// <summary><c>409 ECR-SCHM-0409 permitBindingBreaking</c>: руйнівна зміна у версії з документами.</summary>
     /// <param name="code">Код прив'язки.</param>
     internal static ConcurrencyConflictException Breaking(string code)

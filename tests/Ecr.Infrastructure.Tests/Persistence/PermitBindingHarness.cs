@@ -39,6 +39,12 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
             inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User);
         Delete = new DeletePermitBindingHandler(
             Versions, Bindings, Store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User);
+        SaveTable = new Ecr.Application.Templates.SaveTableDefHandler(
+            Store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User, Bindings);
+        DeleteTable = new Ecr.Application.Templates.DeleteTableDefHandler(
+            Store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User, Bindings);
+        DeleteColumn = new Ecr.Application.Templates.DeleteColumnDefHandler(
+            Store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User, Bindings);
         Preview = new PreviewPermitBindingHandler(
             Versions, Bindings, inner.Permits, inner.Registries, Store, new PermitResolver(inner.Registries),
             new RegistrySnapshotLoader(inner.Db), Documents, Headers, Periods, RowsStore, CellsStore, new UnitStore(inner.Db),
@@ -66,6 +72,15 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
     public DeletePermitBindingHandler Delete { get; }
 
     public PreviewPermitBindingHandler Preview { get; }
+
+    /// <summary>Правка таблиці шаблону (PM-09b): охоронець прив'язок.</summary>
+    public Ecr.Application.Templates.SaveTableDefHandler SaveTable { get; }
+
+    /// <summary>Видалення таблиці шаблону (PM-09b).</summary>
+    public Ecr.Application.Templates.DeleteTableDefHandler DeleteTable { get; }
+
+    /// <summary>Видалення колонки шаблону (PM-09b).</summary>
+    public Ecr.Application.Templates.DeleteColumnDefHandler DeleteColumn { get; }
 
     /// <summary>Порти документа: у перегляді без документа не торкаються, у перегляді з документом - заглушки тесту.</summary>
     public IDocumentStore Documents { get; } = Substitute.For<IDocumentStore>();

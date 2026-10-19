@@ -8599,6 +8599,12 @@ USING (VALUES
     ,(N'err.ECR-PRM-4101.code', N'en', N'Binding code "{bindingCode}" is already taken (codes are unique across the whole system).', 1)
     ,(N'err.ECR-SCHM-0409.permitBindingBreaking', N'en', N'Deleting the permit binding "{bindingCode}" is a breaking change: documents are already attached to this version and their rows were created from the permit.', 1)
     -- PERMITS: bindings ── кінець секції ──
+    -- PERMITS: sheetguard ── ECR-PRM-4102 ── правку аркуша тримає прив'язка (PM-09b); en ──
+    ,(N'err.ECR-PRM-4102', N'en', N'A permit binding holds this sheet change', 1)
+    ,(N'err.ECR-PRM-4102.rowMode', N'en', N'Table "{tableCode}" takes permit rows through binding "{bindingCode}": fixed rows cannot accept them. Delete the binding first.', 1)
+    ,(N'err.ECR-PRM-4102.table', N'en', N'Table "{tableCode}" is used by permit binding "{bindingCode}": delete the binding first.', 1)
+    ,(N'err.ECR-PRM-4102.column', N'en', N'Column "{columnCode}" is mapped by permit binding "{bindingCode}": change or delete the binding first.', 1)
+    -- PERMITS: sheetguard ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -22009,6 +22015,23 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: bindings ── preview ── кінець секції ──
+
+-- PERMITS: sheetguard ── ECR-PRM-4102 ── ru/kz: правку аркуша тримає прив'язка (PM-09b); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-4102', N'ru', N'Эту правку листа удерживает привязка разрешения'),
+    (N'err.ECR-PRM-4102', N'kz', N'Парақтың бұл өзгерісін рұқсат байланысы ұстап тұр'),
+    (N'err.ECR-PRM-4102.rowMode', N'ru', N'Таблица «{tableCode}» принимает строки разрешения через привязку «{bindingCode}»: фиксированные строки их не принимают. Сначала удалите привязку.'),
+    (N'err.ECR-PRM-4102.rowMode', N'kz', N'«{tableCode}» кестесі «{bindingCode}» байланысы арқылы рұқсат жолдарын қабылдайды: тұрақты жолдар оларды қабылдамайды. Алдымен байланысты жойыңыз.'),
+    (N'err.ECR-PRM-4102.table', N'ru', N'Таблица «{tableCode}» используется привязкой разрешения «{bindingCode}»: сначала удалите привязку.'),
+    (N'err.ECR-PRM-4102.table', N'kz', N'«{tableCode}» кестесін «{bindingCode}» рұқсат байланысы пайдаланады: алдымен байланысты жойыңыз.'),
+    (N'err.ECR-PRM-4102.column', N'ru', N'Колонка «{columnCode}» сопоставлена привязкой разрешения «{bindingCode}»: сначала измените или удалите привязку.'),
+    (N'err.ECR-PRM-4102.column', N'kz', N'«{columnCode}» бағанын «{bindingCode}» рұқсат байланысы сәйкестендірген: алдымен байланысты өзгертіңіз немесе жойыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: sheetguard ── ECR-PRM-4102 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

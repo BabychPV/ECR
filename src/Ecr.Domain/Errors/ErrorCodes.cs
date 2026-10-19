@@ -935,4 +935,14 @@ public static class ErrorCodes
     /// ⚠ 409 за цифрами коду: <c>BusinessRuleException</c> без власного арма в <c>ExceptionHandlingMiddleware</c> доїхав би як 422.
     /// </remarks>
     public const string PermitBindingDuplicate = "ECR-PRM-4101";
+
+    /// <summary>
+    /// Правку структури аркуша тримає прив'язка до дозволу (<c>ECR-PRM-4102</c>, Permits PM-09b): таблицю з прив'язкою
+    /// «рядки» не можна зробити <c>Fixed</c> (<c>rowMode</c>), таблицю з прив'язкою чи колонку, яку вона зіставляє, не можна
+    /// видалити (<c>table</c>, <c>column</c>). У деталях - код прив'язки.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ 409 за цифрами коду: без власного арма в <c>ExceptionHandlingMiddleware</c> <c>BusinessRuleException</c> доїхав би як 422.
+    /// </remarks>
+    public const string PermitBindingBlocksSheetChange = "ECR-PRM-4102";
 }
