@@ -8824,8 +8824,8 @@ USING (VALUES
     ,(N'permits.page.paste.rowsHint', N'en', N'Tab-separated, as Excel copies them. A decimal comma is accepted.', 1)
     ,(N'permits.page.paste.header', N'en', N'The first line is a header (skip it)', 1)
     ,(N'permits.page.paste.nothing', N'en', N'Nothing to add yet', 1)
-    ,(N'permits.page.paste.summary', N'en', N'{rows} rows can be added to {table}; {bad} need fixing first.', 1)
-    ,(N'permits.page.paste.extra', N'en', N'{count} cells to the right of the last column were ignored.', 1)
+    ,(N'permits.page.paste.summary', N'en', N'{rows} rows can be added to {table}; {bad} need fixing before anything is added.', 1)
+    ,(N'permits.page.paste.extra', N'en', N'{count} cells to the right of the last column. Remove them: nothing is added while they are there.', 1)
     ,(N'permits.page.paste.issues', N'en', N'Cells that could not be read', 1)
     ,(N'permits.page.paste.issueWhere', N'en', N'Row {row}, {column}', 1)
     ,(N'permits.page.paste.issueNumber', N'en', N'"{text}" is not a number', 1)
@@ -8833,7 +8833,7 @@ USING (VALUES
     ,(N'permits.page.paste.issueDate', N'en', N'"{text}" is not a date (use year-month-day or day.month.year)', 1)
     ,(N'permits.page.paste.issueInteger', N'en', N'"{text}" is not a whole number', 1)
     ,(N'permits.page.paste.issueUnknown', N'en', N'"{text}" is not in the list', 1)
-    ,(N'permits.page.paste.issueLimit', N'en', N'Only the first {max} rows are read; the rest are ignored.', 1)
+    ,(N'permits.page.paste.issueLimit', N'en', N'More than {max} rows: nothing is added. Split the data into several parts.', 1)
     ,(N'permits.page.paste.moreIssues', N'en', N'and {count} more', 1)
     ,(N'permits.page.paste.progress', N'en', N'Progress: {done} of {total} rows', 1)
     ,(N'permits.page.paste.check', N'en', N'Check rows', 1)
@@ -8841,9 +8841,11 @@ USING (VALUES
     ,(N'permits.page.paste.add', N'en', N'Add {count} rows', 1)
     ,(N'permits.page.paste.done', N'en', N'{count} rows added', 1)
     ,(N'permits.page.paste.stopped', N'en', N'Stopped after saving {written} rows', 1)
-    ,(N'permits.page.paste.stoppedText', N'en', N'The server rejected the next block. Rows saved before it stay in the table. Fix the listed rows and add the rest again.', 1)
+    ,(N'permits.page.paste.stoppedText', N'en', N'The check passed, but the server rejected a later block (most likely someone changed the data meanwhile). Rows saved before it stay in the table: look at the table and add only the missing ones.', 1)
     ,(N'permits.page.paste.failures', N'en', N'Rows rejected by the server', 1)
     ,(N'permits.page.paste.failure', N'en', N'Row {row}: {text}', 1)
+    ,(N'permits.page.paste.blocked', N'en', N'Nothing is added while there are problems. Fix them and check the rows again.', 1)
+    ,(N'permits.page.paste.fileTooBig', N'en', N'The file is larger than {max} MB, so nothing was loaded. Split it into several files.', 1)
     ,(N'permits.page.activate.title', N'en', N'Activate permit {number}?', 1)
     ,(N'permits.page.activate.reads', N'en', N'Sheets bound to type {type} start reading these limits for periods from {from} to {to}.', 1)
     ,(N'permits.page.activate.edits', N'en', N'Rows can still be edited; every edit is dated and shows in the history.', 1)
@@ -22930,10 +22932,10 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.page.paste.header', N'kz', N'Бірінші жол — тақырып (өткізіп жіберу)'),
     (N'permits.page.paste.nothing', N'ru', N'Пока нечего добавлять'),
     (N'permits.page.paste.nothing', N'kz', N'Әзірге қосатын ештеңе жоқ'),
-    (N'permits.page.paste.summary', N'ru', N'В таблицу «{table}» можно добавить строк: {rows}; сначала нужно исправить: {bad}.'),
-    (N'permits.page.paste.summary', N'kz', N'«{table}» кестесіне {rows} жол қосуға болады; алдымен түзету керек: {bad}.'),
-    (N'permits.page.paste.extra', N'ru', N'Ячеек правее последнего столбца пропущено: {count}.'),
-    (N'permits.page.paste.extra', N'kz', N'Соңғы бағаннан оңдағы ұяшықтар еленбеді: {count}.'),
+    (N'permits.page.paste.summary', N'ru', N'В таблицу «{table}» можно добавить строк: {rows}; нужно исправить до добавления: {bad}.'),
+    (N'permits.page.paste.summary', N'kz', N'«{table}» кестесіне {rows} жол қосуға болады; қосу алдында түзету керек: {bad}.'),
+    (N'permits.page.paste.extra', N'ru', N'Ячеек правее последнего столбца: {count}. Удалите их: пока они есть, ничего не добавляется.'),
+    (N'permits.page.paste.extra', N'kz', N'Соңғы бағаннан оңдағы ұяшықтар: {count}. Оларды жойыңыз: олар тұрғанда ештеңе қосылмайды.'),
     (N'permits.page.paste.issues', N'ru', N'Ячейки, которые не удалось прочитать'),
     (N'permits.page.paste.issues', N'kz', N'Оқылмаған ұяшықтар'),
     (N'permits.page.paste.issueWhere', N'ru', N'Строка {row}, {column}'),
@@ -22948,8 +22950,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.page.paste.issueInteger', N'kz', N'«{text}» бүтін сан емес'),
     (N'permits.page.paste.issueUnknown', N'ru', N'«{text}» нет в списке'),
     (N'permits.page.paste.issueUnknown', N'kz', N'«{text}» тізімде жоқ'),
-    (N'permits.page.paste.issueLimit', N'ru', N'Читаются только первые {max} строк, остальные пропущены.'),
-    (N'permits.page.paste.issueLimit', N'kz', N'Тек алғашқы {max} жол оқылады, қалғаны еленбейді.'),
+    (N'permits.page.paste.issueLimit', N'ru', N'Больше {max} строк: ничего не добавляется. Разделите данные на несколько частей.'),
+    (N'permits.page.paste.issueLimit', N'kz', N'{max} жолдан көп: ештеңе қосылмайды. Деректерді бірнеше бөлікке бөліңіз.'),
     (N'permits.page.paste.moreIssues', N'ru', N'и ещё {count}'),
     (N'permits.page.paste.moreIssues', N'kz', N'және тағы {count}'),
     (N'permits.page.paste.progress', N'ru', N'Выполнено: {done} из {total} строк'),
@@ -22964,12 +22966,16 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.page.paste.done', N'kz', N'Қосылған жолдар: {count}'),
     (N'permits.page.paste.stopped', N'ru', N'Остановлено после сохранения строк: {written}'),
     (N'permits.page.paste.stopped', N'kz', N'Сақталған жолдардан кейін тоқтатылды: {written}'),
-    (N'permits.page.paste.stoppedText', N'ru', N'Сервер отклонил следующий блок. Строки, сохранённые до него, остаются в таблице. Исправьте перечисленные строки и добавьте остальные снова.'),
-    (N'permits.page.paste.stoppedText', N'kz', N'Сервер келесі блокты қабылдамады. Одан бұрын сақталған жолдар кестеде қалады. Көрсетілген жолдарды түзетіп, қалғандарын қайта қосыңыз.'),
+    (N'permits.page.paste.stoppedText', N'ru', N'Проверка прошла, но сервер отклонил один из следующих блоков (скорее всего, данные изменили в это время). Строки, сохранённые до него, остаются в таблице: посмотрите таблицу и добавьте только недостающие.'),
+    (N'permits.page.paste.stoppedText', N'kz', N'Тексеру өтті, бірақ сервер келесі блоктардың бірін қабылдамады (деректер сол кезде өзгерген болуы мүмкін). Одан бұрын сақталған жолдар кестеде қалады: кестені қарап, жетіспейтіндерін ғана қосыңыз.'),
     (N'permits.page.paste.failures', N'ru', N'Строки, отклонённые сервером'),
     (N'permits.page.paste.failures', N'kz', N'Сервер қабылдамаған жолдар'),
     (N'permits.page.paste.failure', N'ru', N'Строка {row}: {text}'),
     (N'permits.page.paste.failure', N'kz', N'{row}-жол: {text}'),
+    (N'permits.page.paste.blocked', N'ru', N'Пока есть проблемы, ничего не добавляется. Исправьте их и проверьте строки снова.'),
+    (N'permits.page.paste.blocked', N'kz', N'Мәселелер болғанша ештеңе қосылмайды. Оларды түзетіп, жолдарды қайта тексеріңіз.'),
+    (N'permits.page.paste.fileTooBig', N'ru', N'Файл больше {max} МБ, поэтому ничего не загружено. Разделите его на несколько файлов.'),
+    (N'permits.page.paste.fileTooBig', N'kz', N'Файл {max} МБ-тан үлкен, сондықтан ештеңе жүктелмеді. Оны бірнеше файлға бөліңіз.'),
     (N'permits.page.activate.title', N'ru', N'Активировать разрешение {number}?'),
     (N'permits.page.activate.title', N'kz', N'{number} рұқсатын белсендіру керек пе?'),
     (N'permits.page.activate.reads', N'ru', N'Листы, привязанные к типу {type}, начнут читать эти лимиты для периодов с {from} по {to}.'),

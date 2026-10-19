@@ -520,7 +520,7 @@ describe('вставка з Excel', () => {
     );
     const dialog = await openPaste();
     await fill(dialog, rowsText);
-    expect(await within(dialog).findByText('2 rows can be added to Limits; 0 need fixing first.')).toBeTruthy();
+    expect(await within(dialog).findByText('2 rows can be added to Limits; 0 need fixing before anything is added.')).toBeTruthy();
 
     const check = within(dialog).getByRole('button', { name: 'Check rows' });
     await waitFor(() => expect(check).toHaveProperty('disabled', false));
@@ -529,9 +529,10 @@ describe('вставка з Excel', () => {
     expect(saveBatch.mock.calls[0]?.[2]).toBe(true);
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Add 2 rows' }));
-    await waitFor(() => expect(saveBatch).toHaveBeenCalledTimes(2));
-    expect(saveBatch.mock.calls[1]?.[2]).toBe(false);
-    const sent = saveBatch.mock.calls[1]?.[1] ?? [];
+    // Перевірка → (повторна перевірка всіх шматків перед записом) → запис.
+    await waitFor(() => expect(saveBatch).toHaveBeenCalledTimes(3));
+    expect(saveBatch.mock.calls.map((call) => call[2])).toEqual([true, true, false]);
+    const sent = saveBatch.mock.calls[2]?.[1] ?? [];
     expect(sent.map((item) => item.values)).toEqual([
       { PERMIT: '5', Name: 'Outfall C', Annual: '5.5', Count: '1', Active: 'true', Issued: '2026-03-01', Place: '31', Use: '21', Substance: '41' },
       { PERMIT: '5', Name: 'Outfall D', Annual: '7' },
@@ -539,14 +540,68 @@ describe('вставка з Excel', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Paste rows into Limits' })).toBeNull());
   });
 
-  it('нерозпізнана клітинка названа, рядок не йде на запис', async () => {
+  it('нерозпізнана клітинка названа; «все або нічого»: перевірка й додавання недоступні, нічого не пишеться', async () => {
     const dialog = await openPaste();
     await fill(dialog, ['Outfall C', '12abc'].join('\t') + '\n' + ['Outfall D', '7'].join('\t'));
-    expect(await within(dialog).findByText('1 rows can be added to Limits; 1 need fixing first.')).toBeTruthy();
+    expect(await within(dialog).findByText('1 rows can be added to Limits; 1 need fixing before anything is added.')).toBeTruthy();
     expect(within(dialog).getByText('Row 1, Annual volume: "12abc" is not a number')).toBeTruthy();
+    expect(within(dialog).getByText('Nothing is added while there are problems. Fix them and check the rows again.')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Check rows' })).toHaveProperty('disabled', true);
+    expect(within(dialog).getByRole('button', { name: 'Add 0 rows' })).toHaveProperty('disabled', true);
+    expect(saveBatch).not.toHaveBeenCalled();
   });
 
-  it('відхилений сервером рядок виключається з запису, решта додається', async () => {
+  it('понад 5000 рядків: причина названа, «Check rows» і «Add» недоступні, нічого не пишеться', async () => {
+    const dialog = await openPaste();
+    await fill(dialog, Array.from({ length: 5001 }, (_, index) => `N${String(index)}\t1`).join('\n'));
+    expect(await within(dialog).findByText('More than 5000 rows: nothing is added. Split the data into several parts.')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Check rows' })).toHaveProperty('disabled', true);
+    expect(within(dialog).getByRole('button', { name: 'Add 0 rows' })).toHaveProperty('disabled', true);
+    expect(saveBatch).not.toHaveBeenCalled();
+  });
+
+  it('CSV більший за 5 МБ не читається: повідомлення біля поля, текст порожній', async () => {
+    const dialog = await openPaste();
+    const big = new File(['Name;Annual\nA;1\n'], 'big.csv', { type: 'text/csv' });
+    Object.defineProperty(big, 'size', { value: 5 * 1024 * 1024 + 1 });
+    const input = dialog.querySelector('input[type="file"]');
+    await userEvent.setup({ applyAccept: false }).upload(input as HTMLInputElement, big);
+    expect(await within(dialog).findByText('The file is larger than 5 MB, so nothing was loaded. Split it into several files.')).toBeTruthy();
+    expect(within(dialog).getByRole('textbox', { name: 'Rows' })).toHaveProperty('value', '');
+    expect(within(dialog).getByText('Nothing to add yet')).toBeTruthy();
+  });
+
+  it('відмова середнього шматка під час запису: банер «зупинено», шматок до нього лишається записаним', async () => {
+    saveBatch.mockImplementation((_code, items, dryRun) => {
+      const second = items[0]?.clientRowId === 'row-501';
+      const refused = !dryRun && second;
+      return Promise.resolve({
+        added: 0,
+        applied: !dryRun && !refused,
+        deleted: 0,
+        dryRun,
+        rows: items.map((item) => ({
+          clientRowId: item.clientRowId,
+          entryId: null,
+          errors: refused ? [{ errorCode: 'ECR-REG-4221', field: 'Name', messageKey: 'permits.page.row.required', params: {} }] : [],
+          status: 'added',
+          version: null,
+        })),
+        unchanged: 0,
+        updated: 0,
+      });
+    });
+    const dialog = await openPaste();
+    await fill(dialog, Array.from({ length: 501 }, (_, index) => `N${String(index)}\t1`).join('\n'));
+    const check = within(dialog).getByRole('button', { name: 'Check rows' });
+    await waitFor(() => expect(check).toHaveProperty('disabled', false));
+    fireEvent.click(check);
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Add 501 rows' }));
+    expect(await within(dialog).findByText('Stopped after saving 500 rows')).toBeTruthy();
+    expect(saveBatch.mock.calls.map((call) => call[2])).toEqual([true, true, true, true, false, false]);
+  });
+
+  it('відхилений сервером рядок блокує весь запис: Add недоступна, не записано нічого', async () => {
     saveBatch.mockImplementation((_code, items, dryRun) =>
       Promise.resolve({
         added: 0,
@@ -569,12 +624,12 @@ describe('вставка з Excel', () => {
     const check = within(dialog).getByRole('button', { name: 'Check rows' });
     await waitFor(() => expect(check).toHaveProperty('disabled', false));
     fireEvent.click(check);
-    expect(await within(dialog).findByText('1 rows pass the check, 1 are rejected by the server')).toBeTruthy();
+    expect(await within(dialog).findByText('0 rows pass the check, 1 are rejected by the server')).toBeTruthy();
     expect(within(dialog).getByText('Row 1: Required')).toBeTruthy();
+    expect(within(dialog).getByText('Nothing is added while there are problems. Fix them and check the rows again.')).toBeTruthy();
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add 1 rows' }));
-    await waitFor(() => expect(saveBatch).toHaveBeenCalledTimes(2));
-    expect((saveBatch.mock.calls[1]?.[1] ?? []).map((item) => item.values?.['Name'])).toEqual(['B']);
+    expect(within(dialog).getByRole('button', { name: 'Add 0 rows' })).toHaveProperty('disabled', true);
+    expect(saveBatch.mock.calls.every((call) => call[2] === true)).toBe(true);
   });
 
   it('CSV-файл: крапка з комою, заголовок пропущено', async () => {
@@ -583,7 +638,7 @@ describe('вставка з Excel', () => {
     const input = dialog.querySelector('input[type="file"]');
     expect(input).not.toBeNull();
     await userEvent.setup().upload(input as HTMLInputElement, file);
-    expect(await within(dialog).findByText('1 rows can be added to Limits; 0 need fixing first.')).toBeTruthy();
+    expect(await within(dialog).findByText('1 rows can be added to Limits; 0 need fixing before anything is added.')).toBeTruthy();
     expect(within(dialog).getByRole('checkbox', { name: 'The first line is a header (skip it)' })).toHaveProperty('checked', true);
   });
 

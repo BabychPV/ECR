@@ -9,8 +9,11 @@ import { newRowItem, type PermitField, type PickerData, pickerOptions } from './
  *
  * ⚠ Окремого «пакетного» ендпоінта рядків дозволу немає: рядки пишуться наявним `entries/batch` довідника таблиці
  * (до 2000 рядків за виклик). Тут блок розбирається `parsePastedRows` (PM-06), зіставляється з пікерами й іде
- * шматками по {@link ImportChunk} рядків. Кожен шматок атомарний (`applied: false` = не записано нічого), тож при
- * відмові шматка попередні вже записані — це кажемо людині, а не ховаємо.
+ * шматками по {@link ImportChunk} рядків. Кожен шматок атомарний (`applied: false` = не записано нічого).
+ *
+ * ⛔ Рішення 19.10: «все або нічого». Зауваження розбору, понад 5000 рядків (`MaxPastedRows`) чи відмова сервера на
+ * перевірці блокують ВЕСЬ запис; перевірка всіх шматків йде ДО першого запису. Єдиний виняток, якого клієнт не
+ * контролює, - відмова середнього шматка під час запису (гонитва): це `stopped` і відома межа.
  */
 
 /** Рядків за один виклик `entries/batch` (межа сервера — 2000). */
@@ -117,15 +120,54 @@ export interface BatchRun {
   /** Скільки рядків записано (для прогону `dryRun` — скільки пройшло б). */
   readonly ok: number;
   readonly failures: readonly RowFailure[];
-  /** Прогін обірвано відмовою шматка (лише справжній запис). */
+  /** Прогін обірвано відмовою шматка під час запису (недетермінована гонитва після успішної перевірки). */
   readonly stopped: boolean;
   /** Скільки шматків записано до зупинки. */
   readonly chunksWritten: number;
+  /** Перевірка ВСІХ шматків перед записом відхилила рядки: не записано нічого. */
+  readonly refused: boolean;
+}
+
+/** Межа розміру CSV-файлу, байт (5 МБ): більший не читається. */
+export const MaxImportFileMb = 5;
+export const MaxImportFileBytes = MaxImportFileMb * 1024 * 1024;
+
+/** План можна перевіряти й писати лише цілком: жодного зауваження, зайвих клітинок і хоч один рядок. */
+export function isPlanClean(plan: ImportPlan): boolean {
+  return plan.rows.length > 0 && plan.issues.length === 0 && plan.extraCells === 0;
+}
+
+/** Один прохід усіма шматками з `dryRun`: помилки рядків за номерами плану. */
+async function sweepDryRun(
+  code: string,
+  rows: readonly ImportRow[],
+  byClient: ReadonlyMap<string, number>,
+  onProgress: (done: number) => void,
+): Promise<{ ok: number; failures: RowFailure[] }> {
+  const failures: RowFailure[] = [];
+  let ok = 0;
+  for (let start = 0; start < rows.length; start += ImportChunk) {
+    const chunk = rows.slice(start, start + ImportChunk);
+    const result = await saveBatch(code, chunk.map((row) => row.item), true);
+    failures.push(
+      ...result.rows
+        .filter((row) => row.errors.length > 0)
+        .map((row) => ({
+          index: byClient.get(row.clientRowId) ?? 0,
+          messages: row.errors.map((error) => serverMessage(error.messageKey, error.params)),
+        })),
+    );
+    ok += result.rows.filter((row) => row.errors.length === 0).length;
+    onProgress(start + chunk.length);
+  }
+  return { ok, failures };
 }
 
 /**
- * Відправляє рядки шматками. `dryRun` проходить усі шматки й збирає помилки рядків; справжній запис зупиняється на
- * першому шматку з помилками (нічого з нього не записано), попередні лишаються.
+ * «Все або нічого» (рішення 19.10). `dryRun` проходить усі шматки й збирає помилки рядків. Справжній запис СПЕРШУ
+ * проганяє `dryRun` усіх шматків і, якщо сервер відхилив хоч один рядок, не пише нічого (`refused`); лише чиста
+ * перевірка відкриває запис шматками. Відмова середнього шматка вже під час запису (гонитва з чужою правкою) —
+ * `stopped`: попередні шматки лишаються, це відома межа (FEATURE-PERMITS.md).
  */
 export async function runImport(
   code: string,
@@ -133,35 +175,34 @@ export async function runImport(
   dryRun: boolean,
   onProgress: (done: number, total: number) => void,
 ): Promise<BatchRun> {
-  const failures: RowFailure[] = [];
+  const byClient = new Map(rows.map((row) => [row.item.clientRowId, row.index]));
+  const total = dryRun ? rows.length : rows.length * 2;
+
+  const verified = await sweepDryRun(code, rows, byClient, (done) => onProgress(done, total));
+  if (dryRun) return { ok: verified.ok, failures: verified.failures, stopped: false, chunksWritten: 0, refused: false };
+  if (verified.failures.length > 0) {
+    return { ok: 0, failures: verified.failures, stopped: false, chunksWritten: 0, refused: true };
+  }
+
   let ok = 0;
   let chunksWritten = 0;
-  let done = 0;
-  const byClient = new Map(rows.map((row) => [row.item.clientRowId, row.index]));
-
   for (let start = 0; start < rows.length; start += ImportChunk) {
     const chunk = rows.slice(start, start + ImportChunk);
-    const result = await saveBatch(code, chunk.map((row) => row.item), dryRun);
-    const chunkFailures = result.rows
-      .filter((row) => row.errors.length > 0)
-      .map((row) => ({
-        index: byClient.get(row.clientRowId) ?? 0,
-        messages: row.errors.map((error) => serverMessage(error.messageKey, error.params)),
-      }));
-    failures.push(...chunkFailures);
-    done += chunk.length;
-    onProgress(done, rows.length);
-
-    if (dryRun) {
-      ok += result.rows.filter((row) => row.errors.length === 0).length;
-    } else if (result.applied) {
-      ok += chunk.length;
-      chunksWritten += 1;
-    } else {
-      return { ok, failures, stopped: true, chunksWritten };
+    const result = await saveBatch(code, chunk.map((row) => row.item), false);
+    onProgress(rows.length + start + chunk.length, total);
+    if (!result.applied) {
+      const failures = result.rows
+        .filter((row) => row.errors.length > 0)
+        .map((row) => ({
+          index: byClient.get(row.clientRowId) ?? 0,
+          messages: row.errors.map((error) => serverMessage(error.messageKey, error.params)),
+        }));
+      return { ok, failures, stopped: true, chunksWritten, refused: false };
     }
+    ok += chunk.length;
+    chunksWritten += 1;
   }
-  return { ok, failures, stopped: false, chunksWritten };
+  return { ok, failures: [], stopped: false, chunksWritten, refused: false };
 }
 
 /** CSV/TSV з файлу → текст із табуляціями між клітинками (формат вставки). Роздільник — найчастіший у першому рядку. */
