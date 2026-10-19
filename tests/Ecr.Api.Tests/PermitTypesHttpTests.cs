@@ -3,6 +3,10 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Ecr.TestKit;
+using Microsoft.AspNetCore.Http.Metadata;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -109,6 +113,68 @@ public sealed class PermitTypesHttpTests(SqlServerFixture sql)
         // Читання теж потребує права: без Registry.View - 403.
         using var nobody = await SystemHealthControllerTests.SignedInAsync(sql, app, "Document.View");
         Assert.Equal(HttpStatusCode.Forbidden, (await nobody.GetAsync(new Uri("/api/v1/permit-types", UriKind.Relative))).StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public void Запис_типу_оголошує_стелю_тіла_запиту_1_МіБ_у_метаданих_ендпоінтів()
+    {
+        using var app = new EcrApiFactory(sql);
+
+        // PA-A-06: гігантське тіло має відсікти Kestrel ще до розбору JSON (413), а не валідатор після нього.
+        // ⚠ TestServer стелі НЕ виконує (перевірено: тіло 1,1 МБ доходило до валідатора й давало 422 textTooLong), тож тест
+        // фіксує ОГОЛОШЕННЯ на ендпоінтах - ті самі метадані, які читає RequestSizeFilter на Kestrel, - а не роботу обмежувача.
+        // ⛔ Мутаційний доказ: прибрати [RequestSizeLimit] з будь-якого з трьох дій - червоніє цей тест.
+        var endpoints = app.Services.GetRequiredService<EndpointDataSource>().Endpoints;
+        foreach (var action in new[] { "Create", "Replace", "Publish" })
+        {
+            var endpoint = Assert.Single(endpoints, e =>
+                e.Metadata.GetMetadata<ControllerActionDescriptor>() is { ControllerName: "PermitTypes" } d && d.ActionName == action);
+            Assert.Equal(1_048_576L, endpoint.Metadata.GetMetadata<IRequestSizeLimitMetadata>()?.MaxRequestBodySize);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Склад_типу_понад_межі_дає_422_PRM_0422()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Registry.View", "Permit.EditType", "Permit.PublishType");
+        var code = $"LIM{_tag}";
+        var created = await client.PostAsJsonAsync(new Uri("/api/v1/permit-types", UriKind.Relative), Create(code));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var rowVersion = (await Json(created)).GetProperty("rowVersion").GetString()!;
+        var route = new Uri($"/api/v1/permit-types/{code}", UriKind.Relative);
+
+        // Склад понад межу (101 стовпець) - 422 з окремим ключем.
+        var columns = Enumerable.Range(0, 101).Select(i => new
+        {
+            code = i == 0 ? "K" : $"C{i}",
+            nameL10n = new { en = "c" },
+            dataType = "String",
+            unitId = (int?)null,
+            required = i == 0,
+            key = i == 0,
+            group = (string?)null,
+            precision = (int?)null,
+            scale = (int?)null,
+            listScope = (string?)null,
+            listRegistryCode = (string?)null,
+            siblingTableCode = (string?)null,
+            choices = (string[]?)null,
+            order = i + 1,
+        }).ToArray();
+        var wide = new
+        {
+            rowVersion,
+            nameL10n = new { en = "Wide" },
+            category = "Air",
+            tables = new[] { new { code = "Rows", nameL10n = new { en = "Rows" }, order = 1, columns, rules = Array.Empty<object>() } },
+            rules = Array.Empty<object>(),
+        };
+        var refused = await client.PutAsJsonAsync(route, wide);
+        await AssertErrorAsync(refused, HttpStatusCode.UnprocessableEntity, "ECR-PRM-0422");
     }
 
     private static object Create(string code) => new { code, nameL10n = new { en = code }, category = "Air" };

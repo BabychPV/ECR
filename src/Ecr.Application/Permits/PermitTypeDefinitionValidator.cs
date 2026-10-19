@@ -37,6 +37,8 @@ public static class PermitTypeDefinitionValidator
             throw Invalid("Назва типу дозволу обов'язкова.", "err.ECR-PRM-0422.nameRequired", ("item", "type"));
         }
 
+        RequireNameLength(name, "type");
+
         if (!PermitTypeCodec.TryCategory(category, out var parsed))
         {
             throw Invalid(
@@ -71,6 +73,10 @@ public static class PermitTypeDefinitionValidator
 
         _ = ValidateDetails(content.NameL10n, content.Category);
 
+        // ⛔ Межі розміру - ПЕРШИМИ, до будь-якого обходу складу: інакше циклам нижче (і рушієві правил) дістався б
+        // склад на десятки тисяч стовпців (PA-A-06).
+        ValidateSize(content);
+
         var tableCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var table in content.Tables)
         {
@@ -97,6 +103,8 @@ public static class PermitTypeDefinitionValidator
             {
                 throw Invalid("Назва таблиці обов'язкова.", "err.ECR-PRM-0422.nameRequired", ("item", table.Code));
             }
+
+            RequireNameLength(table.NameL10n, table.Code);
         }
 
         foreach (var table in content.Tables)
@@ -158,6 +166,8 @@ public static class PermitTypeDefinitionValidator
             {
                 throw Invalid("Підпис стовпця обов'язковий.", "err.ECR-PRM-0422.nameRequired", ("item", column.Code));
             }
+
+            RequireNameLength(column.NameL10n, column.Code);
 
             if (!DataTypes.Contains(column.DataType, StringComparer.Ordinal))
             {
@@ -385,6 +395,58 @@ public static class PermitTypeDefinitionValidator
             {
                 throw Invalid("Назва перевірки обов'язкова.", "err.ECR-PRM-0422.nameRequired", ("item", rule.Code));
             }
+
+            RequireNameLength(rule.NameL10n, rule.Code);
+        }
+    }
+
+    /// <summary>Кількість таблиць і стовпців у межах <see cref="PermitTypeLimits"/>.</summary>
+    private static void ValidateSize(PermitTypeContent content)
+    {
+        if (content.Tables.Count > PermitTypeLimits.MaxTables)
+        {
+            throw Invalid(
+                $"У типі не може бути більше {PermitTypeLimits.MaxTables} таблиць.",
+                "err.ECR-PRM-0422.tooManyTables",
+                ("max", PermitTypeLimits.MaxTables.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        var total = 0;
+        foreach (var table in content.Tables)
+        {
+            if (table.Columns.Count > PermitTypeLimits.MaxColumnsPerTable)
+            {
+                throw Invalid(
+                    $"У таблиці «{table.Code}» не може бути більше {PermitTypeLimits.MaxColumnsPerTable} стовпців.",
+                    "err.ECR-PRM-0422.tooManyColumns",
+                    ("tableCode", table.Code ?? string.Empty),
+                    ("max", PermitTypeLimits.MaxColumnsPerTable.ToString(CultureInfo.InvariantCulture)));
+            }
+
+            total += table.Columns.Count;
+        }
+
+        if (total > PermitTypeLimits.MaxColumnsTotal)
+        {
+            throw Invalid(
+                $"У типі не може бути більше {PermitTypeLimits.MaxColumnsTotal} стовпців разом.",
+                "err.ECR-PRM-0422.tooManyColumnsTotal",
+                ("max", PermitTypeLimits.MaxColumnsTotal.ToString(CultureInfo.InvariantCulture)));
+        }
+    }
+
+    /// <summary>Жодне значення назви не довше за <see cref="PermitTypeLimits.MaxNameLength"/>.</summary>
+    /// <param name="text">Назва мовами каталогу.</param>
+    /// <param name="item">Код того, чия це назва (<c>type</c> - сам тип).</param>
+    private static void RequireNameLength(IReadOnlyDictionary<string, string>? text, string? item)
+    {
+        if (text is not null && text.Values.Any(v => v is not null && v.Length > PermitTypeLimits.MaxNameLength))
+        {
+            throw Invalid(
+                $"Назва «{item}» довша за {PermitTypeLimits.MaxNameLength} символів.",
+                "err.ECR-PRM-0422.textTooLong",
+                ("item", item ?? string.Empty),
+                ("max", PermitTypeLimits.MaxNameLength.ToString(CultureInfo.InvariantCulture)));
         }
     }
 

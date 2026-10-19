@@ -9056,6 +9056,12 @@ USING (VALUES
     ,(N'permits.sheetBinding.warning.cellNotFromPermit', N'en', N'Some cells were not updated: their last change was not made from the permit.', 1)
     ,(N'permits.sheetBinding.warning.periodUnknown', N'en', N'The period boundaries are unknown, so no rows were created from the permit.', 1)
     -- PERMITS: sheet-binding-ui ── кінець секції ──
+    -- PERMITS: type-limits ── en: межі розміру визначення типу (ECR-PRM-0422 tooMany*, textTooLong; аудит A, PA-A-06); ru/kz — порцією PERMITS: type-limits нижче ──
+    ,(N'err.ECR-PRM-0422.tooManyTables', N'en', N'A permit type can have at most {max} tables.', 1)
+    ,(N'err.ECR-PRM-0422.tooManyColumns', N'en', N'Table "{tableCode}" can have at most {max} columns.', 1)
+    ,(N'err.ECR-PRM-0422.tooManyColumnsTotal', N'en', N'A permit type can have at most {max} columns in all its tables together.', 1)
+    ,(N'err.ECR-PRM-0422.textTooLong', N'en', N'The name of "{item}" must not be longer than {max} characters.', 1)
+    -- PERMITS: type-limits ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -23407,6 +23413,22 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: sheet-binding-ui ── кінець секції ──
+-- PERMITS: type-limits ── ru/kz: межі розміру визначення типу (аудит A, PA-A-06); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-0422.tooManyTables', N'ru', N'В типе разрешения может быть не более {max} таблиц.'),
+    (N'err.ECR-PRM-0422.tooManyTables', N'kz', N'Рұқсат түрінде {max} кестеден артық болмауы тиіс.'),
+    (N'err.ECR-PRM-0422.tooManyColumns', N'ru', N'В таблице «{tableCode}» может быть не более {max} столбцов.'),
+    (N'err.ECR-PRM-0422.tooManyColumns', N'kz', N'«{tableCode}» кестесінде {max} бағаннан артық болмауы тиіс.'),
+    (N'err.ECR-PRM-0422.tooManyColumnsTotal', N'ru', N'Во всех таблицах типа разрешения вместе может быть не более {max} столбцов.'),
+    (N'err.ECR-PRM-0422.tooManyColumnsTotal', N'kz', N'Рұқсат түрінің барлық кестелеріндегі бағандар саны жиынтығында {max}-ден аспауы тиіс.'),
+    (N'err.ECR-PRM-0422.textTooLong', N'ru', N'Название «{item}» не должно быть длиннее {max} символов.'),
+    (N'err.ECR-PRM-0422.textTooLong', N'kz', N'«{item}» атауы {max} таңбадан ұзын болмауы тиіс.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: type-limits ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

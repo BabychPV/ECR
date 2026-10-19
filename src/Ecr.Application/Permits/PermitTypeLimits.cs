@@ -1,0 +1,41 @@
+// src/Ecr.Application/Permits/PermitTypeLimits.cs
+namespace Ecr.Application.Permits;
+
+/// <summary>
+/// Межі розміру визначення типу дозволу — ЄДИНЕ місце: валідатор (<see cref="PermitTypeDefinitionValidator"/>) і
+/// ендпоінти <c>PermitTypesController</c> читають числа звідси (аудит, прохід A, PA-A-06).
+/// </summary>
+/// <remarks>
+/// <para>
+/// ⛔ Чому. Склад типу — один JSON, який <c>PUT /permit-types/{code}</c> приймає цілком. Без меж 20 000 стовпців
+/// оброблялись 23–29 с, 100 000 — 150 с із зростанням пам'яті Api з 274 МБ до 2,5 ГБ і ~3 ядрами, після чого
+/// читання й видалення типів таймаутили в усіх користувачів; назва на 10 МБ теж приймалась. Право
+/// <c>Permit.EditType</c> адміністративне, але одна його помилка чи скрипт клали сервіс.
+/// </para>
+/// <para>
+/// ⚠ Дві лінії. Межі складу й довжин (422 <c>ECR-PRM-0422</c> з окремим <c>messageKey</c>) спрацьовують ПІСЛЯ розбору
+/// JSON, тому не рятують від самого розбору гігантського тіла; його відсікає <see cref="MaxRequestBodyBytes"/> (413) на
+/// ендпоінтах запису, ще до розбору. Прибрати котрусь одну — лишити дірку.
+/// </para>
+/// <para>
+/// ⚠ Типу дозволу окремого опису (description) не має: є лише назви мовами каталогу (тип, таблиця, стовпець, перевірка).
+/// Нове текстове поле типу бере <see cref="MaxNameLength"/> чи власну межу ТУТ.
+/// </para>
+/// </remarks>
+public static class PermitTypeLimits
+{
+    /// <summary>Найбільше таблиць у типі.</summary>
+    public const int MaxTables = 50;
+
+    /// <summary>Найбільше стовпців в одній таблиці типу.</summary>
+    public const int MaxColumnsPerTable = 100;
+
+    /// <summary>Найбільше стовпців у всіх таблицях типу разом (поля типу).</summary>
+    public const int MaxColumnsTotal = 200;
+
+    /// <summary>Найбільша довжина тексту назви (одного значення однією мовою), символів.</summary>
+    public const int MaxNameLength = 256;
+
+    /// <summary>Стеля тіла запиту заведення/заміни/публікації типу, байтів: 1 МіБ (типовий склад - десятки КіБ).</summary>
+    public const int MaxRequestBodyBytes = 1024 * 1024;
+}
