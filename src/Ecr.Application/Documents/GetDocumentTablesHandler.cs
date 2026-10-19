@@ -90,10 +90,15 @@ public sealed class GetDocumentTablesHandler(
         // PM-11b: ознака «таблиця з дозволу» - ОДИН запит на всю відповідь, за власною версією документа (не проєкту).
         // Лише код/режим/тип: дані дозволу (номери, ліміти, рядки) лишаються за Registry.View. Права окремо не питаємо -
         // це та сама структура версії, що й назви таблиць вище, а читання вже вимагало Document.View.
-        var bindings = (await permitBindings
-            .ListActiveSummariesAsync(instances[0].TemplateVersionId, ct)
-            .ConfigureAwait(false))
-            .ToDictionary(b => b.SheetTableDefId);
+        //
+        // PM-11c: у версії без чинних прив'язок (Land та решта) запиту немає взагалі - прапор бере знімок метаданих, який
+        // уже прочитано вище. Прив'язки міняються лише в чернетці з скиданням знімка (див. HasActivePermitBindings).
+        var bindings = snapshot.HasActivePermitBindings
+            ? (await permitBindings
+                .ListActiveSummariesAsync(instances[0].TemplateVersionId, ct)
+                .ConfigureAwait(false))
+                .ToDictionary(b => b.SheetTableDefId)
+            : new Dictionary<int, PermitBindingSummary>();
 
         var byTableDef = instances.ToDictionary(i => i.TableDefId);
         var result = new List<DocumentTableDto>(instances.Count);
