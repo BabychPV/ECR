@@ -44,6 +44,7 @@ describe('jobKindLabel', () => {
     ['PartitionCheckJob', 'partitionCheck'],
     ['Ecr.Infrastructure.Jobs.ConsistencyCheckJob', 'consistencyCheck'],
     ['RegistrySyncJob', 'registrySync'],
+    ['Ecr.Infrastructure.Jobs.OrphanScanJob', 'orphanScan'],
     ['ReportRetentionJob', 'reportRetention'],
     ['ReportSnapshotFormatJob', 'reportSnapshotFormat'],
   ])('FP-7: повторювана задача конкретного класу %s має людську назву, а не сирий тип', (type, key) => {

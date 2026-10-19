@@ -40,6 +40,8 @@ const KindKeys: Record<string, string> = {
   // CL-25 (B-11): перевірка узгодженості теж повторювана й реєструється конкретним класом
   // `ConsistencyCheckJob` — без цього рядка в ru/kz лишалося англійське запасне «Consistency check».
   ConsistencyCheckJob: 'jobs.kind.consistencyCheck',
+  // `RecurringScheduleService` планує КОНКРЕТНИЙ `OrphanScanJob` (а не `IOrphanScanJob`).
+  OrphanScanJob: 'jobs.kind.orphanScan',
   NotificationJob: 'jobs.kind.notification',
   PartitionCheckJob: 'jobs.kind.partitionCheck',
   PeriodStateJob: 'jobs.kind.periodState',
