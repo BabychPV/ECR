@@ -155,6 +155,10 @@ public sealed class SaveTableDefHandler(
         {
             await PermitSheetBindingGuard.RequireRowModeAllowedAsync(
                 permitBindings, templateVersionId, existing, command.RowMode, ct).ConfigureAwait(false);
+
+            // PM-09b2: стеля рядків під прив'язкою «рядки» не знижується (існуюча таблиця ще зі старою стелею).
+            await PermitSheetBindingGuard.RequireMaxRowsNotLoweredAsync(
+                permitBindings, templateVersionId, existing, command.MaxDynamicRows, ct).ConfigureAwait(false);
         }
 
         var oldJson = existing is null ? null : Describe(existing);

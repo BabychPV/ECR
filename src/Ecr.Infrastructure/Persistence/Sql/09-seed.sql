@@ -8604,6 +8604,8 @@ USING (VALUES
     ,(N'err.ECR-PRM-4102.rowMode', N'en', N'Table "{tableCode}" takes permit rows through binding "{bindingCode}": fixed rows cannot accept them. Delete the binding first.', 1)
     ,(N'err.ECR-PRM-4102.table', N'en', N'Table "{tableCode}" is used by permit binding "{bindingCode}": delete the binding first.', 1)
     ,(N'err.ECR-PRM-4102.column', N'en', N'Column "{columnCode}" is mapped by permit binding "{bindingCode}": change or delete the binding first.', 1)
+    ,(N'err.ECR-PRM-4102.maxRows', N'en', N'Table "{tableCode}" takes permit rows through binding "{bindingCode}": the row limit cannot be lowered (was {previousMax}, requested {newMax}). Delete the binding first.', 1)
+    ,(N'err.ECR-PRM-4102.sheet', N'en', N'Sheet "{sheetCode}" holds table "{tableCode}" bound to permit binding "{bindingCode}": delete the binding first.', 1)
     -- PERMITS: sheetguard ── кінець секції ──
     -- PERMITS: ui-lists ── PM-08d: екран «Lists» (списки вибору пермітів), варіант A без окремого ендпоінта; ru/kz — порцією PERMITS: ui-lists нижче ──
     ,(N'permits.lists.openRegistries', N'en', N'Open Registries', 1)
@@ -22157,7 +22159,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-PRM-4102.table', N'ru', N'Таблица «{tableCode}» используется привязкой разрешения «{bindingCode}»: сначала удалите привязку.'),
     (N'err.ECR-PRM-4102.table', N'kz', N'«{tableCode}» кестесін «{bindingCode}» рұқсат байланысы пайдаланады: алдымен байланысты жойыңыз.'),
     (N'err.ECR-PRM-4102.column', N'ru', N'Колонка «{columnCode}» сопоставлена привязкой разрешения «{bindingCode}»: сначала измените или удалите привязку.'),
-    (N'err.ECR-PRM-4102.column', N'kz', N'«{columnCode}» бағанын «{bindingCode}» рұқсат байланысы сәйкестендірген: алдымен байланысты өзгертіңіз немесе жойыңыз.')
+    (N'err.ECR-PRM-4102.column', N'kz', N'«{columnCode}» бағанын «{bindingCode}» рұқсат байланысы сәйкестендірген: алдымен байланысты өзгертіңіз немесе жойыңыз.'),
+    (N'err.ECR-PRM-4102.maxRows', N'ru', N'Таблица «{tableCode}» принимает строки разрешения через привязку «{bindingCode}»: лимит строк нельзя снижать (было {previousMax}, запрошено {newMax}). Сначала удалите привязку.'),
+    (N'err.ECR-PRM-4102.maxRows', N'kz', N'«{tableCode}» кестесі «{bindingCode}» байланысы арқылы рұқсат жолдарын қабылдайды: жол шегін төмендетуге болмайды (болған {previousMax}, сұралған {newMax}). Алдымен байланысты жойыңыз.'),
+    (N'err.ECR-PRM-4102.sheet', N'ru', N'Лист «{sheetCode}» содержит таблицу «{tableCode}», привязанную к разрешению «{bindingCode}»: сначала удалите привязку.'),
+    (N'err.ECR-PRM-4102.sheet', N'kz', N'«{sheetCode}» парағында «{bindingCode}» рұқсат байланысы бекітілген «{tableCode}» кестесі бар: алдымен байланысты жойыңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

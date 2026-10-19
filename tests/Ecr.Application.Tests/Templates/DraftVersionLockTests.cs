@@ -200,7 +200,7 @@ public sealed class DraftVersionLockTests
         {
             "SaveSheet" => new SaveSheetDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user)
                 .HandleAsync(1, "S2", new SaveSheetDefCommand(En("S2"), null, null, false, true), ct),
-            "DeleteSheet" => new DeleteSheetDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user)
+            "DeleteSheet" => new DeleteSheetDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user, _permitBindings)
                 .HandleAsync(1, "S1", ct),
             "SaveTable" => new SaveTableDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user, _permitBindings)
                 .HandleAsync(1, "S1", "T2", new SaveTableDefCommand(
