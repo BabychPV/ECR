@@ -501,6 +501,9 @@ try {
             # заводить порожній довідник (сід довідників не має). Лише тестова роль стенда;
             # права bootstrap і ролей продукту не змінюються.
             'Registry.View', 'Registry.EditData', 'Registry.EditDefinition',
+            # ✎ rc8: керування типами Permits — Permit.EditType/PublishType (rc7); без них
+            # permitTypes*.spec і screenshots(permit-types) дають 403. Лише тестова роль стенда.
+            'Permit.EditType', 'Permit.PublishType',
             'Document.View', 'Document.Create', 'Document.Export', 'Document.Import',
             'Document.Reopen',
             'Project.Manage', 'Period.Configure', 'Period.Reopen',
