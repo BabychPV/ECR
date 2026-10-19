@@ -414,7 +414,7 @@ public sealed partial class PermitBindingService(
                 }
 
                 // Комірка з вмістом, остання зміна якої не від дозволу, - чужа: не чіпаємо.
-                if (hasCurrent && !string.Equals(origins.GetValueOrDefault((rowId, column.Id)), CellChangeOrigins.Permit, StringComparison.Ordinal))
+                if (hasCurrent && !string.Equals(origins.GetValueOrDefault((rowId, code)), CellChangeOrigins.Permit, StringComparison.Ordinal))
                 {
                     notFromPermit++;
                     continue;
@@ -460,21 +460,27 @@ public sealed partial class PermitBindingService(
     }
 
     /// <summary>Походження останньої зміни кожної комірки екземпляра (гарячий журнал + архів, як у <c>RowStore</c>).</summary>
-    private Task<Dictionary<(long RowId, int ColumnId), string>> LastOriginsAsync(
+    /// <remarks>
+    /// ⛔ Комірка впізнається за КОДОМ колонки, а не за <c>ColumnDefId</c> (PM-10c): після переносу документа на нову версію
+    /// шаблону комірки лежать на колонках цільової версії, а журнал досі посилається на колонки старої. За Id походження
+    /// <c>Permit</c> «губилося» б, і «Оновити з дозволу» вважало б усі перенесені ліміти чужою правкою. Колонку перейменовано
+    /// при переносі - збігу за кодом немає, комірка вважається чужою (безпечний бік: не затирати).
+    /// </remarks>
+    private Task<Dictionary<(long RowId, string ColumnCode), string>> LastOriginsAsync(
         long documentId, PeriodKey periodKey, long instanceId, CancellationToken ct)
         => AuditReader.WithArchiveFallbackAsync(
             withArchive => QueryOriginsAsync(documentId, periodKey, instanceId, withArchive, ct), log);
 
-    private async Task<Dictionary<(long RowId, int ColumnId), string>> QueryOriginsAsync(
+    private async Task<Dictionary<(long RowId, string ColumnCode), string>> QueryOriginsAsync(
         long documentId, PeriodKey periodKey, long instanceId, bool withArchive, CancellationToken ct)
     {
         var pk = periodKey.Value;
         var query = withArchive
             ? db.Database.SqlQuery<OriginRow>($"""
-                SELECT x.TableRowId AS TableRowId, x.ColumnDefId AS ColumnDefId, x.Origin AS Origin
+                SELECT x.TableRowId AS TableRowId, x.ColumnCode AS ColumnCode, x.Origin AS Origin
                 FROM (
-                    SELECT u.TableRowId, u.ColumnDefId, u.Origin,
-                           ROW_NUMBER() OVER (PARTITION BY u.TableRowId, u.ColumnDefId ORDER BY u.ChangedAt DESC, u.Id DESC) AS Rn
+                    SELECT u.TableRowId, d.Code AS ColumnCode, u.Origin,
+                           ROW_NUMBER() OVER (PARTITION BY u.TableRowId, d.Code ORDER BY u.ChangedAt DESC, u.Id DESC) AS Rn
                     FROM (
                         SELECT c.Id, c.ChangedAt, c.TableRowId, c.ColumnDefId, c.Origin
                         FROM aud.CellChange c
@@ -486,15 +492,17 @@ public sealed partial class PermitBindingService(
                         WHERE a.DocumentId = {documentId} AND a.PeriodKey = {pk}
                           AND a.TableRowId IN (SELECT r.Id FROM doc.TableRow r WHERE r.PeriodKey = {pk} AND r.TableInstanceId = {instanceId})
                     ) u
+                    JOIN cfg.ColumnDef d ON d.Id = u.ColumnDefId
                 ) x
                 WHERE x.Rn = 1
                 """)
             : db.Database.SqlQuery<OriginRow>($"""
-                SELECT x.TableRowId AS TableRowId, x.ColumnDefId AS ColumnDefId, x.Origin AS Origin
+                SELECT x.TableRowId AS TableRowId, x.ColumnCode AS ColumnCode, x.Origin AS Origin
                 FROM (
-                    SELECT c.TableRowId, c.ColumnDefId, c.Origin,
-                           ROW_NUMBER() OVER (PARTITION BY c.TableRowId, c.ColumnDefId ORDER BY c.ChangedAt DESC, c.Id DESC) AS Rn
+                    SELECT c.TableRowId, d.Code AS ColumnCode, c.Origin,
+                           ROW_NUMBER() OVER (PARTITION BY c.TableRowId, d.Code ORDER BY c.ChangedAt DESC, c.Id DESC) AS Rn
                     FROM aud.CellChange c
+                    JOIN cfg.ColumnDef d ON d.Id = c.ColumnDefId
                     WHERE c.DocumentId = {documentId} AND c.PeriodKey = {pk}
                       AND c.TableRowId IN (SELECT r.Id FROM doc.TableRow r WHERE r.PeriodKey = {pk} AND r.TableInstanceId = {instanceId})
                 ) x
@@ -502,7 +510,7 @@ public sealed partial class PermitBindingService(
                 """);
 
         var rows = await query.ToListAsync(ct).ConfigureAwait(false);
-        return rows.ToDictionary(r => (r.TableRowId, r.ColumnDefId), r => r.Origin);
+        return rows.ToDictionary(r => (r.TableRowId, r.ColumnCode), r => r.Origin);
     }
 
     private sealed record ExistingRow(long Id, string Key, bool IsDeleted);
@@ -511,7 +519,7 @@ public sealed partial class PermitBindingService(
     {
         public long TableRowId { get; set; }
 
-        public int ColumnDefId { get; set; }
+        public string ColumnCode { get; set; } = string.Empty;
 
         public string Origin { get; set; } = string.Empty;
     }
