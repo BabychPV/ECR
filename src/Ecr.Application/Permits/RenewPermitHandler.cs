@@ -145,6 +145,7 @@ public sealed class RenewPermitHandler(
             // (`entryCodeAutomatic`): порожній код - код видасть writer. Типи, опубліковані раніше, лишаються в
             // `Manual` і, як і було, отримують код із послідовності тут.
             var auto = table.Def.CodeMode == RegistryCodeMode.Auto;
+            // Для Auto послідовність тут НЕ чіпається (`first` не використовується: коди резервує writer).
             var first = auto ? 0L : await registries.NextEntryCodesAsync(olds.Count, ct).ConfigureAwait(false);
             var batch = new List<RegistryEntryWrite>(olds.Count);
             for (var i = 0; i < olds.Count; i++)
