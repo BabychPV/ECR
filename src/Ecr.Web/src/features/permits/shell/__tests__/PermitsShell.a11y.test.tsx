@@ -3,7 +3,6 @@ import { cleanup, render } from '@testing-library/react';
 import { PermitEditorHead, PermitStateStepper } from '../PermitEditorHead';
 import { PermitStateBadge } from '../../ui/PermitStateBadge';
 import { PermitListsPage } from '@/pages/admin/PermitListsPage';
-import { PermitBindingsPage } from '@/pages/admin/PermitBindingsPage';
 import { Catalog, Shell, Themes } from '@/test/__tests__/a11yFixtures';
 import { describe as describeViolations, findViolations } from '@/test/a11y';
 
@@ -31,8 +30,9 @@ afterEach(cleanup);
 describe('Permits: каркас — доступність', { timeout: 120_000 }, () => {
   for (const colorScheme of Themes) {
     it(`${colorScheme}: сторінки-каркаси розділів без блокуючих порушень і без ⟦ключів⟧`, async () => {
-      // (Перелік дозволів — справжня сторінка PM-07: `features/permits/list/__tests__/PermitsPage.a11y.test.tsx`.)
-      for (const page of [<PermitListsPage key="l" />, <PermitBindingsPage key="b" />]) {
+      // (Перелік дозволів — справжня сторінка PM-07: `features/permits/list/__tests__/PermitsPage.a11y.test.tsx`;
+      // перелік прив'язок — справжня сторінка, її доступність у `features/permits/bindingsPages/__tests__/`.)
+      for (const page of [<PermitListsPage key="l" />]) {
         const { container, unmount } = render(<Shell colorScheme={colorScheme}>{page}</Shell>);
         expect(container.textContent).not.toContain('⟦');
         const violations = await findViolations(container);

@@ -3,13 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
-import { PermitBindingPage } from '../PermitBindingPage';
-import { PermitBindingsPage } from '../PermitBindingsPage';
 import { PermitListsPage } from '../PermitListsPage';
 import { PageDescriptionContext } from '@/shared/ui/pageDescription';
 
 /**
- * (Перелік типів — справжня сторінка PM-08a, її тести: `features/permits/types/__tests__/PermitTypesPage.test.tsx`.)
+ * (Перелік типів — справжня сторінка PM-08a, її тести: `features/permits/types/__tests__/PermitTypesPage.test.tsx`.
+ * Прив'язки аркушів — справжні сторінки, тести: `features/permits/bindingsPages/__tests__/`.)
  * Сторінки-каркаси Permits (PM-06): заголовок, смуга розділів, чесний порожній стан, недоступні дії
  * з поясненням і жодного запиту до мережі (ендпоінтів ще немає).
  */
@@ -43,7 +42,6 @@ function showAt(path: string, route: string, element: ReactElement, descriptionK
 const sectionPages = [
   // (Перелік дозволів — справжня сторінка PM-07, її тести: `features/permits/list/__tests__/PermitsPage.test.tsx`.)
   ['/admin/permits/lists', <PermitListsPage key="c" />, 'text of permits.lists.title', 'text of permits.lists.empty.title', [], 2],
-  ['/admin/permits/bindings', <PermitBindingsPage key="d" />, 'text of permits.bindings.title', 'text of permits.bindings.empty.title', ['text of permits.bindings.new'], 3],
 ] as const;
 
 describe('Permits: сторінки розділів', () => {
@@ -87,12 +85,5 @@ describe('Permits: сторінки розділів', () => {
   });
 });
 
-describe('Permits: сторінки з параметром', () => {
-  // (Екран дозволу — справжня сторінка PM-07, її тести: `features/permits/permit/__tests__/PermitPage.test.tsx`.)
-  it('привʼязка: ідентифікатор із адреси й посилання на перелік привʼязок', () => {
-    showAt('/admin/permits/bindings/B-01', '/admin/permits/bindings/:id', <PermitBindingPage />);
-    expect(screen.getByText('B-01')).toBeTruthy();
-    expect(screen.getByRole('link', { name: '← text of permits.back.bindings' }).getAttribute('href')).toBe('/admin/permits/bindings');
-    expect(screen.getByText('text of permits.binding.emptyTitle')).toBeTruthy();
-  });
-});
+// (Екран дозволу — справжня сторінка PM-07, її тести: `features/permits/permit/__tests__/PermitPage.test.tsx`.
+// Екрани прив'язок — справжні сторінки, їхні тести: `features/permits/bindingsPages/__tests__/`.)
