@@ -56,8 +56,12 @@ public sealed class GetRegistryRowsHandler(
     IRegistryRowsQuery rows,
     RegistryResolver resolver,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IPermitTypeStore? permitTypes = null)
 {
+    // ⚠ `permitTypes` необов'язковий лише для тестів, що будують обробник руками (як `keys` у RegistryEntryWriter); контейнер
+    // підставляє його завжди. Потрібен єдиному винятку видимості - рядкам таблиць дозволу (див. VisibleAsync).
+
     /// <summary>Право на читання довідників (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.View";
 
@@ -343,8 +347,17 @@ public sealed class GetRegistryRowsHandler(
             .ToDictionary(v => v.RegistryEntryId, v => v.RefEntryId);
         var children = chain.Select(link => link.Child.Id).ToHashSet();
 
+        // ⛔ Permits PM-04. Рядки таблиці ОДНОГО дозволу (`parentEntryId`) видно незалежно від стану й вікна шапки: чернетка
+        // (`IsActive = 0`) і закінчений дозвіл мають бути читабельні (редактор чернетки, екран закінченого). Правило пікера
+        // («батько видимий») лишається для всіх запитів без `parentEntryId` і для знімка формул (`RegistrySnapshot`): аркуші
+        // читають лише чинні дозволи. Виняток вузький: лише записи реєстрів шапок типів і лише не видалені.
+        var permitHeaders = request.ParentEntryId is not null && permitTypes is not null
+            ? (await permitTypes.ListAsync(ct).ConfigureAwait(false)).Select(t => t.HeaderRegistryDefId).ToHashSet()
+            : [];
+
         var isVisible = resolver.VisibleWithCompositionParents(
-            id => byId.TryGetValue(id, out var entry) && resolver.IsSelectable(entry, request.AsOf),
+            id => byId.TryGetValue(id, out var entry)
+                && (permitHeaders.Contains(entry.RegistryDefId) ? !entry.IsDeleted : resolver.IsSelectable(entry, request.AsOf)),
             id => byId.TryGetValue(id, out var entry) && children.Contains(entry.RegistryDefId)
                 ? (true, parentOf.GetValueOrDefault(id))
                 : (false, null));

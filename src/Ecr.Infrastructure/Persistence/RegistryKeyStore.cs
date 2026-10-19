@@ -51,6 +51,11 @@ public sealed class RegistryKeyStore(EcrDbContext db) : IRegistryKeyStore
     public void AddKey(RegistryKeyDef key) => db.RegistryKeyDefs.Add(key);
 
     /// <inheritdoc />
+    public async Task<bool> InactiveEntriesHoldNoKeyAsync(int registryDefId, CancellationToken ct)
+        => await db.PermitTypeDefs.AsNoTracking()
+            .AnyAsync(t => t.HeaderRegistryDefId == registryDefId, ct).ConfigureAwait(false);
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⚠ Запит до бази сам по собі не бачить значень, доданих у цій одиниці роботи (нове поле
     /// наявного запису, новий запис цілком), — їх дає <c>Local</c>. Навпаки, <c>Local</c> не має

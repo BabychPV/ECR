@@ -10,7 +10,7 @@ namespace Ecr.Application.Permits;
 
 /// <summary>
 /// Видаляє ніколи не опублікований тип без дозволів разом з порожнім реєстром шапки. Право
-/// <c>Registry.EditDefinition</c> (Permits, PM-03).
+/// <c>Permit.EditType</c> (Permits, PM-03).
 /// </summary>
 /// <remarks>
 /// ⛔ Опублікований тип не видаляється ніколи: на нього посилаються реєстри з даними, прив'язки аркушів і документи.
@@ -24,8 +24,8 @@ public sealed class DeletePermitTypeHandler(
     ICurrentUser currentUser,
     IClock clock)
 {
-    /// <summary>Право на зміну опису довідників.</summary>
-    public const string Permission = "Registry.EditDefinition";
+    /// <summary>Право на зміну типів дозволів.</summary>
+    public const string Permission = "Permit.EditType";
 
     /// <summary>Видаляє тип.</summary>
     /// <param name="code">Код типу.</param>

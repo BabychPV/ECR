@@ -195,11 +195,16 @@ public sealed class PublishPermitTypeTests(SqlServerFixture sql)
         await using var put = await h.NextRequestAsync();
         var draft = await put.Replace.HandleAsync(Code("PERM"), new ReplacePermitTypeRequest(created.RowVersion, Name("Perm"), "Air", [Table("T", [Col("K", true)])], []), default);
 
-        await using var editor = await PermitHarness.CreateAsync(sql, ["Registry.View", "Registry.EditDefinition"]);
+        await using var editor = await PermitHarness.CreateAsync(sql, ["Registry.View", "Permit.EditType"]);
         await using var reader = await PermitHarness.CreateAsync(sql, ["Registry.View"]);
+        // Адміністратор реєстрів (Land) має Registry.EditDefinition/Publish, але типами дозволів не керує.
+        await using var registryAdmin = await PermitHarness.CreateAsync(sql, ["Registry.View", "Registry.EditDefinition", "Registry.Publish"]);
         var request = new PublishPermitTypeRequest("публікація без права", draft.RowVersion);
 
         await Assert.ThrowsAsync<AccessDeniedException>(() => editor.Publish.HandleAsync(Code("PERM"), request, default));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => registryAdmin.Publish.HandleAsync(Code("PERM"), request, default));
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => registryAdmin.Create.HandleAsync(new CreatePermitTypeRequest(Code("LAND"), Name("Land"), "Air"), default));
         await Assert.ThrowsAsync<AccessDeniedException>(() => reader.Publish.HandleAsync(Code("PERM"), request, default));
 
         await using var check = await h.NextRequestAsync();

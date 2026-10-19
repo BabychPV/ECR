@@ -35,7 +35,7 @@ export function getPermitType(code: string): Promise<PermitType> {
   return apiFetch<PermitType>(`/api/v1/permit-types/${encodeURIComponent(code)}`);
 }
 
-/** Заводить тип чернеткою. `409 ECR-PRM-4091` — код зайнятий. Право `Registry.EditDefinition`. */
+/** Заводить тип чернеткою. `409 ECR-PRM-4091` — код зайнятий. Право `Permit.EditType`. */
 export function createPermitType(body: CreatePermitTypeRequest): Promise<PermitType> {
   return apiFetch<PermitType>('/api/v1/permit-types', {
     method: 'POST',
@@ -61,7 +61,7 @@ export function deletePermitType(code: string): Promise<void> {
   return apiFetch<void>(`/api/v1/permit-types/${encodeURIComponent(code)}`, { method: 'DELETE' });
 }
 
-/** Публікує чернетку атомарно (шапка + усі таблиці). Право `Registry.Publish`. */
+/** Публікує чернетку атомарно (шапка + усі таблиці). Право `Permit.PublishType`. */
 export function publishPermitType(code: string, body: PublishPermitTypeRequest): Promise<PermitType> {
   return apiFetch<PermitType>(`/api/v1/permit-types/${encodeURIComponent(code)}/publish`, {
     method: 'POST',

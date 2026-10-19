@@ -27,6 +27,50 @@ export type ReplacePermitTypeRequest = components['schemas']['ReplacePermitTypeR
 /** Запит на публікацію чернетки: причина ≥ 10 символів і токен чернетки. */
 export type PublishPermitTypeRequest = components['schemas']['PublishPermitTypeRequest'];
 
+/** Рядок переліку дозволів (`GET /api/v1/permits`). */
+export type PermitListItem = components['schemas']['PermitListItemDto'];
+
+/** Дозвіл: шапка, стан, таблиці з підсумками, аркуші, що його читають (`GET /api/v1/permits/{id}`). */
+export type Permit = components['schemas']['PermitDto'];
+
+/** Таблиця дозволу: код приховуваного реєстру `PRM_…`, кількість рядків, головний підсумок. */
+export type PermitTable = components['schemas']['PermitTableDto'];
+
+/** Аркуш, що читає дозвіл (з PM-09; до того порожньо). */
+export type PermitBoundSheet = components['schemas']['PermitBoundSheetDto'];
+
+/** Прапорці звітних форм шапки дозволу. */
+export type PermitReportingFlags = components['schemas']['PermitReportingFlags'];
+
+/** Запит на заведення дозволу чернеткою. */
+export type CreatePermitRequest = components['schemas']['CreatePermitRequest'];
+
+/** Запит на зміну шапки дозволу (з токеном `rowVersion`). */
+export type UpdatePermitRequest = components['schemas']['UpdatePermitRequest'];
+
+/** Запит на дострокове завершення чинного дозволу. */
+export type EndPermitRequest = components['schemas']['EndPermitRequest'];
+
+/** Необов'язкові параметри поновлення. */
+export type RenewPermitRequest = components['schemas']['RenewPermitRequest'];
+
+/** Стан дозволу на дату. */
+export type PermitStatus = 'Draft' | 'Active' | 'Expired';
+
+/** Фільтри переліку дозволів. */
+export interface PermitListParams {
+  /** Код типу. */
+  type?: string;
+  status?: PermitStatus;
+  q?: string;
+  /** Дата, на яку рахується стан (`YYYY-MM-DD`); сервер за замовчуванням бере сьогодні (UTC). */
+  asOf?: string;
+  /** Розмір сторінки 1..500; сервер за замовчуванням дає 500 (екран рахує підсумки з повного переліку). */
+  limit?: number;
+  /** Id останнього дозволу попередньої сторінки. */
+  cursor?: string;
+}
+
 /** Фільтри переліку типів. */
 export interface PermitTypeListParams {
   category?: string;

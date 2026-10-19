@@ -2822,6 +2822,19 @@ public interface IPermitTypeStore
 }
 ```
 
+#### `IPermitStore`
+
+Екземпляри дозволів (Permits, PM-04): дозвіл — запис реєстру шапки типу, тож власного сховища немає; порт дає лише
+підсумки рядків таблиці дозволу (кількість і Σ головного числового стовпця) одним запитом на таблицю.
+
+```csharp
+public interface IPermitStore
+{
+    public Task<IReadOnlyDictionary<long, PermitRowStat>> RowStatsAsync(
+        int permitFieldDefId, int? totalFieldDefId, IReadOnlyCollection<long>? permitIds, CancellationToken ct);
+}
+```
+
 #### `IRegistryRowsQuery`
 
 Рядки довідника для редактора даних (RT-13, FEATURE-REGISTRY-TABLES §7.1): записи, значення полів,
@@ -3823,8 +3836,11 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-RPT-0409` | 409 | зріз подано або версію звіту вже опубліковано: обидва іммутабельні, потрібен новий (ФВ-9.17) |
 | `ECR-RPT-4091` | 409 | опис звіту з таким кодом уже є (`UQ_ReportDef`); код і є адресою побудови |
 | `ECR-RPT-0422` | 422 | опис звіту не складається: порожня назва, немає колонок, невідомий тип колонки чи джерело рядків |
-| `ECR-PRM-0404` | 404 | типу дозволу з таким кодом немає (Permits, PM-03; `messageKey` `type`) |
-| `ECR-PRM-0422` | 422 | визначення типу дозволу не складається (PM-03): `messageKey` розрізняє випадок — таблиця без ключового стовпця (`tableWithoutKey`), повторні коди (`tableDuplicate`, `columnDuplicate`, `ruleDuplicate`), недопустимий або зарезервований код (`tableCodeInvalid`, `columnCodeInvalid`, `columnCodeReserved`, `registryCodeInvalid`, `ruleCodeInvalid`), тип і формат (`columnTypeUnknown`, `numericFormat`), суперечливий список (`listInconsistent`, `listForNonLookup`, `typeOnlyNoChoices`, `choicesInvalid`, `siblingUnknown`, `siblingCycle`), перевірки (`ruleExpressionRequired`, `ruleSeverityUnknown`), порожні назви/категорія (`nameRequired`, `categoryUnknown`), зламаний опублікований склад (`tableRemoved`, `columnRemoved`, `columnRetyped`, `keyChanged`), публікація (`noTables`, `reasonTooShort`, `sharedRegistryUnknown`, `groupCodeInvalid`) |
+| `ECR-PRM-0404` | 404 | типу дозволу з таким кодом немає (Permits, PM-03; `messageKey` `type`); або дозволу (екземпляра) з таким Id немає, запис не з шапки типу чи заборона на реєстр його шапки (PM-04; `permit`) |
+| `ECR-PRM-0422` | 422 | визначення типу дозволу не складається (PM-03): `messageKey` розрізняє випадок — таблиця без ключового стовпця (`tableWithoutKey`), повторні коди (`tableDuplicate`, `columnDuplicate`, `ruleDuplicate`), недопустимий або зарезервований код (`tableCodeInvalid`, `columnCodeInvalid`, `columnCodeReserved`, `registryCodeInvalid`, `ruleCodeInvalid`), тип і формат (`columnTypeUnknown`, `numericFormat`), суперечливий список (`listInconsistent`, `listForNonLookup`, `typeOnlyNoChoices`, `choicesInvalid`, `siblingUnknown`, `siblingCycle`), перевірки (`ruleExpressionRequired`, `ruleSeverityUnknown`), порожні назви/категорія (`nameRequired`, `categoryUnknown`), зламаний опублікований склад (`tableRemoved`, `columnRemoved`, `columnRetyped`, `keyChanged`), публікація (`noTables`, `reasonTooShort`, `sharedRegistryUnknown`, `groupCodeInvalid`); екземпляр дозволу (PM-04): порожній/задовгий номер (`numberRequired`, `numberTooLong`), задовге розташування (`locationTooLong`), кінець не пізніший за початок (`validityOrder`), тип ще не опублікований (`typeNotPublished`), невідомий фільтр стану / курсор переліку (`statusUnknown`, `cursorInvalid`), коротка причина / дата дострокового завершення (`endReasonTooShort`, `endDateOutOfRange`), рядок не скопіювався при поновленні (`renewRowInvalid`) |
+| `ECR-PRM-4092` | 409 | чинний дозвіл того самого типу й номера уже діє в частині вікна (півінтервали `[ValidFrom, ValidTo)` перетинаються) — при активації та зміні чинного дозволу (PM-04; `overlap`); чернетки ключ не тримають |
+| `ECR-PRM-4096` | 409 | стан дозволу не дозволяє дію або дозвіл змінили після читання (PM-04): токен не збігся (`changed`), закінчений дозвіл не редагується (`notEditable`), дія лише для чернетки (`notDraft`), лише для чинного (`notActive`), чернетку не поновлюють (`notRenewable`), на дозвіл чи його рядки посилаються (`inUse`) |
+| `ECR-PRM-4095` | 409 | дозвіл цього типу з таким номером і початком чинності вже є (PM-04; `number`): номер у поновленнях повторюється, тож дублем вважається збіг номера з ПОЧАТКОМ - версією дозволу |
 | `ECR-PRM-4091` | 409 | тип дозволу з таким кодом уже є (`UQ_PermitTypeDef`, `messageKey` `code`) або код реєстру шапки `PRM_<код>` зайнятий (`registryCode`) |
 | `ECR-PRM-4093` | 409 | тип дозволу змінили чи опублікували після читання — `rowVersion` не збігся (`changed`); або дія не відповідає стану типу: опублікований тип без відкритої чернетки (`noDraft`, спершу `new-version`), чернетка нової версії вже є (`draftExists`), тип ще не опублікований (`notPublished`) |
 | `ECR-PRM-4094` | 409 | тип дозволу не видаляється: він опублікований (`published`) або має екземпляри дозволів (`hasPermits`, `count`); видаляється лише ніколи не опублікований тип без дозволів |
@@ -4272,11 +4288,19 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/registries/{code}/export?format=&asOf=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types?category=&status=&q=&limit=&cursor=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types/{code}` | `Registry.View` | 8 |
-| `POST` | `/api/v1/permit-types` | `Registry.EditDefinition` | 8 |
-| `PUT` | `/api/v1/permit-types/{code}` | `Registry.EditDefinition` | 8 |
-| `DELETE` | `/api/v1/permit-types/{code}` | `Registry.EditDefinition` | 8 |
-| `POST` | `/api/v1/permit-types/{code}/publish` | `Registry.Publish` | 8 |
-| `POST` | `/api/v1/permit-types/{code}/new-version` | `Registry.EditDefinition` | 8 |
+| `POST` | `/api/v1/permit-types` | `Permit.EditType` | 8 |
+| `PUT` | `/api/v1/permit-types/{code}` | `Permit.EditType` | 8 |
+| `DELETE` | `/api/v1/permit-types/{code}` | `Permit.EditType` | 8 |
+| `POST` | `/api/v1/permit-types/{code}/publish` | `Permit.PublishType` | 8 |
+| `POST` | `/api/v1/permit-types/{code}/new-version` | `Permit.EditType` | 8 |
+| `GET` | `/api/v1/permits?type=&status=&q=&asOf=&limit=&cursor=` | `Registry.View` | 8 |
+| `POST` | `/api/v1/permits` | `Registry.EditData` | 8 |
+| `GET` | `/api/v1/permits/{id}?asOf=` | `Registry.View` | 8 |
+| `PUT` | `/api/v1/permits/{id}` | `Registry.EditData` | 8 |
+| `DELETE` | `/api/v1/permits/{id}` | `Registry.EditData` | 8 |
+| `POST` | `/api/v1/permits/{id}/activate` | `Registry.EditData` | 8 |
+| `POST` | `/api/v1/permits/{id}/end` | `Registry.EditData` | 8 |
+| `POST` | `/api/v1/permits/{id}/renew` | `Registry.EditData` | 8 |
 | `GET` | `/api/v1/reports` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions` | `Report.EditDefinition` | 5 |
