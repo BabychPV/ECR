@@ -45,6 +45,8 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
             Store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User, Bindings);
         DeleteColumn = new Ecr.Application.Templates.DeleteColumnDefHandler(
             Store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User, Bindings);
+        DeleteSheet = new Ecr.Application.Templates.DeleteSheetDefHandler(
+            Store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User, Bindings);
         Preview = new PreviewPermitBindingHandler(
             Versions, Bindings, inner.Permits, inner.Registries, Store, new PermitResolver(inner.Registries),
             new RegistrySnapshotLoader(inner.Db), Documents, Headers, Periods, RowsStore, CellsStore, new UnitStore(inner.Db),
@@ -81,6 +83,9 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
 
     /// <summary>Видалення колонки шаблону (PM-09b).</summary>
     public Ecr.Application.Templates.DeleteColumnDefHandler DeleteColumn { get; }
+
+    /// <summary>Видалення аркуша шаблону (PM-09b2).</summary>
+    public Ecr.Application.Templates.DeleteSheetDefHandler DeleteSheet { get; }
 
     /// <summary>Порти документа: у перегляді без документа не торкаються, у перегляді з документом - заглушки тесту.</summary>
     public IDocumentStore Documents { get; } = Substitute.For<IDocumentStore>();

@@ -187,6 +187,41 @@ internal static class PermitBindingErrors
                 ["bindingCode"] = bindingCode,
             });
 
+    /// <summary><c>409 ECR-PRM-4102 maxRows</c>: стелю рядків таблиці з прив'язкою «рядки» не можна знизити.</summary>
+    /// <param name="tableCode">Код таблиці аркуша.</param>
+    /// <param name="bindingCode">Код прив'язки, що її тримає.</param>
+    /// <param name="previousMax">Стеля до правки; <c>null</c> - без стелі.</param>
+    /// <param name="newMax">Стеля, яку просять.</param>
+    internal static BusinessRuleException SheetMaxRowsHeld(string tableCode, string bindingCode, int? previousMax, int? newMax)
+        => new(
+            ErrorCodes.PermitBindingBlocksSheetChange,
+            $"Таблиця «{tableCode}» приймає рядки дозволу через прив'язку «{bindingCode}»: стелю рядків не можна знижувати "
+            + $"(було {Describe(previousMax)}, просять {Describe(newMax)}). Спершу видаліть прив'язку.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-4102.maxRows",
+                ["tableCode"] = tableCode,
+                ["bindingCode"] = bindingCode,
+                ["previousMax"] = Describe(previousMax),
+                ["newMax"] = Describe(newMax),
+            });
+
+    /// <summary><c>409 ECR-PRM-4102 sheet</c>: аркуш, таблицю якого тримає прив'язка, не можна видалити.</summary>
+    /// <param name="sheetCode">Код аркуша.</param>
+    /// <param name="tableCode">Код прив'язаної таблиці аркуша.</param>
+    /// <param name="bindingCode">Код прив'язки, що її тримає.</param>
+    internal static BusinessRuleException SheetHeld(string sheetCode, string tableCode, string bindingCode)
+        => new(
+            ErrorCodes.PermitBindingBlocksSheetChange,
+            $"Аркуш «{sheetCode}» містить таблицю «{tableCode}», прив'язану до дозволу («{bindingCode}»): спершу видаліть прив'язку.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-4102.sheet",
+                ["sheetCode"] = sheetCode,
+                ["tableCode"] = tableCode,
+                ["bindingCode"] = bindingCode,
+            });
+
     /// <summary><c>409 ECR-SCHM-0409 permitBindingBreaking</c>: руйнівна зміна у версії з документами.</summary>
     /// <param name="code">Код прив'язки.</param>
     internal static ConcurrencyConflictException Breaking(string code)
@@ -210,4 +245,6 @@ internal static class PermitBindingErrors
                 ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
                 ["versionId"] = templateVersionId.ToString(CultureInfo.InvariantCulture),
             });
+
+    private static string Describe(int? max) => max is { } m ? m.ToString(CultureInfo.InvariantCulture) : "none";
 }

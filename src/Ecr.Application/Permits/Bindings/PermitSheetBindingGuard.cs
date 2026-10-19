@@ -50,6 +50,56 @@ internal static class PermitSheetBindingGuard
         }
     }
 
+    /// <summary>
+    /// Стеля рядків таблиці з чинною прив'язкою «рядки» не знижується (PM-09b2). Кількість рядків живих дозволів у
+    /// момент правки шаблону невідома, тож правило просте: прив'язка є - стеля не менша за попередню; «без стелі»
+    /// (<c>null</c>) вважається найбільшою, тож з нього можна лише зняти стелю, не поставити.
+    /// </summary>
+    /// <param name="bindings">Прив'язки.</param>
+    /// <param name="templateVersionId">Версія-чернетка.</param>
+    /// <param name="table">Таблиця, що змінюється (ще зі СТАРОЮ стелею).</param>
+    /// <param name="newMax">Стеля після правки; <c>null</c> - без стелі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="Errors.BusinessRuleException"><c>ECR-PRM-4102</c> <c>maxRows</c>.</exception>
+    internal static async Task RequireMaxRowsNotLoweredAsync(
+        IPermitBindingStore bindings, int templateVersionId, TableDef table, int? newMax, CancellationToken ct)
+    {
+        // Без запиту, якщо це не зниження: нова стеля не менша за стару, або стелю знімають.
+        var previous = table.MaxDynamicRows;
+        var lowered = newMax is { } n && (previous is null || n < previous);
+        if (!lowered)
+        {
+            return;
+        }
+
+        var held = (await bindings.ListAsync(templateVersionId, ct).ConfigureAwait(false))
+            .FirstOrDefault(v => v.Binding.SheetTableDefId == table.Id && v.Binding.IsActive && v.Binding.Mode == PermitBindingMode.Rows);
+
+        if (held is not null)
+        {
+            throw PermitBindingErrors.SheetMaxRowsHeld(table.Code, held.Binding.Code, previous, newMax);
+        }
+    }
+
+    /// <summary>Аркуш, на якому є таблиця з будь-якою прив'язкою, не видаляється (PM-09b2).</summary>
+    /// <param name="bindings">Прив'язки.</param>
+    /// <param name="templateVersionId">Версія-чернетка.</param>
+    /// <param name="sheet">Аркуш, що видаляється.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="Errors.BusinessRuleException"><c>ECR-PRM-4102</c> <c>sheet</c>.</exception>
+    internal static async Task RequireSheetFreeAsync(
+        IPermitBindingStore bindings, int templateVersionId, SheetDef sheet, CancellationToken ct)
+    {
+        var tablesById = sheet.Tables.ToDictionary(t => t.Id);
+        var held = (await bindings.ListAsync(templateVersionId, ct).ConfigureAwait(false))
+            .FirstOrDefault(v => tablesById.ContainsKey(v.Binding.SheetTableDefId));
+
+        if (held is not null)
+        {
+            throw PermitBindingErrors.SheetHeld(sheet.Code, tablesById[held.Binding.SheetTableDefId].Code, held.Binding.Code);
+        }
+    }
+
     /// <summary>Таблиця з будь-якою прив'язкою (чинною чи вимкненою, у будь-якому режимі) не видаляється.</summary>
     /// <param name="bindings">Прив'язки.</param>
     /// <param name="templateVersionId">Версія-чернетка.</param>
