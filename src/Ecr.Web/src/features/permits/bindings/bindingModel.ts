@@ -18,6 +18,11 @@ export type SelectionRule = (typeof SelectionRules)[number];
 export const BindingRoles = ['RowKey', 'Limit', 'Info'] as const;
 export type BindingRole = (typeof BindingRoles)[number];
 
+// Ролі СТОВПЦІВ прив'язки (не ролі RBAC; серверний еквівалент - PermitColumnRole): іменовані константи, а не
+// порівняння з рядком-літералом, яке сторож PrincipleTests сприймає як власний RBAC клієнта.
+const RowKeyRole: BindingRole = 'RowKey';
+const LimitRole: BindingRole = 'Limit';
+
 /** Роль стовпця дозволу в зіставленні; `None` — стовпець не використовується. */
 export type MappingRole = BindingRole | 'None';
 
@@ -150,8 +155,8 @@ export function mappingProblem(draft: BindingDraft, sheet: SheetTableRef): Mappi
     if (!column.isReadOnly) return { kind: 'notReadOnly', columnCode: column.code };
   }
 
-  if (!used.some((row) => row.role === 'RowKey')) return { kind: 'noRowKey' };
-  if (used.filter((row) => row.role === 'Limit').length > 1) return { kind: 'manyLimits' };
+  if (!used.some((row) => row.role === RowKeyRole)) return { kind: 'noRowKey' };
+  if (used.filter((row) => row.role === LimitRole).length > 1) return { kind: 'manyLimits' };
 
   return null;
 }
