@@ -69,9 +69,11 @@ public sealed partial class MetadataCacheInvalidationTests
     /// <c>TemplateVersionStore</c> — адаптер: <c>ApplyPresentationAsync</c> і підйом ревізії кличуть
     /// обробники, які самі тут перевіряються (тригер «презентація»); клон і нова чернетка пишуть лише в
     /// НОВУ версію, ключа якої в кеші ще немає. <c>DraftVersionLock</c> — помічник блоку, його
-    /// викликачі перевіряються.
+    /// викликачі перевіряються. <c>PermitBindingStore</c> (PM-11c: прапор <c>HasActivePermitBindings</c> у знімку) —
+    /// адаптер над <c>Add/Remove</c>; його викликачі <c>SavePermitBindingHandler</c> і <c>DeletePermitBindingHandler</c>
+    /// беруть блок версії, тож самі потрапляють у записувачі й тут перевіряються на <c>InvalidateAsync</c> після коміту.
     /// </remarks>
-    private static readonly string[] Plumbing = ["TemplateVersionStore", "DraftVersionLock"];
+    private static readonly string[] Plumbing = ["TemplateVersionStore", "DraftVersionLock", "PermitBindingStore"];
 
     [Fact]
     [Trait("Requirement", "ФВ-2.12")]
@@ -101,6 +103,10 @@ public sealed partial class MetadataCacheInvalidationTests
         var names = writers.Select(w => w.Name).ToHashSet(StringComparer.Ordinal);
         Assert.Contains("SaveTableRelationHandler", names);
         Assert.Contains("DeleteTableRelationHandler", names);
+
+        // PM-11c: записувачі прив'язок до дозволу (прапор у знімку) мають бути розпізнані й пройти перевірку.
+        Assert.Contains("SavePermitBindingHandler", names);
+        Assert.Contains("DeletePermitBindingHandler", names);
         Assert.True(writers.Count >= 15, $"Знайдено лише {writers.Count} записувачів — тригери сторожа зламались?");
 
         Assert.True(
@@ -178,6 +184,7 @@ public sealed partial class MetadataCacheInvalidationTests
                      nameof(EcrDbContext.TableDefs), nameof(EcrDbContext.ColumnDefs), nameof(EcrDbContext.RowDefs),
                      nameof(EcrDbContext.ValidationRules), nameof(EcrDbContext.FormulaDefs),
                      nameof(EcrDbContext.HeaderFieldDefs), nameof(EcrDbContext.TableRelations),
+                     nameof(EcrDbContext.PermitSheetBindings),
                  })
         {
             Assert.True(cached.ContainsKey(set), $"MetadataCache.cs читає {set}, а розбір сторожа його не бачить.");
