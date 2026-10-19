@@ -24,6 +24,24 @@ public sealed class PermitTypeLimitsTests
         Assert.Equal(200, PermitTypeLimits.MaxColumnsTotal);
         Assert.Equal(256, PermitTypeLimits.MaxNameLength);
         Assert.Equal(1024 * 1024, PermitTypeLimits.MaxRequestBodyBytes);
+        Assert.Equal(2_097_152, PermitTypeLimits.MaxDraftJsonChars);
+    }
+
+    [Fact]
+    public void Чернетка_рівно_2_Mі_символів_розбирається_а_на_символ_більша_відхиляється_без_розбору()
+    {
+        // Пробіли після об'єкта - валідний JSON: межа відсікає за довжиною, а не за змістом.
+        const string Body = "{\"nameL10n\":{},\"category\":\"Other\",\"tables\":[],\"rules\":[]}";
+        var exact = Body + new string(' ', 2_097_152 - Body.Length);
+        Assert.Equal(2_097_152, exact.Length);
+        Assert.Empty(PermitTypeCodec.Parse(exact).Tables);
+
+        var error = Assert.Throws<BusinessRuleException>(() => PermitTypeCodec.Parse(exact + " "));
+        Assert.Equal("err.ECR-PRM-0422.draftTooLarge", error.Details!["messageKey"]);
+        Assert.Equal("ECR-PRM-0422", error.ErrorCode);
+
+        // Навіть не-JSON понад межу відмовляє межею, а не помилкою розбору: розбір не починався.
+        Assert.Throws<BusinessRuleException>(() => PermitTypeCodec.Parse(new string('x', 2_097_153)));
     }
 
     [Fact]

@@ -16,9 +16,25 @@ public static class PermitTypeCodec
 
     /// <summary>Розбирає JSON чернетки.</summary>
     /// <param name="json">Текст з <c>DraftJson</c>.</param>
+    /// <exception cref="Ecr.Application.Errors.BusinessRuleException"><c>ECR-PRM-0422 draftTooLarge</c>: чернетка понад межу.</exception>
     public static PermitTypeContent Parse(string json)
-        => JsonSerializer.Deserialize<PermitTypeContent>(json, Json)
-           ?? new PermitTypeContent([], nameof(PermitCategory.Other), [], []);
+    {
+        ArgumentNullException.ThrowIfNull(json);
+
+        // ⛔ PA-U-01: чернетка на десятки МБ (дописана поза API) розбиралась десятки секунд на кожному читанні й вішала
+        // перелік і сторінки типів для всіх. Понад межу - не розбираємо.
+        if (IsOversized(json))
+        {
+            throw PermitTypeErrors.DraftTooLarge();
+        }
+
+        return JsonSerializer.Deserialize<PermitTypeContent>(json, Json)
+               ?? new PermitTypeContent([], nameof(PermitCategory.Other), [], []);
+    }
+
+    /// <summary>Чи чернетка більша за <see cref="PermitTypeLimits.MaxDraftJsonChars"/>.</summary>
+    /// <param name="json">Текст з <c>DraftJson</c>.</param>
+    public static bool IsOversized(string? json) => json is { Length: > PermitTypeLimits.MaxDraftJsonChars };
 
     /// <summary>Рядок контракту для категорії.</summary>
     /// <param name="category">Категорія.</param>

@@ -55,7 +55,8 @@ public sealed class DeletePermitTypeHandler(
         }
 
         var typeId = type.Id;
-        var draft = type.DraftJson;
+        // Чернетку понад межу (PA-U-01) в аудит не пишемо: це ще десятки МБ в одному рядку журналу.
+        var draft = PermitTypeCodec.IsOversized(type.DraftJson) ? null : type.DraftJson;
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
