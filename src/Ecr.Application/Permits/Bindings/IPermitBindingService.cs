@@ -53,4 +53,33 @@ public interface IPermitBindingService
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>⚠ Той самий план, що створює <see cref="MaterializeAsync"/> і показує перегляд PM-09.</remarks>
     public Task<PermitBindingPlan> PlanAsync(PermitBindingView view, long documentId, DateOnly periodEnd, CancellationToken ct);
+
+    /// <summary>
+    /// Оновлює екземпляр таблиці за планом: ДОДАЄ рядки <c>P&lt;id&gt;</c>, яких ще немає, і перезаписує ліміти/довідкові
+    /// значення лише там, де остання зміна комірки - від дозволу. Рядків НЕ видаляє.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="tableInstanceId">Екземпляр таблиці прив'язки.</param>
+    /// <param name="view">Прив'язка.</param>
+    /// <param name="plan">План з <see cref="PlanAsync"/>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Кличеться ВСЕРЕДИНІ транзакції запису, під замком структури й аркуша (обробник перевірив права й стан).
+    /// </remarks>
+    public Task<PermitRefreshResult> RefreshAsync(
+        long documentId, PeriodKey periodKey, long tableInstanceId, PermitBindingView view, PermitBindingPlan plan, CancellationToken ct);
 }
+
+/// <summary>Підсумок оновлення екземпляра з дозволу.</summary>
+/// <param name="Added">Скільки рядків додано.</param>
+/// <param name="Updated">У скількох наявних рядках змінено значення.</param>
+/// <param name="RemovedFromPermit">Ключі наявних рядків <c>P&lt;id&gt;</c>, яких у дозволі більше немає (НЕ видалені).</param>
+/// <param name="Warnings">Попередження.</param>
+/// <param name="ChangedCells">Змінені комірки (рядок, колонка) - насіння перерахунку.</param>
+public sealed record PermitRefreshResult(
+    int Added,
+    int Updated,
+    IReadOnlyList<string> RemovedFromPermit,
+    IReadOnlyList<PermitBindingIssue> Warnings,
+    IReadOnlyList<(long RowId, int ColumnId)> ChangedCells);
