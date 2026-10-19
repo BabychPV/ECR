@@ -20,6 +20,22 @@ public interface IPermitStore
     /// <returns>Дозвіл → підсумок; дозвіл без рядків у словнику відсутній.</returns>
     public Task<IReadOnlyDictionary<long, PermitRowStat>> RowStatsAsync(
         int permitFieldDefId, int? totalFieldDefId, IReadOnlyCollection<long>? permitIds, CancellationToken ct);
+
+    /// <summary>
+    /// Бере транзакційний замок на номер дозволу типу: до коміту чи відкату транзакції інший запит із тим самим типом і
+    /// номером чекає тут (PA-A-07, аудит, прохід A).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Викликається ЛИШЕ всередині транзакції запису й ПЕРШИМ ділом, а перевірка «такий дозвіл уже є» - ПІСЛЯ замка: ключ
+    /// (тип, номер, початок чинності) унікальним індексом не захищений (чернетка ключ не тримає, міграції немає), тож
+    /// перевірка без замка бачить лише закомічене, і двадцять паралельних <c>POST /permits</c> створювали двадцять чернеток.
+    /// Номер порівнюється без урахування регістру, як і перевірка дубля.
+    /// </remarks>
+    /// <param name="typeCode">Код типу.</param>
+    /// <param name="number">Номер без крайніх пробілів.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="Errors.ConcurrencyConflictException">Замка не дочекалися (<c>ECR-DOC-4091</c>).</exception>
+    public Task LockNumberAsync(string typeCode, string number, CancellationToken ct);
 }
 
 /// <summary>Підсумок рядків однієї таблиці одного дозволу.</summary>

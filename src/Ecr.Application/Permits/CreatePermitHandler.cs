@@ -89,18 +89,31 @@ public sealed class CreatePermitHandler(
         // ⛔ D-211: запис External-довідника - лише синком з AF (шапка дозволу таким не буває, але гард один на всіх писачів).
         ExternalRegistryGuard.EnsureManualEditAllowed(view.Header);
 
-        var twin = (await reader.HeadersAsync(view, null, ct).ConfigureAwait(false))
-            .FirstOrDefault(h => string.Equals(h.Number, number, StringComparison.OrdinalIgnoreCase) && h.Entry.ValidFrom == request.ValidFrom);
-        if (twin is not null)
+        async Task EnsureNoTwinAsync(CancellationToken token)
         {
-            throw PermitErrors.Duplicate(type.Code, number, request.ValidFrom, twin.Entry.Id);
+            var twin = (await reader.HeadersAsync(view, null, token).ConfigureAwait(false))
+                .FirstOrDefault(h => string.Equals(h.Number, number, StringComparison.OrdinalIgnoreCase) && h.Entry.ValidFrom == request.ValidFrom);
+            if (twin is not null)
+            {
+                throw PermitErrors.Duplicate(type.Code, number, request.ValidFrom, twin.Entry.Id);
+            }
         }
+
+        // Швидка відмова без транзакції й замка; вирішує перевірка ПІД замком нижче.
+        await EnsureNoTwinAsync(ct).ConfigureAwait(false);
 
         var values = PermitInput.HeaderValues(number, location, request.IssueDate, null, request.ReportingFlags, clearEmpty: false);
         long createdId = 0;
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ PA-A-07 (аудит, прохід A): двадцять паралельних POST з тим самим типом, номером і початком проходили перевірку
+            // вище обидва (вона бачить лише закомічене) і створювали двадцять чернеток; чернетка ключ не тримає, унікального
+            // індексу немає (міграції немає). Замок на (тип, номер) серіалізує створення, а повторна перевірка під ним бачить
+            // чернетку переможця, тож решта дістає 409 ECR-PRM-4095, як і послідовний дубль.
+            await stats.LockNumberAsync(type.Code, number, innerCt).ConfigureAwait(false);
+            await EnsureNoTwinAsync(innerCt).ConfigureAwait(false);
+
             var entry = await PermitDraftWriter
                 .CreateAsync(registries, writer, view, values, number, request.ValidFrom, request.ValidTo, userId, innerCt).ConfigureAwait(false);
 

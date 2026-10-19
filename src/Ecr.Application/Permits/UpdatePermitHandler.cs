@@ -96,6 +96,22 @@ public sealed class UpdatePermitHandler(
             await rows.LockEntriesAsync([permitId], innerCt).ConfigureAwait(false);
             await reader.RequireVersionAsync(permitId, request.RowVersion, innerCt).ConfigureAwait(false);
 
+            // ⛔ PA-A-07 (клас «створення»): зміна номера чи початку на значення, яке паралельно займає інший запит, проходила
+            // перевірку twin вище (вона бачить лише закомічене). Замок на (тип, новий номер) + повторна перевірка під ним;
+            // без зміни номера й початку замок не потрібен - дубля такий запит створити не може.
+            if (!string.Equals(current.Number, number, StringComparison.OrdinalIgnoreCase) || current.Entry.ValidFrom != request.ValidFrom)
+            {
+                await stats.LockNumberAsync(type.Code, number, innerCt).ConfigureAwait(false);
+                var raced = (await reader.HeadersAsync(view, null, innerCt).ConfigureAwait(false)).FirstOrDefault(h =>
+                    h.Entry.Id != permitId
+                    && string.Equals(h.Number, number, StringComparison.OrdinalIgnoreCase)
+                    && h.Entry.ValidFrom == request.ValidFrom);
+                if (raced is not null)
+                {
+                    throw PermitErrors.Duplicate(type.Code, number, request.ValidFrom, raced.Entry.Id);
+                }
+            }
+
             var changes = (await writer.ApplyValuesAsync(view.Header, entry, values, prefetch: null, innerCt).ConfigureAwait(false)).ToList();
             if (entry.Window != new ValidityWindow(request.ValidFrom, request.ValidTo))
             {
