@@ -21,20 +21,35 @@ export function ruleLabel(rule: string): string {
   return rule;
 }
 
+/*
+ * ⚠ Ролі колонок прив'язки (RowKey/Limit/Info) - не ролі доступу; `switch`/`case`, а не `role === '…'`: цей запис
+ * сторож клієнтських бізнес-правил (`PrincipleTests`) читає як власний RBAC клієнта.
+ */
+
 /** Роль зіставленої колонки. */
 export function roleLabel(role: string): string {
-  if (role === 'RowKey') return t('permits.bindingView.role.RowKey');
-  if (role === 'Limit') return t('permits.bindingView.role.Limit');
-  if (role === 'Info') return t('permits.bindingView.role.Info');
-
-  return role;
+  switch (role) {
+    case 'RowKey':
+      return t('permits.bindingView.role.RowKey');
+    case 'Limit':
+      return t('permits.bindingView.role.Limit');
+    case 'Info':
+      return t('permits.bindingView.role.Info');
+    default:
+      return role;
+  }
 }
 
 /** Що роль означає для колонки на аркуші. */
 export function roleNote(role: string): string | null {
-  if (role === 'RowKey') return t('permits.bindingView.roleNote.RowKey');
-  if (role === 'Limit') return t('permits.bindingView.roleNote.Limit');
-  if (role === 'Info') return t('permits.bindingView.roleNote.Info');
-
-  return null;
+  switch (role) {
+    case 'RowKey':
+      return t('permits.bindingView.roleNote.RowKey');
+    case 'Limit':
+      return t('permits.bindingView.roleNote.Limit');
+    case 'Info':
+      return t('permits.bindingView.roleNote.Info');
+    default:
+      return null;
+  }
 }
