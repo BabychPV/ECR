@@ -3052,6 +3052,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{documentId}/permit-bindings/{code}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Додає в таблицю документа нові рядки дозволу й оновлює ліміти та довідкові значення, не видаляючи рядків.
+         * @description ⚠ Право - те саме, що на додавання рядка в цю таблицю; закритий період і поданий чи затверджений аркуш
+         *     відхиляються `403 ECR-ACCS-0403` (`addRowDenied`). Значення переписуються лише там, де остання зміна
+         *     комірки - від дозволу. Рядки, яких у дозволі більше немає, лишаються й повертаються в `removedFromPermit`.
+         */
+        post: {
+            parameters: {
+                query?: {
+                    /** @description Період документа `РРРРММ`. */
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    documentId: number;
+                    /** @description Код прив'язки. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitRefreshResultDto"];
+                        "text/json": components["schemas"]["PermitRefreshResultDto"];
+                        "text/plain": components["schemas"]["PermitRefreshResultDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{documentId}/rows": {
         parameters: {
             query?: never;
@@ -16935,6 +17030,314 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/permit-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Прив'язки версії. Право `Template.View`.
+         * @description ⚠ Порожній перелік - законна відповідь (механізм опційний); відповідь - конверт із `isEditable`, щоб клієнт не
+         *     показував «нова прив'язка» там, де версія заморожена.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія шаблону. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitBindingsDto"];
+                        "text/json": components["schemas"]["PermitBindingsDto"];
+                        "text/plain": components["schemas"]["PermitBindingsDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/template-versions/{id}/permit-bindings/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Одна прив'язка за кодом. Право `Template.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія шаблону. */
+                    id: number;
+                    /** @description Код прив'язки. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitBindingDto"];
+                        "text/json": components["schemas"]["PermitBindingDto"];
+                        "text/plain": components["schemas"]["PermitBindingDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /**
+         * Створює або замінює прив'язку чернетки (колонки замінюються цілком). Право `Template.Edit`.
+         * @description ⚠ `PUT` за кодом: створення й зміна - та сама дія. `409 ECR-PRM-4101` - таблицю аркуша вже зайнято чи
+         *     код зайнятий; `422 ECR-PRM-0422` - прив'язка не складається (`details.caseKeys` - усі випадки);
+         *     `409 ECR-TMPL-0409` - версія заморожена.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Код прив'язки (унікальний по всій системі). */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SavePermitBindingRequest"];
+                    "application/json": components["schemas"]["SavePermitBindingRequest"];
+                    "text/json": components["schemas"]["SavePermitBindingRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitBindingDto"];
+                        "text/json": components["schemas"]["PermitBindingDto"];
+                        "text/plain": components["schemas"]["PermitBindingDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Видаляє прив'язку чернетки разом із її колонками. Право `Template.Edit`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Код прив'язки. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/template-versions/{id}/permit-bindings/{code}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Перегляд аркуша очима користувача: обраний дозвіл, колонки з ролями, рядки з дозволу, попередження. Право
+         *     `Template.View`; з `documentId` - ще й `Document.View`.
+         * @description ⚠ Дозвіл не знайдено - це `200` із `permit.reasonIfNone` (`noFacility`, `noPermit`,
+         *     `headerEmpty`, `headerUnknown`), а не помилка: саме це перегляд і має показати.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Документ - джерело об'єкта, поля шапки й фактичних комірок (необов'язковий). */
+                    documentId?: number;
+                    /** @description Період документа `РРРРММ`; обов'язковий разом із `documentId`. */
+                    periodKey?: number;
+                    /** @description Об'єкт вручну (`ByFacilityPeriodEnd`); перекриває об'єкт документа. */
+                    facilityName?: string;
+                    /** @description Останній день періоду вручну (`yyyy-MM-dd`); без нього - кінець періоду документа, а без документа - сьогодні. */
+                    periodEnd?: string;
+                    /** @description Дозвіл вручну (`FromHeaderLookup`); перекриває поле шапки документа. */
+                    permitEntryId?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Версія шаблону. */
+                    id: number;
+                    /** @description Код прив'язки. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitBindingPreviewDto"];
+                        "text/json": components["schemas"]["PermitBindingPreviewDto"];
+                        "text/plain": components["schemas"]["PermitBindingPreviewDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/presentation": {
         parameters: {
             query?: never;
@@ -25634,6 +26037,95 @@ export interface components {
              *     за seed і видається поіменно, а не через матрицю. */
             isDangerous: boolean;
         };
+        /** @description Зіставлена колонка прив'язки у відповіді. */
+        PermitBindingColumnDto: {
+            /**
+             * Format: int32
+             * @description Позиція в прив'язці.
+             */
+            ordinal: number;
+            /** @description Код поля таблиці дозволу. */
+            permitFieldCode: string;
+            /** @description `RowKey`, `Limit` або `Info`. */
+            role: string;
+            /** @description Код колонки аркуша. */
+            sheetColumnCode: string;
+            /**
+             * Format: int32
+             * @description Колонка аркуша.
+             */
+            sheetColumnDefId: number;
+        };
+        /** @description Зіставлена колонка в запиті. */
+        PermitBindingColumnRequest: {
+            /** @description Код поля таблиці дозволу. */
+            permitFieldCode: string;
+            /** @description `RowKey`, `Limit` або `Info`. */
+            role: string;
+            /**
+             * Format: int32
+             * @description Колонка аркуша цієї версії.
+             */
+            sheetColumnDefId: number;
+        };
+        /** @description Прив'язка таблиці аркуша версії шаблону до таблиці типу дозволу. */
+        PermitBindingDto: {
+            /** @description Код прив'язки (унікальний у системі). */
+            code: string;
+            /** @description Зіставлення колонок у порядку позицій. */
+            columns: components["schemas"]["PermitBindingColumnDto"][];
+            /** @description Код поля шапки. */
+            headerFieldCode: null | string;
+            /**
+             * Format: int32
+             * @description Поле шапки (лише для `FromHeaderLookup`).
+             */
+            headerFieldDefId: null | number;
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description Чи діє прив'язка. */
+            isActive: boolean;
+            /** @description `Rows` або `Formulas`. */
+            mode: string;
+            /** @description Код таблиці типу дозволу. */
+            permitTableCode: string;
+            /** @description Код типу дозволу. */
+            permitTypeCode: string;
+            /** @description Токен зміни (base64). */
+            rowVersion: string;
+            /** @description `ByFacilityPeriodEnd` або `FromHeaderLookup`. */
+            selectionRule: string;
+            /** @description Код таблиці аркуша. */
+            sheetTableCode: string;
+            /**
+             * Format: int32
+             * @description Таблиця аркуша.
+             */
+            sheetTableDefId: number;
+        };
+        /** @description Перегляд аркуша очима користувача: що створить прив'язка для обраного дозволу (Permits, PM-09). */
+        PermitBindingPreviewDto: {
+            /** @description Прив'язка. */
+            binding: components["schemas"]["PermitBindingDto"];
+            /** @description Усі колонки таблиці аркуша в порядку позицій. */
+            columns: components["schemas"]["PermitPreviewColumnDto"][];
+            /** @description Обраний дозвіл. */
+            permit: components["schemas"]["PermitPreviewPermitDto"];
+            /** @description Заплановані рядки; у режимі `Formulas` порожні. */
+            rows: components["schemas"]["PermitPreviewRowDto"][];
+            /** @description Попередження. */
+            warnings: components["schemas"]["PermitPreviewWarningDto"][];
+        };
+        /** @description Прив'язки версії разом зі станом версії. */
+        PermitBindingsDto: {
+            /** @description Чи можна правити: `false` для опублікованої (замороженої) версії. */
+            isEditable: boolean;
+            /** @description Прив'язки в порядку коду; порожній перелік - норма (механізм опційний). */
+            items: components["schemas"]["PermitBindingDto"][];
+        };
         /** @description Аркуш, що читає дозвіл через привʼязку (з PM-09; до того завжди порожньо). */
         PermitBoundSheetDto: {
             /** @description Код привʼязки. */
@@ -25776,6 +26268,78 @@ export interface components {
              * @description Перший НЕчинний день (виключна межа, півінтервал `[from, to)`).
              */
             validTo: null | string;
+        };
+        /** @description Колонка аркуша в перегляді. */
+        PermitPreviewColumnDto: {
+            /** @description Код колонки аркуша. */
+            columnCode: string;
+            /** @description Тип даних колонки. */
+            dataType: string;
+            /** @description Заголовок (мова за замовчуванням). */
+            header: string;
+            /** @description Колонку пише машина: користувач її не править. */
+            locked: boolean;
+            /** @description `RowKey`, `Limit`, `Info` - з дозволу; `Fact` - вводить користувач; `Formula` - рахується. */
+            role: string;
+            /** @description Код одиниці; `null` - безрозмірна. */
+            unit: null | string;
+        };
+        /** @description Дозвіл, обраний для перегляду. */
+        PermitPreviewPermitDto: {
+            /**
+             * Format: int64
+             * @description Запис-шапка; `null` - дозволу немає.
+             */
+            entryId: null | number;
+            /** @description Номер дозволу. */
+            number: null | string;
+            /** @description Чому дозволу немає: `noFacility`, `noPermit`, `headerEmpty`, `headerUnknown`. */
+            reasonIfNone: null | string;
+            /**
+             * Format: date
+             * @description Початок чинності.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description Кінець чинності (виключно).
+             */
+            validTo: null | string;
+        };
+        /** @description Рядок аркуша в перегляді. */
+        PermitPreviewRowDto: {
+            /** @description Значення за кодом колонки: з дозволу для зіставлених, з документа для фактичних (якщо документ задано). */
+            cells: {
+                [key: string]: unknown;
+            };
+            /** @description Колонки, які пише машина. */
+            locked: string[];
+            /** @description Ключ рядка: `P&lt;id запису таблиці дозволу&gt;`. */
+            rowKey: string;
+        };
+        /** @description Попередження перегляду. */
+        PermitPreviewWarningDto: {
+            /** @description Стабільний код. */
+            code: string;
+            /** @description Пояснення. */
+            text: string;
+        };
+        /** @description Підсумок оновлення таблиці документа з дозволу. */
+        PermitRefreshResultDto: {
+            /**
+             * Format: int32
+             * @description Скільки рядків додано.
+             */
+            added: number;
+            /** @description Ключі рядків документа, яких у дозволі більше немає (рядки НЕ видалено). */
+            removedFromPermit: string[];
+            /**
+             * Format: int32
+             * @description У скількох наявних рядках оновлено ліміти чи довідкові значення.
+             */
+            updated: number;
+            /** @description Попередження. */
+            warnings: components["schemas"]["PermitPreviewWarningDto"][];
         };
         /** @description Прапорці звітних форм, до яких входить дозвіл (поля шапки `Form_300`…`TOx`). */
         PermitReportingFlags: {
@@ -28123,6 +28687,31 @@ export interface components {
              * @description Для `EditablePeriodOnly`: до якого номера періоду.
              */
             toSequence: null | number;
+        };
+        /** @description Запит на створення чи заміну прив'язки (`PUT` за кодом). */
+        SavePermitBindingRequest: {
+            /** @description Зіставлення колонок; у режимі `Formulas` порожнє. */
+            columns: components["schemas"]["PermitBindingColumnRequest"][];
+            /**
+             * Format: int32
+             * @description Поле шапки - лише для `FromHeaderLookup`.
+             */
+            headerFieldDefId: null | number;
+            /** @description Чи діє прив'язка. */
+            isActive: boolean;
+            /** @description `Rows` або `Formulas`. */
+            mode: string;
+            /** @description Код таблиці типу дозволу. */
+            permitTableCode: string;
+            /** @description Код опублікованого типу дозволу. */
+            permitTypeCode: string;
+            /** @description `ByFacilityPeriodEnd` або `FromHeaderLookup`. */
+            selectionRule: string;
+            /**
+             * Format: int32
+             * @description Таблиця аркуша цієї версії.
+             */
+            sheetTableDefId: number;
         };
         /** @description Запит на збереження чернетки опису (`BE-24` крок 2). */
         SaveRegistryDefinitionDraftRequest: {
