@@ -667,4 +667,22 @@ describe('стани завантаження', () => {
     expect(await screen.findByRole('link', { name: '← Back to Permits' })).toBeTruthy();
     expect(screen.queryByRole('tablist')).toBeNull();
   });
+
+  it.each(['abc', '0', '-3', '1.5', '12abc'])('/admin/permits/%s — «не знайдено», запиту до API немає', async (bad) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <TestProviders>
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={[`/admin/permits/${bad}`]}>
+            <Routes>
+              <Route path="/admin/permits/:id" element={<PermitPage />} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </TestProviders>,
+    );
+    expect(await screen.findByText('Page not found')).toBeTruthy();
+    expect(getPermit).not.toHaveBeenCalled();
+    expect(screen.queryByRole('tablist')).toBeNull();
+  });
 });

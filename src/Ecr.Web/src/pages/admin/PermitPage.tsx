@@ -1,6 +1,7 @@
 import { lazy, Suspense, type JSX } from 'react';
 import { Badge, Button, Menu, Skeleton, Stack, Tabs } from '@mantine/core';
 import { useParams, useSearchParams } from 'react-router-dom';
+import { NotFoundPage } from '@/app/NotFoundPage';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Banner } from '@/shared/ui/Banner';
@@ -163,12 +164,19 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
 export function PermitPage(): JSX.Element {
   const { id } = useParams();
   const permitId = Number(id);
+
+  // ⛔ `/admin/permits/abc`: ідентифікатор - додатне ціле, інакше це «не знайдено», а не вічний скелет (запит із
+  // `NaN` у шляху не йде).
+  return Number.isInteger(permitId) && permitId > 0 ? <PermitById id={id ?? ''} permitId={permitId} /> : <NotFoundPage />;
+}
+
+function PermitById({ id, permitId }: { readonly id: string; readonly permitId: number }): JSX.Element {
   const query = usePermit(permitId);
 
   return (
     <>
       {query.data === undefined && (
-        <PermitEditorHead back={{ label: t('permits.back.permits'), href: PermitsPaths.permits }} title={id ?? ''} mono />
+        <PermitEditorHead back={{ label: t('permits.back.permits'), href: PermitsPaths.permits }} title={id} mono />
       )}
       <AsyncBoundary<Permit>
         isPending={query.isPending}
