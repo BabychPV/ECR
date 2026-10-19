@@ -8599,6 +8599,144 @@ USING (VALUES
     ,(N'err.ECR-PRM-4101.code', N'en', N'Binding code "{bindingCode}" is already taken (codes are unique across the whole system).', 1)
     ,(N'err.ECR-SCHM-0409.permitBindingBreaking', N'en', N'Deleting the permit binding "{bindingCode}" is a breaking change: documents are already attached to this version and their rows were created from the permit.', 1)
     -- PERMITS: bindings ── кінець секції ──
+    -- PERMITS: ui-page ── екран дозволу /admin/permits/:id (PM-07); ru/kz — порцією PERMITS: ui-page нижче ──
+    ,(N'permits.page.tabs.aria', N'en', N'Permit sections', 1)
+    ,(N'permits.page.tabs.overview', N'en', N'Overview', 1)
+    ,(N'permits.page.actions.renew', N'en', N'Renew…', 1)
+    ,(N'permits.page.actions.activate', N'en', N'Activate…', 1)
+    ,(N'permits.page.actions.end', N'en', N'End this permit early…', 1)
+    ,(N'permits.page.actions.delete', N'en', N'Delete draft…', 1)
+    ,(N'permits.page.actions.more', N'en', N'More', 1)
+    ,(N'permits.page.banner.endsTitle', N'en', N'Ends in {days} days ({date})', 1)
+    ,(N'permits.page.banner.endsText', N'en', N'Sheets of periods after that date will find no limits unless a renewal is active.', 1)
+    ,(N'permits.page.banner.draftTitle', N'en', N'Draft - sheets do not read this permit yet', 1)
+    ,(N'permits.page.banner.draftText', N'en', N'Check the tables, then activate. Activating makes the limits visible to every sheet bound to this type.', 1)
+    ,(N'permits.page.banner.expiredTitle', N'en', N'This permit has expired and is read-only here', 1)
+    ,(N'permits.page.banner.expiredText', N'en', N'Rows and header cannot be changed on this screen. Renew the permit to continue in a new draft.', 1)
+    ,(N'permits.page.header.title', N'en', N'Permit details', 1)
+    ,(N'permits.page.header.groupIdentity', N'en', N'Identity', 1)
+    ,(N'permits.page.header.groupValidity', N'en', N'Dates and validity', 1)
+    ,(N'permits.page.header.groupForms', N'en', N'Reporting forms', 1)
+    ,(N'permits.page.header.number', N'en', N'Number', 1)
+    ,(N'permits.page.header.type', N'en', N'Type', 1)
+    ,(N'permits.page.header.location', N'en', N'Location', 1)
+    ,(N'permits.page.header.issueDate', N'en', N'Issued', 1)
+    ,(N'permits.page.header.validFrom', N'en', N'Valid from', 1)
+    ,(N'permits.page.header.validTo', N'en', N'Valid to', 1)
+    ,(N'permits.page.header.validToHint', N'en', N'The first day it is no longer valid', 1)
+    ,(N'permits.page.header.valid', N'en', N'Valid', 1)
+    ,(N'permits.page.header.actualEnd', N'en', N'Ended early', 1)
+    ,(N'permits.page.header.reportedIn', N'en', N'Reported in', 1)
+    ,(N'permits.page.header.form300', N'en', N'Form 300', 1)
+    ,(N'permits.page.header.form301', N'en', N'Form 301', 1)
+    ,(N'permits.page.header.form302', N'en', N'Form 302', 1)
+    ,(N'permits.page.header.tox', N'en', N'TOx', 1)
+    ,(N'permits.page.header.noForms', N'en', N'No reporting form', 1)
+    ,(N'permits.page.header.numberRequired', N'en', N'Enter the permit number.', 1)
+    ,(N'permits.page.header.dateRequired', N'en', N'Choose a date.', 1)
+    ,(N'permits.page.header.validToAfter', N'en', N'The end must be after the start.', 1)
+    ,(N'permits.page.header.save', N'en', N'Save changes', 1)
+    ,(N'permits.page.header.discard', N'en', N'Discard changes', 1)
+    ,(N'permits.page.header.saved', N'en', N'Permit saved', 1)
+    ,(N'permits.page.validity.title', N'en', N'Validity', 1)
+    ,(N'permits.page.validity.none', N'en', N'The dates are not set yet.', 1)
+    ,(N'permits.page.validity.aria', N'en', N'Permit validity with today marked', 1)
+    ,(N'permits.page.validity.today', N'en', N'Today {date}', 1)
+    ,(N'permits.page.validity.note', N'en', N'Sheets pick the permit that is valid on the last day of their period. Between two permits with the same number and type, the one with the later start wins from its first day.', 1)
+    ,(N'permits.page.totals.title', N'en', N'Totals', 1)
+    ,(N'permits.page.totals.note', N'en', N'Totals are never typed. They are summed from the table rows each time, so they cannot drift from the rows.', 1)
+    ,(N'permits.page.totals.rows', N'en', N'{count} rows', 1)
+    ,(N'permits.page.readBy.title', N'en', N'Read by', 1)
+    ,(N'permits.page.readBy.none', N'en', N'No sheet reads this permit yet.', 1)
+    ,(N'permits.page.readBy.sheet', N'en', N'Sheet table', 1)
+    ,(N'permits.page.readBy.binding', N'en', N'Binding', 1)
+    ,(N'permits.page.readBy.how', N'en', N'How', 1)
+    ,(N'permits.page.readBy.rows', N'en', N'Rows from the permit', 1)
+    ,(N'permits.page.readBy.formulas', N'en', N'Formulas only', 1)
+    ,(N'permits.page.table.addRow', N'en', N'Add row', 1)
+    ,(N'permits.page.table.paste', N'en', N'Paste from Excel…', 1)
+    ,(N'permits.page.table.importFile', N'en', N'Import file…', 1)
+    ,(N'permits.page.table.readOnlyReason', N'en', N'This permit is read-only here', 1)
+    ,(N'permits.page.table.note', N'en', N'{name} has {columns} columns and {rows} rows. Click a row to edit it.', 1)
+    ,(N'permits.page.table.emptyTitle', N'en', N'No rows in {name} yet', 1)
+    ,(N'permits.page.table.emptyHint', N'en', N'Add the first row by hand, or paste a block of rows from Excel.', 1)
+    ,(N'permits.page.table.emptyReadOnly', N'en', N'This permit is read-only here, so rows cannot be added.', 1)
+    ,(N'permits.page.table.sumAll', N'en', N'Sum of all {count} rows', 1)
+    ,(N'permits.page.row.newTitle', N'en', N'New row', 1)
+    ,(N'permits.page.row.readOnly', N'en', N'read-only', 1)
+    ,(N'permits.page.row.close', N'en', N'Close', 1)
+    ,(N'permits.page.row.save', N'en', N'Save', 1)
+    ,(N'permits.page.row.saveNext', N'en', N'Save and add next', 1)
+    ,(N'permits.page.row.delete', N'en', N'Delete row', 1)
+    ,(N'permits.page.row.added', N'en', N'Row added', 1)
+    ,(N'permits.page.row.saved', N'en', N'Row saved', 1)
+    ,(N'permits.page.row.deleted', N'en', N'Row deleted', 1)
+    ,(N'permits.page.row.notSaved', N'en', N'The row was not saved. Check the fields and try again.', 1)
+    ,(N'permits.page.row.notDeleted', N'en', N'The row was not deleted.', 1)
+    ,(N'permits.page.row.required', N'en', N'Required', 1)
+    ,(N'permits.page.row.fillRequired', N'en', N'Fill in the required fields.', 1)
+    ,(N'permits.page.row.duplicate', N'en', N'This permit already has a row with the same {columns}.', 1)
+    ,(N'permits.page.row.notNumber', N'en', N'Enter a number, for example 12.5.', 1)
+    ,(N'permits.page.row.notInteger', N'en', N'Enter a whole number.', 1)
+    ,(N'permits.page.row.notDate', N'en', N'Enter a date as year-month-day.', 1)
+    ,(N'permits.page.row.requiredNote', N'en', N'Fields marked with * are required.', 1)
+    ,(N'permits.page.row.groupMain', N'en', N'Main', 1)
+    ,(N'permits.page.row.fieldCount', N'en', N'{count} fields', 1)
+    ,(N'permits.page.row.hintShared', N'en', N'From the shared registry {name}', 1)
+    ,(N'permits.page.row.hintType', N'en', N'A list only for this permit type', 1)
+    ,(N'permits.page.row.hintPermit', N'en', N'A table of this permit: {name}. Add the row there first.', 1)
+    ,(N'permits.page.row.noValues', N'en', N'No values to choose', 1)
+    ,(N'permits.page.row.pickersFailed', N'en', N'The lists for this form could not be loaded, so values cannot be chosen now.', 1)
+    ,(N'permits.page.paste.title', N'en', N'Paste rows into {table}', 1)
+    ,(N'permits.page.paste.intro', N'en', N'Copy cells in Excel and paste them here, or load a CSV file. One line is one row. Columns are expected in this order:', 1)
+    ,(N'permits.page.paste.file', N'en', N'CSV file', 1)
+    ,(N'permits.page.paste.fileHint', N'en', N'Excel workbooks are not read here: copy the cells instead, or save the sheet as CSV.', 1)
+    ,(N'permits.page.paste.rows', N'en', N'Rows', 1)
+    ,(N'permits.page.paste.rowsHint', N'en', N'Tab-separated, as Excel copies them. A decimal comma is accepted.', 1)
+    ,(N'permits.page.paste.header', N'en', N'The first line is a header (skip it)', 1)
+    ,(N'permits.page.paste.nothing', N'en', N'Nothing to add yet', 1)
+    ,(N'permits.page.paste.summary', N'en', N'{rows} rows can be added to {table}; {bad} need fixing first.', 1)
+    ,(N'permits.page.paste.extra', N'en', N'{count} cells to the right of the last column were ignored.', 1)
+    ,(N'permits.page.paste.issues', N'en', N'Cells that could not be read', 1)
+    ,(N'permits.page.paste.issueWhere', N'en', N'Row {row}, {column}', 1)
+    ,(N'permits.page.paste.issueNumber', N'en', N'"{text}" is not a number', 1)
+    ,(N'permits.page.paste.issueBool', N'en', N'"{text}" is not yes or no', 1)
+    ,(N'permits.page.paste.issueDate', N'en', N'"{text}" is not a date (use year-month-day or day.month.year)', 1)
+    ,(N'permits.page.paste.issueInteger', N'en', N'"{text}" is not a whole number', 1)
+    ,(N'permits.page.paste.issueUnknown', N'en', N'"{text}" is not in the list', 1)
+    ,(N'permits.page.paste.issueLimit', N'en', N'Only the first {max} rows are read; the rest are ignored.', 1)
+    ,(N'permits.page.paste.moreIssues', N'en', N'and {count} more', 1)
+    ,(N'permits.page.paste.progress', N'en', N'Progress: {done} of {total} rows', 1)
+    ,(N'permits.page.paste.check', N'en', N'Check rows', 1)
+    ,(N'permits.page.paste.checked', N'en', N'{ok} rows pass the check, {bad} are rejected by the server', 1)
+    ,(N'permits.page.paste.add', N'en', N'Add {count} rows', 1)
+    ,(N'permits.page.paste.done', N'en', N'{count} rows added', 1)
+    ,(N'permits.page.paste.stopped', N'en', N'Stopped after saving {written} rows', 1)
+    ,(N'permits.page.paste.stoppedText', N'en', N'The server rejected the next block. Rows saved before it stay in the table. Fix the listed rows and add the rest again.', 1)
+    ,(N'permits.page.paste.failures', N'en', N'Rows rejected by the server', 1)
+    ,(N'permits.page.paste.failure', N'en', N'Row {row}: {text}', 1)
+    ,(N'permits.page.activate.title', N'en', N'Activate permit {number}?', 1)
+    ,(N'permits.page.activate.reads', N'en', N'Sheets bound to type {type} start reading these limits for periods from {from} to {to}.', 1)
+    ,(N'permits.page.activate.edits', N'en', N'Rows can still be edited; every edit is dated and shows in the history.', 1)
+    ,(N'permits.page.activate.overlap', N'en', N'Two active permits of one type, number and overlapping dates are not allowed.', 1)
+    ,(N'permits.page.activate.verb', N'en', N'Activate', 1)
+    ,(N'permits.page.end.title', N'en', N'End permit {number} early?', 1)
+    ,(N'permits.page.end.text', N'en', N'Sheets stop reading it from today. Past periods keep their limits.', 1)
+    ,(N'permits.page.end.reason', N'en', N'Reason', 1)
+    ,(N'permits.page.end.verb', N'en', N'End permit', 1)
+    ,(N'permits.page.renew.title', N'en', N'Renew permit {number}?', 1)
+    ,(N'permits.page.renew.creates', N'en', N'A new draft is created with the same rows, valid from {date} (the day the current one ends).', 1)
+    ,(N'permits.page.renew.kept', N'en', N'This permit stays valid until then and is kept as Expired afterwards, because old periods still read its limits.', 1)
+    ,(N'permits.page.renew.verb', N'en', N'Create renewal', 1)
+    ,(N'permits.page.delete.title', N'en', N'Delete draft {number}?', 1)
+    ,(N'permits.page.delete.rows', N'en', N'The draft and all rows of its tables are deleted.', 1)
+    ,(N'permits.page.delete.inUse', N'en', N'A permit that sheets or other records refer to cannot be deleted.', 1)
+    ,(N'permits.page.delete.verb', N'en', N'Delete draft', 1)
+    ,(N'permits.page.done.activated', N'en', N'Permit {number} is active', 1)
+    ,(N'permits.page.done.ended', N'en', N'Permit {number} ended', 1)
+    ,(N'permits.page.done.renewed', N'en', N'Renewal created as a draft', 1)
+    ,(N'permits.page.done.deleted', N'en', N'Draft {number} deleted', 1)
+    -- PERMITS: ui-page ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -22009,6 +22147,287 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: bindings ── preview ── кінець секції ──
+
+-- PERMITS: ui-page ── ru/kz: екран дозволу /admin/permits/:id (PM-07); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.page.tabs.aria', N'ru', N'Разделы разрешения'),
+    (N'permits.page.tabs.aria', N'kz', N'Рұқсат бөлімдері'),
+    (N'permits.page.tabs.overview', N'ru', N'Обзор'),
+    (N'permits.page.tabs.overview', N'kz', N'Шолу'),
+    (N'permits.page.actions.renew', N'ru', N'Продлить…'),
+    (N'permits.page.actions.renew', N'kz', N'Ұзарту…'),
+    (N'permits.page.actions.activate', N'ru', N'Активировать…'),
+    (N'permits.page.actions.activate', N'kz', N'Белсендіру…'),
+    (N'permits.page.actions.end', N'ru', N'Завершить досрочно…'),
+    (N'permits.page.actions.end', N'kz', N'Мерзімінен бұрын аяқтау…'),
+    (N'permits.page.actions.delete', N'ru', N'Удалить черновик…'),
+    (N'permits.page.actions.delete', N'kz', N'Жобаны жою…'),
+    (N'permits.page.actions.more', N'ru', N'Ещё'),
+    (N'permits.page.actions.more', N'kz', N'Тағы'),
+    (N'permits.page.banner.endsTitle', N'ru', N'Заканчивается через {days} дн. ({date})'),
+    (N'permits.page.banner.endsTitle', N'kz', N'{days} күннен кейін аяқталады ({date})'),
+    (N'permits.page.banner.endsText', N'ru', N'Листы периодов после этой даты не найдут лимитов, если не действует продление.'),
+    (N'permits.page.banner.endsText', N'kz', N'Осы күннен кейінгі кезеңдердің парақтары, егер ұзарту қолданыста болмаса, лимиттерді таппайды.'),
+    (N'permits.page.banner.draftTitle', N'ru', N'Черновик: листы пока не читают это разрешение'),
+    (N'permits.page.banner.draftTitle', N'kz', N'Жоба: парақтар бұл рұқсатты әлі оқымайды'),
+    (N'permits.page.banner.draftText', N'ru', N'Проверьте таблицы и активируйте. Активация делает лимиты видимыми всем листам, привязанным к этому типу.'),
+    (N'permits.page.banner.draftText', N'kz', N'Кестелерді тексеріп, белсендіріңіз. Белсендіру лимиттерді осы түрге байланған барлық парақтарға көрінетін етеді.'),
+    (N'permits.page.banner.expiredTitle', N'ru', N'Срок разрешения истёк, здесь оно только для чтения'),
+    (N'permits.page.banner.expiredTitle', N'kz', N'Рұқсаттың мерзімі өтті, мұнда ол тек оқуға арналған'),
+    (N'permits.page.banner.expiredText', N'ru', N'Строки и шапку на этом экране изменить нельзя. Продлите разрешение, чтобы продолжить в новом черновике.'),
+    (N'permits.page.banner.expiredText', N'kz', N'Бұл экранда жолдар мен тақырыпты өзгертуге болмайды. Жаңа жобада жалғастыру үшін рұқсатты ұзартыңыз.'),
+    (N'permits.page.header.title', N'ru', N'Данные разрешения'),
+    (N'permits.page.header.title', N'kz', N'Рұқсат деректері'),
+    (N'permits.page.header.groupIdentity', N'ru', N'Идентификация'),
+    (N'permits.page.header.groupIdentity', N'kz', N'Сәйкестендіру'),
+    (N'permits.page.header.groupValidity', N'ru', N'Даты и срок действия'),
+    (N'permits.page.header.groupValidity', N'kz', N'Мерзімдер және қолданыс'),
+    (N'permits.page.header.groupForms', N'ru', N'Отчётные формы'),
+    (N'permits.page.header.groupForms', N'kz', N'Есептік нысандар'),
+    (N'permits.page.header.number', N'ru', N'Номер'),
+    (N'permits.page.header.number', N'kz', N'Нөмір'),
+    (N'permits.page.header.type', N'ru', N'Тип'),
+    (N'permits.page.header.type', N'kz', N'Түрі'),
+    (N'permits.page.header.location', N'ru', N'Расположение'),
+    (N'permits.page.header.location', N'kz', N'Орналасуы'),
+    (N'permits.page.header.issueDate', N'ru', N'Дата выдачи'),
+    (N'permits.page.header.issueDate', N'kz', N'Берілген күні'),
+    (N'permits.page.header.validFrom', N'ru', N'Действует с'),
+    (N'permits.page.header.validFrom', N'kz', N'Қолданыс басталуы'),
+    (N'permits.page.header.validTo', N'ru', N'Действует до'),
+    (N'permits.page.header.validTo', N'kz', N'Қолданыс аяқталуы'),
+    (N'permits.page.header.validToHint', N'ru', N'Первый день, когда разрешение уже не действует'),
+    (N'permits.page.header.validToHint', N'kz', N'Рұқсат енді қолданылмайтын алғашқы күн'),
+    (N'permits.page.header.valid', N'ru', N'Срок действия'),
+    (N'permits.page.header.valid', N'kz', N'Қолданыс мерзімі'),
+    (N'permits.page.header.actualEnd', N'ru', N'Досрочное завершение'),
+    (N'permits.page.header.actualEnd', N'kz', N'Мерзімінен бұрын аяқталды'),
+    (N'permits.page.header.reportedIn', N'ru', N'Входит в отчёты'),
+    (N'permits.page.header.reportedIn', N'kz', N'Есептерге кіреді'),
+    (N'permits.page.header.form300', N'ru', N'Форма 300'),
+    (N'permits.page.header.form300', N'kz', N'300 нысаны'),
+    (N'permits.page.header.form301', N'ru', N'Форма 301'),
+    (N'permits.page.header.form301', N'kz', N'301 нысаны'),
+    (N'permits.page.header.form302', N'ru', N'Форма 302'),
+    (N'permits.page.header.form302', N'kz', N'302 нысаны'),
+    (N'permits.page.header.tox', N'ru', N'TOx'),
+    (N'permits.page.header.tox', N'kz', N'TOx'),
+    (N'permits.page.header.noForms', N'ru', N'Нет отчётной формы'),
+    (N'permits.page.header.noForms', N'kz', N'Есептік нысан жоқ'),
+    (N'permits.page.header.numberRequired', N'ru', N'Укажите номер разрешения.'),
+    (N'permits.page.header.numberRequired', N'kz', N'Рұқсат нөмірін енгізіңіз.'),
+    (N'permits.page.header.dateRequired', N'ru', N'Выберите дату.'),
+    (N'permits.page.header.dateRequired', N'kz', N'Күнді таңдаңыз.'),
+    (N'permits.page.header.validToAfter', N'ru', N'Конец должен быть позже начала.'),
+    (N'permits.page.header.validToAfter', N'kz', N'Аяқталуы басталуынан кейін болуы керек.'),
+    (N'permits.page.header.save', N'ru', N'Сохранить изменения'),
+    (N'permits.page.header.save', N'kz', N'Өзгерістерді сақтау'),
+    (N'permits.page.header.discard', N'ru', N'Отменить изменения'),
+    (N'permits.page.header.discard', N'kz', N'Өзгерістерден бас тарту'),
+    (N'permits.page.header.saved', N'ru', N'Разрешение сохранено'),
+    (N'permits.page.header.saved', N'kz', N'Рұқсат сақталды'),
+    (N'permits.page.validity.title', N'ru', N'Срок действия'),
+    (N'permits.page.validity.title', N'kz', N'Қолданыс мерзімі'),
+    (N'permits.page.validity.none', N'ru', N'Даты ещё не заданы.'),
+    (N'permits.page.validity.none', N'kz', N'Күндер әлі белгіленбеген.'),
+    (N'permits.page.validity.aria', N'ru', N'Срок действия разрешения с отметкой сегодняшнего дня'),
+    (N'permits.page.validity.aria', N'kz', N'Бүгінгі күн белгіленген рұқсаттың қолданыс мерзімі'),
+    (N'permits.page.validity.today', N'ru', N'Сегодня {date}'),
+    (N'permits.page.validity.today', N'kz', N'Бүгін {date}'),
+    (N'permits.page.validity.note', N'ru', N'Листы берут разрешение, действующее в последний день их периода. Из двух разрешений с одним номером и типом с первого дня побеждает то, у которого начало позже.'),
+    (N'permits.page.validity.note', N'kz', N'Парақтар өз кезеңінің соңғы күні қолданыста болатын рұқсатты алады. Нөмірі мен түрі бірдей екі рұқсаттың ішінде басталуы кейінгісі бірінші күнінен бастап басым болады.'),
+    (N'permits.page.totals.title', N'ru', N'Итоги'),
+    (N'permits.page.totals.title', N'kz', N'Қорытындылар'),
+    (N'permits.page.totals.note', N'ru', N'Итоги не вводятся вручную. Они каждый раз суммируются по строкам таблицы, поэтому не могут разойтись со строками.'),
+    (N'permits.page.totals.note', N'kz', N'Қорытындылар қолмен енгізілмейді. Олар әр жолы кесте жолдары бойынша қосылады, сондықтан жолдардан ауытқи алмайды.'),
+    (N'permits.page.totals.rows', N'ru', N'Строк: {count}'),
+    (N'permits.page.totals.rows', N'kz', N'Жолдар: {count}'),
+    (N'permits.page.readBy.title', N'ru', N'Кто читает'),
+    (N'permits.page.readBy.title', N'kz', N'Кім оқиды'),
+    (N'permits.page.readBy.none', N'ru', N'Пока ни один лист не читает это разрешение.'),
+    (N'permits.page.readBy.none', N'kz', N'Әзірге бірде-бір парақ бұл рұқсатты оқымайды.'),
+    (N'permits.page.readBy.sheet', N'ru', N'Таблица листа'),
+    (N'permits.page.readBy.sheet', N'kz', N'Парақ кестесі'),
+    (N'permits.page.readBy.binding', N'ru', N'Привязка'),
+    (N'permits.page.readBy.binding', N'kz', N'Байланыс'),
+    (N'permits.page.readBy.how', N'ru', N'Как'),
+    (N'permits.page.readBy.how', N'kz', N'Қалай'),
+    (N'permits.page.readBy.rows', N'ru', N'Строки из разрешения'),
+    (N'permits.page.readBy.rows', N'kz', N'Рұқсаттан алынған жолдар'),
+    (N'permits.page.readBy.formulas', N'ru', N'Только формулы'),
+    (N'permits.page.readBy.formulas', N'kz', N'Тек формулалар'),
+    (N'permits.page.table.addRow', N'ru', N'Добавить строку'),
+    (N'permits.page.table.addRow', N'kz', N'Жол қосу'),
+    (N'permits.page.table.paste', N'ru', N'Вставить из Excel…'),
+    (N'permits.page.table.paste', N'kz', N'Excel-ден қою…'),
+    (N'permits.page.table.importFile', N'ru', N'Импорт файла…'),
+    (N'permits.page.table.importFile', N'kz', N'Файлды импорттау…'),
+    (N'permits.page.table.readOnlyReason', N'ru', N'Здесь разрешение только для чтения'),
+    (N'permits.page.table.readOnlyReason', N'kz', N'Мұнда рұқсат тек оқуға арналған'),
+    (N'permits.page.table.note', N'ru', N'В таблице «{name}» столбцов: {columns}, строк: {rows}. Нажмите на строку, чтобы изменить её.'),
+    (N'permits.page.table.note', N'kz', N'«{name}» кестесінде {columns} баған және {rows} жол бар. Жолды өзгерту үшін оны басыңыз.'),
+    (N'permits.page.table.emptyTitle', N'ru', N'В таблице «{name}» пока нет строк'),
+    (N'permits.page.table.emptyTitle', N'kz', N'«{name}» кестесінде әзірге жол жоқ'),
+    (N'permits.page.table.emptyHint', N'ru', N'Добавьте первую строку вручную или вставьте блок строк из Excel.'),
+    (N'permits.page.table.emptyHint', N'kz', N'Алғашқы жолды қолмен қосыңыз немесе Excel-ден жолдар блогын қойыңыз.'),
+    (N'permits.page.table.emptyReadOnly', N'ru', N'Здесь разрешение только для чтения, поэтому строки добавить нельзя.'),
+    (N'permits.page.table.emptyReadOnly', N'kz', N'Мұнда рұқсат тек оқуға арналған, сондықтан жол қосуға болмайды.'),
+    (N'permits.page.table.sumAll', N'ru', N'Сумма по всем строкам: {count}'),
+    (N'permits.page.table.sumAll', N'kz', N'Барлық жолдар бойынша қосынды: {count}'),
+    (N'permits.page.row.newTitle', N'ru', N'Новая строка'),
+    (N'permits.page.row.newTitle', N'kz', N'Жаңа жол'),
+    (N'permits.page.row.readOnly', N'ru', N'только чтение'),
+    (N'permits.page.row.readOnly', N'kz', N'тек оқу'),
+    (N'permits.page.row.close', N'ru', N'Закрыть'),
+    (N'permits.page.row.close', N'kz', N'Жабу'),
+    (N'permits.page.row.save', N'ru', N'Сохранить'),
+    (N'permits.page.row.save', N'kz', N'Сақтау'),
+    (N'permits.page.row.saveNext', N'ru', N'Сохранить и добавить следующую'),
+    (N'permits.page.row.saveNext', N'kz', N'Сақтап, келесіні қосу'),
+    (N'permits.page.row.delete', N'ru', N'Удалить строку'),
+    (N'permits.page.row.delete', N'kz', N'Жолды жою'),
+    (N'permits.page.row.added', N'ru', N'Строка добавлена'),
+    (N'permits.page.row.added', N'kz', N'Жол қосылды'),
+    (N'permits.page.row.saved', N'ru', N'Строка сохранена'),
+    (N'permits.page.row.saved', N'kz', N'Жол сақталды'),
+    (N'permits.page.row.deleted', N'ru', N'Строка удалена'),
+    (N'permits.page.row.deleted', N'kz', N'Жол жойылды'),
+    (N'permits.page.row.notSaved', N'ru', N'Строка не сохранена. Проверьте поля и повторите.'),
+    (N'permits.page.row.notSaved', N'kz', N'Жол сақталмады. Өрістерді тексеріп, қайталаңыз.'),
+    (N'permits.page.row.notDeleted', N'ru', N'Строка не удалена.'),
+    (N'permits.page.row.notDeleted', N'kz', N'Жол жойылмады.'),
+    (N'permits.page.row.required', N'ru', N'Обязательно'),
+    (N'permits.page.row.required', N'kz', N'Міндетті'),
+    (N'permits.page.row.fillRequired', N'ru', N'Заполните обязательные поля.'),
+    (N'permits.page.row.fillRequired', N'kz', N'Міндетті өрістерді толтырыңыз.'),
+    (N'permits.page.row.duplicate', N'ru', N'В этом разрешении уже есть строка с тем же значением: {columns}.'),
+    (N'permits.page.row.duplicate', N'kz', N'Бұл рұқсатта {columns} мәні бірдей жол бұрыннан бар.'),
+    (N'permits.page.row.notNumber', N'ru', N'Введите число, например 12,5.'),
+    (N'permits.page.row.notNumber', N'kz', N'Санды енгізіңіз, мысалы 12,5.'),
+    (N'permits.page.row.notInteger', N'ru', N'Введите целое число.'),
+    (N'permits.page.row.notInteger', N'kz', N'Бүтін санды енгізіңіз.'),
+    (N'permits.page.row.notDate', N'ru', N'Введите дату в виде год-месяц-день.'),
+    (N'permits.page.row.notDate', N'kz', N'Күнді жыл-ай-күн түрінде енгізіңіз.'),
+    (N'permits.page.row.requiredNote', N'ru', N'Поля со звёздочкой обязательны.'),
+    (N'permits.page.row.requiredNote', N'kz', N'Жұлдызшасы бар өрістер міндетті.'),
+    (N'permits.page.row.groupMain', N'ru', N'Основное'),
+    (N'permits.page.row.groupMain', N'kz', N'Негізгі'),
+    (N'permits.page.row.fieldCount', N'ru', N'полей: {count}'),
+    (N'permits.page.row.fieldCount', N'kz', N'өрістер: {count}'),
+    (N'permits.page.row.hintShared', N'ru', N'Из общего справочника {name}'),
+    (N'permits.page.row.hintShared', N'kz', N'{name} ортақ анықтамалығынан'),
+    (N'permits.page.row.hintType', N'ru', N'Список только для этого типа разрешений'),
+    (N'permits.page.row.hintType', N'kz', N'Тек осы рұқсат түріне арналған тізім'),
+    (N'permits.page.row.hintPermit', N'ru', N'Таблица этого разрешения: {name}. Сначала добавьте строку в ней.'),
+    (N'permits.page.row.hintPermit', N'kz', N'Осы рұқсаттың кестесі: {name}. Алдымен жолды сонда қосыңыз.'),
+    (N'permits.page.row.noValues', N'ru', N'Нет значений для выбора'),
+    (N'permits.page.row.noValues', N'kz', N'Таңдайтын мәндер жоқ'),
+    (N'permits.page.row.pickersFailed', N'ru', N'Списки для этой формы не загрузились, поэтому значения сейчас выбрать нельзя.'),
+    (N'permits.page.row.pickersFailed', N'kz', N'Бұл форманың тізімдері жүктелмеді, сондықтан қазір мәндерді таңдауға болмайды.'),
+    (N'permits.page.paste.title', N'ru', N'Вставка строк в таблицу «{table}»'),
+    (N'permits.page.paste.title', N'kz', N'«{table}» кестесіне жолдарды қою'),
+    (N'permits.page.paste.intro', N'ru', N'Скопируйте ячейки в Excel и вставьте сюда или загрузите CSV-файл. Одна строка текста — одна строка таблицы. Столбцы ожидаются в таком порядке:'),
+    (N'permits.page.paste.intro', N'kz', N'Excel-де ұяшықтарды көшіріп, осында қойыңыз немесе CSV файлын жүктеңіз. Бір мәтін жолы — кестенің бір жолы. Бағандар мына тәртіппен күтіледі:'),
+    (N'permits.page.paste.file', N'ru', N'CSV-файл'),
+    (N'permits.page.paste.file', N'kz', N'CSV файлы'),
+    (N'permits.page.paste.fileHint', N'ru', N'Книги Excel здесь не читаются: скопируйте ячейки или сохраните лист как CSV.'),
+    (N'permits.page.paste.fileHint', N'kz', N'Excel кітаптары мұнда оқылмайды: ұяшықтарды көшіріңіз немесе парақты CSV ретінде сақтаңыз.'),
+    (N'permits.page.paste.rows', N'ru', N'Строки'),
+    (N'permits.page.paste.rows', N'kz', N'Жолдар'),
+    (N'permits.page.paste.rowsHint', N'ru', N'Через табуляцию, как копирует Excel. Десятичная запятая допускается.'),
+    (N'permits.page.paste.rowsHint', N'kz', N'Excel көшіргендей табуляциямен бөлінген. Ондық үтір қабылданады.'),
+    (N'permits.page.paste.header', N'ru', N'Первая строка — заголовок (пропустить)'),
+    (N'permits.page.paste.header', N'kz', N'Бірінші жол — тақырып (өткізіп жіберу)'),
+    (N'permits.page.paste.nothing', N'ru', N'Пока нечего добавлять'),
+    (N'permits.page.paste.nothing', N'kz', N'Әзірге қосатын ештеңе жоқ'),
+    (N'permits.page.paste.summary', N'ru', N'В таблицу «{table}» можно добавить строк: {rows}; сначала нужно исправить: {bad}.'),
+    (N'permits.page.paste.summary', N'kz', N'«{table}» кестесіне {rows} жол қосуға болады; алдымен түзету керек: {bad}.'),
+    (N'permits.page.paste.extra', N'ru', N'Ячеек правее последнего столбца пропущено: {count}.'),
+    (N'permits.page.paste.extra', N'kz', N'Соңғы бағаннан оңдағы ұяшықтар еленбеді: {count}.'),
+    (N'permits.page.paste.issues', N'ru', N'Ячейки, которые не удалось прочитать'),
+    (N'permits.page.paste.issues', N'kz', N'Оқылмаған ұяшықтар'),
+    (N'permits.page.paste.issueWhere', N'ru', N'Строка {row}, {column}'),
+    (N'permits.page.paste.issueWhere', N'kz', N'{row}-жол, {column}'),
+    (N'permits.page.paste.issueNumber', N'ru', N'«{text}» не число'),
+    (N'permits.page.paste.issueNumber', N'kz', N'«{text}» сан емес'),
+    (N'permits.page.paste.issueBool', N'ru', N'«{text}» не «да» и не «нет»'),
+    (N'permits.page.paste.issueBool', N'kz', N'«{text}» «иә» да, «жоқ» та емес'),
+    (N'permits.page.paste.issueDate', N'ru', N'«{text}» не дата (год-месяц-день или день.месяц.год)'),
+    (N'permits.page.paste.issueDate', N'kz', N'«{text}» күн емес (жыл-ай-күн немесе күн.ай.жыл)'),
+    (N'permits.page.paste.issueInteger', N'ru', N'«{text}» не целое число'),
+    (N'permits.page.paste.issueInteger', N'kz', N'«{text}» бүтін сан емес'),
+    (N'permits.page.paste.issueUnknown', N'ru', N'«{text}» нет в списке'),
+    (N'permits.page.paste.issueUnknown', N'kz', N'«{text}» тізімде жоқ'),
+    (N'permits.page.paste.issueLimit', N'ru', N'Читаются только первые {max} строк, остальные пропущены.'),
+    (N'permits.page.paste.issueLimit', N'kz', N'Тек алғашқы {max} жол оқылады, қалғаны еленбейді.'),
+    (N'permits.page.paste.moreIssues', N'ru', N'и ещё {count}'),
+    (N'permits.page.paste.moreIssues', N'kz', N'және тағы {count}'),
+    (N'permits.page.paste.progress', N'ru', N'Выполнено: {done} из {total} строк'),
+    (N'permits.page.paste.progress', N'kz', N'Орындалды: {done} / {total} жол'),
+    (N'permits.page.paste.check', N'ru', N'Проверить строки'),
+    (N'permits.page.paste.check', N'kz', N'Жолдарды тексеру'),
+    (N'permits.page.paste.checked', N'ru', N'Проверку проходят строк: {ok}, сервер отклонил: {bad}'),
+    (N'permits.page.paste.checked', N'kz', N'Тексеруден өтетін жолдар: {ok}, сервер қабылдамағаны: {bad}'),
+    (N'permits.page.paste.add', N'ru', N'Добавить строк: {count}'),
+    (N'permits.page.paste.add', N'kz', N'Жол қосу: {count}'),
+    (N'permits.page.paste.done', N'ru', N'Добавлено строк: {count}'),
+    (N'permits.page.paste.done', N'kz', N'Қосылған жолдар: {count}'),
+    (N'permits.page.paste.stopped', N'ru', N'Остановлено после сохранения строк: {written}'),
+    (N'permits.page.paste.stopped', N'kz', N'Сақталған жолдардан кейін тоқтатылды: {written}'),
+    (N'permits.page.paste.stoppedText', N'ru', N'Сервер отклонил следующий блок. Строки, сохранённые до него, остаются в таблице. Исправьте перечисленные строки и добавьте остальные снова.'),
+    (N'permits.page.paste.stoppedText', N'kz', N'Сервер келесі блокты қабылдамады. Одан бұрын сақталған жолдар кестеде қалады. Көрсетілген жолдарды түзетіп, қалғандарын қайта қосыңыз.'),
+    (N'permits.page.paste.failures', N'ru', N'Строки, отклонённые сервером'),
+    (N'permits.page.paste.failures', N'kz', N'Сервер қабылдамаған жолдар'),
+    (N'permits.page.paste.failure', N'ru', N'Строка {row}: {text}'),
+    (N'permits.page.paste.failure', N'kz', N'{row}-жол: {text}'),
+    (N'permits.page.activate.title', N'ru', N'Активировать разрешение {number}?'),
+    (N'permits.page.activate.title', N'kz', N'{number} рұқсатын белсендіру керек пе?'),
+    (N'permits.page.activate.reads', N'ru', N'Листы, привязанные к типу {type}, начнут читать эти лимиты для периодов с {from} по {to}.'),
+    (N'permits.page.activate.reads', N'kz', N'{type} түріне байланған парақтар осы лимиттерді {from} - {to} аралығындағы кезеңдер үшін оқи бастайды.'),
+    (N'permits.page.activate.edits', N'ru', N'Строки можно редактировать и дальше; каждая правка датируется и видна в истории.'),
+    (N'permits.page.activate.edits', N'kz', N'Жолдарды әрі қарай өңдеуге болады; әр өзгеріс күнделіп, тарихта көрінеді.'),
+    (N'permits.page.activate.overlap', N'ru', N'Два действующих разрешения одного типа и номера с пересекающимися датами не допускаются.'),
+    (N'permits.page.activate.overlap', N'kz', N'Бір түрдегі, нөмірі бірдей және күндері қиылысатын екі қолданыстағы рұқсатқа жол берілмейді.'),
+    (N'permits.page.activate.verb', N'ru', N'Активировать'),
+    (N'permits.page.activate.verb', N'kz', N'Белсендіру'),
+    (N'permits.page.end.title', N'ru', N'Завершить разрешение {number} досрочно?'),
+    (N'permits.page.end.title', N'kz', N'{number} рұқсатын мерзімінен бұрын аяқтау керек пе?'),
+    (N'permits.page.end.text', N'ru', N'Листы перестанут читать его с сегодняшнего дня. Прошлые периоды сохраняют свои лимиты.'),
+    (N'permits.page.end.text', N'kz', N'Парақтар оны бүгіннен бастап оқуды тоқтатады. Өткен кезеңдер өз лимиттерін сақтайды.'),
+    (N'permits.page.end.reason', N'ru', N'Причина'),
+    (N'permits.page.end.reason', N'kz', N'Себебі'),
+    (N'permits.page.end.verb', N'ru', N'Завершить разрешение'),
+    (N'permits.page.end.verb', N'kz', N'Рұқсатты аяқтау'),
+    (N'permits.page.renew.title', N'ru', N'Продлить разрешение {number}?'),
+    (N'permits.page.renew.title', N'kz', N'{number} рұқсатын ұзарту керек пе?'),
+    (N'permits.page.renew.creates', N'ru', N'Будет создан новый черновик с теми же строками, действующий с {date} (день окончания текущего).'),
+    (N'permits.page.renew.creates', N'kz', N'Дәл сол жолдармен жаңа жоба жасалады, {date} күнінен бастап қолданылады (қазіргісі аяқталатын күн).'),
+    (N'permits.page.renew.kept', N'ru', N'Это разрешение действует до этой даты и затем остаётся как истёкшее, потому что старые периоды читают его лимиты.'),
+    (N'permits.page.renew.kept', N'kz', N'Бұл рұқсат сол күнге дейін қолданылады, содан кейін мерзімі өткен ретінде сақталады, өйткені ескі кезеңдер оның лимиттерін оқиды.'),
+    (N'permits.page.renew.verb', N'ru', N'Создать продление'),
+    (N'permits.page.renew.verb', N'kz', N'Ұзартуды жасау'),
+    (N'permits.page.delete.title', N'ru', N'Удалить черновик {number}?'),
+    (N'permits.page.delete.title', N'kz', N'{number} жобасын жою керек пе?'),
+    (N'permits.page.delete.rows', N'ru', N'Черновик и все строки его таблиц будут удалены.'),
+    (N'permits.page.delete.rows', N'kz', N'Жоба және оның кестелерінің барлық жолдары жойылады.'),
+    (N'permits.page.delete.inUse', N'ru', N'Разрешение, на которое ссылаются листы или другие записи, удалить нельзя.'),
+    (N'permits.page.delete.inUse', N'kz', N'Парақтар немесе басқа жазбалар сілтеме жасайтын рұқсатты жоюға болмайды.'),
+    (N'permits.page.delete.verb', N'ru', N'Удалить черновик'),
+    (N'permits.page.delete.verb', N'kz', N'Жобаны жою'),
+    (N'permits.page.done.activated', N'ru', N'Разрешение {number} активно'),
+    (N'permits.page.done.activated', N'kz', N'{number} рұқсаты белсенді'),
+    (N'permits.page.done.ended', N'ru', N'Разрешение {number} завершено'),
+    (N'permits.page.done.ended', N'kz', N'{number} рұқсаты аяқталды'),
+    (N'permits.page.done.renewed', N'ru', N'Продление создано как черновик'),
+    (N'permits.page.done.renewed', N'kz', N'Ұзарту жоба ретінде жасалды'),
+    (N'permits.page.done.deleted', N'ru', N'Черновик {number} удалён'),
+    (N'permits.page.done.deleted', N'kz', N'{number} жобасы жойылды')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: ui-page ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
