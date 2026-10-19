@@ -116,7 +116,7 @@ const loadPeriodPicker = () => import('@/shared/ui/PeriodPicker');
 void loadPeriodPicker();
 const PeriodPicker = lazy(async () => ({ default: (await loadPeriodPicker()).PeriodPicker }));
 
-// PM-11: «З дозволу» + «Оновити з дозволу» — окремий чанк (бюджет маршруту D-132), лише з правом Template.View.
+// PM-11: «З дозволу» + «Оновити з дозволу» — окремий чанк (бюджет маршруту D-132).
 const PermitRefreshStrip = lazy(async () => ({
   default: (await import('@/features/permits/bindings/PermitRefreshStrip')).PermitRefreshStrip,
 }));
@@ -693,17 +693,11 @@ export function DocumentPage(): JSX.Element {
       {/* EA-5b: передача місяця - «Місяць передано вам», «Заповнено», коментар повернення. Права комірок рішає сервер. */}
       <ExecutorStrip documentId={documentId} periodKey={periodKey} />
 
-      {/* PM-11: таблиці активного аркуша, що читають дозвіл, — позначка і «Оновити з дозволу». */}
-      {active !== undefined && can(session.data, 'Template.View') && (
+      {/* PM-11: таблиці активного аркуша, що читають дозвіл (permitBinding у відповіді …/tables), — позначка і
+          «Оновити з дозволу». Чанк вантажиться лише коли така таблиця є; додаткових запитів немає. */}
+      {active !== undefined && active.tables.some((table) => table.permitBinding != null) && (
         <Suspense fallback={null}>
-          <PermitRefreshStrip
-            documentId={documentId}
-            periodKey={periodKey}
-            projectId={projectId}
-            tables={active.tables}
-            readOnly={readOnly}
-            canView
-          />
+          <PermitRefreshStrip documentId={documentId} periodKey={periodKey} tables={active.tables} readOnly={readOnly} />
         </Suspense>
       )}
 

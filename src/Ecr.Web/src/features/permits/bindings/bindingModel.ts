@@ -12,6 +12,9 @@ import type { PermitTypeTable } from '../api/types';
 export const BindingModes = ['Rows', 'Formulas'] as const;
 export type BindingMode = (typeof BindingModes)[number];
 
+/** Режим «рядки з дозволу» — єдиний, у якому документ має що оновлювати (DocumentTableDto.permitBinding.mode). */
+export const RowsMode: BindingMode = 'Rows';
+
 export const SelectionRules = ['ByFacilityPeriodEnd', 'FromHeaderLookup'] as const;
 export type SelectionRule = (typeof SelectionRules)[number];
 

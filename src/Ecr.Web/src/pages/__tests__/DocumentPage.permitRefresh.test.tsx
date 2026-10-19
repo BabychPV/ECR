@@ -9,11 +9,13 @@ import { DocumentPage } from '@/pages/DocumentPage';
 import { testTheme } from '@/test/render';
 
 /**
- * «З дозволу» + «Оновити з дозволу» в сторінці документа (Permits, PM-11): смуга з'являється для таблиці
- * активного аркуша з прив'язкою Rows і лише з правом `Template.View`; кнопка шле POST за кодом прив'язки.
+ * «З дозволу» і «Оновити з дозволу» в сторінці документа (Permits, PM-11/PM-11r2): смугу вирішує
+ * `permitBinding` у відповіді `…/tables`, яку сторінка і так читає. Жодних запитів до `document-template` і
+ * `permit-bindings` (перелік), права `Template.View` не потрібно.
  *
- * Мутаційний доказ (виконано, відновлено): у `DocumentPage` прибрати `can(session.data, 'Template.View') &&`
- * валить «без Template.View»; замінити `tables={active.tables}` на `tables={[]}` валить «показує».
+ * Мутаційний доказ (виконано, відновлено): у `DocumentPage` умову `table.permitBinding != null` замінити на `true`
+ * валить «Template.View є, прив'язок нема»; `tables={active.tables}` → `tables={[]}` валить «показує смугу»;
+ * повернути в смугу запит переліку прив'язок валить «жодних запитів».
  */
 vi.mock('@/features/methodologies/CalculationResultsPanel', () => ({
   CalculationResultsPanel: (): JSX.Element => <div data-testid="calc-stub" />,
@@ -29,7 +31,7 @@ const jsonResponse = (body: unknown, status = 200): Response =>
 
 const calls: { url: string; method: string }[] = [];
 
-function mockFetch(permissions: string[]): void {
+function mockFetch(permissions: string[], permitBinding: { code: string; mode: string; permitTypeCode: string } | null): void {
   calls.length = 0;
   vi.stubGlobal(
     'fetch',
@@ -43,18 +45,8 @@ function mockFetch(permissions: string[]): void {
       if (url.includes('/permit-bindings/PB1_T0/refresh')) {
         return jsonResponse({ added: 3, updated: 0, removedFromPermit: [], warnings: [] });
       }
-      if (url.includes('/permit-bindings')) {
-        return jsonResponse({
-          isEditable: true,
-          items: [
-            {
-              id: 1, code: 'PB1_T0', sheetTableDefId: 1, sheetTableCode: 'T0', permitTypeCode: 'AirPermit', permitTableCode: 'AirEmissions',
-              mode: 'Rows', selectionRule: 'ByFacilityPeriodEnd', headerFieldDefId: null, headerFieldCode: null, isActive: true, rowVersion: 'x', columns: [],
-            },
-          ],
-        });
-      }
-      if (url.includes('/document-template')) return jsonResponse({ templateVersionId: 7, templateCode: 'GEN', groupRules: [], sheets: [] });
+      // Якби смуга знову ходила по версію шаблону чи перелік прив'язок, ці відповіді були б відмовою.
+      if (url.includes('/document-template') || url.includes('/permit-bindings')) return jsonResponse({ title: 'Forbidden' }, 403);
       if (url.includes('/api/v1/projects?')) return jsonResponse({ items: [], nextCursor: null, totalCount: 0 });
       if (url.includes('/api/v1/projects/1/periods')) {
         return jsonResponse({ projectId: 1, periodKind: 'Monthly', currentPeriodMode: 'Auto', timeZoneId: 'UTC', policy: {}, periods: [] });
@@ -63,7 +55,7 @@ function mockFetch(permissions: string[]): void {
       if (url.includes('/tables/status')) return jsonResponse([]);
       if (url.includes('/tables')) {
         return jsonResponse([
-          { allowsDynamicRows: true, maxDynamicRows: 100, sheetCode: 'GEN', sheetDefId: 1, sheetNameL10n: { values: { en: 'General' } }, sheetOrdinal: 0, tableCode: 'T0', tableDefId: 1, tableInstanceId: 1, tableNameL10n: { values: { en: 'Table 0' } }, tableOrdinal: 0 },
+          { allowsDynamicRows: true, maxDynamicRows: 100, sheetCode: 'GEN', sheetDefId: 1, sheetNameL10n: { values: { en: 'General' } }, sheetOrdinal: 0, tableCode: 'T0', tableDefId: 1, tableInstanceId: 1, tableNameL10n: { values: { en: 'Table 0' } }, tableOrdinal: 0, permitBinding },
         ]);
       }
       if (url.includes('/api/v1/documents/1')) {
@@ -94,34 +86,48 @@ function renderPage(): void {
   );
 }
 
-describe('DocumentPage: «З дозволу» і «Оновити з дозволу» (PM-11)', () => {
+const permitRequests = (): string[] =>
+  calls.filter((call) => call.url.includes('permit-bindings') || call.url.includes('document-template')).map((call) => `${call.method} ${call.url}`);
+
+describe('DocumentPage: «З дозволу» і «Оновити з дозволу» (PM-11r2)', () => {
   it(
-    'з Template.View показує позначку й кнопку для таблиці з прив’язкою; кнопка шле POST за кодом і періодом',
+    'permitBinding Rows у відповіді tables: смуга з кнопкою; кнопка шле POST за кодом і періодом; жодних інших запитів прив’язок',
     async () => {
-      mockFetch(['Document.View', 'Template.View']);
+      mockFetch(['Document.View'], { code: 'PB1_T0', mode: 'Rows', permitTypeCode: 'AirPermit' });
       renderPage();
 
       expect(await screen.findByTestId('from-permit-badge', {}, { timeout: SlowEnvTimeout })).toBeDefined();
       await userEvent.setup().click(screen.getByRole('button', { name: '⟦permits.sheetBinding.doc.refresh⟧' }));
 
-      await waitFor(() =>
-        expect(calls.some((call) => call.method === 'POST' && call.url.includes(`/api/v1/documents/1/permit-bindings/PB1_T0/refresh?periodKey=${String(Period)}`))).toBe(true),
-      );
       expect(await screen.findByTestId('permit-refresh-result')).toBeDefined();
-      expect(calls.some((call) => call.url.includes('/api/v1/template-versions/7/permit-bindings'))).toBe(true);
+      expect(permitRequests()).toEqual([`POST /api/v1/documents/1/permit-bindings/PB1_T0/refresh?periodKey=${String(Period)}`]);
     },
     SlowEnvTimeout,
   );
 
   it(
-    'без Template.View — смуги немає і запитів прив’язок немає',
+    'Template.View є, прив’язок нема (permitBinding null): смуги немає і жодного запиту до permit-bindings/document-template',
     async () => {
-      mockFetch(['Document.View']);
+      mockFetch(['Document.View', 'Template.View'], null);
       renderPage();
 
       await screen.findByRole('tab', { name: /General/ }, { timeout: SlowEnvTimeout });
       expect(screen.queryByTestId('permit-refresh-strip')).toBeNull();
-      expect(calls.some((call) => call.url.includes('permit-bindings') || call.url.includes('document-template'))).toBe(false);
+      await waitFor(() => expect(calls.some((call) => call.url.includes('/tables'))).toBe(true));
+      expect(permitRequests()).toEqual([]);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'режим Formulas: смуги немає',
+    async () => {
+      mockFetch(['Document.View', 'Template.View'], { code: 'PB1_T0', mode: 'Formulas', permitTypeCode: 'AirPermit' });
+      renderPage();
+
+      await screen.findByRole('tab', { name: /General/ }, { timeout: SlowEnvTimeout });
+      expect(screen.queryByTestId('permit-refresh-strip')).toBeNull();
+      expect(permitRequests()).toEqual([]);
     },
     SlowEnvTimeout,
   );

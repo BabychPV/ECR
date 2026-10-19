@@ -1,29 +1,24 @@
 import { useState, type JSX } from 'react';
 import { Badge, Button, Group, Text } from '@mantine/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { DocumentTableDto } from '@/api/types';
+import { invalidateSlices } from '@/features/grid/sliceCache';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import { showApiError } from '@/shared/ui/notify';
-import { listPermitBindings } from '../api/bindingsApi';
 import { refreshPermitBinding } from '../api/bindingsRuntimeApi';
-import { getProjectDocumentTemplate } from '../api/documentTemplateApi';
-import { refreshSummary, warningKind, type RefreshSummary } from './bindingModel';
+import { RowsMode, refreshSummary, warningKind, type RefreshSummary } from './bindingModel';
 import { warningText } from './bindingText';
-import { bindingsKey } from './bindingsKeys';
 
 export interface PermitRefreshStripProps {
   readonly documentId: number;
   readonly periodKey: number;
-  readonly projectId: number | null;
-  /** Таблиці активного аркуша документа. */
+  /** Таблиці активного аркуша; прив'язку несе сама відповідь `…/tables` (`permitBinding`, PM-11b). */
   readonly tables: readonly DocumentTableDto[];
   /** Документ лише для читання (стан аркуша, закритий період, блокування, вузький екран). */
   readonly readOnly: boolean;
-  /** Право `Template.View`: без нього перелік прив'язок недоступний, і смуги немає. */
-  readonly canView: boolean;
 }
 
 interface Outcome {
@@ -34,39 +29,22 @@ interface Outcome {
 /**
  * «З дозволу» + «Оновити з дозволу» над сіткою документа (Permits, PM-11).
  *
- * ⚠ Документ не знає своїх прив'язок: перелік береться з версії шаблону ПРОЄКТУ (`document-template`), а таблиці
- * зіставляються за кодом. Документ на старій версії однаково знайде свою прив'язку за кодом: сервер за
- * `POST …/refresh` бере її з версії документа (`404`, якщо такої немає — показується відмова).
- * ⛔ Смуга мовчить, коли даних немає: відсутність права (`403`), прив'язок немає, шаблон не віддано.
+ * ⚠ Жодних додаткових запитів: чи прив'язана таблиця, сервер каже в `DocumentTableDto.permitBinding`
+ * (код, режим, тип дозволу) разом зі списком таблиць, який сторінка вже читає. Тому смуга доступна кожному, хто
+ * бачить документ, а не лише `Template.View`. Показується для режиму `Rows` (у `Formulas` рядків немає).
  * ⚠ Права: дія вимкнена для документа лише для читання; чи можна додавати рядки саме в цю таблицю, вирішує
  * сервер (`403 ECR-ACCS-0403`) — відмова показується локалізованим текстом.
  */
-export function PermitRefreshStrip({ documentId, periodKey, projectId, tables, readOnly, canView }: PermitRefreshStripProps): JSX.Element | null {
+export function PermitRefreshStrip({ documentId, periodKey, tables, readOnly }: PermitRefreshStripProps): JSX.Element | null {
   const queryClient = useQueryClient();
   const [outcome, setOutcome] = useState<Outcome | null>(null);
-
-  const template = useQuery({
-    queryKey: ['projects', projectId, 'document-template'],
-    queryFn: () => getProjectDocumentTemplate(projectId ?? 0),
-    enabled: canView && projectId !== null,
-    retry: false,
-  });
-  const versionId = template.data?.templateVersionId;
-
-  const bindings = useQuery({
-    queryKey: bindingsKey(versionId ?? 0),
-    queryFn: () => listPermitBindings(versionId ?? 0),
-    enabled: versionId !== undefined,
-    retry: false,
-  });
-
   const refresh = useMutation({
-    mutationFn: ({ code }: { code: string; tableName: string }) => refreshPermitBinding(documentId, code, periodKey),
+    mutationFn: ({ code }: { code: string; tableName: string; sheetDefId: number }) => refreshPermitBinding(documentId, code, periodKey),
     onSuccess: async (result, variables) => {
       setOutcome({ tableName: variables.tableName, summary: refreshSummary(result) });
-      // Сітка тримає зріз таблиці під власним ключем: без скидання нові рядки з'явилися б лише після перезавантаження.
+      // Зрізи саме цього аркуша (CL-02), а не весь префікс ['table-slice']: інакше йдуть усі змонтовані зрізи.
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['table-slice'] }),
+        invalidateSlices(queryClient, { documentId, periodKey, sheetDefId: variables.sheetDefId }),
         queryClient.invalidateQueries({ queryKey: ['document-tables', documentId] }),
       ]);
     },
@@ -78,22 +56,17 @@ export function PermitRefreshStrip({ documentId, periodKey, projectId, tables, r
 
   const refreshLoading = usePendingLoading(refresh.isPending);
 
-  if (!canView) return null;
-
-  const bound = (bindings.data?.items ?? [])
-    .filter((binding) => binding.mode === 'Rows' && binding.isActive)
-    .flatMap((binding) => {
-      const table = tables.find((candidate) => candidate.tableCode === binding.sheetTableCode);
-
-      return table === undefined ? [] : [{ binding, tableName: localized(table.tableNameL10n) || table.tableCode }];
-    });
-
+  const bound = tables.flatMap((table) =>
+    table.permitBinding != null && table.permitBinding.mode === RowsMode
+      ? [{ code: table.permitBinding.code, table, tableName: localized(table.tableNameL10n) || table.tableCode }]
+      : [],
+  );
   if (bound.length === 0) return null;
 
   return (
     <section aria-label={t('permits.sheetBinding.doc.region')} data-testid="permit-refresh-strip">
-      {bound.map(({ binding, tableName }) => (
-        <Group key={binding.code} gap="sm" mb="xs" wrap="nowrap" align="center">
+      {bound.map(({ code, table, tableName }) => (
+        <Group key={code} gap="sm" mb="xs" wrap="nowrap" align="center">
           <Badge variant="light" data-testid="from-permit-badge">
             {t('permits.sheetBinding.doc.fromPermit')}
           </Badge>
@@ -105,8 +78,8 @@ export function PermitRefreshStrip({ documentId, periodKey, projectId, tables, r
             variant="default"
             disabled={readOnly}
             title={readOnly ? t('permits.sheetBinding.doc.readOnly') : undefined}
-            loading={refreshLoading && refresh.variables?.code === binding.code}
-            onClick={() => refresh.mutate({ code: binding.code, tableName })}
+            loading={refreshLoading && refresh.variables?.code === code}
+            onClick={() => refresh.mutate({ code, tableName, sheetDefId: table.sheetDefId })}
           >
             {t('permits.sheetBinding.doc.refresh')}
           </Button>
