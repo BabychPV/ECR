@@ -86,6 +86,55 @@ public sealed class PermitBindingSaveTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Остання_вдала_правка_виграє_у_межах_чернетки_навіть_якщо_редактор_читав_застарілий_токен_RowVersion()
+    {
+        // B16: PUT/DELETE прив'язки не приймають RowVersion (немає оптимістичної конкуренції): чернетку шаблону
+        // серіалізує блок версії (DraftVersionLock), а далі - last-write-wins. Тест фіксує це як контракт, а не випадковість.
+        var sheet = await PermitBindingHarness.PrepareSheetAsync(sql, withDocument: false);
+        await using var h = await PermitBindingHarness.CreateAsync(sql, PermitBindingHarness.Everything);
+        await h.PublishEmissionsTypeAsync($"AIR{_tag}");
+
+        // Редактор A відкрив прив'язку (токен v1) і довго її редагує.
+        await using var firstSave = await h.NextRequestAsync();
+        var v1 = await firstSave.Save.HandleAsync(sheet.Doc.TemplateVersionId, $"B{_tag}", Request(sheet), default);
+
+        // Редактор B зберіг свою правку раніше: режим «Лише ліміт», неактивна.
+        var byB = Request(sheet) with
+        {
+            IsActive = false,
+            Columns =
+            [
+                new PermitBindingColumnRequest("RowKey", "Substance", sheet.Doc.ColumnDefIds[0]),
+                new PermitBindingColumnRequest("Limit", "Limit", sheet.Doc.ColumnDefIds[1]),
+            ],
+        };
+        await using var secondSave = await h.NextRequestAsync();
+        var v2 = await secondSave.Save.HandleAsync(sheet.Doc.TemplateVersionId, $"B{_tag}", byB, default);
+        Assert.NotEqual(v1.RowVersion, v2.RowVersion);
+
+        // Редактор A зберігає з тією ж формою, що читав (v1): без передумови - вдало, і його версія остання.
+        await using var thirdSave = await h.NextRequestAsync();
+        var v3 = await thirdSave.Save.HandleAsync(sheet.Doc.TemplateVersionId, $"B{_tag}", Request(sheet), default);
+
+        Assert.Equal((v1.Id, true), (v3.Id, v3.IsActive));
+        Assert.Equal(["RowKey", "Limit", "Info"], v3.Columns.Select(c => c.Role));
+        Assert.NotEqual(v2.RowVersion, v3.RowVersion);
+
+        await using var read = await h.NextRequestAsync();
+        var current = await read.Get.HandleAsync(sheet.Doc.TemplateVersionId, $"B{_tag}", default);
+        Assert.Equal((v3.RowVersion, 3), (current.RowVersion, current.Columns.Count));
+        Assert.Single((await read.List.HandleAsync(sheet.Doc.TemplateVersionId, default)).Items);
+
+        // Видалення так само без передумови: після нього прив'язки немає, повторне - 404, а не мовчки.
+        await using var delete = await h.NextRequestAsync();
+        await delete.Delete.HandleAsync(sheet.Doc.TemplateVersionId, $"B{_tag}", default);
+        await using var again = await h.NextRequestAsync();
+        await Assert.ThrowsAsync<NotFoundException>(() => again.Delete.HandleAsync(sheet.Doc.TemplateVersionId, $"B{_tag}", default));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Некоректна_прив_язка_відхиляється_422_з_усіма_випадками_і_нічого_не_пишеться()
     {
         var sheet = await PermitBindingHarness.PrepareSheetAsync(sql);
