@@ -533,6 +533,9 @@ public static class DependencyInjection
         // PERMITS: bindings — прив'язки таблиць аркуша до дозволів (PM-09)
         services.AddScoped<IPermitBindingStore, PermitBindingStore>();
 
+        // PERMITS: runtime — рядки й заблоковані ліміти документа з дозволу (PM-10); RowStore кличе його на створенні екземплярів
+        services.AddScoped<Application.Permits.Bindings.IPermitBindingService, PermitBindingService>();
+
         // Прогрів кешу метаданих на старті (B01 §6.3, крок 7).
         services.AddScoped<MetadataWarmup>();
 
