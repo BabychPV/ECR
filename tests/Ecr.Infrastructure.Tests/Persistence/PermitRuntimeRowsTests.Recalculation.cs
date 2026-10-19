@@ -115,6 +115,37 @@ public sealed partial class PermitRuntimeRowsTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Закритий_період_D39_відкриття_не_пише_рядків_і_лімітів_з_дозволу_і_не_ставить_задачу()
+    {
+        // D-39: закритий період не змінюється. Документ відкривається без помилки (порожній екземпляр, як і раніше),
+        // але ні рядків, ні лімітів, ні аудиту Permit, ні перерахунку.
+        var scene = await ArrangeAsync();
+        await using var _ = scene.H;
+        await using (var setup = scene.NewContext())
+        {
+            var period = await setup.Periods.FirstAsync(p => p.ProjectId == scene.ProjectId && p.PeriodKeyValue == January.Value);
+            period.AdvanceTo(PeriodState.Open, Now);
+            period.AdvanceTo(PeriodState.Closed, Now);
+            await setup.SaveChangesAsync();
+        }
+
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        await using var db = scene.NewContext();
+        Assert.Equal(1, await NewStore(db, permits: true, jobs).EnsureTableInstancesAsync(scene.DocumentId, January, default));
+
+        Assert.Empty(await scene.RowsAsync());
+        Assert.Equal(0, await scene.PermitAuditCountAsync());
+        Assert.Empty(jobs.ReceivedCalls());
+
+        await using var direct = scene.NewContext();
+        var result = await NewService(direct).MaterializeAsync(scene.DocumentId, January, [scene.Sheet.Doc.TableDefId], default);
+        Assert.Equal(0, result.Rows);
+        Assert.Contains(result.Warnings, w => w.Case == "periodClosed");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Збій_постановки_перерахунку_не_ламає_відкриття_рядки_й_ліміти_збережено()
     {
         var scene = await ArrangeAsync();
