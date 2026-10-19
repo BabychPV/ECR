@@ -13,9 +13,12 @@ import { testTheme } from '@/test/render';
  * `permitBinding` у відповіді `…/tables`, яку сторінка і так читає. Жодних запитів до `document-template` і
  * `permit-bindings` (перелік), права `Template.View` не потрібно.
  *
- * Мутаційний доказ (виконано, відновлено): у `DocumentPage` умову `table.permitBinding != null` замінити на `true`
- * валить «Template.View є, прив'язок нема»; `tables={active.tables}` → `tables={[]}` валить «показує смугу»;
- * повернути в смугу запит переліку прив'язок валить «жодних запитів».
+ * Мутаційний доказ: `tables={active.tables}` → `tables={[]}` валить «показує смугу»; повернути в смугу запит переліку
+ * прив'язок валить «жодних запитів».
+ * ⚠ Чого тест НЕ розрізняє: умова монтування в `DocumentPage` (`active.tables.some(table => table.permitBinding != null)`)
+ * лише вирішує, чи вантажити lazy-чанк смуги, а сама смуга без прив'язок Rows повертає `null`. Заміна умови на `true`
+ * чи `active.tables.length >= 0` у DOM нічого не змінює, тож тести цього не ловлять (мутація виживає); відсутність
+ * чанка без прив'язок не перевіряється.
  */
 vi.mock('@/features/methodologies/CalculationResultsPanel', () => ({
   CalculationResultsPanel: (): JSX.Element => <div data-testid="calc-stub" />,
