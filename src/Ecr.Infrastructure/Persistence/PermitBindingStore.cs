@@ -1,5 +1,6 @@
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -22,6 +23,35 @@ public sealed class PermitBindingStore(EcrDbContext db) : IPermitBindingStore
             .ToListAsync(ct).ConfigureAwait(false);
 
         return await ViewsAsync(bindings, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public Task<bool> AnyActiveRowsAsync(IReadOnlyCollection<int> sheetTableDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(sheetTableDefIds);
+        var ids = sheetTableDefIds.Distinct().ToList();
+
+        return db.PermitSheetBindings
+            .AsNoTracking()
+            .AnyAsync(b => ids.Contains(b.SheetTableDefId) && b.IsActive && b.Mode == PermitBindingMode.Rows, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<PermitBindingView>> ListActiveRowsAsync(
+        IReadOnlyCollection<int> sheetTableDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(sheetTableDefIds);
+        var ids = sheetTableDefIds.Distinct().ToList();
+
+        var found = await db.PermitSheetBindings
+            .AsNoTracking()
+            .Include(b => b.Columns)
+            .Where(b => ids.Contains(b.SheetTableDefId) && b.IsActive && b.Mode == PermitBindingMode.Rows)
+            .OrderBy(b => b.Code)
+            .Take(MaxRows)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        return await ViewsAsync(found, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

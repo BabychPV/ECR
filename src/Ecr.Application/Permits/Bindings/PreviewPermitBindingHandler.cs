@@ -98,28 +98,16 @@ public sealed class PreviewPermitBindingHandler(
         // 1. Звідки дані: документ → шапка й період; явні параметри перекривають.
         var source = await ReadSourceAsync(templateVersionId, view, query, warnings, ct).ConfigureAwait(false);
 
-        // 2. Який дозвіл.
-        var resolution = await resolver.ResolveAsync(
-            new PermitResolveRequest(
-                type.HeaderRegistryDefId, binding.SelectionRule, source.PeriodEnd, source.FacilityNames, source.HeaderEntryId),
-            ct).ConfigureAwait(false);
-        warnings.AddRange(resolution.Warnings);
-
-        // 3. Які рядки: той самий планувальник і знімок, що й рантайм.
-        var plan = new PermitRowPlan([], []);
-        if (binding.Mode == PermitBindingMode.Rows && resolution.EntryId is { } permitId)
-        {
-            var snapshot = await snapshots
-                .LoadAsync([type.HeaderRegistryDefId, table.RegistryDefId], source.PeriodEnd, null, ct)
-                .ConfigureAwait(false);
-            plan = PermitRowPlanner.Plan(
-                snapshot,
-                PermitHeaderFields.TableRegistryCode(type.Code, table.Code),
-                permitId,
-                [.. view.Columns.Select(c => new PlannerColumn(ColumnCode(view, c.SheetColumnDefId), c.PermitFieldCode, c.Role))]);
-            warnings.AddRange(plan.Warnings);
-        }
-        else if (binding.Mode == PermitBindingMode.Formulas)
+        // 2-3. Який дозвіл і які рядки: ТОЙ САМИЙ побудовник і планувальник, що й рантайм (PM-10).
+        var built = await PermitPlanBuilder
+            .BuildAsync(
+                view, type, table, new PermitPlanSource(source.PeriodEnd, source.FacilityNames, source.HeaderEntryId),
+                resolver, snapshots, cache: null, ct)
+            .ConfigureAwait(false);
+        var resolution = built.Resolution;
+        var plan = built.Rows;
+        warnings.AddRange(built.Warnings);
+        if (binding.Mode == PermitBindingMode.Formulas)
         {
             warnings.Add(Warning("binding.warning.formulasMode", "У режимі формул рядки не створюються: аркуш читає дозвіл формулами."));
         }
@@ -161,15 +149,11 @@ public sealed class PreviewPermitBindingHandler(
                     "Документ належить іншій версії шаблону: фактичні комірки не накладаються."));
             }
 
-            var header = await headers.GetExpressionValuesAsync(documentId, ct).ConfigureAwait(false);
-            if (view.Binding.SelectionRule == PermitSelectionRule.FromHeaderLookup)
-            {
-                headerEntryId = LookupId(header, view.HeaderFieldCode);
-            }
-            else
-            {
-                facilityNames.AddRange(await FacilityNamesAsync(header, ct).ConfigureAwait(false));
-            }
+            var (names, entryId) = await PermitDocumentSource
+                .ReadAsync(headers, registries, documentId, view.Binding.SelectionRule, view.HeaderFieldCode, ct)
+                .ConfigureAwait(false);
+            facilityNames.AddRange(names);
+            headerEntryId = entryId;
         }
 
         if (!string.IsNullOrWhiteSpace(query.FacilityName))
@@ -182,37 +166,6 @@ public sealed class PreviewPermitBindingHandler(
             facilityNames,
             query.PermitEntryId ?? headerEntryId,
             query.DocumentId is not null);
-    }
-
-    private static long? LookupId(IReadOnlyDictionary<string, ExpressionValue> header, string? fieldCode)
-    {
-        if (fieldCode is null)
-        {
-            return null;
-        }
-
-        var value = header.FirstOrDefault(p => string.Equals(p.Key, fieldCode, StringComparison.OrdinalIgnoreCase)).Value;
-        return value.AsNumber() is { } n && n == decimal.Truncate(n) ? (long)n : null;
-    }
-
-    private async Task<IReadOnlyList<string>> FacilityNamesAsync(IReadOnlyDictionary<string, ExpressionValue> header, CancellationToken ct)
-    {
-        var value = header.FirstOrDefault(
-            p => string.Equals(p.Key, PermitBindingFacility.HeaderFieldCode, StringComparison.OrdinalIgnoreCase)).Value;
-
-        if (value.Type == Ecr.Expressions.Ast.ExpressionValueType.Text)
-        {
-            return [(string)value.Value!];
-        }
-
-        // Lookup: у документі лежить id запису довідника - порівнюється його код і назви.
-        if (LookupId(header, PermitBindingFacility.HeaderFieldCode) is { } entryId
-            && await registries.FindEntryAsync(entryId, ct).ConfigureAwait(false) is { } entry)
-        {
-            return [entry.Code, .. entry.DisplayL10n.Values.Values];
-        }
-
-        return [];
     }
 
     private async Task<IReadOnlyList<PermitPreviewColumnDto>> ColumnsAsync(
@@ -303,9 +256,6 @@ public sealed class PreviewPermitBindingHandler(
         CellDataType.Unit => value.ValueUnitId,
         _ => null,
     };
-
-    private static string ColumnCode(PermitBindingView view, int columnId)
-        => view.SheetColumnCodes.GetValueOrDefault(columnId, columnId.ToString(CultureInfo.InvariantCulture));
 
     private static PermitBindingIssue Warning(string key, string text)
         => new(key, new Dictionary<string, string>(), text);

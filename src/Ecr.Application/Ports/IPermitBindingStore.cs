@@ -32,6 +32,19 @@ public interface IPermitBindingStore
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<PermitBindingView>> ListAsync(int templateVersionId, CancellationToken ct);
 
+    /// <summary>
+    /// Чи є ЧИННА (<c>IsActive</c>) прив'язка в режимі «рядки» до якоїсь із таблиць аркуша (без відстеження). Один дешевий
+    /// запит: охоронець рантайму PM-10 на шляху створення екземплярів.
+    /// </summary>
+    /// <param name="sheetTableDefIds">Таблиці аркуша.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<bool> AnyActiveRowsAsync(IReadOnlyCollection<int> sheetTableDefIds, CancellationToken ct);
+
+    /// <summary>Чинні прив'язки в режимі «рядки» до таблиць аркуша, з колонками (без відстеження).</summary>
+    /// <param name="sheetTableDefIds">Таблиці аркуша.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<PermitBindingView>> ListActiveRowsAsync(IReadOnlyCollection<int> sheetTableDefIds, CancellationToken ct);
+
     /// <summary>Прив'язка версії за кодом (без відстеження); <c>null</c> - немає.</summary>
     /// <param name="templateVersionId">Версія шаблону.</param>
     /// <param name="code">Код прив'язки.</param>
