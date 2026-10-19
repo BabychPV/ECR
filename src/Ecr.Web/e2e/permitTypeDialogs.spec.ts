@@ -232,4 +232,75 @@ test.describe('Діалоги конструктора типу дозволу',
     expect(type.status).toBe('Published');
     expect(type.tables.map((t) => t.code)).toContain('MonitoringPoints');
   });
+
+  // P2-2 (прохід B): сервер для ніколи не опублікованого типу віддає version=1, status=Draft, і меню «…»
+  // з «Delete type…» мало бути досяжним (раніше умова була `version === 0`).
+  test('Видалення чернетки типу через меню «…»', async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+
+    const code = tracked.track(`E2E_DeleteDraft_${Date.now()}`);
+    const created = await page.request.post('/api/v1/permit-types', {
+      data: { code, nameL10n: { en: 'E2E delete draft' }, category: 'Water' },
+    });
+    expect(created.status(), `заведення типу: ${await created.text()}`).toBe(201);
+    const draft = await getPermitType(page, code);
+    expect(draft.status, 'сервер віддає ніколи не опублікований тип зі status=Draft').toBe('Draft');
+    expect(draft.version, 'і з version=1, а не 0').toBe(1);
+
+    await page.goto(`/admin/permits/types/${code}`);
+    const more = page.getByRole('button', { name: 'More actions' });
+    await expect(more, 'меню «…» чернетки недосяжне').toBeVisible({ timeout: 30_000 });
+    await more.click();
+    await page.getByRole('menuitem', { name: 'Delete type…' }).click();
+
+    const confirm = page.getByRole('dialog');
+    await expect(confirm).toBeVisible({ timeout: 15_000 });
+    const removed = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'DELETE' && response.url().includes(`/api/v1/permit-types/${code}`),
+      { timeout: 30_000 },
+    );
+    await confirm.getByRole('button', { name: 'Delete type' }).click();
+    expect((await removed).status()).toBe(204);
+
+    await expect(page).toHaveURL(/\/admin\/permits\/types\/?$/, { timeout: 30_000 });
+    expect((await page.request.get(`/api/v1/permit-types/${code}`)).status()).toBe(404);
+    await expect(page.getByText(code)).toHaveCount(0);
+  });
+
+  // PA-U-02: той самий шлях з меню рядка ПЕРЕЛІКУ типів; для опублікованого пункт вимкнений.
+  test('Видалення чернетки типу з меню рядка переліку', async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+
+    const code = tracked.track(`E2E_DeleteList_${Date.now()}`);
+    const created = await page.request.post('/api/v1/permit-types', {
+      data: { code, nameL10n: { en: `E2E delete list ${code}` }, category: 'Water' },
+    });
+    expect(created.status(), `заведення типу: ${await created.text()}`).toBe(201);
+
+    await page.goto(`/admin/permits/types?q=${encodeURIComponent(code)}`);
+    const menu = page.locator(`[data-type-menu="${code}"]`);
+    await expect(menu).toBeVisible({ timeout: 30_000 });
+    await menu.click();
+    const item = page.getByRole('menuitem', { name: 'Delete type…' });
+    await expect(item).toBeEnabled();
+    await item.click();
+
+    await expect(page).toHaveURL(new RegExp(`/admin/permits/types/${code}\\?dialog=delete-type`), { timeout: 30_000 });
+    const confirm = page.getByRole('dialog');
+    await expect(confirm).toBeVisible({ timeout: 30_000 });
+    const removed = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'DELETE' && response.url().includes(`/api/v1/permit-types/${code}`),
+      { timeout: 30_000 },
+    );
+    await confirm.getByRole('button', { name: 'Delete type' }).click();
+    expect((await removed).status()).toBe(204);
+    await expect(page).toHaveURL(/\/admin\/permits\/types\/?$/, { timeout: 30_000 });
+    expect((await page.request.get(`/api/v1/permit-types/${code}`)).status()).toBe(404);
+  });
 });

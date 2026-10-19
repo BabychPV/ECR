@@ -1,6 +1,7 @@
 import { useEffect, useState, type JSX, type ReactNode } from 'react';
 import { Button, Group, List, Modal, Stack, Text, TextInput } from '@mantine/core';
 import { t } from '@/shared/i18n';
+import { useRestoreFocus } from './useRestoreFocus';
 
 /**
  * Підтвердження НЕЗВОРОТНОЇ дії (`KIT.md` §6.9 `ConfirmDialog`, правило `L6`).
@@ -111,6 +112,7 @@ export function ConfirmModal({
   children,
 }: ConfirmModalProps): JSX.Element {
   const [typed, setTyped] = useState('');
+  useRestoreFocus(opened);
 
   /*
    * ⚠ Поле очищається при КОЖНОМУ відкритті — той самий аргумент, що і в

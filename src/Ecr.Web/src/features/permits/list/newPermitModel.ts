@@ -38,8 +38,12 @@ export function defaultValidity(today: Date): { validFrom: string; validTo: stri
   return { validFrom: isoDate(today), validTo: isoDate(next) };
 }
 
-export function initialData(today: Date, types: readonly PermitTypeListItem[]): NewPermitData {
-  return { type: publishedTypes(types)[0]?.code ?? '', number: '', location: '', ...defaultValidity(today) };
+/**
+ * ⛔ Тип НЕ передвибирається (PA-U-08): «Next» без вибору створював дозвіл не того типу. Порожній `type`
+ * зупиняє перший крок (`checkType` → `typeRequired`), доки людина не обере явно.
+ */
+export function initialData(today: Date): NewPermitData {
+  return { type: '', number: '', location: '', ...defaultValidity(today) };
 }
 
 /** Типи, за якими можна заводити дозволи: лише опубліковані (`status === 'Published'`). */

@@ -103,6 +103,7 @@ describe('PermitTypesPage: дані', () => {
       'permits.types.col.permits',
       'permits.types.col.updated',
       'permits.types.col.state',
+      'permits.list.col.actions',
     ]);
 
     const air = bodyRows()[0]!;
@@ -204,6 +205,46 @@ describe('PermitTypesPage: навігація', () => {
 
     fireEvent.click(link);
     await waitFor(() => expect(where()).toBe('/admin/permits/types/AirEmission'));
+  });
+});
+
+describe('PermitTypesPage: меню рядка «Delete type…» (PA-U-02)', () => {
+  const menuOf = (code: string): HTMLElement => document.querySelector(`[data-type-menu="${code}"]`) as HTMLElement;
+
+  it('чернетка: пункт активний і веде в редактор з відкритим діалогом видалення; рядок не відкривається', async () => {
+    stubList(() => page());
+    show();
+    await screen.findByText('Air emission permit');
+
+    // WasteStorage у фікстурі — status Draft (ніколи не публікувався).
+    fireEvent.click(menuOf('WasteStorage'));
+    const item = await screen.findByRole('menuitem', { name: 'permits.editor.actions.deleteType' });
+    expect(item.hasAttribute('disabled') || item.getAttribute('data-disabled') === 'true').toBe(false);
+    fireEvent.click(item);
+
+    await waitFor(() => expect(where()).toBe('/admin/permits/types/WasteStorage?dialog=delete-type'));
+  });
+
+  it('опублікований: пункт вимкнений, причина в title, переходу немає', async () => {
+    stubList(() => page());
+    show();
+    await screen.findByText('Air emission permit');
+
+    fireEvent.click(menuOf('AirEmission'));
+    const item = await screen.findByRole('menuitem', { name: 'permits.editor.actions.deleteType' });
+    expect(item.getAttribute('data-disabled')).toBe('true');
+    expect(item.getAttribute('title')).toBe('permits.editor.dialogs.deleteType.published');
+    fireEvent.click(item);
+    expect(where()).toBe('/admin/permits/types');
+  });
+
+  it('без права правити типи колонки дій немає', async () => {
+    session.permissions = ['Registry.View'];
+    stubList(() => page());
+    show();
+    await screen.findByText('Air emission permit');
+
+    expect(document.querySelector('[data-type-menu]')).toBeNull();
   });
 });
 

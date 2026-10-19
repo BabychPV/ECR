@@ -7,6 +7,7 @@ import { language, t } from '@/shared/i18n';
 import { KeyValue } from '@/shared/ui/KeyValue';
 import { showDone } from '@/shared/ui/notify';
 import { problemText } from '@/shared/ui/problemText';
+import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
 import { Wizard, type WizardStep } from '@/shared/ui/Wizard';
 import type { PermitTypeListItem } from '../api/types';
 import { typeName, tablesText } from '../types/typesListModel';
@@ -188,7 +189,7 @@ function WizardBody({
     <Wizard<NewPermitData>
       opened={opened}
       title={t('permits.list.wizard.title')}
-      initialData={initialData(new Date(), types)}
+      initialData={initialData(new Date())}
       steps={steps}
       labels={{ back: t('wizard.back'), next: t('wizard.next'), review: t('wizard.review') }}
       reviewText={t('permits.list.wizard.review')}
@@ -238,6 +239,9 @@ function WizardBody({
  */
 export function NewPermitWizard({ opened, onClose }: NewPermitWizardProps): JSX.Element | null {
   const types = useAllPermitTypes();
+  // ⚠ Тут, а не лише у `Wizard`: поки типи вантажаться, стоїть модалка «loading» (фокус у ній), і майстер
+  // монтується, коли кнопка-виклик уже не в фокусі — запам'ятати її він би не зміг (PA-U-03).
+  useRestoreFocus(opened);
 
   if (types.data !== undefined) return <WizardBody opened={opened} types={types.data} onClose={onClose} />;
   if (!opened) return null;

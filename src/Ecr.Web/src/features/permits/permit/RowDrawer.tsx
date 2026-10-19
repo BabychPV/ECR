@@ -7,6 +7,7 @@ import { saveBatch, type RegistryBatchItem, type RegistryBatchResult } from '@/f
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import { showApiError, showDone, showUndo } from '@/shared/ui/notify';
+import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
 import type { Permit } from '../api/types';
 import { requiredColumns, validateRow } from '../lib/rowForm';
 import {
@@ -83,6 +84,8 @@ export function RowDrawer({
   onClose,
 }: RowDrawerProps): JSX.Element {
   const queryClient = useQueryClient();
+  // Шторка живе, лише поки відкрита (`?panel=`): після закриття фокус — на кнопку, що її відкрила (PA-U-03).
+  useRestoreFocus(true);
   const isNew = loaded === null;
   // Знімок значень на момент відкриття: порівняння «що змінено» не має повзти разом із фоновим перечитанням рядків.
   const [original] = useState<FormValues>(() => initialForm(fields, loaded ?? undefined));
