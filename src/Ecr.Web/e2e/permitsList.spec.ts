@@ -184,6 +184,9 @@ test.describe('Permits list', () => {
     const number = `E2E-LC-${stamp}`;
     const today = new Date();
     const nextYear = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
+    // ⛔ Початок - у минулому: «End early» без дати завершує сьогодні, а сервер вимагає дату строго ПІСЛЯ початку
+    // (`422 ECR-PRM-0422 endDateOutOfRange`) - дозвіл, що стартує сьогодні, достроково завершити не можна (стенд 19.10).
+    const monthAgo = new Date(today.getFullYear(), today.getMonth() - 1, today.getDate());
     const permit = await body<{ id: number; status: string }>(
       await page.request.post('/api/v1/permits', {
         data: {
@@ -191,7 +194,7 @@ test.describe('Permits list', () => {
           number,
           location: 'E2E lifecycle site',
           issueDate: null,
-          validFrom: isoDate(today),
+          validFrom: isoDate(monthAgo),
           validTo: isoDate(nextYear),
           reportingFlags: null,
         },

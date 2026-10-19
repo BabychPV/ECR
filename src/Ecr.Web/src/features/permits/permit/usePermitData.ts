@@ -4,6 +4,7 @@ import { apiFetch } from '@/api/client';
 import type { UnitRef } from '@/api/types';
 import { getRegistryRows } from '@/features/registries/rows/api';
 import type { RegistryRow } from '@/features/registries/rows/api';
+import { todayDateOnly } from '@/shared/format/dateOnly';
 import { getPermit } from '../api/permitsApi';
 import { getPermitType } from '../api/typesApi';
 import type { Permit, PermitType } from '../api/types';
@@ -62,7 +63,9 @@ async function readAll(code: string, parentEntryId?: number): Promise<RegistryRo
   const rows: RegistryRow[] = [];
   let cursor: string | null = null;
   do {
+    // ⛔ `asOf` обов'язковий: реєстри темпоральні, без нього сервер відповідає `422 ECR-REQ-0422` (e2e-стенд 19.10).
     const page: Awaited<ReturnType<typeof getRegistryRows>> = await getRegistryRows(code, {
+      asOf: todayDateOnly(),
       ...(parentEntryId === undefined ? {} : { parentEntryId }),
       cursor,
       limit: PageSize,
