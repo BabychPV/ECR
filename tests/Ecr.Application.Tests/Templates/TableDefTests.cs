@@ -30,6 +30,7 @@ public sealed class TableDefTests
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
+    private readonly IPermitBindingStore _permitBindings = Substitute.For<IPermitBindingStore>();
 
     // ⚠ Не мок: обробник читає й пише через ЦЕЙ агрегат, і саме на ньому
     // тримається перевірка «код уже існує» та підйом Ordinal — так само, як
@@ -55,6 +56,7 @@ public sealed class TableDefTests
 
         _store.GetWithStructureAsync(1, Arg.Any<CancellationToken>()).Returns(_draft);
         _store.HasDocumentsAsync(1, Arg.Any<CancellationToken>()).Returns(false);
+        _permitBindings.ListAsync(1, Arg.Any<CancellationToken>()).Returns(Array.Empty<PermitBindingView>());
 
         _sheet = new SheetDef(1, EcrCode.Create("Water"), Name("Water balance"), ordinal: 0);
         _draft.AddSheet(_sheet);
@@ -72,10 +74,10 @@ public sealed class TableDefTests
             ordinal, layoutKind, rowMode, maxDynamicRows);
 
     private SaveTableDefHandler Save()
-        => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user);
+        => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user, _permitBindings);
 
     private DeleteTableDefHandler Delete()
-        => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user);
+        => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user, _permitBindings);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]

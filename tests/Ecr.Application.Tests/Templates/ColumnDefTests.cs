@@ -37,6 +37,7 @@ public sealed class ColumnDefTests
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IUnitCatalog _units = Substitute.For<IUnitCatalog>();
+    private readonly IPermitBindingStore _permitBindings = Substitute.For<IPermitBindingStore>();
 
     private readonly TemplateBuilder _builder = new() { TemplateVersionId = 1 };
 
@@ -67,6 +68,7 @@ public sealed class ColumnDefTests
 
         _store.GetWithStructureAsync(1, Arg.Any<CancellationToken>()).Returns(_draft);
         _store.HasDocumentsAsync(1, Arg.Any<CancellationToken>()).Returns(false);
+        _permitBindings.ListAsync(1, Arg.Any<CancellationToken>()).Returns(Array.Empty<PermitBindingView>());
 
         // HSE301 U1: одиниця колонки звіряється з довідником. 12 — та, що бере
         // тест читання нижче; 777 навмисно немає.
@@ -92,7 +94,7 @@ public sealed class ColumnDefTests
         => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user, _units);
 
     private DeleteColumnDefHandler Delete()
-        => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user);
+        => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user, _permitBindings);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
