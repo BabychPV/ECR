@@ -4,6 +4,7 @@ import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import { badgeLook, statusTone } from '@/shared/ui/StatusBadge';
 import { PermitEditorHead } from '../shell/PermitEditorHead';
+import { isNeverPublished } from '../lib/typeStatus';
 import { useMayEditPermitTypes, useMayPublishPermitTypes } from '../permitRights';
 import { PermitsPaths } from '../shell/permitPaths';
 import { validateDraft, validateForPublish, type DraftProblem } from './draftModel';
@@ -61,7 +62,7 @@ export function TypeEditorHeader(): JSX.Element {
   const subtitle = secondaryTextOf(draft.nameL10n, title);
   const version = editable ? (type.draftVersion ?? type.version + 1) : type.version;
   // Видалити можна лише тип, що ніколи не публікувався (сервер: `ECR-PRM-4094` для опублікованого).
-  const deletable = writable && type.version === 0;
+  const deletable = writable && isNeverPublished(type);
 
   const check = (): void => setChecked([...validateDraft(draft, { typeCode: type.code }), ...validateForPublish(draft)]);
 

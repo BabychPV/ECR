@@ -207,7 +207,7 @@ describe('видалення таблиці', () => {
   });
 
   it('опублікований тип: збережену таблицю не видалити, текст — з каталогу відмови сервера', async () => {
-    await open(opened, permitType({ version: 2, draftVersion: 3 }));
+    await open(opened, permitType({ status: 'Published', version: 2, draftVersion: 3 }));
     const dialog = await screen.findByRole('dialog', { name: 'Remove table "Storage"?' });
     expect(within(dialog).getByText(/Table "Storage" is published and cannot be removed\./)).toBeTruthy();
     expect((within(dialog).getByRole('button', { name: 'Remove table' }) as HTMLButtonElement).disabled).toBe(true);
