@@ -23241,6 +23241,7 @@ export interface components {
              * @description Стеля кількості рядків; `null` — без стелі.
              */
             maxDynamicRows: null | number;
+            permitBinding?: null | components["schemas"]["DocumentTablePermitBindingDto"];
             /** @description Код аркуша; він же ключ у `DocumentSummary.SheetStates`. */
             sheetCode: string;
             /**
@@ -23274,6 +23275,15 @@ export interface components {
              * @description Порядок таблиці в аркуші.
              */
             tableOrdinal: number;
+        };
+        /** @description Ознака прив'язки таблиці документа до дозволу (PM-11b): без даних дозволу. */
+        DocumentTablePermitBindingDto: {
+            /** @description Код прив'язки. */
+            code: string;
+            /** @description `Rows` або `Formulas`. */
+            mode: string;
+            /** @description Код типу дозволу. */
+            permitTypeCode: string;
         };
         /** @description З чого складається новий документ проєкту. */
         DocumentTemplateDto: {

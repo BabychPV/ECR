@@ -191,6 +191,42 @@ public sealed class PermitLifecycleTests(SqlServerFixture sql)
         Assert.Equal("Active", (await activateNew.ActivatePermit.HandleAsync(renewed.Id, default)).Status);
     }
 
+    /// <summary>
+    /// Тип, опублікований ДО режиму Auto для таблиць (емуляція: реєстри таблиць переведено в Manual), поновлюється як і
+    /// раніше: рядки копіюються з кодами з послідовності. Мутаційний доказ: у <c>RenewPermitHandler.CopyRowsAsync</c>
+    /// <c>auto = true</c> завжди - порожній код у Manual-реєстрі дає <c>RenewRowInvalid</c>.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Поновлення_типу_з_Manual_реєстрами_таблиць_копіює_рядки_з_кодами_послідовності()
+    {
+        await using var h = await PermitHarness.CreateAsync(sql, PermitHarness.EverythingWithData);
+        await PublishSiblingTypeAsync(h);
+        var source = await CreateAsync(h, "LC-MN", Y2026, Y2027);
+        var place = await AddRowAsync(h, "Places", source.Id, new Dictionary<string, object?> { ["Name"] = "A" });
+        await AddRowAsync(h, "Limits", source.Id, new Dictionary<string, object?> { ["Place"] = place, ["Annual"] = 4m });
+
+        await using (var legacy = await h.NextRequestAsync())
+        {
+            (await PermitFixtures.TableDefAsync(legacy, TypeCode, "Places")).UseCodeMode(Ecr.Domain.Enums.RegistryCodeMode.Manual);
+            (await PermitFixtures.TableDefAsync(legacy, TypeCode, "Limits")).UseCodeMode(Ecr.Domain.Enums.RegistryCodeMode.Manual);
+            await legacy.Uow.SaveChangesAsync(default);
+        }
+
+        await using var activate = await h.NextRequestAsync();
+        await activate.ActivatePermit.HandleAsync(source.Id, default);
+        await using var renew = await h.NextRequestAsync();
+        var renewed = await renew.RenewPermit.HandleAsync(source.Id, null, default);
+
+        Assert.Equal((1, 1), (renewed.Tables.Single(t => t.Code == "Limits").RowCount, renewed.Tables.Single(t => t.Code == "Places").RowCount));
+        await using var db = sql.CreateContext();
+        var limitsDef = await PermitFixtures.TableDefAsync(h, TypeCode, "Limits");
+        var codes = await db.RegistryEntries.AsNoTracking().Where(e => e.RegistryDefId == limitsDef.Id).Select(e => e.Code).ToListAsync();
+        Assert.Equal(2, codes.Count);
+        Assert.All(codes, c => Assert.Matches("^E[0-9]{9}$", c));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -222,7 +258,7 @@ public sealed class PermitLifecycleTests(SqlServerFixture sql)
         values["PERMIT"] = permitId;
         var result = await h.Writer.WriteAsync(
             new Ecr.Application.Registries.RegistryEntryWriteBatch(
-                table.Id, [new Ecr.Application.Registries.RegistryEntryWrite($"R{Guid.NewGuid():N}"[..12], values)]),
+                table.Id, [new Ecr.Application.Registries.RegistryEntryWrite(string.Empty, values)]),
             default);
         Assert.True(result.Applied, string.Join(";", result.Errors.Select(e => e.MessageKey)));
         return result.Rows.Single().Entry.Id;

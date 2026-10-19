@@ -117,6 +117,10 @@ public sealed class PublishPermitTypeHandler(
 
             tableDefs[table.Code] = await NewRegistryAsync(
                 PermitHeaderFields.TableRegistryCode(type.Code, table.Code), table.NameL10n, isTemporal: false, ct).ConfigureAwait(false);
+
+            // Рядки таблиці дозволу пише клієнт (`entries/batch`) без коду: код видає послідовність (D-157). Режим Manual
+            // дав би `422 ECR-CFG-0422 invalidCode` на першому ж рядку (e2e 39279368294). Режим ставиться лише при створенні.
+            tableDefs[table.Code].UseCodeMode(RegistryCodeMode.Auto);
         }
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);

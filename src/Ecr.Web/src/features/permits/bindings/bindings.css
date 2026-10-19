@@ -1,0 +1,64 @@
+/*
+ * Прив'язка аркуша до дозволу (PM-11). Макет: `docs/design/permits/screens-permits.js` (`.pm-arrow`,
+ * `.pm-gridnote`, `.is-locked`, `.is-warn`). Широкі таблиці беруть `.pm-tw` / `.pm-t` з `permitDefTable.css`.
+ * Кольори — лише токени теми (`ФВ-14.11`).
+ */
+.pm-arrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  margin-bottom: var(--mantine-spacing-sm);
+}
+
+.pm-gridnote {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  margin-bottom: var(--mantine-spacing-xs);
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-sm);
+}
+
+/* Комірка, яку пише машина: штрихування, як «лише читання» в сітці документа. */
+.pm-t :is(td, th).is-locked {
+  background-color: var(--ecr-cell-read-only-bg);
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 6px,
+    var(--ecr-cell-read-only-line) 6px,
+    var(--ecr-cell-read-only-line) 7px
+  );
+}
+
+.pm-bind-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--mantine-spacing-sm);
+  align-items: end;
+  margin-bottom: var(--mantine-spacing-sm);
+}
+
+.pm-bind-wide {
+  grid-column: 1 / -1;
+}
+
+.pm-bind-radio {
+  display: flex;
+  gap: var(--mantine-spacing-sm);
+  align-items: flex-start;
+  padding: var(--mantine-spacing-sm);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  cursor: pointer;
+}
+
+.pm-bind-radio:has(input:checked) {
+  border-color: var(--mantine-primary-color-filled);
+}
+
+.pm-bind-radio:focus-within {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 1px;
+}

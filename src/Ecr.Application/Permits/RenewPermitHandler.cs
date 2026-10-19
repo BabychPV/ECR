@@ -141,13 +141,18 @@ public sealed class RenewPermitHandler(
                 continue;
             }
 
-            var first = await registries.NextEntryCodesAsync(olds.Count, ct).ConfigureAwait(false);
+            // Реєстр таблиці з `CodeMode = Auto` (з c5ebf5d94) відхиляє ЯВНИЙ код нового запису
+            // (`entryCodeAutomatic`): порожній код - код видасть writer. Типи, опубліковані раніше, лишаються в
+            // `Manual` і, як і було, отримують код із послідовності тут.
+            var auto = table.Def.CodeMode == RegistryCodeMode.Auto;
+            // Для Auto послідовність тут НЕ чіпається (`first` не використовується: коди резервує writer).
+            var first = auto ? 0L : await registries.NextEntryCodesAsync(olds.Count, ct).ConfigureAwait(false);
             var batch = new List<RegistryEntryWrite>(olds.Count);
             for (var i = 0; i < olds.Count; i++)
             {
                 var old = olds[i];
                 batch.Add(new RegistryEntryWrite(
-                    RegistryEntryWriter.AutoCode(first + i),
+                    auto ? string.Empty : RegistryEntryWriter.AutoCode(first + i),
                     RowValues(table, valuesByEntry[old.Id], newPermitId, tableById, created))
                 {
                     DisplayName = old.DisplayL10n.Get(UiStringResolver.DefaultLanguage),
