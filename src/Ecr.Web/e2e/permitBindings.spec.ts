@@ -162,6 +162,19 @@ async function arrange(page: Page, tracked: CreatedPermitTypes): Promise<Scenari
   return { templateId: template.templateId, versionId: version.versionId, tableId: table.id, typeCode, typeName };
 }
 
+/** Id стовпця таблиці версії за кодом (з відповіді структури). */
+async function columnId(page: Page, s: Scenario, code: string): Promise<number> {
+  const structure = await ok<{ sheets: { tables: { id: number; columns: { id: number; code: string }[] }[] }[] }>(
+    await page.request.get(`/api/v1/template-versions/${s.versionId}/structure`),
+    'структура версії',
+  );
+  const column = structure.sheets.flatMap((sheet) => sheet.tables).find((table) => table.id === s.tableId)?.columns.find((item) => item.code === code);
+  expect(column, `стовпця ${code} немає в структурі`).toBeDefined();
+
+  return column?.id ?? 0;
+}
+
+
 test.describe('Permit bindings', () => {
   test.skip(PeriodKey === '', 'ECR_E2E_OPTIONAL: стенда немає. Стенд: tools/e2e-stand.ps1.');
 
@@ -243,4 +256,72 @@ test.describe('Permit bindings', () => {
     const after = await ok<{ items: unknown[] }>(await page.request.get(`/api/v1/template-versions/${s.versionId}/permit-bindings`), 'перелік після видалення');
     expect(after.items).toHaveLength(0);
   });
-});
+
+  test('документ із таблицею, прив’язаною в режимі Rows: смуга «З дозволу» і «Оновити з дозволу» з підсумком', async ({ page }) => {
+    test.setTimeout(300_000);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+    const s = await arrange(page, tracked);
+    const base = `/api/v1/template-versions/${s.versionId}`;
+
+    // Прив'язка - тим самим запитом, що й майстер (його шлях перевіряє перший тест).
+    await ok(
+      await page.request.put(`${base}/permit-bindings/PB${s.tableId}_Sources`, {
+        data: {
+          permitTypeCode: s.typeCode,
+          permitTableCode: 'Points',
+          sheetTableDefId: s.tableId,
+          mode: 'Rows',
+          selectionRule: 'ByFacilityPeriodEnd',
+          headerFieldDefId: null,
+          isActive: true,
+          columns: [
+            { permitFieldCode: 'Name', role: 'RowKey', sheetColumnDefId: await columnId(page, s, 'Name') },
+            { permitFieldCode: 'Note', role: 'Info', sheetColumnDefId: await columnId(page, s, 'Note') },
+          ],
+        },
+      }),
+      'прив’язка (API)',
+    );
+
+    // Документ: версію публікуємо, проєкт і документ заводимо на ній.
+    await ok(await page.request.post(`${base}/publish`, { data: { reason: 'e2e: документ із прив’язкою до дозволу' } }), 'публікація версії шаблону');
+    const stamp = String(Date.now());
+    const project = await ok<{ id: number }>(
+      await page.request.post('/api/v1/projects', {
+        data: {
+          code: `E2EBindPrj${stamp}`,
+          nameL10n: { en: `E2E binding project ${stamp}` },
+          periodKind: 'Monthly',
+          timeZoneId: 'UTC',
+          templateVersionId: s.versionId,
+          year: new Date().getUTCFullYear(),
+        },
+      }),
+      'проєкт',
+    );
+    await ok(await page.request.post(`/api/v1/projects/${project.id}/activate`), 'активація проєкту');
+    const structure = await ok<{ sheets: { id: number }[] }>(await page.request.get(`${base}/structure`), 'структура версії');
+    const document = await ok<{ id: number }>(
+      await page.request.post('/api/v1/documents', {
+        data: { projectId: project.id, sheetDefIds: structure.sheets.map((sheet) => sheet.id), templateVersionId: s.versionId },
+      }),
+      'документ',
+    );
+    const calendar = await ok<{ periods: { periodKey: number; state: string }[] }>(
+      await page.request.get(`/api/v1/projects/${project.id}/periods`),
+      'календар проєкту',
+    );
+    const period = calendar.periods.find((item) => item.state === 'Open') ?? calendar.periods[0];
+    expect(period, 'у проєкту немає періодів').toBeDefined();
+
+    // Смугу вирішує `permitBinding` у відповіді …/tables (без Template.View і без додаткових запитів).
+    await page.goto(`/documents/${document.id}?periodKey=${String(period?.periodKey)}`);
+    const strip = page.getByTestId('permit-refresh-strip');
+    await expect(strip, 'смуги «З дозволу» немає: сервер не віддав permitBinding').toBeVisible({ timeout: 60_000 });
+    await expect(strip.getByTestId('from-permit-badge')).toBeVisible();
+
+    await strip.getByRole('button', { name: 'Refresh from permit' }).click();
+    // Об'єкт документа порожній - дозволу немає, тож рядків не додано; підсумок (або попередження) все одно показується.
+    await expect(page.getByTestId('permit-refresh-result'), 'підсумок «Оновити з дозволу» не з’явився').toBeVisible({ timeout: 60_000 });
+  });});
