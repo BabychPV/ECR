@@ -336,11 +336,11 @@ public sealed partial class PermitRuntimeRowsTests(SqlServerFixture sql)
 
     // ── Побудова ────────────────────────────────────────────────────────────
 
-    private RowStore NewStore(EcrDbContext db, bool permits)
+    private RowStore NewStore(EcrDbContext db, bool permits, IBackgroundJobScheduler? jobs = null)
     {
         var clock = new TestClock(Now);
         return new RowStore(
-            db, new BulkCellLoader(sql.ConnectionString, 1000), clock, permits: permits ? NewService(db) : null);
+            db, new BulkCellLoader(sql.ConnectionString, 1000), clock, permits: permits ? NewService(db) : null, jobs: jobs);
     }
 
     private PermitBindingService NewService(EcrDbContext db)

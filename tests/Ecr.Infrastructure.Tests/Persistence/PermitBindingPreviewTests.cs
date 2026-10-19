@@ -177,6 +177,10 @@ public sealed class PermitBindingPreviewTests(SqlServerFixture sql)
         Assert.False(preview.Rows[1].Cells.ContainsKey(ColumnCode(preview, "Fact")));
         Assert.Empty(preview.Warnings);
 
+        // PM-10b: перегляд лише ЧИТАЄ екземпляри (GetTableInstancesAsync) і сам їх не створює, отже не пише рядків
+        // з дозволу й не ставить перерахунок: EnsureTableInstancesAsync (там єдина постановка) перегляд не кличе.
+        await read.RowsStore.DidNotReceive().EnsureTableInstancesAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+
         // Без Document.View документ як джерело недоступний.
         await using var denied = await PermitBindingHarness.CreateAsync(sql, PermitBindingHarness.Everything);
         await Assert.ThrowsAsync<AccessDeniedException>(
