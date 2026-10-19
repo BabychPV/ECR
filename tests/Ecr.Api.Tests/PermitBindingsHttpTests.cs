@@ -33,7 +33,7 @@ public sealed class PermitBindingsHttpTests(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         using var client = await SystemHealthControllerTests.SignedInAsync(
-            sql, app, "Registry.View", "Registry.EditDefinition", "Registry.Publish", "Template.View", "Template.Edit").ConfigureAwait(true);
+            sql, app, "Registry.View", "Permit.EditType", "Permit.PublishType", "Template.View", "Template.Edit").ConfigureAwait(true);
         await PublishTypeAsync(client).ConfigureAwait(true);
         var stand = await StandAsync().ConfigureAwait(true);
         var root = $"/api/v1/template-versions/{stand.VersionId}/permit-bindings";
