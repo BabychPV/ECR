@@ -21,9 +21,12 @@ namespace Ecr.Infrastructure.Persistence;
 public sealed class RowStore(
     EcrDbContext db, BulkCellLoader bulk, Domain.Abstractions.IClock clock, ArchiveAwareCellReader? archive = null,
     ISheetEditGate? structureGate = null,
-    Microsoft.Extensions.Logging.ILogger<RowStore>? log = null)
+    Microsoft.Extensions.Logging.ILogger<RowStore>? log = null,
+    Application.Permits.Bindings.IPermitBindingService? permits = null)
     : IRowStore
 {
+    // ⚠ PM-10: `permits` - необов'язковий з тієї ж причини, що й `archive`/`structureGate`: RowStore будують напряму
+    // десятки тестів. `null` - рядків з дозволу немає (поведінка до PM-10); у DI сервіс зареєстровано.
     // ⚠ F-13. `archive` — необов'язковий параметр, а не звичайна залежність:
     // десятки тестів у Ecr.Infrastructure.Tests/Ecr.Adapters.Tests
     // конструюють `RowStore` напряму трьома аргументами (db, bulk, clock), і
@@ -401,6 +404,7 @@ public sealed class RowStore(
     {
         // ⚠ Журнал не є сутністю EF; `IX_CellChange_Cell (DocumentId, TableRowId, ColumnDefId, ChangedAt DESC)`.
         // Береться ОСТАННЯ зміна кожної комірки, окрім перерахунку (він міняє похідне, а не вхід).
+        // Машинні походження: збір (Integration) і дозвіл (Permit, PM-10).
         var query = withArchive
             ? db.Database
                 .SqlQuery<int>($"""
@@ -419,7 +423,7 @@ public sealed class RowStore(
                         ) u
                         WHERE u.Origin <> {CellChangeOrigins.Recalculation}
                     ) x
-                    WHERE x.Rn = 1 AND x.Origin = {CellChangeOrigins.Integration}
+                    WHERE x.Rn = 1 AND x.Origin IN ({CellChangeOrigins.Integration}, {CellChangeOrigins.Permit})
                     """)
             : db.Database
                 .SqlQuery<int>($"""
@@ -431,7 +435,7 @@ public sealed class RowStore(
                         WHERE c.DocumentId = {documentId} AND c.TableRowId = {rowId} AND c.PeriodKey = {periodKey.Value}
                           AND c.Origin <> {CellChangeOrigins.Recalculation}
                     ) x
-                    WHERE x.Rn = 1 AND x.Origin = {CellChangeOrigins.Integration}
+                    WHERE x.Rn = 1 AND x.Origin IN ({CellChangeOrigins.Integration}, {CellChangeOrigins.Permit})
                     """);
 
         var found = await query.ToListAsync(ct).ConfigureAwait(false);
@@ -975,6 +979,18 @@ public sealed class RowStore(
             }
 
             throw new InstancesCreatedConcurrently();
+        }
+
+        // ⛔ PM-10: рядки й заблоковані ліміти з дозволу - для ЩОЙНО створених екземплярів, у цій самій транзакції й під
+        // тим самим замком структури. Програш гонитви вийшов вище (`InstancesCreatedConcurrently`), тож тут рядки
+        // створює рівно один переможець. Без прив'язки до таблиць - один дешевий запит у сервісі, швидкий шлях
+        // (`EnsureTableInstancesAsync`) не змінено. Збій ПЛАНУВАННЯ (вибір дозволу, читання довідників) відкриття не
+        // ламає: сервіс повертає попередження `planFailed` (і журналює їх), екземпляр лишається без рядків. Збій ЗАПИСУ
+        // рядків з дозволу виходить назовні і відкочує транзакцію разом з екземплярами (аудит B17, тести
+        // `PermitRuntimeRowsTests.FailurePaths`).
+        if (permits is not null)
+        {
+            await permits.MaterializeAsync(documentId, periodKey, missing, ct).ConfigureAwait(false);
         }
 
         return missing.Count;

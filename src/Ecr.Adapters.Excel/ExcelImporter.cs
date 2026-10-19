@@ -44,7 +44,11 @@ public sealed class ExcelImporter(
     // ⛔ Y5-03: межі періоду — дата чинності запису довідника в перегляді (C7, D-158).
     // Необов'язковий лише заради тестів, що конструюють імпортер вручну; без нього
     // перевірки на дату в перегляді немає (решта причин діють), як і в PATCH без періоду.
-    IPeriodStore? periods = null) : IExcelImporter
+    IPeriodStore? periods = null,
+
+    // ⛔ Permits PM-10: таблиці з прив'язкою «рядки з дозволу» не приймають нових рядків і зіставлених колонок з книги
+    // (`PermitBoundImportGuard`). Необов'язковий лише заради тестів, що конструюють імпортер вручну; `null` - без охоронця.
+    IPermitBindingStore? permitBindings = null) : IExcelImporter
 {
     /// <summary>Порожній зріз — таблиця без жодного рядка чи непорожньої комірки.</summary>
     private static readonly IReadOnlyDictionary<string, long> EmptyRowIds =
@@ -276,6 +280,10 @@ public sealed class ExcelImporter(
             .CanEditSlicesAsync(profile, tableInstanceIds, ct)
             .ConfigureAwait(false);
 
+        // ⛔ PM-10: один дешевий запит; прив'язки читаються лише коли вони є. Без прив'язок (усі таблиці Land та решта)
+        // шлях імпорту не змінюється.
+        var permitLocked = await PermitLockedColumnsAsync(validBlocks.ConvertAll(v => v.Table.Id), ct).ConfigureAwait(false);
+
         foreach (var (block, table) in validBlocks)
         {
             var worksheet = workbook.Worksheet(block.SheetName);
@@ -300,6 +308,11 @@ public sealed class ExcelImporter(
                 readable.CanReadColumn,
                 Ecr.Application.Localization.NumberCulture.ForLanguage(currentUser.Language),
                 unusableLookups);
+
+            if (permitLocked.TryGetValue(table.Id, out var lockedCodes))
+            {
+                diff = PermitBoundImportGuard.Apply(diff, lockedCodes);
+            }
 
             diffs.Add(diff);
             changes.AddRange(diff.Changes);
@@ -337,6 +350,30 @@ public sealed class ExcelImporter(
         // наперед означало б вигадати їх.
         return new ImportPreview(
             token, changes, rejected, [], overwritable, OutdatedWorkbook(map) ? [ImportMessageKeys.OutdatedWorkbook] : null);
+    }
+
+    /// <summary>Таблиця → коди її зіставлених колонок, для таблиць із чинною прив'язкою «рядки з дозволу».</summary>
+    private async Task<IReadOnlyDictionary<int, IReadOnlySet<string>>> PermitLockedColumnsAsync(
+        List<int> tableDefIds, CancellationToken ct)
+    {
+        var result = new Dictionary<int, IReadOnlySet<string>>();
+        if (permitBindings is null
+            || tableDefIds.Count == 0
+            || !await permitBindings.AnyActiveRowsAsync(tableDefIds, ct).ConfigureAwait(false))
+        {
+            return result;
+        }
+
+        foreach (var view in await permitBindings.ListActiveRowsAsync(tableDefIds, ct).ConfigureAwait(false))
+        {
+            result[view.Binding.SheetTableDefId] = view.Columns
+                .Select(c => view.SheetColumnCodes.GetValueOrDefault(c.SheetColumnDefId))
+                .Where(code => code is not null)
+                .Select(code => code!)
+                .ToHashSet(StringComparer.Ordinal);
+        }
+
+        return result;
     }
 
     /// <summary>
