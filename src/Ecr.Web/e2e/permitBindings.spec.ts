@@ -287,6 +287,10 @@ test.describe('Permit bindings', () => {
     // Документ: версію публікуємо, проєкт і документ заводимо на ній.
     await ok(await page.request.post(`${base}/publish`, { data: { reason: 'e2e: документ із прив’язкою до дозволу' } }), 'публікація версії шаблону');
     const stamp = String(Date.now());
+    // Проєкт без політики періодів сервер не створює (`422 ECR-PRD-0422`, e2e 39279368294): беремо сіяну (`ECR-Standard`).
+    const policies = await ok<{ id: number; code: string }[]>(await page.request.get('/api/v1/projects/period-policies'), 'політики періодів');
+    const policy = policies.find((item) => item.code === 'ECR-Standard') ?? policies[0];
+    expect(policy, 'у стенда немає жодної політики періодів').toBeDefined();
     const project = await ok<{ id: number }>(
       await page.request.post('/api/v1/projects', {
         data: {
@@ -295,6 +299,7 @@ test.describe('Permit bindings', () => {
           periodKind: 'Monthly',
           timeZoneId: 'UTC',
           templateVersionId: s.versionId,
+          periodPolicyId: policy?.id,
           year: new Date().getUTCFullYear(),
         },
       }),
