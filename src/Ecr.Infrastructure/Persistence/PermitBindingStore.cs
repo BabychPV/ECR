@@ -55,6 +55,21 @@ public sealed class PermitBindingStore(EcrDbContext db) : IPermitBindingStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<PermitBindingSummary>> ListActiveSummariesAsync(int templateVersionId, CancellationToken ct)
+    {
+        var rows = await db.PermitSheetBindings
+            .AsNoTracking()
+            .Where(b => b.TemplateVersionId == templateVersionId && b.IsActive)
+            .Join(db.PermitTypeDefs.AsNoTracking(), b => b.PermitTypeDefId, t => t.Id,
+                (b, t) => new { b.SheetTableDefId, b.Code, b.Mode, TypeCode = t.Code })
+            .OrderBy(x => x.Code)
+            .Take(MaxRows)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        return [.. rows.Select(x => new PermitBindingSummary(x.SheetTableDefId, x.Code, x.Mode.ToString(), x.TypeCode))];
+    }
+
+    /// <inheritdoc />
     public async Task<PermitBindingView?> GetAsync(int templateVersionId, string code, CancellationToken ct)
     {
         var binding = await db.PermitSheetBindings
