@@ -153,6 +153,11 @@ jobs:
         include:
           - part: core
             only: "-Only 'Складання','Ліцензії NuGet','Тести .NET','Розгортання під sqlcmd'"
+          # ✎ 2026-10-19: `Ecr.Infrastructure.Tests.Persistence.*` винесено з `core` (там був
+          # «хвіст» ~15 хв, job 19–20 хв). Дві частини — взаємні заперечення фільтра в
+          # `verify-all.ps1`; складання повторюється в кожній (раннери ізольовані).
+          - part: core-persistence
+            only: "-Only 'Складання','Тести Infrastructure (Persistence)'"
           - part: scenarios
             only: "-Only 'Складання','Сценарії директиви №09 (довідково)'"
           - part: api-1

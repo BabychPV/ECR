@@ -296,7 +296,23 @@ Step 'Тести .NET' {
     # закінчує за ~2 хв. Одне завдання тримало весь вердикт на цьому хвості.
     & dotnet test (Join-Path $root 'Ecr.sln') --no-build -v q --nologo `
         --logger 'console;verbosity=normal' `
-        --filter 'FullyQualifiedName!~Ecr.Scenarios.Tests&FullyQualifiedName!~Ecr.Api.Tests.'
+        --filter 'FullyQualifiedName!~Ecr.Scenarios.Tests&FullyQualifiedName!~Ecr.Api.Tests.&FullyQualifiedName!~Ecr.Infrastructure.Tests.Persistence.'
+}
+
+# ⛔ `Ecr.Infrastructure.Tests.Persistence.*` — окремий крок (✎ 2026-10-19, CI-борг:
+# `server-part (core)` 19–20 хв, правило 5 «≤ 20 хв»). У журналі core
+# (run 39289083401) Infrastructure.Tests — єдиний «хвіст»: ~900 с одним процесом
+# (колекція SqlServer), решта проєктів закінчує за ~5 хв; Persistence — ≈ 70 %
+# його часу (571 із 823 с сум тривалостей, 1078 із 2117 тестів). Крок 'Тести .NET'
+# вище виключає цей простір імен, цей крок бере РІВНО його: фільтри — взаємні
+# заперечення (`!~X` / `~X` з тим самим X), тож тест не випадає й не дублюється.
+# У конвеєрі йде окремою частиною `server-part (core-persistence)`.
+Step 'Тести Infrastructure (Persistence)' {
+    if ($TestSql) { $env:ECR_TEST_SQL = $TestSql }
+
+    & dotnet test (Join-Path $root 'tests/Ecr.Infrastructure.Tests') --no-build -v q --nologo `
+        --logger 'console;verbosity=normal' `
+        --filter 'FullyQualifiedName~Ecr.Infrastructure.Tests.Persistence.'
 }
 
 # ⛔ `Ecr.Api.Tests` — ЧОТИРМА кроками (✎ 2026-10-12), щоб конвеєр гнав їх
