@@ -57,7 +57,7 @@ public sealed partial class CiPersistenceStepTests
             }
 
             var text = File.ReadAllText(file);
-            var count = TestAttribute().Matches(text).Count;
+            var count = TestAttribute().Count(text);
             if (count == 0)
             {
                 continue;
