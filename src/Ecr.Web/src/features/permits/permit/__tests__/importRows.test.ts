@@ -133,6 +133,47 @@ describe('дублі ключа всередині файлу (все або н�
   });
 });
 
+describe('дублі ключа: канонічна форма (canonicalKey)', () => {
+  /** Ключем стає лише названий стовпець (решта - не ключ), щоб перевірити типи частин. */
+  const keyedBy = (code: string): typeof fields =>
+    fields.map((field) => ({ ...field, column: { ...field.column, key: field.column.code === code } }));
+  const names = (values: readonly string[], keyed: typeof fields = fields, ignoreCase?: boolean) =>
+    planImport(values.map((name) => line([name, '1'])).join('\n'), keyed, picker, 5, false, ignoreCase);
+  const reasons = (plan: ReturnType<typeof planImport>): string[] => plan.issues.map((issue) => issue.reason);
+
+  it('числовий ключ: однакове число в рядках 1 і 501 - дубль, план не чистий', () => {
+    const counts = Array.from({ length: ImportChunk + 5 }, (_, index) => String(index + 100));
+    counts[0] = '7';
+    counts[ImportChunk] = '7';
+    const plan = planImport(counts.map((count, index) => line([`N${String(index)}`, '1', count])).join('\n'), keyedBy('Count'), picker, 5, false);
+    expect(plan.issues.map((issue) => [issue.row, issue.column, issue.reason])).toEqual([
+      [1, 'Count', 'duplicateKey'],
+      [ImportChunk + 1, 'Count', 'duplicateKey'],
+    ]);
+    expect(isPlanClean(plan)).toBe(false);
+  });
+
+  it('логічний і датовий ключі зводяться за типом', () => {
+    const active = planImport([line(['A', '1', '', 'так']), line(['B', '1', '', 'true'])].join('\n'), keyedBy('Active'), picker, 5, false);
+    expect(reasons(active)).toEqual(['duplicateKey', 'duplicateKey']);
+    const issued = planImport([line(['A', '1', '', '', '01.03.2026']), line(['B', '1', '', '', '2026-03-01'])].join('\n'), keyedBy('Issued'), picker, 5, false);
+    expect(reasons(issued)).toEqual(['duplicateKey', 'duplicateKey']);
+  });
+
+  it('текст: внутрішні пробіли, NBSP і крайні пробіли згортаються', () => {
+    expect(reasons(names(['Pond  1', ' Pond 1 ']))).toEqual(['duplicateKey', 'duplicateKey']);
+  });
+
+  it('текст: NFC - складений і розкладений «é» один ключ', () => {
+    expect(reasons(names(['café', 'café']))).toEqual(['duplicateKey', 'duplicateKey']);
+  });
+
+  it('ignoreCase=false: «A» і «a» не дубль; за замовчуванням (true) - дубль', () => {
+    expect(reasons(names(['A', 'a'], fields, false))).toEqual([]);
+    expect(reasons(names(['A', 'a']))).toEqual(['duplicateKey', 'duplicateKey']);
+  });
+});
+
 describe('delimitedToTabs', () => {
   it('крапка з комою, лапки з комою всередині та подвоєні лапки', () => {
     expect(delimitedToTabs('Name;Note\nA;"x; y"\nB;"say ""hi"""\n')).toBe('Name\tNote\nA\tx; y\nB\tsay "hi"');
