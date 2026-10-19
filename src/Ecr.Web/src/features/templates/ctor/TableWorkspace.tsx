@@ -16,6 +16,10 @@ const ValidationRuleList = lazy(async () => ({
 const TablePreview = lazy(async () => ({
   default: (await import('@/features/templates/TablePreview')).TablePreview,
 }));
+// Вкладка «Permit binding» (PM-11): окремий чанк, потрібен лише тому, хто її відкрив.
+const PermitBindingPanel = lazy(async () => ({
+  default: (await import('@/features/permits/bindings/PermitBindingPanel')).PermitBindingPanel,
+}));
 
 export interface TableWorkspaceProps {
   readonly templateVersionId: number;
@@ -112,6 +116,7 @@ export function TableWorkspace(props: TableWorkspaceProps): JSX.Element {
               {count(rules.data?.length)}
             </Tabs.Tab>
             <Tabs.Tab value="preview">{t('ctor.tab.preview')}</Tabs.Tab>
+            <Tabs.Tab value="permit">{t('ctor.tab.permit')}</Tabs.Tab>
           </Tabs.List>
 
           <Tabs.Panel value="columns">
@@ -208,6 +213,13 @@ export function TableWorkspace(props: TableWorkspaceProps): JSX.Element {
           <Tabs.Panel value="preview">
             <Suspense fallback={<Skeleton height={160} radius="sm" />}>
               <TablePreview templateVersionId={templateVersionId} table={table} />
+            </Suspense>
+          </Tabs.Panel>
+
+          <Tabs.Panel value="permit">
+            <p className="ecr-ctor-hint">{t('ctor.permitHint')}</p>
+            <Suspense fallback={<Skeleton height={160} radius="sm" />}>
+              <PermitBindingPanel templateVersionId={templateVersionId} table={table} canEdit={canEditStructure} />
             </Suspense>
           </Tabs.Panel>
         </Tabs>
