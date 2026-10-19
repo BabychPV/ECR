@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Badge, Button, Group, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DocumentTableDto } from '@/api/types';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
@@ -75,6 +76,8 @@ export function PermitRefreshStrip({ documentId, periodKey, projectId, tables, r
     },
   });
 
+  const refreshLoading = usePendingLoading(refresh.isPending);
+
   if (!canView) return null;
 
   const bound = (bindings.data?.items ?? [])
@@ -102,7 +105,7 @@ export function PermitRefreshStrip({ documentId, periodKey, projectId, tables, r
             variant="default"
             disabled={readOnly}
             title={readOnly ? t('permits.sheetBinding.doc.readOnly') : undefined}
-            loading={refresh.isPending && refresh.variables?.code === binding.code}
+            loading={refreshLoading && refresh.variables?.code === binding.code}
             onClick={() => refresh.mutate({ code: binding.code, tableName })}
           >
             {t('permits.sheetBinding.doc.refresh')}
