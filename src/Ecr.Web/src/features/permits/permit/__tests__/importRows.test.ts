@@ -99,6 +99,40 @@ describe('planImport', () => {
   });
 });
 
+describe('дублі ключа всередині файлу (все або нічого)', () => {
+  const batch = (names: readonly string[]): string => names.map((name) => line([name, '1'])).join('\n');
+  const distinct = (count: number): string[] => Array.from({ length: count }, (_, index) => `N${String(index)}`);
+
+  it('дубль між рядками 1 і 501 (різні шматки): план не чистий, зауваження на обох рядках', () => {
+    const names = distinct(ImportChunk + 5);
+    names[ImportChunk] = names[0] ?? '';
+    const plan = planImport(batch(names), fields, picker, 5, false);
+    expect(isPlanClean(plan)).toBe(false);
+    expect(plan.issues.map((issue) => [issue.row, issue.column, issue.reason])).toEqual([
+      [1, 'Name', 'duplicateKey'],
+      [ImportChunk + 1, 'Name', 'duplicateKey'],
+    ]);
+    expect(plan.rows.filter((row) => !row.clean).map((row) => row.index)).toEqual([1, ImportChunk + 1]);
+  });
+
+  it('запис не починається: з нечистим планом жоден шматок не пишеться (шлюз діалогу)', async () => {
+    const names = distinct(ImportChunk + 5);
+    names[ImportChunk] = names[0] ?? '';
+    const plan = planImport(batch(names), fields, picker, 5, false);
+    // Діалог кличе runImport лише для чистого плану (PasteDialog.check/apply).
+    if (isPlanClean(plan)) await runImport('PRM_WD_Limits', plan.rows, false, () => undefined);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('порівняння без регістру й крайніх пробілів; різні ключі не конфліктують', () => {
+    expect(planImport(batch(['Pond', ' pond ']), fields, picker, 5, false).issues.map((issue) => issue.reason)).toEqual([
+      'duplicateKey',
+      'duplicateKey',
+    ]);
+    expect(isPlanClean(planImport(batch(['Pond', 'Pond 2']), fields, picker, 5, false))).toBe(true);
+  });
+});
+
 describe('delimitedToTabs', () => {
   it('крапка з комою, лапки з комою всередині та подвоєні лапки', () => {
     expect(delimitedToTabs('Name;Note\nA;"x; y"\nB;"say ""hi"""\n')).toBe('Name\tNote\nA\tx; y\nB\tsay "hi"');

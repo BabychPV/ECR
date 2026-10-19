@@ -13,13 +13,14 @@ import { newRowItem, type PermitField, type PickerData, pickerOptions } from './
  *
  * ⛔ Рішення 19.10: «все або нічого». Зауваження розбору, понад 5000 рядків (`MaxPastedRows`) чи відмова сервера на
  * перевірці блокують ВЕСЬ запис; перевірка всіх шматків йде ДО першого запису. Єдиний виняток, якого клієнт не
- * контролює, - відмова середнього шматка під час запису (гонитва): це `stopped` і відома межа.
+ * контролює, - відмова середнього шматка під час запису через одночасну зміну іншим користувачем (реальна гонитва):
+ * це `stopped` і відома межа. Дублі ключа всередині файлу ловить `planImport` до будь-якого запису.
  */
 
 /** Рядків за один виклик `entries/batch` (межа сервера — 2000). */
 export const ImportChunk = 500;
 
-export type ImportIssueReason = 'number' | 'bool' | 'date' | 'limit' | 'integer' | 'unknownValue';
+export type ImportIssueReason = 'number' | 'bool' | 'date' | 'limit' | 'integer' | 'unknownValue' | 'duplicateKey';
 
 /** Клітинка, яку не вдалось прочитати: рядок вставки (з 1), стовпець, сирий текст. */
 export interface ImportIssue {
@@ -107,7 +108,51 @@ export function planImport(
     return { index, item: newRowItem(`row-${String(index)}`, permitId, fields, form), clean: !bad.has(index) };
   });
 
-  return { rows, issues, extraCells: parsed.extraCells };
+  markDuplicateKeys(rows, fields, issues, bad);
+
+  return {
+    rows: rows.map((row) => (bad.has(row.index) && row.clean ? { ...row, clean: false } : row)),
+    issues,
+    extraCells: parsed.extraCells,
+  };
+}
+
+/**
+ * Дублі складеного ключа ВСЕРЕДИНІ файлу (по всій партії, а не по шматках): `dryRun` кожного шматка бачить лише базу
+ * й власний шматок, тож дубль між рядками 1 і 501 пройшов би перевірку й упав би на записі другого шматка.
+ * Ключ - значення стовпців із `key` у вигляді пакета (числа інваріантні, `Lookup` - id), без крайніх пробілів і
+ * без урахування регістру; поле композиції `PERMIT` в усіх рядків однакове, тож у порівнянні не бере участі.
+ * ⚠ Припущення: клієнт не має дзеркала серверного нормалізатора ключа, тому порівняння - обрізаний рядок без
+ * регістру (як `keyPart` у `rowForm` + нижній регістр). Рядок із порожньою частиною ключа не рахується: це «обовʼязкове
+ * поле» і його називає сервер. Зауваження ставиться на ОБИДВА рядки пари (і на всі рядки групи).
+ */
+function markDuplicateKeys(
+  rows: readonly ImportRow[],
+  fields: readonly PermitField[],
+  issues: ImportIssue[],
+  bad: Set<number>,
+): void {
+  const keys = fields.filter((field) => field.column.key === true).map((field) => field.column.code);
+  if (keys.length === 0) return;
+
+  const groups = new Map<string, number[]>();
+  for (const row of rows) {
+    const parts = keys.map((code) => {
+      const value = row.item.values?.[code];
+      return typeof value === 'string' ? value.trim().toLowerCase() : '';
+    });
+    if (parts.some((part) => part === '')) continue;
+    const id = parts.join('\u0000');
+    groups.set(id, [...(groups.get(id) ?? []), row.index]);
+  }
+
+  for (const [id, indexes] of groups) {
+    if (indexes.length < 2) continue;
+    for (const index of indexes) {
+      issues.push({ row: index, column: keys.join(','), text: id.split('\u0000').join(' + '), reason: 'duplicateKey' });
+      bad.add(index);
+    }
+  }
 }
 
 /** Рядок плану, що не пройшов перевірку сервера, і чому. */
@@ -120,7 +165,7 @@ export interface BatchRun {
   /** Скільки рядків записано (для прогону `dryRun` — скільки пройшло б). */
   readonly ok: number;
   readonly failures: readonly RowFailure[];
-  /** Прогін обірвано відмовою шматка під час запису (недетермінована гонитва після успішної перевірки). */
+  /** Прогін обірвано відмовою шматка під час запису (лише реальна гонитва: чужа зміна між перевіркою й записом; дублі всередині файлу ловить `planImport`). */
   readonly stopped: boolean;
   /** Скільки шматків записано до зупинки. */
   readonly chunksWritten: number;
