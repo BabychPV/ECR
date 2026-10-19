@@ -133,6 +133,13 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
         // на ключ (порціями). Рішення по кожному запису — далі тим самим циклом і в тому самому
         // порядку, що й до пакетного читання: перший конфлікт той самий.
         await store.PreloadAsync(entries, ct).ConfigureAwait(false);
+
+        // ⛔ Permits PM-04, R2: у шапці типу дозволу чернетка (`IsActive = 0`) ключ не тримає. Питання — до бази раз на
+        // пакет і ЛИШЕ для таких довідників (решта довідників, зокрема складені ключі Land, лишаються як були).
+        // ⚠ Лише коли в пакеті є вимкнений запис: решта пакетів (а їх переважна більшість) не платить зайвим запитом, і
+        // храповик запитів `RegistryKeyBatchQueryTests` (4 / 16 звернень) лишається точним.
+        var inactiveHoldsNoKey = entries.Any(e => !e.IsActive)
+            && await store.InactiveEntriesHoldNoKeyAsync(definition.Id, ct).ConfigureAwait(false);
         try
         {
             var plans = new List<EntryPlan>(entries.Count);
@@ -148,14 +155,14 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
             }
 
             var names = await ReferenceNamesAsync([.. plans.SelectMany(p => p.Keys)], ct).ConfigureAwait(false);
-            await LockHoldersAsync(keys, plans, ct).ConfigureAwait(false);
+            await LockHoldersAsync(keys, plans, inactiveHoldsNoKey, ct).ConfigureAwait(false);
 
             // Фаза 1 обміну ключами (§4.3); фаза 2 — перерахунок нижче повертає живість із запису.
-            await RetireMovedRowsAsync(plans, ct).ConfigureAwait(false);
+            await RetireMovedRowsAsync(plans, inactiveHoldsNoKey, ct).ConfigureAwait(false);
 
             foreach (var plan in plans)
             {
-                await ApplyAsync(definition, plan, names, batch, ct).ConfigureAwait(false);
+                await ApplyAsync(definition, plan, names, batch, inactiveHoldsNoKey, ct).ConfigureAwait(false);
             }
         }
         finally
@@ -248,12 +255,12 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
     /// відсутність взаємоблокувань на сортуванні в чужому запиті.
     /// </remarks>
     private async Task LockHoldersAsync(
-        IReadOnlyList<RegistryKeyDef> keys, IReadOnlyList<EntryPlan> plans, CancellationToken ct)
+        IReadOnlyList<RegistryKeyDef> keys, IReadOnlyList<EntryPlan> plans, bool inactiveHoldsNoKey, CancellationToken ct)
     {
         foreach (var i in Enumerable.Range(0, keys.Count).OrderBy(i => keys[i].Id))
         {
             var hashes = plans
-                .Where(p => !p.Entry.IsDeleted)
+                .Where(p => !p.Entry.IsDeleted && !IsInert(p.Entry, inactiveHoldsNoKey))
                 .Select(p => p.Keys[i].Hash)
                 .OfType<byte[]>()
                 .DistinctBy(Convert.ToHexString)
@@ -282,7 +289,7 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
     /// одним <c>SaveChanges</c>, як і досі. Виклик — усередині транзакції (як і весь пакетний
     /// <c>ApplyAsync</c>): інакше проміжний стан закомітився б окремо.
     /// </remarks>
-    private async Task RetireMovedRowsAsync(IReadOnlyList<EntryPlan> plans, CancellationToken ct)
+    private async Task RetireMovedRowsAsync(IReadOnlyList<EntryPlan> plans, bool inactiveHoldsNoKey, CancellationToken ct)
     {
         // Рядок покидає значення (ключ, хеш, початок вікна), якщо запис видалено, частина ключа
         // спорожніла, хеш чи початок вікна змінилися.
@@ -295,7 +302,7 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
             {
                 if (plan.Rows.TryGetValue(key.Definition.Id, out var row)
                     && row.IsLive
-                    && (plan.Entry.IsDeleted || key.Hash is null
+                    && (plan.Entry.IsDeleted || IsInert(plan.Entry, inactiveHoldsNoKey) || key.Hash is null
                         || !row.KeyHash.AsSpan().SequenceEqual(key.Hash) || row.ValidFromKey != validFrom))
                 {
                     moved.Add(row);
@@ -305,7 +312,7 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
         }
 
         var taken = plans
-            .Where(p => !p.Entry.IsDeleted)
+            .Where(p => !p.Entry.IsDeleted && !IsInert(p.Entry, inactiveHoldsNoKey))
             .SelectMany(p => p.Keys
                 .Where(k => k.Hash is not null)
                 .Select(k => (Entry: p.Entry, Slot: (k.Definition.Id, Convert.ToHexString(k.Hash!), p.Entry.ValidFrom ?? DateOnly.MinValue))));
@@ -328,9 +335,11 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
         EntryPlan plan,
         ReferenceNames names,
         IReadOnlySet<long> batch,
+        bool inactiveHoldsNoKey,
         CancellationToken ct)
     {
         var (entry, rows, computed) = plan;
+        var inert = IsInert(entry, inactiveHoldsNoKey);
 
         foreach (var key in computed)
         {
@@ -344,22 +353,34 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
 
             var keyText = string.Join(KeyTextSeparator, key.Parts.Select(p => Display(p, names)));
 
-            // Видалений запис ключ не тримає (IsLive = 0) — і перевіряти його нема з ким.
-            if (!entry.IsDeleted)
+            // Видалений запис ключ не тримає (IsLive = 0) — і перевіряти його нема з ким. Те саме — чернетка
+            // дозволу в шапці типу (R2): її ключ не конфліктує з активним і сам нікого не блокує.
+            if (!entry.IsDeleted && !inert)
             {
                 await RequireFreeAsync(definition, entry, key.Definition, hash, batch, ct).ConfigureAwait(false);
             }
 
-            if (row is null)
+            var target = row;
+            if (target is null)
             {
-                store.Add(new RegistryEntryKey(entry, key.Definition.Id, hash, keyText));
+                target = new RegistryEntryKey(entry, key.Definition.Id, hash, keyText);
+                store.Add(target);
             }
             else
             {
-                row.Recompute(entry, hash, keyText);
+                target.Recompute(entry, hash, keyText);
+            }
+
+            // Рядок лишається (хеш і вікно потрібні для наступної активації), але з унікальності виведений.
+            if (inert)
+            {
+                target.Retire();
             }
         }
     }
+
+    /// <summary>Чернетка дозволу: запис вимкнений у довіднику, де вимкнений запис ключ не тримає (R2).</summary>
+    private static bool IsInert(RegistryEntry entry, bool inactiveHoldsNoKey) => inactiveHoldsNoKey && !entry.IsActive;
 
     private async Task RequireFreeAsync(
         RegistryDef definition,

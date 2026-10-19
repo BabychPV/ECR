@@ -301,6 +301,16 @@ public static class DependencyInjection
         services.AddScoped<Permits.DeletePermitTypeHandler>();
         services.AddScoped<Permits.PublishPermitTypeHandler>();
 
+        // PERMITS: permits — екземпляри дозволів і життєвий цикл (PM-04)
+        services.AddScoped<Permits.CreatePermitHandler>();
+        services.AddScoped<Permits.GetPermitHandler>();
+        services.AddScoped<Permits.ListPermitsHandler>();
+        services.AddScoped<Permits.UpdatePermitHandler>();
+        services.AddScoped<Permits.DeletePermitHandler>();
+        services.AddScoped<Permits.ActivatePermitHandler>();
+        services.AddScoped<Permits.EndPermitHandler>();
+        services.AddScoped<Permits.RenewPermitHandler>();
+
         // RT: expressions
 
         // Редактор виразів (`ФВ-9.15a`): перевірка тексту і склад мови.

@@ -900,4 +900,28 @@ public static class ErrorCodes
     /// (<c>published</c>) або має екземпляри дозволів (<c>hasPermits</c>).
     /// </summary>
     public const string PermitTypeInUse = "ECR-PRM-4094";
+
+    /// <summary>
+    /// Дозвіл цього типу з таким номером і початком чинності вже є (<c>ECR-PRM-4095</c>, <c>number</c>). Номер у різних
+    /// версіях (поновлення) однаковий, тому дублем вважається збіг номера з ПОЧАТКОМ - версія дозволу.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Кидається як <c>ConcurrencyConflictException</c>: <c>ExceptionHandlingMiddleware</c> дає такому 409 за типом.
+    /// </remarks>
+    public const string PermitDuplicate = "ECR-PRM-4095";
+
+    /// <summary>
+    /// Дія не відповідає стану дозволу або дозвіл змінили після читання (<c>ECR-PRM-4096</c>): токен не збігся
+    /// (<c>changed</c>), не чернетка (<c>notDraft</c>), не чинний (<c>notActive</c>), закінчився (<c>notEditable</c>),
+    /// не поновлюється (<c>notRenewable</c>), на дозвіл чи його рядки посилаються (<c>inUse</c>).
+    /// </summary>
+    /// <remarks>⚠ <c>ConcurrencyConflictException</c> - 409 за типом, власного арма в middleware не потрібно.</remarks>
+    public const string PermitStateConflict = "ECR-PRM-4096";
+
+    /// <summary>
+    /// Чинний дозвіл із тим самим типом і номером уже діє в частині цього вікна (<c>ECR-PRM-4092</c>, <c>overlap</c>):
+    /// півінтервали <c>[ValidFrom, ValidTo)</c> перетинаються. Перевіряється при активації та зміні чинного дозволу.
+    /// </summary>
+    /// <remarks>⚠ <c>ConcurrencyConflictException</c> - 409 за типом, власного арма в middleware не потрібно.</remarks>
+    public const string PermitOverlap = "ECR-PRM-4092";
 }

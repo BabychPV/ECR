@@ -9655,7 +9655,7 @@ export interface paths {
             };
         };
         put?: never;
-        /** Заводить тип чернеткою (з копією іншого типу за потреби). Право `Registry.EditDefinition`. */
+        /** Заводить тип чернеткою (з копією іншого типу за потреби). Право `Permit.EditType`. */
         post: {
             parameters: {
                 query?: never;
@@ -9769,7 +9769,7 @@ export interface paths {
             };
         };
         /** Замінює ЧЕРНЕТКУ визначення цілком (таблиці, стовпці, списки, перевірки). Право
-         *     `Registry.EditDefinition`. Токен `rowVersion` - з останнього читання. */
+         *     `Permit.EditType`. Токен `rowVersion` - з останнього читання. */
         put: {
             parameters: {
                 query?: never;
@@ -9836,7 +9836,7 @@ export interface paths {
             };
         };
         post?: never;
-        /** Видаляє ніколи не опублікований тип без дозволів. Право `Registry.EditDefinition`. */
+        /** Видаляє ніколи не опублікований тип без дозволів. Право `Permit.EditType`. */
         delete: {
             parameters: {
                 query?: never;
@@ -9894,7 +9894,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Відкриває чернетку нової версії опублікованого типу. Право `Registry.EditDefinition`. */
+        /** Відкриває чернетку нової версії опублікованого типу. Право `Permit.EditType`. */
         post: {
             parameters: {
                 query?: never;
@@ -9958,7 +9958,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** Публікує чернетку АТОМАРНО: шапка, усі таблиці й приховані списки - однією транзакцією. Право
-         *     `Registry.Publish`. */
+         *     `Permit.PublishType`. */
         post: {
             parameters: {
                 query?: never;
@@ -9987,6 +9987,531 @@ export interface paths {
                         "application/json": components["schemas"]["PermitTypeDto"];
                         "text/json": components["schemas"]["PermitTypeDto"];
                         "text/plain": components["schemas"]["PermitTypeDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Перелік дозволів (усі доступні типи). Право `Registry.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Код типу. */
+                    type?: string;
+                    /** @description `Draft`, `Active` або `Expired` на asOf. */
+                    status?: string;
+                    /** @description Підрядок номера, розташування чи назви типу. */
+                    q?: string;
+                    /** @description Дата, на яку рахується стан (типово сьогодні, UTC). */
+                    asOf?: string;
+                    /** @description Розмір сторінки 1..500 (типово 500: екран рахує підсумки з повного переліку). */
+                    limit?: number;
+                    /** @description Id останнього дозволу попередньої сторінки. */
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfPermitListItemDto"];
+                        "text/json": components["schemas"]["PagedResultOfPermitListItemDto"];
+                        "text/plain": components["schemas"]["PagedResultOfPermitListItemDto"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Заводить дозвіл ЧЕРНЕТКОЮ за опублікованим типом. Право `Registry.EditData`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreatePermitRequest"];
+                    "application/json": components["schemas"]["CreatePermitRequest"];
+                    "text/json": components["schemas"]["CreatePermitRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitDto"];
+                        "text/json": components["schemas"]["PermitDto"];
+                        "text/plain": components["schemas"]["PermitDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permits/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Дозвіл: шапка, стан, таблиці з підсумками. Право `Registry.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Дата, на яку рахується стан (типово сьогодні, UTC). */
+                    asOf?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор дозволу. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitDto"];
+                        "text/json": components["schemas"]["PermitDto"];
+                        "text/plain": components["schemas"]["PermitDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Змінює шапку чернетки чи чинного дозволу (не закінченого). Право `Registry.EditData`. Токен
+         *     `rowVersion` - з останнього читання. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор дозволу. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UpdatePermitRequest"];
+                    "application/json": components["schemas"]["UpdatePermitRequest"];
+                    "text/json": components["schemas"]["UpdatePermitRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitDto"];
+                        "text/json": components["schemas"]["PermitDto"];
+                        "text/plain": components["schemas"]["PermitDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Видаляє чернетку разом із рядками її таблиць. Право `Registry.EditData`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор дозволу. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permits/{id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Активує чернетку (`Draft → Active`) з перевіркою перетину чинних. Право `Registry.EditData`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор дозволу. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitDto"];
+                        "text/json": components["schemas"]["PermitDto"];
+                        "text/plain": components["schemas"]["PermitDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permits/{id}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Достроково завершує чинний дозвіл. Право `Registry.EditData`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор дозволу. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["EndPermitRequest"];
+                    "application/json": components["schemas"]["EndPermitRequest"];
+                    "text/json": components["schemas"]["EndPermitRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitDto"];
+                        "text/json": components["schemas"]["PermitDto"];
+                        "text/plain": components["schemas"]["PermitDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permits/{id}/renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Поновлює дозвіл: нова чернетка з копією шапки й усіх рядків; початок = кінець поточного. Право
+         *     `Registry.EditData`. Тіло необов'язкове. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор дозволу. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody?: {
+                content: {
+                    "application/*+json": null | components["schemas"]["RenewPermitRequest"];
+                    "application/json": null | components["schemas"]["RenewPermitRequest"];
+                    "text/json": null | components["schemas"]["RenewPermitRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitDto"];
+                        "text/json": components["schemas"]["PermitDto"];
+                        "text/plain": components["schemas"]["PermitDto"];
                     };
                 };
                 /** @description Not Found */
@@ -21658,6 +22183,31 @@ export interface components {
              */
             yearGraceOffsetDays: number;
         };
+        /** @description Запит на заведення дозволу (чернеткою). */
+        CreatePermitRequest: {
+            /**
+             * Format: date
+             * @description Дата видачі.
+             */
+            issueDate: null | string;
+            /** @description Розташування. */
+            location: null | string;
+            /** @description Номер дозволу. */
+            number: string;
+            reportingFlags: null | components["schemas"]["PermitReportingFlags"];
+            /** @description Опублікований тип. */
+            typeCode: string;
+            /**
+             * Format: date
+             * @description Перший чинний день.
+             */
+            validFrom: string;
+            /**
+             * Format: date
+             * @description Перший НЕчинний день; суворо пізніше за початок.
+             */
+            validTo: string;
+        };
         /** @description Запит на заведення типу. */
         CreatePermitTypeRequest: {
             /** @description `Air`, `Water`, `Waste` або `Other`. */
@@ -22751,6 +23301,16 @@ export interface components {
             userId: number;
             /** @description Ім'я входу. */
             userName: string;
+        };
+        /** @description Запит на дострокове завершення чинного дозволу. */
+        EndPermitRequest: {
+            /**
+             * Format: date
+             * @description Перший нечинний день; `null` - сьогодні (UTC).
+             */
+            endDate: null | string;
+            /** @description Причина, не коротша за 10 символів (іде в журнал). */
+            reason: string;
         };
         /** @description Мапінг у відповіді на створення. */
         EntityFieldMapDto: {
@@ -24554,6 +25114,19 @@ export interface components {
         };
         /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
          *     перевіряється архітектурним тестом. */
+        PagedResultOfPermitListItemDto: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["PermitListItemDto"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
         PagedResultOfPermitTypeListItemDto: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["PermitTypeListItemDto"][];
@@ -25060,6 +25633,183 @@ export interface components {
             /** @description Небезпечне право (`ФВ-6.12`, `D-40`): у складені ролі не входить
              *     за seed і видається поіменно, а не через матрицю. */
             isDangerous: boolean;
+        };
+        /** @description Аркуш, що читає дозвіл через привʼязку (з PM-09; до того завжди порожньо). */
+        PermitBoundSheetDto: {
+            /** @description Код привʼязки. */
+            bindingCode: string;
+            /** @description `Rows` або `Formulas`. */
+            mode: string;
+            /** @description Назва аркуша. */
+            sheetName: string;
+        };
+        /** @description Дозвіл: шапка, життєвий цикл, таблиці й хто його читає. */
+        PermitDto: {
+            /**
+             * Format: date
+             * @description Фактична дата закінчення.
+             */
+            actualEnd: null | string;
+            /** @description Аркуші, що читають дозвіл (з PM-09; до того порожньо). */
+            boundSheets: components["schemas"]["PermitBoundSheetDto"][];
+            /** @description Категорія типу. */
+            category: string;
+            /**
+             * Format: int32
+             * @description Днів до закінчення; лише для `Active`.
+             */
+            endsInDays: null | number;
+            /**
+             * Format: int64
+             * @description Ідентифікатор дозволу (запис шапки).
+             */
+            id: number;
+            /**
+             * Format: date
+             * @description Дата видачі.
+             */
+            issueDate: null | string;
+            /** @description Розташування. */
+            location: null | string;
+            /** @description Номер дозволу. */
+            number: string;
+            /** @description Прапорці звітних форм. */
+            reportingFlags: components["schemas"]["PermitReportingFlags"];
+            /** @description Токен для наступного `PUT`. */
+            rowVersion: string;
+            /** @description `Draft`, `Active` або `Expired` на дату `asOf` (за замовчуванням сьогодні, UTC). */
+            status: string;
+            /** @description Таблиці типу з підсумками по цьому дозволу. */
+            tables: components["schemas"]["PermitTableDto"][];
+            /** @description Код типу. */
+            typeCode: string;
+            /** @description Назва типу мовами каталогу. */
+            typeNameL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: int32
+             * @description Опублікована версія типу.
+             */
+            typeVersion: number;
+            /**
+             * Format: date-time
+             * @description Остання зміна запису шапки, UTC.
+             */
+            updatedAt: null | string;
+            /** @description Хто змінив. */
+            updatedByDisplayName: null | string;
+            /**
+             * Format: date
+             * @description Перший чинний день.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description Перший НЕчинний день (виключна межа).
+             */
+            validTo: null | string;
+        };
+        /** @description Рядок переліку дозволів. */
+        PermitListItemDto: {
+            /**
+             * Format: date
+             * @description Фактична дата закінчення.
+             */
+            actualEnd: null | string;
+            /**
+             * Format: int32
+             * @description Скільки аркушів читають дозвіл; поки привʼязок немає (PM-09) - завжди 0.
+             */
+            boundSheetCount: number;
+            /**
+             * Format: int32
+             * @description Днів від `asOf` до закінчення; лише для `Active` з відомою датою закінчення.
+             */
+            endsInDays: null | number;
+            /**
+             * Format: int64
+             * @description Ідентифікатор дозволу (запис шапки).
+             */
+            id: number;
+            /**
+             * Format: date
+             * @description Дата видачі.
+             */
+            issueDate: null | string;
+            /** @description Розташування. */
+            location: null | string;
+            /** @description Номер дозволу. */
+            number: string;
+            /**
+             * Format: int32
+             * @description Σ рядків усіх таблиць.
+             */
+            rowCount: number;
+            /** @description `Draft`, `Active` або `Expired` на дату `asOf`. */
+            status: string;
+            /**
+             * Format: int32
+             * @description Кількість таблиць типу.
+             */
+            tableCount: number;
+            /** @description Код типу. */
+            typeCode: string;
+            /** @description Назва типу мовами каталогу. */
+            typeNameL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: date-time
+             * @description Остання зміна запису шапки, UTC.
+             */
+            updatedAt: null | string;
+            /** @description Хто змінив. */
+            updatedByDisplayName: null | string;
+            /**
+             * Format: date
+             * @description Перший чинний день.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description Перший НЕчинний день (виключна межа, півінтервал `[from, to)`).
+             */
+            validTo: null | string;
+        };
+        /** @description Прапорці звітних форм, до яких входить дозвіл (поля шапки `Form_300`…`TOx`). */
+        PermitReportingFlags: {
+            /** @description Входить у форму 300. */
+            form300: boolean;
+            /** @description Входить у форму 301. */
+            form301: boolean;
+            /** @description Входить у форму 302. */
+            form302: boolean;
+            /** @description Входить у TOx. */
+            tox: boolean;
+        };
+        /** @description Таблиця дозволу: склад з типу й підсумки по рядках. */
+        PermitTableDto: {
+            /** @description Код таблиці в межах типу. */
+            code: string;
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /** @description Код прихованого реєстру таблиці (`PRM_&lt;тип&gt;_&lt;таблиця&gt;`): через нього клієнт читає й пише рядки. */
+            registryCode: string;
+            /**
+             * Format: int32
+             * @description Скільки живих рядків у цього дозволу.
+             */
+            rowCount: number;
+            /**
+             * Format: decimal
+             * @description Σ головного стовпця по рядках дозволу; `null`, якщо стовпця немає.
+             */
+            total: null | string;
+            /** @description Головний числовий стовпець (перший обов'язковий `Decimal` за порядком); `null` - такого немає. */
+            totalColumnCode: null | string;
         };
         /** @description Стовпець таблиці типу дозволу (і поле шапки) — у запиті й у відповіді (Permits, PM-03). */
         PermitTypeColumnDto: {
@@ -26339,6 +27089,14 @@ export interface components {
             nameL10n: {
                 [key: string]: string;
             };
+        };
+        /** @description Необовʼязкові параметри поновлення дозволу. */
+        RenewPermitRequest: {
+            /**
+             * Format: date
+             * @description Кінець нового дозволу; `null` - рівно на рік після його початку.
+             */
+            validTo: null | string;
         };
         /** @description Запит на відкриття поданого документа. */
         ReopenDocumentRequest: {
@@ -29417,6 +30175,36 @@ export interface components {
              * @description Пільговий строк після кінця року.
              */
             yearGraceOffsetDays: number;
+        };
+        /** @description Запит на зміну шапки дозволу (чернетка чи чинний). */
+        UpdatePermitRequest: {
+            /**
+             * Format: date
+             * @description Фактична дата закінчення; `null` - не задана.
+             */
+            actualEnd: null | string;
+            /**
+             * Format: date
+             * @description Дата видачі.
+             */
+            issueDate: null | string;
+            /** @description Розташування. */
+            location: null | string;
+            /** @description Номер дозволу. */
+            number: string;
+            reportingFlags: null | components["schemas"]["PermitReportingFlags"];
+            /** @description Токен з останнього читання. */
+            rowVersion: string;
+            /**
+             * Format: date
+             * @description Перший чинний день.
+             */
+            validFrom: string;
+            /**
+             * Format: date
+             * @description Перший НЕчинний день.
+             */
+            validTo: string;
         };
         /** @description Повна заміна налаштувань прив'язки; таблиця й колонка-ціль — її ключ і не змінюються. */
         UpdateRowWindowMapCommand: {

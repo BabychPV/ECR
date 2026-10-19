@@ -119,7 +119,15 @@ USING (VALUES
   -- звужуване (`PermissionScopes.Narrowable` не містить). Не небезпечне (0):
   -- `SystemAdministrator` (`%`) отримує його цим же MERGE; роздача
   -- `DataEntry` — секція `SEC:SUBMIT` нижче, після `SEC:RPT`.
-  (N'Document.Submit',          N'Document',    0)
+  (N'Document.Submit',          N'Document',    0),
+  -- PERMITS: permissions ── права типів дозволів (PM-04, рішення «Аудиту» ч.1, варіант б) ──
+  -- Окремі глобальні права замість Registry.EditDefinition / Registry.Publish: ними керують реєстри Land, а тип
+  -- дозволу — власна сутність. Не небезпечні (0), як і Registry.EditDefinition: `SystemAdministrator` (`%`) бере їх
+  -- сам; `TemplateAdministrator` і явна пара `SystemAdministrator` — секція `PERMITS: permissions` після роздач ролей.
+  -- Рядок стоїть у єдиному каталозі (його читають сторожі). Перегляд типів лишається Registry.View.
+  (N'Permit.EditType',          N'Permit',      0),
+  (N'Permit.PublishType',       N'Permit',      0)
+  -- PERMITS: permissions ── кінець секції ──
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)
@@ -602,6 +610,25 @@ USING (
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
 GO
+
+-- PERMITS: permissions ── роздача ролям ──
+-- Поіменно й окремим MERGE (як `Approver` × `Report.EditDefinition`), щоб блок вище не міняти: обидві вбудовані ролі
+-- керують типами дозволів. Права не небезпечні, тож `SystemAdministrator` отримав би їх і шаблоном `%`; явна пара
+-- тримає роздачу незалежною від того, чи каталог прав був заповнений до першого MERGE ролей.
+MERGE sec.RolePermission AS t
+USING (
+    SELECT r.Id AS RoleId, p.Code AS PermissionCode
+    FROM (VALUES
+        (N'SystemAdministrator',   N'Permit.EditType'), (N'SystemAdministrator',   N'Permit.PublishType'),
+        (N'TemplateAdministrator', N'Permit.EditType'), (N'TemplateAdministrator', N'Permit.PublishType')
+    ) AS m (RoleCode, PermissionCode)
+    JOIN sec.Role       AS r ON r.Code = m.RoleCode AND r.IsBuiltIn = 1 -- U1-04
+    JOIN sec.Permission AS p ON p.Code = m.PermissionCode
+) AS s
+ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
+WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
+GO
+-- PERMITS: permissions ── роздача ── кінець секції ──
 
 -- ── Роль первинного налаштування ─────────────────────────────────────────
 -- ⚠ Роль лишається, а от НЕБЕЗПЕЧНІ ПРАВА їй більше не видаються (`D-121`).
@@ -8174,6 +8201,41 @@ USING (VALUES
     ,(N'err.ECR-PRM-4094.published', N'en', N'The permit type "{code}" is published and cannot be deleted.', 1)
     ,(N'err.ECR-PRM-4094.hasPermits', N'en', N'The permit type "{code}" already has {count} permits and cannot be deleted.', 1)
     -- PERMITS: types ── кінець секції ──
+    -- PERMITS: permits ── en: ECR-PRM-4095 і випадки 0404/0422 екземплярів дозволів (PM-04) ──
+    ,(N'err.ECR-PRM-0404.permit', N'en', N'Permit {id} does not exist.', 1)
+    ,(N'err.ECR-PRM-0422.numberRequired', N'en', N'The permit number is required.', 1)
+    ,(N'err.ECR-PRM-0422.numberTooLong', N'en', N'The permit number must not be longer than {max} characters.', 1)
+    ,(N'err.ECR-PRM-0422.locationTooLong', N'en', N'The location must not be longer than {max} characters.', 1)
+    ,(N'err.ECR-PRM-0422.validityOrder', N'en', N'The permit must end after it starts: {from} - {to}. The end date is the first day it is no longer valid.', 1)
+    ,(N'err.ECR-PRM-0422.typeNotPublished', N'en', N'The permit type "{typeCode}" is not published yet, so a permit cannot be created for it.', 1)
+    ,(N'err.ECR-PRM-4095', N'en', N'Permit already exists', 1)
+    ,(N'err.ECR-PRM-4095.number', N'en', N'A permit "{number}" of type "{typeCode}" valid from {validFrom} already exists (id {id}).', 1)
+    -- PERMITS: permits ── ECR-PRM-4095 ── кінець секції ──
+    -- PERMITS: permissions ── en: підписи прав типів дозволів ──
+    ,(N'permission.Permit.EditType', N'en', N'Edit permit types', 1)
+    ,(N'permission.Permit.PublishType', N'en', N'Publish permit types', 1)
+    ,(N'security.domain.Permit', N'en', N'Permits', 1)
+    -- PERMITS: permissions ── en ── кінець секції ──
+    -- PERMITS: permits ── en: читання дозволів — фільтри переліку (PM-04) ──
+    ,(N'err.ECR-PRM-0422.statusUnknown', N'en', N'The status "{status}" does not exist. Use Draft, Active or Expired.', 1)
+    ,(N'err.ECR-PRM-0422.cursorInvalid', N'en', N'The page cursor of the permit list is not valid. Start from the first page.', 1)
+    -- PERMITS: permits ── читання ── кінець секції ──
+    -- PERMITS: permits ── en: ECR-PRM-4096 і зміна/видалення дозволу (PM-04) ──
+    ,(N'err.ECR-PRM-4096', N'en', N'Permit state does not allow this', 1)
+    ,(N'err.ECR-PRM-4096.changed', N'en', N'The permit {id} was changed after you opened it. Reload it and repeat your edit.', 1)
+    ,(N'err.ECR-PRM-4096.notEditable', N'en', N'The permit {id} has expired and can no longer be edited.', 1)
+    ,(N'err.ECR-PRM-4096.notDraft', N'en', N'The permit {id} is {status}: this is only possible for a draft.', 1)
+    ,(N'err.ECR-PRM-4096.inUse', N'en', N'The permit {id} or its rows are referenced from elsewhere ({count}) and cannot be deleted.', 1)
+    -- PERMITS: permits ── ECR-PRM-4096 ── кінець секції ──
+    -- PERMITS: permits ── en: ECR-PRM-4092 і життєвий цикл дозволу (PM-04) ──
+    ,(N'err.ECR-PRM-4092', N'en', N'Permit validity overlaps', 1)
+    ,(N'err.ECR-PRM-4092.overlap', N'en', N'The permit "{number}" ({id}) overlaps in time with the active permit {otherId} of the same number.', 1)
+    ,(N'err.ECR-PRM-4096.notActive', N'en', N'The permit {id} is {status}: this is only possible for an active permit.', 1)
+    ,(N'err.ECR-PRM-4096.notRenewable', N'en', N'The permit {id} is a draft: only an active or expired permit can be renewed.', 1)
+    ,(N'err.ECR-PRM-0422.endReasonTooShort', N'en', N'The reason for ending the permit early must have at least {min} characters.', 1)
+    ,(N'err.ECR-PRM-0422.endDateOutOfRange', N'en', N'The end date {endDate} must be after the start {from} and not later than the current end {to}.', 1)
+    ,(N'err.ECR-PRM-0422.renewRowInvalid', N'en', N'Row "{rowCode}" of table "{tableCode}" could not be copied into the new draft: {reason}.', 1)
+    -- PERMITS: permits ── ECR-PRM-4092 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -20696,6 +20758,101 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: types ── ECR-PRM-4094 ── кінець секції ──
+
+-- PERMITS: permits ── ECR-PRM-4095 ── ru/kz: дозвіл уже існує, випадки 0404/0422 екземплярів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-0404.permit', N'ru', N'Разрешения {id} не существует.'),
+    (N'err.ECR-PRM-0404.permit', N'kz', N'{id} рұқсаты жоқ.'),
+    (N'err.ECR-PRM-0422.numberRequired', N'ru', N'Номер разрешения обязателен.'),
+    (N'err.ECR-PRM-0422.numberRequired', N'kz', N'Рұқсат нөмірі міндетті.'),
+    (N'err.ECR-PRM-0422.numberTooLong', N'ru', N'Номер разрешения не должен быть длиннее {max} символов.'),
+    (N'err.ECR-PRM-0422.numberTooLong', N'kz', N'Рұқсат нөмірі {max} таңбадан ұзын болмауы керек.'),
+    (N'err.ECR-PRM-0422.locationTooLong', N'ru', N'Расположение не должно быть длиннее {max} символов.'),
+    (N'err.ECR-PRM-0422.locationTooLong', N'kz', N'Орналасқан жері {max} таңбадан ұзын болмауы керек.'),
+    (N'err.ECR-PRM-0422.validityOrder', N'ru', N'Разрешение должно заканчиваться после начала: {from} - {to}. Дата окончания - первый день, когда оно уже не действует.'),
+    (N'err.ECR-PRM-0422.validityOrder', N'kz', N'Рұқсат басталғаннан кейін аяқталуы керек: {from} - {to}. Аяқталу күні - ол енді жарамсыз болатын алғашқы күн.'),
+    (N'err.ECR-PRM-0422.typeNotPublished', N'ru', N'Тип разрешения «{typeCode}» ещё не опубликован: разрешение по нему создать нельзя.'),
+    (N'err.ECR-PRM-0422.typeNotPublished', N'kz', N'«{typeCode}» рұқсат түрі әлі жарияланбаған: ол бойынша рұқсат жасау мүмкін емес.'),
+    (N'err.ECR-PRM-4095', N'ru', N'Разрешение уже существует'),
+    (N'err.ECR-PRM-4095', N'kz', N'Рұқсат бұрыннан бар'),
+    (N'err.ECR-PRM-4095.number', N'ru', N'Разрешение «{number}» типа «{typeCode}» с началом {validFrom} уже существует (Id {id}).'),
+    (N'err.ECR-PRM-4095.number', N'kz', N'«{typeCode}» түріндегі {validFrom} басталатын «{number}» рұқсаты бұрыннан бар (Id {id}).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: permits ── ECR-PRM-4095 ── ru/kz ── кінець секції ──
+
+-- PERMITS: permissions ── ru/kz: підписи прав типів дозволів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permission.Permit.EditType', N'ru', N'Изменение типов разрешений'),
+    (N'permission.Permit.EditType', N'kz', N'Рұқсат түрлерін өңдеу'),
+    (N'permission.Permit.PublishType', N'ru', N'Публикация типов разрешений'),
+    (N'permission.Permit.PublishType', N'kz', N'Рұқсат түрлерін жариялау'),
+    (N'security.domain.Permit', N'ru', N'Разрешения'),
+    (N'security.domain.Permit', N'kz', N'Рұқсаттар')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: permissions ── ru/kz ── кінець секції ──
+
+-- PERMITS: permits ── ru/kz: читання дозволів — фільтри переліку; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-0422.statusUnknown', N'ru', N'Статуса «{status}» не существует. Используйте Draft, Active или Expired.'),
+    (N'err.ECR-PRM-0422.statusUnknown', N'kz', N'«{status}» күйі жоқ. Draft, Active немесе Expired қолданыңыз.'),
+    (N'err.ECR-PRM-0422.cursorInvalid', N'ru', N'Курсор страницы списка разрешений некорректен. Начните с первой страницы.'),
+    (N'err.ECR-PRM-0422.cursorInvalid', N'kz', N'Рұқсаттар тізімі бетінің курсоры жарамсыз. Бірінші беттен бастаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: permits ── читання ── ru/kz ── кінець секції ──
+
+-- PERMITS: permits ── ECR-PRM-4096 ── ru/kz: стан дозволу не дозволяє дію; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-4096', N'ru', N'Состояние разрешения не допускает это действие'),
+    (N'err.ECR-PRM-4096', N'kz', N'Рұқсаттың күйі бұл әрекетке жол бермейді'),
+    (N'err.ECR-PRM-4096.changed', N'ru', N'Разрешение {id} изменили после того, как вы его открыли. Перечитайте его и повторите правку.'),
+    (N'err.ECR-PRM-4096.changed', N'kz', N'{id} рұқсатын сіз ашқаннан кейін өзгертті. Оны қайта оқып, өзгерісті қайталаңыз.'),
+    (N'err.ECR-PRM-4096.notEditable', N'ru', N'Разрешение {id} закончилось и больше не редактируется.'),
+    (N'err.ECR-PRM-4096.notEditable', N'kz', N'{id} рұқсатының мерзімі аяқталды, енді өңделмейді.'),
+    (N'err.ECR-PRM-4096.notDraft', N'ru', N'Разрешение {id} в состоянии {status}: это возможно только для черновика.'),
+    (N'err.ECR-PRM-4096.notDraft', N'kz', N'{id} рұқсаты {status} күйінде: бұл тек жоба үшін мүмкін.'),
+    (N'err.ECR-PRM-4096.inUse', N'ru', N'На разрешение {id} или его строки ссылаются ({count}): оно не удаляется.'),
+    (N'err.ECR-PRM-4096.inUse', N'kz', N'{id} рұқсатына немесе оның жолдарына сілтемелер бар ({count}): ол жойылмайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: permits ── ECR-PRM-4096 ── ru/kz ── кінець секції ──
+
+-- PERMITS: permits ── ECR-PRM-4092 ── ru/kz: перетин чинності, життєвий цикл дозволу; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-4092', N'ru', N'Сроки действия разрешений пересекаются'),
+    (N'err.ECR-PRM-4092', N'kz', N'Рұқсаттардың жарамдылық мерзімдері қиылысады'),
+    (N'err.ECR-PRM-4092.overlap', N'ru', N'Разрешение «{number}» ({id}) пересекается по времени с действующим разрешением {otherId} того же номера.'),
+    (N'err.ECR-PRM-4092.overlap', N'kz', N'«{number}» ({id}) рұқсаты сол нөмірдегі {otherId} жарамды рұқсатымен уақыт бойынша қиылысады.'),
+    (N'err.ECR-PRM-4096.notActive', N'ru', N'Разрешение {id} в состоянии {status}: это возможно только для действующего разрешения.'),
+    (N'err.ECR-PRM-4096.notActive', N'kz', N'{id} рұқсаты {status} күйінде: бұл тек жарамды рұқсат үшін мүмкін.'),
+    (N'err.ECR-PRM-4096.notRenewable', N'ru', N'Разрешение {id} - черновик: продлевать можно только действующее или закончившееся разрешение.'),
+    (N'err.ECR-PRM-4096.notRenewable', N'kz', N'{id} рұқсаты - жоба: тек жарамды немесе аяқталған рұқсатты ұзартуға болады.'),
+    (N'err.ECR-PRM-0422.endReasonTooShort', N'ru', N'Причина досрочного завершения разрешения должна содержать не менее {min} символов.'),
+    (N'err.ECR-PRM-0422.endReasonTooShort', N'kz', N'Рұқсатты мерзімінен бұрын аяқтау себебі кемінде {min} таңба болуы керек.'),
+    (N'err.ECR-PRM-0422.endDateOutOfRange', N'ru', N'Дата завершения {endDate} должна быть позже начала {from} и не позже текущего окончания {to}.'),
+    (N'err.ECR-PRM-0422.endDateOutOfRange', N'kz', N'Аяқталу күні {endDate} басталудан {from} кейін және ағымдағы аяқталудан {to} кеш болмауы керек.'),
+    (N'err.ECR-PRM-0422.renewRowInvalid', N'ru', N'Строку «{rowCode}» таблицы «{tableCode}» не удалось скопировать в новый черновик: {reason}.'),
+    (N'err.ECR-PRM-0422.renewRowInvalid', N'kz', N'«{tableCode}» кестесінің «{rowCode}» жолын жаңа жобаға көшіру мүмкін болмады: {reason}.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: permits ── ECR-PRM-4092 ── ru/kz ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

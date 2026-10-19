@@ -129,15 +129,19 @@ public sealed class PermitConstraintsTests(SqlServerFixture sql)
     {
         var c = Uid();
         var t = Type(c) + "DECLARE @t int = SCOPE_IDENTITY();";
+        // ⚠ Ідентифікатори реєстрів - з діапазону, якого немає в базі: ключі (FK вимкнено в транзакції) не мають стикатися
+        // з реєстрами таблиць справжніх типів, створених іншими тестами тієї самої бази (Permits PM-04).
+        const string r1 = "2147000001";
+        const string r2 = "2147000002";
         await Violates("UQ_PermitTypeTable",
-            t + "INSERT cfg.PermitTypeTable(PermitTypeDefId,Code,NameL10n,Ordinal,RegistryDefId) VALUES(@t,N'a',N'{}',1,1);" +
-                "INSERT cfg.PermitTypeTable(PermitTypeDefId,Code,NameL10n,Ordinal,RegistryDefId) VALUES(@t,N'a',N'{}',2,2);");
+            t + $"INSERT cfg.PermitTypeTable(PermitTypeDefId,Code,NameL10n,Ordinal,RegistryDefId) VALUES(@t,N'a',N'{{}}',1,{r1});" +
+                $"INSERT cfg.PermitTypeTable(PermitTypeDefId,Code,NameL10n,Ordinal,RegistryDefId) VALUES(@t,N'a',N'{{}}',2,{r2});");
         await Violates("UQ_PermitTypeTable_Registry",
-            t + "INSERT cfg.PermitTypeTable(PermitTypeDefId,Code,NameL10n,Ordinal,RegistryDefId) VALUES(@t,N'a',N'{}',1,1);" +
-                "INSERT cfg.PermitTypeTable(PermitTypeDefId,Code,NameL10n,Ordinal,RegistryDefId) VALUES(@t,N'b',N'{}',2,1);");
+            t + $"INSERT cfg.PermitTypeTable(PermitTypeDefId,Code,NameL10n,Ordinal,RegistryDefId) VALUES(@t,N'a',N'{{}}',1,{r1});" +
+                $"INSERT cfg.PermitTypeTable(PermitTypeDefId,Code,NameL10n,Ordinal,RegistryDefId) VALUES(@t,N'b',N'{{}}',2,{r1});");
         await Valid(
-            t + "INSERT cfg.PermitTypeTable(PermitTypeDefId,Code,NameL10n,Ordinal,RegistryDefId) VALUES(@t,N'a',N'{}',1,1);" +
-                "INSERT cfg.PermitTypeTable(PermitTypeDefId,Code,NameL10n,Ordinal,RegistryDefId) VALUES(@t,N'b',N'{}',2,2);");
+            t + $"INSERT cfg.PermitTypeTable(PermitTypeDefId,Code,NameL10n,Ordinal,RegistryDefId) VALUES(@t,N'a',N'{{}}',1,{r1});" +
+                $"INSERT cfg.PermitTypeTable(PermitTypeDefId,Code,NameL10n,Ordinal,RegistryDefId) VALUES(@t,N'b',N'{{}}',2,{r2});");
     }
 
     // ---------- PermitFieldMeta ----------

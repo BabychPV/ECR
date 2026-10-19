@@ -8,8 +8,7 @@ namespace Ecr.Api.Controllers;
 
 /// <summary>
 /// Типи дозволів: перелік, визначення, чернетка складу, нова версія, атомарна публікація (Permits, PM-03).
-/// Права - ті самі, що в реєстрів: читання <c>Registry.View</c>, зміна <c>Registry.EditDefinition</c>, публікація
-/// <c>Registry.Publish</c>.
+/// Права: читання <c>Registry.View</c>, зміна <c>Permit.EditType</c>, публікація <c>Permit.PublishType</c>.
 /// </summary>
 [ApiController]
 [Route("api/v1/permit-types")]
@@ -49,7 +48,7 @@ public sealed class PermitTypesController(
     public async Task<ActionResult<PermitTypeDto>> Get(string code, CancellationToken ct)
         => Ok(await get.HandleAsync(code, ct).ConfigureAwait(false));
 
-    /// <summary>Заводить тип чернеткою (з копією іншого типу за потреби). Право <c>Registry.EditDefinition</c>.</summary>
+    /// <summary>Заводить тип чернеткою (з копією іншого типу за потреби). Право <c>Permit.EditType</c>.</summary>
     /// <param name="request">Код, назва, категорія, <c>copyFromCode</c>.</param>
     /// <param name="ct">Токен скасування.</param>
     [HttpPost]
@@ -65,7 +64,7 @@ public sealed class PermitTypesController(
 
     /// <summary>
     /// Замінює ЧЕРНЕТКУ визначення цілком (таблиці, стовпці, списки, перевірки). Право
-    /// <c>Registry.EditDefinition</c>. Токен <c>rowVersion</c> - з останнього читання.
+    /// <c>Permit.EditType</c>. Токен <c>rowVersion</c> - з останнього читання.
     /// </summary>
     /// <param name="code">Код типу.</param>
     /// <param name="request">Повний склад і токен.</param>
@@ -80,7 +79,7 @@ public sealed class PermitTypesController(
         => Ok(await replace.HandleAsync(code, request, ct).ConfigureAwait(false));
 
     /// <summary>
-    /// Видаляє ніколи не опублікований тип без дозволів. Право <c>Registry.EditDefinition</c>.
+    /// Видаляє ніколи не опублікований тип без дозволів. Право <c>Permit.EditType</c>.
     /// </summary>
     /// <param name="code">Код типу.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -96,7 +95,7 @@ public sealed class PermitTypesController(
 
     /// <summary>
     /// Публікує чернетку АТОМАРНО: шапка, усі таблиці й приховані списки - однією транзакцією. Право
-    /// <c>Registry.Publish</c>.
+    /// <c>Permit.PublishType</c>.
     /// </summary>
     /// <param name="code">Код типу.</param>
     /// <param name="request">Причина (не коротша за 10 символів) і токен чернетки.</param>
@@ -111,7 +110,7 @@ public sealed class PermitTypesController(
         => Ok(await publish.HandleAsync(code, request, ct).ConfigureAwait(false));
 
     /// <summary>
-    /// Відкриває чернетку нової версії опублікованого типу. Право <c>Registry.EditDefinition</c>.
+    /// Відкриває чернетку нової версії опублікованого типу. Право <c>Permit.EditType</c>.
     /// </summary>
     /// <param name="code">Код типу.</param>
     /// <param name="ct">Токен скасування.</param>

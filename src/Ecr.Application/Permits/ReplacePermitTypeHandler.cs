@@ -11,7 +11,7 @@ namespace Ecr.Application.Permits;
 
 /// <summary>
 /// Замінює ЧЕРНЕТКУ визначення типу цілком: таблиці, стовпці, списки, перевірки (Permits, PM-03).
-/// Право <c>Registry.EditDefinition</c>.
+/// Право <c>Permit.EditType</c>.
 /// </summary>
 /// <remarks>
 /// ⛔ Реєстри тут не змінюються: чернетка - JSON у типі (<see cref="PermitTypeCodec"/>), реєстри оновить публікація
@@ -26,8 +26,8 @@ public sealed class ReplacePermitTypeHandler(
     ICurrentUser currentUser,
     IClock clock)
 {
-    /// <summary>Право на зміну опису довідників.</summary>
-    public const string Permission = "Registry.EditDefinition";
+    /// <summary>Право на зміну типів дозволів.</summary>
+    public const string Permission = "Permit.EditType";
 
     /// <summary>Замінює чернетку.</summary>
     /// <param name="code">Код типу.</param>
@@ -97,7 +97,7 @@ public sealed class ReplacePermitTypeHandler(
 
 /// <summary>
 /// Відкриває чернетку нової версії опублікованого типу: вона стартує з його поточного складу. Право
-/// <c>Registry.EditDefinition</c> (Permits, PM-03).
+/// <c>Permit.EditType</c> (Permits, PM-03).
 /// </summary>
 public sealed class OpenPermitTypeVersionHandler(
     IPermitTypeStore permits,
@@ -107,8 +107,8 @@ public sealed class OpenPermitTypeVersionHandler(
     ICurrentUser currentUser,
     IClock clock)
 {
-    /// <summary>Право на зміну опису довідників.</summary>
-    public const string Permission = "Registry.EditDefinition";
+    /// <summary>Право на зміну типів дозволів.</summary>
+    public const string Permission = "Permit.EditType";
 
     /// <summary>Відкриває нову версію.</summary>
     /// <param name="code">Код типу.</param>

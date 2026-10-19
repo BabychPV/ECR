@@ -64,6 +64,22 @@ internal sealed class PermitHarness : IAsyncDisposable
             new Ecr.Application.Registries.Keys.RegistryKeyService(keys, Uow));
         Publish = new PublishPermitTypeHandler(Permits, Registries, keys, save, Uow, audit, access, user, clock);
 
+        // Запис записів реєстрів - тим самим писачем і службою ключів, що в контейнері (PM-04: шапки дозволів, R2).
+        KeyService = new Ecr.Application.Registries.Keys.RegistryKeyService(keys, Uow);
+        Writer = new RegistryEntryWriter(Registries, Uow, audit, user, clock, KeyService);
+        RowsQuery = new RegistryRowsQuery(Db);
+        Stats = new PermitStore(Db);
+        CreatePermit = new CreatePermitHandler(Permits, Registries, RowsQuery, Stats, Writer, Uow, access, user, clock);
+        GetPermit = new GetPermitHandler(Permits, Registries, RowsQuery, Stats, access, user, clock);
+        ListPermits = new ListPermitsHandler(Permits, Registries, RowsQuery, Stats, access, user, clock);
+        UpdatePermit = new UpdatePermitHandler(Permits, Registries, RowsQuery, Stats, Writer, Uow, access, user, clock);
+        DeletePermit = new DeletePermitHandler(Permits, Registries, RowsQuery, Stats, KeyService, Uow, audit, access, user, clock);
+        GetRows = new Ecr.Application.Registries.Rows.GetRegistryRowsHandler(
+            Registries, RowsQuery, new RegistryResolver(), access, user, Permits);
+        ActivatePermit = new ActivatePermitHandler(Permits, Registries, RowsQuery, Stats, Writer, Uow, audit, access, user, clock);
+        EndPermit = new EndPermitHandler(Permits, Registries, RowsQuery, Stats, Writer, Uow, audit, access, user, clock);
+        RenewPermit = new RenewPermitHandler(Permits, Registries, RowsQuery, Stats, Writer, Uow, audit, access, user, clock);
+
         Access = access;
         User = user;
         Clock = clock;
@@ -109,6 +125,38 @@ internal sealed class PermitHarness : IAsyncDisposable
 
     public PublishPermitTypeHandler Publish { get; }
 
+    public Ecr.Application.Registries.Keys.RegistryKeyService KeyService { get; }
+
+    public RegistryEntryWriter Writer { get; }
+
+    public RegistryRowsQuery RowsQuery { get; }
+
+    public PermitStore Stats { get; }
+
+    public CreatePermitHandler CreatePermit { get; }
+
+    public GetPermitHandler GetPermit { get; }
+
+    public ListPermitsHandler ListPermits { get; }
+
+    public UpdatePermitHandler UpdatePermit { get; }
+
+    public DeletePermitHandler DeletePermit { get; }
+
+    public Ecr.Application.Registries.Rows.GetRegistryRowsHandler GetRows { get; }
+
+    public ActivatePermitHandler ActivatePermit { get; }
+
+    public EndPermitHandler EndPermit { get; }
+
+    public RenewPermitHandler RenewPermit { get; }
+
+    /// <summary>Права, потрібні для ведення дозволів: читати й писати дані реєстрів.</summary>
+    public static string[] Editor => ["Registry.View", "Registry.EditData"];
+
+    /// <summary>Усі права: тип + дозволи.</summary>
+    public static string[] EverythingWithData => [.. Everything, "Registry.EditData"];
+
     /// <summary>Нова «сесія» тієї самої особи: свій контекст, як у наступному запиті.</summary>
     public async Task<PermitHarness> NextRequestAsync() => await CreateAsync(Sql, Permissions, UserId).ConfigureAwait(false);
 
@@ -126,7 +174,7 @@ internal sealed class PermitHarness : IAsyncDisposable
 
     /// <summary>Усі права, потрібні для повного циклу типу.</summary>
     public static string[] Everything =>
-        ["Registry.View", "Registry.EditDefinition", "Registry.Publish"];
+        ["Registry.View", "Permit.EditType", "Permit.PublishType"];
 
     public static LocalizedText Text(string en) => new(new Dictionary<string, string> { ["en"] = en });
 

@@ -3163,6 +3163,65 @@
         ],
         "type": "object"
       },
+      "CreatePermitRequest": {
+        "description": "Запит на заведення дозволу (чернеткою).",
+        "properties": {
+          "issueDate": {
+            "description": "Дата видачі.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "location": {
+            "description": "Розташування.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "number": {
+            "description": "Номер дозволу.",
+            "type": "string"
+          },
+          "reportingFlags": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PermitReportingFlags",
+                "description": "Прапорці звітних форм; `null` - жодного."
+              }
+            ]
+          },
+          "typeCode": {
+            "description": "Опублікований тип.",
+            "type": "string"
+          },
+          "validFrom": {
+            "description": "Перший чинний день.",
+            "format": "date",
+            "type": "string"
+          },
+          "validTo": {
+            "description": "Перший НЕчинний день; суворо пізніше за початок.",
+            "format": "date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "typeCode",
+          "number",
+          "location",
+          "issueDate",
+          "validFrom",
+          "validTo",
+          "reportingFlags"
+        ],
+        "type": "object"
+      },
       "CreatePermitTypeRequest": {
         "description": "Запит на заведення типу.",
         "properties": {
@@ -5384,6 +5443,28 @@
           "denyReason",
           "groupsFromTicket",
           "contributions"
+        ],
+        "type": "object"
+      },
+      "EndPermitRequest": {
+        "description": "Запит на дострокове завершення чинного дозволу.",
+        "properties": {
+          "endDate": {
+            "description": "Перший нечинний день; `null` - сьогодні (UTC).",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "description": "Причина, не коротша за 10 символів (іде в журнал).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "endDate"
         ],
         "type": "object"
       },
@@ -9361,6 +9442,39 @@
         ],
         "type": "object"
       },
+      "PagedResultOfPermitListItemDto": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/PermitListItemDto"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
       "PagedResultOfPermitTypeListItemDto": {
         "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
         "properties": {
@@ -10356,6 +10470,375 @@
           "code",
           "group",
           "isDangerous"
+        ],
+        "type": "object"
+      },
+      "PermitBoundSheetDto": {
+        "description": "Аркуш, що читає дозвіл через привʼязку (з PM-09; до того завжди порожньо).",
+        "properties": {
+          "bindingCode": {
+            "description": "Код привʼязки.",
+            "type": "string"
+          },
+          "mode": {
+            "description": "`Rows` або `Formulas`.",
+            "type": "string"
+          },
+          "sheetName": {
+            "description": "Назва аркуша.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bindingCode",
+          "sheetName",
+          "mode"
+        ],
+        "type": "object"
+      },
+      "PermitDto": {
+        "description": "Дозвіл: шапка, життєвий цикл, таблиці й хто його читає.",
+        "properties": {
+          "actualEnd": {
+            "description": "Фактична дата закінчення.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "boundSheets": {
+            "description": "Аркуші, що читають дозвіл (з PM-09; до того порожньо).",
+            "items": {
+              "$ref": "#/components/schemas/PermitBoundSheetDto"
+            },
+            "type": "array"
+          },
+          "category": {
+            "description": "Категорія типу.",
+            "type": "string"
+          },
+          "endsInDays": {
+            "description": "Днів до закінчення; лише для `Active`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор дозволу (запис шапки).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "issueDate": {
+            "description": "Дата видачі.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "location": {
+            "description": "Розташування.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "number": {
+            "description": "Номер дозволу.",
+            "type": "string"
+          },
+          "reportingFlags": {
+            "$ref": "#/components/schemas/PermitReportingFlags",
+            "description": "Прапорці звітних форм."
+          },
+          "rowVersion": {
+            "description": "Токен для наступного `PUT`.",
+            "type": "string"
+          },
+          "status": {
+            "description": "`Draft`, `Active` або `Expired` на дату `asOf` (за замовчуванням сьогодні, UTC).",
+            "type": "string"
+          },
+          "tables": {
+            "description": "Таблиці типу з підсумками по цьому дозволу.",
+            "items": {
+              "$ref": "#/components/schemas/PermitTableDto"
+            },
+            "type": "array"
+          },
+          "typeCode": {
+            "description": "Код типу.",
+            "type": "string"
+          },
+          "typeNameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва типу мовами каталогу.",
+            "type": "object"
+          },
+          "typeVersion": {
+            "description": "Опублікована версія типу.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "updatedAt": {
+            "description": "Остання зміна запису шапки, UTC.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "updatedByDisplayName": {
+            "description": "Хто змінив.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validFrom": {
+            "description": "Перший чинний день.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validTo": {
+            "description": "Перший НЕчинний день (виключна межа).",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "typeCode",
+          "typeNameL10n",
+          "typeVersion",
+          "category",
+          "location",
+          "issueDate",
+          "validFrom",
+          "validTo",
+          "actualEnd",
+          "status",
+          "endsInDays",
+          "reportingFlags",
+          "tables",
+          "boundSheets",
+          "rowVersion",
+          "updatedAt",
+          "updatedByDisplayName"
+        ],
+        "type": "object"
+      },
+      "PermitListItemDto": {
+        "description": "Рядок переліку дозволів.",
+        "properties": {
+          "actualEnd": {
+            "description": "Фактична дата закінчення.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "boundSheetCount": {
+            "description": "Скільки аркушів читають дозвіл; поки привʼязок немає (PM-09) - завжди 0.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "endsInDays": {
+            "description": "Днів від `asOf` до закінчення; лише для `Active` з відомою датою закінчення.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор дозволу (запис шапки).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "issueDate": {
+            "description": "Дата видачі.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "location": {
+            "description": "Розташування.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "number": {
+            "description": "Номер дозволу.",
+            "type": "string"
+          },
+          "rowCount": {
+            "description": "Σ рядків усіх таблиць.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "status": {
+            "description": "`Draft`, `Active` або `Expired` на дату `asOf`.",
+            "type": "string"
+          },
+          "tableCount": {
+            "description": "Кількість таблиць типу.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "typeCode": {
+            "description": "Код типу.",
+            "type": "string"
+          },
+          "typeNameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва типу мовами каталогу.",
+            "type": "object"
+          },
+          "updatedAt": {
+            "description": "Остання зміна запису шапки, UTC.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "updatedByDisplayName": {
+            "description": "Хто змінив.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validFrom": {
+            "description": "Перший чинний день.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validTo": {
+            "description": "Перший НЕчинний день (виключна межа, півінтервал `[from, to)`).",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "typeCode",
+          "typeNameL10n",
+          "location",
+          "issueDate",
+          "validFrom",
+          "validTo",
+          "actualEnd",
+          "status",
+          "endsInDays",
+          "rowCount",
+          "tableCount",
+          "boundSheetCount",
+          "updatedAt",
+          "updatedByDisplayName"
+        ],
+        "type": "object"
+      },
+      "PermitReportingFlags": {
+        "description": "Прапорці звітних форм, до яких входить дозвіл (поля шапки `Form_300`…`TOx`).",
+        "properties": {
+          "form300": {
+            "description": "Входить у форму 300.",
+            "type": "boolean"
+          },
+          "form301": {
+            "description": "Входить у форму 301.",
+            "type": "boolean"
+          },
+          "form302": {
+            "description": "Входить у форму 302.",
+            "type": "boolean"
+          },
+          "tox": {
+            "description": "Входить у TOx.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "form300",
+          "form301",
+          "form302",
+          "tox"
+        ],
+        "type": "object"
+      },
+      "PermitTableDto": {
+        "description": "Таблиця дозволу: склад з типу й підсумки по рядках.",
+        "properties": {
+          "code": {
+            "description": "Код таблиці в межах типу.",
+            "type": "string"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва мовами каталогу.",
+            "type": "object"
+          },
+          "registryCode": {
+            "description": "Код прихованого реєстру таблиці (`PRM_&lt;тип&gt;_&lt;таблиця&gt;`): через нього клієнт читає й пише рядки.",
+            "type": "string"
+          },
+          "rowCount": {
+            "description": "Скільки живих рядків у цього дозволу.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Σ головного стовпця по рядках дозволу; `null`, якщо стовпця немає.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalColumnCode": {
+            "description": "Головний числовий стовпець (перший обов'язковий `Decimal` за порядком); `null` - такого немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "nameL10n",
+          "registryCode",
+          "rowCount",
+          "totalColumnCode",
+          "total"
         ],
         "type": "object"
       },
@@ -13156,6 +13639,23 @@
         },
         "required": [
           "nameL10n"
+        ],
+        "type": "object"
+      },
+      "RenewPermitRequest": {
+        "description": "Необовʼязкові параметри поновлення дозволу.",
+        "properties": {
+          "validTo": {
+            "description": "Кінець нового дозволу; `null` - рівно на рік після його початку.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "validTo"
         ],
         "type": "object"
       },
@@ -19741,6 +20241,74 @@
           "graceOffsetDays",
           "hardCloseOffsetDays",
           "yearGraceOffsetDays"
+        ],
+        "type": "object"
+      },
+      "UpdatePermitRequest": {
+        "description": "Запит на зміну шапки дозволу (чернетка чи чинний).",
+        "properties": {
+          "actualEnd": {
+            "description": "Фактична дата закінчення; `null` - не задана.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "issueDate": {
+            "description": "Дата видачі.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "location": {
+            "description": "Розташування.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "number": {
+            "description": "Номер дозволу.",
+            "type": "string"
+          },
+          "reportingFlags": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PermitReportingFlags",
+                "description": "Прапорці звітних форм; `null` - жодного."
+              }
+            ]
+          },
+          "rowVersion": {
+            "description": "Токен з останнього читання.",
+            "type": "string"
+          },
+          "validFrom": {
+            "description": "Перший чинний день.",
+            "format": "date",
+            "type": "string"
+          },
+          "validTo": {
+            "description": "Перший НЕчинний день.",
+            "format": "date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rowVersion",
+          "number",
+          "location",
+          "issueDate",
+          "validFrom",
+          "validTo",
+          "actualEnd",
+          "reportingFlags"
         ],
         "type": "object"
       },
@@ -34149,7 +34717,7 @@
             "description": "Unprocessable Entity"
           }
         },
-        "summary": "Заводить тип чернеткою (з копією іншого типу за потреби). Право `Registry.EditDefinition`.",
+        "summary": "Заводить тип чернеткою (з копією іншого типу за потреби). Право `Permit.EditType`.",
         "tags": [
           "PermitTypes"
         ]
@@ -34213,7 +34781,7 @@
             "description": "Conflict"
           }
         },
-        "summary": "Видаляє ніколи не опублікований тип без дозволів. Право `Registry.EditDefinition`.",
+        "summary": "Видаляє ніколи не опублікований тип без дозволів. Право `Permit.EditType`.",
         "tags": [
           "PermitTypes"
         ]
@@ -34392,7 +34960,7 @@
             "description": "Unprocessable Entity"
           }
         },
-        "summary": "Замінює ЧЕРНЕТКУ визначення цілком (таблиці, стовпці, списки, перевірки). Право\n`Registry.EditDefinition`. Токен `rowVersion` - з останнього читання.",
+        "summary": "Замінює ЧЕРНЕТКУ визначення цілком (таблиці, стовпці, списки, перевірки). Право\n`Permit.EditType`. Токен `rowVersion` - з останнього читання.",
         "tags": [
           "PermitTypes"
         ]
@@ -34473,7 +35041,7 @@
             "description": "Conflict"
           }
         },
-        "summary": "Відкриває чернетку нової версії опублікованого типу. Право `Registry.EditDefinition`.",
+        "summary": "Відкриває чернетку нової версії опублікованого типу. Право `Permit.EditType`.",
         "tags": [
           "PermitTypes"
         ]
@@ -34595,9 +35163,849 @@
             "description": "Unprocessable Entity"
           }
         },
-        "summary": "Публікує чернетку АТОМАРНО: шапка, усі таблиці й приховані списки - однією транзакцією. Право\n`Registry.Publish`.",
+        "summary": "Публікує чернетку АТОМАРНО: шапка, усі таблиці й приховані списки - однією транзакцією. Право\n`Permit.PublishType`.",
         "tags": [
           "PermitTypes"
+        ]
+      }
+    },
+    "/api/v1/permits": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Код типу.",
+            "in": "query",
+            "name": "type",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "`Draft`, `Active` або `Expired` на asOf.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Підрядок номера, розташування чи назви типу.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Дата, на яку рахується стан (типово сьогодні, UTC).",
+            "in": "query",
+            "name": "asOf",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Розмір сторінки 1..500 (типово 500: екран рахує підсумки з повного переліку).",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Id останнього дозволу попередньої сторінки.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfPermitListItemDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfPermitListItemDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfPermitListItemDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Перелік дозволів (усі доступні типи). Право `Registry.View`.",
+        "tags": [
+          "Permits"
+        ]
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePermitRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePermitRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePermitRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Заводить дозвіл ЧЕРНЕТКОЮ за опублікованим типом. Право `Registry.EditData`.",
+        "tags": [
+          "Permits"
+        ]
+      }
+    },
+    "/api/v1/permits/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Ідентифікатор дозволу.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Видаляє чернетку разом із рядками її таблиць. Право `Registry.EditData`.",
+        "tags": [
+          "Permits"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Ідентифікатор дозволу.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Дата, на яку рахується стан (типово сьогодні, UTC).",
+            "in": "query",
+            "name": "asOf",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Дозвіл: шапка, стан, таблиці з підсумками. Право `Registry.View`.",
+        "tags": [
+          "Permits"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Ідентифікатор дозволу.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePermitRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePermitRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePermitRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює шапку чернетки чи чинного дозволу (не закінченого). Право `Registry.EditData`. Токен\n`rowVersion` - з останнього читання.",
+        "tags": [
+          "Permits"
+        ]
+      }
+    },
+    "/api/v1/permits/{id}/activate": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Ідентифікатор дозволу.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Активує чернетку (`Draft → Active`) з перевіркою перетину чинних. Право `Registry.EditData`.",
+        "tags": [
+          "Permits"
+        ]
+      }
+    },
+    "/api/v1/permits/{id}/end": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Ідентифікатор дозволу.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndPermitRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndPermitRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndPermitRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Достроково завершує чинний дозвіл. Право `Registry.EditData`.",
+        "tags": [
+          "Permits"
+        ]
+      }
+    },
+    "/api/v1/permits/{id}/renew": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Ідентифікатор дозволу.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RenewPermitRequest"
+                  }
+                ]
+              }
+            },
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RenewPermitRequest"
+                  }
+                ]
+              }
+            },
+            "text/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RenewPermitRequest"
+                  }
+                ]
+              }
+            }
+          },
+          "description": "Токен скасування."
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitDto"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Поновлює дозвіл: нова чернетка з копією шапки й усіх рядків; початок = кінець поточного. Право\n`Registry.EditData`. Тіло необов'язкове.",
+        "tags": [
+          "Permits"
         ]
       }
     },
@@ -48569,6 +49977,9 @@
     },
     {
       "name": "Periods"
+    },
+    {
+      "name": "Permits"
     },
     {
       "name": "PermitTypes"

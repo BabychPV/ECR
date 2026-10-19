@@ -16,7 +16,7 @@ namespace Ecr.Application.Permits;
 
 /// <summary>
 /// Публікує чернетку типу АТОМАРНО: шапка, усі таблиці й приховані списки «лише для типу» застосовуються до реєстрів
-/// однією транзакцією, разом із надбудовою полів і станом типу (Permits, PM-03). Право <c>Registry.Publish</c>.
+/// однією транзакцією, разом із надбудовою полів і станом типу (Permits, PM-03). Право <c>Permit.PublishType</c>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -40,7 +40,7 @@ public sealed class PublishPermitTypeHandler(
     IClock clock)
 {
     /// <summary>Право на публікацію опису довідників.</summary>
-    public const string Permission = "Registry.Publish";
+    public const string Permission = "Permit.PublishType";
 
     /// <summary>Публікує чернетку.</summary>
     /// <param name="code">Код типу.</param>
@@ -86,6 +86,12 @@ public sealed class PublishPermitTypeHandler(
         }
         catch (ConcurrencyConflictException ex) when (ex.ErrorCode == Ecr.Domain.Errors.ErrorCodes.CellConflict)
         {
+            throw PermitTypeErrors.Changed(type.Code, type.RowVersion);
+        }
+        catch (BusinessRuleException ex) when (ex.ErrorCode == Ecr.Domain.Errors.ErrorCodes.PermitTypeDuplicate
+                                               && ex.Details?.GetValueOrDefault("concurrent") as string == "true")
+        {
+            // Паралельна публікація (або заведення) випередила нас на коді реєстру `PRM_…`: для публікації це «тип змінили».
             throw PermitTypeErrors.Changed(type.Code, type.RowVersion);
         }
 
