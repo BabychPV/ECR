@@ -22,9 +22,13 @@ public sealed class RowStore(
     EcrDbContext db, BulkCellLoader bulk, Domain.Abstractions.IClock clock, ArchiveAwareCellReader? archive = null,
     ISheetEditGate? structureGate = null,
     Microsoft.Extensions.Logging.ILogger<RowStore>? log = null,
-    Application.Permits.Bindings.IPermitBindingService? permits = null)
+    Application.Permits.Bindings.IPermitBindingService? permits = null,
+    IBackgroundJobScheduler? jobs = null)
     : IRowStore
 {
+    // ⚠ PM-10b: `jobs` - необов'язковий з тієї ж причини, що й `permits`; `null` - перерахунок після рядків з дозволу
+    // не ставиться (поведінка до PM-10b).
+
     // ⚠ PM-10: `permits` - необов'язковий з тієї ж причини, що й `archive`/`structureGate`: RowStore будують напряму
     // десятки тестів. `null` - рядків з дозволу немає (поведінка до PM-10); у DI сервіс зареєстровано.
     // ⚠ F-13. `archive` — необов'язковий параметр, а не звичайна залежність:
@@ -822,6 +826,7 @@ public sealed class RowStore(
         }
 
         var created = 0;
+        Application.Permits.Bindings.PermitMaterialization? materialized = null;
 
         try
         {
@@ -833,10 +838,11 @@ public sealed class RowStore(
                 async token =>
                 {
                     created = 0;
+                    materialized = null;
                     await (structureGate ?? new SheetEditGate(db))
                         .EnterStructureAsync(documentId, exclusive: false, token)
                         .ConfigureAwait(false);
-                    created = await CreateMissingTableInstancesAsync(documentId, periodKey, token).ConfigureAwait(false);
+                    (created, materialized) = await CreateMissingTableInstancesAsync(documentId, periodKey, token).ConfigureAwait(false);
                 },
                 ct).ConfigureAwait(false);
         }
@@ -845,6 +851,12 @@ public sealed class RowStore(
             // Переможець створив усе; наша транзакція відкочена, трекер уже очищено.
             return 0;
         }
+
+        // ⛔ PM-10b: рядки й ліміти з дозволу вже закомічені - формули, що від них залежать, перераховуються (одна
+        // coalesced-задача на відкриття; нічого не створено - нічого не ставиться). Збій постановки відкриття не ламає.
+        await PermitMaterializationRecalculation
+            .EnqueueAsync(jobs, log, documentId, periodKey, materialized, ct)
+            .ConfigureAwait(false);
 
         return created;
     }
@@ -904,14 +916,15 @@ public sealed class RowStore(
     /// <exception cref="InstancesCreatedConcurrently">
     /// Паралельне перше відкриття випередило: програш на <c>UQ_TableInstance</c>.
     /// </exception>
-    private async Task<int> CreateMissingTableInstancesAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    private async Task<(int Created, Application.Permits.Bindings.PermitMaterialization? Materialized)>
+        CreateMissingTableInstancesAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
     {
         // ⛔ L6-02: читати ПІСЛЯ блокування — те, що знайшов швидкий шлях, могло бути структурою
         // версії, з якої документ уже перенесено.
         var missing = await FindMissingTableDefsAsync(documentId, periodKey, ct).ConfigureAwait(false);
         if (missing.Count == 0)
         {
-            return 0;
+            return (0, null);
         }
 
         // ⛔ L6-05: період мусить належати проєкту документа. Доти перевірявся
@@ -988,12 +1001,13 @@ public sealed class RowStore(
         // ламає: сервіс повертає попередження `planFailed` (і журналює їх), екземпляр лишається без рядків. Збій ЗАПИСУ
         // рядків з дозволу виходить назовні і відкочує транзакцію разом з екземплярами (аудит B17, тести
         // `PermitRuntimeRowsTests.FailurePaths`).
+        Application.Permits.Bindings.PermitMaterialization? materialized = null;
         if (permits is not null)
         {
-            await permits.MaterializeAsync(documentId, periodKey, missing, ct).ConfigureAwait(false);
+            materialized = await permits.MaterializeAsync(documentId, periodKey, missing, ct).ConfigureAwait(false);
         }
 
-        return missing.Count;
+        return (missing.Count, materialized);
     }
 
     /// <summary>Програш гонитви за <c>UQ_TableInstance</c> — штатний вихід, а не помилка.</summary>
