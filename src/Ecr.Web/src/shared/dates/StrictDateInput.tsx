@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FocusEvent, type JSX, type KeyboardEvent, type MouseEvent } from 'react';
 import { DateInput, type DateInputProps } from '@mantine/dates';
 import { language, t } from '@/shared/i18n';
+import { calendarLocale } from './calendarLocale';
 import { parseUserDate } from './userDate';
 
 /**
@@ -91,6 +92,8 @@ export function StrictDateInput({
       // ⛔ PA2-U-02: кнопки «попередній/наступний місяць» календаря без імені - axe `button-name` critical.
       previousLabel={t('dates.previousMonth')}
       nextLabel={t('dates.nextMonth')}
+      // P3-N5: назва місяця й дні тижня — мовою інтерфейсу (за замовчуванням Mantine — англійська).
+      locale={calendarLocale(lang)}
       {...props}
       // Підпис — від того, хто ставить поле (ФВ-14.20 перевіряє його там).
       label={label}
