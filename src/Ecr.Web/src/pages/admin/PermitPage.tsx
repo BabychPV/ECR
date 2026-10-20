@@ -40,7 +40,9 @@ function Actions({ caps, open }: { readonly caps: PermitCapabilities; readonly o
       {(caps.end || caps.remove) && (
         <Menu position="bottom-end" withinPortal>
           <Menu.Target>
-            <Button variant="default">{t('permits.page.actions.more')}</Button>
+            <Button variant="default" data-permit-more>
+              {t('permits.page.actions.more')}
+            </Button>
           </Menu.Target>
           <Menu.Dropdown>
             {caps.end && <Menu.Item onClick={() => open('end')}>{t('permits.page.actions.end')}</Menu.Item>}

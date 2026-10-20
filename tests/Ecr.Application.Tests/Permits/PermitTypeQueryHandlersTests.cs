@@ -36,7 +36,7 @@ public sealed class PermitTypeQueryHandlersTests
     public async Task Перелік_віддає_сторінку_за_кодом_і_курсор_наступної()
     {
         var types = new[] { Type("AIR", PermitCategory.Air), Type("WASTE", PermitCategory.Waste), Type("WATER", PermitCategory.Water) };
-        _permits.ListAsync(Arg.Any<CancellationToken>()).Returns(types);
+        Summaries(types);
 
         var first = await List().HandleAsync(new CursorRequest(2), null, null, null, default);
         var second = await List().HandleAsync(new CursorRequest(2, first.NextCursor), null, null, null, default);
@@ -63,8 +63,7 @@ public sealed class PermitTypeQueryHandlersTests
     {
         var published = Type("WATER", PermitCategory.Water);
         published.Publish(7, Now);
-        _permits.ListAsync(Arg.Any<CancellationToken>())
-            .Returns([Type("AIR", PermitCategory.Air), published, Type("WASTE", PermitCategory.Waste)]);
+        Summaries(Type("AIR", PermitCategory.Air), published, Type("WASTE", PermitCategory.Waste));
 
         var byCategory = await List().HandleAsync(new CursorRequest(), "Air", null, null, default);
         var byStatus = await List().HandleAsync(new CursorRequest(), null, "Published", null, default);
@@ -84,13 +83,31 @@ public sealed class PermitTypeQueryHandlersTests
             [new PermitTypeTableDto("Emissions", Name("Emissions"), 1, [Column("A"), Column("B")], [])],
             []);
         type.SaveDraft(PermitTypeCodec.Serialize(draft), 7, Now);
-        _permits.ListAsync(Arg.Any<CancellationToken>()).Returns([type]);
+        Summaries(type);
 
         var item = Assert.Single((await List().HandleAsync(new CursorRequest(), null, null, null, default)).Items);
 
         Assert.True(item.HasUnpublishedChanges);
         var table = Assert.Single(item.Tables);
         Assert.Equal(("Emissions", 2), (table.Code, table.ColumnCount));
+    }
+
+    [Fact]
+    public async Task Перелік_не_розбирає_чернетку_понад_межу_зведення_і_лишає_ознаку_незавершених_змін()
+    {
+        var type = Type("AIR", PermitCategory.Air);
+        var draft = new PermitTypeContent(
+            Name("Air"), "Air",
+            [new PermitTypeTableDto("Emissions", Name("Emissions"), 1, [Column("A")], [])],
+            []);
+        type.SaveDraft(PermitTypeCodec.Serialize(draft), 7, Now);
+        // Сховище не віддало текст (чернетка більша за межу): знімок має HasDraft, але не SmallDraftJson.
+        _permits.ListSummariesAsync(Arg.Any<CancellationToken>()).Returns([PermitTypeSummary.From(type) with { SmallDraftJson = null }]);
+
+        var item = Assert.Single((await List().HandleAsync(new CursorRequest(), null, null, null, default)).Items);
+
+        Assert.True(item.HasUnpublishedChanges);
+        Assert.Empty(item.Tables);
     }
 
     [Fact]
@@ -142,6 +159,14 @@ public sealed class PermitTypeQueryHandlersTests
         Assert.Equal("Permit_Number", dto.HeaderFields[0].Code);
         Assert.Single(dto.Tables);
     }
+
+    // Склад чернетки віддається, як це робить сховище: лише коли вона в межах PermitTypeLimits.ListDraftSummaryMaxChars.
+    private void Summaries(params PermitTypeDef[] types)
+        => _permits.ListSummariesAsync(Arg.Any<CancellationToken>()).Returns(
+            [.. types.Select(t => PermitTypeSummary.From(t) with
+            {
+                SmallDraftJson = t.DraftJson is { Length: <= PermitTypeLimits.ListDraftSummaryMaxChars } ? t.DraftJson : null,
+            })]);
 
     private ListPermitTypesHandler List(IAccessDecisionService? access = null)
         => new(_permits, _registries, access ?? Viewer(), User());

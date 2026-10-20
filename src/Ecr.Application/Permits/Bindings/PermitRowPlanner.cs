@@ -42,6 +42,17 @@ public static class PermitRowPlanner
     public static string RowKeyFor(long entryId)
         => RowKeyPrefix + entryId.ToString(CultureInfo.InvariantCulture);
 
+    /// <summary>Чи має ключ рядка вигляд <see cref="RowKeyFor"/> (<c>P</c> і число): лише такі рядки може створювати прив'язка.</summary>
+    /// <param name="rowKey">Ключ рядка аркуша.</param>
+    public static bool IsPermitRowKey(string rowKey)
+    {
+        ArgumentNullException.ThrowIfNull(rowKey);
+
+        return rowKey.Length > RowKeyPrefix.Length
+               && rowKey.StartsWith(RowKeyPrefix, StringComparison.Ordinal)
+               && rowKey.AsSpan(RowKeyPrefix.Length).IndexOfAnyExceptInRange('0', '9') < 0;
+    }
+
     /// <summary>Планує рядки.</summary>
     /// <param name="snapshot">Знімок довідників на кінець періоду.</param>
     /// <param name="tableRegistryCode">Код реєстру таблиці дозволу (<c>PRM_&lt;тип&gt;_&lt;таблиця&gt;</c>).</param>

@@ -93,6 +93,10 @@ export function LifecycleDialogs({ permit, dialog, onClose }: LifecycleDialogsPr
   const from = formatDate(permit.validFrom ?? '');
   const to = formatDate(permit.validTo ?? '');
 
+  // P3-F2: «End this permit early…» і «Delete draft…» відкриваються пунктами меню «More»; пункт зникає разом із випадним
+  // списком, тож після Esc фокус повертається на кнопку «More» (її позначає `data-permit-more` на сторінці дозволу).
+  const moreButton = (): HTMLElement | null => document.querySelector<HTMLElement>('[data-permit-more]');
+
   switch (dialog) {
     case 'activate':
       return (
@@ -108,6 +112,7 @@ export function LifecycleDialogs({ permit, dialog, onClose }: LifecycleDialogsPr
           verb={t('permits.page.activate.verb')}
           isPending={activate.isPending}
           onConfirm={() => activate.mutate()}
+          returnFocusTo={moreButton}
           onClose={onClose}
         />
       );
@@ -122,6 +127,7 @@ export function LifecycleDialogs({ permit, dialog, onClose }: LifecycleDialogsPr
           minLength={MinEndReasonLength}
           isPending={end.isPending}
           onConfirm={(reason) => end.mutate(reason)}
+          returnFocusTo={moreButton}
           onClose={onClose}
         />
       );
@@ -138,6 +144,7 @@ export function LifecycleDialogs({ permit, dialog, onClose }: LifecycleDialogsPr
           verb={t('permits.page.renew.verb')}
           isPending={renew.isPending}
           onConfirm={() => renew.mutate()}
+          returnFocusTo={moreButton}
           onClose={onClose}
         />
       );
@@ -150,6 +157,7 @@ export function LifecycleDialogs({ permit, dialog, onClose }: LifecycleDialogsPr
           verb={t('permits.page.delete.verb')}
           isPending={remove.isPending}
           onConfirm={() => remove.mutate()}
+          returnFocusTo={moreButton}
           onClose={onClose}
         />
       );

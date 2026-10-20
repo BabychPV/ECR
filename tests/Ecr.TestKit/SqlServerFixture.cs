@@ -569,13 +569,22 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// кожному тесті руками означало б мати десяток місць, де налаштування
     /// розійдуться з фікстурою.
     /// </remarks>
-    public EcrDbContext CreateContext()
-    {
-        var options = EfWarningGuard.Apply(new DbContextOptionsBuilder<EcrDbContext>()
-            .UseSqlServer(ConnectionString, o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo")))
-            .Options;
+    public EcrDbContext CreateContext() => CreateContext([]);
 
-        return new EcrDbContext(options);
+    /// <summary>Контекст на тестову базу з перехоплювачами команд (рахунок чи запис тексту SQL).</summary>
+    /// <param name="interceptors">Перехоплювачі EF.</param>
+    public EcrDbContext CreateContext(params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors)
+    {
+        ArgumentNullException.ThrowIfNull(interceptors);
+
+        var builder = new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(ConnectionString, o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"));
+        if (interceptors.Length > 0)
+        {
+            builder.AddInterceptors(interceptors);
+        }
+
+        return new EcrDbContext(EfWarningGuard.Apply(builder).Options);
     }
 
     /// <summary>Виконує SQL-скрипт із <c>Persistence/Sql</c>, розділяючи його по <c>GO</c>.</summary>

@@ -263,6 +263,19 @@ test.describe('Permits list', () => {
     await page.getByRole('menuitem', { name: /^End early/ }).click();
     const end = page.getByRole('dialog', { name: new RegExp(`End permit ${number} early`) });
     await expect(end).toBeVisible();
+
+    // P3-F2: Esc у діалозі, відкритому пунктом меню, повертає фокус на «⋯» рядка (пункт меню вже зник), не на BODY.
+    const rowMenu = active.getByRole('button', { name: new RegExp(`Actions for permit ${number}`) });
+    await page.keyboard.press('Escape');
+    await expect(end).toBeHidden({ timeout: 15_000 });
+    await expect(rowMenu).toBeFocused();
+    // Фокус має витримати вихід меню з дерева (перехід exit), а не лише з'явитись на мить.
+    await page.waitForTimeout(600);
+    await expect(rowMenu).toBeFocused();
+    await rowMenu.click();
+    await page.getByRole('menuitem', { name: /^End early/ }).click();
+    await expect(end).toBeVisible();
+
     await end.getByLabel('Reason').fill('too short');
     await expect(end.getByRole('button', { name: 'End permit' })).toBeDisabled();
     await end.getByLabel('Reason').fill('E2E: permit surrendered by the operator');

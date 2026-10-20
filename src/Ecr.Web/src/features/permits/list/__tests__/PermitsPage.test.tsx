@@ -346,6 +346,25 @@ describe('PermitsPage: меню дій рядка', () => {
     expect(where()).toBe('/admin/permits');
   });
 
+  it('«End…» з меню рядка: Esc повертає фокус на кнопку меню рядка, а не на BODY (P3-F2)', async () => {
+    stub();
+    show();
+    await screen.findByText('KZ06VCZ14825472');
+
+    await openMenu(0);
+    const item = screen.getByRole('menuitem', { name: 'permits.list.action.end' });
+    item.focus();
+    fireEvent.click(item);
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(document.querySelector('[role="menuitem"]')).toBeNull());
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    const trigger = within(bodyRows()[0]!).getByRole('button', { name: /permits\.list\.rowMenu/ });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
   it('«Activate…» з меню чернетки: діалог, підтвердження, POST і повторне читання переліку', async () => {
     stub();
     show();

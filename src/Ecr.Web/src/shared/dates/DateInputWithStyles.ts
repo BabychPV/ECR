@@ -18,6 +18,7 @@
  * вантажить поле через цей модуль). Хто додасть статичний — підключає `styles.css` сам.
  */
 import '@mantine/dates/styles.css';
+import './dateInput.css';
 
 /*
  * ⛔ Під іменем `DateInput` — поле зі СТРОГИМ розбором набраного тексту (A1-02, `StrictDateInput`),

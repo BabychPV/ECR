@@ -31,6 +31,7 @@ export function ReasonModal({
   isPending,
   minLength,
   maxLength,
+  returnFocusTo,
   onConfirm,
   onClose,
 }: {
@@ -59,11 +60,17 @@ export function ReasonModal({
    * надіслане (після `trim()`) межу не перевищить.
    */
   maxLength?: number | undefined;
+
+  /**
+   * Куди повернути фокус, якщо елемент, що відкрив діалог, уже зник (пункт меню зникає разом із випадним списком):
+   * зазвичай кнопка самого меню. Без нього - кнопка меню за `aria-labelledby`, далі заголовок сторінки.
+   */
+  returnFocusTo?: (() => HTMLElement | null) | undefined;
   onConfirm: (reason: string) => void;
   onClose: () => void;
 }): JSX.Element {
   const [reason, setReason] = useState('');
-  useRestoreFocus(opened);
+  useRestoreFocus(opened, returnFocusTo);
 
   // ⛔ Рахуються символи ПІСЛЯ `trim()` — ті самі, що підуть на сервер
   // (`onConfirm(reason.trim())` нижче). Інакше поріг обходився б пробілами:
@@ -81,7 +88,9 @@ export function ReasonModal({
   }, [opened]);
 
   return (
-    <Modal opened={opened} onClose={onClose} title={title}>
+    // ⛔ `returnFocus={false}`: фокус повертає `useRestoreFocus`. Власний `returnFocus` Mantine пізніше фокусував би
+    // запам'ятований пункт меню, що за мить розмонтується, і крав би фокус у кнопки меню (гонка P3-F2).
+    <Modal opened={opened} onClose={onClose} title={title} returnFocus={false}>
       <Textarea
         label={label}
         description={description}
