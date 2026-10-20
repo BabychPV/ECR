@@ -1,17 +1,13 @@
-import { t } from '@/shared/i18n';
-import { localized } from '@/shared/i18n/localized';
-import type { RegistryDefDto } from '@/api/types';
-import type { PermitType, PermitTypeColumn } from '../api/types';
-import { scopeKeyOf } from '../typeEditor/draftModel';
+import { language, t } from '@/shared/i18n';
 import { textOf } from '../typeEditor/labels';
+import type { PermitListDto, PermitListUseDto } from './listsApi';
 
 /**
- * Модель екрана «Lists» (PM-08d, варіант A): списки вибору зводяться на клієнті з визначень типів
- * (`GET permit-types/{code}`) і наявних довідників. Окремого ендпоінта списків немає — це відомо й чесно
- * сказано на екрані (значення «лише тип» редагуються в конструкторі типу). Нічого з React і мережі.
+ * Модель екрана «Lists» (PM-08d, PM-08e): рядки будуються з відповіді ОДНОГО ендпоінта `GET /permit-lists` — без читання
+ * визначення кожного типу. Нічого з React і мережі.
  */
 
-/** Походження списку; збігається з `ListScopeKey` конструктора. */
+/** Походження списку; збігається з областю списку в конструкторі типу. */
 export type ListKind = 'shared' | 'type' | 'permit';
 
 export const ListKinds: readonly ListKind[] = ['shared', 'type', 'permit'];
@@ -20,15 +16,14 @@ export const ListKinds: readonly ListKind[] = ['shared', 'type', 'permit'];
 export interface ListUse {
   readonly typeCode: string;
   readonly typeName: string;
-  /** `null` — поле шапки дозволу. */
-  readonly tableCode: string | null;
+  readonly tableCode: string;
   readonly tableName: string;
   readonly columnCode: string;
   readonly columnName: string;
 }
 
 export interface ListRow {
-  /** Стабільний ключ рядка й значення `?panel=`. */
+  /** Ключ списку з сервера: він же ключ рядка, значення `?panel=` і сегмент адреси значень. */
   readonly id: string;
   readonly kind: ListKind;
   readonly name: string;
@@ -36,12 +31,12 @@ export interface ListRow {
   readonly owner: string;
   /** Код тип-власника (куди веде «Open the permit type»); для спільного — перший тип, що ним користується. */
   readonly typeCode: string;
-  /** Код спільного довідника. */
+  /** Код довідника зі значеннями (для «лише тип» — прихований). */
   readonly registryCode: string | null;
-  /** Значення «лише тип» (read-only). */
-  readonly choices: readonly string[];
-  /** Кількість значень; `null` — невідомо (довідник не віддано) або список-таблиця. */
+  /** Кількість значень; `null` — список-таблиця дозволу (значення — рядки дозволу). */
   readonly entries: number | null;
+  /** Чи може поточний користувач змінювати значення (рішення сервера: право й область). */
+  readonly editable: boolean;
   readonly used: readonly ListUse[];
 }
 
@@ -66,89 +61,55 @@ export function kindLabel(kind: ListKind): string {
 
 const KindOrder: Record<ListKind, number> = { shared: 0, type: 1, permit: 2 };
 
-function useOf(type: PermitType, tableCode: string | null, tableName: string, column: PermitTypeColumn, lang: string | undefined): ListUse {
+/** Область списку на сервері → походження екрана; невідома область дає `null` (рядок пропускається). */
+export function kindOfScope(scope: string): ListKind | null {
+  switch (scope) {
+    case 'SharedRegistry':
+      return 'shared';
+    case 'TypeOnly':
+      return 'type';
+    case 'SamePermitTable':
+      return 'permit';
+    default:
+      return null;
+  }
+}
+
+function useOf(use: PermitListUseDto, lang: string | undefined): ListUse {
   return {
-    typeCode: type.code,
-    typeName: textOf(type.nameL10n, lang) || type.code,
-    tableCode,
-    tableName,
-    columnCode: column.code,
-    columnName: textOf(column.nameL10n, lang) || column.code,
+    typeCode: use.typeCode,
+    typeName: textOf(use.typeNameL10n, lang) || use.typeCode,
+    tableCode: use.tableCode,
+    tableName: textOf(use.tableNameL10n, lang) || use.tableCode,
+    columnCode: use.fieldCode,
+    columnName: textOf(use.fieldNameL10n, lang) || use.fieldCode,
   };
 }
 
-/** Усі стовпці-списки типу: спершу шапка (`tableCode = null`), далі таблиці. */
-function listColumns(type: PermitType): { tableCode: string | null; tableName: string; column: PermitTypeColumn }[] {
-  return [
-    ...type.headerFields.map((column) => ({ tableCode: null, tableName: '', column })),
-    ...type.tables.flatMap((table) =>
-      table.columns.map((column) => ({ tableCode: table.code as string | null, tableName: textOf(table.nameL10n), column })),
-    ),
-  ];
-}
-
-/**
- * Рядки екрана: спільний довідник — один рядок на довідник (усі стовпці, що його беруть, у `used`);
- * «лише тип» і «таблиця того ж дозволу» — по рядку на стовпець.
- */
-export function buildListRows(
-  types: readonly PermitType[],
-  registries: readonly RegistryDefDto[],
-  lang?: string,
-): ListRow[] {
-  const shared = new Map<string, { row: ListRow; used: ListUse[] }>();
+/** Рядки екрана з відповіді сервера: спершу спільні, далі «лише тип» і «таблиця дозволу», усередині — за назвою. */
+export function rowsFromLists(lists: readonly PermitListDto[], lang: string | undefined = undefined): ListRow[] {
   const rows: ListRow[] = [];
 
-  for (const type of types) {
-    for (const { tableCode, tableName, column } of listColumns(type)) {
-      const kind = scopeKeyOf(column);
-      if (kind === null) continue;
-      const use = useOf(type, tableCode, tableName, column, lang);
+  for (const list of lists) {
+    const kind = kindOfScope(list.scope);
+    if (kind === null) continue;
+    const used = list.usedBy.map((use) => useOf(use, lang));
+    const first = used[0];
 
-      if (kind === 'shared') {
-        const code = column.listRegistryCode ?? '';
-        if (code === '') continue;
-        const known = shared.get(code);
-        if (known !== undefined) {
-          known.used.push(use);
-          continue;
-        }
-        const registry = registries.find((item) => item.code === code);
-        const used: ListUse[] = [use];
-        shared.set(code, {
-          used,
-          row: {
-            id: `shared:${code}`,
-            kind,
-            name: (registry === undefined ? '' : localized(registry.nameL10n)) || code,
-            owner: '',
-            typeCode: type.code,
-            registryCode: code,
-            choices: [],
-            entries: registry?.entryCount ?? null,
-            used,
-          },
-        });
-        continue;
-      }
-
-      rows.push({
-        id: `${kind}:${type.code}:${tableCode ?? '_header'}:${column.code}`,
-        kind,
-        name: use.columnName,
-        owner: use.typeName,
-        typeCode: type.code,
-        registryCode: null,
-        choices: kind === 'type' ? (column.choices ?? []) : [],
-        entries: kind === 'type' ? (column.choices ?? []).length : null,
-        used: [use],
-      });
-    }
+    rows.push({
+      id: list.key,
+      kind,
+      name: textOf(list.nameL10n, lang) || list.registryCode || list.key,
+      owner: kind === 'shared' ? '' : (first?.typeName ?? list.typeCode ?? ''),
+      typeCode: list.typeCode ?? first?.typeCode ?? '',
+      registryCode: list.registryCode,
+      entries: list.itemCount,
+      editable: list.editable,
+      used,
+    });
   }
 
-  return [...[...shared.values()].map((item) => item.row), ...rows].sort(
-    (a, b) => KindOrder[a.kind] - KindOrder[b.kind] || a.name.localeCompare(b.name),
-  );
+  return rows.sort((a, b) => KindOrder[a.kind] - KindOrder[b.kind] || a.name.localeCompare(b.name));
 }
 
 export interface ListsStats {
@@ -188,4 +149,34 @@ export function filterLists(rows: readonly ListRow[], filter: ListsFilter): List
 /** Значення показника смуги/фільтра як походження або `''`. */
 export function kindParam(value: string | null | undefined): string {
   return value !== null && value !== undefined && (ListKinds as readonly string[]).includes(value) ? value : '';
+}
+
+/**
+ * Підписи нового чи зміненого значення для запиту. Англійська — основа списку «лише для типу» (за нею збігаються значення
+ * чернетки типу), тож вона є завжди: користувач англійської міняє її, іншої мови — лише свою, англійська лишається як була
+ * (або дорівнює введеному, якщо значення нове).
+ */
+export function valueLabels(
+  text: string,
+  existing: Readonly<Record<string, string>> | undefined,
+  lang: string = language(),
+): Record<string, string> {
+  const trimmed = text.trim();
+  if (lang === 'en') return { en: trimmed };
+
+  return { en: existing?.en ?? trimmed, [lang]: trimmed };
+}
+
+/** Ключ списку зі стовпця форми дозволу: `shared:…` чи `type:…`; для списку-таблиці дозволу `null` (там нічого не додають). */
+export function listKeyOf(
+  scope: string | null | undefined,
+  typeCode: string,
+  tableCode: string,
+  fieldCode: string,
+  registryCode: string | null | undefined,
+): string | null {
+  if (scope === 'SharedRegistry') return registryCode == null || registryCode === '' ? null : `shared:${registryCode}`;
+  if (scope === 'TypeOnly') return `type:${typeCode}:${tableCode}:${fieldCode}`;
+
+  return null;
 }
