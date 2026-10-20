@@ -2,7 +2,8 @@ import type { JSX } from 'react';
 import type { PermitType } from '@/features/permits/api/types';
 import { t } from '@/shared/i18n';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
-import { findTable, referencesTo, type TypeDraft } from '../draftModel';
+import { hasPublishedVersion } from '../../lib/typeStatus';
+import { findTable,referencesTo, type TypeDraft } from '../draftModel';
 import { pickName } from './names';
 
 /**
@@ -37,7 +38,7 @@ export function DeleteTableDialog({ type, draft, tableCode, onRemove, onClose }:
   const name = pickName(table.nameL10n) || table.code;
   const columns = referencesTo(draft, table.code).map((ref) => `${ref.tableCode}.${ref.columnCode}`);
   const saved = type.tables.some((entry) => entry.code.toLowerCase() === table.code.toLowerCase());
-  const publishedBlock = type.version > 0 && saved;
+  const publishedBlock = hasPublishedVersion(type) && saved;
 
   const text =
     columns.length > 0

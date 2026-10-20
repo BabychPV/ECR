@@ -430,6 +430,40 @@ public sealed class UnitOfWork(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRM-4091.registryCode", ["registryCode"] = permitRegistry.Code, ["concurrent"] = "true" });
         }
 
+        // ⛔ Permits PA-A-06/PA-A-11 (аудит, прохід A). Десять паралельних `PUT …/permit-bindings/{код}` на ту саму таблицю
+        // аркуша проходять `EnsureNoDuplicateAsync` обидва (check-then-insert ДО блоку чернетки), і програвших відбивав лише
+        // `UQ_PermitSheetBinding_Sheet` - голий 500 `ECR-SYS-0500` (7-9 з 10). Та сама відмова, що й перевірка обробника
+        // (`409 ECR-PRM-4101`); код зайнятий паралельним запитом - так само (`UQ_PermitSheetBinding_Code`). Лише ці індекси.
+        // ⚠ Хто переміг, база не каже, а запит по нього тут - зайвий обмін (як у `RegistryEntryKey` нижче), тому для «таблиця»
+        // власний ключ `.sheetConcurrent` без коду переможця, а не `.sheet` з вигаданим `bindingCode`.
+        if (SqlConflict.ViolatesIndex(ex, "UQ_PermitSheetBinding_Sheet")
+            && ex.Entries.FirstOrDefault(e => e.State == EntityState.Added && e.Entity is PermitSheetBinding)
+                is { Entity: PermitSheetBinding sheetBinding })
+        {
+            return new BusinessRuleException(
+                ErrorCodes.PermitBindingDuplicate,
+                $"Таблицю {sheetBinding.SheetTableDefId} цієї версії щойно прив'язав інший запит: одна таблиця аркуша - один дозвіл.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRM-4101.sheetConcurrent",
+                    ["tableDefId"] = sheetBinding.SheetTableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        if (SqlConflict.ViolatesIndex(ex, "UQ_PermitSheetBinding_Code")
+            && ex.Entries.FirstOrDefault(e => e.State == EntityState.Added && e.Entity is PermitSheetBinding)
+                is { Entity: PermitSheetBinding codeBinding })
+        {
+            return new BusinessRuleException(
+                ErrorCodes.PermitBindingDuplicate,
+                $"Код прив'язки «{codeBinding.Code}» уже зайнятий (код унікальний по всій системі).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRM-4101.code",
+                    ["bindingCode"] = codeBinding.Code,
+                });
+        }
+
         foreach (var entry in ex.Entries)
         {
             switch (entry.Entity)

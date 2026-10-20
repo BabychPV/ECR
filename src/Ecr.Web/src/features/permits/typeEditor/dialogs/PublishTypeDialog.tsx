@@ -3,6 +3,7 @@ import { Button, Group, Modal, Stack, Text } from '@mantine/core';
 import type { PermitType } from '@/features/permits/api/types';
 import { t } from '@/shared/i18n';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
+import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
 import { pickName } from './names';
 
 /** Мінімальна довжина причини публікації: дзеркало сервера (`PermitTypeDefinitionValidator.MinReasonLength`). */
@@ -41,6 +42,8 @@ export function PublishTypeDialog({
   onClose,
 }: PublishTypeDialogProps): JSX.Element {
   const name = pickName(type.nameL10n);
+  // Гілка «без таблиць» рендерить простий Modal; гілка з причиною — ReasonModal, що відновлює фокус сам.
+  useRestoreFocus(opened && type.tables.length === 0);
 
   if (type.tables.length === 0) {
     return (

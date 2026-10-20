@@ -174,6 +174,33 @@ test.describe('Permits list', () => {
     expect((await page.request.get(`/api/v1/permits/${String(permit.id)}`)).status()).toBe(404);
   });
 
+  // PA-U-08 і PA-U-03: тип не передвибрано; Esc повертає фокус на кнопку «New permit».
+  test('майстер New permit: тип не передвибрано, Esc повертає фокус на кнопку-виклик', async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+    await publishedType(page, types, `E2E_ focus permit ${String(Date.now())}`);
+
+    await page.goto('/admin/permits');
+    await expect(page.getByRole('heading', { level: 1, name: 'Permits' })).toBeVisible({ timeout: 30_000 });
+
+    const trigger = page.getByRole('button', { name: /^New permit$/ }).first();
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('dialog', { name: /^New permit/ });
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+
+    // Жоден тип не вибрано: «Next» не пускає далі (крок Details не з'являється).
+    await expect(dialog.getByRole('radio', { checked: true })).toHaveCount(0);
+    await dialog.getByTestId('wizard-next').click();
+    await expect(dialog.getByTestId('wizard-step-error')).toBeVisible();
+    await expect(dialog.getByRole('textbox', { name: /^Permit number/ })).toHaveCount(0);
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden({ timeout: 15_000 });
+    await expect(trigger).toBeFocused();
+  });
+
   test('дозвіл із API: активація й дострокове завершення з меню, фільтр стану в адресі', async ({ page }) => {
     test.setTimeout(180_000);
     await page.setViewportSize({ width: 1440, height: 900 });

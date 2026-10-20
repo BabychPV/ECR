@@ -1,3 +1,4 @@
+import { useState, type JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -88,19 +89,30 @@ afterEach(() => {
 const where = (): string | undefined => (globalThis as { __where?: string }).__where;
 
 describe('NewPermitWizard: крок «Type»', () => {
-  it('опубліковані типи вибираються, неопублікований недоступний і пояснений; перший вибрано', async () => {
+  it('опубліковані типи вибираються, неопублікований недоступний і пояснений; нічого не передвибрано', async () => {
     stub();
     show();
 
     const group = await screen.findByTestId('permit-type-pick');
     const radios = within(group).getAllByRole('radio') as HTMLInputElement[];
     expect(radios.map((r) => [r.value, r.disabled, r.checked])).toEqual([
-      ['AirEmission', false, true],
+      ['AirEmission', false, false],
       ['WaterDischarge', false, false],
       ['WasteStorage', true, false],
     ]);
     expect(group.textContent).toContain('permits.list.wizard.notPublished');
     expect(group.textContent).toContain('Emission limits (6) · Sources (4)');
+  });
+
+  it('PA-U-08: «Next» без явного вибору типу не пускає далі й нічого не створює', async () => {
+    stub();
+    show();
+    await screen.findByTestId('permit-type-pick');
+    fireEvent.click(screen.getByTestId('wizard-next'));
+
+    expect((await screen.findByTestId('wizard-step-error')).textContent).toContain('permits.list.wizard.typeRequired');
+    expect(screen.queryByRole('textbox', { name: /permits\.list\.wizard\.number/ })).toBeNull();
+    expect(posts).toEqual([]);
   });
 
   it('жодного опублікованого типу: пояснення, а «Next» не пускає далі', async () => {
@@ -132,11 +144,54 @@ describe('NewPermitWizard: крок «Type»', () => {
   });
 });
 
+describe('NewPermitWizard: фокус (PA-U-03)', () => {
+  it('типи вантажаться після відкриття, Esc повертає фокус на кнопку-виклик, а не на BODY', async () => {
+    // Типи приходять із затримкою: спершу модалка «loading», потім майстер.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+
+        return types();
+      }),
+    );
+    function Host(): JSX.Element {
+      const [open, setOpen] = useState(false);
+
+      return (
+        <MantineProvider theme={testTheme}>
+          <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+            <button type="button" onClick={() => setOpen(true)}>
+              Open wizard
+            </button>
+            {open && <NewPermitWizard opened onClose={() => setOpen(false)} />}
+          </QueryClientProvider>
+        </MantineProvider>
+      );
+    }
+    render(
+      <MemoryRouter>
+        <Host />
+      </MemoryRouter>,
+    );
+    const trigger = screen.getByRole('button', { name: 'Open wizard' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    await screen.findByTestId('permit-type-pick');
+
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+});
+
 describe('NewPermitWizard: крок «Details» і створення', () => {
   async function toDetails(): Promise<void> {
     stub();
     show();
     await screen.findByTestId('permit-type-pick');
+    fireEvent.click(screen.getByRole('radio', { name: /Air emission permit/ }));
     fireEvent.click(screen.getByTestId('wizard-next'));
     await screen.findByRole('textbox', { name: /permits\.list\.wizard\.number/ });
   }
@@ -205,6 +260,7 @@ describe('NewPermitWizard: крок «Details» і створення', () => {
     });
     show();
     await screen.findByTestId('permit-type-pick');
+    fireEvent.click(screen.getByRole('radio', { name: /Air emission permit/ }));
     fireEvent.click(screen.getByTestId('wizard-next'));
     fireEvent.change(await screen.findByRole('textbox', { name: /permits\.list\.wizard\.number/ }), { target: { value: 'KZ-1' } });
     fireEvent.click(screen.getByTestId('wizard-next'));

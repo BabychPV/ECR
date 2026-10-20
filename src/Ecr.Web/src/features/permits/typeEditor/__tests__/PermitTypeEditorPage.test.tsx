@@ -118,9 +118,15 @@ describe('шапка', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Delete type…' }));
     expect(params().get('dialog')).toBe('delete-type');
     cleanup();
-    await open('/admin/permits/types/WaterDischarge', permitType({ version: 2, draftVersion: 3 }));
+    await open('/admin/permits/types/WaterDischarge', permitType({ status: 'Published', version: 2, draftVersion: 3 }));
     expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
     expect(screen.getByText('Draft v3')).toBeTruthy();
+  });
+
+  it('опублікований v1 з відкритою чернеткою v2: видалення типу недоступне (сервер: ECR-PRM-4094)', async () => {
+    await open('/admin/permits/types/WaterDischarge', permitType({ status: 'Published', version: 1, draftVersion: 2 }));
+    expect(screen.getByText('Draft v2')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
   });
 });
 

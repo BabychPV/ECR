@@ -49,7 +49,7 @@ export function PermitTypeEditorPage(): JSX.Element {
             <TypeEditorHeader />
             <TypeEditorTabs />
             {dialogRequested && (
-              <Suspense fallback={<Skeleton height={160} aria-label={t('common.loading')} />}>
+              <Suspense fallback={<Skeleton height={160} role="status" aria-label={t('common.loading')} />}>
                 <DialogsHost />
               </Suspense>
             )}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type JSX, typ
 import { Button, Group, Modal, Stack, Text } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
+import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
 
 /**
  * Багатокроковий майстер (`KIT.md` §6 `Wizard`, директива №15 §2, шар 3).
@@ -245,6 +246,7 @@ export function Wizard<TData>({
     }
   }
 
+  useRestoreFocus(opened);
   const [index, setIndex] = useState(0);
   const [data, setData] = useState<TData>(initialData);
   const [dirty, setDirty] = useState(false);

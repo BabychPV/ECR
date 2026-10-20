@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type JSX } from 'react';
 import { Button, Group, Modal, SegmentedControl, Select, Stack, Text, Textarea, TextInput } from '@mantine/core';
 import type { PermitType, PermitTypeRule } from '@/features/permits/api/types';
 import { t } from '@/shared/i18n';
+import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
 import { allRuleCodes, buildRule, validateRuleInput, type RuleSeverity } from '../checks/ruleOps';
 import { pickName } from './names';
 
@@ -41,6 +42,7 @@ export function AddRuleDialog({
   const [where, setWhere] = useState(initialWhere);
   const [severity, setSeverity] = useState<RuleSeverity>('Warn');
   const [showErrors, setShowErrors] = useState(false);
+  useRestoreFocus(opened);
 
   useEffect(() => {
     if (!opened) return;

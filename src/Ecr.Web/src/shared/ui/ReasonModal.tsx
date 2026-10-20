@@ -1,6 +1,7 @@
 import { useEffect, useState, type JSX } from 'react';
 import { Button, Group, Modal, Textarea } from '@mantine/core';
 import { t } from '@/shared/i18n';
+import { useRestoreFocus } from './useRestoreFocus';
 
 /**
  * Діалог, який збирає **обов'язкову причину** дії.
@@ -62,6 +63,7 @@ export function ReasonModal({
   onClose: () => void;
 }): JSX.Element {
   const [reason, setReason] = useState('');
+  useRestoreFocus(opened);
 
   // ⛔ Рахуються символи ПІСЛЯ `trim()` — ті самі, що підуть на сервер
   // (`onConfirm(reason.trim())` нижче). Інакше поріг обходився б пробілами:

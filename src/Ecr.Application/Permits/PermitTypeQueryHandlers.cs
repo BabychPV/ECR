@@ -157,6 +157,12 @@ public sealed class ListPermitTypesHandler(
         PermitTypeDef type, IEnumerable<PermitTypeTable> published, Dictionary<int, RegistryDef> definitions)
     {
         // Чернетка показує склад, який людина збирає; без неї — опублікований (лічильник стовпців з реєстру).
+        // ⚠ Понад межу (PA-U-01) чернетку не розбираємо: тип лишається в переліку (його можна відкрити й видалити), без таблиць.
+        if (PermitTypeCodec.IsOversized(type.DraftJson))
+        {
+            return [];
+        }
+
         if (type.HasDraft)
         {
             return [.. PermitTypeCodec.Parse(type.DraftJson!).Tables

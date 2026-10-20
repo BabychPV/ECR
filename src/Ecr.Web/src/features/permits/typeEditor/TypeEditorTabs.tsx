@@ -88,12 +88,12 @@ export function TypeEditorTabs(): JSX.Element {
           <StructureTab />
         </Tabs.Panel>
         <Tabs.Panel value="rules">
-          <Suspense fallback={<Skeleton height={160} aria-label={t('common.loading')} />}>
+          <Suspense fallback={<Skeleton height={160} role="status" aria-label={t('common.loading')} />}>
             <TypeChecksTab type={shown} onAddCheck={actions.openAddRule} canEdit={editable && mayEdit} />
           </Suspense>
         </Tabs.Panel>
         <Tabs.Panel value="versions">
-          <Suspense fallback={<Skeleton height={160} aria-label={t('common.loading')} />}>
+          <Suspense fallback={<Skeleton height={160} role="status" aria-label={t('common.loading')} />}>
             <TypeVersionsTab type={shown} />
           </Suspense>
         </Tabs.Panel>

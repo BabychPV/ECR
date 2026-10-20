@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
+import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import type { Permit } from '../api/types';
 import { MaxPastedRows } from '../lib/pasteRows';
@@ -77,6 +78,7 @@ function issueText(issue: ImportIssue, labelOf: (code: string) => string): strin
  */
 export function PasteDialog({ permit, registryCode, tableName, fields, fromFile, onClose }: PasteDialogProps): JSX.Element {
   const queryClient = useQueryClient();
+  useRestoreFocus(true);
   const picker = usePickerData(permit, fields, true);
   const [text, setText] = useState('');
   const [skipHeader, setSkipHeader] = useState(fromFile);
