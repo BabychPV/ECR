@@ -1,5 +1,5 @@
 import { createTheme, type MantineColorsTuple } from '@mantine/core';
-import { closeNotificationButtonProps } from '@/shared/ui/a11yLabels';
+import { closeModalButtonProps, closeNotificationButtonProps } from '@/shared/ui/a11yLabels';
 
 /**
  * Основний колір — кортеж макета `--brand-50…900`
@@ -468,8 +468,10 @@ export const theme = createTheme({
     // Той самий компроміс, що вже прийнятий для `Breadcrumbs.tsx`
     // (`aria-label="Show all breadcrumbs"`) — текст лише для скрінрідера,
     // не видимий UI-напис.
+    // ✎ P3-N6: далі це геттер `closeModalButtonProps` (каталог `common.close`, англійський запасний):
+    // читається в момент рендера модалки, а не імпорту теми, тож ru/kz не чують «Close».
     Modal: {
-      defaultProps: { transitionProps: { duration: 150 }, closeButtonProps: { 'aria-label': 'Close' } },
+      defaultProps: { transitionProps: { duration: 150 }, closeButtonProps: closeModalButtonProps },
     },
     // ⛔ Те саме, що в `Modal` вище, і з тієї ж причини — але для сповіщень,
     // і знайдено це вже проходом інтерфейсу як користувач
