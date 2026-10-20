@@ -7,6 +7,7 @@ import { Catalog, RouteShell, Themes } from '@/test/__tests__/a11yFixtures';
 import { describe as describeViolations, findViolations } from '@/test/a11y';
 import * as permitsApi from '../../api/permitsApi';
 import * as typesApi from '../../api/typesApi';
+import * as listsApi from '../../lists/listsApi';
 import { permit, permitType, rowsFor } from './permitFixtures';
 
 /**
@@ -33,6 +34,10 @@ vi.mock('../../api/permitsApi', () => ({
   deletePermit: vi.fn(),
 }));
 vi.mock('../../api/typesApi', () => ({ getPermitType: vi.fn() }));
+vi.mock('../../lists/listsApi', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lists/listsApi')>()),
+  listPermitLists: vi.fn(),
+}));
 vi.mock('@/features/registries/rows/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/features/registries/rows/api')>()),
   getRegistryRows: vi.fn(),
@@ -48,6 +53,19 @@ beforeEach(() => {
     Promise.resolve(path === '/api/v1/units' ? [{ id: 7, code: 't/yr' }] : []) as never,
   );
   vi.mocked(typesApi.getPermitType).mockResolvedValue(permitType());
+  // «Add a value…» показується лише для списків, які сервер віддав як `editable` (PM-08e).
+  vi.mocked(listsApi.listPermitLists).mockResolvedValue(
+    ['shared:Substances', 'type:WaterDischarge:Limits:Use'].map((key) => ({
+      key,
+      scope: key.startsWith('shared') ? 'SharedRegistry' : 'TypeOnly',
+      registryCode: key.startsWith('shared') ? 'Substances' : 'PRM_WD_Use',
+      typeCode: key.startsWith('shared') ? null : 'WaterDischarge',
+      nameL10n: { en: key.startsWith('shared') ? 'Substances' : 'Type of use' },
+      itemCount: 2,
+      editable: true,
+      usedBy: [],
+    })),
+  );
   vi.mocked(rowsApi.getRegistryRows).mockImplementation((code, query) => Promise.resolve(rowsFor(code, query?.parentEntryId)));
 });
 afterEach(() => cleanup());
@@ -94,6 +112,23 @@ describe('Екран дозволу — доступність', { timeout: 180_
       await scan(colorScheme, '/admin/permits/5?tab=Limits&panel=Limits:11', permit(), async () => {
         await screen.findByRole('dialog', { name: 'Outfall A' });
         await screen.findByDisplayValue('Pond 1');
+      });
+    });
+
+    it(`${colorScheme}: шторка рядка з кнопками «Add a value…» під списками`, async () => {
+      await scan(colorScheme, '/admin/permits/5?tab=Limits&panel=Limits:11', permit(), async () => {
+        await screen.findByRole('dialog', { name: 'Outfall A' });
+        await screen.findByDisplayValue('Pond 1');
+        await waitFor(() => expect(screen.getAllByText('Not in the list? Add a value…')).toHaveLength(2));
+      });
+    });
+
+    it(`${colorScheme}: діалог «Add a value»`, async () => {
+      await scan(colorScheme, '/admin/permits/5?tab=Limits&panel=Limits:11', permit(), async () => {
+        await screen.findByRole('dialog', { name: 'Outfall A' });
+        const buttons = await screen.findAllByText('Not in the list? Add a value…');
+        fireEvent.click(buttons[0] as HTMLElement);
+        await screen.findByRole('dialog', { name: 'Add a value' });
       });
     });
 
