@@ -385,6 +385,22 @@ public sealed class UnitOfWork(
                 });
         }
 
+        // ⛔ PA4-S-01 (клас A1-05). `PUT /me/preferences/{key}`: дві сесії одного користувача пишуть ПЕРШЕ значення
+        // ключа — обидві читають «налаштування немає» й додають його; другого відбиває лише PK_UserPreference (2627) —
+        // голий 500. Обробник на цей конфлікт перечитує рядок і оновлює його (upsert), тож клієнт бачить 200.
+        // ⚠ Код і ключ ЗАГАЛЬНІ (ті самі, що в `DbUpdateConcurrencyException` вище); лише цей ключ, за ім'ям.
+        if (SqlConflict.ViolatesIndex(ex, "PK_UserPreference")
+            && ex.Entries.Any(e => e.State == EntityState.Added && e.Entity is Domain.Entities.Security.UserPreference))
+        {
+            return new ConcurrencyConflictException(
+                "ECR-CELL-0409",
+                "Налаштування щойно записала інша сесія: повторіть дію.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
+                });
+        }
+
         // ⛔ Два одночасні `POST /reports` з тим самим кодом проходять `ExistsAsync` обидва (check-then-insert,
         // `CreateReportDefHandler`), і другий відбиває лише `UQ_ReportDef` — голий 500 на звичайну гонку.
         // Та сама відмова, що й перевірка обробника (`409 ECR-RPT-4091`, ключ `err.ECR-RPT-4091.code` з `{code}`):
