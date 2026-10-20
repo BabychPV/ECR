@@ -115,7 +115,7 @@ internal static class PermitListCatalog
     }
 
     /// <summary>Чинні значення списку: активні, не видалені; порядок показу - за позицією.</summary>
-    internal static async Task<IReadOnlyList<PermitListItemDto>> ItemsAsync(
+    internal static async Task<IReadOnlyList<PermitListValueDto>> ItemsAsync(
         IRegistryStore registries, int? registryDefId, CancellationToken ct)
     {
         if (registryDefId is not { } id)
@@ -126,7 +126,7 @@ internal static class PermitListCatalog
         return [.. (await registries.ListEntriesAsync(id, ct).ConfigureAwait(false))
             .Where(e => e.IsActive && !e.IsDeleted)
             .OrderBy(e => e.Ordinal).ThenBy(e => e.Id)
-            .Select(e => new PermitListItemDto(e.Id, e.Code, new Dictionary<string, string>(e.DisplayL10n.Values, StringComparer.OrdinalIgnoreCase)))];
+            .Select(e => new PermitListValueDto(e.Id, e.Code, new Dictionary<string, string>(e.DisplayL10n.Values, StringComparer.OrdinalIgnoreCase)))];
     }
 
     /// <summary>Список за ключем або <c>404 ECR-PRM-0404 list</c> (невидимий читачеві - те саме).</summary>
