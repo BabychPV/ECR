@@ -17,7 +17,7 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// <remarks>
 /// Мутаційні докази (запущені): у <c>PermitBindingStore.FindHoldAsync</c> додати <c>b.IsActive</c> - червоніють обидва
 /// тести про вимкнену прив'язку; у <c>FindHoldAsync</c> прибрати ранній вихід для порожнього переліку - червоніє
-/// «Порожній_перелік…» (один запит замість нуля).
+/// «Пошук_тримача…» (один запит замість нуля).
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class PermitBindingHoldTests(SqlServerFixture sql)

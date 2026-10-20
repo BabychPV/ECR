@@ -17,9 +17,9 @@ namespace Ecr.Application.Tests.Permits;
 /// (<see cref="IPermitBindingStore.ListAsync"/> тягне колонки й довідники).
 /// </summary>
 /// <remarks>
-/// Мутаційні докази (запущені): повернути в <c>RequireSheetFreeAsync</c> виклик <c>ListAsync</c> - червоніє
-/// «Аркуш_без_прив_язок…» (<c>ListAsync</c> викликано); прибрати ранній вихід для порожнього переліку таблиць - червоніє
-/// «Аркуш_без_таблиць…».
+/// Мутаційний доказ (запущений): замінити в <c>RequireSheetFreeAsync</c> <c>FindHoldAsync</c> на <c>ListAsync</c> - червоніють
+/// три з чотирьох («Аркуш_без_прив_язок…», «Аркуш_без_таблиць…», «Аркуш_з_прив_язаною…»). Нуль запитів для порожнього
+/// переліку забезпечує сховище (<c>FindHoldAsync</c>), його доводить <c>PermitBindingHoldTests</c>.
 /// </remarks>
 public sealed class PermitSheetBindingGuardQueryTests
 {
