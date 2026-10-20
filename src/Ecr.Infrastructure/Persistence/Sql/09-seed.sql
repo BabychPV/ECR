@@ -9066,6 +9066,11 @@ USING (VALUES
     -- PERMITS: binding-race ── en: паралельна прив'язка тієї самої таблиці аркуша (ECR-PRM-4101 sheetConcurrent; аудит A, PA-A-11); ru/kz — порцією PERMITS: binding-race нижче ──
     ,(N'err.ECR-PRM-4101.sheetConcurrent', N'en', N'Table {tableDefId} of this version was just bound by another request: reload the bindings. One sheet table takes one permit.', 1)
     -- PERMITS: binding-race ── кінець секції ──
+    -- PERMITS: a11y-dates ── en: імена кнопок «попередній/наступний місяць» календаря й область прокрутки таблиці стовпців (аудит A, PA2-U-02/03); ru/kz — порцією PERMITS: a11y-dates нижче ──
+    ,(N'dates.previousMonth', N'en', N'Previous month', 1)
+    ,(N'dates.nextMonth', N'en', N'Next month', 1)
+    ,(N'permits.editor.cols.region', N'en', N'Columns table', 1)
+    -- PERMITS: a11y-dates ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -23445,6 +23450,20 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: binding-race ── кінець секції ──
+-- PERMITS: a11y-dates ── ru/kz: імена кнопок місяця календаря й область прокрутки таблиці стовпців (PA2-U-02/03); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'dates.previousMonth', N'ru', N'Предыдущий месяц'),
+    (N'dates.previousMonth', N'kz', N'Алдыңғы ай'),
+    (N'dates.nextMonth', N'ru', N'Следующий месяц'),
+    (N'dates.nextMonth', N'kz', N'Келесі ай'),
+    (N'permits.editor.cols.region', N'ru', N'Таблица столбцов'),
+    (N'permits.editor.cols.region', N'kz', N'Бағандар кестесі')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: a11y-dates ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

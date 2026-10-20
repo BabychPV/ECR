@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import { useId, type JSX } from 'react';
 import { ActionIcon, Anchor, Badge, Menu } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { language, t } from '@/shared/i18n';
@@ -40,6 +40,7 @@ export function TypeStateBadge({ item }: { readonly item: PermitTypeListItem }):
  */
 function RowMenu({ item, onDelete }: { readonly item: PermitTypeListItem; readonly onDelete: (item: PermitTypeListItem) => void }): JSX.Element {
   const blocked = hasPublishedVersion(item);
+  const reasonId = useId();
 
   return (
     <Menu position="bottom-end" withinPortal>
@@ -58,17 +59,26 @@ function RowMenu({ item, onDelete }: { readonly item: PermitTypeListItem; readon
       </Menu.Target>
       {/* Меню в порталі, але React-події йдуть вгору по дереву до рядка: клік по меню не відкриває рядок. */}
       <Menu.Dropdown onClick={(event) => event.stopPropagation()}>
+        {/* PA2-U-04: нативний `disabled` виймає пункт з клавіатури, а причина була лише в `title`. Тут пункт досяжний
+            (`aria-disabled`, клік нічого не робить), причина - видимо для читалки через `aria-describedby`. */}
         <Menu.Item
           data-type-action="delete"
           color="statusError"
-          disabled={blocked}
           title={blocked ? t('permits.editor.dialogs.deleteType.published') : undefined}
+          {...(blocked
+            ? { 'aria-disabled': true, 'aria-describedby': reasonId, style: { opacity: 0.6, cursor: 'not-allowed' } }
+            : {})}
           onClick={(event) => {
             event.stopPropagation();
-            onDelete(item);
+            if (!blocked) onDelete(item);
           }}
         >
           {t('permits.editor.actions.deleteType')}
+          {blocked && (
+            <span id={reasonId} style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>
+              {t('permits.editor.dialogs.deleteType.published')}
+            </span>
+          )}
         </Menu.Item>
       </Menu.Dropdown>
     </Menu>

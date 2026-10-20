@@ -88,6 +88,9 @@ export function StrictDateInput({
 
   return (
     <DateInput
+      // ⛔ PA2-U-02: кнопки «попередній/наступний місяць» календаря без імені - axe `button-name` critical.
+      previousLabel={t('dates.previousMonth')}
+      nextLabel={t('dates.nextMonth')}
       {...props}
       // Підпис — від того, хто ставить поле (ФВ-14.20 перевіряє його там).
       label={label}

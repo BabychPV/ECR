@@ -231,9 +231,13 @@ describe('PermitTypesPage: меню рядка «Delete type…» (PA-U-02)', ()
     await screen.findByText('Air emission permit');
 
     fireEvent.click(menuOf('AirEmission'));
-    const item = await screen.findByRole('menuitem', { name: 'permits.editor.actions.deleteType' });
-    expect(item.getAttribute('data-disabled')).toBe('true');
+    const item = await screen.findByRole('menuitem', { name: /permits\.editor\.actions\.deleteType/ });
     expect(item.getAttribute('title')).toBe('permits.editor.dialogs.deleteType.published');
+    // PA2-U-04: пункт досяжний з клавіатури (не нативний `disabled`), причину читає читалка через aria-describedby.
+    expect(item.hasAttribute('disabled')).toBe(false);
+    expect(item.getAttribute('aria-disabled')).toBe('true');
+    const reason = document.getElementById(item.getAttribute('aria-describedby') ?? '');
+    expect(reason?.textContent).toBe('permits.editor.dialogs.deleteType.published');
     fireEvent.click(item);
     expect(where()).toBe('/admin/permits/types');
   });

@@ -352,6 +352,45 @@ describe('життєвий цикл за станом і правами', () => 
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'More' })));
   });
 
+  it('Delete draft з меню «More»: Cancel повертає фокус на «More» (PA2-U-01)', async () => {
+    await open();
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    const item = await screen.findByRole('menuitem', { name: 'Delete draft…' });
+    item.focus();
+    fireEvent.click(item);
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(document.querySelector('[role="menuitem"]')).toBeNull());
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'More' })));
+  });
+
+  it('успішний Confirm «Activate» і «End permit» не лишає фокус на BODY (PA2-U-01)', async () => {
+    activatePermit.mockResolvedValue(permit({ status: 'Active' }));
+    await open();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Activate…' })[0]!);
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Activate' }));
+    await waitFor(() => expect(activatePermit).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    cleanup();
+
+    endPermit.mockResolvedValue(permit({ status: 'Expired' }));
+    await open('/admin/permits/5', permit({ status: 'Active', endsInDays: 400 }));
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    const item = await screen.findByRole('menuitem', { name: 'End this permit early…' });
+    item.focus();
+    fireEvent.click(item);
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /Reason/ }), { target: { value: 'Operations stopped for good' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'End permit' }));
+    await waitFor(() => expect(endPermit).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+  });
+
   it('Renew відкриває нову чернетку; Delete draft повертає до переліку', async () => {
     renewPermit.mockResolvedValue(permit({ id: 6, status: 'Draft' }));
     await open('/admin/permits/5', permit({ status: 'Active', endsInDays: 400 }));
