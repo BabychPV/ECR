@@ -1,6 +1,6 @@
 import { useMemo, useState, type JSX, type ReactNode } from 'react';
 import { Button, Group, ScrollArea, Table, Text, UnstyledButton } from '@mantine/core';
-import { AsyncBoundary } from '../AsyncBoundary';
+import { AsyncBoundary, type EmptyHeadingOrder } from '../AsyncBoundary';
 import {
   decimalEquals,
   formatDecimal,
@@ -71,6 +71,9 @@ export interface DataTableProps<Row> {
 
   /** Пояснення порожнього стану: ЧОМУ порожньо і що робити. */
   readonly emptyHint?: string | undefined;
+
+  /** Рівень заголовка порожнього стану й стану «нічого не знайдено» (типово 4); 2 - коли над таблицею лише `h1`. */
+  readonly emptyHeadingOrder?: EmptyHeadingOrder | undefined;
 
   /** Дія порожнього стану; ховає її викликач, коли права немає. */
   readonly emptyAction?: ReactNode;
@@ -380,6 +383,7 @@ export function DataTable<Row>({
   filtered = false,
   emptyTitle,
   emptyHint,
+  emptyHeadingOrder,
   emptyAction,
   noMatchTitle,
   noMatchHint,
@@ -484,6 +488,7 @@ export function DataTable<Row>({
         isEmpty={(page) => page.length === 0}
         emptyTitle={stateTitle}
         emptyHint={stateHint}
+        emptyHeadingOrder={emptyHeadingOrder}
         emptyAction={stateAction}
         skeleton="table"
         onRetry={onRetry}

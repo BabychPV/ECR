@@ -68,6 +68,7 @@ export function BindingsListView(): JSX.Element {
         <EmptyState
           title={t('permits.bindingsList.noAccess.title')}
           hint={t('permits.bindingsList.noAccess.hint')}
+          headingOrder={2}
         />
       </Stack>
     );
@@ -149,6 +150,7 @@ export function BindingsListView(): JSX.Element {
           filtered={filtered}
           emptyTitle={t('permits.bindingsList.empty.title')}
           emptyHint={t('permits.bindingsList.empty.hint')}
+          emptyHeadingOrder={2}
           noMatchTitle={t('permits.bindingsList.noMatches')}
           onClearFilters={() => setParams({ q: null, mode: null, stat: null })}
           clearFiltersLabel={t('filters.clear')}

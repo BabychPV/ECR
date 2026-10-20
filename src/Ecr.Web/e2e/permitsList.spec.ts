@@ -1,4 +1,5 @@
 import { expect, test, type APIResponse, type Page } from '@playwright/test';
+import { axeViolations } from './axeRule';
 import { CreatedPermitTypes } from './permitTypeCleanup';
 
 /**
@@ -228,6 +229,21 @@ test.describe('Permits list', () => {
 
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden({ timeout: 15_000 });
+  });
+
+  test('порожні стани розділу Permits: h1 -> h2, справжній axe не знаходить heading-order', async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+
+    // «Нічого не знайдено» - той самий EmptyState, що й «порожньо»; фільтр дає його на будь-якому стані стенда.
+    for (const path of ['/admin/permits', '/admin/permits/lists', '/admin/permits/types', '/admin/permits/bindings']) {
+      await page.goto(`${path}?q=zzz-no-such-${String(Date.now())}`);
+      await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole('heading', { level: 2 }), `${path}: порожній стан - h2`).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole('heading', { level: 4 }), `${path}: h4 більше немає`).toHaveCount(0);
+      expect(await axeViolations(page, 'heading-order'), `axe heading-order: ${path}`).toEqual([]);
+    }
   });
 
   test('дозвіл із API: активація й дострокове завершення з меню, фільтр стану в адресі', async ({ page }) => {

@@ -69,6 +69,7 @@ export function TypeChecksTab({ type, onAddCheck, canEdit = true }: TypeChecksTa
         rows={rows}
         rowKey={(row) => row.key}
         emptyTitle={t('permits.editor.checks.empty')}
+        emptyHeadingOrder={2}
         caption={t('permits.editor.checks.caption')}
       />
 
