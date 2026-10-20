@@ -27,6 +27,35 @@ function openCalendar(): void {
 const monthLabel = (): string =>
   [...document.querySelectorAll('[data-dates-dropdown] button')].map((b) => b.textContent ?? '').find((text) => /2026/.test(text) && !/^\d+$/.test(text)) ?? '';
 
+/** P3-N9: жовтень у шапці, на рівні «місяці» (клік по шапці) і в списку місяців - без «M10» і англійської. */
+describe('календар: жовтень у трьох мовах, включно з вибором місяця', () => {
+  for (const [language, header, monthInList] of [
+    ['en', 'october 2026', 'oct'],
+    ['ru', 'октябрь 2026', 'окт'],
+    ['kz', 'қазан 2026', 'қаз'],
+  ] as const) {
+    it(`${language}: шапка «${header}», у списку місяців «${monthInList}»`, async () => {
+      lang.value = language;
+      renderWithMantine(<StrictDateInput label="Date" value={new Date('2026-10-15T00:00:00')} onChange={() => undefined} />);
+      const input = screen.getByLabelText('Date');
+      input.focus();
+      fireEvent.focus(input);
+      fireEvent.click(input);
+
+      await waitFor(() => expect(monthLabel().toLowerCase()).toBe(header));
+      fireEvent.click(
+        [...document.querySelectorAll('[data-dates-dropdown] button')].find((b) => /2026/.test(b.textContent ?? '') && !/^\d+$/.test(b.textContent ?? '')) as Element,
+      );
+
+      await waitFor(() => {
+        const texts = [...document.querySelectorAll('[data-dates-dropdown] button')].map((b) => (b.textContent ?? '').toLowerCase());
+        expect(texts.some((text) => text.startsWith(monthInList))).toBe(true);
+        expect(texts.join('|')).not.toMatch(/m\d/);
+      });
+    });
+  }
+});
+
 describe('календар: мова назви місяця', () => {
   it('calendarLocale: en/ru/kz -> en/ru/kk', () => {
     expect([calendarLocale('en'), calendarLocale('ru'), calendarLocale('kz'), calendarLocale('xx')]).toEqual(['en', 'ru', 'kk', 'en']);

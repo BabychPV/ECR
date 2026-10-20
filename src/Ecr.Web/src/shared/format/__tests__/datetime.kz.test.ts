@@ -68,6 +68,22 @@ describe('formatDate/formatDateTime/formatTime у kz без ICU kk', () => {
   });
 });
 
+describe('P3-N9: ICU «знає» kk, але без назв місяців', () => {
+  it('«2026 M10 2» не потрапляє на екран - числовий запис', async () => {
+    const Real = Intl.DateTimeFormat;
+    vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (locales?: string | string[], options?: Intl.DateTimeFormatOptions) {
+      if (locales === 'kk') {
+        return { format: () => (options?.month === 'long' ? 'M10' : '2026 M10 2') } as unknown as Intl.DateTimeFormat;
+      }
+
+      return new Real(locales, options);
+    } as unknown as typeof Intl.DateTimeFormat);
+    const { formatDate } = await load(true);
+
+    expect(formatDate(At)).toBe('18.10.2026');
+  });
+});
+
 describe('formatDateTime у kz з повною ICU', () => {
   it('використовує Intl kk, а не запасний числовий запис', async () => {
     const { formatDateTime } = await load(true);
