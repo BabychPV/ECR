@@ -77,6 +77,9 @@ interface ConfirmModalProps {
   readonly confirmDisabled?: boolean | undefined;
 
   readonly isPending?: boolean | undefined;
+
+  /** Куди повернути фокус, якщо елемент, що відкрив діалог (пункт меню), уже зник; див. `useRestoreFocus`. */
+  readonly returnFocusTo?: (() => HTMLElement | null) | undefined;
   readonly onConfirm: () => void;
   readonly onClose: () => void;
 
@@ -107,12 +110,13 @@ export function ConfirmModal({
   typeToConfirm,
   confirmDisabled,
   isPending,
+  returnFocusTo,
   onConfirm,
   onClose,
   children,
 }: ConfirmModalProps): JSX.Element {
   const [typed, setTyped] = useState('');
-  useRestoreFocus(opened);
+  useRestoreFocus(opened, returnFocusTo);
 
   /*
    * ⚠ Поле очищається при КОЖНОМУ відкритті — той самий аргумент, що і в

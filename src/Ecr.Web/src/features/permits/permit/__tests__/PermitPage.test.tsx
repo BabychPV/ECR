@@ -336,6 +336,22 @@ describe('життєвий цикл за станом і правами', () => 
     await waitFor(() => expect(endPermit).toHaveBeenCalledWith(5, { endDate: null, reason: 'Operations stopped for good' }));
   });
 
+  it('End з меню «More»: Esc повертає фокус на кнопку «More», а не на BODY (P3-F2)', async () => {
+    await open('/admin/permits/5', permit({ status: 'Active', endsInDays: 400 }));
+    const more = screen.getByRole('button', { name: 'More' });
+    fireEvent.click(more);
+    const item = await screen.findByRole('menuitem', { name: 'End this permit early…' });
+    item.focus();
+    fireEvent.click(item);
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(document.querySelector('[role="menuitem"]')).toBeNull());
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'More' })));
+  });
+
   it('Renew відкриває нову чернетку; Delete draft повертає до переліку', async () => {
     renewPermit.mockResolvedValue(permit({ id: 6, status: 'Draft' }));
     await open('/admin/permits/5', permit({ status: 'Active', endsInDays: 400 }));
