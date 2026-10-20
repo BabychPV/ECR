@@ -1,4 +1,4 @@
-import type { JSX, KeyboardEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react';
 import { t } from '@/shared/i18n';
 import type { PermitTypeColumn, PermitTypeTable } from '../api/types';
 import { columnTypeLabel, secondaryTextOf, textOf } from './labels';
@@ -39,12 +39,28 @@ export function ColumnsTable({ columns, tables, selectedCode, unitCode, readOnly
     }
   };
 
+  // PA3-U-02: область прокручується на вузькій ширині - axe `scrollable-region-focusable`. Раніше фокусованою вона
+  // ставала лише без рядків; тепер за ЗАГАЛЬНОЮ умовою: вміст ширший за область (`scrollWidth > clientWidth`, міряємо
+  // на монтуванні, зміні стовпців і зміні розміру), незалежно від кількості стовпців. Вузька область зайвого `tabIndex` не має.
+  const wrap = useRef<HTMLDivElement>(null);
+  const [scrolls, setScrolls] = useState(false);
+  useLayoutEffect(() => {
+    const element = wrap.current;
+    if (element === null) return undefined;
+    const measure = (): void => setScrolls(element.scrollWidth > element.clientWidth);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [columns]);
+  const focusable = columns.length === 0 || scrolls;
+
   return (
-    // PA2-U-03: область прокручується (на вузькій ширині), а без рядків у ній немає фокусованого вмісту - axe
-    // `scrollable-region-focusable`. Сама область береться в Tab (`tabIndex=0`) з іменем; із рядками вона не потрібна.
     <div
+      ref={wrap}
       className="pt-table-wrap"
-      {...(columns.length === 0 ? { tabIndex: 0, role: 'region', 'aria-label': t('permits.editor.cols.region') } : {})}
+      {...(focusable ? { tabIndex: 0, role: 'region', 'aria-label': t('permits.editor.cols.region') } : {})}
     >
       <table className="pt-table">
         <thead>
