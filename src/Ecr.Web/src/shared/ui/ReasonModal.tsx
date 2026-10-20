@@ -88,7 +88,9 @@ export function ReasonModal({
   }, [opened]);
 
   return (
-    <Modal opened={opened} onClose={onClose} title={title}>
+    // ⛔ `returnFocus={false}`: фокус повертає `useRestoreFocus`. Власний `returnFocus` Mantine пізніше фокусував би
+    // запам'ятований пункт меню, що за мить розмонтується, і крав би фокус у кнопки меню (гонка P3-F2).
+    <Modal opened={opened} onClose={onClose} title={title} returnFocus={false}>
       <Textarea
         label={label}
         description={description}

@@ -141,6 +141,8 @@ export function ConfirmModal({
       opened={opened}
       onClose={onClose}
       title={title}
+      // ⛔ Фокус повертає `useRestoreFocus` (власний `returnFocus` Mantine крав би його в кнопки меню, гонка P3-F2).
+      returnFocus={false}
       /*
        * ⚠ Хрестик СВІДОМО лишається з власним ім'ям Mantine («Close»), а не
        * отримує підпис «Скасувати». Дві кнопки з однаковим іменем у тому

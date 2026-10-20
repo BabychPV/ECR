@@ -269,6 +269,9 @@ test.describe('Permits list', () => {
     await page.keyboard.press('Escape');
     await expect(end).toBeHidden({ timeout: 15_000 });
     await expect(rowMenu).toBeFocused();
+    // Фокус має витримати вихід меню з дерева (перехід exit), а не лише з'явитись на мить.
+    await page.waitForTimeout(600);
+    await expect(rowMenu).toBeFocused();
     await rowMenu.click();
     await page.getByRole('menuitem', { name: /^End early/ }).click();
     await expect(end).toBeVisible();

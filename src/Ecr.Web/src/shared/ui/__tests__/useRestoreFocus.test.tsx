@@ -35,7 +35,16 @@ function Host({ mountOnly }: { readonly mountOnly: boolean }): JSX.Element {
  * P3-F2: діалог відкрито пунктом меню («More» → «End this permit early…»): пункт зникає разом із випадним списком, тож
  * запам'ятований елемент уже не в дереві. Фокус має повернутись на кнопку меню, а без неї - на заголовок, не на `BODY`.
  */
-function MenuHost({ mountOnly, hideTriggerOnOpen }: { readonly mountOnly: boolean; readonly hideTriggerOnOpen: boolean }): JSX.Element {
+function MenuHost({
+  mountOnly,
+  hideTriggerOnOpen,
+  closeDelayMs = 0,
+}: {
+  readonly mountOnly: boolean;
+  readonly hideTriggerOnOpen: boolean;
+  /** Через скільки список меню закривається після кліку по пункту (у браузері - перехід `exit`). */
+  readonly closeDelayMs?: number;
+}): JSX.Element {
   const [open, setOpen] = useState(false);
   const [triggerShown, setTriggerShown] = useState(true);
   const [menuOpened, setMenuOpened] = useState(false);
@@ -65,7 +74,7 @@ function MenuHost({ mountOnly, hideTriggerOnOpen }: { readonly mountOnly: boolea
               setTimeout(() => {
                 setMenuOpened(false);
                 if (hideTriggerOnOpen) setTriggerShown(false);
-              }, 0);
+              }, closeDelayMs);
             }}
           >
             End this permit early…
@@ -96,6 +105,26 @@ describe('useRestoreFocus: діалог відкрито пунктом меню
 
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
       await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'More' })));
+    });
+  }
+
+  // Реальний порядок гонки (CI integ-y31): клік по пункту -> діалог відкрито -> Esc, ПОКИ пункт ще в дереві (меню згасає)
+  // -> пункт розмонтовується. Фокус мав би лишитись на «More», а не піти разом із пунктом на BODY.
+  for (const mountOnly of [true, false]) {
+    it(`Esc до того, як меню розмонтувалось: фокус лишається на «More» (${mountOnly ? 'змонтовано відкритим' : 'opened перемикається'})`, async () => {
+      render(<MenuHost mountOnly={mountOnly} hideTriggerOnOpen={false} closeDelayMs={400} />);
+      fireEvent.click(screen.getByRole('button', { name: 'More' }));
+      const item = await screen.findByRole('menuitem', { name: 'End this permit early…' });
+      item.focus();
+      fireEvent.click(item);
+      const dialog = await screen.findByRole('dialog', { name: 'End early' });
+      expect(document.querySelector('[role="menuitem"]')).not.toBeNull();
+
+      fireEvent.keyDown(dialog, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      await waitFor(() => expect(document.querySelector('[role="menuitem"]')).toBeNull());
+
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'More' }));
     });
   }
 

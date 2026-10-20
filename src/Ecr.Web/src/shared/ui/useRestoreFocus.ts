@@ -47,12 +47,20 @@ export function useRestoreFocus(opened: boolean, returnTo?: () => HTMLElement | 
     const trigger = fallback.current;
     origin.current = null;
     fallback.current = null;
+    // ⛔ Кнопка меню - ПЕРШОЮ: пункт меню ще в дереві, поки випадний список згасає (перехід `exit`), тож Esc одразу після
+    // відкриття діалогу фокусував би пункт, який за мить розмонтується, і фокус падав на `BODY` (trace e2e permitPage:
+    // `focus() on BUTTON[menuitem]` ... `removed menu`; CI-запуск lane/integ-y31).
+    if (trigger?.isConnected === true) {
+      trigger.focus({ preventScroll: true });
+      return;
+    }
+
     if (element?.isConnected === true) {
       element.focus({ preventScroll: true });
       return;
     }
 
-    const target = trigger?.isConnected === true ? trigger : provider.current?.();
+    const target = provider.current?.();
     if (target?.isConnected === true) {
       target.focus({ preventScroll: true });
     } else if (element !== null || trigger !== null || provider.current !== undefined) {
