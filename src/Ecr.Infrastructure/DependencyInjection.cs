@@ -527,6 +527,7 @@ public static class DependencyInjection
 
         // PERMITS: types — типи дозволів над реєстрами (PM-03)
         services.AddScoped<IPermitTypeStore, PermitTypeStore>();
+        services.AddScoped<IPermitListStore, PermitListStore>(); // PM-08e
 
         // PERMITS: permits — екземпляри дозволів (PM-04)
         services.AddScoped<IPermitStore, PermitStore>();
