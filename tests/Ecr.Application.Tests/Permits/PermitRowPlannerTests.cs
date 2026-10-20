@@ -88,6 +88,18 @@ public sealed class PermitRowPlannerTests
     public void Ключ_рядка_стабільний_для_запису()
         => Assert.Equal("P42", PermitRowPlanner.RowKeyFor(42));
 
+    [Theory]
+    [InlineData("P42", true)]
+    [InlineData("P0", true)]
+    [InlineData("P", false)]
+    [InlineData("p42", false)]
+    [InlineData("P4x", false)]
+    [InlineData("PX42", false)]
+    [InlineData("42", false)]
+    [InlineData("P-1", false)]
+    public void Ключ_виду_P_число_впізнається_лише_точно(string key, bool expected)
+        => Assert.Equal(expected, PermitRowPlanner.IsPermitRowKey(key));
+
     private static InMemoryRegistrySnapshot Snapshot()
     {
         var snapshot = new InMemoryRegistrySnapshot()
