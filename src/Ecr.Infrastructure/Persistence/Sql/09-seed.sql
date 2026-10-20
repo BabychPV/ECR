@@ -9079,6 +9079,9 @@ USING (VALUES
     ,(N'permits.editor.deleteTable.usagePublished', N'en', N'Permits of this type: {permits}. Rows in this published table: {rows}. They stay untouched: a published table cannot be removed.', 1)
     ,(N'permits.editor.deleteTable.usageDraftOnly', N'en', N'This table is not published yet: none of the {permits} permits of this type holds rows in it.', 1)
     -- PERMITS: type-usage ── кінець секції ──
+    -- PERMITS: lists-api ── en: відмови списків вибору дозволів (ECR-PRM-0404 list, ECR-PRM-0422 listReadOnly/listChangeInvalid; PM-08e); ru/kz — порцією PERMITS: lists-api нижче ──
+    ,(N'err.ECR-PRM-0404.list', N'en', N'The list "{key}" does not exist.', 1)
+    -- PERMITS: lists-api ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -23492,6 +23495,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: type-usage ── кінець секції ──
+-- PERMITS: lists-api ── ru/kz: відмови списків вибору дозволів (PM-08e); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-0404.list', N'ru', N'Списка «{key}» не существует.'),
+    (N'err.ECR-PRM-0404.list', N'kz', N'«{key}» тізімі жоқ.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: lists-api ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

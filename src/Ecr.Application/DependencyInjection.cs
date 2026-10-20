@@ -316,6 +316,9 @@ public static class DependencyInjection
         services.AddScoped<Permits.Bindings.GetPermitBindingHandler>();
         services.AddScoped<Permits.Bindings.SavePermitBindingHandler>();
         services.AddScoped<Permits.Bindings.DeletePermitBindingHandler>();
+        // PERMITS: lists — списки вибору дозволів (PM-08e)
+        services.AddScoped<Permits.Lists.ListPermitListsHandler>();
+        services.AddScoped<Permits.Lists.GetPermitListHandler>();
         services.AddScoped<Permits.Bindings.IPermitResolver, Permits.Bindings.PermitResolver>();
         services.AddScoped<Permits.Bindings.PreviewPermitBindingHandler>();
         services.AddScoped<Permits.Bindings.RefreshPermitBindingHandler>();
