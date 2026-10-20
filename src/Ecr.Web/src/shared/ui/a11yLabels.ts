@@ -22,6 +22,18 @@ export function closeNotificationLabel(): string {
   return hasText('common.closeNotification') ? t('common.closeNotification') : 'Close notification';
 }
 
+/** Хрестик модалки (`common.close`): раніше тема тримала англійський літерал `Close` і в ru/kz читалка озвучувала його англійською (P3-N6). */
+function closeModalLabel(): string {
+  return hasText('common.close') ? t('common.close') : 'Close';
+}
+
+/** Геттер - як у `closeNotificationButtonProps`: каталог читається в момент рендера, а не імпорту теми. */
+export const closeModalButtonProps: { readonly 'aria-label': string } = {
+  get 'aria-label'(): string {
+    return closeModalLabel();
+  },
+};
+
 /** Дія «назад» у тості скасування. */
 export function undoLabel(): string {
   return hasText('common.undo') ? t('common.undo') : 'Undo';
