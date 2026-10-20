@@ -148,6 +148,7 @@ export function PermitsPage(): JSX.Element {
           }
           emptyTitle={t('permits.empty.title')}
           emptyHint={t('permits.list.empty.hint')}
+          emptyHeadingOrder={2}
           emptyAction={mayWrite ? <Button onClick={openWizard}>{t('permits.empty.new')}</Button> : undefined}
           noMatchTitle={t('permits.list.noMatches')}
           // ⛔ Один перехід на всі параметри: кілька сеттерів поспіль губили б зміни (`useUrlState.ts`).

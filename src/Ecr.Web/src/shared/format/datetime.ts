@@ -140,12 +140,28 @@ function format(value: DateLike, options: Intl.DateTimeFormatOptions, lang?: Lan
 
   const locale = formatLocale(lang);
 
-  if (locale !== 'kk' && (lang ?? language()) === 'kz') {
+  if ((locale !== 'kk' || !kkMonthsUsable()) && (lang ?? language()) === 'kz') {
     const manual = kzNumeric(at, options);
     if (manual !== null) return manual;
   }
 
   return formatter(locale, options).format(at);
+}
+
+let kkMonths: boolean | undefined;
+
+/**
+ * P3-N9: у частини браузерів `supportedLocalesOf('kk')` каже «так», а даних про місяці немає - `dateStyle: 'medium'`
+ * дає «2026 M10 2» (діалог «Activate permit» у kz). Зондуємо раз: довгий місяць `kk` має бути словом із літер,
+ * а не «M10» і не англійським «October». Не пройшов - числовий запис `kzNumeric`, як і без ICU.
+ */
+function kkMonthsUsable(): boolean {
+  if (kkMonths === undefined) {
+    const name = new Intl.DateTimeFormat('kk', { month: 'long', timeZone: 'UTC' }).format(new Date(Date.UTC(2026, 9, 1)));
+    kkMonths = /^\p{L}{3,}$/u.test(name) && !/^October$/i.test(name);
+  }
+
+  return kkMonths;
 }
 
 /**

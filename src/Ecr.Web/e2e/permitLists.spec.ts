@@ -141,6 +141,59 @@ test.describe('Списки пермітів: екран «Lists»', () => {
     await expect(page).toHaveURL(new RegExp(`/admin/permits/types/${code}$`), { timeout: 30_000 });
   });
 
+  test('PUI-1: перелік відкривається з клавіатури (Tab -> рядок -> Enter), значення додається, Esc повертає фокус на рядок', async ({ page }) => {
+    test.setTimeout(150_000);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+
+    const stamp = String(Date.now());
+    const code = created.track(`E2EListsKbd${stamp}`);
+    const method = `E2E_Kbd${stamp}`;
+    await publishType(page, code, method);
+
+    await page.goto('/admin/permits/lists');
+    const row = page.locator('[data-list-table] table tbody tr', { hasText: method });
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await expect(row).toHaveAttribute('tabindex', '0');
+
+    const focused = (selector: string) => page.evaluate((s) => document.activeElement?.matches(s) === true, selector);
+    const tabUntil = async (selector: string): Promise<void> => {
+      for (let i = 0; i < 80; i += 1) {
+        await page.keyboard.press('Tab');
+        if (await focused(selector)) return;
+      }
+      throw new Error(`Tab не дійшов до ${selector}`);
+    };
+
+    // Tab з останнього заголовка стовпця приводить до рядків (раніше - одразу до «Skip to main content»).
+    await page.locator('[data-list-table] thead th button').last().focus();
+    await tabUntil(`[data-row-key="type:${code}:Items:${method}"]`);
+    await page.keyboard.press('Enter');
+
+    const drawer = page.getByRole('dialog');
+    await expect(drawer).toBeVisible({ timeout: 10_000 });
+    await expect(drawer).toContainText('Alpha');
+
+    const field = drawer.getByRole('textbox', { name: 'New value' });
+    for (let i = 0; i < 30 && !(await field.evaluate((el) => el === document.activeElement)); i += 1) {
+      await page.keyboard.press('Tab');
+    }
+    await expect(field).toBeFocused();
+    await page.keyboard.type('Gamma');
+    await page.keyboard.press('Tab');
+    await expect(drawer.getByRole('button', { name: 'Add value' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(drawer).toContainText('Gamma', { timeout: 15_000 });
+
+    await page.keyboard.press('Escape');
+    await expect(drawer).toBeHidden({ timeout: 10_000 });
+    await expect(row, 'фокус вернувся на рядок').toBeFocused();
+
+    // Space відкриває той самий рядок і не гортає сторінку.
+    await page.keyboard.press('Space');
+    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10_000 });
+  });
+
   test('форма рядка дозволу: «Add a value…» кладе значення в спільний довідник, пікер його показує', async ({ page }) => {
     test.setTimeout(180_000);
     await page.setViewportSize({ width: 1440, height: 900 });

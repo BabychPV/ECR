@@ -45,6 +45,9 @@ interface AsyncBoundaryProps<T> {
   /** Пояснення: ЧОМУ порожньо і що з цим робити. */
   readonly emptyHint?: string | undefined;
 
+  /** Рівень заголовка порожнього стану (за замовчуванням 4); див. `EmptyState`. */
+  readonly emptyHeadingOrder?: EmptyHeadingOrder | undefined;
+
   /** Дія порожнього стану; ховається, коли права немає. */
   readonly emptyAction?: ReactNode | undefined;
 
@@ -106,6 +109,7 @@ export function AsyncBoundary<T>({
   isEmpty,
   emptyTitle,
   emptyHint,
+  emptyHeadingOrder,
   emptyAction,
   skeleton = 'none',
   onRetry,
@@ -132,11 +136,11 @@ export function AsyncBoundary<T>({
 
   if (data === undefined) {
     // Не помилка і не дані: запит іще не робили (наприклад, не обрано проєкт).
-    return <EmptyState title={emptyTitle} hint={emptyHint} action={emptyAction} />;
+    return <EmptyState title={emptyTitle} hint={emptyHint} action={emptyAction} headingOrder={emptyHeadingOrder} />;
   }
 
   if (isEmpty?.(data) === true) {
-    return <EmptyState title={emptyTitle} hint={emptyHint} action={emptyAction} />;
+    return <EmptyState title={emptyTitle} hint={emptyHint} action={emptyAction} headingOrder={emptyHeadingOrder} />;
   }
 
   return <>{children(data)}</>;
@@ -211,19 +215,29 @@ export function ErrorState({
  * ≠ «фільтр нічого не знайшов») малювати заново означало б четверту подачу
  * того самого.
  */
+export type EmptyHeadingOrder = 2 | 3 | 4;
+
 export function EmptyState({
   title,
   hint,
   action,
+  headingOrder = 4,
 }: {
   readonly title?: string | undefined;
   readonly hint?: string | undefined;
   readonly action?: ReactNode;
+  /**
+   * Рівень заголовка. Типово 4 (екрани, де порожній стан стоїть у вкладеній секції). Сторінка з `h1` і порожнім станом без
+   * проміжних секцій передає 2 - інакше `h1` -> `h4` дає axe `heading-order`; вигляд той самий (`size="h4"`).
+   */
+  readonly headingOrder?: EmptyHeadingOrder | undefined;
 }): JSX.Element {
   return (
     <Center py="xl">
       <Stack gap="xs" align="center" maw={420}>
-        <Title order={4}>{title ?? t('state.emptyTitle')}</Title>
+        <Title order={headingOrder} {...(headingOrder === 4 ? {} : { size: 'h4' })}>
+          {title ?? t('state.emptyTitle')}
+        </Title>
 
         {hint !== undefined && (
           <Text size="sm" c="dimmed" ta="center">

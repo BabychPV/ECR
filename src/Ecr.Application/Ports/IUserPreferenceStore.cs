@@ -20,4 +20,10 @@ public interface IUserPreferenceStore
 
     /// <summary>Ставить налаштування в чергу на видалення.</summary>
     public void Remove(UserPreference preference);
+
+    /// <summary>
+    /// Знімає налаштування з відстеження: невдала вставка (гонка першого запису, PA4-S-01) інакше лишилась би
+    /// в трекері й повторила б той самий <c>INSERT</c> при наступному збереженні.
+    /// </summary>
+    public void Detach(UserPreference preference);
 }

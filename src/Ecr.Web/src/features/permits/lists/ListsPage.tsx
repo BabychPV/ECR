@@ -96,10 +96,14 @@ export function ListsPage(): JSX.Element {
           filtered={(query ?? '').trim().length > 0 || kind !== ''}
           emptyTitle={t('permits.lists.empty.title')}
           emptyHint={t('permits.lists.empty.hint')}
+          emptyHeadingOrder={2}
           noMatchTitle={t('permits.lists.noMatches')}
           onClearFilters={() => setParams({ q: null, kind: null, stat: null })}
           clearFiltersLabel={t('filters.clear')}
           onRowClick={(row) => setParams({ panel: row.id })}
+          // PUI-1: у клітинках немає посилання на шторку - рядок мусить відкриватися клавіатурою (Tab -> Enter/Space).
+          rowFocusable
+          rowLabel={(row) => row.name}
         />
       </Box>
 
