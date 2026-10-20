@@ -1,8 +1,8 @@
-/** Ключі кешу екрана «Lists» (PM-08d). Власні, щоб не чіпати спільний `queryKeys.ts`. */
+/** Ключі кешу екрана «Lists» (PM-08d, PM-08e). Власні, щоб не чіпати спільний `queryKeys.ts`. */
 export const listsKeys = {
   all: ['permits', 'lists'] as const,
-  /** Визначення всіх типів (відбиток — коди типів). */
-  definitions: (codes: readonly string[]) => ['permits', 'lists', 'definitions', codes.join('|')] as const,
-  /** Чинні значення спільного довідника для шторки. */
-  entries: (code: string) => ['permits', 'lists', 'entries', code] as const,
+  /** Перелік усіх списків (`GET /permit-lists`). */
+  index: ['permits', 'lists', 'index'] as const,
+  /** Список зі значеннями за ключем (`GET /permit-lists/{key}`). */
+  detail: (key: string) => ['permits', 'lists', 'detail', key] as const,
 };

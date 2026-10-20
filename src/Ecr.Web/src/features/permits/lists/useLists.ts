@@ -1,119 +1,69 @@
 import { useMemo } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
-import type { RegistryEntryDto } from '@/api/types';
-import { getPermitType } from '../api/typesApi';
-import type { PermitType } from '../api/types';
-import { useSharedRegistries } from '../typeEditor/lookups';
-import { typesKeys } from '../types/typesKeys';
-import { useAllPermitTypes } from '../types/useTypes';
-import { buildListRows, type ListRow } from './listsModel';
+import { useMutation, useQuery, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
+import { changePermitListItems, getPermitList, listPermitLists, type PermitListChange, type PermitListDetail, type PermitListDto } from './listsApi';
 import { listsKeys } from './listsKeys';
+import { rowsFromLists, type ListRow } from './listsModel';
 
 export interface ListsData {
   /** `undefined` — ще не приїхало (≠ «списків немає»). */
   readonly rows: readonly ListRow[] | undefined;
   readonly isPending: boolean;
   readonly error: Error | null;
-  /** Довідники не прочитались (немає `Registry.View` чи збій): списки показані за кодами. */
-  readonly registriesFailed: boolean;
-  /** Коди типів, визначення яких не прочиталось: екран живий, їхніх списків просто немає. */
-  readonly failedTypes: readonly string[];
   readonly refetch: () => void;
 }
 
-/** Скільки визначень типів читається одночасно (ліміт запитів — 100/хв на користувача). */
-export const TypeFetchConcurrency = 4;
-
-/** Свіжість визначення в кеші: відкритий щойно конструктор не читається вдруге. */
-const DefinitionFreshMs = 30_000;
-
-interface Definitions {
-  readonly types: PermitType[];
-  readonly failed: string[];
-}
-
-/** Виконує `task` над елементами не більш як `limit` одночасно; порядок результатів збережено. */
-async function inPool<T, R>(items: readonly T[], limit: number, task: (item: T) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < items.length) {
-      const index = next;
-      next += 1;
-      results[index] = await task(items[index] as T);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-
-  return results;
-}
-
-/**
- * Дані екрана: перелік типів → визначення типів (колонки зі списками, по `TypeFetchConcurrency` одночасно,
- * зі спільного кешу `typesKeys.one`, якщо він свіжий) + спільні довідники. Тип, який не прочитався, не валить
- * екран: його код іде в `failedTypes`.
- */
-export function useLists(): ListsData {
-  const client = useQueryClient();
-  const list = useAllPermitTypes();
-  const codes = (list.data ?? []).map((item) => item.code);
-  const definitions = useQuery({
-    queryKey: listsKeys.definitions(codes),
-    enabled: list.data !== undefined,
-    queryFn: async (): Promise<Definitions> => {
-      const read = await inPool(codes, TypeFetchConcurrency, async (code) => {
-        try {
-          return await client.fetchQuery({
-            queryKey: typesKeys.one(code),
-            queryFn: () => getPermitType(code),
-            staleTime: DefinitionFreshMs,
-          });
-        } catch {
-          return code;
-        }
-      });
-
-      return {
-        types: read.filter((item): item is PermitType => typeof item !== 'string'),
-        failed: read.filter((item): item is string => typeof item === 'string'),
-      };
-    },
+/** Перелік усіх списків вибору: ОДИН запит (`GET /permit-lists`), кеш спільний з формою рядка дозволу. */
+export function usePermitListIndex(enabled = true) {
+  return useQuery<PermitListDto[]>({
+    queryKey: listsKeys.index,
+    queryFn: listPermitLists,
+    enabled,
   });
-  const registries = useSharedRegistries(true);
+}
 
-  const rows = useMemo(
-    () =>
-      definitions.data === undefined ? undefined : buildListRows(definitions.data.types, registries.data ?? []),
-    [definitions.data, registries.data],
-  );
+/** Дані екрана: перелік списків одним запитом, рядки — за моделлю. */
+export function useLists(): ListsData {
+  const query = usePermitListIndex();
+  const rows = useMemo(() => (query.data === undefined ? undefined : rowsFromLists(query.data)), [query.data]);
 
   return {
     rows,
-    isPending: list.isPending || definitions.isPending || registries.isPending,
-    error: list.error ?? definitions.error,
-    registriesFailed: registries.isError,
-    failedTypes: definitions.data?.failed ?? [],
+    isPending: query.isPending,
+    error: query.error,
     refetch: () => {
-      void list.refetch();
-      void definitions.refetch();
-      void registries.refetch();
+      void query.refetch();
     },
   };
 }
-/** Сьогодні, UTC (`YYYY-MM-DD`): довідники темпоральні, значення беруться на дату. */
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
+
+/** Значення списку для шторки (лише за відкритою шторкою; `null` — не читати). */
+export function useListDetail(key: string | null) {
+  return useQuery<PermitListDetail>({
+    queryKey: listsKeys.detail(key ?? ''),
+    queryFn: () => getPermitList(key ?? ''),
+    enabled: key !== null,
+  });
 }
 
-/** Чинні значення спільного довідника для шторки (лише за відкритою шторкою). */
-export function useListEntries(registryCode: string | null) {
-  return useQuery({
-    queryKey: listsKeys.entries(registryCode ?? ''),
-    queryFn: () =>
-      apiFetch<RegistryEntryDto[]>(
-        `/api/v1/registries/${encodeURIComponent(registryCode ?? '')}/entries?asOf=${today()}`,
-      ),
-    enabled: registryCode !== null,
+/** Префікс кешу значень пікерів у формі рядка дозволу (`permitKeys.list`): після зміни значень їх треба перечитати. */
+const PickerKeys = ['permits', 'pick'] as const;
+
+/**
+ * Зміна значень списку (`PUT /permit-lists/{key}/items`). Успіх кладе нову відповідь у кеш шторки, скидає перелік
+ * (лічильники) і значення пікерів форми дозволу; готова відповідь доступна й виклику (`mutateAsync`).
+ */
+export function useChangeListItems(key: string): UseMutationResult<PermitListDetail, Error, readonly PermitListChange[]> {
+  const client = useQueryClient();
+
+  return useMutation<PermitListDetail, Error, readonly PermitListChange[]>({
+    mutationKey: ['permits', 'lists', 'change', key],
+    mutationFn: (changes) => changePermitListItems(key, changes),
+    onSuccess: async (detail) => {
+      client.setQueryData(listsKeys.detail(key), detail);
+      await Promise.all([
+        client.invalidateQueries({ queryKey: listsKeys.index }),
+        client.invalidateQueries({ queryKey: PickerKeys }),
+      ]);
+    },
   });
 }

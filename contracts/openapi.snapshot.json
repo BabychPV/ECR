@@ -1746,6 +1746,22 @@
         ],
         "type": "object"
       },
+      "ChangePermitListItemsRequest": {
+        "description": "Запит на зміну значень списку: усе або нічого.",
+        "properties": {
+          "changes": {
+            "description": "Зміни в порядку виконання (1..200).",
+            "items": {
+              "$ref": "#/components/schemas/PermitListItemChange"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "changes"
+        ],
+        "type": "object"
+      },
       "ChangeProjectTimeZoneRequest": {
         "description": "Запит на зміну поясу майданчика проєкту (T6/#52).",
         "properties": {
@@ -10881,6 +10897,124 @@
         ],
         "type": "object"
       },
+      "PermitListDetailDto": {
+        "description": "Список зі значеннями.",
+        "properties": {
+          "items": {
+            "description": "Чинні значення в порядку показу.",
+            "items": {
+              "$ref": "#/components/schemas/PermitListValueDto"
+            },
+            "type": "array"
+          },
+          "list": {
+            "$ref": "#/components/schemas/PermitListDto",
+            "description": "Опис списку."
+          }
+        },
+        "required": [
+          "list",
+          "items"
+        ],
+        "type": "object"
+      },
+      "PermitListDto": {
+        "description": "Список вибору: спільний довідник, список «лише для типу» або таблиця того самого дозволу.",
+        "properties": {
+          "editable": {
+            "description": "Чи може поточний користувач змінювати значення (право і область).",
+            "type": "boolean"
+          },
+          "itemCount": {
+            "description": "Скільки чинних значень; `null` для таблиці того самого дозволу (значення - рядки дозволу).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "key": {
+            "description": "Ключ списку для маршруту: `shared:{registryCode}`, `type:{typeCode}:{tableCode}:{fieldCode}` або `permit:{typeCode}:{tableCode}:{fieldCode}`.",
+            "type": "string"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва: довідника (спільний) або стовпця-власника (решта).",
+            "type": "object"
+          },
+          "registryCode": {
+            "description": "Код довідника зі значеннями (для `SharedRegistry` і `TypeOnly` - прихованого); для таблиці дозволу `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "scope": {
+            "description": "`SharedRegistry`, `TypeOnly` або `SamePermitTable`.",
+            "type": "string"
+          },
+          "typeCode": {
+            "description": "Тип-власник для `TypeOnly` і `SamePermitTable`; для спільного `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "usedBy": {
+            "description": "Стовпці опублікованих типів, що беруть значення зі списку.",
+            "items": {
+              "$ref": "#/components/schemas/PermitListUseDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "scope",
+          "registryCode",
+          "typeCode",
+          "nameL10n",
+          "itemCount",
+          "editable",
+          "usedBy"
+        ],
+        "type": "object"
+      },
+      "PermitListItemChange": {
+        "description": "Одна зміна значень списку.",
+        "properties": {
+          "action": {
+            "description": "`Add`, `Update` або `Remove`.",
+            "type": "string"
+          },
+          "displayL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Підпис (для `Add` і `Update`); для списку «лише для типу» обов'язкова мова `en`.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "id": {
+            "description": "Запис (для `Update` і `Remove`).",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "id",
+          "displayL10n"
+        ],
+        "type": "object"
+      },
       "PermitListItemDto": {
         "description": "Рядок переліку дозволів.",
         "properties": {
@@ -11003,6 +11137,80 @@
           "boundSheetCount",
           "updatedAt",
           "updatedByDisplayName"
+        ],
+        "type": "object"
+      },
+      "PermitListUseDto": {
+        "description": "Стовпець типу дозволу, що бере значення зі списку.",
+        "properties": {
+          "fieldCode": {
+            "description": "Код стовпця.",
+            "type": "string"
+          },
+          "fieldNameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва стовпця.",
+            "type": "object"
+          },
+          "tableCode": {
+            "description": "Код таблиці типу.",
+            "type": "string"
+          },
+          "tableNameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва таблиці.",
+            "type": "object"
+          },
+          "typeCode": {
+            "description": "Код типу.",
+            "type": "string"
+          },
+          "typeNameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва типу мовами каталогу.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "typeCode",
+          "typeNameL10n",
+          "tableCode",
+          "tableNameL10n",
+          "fieldCode",
+          "fieldNameL10n"
+        ],
+        "type": "object"
+      },
+      "PermitListValueDto": {
+        "description": "Значення списку.",
+        "properties": {
+          "code": {
+            "description": "Код запису.",
+            "type": "string"
+          },
+          "displayL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Підпис мовами каталогу.",
+            "type": "object"
+          },
+          "id": {
+            "description": "Ідентифікатор запису довідника.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "displayL10n"
         ],
         "type": "object"
       },
@@ -35174,6 +35382,248 @@
         ]
       }
     },
+    "/api/v1/permit-lists": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PermitListDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PermitListDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PermitListDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Усі списки з кількістю значень і стовпцями, що їх беруть (опубліковані типи). Право `Registry.View`.",
+        "tags": [
+          "PermitLists"
+        ]
+      }
+    },
+    "/api/v1/permit-lists/{key}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Ключ: `shared:{registryCode}`, `type:{type}:{table}:{field}` або `permit:{type}:{table}:{field}`.",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitListDetailDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitListDetailDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitListDetailDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Список зі значеннями. Право `Registry.View`.",
+        "tags": [
+          "PermitLists"
+        ]
+      }
+    },
+    "/api/v1/permit-lists/{key}/items": {
+      "put": {
+        "parameters": [
+          {
+            "description": "Ключ списку.",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePermitListItemsRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePermitListItemsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePermitListItemsRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitListDetailDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitListDetailDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitListDetailDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Додає, змінює й прибирає значення списку: усе або нічого. Спільний довідник - право `Registry.EditData` (або\nгрант на нього), «лише для типу» - `Permit.EditType`; таблиця того самого дозволу - `422`.",
+        "tags": [
+          "PermitLists"
+        ]
+      }
+    },
     "/api/v1/permit-types": {
       "get": {
         "parameters": [
@@ -51175,6 +51625,9 @@
     },
     {
       "name": "PermitBindings"
+    },
+    {
+      "name": "PermitLists"
     },
     {
       "name": "Permits"

@@ -149,3 +149,15 @@ details.pp-group > summary {
   max-height: 160px;
   overflow-y: auto;
 }
+
+/* «Not in the list? Add a value…» під полем-списком (PM-08e). */
+.pp-with-add {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.pp-with-add > :first-child {
+  align-self: stretch;
+}
