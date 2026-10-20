@@ -4,3 +4,30 @@
   margin: 0;
   padding: 0;
 }
+
+/* PA4-U-03: довге значення без пробілів переноситься всередині шторки, кнопки дій лишаються в межах. */
+.pl-values li {
+  min-width: 0;
+}
+
+.pl-value-text {
+  min-width: 0;
+  flex: 1 1 0;
+  overflow-wrap: anywhere;
+}
+
+.pl-value-actions {
+  flex: 0 0 auto;
+}
+
+/* Список «Used by»: рядок вужчий за шторку (маркер List давав +6 px до scrollWidth). */
+[data-list-used] .mantine-List-itemWrapper,
+[data-list-used] .mantine-List-itemLabel {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+[data-list-used] {
+  overflow-x: clip;
+}

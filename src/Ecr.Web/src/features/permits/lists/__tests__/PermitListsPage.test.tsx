@@ -352,3 +352,89 @@ describe('Lists: правка значень', () => {
     expect(within(drawer).getByText('Calc')).toBeTruthy();
   });
 });
+
+describe('Lists: фокус у шторці (PA4-U-01)', () => {
+  async function openType(): Promise<HTMLElement> {
+    fireEvent.click(await screen.findByText('Method'));
+    const drawer = await screen.findByRole('dialog');
+    await within(drawer).findByText('Direct');
+
+    return drawer;
+  }
+  const renameOf = (drawer: HTMLElement, name: string): HTMLElement =>
+    within(drawer).getByRole('button', { name: `permits.lists.drawer.renameAria {"value":"${name}"}` });
+
+  it('Rename -> фокус у полі; Cancel -> фокус на Rename цього значення', async () => {
+    stub();
+    show();
+    const drawer = await openType();
+
+    fireEvent.click(renameOf(drawer, 'Calc'));
+    const input = within(drawer).getByRole('textbox', { name: 'permits.lists.drawer.edit.label' });
+    await waitFor(() => expect(document.activeElement).toBe(input));
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'permits.lists.drawer.edit.cancel' }));
+    await waitFor(() => expect(document.activeElement).toBe(renameOf(drawer, 'Calc')));
+  });
+
+  it('Save -> фокус на Rename перейменованого значення', async () => {
+    stub();
+    show();
+    const drawer = await openType();
+
+    fireEvent.click(renameOf(drawer, 'Calc'));
+    fireEvent.change(within(drawer).getByRole('textbox', { name: 'permits.lists.drawer.edit.label' }), { target: { value: 'Calculation' } });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'permits.lists.drawer.edit.save' }));
+
+    await within(drawer).findByText('Calculation');
+    await waitFor(() => expect(document.activeElement).toBe(renameOf(drawer, 'Calculation')));
+  });
+
+  it('Remove -> фокус на Rename сусіднього значення, а для останнього - на поле додавання', async () => {
+    stub();
+    show();
+    const drawer = await openType();
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'permits.lists.drawer.removeAria {"value":"Direct"}' }));
+    await waitFor(() => expect(within(drawer).queryByText('Direct')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(renameOf(drawer, 'Calc')));
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'permits.lists.drawer.removeAria {"value":"Calc"}' }));
+    await waitFor(() => expect(within(drawer).queryByText('Calc')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(within(drawer).getByRole('textbox', { name: 'permits.lists.drawer.add.label' })));
+  });
+
+  it('Add -> фокус на полі додавання (кнопка стала вимкненою - фокус не падає на BODY)', async () => {
+    stub();
+    show();
+    const drawer = await openType();
+    const field = within(drawer).getByRole('textbox', { name: 'permits.lists.drawer.add.label' });
+
+    fireEvent.change(field, { target: { value: 'Manual' } });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'permits.lists.drawer.add.submit' }));
+
+    await within(drawer).findByText('Manual');
+    await waitFor(() => expect(document.activeElement).toBe(field));
+  });
+
+  it('шторка при відкритті забирає фокус на себе', async () => {
+    stub();
+    show();
+    const drawer = await openType();
+
+    await waitFor(() => expect(drawer.contains(document.activeElement)).toBe(true));
+  });
+});
+
+describe('Lists: довге значення (PA4-U-03)', () => {
+  it('значення без пробілів несе клас переносу (самі стилі перевіряє e2e у справжньому браузері)', async () => {
+    const long = 'Z'.repeat(240);
+    stub({ items: { [TypeKey]: [value(10, long)] } });
+    show();
+    fireEvent.click(await screen.findByText('Method'));
+    const drawer = await screen.findByRole('dialog');
+
+    const text = await within(drawer).findByText(long);
+    expect(text.className).toContain('pl-value-text');
+  });
+});

@@ -222,6 +222,8 @@ export function RowDrawer({
       onClose={onClose}
       position="right"
       size="lg"
+      // PA4-U-09: Esc у вкладеному «Add a value…» закриває лише його (обидва Modal слухають keydown на window).
+      closeOnEscape={adding === null}
       title={title}
       closeButtonProps={{ 'aria-label': t('permits.page.row.close') }}
     >
@@ -279,7 +281,14 @@ export function RowDrawer({
           listName={adding.name}
           // Пікери вже перечитано (мутація чекає скидання кешу): нове значення стає вибраним у полі, з якого його додали.
           onAdded={(item) => changeField(adding.field.column.code, String(item.id))}
-          onClose={() => setAdding(null)}
+          onClose={() => {
+            // PA4-U-02: вкладений Modal змонтовано вже відкритим, тож власного повернення фокуса Mantine не робить (BODY).
+            const code = adding.field.column.code;
+            setAdding(null);
+            window.setTimeout(() => {
+              document.querySelector<HTMLElement>(`[data-add-value-field="${code}"] [data-add-value]`)?.focus({ preventScroll: true });
+            }, 0);
+          }}
         />
       )}
     </Drawer>
