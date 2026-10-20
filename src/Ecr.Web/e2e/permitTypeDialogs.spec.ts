@@ -240,6 +240,68 @@ test.describe('Діалоги конструктора типу дозволу',
     expect(type.tables.map((t) => t.code)).toContain('MonitoringPoints');
   });
 
+  // PM-03b2: «Remove table» показує кількості з GET …/usage. Тип публікується, у нього заводяться два дозволи, потім
+  // відкривається нова версія з другою таблицею (лише в чернетці). Опублікований тип сервер не видаляє — код унікальний.
+  test('Remove table: опублікована таблиця з числами, таблиця лише з чернетки', async ({ page }) => {
+    test.setTimeout(180_000);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+
+    const code = tracked.track(`E2E_Usage_${Date.now()}`);
+    const table = (tableCode: string, order: number) => ({
+      code: tableCode,
+      nameL10n: { en: tableCode },
+      order,
+      columns: [
+        {
+          code: 'Name', nameL10n: { en: 'Name' }, dataType: 'String', unitId: null, required: true, key: true, group: null,
+          precision: null, scale: null, listScope: null, listRegistryCode: null, siblingTableCode: null, choices: null, order: 1,
+        },
+      ],
+      rules: [],
+    });
+    const base = { nameL10n: { en: 'E2E usage' }, category: 'Water', rules: [] };
+
+    const created = await page.request.post('/api/v1/permit-types', { data: { code, nameL10n: base.nameL10n, category: 'Water' } });
+    expect(created.status(), `заведення типу: ${await created.text()}`).toBe(201);
+    const first = await page.request.put(`/api/v1/permit-types/${code}`, {
+      data: { ...base, tables: [table('Rows', 1)], rowVersion: ((await created.json()) as { rowVersion: string }).rowVersion },
+    });
+    expect(first.status(), `PUT: ${await first.text()}`).toBe(200);
+    const published = await page.request.post(`/api/v1/permit-types/${code}/publish`, {
+      data: { reason: 'e2e: тип для кількостей', rowVersion: ((await first.json()) as { rowVersion: string }).rowVersion },
+    });
+    expect(published.status(), `publish: ${await published.text()}`).toBe(200);
+
+    for (const number of ['E2E-U-1', 'E2E-U-2']) {
+      const permit = await page.request.post('/api/v1/permits', {
+        data: { typeCode: code, number, location: null, issueDate: null, validFrom: '2026-01-01', validTo: '2027-01-01', reportingFlags: null },
+      });
+      expect(permit.status(), `дозвіл ${number}: ${await permit.text()}`).toBe(201);
+    }
+
+    const opened = await page.request.post(`/api/v1/permit-types/${code}/new-version`);
+    expect(opened.status(), `new-version: ${await opened.text()}`).toBe(200);
+    const second = await page.request.put(`/api/v1/permit-types/${code}`, {
+      data: { ...base, tables: [table('Rows', 1), table('Extra', 2)], rowVersion: ((await opened.json()) as { rowVersion: string }).rowVersion },
+    });
+    expect(second.status(), `PUT другої версії: ${await second.text()}`).toBe(200);
+
+    // Опублікована таблиця: відмова сервера + числа, кнопка вимкнена.
+    await page.goto(`/admin/permits/types/${code}?dialog=delete-table&table=Rows`);
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText(/Permits of this type: 2\. Rows in this published table: 0\./)).toBeVisible({ timeout: 30_000 });
+    await expect(dialog.getByText(/Table "Rows" is published and cannot be removed\./)).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Remove table' })).toBeDisabled();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden({ timeout: 15_000 });
+
+    // Таблиця лише з чернетки нової версії: видалення можна, рядків у ній ні в кого немає.
+    await page.goto(`/admin/permits/types/${code}?dialog=delete-table&table=Extra`);
+    await expect(dialog.getByText(/not published yet: none of the 2 permits of this type holds rows in it\./)).toBeVisible({ timeout: 30_000 });
+    await expect(dialog.getByRole('button', { name: 'Remove table' })).toBeEnabled();
+  });
+
   // P2-2 (прохід B): сервер для ніколи не опублікованого типу віддає version=1, status=Draft, і меню «…»
   // з «Delete type…» мало бути досяжним (раніше умова була `version === 0`).
   test('Видалення чернетки типу через меню «…»', async ({ page }) => {
