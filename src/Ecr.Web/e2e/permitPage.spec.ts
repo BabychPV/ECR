@@ -211,5 +211,29 @@ test.describe('Permit page', () => {
     await page.keyboard.press('Escape');
     await expect(renewDialog).toBeHidden({ timeout: 15_000 });
     await expect(renew).toBeFocused();
+
+    // P3-1: успішний Renew переходить на нову чернетку - фокус на її заголовку (h1.ecr-route-heading), не на BODY.
+    // П'ять кіл (гонка фокуса проти переходу): кожне коло - Renew -> заголовок нової чернетки -> Delete draft -> заголовок переліку.
+    const heading = page.locator('h1.ecr-route-heading');
+    for (let round = 1; round <= 5; round += 1) {
+      await page.goto(`/admin/permits/${String(id)}`);
+      await expect(page.getByRole('heading', { level: 1, name: number })).toBeVisible({ timeout: 30_000 });
+      await page.getByRole('button', { name: 'Renew…' }).first().click();
+      await page.getByRole('dialog').getByRole('button', { name: 'Create renewal' }).click();
+      await page.waitForURL((url) => /^\/admin\/permits\/\d+$/.test(url.pathname) && url.pathname !== `/admin/permits/${String(id)}`, {
+        timeout: 15_000,
+      });
+      await expect(heading, `коло ${String(round)}: Renew`).toBeFocused({ timeout: 10_000 });
+      await page.waitForTimeout(600);
+      await expect(heading, `коло ${String(round)}: Renew (витримав)`).toBeFocused();
+
+      await page.getByRole('button', { name: 'More', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Delete draft…' }).click();
+      await page.getByRole('dialog').getByRole('button', { name: 'Delete draft' }).click();
+      await page.waitForURL((url) => url.pathname === '/admin/permits', { timeout: 15_000 });
+      await expect(heading, `коло ${String(round)}: Delete`).toBeFocused({ timeout: 10_000 });
+      await page.waitForTimeout(600);
+      await expect(heading, `коло ${String(round)}: Delete (витримав)`).toBeFocused();
+    }
   });
 });
