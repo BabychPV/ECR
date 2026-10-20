@@ -565,9 +565,6 @@ public sealed class DeleteColumnDefHandler(
 
         SaveTableRelationHandler.RejectBreaking(change, code, hasDocuments, "Видалення");
 
-        // ⛔ PM-09b: колонку, яку зіставляє прив'язка до дозволу, не прибирають (м'яке видалення залишило б мертву ціль).
-        await PermitSheetBindingGuard.RequireColumnFreeAsync(permitBindings, templateVersionId, column, ct).ConfigureAwait(false);
-
         // ⛔ Q-244: аудит писався РАНІШЕ за `SoftDelete`/`SaveChanges` без
         // жодної спільної транзакції — збій між ними лишав журнал із записом
         // про видалення, якого в даних не було.
@@ -575,6 +572,11 @@ public sealed class DeleteColumnDefHandler(
         {
             // ⛔ C5: див. SaveColumnDefHandler.
             await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
+            // ⛔ PM-09b/PM-09b2: колонку, яку зіставляє прив'язка до дозволу, не прибирають (м'яке видалення залишило б
+            // мертву ціль). Перевірка - ПІД блоком версії, в одній транзакції із записом: збереження прив'язки бере той
+            // самий блок, тож між перевіркою й комітом прив'язка не з'явиться.
+            await PermitSheetBindingGuard.RequireColumnFreeAsync(permitBindings, templateVersionId, column, innerCt).ConfigureAwait(false);
 
             await audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(

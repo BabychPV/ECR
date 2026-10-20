@@ -307,14 +307,15 @@ public sealed class DeleteSheetDefHandler(
 
         SaveTableRelationHandler.RejectBreaking(change, code, hasDocuments, "Видалення");
 
-        // ⛔ PM-09b2: аркуш із прив'язаною таблицею не видаляється (м'яке видалення лишило б прив'язку з мертвою ціллю).
-        await PermitSheetBindingGuard.RequireSheetFreeAsync(permitBindings, templateVersionId, sheet, ct).ConfigureAwait(false);
-
         // ⛔ Q-244: аудит і `SoftDelete`/`SaveChanges` тепер одна транзакція.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             // ⛔ C5: блок рядка версії першим, «ще чернетка» — під ним.
             await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
+            // ⛔ PM-09b2: аркуш із прив'язаною таблицею не видаляється (м'яке видалення лишило б прив'язку з мертвою ціллю).
+            // Перевірка - ПІД блоком версії, в одній транзакції із записом (збереження прив'язки бере той самий блок).
+            await PermitSheetBindingGuard.RequireSheetFreeAsync(permitBindings, sheet, innerCt).ConfigureAwait(false);
 
             await audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(
