@@ -39,12 +39,12 @@ public sealed record PermitListDto(
 /// <param name="Id">Ідентифікатор запису довідника.</param>
 /// <param name="Code">Код запису.</param>
 /// <param name="DisplayL10n">Підпис мовами каталогу.</param>
-public sealed record PermitListItemDto(long Id, string Code, Dictionary<string, string> DisplayL10n);
+public sealed record PermitListValueDto(long Id, string Code, Dictionary<string, string> DisplayL10n);
 
 /// <summary>Список зі значеннями.</summary>
 /// <param name="List">Опис списку.</param>
 /// <param name="Items">Чинні значення в порядку показу.</param>
-public sealed record PermitListDetailDto(PermitListDto List, IReadOnlyList<PermitListItemDto> Items);
+public sealed record PermitListDetailDto(PermitListDto List, IReadOnlyList<PermitListValueDto> Items);
 
 /// <summary>Одна зміна значень списку.</summary>
 /// <param name="Action"><c>Add</c>, <c>Update</c> або <c>Remove</c>.</param>

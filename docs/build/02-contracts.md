@@ -2822,6 +2822,22 @@ public interface IPermitTypeStore
 }
 ```
 
+#### `IPermitListStore`
+
+Списки вибору дозволів (Permits, PM-08e; `GET/PUT permit-lists`): стовпці ОПУБЛІКОВАНИХ типів зі списком (область
+`SharedRegistry`/`TypeOnly`/`SamePermitTable`) одним запитом проєкції надбудови полів — без `DraftJson` і без читання
+визначень типів по одному (раніше екран «Lists» робив 1 + N запитів) — та кількість чинних значень у реєстрах списків
+одним запитом. Ключ списку: `shared:{registryCode}`, `type:{type}:{table}:{field}`, `permit:{type}:{table}:{field}`;
+значення «лише для типу» лежать у прихованому реєстрі `PRM_…` і дублюються в чернетці типу, якщо вона відкрита.
+
+```csharp
+public interface IPermitListStore
+{
+    public Task<IReadOnlyList<PermitListUsage>> ListUsagesAsync(CancellationToken ct);
+    public Task<IReadOnlyDictionary<int, int>> CountActiveEntriesAsync(IReadOnlyCollection<int> registryDefIds, CancellationToken ct);
+}
+```
+
 #### `IPermitStore`
 
 Екземпляри дозволів (Permits, PM-04): дозвіл — запис реєстру шапки типу, тож власного сховища немає; порт дає лише
@@ -4318,6 +4334,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/permit-types/{code}` | `Permit.EditType` | 8 |
 | `POST` | `/api/v1/permit-types/{code}/publish` | `Permit.PublishType` | 8 |
 | `POST` | `/api/v1/permit-types/{code}/new-version` | `Permit.EditType` | 8 |
+| `GET` | `/api/v1/permit-lists` | `Registry.View` | 8 |
+| `GET` | `/api/v1/permit-lists/{key}` | `Registry.View` | 8 |
+| `PUT` | `/api/v1/permit-lists/{key}/items` | `Registry.EditData` (спільний довідник) або `Permit.EditType` («лише для типу») | 8 |
 | `GET` | `/api/v1/template-versions/{id}/permit-bindings` | `Template.View` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/permit-bindings/{code}` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/permit-bindings/{code}` | `Template.Edit` | 7 |
