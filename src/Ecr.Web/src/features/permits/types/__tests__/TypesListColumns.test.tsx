@@ -33,7 +33,7 @@ const published = makeType('AirEmission', { version: 3 });
 function renderMenu(item: PermitTypeListItem, onDelete: (item: PermitTypeListItem) => void, onRow: () => void): void {
   const actions = typeColumns(onDelete).find((column) => column.key === 'actions');
   if (actions === undefined) throw new Error('колонки дій немає');
-  const cell: JSX.Element = <>{actions.render(item)}</>;
+  const cell: JSX.Element = <>{actions.render?.(item)}</>;
 
   render(
     <MantineProvider theme={testTheme}>
