@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Group, List, Stack, Text, TextInput } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
@@ -43,6 +43,17 @@ function ValueList({ row, detail }: ValuesProps): JSX.Element {
   const [fresh, setFresh] = useState('');
   const limit = row.editable ? DrawerEditLimit : DrawerValueLimit;
   const shown = detail.items.slice(0, limit);
+  const root = useRef<HTMLDivElement>(null);
+  // PA4-U-01: куди повернути фокус після дії (елемент, який дія прибрала, лишив би його на BODY); ключ - data-focus-key.
+  const pendingFocus = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (pendingFocus.current === null) return;
+    const target = root.current?.querySelector<HTMLElement>(`[data-focus-key="${pendingFocus.current}"]`);
+    if (target === null || target === undefined) return;
+    pendingFocus.current = null;
+    target.focus({ preventScroll: true });
+  });
 
   function apply(changes: readonly PermitListChange[], done: string, after: () => void): void {
     if (change.isPending) return;
@@ -60,7 +71,10 @@ function ValueList({ row, detail }: ValuesProps): JSX.Element {
     apply(
       [{ action: 'Add', id: null, displayL10n: valueLabels(fresh, undefined, language()) }],
       t('permits.lists.drawer.added'),
-      () => setFresh(''),
+      () => {
+        pendingFocus.current = 'add';
+        setFresh('');
+      },
     );
   }
 
@@ -69,16 +83,24 @@ function ValueList({ row, detail }: ValuesProps): JSX.Element {
     apply(
       [{ action: 'Update', id: item.id, displayL10n: valueLabels(text, item.displayL10n, language()) }],
       t('permits.lists.drawer.renamed'),
-      () => setEditing(null),
+      () => {
+        pendingFocus.current = `rename:${String(item.id)}`;
+        setEditing(null);
+      },
     );
   }
 
   function remove(item: PermitListValue): void {
-    apply([{ action: 'Remove', id: item.id, displayL10n: null }], t('permits.lists.drawer.removed'), () => setEditing(null));
+    const at = shown.findIndex((candidate) => candidate.id === item.id);
+    const next = shown[at + 1] ?? shown[at - 1];
+    apply([{ action: 'Remove', id: item.id, displayL10n: null }], t('permits.lists.drawer.removed'), () => {
+      pendingFocus.current = next === undefined ? 'add' : `rename:${String(next.id)}`;
+      setEditing(null);
+    });
   }
 
   return (
-    <Stack gap="xs" data-list-values="">
+    <Stack gap="xs" data-list-values="" ref={root}>
       {shown.length === 0 ? (
         <Text size="sm" c="dimmed">
           {t('permits.lists.drawer.noValues')}
@@ -104,11 +126,19 @@ function ValueList({ row, detail }: ValuesProps): JSX.Element {
                       onChange={(event) => setText(event.currentTarget.value)}
                       style={{ flex: 1 }}
                       data-list-edit=""
+                      data-focus-key="edit"
+                      styles={{ root: { minWidth: 0 } }}
                     />
                     <Button type="submit" loading={saving} disabled={text.trim() === ''}>
                       {t('permits.lists.drawer.edit.save')}
                     </Button>
-                    <Button variant="default" onClick={() => setEditing(null)}>
+                    <Button
+                      variant="default"
+                      onClick={() => {
+                        pendingFocus.current = `rename:${String(item.id)}`;
+                        setEditing(null);
+                      }}
+                    >
                       {t('permits.lists.drawer.edit.cancel')}
                     </Button>
                   </Group>
@@ -117,14 +147,19 @@ function ValueList({ row, detail }: ValuesProps): JSX.Element {
             ) : (
               <li key={item.id}>
                 <Group justify="space-between" gap="xs" wrap="nowrap">
-                  <Text size="sm">{label}</Text>
+                  {/* PA4-U-03: значення без пробілів (код, URL) переноситься, а не виштовхує Rename/Remove за край шторки. */}
+                  <Text size="sm" className="pl-value-text">
+                    {label}
+                  </Text>
                   {row.editable && (
-                    <Group gap="xs" wrap="nowrap">
+                    <Group gap="xs" wrap="nowrap" className="pl-value-actions">
                       <Button
                         variant="subtle"
                         size="xs"
+                        data-focus-key={`rename:${String(item.id)}`}
                         aria-label={t('permits.lists.drawer.renameAria', { value: label })}
                         onClick={() => {
+                          pendingFocus.current = 'edit';
                           setEditing(item.id);
                           setText(label);
                         }}
@@ -169,6 +204,8 @@ function ValueList({ row, detail }: ValuesProps): JSX.Element {
               onChange={(event) => setFresh(event.currentTarget.value)}
               style={{ flex: 1 }}
               data-list-add=""
+              data-focus-key="add"
+              styles={{ root: { minWidth: 0 } }}
             />
             <Button type="submit" variant="default" loading={saving} disabled={fresh.trim() === ''}>
               {t('permits.lists.drawer.add.submit')}
@@ -212,6 +249,18 @@ function note(row: ListRow): string {
  * значень не має: це рядки самого дозволу.
  */
 export function ListDrawer({ row }: { readonly row: ListRow }): JSX.Element {
+  // PA4-U-01: шторка змонтована вже відкритою, а на широкому екрані без пастки фокуса Mantine його не переносить - ставимо
+  // фокус на саму шторку (діалог з іменем), далі Tab іде її вмістом. Закриття повертає фокус на рядок (DetailDrawer).
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const root = [...document.querySelectorAll<HTMLElement>('[data-panel]')].find((element) => element.getAttribute('data-panel') === row.id);
+      const dialog = root?.matches('[role="dialog"]') === true ? root : (root?.querySelector<HTMLElement>('[role="dialog"]') ?? null);
+      if (dialog !== null && !dialog.contains(document.activeElement)) dialog.focus({ preventScroll: true });
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [row.id]);
+
   return (
     <DetailDrawer
       panelId={row.id}
