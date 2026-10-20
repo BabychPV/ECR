@@ -319,6 +319,7 @@ public static class DependencyInjection
         // PERMITS: lists — списки вибору дозволів (PM-08e)
         services.AddScoped<Permits.Lists.ListPermitListsHandler>();
         services.AddScoped<Permits.Lists.GetPermitListHandler>();
+        services.AddScoped<Permits.Lists.ChangePermitListItemsHandler>();
         services.AddScoped<Permits.Bindings.IPermitResolver, Permits.Bindings.PermitResolver>();
         services.AddScoped<Permits.Bindings.PreviewPermitBindingHandler>();
         services.AddScoped<Permits.Bindings.RefreshPermitBindingHandler>();
