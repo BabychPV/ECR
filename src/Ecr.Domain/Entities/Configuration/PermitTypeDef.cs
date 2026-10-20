@@ -122,6 +122,22 @@ public sealed class PermitTypeDef : Entity<int>
         UpdatedByUserId = userId;
     }
 
+    /// <summary>
+    /// Відмічає зміну значень списку «лише для типу»: оновлює час і автора, а з ними - токен <see cref="RowVersion"/>.
+    /// Паралельна зміна тих самих списків читала той самий токен, тож програє на збереженні (оптимістична конкуренція),
+    /// а не губить значення чи дублює їхні коди (PM-08e).
+    /// </summary>
+    /// <param name="userId">Автор.</param>
+    /// <param name="utcNow">Момент зміни в UTC.</param>
+    public void MarkListChanged(int userId, DateTime utcNow)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(userId);
+        EnsureUtc(utcNow);
+
+        UpdatedAt = utcNow;
+        UpdatedByUserId = userId;
+    }
+
     /// <summary>Відкриває нову версію опублікованого типу: чернетка стартує з його поточного складу.</summary>
     /// <param name="json">Поточне опубліковане визначення як JSON.</param>
     /// <param name="userId">Автор.</param>

@@ -9070,6 +9070,7 @@ USING (VALUES
     ,(N'err.ECR-PRM-0404.list', N'en', N'The list "{key}" does not exist.', 1)
     ,(N'err.ECR-PRM-0422.listReadOnly', N'en', N'The list "{key}" is a table of the same permit: its values are the permit rows, so they are edited in the permit.', 1)
     ,(N'err.ECR-PRM-0422.listChangeInvalid', N'en', N'The list change is incomplete or its action "{action}" is unknown. Send 1 to 200 changes: Add, Update or Remove.', 1)
+    ,(N'err.ECR-PRM-4094.valueInUse', N'en', N'The value "{value}" is already chosen in permits, so its English label cannot be changed. Add a new value instead; labels in other languages can be edited.', 1)
     -- PERMITS: lists-api ── кінець секції ──
     -- PERMITS: lists-edit ── en: PM-08e, запис значень списків: шторка екрана «Lists» і «Add a value» у формі рядка дозволу; ru/kz — порцією PERMITS: lists-edit нижче ──
     ,(N'permits.lists.editable', N'en', N'Open a list to add, rename or remove its values. A value of a shared list that permits still use cannot be removed.', 1)
@@ -23483,6 +23484,8 @@ SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'err.ECR-PRM-0404.list', N'ru', N'Списка «{key}» не существует.'),
     (N'err.ECR-PRM-0404.list', N'kz', N'«{key}» тізімі жоқ.'),
+    (N'err.ECR-PRM-4094.valueInUse', N'ru', N'Значение «{value}» уже выбрано в разрешениях, поэтому его английскую подпись менять нельзя. Добавьте новое значение; подписи на других языках править можно.'),
+    (N'err.ECR-PRM-4094.valueInUse', N'kz', N'«{value}» мәні рұқсаттарда таңдалып қойған, сондықтан оның ағылшынша атауын өзгертуге болмайды. Жаңа мән қосыңыз; басқа тілдердегі атауларды өңдеуге болады.'),
     (N'err.ECR-PRM-0422.listReadOnly', N'ru', N'Список «{key}» — таблица того же разрешения: его значения — строки разрешения, поэтому они правятся в самом разрешении.'),
     (N'err.ECR-PRM-0422.listReadOnly', N'kz', N'«{key}» тізімі — сол рұқсаттың кестесі: оның мәндері — рұқсат жолдары, сондықтан олар рұқсаттың өзінде өңделеді.'),
     (N'err.ECR-PRM-0422.listChangeInvalid', N'ru', N'Изменение списка неполное или действие «{action}» неизвестно. Передайте от 1 до 200 изменений: Add, Update или Remove.'),

@@ -1,6 +1,7 @@
 // tests/Ecr.Api.Tests/PermitListsWriteHttpTests.cs
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -165,6 +166,140 @@ public sealed class PermitListsWriteHttpTests(SqlServerFixture sql)
         await AssertErrorAsync(
             await PutAsync(client, $"permit:PLS{_tag}:Rows:Place", Changes(new { action = "Add", displayL10n = new { en = "X" } })),
             HttpStatusCode.UnprocessableEntity, "ECR-PRM-0422");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Без_права_перегляду_наявний_і_неіснуючий_ключ_відповідають_однаково_403()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var admin = await SystemHealthControllerTests.SignedInAsync(sql, app, AllRights);
+        var shared = await EnsureSharedRegistryAsync(sql, $"PLO_{_tag}");
+        await PublishTypeAsync(admin, $"PLO{_tag}", shared, ["A"]);
+        var add = Changes(new { action = "Add", displayL10n = new { en = "New" } });
+
+        // Оракул існування: без Registry.View 403 і для наявного, і для вигаданого ключа (не 403 проти 404).
+        using var nobody = await SystemHealthControllerTests.SignedInAsync(sql, app, "Document.View", "Permit.EditType", "Registry.EditData");
+        var existing = await PutAsync(nobody, $"type:PLO{_tag}:Rows:Kind", add);
+        var missing = await PutAsync(nobody, $"type:NOPE{_tag}:Rows:Kind", add);
+        Assert.Equal(HttpStatusCode.Forbidden, existing.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, missing.StatusCode);
+        Assert.Equal(
+            JsonDocument.Parse(await existing.Content.ReadAsStringAsync()).RootElement.GetProperty("errorCode").GetString(),
+            JsonDocument.Parse(await missing.Content.ReadAsStringAsync()).RootElement.GetProperty("errorCode").GetString());
+        Assert.Equal(HttpStatusCode.Forbidden, (await PutAsync(nobody, $"shared:{shared}", add)).StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Англійський_підпис_значення_вже_вибраного_в_дозволі_не_змінюється_409_а_інші_мови_так()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, AllRights);
+        var shared = await EnsureSharedRegistryAsync(sql, $"PLU_{_tag}");
+        var type = $"PLU{_tag}";
+        await PublishTypeAsync(client, type, shared, ["Used", "Free"]);
+        var key = $"type:{type}:Rows:Kind";
+        var ids = (await Json(await GetAsync(client, key))).GetProperty("items").EnumerateArray().ToDictionary(
+            i => i.GetProperty("displayL10n").GetProperty("en").GetString()!, i => i.GetProperty("id").GetInt64());
+
+        // Рядок дозволу вибирає значення «Used».
+        var permit = await client.PostAsJsonAsync(
+            new Uri("/api/v1/permits", UriKind.Relative),
+            new { typeCode = type, number = $"PLU-{_tag}", location = "x", issueDate = "2026-01-05", validFrom = "2026-01-10", validTo = "2027-01-10", reportingFlags = new { form300 = false, form301 = false, form302 = false, tox = false } });
+        Assert.Equal(HttpStatusCode.Created, permit.StatusCode);
+        var permitId = (await Json(permit)).GetProperty("id").GetInt64();
+        var batch = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/registries/PRM_{type}_Rows/entries/batch?dryRun=false", UriKind.Relative),
+            new
+            {
+                items = new[]
+                {
+                    new
+                    {
+                        clientRowId = "save", op = "upsert", id = (long?)null, code = (string?)null, baseVersion = (string?)null,
+                        values = new Dictionary<string, string?> { ["PERMIT"] = permitId.ToString(System.Globalization.CultureInfo.InvariantCulture), ["Name"] = "Row", ["Kind"] = ids["Used"].ToString(System.Globalization.CultureInfo.InvariantCulture) },
+                    },
+                },
+            });
+        var body = await Json(batch);
+        Assert.True(batch.StatusCode == HttpStatusCode.OK && body.GetProperty("applied").GetBoolean(), body.ToString());
+
+        // en змінити не можна (409 ECR-PRM-4094), нічого не змінилось; те саме en + нова ru - можна; вільне значення - можна.
+        await AssertErrorAsync(
+            await PutAsync(client, key, Changes(new { action = "Update", id = ids["Used"], displayL10n = new { en = "Renamed" } })),
+            HttpStatusCode.Conflict, "ECR-PRM-4094");
+        Assert.Contains("Used", Labels(await Json(await GetAsync(client, key))));
+        var translated = await PutAsync(client, key, Changes(new { action = "Update", id = ids["Used"], displayL10n = new { en = "Used", ru = "Занято" } }));
+        Assert.Equal(HttpStatusCode.OK, translated.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await PutAsync(client, key, Changes(new { action = "Update", id = ids["Free"], displayL10n = new { en = "Spare" } }))).StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Паралельні_додавання_у_список_лише_для_типу_не_губляться_і_не_дублюють_код_20_раундів()
+        => await RaceAsync(withDraft: false);
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Паралельні_додавання_у_відкриту_чернетку_типу_не_губляться_20_раундів()
+        => await RaceAsync(withDraft: true);
+
+    /// <summary>
+    /// Два паралельні Add у той самий список: кожна відповідь - 200 або 409 ECR-PRM-4093 (ніколи 500/дубль коду); програвший
+    /// повторює й дістає 200; наприкінці всі значення на місці з РІЗНИМИ кодами (а за відкритої чернетки - і в її Choices).
+    /// Мутаційний доказ: прибрати <c>type.MarkListChanged</c> - обидва беруть той самий код V### (500) чи губиться значення
+    /// чернетки, тест червоніє.
+    /// </summary>
+    private async Task RaceAsync(bool withDraft)
+    {
+        using var app = new EcrApiFactory(sql);
+        using var first = await SystemHealthControllerTests.SignedInAsync(sql, app, AllRights);
+        using var second = await SystemHealthControllerTests.SignedInAsync(sql, app, AllRights);
+        var shared = await EnsureSharedRegistryAsync(sql, $"PLC{(withDraft ? "D" : "P")}_{_tag}");
+        var type = $"PLC{(withDraft ? "D" : "P")}{_tag}";
+        await PublishTypeAsync(first, type, shared, ["Seed"]);
+        if (withDraft)
+        {
+            Assert.Equal(HttpStatusCode.OK, (await first.PostAsync(new Uri($"/api/v1/permit-types/{type}/new-version", UriKind.Relative), null)).StatusCode);
+        }
+
+        var key = $"type:{type}:Rows:Kind";
+        var expected = new List<string> { "Seed" };
+        for (var round = 0; round < 20; round++)
+        {
+            var names = new[] { $"A{round}", $"B{round}" };
+            var results = await Task.WhenAll(
+                PutAsync(first, key, Changes(new { action = "Add", displayL10n = new { en = names[0] } })),
+                PutAsync(second, key, Changes(new { action = "Add", displayL10n = new { en = names[1] } })));
+
+            for (var i = 0; i < 2; i++)
+            {
+                var status = results[i].StatusCode;
+                var text = await results[i].Content.ReadAsStringAsync();
+                Assert.True(status is HttpStatusCode.OK or HttpStatusCode.Conflict, $"раунд {round}: {status}: {text}");
+                if (status == HttpStatusCode.Conflict)
+                {
+                    Assert.Equal("ECR-PRM-4093", JsonDocument.Parse(text).RootElement.GetProperty("errorCode").GetString());
+                    var retry = await PutAsync(i == 0 ? first : second, key, Changes(new { action = "Add", displayL10n = new { en = names[i] } }));
+                    Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+                }
+            }
+
+            expected.AddRange(names);
+        }
+
+        var items = (await Json(await GetAsync(first, key))).GetProperty("items").EnumerateArray().ToList();
+        Assert.Equal(expected.Order(), items.Select(i => i.GetProperty("displayL10n").GetProperty("en").GetString()!).Order());
+        Assert.Equal(items.Count, items.Select(i => i.GetProperty("code").GetString()).Distinct().Count());
+
+        if (withDraft)
+        {
+            var draft = await Json(await first.GetAsync(new Uri($"/api/v1/permit-types/{type}", UriKind.Relative)));
+            var choices = draft.GetProperty("tables")[0].GetProperty("columns").EnumerateArray()
+                .Single(c => c.GetProperty("code").GetString() == "Kind").GetProperty("choices").EnumerateArray().Select(c => c.GetString()!).ToList();
+            Assert.Equal(expected.Order(), choices.Order());
+        }
     }
 
     private async Task<long> ForeignEntryIdAsync()
