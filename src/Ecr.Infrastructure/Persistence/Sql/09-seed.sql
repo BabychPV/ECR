@@ -23569,7 +23569,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.lists.drawer.renamed', N'ru', N'Значение переименовано'),
     (N'permits.lists.drawer.renamed', N'kz', N'Мәннің аты өзгертілді'),
     (N'permits.lists.drawer.removed', N'ru', N'Значение убрано'),
-    (N'permits.lists.drawer.removed', N'kz', N'Мән алып тасталды'),
     (N'permits.lists.drawer.removed', N'kz', N'Мән алып тасталды')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
