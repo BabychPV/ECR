@@ -185,10 +185,14 @@ public sealed class SaveTableDefHandler(
                 // непомітно). PM-09b2: стеля рядків під такою прив'язкою не знижується. Обидві перевірки - ПІД блоком
                 // версії й ПЕРЕД правкою (таблиця ще зі старими режимом і стелею): збереження прив'язки бере той самий
                 // блок, тож між перевіркою й комітом прив'язка не з'явиться.
+                // ⚠ «Старе» значення для порівняння читається З БАЗИ під блоком (а не з графа `existing`, прочитаного до
+                // блоку): друга з двох паралельних правок порівнюється з уже зміненим станом переможця.
+                var current = await permitBindings.FindTableStateAsync(existing.Id, innerCt).ConfigureAwait(false)
+                    ?? new PermitSheetTableState(existing.RowMode, existing.MaxDynamicRows);
                 await PermitSheetBindingGuard.RequireRowModeAllowedAsync(
-                    permitBindings, templateVersionId, existing, command.RowMode, innerCt).ConfigureAwait(false);
+                    permitBindings, templateVersionId, existing, current.RowMode, command.RowMode, innerCt).ConfigureAwait(false);
                 await PermitSheetBindingGuard.RequireMaxRowsNotLoweredAsync(
-                    permitBindings, templateVersionId, existing, command.MaxDynamicRows, innerCt).ConfigureAwait(false);
+                    permitBindings, templateVersionId, existing, current.MaxDynamicRows, command.MaxDynamicRows, innerCt).ConfigureAwait(false);
 
                 existing.Rename(name);
                 existing.SetLayout(command.LayoutKind);

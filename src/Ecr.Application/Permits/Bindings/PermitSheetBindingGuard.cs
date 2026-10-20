@@ -37,14 +37,15 @@ internal static class PermitSheetBindingGuard
     /// <param name="bindings">Прив'язки.</param>
     /// <param name="templateVersionId">Версія-чернетка.</param>
     /// <param name="table">Таблиця, що змінюється.</param>
+    /// <param name="currentMode">Режим рядків ЗАРАЗ у базі (прочитаний під блоком версії, а не зі знімка графа до нього).</param>
     /// <param name="newMode">Режим рядків після правки.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="Errors.BusinessRuleException"><c>ECR-PRM-4102</c> <c>rowMode</c>.</exception>
     internal static async Task RequireRowModeAllowedAsync(
-        IPermitBindingStore bindings, int templateVersionId, TableDef table, TableRowMode newMode, CancellationToken ct)
+        IPermitBindingStore bindings, int templateVersionId, TableDef table, TableRowMode currentMode, TableRowMode newMode, CancellationToken ct)
     {
         // Лише перехід: таблиця, що вже Fixed, правиться (назва, порядок) без перевірки - вона не нова поломка.
-        if (newMode != TableRowMode.Fixed || table.RowMode == TableRowMode.Fixed)
+        if (newMode != TableRowMode.Fixed || currentMode == TableRowMode.Fixed)
         {
             return;
         }
@@ -65,15 +66,15 @@ internal static class PermitSheetBindingGuard
     /// </summary>
     /// <param name="bindings">Прив'язки.</param>
     /// <param name="templateVersionId">Версія-чернетка.</param>
-    /// <param name="table">Таблиця, що змінюється (ще зі СТАРОЮ стелею).</param>
+    /// <param name="table">Таблиця, що змінюється.</param>
+    /// <param name="previous">Стеля ЗАРАЗ у базі (прочитана під блоком версії, а не зі знімка графа до нього); <c>null</c> - без стелі.</param>
     /// <param name="newMax">Стеля після правки; <c>null</c> - без стелі.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="Errors.BusinessRuleException"><c>ECR-PRM-4102</c> <c>maxRows</c>.</exception>
     internal static async Task RequireMaxRowsNotLoweredAsync(
-        IPermitBindingStore bindings, int templateVersionId, TableDef table, int? newMax, CancellationToken ct)
+        IPermitBindingStore bindings, int templateVersionId, TableDef table, int? previous, int? newMax, CancellationToken ct)
     {
         // Без запиту, якщо це не зниження: нова стеля не менша за стару, або стелю знімають.
-        var previous = table.MaxDynamicRows;
         if (newMax is not { } requested || (previous is { } old && requested >= old))
         {
             return;

@@ -89,6 +89,14 @@ public sealed class PermitBindingStore(EcrDbContext db) : IPermitBindingStore
     }
 
     /// <inheritdoc />
+    public Task<PermitSheetTableState?> FindTableStateAsync(int sheetTableDefId, CancellationToken ct)
+        => db.TableDefs
+            .AsNoTracking()
+            .Where(t => t.Id == sheetTableDefId)
+            .Select(t => new PermitSheetTableState(t.RowMode, t.MaxDynamicRows))
+            .FirstOrDefaultAsync(ct);
+
+    /// <inheritdoc />
     public async Task<PermitBindingView?> GetAsync(int templateVersionId, string code, CancellationToken ct)
     {
         var binding = await db.PermitSheetBindings

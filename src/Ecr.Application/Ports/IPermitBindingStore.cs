@@ -32,6 +32,11 @@ public sealed record PermitBindingSummary(int SheetTableDefId, string Code, stri
 /// <param name="Code">Код прив'язки.</param>
 public sealed record PermitBindingHold(int SheetTableDefId, string Code);
 
+/// <summary>Режим рядків і стеля таблиці аркуша, прочитані з бази (без відстеження) - «старе» значення для охоронця.</summary>
+/// <param name="RowMode">Режим рядків.</param>
+/// <param name="MaxDynamicRows">Стеля рядків; <c>null</c> - без стелі.</param>
+public sealed record PermitSheetTableState(Domain.Enums.TableRowMode RowMode, int? MaxDynamicRows);
+
 /// <summary>Доступ до прив'язок таблиць аркуша до дозволів (Permits, PM-09).</summary>
 /// <remarks>
 /// ⚠ Каскаду від прив'язки до колонок у схемі немає (усі FK - Restrict): колонки видаляє той, хто видаляє прив'язку,
@@ -73,6 +78,11 @@ public interface IPermitBindingStore
     /// <param name="sheetTableDefIds">Таблиці аркуша.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<PermitBindingHold?> FindHoldAsync(IReadOnlyCollection<int> sheetTableDefIds, CancellationToken ct);
+
+    /// <summary>Поточні режим рядків і стеля таблиці аркуша З БАЗИ (без відстеження); <c>null</c> - таблиці немає.</summary>
+    /// <param name="sheetTableDefId">Таблиця аркуша.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<PermitSheetTableState?> FindTableStateAsync(int sheetTableDefId, CancellationToken ct);
 
     /// <summary>Прив'язка версії за кодом (без відстеження); <c>null</c> - немає.</summary>
     /// <param name="templateVersionId">Версія шаблону.</param>

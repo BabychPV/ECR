@@ -155,6 +155,58 @@ public sealed class PermitSheetGuardRaceTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// «Старе» значення для порівняння береться з бази ПІД блоком версії, а не з графа, прочитаного до нього: друга з двох
+    /// паралельних правок порівнюється з уже зміненим станом переможця. Перший запит (10 → 15) стоїть перед блоком, другий
+    /// піднімає стелю 10 → 20 і комітить; перший після блоку бачить 20 і ЗНИЖУЄ її до 15 - відмова з <c>previousMax = 20</c>
+    /// (за застарілим 10 це «підняття», і стеля тихо впала б до 15). Мутація (запущена): порівнювати зі значенням графа
+    /// (<c>existing.MaxDynamicRows</c>) - червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Друга_паралельна_правка_стелі_порівнюється_з_уже_зміненою_стелею_а_не_із_застарілою()
+    {
+        await using var h = await PermitBindingHarness.CreateAsync(sql, PermitBindingHarness.Everything);
+        await h.PublishEmissionsTypeAsync($"AIR{_tag}");
+
+        for (var round = 0; round < Rounds; round++)
+        {
+            var sheet = await PermitBindingHarness.PrepareSheetAsync(sql, withDocument: false);
+            await SetMaxAsync(sheet, 10);
+            await using (var binder = await h.NextRequestAsync())
+            {
+                await binder.Save.HandleAsync(sheet.Doc.TemplateVersionId, $"M{round}{_tag}", Request(sheet), default);
+            }
+
+            var gate = new LockGate();
+            await using var lowering = await h.NextRequestAsync(gate.Wrap);
+            var tableCode = await TableCodeAsync(lowering, sheet);
+            var lower = Task.Run(() => lowering.SaveTable.HandleAsync(
+                sheet.Doc.TemplateVersionId, sheet.Doc.SheetCode, tableCode, Command(TableRowMode.Dynamic, 15), default));
+            await gate.ReachedAsync();
+
+            await using (var raising = await h.NextRequestAsync())
+            {
+                await raising.SaveTable.HandleAsync(
+                    sheet.Doc.TemplateVersionId, sheet.Doc.SheetCode, tableCode, Command(TableRowMode.Dynamic, 20), default);
+            }
+
+            gate.Release();
+
+            var outcome = await Record.ExceptionAsync(() => lower);
+            await using var read = await h.NextRequestAsync();
+            var max = (await read.Db.TableDefs.AsNoTracking().SingleAsync(t => t.Id == sheet.Doc.TableDefId)).MaxDynamicRows;
+
+            var refused = outcome is BusinessRuleException { ErrorCode: "ECR-PRM-4102" } rule
+                && (string?)rule.Details!["messageKey"] == "err.ECR-PRM-4102.maxRows"
+                && (string?)rule.Details["previousMax"] == "20";
+            Assert.True(
+                refused && max == 20,
+                $"Раунд {round}: відмова зі старою стелею 20={refused}, стеля в базі={max}, результат={outcome?.GetType().Name ?? "успіх"}.");
+        }
+    }
+
     private static SaveTableDefCommand Command(TableRowMode mode, int? maxDynamicRows = null)
         => new(new Dictionary<string, string> { ["en"] = "Table" }, null, TableLayoutKind.PerPeriodInstance, mode, maxDynamicRows);
 
