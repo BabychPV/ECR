@@ -9,6 +9,12 @@ export type PermitTypeTableSummary = components['schemas']['PermitTypeTableSumma
 /** Повне визначення типу: чернетка, якщо вона є, інакше опубліковане. */
 export type PermitType = components['schemas']['PermitTypeDto'];
 
+/** Використання типу даними: скільки дозволів і скільки рядків у кожній опублікованій таблиці (`GET …/{code}/usage`). */
+export type PermitTypeUsage = components['schemas']['PermitTypeUsageDto'];
+
+/** Кількість рядків в опублікованій таблиці типу, у всіх його дозволах. */
+export type PermitTypeTableUsage = components['schemas']['PermitTypeTableUsageDto'];
+
 /** Таблиця типу з усіма стовпцями й перевірками. */
 export type PermitTypeTable = components['schemas']['PermitTypeTableDto'];
 
