@@ -9697,6 +9697,189 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/permit-lists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Усі списки з кількістю значень і стовпцями, що їх беруть (опубліковані типи). Право `Registry.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitListDto"][];
+                        "text/json": components["schemas"]["PermitListDto"][];
+                        "text/plain": components["schemas"]["PermitListDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permit-lists/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Список зі значеннями. Право `Registry.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ключ: `shared:{registryCode}`, `type:{type}:{table}:{field}` або `permit:{type}:{table}:{field}`. */
+                    key: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitListDetailDto"];
+                        "text/json": components["schemas"]["PermitListDetailDto"];
+                        "text/plain": components["schemas"]["PermitListDetailDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permit-lists/{key}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Додає, змінює й прибирає значення списку: усе або нічого. Спільний довідник - право `Registry.EditData` (або
+         *     грант на нього), «лише для типу» - `Permit.EditType`; таблиця того самого дозволу - `422`. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ключ списку. */
+                    key: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ChangePermitListItemsRequest"];
+                    "application/json": components["schemas"]["ChangePermitListItemsRequest"];
+                    "text/json": components["schemas"]["ChangePermitListItemsRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitListDetailDto"];
+                        "text/json": components["schemas"]["PermitListDetailDto"];
+                        "text/plain": components["schemas"]["PermitListDetailDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/permit-types": {
         parameters: {
             query?: never;
@@ -21989,6 +22172,11 @@ export interface components {
             /** @description Новий пароль. */
             newPassword: string;
         };
+        /** @description Запит на зміну значень списку: усе або нічого. */
+        ChangePermitListItemsRequest: {
+            /** @description Зміни в порядку виконання (1..200). */
+            changes: components["schemas"]["PermitListItemChange"][];
+        };
         /** @description Запит на зміну поясу майданчика проєкту (T6/#52). */
         ChangeProjectTimeZoneRequest: {
             /** @description Новий пояс — ідентифікатор IANA (`Asia/Atyrau`). */
@@ -26265,6 +26453,51 @@ export interface components {
              */
             validTo: null | string;
         };
+        /** @description Список зі значеннями. */
+        PermitListDetailDto: {
+            /** @description Чинні значення в порядку показу. */
+            items: components["schemas"]["PermitListValueDto"][];
+            /** @description Опис списку. */
+            list: components["schemas"]["PermitListDto"];
+        };
+        /** @description Список вибору: спільний довідник, список «лише для типу» або таблиця того самого дозволу. */
+        PermitListDto: {
+            /** @description Чи може поточний користувач змінювати значення (право і область). */
+            editable: boolean;
+            /**
+             * Format: int32
+             * @description Скільки чинних значень; `null` для таблиці того самого дозволу (значення - рядки дозволу).
+             */
+            itemCount: null | number;
+            /** @description Ключ списку для маршруту: `shared:{registryCode}`, `type:{typeCode}:{tableCode}:{fieldCode}` або `permit:{typeCode}:{tableCode}:{fieldCode}`. */
+            key: string;
+            /** @description Назва: довідника (спільний) або стовпця-власника (решта). */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /** @description Код довідника зі значеннями (для `SharedRegistry` і `TypeOnly` - прихованого); для таблиці дозволу `null`. */
+            registryCode: null | string;
+            /** @description `SharedRegistry`, `TypeOnly` або `SamePermitTable`. */
+            scope: string;
+            /** @description Тип-власник для `TypeOnly` і `SamePermitTable`; для спільного `null`. */
+            typeCode: null | string;
+            /** @description Стовпці опублікованих типів, що беруть значення зі списку. */
+            usedBy: components["schemas"]["PermitListUseDto"][];
+        };
+        /** @description Одна зміна значень списку. */
+        PermitListItemChange: {
+            /** @description `Add`, `Update` або `Remove`. */
+            action: string;
+            /** @description Підпис (для `Add` і `Update`); для списку «лише для типу» обов'язкова мова `en`. */
+            displayL10n: null | {
+                [key: string]: string;
+            };
+            /**
+             * Format: int64
+             * @description Запис (для `Update` і `Remove`).
+             */
+            id: null | number;
+        };
         /** @description Рядок переліку дозволів. */
         PermitListItemDto: {
             /**
@@ -26331,6 +26564,41 @@ export interface components {
              * @description Перший НЕчинний день (виключна межа, півінтервал `[from, to)`).
              */
             validTo: null | string;
+        };
+        /** @description Стовпець типу дозволу, що бере значення зі списку. */
+        PermitListUseDto: {
+            /** @description Код стовпця. */
+            fieldCode: string;
+            /** @description Назва стовпця. */
+            fieldNameL10n: {
+                [key: string]: string;
+            };
+            /** @description Код таблиці типу. */
+            tableCode: string;
+            /** @description Назва таблиці. */
+            tableNameL10n: {
+                [key: string]: string;
+            };
+            /** @description Код типу. */
+            typeCode: string;
+            /** @description Назва типу мовами каталогу. */
+            typeNameL10n: {
+                [key: string]: string;
+            };
+        };
+        /** @description Значення списку. */
+        PermitListValueDto: {
+            /** @description Код запису. */
+            code: string;
+            /** @description Підпис мовами каталогу. */
+            displayL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: int64
+             * @description Ідентифікатор запису довідника.
+             */
+            id: number;
         };
         /** @description Колонка аркуша в перегляді. */
         PermitPreviewColumnDto: {

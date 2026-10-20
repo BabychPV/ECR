@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import { Select, Switch, Text, TextInput } from '@mantine/core';
+import { Button, Select, Switch, Text, TextInput } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { scopeOf, type PickerScope } from '../lib/pickerScope';
 import { DateField } from './DateField';
@@ -16,6 +16,11 @@ export interface RowFieldsProps {
   readonly picker: PickerData;
   /** Значення пікерів ще читаються. */
   readonly pickerPending: boolean;
+  /**
+   * «Not in the list? Add a value…»: для поля — дія, що відкриває діалог додавання, або `null`/`undefined`, якщо додати
+   * нічого (нема права, список — таблиця дозволу, закінчений дозвіл).
+   */
+  readonly addValue?: (field: PermitField) => (() => void) | null;
 }
 
 function scopeHint(field: PermitField, scope: PickerScope): string {
@@ -30,7 +35,7 @@ function scopeHint(field: PermitField, scope: PickerScope): string {
   }
 }
 
-function Field({ field, form, errors, onChange, readOnly, picker, pickerPending }: RowFieldsProps & { field: PermitField }): JSX.Element {
+function Field({ field, form, errors, onChange, readOnly, picker, pickerPending, addValue }: RowFieldsProps & { field: PermitField }): JSX.Element {
   const { column } = field;
   const value = form[column.code] ?? '';
   const error = errors[column.code];
@@ -49,7 +54,8 @@ function Field({ field, form, errors, onChange, readOnly, picker, pickerPending 
 
   if (isLookup(column)) {
     const options = pickerOptions(field, picker);
-    return (
+    const add = readOnly ? null : (addValue?.(field) ?? null);
+    const select = (
       <Select
         label={column.label}
         required={required}
@@ -64,6 +70,16 @@ function Field({ field, form, errors, onChange, readOnly, picker, pickerPending 
         placeholder={pickerPending ? t('common.loading') : undefined}
         nothingFoundMessage={t('permits.page.row.noValues')}
       />
+    );
+    if (add === null) return select;
+
+    return (
+      <div className="pp-with-add" data-add-value-field={column.code}>
+        {select}
+        <Button variant="subtle" size="xs" onClick={add} data-add-value="">
+          {t('permits.page.row.addValue')}
+        </Button>
+      </div>
     );
   }
 
@@ -108,8 +124,8 @@ function Field({ field, form, errors, onChange, readOnly, picker, pickerPending 
  * областей. Групи стовпців — розгортані блоки; перша група відкрита, решта — лише коли в ній є обов'язкове поле
  * нового рядка чи помилка.
  *
- * ⚠ «Not in the list? Add a value…» мокапу тут немає: значення додається у спільному реєстрі чи в типі, а не в
- * дозволі (див. підказку під полем).
+ * «Not in the list? Add a value…» (PM-08e): під полем спільного списку чи списку лише цього типу, якщо `addValue`
+ * дає дію (є право на список); діалог пише значення в сам список, а не в дозвіл.
  */
 export function RowFields(props: RowFieldsProps & { readonly isNew: boolean }): JSX.Element {
   const groups = new Map<string, PermitField[]>();

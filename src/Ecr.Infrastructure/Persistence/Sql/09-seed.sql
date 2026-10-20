@@ -9079,6 +9079,39 @@ USING (VALUES
     ,(N'permits.editor.deleteTable.usagePublished', N'en', N'Permits of this type: {permits}. Rows in this published table: {rows}. They stay untouched: a published table cannot be removed.', 1)
     ,(N'permits.editor.deleteTable.usageDraftOnly', N'en', N'This table is not published yet: none of the {permits} permits of this type holds rows in it.', 1)
     -- PERMITS: type-usage ── кінець секції ──
+    -- PERMITS: lists-api ── en: відмови списків вибору дозволів (ECR-PRM-0404 list, ECR-PRM-0422 listReadOnly/listChangeInvalid; PM-08e); ru/kz — порцією PERMITS: lists-api нижче ──
+    ,(N'err.ECR-PRM-0404.list', N'en', N'The list "{key}" does not exist.', 1)
+    ,(N'err.ECR-PRM-0422.listReadOnly', N'en', N'The list "{key}" is a table of the same permit: its values are the permit rows, so they are edited in the permit.', 1)
+    ,(N'err.ECR-PRM-0422.listChangeInvalid', N'en', N'The list change is incomplete or its action "{action}" is unknown. Send 1 to 200 changes: Add, Update or Remove.', 1)
+    ,(N'err.ECR-PRM-4094.valueInUse', N'en', N'The value "{value}" is already chosen in permits, so its English label cannot be changed. Add a new value instead; labels in other languages can be edited.', 1)
+    -- PERMITS: lists-api ── кінець секції ──
+    -- PERMITS: lists-edit ── en: PM-08e, запис значень списків: шторка екрана «Lists» і «Add a value» у формі рядка дозволу; ru/kz — порцією PERMITS: lists-edit нижче ──
+    ,(N'permits.lists.editable', N'en', N'Open a list to add, rename or remove its values. A value of a shared list that permits still use cannot be removed.', 1)
+    ,(N'permits.lists.drawer.note.typeEditable', N'en', N'Only {owner} sees these values. A change applies at once to the published type and to its open draft.', 1)
+    ,(N'permits.lists.drawer.add.label', N'en', N'New value', 1)
+    ,(N'permits.lists.drawer.add.submit', N'en', N'Add value', 1)
+    ,(N'permits.lists.drawer.edit.label', N'en', N'Value', 1)
+    ,(N'permits.lists.drawer.edit.save', N'en', N'Save', 1)
+    ,(N'permits.lists.drawer.edit.cancel', N'en', N'Cancel', 1)
+    ,(N'permits.lists.drawer.rename', N'en', N'Rename', 1)
+    ,(N'permits.lists.drawer.renameAria', N'en', N'Rename {value}', 1)
+    ,(N'permits.lists.drawer.remove', N'en', N'Remove', 1)
+    ,(N'permits.lists.drawer.removeAria', N'en', N'Remove {value}', 1)
+    ,(N'permits.lists.drawer.added', N'en', N'Value added', 1)
+    ,(N'permits.lists.drawer.renamed', N'en', N'Value renamed', 1)
+    ,(N'permits.lists.drawer.removed', N'en', N'Value removed', 1)
+    -- PERMITS: lists-edit ── кінець секції ──
+    -- PERMITS: add-value ── en: PM-08e, «Not in the list? Add a value…» у формі рядка дозволу; ru/kz — порцією PERMITS: add-value нижче ──
+    ,(N'permits.page.row.addValue', N'en', N'Not in the list? Add a value…', 1)
+    ,(N'permits.page.addValue.title', N'en', N'Add a value', 1)
+    ,(N'permits.page.addValue.sharedNote', N'en', N'The value is added to the shared list {name} and is offered to every permit type that uses it.', 1)
+    ,(N'permits.page.addValue.typeNote', N'en', N'The value is added to the list of this permit type only.', 1)
+    ,(N'permits.page.addValue.label', N'en', N'Value', 1)
+    ,(N'permits.page.addValue.submit', N'en', N'Add value', 1)
+    ,(N'permits.page.addValue.cancel', N'en', N'Cancel', 1)
+    ,(N'permits.page.addValue.added', N'en', N'Value added', 1)
+    ,(N'permits.page.addValue.close', N'en', N'Close', 1)
+    -- PERMITS: add-value ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -23492,6 +23525,84 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: type-usage ── кінець секції ──
+-- PERMITS: lists-api ── ru/kz: відмови списків вибору дозволів (PM-08e); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-0404.list', N'ru', N'Списка «{key}» не существует.'),
+    (N'err.ECR-PRM-0404.list', N'kz', N'«{key}» тізімі жоқ.'),
+    (N'err.ECR-PRM-4094.valueInUse', N'ru', N'Значение «{value}» уже выбрано в разрешениях, поэтому его английскую подпись менять нельзя. Добавьте новое значение; подписи на других языках править можно.'),
+    (N'err.ECR-PRM-4094.valueInUse', N'kz', N'«{value}» мәні рұқсаттарда таңдалып қойған, сондықтан оның ағылшынша атауын өзгертуге болмайды. Жаңа мән қосыңыз; басқа тілдердегі атауларды өңдеуге болады.'),
+    (N'err.ECR-PRM-0422.listReadOnly', N'ru', N'Список «{key}» — таблица того же разрешения: его значения — строки разрешения, поэтому они правятся в самом разрешении.'),
+    (N'err.ECR-PRM-0422.listReadOnly', N'kz', N'«{key}» тізімі — сол рұқсаттың кестесі: оның мәндері — рұқсат жолдары, сондықтан олар рұқсаттың өзінде өңделеді.'),
+    (N'err.ECR-PRM-0422.listChangeInvalid', N'ru', N'Изменение списка неполное или действие «{action}» неизвестно. Передайте от 1 до 200 изменений: Add, Update или Remove.'),
+    (N'err.ECR-PRM-0422.listChangeInvalid', N'kz', N'Тізімді өзгерту толық емес немесе «{action}» әрекеті белгісіз. 1-ден 200-ге дейін өзгеріс жіберіңіз: Add, Update немесе Remove.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: lists-api ── кінець секції ──
+-- PERMITS: lists-edit ── ru/kz: PM-08e, запис значень списків; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.lists.editable', N'ru', N'Откройте список, чтобы добавить, переименовать или убрать его значения. Значение общего списка, которое ещё используют разрешения, убрать нельзя.'),
+    (N'permits.lists.editable', N'kz', N'Мәндерін қосу, атын өзгерту немесе алып тастау үшін тізімді ашыңыз. Рұқсаттар әлі қолданатын ортақ тізім мәнін алып тастауға болмайды.'),
+    (N'permits.lists.drawer.note.typeEditable', N'ru', N'Эти значения видит только {owner}. Изменение сразу применяется к опубликованному типу и к его открытому черновику.'),
+    (N'permits.lists.drawer.note.typeEditable', N'kz', N'Бұл мәндерді тек {owner} көреді. Өзгеріс жарияланған түрге және оның ашық жобасына бірден қолданылады.'),
+    (N'permits.lists.drawer.add.label', N'ru', N'Новое значение'),
+    (N'permits.lists.drawer.add.label', N'kz', N'Жаңа мән'),
+    (N'permits.lists.drawer.add.submit', N'ru', N'Добавить значение'),
+    (N'permits.lists.drawer.add.submit', N'kz', N'Мән қосу'),
+    (N'permits.lists.drawer.edit.label', N'ru', N'Значение'),
+    (N'permits.lists.drawer.edit.label', N'kz', N'Мән'),
+    (N'permits.lists.drawer.edit.save', N'ru', N'Сохранить'),
+    (N'permits.lists.drawer.edit.save', N'kz', N'Сақтау'),
+    (N'permits.lists.drawer.edit.cancel', N'ru', N'Отмена'),
+    (N'permits.lists.drawer.edit.cancel', N'kz', N'Бас тарту'),
+    (N'permits.lists.drawer.rename', N'ru', N'Переименовать'),
+    (N'permits.lists.drawer.rename', N'kz', N'Атын өзгерту'),
+    (N'permits.lists.drawer.renameAria', N'ru', N'Переименовать {value}'),
+    (N'permits.lists.drawer.renameAria', N'kz', N'{value} атын өзгерту'),
+    (N'permits.lists.drawer.remove', N'ru', N'Убрать'),
+    (N'permits.lists.drawer.remove', N'kz', N'Алып тастау'),
+    (N'permits.lists.drawer.removeAria', N'ru', N'Убрать {value}'),
+    (N'permits.lists.drawer.removeAria', N'kz', N'{value} мәнін алып тастау'),
+    (N'permits.lists.drawer.added', N'ru', N'Значение добавлено'),
+    (N'permits.lists.drawer.added', N'kz', N'Мән қосылды'),
+    (N'permits.lists.drawer.renamed', N'ru', N'Значение переименовано'),
+    (N'permits.lists.drawer.renamed', N'kz', N'Мәннің аты өзгертілді'),
+    (N'permits.lists.drawer.removed', N'ru', N'Значение убрано'),
+    (N'permits.lists.drawer.removed', N'kz', N'Мән алып тасталды')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: lists-edit ── кінець секції ──
+-- PERMITS: add-value ── ru/kz: PM-08e, «Not in the list? Add a value…» у формі рядка дозволу; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.page.row.addValue', N'ru', N'Нет в списке? Добавить значение…'),
+    (N'permits.page.row.addValue', N'kz', N'Тізімде жоқ па? Мән қосу…'),
+    (N'permits.page.addValue.title', N'ru', N'Добавить значение'),
+    (N'permits.page.addValue.title', N'kz', N'Мән қосу'),
+    (N'permits.page.addValue.sharedNote', N'ru', N'Значение добавляется в общий список {name} и предлагается каждому типу разрешения, который его использует.'),
+    (N'permits.page.addValue.sharedNote', N'kz', N'Мән {name} ортақ тізіміне қосылады және оны қолданатын әрбір рұқсат түріне ұсынылады.'),
+    (N'permits.page.addValue.typeNote', N'ru', N'Значение добавляется только в список этого типа разрешения.'),
+    (N'permits.page.addValue.typeNote', N'kz', N'Мән тек осы рұқсат түрінің тізіміне қосылады.'),
+    (N'permits.page.addValue.label', N'ru', N'Значение'),
+    (N'permits.page.addValue.label', N'kz', N'Мән'),
+    (N'permits.page.addValue.submit', N'ru', N'Добавить значение'),
+    (N'permits.page.addValue.submit', N'kz', N'Мән қосу'),
+    (N'permits.page.addValue.cancel', N'ru', N'Отмена'),
+    (N'permits.page.addValue.cancel', N'kz', N'Бас тарту'),
+    (N'permits.page.addValue.added', N'ru', N'Значение добавлено'),
+    (N'permits.page.addValue.added', N'kz', N'Мән қосылды'),
+    (N'permits.page.addValue.close', N'ru', N'Закрыть'),
+    (N'permits.page.addValue.close', N'kz', N'Жабу')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: add-value ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

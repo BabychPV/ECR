@@ -2822,6 +2822,22 @@ public interface IPermitTypeStore
 }
 ```
 
+#### `IPermitListStore`
+
+Списки вибору дозволів (Permits, PM-08e; `GET/PUT permit-lists`): стовпці ОПУБЛІКОВАНИХ типів зі списком (область
+`SharedRegistry`/`TypeOnly`/`SamePermitTable`) одним запитом проєкції надбудови полів — без `DraftJson` і без читання
+визначень типів по одному (раніше екран «Lists» робив 1 + N запитів) — та кількість чинних значень у реєстрах списків
+одним запитом. Ключ списку: `shared:{registryCode}`, `type:{type}:{table}:{field}`, `permit:{type}:{table}:{field}`;
+значення «лише для типу» лежать у прихованому реєстрі `PRM_…` і дублюються в чернетці типу, якщо вона відкрита.
+
+```csharp
+public interface IPermitListStore
+{
+    public Task<IReadOnlyList<PermitListUsage>> ListUsagesAsync(CancellationToken ct);
+    public Task<IReadOnlyDictionary<int, int>> CountActiveEntriesAsync(IReadOnlyCollection<int> registryDefIds, CancellationToken ct);
+}
+```
+
 #### `IPermitStore`
 
 Екземпляри дозволів (Permits, PM-04): дозвіл — запис реєстру шапки типу, тож власного сховища немає; порт дає лише
@@ -3866,7 +3882,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-PRM-4095` | 409 | дозвіл цього типу з таким номером і початком чинності вже є (PM-04; `number`): номер у поновленнях повторюється, тож дублем вважається збіг номера з ПОЧАТКОМ - версією дозволу |
 | `ECR-PRM-4091` | 409 | тип дозволу з таким кодом уже є (`UQ_PermitTypeDef`, `messageKey` `code`) або код реєстру шапки `PRM_<код>` зайнятий (`registryCode`) |
 | `ECR-PRM-4093` | 409 | тип дозволу змінили чи опублікували після читання — `rowVersion` не збігся (`changed`); або дія не відповідає стану типу: опублікований тип без відкритої чернетки (`noDraft`, спершу `new-version`), чернетка нової версії вже є (`draftExists`), тип ще не опублікований (`notPublished`) |
-| `ECR-PRM-4094` | 409 | тип дозволу не видаляється: він опублікований (`published`) або має екземпляри дозволів (`hasPermits`, `count`); видаляється лише ніколи не опублікований тип без дозволів |
+| `ECR-PRM-4094` | 409 | тип дозволу не видаляється: він опублікований (`published`) або має екземпляри дозволів (`hasPermits`, `count`); видаляється лише ніколи не опублікований тип без дозволів; також значення списку «лише для типу» вже вибране в дозволах (`valueInUse`, `value`): його англійський підпис не змінюється (`PUT permit-lists/{key}/items`, дія `Update`) |
 | `ECR-PRM-4101` | 409 | прив'язка аркуша до дозволу дублює наявну (PM-09): таблицю аркуша цієї версії вже зайняла інша прив'язка (`sheet`, `bindingCode`) або код прив'язки зайнятий — код унікальний по всій системі (`code`) |
 | `ECR-PRM-4102` | 409 | правку структури аркуша тримає прив'язка до дозволу (PM-09b): таблицю з чинною прив'язкою «рядки» не можна зробити `Fixed` (`rowMode`), таблицю з прив'язкою (`table`) чи колонку, яку вона зіставляє (`column`), не можна видалити; стелю рядків таблиці з чинною прив'язкою «рядки» не можна знизити (`maxRows`; PM-09b2), аркуш із прив'язаною таблицею не можна видалити (`sheet`); у деталях `bindingCode` і `tableCode`/`columnCode`/`sheetCode` — лише дані тієї самої версії, до якої в автора є право `Template.Edit`. Прив'язку «формули» режим рядків не блокує |
 | `ECR-JOB-0404` | 404 | фонової задачі з таким ідентифікатором немає; **або** деталь у планувальнику не пережила перезапуск сервера (сховище черги в пам'яті, D-66) — ручний перезапуск неможливий |
@@ -4319,6 +4335,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/permit-types/{code}` | `Permit.EditType` | 8 |
 | `POST` | `/api/v1/permit-types/{code}/publish` | `Permit.PublishType` | 8 |
 | `POST` | `/api/v1/permit-types/{code}/new-version` | `Permit.EditType` | 8 |
+| `GET` | `/api/v1/permit-lists` | `Registry.View` | 8 |
+| `GET` | `/api/v1/permit-lists/{key}` | `Registry.View` | 8 |
+| `PUT` | `/api/v1/permit-lists/{key}/items` | `Registry.EditData` (спільний довідник) або `Permit.EditType` («лише для типу») | 8 |
 | `GET` | `/api/v1/template-versions/{id}/permit-bindings` | `Template.View` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/permit-bindings/{code}` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/permit-bindings/{code}` | `Template.Edit` | 7 |

@@ -10,6 +10,10 @@ import { showApiError, showDone, showUndo } from '@/shared/ui/notify';
 import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
 import type { Permit } from '../api/types';
 import { requiredColumns, validateRow } from '../lib/rowForm';
+import { listKeyOf } from '../lists/listsModel';
+import { usePermitListIndex } from '../lists/useLists';
+import { textOf } from '../typeEditor/labels';
+import { AddValueDialog } from './AddValueDialog';
 import {
   deleteRowItem,
   fieldProblem,
@@ -93,6 +97,22 @@ export function RowDrawer({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const picker = usePickerData(permit, fields, true);
+  // Перелік списків — один запит, кеш спільний з екраном «Lists»; потрібен лише тим, хто може писати рядки.
+  const lists = usePermitListIndex(!readOnly);
+  const [adding, setAdding] = useState<{ field: PermitField; key: string; scope: 'shared' | 'type'; name: string } | null>(null);
+
+  /** Дія «Add a value…» для поля: лише спільний список і список цього типу, і лише коли сервер каже `editable`. */
+  function addValueFor(field: PermitField): (() => void) | null {
+    const tableCode = permit.tables.find((candidate) => candidate.registryCode === registryCode)?.code;
+    if (tableCode === undefined) return null;
+    const scope = field.source.listScope;
+    const key = listKeyOf(scope, permit.typeCode, tableCode, field.column.code, field.source.listRegistryCode);
+    const list = key === null ? undefined : lists.data?.find((candidate) => candidate.key === key);
+    if (key === null || list === undefined || !list.editable) return null;
+    const kind = scope === 'SharedRegistry' ? 'shared' : 'type';
+
+    return () => setAdding({ field, key, scope: kind, name: textOf(list.nameL10n) || (field.source.listRegistryCode ?? key) });
+  }
 
   function refresh(): void {
     void queryClient.invalidateQueries({ queryKey: permitKeys.rows(registryCode, permit.id) });
@@ -219,6 +239,7 @@ export function RowDrawer({
           readOnly={readOnly}
           picker={picker.data}
           pickerPending={picker.pending}
+          addValue={addValueFor}
           isNew={isNew}
         />
         {requiredColumns(fields.map((field) => field.column)).length > 0 && !readOnly && (
@@ -251,6 +272,16 @@ export function RowDrawer({
           </Group>
         </Group>
       </Stack>
+      {adding !== null && (
+        <AddValueDialog
+          listKey={adding.key}
+          scope={adding.scope}
+          listName={adding.name}
+          // Пікери вже перечитано (мутація чекає скидання кешу): нове значення стає вибраним у полі, з якого його додали.
+          onAdded={(item) => changeField(adding.field.column.code, String(item.id))}
+          onClose={() => setAdding(null)}
+        />
+      )}
     </Drawer>
   );
 }
