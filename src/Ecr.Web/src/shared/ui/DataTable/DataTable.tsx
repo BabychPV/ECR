@@ -111,6 +111,12 @@ export interface DataTableProps<Row> {
   readonly onRowClick?: ((row: Row) => void) | undefined;
 
   /**
+   * Рядок із `onRowClick` досяжний з клавіатури: `tabindex=0`, Enter/Space = клік (PUI-1). Типово вимкнено: екрани, де в
+   * клітинці вже є посилання на ту саму дію, не мають отримувати другу зупинку Tab на рядок.
+   */
+  readonly rowFocusable?: boolean | undefined;
+
+  /**
    * `aria-label` рядка: чим цей рядок є для того, хто не бачить екрана.
    *
    * ⛔ Повертає `null` для рядка, якому власне ім'я НЕ потрібне — і це не
@@ -394,6 +400,7 @@ export function DataTable<Row>({
   showMoreLabel = MoreGlyph,
   isFetchingMore = false,
   onRowClick,
+  rowFocusable,
   rowLabel,
   selectedKey,
   caption,
@@ -544,6 +551,20 @@ export function DataTable<Row>({
                         // читалці прочитати клітинки.
                         aria-label={(rowLabel === undefined ? null : rowLabel(row)) ?? undefined}
                         style={{ cursor: onRowClick === undefined ? 'default' : 'pointer' }}
+                        // PUI-1: рядок, який відкривають лише кліком, недосяжний з клавіатури. `rowFocusable` (опція екрана, у
+                        // клітинках якого НЕМАЄ посилання на ту саму дію) дає рядку tabindex=0 і Enter/Space = клік. Подія зі
+                        // вкладеного елемента (меню, чекбокс, посилання) рядок не відкриває: `target === currentTarget`.
+                        tabIndex={rowFocusable === true && onRowClick !== undefined ? 0 : undefined}
+                        onKeyDown={
+                          rowFocusable === true && onRowClick !== undefined
+                            ? (event) => {
+                                if (event.target !== event.currentTarget) return;
+                                if (event.key !== 'Enter' && event.key !== ' ') return;
+                                event.preventDefault();
+                                onRowClick(row);
+                              }
+                            : undefined
+                        }
                         onClick={
                           onRowClick === undefined
                             ? undefined

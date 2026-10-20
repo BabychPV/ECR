@@ -101,6 +101,9 @@ export function ListsPage(): JSX.Element {
           onClearFilters={() => setParams({ q: null, kind: null, stat: null })}
           clearFiltersLabel={t('filters.clear')}
           onRowClick={(row) => setParams({ panel: row.id })}
+          // PUI-1: у клітинках немає посилання на шторку - рядок мусить відкриватися клавіатурою (Tab -> Enter/Space).
+          rowFocusable
+          rowLabel={(row) => row.name}
         />
       </Box>
 
