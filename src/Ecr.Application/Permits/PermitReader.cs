@@ -42,7 +42,7 @@ internal sealed record PermitTableView(PermitTypeTable Table, RegistryDef Def, R
 /// <param name="Type">Тип.</param>
 /// <param name="Header">Реєстр шапки (з полями).</param>
 /// <param name="Tables">Таблиці в порядку складу.</param>
-internal sealed record PermitTypeView(PermitTypeDef Type, RegistryDef Header, IReadOnlyList<PermitTableView> Tables);
+internal sealed record PermitTypeView(PermitTypeSummary Type, RegistryDef Header, IReadOnlyList<PermitTableView> Tables);
 
 /// <summary>
 /// Читання дозволів з реєстрів: шапки, стан, підсумки таблиць (Permits, PM-04). Дозвіл - запис реєстру шапки типу, тож
@@ -69,7 +69,7 @@ internal sealed class PermitReader(
     /// <summary>Тип, реєстр шапки й таблиці.</summary>
     /// <param name="type">Тип.</param>
     /// <param name="ct">Токен скасування.</param>
-    internal async Task<PermitTypeView?> ViewAsync(PermitTypeDef type, CancellationToken ct)
+    internal async Task<PermitTypeView?> ViewAsync(PermitTypeSummary type, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(type);
 

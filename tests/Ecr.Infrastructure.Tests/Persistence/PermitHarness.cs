@@ -25,12 +25,15 @@ internal sealed class PermitHarness : IAsyncDisposable
 {
     private static readonly DateTime Now = new(2026, 10, 18, 12, 0, 0, DateTimeKind.Utc);
 
-    private PermitHarness(SqlServerFixture sql, int userId, string[] permissions)
+    private readonly Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] _interceptors;
+
+    private PermitHarness(SqlServerFixture sql, int userId, string[] permissions, Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors)
     {
         Sql = sql;
         UserId = userId;
         Permissions = permissions;
-        Db = sql.CreateContext();
+        _interceptors = interceptors;
+        Db = sql.CreateContext(interceptors);
 
         var access = Substitute.For<IAccessDecisionService>();
         var builder = new AccessBuilder { UserId = userId };
@@ -158,18 +161,21 @@ internal sealed class PermitHarness : IAsyncDisposable
     public static string[] EverythingWithData => [.. Everything, "Registry.EditData"];
 
     /// <summary>Нова «сесія» тієї самої особи: свій контекст, як у наступному запиті.</summary>
-    public async Task<PermitHarness> NextRequestAsync() => await CreateAsync(Sql, Permissions, UserId).ConfigureAwait(false);
+    public async Task<PermitHarness> NextRequestAsync() => await CreateAsync(Sql, Permissions, UserId, _interceptors).ConfigureAwait(false);
 
     /// <summary>Будує обробники для нового користувача з потрібними правами.</summary>
     /// <param name="sql">Фікстура бази.</param>
     /// <param name="permissions">Глобальні права.</param>
     /// <param name="existingUserId">Користувач, якщо вже заведений.</param>
-    public static async Task<PermitHarness> CreateAsync(SqlServerFixture sql, string[] permissions, int? existingUserId = null)
+    /// <param name="interceptors">Перехоплювачі команд EF (за потреби тесту: запис тексту SQL).</param>
+    public static async Task<PermitHarness> CreateAsync(
+        SqlServerFixture sql, string[] permissions, int? existingUserId = null,
+        params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors)
     {
         ArgumentNullException.ThrowIfNull(sql);
 
         var userId = existingUserId ?? await NewUserAsync(sql).ConfigureAwait(false);
-        return new PermitHarness(sql, userId, permissions);
+        return new PermitHarness(sql, userId, permissions, interceptors);
     }
 
     /// <summary>Усі права, потрібні для повного циклу типу.</summary>

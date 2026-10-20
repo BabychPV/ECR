@@ -113,7 +113,7 @@ public sealed class ListPermitTypesHandler(
         }
 
         // Типів дозволів десятки: метадані читаються цілком, а сторінка — за кодом (стійкий порядок без OFFSET).
-        var types = (await permits.ListAsync(ct).ConfigureAwait(false))
+        var types = (await permits.ListSummariesAsync(ct).ConfigureAwait(false))
             .Where(t => !Registries.RegistryAccess.IsDenied(profile, t.HeaderRegistryDefId))
             .Where(t => string.IsNullOrWhiteSpace(category)
                         || string.Equals(PermitTypeCodec.CategoryName(t.Category), category, StringComparison.Ordinal))
@@ -154,18 +154,15 @@ public sealed class ListPermitTypesHandler(
     }
 
     private static List<PermitTypeTableSummaryDto> Tables(
-        PermitTypeDef type, IEnumerable<PermitTypeTable> published, Dictionary<int, RegistryDef> definitions)
+        PermitTypeSummary type, IEnumerable<PermitTypeTable> published, Dictionary<int, RegistryDef> definitions)
     {
-        // Чернетка показує склад, який людина збирає; без неї — опублікований (лічильник стовпців з реєстру).
-        // ⚠ Понад межу (PA-U-01) чернетку не розбираємо: тип лишається в переліку (його можна відкрити й видалити), без таблиць.
-        if (PermitTypeCodec.IsOversized(type.DraftJson))
+        // Чернетка показує склад, який людина збирає; без неї - опублікований (лічильник стовпців з реєстру).
+        // ⚠ PA2-S-01: текст чернетки більшої за PermitTypeLimits.ListDraftSummaryMaxChars (та понад межу PA-U-01) перелік не
+        // отримує з бази взагалі (SmallDraftJson = null) - тип лишається в переліку (його можна відкрити й видалити),
+        // а таблиці беруться з опублікованого складу (ніколи не опублікований - порожньо).
+        if (type is { HasDraft: true, SmallDraftJson: { } draft })
         {
-            return [];
-        }
-
-        if (type.HasDraft)
-        {
-            return [.. PermitTypeCodec.Parse(type.DraftJson!).Tables
+            return [.. PermitTypeCodec.Parse(draft).Tables
                 .OrderBy(t => t.Order)
                 .Select(t => new PermitTypeTableSummaryDto(t.Code, t.NameL10n, t.Columns.Count))];
         }

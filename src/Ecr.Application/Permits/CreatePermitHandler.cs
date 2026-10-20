@@ -83,7 +83,7 @@ public sealed class CreatePermitHandler(
         }
 
         var reader = new PermitReader(permits, registries, rows, stats, clock);
-        var view = await reader.ViewAsync(type, ct).ConfigureAwait(false)
+        var view = await reader.ViewAsync(PermitTypeSummary.From(type), ct).ConfigureAwait(false)
             ?? throw PermitTypeErrors.NotFound(typeCode);
 
         // ⛔ D-211: запис External-довідника - лише синком з AF (шапка дозволу таким не буває, але гард один на всіх писачів).

@@ -16,8 +16,22 @@ public sealed class PermitTypeStore(EcrDbContext db) : IPermitTypeStore
         => db.PermitTypeDefs.FirstOrDefaultAsync(t => t.Code == code, ct);
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<PermitTypeDef>> ListAsync(CancellationToken ct)
-        => await db.PermitTypeDefs.AsNoTracking().OrderBy(t => t.Code).Take(MaxRows).ToListAsync(ct).ConfigureAwait(false);
+    public async Task<IReadOnlyList<PermitTypeSummary>> ListSummariesAsync(CancellationToken ct)
+    {
+        const int maxChars = Ecr.Application.Permits.PermitTypeLimits.ListDraftSummaryMaxChars;
+
+        // ⚠ PA2-S-01: проєкція без стовпця DraftJson як такого - текст віддається лише за умови DATALENGTH <= межі (байти,
+        // 2 на символ), тож великі чернетки з бази не виходять взагалі.
+        return await db.PermitTypeDefs.AsNoTracking()
+            .OrderBy(t => t.Code)
+            .Take(MaxRows)
+            .Select(t => new PermitTypeSummary(
+                t.Id, t.Code, t.NameL10n, t.Category, t.HeaderRegistryDefId, t.Version, t.Status,
+                t.UpdatedAt, t.UpdatedByUserId,
+                t.DraftJson != null,
+                t.DraftJson != null && EF.Functions.DataLength(t.DraftJson) <= maxChars * 2 ? t.DraftJson : null))
+            .ToListAsync(ct).ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<PermitTypeTable>> ListTablesAsync(int permitTypeDefId, CancellationToken ct)
