@@ -3,6 +3,7 @@ import {
   createPermitType,
   deletePermitType,
   getPermitType,
+  getPermitTypeUsage,
   listPermitTypes,
   openPermitTypeVersion,
   publishPermitType,
@@ -64,6 +65,16 @@ describe('API типів дозволів', () => {
 
     expect(attempts[0]).toMatchObject({ url: '/api/v1/permit-types/A%2FB', method: 'GET' });
     expect(attempts[1]).toMatchObject({ url: '/api/v1/permit-types/A%2FB/new-version', method: 'POST' });
+  });
+
+  it('кількості по таблицях типу: GET …/usage з закодованим кодом, повертає тіло як є', async () => {
+    const body = { instanceCount: 2, tables: [{ code: 'Storage', rowCount: 5 }] };
+    const attempts = mockFetch(200, body);
+
+    const usage = await getPermitTypeUsage('A/B');
+
+    expect(attempts[0]).toMatchObject({ url: '/api/v1/permit-types/A%2FB/usage', method: 'GET', body: null });
+    expect(usage).toEqual(body);
   });
 
   it('створення, заміна й публікація шлють тіло відповідними методами', async () => {

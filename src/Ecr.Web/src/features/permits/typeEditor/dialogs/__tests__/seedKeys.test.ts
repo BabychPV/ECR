@@ -24,6 +24,8 @@ const ownDirs = ['dialogs', 'checks', 'versions'].map((name) => path.join(root, 
 const sectionMarkers = [
   { en: '-- PERMITS: editor-dialogs ── PM-08c', rukz: '-- PERMITS: editor-dialogs ── ru/kz', end: '-- PERMITS: editor-dialogs ── кінець секції ──' },
   { en: '-- PERMITS: ui-wiring ── зведення', rukz: '-- PERMITS: ui-wiring ── ru/kz', end: '-- PERMITS: ui-wiring ── кінець секції ──' },
+  // PM-03b2: кількості в «Remove table» — власна секція в кінці блоку.
+  { en: '-- PERMITS: type-usage ── en: PM-03b2', rukz: '-- PERMITS: type-usage ── ru/kz', end: '-- PERMITS: type-usage ── кінець секції ──' },
 ];
 
 function sources(dir: string): string[] {

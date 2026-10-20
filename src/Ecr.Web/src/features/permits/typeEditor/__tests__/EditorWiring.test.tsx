@@ -38,6 +38,7 @@ vi.mock('../../api/typesApi', () => ({
   publishPermitType: vi.fn(),
   openPermitTypeVersion: vi.fn(),
   deletePermitType: vi.fn(),
+  getPermitTypeUsage: vi.fn(),
 }));
 const session = vi.hoisted(() => ({ permissions: ['Permit.EditType', 'Permit.PublishType'] as string[] }));
 vi.mock('@/shared/session/useSession', async (importOriginal) => ({
@@ -207,9 +208,11 @@ describe('видалення таблиці', () => {
   });
 
   it('опублікований тип: збережену таблицю не видалити, текст — з каталогу відмови сервера', async () => {
+    vi.mocked(typesApi.getPermitTypeUsage).mockResolvedValue({ instanceCount: 2, tables: [{ code: 'Storage', rowCount: 5 }] });
     await open(opened, permitType({ status: 'Published', version: 2, draftVersion: 3 }));
     const dialog = await screen.findByRole('dialog', { name: 'Remove table "Storage"?' });
-    expect(within(dialog).getByText(/Table "Storage" is published and cannot be removed\./)).toBeTruthy();
+    expect(await within(dialog).findByText(/Table "Storage" is published and cannot be removed\./)).toBeTruthy();
+    expect(within(dialog).getByText(/Permits of this type: 2\. Rows in this published table: 5\./)).toBeTruthy();
     expect((within(dialog).getByRole('button', { name: 'Remove table' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
