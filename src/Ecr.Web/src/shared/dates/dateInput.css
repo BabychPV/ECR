@@ -9,3 +9,24 @@
   opacity: 1;
   color: color-mix(in srgb, var(--mantine-color-text) 70%, var(--mantine-color-body));
 }
+
+/*
+ * P2-N1 (прохід B, PA2-U-02): дні-вихідні Mantine фарбує `--mantine-color-red-6` (#fa5252) - axe `color-contrast` serious:
+ * 3.28:1 у світлій і 4.13:1 у темній темі (норма 4.5). Колір вихідних - окремий токен на тему; значення підібрано
+ * обчисленням (`shared/theme/contrast.ts`, перевіряє `dateInput.contrast.test.ts` проти тла поповера, hover і вибору):
+ * світла #b02525 - від 5.51:1, темна #ff8787 - від 5.80:1. Вибраний день (білий текст на акценті) і дні сусідніх
+ * місяців (правило вище) не чіпаємо.
+ */
+:root {
+  --ecr-weekend-day: #b02525;
+}
+
+:root[data-mantine-color-scheme='dark'] {
+  --ecr-weekend-day: #ff8787;
+}
+
+.mantine-DateInput-day[data-weekend]:not([data-selected]):not([data-outside]),
+.mantine-DatePicker-day[data-weekend]:not([data-selected]):not([data-outside]),
+.mantine-Day-day[data-weekend]:not([data-selected]):not([data-outside]) {
+  color: var(--ecr-weekend-day);
+}

@@ -190,21 +190,38 @@ internal static class PermitBindingErrors
     /// <summary><c>409 ECR-PRM-4102 maxRows</c>: стелю рядків таблиці з прив'язкою «рядки» не можна знизити.</summary>
     /// <param name="tableCode">Код таблиці аркуша.</param>
     /// <param name="bindingCode">Код прив'язки, що її тримає.</param>
-    /// <param name="previousMax">Стеля до правки; <c>null</c> - без стелі.</param>
+    /// <param name="previousMax">Стеля до правки; <c>null</c> - без стелі (інший ключ: слова «без стелі» кладе каталог мовою, а не код).</param>
     /// <param name="newMax">Стеля, яку просять.</param>
-    internal static BusinessRuleException SheetMaxRowsHeld(string tableCode, string bindingCode, int? previousMax, int? newMax)
-        => new(
-            ErrorCodes.PermitBindingBlocksSheetChange,
-            $"Таблиця «{tableCode}» приймає рядки дозволу через прив'язку «{bindingCode}»: стелю рядків не можна знижувати "
-            + $"(було {Describe(previousMax)}, просять {Describe(newMax)}). Спершу видаліть прив'язку.",
-            new Dictionary<string, object?>
-            {
-                ["messageKey"] = "err.ECR-PRM-4102.maxRows",
-                ["tableCode"] = tableCode,
-                ["bindingCode"] = bindingCode,
-                ["previousMax"] = Describe(previousMax),
-                ["newMax"] = Describe(newMax),
-            });
+    /// <remarks>
+    /// ⚠ Ключів два, бо слово «без стелі» не можна вписати параметром: воно потрапило б у ru/kz-текст сирим англійським
+    /// літералом. <c>maxRows</c> - були число й нова стеля; <c>maxRowsUnlimited</c> - стелі не було (параметра
+    /// <c>previousMax</c> тоді немає зовсім).
+    /// </remarks>
+    internal static BusinessRuleException SheetMaxRowsHeld(string tableCode, string bindingCode, int? previousMax, int newMax)
+        => previousMax is { } previous
+            ? new(
+                ErrorCodes.PermitBindingBlocksSheetChange,
+                $"Таблиця «{tableCode}» приймає рядки дозволу через прив'язку «{bindingCode}»: стелю рядків не можна знижувати "
+                + $"(було {previous.ToString(CultureInfo.InvariantCulture)}, просять {newMax.ToString(CultureInfo.InvariantCulture)}). Спершу видаліть прив'язку.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRM-4102.maxRows",
+                    ["tableCode"] = tableCode,
+                    ["bindingCode"] = bindingCode,
+                    ["previousMax"] = previous.ToString(CultureInfo.InvariantCulture),
+                    ["newMax"] = newMax.ToString(CultureInfo.InvariantCulture),
+                })
+            : new(
+                ErrorCodes.PermitBindingBlocksSheetChange,
+                $"Таблиця «{tableCode}» приймає рядки дозволу через прив'язку «{bindingCode}»: стелі рядків не було, поставити її "
+                + $"({newMax.ToString(CultureInfo.InvariantCulture)}) не можна. Спершу видаліть прив'язку.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRM-4102.maxRowsUnlimited",
+                    ["tableCode"] = tableCode,
+                    ["bindingCode"] = bindingCode,
+                    ["newMax"] = newMax.ToString(CultureInfo.InvariantCulture),
+                });
 
     /// <summary><c>409 ECR-PRM-4102 sheet</c>: аркуш, таблицю якого тримає прив'язка, не можна видалити.</summary>
     /// <param name="sheetCode">Код аркуша.</param>
@@ -245,6 +262,4 @@ internal static class PermitBindingErrors
                 ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
                 ["versionId"] = templateVersionId.ToString(CultureInfo.InvariantCulture),
             });
-
-    private static string Describe(int? max) => max is { } m ? m.ToString(CultureInfo.InvariantCulture) : "none";
 }

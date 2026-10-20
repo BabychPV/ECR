@@ -125,7 +125,17 @@ async function open(url = '/admin/permits/5', over = permit()): Promise<void> {
                 </>
               }
             />
-            <Route path="/admin/permits" element={<Probe />} />
+            <Route
+              path="/admin/permits"
+              element={
+                <>
+                  <h1 className="ecr-route-heading" tabIndex={-1}>
+                    Permits list
+                  </h1>
+                  <Probe />
+                </>
+              }
+            />
           </Routes>
         </MemoryRouter>
       </QueryClientProvider>
@@ -389,6 +399,61 @@ describe('життєвий цикл за станом і правами', () => 
     await waitFor(() => expect(endPermit).toHaveBeenCalled());
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+  });
+
+  // P3-1: Renew / Delete закривають діалог РАЗОМ із переходом на іншу сторінку; фокус має опинитись на `h1` сторінки-призначення
+  // (а не на «More»/Renew…, що зникли, і не на BODY). Реальний порядок: Confirm -> навігація -> нова сторінка змонтована -> фокус.
+  // Мутаційний доказ (вручну, відновлено): прибрати виклик `focusHeadingAfterNavigation` у `LifecycleDialogs` - обидва тести червоні.
+  it('успішний Renew: фокус на заголовку нової чернетки, не на BODY і не на зниклій кнопці', async () => {
+    renewPermit.mockResolvedValue(permit({ id: 6, number: 'KZ-100-R1', status: 'Draft' }));
+    await open('/admin/permits/5', permit({ status: 'Active', endsInDays: 400 }));
+    getPermit.mockImplementation((id) =>
+      Promise.resolve(id === 6 ? permit({ id: 6, number: 'KZ-100-R1', status: 'Draft' }) : permit({ status: 'Active', endsInDays: 400 })),
+    );
+    const renew = screen.getByRole('button', { name: 'Renew…' });
+    fireEvent.click(renew);
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Create renewal' }));
+
+    await waitFor(() => expect(url()).toBe('/admin/permits/6'));
+    const heading = await screen.findByRole('heading', { level: 1, name: 'KZ-100-R1' });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    expect(heading.classList.contains('ecr-route-heading')).toBe(true);
+  });
+
+  it('успішний Delete draft: фокус на заголовку переліку, не на BODY', async () => {
+    deletePermit.mockResolvedValue(undefined);
+    await open();
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    const item = await screen.findByRole('menuitem', { name: 'Delete draft…' });
+    item.focus();
+    fireEvent.click(item);
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete draft' }));
+
+    await waitFor(() => expect(url()).toBe('/admin/permits'));
+    const heading = await screen.findByRole('heading', { level: 1, name: 'Permits list' });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+  });
+
+  it('Cancel у діалозі Renew повертає фокус на «Renew…», а Esc у Delete draft - на «More»', async () => {
+    await open('/admin/permits/5', permit({ status: 'Active', endsInDays: 400 }));
+    const renew = screen.getByRole('button', { name: 'Renew…' });
+    renew.focus();
+    fireEvent.click(renew);
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Renew…' })));
+    expect(renewPermit).not.toHaveBeenCalled();
+    cleanup();
+
+    await open();
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    const item = await screen.findByRole('menuitem', { name: 'Delete draft…' });
+    item.focus();
+    fireEvent.click(item);
+    fireEvent.keyDown(await screen.findByRole('dialog'), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'More' })));
+    expect(deletePermit).not.toHaveBeenCalled();
   });
 
   it('Renew відкриває нову чернетку; Delete draft повертає до переліку', async () => {

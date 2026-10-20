@@ -149,18 +149,6 @@ public sealed class SaveTableDefHandler(
 
         SaveTableRelationHandler.RejectBreaking(change, code, hasDocuments, "Зміна");
 
-        // ⛔ PM-09b: Dynamic → Fixed під чинною прив'язкою «рядки» - 409 ECR-PRM-4102 ДО запису, а не 422 при наступному
-        // збереженні прив'язки (рантайм режиму рядків не питає, тож без цього розбіжність жила б непомітно).
-        if (existing is not null)
-        {
-            await PermitSheetBindingGuard.RequireRowModeAllowedAsync(
-                permitBindings, templateVersionId, existing, command.RowMode, ct).ConfigureAwait(false);
-
-            // PM-09b2: стеля рядків під прив'язкою «рядки» не знижується (існуюча таблиця ще зі старою стелею).
-            await PermitSheetBindingGuard.RequireMaxRowsNotLoweredAsync(
-                permitBindings, templateVersionId, existing, command.MaxDynamicRows, ct).ConfigureAwait(false);
-        }
-
         var oldJson = existing is null ? null : Describe(existing);
 
         // ⛔ Q-244: «запис → аудит → SaveChanges» — одним замиканням
@@ -192,6 +180,20 @@ public sealed class SaveTableDefHandler(
             }
             else
             {
+                // ⛔ PM-09b: Dynamic → Fixed під чинною прив'язкою «рядки» - 409 ECR-PRM-4102 ДО запису, а не 422 при
+                // наступному збереженні прив'язки (рантайм режиму рядків не питає, тож без цього розбіжність жила б
+                // непомітно). PM-09b2: стеля рядків під такою прив'язкою не знижується. Обидві перевірки - ПІД блоком
+                // версії й ПЕРЕД правкою (таблиця ще зі старими режимом і стелею): збереження прив'язки бере той самий
+                // блок, тож між перевіркою й комітом прив'язка не з'явиться.
+                // ⚠ «Старе» значення для порівняння читається З БАЗИ під блоком (а не з графа `existing`, прочитаного до
+                // блоку): друга з двох паралельних правок порівнюється з уже зміненим станом переможця.
+                var current = await permitBindings.FindTableStateAsync(existing.Id, innerCt).ConfigureAwait(false)
+                    ?? new PermitSheetTableState(existing.RowMode, existing.MaxDynamicRows);
+                await PermitSheetBindingGuard.RequireRowModeAllowedAsync(
+                    permitBindings, templateVersionId, existing, current.RowMode, command.RowMode, innerCt).ConfigureAwait(false);
+                await PermitSheetBindingGuard.RequireMaxRowsNotLoweredAsync(
+                    permitBindings, templateVersionId, existing, current.MaxDynamicRows, command.MaxDynamicRows, innerCt).ConfigureAwait(false);
+
                 existing.Rename(name);
                 existing.SetLayout(command.LayoutKind);
 
@@ -346,14 +348,15 @@ public sealed class DeleteTableDefHandler(
 
         SaveTableRelationHandler.RejectBreaking(change, code, hasDocuments, "Видалення");
 
-        // ⛔ PM-09b: м'яке видалення не зупинить зовнішній ключ - прив'язка лишилась би з мертвою таблицею.
-        await PermitSheetBindingGuard.RequireTableFreeAsync(permitBindings, templateVersionId, table, ct).ConfigureAwait(false);
-
         // ⛔ Q-244: аудит і `SoftDelete`/`SaveChanges` тепер одна транзакція.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             // ⛔ C5: блок рядка версії першим, «ще чернетка» — під ним.
             await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
+            // ⛔ PM-09b/PM-09b2: м'яке видалення не зупинить зовнішній ключ - прив'язка лишилась би з мертвою таблицею.
+            // Перевірка - ПІД блоком версії, в одній транзакції із записом (збереження прив'язки бере той самий блок).
+            await PermitSheetBindingGuard.RequireTableFreeAsync(permitBindings, table, innerCt).ConfigureAwait(false);
 
             await audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { MantineProvider, PasswordInput } from '@mantine/core';
+import { cleanup, render, screen } from '@testing-library/react';
+import { MantineProvider, Modal, PasswordInput } from '@mantine/core';
 import { loadCatalog } from '@/shared/i18n';
+import { theme } from '@/shared/theme/theme';
 import {
   closeNotificationButtonProps,
   closeNotificationLabel,
@@ -66,5 +67,29 @@ describe('a11yLabels: доступні імена — з каталогу', () =
     );
 
     expect(screen.getByRole('button', { name: 'Показать или скрыть пароль' })).toBeTruthy();
+  });
+
+  // P3-N6: хрестик модалки в ru - «Закрыть», а не англійський літерал теми. Мутація (вручну, відновлено): повернути
+  // `closeButtonProps: { 'aria-label': 'Close' }` у `theme.ts` - тест червоний.
+  it('хрестик модалки: до каталогу - Close, з каталогом ru - Закрыть', async () => {
+    const open = (): void => {
+      render(
+        <MantineProvider theme={theme}>
+          <Modal opened onClose={() => undefined} title="Title" transitionProps={{ duration: 0 }}>
+            body
+          </Modal>
+        </MantineProvider>,
+      );
+    };
+    open();
+    expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy();
+    cleanup();
+
+    catalog({ 'common.close': 'Закрыть' });
+    await loadCatalog('ru', 'public');
+    open();
+
+    expect(screen.getByRole('button', { name: 'Закрыть' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
   });
 });

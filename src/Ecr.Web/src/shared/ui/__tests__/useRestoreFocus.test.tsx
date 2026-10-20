@@ -42,7 +42,10 @@ function MenuHost({
 }: {
   readonly mountOnly: boolean;
   readonly hideTriggerOnOpen: boolean;
-  /** Через скільки список меню закривається після кліку по пункту (у браузері - перехід `exit`). */
+  /**
+   * Через скільки список меню закривається після кліку по пункту (у браузері - перехід `exit`). Це змодельована
+   * затримка, а не очікування в асерті: усі перевірки йдуть через `waitFor`. Таймінг-перевірка 20.10: 20/20 поспіль.
+   */
   readonly closeDelayMs?: number;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
