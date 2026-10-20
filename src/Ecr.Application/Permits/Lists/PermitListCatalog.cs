@@ -152,11 +152,14 @@ public sealed class ListPermitListsHandler(
     Security.IAccessDecisionService access,
     ICurrentUser currentUser)
 {
+    /// <summary>Право на читання довідників.</summary>
+    public const string Permission = "Registry.View";
+
     /// <summary>Читає перелік: ОДИН запит проєкції стовпців і один підрахунок значень.</summary>
     /// <param name="ct">Токен скасування.</param>
     public async Task<IReadOnlyList<PermitListDto>> HandleAsync(CancellationToken ct)
     {
-        var profile = await Security.PermissionCheck.RequireAsync(access, currentUser, PermitListCatalog.ViewPermission, ct).ConfigureAwait(false);
+        var profile = await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         return [.. (await PermitListCatalog.BuildAsync(lists, profile, ct).ConfigureAwait(false)).Select(e => e.Dto)];
     }
@@ -169,13 +172,16 @@ public sealed class GetPermitListHandler(
     Security.IAccessDecisionService access,
     ICurrentUser currentUser)
 {
+    /// <summary>Право на читання довідників.</summary>
+    public const string Permission = "Registry.View";
+
     /// <summary>Читає список за ключем.</summary>
     /// <param name="key">Ключ зі шляху.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException"><c>ECR-PRM-0404</c>: списку немає або він схований забороною.</exception>
     public async Task<PermitListDetailDto> HandleAsync(string key, CancellationToken ct)
     {
-        var profile = await Security.PermissionCheck.RequireAsync(access, currentUser, PermitListCatalog.ViewPermission, ct).ConfigureAwait(false);
+        var profile = await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         var entry = PermitListCatalog.Find(await PermitListCatalog.BuildAsync(lists, profile, ct).ConfigureAwait(false), key);
 
         return new PermitListDetailDto(
