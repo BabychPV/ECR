@@ -360,6 +360,9 @@ public sealed class MetadataCache(
                         || r.RelationKind == Ecr.Domain.Enums.TableRelationKind.Check)
                     && db.TableDefs.Any(t => t.Id == r.SourceTableDefId
                         && db.SheetDefs.Any(s2 => s2.Id == t.SheetDefId && s2.TemplateVersionId == templateVersionId))),
+
+                // PM-11c: прапор «є чинна прив'язка до дозволу» - тією ж проєкцією, без окремого звернення.
+                HasPermitBindings = db.PermitSheetBindings.Any(b => b.TemplateVersionId == templateVersionId && b.IsActive),
             })
             .Where(x => x.Sheet.TemplateVersionId == templateVersionId && !x.Sheet.IsDeleted)
             .OrderBy(x => x.Sheet.Ordinal)
@@ -368,6 +371,7 @@ public sealed class MetadataCache(
 
         var sheets = sheetRows.Select(x => x.Sheet).ToList();
         var hasRelations = sheetRows.Any(x => x.HasRelations);
+        var hasPermitBindings = sheetRows.Any(x => x.HasPermitBindings);
 
         var sheetIds = sheets.Select(s => s.Id).ToArray();
 
@@ -488,6 +492,7 @@ public sealed class MetadataCache(
         {
             HeaderFields = headerFields,
             HasActiveRollupOrCheck = hasRelations,
+            HasActivePermitBindings = hasPermitBindings,
         };
     }
 }

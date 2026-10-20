@@ -17,9 +17,12 @@ public interface IPermitTypeStore
     /// <param name="ct">Токен скасування.</param>
     public Task<PermitTypeDef?> FindByCodeAsync(string code, CancellationToken ct);
 
-    /// <summary>Усі типи, впорядковані за кодом (без відстеження).</summary>
+    /// <summary>
+    /// Усі типи, впорядковані за кодом, короткими знімками (без відстеження). ⚠ Текст чернетки не читається, якщо він
+    /// більший за <c>PermitTypeLimits.ListDraftSummaryMaxChars</c> (PA2-S-01); повну сутність дає <see cref="FindByCodeAsync"/>.
+    /// </summary>
     /// <param name="ct">Токен скасування.</param>
-    public Task<IReadOnlyList<PermitTypeDef>> ListAsync(CancellationToken ct);
+    public Task<IReadOnlyList<PermitTypeSummary>> ListSummariesAsync(CancellationToken ct);
 
     /// <summary>Таблиці типу в порядку складу (відстежувані).</summary>
     /// <param name="permitTypeDefId">Тип.</param>

@@ -40,7 +40,12 @@ export function ColumnsTable({ columns, tables, selectedCode, unitCode, readOnly
   };
 
   return (
-    <div className="pt-table-wrap">
+    // PA2-U-03: область прокручується (на вузькій ширині), а без рядків у ній немає фокусованого вмісту - axe
+    // `scrollable-region-focusable`. Сама область береться в Tab (`tabIndex=0`) з іменем; із рядками вона не потрібна.
+    <div
+      className="pt-table-wrap"
+      {...(columns.length === 0 ? { tabIndex: 0, role: 'region', 'aria-label': t('permits.editor.cols.region') } : {})}
+    >
       <table className="pt-table">
         <thead>
           <tr>

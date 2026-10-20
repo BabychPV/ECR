@@ -27,12 +27,12 @@ internal sealed class PermitLocator(
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException"><c>ECR-PRM-0404</c>: дозволу немає, запис не з шапки типу, або заборона на реєстр.</exception>
     /// <exception cref="AccessDeniedException">Немає права й гранта.</exception>
-    internal async Task<(PermitTypeDef Type, RegistryEntry Entry)> FindAsync(
+    internal async Task<(PermitTypeSummary Type, RegistryEntry Entry)> FindAsync(
         long permitId, string permission, GrantLevel level, CancellationToken ct)
     {
         var entry = await registries.FindEntryAsync(permitId, ct).ConfigureAwait(false);
         var type = entry is { IsDeleted: false }
-            ? (await permits.ListAsync(ct).ConfigureAwait(false)).FirstOrDefault(t => t.HeaderRegistryDefId == entry.RegistryDefId)
+            ? (await permits.ListSummariesAsync(ct).ConfigureAwait(false)).FirstOrDefault(t => t.HeaderRegistryDefId == entry.RegistryDefId)
             : null;
 
         if (entry is null || type is null)

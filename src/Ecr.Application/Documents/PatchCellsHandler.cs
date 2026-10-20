@@ -66,7 +66,10 @@ public sealed partial class PatchCellsHandler(
 
     // ⛔ D-425: фільтр активності рядків методології («лише Running» для Land). Gate обов'язкових входів не
     // вимагає входів від рядків, яких прогін не рахує. `null` — фільтра немає (прямий конструктор у тестах).
-    IRowActivityFilterSource? rowActivity = null)
+    IRowActivityFilterSource? rowActivity = null,
+
+    // ⛔ PA2-S-02: ключ рядка дозволу (роль RowKey) людина не править; `null` (прямий конструктор у тестах) - без цієї перевірки.
+    IPermitBindingStore? permitBindings = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -126,6 +129,7 @@ public sealed partial class PatchCellsHandler(
         EnforceRowCreationRules(context);
         await EnsureNoVersionConflictsAsync(context, ct).ConfigureAwait(false);
         await EnsureAccessAsync(request, context, ct).ConfigureAwait(false);
+        await EnsurePermitRowKeysUntouchedAsync(context, ct).ConfigureAwait(false);
 
         // ⛔ `DAT-04` п. 1: нові рядки тут ЩЕ НЕ створюються — їхні комірки
         // адресуються тимчасовими від'ємними ідентифікаторами

@@ -18,6 +18,8 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// Мутаційні докази: прибрати виклик <c>RequireRowModeAllowedAsync</c> у <c>SaveTableDefHandler</c> - червоний
 /// «Dynamic_у_Fixed…»; прибрати <c>RequireTableFreeAsync</c> у <c>DeleteTableDefHandler</c> - червоний «Таблиця_з_прив_язкою…»;
 /// прибрати <c>RequireColumnFreeAsync</c> у <c>DeleteColumnDefHandler</c> - червоний «Зіставлена_колонка…».
+/// PM-09b2: прибрати <c>RequireMaxRowsNotLoweredAsync</c> у <c>SaveTableDefHandler</c> - червоний «Стеля_рядків…»;
+/// прибрати <c>RequireSheetFreeAsync</c> у <c>DeleteSheetDefHandler</c> - червоний «Аркуш_з_прив_язаною_таблицею…».
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class PermitSheetGuardTests(SqlServerFixture sql)
@@ -126,8 +128,103 @@ public sealed class PermitSheetGuardTests(SqlServerFixture sql)
         Assert.True((await read.Db.ColumnDefs.SingleAsync(c => c.Id == sheet.Doc.ColumnDefIds[2])).IsDeleted);
     }
 
-    private static SaveTableDefCommand Command(TableRowMode mode)
-        => new(new Dictionary<string, string> { ["en"] = "Table" }, null, TableLayoutKind.PerPeriodInstance, mode, null);
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Стеля_рядків_під_прив_язкою_рядки_не_знижується_а_підняття_і_зняття_проходять()
+    {
+        var sheet = await PermitBindingHarness.PrepareSheetAsync(sql, withDocument: false);
+        await SetMaxAsync(sheet, 10);
+        await BindAsync(sheet, "Rows");
+        await using var h = await PermitBindingHarness.CreateAsync(sql, PermitBindingHarness.Everything);
+        var tableCode = await TableCodeAsync(h, sheet);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => h.SaveTable.HandleAsync(sheet.Doc.TemplateVersionId, sheet.Doc.SheetCode, tableCode, Command(TableRowMode.Dynamic, 9), default));
+
+        Assert.Equal(("ECR-PRM-4102", "err.ECR-PRM-4102.maxRows"), (error.ErrorCode, error.Details!["messageKey"]));
+        Assert.Equal(($"B{_tag}", tableCode), (error.Details["bindingCode"], error.Details["tableCode"]));
+        Assert.Equal(("10", "9"), (error.Details["previousMax"], error.Details["newMax"]));
+        await using var unchanged = await h.NextRequestAsync();
+        Assert.Equal(10, (await unchanged.Db.TableDefs.SingleAsync(t => t.Id == sheet.Doc.TableDefId)).MaxDynamicRows);
+
+        // Та сама стеля й підняття проходять; зняття стелі (null) - теж.
+        foreach (var allowed in new int?[] { 10, 20, null })
+        {
+            await using var next = await h.NextRequestAsync();
+            await next.SaveTable.HandleAsync(
+                sheet.Doc.TemplateVersionId, sheet.Doc.SheetCode, tableCode, Command(TableRowMode.Dynamic, allowed), default);
+            await using var read = await h.NextRequestAsync();
+            Assert.Equal(allowed, (await read.Db.TableDefs.SingleAsync(t => t.Id == sheet.Doc.TableDefId)).MaxDynamicRows);
+        }
+
+        // «Без стелі» найбільша: з null поставити число - це зниження.
+        await using var fromNone = await h.NextRequestAsync();
+        var lowered = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => fromNone.SaveTable.HandleAsync(
+                sheet.Doc.TemplateVersionId, sheet.Doc.SheetCode, tableCode, Command(TableRowMode.Dynamic, 5), default));
+        Assert.Equal(("err.ECR-PRM-4102.maxRows", "none", "5"), (lowered.Details!["messageKey"], lowered.Details["previousMax"], lowered.Details["newMax"]));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Стелю_можна_знизити_у_таблиці_без_прив_язки_і_під_прив_язкою_формули()
+    {
+        var formulas = await PermitBindingHarness.PrepareSheetAsync(sql, withDocument: false);
+        await SetMaxAsync(formulas, 10);
+        await BindAsync(formulas, "Formulas", code: $"F{_tag}");
+        var free = await PermitBindingHarness.PrepareSheetAsync(sql, withDocument: false);
+        await SetMaxAsync(free, 10);
+        await using var h = await PermitBindingHarness.CreateAsync(sql, PermitBindingHarness.Everything);
+
+        await h.SaveTable.HandleAsync(
+            formulas.Doc.TemplateVersionId, formulas.Doc.SheetCode, await TableCodeAsync(h, formulas), Command(TableRowMode.Dynamic, 3), default);
+        await using var other = await h.NextRequestAsync();
+        await other.SaveTable.HandleAsync(
+            free.Doc.TemplateVersionId, free.Doc.SheetCode, await TableCodeAsync(other, free), Command(TableRowMode.Dynamic, 3), default);
+
+        await using var read = await h.NextRequestAsync();
+        Assert.Equal(3, (await read.Db.TableDefs.SingleAsync(t => t.Id == formulas.Doc.TableDefId)).MaxDynamicRows);
+        Assert.Equal(3, (await read.Db.TableDefs.SingleAsync(t => t.Id == free.Doc.TableDefId)).MaxDynamicRows);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Аркуш_з_прив_язаною_таблицею_не_видаляється_а_вільний_видаляється()
+    {
+        var bound = await PermitBindingHarness.PrepareSheetAsync(sql, withDocument: false);
+        await BindAsync(bound, "Rows");
+        var free = await PermitBindingHarness.PrepareSheetAsync(sql, withDocument: false);
+        await using var h = await PermitBindingHarness.CreateAsync(sql, PermitBindingHarness.Everything);
+        var tableCode = await TableCodeAsync(h, bound);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => h.DeleteSheet.HandleAsync(bound.Doc.TemplateVersionId, bound.Doc.SheetCode, default));
+
+        Assert.Equal(("ECR-PRM-4102", "err.ECR-PRM-4102.sheet"), (error.ErrorCode, error.Details!["messageKey"]));
+        Assert.Equal(($"B{_tag}", tableCode, bound.Doc.SheetCode), (error.Details["bindingCode"], error.Details["tableCode"], error.Details["sheetCode"]));
+
+        await using var other = await h.NextRequestAsync();
+        await other.DeleteSheet.HandleAsync(free.Doc.TemplateVersionId, free.Doc.SheetCode, default);
+
+        await using var read = await h.NextRequestAsync();
+        Assert.False((await read.Db.SheetDefs.SingleAsync(s => s.Id == bound.Doc.SheetDefId)).IsDeleted);
+        Assert.True((await read.Db.SheetDefs.SingleAsync(s => s.Id == free.Doc.SheetDefId)).IsDeleted);
+    }
+
+    private static SaveTableDefCommand Command(TableRowMode mode, int? maxDynamicRows = null)
+        => new(new Dictionary<string, string> { ["en"] = "Table" }, null, TableLayoutKind.PerPeriodInstance, mode, maxDynamicRows);
+
+    /// <summary>Виставляє стелю рядків таблиці напряму (до прив'язки: під нею зі «без стелі» число вже не поставити).</summary>
+    private async Task SetMaxAsync(PreparedSheet sheet, int max)
+    {
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var table = await db.TableDefs.SingleAsync(t => t.Id == sheet.Doc.TableDefId);
+        table.SetMaxDynamicRows(max);
+        await db.SaveChangesAsync();
+    }
 
     private static Task<string> TableCodeAsync(PermitBindingHarness h, PreparedSheet sheet)
         => h.Db.TableDefs.AsNoTracking().Where(t => t.Id == sheet.Doc.TableDefId).Select(t => t.Code).SingleAsync();

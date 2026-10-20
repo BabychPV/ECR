@@ -23,7 +23,9 @@ namespace Ecr.Api.Tests;
 /// Мутаційні докази (запущені): (1) у <c>GetDocumentTablesHandler</c> віддавати <c>null</c> замість ознаки - червоний
 /// перший тест; (2) прибрати <c>b.IsActive</c> із <c>PermitBindingStore.ListActiveSummariesAsync</c> - червоніє рядок про
 /// вимкнену прив'язку; (3) у запиті прибрати <c>Join</c> із типами (відповідь без коду типу) - червоніє перевірка коду
-/// типу. Лічильник: ТЕПЛИЙ запит (екземпляри вже створені прогрівом), лише команди потоку запиту - як у
+/// типу. PM-11c (прапор <c>HasActivePermitBindings</c> у знімку метаданих): (4) у обробнику питати прив'язки завжди -
+/// червоніє «Версія_без_прив_язок…» і лічильник «0» у другому тесті; (5) прибрати <c>InvalidateAsync</c> після збереження
+/// прив'язки (<c>SavePermitBindingHandler</c>) - червоніє «чернетка слідує за прив'язкою». Лічильник: ТЕПЛИЙ запит (екземпляри вже створені прогрівом), лише команди потоку запиту - як у
 /// <c>PatchCellsQueryCountTests</c>.
 /// </remarks>
 [Collection("SqlServer")]
@@ -95,22 +97,82 @@ public sealed class DocumentTablesPermitBindingTests(SqlServerFixture sql)
 
         Assert.Equal((2, 6, 3), (measuredSmall.Tables, measuredLarge.Tables, measuredNone.Tables));
 
-        // Рівно одне звернення до прив'язок - і з прив'язкою, і без неї (охоронця окремо немає: запит і є охоронець).
+        // PM-11c: рівно одне звернення до прив'язок з прив'язкою і НІ ЖОДНОГО без неї (прапор у знімку метаданих).
         Assert.True(
-            (measuredSmall.BindingCommands, measuredLarge.BindingCommands, measuredNone.BindingCommands) == (1, 1, 1),
+            (measuredSmall.BindingCommands, measuredLarge.BindingCommands, measuredNone.BindingCommands) == (1, 1, 0),
             $"Звернень до PermitSheetBinding: {measuredSmall.BindingCommands}/{measuredLarge.BindingCommands}/{measuredNone.BindingCommands}.\n{measuredLarge.Dump}");
 
-        // Не росте з числом таблиць (2 → 6) і не залежить від наявності прив'язок.
+        // Не росте з числом таблиць (2 → 6); без прив'язок рівно на одне звернення менше, ніж з ними.
         Assert.True(
-            measuredSmall.Total == measuredLarge.Total && measuredLarge.Total == measuredNone.Total,
+            measuredSmall.Total == measuredLarge.Total && measuredNone.Total == measuredLarge.Total - 1,
             $"Усього звернень: {measuredSmall.Total} (2 табл.), {measuredLarge.Total} (6 табл.), {measuredNone.Total} (3 табл., без прив'язок).\n{measuredLarge.Dump}");
     }
 
-    /// <summary>Прогрів (створює екземпляри), потім замір теплого запиту.</summary>
-    private async Task<(int Tables, int Total, int BindingCommands, string Dump)> MeasureAsync(EcrApiFactory app, Stand stand)
+    /// <summary>
+    /// PM-11c: версія з ОПУБЛІКОВАНОЮ структурою й без прив'язок (Land та решта) не питає прив'язок узагалі; чернетка
+    /// слідує за прив'язкою без застарілого кешу: додали - з'явилась, вимкнули - зникла, а в теплому запиті звернень нуль.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Версія_без_прив_язок_не_питає_їх_а_чернетка_слідує_за_прив_язкою_без_застарілого_кешу()
     {
-        using var reader = await ReaderAsync(app, stand.Document.ProjectId).ConfigureAwait(true);
-        await TablesAsync(reader, stand).ConfigureAwait(true);
+        // Довгі вікна кешу: без явного скидання знімка чернетки стару відповідь тест би побачив.
+        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5));
+        app.Server.PreserveExecutionContext = true;
+        using var admin = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Registry.View", "Permit.EditType", "Permit.PublishType", "Template.View", "Template.Edit").ConfigureAwait(true);
+        await PublishTypeAsync(admin).ConfigureAwait(true);
+
+        // Опублікована версія без прив'язок: нуль звернень до прив'язок у теплому запиті.
+        var published = await ArrangeAsync(extraTables: 1).ConfigureAwait(true);
+        await PublishVersionAsync(published.Document.TemplateVersionId).ConfigureAwait(true);
+        var asPublished = await MeasureAsync(app, published).ConfigureAwait(true);
+        Assert.Equal((2, 0), (asPublished.Tables, asPublished.BindingCommands));
+
+        // Чернетка: спершу прив'язки немає.
+        var draft = await ArrangeAsync(extraTables: 1).ConfigureAwait(true);
+        using var reader = await ReaderAsync(app, draft.Document.ProjectId).ConfigureAwait(true);
+        Assert.All(await TablesAsync(reader, draft).ConfigureAwait(true), t => Assert.Equal(JsonValueKind.Null, t.GetProperty("permitBinding").ValueKind));
+        var before = await MeasureAsync(app, draft, reader, warm: false).ConfigureAwait(true);
+        Assert.Equal(0, before.BindingCommands);
+
+        // Додали прив'язку: наступний запит її бачить (знімок скинуто), хоч вікна кешу довгі.
+        await BindAsync(admin, draft, draft.Document.TableDefId, "D", isActive: true).ConfigureAwait(true);
+        var afterAdd = await TablesAsync(reader, draft).ConfigureAwait(true);
+        Assert.Equal(
+            $"D{_tag}",
+            afterAdd.Single(t => t.GetProperty("tableDefId").GetInt32() == draft.Document.TableDefId).GetProperty("permitBinding").GetProperty("code").GetString());
+
+        // Вимкнули її: знову null, а в ТЕПЛОМУ запиті звернень до прив'язок нуль.
+        await BindAsync(admin, draft, draft.Document.TableDefId, "D", isActive: false).ConfigureAwait(true);
+        Assert.All(await TablesAsync(reader, draft).ConfigureAwait(true), t => Assert.Equal(JsonValueKind.Null, t.GetProperty("permitBinding").ValueKind));
+        var afterOff = await MeasureAsync(app, draft, reader, warm: false).ConfigureAwait(true);
+        Assert.Equal(0, afterOff.BindingCommands);
+    }
+
+    /// <summary>Публікує версію напряму в базі (структура заморожується): прив'язок у ній вже не змінити.</summary>
+    private async Task PublishVersionAsync(int templateVersionId)
+    {
+        await using var db = Context();
+        var version = await db.TemplateVersions.SingleAsync(v => v.Id == templateVersionId).ConfigureAwait(false);
+        var userId = await db.Users.OrderBy(u => u.Id).Select(u => u.Id).FirstAsync().ConfigureAwait(false);
+        version.Publish(userId, new DateTime(2026, 1, 20, 10, 0, 0, DateTimeKind.Utc));
+        await db.SaveChangesAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Прогрів (створює екземпляри), потім замір теплого запиту.</summary>
+    private async Task<(int Tables, int Total, int BindingCommands, string Dump)> MeasureAsync(
+        EcrApiFactory app, Stand stand, HttpClient? existingReader = null, bool warm = true)
+    {
+        using var ownReader = existingReader is null
+            ? await ReaderAsync(app, stand.Document.ProjectId).ConfigureAwait(true)
+            : null;
+        var reader = existingReader ?? ownReader!;
+        if (warm)
+        {
+            await TablesAsync(reader, stand).ConfigureAwait(true);
+        }
 
         var texts = new ConcurrentQueue<string>();
         using var counter = new SqlClientCommandCounter(new CommandTally(), command =>

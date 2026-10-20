@@ -107,6 +107,16 @@ describe('Екран дозволу — доступність', { timeout: 180_
       });
     });
 
+    // PA2-U-02: з ВІДКРИТИМ календарем axe бачив button-name (prev/next) і color-contrast (дні сусідніх місяців).
+    it(`${colorScheme}: відкритий календар поля дати (Valid from)`, async () => {
+      await scan(colorScheme, '/admin/permits/5', permit(), async () => {
+        await screen.findByRole('form', { name: 'Permit details' });
+        const field = await screen.findByRole('textbox', { name: /Valid from/ });
+        fireEvent.click(field);
+        await screen.findByRole('button', { name: 'Previous month' });
+      });
+    });
+
     it(`${colorScheme}: діалог Activate`, async () => {
       await scan(colorScheme, '/admin/permits/5?dialog=activate', permit(), () =>
         screen.findByRole('dialog', { name: 'Activate permit KZ-100?' }),

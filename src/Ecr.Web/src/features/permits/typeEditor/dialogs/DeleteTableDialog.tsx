@@ -1,25 +1,32 @@
 import type { JSX } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { getPermitTypeUsage } from '@/features/permits/api/typesApi';
 import type { PermitType } from '@/features/permits/api/types';
 import { t } from '@/shared/i18n';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { hasPublishedVersion } from '../../lib/typeStatus';
-import { findTable,referencesTo, type TypeDraft } from '../draftModel';
+import { findTable, referencesTo, type TypeDraft } from '../draftModel';
+import { typeEditorKeys } from '../typeEditorKeys';
 import { pickName } from './names';
 
 /**
- * Підтвердження «Remove table» (Permits, зведення PM-08b + PM-08c). Видалення таблиці — правка
- * робочої копії (`removeTable`), тож вирішує, чи можна, ЛИШЕ те, що відомо клієнту:
+ * Підтвердження «Remove table» (Permits, зведення PM-08b + PM-08c, кількості — PM-03b2). Видалення таблиці —
+ * правка робочої копії (`removeTable`). Що в діалозі, залежить від стану:
  *
- * - на таблицю посилається список іншої таблиці — не можна, діалог називає стовпці;
- * - тип має опубліковані версії, а таблиця вже збережена на сервері — не можна: сервер відхилив би
- *   збереження `422 ECR-PRM-0422 tableRemoved` («Table … is published and cannot be removed»), тож
- *   показуємо ТОЙ САМИЙ текст каталогу заздалегідь, а не приречену кнопку;
- * - решта (тип ще не публікувався або таблиця додана в цій чернетці й не збережена) — звичайне
- *   підтвердження.
+ * 1. на таблицю посилається список іншої таблиці — не можна, діалог називає стовпці (кількості не питаємо);
+ * 2. тип ніколи не публікувався або таблиця додана в цій чернетці й не збережена — дані в ній не можуть бути:
+ *    звичайне підтвердження, запиту немає;
+ * 3. тип має опубліковану версію, а таблиця вже збережена — клієнт питає `GET …/usage` (кількості ОПУБЛІКОВАНИХ
+ *    таблиць) і, доки відповіді немає, кнопка вимкнена («Checking…»):
+ *    a. таблиця опублікована — не можна: сервер відхилив би збереження `422 ECR-PRM-0422 tableRemoved`, тож
+ *       показуємо ТОЙ САМИЙ текст каталогу + скільки дозволів і рядків лишаються недоторканими;
+ *    b. таблиці немає серед опублікованих (її додано в чернетці нової версії) — можна: звичайне підтвердження
+ *       і примітка, що жоден дозвіл не тримає в ній рядків;
+ *    c. запит не вдався — діалог поводиться як до PM-03b2 (збережену таблицю опублікованого типу не видалити):
+ *       без кількостей, але й без зайвої обіцянки.
  *
- * ⚠ Тип, який мав опубліковану версію, а таблицю зберіг у чернетці й не публікував, клієнт від
- * опублікованої не відрізнить (сервер не віддає склад опублікованої версії) — такі таблиці теж
- * блокуються. Це відома межа, не прихований стан.
+ * ⚠ Рішення «можна/не можна» в 3a/3b узяте з того, що знає сервер (склад опублікованої версії), а не з
+ * припущення клієнта; правило сервера (`ValidateAgainstPublished`) не змінювалося.
  */
 export interface DeleteTableDialogProps {
   /** Те, що знає сервер: `version` і збережений склад. */
@@ -33,27 +40,64 @@ export interface DeleteTableDialogProps {
 
 export function DeleteTableDialog({ type, draft, tableCode, onRemove, onClose }: DeleteTableDialogProps): JSX.Element | null {
   const table = findTable(draft, tableCode);
+  const columns = table === undefined ? [] : referencesTo(draft, table.code).map((ref) => `${ref.tableCode}.${ref.columnCode}`);
+  const saved = table !== undefined && type.tables.some((entry) => entry.code.toLowerCase() === table.code.toLowerCase());
+  const asksUsage = table !== undefined && columns.length === 0 && saved && hasPublishedVersion(type);
+
+  // Свіжий запит на кожне відкриття: число з кешу минулого діалогу могло встигнути застаріти.
+  const usage = useQuery({
+    queryKey: typeEditorKeys.usage(type.code),
+    queryFn: () => getPermitTypeUsage(type.code),
+    enabled: asksUsage,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+
   if (table === undefined) return null;
 
   const name = pickName(table.nameL10n) || table.code;
-  const columns = referencesTo(draft, table.code).map((ref) => `${ref.tableCode}.${ref.columnCode}`);
-  const saved = type.tables.some((entry) => entry.code.toLowerCase() === table.code.toLowerCase());
-  const publishedBlock = hasPublishedVersion(type) && saved;
+  const blockedText = `${t('err.ECR-PRM-0422.tableRemoved', { tableCode: table.code })} ${t('permits.editor.deleteTable.published')}`;
+  const confirmText = t('permits.editor.deleteTable.confirm', { name });
 
-  const text =
-    columns.length > 0
-      ? t('permits.editor.deleteTable.referenced', { name, columns: columns.join(', ') })
-      : publishedBlock
-        ? `${t('err.ECR-PRM-0422.tableRemoved', { tableCode: table.code })} ${t('permits.editor.deleteTable.published')}`
-        : t('permits.editor.deleteTable.confirm', { name });
+  let text: JSX.Element | string = confirmText;
+  let blocked = false;
+  let note: string | undefined;
+  // Кількості опублікованої таблиці — суть відмови (звичайний рядок); «нічого не втрачається» — лише уточнення.
+  let dim = true;
+
+  if (columns.length > 0) {
+    text = t('permits.editor.deleteTable.referenced', { name, columns: columns.join(', ') });
+    blocked = true;
+  } else if (asksUsage) {
+    if (usage.isPending) {
+      text = <span role="status">{t('permits.editor.deleteTable.checking')}</span>;
+      blocked = true;
+    } else if (usage.isError) {
+      text = blockedText;
+      blocked = true;
+    } else {
+      const entry = usage.data.tables.find((row) => row.code.toLowerCase() === table.code.toLowerCase());
+      if (entry === undefined) {
+        note = t('permits.editor.deleteTable.usageDraftOnly', { permits: usage.data.instanceCount });
+      } else {
+        text = blockedText;
+        blocked = true;
+        note = t('permits.editor.deleteTable.usagePublished', { permits: usage.data.instanceCount, rows: entry.rowCount });
+        dim = false;
+      }
+    }
+  }
 
   return (
     <ConfirmModal
       opened
       title={t('permits.editor.deleteTable.title', { name })}
       text={text}
+      {...(note === undefined ? {} : { consequences: [{ text: note, note: dim }] })}
       verb={t('permits.editor.deleteTable.verb')}
-      confirmDisabled={columns.length > 0 || publishedBlock}
+      confirmDisabled={blocked}
       onConfirm={() => {
         onRemove(table.code);
         onClose();

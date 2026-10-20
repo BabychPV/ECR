@@ -117,8 +117,10 @@ describe('Перелік дозволів — доступність', { timeout
       );
       await screen.findByText('KZ06VCZ14825472');
       fireEvent.click(screen.getByRole('button', { name: text('permits.empty.new') }));
-      const dialog = await screen.findByRole('dialog');
-      await screen.findByTestId('permit-type-pick');
+      // Майстер - ледачий чанк: у навантаженому CI 1 с findBy за замовчуванням замало (run 39337728834 і локальний 19/20).
+      const lazy = { timeout: 10_000 };
+      const dialog = await screen.findByRole('dialog', {}, lazy);
+      await screen.findByTestId('permit-type-pick', {}, lazy);
       await expectClean(document.body);
 
       // PA-U-08: тип не передвибрано, без явного вибору «Next» стоїть на кроці «Type» (банер «type required»).
@@ -129,15 +131,15 @@ describe('Перелік дозволів — доступність', { timeout
       fireEvent.click(published!);
       fireEvent.click(screen.getByTestId('wizard-next'));
       // Ледачий чанк кроку «Details»: запас понад типові 1 с findBy.
-      const number = await screen.findByRole('textbox', { name: /Permit number/ }, { timeout: 4000 });
-      await screen.findByText(text('permits.list.wizard.validFrom'));
+      const number = await within(screen.getByRole('dialog')).findByRole('textbox', { name: /Permit number/ }, lazy);
+      await screen.findByText(text('permits.list.wizard.validFrom'), {}, lazy);
       fireEvent.click(screen.getByTestId('wizard-next'));
-      await screen.findByTestId('wizard-step-error');
+      await screen.findByTestId('wizard-step-error', {}, lazy);
       await expectClean(document.body);
 
       fireEvent.change(number, { target: { value: 'KZ-77' } });
       fireEvent.click(screen.getByTestId('wizard-next'));
-      await waitFor(() => expect(screen.getByTestId('wizard-summary')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('wizard-summary')).toBeTruthy(), lazy);
       expect(dialog.textContent).not.toContain('⟦');
       await expectClean(document.body);
     });

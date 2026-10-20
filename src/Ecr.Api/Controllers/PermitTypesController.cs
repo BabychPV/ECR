@@ -20,7 +20,8 @@ public sealed class PermitTypesController(
     ReplacePermitTypeHandler replace,
     DeletePermitTypeHandler delete,
     PublishPermitTypeHandler publish,
-    OpenPermitTypeVersionHandler openVersion) : ControllerBase
+    OpenPermitTypeVersionHandler openVersion,
+    GetPermitTypeUsageHandler usage) : ControllerBase
 {
     /// <summary>Перелік типів зі сторінками. Право <c>Registry.View</c>.</summary>
     /// <param name="category"><c>Air</c>, <c>Water</c>, <c>Waste</c> або <c>Other</c>.</param>
@@ -47,6 +48,18 @@ public sealed class PermitTypesController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PermitTypeDto>> Get(string code, CancellationToken ct)
         => Ok(await get.HandleAsync(code, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Скільки дозволів типу і скільки рядків у кожній його опублікованій таблиці (лише кількості; PM-03b2).
+    /// Право <c>Registry.View</c>, як у читання типу.
+    /// </summary>
+    /// <param name="code">Код типу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{code}/usage")]
+    [ProducesResponseType<PermitTypeUsageDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PermitTypeUsageDto>> Usage(string code, CancellationToken ct)
+        => Ok(await usage.HandleAsync(code, ct).ConfigureAwait(false));
 
     /// <summary>Заводить тип чернеткою (з копією іншого типу за потреби). Право <c>Permit.EditType</c>.</summary>
     /// <param name="request">Код, назва, категорія, <c>copyFromCode</c>.</param>

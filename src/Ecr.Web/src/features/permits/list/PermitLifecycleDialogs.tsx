@@ -75,6 +75,13 @@ export function PermitLifecycleDialogs({
 
   const item = target?.item;
   const action = target?.action;
+
+  // P3-F2: діалог відкрито пунктом меню рядка, а пункт зникає разом із випадним списком. Після закриття (`target === null`)
+  // дозвіл уже невідомий, тож id пам'ятається; фокус повертається на «⋯» цього рядка.
+  const lastId = useRef<number | null>(null);
+  if (item !== undefined) lastId.current = item.id;
+  const rowMenuButton = (): HTMLElement | null =>
+    lastId.current === null ? null : document.querySelector<HTMLElement>(`[data-permit-menu="${String(lastId.current)}"]`);
   const number = item?.number ?? "";
   const { from, to } = item === undefined ? { from: "", to: "" } : range(item);
 
@@ -107,6 +114,7 @@ export function PermitLifecycleDialogs({
             }),
           );
         }}
+        returnFocusTo={rowMenuButton}
         onClose={onClose}
       />
 
@@ -134,6 +142,7 @@ export function PermitLifecycleDialogs({
             ),
           );
         }}
+        returnFocusTo={rowMenuButton}
         onClose={onClose}
       />
 
@@ -161,6 +170,7 @@ export function PermitLifecycleDialogs({
             }),
           );
         }}
+        returnFocusTo={rowMenuButton}
         onClose={onClose}
       />
 
@@ -187,6 +197,7 @@ export function PermitLifecycleDialogs({
             }),
           );
         }}
+        returnFocusTo={rowMenuButton}
         onClose={onClose}
       />
     </>

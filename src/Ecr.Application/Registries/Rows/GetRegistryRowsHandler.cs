@@ -352,7 +352,7 @@ public sealed class GetRegistryRowsHandler(
         // («батько видимий») лишається для всіх запитів без `parentEntryId` і для знімка формул (`RegistrySnapshot`): аркуші
         // читають лише чинні дозволи. Виняток вузький: лише записи реєстрів шапок типів і лише не видалені.
         var permitHeaders = request.ParentEntryId is not null && permitTypes is not null
-            ? (await permitTypes.ListAsync(ct).ConfigureAwait(false)).Select(t => t.HeaderRegistryDefId).ToHashSet()
+            ? (await permitTypes.ListSummariesAsync(ct).ConfigureAwait(false)).Select(t => t.HeaderRegistryDefId).ToHashSet()
             : [];
 
         var isVisible = resolver.VisibleWithCompositionParents(

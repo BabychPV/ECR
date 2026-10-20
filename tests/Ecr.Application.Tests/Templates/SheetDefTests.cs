@@ -71,7 +71,7 @@ public sealed class SheetDefTests
         => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user);
 
     private DeleteSheetDefHandler Delete()
-        => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user);
+        => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user, Substitute.For<IPermitBindingStore>());
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]

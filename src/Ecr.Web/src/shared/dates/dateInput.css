@@ -1,0 +1,11 @@
+/*
+ * PA2-U-02: дні сусідніх місяців у відкритому календарі. Mantine фарбує їх `--mantine-color-dimmed` ще й з
+ * `opacity: .5` - axe `color-contrast` serious (7-11 вузлів на календар). Прозорість знімаємо, колір - 70 % кольору
+ * тексту теми над тлом: відрізняється від днів поточного місяця й тримає контраст у світлій та темній темі.
+ */
+.mantine-DateInput-day[data-outside],
+.mantine-DatePicker-day[data-outside],
+.mantine-Day-day[data-outside] {
+  opacity: 1;
+  color: color-mix(in srgb, var(--mantine-color-text) 70%, var(--mantine-color-body));
+}

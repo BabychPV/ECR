@@ -5,6 +5,7 @@ import type {
   CreatePermitTypeRequest,
   PermitType,
   PermitTypeListParams,
+  PermitTypeUsage,
   PublishPermitTypeRequest,
   ReplacePermitTypeRequest,
 } from './types';
@@ -33,6 +34,14 @@ export function listPermitTypes(params: PermitTypeListParams = {}): Promise<Perm
 /** Повне визначення типу (чернетка, якщо є). `404 ECR-PRM-0404`, якщо типу немає. */
 export function getPermitType(code: string): Promise<PermitType> {
   return apiFetch<PermitType>(`/api/v1/permit-types/${encodeURIComponent(code)}`);
+}
+
+/**
+ * Скільки дозволів у типу і скільки рядків у кожній його ОПУБЛІКОВАНІЙ таблиці (лише кількості).
+ * Право `Registry.View`; `404 ECR-PRM-0404`, якщо типу немає.
+ */
+export function getPermitTypeUsage(code: string): Promise<PermitTypeUsage> {
+  return apiFetch<PermitTypeUsage>(`/api/v1/permit-types/${encodeURIComponent(code)}/usage`);
 }
 
 /** Заводить тип чернеткою. `409 ECR-PRM-4091` — код зайнятий. Право `Permit.EditType`. */

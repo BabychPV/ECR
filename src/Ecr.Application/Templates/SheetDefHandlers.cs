@@ -1,5 +1,6 @@
 // src/Ecr.Application/Templates/SheetDefHandlers.cs
 using Ecr.Application.Errors;
+using Ecr.Application.Permits.Bindings;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Application.Templates.Dto;
@@ -261,7 +262,8 @@ public sealed class DeleteSheetDefHandler(
     IUnitOfWork uow,
     IClock clock,
     IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IPermitBindingStore permitBindings)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
@@ -304,6 +306,9 @@ public sealed class DeleteSheetDefHandler(
         var change = classifier.ClassifyDeletion(nameof(SheetDef), hasDocuments);
 
         SaveTableRelationHandler.RejectBreaking(change, code, hasDocuments, "Видалення");
+
+        // ⛔ PM-09b2: аркуш із прив'язаною таблицею не видаляється (м'яке видалення лишило б прив'язку з мертвою ціллю).
+        await PermitSheetBindingGuard.RequireSheetFreeAsync(permitBindings, templateVersionId, sheet, ct).ConfigureAwait(false);
 
         // ⛔ Q-244: аудит і `SoftDelete`/`SaveChanges` тепер одна транзакція.
         await uow.ExecuteInTransactionAsync(async innerCt =>

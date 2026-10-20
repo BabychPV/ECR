@@ -183,6 +183,25 @@ test.describe('Permit page', () => {
     await expect.poll(async () => (await getPermit(page, id)).status, { timeout: 15_000 }).toBe('Active');
     await expect(page.getByText('Draft - sheets do not read this permit yet')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Renew…' }).first()).toBeVisible();
+    // PA2-U-01: після успішного Confirm кнопка «Activate…» зникла, фокус не лишається на BODY.
+    expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('BODY');
+
+    // PA2-U-01: «More» → «End this permit early…» → Esc і Cancel повертають фокус на «More».
+    const more = page.getByRole('button', { name: 'More', exact: true });
+    // Шість кіл: Esc/Cancel приходять, поки меню ще згасає (гонка: фокус на пункті, який за мить зникає).
+    for (const close of ['Escape', 'Cancel', 'Escape', 'Cancel', 'Escape', 'Cancel']) {
+      await more.click();
+      await page.getByRole('menuitem', { name: 'End this permit early…' }).click();
+      const endDialog = page.getByRole('dialog');
+      await expect(endDialog).toBeVisible({ timeout: 15_000 });
+      if (close === 'Escape') await page.keyboard.press('Escape');
+      else await endDialog.getByRole('button', { name: 'Cancel' }).click();
+      await expect(endDialog).toBeHidden({ timeout: 15_000 });
+      await expect(more).toBeFocused({ timeout: 10_000 });
+      // Фокус має ВИТРИМАТИ вихід меню з дерева (перехід exit), а не лише з'явитись на мить.
+      await page.waitForTimeout(600);
+      await expect(more).toBeFocused();
+    }
 
     // PA-U-03: діалог «Renew…» відкривається через ?dialog=; Esc повертає фокус на «Renew…».
     const renew = page.getByRole('button', { name: 'Renew…' }).first();

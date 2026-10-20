@@ -77,6 +77,9 @@ interface ConfirmModalProps {
   readonly confirmDisabled?: boolean | undefined;
 
   readonly isPending?: boolean | undefined;
+
+  /** Куди повернути фокус, якщо елемент, що відкрив діалог (пункт меню), уже зник; див. `useRestoreFocus`. */
+  readonly returnFocusTo?: (() => HTMLElement | null) | undefined;
   readonly onConfirm: () => void;
   readonly onClose: () => void;
 
@@ -107,12 +110,13 @@ export function ConfirmModal({
   typeToConfirm,
   confirmDisabled,
   isPending,
+  returnFocusTo,
   onConfirm,
   onClose,
   children,
 }: ConfirmModalProps): JSX.Element {
   const [typed, setTyped] = useState('');
-  useRestoreFocus(opened);
+  useRestoreFocus(opened, returnFocusTo);
 
   /*
    * ⚠ Поле очищається при КОЖНОМУ відкритті — той самий аргумент, що і в
@@ -137,6 +141,8 @@ export function ConfirmModal({
       opened={opened}
       onClose={onClose}
       title={title}
+      // ⛔ Фокус повертає `useRestoreFocus` (власний `returnFocus` Mantine крав би його в кнопки меню, гонка P3-F2).
+      returnFocus={false}
       /*
        * ⚠ Хрестик СВІДОМО лишається з власним ім'ям Mantine («Close»), а не
        * отримує підпис «Скасувати». Дві кнопки з однаковим іменем у тому

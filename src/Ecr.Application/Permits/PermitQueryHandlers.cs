@@ -103,7 +103,7 @@ public sealed class ListPermitsHandler(
             throw PermitErrors.CursorInvalid();
         }
 
-        var types = (await permits.ListAsync(ct).ConfigureAwait(false))
+        var types = (await permits.ListSummariesAsync(ct).ConfigureAwait(false))
             .Where(t => RegistryAccess.CanAccess(profile, Permission, GrantLevel.Read, t.HeaderRegistryDefId))
             .ToList();
         if (types.Count == 0 && !Security.PermissionCheck.IsGranted(profile, Permission))
