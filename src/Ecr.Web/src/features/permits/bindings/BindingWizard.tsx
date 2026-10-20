@@ -14,6 +14,7 @@ import { pickName } from '../typeEditor/dialogs/names';
 import { savePermitBinding } from '../api/bindingsApi';
 import type { PermitBinding } from '../api/bindingsTypes';
 import { listPermitTypes } from '../api/typesApi';
+import { hasPublishedVersion } from '../lib/typeStatus';
 import {
   bindingCodeFor,
   draftOfBinding,
@@ -73,7 +74,7 @@ export function BindingWizard({ opened, templateVersionId, table, existing, onCl
     enabled: opened,
   });
 
-  const publishedTypes = (types.data?.items ?? []).filter((item) => item.version > 0);
+  const publishedTypes = (types.data?.items ?? []).filter(hasPublishedVersion);
 
   const save = useMutation({
     mutationFn: (data: WizardData) =>

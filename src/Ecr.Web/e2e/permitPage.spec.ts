@@ -140,6 +140,13 @@ test.describe('Permit page', () => {
     const drawer = page.getByRole('dialog', { name: 'New row' });
     await expect(drawer).toBeVisible();
 
+    // PA-U-03: Esc закриває порожню шторку, фокус повертається на кнопку-виклик (не на BODY).
+    await page.keyboard.press('Escape');
+    await expect(drawer).toBeHidden({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: 'Add row' }).first()).toBeFocused();
+    await page.getByRole('button', { name: 'Add row' }).first().click();
+    await expect(drawer).toBeVisible();
+
     await drawer.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(drawer.getByText('Fill in the required fields.')).toBeVisible();
 
@@ -152,6 +159,12 @@ test.describe('Permit page', () => {
     // 4. Вставка з Excel: перевірка dryRun, потім запис двох рядків.
     await page.getByRole('button', { name: 'Paste from Excel…' }).click();
     const paste = page.getByRole('dialog', { name: 'Paste rows into Limits' });
+    await expect(paste).toBeVisible();
+    // P2-F1 (фікс-пак): Esc повертає фокус на «Paste from Excel…», не на BODY.
+    await page.keyboard.press('Escape');
+    await expect(paste).toBeHidden({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: 'Paste from Excel…' })).toBeFocused();
+    await page.getByRole('button', { name: 'Paste from Excel…' }).click();
     await expect(paste).toBeVisible();
     await paste.getByRole('textbox', { name: 'Rows' }).fill('Outfall 2\t7,25\nOutfall 3\t3');
     await expect(paste.getByText('2 rows can be added to Limits; 0 need fixing before anything is added.')).toBeVisible();
@@ -170,5 +183,14 @@ test.describe('Permit page', () => {
     await expect.poll(async () => (await getPermit(page, id)).status, { timeout: 15_000 }).toBe('Active');
     await expect(page.getByText('Draft - sheets do not read this permit yet')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Renew…' }).first()).toBeVisible();
+
+    // PA-U-03: діалог «Renew…» відкривається через ?dialog=; Esc повертає фокус на «Renew…».
+    const renew = page.getByRole('button', { name: 'Renew…' }).first();
+    await renew.click();
+    const renewDialog = page.getByRole('dialog');
+    await expect(renewDialog).toBeVisible({ timeout: 15_000 });
+    await page.keyboard.press('Escape');
+    await expect(renewDialog).toBeHidden({ timeout: 15_000 });
+    await expect(renew).toBeFocused();
   });
 });

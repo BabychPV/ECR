@@ -11,6 +11,17 @@ namespace Ecr.Application.Permits;
 /// </remarks>
 internal static class PermitTypeErrors
 {
+    /// <summary><c>422 ECR-PRM-0422 draftTooLarge</c>: чернетка типу більша за <see cref="PermitTypeLimits.MaxDraftJsonChars"/>.</summary>
+    internal static BusinessRuleException DraftTooLarge()
+        => new(
+            ErrorCodes.PermitTypeInvalid,
+            $"Чернетка типу більша за {PermitTypeLimits.MaxDraftJsonChars} символів.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-0422.draftTooLarge",
+                ["max"] = PermitTypeLimits.MaxDraftJsonChars.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+
     /// <summary><c>409 ECR-PRM-4091 code</c>: тип з таким кодом уже є.</summary>
     /// <param name="code">Код типу.</param>
     internal static BusinessRuleException Duplicate(string code)

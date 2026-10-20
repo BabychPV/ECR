@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, type JSX } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { RouteHeadingClass } from '@/shared/theme/routeHeading';
 import { showApiError } from '@/shared/ui/notify';
 import type { PermitType } from '../../api/types';
 import { useMayEditPermitTypes, useMayPublishPermitTypes } from '../../permitRights';
@@ -41,6 +42,22 @@ export function DialogsHost(): JSX.Element | null {
   useEffect(() => {
     if (deniedDeleteTable) setParams(withoutDialog(latestParams.current), { replace: true });
   }, [deniedDeleteTable, setParams]);
+
+  // ⚠ «Delete type…» з меню переліку веде сюди вже з `?dialog=delete-type`: кнопки-виклику на цій сторінці немає, тож
+  // `useRestoreFocus` діалогу нічого не повертає і після Esc фокус падав на `BODY`. Коли хост зникає (діалог закрито), а
+  // фокус так і лишився на `BODY`, він іде на заголовок сторінки (`h1` з `tabIndex=-1`). `mounted` відсікає повторний
+  // запуск ефектів у StrictMode, а кнопку-виклик (якщо діалог відкрила кнопка цієї сторінки) не чіпає.
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      requestAnimationFrame(() => {
+        if (mounted.current || document.activeElement !== document.body) return;
+        document.querySelector<HTMLElement>(`.${RouteHeadingClass}`)?.focus({ preventScroll: true });
+      });
+    };
+  }, []);
 
   // Вибір щойно доданої таблиці, що чекає зникнення `?dialog=` з адреси; зникає разом із хостом.
   const pendingSelect = useRef<string | null>(null);

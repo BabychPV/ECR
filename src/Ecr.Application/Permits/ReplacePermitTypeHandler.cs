@@ -67,7 +67,13 @@ public sealed class ReplacePermitTypeHandler(
         PermitTypeDefinitionValidator.Validate(type.Code, content, published);
         await RequireSharedRegistriesAsync(content, ct).ConfigureAwait(false);
 
-        type.SaveDraft(PermitTypeCodec.Serialize(content), userId, clock.UtcNow);
+        var json = PermitTypeCodec.Serialize(content);
+        if (PermitTypeCodec.IsOversized(json))
+        {
+            throw PermitTypeErrors.DraftTooLarge();
+        }
+
+        type.SaveDraft(json, userId, clock.UtcNow);
 
         try
         {

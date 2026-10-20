@@ -121,8 +121,15 @@ describe('Перелік дозволів — доступність', { timeout
       await screen.findByTestId('permit-type-pick');
       await expectClean(document.body);
 
+      // PA-U-08: тип не передвибрано, без явного вибору «Next» стоїть на кроці «Type» (банер «type required»).
+      const published = within(screen.getByTestId('permit-type-pick'))
+        .getAllByRole('radio')
+        .find((radio) => !(radio as HTMLInputElement).disabled);
+      expect(published).toBeDefined();
+      fireEvent.click(published!);
       fireEvent.click(screen.getByTestId('wizard-next'));
-      const number = await screen.findByRole('textbox', { name: /Permit number/ });
+      // Ледачий чанк кроку «Details»: запас понад типові 1 с findBy.
+      const number = await screen.findByRole('textbox', { name: /Permit number/ }, { timeout: 4000 });
       await screen.findByText(text('permits.list.wizard.validFrom'));
       fireEvent.click(screen.getByTestId('wizard-next'));
       await screen.findByTestId('wizard-step-error');

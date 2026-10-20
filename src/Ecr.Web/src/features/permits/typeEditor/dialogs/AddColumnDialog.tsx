@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type JSX } from 'react';
 import { Button, Group, Modal, Stack, Text } from '@mantine/core';
 import type { PermitTypeColumn } from '@/features/permits/api/types';
 import { t } from '@/shared/i18n';
+import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
 import { ColumnFields } from './ColumnFields';
 import type { UnitOption } from './names';
 import { ReservedColumnCode, buildColumn, emptyDraftColumn, type DraftColumn } from './ops';
@@ -40,6 +41,7 @@ export function AddColumnDialog({
 }: AddColumnDialogProps): JSX.Element {
   const [draft, setDraft] = useState<DraftColumn>(() => emptyDraftColumn());
   const [showError, setShowError] = useState(false);
+  useRestoreFocus(opened);
 
   // ⚠ Скидання при КОЖНОМУ відкритті: назва попереднього стовпця в полі — найтихіший спосіб
   // додати стовпець, якого людина не збиралася додавати вдруге.

@@ -26,7 +26,8 @@ export function permitType(over: Partial<PermitType> = {}): PermitType {
     nameL10n: { en: 'Water discharge', ru: 'Сброс воды' },
     category: 'Water',
     status: 'Draft',
-    version: 0,
+    // Сервер для ніколи не опублікованого типу віддає `version = 1` (майбутня перша), не 0.
+    version: 1,
     draftVersion: 1,
     hasUnpublishedChanges: true,
     rowVersion: 'rv-1',

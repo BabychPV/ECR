@@ -9,6 +9,7 @@ import { StatStrip } from '@/shared/ui/StatStrip';
 import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import type { PermitTypeListItem } from '@/features/permits/api/types';
 import { useMayEditPermitTypes } from '@/features/permits/permitRights';
+import { EditorParams } from '@/features/permits/typeEditor/editorActions';
 import { typeEditorPath } from '@/features/permits/shell/permitPaths';
 import { PermitsSubnav } from '@/features/permits/shell/PermitsSubnav';
 import { typeColumns } from '@/features/permits/types/TypesListColumns';
@@ -55,10 +56,17 @@ export function PermitTypesPage(): JSX.Element {
     [types.data, query, category, stat],
   );
   const stats = useMemo(() => listStats(all), [all]);
-  const columns = useMemo(() => typeColumns(), []);
-
   // ⛔ У симуляції сеанс лише читає (`isSimulation`): створення типу заблоковане, як і решта записів.
   const mayCreate = useMayEditPermitTypes();
+  const columns = useMemo(
+    () =>
+      typeColumns(
+        mayCreate
+          ? (item) => void navigate(`${typeEditorPath(item.code)}?${EditorParams.dialog}=delete-type`)
+          : undefined,
+      ),
+    [mayCreate, navigate],
+  );
   const openWizard = (): void => {
     setWizardMounted(true);
     setWizardOpen(true);

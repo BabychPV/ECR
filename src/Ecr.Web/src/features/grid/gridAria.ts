@@ -15,6 +15,8 @@ import type { CellProps, ColumnRegular, PluginProviders } from '@revolist/revogr
  *    всередині сітки — зайва зупинка Tab і заборонений нащадок
  *    (`aria-required-children`). Атрибуцію не ховаємо (умова ліцензії) —
  *    лише виводимо з дерева доступності й порядку Tab; мишею вона клікабельна.
+ *    Прокручувана область `rgCol` із `tabindex` (CL-17) без ролі була недозволеною
+ *    дитиною `grid` — їй ставиться `role=rowgroup` (P2-1).
  * 4. `aria-rowcount` перезаписується кожним джерелом (основне, закріплений
  *    підсумок) — лишалась довжина останнього.
  *
@@ -95,6 +97,10 @@ export class GridAriaPlugin extends BasePlugin {
     // як і раніше, обробляє сітка.
     const scroller = this.revogrid.querySelector('revogr-viewport-scroll.rgCol');
     if (scroller !== null && scroller.getAttribute('tabindex') !== '0') scroller.setAttribute('tabindex', '0');
+    // P2-1: фокусований елемент без ролі axe рахує недозволеною дитиною `role=grid` (`aria-required-children`,
+    // critical). `rowgroup` дозволена дитина `grid`, а всередині — ті самі `row` (шапка й рядки даних), тож
+    // структура дерева доступності лишається коректною, розкладка й клавіатурна навігація сітки не змінюються.
+    if (scroller !== null && scroller.getAttribute('role') !== 'rowgroup') scroller.setAttribute('role', 'rowgroup');
     const attribution = this.revogrid.querySelector('revogr-attribution');
     if (attribution === null) return;
     if (attribution.getAttribute('aria-hidden') !== 'true') attribution.setAttribute('aria-hidden', 'true');

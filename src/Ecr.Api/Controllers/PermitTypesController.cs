@@ -52,6 +52,7 @@ public sealed class PermitTypesController(
     /// <param name="request">Код, назва, категорія, <c>copyFromCode</c>.</param>
     /// <param name="ct">Токен скасування.</param>
     [HttpPost]
+    [RequestSizeLimit(PermitTypeLimits.MaxRequestBodyBytes)]
     [ProducesResponseType<PermitTypeDto>(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -70,6 +71,7 @@ public sealed class PermitTypesController(
     /// <param name="request">Повний склад і токен.</param>
     /// <param name="ct">Токен скасування.</param>
     [HttpPut("{code}")]
+    [RequestSizeLimit(PermitTypeLimits.MaxRequestBodyBytes)]
     [ProducesResponseType<PermitTypeDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -101,6 +103,7 @@ public sealed class PermitTypesController(
     /// <param name="request">Причина (не коротша за 10 символів) і токен чернетки.</param>
     /// <param name="ct">Токен скасування.</param>
     [HttpPost("{code}/publish")]
+    [RequestSizeLimit(PermitTypeLimits.MaxRequestBodyBytes)]
     [ProducesResponseType<PermitTypeDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

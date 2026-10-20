@@ -26,7 +26,7 @@ const next = (): HTMLElement => screen.getByTestId('wizard-next');
 const stepError = (): HTMLElement => screen.getByTestId('wizard-step-error');
 
 beforeEach(() => {
-  vi.mocked(typesApi.listPermitTypes).mockResolvedValue({ items: [airTypeItem(), airTypeItem({ code: 'DraftOnly', version: 0, status: 'Draft' })] } as never);
+  vi.mocked(typesApi.listPermitTypes).mockResolvedValue({ items: [airTypeItem(), airTypeItem({ code: 'DraftOnly', version: 1, status: 'Draft' })] } as never);
   vi.mocked(typesApi.getPermitType).mockResolvedValue(airType());
   vi.mocked(headerFieldApi.getHeaderFields).mockResolvedValue([
     { id: 3, code: 'Permit', dataType: 'Lookup', isRequired: false, labelL10n: { values: { en: 'Permit' } }, lookupRegistryDefId: 8, ordinal: 1 },

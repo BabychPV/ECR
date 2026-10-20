@@ -61,10 +61,11 @@ describe('типи', () => {
     expect(checkType({ ...valid, type: 'WaterDischarge' }, types)).toBeNull();
   });
 
-  it('початкові дані: перший опублікований тип; без таких — порожньо', () => {
+  it('початкові дані: тип не передвибирається (PA-U-08), навіть коли опубліковані є', () => {
     const today = new Date(2026, 9, 19);
-    expect(initialData(today, types).type).toBe('AirEmission');
-    expect(initialData(today, [makeType('X', { status: 'Draft' })]).type).toBe('');
+    expect(types.some((item) => item.status === 'Published')).toBe(true);
+    expect(initialData(today).type).toBe('');
+    expect(checkType(initialData(today), types)).toBe('typeRequired');
   });
 });
 
