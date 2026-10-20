@@ -295,6 +295,7 @@ public static class DependencyInjection
         // PERMITS: types — типи дозволів над реєстрами (PM-03)
         services.AddScoped<Permits.ListPermitTypesHandler>();
         services.AddScoped<Permits.GetPermitTypeHandler>();
+        services.AddScoped<Permits.GetPermitTypeUsageHandler>();
         services.AddScoped<Permits.CreatePermitTypeHandler>();
         services.AddScoped<Permits.ReplacePermitTypeHandler>();
         services.AddScoped<Permits.OpenPermitTypeVersionHandler>();
