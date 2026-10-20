@@ -86,49 +86,56 @@ public sealed class SavePermitBindingHandler(
         var input = ParseInput(request);
         var bindingCode = EcrCode.Create(code);
 
-        var type = await permits.FindByCodeAsync(request.PermitTypeCode, ct).ConfigureAwait(false)
-            ?? throw PermitBindingErrors.TypeUnknown(request.PermitTypeCode);
-        var table = (await permits.ListTablesAsync(type.Id, ct).ConfigureAwait(false))
-            .FirstOrDefault(t => string.Equals(t.Code, request.PermitTableCode, StringComparison.Ordinal))
-            ?? throw PermitBindingErrors.PermitTableUnknown(type.Code, request.PermitTableCode);
-
-        var context = await BuildContextAsync(templateVersionId, input, type, table, ct).ConfigureAwait(false);
-        var validation = PermitBindingValidator.Validate(input, context);
-        if (!validation.IsValid)
-        {
-            throw PermitBindingErrors.Invalid(validation.Errors);
-        }
-
-        var existing = await bindings.FindForUpdateAsync(templateVersionId, bindingCode.Value, ct).ConfigureAwait(false);
-        await EnsureNoDuplicateAsync(templateVersionId, bindingCode.Value, input.SheetTableDefId, existing, ct).ConfigureAwait(false);
-
-        if (existing is not null
-            && (existing.SheetTableDefId != input.SheetTableDefId
-                || existing.PermitTypeDefId != type.Id
-                || existing.PermitTypeTableId != table.Id))
-        {
-            throw PermitBindingErrors.IdentityChanged(bindingCode.Value);
-        }
-
-        IReadOnlyList<PermitSheetBindingColumn> oldColumns = existing is null
-            ? []
-            : await bindings.ListColumnsForUpdateAsync(existing.Id, ct).ConfigureAwait(false);
-        var oldJson = existing is null ? null : Describe(existing, oldColumns);
-
-        var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
-
-        // ⚠ Класифікація йде і для створення: клас пишеться в аудит структурних змін, і «додано» без класу виглядало б
-        // у журналі так само, як зміна, яку ніхто не класифікував.
-        var change = existing is null
-            ? classifier.ClassifyAddition(nameof(PermitSheetBinding))
-            : classifier.Classify(nameof(PermitSheetBinding), nameof(PermitSheetBinding.Mode), hasDocuments);
-
-        PermitSheetBinding saved = existing!;
+        PermitSheetBinding saved = null!;
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             // ⛔ C5: блок рядка версії першим, «ще чернетка» - під ним.
             await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
+            // ⛔ PM-09b2: УСЕ, що перевіряє «цілі» прив'язки (таблиця жива, режим рядків, стеля, дублікат), читається ПІД
+            // блоком версії. Правка таблиці й аркуша (SaveTableDef/DeleteTableDef/DeleteSheetDef/DeleteColumnDef) бере
+            // той самий блок і перевіряє прив'язки під ним, тож пара «збереження прив'язки» і «зміна цілі» серіалізується:
+            // виграє одна, друга бачить результат переможця. Раніше читання йшло до блоку, і між ним та комітом ціль
+            // могли змінити (прив'язка лишалась би на видаленій чи зафіксованій таблиці).
+            var type = await permits.FindByCodeAsync(request.PermitTypeCode, innerCt).ConfigureAwait(false)
+                ?? throw PermitBindingErrors.TypeUnknown(request.PermitTypeCode);
+            var table = (await permits.ListTablesAsync(type.Id, innerCt).ConfigureAwait(false))
+                .FirstOrDefault(t => string.Equals(t.Code, request.PermitTableCode, StringComparison.Ordinal))
+                ?? throw PermitBindingErrors.PermitTableUnknown(type.Code, request.PermitTableCode);
+
+            var context = await BuildContextAsync(templateVersionId, input, type, table, innerCt).ConfigureAwait(false);
+            var validation = PermitBindingValidator.Validate(input, context);
+            if (!validation.IsValid)
+            {
+                throw PermitBindingErrors.Invalid(validation.Errors);
+            }
+
+            var existing = await bindings.FindForUpdateAsync(templateVersionId, bindingCode.Value, innerCt).ConfigureAwait(false);
+            await EnsureNoDuplicateAsync(templateVersionId, bindingCode.Value, input.SheetTableDefId, existing, innerCt).ConfigureAwait(false);
+
+            if (existing is not null
+                && (existing.SheetTableDefId != input.SheetTableDefId
+                    || existing.PermitTypeDefId != type.Id
+                    || existing.PermitTypeTableId != table.Id))
+            {
+                throw PermitBindingErrors.IdentityChanged(bindingCode.Value);
+            }
+
+            IReadOnlyList<PermitSheetBindingColumn> oldColumns = existing is null
+                ? []
+                : await bindings.ListColumnsForUpdateAsync(existing.Id, innerCt).ConfigureAwait(false);
+            var oldJson = existing is null ? null : Describe(existing, oldColumns);
+
+            var hasDocuments = await store.HasDocumentsAsync(templateVersionId, innerCt).ConfigureAwait(false);
+
+            // ⚠ Класифікація йде і для створення: клас пишеться в аудит структурних змін, і «додано» без класу виглядало б
+            // у журналі так само, як зміна, яку ніхто не класифікував.
+            var change = existing is null
+                ? classifier.ClassifyAddition(nameof(PermitSheetBinding))
+                : classifier.Classify(nameof(PermitSheetBinding), nameof(PermitSheetBinding.Mode), hasDocuments);
+
+            saved = existing!;
 
             if (existing is null)
             {

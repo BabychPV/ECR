@@ -16,8 +16,16 @@ namespace Ecr.Application.Permits.Bindings;
 /// прив'язка лишилась би з мертвою ціллю, а рантайм PM-10 писав би рядки в таблицю, якої немає у структурі.
 /// </para>
 /// <para>
-/// ⚠ Читання - один <see cref="IPermitBindingStore.ListAsync"/> по версії (прив'язок на версію одиниці), без запитів на
-/// шляху документа: рантайм (<c>EnsureTable</c>, <c>PatchCells</c>) цього класу не торкається.
+/// ⚠ Читання - один запит на перевірку (<see cref="IPermitBindingStore.ListAsync"/> по версії - прив'язок на версію
+/// одиниці; <see cref="IPermitBindingStore.FindHoldAsync"/> по таблицях - для видалення таблиці й аркуша), без запитів
+/// на шляху документа: рантайм (<c>EnsureTable</c>, <c>PatchCells</c>) цього класу не торкається.
+/// </para>
+/// <para>
+/// ⛔ Охоронець кличеться ПІД блоком рядка версії (<c>DraftVersionLock</c>), в одній транзакції з записом: збереження
+/// прив'язки бере той самий блок, тож між перевіркою й комітом прив'язка не з'явиться (PM-09b2, знахідка Аналізу ч.1).
+/// Прапор <c>HasActivePermitBindings</c> знімка метаданих тут НЕ годиться навіть як швидкий вихід: він рахує лише ЧИННІ
+/// прив'язки (вимкнена теж тримає таблицю/аркуш/колонку) і оновлюється ПІСЛЯ коміту - у вікні між комітом прив'язки й
+/// скиданням знімка він бреше «немає».
 /// </para>
 /// </remarks>
 internal static class PermitSheetBindingGuard
@@ -29,14 +37,15 @@ internal static class PermitSheetBindingGuard
     /// <param name="bindings">Прив'язки.</param>
     /// <param name="templateVersionId">Версія-чернетка.</param>
     /// <param name="table">Таблиця, що змінюється.</param>
+    /// <param name="currentMode">Режим рядків ЗАРАЗ у базі (прочитаний під блоком версії, а не зі знімка графа до нього).</param>
     /// <param name="newMode">Режим рядків після правки.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="Errors.BusinessRuleException"><c>ECR-PRM-4102</c> <c>rowMode</c>.</exception>
     internal static async Task RequireRowModeAllowedAsync(
-        IPermitBindingStore bindings, int templateVersionId, TableDef table, TableRowMode newMode, CancellationToken ct)
+        IPermitBindingStore bindings, int templateVersionId, TableDef table, TableRowMode currentMode, TableRowMode newMode, CancellationToken ct)
     {
         // Лише перехід: таблиця, що вже Fixed, правиться (назва, порядок) без перевірки - вона не нова поломка.
-        if (newMode != TableRowMode.Fixed || table.RowMode == TableRowMode.Fixed)
+        if (newMode != TableRowMode.Fixed || currentMode == TableRowMode.Fixed)
         {
             return;
         }
@@ -57,17 +66,16 @@ internal static class PermitSheetBindingGuard
     /// </summary>
     /// <param name="bindings">Прив'язки.</param>
     /// <param name="templateVersionId">Версія-чернетка.</param>
-    /// <param name="table">Таблиця, що змінюється (ще зі СТАРОЮ стелею).</param>
+    /// <param name="table">Таблиця, що змінюється.</param>
+    /// <param name="previous">Стеля ЗАРАЗ у базі (прочитана під блоком версії, а не зі знімка графа до нього); <c>null</c> - без стелі.</param>
     /// <param name="newMax">Стеля після правки; <c>null</c> - без стелі.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="Errors.BusinessRuleException"><c>ECR-PRM-4102</c> <c>maxRows</c>.</exception>
     internal static async Task RequireMaxRowsNotLoweredAsync(
-        IPermitBindingStore bindings, int templateVersionId, TableDef table, int? newMax, CancellationToken ct)
+        IPermitBindingStore bindings, int templateVersionId, TableDef table, int? previous, int? newMax, CancellationToken ct)
     {
         // Без запиту, якщо це не зниження: нова стеля не менша за стару, або стелю знімають.
-        var previous = table.MaxDynamicRows;
-        var lowered = newMax is { } n && (previous is null || n < previous);
-        if (!lowered)
+        if (newMax is not { } requested || (previous is { } old && requested >= old))
         {
             return;
         }
@@ -77,44 +85,40 @@ internal static class PermitSheetBindingGuard
 
         if (held is not null)
         {
-            throw PermitBindingErrors.SheetMaxRowsHeld(table.Code, held.Binding.Code, previous, newMax);
+            throw PermitBindingErrors.SheetMaxRowsHeld(table.Code, held.Binding.Code, previous, requested);
         }
     }
 
     /// <summary>Аркуш, на якому є таблиця з будь-якою прив'язкою, не видаляється (PM-09b2).</summary>
     /// <param name="bindings">Прив'язки.</param>
-    /// <param name="templateVersionId">Версія-чернетка.</param>
     /// <param name="sheet">Аркуш, що видаляється.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="Errors.BusinessRuleException"><c>ECR-PRM-4102</c> <c>sheet</c>.</exception>
-    internal static async Task RequireSheetFreeAsync(
-        IPermitBindingStore bindings, int templateVersionId, SheetDef sheet, CancellationToken ct)
+    internal static async Task RequireSheetFreeAsync(IPermitBindingStore bindings, SheetDef sheet, CancellationToken ct)
     {
+        // Один запит по ідентифікаторах таблиць аркуша (а не перелік усіх прив'язок версії з колонками й довідниками):
+        // аркуш без таблиць не питає нічого, версія без прив'язок (Land) - один індексний запит.
         var tablesById = sheet.Tables.ToDictionary(t => t.Id);
-        var held = (await bindings.ListAsync(templateVersionId, ct).ConfigureAwait(false))
-            .FirstOrDefault(v => tablesById.ContainsKey(v.Binding.SheetTableDefId));
+        var held = await bindings.FindHoldAsync([.. tablesById.Keys], ct).ConfigureAwait(false);
 
         if (held is not null)
         {
-            throw PermitBindingErrors.SheetHeld(sheet.Code, tablesById[held.Binding.SheetTableDefId].Code, held.Binding.Code);
+            throw PermitBindingErrors.SheetHeld(sheet.Code, tablesById[held.SheetTableDefId].Code, held.Code);
         }
     }
 
     /// <summary>Таблиця з будь-якою прив'язкою (чинною чи вимкненою, у будь-якому режимі) не видаляється.</summary>
     /// <param name="bindings">Прив'язки.</param>
-    /// <param name="templateVersionId">Версія-чернетка.</param>
     /// <param name="table">Таблиця, що видаляється.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="Errors.BusinessRuleException"><c>ECR-PRM-4102</c> <c>table</c>.</exception>
-    internal static async Task RequireTableFreeAsync(
-        IPermitBindingStore bindings, int templateVersionId, TableDef table, CancellationToken ct)
+    internal static async Task RequireTableFreeAsync(IPermitBindingStore bindings, TableDef table, CancellationToken ct)
     {
-        var held = (await bindings.ListAsync(templateVersionId, ct).ConfigureAwait(false))
-            .FirstOrDefault(v => v.Binding.SheetTableDefId == table.Id);
+        var held = await bindings.FindHoldAsync([table.Id], ct).ConfigureAwait(false);
 
         if (held is not null)
         {
-            throw PermitBindingErrors.SheetTableHeld(table.Code, held.Binding.Code);
+            throw PermitBindingErrors.SheetTableHeld(table.Code, held.Code);
         }
     }
 

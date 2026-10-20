@@ -10,6 +10,7 @@ import { activatePermit, deletePermit, endPermit, renewPermit } from '../api/per
 import type { Permit } from '../api/types';
 import { PermitsPaths } from '../shell/permitPaths';
 import { type LifecycleDialogId } from './lifecycleDialogIds';
+import { focusHeadingAfterNavigation, pageHeading } from './focusHeadingAfterNavigation';
 import { permitKeys } from './usePermitData';
 
 /** Мінімальна довжина причини дострокового завершення: дзеркало сервера (`EndPermitRequest.reason`). */
@@ -72,8 +73,10 @@ export function LifecycleDialogs({ permit, dialog, onClose }: LifecycleDialogsPr
     onSuccess: (next) => {
       refresh();
       showDone(t('permits.page.done.renewed'));
+      const previous = pageHeading();
       onClose();
       void navigate(`${PermitsPaths.permits}/${String(next.id)}`);
+      focusHeadingAfterNavigation({ previous, expectText: next.number });
     },
     onError: fail,
   });
@@ -84,8 +87,10 @@ export function LifecycleDialogs({ permit, dialog, onClose }: LifecycleDialogsPr
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['permits', 'list'] });
       showDone(t('permits.page.done.deleted', { number: permit.number }));
+      const previous = pageHeading();
       onClose();
       void navigate(PermitsPaths.permits);
+      focusHeadingAfterNavigation({ previous });
     },
     onError: fail,
   });

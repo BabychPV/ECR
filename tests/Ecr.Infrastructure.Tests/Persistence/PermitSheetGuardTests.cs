@@ -20,6 +20,8 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// прибрати <c>RequireColumnFreeAsync</c> у <c>DeleteColumnDefHandler</c> - червоний «Зіставлена_колонка…».
 /// PM-09b2: прибрати <c>RequireMaxRowsNotLoweredAsync</c> у <c>SaveTableDefHandler</c> - червоний «Стеля_рядків…»;
 /// прибрати <c>RequireSheetFreeAsync</c> у <c>DeleteSheetDefHandler</c> - червоний «Аркуш_з_прив_язаною_таблицею…».
+/// PM-09b2 ч.1 п.2 (запущено): у гілці «стелі не було» <c>SheetMaxRowsHeld</c> повернути ключ <c>maxRows</c> замість
+/// <c>maxRowsUnlimited</c> - червоний «Стеля_рядків…».
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class PermitSheetGuardTests(SqlServerFixture sql)
@@ -163,7 +165,11 @@ public sealed class PermitSheetGuardTests(SqlServerFixture sql)
         var lowered = await Assert.ThrowsAsync<BusinessRuleException>(
             () => fromNone.SaveTable.HandleAsync(
                 sheet.Doc.TemplateVersionId, sheet.Doc.SheetCode, tableCode, Command(TableRowMode.Dynamic, 5), default));
-        Assert.Equal(("err.ECR-PRM-4102.maxRows", "none", "5"), (lowered.Details!["messageKey"], lowered.Details["previousMax"], lowered.Details["newMax"]));
+
+        // Стелі не було: окремий ключ каталогу, а не слово «none» у параметрі (воно потрапило б сирим у ru/kz-текст).
+        Assert.Equal(("err.ECR-PRM-4102.maxRowsUnlimited", "5"), (lowered.Details!["messageKey"], lowered.Details["newMax"]));
+        Assert.False(lowered.Details.ContainsKey("previousMax"));
+        Assert.DoesNotContain("none", lowered.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -46,6 +46,16 @@ function column(code: string, order: number, over: Record<string, unknown> = {})
   };
 }
 
+/** Справжній axe-core у браузері (скрипт з node_modules, без нових пакетів): порушення `scrollable-region-focusable`. */
+async function scrollableRegionViolations(page: Page): Promise<string[]> {
+  await page.addScriptTag({ path: 'node_modules/axe-core/axe.min.js' });
+  return page.evaluate(async () => {
+    const axe = (window as unknown as { axe: { run: (c: Document, o: object) => Promise<{ violations: { id: string; nodes: { target: unknown[] }[] }[] }> } }).axe;
+    const result = await axe.run(document, { runOnly: { type: 'rule', values: ['scrollable-region-focusable'] } });
+    return result.violations.flatMap((v) => v.nodes.map((n) => `${v.id}: ${String(n.target.join(' '))}`));
+  });
+}
+
 test.describe('Конструктор типу дозволу', () => {
   test.skip(PeriodKey === '', 'ECR_E2E_OPTIONAL: стенда немає. Стенд: tools/e2e-stand.ps1.');
 
@@ -113,6 +123,32 @@ test.describe('Конструктор типу дозволу', () => {
     await page.reload();
     await expect(page.getByRole('row', { name: 'Remarks' })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/unsaved changes/)).toHaveCount(0);
+    // P2-N2: на 500 px підказка «Unique rows…» переноситься, а не прокручується (axe scrollable-region-focusable).
+    await page.setViewportSize({ width: 500, height: 900 });
+    const hint = page.locator('.pt-below .mantine-Code-root');
+    await expect(hint).toBeVisible();
+    const style = await hint.evaluate((el) => ({
+      whiteSpace: getComputedStyle(el).whiteSpace,
+      overflowX: getComputedStyle(el).overflowX,
+      scrolls: el.scrollWidth > el.clientWidth + 1,
+    }));
+    expect(style).toEqual({ whiteSpace: 'pre-wrap', overflowX: 'visible', scrolls: false });
+
+    // PA3-U-02: на 500 px таблиця стовпців переповнюється - область має tabindex=0, role=region, aria-label, а справжній axe
+    // (axe-core з node_modules, без нових пакетів) не знаходить `scrollable-region-focusable`.
+    const wrap = page.locator('.pt-table-wrap');
+    await expect(wrap).toBeVisible();
+    expect(await wrap.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+    await expect(wrap).toHaveAttribute('tabindex', '0');
+    await expect(wrap).toHaveAttribute('role', 'region');
+    expect(((await wrap.getAttribute('aria-label')) ?? '').length).toBeGreaterThan(0);
+    expect(await scrollableRegionViolations(page), 'axe: редактор типу @500').toEqual([]);
+
+    // Діалог delete-type на 500 px.
+    await page.goto(`/admin/permits/types/${code}?t=Points&dialog=delete-type`);
+    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 30_000 });
+    expect(await scrollableRegionViolations(page), 'axe: діалог delete-type @500').toEqual([]);
+
     // Тип ніколи не публікувався: його знімає `afterEach` (і тоді, коли тест упав раніше).
   });
 });

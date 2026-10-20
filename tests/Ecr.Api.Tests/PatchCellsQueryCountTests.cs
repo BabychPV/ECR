@@ -180,6 +180,107 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
             + $"Заміри: {string.Join(", ", rounds.Select(r => r.Total))}.\n{worst.Detail}");
     }
 
+    /// <summary>
+    /// PA2-S-02: гард «ключ рядка з прив'язки не править людина» (<c>EnsurePermitRowKeysUntouchedAsync</c>) не додає
+    /// нічого до гарячого шляху Land: батч без ключів <c>P&lt;цифри&gt;</c> не питає прив'язок узагалі (0 звернень до
+    /// <c>PermitSheetBinding</c>), батч із таким ключем платить рівно ОДИН запит (<c>AnyActiveRowsAsync</c>; прив'язок у
+    /// таблиці немає, тож далі перелік колонок не читається). Той самий батч з однією коміркою, лише ключ рядка інший.
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ (запущений): прибрати з гарда <c>permitRows.Count == 0 ||</c> (питає завжди) - червоніє про Land
+    /// (прив'язки питає і батч без ключів <c>P&lt;цифри&gt;</c>).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "WR-04")]
+    public async Task PATCH_рядка_Land_не_питає_прив_язок_а_рядка_з_ключем_P_цифри_платить_один_запит()
+    {
+        var scenario = await ArrangeAsync().ConfigureAwait(true);
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            // Один рядок отримує ключ виду P<цифри> (як рядок, створений прив'язкою); решта - Land-ключі R<n>_<tag>.
+            await db.TableRows.Where(r => r.Id == scenario.RowIds[0])
+                .ExecuteUpdateAsync(s => s.SetProperty(r => r.RowKeyValue, "P1")).ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5));
+        app.Server.PreserveExecutionContext = true;
+        using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
+
+        var sliceUri = new Uri($"/api/v1/documents/{scenario.DocumentId}/tables/{scenario.TableInstanceId}", UriKind.Relative);
+        var patchUri = new Uri($"/api/v1/documents/{scenario.DocumentId}/cells", UriKind.Relative);
+        var (columnCodes, versions) = await OpenSliceAsync(client, sliceUri, app).ConfigureAwait(true);
+        var landKey = versions.Keys.Order(StringComparer.Ordinal).First(k => k != "P1");
+        Assert.True(versions.ContainsKey("P1"), "Ключ P1 не потрапив у зріз.");
+
+        // Розігрів (кеші метаданих, доступу, штампа): по одному запису кожного виду.
+        versions[landKey] = await PatchRowAsync(client, patchUri, scenario, landKey, versions[landKey], columnCodes[0], "warm-l", app).ConfigureAwait(true);
+        versions["P1"] = await PatchRowAsync(client, patchUri, scenario, "P1", versions["P1"], columnCodes[0], "warm-p", app).ConfigureAwait(true);
+
+        var texts = new ConcurrentQueue<string>();
+        using var counter = new SqlClientCommandCounter(new CommandTally(), command =>
+        {
+            if (Measuring.Value is not { Value: true })
+            {
+                return false;
+            }
+
+            texts.Enqueue(command.CommandText ?? string.Empty);
+            return true;
+        });
+
+        async Task<(int Total, int Bindings)> MeasureAsync(string rowKey, string value)
+        {
+            counter.Tally.Reset();
+            texts.Clear();
+            var flag = new StrongBox<bool>(true);
+            Measuring.Value = flag;
+            try
+            {
+                versions[rowKey] = await PatchRowAsync(client, patchUri, scenario, rowKey, versions[rowKey], columnCodes[0], value, app).ConfigureAwait(true);
+            }
+            finally
+            {
+                flag.Value = false;
+                Measuring.Value = null;
+            }
+
+            counter.AssertObserved();
+            return (counter.Tally.Snapshot().Total, texts.Count(t => t.Contains("PermitSheetBinding", StringComparison.Ordinal)));
+        }
+
+        for (var round = 1; round <= MeasuredRounds; round++)
+        {
+            var land = await MeasureAsync(landKey, $"land-{round}").ConfigureAwait(true);
+            var permit = await MeasureAsync("P1", $"permit-{round}").ConfigureAwait(true);
+
+            Assert.True(land.Bindings == 0, $"Батч Land питає прив'язки ({land.Bindings}).");
+            Assert.True(permit.Bindings == 1, $"Батч із ключем P1: звернень до прив'язок {permit.Bindings}, очікувалось 1.");
+            Assert.True(
+                permit.Total == land.Total + 1,
+                $"Батч із ключем P1: {permit.Total} звернень, Land: {land.Total}; різниця має бути рівно 1.");
+        }
+    }
+
+    /// <summary>Один <c>PATCH</c> однієї комірки одного рядка; повертає нову версію рядка.</summary>
+    private static async Task<string> PatchRowAsync(
+        HttpClient client, Uri patchUri, Scenario scenario, string rowKey, string baseVersion, string columnCode, string value, EcrApiFactory app)
+    {
+        var response = await client.PatchAsJsonAsync(patchUri, new
+        {
+            tableInstanceId = scenario.TableInstanceId,
+            periodKey = scenario.PeriodKey,
+            origin = "UserEdit",
+            rows = new[] { new { rowKey, baseVersion, cells = new[] { new { columnCode, value = (object)value } } } },
+        }).ConfigureAwait(false);
+
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"PATCH {rowKey}: {response.StatusCode}\n{body}\n{app.ErrorsText}");
+
+        return JsonDocument.Parse(body).RootElement.GetProperty("rowVersions").GetProperty(rowKey).GetString()!;
+    }
+
     /// <summary>Розклад звернень: категорії і тексти, скорочені до суті.</summary>
     private static string Describe(CommandTallySnapshot seen, IEnumerable<string> texts)
     {
@@ -340,8 +441,8 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
 
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        return new Scenario(document.DocumentId, document.TableInstanceId, userName, periodKey);
+        return new Scenario(document.DocumentId, document.TableInstanceId, userName, periodKey, document.RowIds);
     }
 
-    private sealed record Scenario(long DocumentId, long TableInstanceId, string UserName, int PeriodKey);
+    private sealed record Scenario(long DocumentId, long TableInstanceId, string UserName, int PeriodKey, IReadOnlyList<long> RowIds);
 }

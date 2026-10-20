@@ -23,11 +23,14 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
 {
     private readonly PermitHarness _inner;
 
-    private PermitBindingHarness(PermitHarness inner)
+    private PermitBindingHarness(PermitHarness inner, Func<ITemplateVersionStore, ITemplateVersionStore>? wrapStore = null)
     {
         _inner = inner;
         Bindings = new PermitBindingStore(inner.Db);
         Store = new TemplateVersionStore(inner.Db);
+
+        // Обгортка порту версій (тест гонки ставить паузу перед блоком версії); без неї - справжнє сховище.
+        ITemplateVersionStore store = wrapStore?.Invoke(Store) ?? Store;
         Versions = new Repository<TemplateVersion, int>(inner.Db);
         MetadataCache = Substitute.For<IMetadataCache>();
         Classifier = new ChangeClassifier();
@@ -35,20 +38,20 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
         List = new ListPermitBindingsHandler(Versions, Bindings, inner.Access, inner.User);
         Get = new GetPermitBindingHandler(Versions, Bindings, inner.Access, inner.User);
         Save = new SavePermitBindingHandler(
-            Versions, Bindings, inner.Permits, inner.Registries, Store, Classifier, MetadataCache,
+            Versions, Bindings, inner.Permits, inner.Registries, store, Classifier, MetadataCache,
             inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User);
         Delete = new DeletePermitBindingHandler(
-            Versions, Bindings, Store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User);
+            Versions, Bindings, store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User);
         SaveTable = new Ecr.Application.Templates.SaveTableDefHandler(
-            Store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User, Bindings);
+            store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User, Bindings);
         DeleteTable = new Ecr.Application.Templates.DeleteTableDefHandler(
-            Store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User, Bindings);
+            store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User, Bindings);
         DeleteColumn = new Ecr.Application.Templates.DeleteColumnDefHandler(
-            Store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User, Bindings);
+            store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User, Bindings);
         DeleteSheet = new Ecr.Application.Templates.DeleteSheetDefHandler(
-            Store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User, Bindings);
+            store, Classifier, MetadataCache, inner.Audit, inner.Uow, inner.Clock, inner.Access, inner.User, Bindings);
         Preview = new PreviewPermitBindingHandler(
-            Versions, Bindings, inner.Permits, inner.Registries, Store, new PermitResolver(inner.Registries),
+            Versions, Bindings, inner.Permits, inner.Registries, store, new PermitResolver(inner.Registries),
             new RegistrySnapshotLoader(inner.Db), Documents, Headers, Periods, RowsStore, CellsStore, new UnitStore(inner.Db),
             inner.Access, inner.User, inner.Clock);
     }
@@ -103,8 +106,8 @@ internal sealed class PermitBindingHarness : IAsyncDisposable
     public static string[] Everything => ["Template.View", "Template.Edit", .. PermitHarness.Everything];
 
     /// <summary>Нова «сесія» тієї самої особи: свій контекст, як у наступному запиті.</summary>
-    public async Task<PermitBindingHarness> NextRequestAsync()
-        => new(await _inner.NextRequestAsync().ConfigureAwait(false));
+    public async Task<PermitBindingHarness> NextRequestAsync(Func<ITemplateVersionStore, ITemplateVersionStore>? wrapStore = null)
+        => new(await _inner.NextRequestAsync().ConfigureAwait(false), wrapStore);
 
     /// <summary>Будує обробники для нового користувача з потрібними правами.</summary>
     /// <param name="sql">Фікстура бази.</param>
