@@ -201,6 +201,35 @@ test.describe('Permits list', () => {
     await expect(trigger).toBeFocused();
   });
 
+  // PA3-U-04: Esc у відкритому календарі поля дати закриває ЛИШЕ календар; другий Esc закриває майстер.
+  test('майстер New permit: Esc у календарі закриває календар, а не діалог', async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+    const typeName = `E2E_ esc permit ${String(Date.now())}`;
+    await publishedType(page, types, typeName);
+
+    await page.goto('/admin/permits');
+    await expect(page.getByRole('heading', { level: 1, name: 'Permits' })).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('button', { name: /^New permit$/ }).first().click();
+    const dialog = page.getByRole('dialog', { name: /^New permit/ });
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    await dialog.getByRole('radio', { name: new RegExp(typeName) }).check();
+    await dialog.getByTestId('wizard-next').click();
+
+    const from = dialog.getByRole('textbox', { name: /^Valid from/ });
+    await from.click();
+    const calendar = page.locator('[data-dates-dropdown]');
+    await expect(calendar).toBeVisible({ timeout: 10_000 });
+
+    await page.keyboard.press('Escape');
+    await expect(calendar).toBeHidden({ timeout: 10_000 });
+    await expect(dialog).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden({ timeout: 15_000 });
+  });
+
   test('дозвіл із API: активація й дострокове завершення з меню, фільтр стану в адресі', async ({ page }) => {
     test.setTimeout(180_000);
     await page.setViewportSize({ width: 1440, height: 900 });
