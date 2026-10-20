@@ -163,7 +163,11 @@ public sealed class PermitSheetGuardTests(SqlServerFixture sql)
         var lowered = await Assert.ThrowsAsync<BusinessRuleException>(
             () => fromNone.SaveTable.HandleAsync(
                 sheet.Doc.TemplateVersionId, sheet.Doc.SheetCode, tableCode, Command(TableRowMode.Dynamic, 5), default));
-        Assert.Equal(("err.ECR-PRM-4102.maxRows", "none", "5"), (lowered.Details!["messageKey"], lowered.Details["previousMax"], lowered.Details["newMax"]));
+
+        // Стелі не було: окремий ключ каталогу, а не слово «none» у параметрі (воно потрапило б сирим у ru/kz-текст).
+        Assert.Equal(("err.ECR-PRM-4102.maxRowsUnlimited", "5"), (lowered.Details!["messageKey"], lowered.Details["newMax"]));
+        Assert.False(lowered.Details.ContainsKey("previousMax"));
+        Assert.DoesNotContain("none", lowered.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
