@@ -1,5 +1,5 @@
 import { useMemo, type JSX } from 'react';
-import { Alert, Box, Stack, Text } from '@mantine/core';
+import { Box, Stack, Text } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { DataTable } from '@/shared/ui/DataTable';
 import { useDetailPanel } from '@/shared/ui/DetailDrawer';
@@ -18,8 +18,8 @@ import { useLists } from './useLists';
  * Будова — як у переліку типів: шапка → смуга розділів → показники → пошук і походження → таблиця;
  * клік по рядку відкриває шторку (`?panel=`). Пошук, походження й показник живуть в адресі.
  *
- * ⚠ Варіант A: списки зведені з визначень типів і довідників; екран ЧИТАЄ. Це сказано рядком
- * `permits.lists.readOnly` під шапкою, а не лишено здогадуватись.
+ * Дані — один запит `GET /permit-lists` (PM-08e; раніше визначення кожного типу читалось окремо). Правити значення
+ * можна у шторці, якщо сервер віддав `editable`; без права під шапкою стоїть `permits.lists.readOnly`.
  */
 export function ListsPage(): JSX.Element {
   const data = useLists();
@@ -40,6 +40,8 @@ export function ListsPage(): JSX.Element {
   const columns = useMemo(() => listColumns(), []);
   const opened: ListRow | undefined = all.find((row) => row.id === panel);
   const hasLists = all.length > 0;
+  // Права решає сервер на кожен список; підказка «лише читання» правдива, тільки коли правити нічого.
+  const canEdit = all.some((row) => row.editable);
 
   return (
     <Stack gap="md" data-list-page="">
@@ -49,21 +51,9 @@ export function ListsPage(): JSX.Element {
         secondary={[{ label: t('permits.lists.openRegistries'), href: '/admin/registries' }]}
       />
       <PermitsSubnav current="lists" />
-      <Text size="sm" c="dimmed" data-lists-readonly="">
-        {t('permits.lists.readOnly')}
+      <Text size="sm" c="dimmed" data-lists-readonly={canEdit ? undefined : ''} data-lists-editable={canEdit ? '' : undefined}>
+        {canEdit ? t('permits.lists.editable') : t('permits.lists.readOnly')}
       </Text>
-
-      {data.registriesFailed && (
-        <Alert color="statusWarning" role="status" data-lists-registries-failed="">
-          {t('permits.lists.registriesFailed')}
-        </Alert>
-      )}
-
-      {data.failedTypes.length > 0 && (
-        <Alert color="statusWarning" role="status" data-lists-types-failed="">
-          {t('permits.lists.typesFailed', { count: data.failedTypes.length })}
-        </Alert>
-      )}
 
       {hasLists && (
         <StatStrip

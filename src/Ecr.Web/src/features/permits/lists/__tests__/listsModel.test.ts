@@ -1,87 +1,103 @@
 import { describe, expect, it } from 'vitest';
-import type { RegistryDefDto } from '@/api/types';
-import { column, permitType, table } from '../../typeEditor/__tests__/fixtures';
-import { buildListRows, filterLists, kindParam, listsStats } from '../listsModel';
+import type { PermitListDto, PermitListUseDto } from '../listsApi';
+import { filterLists, kindOfScope, kindParam, listKeyOf, listsStats, rowsFromLists, valueLabels } from '../listsModel';
 
 /**
- * Модель екрана «Lists» (PM-08d). Мутаційний доказ (вручну, відновлено): без `continue` після `shared` рядок
- * довідника дублювався б на кожен стовпець (падає «один рядок на довідник»); без `known.used.push` друга
- * згадка довідника губилась би (падає лічильник «використовується»); `scopeKeyOf` без перевірки `Lookup`
- * вважав би списком звичайний стовпець (падає «не-списки пропущені»).
+ * Модель екрана «Lists» (PM-08d, PM-08e). Мутаційний доказ (вручну, відновлено): без `if (kind === null) continue` невідома
+ * область дала б рядок без походження (падає «невідома область пропущена»); `KindOrder` без спільних першими валить
+ * «спершу спільні»; `valueLabels` без `existing?.en` перезаписав би англійську назву значення «лише для типу» при
+ * перейменуванні російською (падає «перейменування іншою мовою лишає англійську»).
  */
-const registries = [
-  { code: 'SUBSTANCES', nameL10n: { values: { en: 'Substances' } }, entryCount: 42 },
-  { code: 'UNUSED', nameL10n: { values: { en: 'Not used' } }, entryCount: 3 },
-] as unknown as RegistryDefDto[];
-
-const sharedCol = (code: string, registry: string) =>
-  column(code, { dataType: 'Lookup', listScope: 'SharedRegistry', listRegistryCode: registry });
-
-const air = permitType({
-  code: 'Air',
-  nameL10n: { en: 'Air permit' },
-  headerFields: [sharedCol('Region', 'REGIONS')],
-  tables: [
-    table('Emission', [
-      sharedCol('Substance', 'SUBSTANCES'),
-      column('Method', { dataType: 'Lookup', listScope: 'TypeOnly', choices: ['Direct', 'Calc'] }),
-      column('Annual', { dataType: 'Decimal' }),
-    ]),
-    table('Sources', [column('Name', { key: true }), column('Kind', { dataType: 'Lookup', listScope: 'SamePermitTable', siblingTableCode: 'Emission' })]),
-  ],
-});
-const water = permitType({
-  code: 'Water',
-  nameL10n: { en: 'Water permit' },
-  headerFields: [],
-  tables: [table('Discharge', [sharedCol('Substance', 'SUBSTANCES')])],
+const use = (type: string, table: string, field: string): PermitListUseDto => ({
+  typeCode: type,
+  typeNameL10n: { en: `${type} permit` },
+  tableCode: table,
+  tableNameL10n: { en: table },
+  fieldCode: field,
+  fieldNameL10n: { en: field },
 });
 
-describe('buildListRows', () => {
-  const rows = buildListRows([air, water], registries, 'en');
+const base = { typeCode: null, registryCode: null, itemCount: null, editable: false, usedBy: [] } satisfies Partial<PermitListDto>;
 
-  it('один рядок на довідник, усі згадки — у «used»', () => {
-    const shared = rows.filter((row) => row.kind === 'shared');
-    expect(shared.map((row) => row.registryCode)).toEqual(['REGIONS', 'SUBSTANCES']);
-    const substances = shared.find((row) => row.registryCode === 'SUBSTANCES');
-    expect(substances?.used.map((use) => `${use.typeCode}.${use.tableCode}.${use.columnCode}`)).toEqual([
+const lists: PermitListDto[] = [
+  {
+    ...base,
+    key: 'type:Air:Emission:Method',
+    scope: 'TypeOnly',
+    registryCode: 'PRM_Air_Emission_Method',
+    typeCode: 'Air',
+    nameL10n: { en: 'Method' },
+    itemCount: 2,
+    usedBy: [use('Air', 'Emission', 'Method')],
+  },
+  {
+    ...base,
+    key: 'permit:Air:Sources:Kind',
+    scope: 'SamePermitTable',
+    typeCode: 'Air',
+    nameL10n: { en: 'Kind' },
+    usedBy: [use('Air', 'Sources', 'Kind')],
+  },
+  {
+    ...base,
+    key: 'shared:SUBSTANCES',
+    scope: 'SharedRegistry',
+    registryCode: 'SUBSTANCES',
+    nameL10n: { en: 'Substances' },
+    itemCount: 42,
+    editable: true,
+    usedBy: [use('Air', 'Emission', 'Substance'), use('Water', 'Discharge', 'Substance')],
+  },
+  { ...base, key: 'shared:REGIONS', scope: 'SharedRegistry', registryCode: 'REGIONS', nameL10n: {}, usedBy: [use('Air', 'Emission', 'Region')] },
+  { ...base, key: 'strange:1', scope: 'Unknown', nameL10n: { en: 'Strange' } },
+];
+
+describe('rowsFromLists', () => {
+  const rows = rowsFromLists(lists, 'en');
+
+  it('спершу спільні, далі «лише тип» і «таблиця дозволу»; невідома область пропущена', () => {
+    expect(rows.map((row) => row.id)).toEqual([
+      'shared:REGIONS',
+      'shared:SUBSTANCES',
+      'type:Air:Emission:Method',
+      'permit:Air:Sources:Kind',
+    ]);
+  });
+
+  it('спільний: усі згадки в «used», кількість і право зі списку сервера, власника немає', () => {
+    const substances = rows.find((row) => row.registryCode === 'SUBSTANCES');
+
+    expect(substances).toMatchObject({ name: 'Substances', owner: '', entries: 42, editable: true, kind: 'shared' });
+    expect(substances?.used.map((item) => `${item.typeCode}.${item.tableCode}.${item.columnCode}`)).toEqual([
       'Air.Emission.Substance',
       'Water.Discharge.Substance',
     ]);
-    expect(substances?.name).toBe('Substances');
-    expect(substances?.entries).toBe(42);
   });
 
-  it('довідник без запису в реєстрах: назва — код, кількість невідома; поле шапки без таблиці', () => {
-    const regions = rows.find((row) => row.registryCode === 'REGIONS');
-    expect(regions?.name).toBe('REGIONS');
-    expect(regions?.entries).toBeNull();
-    expect(regions?.used[0]?.tableCode).toBeNull();
-  });
-
-  it('«лише тип»: по рядку на стовпець, значення читаються, власник — тип', () => {
-    const own = rows.find((row) => row.kind === 'type');
-    expect(own).toMatchObject({ name: 'Method', owner: 'Air permit', typeCode: 'Air', entries: 2, choices: ['Direct', 'Calc'] });
+  it('без назви — код довідника; «лише тип»: власник — назва типу, значень на клієнті немає', () => {
+    expect(rows.find((row) => row.id === 'shared:REGIONS')?.name).toBe('REGIONS');
+    expect(rows.find((row) => row.kind === 'type')).toMatchObject({
+      name: 'Method',
+      owner: 'Air permit',
+      typeCode: 'Air',
+      entries: 2,
+      editable: false,
+    });
   });
 
   it('таблиця того ж дозволу: кількість значень невідома', () => {
-    const own = rows.find((row) => row.kind === 'permit');
-    expect(own).toMatchObject({ name: 'Kind', entries: null, choices: [] });
+    expect(rows.find((row) => row.kind === 'permit')).toMatchObject({ name: 'Kind', entries: null });
   });
 
-  it('не-списки й невикористані довідники пропущені; спершу спільні', () => {
-    expect(rows).toHaveLength(4);
-    expect(rows.some((row) => row.registryCode === 'UNUSED')).toBe(false);
-    expect(rows.map((row) => row.kind)).toEqual(['shared', 'shared', 'type', 'permit']);
-  });
-
-  it('ідентифікатори унікальні', () => {
+  it('ідентифікатори — ключі сервера, унікальні', () => {
     expect(new Set(rows.map((row) => row.id)).size).toBe(rows.length);
+    expect(kindOfScope('SharedRegistry')).toBe('shared');
+    expect(kindOfScope('Unknown')).toBeNull();
   });
 });
 
 describe('listsStats / filterLists', () => {
-  const rows = buildListRows([air, water], registries, 'en');
+  const rows = rowsFromLists(lists, 'en');
 
   it('лічильники за походженням', () => {
     expect(listsStats(rows)).toEqual({ all: 4, shared: 2, type: 1, permit: 1 });
@@ -98,5 +114,29 @@ describe('listsStats / filterLists', () => {
     expect(kindParam('bogus')).toBe('');
     expect(kindParam('permit')).toBe('permit');
     expect(kindParam(null)).toBe('');
+  });
+});
+
+describe('valueLabels', () => {
+  it('англійська: лише en', () => {
+    expect(valueLabels('  Cooling ', undefined, 'en')).toEqual({ en: 'Cooling' });
+  });
+
+  it('нове значення іншою мовою: en дорівнює введеному, плюс власна мова', () => {
+    expect(valueLabels('Охлаждение', undefined, 'ru')).toEqual({ en: 'Охлаждение', ru: 'Охлаждение' });
+  });
+
+  it('перейменування іншою мовою лишає англійську як була', () => {
+    expect(valueLabels('Охлаждение 2', { en: 'Cooling', ru: 'Охлаждение' }, 'ru')).toEqual({ en: 'Cooling', ru: 'Охлаждение 2' });
+  });
+});
+
+describe('listKeyOf', () => {
+  it('спільний — за довідником, лише тип — за стовпцем, таблиця дозволу й невідоме — без ключа', () => {
+    expect(listKeyOf('SharedRegistry', 'WD', 'Limits', 'Substance', 'Substances')).toBe('shared:Substances');
+    expect(listKeyOf('TypeOnly', 'WD', 'Limits', 'Use', 'PRM_WD_Limits_Use')).toBe('type:WD:Limits:Use');
+    expect(listKeyOf('SamePermitTable', 'WD', 'Limits', 'Place', null)).toBeNull();
+    expect(listKeyOf('SharedRegistry', 'WD', 'Limits', 'Substance', null)).toBeNull();
+    expect(listKeyOf(null, 'WD', 'Limits', 'Name', null)).toBeNull();
   });
 });
