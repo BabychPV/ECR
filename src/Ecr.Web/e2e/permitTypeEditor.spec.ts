@@ -113,6 +113,16 @@ test.describe('Конструктор типу дозволу', () => {
     await page.reload();
     await expect(page.getByRole('row', { name: 'Remarks' })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/unsaved changes/)).toHaveCount(0);
+    // P2-N2: на 500 px підказка «Unique rows…» переноситься, а не прокручується (axe scrollable-region-focusable).
+    await page.setViewportSize({ width: 500, height: 900 });
+    const hint = page.locator('.pt-below .mantine-Code-root');
+    await expect(hint).toBeVisible();
+    const style = await hint.evaluate((el) => ({
+      whiteSpace: getComputedStyle(el).whiteSpace,
+      overflowX: getComputedStyle(el).overflowX,
+      scrolls: el.scrollWidth > el.clientWidth + 1,
+    }));
+    expect(style).toEqual({ whiteSpace: 'pre-wrap', overflowX: 'visible', scrolls: false });
     // Тип ніколи не публікувався: його знімає `afterEach` (і тоді, коли тест упав раніше).
   });
 });

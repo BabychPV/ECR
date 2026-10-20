@@ -222,6 +222,15 @@
   padding: var(--mantine-spacing-md);
 }
 
+/*
+ * P2-N2 (прохід B, 500 px): підказка «Unique rows: …» - `Code block` Mantine (`white-space: pre; overflow: auto`) на вузькій
+ * ширині ставала прокручуваною областю без фокусу - axe `scrollable-region-focusable`. Прокрутка не потрібна: текст переноситься.
+ */
+.pt-below .mantine-Code-root {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: visible;
+}
 .pt-hood summary {
   cursor: pointer;
   font-weight: 600;
