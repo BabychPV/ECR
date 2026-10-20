@@ -8,6 +8,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Registries;
 using Ecr.Application.Registries.Dto;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
@@ -73,7 +74,11 @@ public sealed class ChangePermitListItemsHandler(
             ?? throw new AccessDeniedException(
                 "ECR-AUTH-0401", "Потрібна автентифікація.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
-        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+
+        // ⛔ Оракул існування: без права читання Registry.View відповідь однакова (403) і для наявного, і для неіснуючого
+        // ключа. Далі «заборонений = неіснуючий» (404) вирішує перелік, а відсутність права ЗМІНИ бачить лише той, хто список
+        // і так читає.
+        var profile = await Security.PermissionCheck.RequireAsync(access, currentUser, PermitListCatalog.ViewPermission, ct).ConfigureAwait(false);
         var entry = PermitListCatalog.Find(await PermitListCatalog.BuildAsync(lists, profile, ct).ConfigureAwait(false), key);
 
         if (entry.Scope == PermitListScope.SamePermitTable)
@@ -101,7 +106,15 @@ public sealed class ChangePermitListItemsHandler(
         }
         else
         {
-            await uow.ExecuteInTransactionAsync(token => ChangeTypeOnlyAsync(entry, request.Changes, userId, token), ct).ConfigureAwait(false);
+            try
+            {
+                await uow.ExecuteInTransactionAsync(token => ChangeTypeOnlyAsync(entry, request.Changes, userId, token), ct).ConfigureAwait(false);
+            }
+            catch (ConcurrencyConflictException ex) when (ex.ErrorCode == ErrorCodes.CellConflict)
+            {
+                // Паралельна зміна списків того ж типу випередила нас (токен типу змінився): 409 ECR-PRM-4093, клієнт повторює.
+                throw PermitTypeErrors.Changed(entry.Usages[0].TypeCode, []);
+            }
         }
 
         var items = await PermitListCatalog.ItemsAsync(registries, entry.RegistryDefId, ct).ConfigureAwait(false);
@@ -174,6 +187,17 @@ public sealed class ChangePermitListItemsHandler(
         var use = entry.Usages[0];
         ExternalRegistryGuard.EnsureManualEditAllowed(
             await registries.FindDefinitionByIdAsync(registryId, ct).ConfigureAwait(false) ?? throw PermitListCatalog.NotFound(entry.Dto.Key));
+
+        // ⛔ Тип читається ПЕРШИМ (його токен RowVersion - точка оптимістичної конкуренції), значення - після. Дві паралельні
+        // зміни списків типу читають той самий токен; друга на збереженні програє (409), а не дає дубль коду V### чи губить
+        // значення в чернетці (read-modify-write DraftJson).
+        var type = await permits.FindByCodeAsync(use.TypeCode, ct).ConfigureAwait(false)
+            ?? throw PermitListCatalog.NotFound(entry.Dto.Key);
+
+        // Токен типу займається ДО читання значень: перший писар бере блокування рядка типу, паралельний чекає на ньому й
+        // програє на перевірці RowVersion (409 ECR-PRM-4093) ще до вставки записів, а не на унікальному коді запису.
+        type.MarkListChanged(userId, clock.UtcNow);
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
         var entries = (await registries.ListEntriesAsync(registryId, ct).ConfigureAwait(false)).ToList();
         var nextNumber = NextNumber(entries);
         var ordinal = entries.Select(e => e.Ordinal).DefaultIfEmpty(0).Max();
@@ -208,6 +232,19 @@ public sealed class ChangePermitListItemsHandler(
                 var display = Display(change, requireEnglish: true, use.FieldCode);
                 var text = display.Get("en")!;
                 RequireUnique(live, text, ignore: tracked, use.FieldCode);
+
+                // ⛔ Англійський підпис - ключ значення «лише для типу» (за ним збігаються чернетка й публікація). Змінити його
+                // у значення, яке вже вибрано в дозволах, означало б мовчки переписати чужі дані: 409. Підписи інших мов
+                // (відображувана назва) правляться вільно; прибрати значення з обігу можна (вимкнення, посилання лишаються).
+                if (!string.Equals(text, oldText, StringComparison.OrdinalIgnoreCase)
+                    && (await registries.CountReferencesAsync(tracked.Id, ct).ConfigureAwait(false)).Total > 0)
+                {
+                    throw new BusinessRuleException(
+                        ErrorCodes.PermitTypeInUse,
+                        $"Значення «{oldText}» уже вибрано в дозволах: його англійський підпис не змінюється.",
+                        new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRM-4094.valueInUse", ["value"] = oldText });
+                }
+
                 tracked.Rename(display);
                 draft.Add((Update, oldText, text));
             }
@@ -225,7 +262,7 @@ public sealed class ChangePermitListItemsHandler(
         }
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-        await PatchDraftAsync(use, draft, userId, ct).ConfigureAwait(false);
+        await PatchDraftAsync(type, use, draft, userId, ct).ConfigureAwait(false);
 
         await audit.WriteStructureChangeAsync(
             new StructureChangeRecord(
@@ -245,10 +282,9 @@ public sealed class ChangePermitListItemsHandler(
 
     /// <summary>Переносить ті самі зміни у відкриту чернетку типу (якщо вона є) - див. примітку класу.</summary>
     private async Task PatchDraftAsync(
-        PermitListUsage use, IReadOnlyList<(string Action, string? Old, string? New)> draft, int userId, CancellationToken ct)
+        PermitTypeDef type, PermitListUsage use, IReadOnlyList<(string Action, string? Old, string? New)> draft, int userId, CancellationToken ct)
     {
-        var type = await permits.FindByCodeAsync(use.TypeCode, ct).ConfigureAwait(false);
-        if (type is null || !type.HasDraft || PermitTypeCodec.IsOversized(type.DraftJson))
+        if (!type.HasDraft || PermitTypeCodec.IsOversized(type.DraftJson))
         {
             return;
         }
@@ -367,7 +403,7 @@ public sealed class ChangePermitListItemsHandler(
 
     private static void RequireUnique(IEnumerable<RegistryEntry> live, string text, RegistryEntry? ignore, string fieldCode)
     {
-        if (live.Any(e => !ReferenceEquals(e, ignore) && string.Equals(e.DisplayL10n.Get("en") ?? e.Code, text, StringComparison.OrdinalIgnoreCase)))
+        if (live.Any(e => (ignore is null || e.Id != ignore.Id) && string.Equals(e.DisplayL10n.Get("en") ?? e.Code, text, StringComparison.OrdinalIgnoreCase)))
         {
             throw new BusinessRuleException(
                 ErrorCodes.PermitTypeInvalid,
