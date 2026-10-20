@@ -4313,6 +4313,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/registries/{code}/export?format=&asOf=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types?category=&status=&q=&limit=&cursor=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types/{code}` | `Registry.View` | 8 |
+| `GET` | `/api/v1/permit-types/{code}/usage` | `Registry.View` | 8 |
 | `POST` | `/api/v1/permit-types` | `Permit.EditType` | 8 |
 | `PUT` | `/api/v1/permit-types/{code}` | `Permit.EditType` | 8 |
 | `DELETE` | `/api/v1/permit-types/{code}` | `Permit.EditType` | 8 |
