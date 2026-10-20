@@ -10125,6 +10125,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/permit-types/{code}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Скільки дозволів типу і скільки рядків у кожній його опублікованій таблиці (лише кількості; PM-03b2).
+         *     Право `Registry.View`, як у читання типу. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код типу. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitTypeUsageDto"];
+                        "text/json": components["schemas"]["PermitTypeUsageDto"];
+                        "text/plain": components["schemas"]["PermitTypeUsageDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/permits": {
         parameters: {
             query?: never;
@@ -26551,6 +26604,27 @@ export interface components {
             nameL10n: {
                 [key: string]: string;
             };
+        };
+        /** @description Скільки даних лежить у ОПУБЛІКОВАНІЙ таблиці типу дозволу (Permits, PM-03b2). */
+        PermitTypeTableUsageDto: {
+            /** @description Код таблиці в межах типу. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Скільки живих рядків у цій таблиці в усіх дозволах типу.
+             */
+            rowCount: number;
+        };
+        /** @description Використання типу дозволу даними: скільки дозволів (екземплярів) і скільки рядків у кожній опублікованій таблиці.
+         *     Лише кількості - жодних значень чи ідентифікаторів записів. */
+        PermitTypeUsageDto: {
+            /**
+             * Format: int32
+             * @description Скільки живих дозволів цього типу (чернетки теж: їхні дані втратилися б так само).
+             */
+            instanceCount: number;
+            /** @description Опубліковані таблиці з кількістю рядків; таблиць, що лише в чернетці, тут немає. */
+            tables: components["schemas"]["PermitTypeTableUsageDto"][];
         };
         /** @description Нова ревізія презентаційного шару. */
         PresentationRevisionResponse: {
