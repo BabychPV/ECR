@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { axeViolations } from './axeRule';
 import { CreatedPermitTypes } from './permitTypeCleanup';
 
 /**
@@ -173,6 +174,8 @@ test.describe('Списки пермітів: екран «Lists»', () => {
     const drawer = page.getByRole('dialog');
     await expect(drawer).toBeVisible({ timeout: 10_000 });
     await expect(drawer).toContainText('Alpha');
+    // PA4-U-01: при відкритті фокус уже у шторці.
+    await expect.poll(() => drawer.evaluate((el) => el.contains(document.activeElement)), { timeout: 5_000 }).toBe(true);
 
     const field = drawer.getByRole('textbox', { name: 'New value' });
     for (let i = 0; i < 30 && !(await field.evaluate((el) => el === document.activeElement)); i += 1) {
@@ -184,6 +187,45 @@ test.describe('Списки пермітів: екран «Lists»', () => {
     await expect(drawer.getByRole('button', { name: 'Add value' })).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(drawer).toContainText('Gamma', { timeout: 15_000 });
+
+    // PUI-9: після кожної дії з клавіатури (Add, Rename -> Save, Rename -> Cancel, Remove) фокус лишається у шторці, не на BODY.
+    const insideDrawer = () => drawer.evaluate((el) => el.contains(document.activeElement) && document.activeElement !== el);
+    expect(await insideDrawer(), 'після Add').toBe(true);
+    await drawer.getByRole('button', { name: 'Rename Gamma' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(drawer.getByRole('textbox', { name: 'Value', exact: true })).toBeFocused();
+    await page.keyboard.type('X');
+    await page.keyboard.press('Enter');
+    await expect(drawer).toContainText('GammaX', { timeout: 15_000 });
+    await expect.poll(insideDrawer, { message: 'після Save' }).toBe(true);
+    await expect(drawer.getByRole('button', { name: 'Rename GammaX' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await drawer.getByRole('button', { name: 'Cancel' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(drawer.getByRole('button', { name: 'Rename GammaX' })).toBeFocused();
+    await drawer.getByRole('button', { name: 'Remove GammaX' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(drawer).not.toContainText('GammaX', { timeout: 15_000 });
+    await expect.poll(insideDrawer, { message: 'після Remove' }).toBe(true);
+    // PA4-U-03: довге значення без пробілів переноситься, кнопки Rename/Remove в межах шторки, без горизонтальної прокрутки.
+    const longValue = 'Z'.repeat(200);
+    await field.fill(longValue);
+    await drawer.getByRole('button', { name: 'Add value' }).click();
+    await expect(drawer).toContainText(longValue.slice(0, 20), { timeout: 15_000 });
+    for (const width of [1440, 500]) {
+      await page.setViewportSize({ width, height: 900 });
+      const box = await drawer.evaluate((el) => ({ sw: el.scrollWidth, cw: el.clientWidth }));
+      expect(box.sw, `шторка @${String(width)}: scrollWidth <= clientWidth`).toBeLessThanOrEqual(box.cw);
+      const rename = drawer.getByRole('button', { name: new RegExp('^Rename Z{20}') });
+      await expect(rename).toBeVisible();
+      const inside = await rename.evaluate((el) => {
+        const dialog = el.closest('[role="dialog"]');
+        return dialog === null ? false : el.getBoundingClientRect().right <= dialog.getBoundingClientRect().right + 1;
+      });
+      expect(inside, `Rename у межах шторки @${String(width)}`).toBe(true);
+      expect(await axeViolations(page, 'scrollable-region-focusable'), `axe @${String(width)}`).toEqual([]);
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
 
     await page.keyboard.press('Escape');
     await expect(drawer).toBeHidden({ timeout: 10_000 });
@@ -229,14 +271,28 @@ test.describe('Списки пермітів: екран «Lists»', () => {
 
     // Кнопка є під обома списками (спільний і «лише тип»): e2e-admin має права на обидва.
     await expect(drawer.getByRole('button', { name: 'Not in the list? Add a value…' })).toHaveCount(2, { timeout: 15_000 });
-    await drawer.locator('[data-add-value-field="Substance"] [data-add-value]').click();
-
+    const opener = drawer.locator('[data-add-value-field="Substance"] [data-add-value]');
     const dialog = page.getByRole('dialog', { name: 'Add a value' });
+
+    // PA4-U-02/09: Esc закриває лише вкладений діалог (шторка лишається), фокус - на «Not in the list?…»; Cancel - так само.
+    await opener.click();
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden({ timeout: 10_000 });
+    await expect(drawer).toBeVisible();
+    await expect(opener).toBeFocused();
+    await opener.click();
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toBeHidden({ timeout: 10_000 });
+    await expect(opener).toBeFocused();
+
+    await opener.click();
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText(`shared list E2E shared ${stamp}`);
     await dialog.getByRole('textbox', { name: 'Value' }).fill('Toluene');
     await dialog.getByRole('button', { name: 'Add value' }).click();
     await expect(dialog).toBeHidden({ timeout: 15_000 });
+    await expect(opener, 'після додавання фокус на кнопці-відкривачі').toBeFocused();
 
     // Нове значення вже вибране в полі (пікер перечитано), а в самому довіднику воно є.
     await expect(drawer.getByLabel(/^Substance/)).toHaveValue('Toluene', { timeout: 15_000 });

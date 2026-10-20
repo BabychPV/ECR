@@ -828,7 +828,7 @@ export function DocumentHeaderPanel({
 
       {contract.length > 0 && (
         <Stack gap="xs" data-testid="document-header-contract">
-          <Title order={5}>{t('document.header.contract.title')}</Title>
+          <Title order={3} size="h5">{t('document.header.contract.title')}</Title>
           <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
             {contract.map(([key, field]) =>
               field === null ? (
@@ -915,7 +915,7 @@ export function DocumentHeaderPanel({
   if (!collapsible) {
     return (
       <Stack gap="xs" data-testid="document-header-panel">
-        <Title order={4}>{t('document.header.title')}</Title>
+        <Title order={2} size="h4">{t('document.header.title')}</Title>
         {body}
       </Stack>
     );
@@ -926,7 +926,7 @@ export function DocumentHeaderPanel({
       {/* ⚠ Кнопка всередині заголовка (шаблон «акордеон»): читалка чує рівень
           заголовка й стан «згорнуто/розгорнуто». Під час `mustStayOpen`
           кнопка не згортає — `aria-disabled` і пояснення в підсумку. */}
-      <Title order={4}>
+      <Title order={2} size="h4">
         <UnstyledButton
           aria-expanded={expanded}
           aria-controls={bodyId}
