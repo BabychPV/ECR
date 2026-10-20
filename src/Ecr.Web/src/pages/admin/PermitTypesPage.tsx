@@ -125,6 +125,7 @@ export function PermitTypesPage(): JSX.Element {
           filtered={(query ?? '').trim().length > 0 || (category ?? '').length > 0 || stat !== null}
           emptyTitle={t('permits.types.empty.title')}
           emptyHint={t('permits.types.empty.hint')}
+          emptyHeadingOrder={2}
           emptyAction={mayCreate ? <Button onClick={openWizard}>{t('permits.types.new')}</Button> : undefined}
           noMatchTitle={t('permits.types.noMatches')}
           // ⛔ Один перехід на всі параметри: кілька сеттерів поспіль губили б зміни (`useUrlState.ts`).

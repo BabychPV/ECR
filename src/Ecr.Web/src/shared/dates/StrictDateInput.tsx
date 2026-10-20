@@ -69,6 +69,7 @@ export function StrictDateInput({
   // Календар закрито з клавіатури (Enter/Escape). Стан відкриття живе всередині `DateInput`, тож
   // закриття — накладка `popoverProps.opened = false`, яку знімає наступна дія людини в полі.
   const [dismissed, setDismissed] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   const problem = draft === null ? null : problemOf(draft, lang, props.minDate, props.maxDate);
 
@@ -103,7 +104,17 @@ export function StrictDateInput({
         'aria-label': typeof label === 'string' ? t('dates.clearNamed', { field: label }) : t('dates.clear'),
         ...props.clearButtonProps,
       }}
-      popoverProps={dismissed ? { ...popoverProps, opened: false } : (popoverProps ?? {})}
+      // PA3-U-04: Esc при відкритому календарі закриває ЛИШЕ календар. Модалка/шторка Mantine слухає `keydown` на window у
+      // фазі capture (до React-обробників) і пропускає подію з `data-mantine-stop-propagation="true"` на цілі, тож мітка на
+      // полі має стояти ЗАЗДАЛЕГІДЬ, поки календар відкритий. Після Esc `dismissed` знімає мітку - другий Esc закриває діалог.
+      data-mantine-stop-propagation={calendarOpen && !dismissed ? 'true' : undefined}
+      popoverProps={{
+        ...(dismissed ? { ...popoverProps, opened: false } : popoverProps),
+        onChange: (next: boolean) => {
+          setCalendarOpen(next);
+          popoverProps?.onChange?.(next);
+        },
+      }}
       valueFormat="YYYY-MM-DD"
       // ⛔ `null` замість `Invalid Date`: `DateInput` тоді не змінює значення — ні перекочування, ні стирання.
       dateParser={(text) => {
@@ -136,10 +147,12 @@ export function StrictDateInput({
       }}
       onFocus={(event: FocusEvent<HTMLInputElement>) => {
         setDismissed(false);
+        setCalendarOpen(true);
         onFocus?.(event);
       }}
       onClick={(event: MouseEvent<HTMLInputElement>) => {
         setDismissed(false);
+        setCalendarOpen(true);
         onClick?.(event);
       }}
       onBlur={(event: FocusEvent<HTMLInputElement>) => {
@@ -147,6 +160,7 @@ export function StrictDateInput({
         const text = event.currentTarget.value;
         setDraft(text);
         setShown(problemOf(text, lang, props.minDate, props.maxDate) !== null);
+        setCalendarOpen(false);
         onBlur?.(event);
       }}
     />

@@ -97,6 +97,9 @@ public sealed class PutUserPreferenceHandler(
 {
     private const int EchoMaxLength = 64;
 
+    // Той самий загальний код, що дає UnitOfWork.TryMapDuplicateKey для PK_UserPreference.
+    private const string ConcurrentInsertCode = "ECR-CELL-0409";
+
     /// <summary>Створює або замінює значення за ключем.</summary>
     /// <param name="key">Ключ із білого списку.</param>
     /// <param name="valueJson">Сире JSON-значення; <c>null</c> — тіла немає.</param>
@@ -120,6 +123,7 @@ public sealed class PutUserPreferenceHandler(
         }
 
         var existing = await store.FindAsync(userId, key, ct).ConfigureAwait(false);
+        var added = existing is null;
         if (existing is null)
         {
             var count = await store.CountAsync(userId, ct).ConfigureAwait(false);
@@ -139,7 +143,29 @@ public sealed class PutUserPreferenceHandler(
             existing.Replace(normalized, clock.UtcNow);
         }
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (ConcurrencyConflictException ex) when (added && ex.ErrorCode == ConcurrentInsertCode)
+        {
+            // PA4-S-01: інша сесія цього користувача встигла записати ПЕРШЕ значення ключа між нашим читанням і
+            // вставкою (PK_UserPreference → UnitOfWork мапить у 0409). Це upsert, тож не відмовляємо: знімаємо свою
+            // невдалу вставку з трекера, перечитуємо рядок переможця й перезаписуємо (остання перемагає, як і в
+            // ланцюжку «знайшли — замінили»). Ліміт не перевіряємо: рядок уже існує і кількість не росте.
+            // ⚠ Лише коли ДОДАВАЛИ ми (`added`): оновлення наявного рядка не вставляє, чужий 0409 не ковтаємо.
+            store.Detach(existing);
+            var winner = await store.FindAsync(userId, key, ct).ConfigureAwait(false);
+            if (winner is null)
+            {
+                throw; // переможця вже прибрали: це справжній конфлікт, не наш випадок
+            }
+
+            winner.Replace(normalized, clock.UtcNow);
+            existing = winner;
+            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+
         return UserPreferenceRules.ToDto(existing);
     }
 

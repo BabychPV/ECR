@@ -45,6 +45,7 @@ export function PermitsEmptySection({
       <PermitsSubnav current={current} />
       <EmptyState
         title={emptyTitle}
+        headingOrder={2}
         hint={emptyHint}
         action={
           <Stack gap="xs" align="center">

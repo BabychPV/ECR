@@ -27,4 +27,7 @@ public sealed class UserPreferenceStore(EcrDbContext db) : IUserPreferenceStore
 
     /// <inheritdoc />
     public void Remove(UserPreference preference) => db.UserPreferences.Remove(preference);
+
+    /// <inheritdoc />
+    public void Detach(UserPreference preference) => db.Entry(preference).State = EntityState.Detached;
 }

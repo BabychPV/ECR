@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { axeViolations } from './axeRule';
 import { CreatedPermitTypes } from './permitTypeCleanup';
 
 /**
@@ -148,6 +149,13 @@ test.describe('Конструктор типу дозволу', () => {
     await page.goto(`/admin/permits/types/${code}?t=Points&dialog=delete-type`);
     await expect(page.getByRole('dialog')).toBeVisible({ timeout: 30_000 });
     expect(await scrollableRegionViolations(page), 'axe: діалог delete-type @500').toEqual([]);
+
+    // P3-N8: вкладка Checks порожнього типу - h1 -> h2 (раніше h4), справжній axe не знаходить heading-order.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`/admin/permits/types/${code}?tab=rules`);
+    await expect(page.getByRole('heading', { level: 2, name: /No checks yet/ })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('heading', { level: 4 })).toHaveCount(0);
+    expect(await axeViolations(page, 'heading-order'), 'axe heading-order: вкладка Checks').toEqual([]);
 
     // Тип ніколи не публікувався: його знімає `afterEach` (і тоді, коли тест упав раніше).
   });

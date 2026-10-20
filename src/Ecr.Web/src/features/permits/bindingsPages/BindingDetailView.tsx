@@ -68,6 +68,7 @@ export function BindingDetailView(): JSX.Element {
         <EmptyState
           title={t('permits.bindingView.incomplete.title')}
           hint={t('permits.bindingView.incomplete.hint')}
+          headingOrder={2}
         />
       </>
     );
@@ -78,7 +79,7 @@ export function BindingDetailView(): JSX.Element {
       <>
         <PageHeader title={t('permits.binding.title')} back={back} />
         <PermitsSubnav current="bindings" />
-        <EmptyState title={t('permits.bindingsList.noAccess.title')} hint={t('permits.bindingsList.noAccess.hint')} />
+        <EmptyState title={t('permits.bindingsList.noAccess.title')} hint={t('permits.bindingsList.noAccess.hint')} headingOrder={2} />
       </>
     );
   }
