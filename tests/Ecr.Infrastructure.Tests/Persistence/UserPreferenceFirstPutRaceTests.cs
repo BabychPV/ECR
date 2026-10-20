@@ -32,6 +32,7 @@ public sealed class UserPreferenceFirstPutRaceTests(SqlServerFixture sql)
 {
     private const int Rounds = 20;
     private const string Key = "theme";
+    private static readonly string[] Expected = ["\"dark\"", "\"light\""];
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -55,7 +56,7 @@ public sealed class UserPreferenceFirstPutRaceTests(SqlServerFixture sql)
                 .ToListAsync();
 
             var row = Assert.Single(rows);
-            Assert.Contains(row.ValueJson, new[] { "\"dark\"", "\"light\"" });
+            Assert.Contains(row.ValueJson, Expected);
         }
     }
 
