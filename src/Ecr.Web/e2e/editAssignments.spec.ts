@@ -56,6 +56,41 @@ test.describe('Передача місяця: власник → виконав�
   // Вхід + холодне відкриття документа на 91 таблицю (Vite, CI-раннер) інколи не вкладаються в типові 30 с.
   test.describe.configure({ mode: 'serial', timeout: 120_000 });
 
+  // Дефект 21.10: після вибраного місяця ні Cancel, ні «X», ні Esc не закривали майстер (`onExitUnsaved` повертав false без
+  // підтвердження). Кожна дорога закриває ЛИШЕ майстер; шторка лишається, фокус вертається на «Assign month…».
+  test('майстер «Assign month» закривається через Cancel, X і Esc; шторка лишається, фокус на кнопці', async ({ browser }) => {
+    const admin = await asUser(browser, Admin);
+    await openDrawer(admin);
+
+    const assign = admin.getByRole('button', { name: /Assign month|Передать месяц/ });
+    // Корінь `[data-panel]` без розміру (Playwright вважає його hidden) - дивимось на сам діалог шторки.
+    const drawer = admin.locator('[data-panel="edit-assignments"] [role="dialog"]');
+    const wizardBody = admin.getByTestId('wizard-step-body');
+
+    const closers: ReadonlyArray<readonly [string, () => Promise<void>]> = [
+      ['Cancel', () => admin.getByTestId('wizard-cancel').click()],
+      ['X', () => admin.locator('button.mantine-Modal-close').click()],
+      ['Esc', () => admin.keyboard.press('Escape')],
+    ];
+
+    // 5 кіл підряд в одній сторінці: фокус і Esc у реальному браузері плавають, одного проходу мало.
+    for (let round = 1; round <= 5; round += 1) {
+      for (const [closer, closeIt] of closers) {
+        const name = `коло ${String(round)}/5, ${closer}`;
+        await assign.click();
+        await expect(wizardBody, name).toBeVisible();
+        // «dirty»: саме з обраним місяцем закриття й не працювало.
+        await admin.getByRole('dialog').last().getByText(/^(February|Февраль)$/).click();
+        await closeIt();
+
+        await expect(wizardBody, `${name}: майстер закрито`).toHaveCount(0);
+        await expect(drawer, `${name}: шторка лишилась`).toBeVisible();
+        await expect(assign, `${name}: фокус на «Assign month…»`).toBeFocused();
+      }
+    }
+    await admin.context().close();
+  });
+
   test('власник передає січень виконавцю через майстер', async ({ browser }) => {
     const admin = await asUser(browser, Admin);
     await openDrawer(admin);

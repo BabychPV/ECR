@@ -300,7 +300,10 @@ export function AssignWizard({
       }}
       onApply={(d, api) => onApply({ ...d, alsoOthers }, api)}
       onClose={onClose}
-      onExitUnsaved={() => false}
+      // ⛔ `true`, не `false`: `false` означає «майстер лишається, викликач покаже власне підтвердження» — а тут його
+      // немає, тож після першого ж вибраного місяця Cancel, «X» і Esc мовчки нічого не робили (дефект 21.10). Введене —
+      // місяці й виконавці, не робота на години; так само `CreateDocumentModal` і `NewPermitWizard`.
+      onExitUnsaved={() => true}
     />
   );
 }
