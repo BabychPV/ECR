@@ -89,6 +89,18 @@ public sealed partial class DocumentVersionMigrationTests
             Assert.Equal("ECR-DOC-4091", problem.GetProperty("errorCode").GetString());
             Assert.Equal("err.ECR-DOC-4091.structureChanging", problem.GetProperty("messageKey").GetString());
 
+            // ⛔ P2-A: читачі DocumentsController (маршрут `{id}`) під маркером теж отримують 409, а не напівстан.
+            foreach (var other in new[]
+                     {
+                         $"/api/v1/documents/{s.Doc.DocumentId}",
+                         $"/api/v1/documents/{s.Doc.DocumentId}/header",
+                         $"/api/v1/documents/{s.Doc.DocumentId}/tables",
+                     })
+            {
+                using var otherRead = await client.GetAsync(new Uri(other, UriKind.Relative)).ConfigureAwait(true);
+                Assert.True(otherRead.StatusCode == HttpStatusCode.Conflict, $"{other}: {otherRead.StatusCode}");
+            }
+
             // ⛔ P1-2: писар (спільна структура документа — перша дія кожного запису) відмовляє тим самим кодом.
             await AssertWriterRefusedAsync(s).ConfigureAwait(true);
         }
