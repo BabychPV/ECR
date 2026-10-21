@@ -789,6 +789,8 @@ public static class VersionMigrationPlanner
         VersionMigrationLookupInput? lookup, LookupOutcome outcome)
     {
         if (lookup is null
+            || field.LookupRegistryDefId is null
+            || other.LookupRegistryDefId is null
             || field.LookupRegistryDefId == other.LookupRegistryDefId
             || !lookup.Fields.TryGetValue(field.Id, out var data))
         {
