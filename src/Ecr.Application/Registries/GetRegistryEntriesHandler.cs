@@ -22,8 +22,13 @@ public sealed class GetRegistryEntriesHandler(
     RegistryResolver resolver,
     IRegistryEntryCache cache,
     Security.IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IDocumentStore? documents = null,
+    IPeriodStore? periods = null)
 {
+    // ⚠ `documents` і `periods` потрібні лише режиму «вікно документа» (`documentId`); необов'язкові для тестів, що
+    // будують обробник руками, - контейнер підставляє їх завжди.
+
     /// <summary>Право на читання довідників (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.View";
 
@@ -33,8 +38,23 @@ public sealed class GetRegistryEntriesHandler(
     /// <param name="parentEntryId">Обраний батьківський запис для каскаду.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException">Довідника немає — <c>ECR-REG-0404</c>.</exception>
-    public async Task<IReadOnlyList<RegistryEntryDto>> HandleAsync(
+    public Task<IReadOnlyList<RegistryEntryDto>> HandleAsync(
         string registryCode, DateOnly asOf, long? parentEntryId, CancellationToken ct)
+        => HandleAsync(registryCode, asOf, parentEntryId, documentId: null, ct);
+
+    /// <summary>Читає записи довідника на дату або у ВІКНІ проєкту документа.</summary>
+    /// <param name="registryCode">Код довідника.</param>
+    /// <param name="asOf">Дата періоду; ігнорується, коли задано <paramref name="documentId"/>.</param>
+    /// <param name="parentEntryId">Обраний батьківський запис для каскаду.</param>
+    /// <param name="documentId">
+    /// Документ, у шапку якого обирається запис. Задано - перелік звужується до записів, придатних у вікні проєкту
+    /// документа <c>[PeriodStart, PeriodEnd]</c> (активні, не видалені, чинні бодай один день вікна): те саме правило,
+    /// що в <c>PATCH …/header</c> (<c>ECR-HDR-4223</c>). <c>asOf</c> тоді не потрібен. Невидимий документ - 404.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Довідника чи документа немає - <c>ECR-REG-0404</c> / <c>ECR-DOC-0404</c>.</exception>
+    public async Task<IReadOnlyList<RegistryEntryDto>> HandleAsync(
+        string registryCode, DateOnly asOf, long? parentEntryId, long? documentId, CancellationToken ct)
     {
         // ⚠ Глобальне право АБО ресурсний грант рівня Read на ЦЕЙ довідник
         // (A7-58). Всередині `RegistryAccess.RequireAsync` довідник з коду
@@ -84,9 +104,12 @@ public sealed class GetRegistryEntriesHandler(
         // не зміниться сам довідник складу.
         var chain = await CompositionChainAsync(definition, ct).ConfigureAwait(false);
 
+        // Режим «вікно документа»: межі проєкту беруться з документа на сервері, а не від клієнта.
+        var window = documentId is { } docId ? await ResolveWindowAsync(docId, ct).ConfigureAwait(false) : null;
+
         // ⚠ Дата потрібна й тоді, коли темпоральний не сам довідник, а його батько композиції:
         // перелік частин залежить від того, чи чинний батько на дату періоду.
-        if ((definition.IsTemporal || chain.Exists(link => link.Parent.IsTemporal)) && asOf == default)
+        if (window is null && (definition.IsTemporal || chain.Exists(link => link.Parent.IsTemporal)) && asOf == default)
         {
             throw new BusinessRuleException(
                 Domain.Errors.ErrorCodes.RequestInvalid,
@@ -108,7 +131,8 @@ public sealed class GetRegistryEntriesHandler(
         var parents = string.Concat(chain.Select(link =>
             $":c{link.Parent.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
             + $"r{link.Parent.DataRevision.ToString(System.Globalization.CultureInfo.InvariantCulture)}"));
-        var key = $"reg:{definition.Code}:r{definition.DataRevision}{parents}:{asOf:yyyy-MM-dd}:p{parentEntryId?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-"}";
+        var when = window is { } w0 ? $"w{w0.Start:yyyy-MM-dd}_{w0.End:yyyy-MM-dd}" : $"{asOf:yyyy-MM-dd}";
+        var key = $"reg:{definition.Code}:r{definition.DataRevision}{parents}:{when}:p{parentEntryId?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-"}";
 
         var selected = await cache.GetOrAddAsync(
             key,
@@ -122,13 +146,15 @@ public sealed class GetRegistryEntriesHandler(
                     ? []
                     : await registries.ListInboundLinksAsync(definition.Id, token).ConfigureAwait(false);
 
-                var own = resolver.Select(entries, links, asOf, parentEntryId);
+                var own = window is { } w
+                    ? resolver.SelectInWindow(entries, links, w.Start, w.End, parentEntryId)
+                    : resolver.Select(entries, links, asOf, parentEntryId);
                 if (chain.Count == 0 || own.Count == 0)
                 {
                     return own;
                 }
 
-                var visible = await CompositionVisibilityAsync(entries, chain, asOf, token).ConfigureAwait(false);
+                var visible = await CompositionVisibilityAsync(entries, chain, window?.End ?? asOf, token).ConfigureAwait(false);
                 return own.Where(e => visible(e.Id)).ToList();
             },
             ct).ConfigureAwait(false);
@@ -144,6 +170,30 @@ public sealed class GetRegistryEntriesHandler(
                 e.ValidFrom,
                 e.ValidTo))
             .ToList();
+    }
+
+    /// <summary>Вікно проєкту документа; невидимий чи відсутній документ - 404 (як <c>GET …/header</c>, B-08).</summary>
+    private async Task<(DateOnly Start, DateOnly End)?> ResolveWindowAsync(long documentId, CancellationToken ct)
+    {
+        var userId = currentUser.UserId;
+        var profile = userId is { } id ? await access.BuildProfileAsync(id, ct).ConfigureAwait(false) : null;
+        var document = documents is not null && profile is not null
+            ? await documents.FindAsync(documentId, new PeriodKeyFilter(null), ct).ConfigureAwait(false)
+            : null;
+        var project = document is not null && periods is not null && profile!.SeesDocumentsOf(document.ProjectId)
+            ? await periods.FindProjectAsync(document.ProjectId, ct).ConfigureAwait(false)
+            : null;
+
+        return project is null
+            ? throw new NotFoundException(
+                Domain.Errors.ErrorCodes.DocumentNotFound,
+                $"Документ {documentId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.document",
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                })
+            : (project.PeriodStart, project.PeriodEnd);
     }
 
     /// <summary>

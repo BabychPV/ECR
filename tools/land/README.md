@@ -77,6 +77,23 @@ $pw = Read-Host 'Пароль ECR' -AsSecureString   # прихований вв
 powershell -NoProfile -File .\Apply-ContractHeader.ps1 -TemplateCode Land -MigrateDocumentId "3,10"
 ```
 
+## Permit -> PRM_AIR (поле шапки Permit)
+
+За замовчуванням поле шапки `Permit` вказує на `LAND_PERMIT` (маніфест `header-fields.json`, ключ `permitLookup.default`).
+Перемикач `-PermitLookup LAND_PERMIT|PRM_AIR` є в `Apply-ContractHeader.ps1` і `Build-LandTemplate.ps1`; без нього
+поведінка Land-інструментів не змінюється.
+
+Вмикати `-PermitLookup PRM_AIR` лише після рішення про перемикання й ремапу: нова версія шаблону з іншим довідником у
+полі `Permit`, що має значення, відхиляється міграцією документів (`guardedWithData`), тож спершу значення документів
+переносяться з `LAND_PERMIT` на записи `PRM_AIR` (за номером дозволу), і лише потім публікується версія. З `PRM_AIR` скрипти
+читають перелік довідників з `?includePermitHeaders=true` (шапки дозволів у звичайному переліку приховані), а записи
+шапки дозволу - з `entries?documentId=` (лише активні й чинні у вікні проєкту). Довідник `LAND_PERMIT` скрипти не чіпають.
+
+Номер дозволу для шапки тестових документів `Build-LandTemplate.ps1` не зберігається в git: його задають
+`-PermitNumber KZ01TEST0001` (синтетичний приклад) або `-PermitPickFile <json поза git>` з ключем `Permit`
+(`{"Permit":"KZ01TEST0001"}`, напр. `.sync-local\permits\header-pick.json`). Для `LAND_PERMIT` без номера береться перший
+запис довідника (з повідомленням у журналі); для `-PermitLookup PRM_AIR` номер обов'язковий, інакше зрозуміла помилка.
+
 ## Повна побудова шаблону Land і бази UI-приймальної
 
 `Build-LandTemplate.ps1` будує з `docs/delivery/reference-data/land-template/land-template.model.json` весь шаблон Excel

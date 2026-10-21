@@ -45,6 +45,40 @@ public sealed class RegistryResolver
         DateOnly asOf,
         long? parentEntryId)
     {
+        return SelectCore(entries, links, e => e.IsValidOn(asOf), parentEntryId);
+    }
+
+    /// <summary>
+    /// Записи, придатні в ВІКНІ документа <c>[windowStart, windowEnd]</c> (обидві межі включно): активні, не видалені й
+    /// чинні бодай один день вікна - те саме правило, що в шапки документа (<c>EnsureLookupEntriesUsableAsync</c>,
+    /// <c>ECR-HDR-4223</c>), тож піцкер пропонує лише те, що збереження прийме.
+    /// </summary>
+    /// <param name="entries">Усі записи довідника.</param>
+    /// <param name="links">Вхідні зв'язки каскаду.</param>
+    /// <param name="windowStart">Перший день вікна.</param>
+    /// <param name="windowEnd">Останній день вікна, включно.</param>
+    /// <param name="parentEntryId">Обраний батьківський запис.</param>
+    public IReadOnlyList<RegistryEntry> SelectInWindow(
+        IReadOnlyList<RegistryEntry> entries,
+        IReadOnlyList<RegistryEntryLink> links,
+        DateOnly windowStart,
+        DateOnly windowEnd,
+        long? parentEntryId)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        ArgumentNullException.ThrowIfNull(links);
+
+        var windowEndExclusive = windowEnd.AddDays(1);
+
+        return SelectCore(entries, links, e => e.Window.OverlapsSegment(windowStart, windowEndExclusive), parentEntryId);
+    }
+
+    private static List<RegistryEntry> SelectCore(
+        IReadOnlyList<RegistryEntry> entries,
+        IReadOnlyList<RegistryEntryLink> links,
+        Func<RegistryEntry, bool> isValid,
+        long? parentEntryId)
+    {
         ArgumentNullException.ThrowIfNull(entries);
         ArgumentNullException.ThrowIfNull(links);
 
@@ -55,7 +89,7 @@ public sealed class RegistryResolver
             //    включний, кінець ВИКЛЮЧНИЙ (`ValidityWindow.Contains`). Запис, чинний по
             //    30 червня включно, має ValidTo = 1 липня; з ValidTo = 30 червня він у звіті
             //    за 30 червня вже нечинний.
-            .Where(e => e.IsValidOn(asOf))
+            .Where(isValid)
 
             // 2. Видалені й вимкнені не пропонуються. Але й не зникають: у
             //    комірках лежать їхні Id, і історія читається далі (ФВ-8.8).

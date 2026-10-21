@@ -102,6 +102,12 @@ const registries = {
   /** `GET /api/v1/registries` — перелік довідників. */
   list: () => ['registries', 'list'] as const,
 
+  /**
+   * `GET /api/v1/registries?includePermitHeaders=true` — цілі Lookup: перелік + шапки типів дозволів. Окремий ключ, бо
+   * відповідь ІНША, ніж у `list()` (там `PRM_*` приховані); префікс `list` лишає спільну інвалідацію переліку.
+   */
+  lookupTargets: () => ['registries', 'list', 'lookupTargets'] as const,
+
   /** `GET /api/v1/registries/{code}/entries`. */
   entries: (code: string) => ['registries', 'entries', code] as const,
 

@@ -97,6 +97,9 @@ param(
     [string]$ProjectCode = 'LANDUI2026',
     [int]$Year = 2026,
     [string]$ConfirmStand,
+    [ValidateSet('LAND_PERMIT', 'PRM_AIR')][string]$PermitLookup,
+    [string]$PermitNumber,
+    [string]$PermitPickFile,
     [switch]$FillData,
     [switch]$PruneStaleTables,
     [switch]$KeepNumericMode,
@@ -1140,7 +1143,9 @@ function Stage-Template {
     }
     # шапка Contract (13 полів) — офіційним скриптом на цій чернетці, з публікацією
     $pw = ConvertTo-SecureString $Acc['land-owner'] -AsPlainText -Force
-    & (Join-Path $here 'Apply-ContractHeader.ps1') -TemplateCode $TemplateCode -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $childStand -UseExistingDraft
+    # -PermitLookup передається лише явно: без нього діє значення маніфесту (LAND_PERMIT), поведінка Land не змінюється.
+    $permitArgs = if ($PermitLookup) { @{ PermitLookup = $PermitLookup } } else { @{} }
+    & (Join-Path $here 'Apply-ContractHeader.ps1') -TemplateCode $TemplateCode -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $childStand -UseExistingDraft @permitArgs
     $vers = @((Api GET "/api/v1/templates/$($S.TemplateId)/versions?limit=100").Json.items)
     $pub = $vers | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Descending | Select-Object -First 1
     if ($null -eq $pub) { throw 'Після Apply-ContractHeader немає опублікованої версії.' }
@@ -2149,10 +2154,27 @@ function Set-DocumentHeader([int]$docId) {
     $h = (Api GET "/api/v1/documents/$docId/header").Json
     $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
     $pick = @{ Area = @('LAND_AREA', 'Island'); Contractor = @('LAND_CONTRACTOR', 'AGS'); Region = @('LAND_REGION', 'Mangistau'); Location = @('LAND_LOCATION', 'LQB')
-        OnOffshore = @('LAND_ONOFFSHORE', 'Onshore'); TypeOfActivity = @('LAND_ACTIVITY', 'Operation'); Permit = @('LAND_PERMIT', 'KZ06VCZ14825472') }
+        OnOffshore = @('LAND_ONOFFSHORE', 'Onshore'); TypeOfActivity = @('LAND_ACTIVITY', 'Operation'); Permit = @('LAND_PERMIT', '') }
+    # ⛔ Реальні номери дозволів у git не лежать: номер - параметр -PermitNumber (приклад: KZ01TEST0001) або ключ Permit
+    # у зовнішньому JSON -PermitPickFile ({"Permit":"<номер>"}, файл поза git, напр. .sync-local\permits\header-pick.json).
+    $permNo = $PermitNumber
+    if (-not $permNo -and $PermitPickFile) {
+        if (-not (Test-Path -LiteralPath $PermitPickFile)) { throw "Файл вибору шапки $PermitPickFile не знайдено." }
+        $permNo = [string](Get-Content -LiteralPath $PermitPickFile -Raw -Encoding UTF8 | ConvertFrom-Json).Permit
+    }
+    # Permit -> PRM_AIR лише за явним -PermitLookup; записи шапки дозволу читаються у вікні документа (documentId).
+    if ($PermitLookup -eq 'PRM_AIR') {
+        if (-not $permNo) {
+            throw 'Для -PermitLookup PRM_AIR потрібен номер дозволу: -PermitNumber <номер> (приклад KZ01TEST0001) або -PermitPickFile <json поза git>.'
+        }
+        $pick.Permit = @('PRM_AIR', $permNo)
+    }
+    elseif ($permNo) { $pick.Permit = @('LAND_PERMIT', $permNo) }
+    else { Log 'Permit: номер не задано (-PermitNumber / -PermitPickFile) - береться перший запис довідника.' }
     $fields = @()
     foreach ($k in $pick.Keys) {
-        $es = @((Api GET "/api/v1/registries/$($pick[$k][0])/entries?asOf=$today").Json)
+        $entriesQuery = if ($pick[$k][0] -like 'PRM_*') { "documentId=$docId" } else { "asOf=$today" }
+        $es = @((Api GET "/api/v1/registries/$($pick[$k][0])/entries?$entriesQuery").Json)
         $e = $es | Where-Object { ([string]$_.display).Trim() -like "$($pick[$k][1])*" } | Select-Object -First 1
         if ($null -eq $e) { $e = $es | Select-Object -First 1 }
         if ($e) { $fields += @{ code = $k; value = [int]$e.id; isEmpty = $false } }
