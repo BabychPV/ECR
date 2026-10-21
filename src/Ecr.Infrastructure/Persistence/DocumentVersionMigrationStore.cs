@@ -40,7 +40,15 @@ public sealed partial class DocumentVersionMigrationStore(
     /// <summary>
     /// Скільки рядків <c>doc.TableRow</c> (≈ ×3 комірок) входить в один діапазон переносу — одну команду й один коміт.
     /// </summary>
-    public const int DefaultRangeRows = 20_000;
+    /// <remarks>
+    /// Вибір 5000 — компроміс "час переносу / тривалість табличного блокування" за ВИМІРОМ (1 млн комірок, один прогін,
+    /// <c>index_lock_promotion_count</c> по <c>doc.CellValue</c>): 20000 рядків — 57,9 с (ескалація 17 з 18 діапазонів);
+    /// 5000 — 83,2 с (67/68); 1000 — 173,8 с (325/335); 300 — 400 с (0). Зміна ключової колонки <c>CellValue</c> (delete+insert
+    /// у кластерному + 3 NC-індекси + FK) дає &gt; 5000 локів уже на ~400 рядках, тож ескалація до табличного X-lock
+    /// неминуча, доки не змінено <c>LOCK_ESCALATION</c> (DDL, беклог: AUTO — ескалація до партиції). Діапазон 5000 тримає її
+    /// ~1,2 с; чужі PATCH на цей час чекають (≤ ~1–3 с) або дістають 409 lockTimeout (повтор). Рішення координатора 21.10.
+    /// </remarks>
+    public const int DefaultRangeRows = 5_000;
 
     /// <summary>Скільки рядків <c>doc.TableRow</c> у діапазоні (змінюється лише у тестах: малі діапазони на малих обсягах).</summary>
     public int RangeRows { get; init; } = DefaultRangeRows;
@@ -499,7 +507,7 @@ public sealed partial class DocumentVersionMigrationStore(
                 {
                     // P2-3: діапазон не переселив усе, що мав, - відкотився цілим; precedent P2-2 (Lookup шапки): ECR-CELL-0409.
                     throw new Application.Errors.ConcurrencyConflictException(
-                        "ECR-CELL-0409",
+                        Domain.Errors.ErrorCodes.CellConflict,
                         $"Діапазон {index} ({kind}) переносу не переселив усі значення: {ex.Message} Перенос зупинено, повторіть його.",
                         new Dictionary<string, object?>
                         {
@@ -557,7 +565,7 @@ public sealed partial class DocumentVersionMigrationStore(
                 if (actual != plan.LookupRemappedValues)
                 {
                     throw new Application.Errors.ConcurrencyConflictException(
-                        "ECR-CELL-0409",
+                        Domain.Errors.ErrorCodes.CellConflict,
                         $"Перенос значень Lookup шапки зачепив {actual} значень замість очікуваних {plan.LookupRemappedValues}: " +
                         "перенос скасовано.",
                         new Dictionary<string, object?>
@@ -612,6 +620,12 @@ public sealed partial class DocumentVersionMigrationStore(
 
                 // 1) Комірки, оформлення комірок і рядки: діапазони за ключем кластерного індексу (PeriodKey, TableRowId).
                 var rowRanges = await ReadRowRangesAsync(heavy, Parameters(), ct).ConfigureAwait(false);
+                if (leaseOwner is not null)
+                {
+                    // Читання меж - один довгий прохід: оренду подовжуємо ПЕРЕД першим комітом діапазону.
+                    await ClaimLeaseAsync(heavy, projectId, leaseOwner, ct).ConfigureAwait(false);
+                }
+
                 var watermark = phase == MigrationPhase.Heavy
                     ? await ReadWatermarkAsync(heavy, projectId, ct).ConfigureAwait(false)
                     : default;
@@ -688,7 +702,7 @@ public sealed partial class DocumentVersionMigrationStore(
                 if (stray != 0)
                 {
                     throw new Application.Errors.ConcurrencyConflictException(
-                        "ECR-CELL-0409",
+                        Domain.Errors.ErrorCodes.CellConflict,
                         $"Після переносу комірок {stray} комірок проєкту лишилося на колонках, яких немає в цільовій версії: " +
                         "версію проєкту не перемкнуто, повторіть перенос.",
                         new Dictionary<string, object?>

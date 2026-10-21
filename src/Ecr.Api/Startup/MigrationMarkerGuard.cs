@@ -140,13 +140,25 @@ public sealed class MigrationMarkerFilter(MigratingProjects projects) : IAsyncAc
         var values = context.RouteData.Values;
         var controller = Convert.ToString(values.GetValueOrDefault("controller"), CultureInfo.InvariantCulture);
         var query = context.HttpContext.Request.Query;
+        // P2-N1: окрім ключів маршруту - ПРЕФІКС шляху `/api/v1/documents/{n}/**` і `/api/v1/projects/{n}/**` (версії,
+        // порівняння, історія процесу, recall та будь-який майбутній контролер під цими префіксами) і `projectId`/`documentId`
+        // у ТІЛІ запиту (наприклад, `POST reports/{code}/build`) - з уже зв'язаних аргументів дії.
+        var prefix = PathPrefix.Match(path);
+        long? prefixProject = prefix.Success && prefix.Groups[1].Value == "projects" ? ParseId(prefix.Groups[2].Value) : null;
+        long? prefixDocument = prefix.Success && prefix.Groups[1].Value == "documents" ? ParseId(prefix.Groups[2].Value) : null;
+        var (bodyProject, bodyDocument) = FromArguments(context.ActionArguments);
+
         long? projectKey = ParseId(values.GetValueOrDefault("projectId"))
+                           ?? prefixProject
                            ?? (string.Equals(controller, "Projects", StringComparison.Ordinal) ? ParseId(values.GetValueOrDefault("id")) : null)
-                           ?? ParseId(query.TryGetValue("projectId", out var queryProject) ? queryProject.ToString() : null);
+                           ?? ParseId(query.TryGetValue("projectId", out var queryProject) ? queryProject.ToString() : null)
+                           ?? bodyProject;
         long? documentKey = projectKey is null
             ? ParseId(values.GetValueOrDefault("documentId"))
+              ?? prefixDocument
               ?? (string.Equals(controller, "Documents", StringComparison.Ordinal) ? ParseId(values.GetValueOrDefault("id")) : null)
               ?? ParseId(query.TryGetValue("documentId", out var queryDocument) ? queryDocument.ToString() : null)
+              ?? bodyDocument
             : null;
 
         int? projectId = projectKey is { } p ? (int)p : null;
@@ -178,6 +190,36 @@ public sealed class MigrationMarkerFilter(MigratingProjects projects) : IAsyncAc
         }
 
         await next().ConfigureAwait(false);
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex PathPrefix = new(
+        @"^/api/v\d+/(documents|projects)/(\d+)(?:/|$)",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.IgnoreCase,
+        TimeSpan.FromMilliseconds(50));
+
+    /// <summary>Властивості <c>ProjectId</c>/<c>DocumentId</c> у зв'язаних аргументах дії (тіло запиту).</summary>
+    private static (long? Project, long? Document) FromArguments(IDictionary<string, object?> arguments)
+    {
+        long? project = null;
+        long? document = null;
+        foreach (var argument in arguments.Values)
+        {
+            if (argument is null || argument is string)
+            {
+                continue;
+            }
+
+            var type = argument.GetType();
+            if (type.IsPrimitive || type.Namespace?.StartsWith("System", StringComparison.Ordinal) == true)
+            {
+                continue;
+            }
+
+            project ??= ParseId(type.GetProperty("ProjectId")?.GetValue(argument));
+            document ??= ParseId(type.GetProperty("DocumentId")?.GetValue(argument));
+        }
+
+        return (project, document);
     }
 
     private static long? ParseId(object? raw)
