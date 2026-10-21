@@ -9123,6 +9123,9 @@ USING (VALUES
     -- MIGRATE-FAST: ключі повідомлень переносу версії (маркер, відновлення, підтвердження бекапу)
     ,(N'err.ECR-SCHM-0422.migrateResumeMismatch', N'en', N'The previous version migration of this project was interrupted. It can only be continued with the same mapping (columns, rows, header Lookup): the mapping differs from the saved one. Nothing was changed.', 1)
     ,(N'err.ECR-SCHM-0422.migrateBackupRequired', N'en', N'Nothing was moved: this migration moves {transferredValues} values (the limit without a backup confirmation is {threshold}). Take a database backup and repeat the request with backupConfirmation (backup path and/or time).', 1)
+    ,(N'documents.migrateBackupLabel', N'en', N'Backup confirmation', 1)
+    ,(N'documents.migrateBackupHint', N'en', N'This migration moves {count} values (the limit without a backup confirmation is {threshold}). Take a database backup first and enter its path and/or time.', 1)
+    ,(N'documents.migrateBackupMissing', N'en', N'Enter the backup path or time to start the migration.', 1)
     -- MIGRATE-FAST: кінець секції
     -- PERMITS: p3-backlog ── en: PUI-4, значення списку вже прибране/змінене деінде; ru/kz — порцією PERMITS: p3-backlog нижче ──
     ,(N'permits.lists.drawer.gone', N'en', N'This value is no longer in the list: it was changed elsewhere. The list has been refreshed.', 1)
@@ -23642,7 +23645,13 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-SCHM-0422.migrateResumeMismatch', N'ru', N'Предыдущий перенос версии этого проекта был прерван. Продолжить его можно только с той же картой (колонок, строк, Lookup шапки): карта отличается от сохранённой. Ничего не изменено.'),
     (N'err.ECR-SCHM-0422.migrateResumeMismatch', N'kz', N'Бұл жобаның нұсқасын көшіру үзілді. Оны тек сол картамен (бағандар, жолдар, тақырып Lookup) жалғастыруға болады: карта сақталғаннан өзгеше. Ештеңе өзгертілген жоқ.'),
     (N'err.ECR-SCHM-0422.migrateBackupRequired', N'ru', N'Ничего не перенесено: перенос затрагивает {transferredValues} значений (лимит без подтверждения резервной копии — {threshold}). Сделайте резервную копию базы и повторите запрос с backupConfirmation (путь и/или время копии).'),
-    (N'err.ECR-SCHM-0422.migrateBackupRequired', N'kz', N'Ештеңе көшірілмеді: көшіру {transferredValues} мәнді қамтиды (сақтық көшірмені растамай рұқсат етілетін шек — {threshold}). Дерекқордың сақтық көшірмесін жасап, backupConfirmation (көшірменің жолы және/немесе уақыты) арқылы өтінімді қайталаңыз.')
+    (N'err.ECR-SCHM-0422.migrateBackupRequired', N'kz', N'Ештеңе көшірілмеді: көшіру {transferredValues} мәнді қамтиды (сақтық көшірмені растамай рұқсат етілетін шек — {threshold}). Дерекқордың сақтық көшірмесін жасап, backupConfirmation (көшірменің жолы және/немесе уақыты) арқылы өтінімді қайталаңыз.'),
+    (N'documents.migrateBackupLabel', N'ru', N'Подтверждение резервной копии'),
+    (N'documents.migrateBackupLabel', N'kz', N'Сақтық көшірмені растау'),
+    (N'documents.migrateBackupHint', N'ru', N'Перенос затрагивает {count} значений (лимит без подтверждения резервной копии — {threshold}). Сначала сделайте резервную копию базы и укажите её путь и/или время.'),
+    (N'documents.migrateBackupHint', N'kz', N'Көшіру {count} мәнді қамтиды (сақтық көшірмені растамай рұқсат етілетін шек — {threshold}). Алдымен дерекқордың сақтық көшірмесін жасап, оның жолын және/немесе уақытын көрсетіңіз.'),
+    (N'documents.migrateBackupMissing', N'ru', N'Укажите путь или время резервной копии, чтобы начать перенос.'),
+    (N'documents.migrateBackupMissing', N'kz', N'Көшіруді бастау үшін сақтық көшірменің жолын немесе уақытын көрсетіңіз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

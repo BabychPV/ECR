@@ -21,6 +21,7 @@ interface Posted {
   readonly dryRun: boolean;
   readonly async?: boolean;
   readonly acceptGuardedOverwrite?: boolean;
+  readonly backupConfirmation?: string;
 }
 
 function baseReport(overrides: Record<string, unknown>): Record<string, unknown> {
@@ -58,7 +59,7 @@ function baseReport(overrides: Record<string, unknown>): Record<string, unknown>
   };
 }
 
-async function mockMigration(page: Page, posted: Posted[]): Promise<void> {
+async function mockMigration(page: Page, posted: Posted[], dryOverrides: Record<string, unknown> | null = null): Promise<void> {
   await page.route(`**/api/v1/documents/${DocumentId}/migrate-version`, async (route) => {
     const request = route.request();
     if (request.method() === 'GET') {
@@ -77,6 +78,10 @@ async function mockMigration(page: Page, posted: Posted[]): Promise<void> {
     const body = request.postDataJSON() as Posted;
     posted.push(body);
     if (body.dryRun) {
+      if (dryOverrides !== null) {
+        return route.fulfill({ json: baseReport({ canApply: true, refusals: [], guardedValues: 0, guardedOverwritable: 0, ...dryOverrides }) });
+      }
+
       return route.fulfill({
         json: body.acceptGuardedOverwrite === true
           ? baseReport({ canApply: true, refusals: [], guardedOverwriteAccepted: true })
@@ -93,7 +98,7 @@ async function mockMigration(page: Page, posted: Posted[]): Promise<void> {
   );
 }
 
-async function openDialog(page: Page, posted: Posted[]): Promise<void> {
+async function openDialog(page: Page, posted: Posted[], dryOverrides: Record<string, unknown> | null = null): Promise<void> {
   await page.goto('/login');
   await expect(page.getByRole('heading').first()).toBeVisible({ timeout: 30_000 });
   await page.getByLabel(/User name|Ім'я/i).fill(Admin.user);
@@ -101,7 +106,7 @@ async function openDialog(page: Page, posted: Posted[]): Promise<void> {
   await page.keyboard.press('Enter');
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
 
-  await mockMigration(page, posted);
+  await mockMigration(page, posted, dryOverrides);
   await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
   await page.getByTestId('document-more').click();
   await page.locator('[data-migrate-version]').click();
@@ -152,5 +157,24 @@ test.describe('versionMigrationOverwrite: діалог «Перезаписат�
     await expect(page.locator('[data-migrate-refused]')).toBeVisible();
     await expect(page.getByTestId('migrate-apply')).toBeDisabled();
     expect(posted.filter((p) => p.acceptGuardedOverwrite === true)).toEqual([]);
+  });
+
+  test('versionMigrationOverwrite: KI-2 - від 500 000 значень «Перенести» чекає підтвердження бекапу, значення йде в apply', async ({ page }) => {
+    const posted: Posted[] = [];
+    await openDialog(page, posted, { transferredValues: 600_000 });
+
+    const field = page.getByTestId('migrate-backup-confirmation');
+    await expect(field).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('migrate-apply')).toBeDisabled();
+
+    await field.fill('D:\\Backup\\ecr.bak 2026-10-22 09:00');
+    await expect(page.getByTestId('migrate-apply')).toBeEnabled();
+    await page.getByTestId('migrate-apply').click();
+    await expect(page.locator('[data-migrate-progress]')).toBeVisible();
+
+    expect(posted).toEqual([
+      { targetVersionId: 2, mode: 'Safe', dryRun: true, async: false },
+      { targetVersionId: 2, mode: 'Safe', dryRun: false, async: true, backupConfirmation: 'D:\\Backup\\ecr.bak 2026-10-22 09:00' },
+    ]);
   });
 });
