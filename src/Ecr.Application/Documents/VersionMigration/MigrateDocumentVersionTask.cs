@@ -18,10 +18,15 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// ACC-OW: згода на перезапис похідних значень (нова комірочна формула на комірці зі значенням); задачі, поставлені
 /// до цього поля, десеріалізуються з <c>false</c> і ведуть себе як раніше.
 /// </param>
+/// <param name="LookupRemaps">
+/// Мапи записів Lookup по полях шапки (із запиту); <c>null</c> — без мап (задачі, поставлені до цього поля,
+/// десеріалізуються з <c>null</c> і ведуть себе як раніше).
+/// </param>
 public sealed record MigrateDocumentVersionTask(
     long DocumentId, int TargetVersionId, string Mode, JobActor? Actor = null,
     IReadOnlyList<VersionMigrationTableRename>? TableRenames = null,
-    bool AcceptGuardedOverwrite = false);
+    bool AcceptGuardedOverwrite = false,
+    IReadOnlyList<VersionMigrationLookupRemap>? LookupRemaps = null);
 
 /// <summary>Підсумок фонового переносу.</summary>
 /// <param name="ToVersion">Цільова версія.</param>

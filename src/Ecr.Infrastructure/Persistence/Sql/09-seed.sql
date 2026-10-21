@@ -9115,6 +9115,10 @@ USING (VALUES
     -- PERMITS: lookup-prm ── en: шапка типу дозволу як ціль Lookup поля шапки й колонки шаблону; ru/kz — порцією PERMITS: lookup-prm нижче ──
     ,(N'registries.permitHeaderOption', N'en', N'Permits: {name} ({code})', 1)
     -- PERMITS: lookup-prm ── кінець секції ──
+    -- PERMITS: migrate-lookup-remap ── перенос версії: мапа записів Lookup шапки (ECR-SCHM-0422 migrateLookup*); ru/kz — порцією PERMITS: migrate-lookup-remap нижче ──
+    ,(N'err.ECR-SCHM-0422.migrateLookupRemapInvalid', N'en', N'The Lookup remap map is malformed: only header fields are supported (kind "header"), the field code must be non-empty, entry ids must be positive, a source entry may be listed once, and every source entry must belong to the registry of the version being moved from. At most {maxTargets} fields with at most {maxPairs} pairs each are allowed.', 1)
+    ,(N'err.ECR-SCHM-0422.migrateLookupNotMapped', N'en', N'Nothing was moved: some header values point to entries that the Lookup remap map does not cover with a usable counterpart (the entry is not in the map, or its target is missing from the new registry, inactive, deleted or not valid in the project window). The report lists the entry ids; extend the map and retry.', 1)
+    -- PERMITS: migrate-lookup-remap ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -23616,6 +23620,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: lookup-prm ── кінець секції ──
+-- PERMITS: migrate-lookup-remap ── ru/kz: мапа записів Lookup шапки при переносі версії; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-SCHM-0422.migrateLookupRemapInvalid', N'ru', N'Карта записей Lookup составлена неверно: поддерживаются только поля шапки (kind "header"), код поля должен быть непустым, идентификаторы записей положительными, исходная запись указывается один раз и должна принадлежать справочнику версии, с которой переносят. Допускается не более {maxTargets} полей и не более {maxPairs} пар в каждом.'),
+    (N'err.ECR-SCHM-0422.migrateLookupRemapInvalid', N'kz', N'Lookup жазбаларының картасы дұрыс құрастырылмаған: тек тақырып өрістері қолдау табады (kind "header"), өріс коды бос болмауы керек, жазба идентификаторлары оң болуы керек, бастапқы жазба бір рет көрсетіледі және көшіріліп жатқан нұсқаның анықтамалығына тиесілі болуы керек. Ең көбі {maxTargets} өріс және әрқайсысында ең көбі {maxPairs} жұп рұқсат етіледі.'),
+    (N'err.ECR-SCHM-0422.migrateLookupNotMapped', N'ru', N'Ничего не перенесено: часть значений шапки ссылается на записи, для которых в карте Lookup нет пригодного соответствия (записи нет в карте либо её цель отсутствует в новом справочнике, неактивна, удалена или не действует в окне проекта). Отчёт называет идентификаторы записей; дополните карту и повторите.'),
+    (N'err.ECR-SCHM-0422.migrateLookupNotMapped', N'kz', N'Ештеңе көшірілмеді: тақырып мәндерінің бір бөлігі Lookup картасында жарамды сәйкестігі жоқ жазбаларға сілтейді (жазба картада жоқ немесе оның мақсаты жаңа анықтамалықта жоқ, белсенді емес, жойылған не жоба терезесінде жарамсыз). Есеп жазба идентификаторларын атайды; картаны толықтырып, қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: migrate-lookup-remap ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
