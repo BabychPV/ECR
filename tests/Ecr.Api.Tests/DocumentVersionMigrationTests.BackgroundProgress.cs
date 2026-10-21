@@ -127,9 +127,10 @@ public sealed partial class DocumentVersionMigrationTests
         var stages = steps.Select(x => x.Stage).Distinct().ToList();
         Assert.Equal(
             [
-                VersionMigrationStages.Cells, VersionMigrationStages.Instances, VersionMigrationStages.NewRows,
-                VersionMigrationStages.Header, VersionMigrationStages.Index, VersionMigrationStages.Workflow,
-                VersionMigrationStages.Validation, VersionMigrationStages.Finish,
+                // Б1: легкі кроки (шапка, склад) — до діапазонів комірок/індексу/валідації, далі екземпляри, нові рядки, фініш.
+                VersionMigrationStages.Header, VersionMigrationStages.Workflow, VersionMigrationStages.Cells,
+                VersionMigrationStages.Index, VersionMigrationStages.Validation, VersionMigrationStages.Instances,
+                VersionMigrationStages.NewRows, VersionMigrationStages.Finish,
             ],
             stages);
         Assert.Equal(VersionMigrationStages.Finish, steps[^1].Stage);
