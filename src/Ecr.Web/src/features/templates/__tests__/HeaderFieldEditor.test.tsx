@@ -32,13 +32,21 @@ const SeededStrings: Record<string, string> = {
   'headerFields.errLabel': 'Give the field a label in at least one language.',
   'headerFields.errLookupRequired': 'Pick a registry for a Lookup field.',
   'common.cancel': 'Cancel',
+  'registries.permitHeaderOption': 'Permits: {name} ({code})',
 };
 
 const registries = [
   { id: 7, code: 'PERMITS', nameL10n: { values: { en: 'Permits' } }, fields: [], isHierarchical: false, isTemporal: true, sourceKind: 'Master' },
 ];
 
+const permitHeaders = [
+  { id: 77, code: 'PRM_AIR', nameL10n: { values: { en: 'Air permit' } }, fields: [], isHierarchical: false, isTemporal: true, sourceKind: 'Master' },
+];
+
+const registryRequests: string[] = [];
+
 function mockFetch(): void {
+  registryRequests.length = 0;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -52,7 +60,12 @@ function mockFetch(): void {
       }
 
       if (url.includes('/api/v1/registries')) {
-        return new Response(JSON.stringify(registries), {
+        registryRequests.push(url);
+
+        // Шапки дозволів віддаються лише за явною згодою (звичайний перелік їх ховає).
+        const listed = url.includes('includePermitHeaders=true') ? [...registries, ...permitHeaders] : registries;
+
+        return new Response(JSON.stringify(listed), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -136,6 +149,26 @@ describe('HeaderFieldEditor: вибір довідника лише для ти�
     fireEvent.click(await screen.findByRole('option', { name: 'Permits (PERMITS)' }));
 
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ lookupRegistryDefId: 7 }));
+  }, 60000);
+
+  // ✎ Permits (lookup-prm). Мутаційний доказ: поверни запит без `includePermitHeaders=true` (або старий ключ списку) —
+  // `PRM_AIR` зникне з варіантів і тест почервоніє.
+  it('шапка типу дозволу PRM_* пропонується як ціль Lookup з підписом «Permits: …» і кодом', async () => {
+    const onChange = vi.fn();
+    const draft: HeaderFieldDraft = {
+      ...emptyHeaderFieldDraft(0),
+      code: 'Permit',
+      labelL10n: { en: 'Permit' },
+      dataType: 'Lookup',
+    };
+
+    await show(draft, onChange);
+
+    fireEvent.click(await screen.findByLabelText('Registry'));
+    fireEvent.click(await screen.findByRole('option', { name: 'Permits: Air permit (PRM_AIR)' }));
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ lookupRegistryDefId: 77 }));
+    expect(registryRequests.every((url) => url.endsWith('/api/v1/registries?includePermitHeaders=true'))).toBe(true);
   }, 60000);
 
   /**

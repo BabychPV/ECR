@@ -9,7 +9,6 @@ import { queryKeys } from '@/api/queryKeys';
 import type {
   CellConflictDto,
   ColumnDto,
-  RegistryDefDto,
   RegistryEntryDto,
   TableSliceDto,
   UnitRef,
@@ -149,6 +148,7 @@ import '@/shared/theme/cell-states.css';
 import './cellEditors.css';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
+import { lookupTargetsQuery } from '@/features/registries/lookupTargets';
 
 /** Властивості grid. */
 interface DocumentGridProps {
@@ -1001,9 +1001,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [data],
   );
 
+  // ✎ Permits: колонка Lookup може вказувати на шапку типу дозволу (`PRM_<TYPE>`) — звичайний перелік довідників
+  // її ховає, тож id → код резолвиться через цілі Lookup (`includePermitHeaders`). Записи читає той самий
+  // `GET …/entries?asOf=` на кінець періоду: сервер віддає лише активні й чинні на цю дату дозволи.
   const registriesList = useQuery({
-    queryKey: queryKeys.registries.list(),
-    queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
+    ...lookupTargetsQuery(),
     enabled: lookupRegistryDefIds.length > 0,
 
     // ⚠ Перелік довідників міняється рідко (адміністративна дія, не робота

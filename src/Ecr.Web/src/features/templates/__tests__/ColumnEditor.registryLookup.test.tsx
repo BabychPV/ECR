@@ -27,6 +27,7 @@ const SeededStrings: Record<string, string> = {
   'columns.lookupRegistryDefIdEmpty': 'No registries found',
   'common.cancel': 'Cancel',
   'columns.save': 'Save',
+  'registries.permitHeaderOption': 'Permits: {name} ({code})',
 };
 
 /**
@@ -54,7 +55,15 @@ function mockFetch(): void {
       }
 
       if (url.includes('/api/v1/registries')) {
-        return new Response(JSON.stringify(registries), {
+        // Шапки дозволів віддаються лише за явною згодою (звичайний перелік їх ховає).
+        const listed = url.includes('includePermitHeaders=true')
+          ? [
+              ...registries,
+              { id: 77, code: 'PRM_AIR', nameL10n: { values: { en: 'Air permit' } }, fields: [], isHierarchical: false, isTemporal: true, sourceKind: 'Master' },
+            ]
+          : registries;
+
+        return new Response(JSON.stringify(listed), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -107,6 +116,20 @@ describe('ColumnEditor: вибір довідника за назвою (ауд�
     fireEvent.click(await screen.findByRole('option', { name: 'Permits (PERMITS)' }));
 
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ lookupRegistryDefId: 7 }));
+  }, 60000);
+
+  // ✎ Permits (lookup-prm). Мутаційний доказ: поверни у `ColumnEditor.tsx` звичайний `GET /registries` —
+  // `PRM_AIR` зникне з варіантів, і тест почервоніє.
+  it('шапка типу дозволу PRM_* пропонується як ціль Lookup колонки', async () => {
+    const onChange = vi.fn();
+    const draft: ColumnDraft = { ...emptyColumnDraft(1), dataType: 'Lookup' };
+
+    await show(draft, onChange);
+
+    fireEvent.click(await screen.findByLabelText('Registry'));
+    fireEvent.click(await screen.findByRole('option', { name: 'Permits: Air permit (PRM_AIR)' }));
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ lookupRegistryDefId: 77 }));
   }, 60000);
 
   it('наявна колонка з уже заданим (сирим) ідентифікатором показує правильно вибраний довідник', async () => {

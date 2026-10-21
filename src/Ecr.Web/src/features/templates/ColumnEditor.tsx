@@ -3,10 +3,10 @@ import { Alert, Button, Group, NumberInput, Select, Skeleton, Stack, Switch, Tex
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import type { RegistryDefDto, UnitRef } from '@/api/types';
+import type { UnitRef } from '@/api/types';
+import { lookupTargetLabel, lookupTargetsQuery } from '@/features/registries/lookupTargets';
 import { formatMonthName } from '@/shared/format';
 import { t } from '@/shared/i18n';
-import { localized } from '@/shared/i18n/localized';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput } from '@/shared/ui/LocalizedInput';
 import {
@@ -95,11 +95,8 @@ export function ColumnEditor({
   // сирим числовим `RegistryDefId` — автор шаблону мав знати ідентифікатор
   // напам'ять, узятий десь поза цим екраном. Запит лінивий (лише коли
   // форма відкрита на колонці Lookup), бо саме тоді список і потрібен.
-  const registries = useQuery({
-    queryKey: queryKeys.registries.list(),
-    queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
-    enabled: isLookup,
-  });
+  // ✎ Permits: ціль Lookup може бути й шапкою типу дозволу (`PRM_<TYPE>`) — звичайний перелік їх ховає.
+  const registries = useQuery({ ...lookupTargetsQuery(), enabled: isLookup });
 
   // ⚠ Мемоізовано: `[]`-літерал у пропі `data` перебудовувався б щорендеру,
   // поки запит іще `pending`, — новий референс масиву на кожен рендер.
@@ -107,7 +104,7 @@ export function ColumnEditor({
     () =>
       (registries.data ?? []).map((registry) => ({
         value: String(registry.id),
-        label: `${localized(registry.nameL10n)} (${registry.code})`,
+        label: lookupTargetLabel(registry),
       })),
     [registries.data],
   );

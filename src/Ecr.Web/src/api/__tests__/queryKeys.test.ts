@@ -50,6 +50,7 @@ describe('queryKeys — фабрика ключів TanStack Query', () => {
       [...queryKeys.templates.accessMatrix(sample)],
       [...queryKeys.registries.all()],
       [...queryKeys.registries.list()],
+      [...queryKeys.registries.lookupTargets()],
       [...queryKeys.registries.entries('CODE')],
       [...queryKeys.registries.definition('CODE')],
       [...queryKeys.registries.history('CODE')],

@@ -1,11 +1,8 @@
 import { useMemo, type JSX } from 'react';
 import { Alert, Button, Group, NumberInput, Select, Skeleton, Stack, Switch, TextInput } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
-import { queryKeys } from '@/api/queryKeys';
-import type { RegistryDefDto } from '@/api/types';
+import { lookupTargetLabel, lookupTargetsQuery } from '@/features/registries/lookupTargets';
 import { t } from '@/shared/i18n';
-import { localized } from '@/shared/i18n/localized';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput } from '@/shared/ui/LocalizedInput';
 import { EditableDataTypes } from './column';
@@ -49,17 +46,14 @@ export function HeaderFieldEditor({
   const blocker = whyCannotSaveHeaderField(draft);
   const isLookup = draft.dataType === 'Lookup';
 
-  const registries = useQuery({
-    queryKey: queryKeys.registries.list(),
-    queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
-    enabled: isLookup,
-  });
+  // ✎ Permits: ціль Lookup може бути й шапкою типу дозволу (`PRM_<TYPE>`) — звичайний перелік їх ховає.
+  const registries = useQuery({ ...lookupTargetsQuery(), enabled: isLookup });
 
   const registryOptions = useMemo(
     () =>
       (registries.data ?? []).map((registry) => ({
         value: String(registry.id),
-        label: `${localized(registry.nameL10n)} (${registry.code})`,
+        label: lookupTargetLabel(registry),
       })),
     [registries.data],
   );
