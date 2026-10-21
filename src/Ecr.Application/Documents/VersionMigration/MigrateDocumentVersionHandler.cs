@@ -219,6 +219,20 @@ public sealed class MigrateDocumentVersionHandler(
     /// <summary>Подія журналу безпеки: перенос розпочато (маркер "міграція в процесі" зафіксовано).</summary>
     public const string StartedEventType = "DocumentVersionMigrationStarted";
 
+    /// <summary>
+    /// Від скількох значень, що переносяться, обов'язкове <see cref="BackupConfirmation"/> (рішення людини 21.10, варіант «б»:
+    /// лише для великих проєктів). Змінюється одним числом; <c>0</c> — вимагати завжди.
+    /// </summary>
+    public static long BackupConfirmationThreshold { get; set; } = DefaultBackupConfirmationThreshold;
+
+    /// <summary>Типовий поріг обов'язковості підтвердження бекапу, значень.</summary>
+    public const long DefaultBackupConfirmationThreshold = 500_000;
+
+    /// <summary>
+    /// Підтвердження резервної копії (шлях і/або час) із запиту. Виставляє той, хто викликає (контролер / фонова задача) ДО
+    /// виклику; не параметр перевантажень, щоб не множити їх (тести й інші виклики незмінні).
+    /// </summary>
+    public string? BackupConfirmation { get; set; }
 
     /// <summary>Подія журналу безпеки: значення Lookup шапки документа перенесено на запис нового довідника.</summary>
     public const string LookupRemapEventType = "DocumentHeaderLookupRemapped";
@@ -541,7 +555,8 @@ public sealed class MigrateDocumentVersionHandler(
                     renames is { Count: > 0 } ? renames : null,
                     acceptGuardedOverwrite,
                     lookupRemaps is { Count: > 0 } ? lookupRemaps : null,
-                    allowLockedDocuments),
+                    allowLockedDocuments,
+                    BackupConfirmation),
                 ct,
                 currentUser.UserId)
             .ConfigureAwait(false);
@@ -852,6 +867,22 @@ public sealed class MigrateDocumentVersionHandler(
             var (dto, plan, foreignKeys) = (planned.Dto, planned.Plan, planned.ForeignKeys);
             ThrowIfRefused(dto, foreignKeys, plan.RenameConflicts, acceptGuardedOverwrite, plan.LookupGuardedValues);
 
+            // ⛔ Без підтвердженого бекапу великий перенос не стартує: частина комірок фіксується діапазонами, відкат -
+            // лише відновленням з копії. Перевіряється ДО маркера - відмова нічого не залишає.
+            if (plan.TransferredValues >= BackupConfirmationThreshold && string.IsNullOrWhiteSpace(BackupConfirmation))
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.GuardedChangeWithoutStrategy,
+                    $"Переноситься {plan.TransferredValues} значень (від {BackupConfirmationThreshold}): потрібне підтвердження резервної копії бази " +
+                    "(поле backupConfirmation — шлях і/або час бекапу).",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-SCHM-0422.migrateBackupRequired",
+                        ["transferredValues"] = plan.TransferredValues.ToString(CultureInfo.InvariantCulture),
+                        ["threshold"] = BackupConfirmationThreshold.ToString(CultureInfo.InvariantCulture),
+                    });
+            }
+
             grantedUsers = await store.ListUsersWithGrantsAsync(plan, MaxInvalidatedUsers, innerCt).ConfigureAwait(false);
 
             if (onProgress is not null)
@@ -895,6 +926,7 @@ public sealed class MigrateDocumentVersionHandler(
                         toVersionId = target.Id,
                         mode = dto.Mode.ToString(),
                         transferredValues = dto.TransferredValues,
+                        backupConfirmation = BackupConfirmation is { Length: > 500 } longValue ? longValue[..500] : BackupConfirmation,
                     }),
                     profile.UserId, currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
@@ -998,6 +1030,7 @@ public sealed class MigrateDocumentVersionHandler(
                             // Мапи Lookup шапки: скільки значень переписано й по скількох полях. ⛔ Лише кількості.
                             lookupRemapped = plan.LookupRemappedValues,
                             lookupRemapTargets = plan.LookupRemaps.Select(r => r.HeaderFieldDefId).Distinct().Count(),
+                            backupConfirmation = BackupConfirmation is { Length: > 500 } longValue ? longValue[..500] : BackupConfirmation,
                         }),
                         profile.UserId, currentUser.CorrelationId),
                     innerCt).ConfigureAwait(false);
