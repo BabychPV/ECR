@@ -87,7 +87,8 @@ public sealed partial class DocumentVersionMigrationTests
     }
 
     private static Task<HttpResponseMessage> PostRemapAsync(
-        HttpClient client, LookupSetup l, bool dryRun, bool async = false, params (long From, long To)[] pairs)
+        HttpClient client, LookupSetup l, bool dryRun, bool async = false, bool? allowLocked = null,
+        params (long From, long To)[] pairs)
         => client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{l.S.Doc.DocumentId.ToString(CultureInfo.InvariantCulture)}/migrate-version", UriKind.Relative),
             new Dictionary<string, object?>
@@ -96,6 +97,7 @@ public sealed partial class DocumentVersionMigrationTests
                 ["mode"] = "Safe",
                 ["dryRun"] = dryRun,
                 ["async"] = async,
+                ["allowLockedDocuments"] = allowLocked,
                 ["lookupRemaps"] = new[]
                 {
                     new Dictionary<string, object?>
@@ -181,6 +183,7 @@ public sealed partial class DocumentVersionMigrationTests
             client, l, dryRun: true, pairs: [(l.OldEntry, l.GoodNew), (l.OtherOldEntry, l.GoodNew)]).ConfigureAwait(true)).ConfigureAwait(true);
         Assert.True(dry.GetProperty("canApply").GetBoolean(), dry.ToString());
         Assert.Equal(1, dry.GetProperty("lookupRemapped").GetInt64());
+        Assert.Equal(0, dry.GetProperty("lockedDocumentCount").GetInt32());
         var item = Assert.Single(dry.GetProperty("lookupRemapReport").EnumerateArray());
         Assert.True(item.GetProperty("applied").GetBoolean());
         Assert.Equal(1, item.GetProperty("mappedValues").GetInt64());
@@ -393,20 +396,91 @@ public sealed partial class DocumentVersionMigrationTests
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-7.5")]
-    public async Task Затверджений_документ_шапка_ремапиться_без_прапора_а_в_аудиті_locked_true()
+    public async Task Затверджений_документ_без_прапора_відмова_422_а_сухий_прогін_називає_кількість()
+    {
+        var l = await ArrangeLookupAsync(submitted: true, approved: true).ConfigureAwait(true);
+        var before = await SnapshotAsync(l.S).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, l.S.UserName).ConfigureAwait(true);
+
+        // Сухий прогін: нічого не змінено, кількість закритих документів названо, застосувати без згоди не можна.
+        var dry = await ReadJsonAsync(await PostRemapAsync(client, l, dryRun: true, pairs: [(l.OldEntry, l.GoodNew)]).ConfigureAwait(true))
+            .ConfigureAwait(true);
+        Assert.Equal(1, dry.GetProperty("lockedDocumentCount").GetInt32());
+        Assert.False(dry.GetProperty("canApply").GetBoolean(), dry.ToString());
+        Assert.Contains("lookupLockedDocuments", dry.GetProperty("refusals").EnumerateArray().Select(r => r.GetString()));
+
+        // Явне «ні» і відсутній прапор - те саме.
+        foreach (var flag in new bool?[] { null, false })
+        {
+            var response = await PostRemapAsync(client, l, dryRun: false, allowLocked: flag, pairs: [(l.OldEntry, l.GoodNew)])
+                .ConfigureAwait(true);
+            await AssertProblemAsync(response, HttpStatusCode.UnprocessableEntity, "ECR-SCHM-0422", "err.ECR-SCHM-0422.migrateLookupLockedDocuments")
+                .ConfigureAwait(true);
+        }
+
+        Assert.Equal(before, await SnapshotAsync(l.S).ConfigureAwait(true));
+        Assert.Equal((l.OldField, (long?)l.OldEntry), await StoredLookupAsync(l).ConfigureAwait(true));
+        Assert.Empty(await RemapEventsAsync(l).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.5")]
+    public async Task Затверджений_документ_з_прапором_шапка_ремапиться_а_в_аудиті_locked_true()
     {
         var l = await ArrangeLookupAsync(submitted: true, approved: true).ConfigureAwait(true);
 
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, l.S.UserName).ConfigureAwait(true);
 
-        var response = await PostRemapAsync(client, l, dryRun: false, pairs: [(l.OldEntry, l.GoodNew)]).ConfigureAwait(true);
+        var dry = await ReadJsonAsync(await PostRemapAsync(
+            client, l, dryRun: true, allowLocked: true, pairs: [(l.OldEntry, l.GoodNew)]).ConfigureAwait(true)).ConfigureAwait(true);
+        Assert.True(dry.GetProperty("canApply").GetBoolean(), dry.ToString());
+        Assert.Equal(1, dry.GetProperty("lockedDocumentCount").GetInt32());
+
+        var response = await PostRemapAsync(client, l, dryRun: false, allowLocked: true, pairs: [(l.OldEntry, l.GoodNew)])
+            .ConfigureAwait(true);
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
         Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {body} {app.ErrorsText}");
 
         Assert.Equal((l.NewField, (long?)l.GoodNew), await StoredLookupAsync(l).ConfigureAwait(true));
         var evt = JsonDocument.Parse(Assert.Single(await RemapEventsAsync(l).ConfigureAwait(true))).RootElement;
         Assert.True(Assert.Single(evt.GetProperty("fields").EnumerateArray()).GetProperty("locked").GetBoolean());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.5")]
+    public async Task Фоновий_перенос_закритого_документа_без_прапора_падає_ECR_SCHM_0422_а_з_прапором_проходить()
+    {
+        var l = await ArrangeLookupAsync(submitted: true, approved: true).ConfigureAwait(true);
+        var before = await SnapshotAsync(l.S).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, l.S.UserName).ConfigureAwait(true);
+
+        var refused = await PostRemapAsync(client, l, dryRun: false, async: true, pairs: [(l.OldEntry, l.GoodNew)]).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Accepted, refused.StatusCode);
+        var failed = await WaitJobAsync(
+            client, JsonDocument.Parse(await refused.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement.GetProperty("jobId").GetString()!, app)
+            .ConfigureAwait(true);
+        Assert.Equal("Failed", failed.GetProperty("state").GetString());
+        Assert.Equal("ECR-SCHM-0422", failed.GetProperty("errorCode").GetString());
+        Assert.Equal(before, await SnapshotAsync(l.S).ConfigureAwait(true));
+        Assert.Equal((l.OldField, (long?)l.OldEntry), await StoredLookupAsync(l).ConfigureAwait(true));
+
+        var accepted = await PostRemapAsync(client, l, dryRun: false, async: true, allowLocked: true, pairs: [(l.OldEntry, l.GoodNew)])
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Accepted, accepted.StatusCode);
+        var ok = await WaitJobAsync(
+            client, JsonDocument.Parse(await accepted.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement.GetProperty("jobId").GetString()!, app)
+            .ConfigureAwait(true);
+        Assert.True(ok.GetProperty("state").GetString() == "Succeeded", $"задача: {ok.GetRawText()}\n{app.ErrorsText}");
+        Assert.Equal((l.NewField, (long?)l.GoodNew), await StoredLookupAsync(l).ConfigureAwait(true));
     }
 
     [Fact]
