@@ -135,6 +135,45 @@
   color: var(--ecr-muted);
 }
 
+/*
+ * Смужка аркушів на картці (дефект людини 21.10): у документа з 19+ аркушами ряд
+ * сегментів по 16 px (304 px) ширший за картку (~196 px), а підпис «N of M approved»
+ * (`white-space: nowrap`) виходив за праву межу на сусідню колонку. Тут — перенос
+ * сегментів на другий рядок і підпис, що обрізується в межах картки (повний текст — у `title`).
+ * Локально, не в `shared/ui/SegmentBar`: таблиця й шапка документа лишаються за макетом.
+ */
+.ecr-board-card .ecr-segbar {
+  flex-wrap: wrap;
+  row-gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ecr-board-card .ecr-segbar__segs {
+  flex-wrap: wrap;
+  row-gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ecr-board-card .ecr-segbar__label {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * Чернетка — суцільна світла заливка замість пунктирної порожньої рамки макета: на картці
+ * ряд «порожніх» квадратів читався як відсутні гліфи. Від затвердженого (темно-сірий
+ * `--ecr-muted`) відрізняється світлістю, а від поданого/відхиленого — тоном.
+ */
+.ecr-board-card .ecr-segbar__sg[data-state='Draft'][data-tone='neutral'] {
+  border-style: solid;
+  border-color: var(--ecr-border-strong);
+  background: var(--ecr-border-strong);
+}
+
 .ecr-board-meta {
   display: flex;
   align-items: center;

@@ -85,7 +85,11 @@ export function SegmentBar({
         ))}
       </span>
       {summary && (
-        <span className="ecr-segbar__label" data-segment-summary={`${String(done)}/${String(all)}`}>
+        <span
+          className="ecr-segbar__label"
+          title={t('segments.approvedOf', { done, total: all })}
+          data-segment-summary={`${String(done)}/${String(all)}`}
+        >
           {t('segments.approvedOf', { done, total: all })}
         </span>
       )}
