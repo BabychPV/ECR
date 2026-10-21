@@ -1,0 +1,5 @@
+# SAMPLE with synthetic ids. DEFAULT dates (1900-01-01 .. 9999-12-31) - decided by the human 21.10.
+# The real file (ids of LAND_PERMIT entries that occur in no Excel book) is NOT in git: see README, section 'Service entries file'.
+number;location;validFrom;validTo
+permit_901;service: Land dictionary only;1900-01-01;9999-12-31
+AF_sample_0001;service: Land dictionary only;1900-01-01;9999-12-31
