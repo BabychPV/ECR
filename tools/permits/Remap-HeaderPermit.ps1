@@ -35,6 +35,7 @@
 .PARAMETER Database        database name (EcrLand* only)
 .PARAMETER SourceRegistry / TargetRegistry / HeaderFieldCode / NumberField
 .PARAMETER MapOut          JSON file with the Id -> Id map
+.PARAMETER MapFormat       legacy (default) | lookupRemaps (body part of POST /documents/{id}/migrate-version, Analiz plan MIGRATE-LOOKUP-REMAP)
 .PARAMETER Execute         NOT IMPLEMENTED: throws and lists the TODO questions
 #>
 [CmdletBinding()]
@@ -47,6 +48,7 @@ param(
     [string]$NumberField = 'Permit_Number',
     [bool]$NormalizeDashUnderscore = $true,
     [string]$MapOut,
+    [ValidateSet('legacy', 'lookupRemaps')][string]$MapFormat = 'legacy',
     [switch]$ShowCodes,
     [switch]$Execute
 )
@@ -54,6 +56,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 . (Join-Path $here '..\land\EcrApi.ps1')
+. (Join-Path $here 'Permits.Excel.Lib.ps1')
 Set-StrictMode -Off
 
 if ($Execute) {
@@ -71,7 +74,6 @@ function Invoke-Select {
     while ($rd.Read()) { $o = [ordered]@{}; for ($i = 0; $i -lt $rd.FieldCount; $i++) { $o[$rd.GetName($i)] = $(if ($rd.IsDBNull($i)) { $null } else { $rd[$i] }) }; [void]$rows.Add([pscustomobject]$o) }
     $rd.Close(); return ,$rows
 }
-function Get-NormKey { param([string]$S) if ($NormalizeDashUnderscore) { return ($S.Trim().ToLowerInvariant() -replace '[-_]', '') } return $S.Trim().ToLowerInvariant() }
 
 $cn = New-Object System.Data.SqlClient.SqlConnection $conn
 $cn.Open()
@@ -97,41 +99,33 @@ WHERE e.RegistryDefId = @rid AND e.IsDeleted = 0
 }
 finally { $cn.Close() }
 
-$withDocs = @($src | Where-Object { $_.Docs -gt 0 })
+$res = Resolve-HeaderPermitMap -Source $src -Target $tgt -Normalize $NormalizeDashUnderscore
+$map = $res.Map; $counters = $res.Counters
 $docsBefore = 0; foreach ($s in $src) { $docsBefore += [int]$s.Docs }
-Write-Host ("Source {0}: entries={1}, entries with documents={2}, header values={3}, template versions with values={4}" -f $SourceRegistry, $src.Count, $withDocs.Count, $docsBefore, $versions[0].V)
+Write-Host ("Source {0}: entries={1}, entries with documents={2}, header values={3}, template versions with values={4}" -f $SourceRegistry, $src.Count, $counters.withDocs, $docsBefore, $versions[0].V)
 if ($tgtReg.Count -eq 0) { Write-Host ("Target registry {0} does not exist yet (load Permits first): no matches can be planned." -f $TargetRegistry) }
 else { Write-Host ("Target {0}: entries={1}" -f $TargetRegistry, $tgt.Count) }
-
-$byNorm = @{}
-foreach ($t in $tgt) { $k = Get-NormKey ([string]$t.Num); if (-not $byNorm.ContainsKey($k)) { $byNorm[$k] = New-Object System.Collections.ArrayList }; [void]$byNorm[$k].Add($t) }
-$map = New-Object System.Collections.ArrayList
-$counters = [ordered]@{ matched = 0; noMatch = 0; ambiguous = 0; docsMatched = 0; docsBlocked = 0; inactiveTarget = 0 }
-foreach ($s in $src) {
-    $hits = @(); $k = Get-NormKey ([string]$s.Code)
-    if ($byNorm.ContainsKey($k)) { $hits = @($byNorm[$k]) }
-    $status = 'no-match'; $newId = $null
-    if ($hits.Count -eq 1) {
-        $status = 'matched'; $newId = [int]$hits[0].Id
-        if (-not [bool]$hits[0].IsActive) { $counters.inactiveTarget++; $status = 'matched-inactive' }
-    }
-    elseif ($hits.Count -gt 1) { $status = 'ambiguous' }
-    switch -Wildcard ($status) {
-        'matched*' { $counters.matched++; $counters.docsMatched += [int]$s.Docs }
-        'ambiguous' { $counters.ambiguous++; $counters.docsBlocked += [int]$s.Docs }
-        default { $counters.noMatch++; if ($s.Docs -gt 0) { $counters.docsBlocked += [int]$s.Docs } }
-    }
-    [void]$map.Add([ordered]@{ oldId = [int]$s.Id; oldCode = [string]$s.Code; docs = [int]$s.Docs; newId = $newId; status = $status })
-}
-Write-Host ("Match (1:1 by number): matched={0} noMatch={1} ambiguous={2} inactiveTarget={3}" -f $counters.matched, $counters.noMatch, $counters.ambiguous, $counters.inactiveTarget)
-Write-Host ("Documents: before (on {0})={1}; after (on {2}, planned)={3}; blocked={4}" -f $SourceRegistry, $docsBefore, $TargetRegistry, $counters.docsMatched, $counters.docsBlocked)
+Write-Host ("Match (1:1 by number): matched={0} noMatch={1} ambiguous={2} inactiveTarget={3} normalized={4}" -f $counters.matched, $counters.noMatch, $counters.ambiguous, $counters.inactiveTarget, $counters.normalized)
+$usedMapped = @($map | Where-Object { $_.docs -gt 0 -and $null -ne $_.newId }).Count
+$usedUnmapped = @($map | Where-Object { $_.docs -gt 0 -and $null -eq $_.newId }).Count
+Write-Host ("Used entries (with documents): mapped={0} unmapped={1}" -f $usedMapped, $usedUnmapped)
+Write-Host ("Documents: before (on {0})={1}; after (on {2}, planned)={3}; blocked={4}" -f $SourceRegistry, $docsBefore, $TargetRegistry, $counters.docsMapped, $counters.docsBlocked)
+# ids only on the console; codes (permit numbers) never; with -ShowCodes they go to the map FILE only
 foreach ($m in $map | Where-Object { $_.docs -gt 0 }) {
-    Write-Host ("  source Id={0}{1}: docs={2} status={3}" -f $m.oldId, $(if ($ShowCodes) { " code=$($m.oldCode)" } else { '' }), $m.docs, $m.status)
+    Write-Host ("  source Id={0}: docs={1} status={2}{3}" -f $m.oldId, $m.docs, $m.status, $(if ($m.normalized) { ' normalized' } else { '' }))
 }
 if ($MapOut) {
-    $obj = [ordered]@{ source = $SourceRegistry; target = $TargetRegistry; createdAt = (Get-Date).ToString('o'); map = @($map) }
-    [IO.File]::WriteAllText($MapOut, ($obj | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
-    Write-Host 'Map written (ids and codes, no field values).'
+    if ($MapFormat -eq 'lookupRemaps') {
+        $obj = ConvertTo-LookupRemapsDocument -Map $map -Database $Database -HeaderFieldCode $HeaderFieldCode -IncludeCodes:$ShowCodes
+    }
+    else {
+        $items = @($map | ForEach-Object { $m = [ordered]@{ oldId = $_.oldId }; if ($ShowCodes) { $m['oldCode'] = $_.oldCode }; $m['docs'] = $_.docs; $m['newId'] = $_.newId; $m['status'] = $_.status; $m })
+        $obj = [ordered]@{ source = $SourceRegistry; target = $TargetRegistry; createdAt = (Get-Date).ToString('o'); map = $items }
+    }
+    $dir = Split-Path -Parent $MapOut
+    if ($dir -and -not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Path $dir -Force) }
+    [IO.File]::WriteAllText($MapOut, ($obj | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host ("Map written ({0}); ids{1}, no field values." -f $MapFormat, $(if ($ShowCodes) { ' and codes' } else { '' }))
 }
-if ($counters.docsBlocked -gt 0) { Write-Host 'REFUSED: documents without a 1:1 target; fix the data first.'; exit 1 }
+if ($counters.docsBlocked -gt 0 -or $usedUnmapped -gt 0) { Write-Host 'REFUSED: documents without a 1:1 target; fix the data first.'; exit 1 }
 exit 0
