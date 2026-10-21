@@ -49,6 +49,23 @@ details.pp-group > summary {
   gap: var(--mantine-spacing-sm);
 }
 
+/* Підказка поля («The first day it is no longer valid») стоїть ПІД полем, а не між підписом і полем: інакше Valid to
+ * опускалось на висоту підказки відносно Issued/Valid from. Лише порядок у flex-колонці - зв'язок підказки з полем
+ * (aria-describedby) і тексти не змінюються. */
+.pp-fields .mantine-InputWrapper-root {
+  display: flex;
+  flex-direction: column;
+}
+
+.pp-fields .mantine-InputWrapper-description {
+  order: 3;
+  margin-top: calc(var(--mantine-spacing-xs) / 2);
+}
+
+.pp-fields .mantine-InputWrapper-error {
+  order: 4;
+}
+
 /* Лінія чинності з позначкою «сьогодні». */
 .pp-tl {
   position: relative;
