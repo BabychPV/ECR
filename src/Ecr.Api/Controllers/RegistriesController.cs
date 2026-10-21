@@ -31,11 +31,16 @@ public sealed class RegistriesController(
     IConfiguration configuration) : ControllerBase
 {
     /// <summary>Перелік довідників. Право <c>Registry.View</c>.</summary>
+    /// <param name="includePermitHeaders">
+    /// <c>true</c> - додатково віддати реєстри шапок опублікованих типів дозволів (код <c>PRM_</c> + код типу) як ціль Lookup
+    /// поля шапки й колонки шаблону. Права ті самі; за замовчуванням ці реєстри приховані.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     [HttpGet]
     [ProducesResponseType<IReadOnlyList<RegistryDefDto>>(StatusCodes.Status200OK)]
-    public async Task<ActionResult<IReadOnlyList<RegistryDefDto>>> List(CancellationToken ct)
-        => Ok(await listRegistries.HandleAsync(ct).ConfigureAwait(false));
+    public async Task<ActionResult<IReadOnlyList<RegistryDefDto>>> List(
+        [FromQuery] bool includePermitHeaders, CancellationToken ct)
+        => Ok(await listRegistries.HandleAsync(includePermitHeaders, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Заводить довідник-контейнер, без жодного поля. Право
@@ -69,6 +74,10 @@ public sealed class RegistriesController(
     /// <param name="code">Код довідника.</param>
     /// <param name="asOf">Дата періоду.</param>
     /// <param name="parentEntryId">Обраний батьківський запис для каскаду.</param>
+    /// <param name="documentId">
+    /// Документ, у шапку якого обирається запис: перелік звужується до записів, придатних у вікні проєкту документа
+    /// (активні, чинні бодай один день вікна), а <paramref name="asOf"/> не потрібен. Невидимий документ - 404.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// <paramref name="asOf"/> обов'язковий за змістом: довідники темпоральні,
@@ -79,8 +88,12 @@ public sealed class RegistriesController(
     [HttpGet("{code}/entries")]
     [ProducesResponseType<IReadOnlyList<RegistryEntryDto>>(StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyList<RegistryEntryDto>>> Entries(
-        string code, [FromQuery] DateOnly asOf, [FromQuery] long? parentEntryId, CancellationToken ct)
-        => Ok(await getEntries.HandleAsync(code, asOf, parentEntryId, ct).ConfigureAwait(false));
+        string code,
+        [FromQuery] DateOnly asOf,
+        [FromQuery] long? parentEntryId,
+        [FromQuery] long? documentId,
+        CancellationToken ct)
+        => Ok(await getEntries.HandleAsync(code, asOf, parentEntryId, documentId, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Повний опис довідника для конструктора. Право <c>Registry.View</c>.

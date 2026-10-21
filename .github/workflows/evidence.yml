@@ -56,7 +56,7 @@ jobs:
   # завдання без `if`.
   gate:
     name: gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -86,7 +86,7 @@ jobs:
     needs: gate
     name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'build (повний, пропущено на rc)' || 'build' }}
     if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -106,7 +106,7 @@ jobs:
     needs: gate
     name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'test (повний, пропущено на rc)' || 'test' }}
     if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -134,7 +134,7 @@ jobs:
 
   honesty-guard:
     name: honesty-guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -188,7 +188,7 @@ jobs:
   attest:
     name: ${{ matrix.check }}
     if: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       actions: read

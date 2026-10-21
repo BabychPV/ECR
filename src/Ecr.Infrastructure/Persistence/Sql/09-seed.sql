@@ -9112,6 +9112,9 @@ USING (VALUES
     ,(N'permits.page.addValue.added', N'en', N'Value added', 1)
     ,(N'permits.page.addValue.close', N'en', N'Close', 1)
     -- PERMITS: add-value ── кінець секції ──
+    -- PERMITS: lookup-prm ── en: шапка типу дозволу як ціль Lookup поля шапки й колонки шаблону; ru/kz — порцією PERMITS: lookup-prm нижче ──
+    ,(N'registries.permitHeaderOption', N'en', N'Permits: {name} ({code})', 1)
+    -- PERMITS: lookup-prm ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -23603,6 +23606,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: add-value ── кінець секції ──
+-- PERMITS: lookup-prm ── ru/kz: шапка типу дозволу як ціль Lookup поля шапки й колонки шаблону; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'registries.permitHeaderOption', N'ru', N'Разрешения: {name} ({code})'),
+    (N'registries.permitHeaderOption', N'kz', N'Рұқсаттар: {name} ({code})')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: lookup-prm ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

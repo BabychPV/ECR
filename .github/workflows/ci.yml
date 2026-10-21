@@ -71,7 +71,8 @@ jobs:
   # імена завдань і атестація не змінені (`attest` — лише PR rc/**, gate йому не потрібен).
   gate:
     name: gate
-    runs-on: ubuntu-latest
+    # ubuntu-24.04 (не ubuntu-latest): Playwright 1.55.1 не підтримує Ubuntu 26.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -143,7 +144,7 @@ jobs:
     needs: gate
     name: server-part (${{ matrix.part }})
     if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -290,7 +291,7 @@ jobs:
     # має ІНШЕ ім'я; на решті подій ім'я незмінне (його читає атестація й ruleset `main`).
     name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'server (повний, пропущено на rc)' || 'server' }}
     if: ${{ always() && !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Усі частини server зелені
         run: |
@@ -304,7 +305,7 @@ jobs:
     needs: gate
     name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'client (повний, пропущено на rc)' || 'client' }}
     if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -335,7 +336,7 @@ jobs:
     needs: gate
     name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'a11y (повний, пропущено на rc)' || format('a11y ({0})', matrix.theme) }}
     if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # ⚠ W4.3 (accessibility.a11y.test.tsx, коментар над ECR_A11Y_THEME) описував
     # матрицю light/dark як чинну — вона такою не була: ця джоба досі проганяла
     # ОБИДВІ теми ПОСЛІДОВНО в одному виклику Vitest (ECR_A11Y_THEME ніде не
@@ -591,7 +592,7 @@ jobs:
     needs: [ worker-windows, msi-windows, msi-install, gate ]
     # ✎ 2026-10-12: на push у не-інтеграційну `lane/**` Windows-завдання пропущені навмисно — агрегатор теж.
     if: ${{ always() && !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Усі Windows-завдання зелені
         run: |
@@ -633,7 +634,7 @@ jobs:
   attest:
     name: ${{ matrix.check }}
     if: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       actions: read
@@ -712,7 +713,7 @@ jobs:
   # перезапускати червоне замість читати його.
   shuffle:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -745,7 +746,7 @@ jobs:
   # червонів, `pr-source` треба додати в обов'язкові перевірки `main`.
   pr-source:
     if: github.event_name == 'pull_request' && github.head_ref == 'dev/integration'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - name: PR з dev/integration заборонено
@@ -761,7 +762,7 @@ jobs:
   # всіх гілок `push` (включно з main), ризик пропущених обов'язкових перевірок.
   lane-shape:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -800,7 +801,7 @@ jobs:
   lane-affected:
     name: lane-affected
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -839,7 +840,7 @@ jobs:
   lane-client:
     name: lane-client
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

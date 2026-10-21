@@ -70,6 +70,14 @@
     Передається в тіло migrate-version як tableRenames (і на dry-run, і на застосування). Без параметра
     тіло як раніше. Готова мапа для трьох таблиць 9a: tools/land/rename-maps/land-9a-missing-tables.json.
 
+.PARAMETER PermitLookup
+    Довідник-ціль поля шапки Permit: LAND_PERMIT (довідник контракту Land) або PRM_AIR (шапка типу дозволу
+    Permits). Без параметра - значення permitLookup.default з маніфесту (зараз LAND_PERMIT), тобто поведінка
+    не змінюється. PRM_AIR вмикати лише після рішення про перемикання й ремапу значень документів (див.
+    tools/land/README.md, «Permit -> PRM_AIR»): інакше нова версія шаблону з іншим довідником Permit
+    відхиляється міграцією документів (guardedWithData). З PRM_AIR перелік довідників читається з
+    ?includePermitHeaders=true (шапки дозволів у звичайному переліку приховані).
+
 .PARAMETER MigrateTimeoutMinutes
     Скільки чекати завершення фонової міграції (за замовчуванням 60 хв).
 
@@ -94,6 +102,7 @@ param(
     [string]$TableRenameMap,
     [int]$MigrateTimeoutMinutes = 60,
     [string]$ConfirmStand,
+    [ValidateSet('LAND_PERMIT', 'PRM_AIR')][string]$PermitLookup,
     [switch]$DryRun
 )
 
@@ -177,7 +186,13 @@ if ($null -ne $draft -and -not [string]::IsNullOrWhiteSpace($NewVersion)) {
 $baseVersion = if ($null -ne $draft) { $draft } else { $source }
 
 # --- довідники ---------------------------------------------------------------------------
-$r = Invoke-Ecr -Method GET -Path '/api/v1/registries'
+# Ціль поля Permit: параметр, інакше значення за замовчуванням з маніфесту (LAND_PERMIT) - поведінка Land не змінюється
+# без явного рішення. Шапки дозволів (PRM_*) у звичайному переліку приховані - їх дає лише includePermitHeaders=true.
+$permitRegistry = if ($PermitLookup) { $PermitLookup }
+    elseif ($manifest.PSObject.Properties.Match('permitLookup').Count -gt 0) { [string]$manifest.permitLookup.default }
+    else { 'LAND_PERMIT' }
+$registriesPath = if ($permitRegistry -like 'PRM_*') { '/api/v1/registries?includePermitHeaders=true' } else { '/api/v1/registries' }
+$r = Invoke-Ecr -Method GET -Path $registriesPath
 Assert-EcrOk $r 'GET registries'
 $registryIds = @{}
 foreach ($x in @($r.Json)) { $registryIds[[string]$x.code] = [int]$x.id }
@@ -186,10 +201,11 @@ $desired = @()
 foreach ($w in $wanted) {
     $lookupId = $null
     if ($w.kind -eq 'Lookup') {
-        if (-not $registryIds.ContainsKey($w.registry)) {
-            throw "Довідника $($w.registry) немає: спершу виконайте Import-ContractDictionaries.ps1."
+        $registryCode = if ([string]$w.key -eq 'Permit') { $permitRegistry } else { [string]$w.registry }
+        if (-not $registryIds.ContainsKey($registryCode)) {
+            throw "Довідника $registryCode немає: спершу виконайте Import-ContractDictionaries.ps1 (LAND_*) або опублікуйте тип дозволу (PRM_*)."
         }
-        $lookupId = $registryIds[$w.registry]
+        $lookupId = $registryIds[$registryCode]
     }
     $req = $false
     if ($w.PSObject.Properties.Match('isRequired').Count -gt 0) { $req = [bool]$w.isRequired }

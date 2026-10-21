@@ -1,5 +1,6 @@
 {
   "$comment": "Маніфест шапки вкладки «2. Contract» у порядку Excel. kind: Lookup | String | Service. Service (FileNumber, Version) — не HeaderFieldDef: read-only з Document.BusinessKey і версії шаблону.",
+  "permitLookup": { "default": "LAND_PERMIT", "allowed": ["LAND_PERMIT", "PRM_AIR"], "$comment": "Довідник-ціль поля Permit. LAND_PERMIT - до рішення про перемикання; PRM_AIR - шапка типу дозволу Permits (після ремапу значень, див. tools/land/README.md). Перемикається параметром -PermitLookup скриптів." },
   "fields": [
     { "position": 1, "key": "Area", "kind": "Lookup", "registry": "LAND_AREA", "csv": "area.csv" },
     { "position": 2, "key": "Contractor", "kind": "Lookup", "registry": "LAND_CONTRACTOR", "csv": "contractor.csv" },

@@ -39,7 +39,18 @@ public sealed class ListRegistriesHandler(
     /// з правом <c>Registry.EditDefinition</c>: перелік відкритий за <c>Registry.View</c>, а те, у
     /// яких шаблонах довідник і чи правиться його опис, — підготовка до зміни опису.
     /// </remarks>
-    public async Task<IReadOnlyList<RegistryDefDto>> HandleAsync(CancellationToken ct)
+    public Task<IReadOnlyList<RegistryDefDto>> HandleAsync(CancellationToken ct)
+        => HandleAsync(includePermitHeaders: false, ct);
+
+    /// <summary>Читає перелік; шапки типів дозволів - лише за явною згодою (вибір цілі Lookup).</summary>
+    /// <param name="includePermitHeaders">
+    /// <c>true</c> - у перелік потрапляють реєстри ШАПОК опублікованих типів дозволів (<c>PRM_&lt;TYPE&gt;</c>), бо
+    /// конструктор шаблону і піцкер шапки документа адресують ціль Lookup за ідентифікатором. Права ті самі:
+    /// <c>Registry.View</c> і S18-заборона на довідник. Таблиці типів і списки «лише для типу» лишаються прихованими.
+    /// За замовчуванням (<c>false</c>) перелік «Довідники» не змінюється.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<IReadOnlyList<RegistryDefDto>> HandleAsync(bool includePermitHeaders, CancellationToken ct)
     {
         await Templates.ListTemplatesHandler
             .RequireAsync(access, currentUser, Permission, ct)
@@ -75,6 +86,12 @@ public sealed class ListRegistriesHandler(
         IReadOnlySet<int> hidden = permits is null
             ? new HashSet<int>()
             : await permits.ListHiddenRegistryIdsAsync(ct).ConfigureAwait(false);
+
+        if (includePermitHeaders && permits is not null && hidden.Count > 0)
+        {
+            var headers = await permits.ListPublishedHeaderRegistryIdsAsync(ct).ConfigureAwait(false);
+            hidden = hidden.Where(id => !headers.Contains(id)).ToHashSet();
+        }
 
         return definitions
             .Where(d => !hidden.Contains(d.Id))

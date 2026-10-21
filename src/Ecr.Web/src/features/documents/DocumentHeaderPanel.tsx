@@ -18,7 +18,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { components } from '@/api/schema';
-import type { RegistryDefDto, RegistryEntryDto, UnitRef } from '@/api/types';
+import type { RegistryEntryDto, UnitRef } from '@/api/types';
 import { coerce } from '@/features/grid/edits';
 import { cellText, sameCellValue, sameDateValue } from '@/features/grid/cellValue';
 import { can, useSession } from '@/shared/session/useSession';
@@ -32,6 +32,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
+import { isPermitHeaderRegistry, lookupTargetsQuery } from '@/features/registries/lookupTargets';
 import {
   bilingualLabel,
   ContractOrder,
@@ -395,9 +396,10 @@ export function DocumentHeaderPanel({
       : 'no';
   const lookupDenied = registryAccess === 'no';
 
+  // ✎ Permits: поле шапки може вказувати на шапку типу дозволу (`PRM_<TYPE>`) — звичайний перелік довідників її
+  // ховає, тож id → код резолвиться через цілі Lookup (`includePermitHeaders`).
   const registriesList = useQuery({
-    queryKey: queryKeys.registries.list(),
-    queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
+    ...lookupTargetsQuery(),
     enabled: lookupRegistryDefIds.length > 0 && registryAccess === 'yes',
   });
 
@@ -436,6 +438,19 @@ export function DocumentHeaderPanel({
 
   const lookupEntriesQueries = useQueries({
     queries: lookupRegistryCodes.map(({ code, isTemporal }) => {
+      // ✎ Permits: перелік дозволів — у ВІКНІ проєкту документа (сервер бере межі з документа): лише активні й чинні
+      // бодай день вікна, як і приймає збереження шапки (`ECR-HDR-4223`). Чернетки (Draft) не пропонуються ніколи.
+      if (isPermitHeaderRegistry(code)) {
+        const permitsUrl = `/api/v1/registries/${encodeURIComponent(code)}/entries`;
+
+        return {
+          queryKey: [...queryKeys.registries.entries(code), 'document', documentId],
+          queryFn: () =>
+            apiFetch<RegistryEntryDto[]>(`${permitsUrl}?documentId=${String(documentId)}`),
+          staleTime: LookupEntriesStaleTimeMs,
+        };
+      }
+
       const asOf = isTemporal ? lookupAsOf : null;
 
       // ⚠ Базовий шлях — ОКРЕМИЙ шаблонний рядок, без `?asOf=` усередині:

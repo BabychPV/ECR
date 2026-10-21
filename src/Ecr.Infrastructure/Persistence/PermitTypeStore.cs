@@ -80,6 +80,13 @@ public sealed class PermitTypeStore(EcrDbContext db) : IPermitTypeStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlySet<int>> ListPublishedHeaderRegistryIdsAsync(CancellationToken ct)
+        => (await db.PermitTypeDefs.AsNoTracking()
+            .Where(t => t.Status == PermitTypeStatus.Published)
+            .Select(t => t.HeaderRegistryDefId).OrderBy(id => id).Take(MaxRows)
+            .ToListAsync(ct).ConfigureAwait(false)).ToHashSet();
+
+    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<int, int>> CountPermitsAsync(
         IReadOnlyCollection<int> headerRegistryDefIds, CancellationToken ct)
     {

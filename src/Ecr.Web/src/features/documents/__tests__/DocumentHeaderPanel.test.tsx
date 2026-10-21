@@ -176,7 +176,7 @@ function mockServer(
 
       // ⚠ Той самий двокроковий резолв, що `DocumentGrid.tsx` для Lookup-
       // колонок сітки: перелік довідників (ID → код), тоді записи ЗА КОДОМ.
-      if (url.endsWith('/api/v1/registries') && method === 'GET') {
+      if (url.endsWith('/api/v1/registries?includePermitHeaders=true') && method === 'GET') {
         return new Response(JSON.stringify(registries?.list ?? []), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -778,6 +778,53 @@ describe('DocumentHeaderPanel: Lookup-поле — picker за довідник�
     // надсилати) — цей рядок почервоніє: query-параметр зникне або
     // з'явиться для нетемпорального тесту вище.
     expect(request?.query).toBe(expected);
+  });
+
+  /*
+   * ✎ Permits (lookup-prm). Шапка типу дозволу `PRM_AIR` приховано в звичайному переліку, тож id → код іде через цілі
+   * Lookup, а записи читаються У ВІКНІ документа: `?documentId=` без `asOf`. Список — рівно те, що віддав сервер
+   * (активні й чинні у вікні проєкту), підпис — номер дозволу; Draft сервер не віддає, клієнт нічого не домислює.
+   * Мутаційний доказ: прибери гілку `isPermitHeaderRegistry` у `DocumentHeaderPanel.tsx` — запит піде з `asOf`, без
+   * `documentId`, і обидва тести нижче почервоніють.
+   */
+  it('шапка дозволу PRM_*: записи читаються з documentId у вікні документа, без asOf', async () => {
+    show({
+      fields: [
+        field({ code: 'Permit', dataType: 'Lookup', value: null, lookupRegistryDefId: 77, label: { values: { en: 'Permit' } } }),
+      ],
+      registries: {
+        list: [registryDef({ id: 77, code: 'PRM_AIR', isTemporal: true })],
+        entries: { PRM_AIR: [registryEntry({ id: 501, display: 'KZ79-0001' })] },
+      },
+    });
+
+    await screen.findByLabelText('Permit');
+    await waitFor(() => expect(entriesRequests.some((r) => r.code === 'PRM_AIR')).toBe(true));
+
+    expect(entriesRequests.find((r) => r.code === 'PRM_AIR')?.query).toBe(`documentId=${String(DocumentId)}`);
+  });
+
+  it('шапка дозволу PRM_*: у списку лише номери, що віддав сервер, вибір зберігається числовим id', async () => {
+    show({
+      fields: [
+        field({ code: 'Permit', dataType: 'Lookup', value: null, lookupRegistryDefId: 77, label: { values: { en: 'Permit' } } }),
+      ],
+      registries: {
+        list: [registryDef({ id: 77, code: 'PRM_AIR', isTemporal: true })],
+        entries: { PRM_AIR: [registryEntry({ id: 501, display: 'KZ79-0001' })] },
+      },
+    });
+
+    const select = await screen.findByLabelText('Permit');
+    await waitFor(() => expect(select.hasAttribute('disabled')).toBe(false));
+
+    fireEvent.click(select);
+    expect(await screen.findAllByRole('option')).toHaveLength(1);
+    fireEvent.click(await screen.findByRole('option', { name: 'KZ79-0001' }));
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
+
+    await waitFor(() => expect(sent.length).toBe(1));
+    expect(JSON.stringify(sent[0]?.body)).toContain('501');
   });
 });
 

@@ -4144,8 +4144,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/documents/{id}/export/{exportId}` | `Document.Export` | 5 |
 | `POST` | `/api/v1/documents/{id}/import/preview` | `Document.Import` | 5 |
 | `POST` | `/api/v1/documents/{id}/import/apply` | `Document.Import` | 5 |
-| `GET` | `/api/v1/registries` | `Registry.View` | 4 |
-| `GET` | `/api/v1/registries/{code}/entries` | `Registry.View` | 4 |
+| `GET` | `/api/v1/registries?includePermitHeaders=` | `Registry.View` | 4 |
+| `GET` | `/api/v1/registries/{code}/entries?asOf=&parentEntryId=&documentId=` | `Registry.View` | 4 |
 | `POST` | `/api/v1/registries/{code}/entries` | `Registry.EditData` | 4 |
 | `PUT` | `/api/v1/registries/source-kind` | `Integration.Manage` | 4 |
 | `GET` | `/api/v1/users/{id}/roles` | `Security.ManageUsers` | 3 |
@@ -4381,6 +4381,13 @@ public sealed class NotFoundException(string errorCode, string message)
 > (нематеріалізована) комірка оцінюється як `null`. Значення беруться з ЗБЕРЕЖЕНОГО
 > стану: ще не збережена правка в мапі не відображена до повторного читання зрізу.
 > Excel-експорт (зі `IncludeStyles`) кладе заливку/колір шрифту/жирність тими ж правилами.
+
+> ✎ 2026-10-21 (Permits, lookup-prm): `GET /registries?includePermitHeaders=true` додає до переліку реєстри ШАПОК
+> опублікованих типів дозволів (`PRM_<TYPE>`) — ціль Lookup для поля шапки й колонки шаблону; права ті самі
+> (`Registry.View`, S18-заборона довідника), таблиці й списки «лише для типу» лишаються прихованими, без параметра
+> перелік «Довідники» не змінюється. `GET /registries/{code}/entries?documentId=` звужує перелік до записів,
+> придатних у вікні проєкту документа `[PeriodStart, PeriodEnd]` (активні, не видалені, чинні бодай один день вікна —
+> правило `ECR-HDR-4223` запису шапки); `asOf` тоді не потрібен; невидимий документ — `404 ECR-DOC-0404`.
 
 > ✎ 2026-09-29 (RT-13): `GET /registries/{code}/rows` — `PagedResult<RegistryRowDto>`, курсор за
 > `Id`, `limit` 1…500 (інакше `422 pageSizeOutOfRange`). `asOf` — бізнес-дата чинності
