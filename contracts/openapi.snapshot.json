@@ -4830,6 +4830,14 @@
             "description": "Перелік обрізано стелею int MigrateDocumentVersionHandler.MaxItems.",
             "type": "boolean"
           },
+          "lockedDocumentCount": {
+            "description": "Скільки документів із поданими/затвердженими аркушами мають значення шапки, яке перепише мапа Lookup; `null` —\nмап не було. Більше нуля без `allowLockedDocuments` — відмова `lookupLockedDocuments` (`ECR-SCHM-0422`).\n⛔ Лише кількість.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "lockedSheetItems": {
             "description": "LP-32: перелік поданих/затверджених пар (спершу зачеплені), не більше `MaxLockedItems`; `null` — таких\nаркушів немає. ⛔ Без імен користувачів і значень — лише код аркуша, період, статус.",
             "items": {
@@ -8893,6 +8901,13 @@
         "properties": {
           "acceptGuardedOverwrite": {
             "description": "ACC-OW (необов'язкове; відсутнє або `null` = `false`): `true` — не відмовляти `guardedWithData` там, де «змінене тлумачення» — це лише НОВА комірочна\nформула цільової версії на комірці з уже введеним значенням (поле `CellFormula` у звіті): значення\nпереїздить, а перерахунок після переносу замінює його результатом формули. Типово `false` (поведінка без\nпрапора незмінна). Інші класи `guardedWithData` (звуження, тип, одиниця, довідник, обов'язковість, режим\nрядків) і подані/затверджені аркуші (`409 sheetsLocked`) прапор НЕ знімає. Те, що буде перезаписано,\nсухий прогін показує до згоди: `guardedOverwritable`, `guardedOverwrittenItems`.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "allowLockedDocuments": {
+            "description": "Необов'язкове (відсутнє або `null` = `false`): згода переписати значення Lookup у ШАПЦІ документів, що мають\nподані чи затверджені аркуші (`lookupRemaps`). Без згоди такі документи — `422 ECR-SCHM-0422`\n(`migrateLookupLockedDocuments`), нічого не записано; їх кількість сухий прогін показує до згоди\n(`lockedDocumentCount`). Не впливає на подані/затверджені аркуші (`409 sheetsLocked`) і на перенос без мап.",
             "type": [
               "null",
               "boolean"

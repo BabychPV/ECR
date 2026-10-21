@@ -23635,6 +23635,13 @@ export interface components {
             items: components["schemas"]["VersionMigrationItem"][];
             /** @description Перелік обрізано стелею int MigrateDocumentVersionHandler.MaxItems. */
             itemsTruncated: boolean;
+            /**
+             * Format: int32
+             * @description Скільки документів із поданими/затвердженими аркушами мають значення шапки, яке перепише мапа Lookup; `null` —
+             *     мап не було. Більше нуля без `allowLockedDocuments` — відмова `lookupLockedDocuments` (`ECR-SCHM-0422`).
+             *     ⛔ Лише кількість.
+             */
+            lockedDocumentCount?: null | number;
             /** @description LP-32: перелік поданих/затверджених пар (спершу зачеплені), не більше `MaxLockedItems`; `null` — таких
              *     аркушів немає. ⛔ Без імен користувачів і значень — лише код аркуша, період, статус. */
             lockedSheetItems?: null | components["schemas"]["LockedSheetItem"][];
@@ -25519,6 +25526,11 @@ export interface components {
              *     рядків) і подані/затверджені аркуші (`409 sheetsLocked`) прапор НЕ знімає. Те, що буде перезаписано,
              *     сухий прогін показує до згоди: `guardedOverwritable`, `guardedOverwrittenItems`. */
             acceptGuardedOverwrite?: null | boolean;
+            /** @description Необов'язкове (відсутнє або `null` = `false`): згода переписати значення Lookup у ШАПЦІ документів, що мають
+             *     подані чи затверджені аркуші (`lookupRemaps`). Без згоди такі документи — `422 ECR-SCHM-0422`
+             *     (`migrateLookupLockedDocuments`), нічого не записано; їх кількість сухий прогін показує до згоди
+             *     (`lockedDocumentCount`). Не впливає на подані/затверджені аркуші (`409 sheetsLocked`) і на перенос без мап. */
+            allowLockedDocuments?: null | boolean;
             /**
              * @description `true` — перенос (не сухий прогін) іде ФОНОВОЮ задачею: відповідь `202` з `jobId`, стан —
              *     `GET /jobs/{jobId}`. Типово `false` — як і раніше, синхронно з `200` і звітом
