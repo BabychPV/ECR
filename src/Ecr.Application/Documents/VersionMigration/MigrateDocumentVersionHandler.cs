@@ -216,6 +216,10 @@ public sealed class MigrateDocumentVersionHandler(
     /// <summary>Подія журналу безпеки.</summary>
     public const string EventType = "DocumentVersionMigrated";
 
+    /// <summary>Подія журналу безпеки: перенос розпочато (маркер "міграція в процесі" зафіксовано).</summary>
+    public const string StartedEventType = "DocumentVersionMigrationStarted";
+
+
     /// <summary>Подія журналу безпеки: значення Lookup шапки документа перенесено на запис нового довідника.</summary>
     public const string LookupRemapEventType = "DocumentHeaderLookupRemapped";
 
@@ -876,7 +880,24 @@ public sealed class MigrateDocumentVersionHandler(
             }
 
             // Маркер «міграція в процесі» — ОСТАННЄ в T1: комітиться разом з нею й відразу блокує писарів і читачів.
-            await store.BeginMigrationAsync(projectId, target.Id, innerCt).ConfigureAwait(false);
+            await store.BeginMigrationAsync(projectId, target.Id, plan, profile.UserId, innerCt).ConfigureAwait(false);
+
+            // ⛔ Початок переносу - у журнал безпеки ТІЄЮ САМОЮ транзакцією, що фіксує маркер (завершення пише T2). Обірваний
+            // перенос лишає слід «розпочато» без «перенесено».
+            await audit.WriteSecurityEventAsync(
+                new SecurityEventRecord(
+                    clock.UtcNow, StartedEventType, TargetUserId: null, TargetRoleId: null,
+                    JsonSerializer.Serialize(new
+                    {
+                        documentId,
+                        projectId,
+                        fromVersionId = current,
+                        toVersionId = target.Id,
+                        mode = dto.Mode.ToString(),
+                        transferredValues = dto.TransferredValues,
+                    }),
+                    profile.UserId, currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
         if (sameVersion)

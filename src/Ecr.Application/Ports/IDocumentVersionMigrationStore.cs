@@ -339,8 +339,12 @@ public interface IDocumentVersionMigrationStore
     /// <summary>Ставить маркер «міграція в процесі» (у транзакції виклику, яка його й фіксує).</summary>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="targetVersionId">Цільова версія.</param>
+    /// <param name="plan">План (його мапа дає відбиток, з яким відновлення після обриву звіряє повтор; інша мапа - 422).</param>
+    /// <param name="startedByUserId">Хто розпочав (у маркері: хто/коли).</param>
     /// <param name="ct">Токен скасування.</param>
-    public Task BeginMigrationAsync(int projectId, int targetVersionId, CancellationToken ct) => Task.CompletedTask;
+    public Task BeginMigrationAsync(
+        int projectId, int targetVersionId, VersionMigrationPlan plan, int? startedByUserId, CancellationToken ct)
+        => Task.CompletedTask;
 
     /// <summary>Переносить комірки, оформлення, рядки, індекс пошуку й валідацію діапазонами з комітом (поза транзакцією).</summary>
     /// <param name="projectId">Проєкт.</param>

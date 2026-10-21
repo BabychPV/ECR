@@ -135,22 +135,28 @@ public sealed class MigrationMarkerFilter(MigratingProjects projects) : IAsyncAc
             return;
         }
 
+        // Ключі: `projectId`/`documentId` (контролери з префіксом ресурсу) і `id` у DocumentsController/ProjectsController
+        // (маршрут `{id:long}`); крім того - query-параметри `projectId`/`documentId` (звіти, пошук, аудит комірок).
         var values = context.RouteData.Values;
-        int? projectId = null;
+        var controller = Convert.ToString(values.GetValueOrDefault("controller"), CultureInfo.InvariantCulture);
+        var query = context.HttpContext.Request.Query;
+        long? projectKey = ParseId(values.GetValueOrDefault("projectId"))
+                           ?? (string.Equals(controller, "Projects", StringComparison.Ordinal) ? ParseId(values.GetValueOrDefault("id")) : null)
+                           ?? ParseId(query.TryGetValue("projectId", out var queryProject) ? queryProject.ToString() : null);
+        long? documentKey = projectKey is null
+            ? ParseId(values.GetValueOrDefault("documentId"))
+              ?? (string.Equals(controller, "Documents", StringComparison.Ordinal) ? ParseId(values.GetValueOrDefault("id")) : null)
+              ?? ParseId(query.TryGetValue("documentId", out var queryDocument) ? queryDocument.ToString() : null)
+            : null;
+
+        int? projectId = projectKey is { } p ? (int)p : null;
         string? documentLabel = null;
-        if (values.TryGetValue("projectId", out var rawProject)
-            && int.TryParse(Convert.ToString(rawProject, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedProject))
-        {
-            projectId = parsedProject;
-        }
-        else if (values.TryGetValue("documentId", out var rawDocument)
-                 && long.TryParse(Convert.ToString(rawDocument, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out var documentId))
+        if (documentKey is { } documentId)
         {
             documentLabel = documentId.ToString(CultureInfo.InvariantCulture);
             var db = context.HttpContext.RequestServices.GetRequiredService<EcrDbContext>();
             projectId = await projects.ProjectOfAsync(documentId, db, context.HttpContext.RequestAborted).ConfigureAwait(false);
         }
-
         if (projectId is { } id && projects.Contains(id))
         {
             var details = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -173,4 +179,9 @@ public sealed class MigrationMarkerFilter(MigratingProjects projects) : IAsyncAc
 
         await next().ConfigureAwait(false);
     }
+
+    private static long? ParseId(object? raw)
+        => long.TryParse(Convert.ToString(raw, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : null;
 }
