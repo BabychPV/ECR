@@ -293,10 +293,39 @@ public sealed partial class DocumentVersionMigrationStore(
             await BatchesAsync(VersionMigrationStages.NewRows, NewRowsBatchSql).ConfigureAwait(false);
         }
 
-        await SingleAsync(
-                VersionMigrationStages.Header,
-                plan.LookupRemaps.Count > 0 ? HeaderSqlWithLookupRemap : HeaderSql)
-            .ConfigureAwait(false);
+        if (plan.LookupRemaps.Count > 0)
+        {
+            // ⛔ P2-2: SQL, що пише нові `ValueRegistryEntryId`, мусить зачепити РІВНО стільки значень, скільки обіцяв
+            // план (і показав сухий прогін). Інакше (менше — запис пропущено; більше — зачеплено зайве) відкат усього
+            // переносу: мовчки неповна або надлишкова мапа лишила б шапку на записах старого довідника.
+            var remapped = new SqlParameter("@lookupChanged", System.Data.SqlDbType.Int)
+            {
+                Direction = System.Data.ParameterDirection.Output,
+            };
+            await db.Database.ExecuteSqlRawAsync(SingleCommand(HeaderSqlWithLookupRemap), Parameters(remapped), ct)
+                .ConfigureAwait(false);
+            stepsDone++;
+            await ReportAsync(VersionMigrationStages.Header, 0).ConfigureAwait(false);
+
+            var actual = remapped.Value is int changed ? changed : -1;
+            if (actual != plan.LookupRemappedValues)
+            {
+                throw new Application.Errors.ConcurrencyConflictException(
+                    "ECR-CELL-0409",
+                    $"Перенос значень Lookup шапки зачепив {actual} значень замість очікуваних {plan.LookupRemappedValues}: " +
+                    "перенос скасовано.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
+                        ["expected"] = plan.LookupRemappedValues.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["actual"] = actual.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
+            }
+        }
+        else
+        {
+            await SingleAsync(VersionMigrationStages.Header, HeaderSql).ConfigureAwait(false);
+        }
 
         foreach (var sql in IndexBatches)
         {
@@ -1008,24 +1037,32 @@ public sealed partial class DocumentVersionMigrationStore(
     /// <c>UPDATE</c> разом із перейменуванням поля переписує <c>ValueRegistryEntryId</c> за мапою.
     /// </summary>
     /// <remarks>
-    /// ⚠ Умова мапи — за СТАРИМ <c>HeaderFieldDefId</c> і старим записом в одному операторі (права частина
-    /// <c>SET</c> бачить значення до зміни); запис без пари мапи (<c>r.n IS NULL</c>) лишається як був. Без
-    /// <c>#</c>-таблиць і DDL: лише <c>OPENJSON</c> параметра.
+    /// ⚠ Спершу окремий <c>UPDATE</c> переписує запис за мапою — умова за СТАРИМ <c>HeaderFieldDefId</c> і старим
+    /// записом, ще до перейменування поля; його <c>@@ROWCOUNT</c> іде у <c>@lookupChanged</c>, і сховище звіряє його з
+    /// планом (P2-2: інакше — відкат). Запис без пари мапи лишається як був. Далі <c>DELETE</c> зниклих полів і
+    /// перейменування, як у <c>HeaderSql</c>. Без <c>#</c>-таблиць і DDL: лише <c>OPENJSON</c> параметра.
     /// </remarks>
     private const string HeaderSqlWithLookupRemap = """
+        UPDATE h
+        SET    h.ValueRegistryEntryId = r.n
+        FROM   doc.DocumentHeaderValue h
+        JOIN   @docs d      ON d.Id = h.DocumentId
+        JOIN   @headerMap m ON m.o = h.HeaderFieldDefId
+        JOIN   OPENJSON(@lookupRemap) WITH (f int, o bigint, n bigint) r
+               ON r.f = h.HeaderFieldDefId AND r.o = h.ValueRegistryEntryId
+        WHERE  h.IsEmpty = 0;
+        SET @lookupChanged = @@ROWCOUNT;
+
         DELETE h
         FROM   doc.DocumentHeaderValue h
         JOIN   @docs d ON d.Id = h.DocumentId
         WHERE  NOT EXISTS (SELECT 1 FROM @headerMap m WHERE m.o = h.HeaderFieldDefId);
 
         UPDATE h
-        SET    h.HeaderFieldDefId = m.n,
-               h.ValueRegistryEntryId = COALESCE(r.n, h.ValueRegistryEntryId)
+        SET    h.HeaderFieldDefId = m.n
         FROM   doc.DocumentHeaderValue h
         JOIN   @docs d      ON d.Id = h.DocumentId
-        JOIN   @headerMap m ON m.o = h.HeaderFieldDefId
-        LEFT JOIN OPENJSON(@lookupRemap) WITH (f int, o bigint, n bigint) r
-               ON r.f = h.HeaderFieldDefId AND r.o = h.ValueRegistryEntryId;
+        JOIN   @headerMap m ON m.o = h.HeaderFieldDefId;
         """;
 
     /// <summary>5. Похідний індекс пошуку (за кількістю — як комірки) — пачками.</summary>

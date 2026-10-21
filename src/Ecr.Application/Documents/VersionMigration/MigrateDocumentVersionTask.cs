@@ -22,11 +22,16 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// Мапи записів Lookup по полях шапки (із запиту); <c>null</c> — без мап (задачі, поставлені до цього поля,
 /// десеріалізуються з <c>null</c> і ведуть себе як раніше).
 /// </param>
+/// <param name="AllowLockedDocuments">
+/// Згода мігрувати шапку документів із поданими/затвердженими аркушами (із запиту); задачі, поставлені до цього поля,
+/// десеріалізуються з <c>false</c> і ведуть себе як раніше.
+/// </param>
 public sealed record MigrateDocumentVersionTask(
     long DocumentId, int TargetVersionId, string Mode, JobActor? Actor = null,
     IReadOnlyList<VersionMigrationTableRename>? TableRenames = null,
     bool AcceptGuardedOverwrite = false,
-    IReadOnlyList<VersionMigrationLookupRemap>? LookupRemaps = null);
+    IReadOnlyList<VersionMigrationLookupRemap>? LookupRemaps = null,
+    bool AllowLockedDocuments = false);
 
 /// <summary>Підсумок фонового переносу.</summary>
 /// <param name="ToVersion">Цільова версія.</param>

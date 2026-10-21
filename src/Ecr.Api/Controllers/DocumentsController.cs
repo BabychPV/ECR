@@ -386,7 +386,7 @@ public sealed class DocumentsController(
             var jobId = await migrateVersion
                 .EnqueueAsync(
                     id, request.TargetVersionId, mode, request.TableRenames, request.AcceptGuardedOverwrite ?? false,
-                    request.LookupRemaps, ct)
+                    request.LookupRemaps, request.AllowLockedDocuments ?? false, ct)
                 .ConfigureAwait(false);
 
             return Accepted(new Contracts.MigrationAcceptedResponse(jobId, id));
@@ -395,7 +395,7 @@ public sealed class DocumentsController(
         return Ok(await migrateVersion
             .HandleAsync(
                 id, request.TargetVersionId, mode, request.DryRun, request.TableRenames,
-                request.AcceptGuardedOverwrite ?? false, request.LookupRemaps, ct)
+                request.AcceptGuardedOverwrite ?? false, request.LookupRemaps, request.AllowLockedDocuments ?? false, ct)
             .ConfigureAwait(false));
     }
 
@@ -742,6 +742,12 @@ public sealed record ChangeDocumentKeyRequest(string? BusinessKey, string? Expec
 /// (<c>migrateLookupNotMapped</c>), нічого не записано. Зайві пари ігноруються. Колонки Lookup (<c>kind = column</c>)
 /// не підтримуються (<c>422 migrateLookupRemapInvalid</c>). Перерахунок не ставиться. Без поля поведінка незмінна.
 /// </param>
+/// <param name="AllowLockedDocuments">
+/// Необов'язкове (відсутнє або <c>null</c> = <c>false</c>): згода переписати значення Lookup у ШАПЦІ документів, що мають
+/// подані чи затверджені аркуші (<c>lookupRemaps</c>). Без згоди такі документи — <c>422 ECR-SCHM-0422</c>
+/// (<c>migrateLookupLockedDocuments</c>), нічого не записано; їх кількість сухий прогін показує до згоди
+/// (<c>lockedDocumentCount</c>). Не впливає на подані/затверджені аркуші (<c>409 sheetsLocked</c>) і на перенос без мап.
+/// </param>
 public sealed record MigrateDocumentVersionRequest(
     int TargetVersionId,
     Application.Documents.VersionMigration.VersionMigrationMode? Mode,
@@ -749,7 +755,8 @@ public sealed record MigrateDocumentVersionRequest(
     bool Async = false,
     IReadOnlyList<Application.Documents.VersionMigration.VersionMigrationTableRename>? TableRenames = null,
     bool? AcceptGuardedOverwrite = null,
-    IReadOnlyList<Application.Documents.VersionMigration.VersionMigrationLookupRemap>? LookupRemaps = null);
+    IReadOnlyList<Application.Documents.VersionMigration.VersionMigrationLookupRemap>? LookupRemaps = null,
+    bool? AllowLockedDocuments = null);
 
 /// <summary>Запит на експорт.</summary>
 /// <param name="IncludeFormulas">

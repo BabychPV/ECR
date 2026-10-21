@@ -89,6 +89,11 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// придатного відповідника.
 /// </param>
 /// <param name="LookupRemapped">Скільки значень шапки переїде (сухий прогін) або переїхало; <c>null</c> — мап не було.</param>
+/// <param name="LockedDocumentCount">
+/// Скільки документів із поданими/затвердженими аркушами мають значення шапки, яке перепише мапа Lookup; <c>null</c> —
+/// мап не було. Більше нуля без <c>allowLockedDocuments</c> — відмова <c>lookupLockedDocuments</c> (<c>ECR-SCHM-0422</c>).
+/// ⛔ Лише кількість.
+/// </param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
     int ProjectId,
@@ -123,7 +128,8 @@ public sealed record DocumentVersionMigrationDto(
     IReadOnlyList<GuardedOverwriteItem>? GuardedOverwrittenItems = null,
     bool? GuardedOverwrittenItemsTruncated = null,
     IReadOnlyList<LookupRemapReportItem>? LookupRemapReport = null,
-    long? LookupRemapped = null);
+    long? LookupRemapped = null,
+    int? LockedDocumentCount = null);
 
 /// <summary>Комірка, значення якої перезапише нова комірочна формула (ACC-OW).</summary>
 /// <param name="SheetCode">Код аркуша вихідної версії.</param>
@@ -328,10 +334,34 @@ public sealed class MigrateDocumentVersionHandler(
     /// Також <c>ECR-SCHM-0422</c>: <c>migrateLookupRemapInvalid</c> (форма або зміст мапи),
     /// <c>migrateLookupNotMapped</c> (є значення без придатного відповідника; нічого не записано).
     /// </exception>
-    public async Task<DocumentVersionMigrationDto> HandleAsync(
+    public Task<DocumentVersionMigrationDto> HandleAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode, bool dryRun,
         IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
         IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps, CancellationToken ct)
+        => HandleAsync(
+            documentId, targetVersionId, mode, dryRun, renames, acceptGuardedOverwrite, lookupRemaps,
+            allowLockedDocuments: false, ct);
+
+    /// <summary>
+    /// Те саме, що попередній виклик, і з явною згодою мігрувати шапку закритих документів (<c>allowLockedDocuments</c>).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="targetVersionId">Цільова версія того самого шаблону.</param>
+    /// <param name="mode">Режим.</param>
+    /// <param name="dryRun"><c>true</c> — лише звіт.</param>
+    /// <param name="renames">Мапа перейменувань; <c>null</c> — без мапи.</param>
+    /// <param name="acceptGuardedOverwrite">Згода на перезапис похідних значень.</param>
+    /// <param name="lookupRemaps">Мапи записів Lookup шапки; <c>null</c> — без мап.</param>
+    /// <param name="allowLockedDocuments">
+    /// <c>true</c> — дозволити переписати значення Lookup у шапці документів, що мають подані/затверджені аркуші.
+    /// Без прапора такі документи — відмова <c>ECR-SCHM-0422</c> (<c>migrateLookupLockedDocuments</c>); сухий прогін
+    /// показує їх кількість (<c>lockedDocumentCount</c>) завжди.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<DocumentVersionMigrationDto> HandleAsync(
+        long documentId, int targetVersionId, VersionMigrationMode mode, bool dryRun,
+        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
+        IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps, bool allowLockedDocuments, CancellationToken ct)
     {
         var request = await ResolveAsync(documentId, targetVersionId, tolerateSame: false, ct).ConfigureAwait(false);
         VersionMigrationRenames.Validate(renames);
@@ -341,12 +371,14 @@ public sealed class MigrateDocumentVersionHandler(
         {
             var planned = await PlanAsync(
                 documentId, request.ProjectId, request.SourceVersionId, request.Target, mode, request.Archived,
-                dryRun: true, renames, acceptGuardedOverwrite, lookupRemaps, ct).ConfigureAwait(false);
+                dryRun: true, renames, acceptGuardedOverwrite, lookupRemaps, allowLockedDocuments, ct).ConfigureAwait(false);
             return planned.Dto;
         }
 
         // Синхронний шлях без приймача прогресу завжди дає звіт (збіг версій там — виняток, не "вже перенесено").
-        return (await ApplyAsync(request, documentId, mode, renames, acceptGuardedOverwrite, lookupRemaps, onProgress: null, ct)
+        return (await ApplyAsync(
+                request, documentId, mode, renames, acceptGuardedOverwrite, lookupRemaps, allowLockedDocuments,
+                onProgress: null, ct)
             .ConfigureAwait(false))!;
     }
 
@@ -415,10 +447,28 @@ public sealed class MigrateDocumentVersionHandler(
     /// <param name="lookupRemaps">Мапи Lookup; <c>null</c> — без мап (форма перевіряється одразу, зміст — у задачі).</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Ідентифікатор задачі.</returns>
-    public async Task<string> EnqueueAsync(
+    public Task<string> EnqueueAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode,
         IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
         IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps, CancellationToken ct)
+        => EnqueueAsync(
+            documentId, targetVersionId, mode, renames, acceptGuardedOverwrite, lookupRemaps,
+            allowLockedDocuments: false, ct);
+
+    /// <summary>Ставить перенос у чергу з усіма мапами запиту й згодою на шапку закритих документів.</summary>
+    /// <param name="documentId">Документ, з якого відкрили перенос.</param>
+    /// <param name="targetVersionId">Цільова версія того самого шаблону.</param>
+    /// <param name="mode">Режим.</param>
+    /// <param name="renames">Мапа перейменувань; <c>null</c> — без мапи.</param>
+    /// <param name="acceptGuardedOverwrite">Згода на перезапис похідних значень.</param>
+    /// <param name="lookupRemaps">Мапи Lookup; <c>null</c> — без мап.</param>
+    /// <param name="allowLockedDocuments">Згода мігрувати шапку документів із поданими/затвердженими аркушами.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатор задачі.</returns>
+    public async Task<string> EnqueueAsync(
+        long documentId, int targetVersionId, VersionMigrationMode mode,
+        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
+        IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps, bool allowLockedDocuments, CancellationToken ct)
     {
         var request = await ResolveAsync(documentId, targetVersionId, tolerateSame: false, ct).ConfigureAwait(false);
         VersionMigrationRenames.Validate(renames);
@@ -440,7 +490,8 @@ public sealed class MigrateDocumentVersionHandler(
         try
         {
             return await EnqueueLockedAsync(
-                    request, documentId, targetVersionId, mode, renames, acceptGuardedOverwrite, lookupRemaps, ct)
+                    request, documentId, targetVersionId, mode, renames, acceptGuardedOverwrite, lookupRemaps,
+                    allowLockedDocuments, ct)
                 .ConfigureAwait(false);
         }
         finally
@@ -455,7 +506,7 @@ public sealed class MigrateDocumentVersionHandler(
     private async Task<string> EnqueueLockedAsync(
         Resolved request, long documentId, int targetVersionId, VersionMigrationMode mode,
         IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
-        IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps, CancellationToken ct)
+        IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps, bool allowLockedDocuments, CancellationToken ct)
     {
         var documentIds = (await store.ListDocumentIdsAsync(request.ProjectId, ct).ConfigureAwait(false)).ToHashSet();
         var active = await FindActiveJobAsync(documentIds, ct).ConfigureAwait(false);
@@ -485,7 +536,8 @@ public sealed class MigrateDocumentVersionHandler(
                     documentId, targetVersionId, mode.ToString(), actor,
                     renames is { Count: > 0 } ? renames : null,
                     acceptGuardedOverwrite,
-                    lookupRemaps is { Count: > 0 } ? lookupRemaps : null),
+                    lookupRemaps is { Count: > 0 } ? lookupRemaps : null,
+                    allowLockedDocuments),
                 ct,
                 currentUser.UserId)
             .ConfigureAwait(false);
@@ -578,10 +630,30 @@ public sealed class MigrateDocumentVersionHandler(
     /// <param name="onProgress">Приймач прогресу.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Звіт: що перенесено.</returns>
-    public async Task<VersionMigrationRunResult> RunQueuedAsync(
+    public Task<VersionMigrationRunResult> RunQueuedAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode,
         IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
         IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps,
+        VersionMigrationProgressReporter onProgress, CancellationToken ct)
+        => RunQueuedAsync(
+            documentId, targetVersionId, mode, renames, acceptGuardedOverwrite, lookupRemaps,
+            allowLockedDocuments: false, onProgress, ct);
+
+    /// <summary>Виконує перенос у задачі черги з усіма мапами запиту й згодою на шапку закритих документів.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="targetVersionId">Цільова версія.</param>
+    /// <param name="mode">Режим.</param>
+    /// <param name="renames">Мапа перейменувань; <c>null</c> — без мапи.</param>
+    /// <param name="acceptGuardedOverwrite">Згода ACC-OW.</param>
+    /// <param name="lookupRemaps">Мапи записів Lookup шапки.</param>
+    /// <param name="allowLockedDocuments">Згода мігрувати шапку документів із поданими/затвердженими аркушами.</param>
+    /// <param name="onProgress">Приймач прогресу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Звіт: що перенесено.</returns>
+    public async Task<VersionMigrationRunResult> RunQueuedAsync(
+        long documentId, int targetVersionId, VersionMigrationMode mode,
+        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
+        IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps, bool allowLockedDocuments,
         VersionMigrationProgressReporter onProgress, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(onProgress);
@@ -601,7 +673,8 @@ public sealed class MigrateDocumentVersionHandler(
             return await AlreadyMigratedAsync(request, ct).ConfigureAwait(false);
         }
 
-        var dto = await ApplyAsync(request, documentId, mode, renames, acceptGuardedOverwrite, lookupRemaps, onProgress, ct)
+        var dto = await ApplyAsync(
+                request, documentId, mode, renames, acceptGuardedOverwrite, lookupRemaps, allowLockedDocuments, onProgress, ct)
             .ConfigureAwait(false);
 
         return dto is null
@@ -701,7 +774,7 @@ public sealed class MigrateDocumentVersionHandler(
     private async Task<DocumentVersionMigrationDto?> ApplyAsync(
         Resolved request, long documentId, VersionMigrationMode mode,
         IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
-        IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps,
+        IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps, bool allowLockedDocuments,
         VersionMigrationProgressReporter? onProgress, CancellationToken ct)
     {
         var profile = request.Profile;
@@ -752,7 +825,7 @@ public sealed class MigrateDocumentVersionHandler(
 
             var planned = await PlanAsync(
                 documentId, projectId, current, target, mode, archived, dryRun: false, renames,
-                acceptGuardedOverwrite, lookupRemaps, innerCt).ConfigureAwait(false);
+                acceptGuardedOverwrite, lookupRemaps, allowLockedDocuments, innerCt).ConfigureAwait(false);
             var (dto, plan, foreignKeys, extended) = (planned.Dto, planned.Plan, planned.ForeignKeys, planned.Extended);
             ThrowIfRefused(dto, foreignKeys, plan.RenameConflicts, acceptGuardedOverwrite, plan.LookupGuardedValues);
 
@@ -969,7 +1042,7 @@ public sealed class MigrateDocumentVersionHandler(
         long documentId, int projectId, int sourceVersionId, TemplateVersion target,
         VersionMigrationMode mode, bool archived, bool dryRun,
         IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
-        IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps, CancellationToken ct)
+        IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps, bool allowLockedDocuments, CancellationToken ct)
     {
         var source = await versions.GetAsync(sourceVersionId, ct).ConfigureAwait(false);
         var from = await metadata.GetAsync(sourceVersionId, ct).ConfigureAwait(false);
@@ -994,6 +1067,24 @@ public sealed class MigrateDocumentVersionHandler(
         if (locked.Affected > 0)
         {
             refusals.Add("sheetsLocked");
+        }
+
+        // ⛔ Шапка закритого документа (є подані/затверджені аркуші) мігрується лише з явною згодою
+        // (`allowLockedDocuments`, рішення людини 21.10): подане стосується значень шапки в тому вигляді, в якому його
+        // подали. Рахуються документи, значення шапки яких справді перепише мапа.
+        int? lockedDocumentCount = null;
+        if (lookup.Input is not null)
+        {
+            var remapKeys = plan.LookupRemaps.Select(r => (r.HeaderFieldDefId, r.OldEntryId)).ToHashSet();
+            lockedDocumentCount = lookup.Rows
+                .Where(r => r.Locked && r.EntryId is { } e && remapKeys.Contains((r.HeaderFieldDefId, e)))
+                .Select(r => r.DocumentId)
+                .Distinct()
+                .Count();
+            if (lockedDocumentCount > 0 && !allowLockedDocuments)
+            {
+                refusals.Add("lookupLockedDocuments");
+            }
         }
 
         if (archived)
@@ -1116,7 +1207,8 @@ public sealed class MigrateDocumentVersionHandler(
             LookupRemapReport: lookup.Input is null && lookup.NotApplied.Count == 0
                 ? null
                 : [.. plan.LookupReport.Concat(lookup.NotApplied).OrderBy(i => i.Target.Code, StringComparer.Ordinal)],
-            LookupRemapped: lookup.Input is null && lookup.NotApplied.Count == 0 ? null : plan.LookupRemappedValues);
+            LookupRemapped: lookup.Input is null && lookup.NotApplied.Count == 0 ? null : plan.LookupRemappedValues,
+            LockedDocumentCount: lockedDocumentCount);
 
         return new PlannedMigration(
             dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds }, lookup.Rows);
@@ -1407,6 +1499,8 @@ public sealed class MigrateDocumentVersionHandler(
                     ? "err.ECR-SCHM-0422.migrateRenameConflict"
                     : dto.Refusals.Contains("lookupValuesNotMapped") && dto.LostValues == 0 && otherGuardedValues == 0
                         ? "err.ECR-SCHM-0422.migrateLookupNotMapped"
+                    : dto.Refusals.Contains("lookupLockedDocuments") && dto.LostValues == 0 && otherGuardedValues == 0
+                        ? "err.ECR-SCHM-0422.migrateLookupLockedDocuments"
                     : dto.Refusals.Contains("grantsNotMapped") && dto.LostValues == 0 && guardedValues == 0
                         ? "err.ECR-SCHM-0422.migrateGrantsNotMapped"
                         : dto.Refusals.Contains("bindingsNotMapped") && dto.LostValues == 0 && guardedValues == 0
@@ -1417,6 +1511,9 @@ public sealed class MigrateDocumentVersionHandler(
                                     ? "err.ECR-SCHM-0422.migrateMappingsNotMapped"
                                     : "err.ECR-SCHM-0422.migrateDataLoss",
                 ["lostValues"] = dto.LostValues.ToString(CultureInfo.InvariantCulture),
+                ["lockedDocumentCount"] = dto.LockedDocumentCount > 0
+                    ? dto.LockedDocumentCount.Value.ToString(CultureInfo.InvariantCulture)
+                    : null,
                 ["guardedValues"] = guardedValues.ToString(CultureInfo.InvariantCulture),
                 ["mode"] = dto.Mode.ToString(),
                 ["refusals"] = dto.Refusals,
