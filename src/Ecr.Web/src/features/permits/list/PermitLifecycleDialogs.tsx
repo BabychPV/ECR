@@ -1,12 +1,13 @@
-import { useRef, type JSX } from "react";
+import { useRef, useState, type JSX } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePendingLoading } from "@/features/common/usePendingLoading";
 import { formatDate } from "@/shared/format";
 import { language, t } from "@/shared/i18n";
 import { ConfirmModal } from "@/shared/ui/ConfirmModal";
 import { showApiError, showDone } from "@/shared/ui/notify";
-import { ReasonModal } from "@/shared/ui/ReasonModal";
 import type { PermitListItem } from "../api/types";
+import { EndEarlyModal } from "../lib/EndEarlyModal";
+import { endDateOutOfRangeText, sentenceDate } from "../lib/lifecycleText";
 import {
   permitHref,
   permitTypeName,
@@ -59,6 +60,7 @@ export function PermitLifecycleDialogs({
   const renew = useRenewPermit();
   const remove = useDeletePermit();
   const lang = language();
+  const [endError, setEndError] = useState<string | null>(null);
   const activatePending = usePendingLoading(activate.isPending);
   const endPending = usePendingLoading(end.isPending);
   const renewPending = usePendingLoading(renew.isPending);
@@ -95,7 +97,8 @@ export function PermitLifecycleDialogs({
           t("permits.list.activate.reads", {
             type: item === undefined ? "" : permitTypeName(item, lang),
             from,
-            to,
+            // PUI-10: `{to}` закінчує речення - «г.» + крапка шаблону давали «г..» (ru).
+            to: sentenceDate(to),
           }),
           { text: t("permits.list.activate.editable"), note: true },
           { text: t("permits.list.activate.overlap"), note: true },
@@ -118,7 +121,7 @@ export function PermitLifecycleDialogs({
         onClose={onClose}
       />
 
-      <ReasonModal
+      <EndEarlyModal
         opened={action === "end"}
         title={t("permits.list.end.title", { number })}
         label={t("permits.list.end.reason")}
@@ -126,8 +129,11 @@ export function PermitLifecycleDialogs({
         confirmLabel={t("permits.list.end.verb")}
         minLength={MinEndReasonLength}
         isPending={endPending}
+        error={endError}
+        onEdit={() => setEndError(null)}
         onConfirm={(reason) => {
           if (item === undefined) return;
+          setEndError(null);
           once((settled) =>
             end.mutate(
               { id: item.id, body: { reason, endDate: null } },
@@ -136,14 +142,22 @@ export function PermitLifecycleDialogs({
                   showDone(t("permits.list.done.ended", { number }));
                   onClose();
                 },
-                onError: showApiError,
+                // PUI-5: дозвіл, що почався сьогодні, достроково не завершити - причина в діалозі, людськими датами.
+                onError: (error) => {
+                  const text = endDateOutOfRangeText(error);
+                  if (text === null) showApiError(error);
+                  else setEndError(text);
+                },
                 onSettled: settled,
               },
             ),
           );
         }}
         returnFocusTo={rowMenuButton}
-        onClose={onClose}
+        onClose={() => {
+          setEndError(null);
+          onClose();
+        }}
       />
 
       <ConfirmModal

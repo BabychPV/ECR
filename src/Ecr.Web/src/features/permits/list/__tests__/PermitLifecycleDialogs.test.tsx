@@ -201,3 +201,36 @@ describe('PermitLifecycleDialogs: видалення чернетки', () => {
     expect(notify.showDone).toHaveBeenCalledWith('permits.list.done.deleted {"number":"DRAFT-1"}');
   });
 });
+
+describe('PermitLifecycleDialogs: End early у день старту (PUI-5)', () => {
+  it('422 endDateOutOfRange: причина людськими датами в діалозі, тосту немає, діалог відкритий', async () => {
+    stub(() =>
+      json(
+        {
+          title: 'Unprocessable',
+          status: 422,
+          errorCode: 'ECR-PRM-0422',
+          correlationId: 'c',
+          messageKey: 'err.ECR-PRM-0422.endDateOutOfRange',
+          endDate: '2026-10-20',
+          from: '2026-10-20',
+          to: '2027-10-20',
+        },
+        422,
+      ),
+    );
+    show({ item: active, action: 'end' });
+
+    fireEvent.change(await screen.findByRole('textbox', { name: 'permits.list.end.reason' }), {
+      target: { value: 'Permit surrendered' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'permits.list.end.verb' }));
+
+    const text = await screen.findByText(/err\.ECR-PRM-0422\.endDateOutOfRange/);
+    expect(text.textContent).toContain('"endDate":"Oct 20, 2026"');
+    expect(text.textContent).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+    expect(notify.showApiError).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+});
