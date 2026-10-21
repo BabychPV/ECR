@@ -133,6 +133,35 @@ public sealed partial class DocumentVersionMigrationStore(
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<HeaderLookupValueRow>> ListHeaderLookupValuesAsync(
+        int projectId, IReadOnlyCollection<int> headerFieldDefIds, int max, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(headerFieldDefIds);
+        if (headerFieldDefIds.Count == 0)
+        {
+            return [];
+        }
+
+        var fieldIds = headerFieldDefIds.ToList();
+        var rows = await (
+                from h in db.DocumentHeaderValues.AsNoTracking()
+                join d in db.Documents.AsNoTracking() on h.DocumentId equals d.Id
+                where d.ProjectId == projectId && !h.IsEmpty && fieldIds.Contains(h.HeaderFieldDefId)
+                orderby h.DocumentId, h.HeaderFieldDefId
+                select new HeaderLookupValueRow(
+                    h.DocumentId,
+                    h.HeaderFieldDefId,
+                    h.ValueRegistryEntryId,
+                    db.ApprovalStates.Any(a => a.DocumentId == h.DocumentId
+                                               && (a.Status == DocumentStatus.Submitted || a.Status == DocumentStatus.Approved))))
+            .Take(max + 1)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows;
+    }
+
+    /// <inheritdoc />
     public Task ApplyAsync(int projectId, int targetVersionId, VersionMigrationPlan plan, CancellationToken ct)
         => ApplyAsync(projectId, targetVersionId, plan, onStep: null, ct);
 
@@ -161,6 +190,10 @@ public sealed partial class DocumentVersionMigrationStore(
         var headers = JsonSerializer.Serialize(plan.HeaderFields.Select(p => new { o = p.Key, n = p.Value }));
         var newRows = JsonSerializer.Serialize(plan.NewRows.Select(r => new { t = r.TargetTableDefId, d = r.TargetRowDefId, k = r.RowKey, s = r.Ordinal }));
 
+        // Мапа Lookup шапки: порожня (`[]`) — параметр лише у спільному списку, текст `HeaderSql` не змінюється.
+        var lookupRemap = JsonSerializer.Serialize(
+            plan.LookupRemaps.Select(r => new { f = r.HeaderFieldDefId, o = r.OldEntryId, n = r.NewEntryId }));
+
         // ⚠ Параметри — свіжі на кожну команду: SqlParameter належить одній колекції. Мапи, документи й
         // екземпляри щоразу збираються заново з цих параметрів (прелюдія) — стан між командами НЕ тримається:
         // #-таблиці були б DDL (сторож `ForbiddenApiTests`), а таблиці-змінні живуть лише в межах пакета.
@@ -178,6 +211,7 @@ public sealed partial class DocumentVersionMigrationStore(
                 new("@rows", System.Data.SqlDbType.NVarChar, -1) { Value = rows },
                 new("@headers", System.Data.SqlDbType.NVarChar, -1) { Value = headers },
                 new("@newRows", System.Data.SqlDbType.NVarChar, -1) { Value = newRows },
+                new("@lookupRemap", System.Data.SqlDbType.NVarChar, -1) { Value = lookupRemap },
             ];
             if (changedOutput is not null)
             {
@@ -259,7 +293,39 @@ public sealed partial class DocumentVersionMigrationStore(
             await BatchesAsync(VersionMigrationStages.NewRows, NewRowsBatchSql).ConfigureAwait(false);
         }
 
-        await SingleAsync(VersionMigrationStages.Header, HeaderSql).ConfigureAwait(false);
+        if (plan.LookupRemaps.Count > 0)
+        {
+            // ⛔ P2-2: SQL, що пише нові `ValueRegistryEntryId`, мусить зачепити РІВНО стільки значень, скільки обіцяв
+            // план (і показав сухий прогін). Інакше (менше — запис пропущено; більше — зачеплено зайве) відкат усього
+            // переносу: мовчки неповна або надлишкова мапа лишила б шапку на записах старого довідника.
+            var remapped = new SqlParameter("@lookupChanged", System.Data.SqlDbType.Int)
+            {
+                Direction = System.Data.ParameterDirection.Output,
+            };
+            await db.Database.ExecuteSqlRawAsync(SingleCommand(HeaderSqlWithLookupRemap), Parameters(remapped), ct)
+                .ConfigureAwait(false);
+            stepsDone++;
+            await ReportAsync(VersionMigrationStages.Header, 0).ConfigureAwait(false);
+
+            var actual = remapped.Value is int changed ? changed : -1;
+            if (actual != plan.LookupRemappedValues)
+            {
+                throw new Application.Errors.ConcurrencyConflictException(
+                    "ECR-CELL-0409",
+                    $"Перенос значень Lookup шапки зачепив {actual} значень замість очікуваних {plan.LookupRemappedValues}: " +
+                    "перенос скасовано.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
+                        ["expected"] = plan.LookupRemappedValues.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["actual"] = actual.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
+            }
+        }
+        else
+        {
+            await SingleAsync(VersionMigrationStages.Header, HeaderSql).ConfigureAwait(false);
+        }
 
         foreach (var sql in IndexBatches)
         {
@@ -954,6 +1020,39 @@ public sealed partial class DocumentVersionMigrationStore(
 
     /// <summary>5. Шапка.</summary>
     private const string HeaderSql = """
+        DELETE h
+        FROM   doc.DocumentHeaderValue h
+        JOIN   @docs d ON d.Id = h.DocumentId
+        WHERE  NOT EXISTS (SELECT 1 FROM @headerMap m WHERE m.o = h.HeaderFieldDefId);
+
+        UPDATE h
+        SET    h.HeaderFieldDefId = m.n
+        FROM   doc.DocumentHeaderValue h
+        JOIN   @docs d      ON d.Id = h.DocumentId
+        JOIN   @headerMap m ON m.o = h.HeaderFieldDefId;
+        """;
+
+    /// <summary>
+    /// 5б. Шапка з мапою Lookup (лише коли <c>plan.LookupRemaps</c> непорожній): той самий <c>DELETE</c>, а єдиний
+    /// <c>UPDATE</c> разом із перейменуванням поля переписує <c>ValueRegistryEntryId</c> за мапою.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Спершу окремий <c>UPDATE</c> переписує запис за мапою — умова за СТАРИМ <c>HeaderFieldDefId</c> і старим
+    /// записом, ще до перейменування поля; його <c>@@ROWCOUNT</c> іде у <c>@lookupChanged</c>, і сховище звіряє його з
+    /// планом (P2-2: інакше — відкат). Запис без пари мапи лишається як був. Далі <c>DELETE</c> зниклих полів і
+    /// перейменування, як у <c>HeaderSql</c>. Без <c>#</c>-таблиць і DDL: лише <c>OPENJSON</c> параметра.
+    /// </remarks>
+    private const string HeaderSqlWithLookupRemap = """
+        UPDATE h
+        SET    h.ValueRegistryEntryId = r.n
+        FROM   doc.DocumentHeaderValue h
+        JOIN   @docs d      ON d.Id = h.DocumentId
+        JOIN   @headerMap m ON m.o = h.HeaderFieldDefId
+        JOIN   OPENJSON(@lookupRemap) WITH (f int, o bigint, n bigint) r
+               ON r.f = h.HeaderFieldDefId AND r.o = h.ValueRegistryEntryId
+        WHERE  h.IsEmpty = 0;
+        SET @lookupChanged = @@ROWCOUNT;
+
         DELETE h
         FROM   doc.DocumentHeaderValue h
         JOIN   @docs d ON d.Id = h.DocumentId
