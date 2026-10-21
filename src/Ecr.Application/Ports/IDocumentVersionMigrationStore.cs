@@ -325,4 +325,44 @@ public interface IDocumentVersionMigrationStore
 
         await ApplyAsync(projectId, targetVersionId, plan, onStep, ct).ConfigureAwait(false);
     }
+
+    // ── Дві транзакції з маркером «міграція в процесі» (Б1, P1-1/P1-2) ────────────────────────────────────────
+    // Важка частина (комірки, індекс, валідація) йде діапазонами з окремими комітами МІЖ двома транзакціями:
+    // перша ставить зафіксований маркер на проєкті (писарі й читачі відмовляють 409 ECR-DOC-4091), друга перемикає версію
+    // й знімає маркер атомарно. Типові реалізації нічого не роблять / виконують усе в другій транзакції (обгортки у тестах).
+
+    /// <summary>Цільова версія незавершеного переносу проєкту (маркер); <c>null</c> — переносу в процесі немає.</summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<int?> ReadMigrationMarkerAsync(int projectId, CancellationToken ct) => Task.FromResult<int?>(null);
+
+    /// <summary>Ставить маркер «міграція в процесі» (у транзакції виклику, яка його й фіксує).</summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="targetVersionId">Цільова версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task BeginMigrationAsync(int projectId, int targetVersionId, CancellationToken ct) => Task.CompletedTask;
+
+    /// <summary>Переносить комірки, оформлення, рядки, індекс пошуку й валідацію діапазонами з комітом (поза транзакцією).</summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="targetVersionId">Цільова версія.</param>
+    /// <param name="plan">План.</param>
+    /// <param name="onStep">Приймач прогресу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task MoveDataAsync(
+        int projectId, int targetVersionId, VersionMigrationPlan plan, VersionMigrationStepReporter? onStep, CancellationToken ct)
+        => Task.CompletedTask;
+
+    /// <summary>
+    /// Решта переносу в транзакції виклику: шапка, склад, екземпляри, нові рядки, гранти, версія проєкту й зняття маркера.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="targetVersionId">Цільова версія.</param>
+    /// <param name="plan">План.</param>
+    /// <param name="onStep">Приймач прогресу.</param>
+    /// <param name="beforeFinish">Дії в транзакції до фінішу (журнал, мапінги збору).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task CompleteAsync(
+        int projectId, int targetVersionId, VersionMigrationPlan plan, VersionMigrationStepReporter? onStep,
+        Func<CancellationToken, Task>? beforeFinish, CancellationToken ct)
+        => ApplyAsync(projectId, targetVersionId, plan, onStep, beforeFinish, ct);
 }
