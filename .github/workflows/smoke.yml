@@ -58,7 +58,7 @@ jobs:
   # PR, dispatch і rc — без змін (gate дає skip=false).
   gate:
     name: gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -88,7 +88,7 @@ jobs:
     name: smoke (linux)
     needs: gate
     if: ${{ needs.gate.outputs.skip != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
