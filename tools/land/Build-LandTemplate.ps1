@@ -2157,19 +2157,19 @@ function Set-DocumentHeader([int]$docId) {
         OnOffshore = @('LAND_ONOFFSHORE', 'Onshore'); TypeOfActivity = @('LAND_ACTIVITY', 'Operation'); Permit = @('LAND_PERMIT', '') }
     # ⛔ Реальні номери дозволів у git не лежать: номер - параметр -PermitNumber (приклад: KZ01TEST0001) або ключ Permit
     # у зовнішньому JSON -PermitPickFile ({"Permit":"<номер>"}, файл поза git, напр. .sync-local\permits\header-pick.json).
-    $permitNumber = $PermitNumber
-    if (-not $permitNumber -and $PermitPickFile) {
+    $permNo = $PermitNumber
+    if (-not $permNo -and $PermitPickFile) {
         if (-not (Test-Path -LiteralPath $PermitPickFile)) { throw "Файл вибору шапки $PermitPickFile не знайдено." }
-        $permitNumber = [string](Get-Content -LiteralPath $PermitPickFile -Raw -Encoding UTF8 | ConvertFrom-Json).Permit
+        $permNo = [string](Get-Content -LiteralPath $PermitPickFile -Raw -Encoding UTF8 | ConvertFrom-Json).Permit
     }
     # Permit -> PRM_AIR лише за явним -PermitLookup; записи шапки дозволу читаються у вікні документа (documentId).
     if ($PermitLookup -eq 'PRM_AIR') {
-        if (-not $permitNumber) {
+        if (-not $permNo) {
             throw 'Для -PermitLookup PRM_AIR потрібен номер дозволу: -PermitNumber <номер> (приклад KZ01TEST0001) або -PermitPickFile <json поза git>.'
         }
-        $pick.Permit = @('PRM_AIR', $permitNumber)
+        $pick.Permit = @('PRM_AIR', $permNo)
     }
-    elseif ($permitNumber) { $pick.Permit = @('LAND_PERMIT', $permitNumber) }
+    elseif ($permNo) { $pick.Permit = @('LAND_PERMIT', $permNo) }
     else { Log 'Permit: номер не задано (-PermitNumber / -PermitPickFile) - береться перший запис довідника.' }
     $fields = @()
     foreach ($k in $pick.Keys) {
