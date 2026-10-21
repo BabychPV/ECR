@@ -94,6 +94,24 @@ public sealed record VersionMigrationPlan(
     /// <summary>ACC-OW: скільки значень лежить у <see cref="GuardedOverwrites"/>.</summary>
     public long GuardedOverwritableValues => GuardedOverwrites.Sum(g => g.Values);
 
+    /// <summary>
+    /// Мапи Lookup шапки: що саме перепише SQL (поле вихідної версії, старий і новий запис). Лише для полів, де мапа
+    /// покриває ВСІ вжиті значення; порожньо — SQL шапки лишається без змін.
+    /// </summary>
+    public IReadOnlyList<VersionMigrationLookupRemapRow> LookupRemaps { get; init; } = [];
+
+    /// <summary>Скільки значень шапки перепише <see cref="LookupRemaps"/>.</summary>
+    public long LookupRemappedValues { get; init; }
+
+    /// <summary>Частина <see cref="VersionMigrationPlan.GuardedValues"/>, що лишилась через неповну мапу Lookup.</summary>
+    public long LookupGuardedValues { get; init; }
+
+    /// <summary>Скільки значень шапки не мають придатного відповідника в мапі (відмова <c>lookupValuesNotMapped</c>).</summary>
+    public long LookupUnmappedValues { get; init; }
+
+    /// <summary>Звіт мап Lookup по цілях, яких стосується пара версій.</summary>
+    public IReadOnlyList<LookupRemapReportItem> LookupReport { get; init; } = [];
+
     /// <summary>Скільки пунктів мапи перейменувань суперечать цій парі версій (<c>renameConflict</c>).</summary>
     public int RenameConflictCount => RenameConflicts?.Count ?? 0;
 
@@ -142,6 +160,12 @@ public sealed record VersionMigrationPlan(
             reasons.Add("guardedWithData");
         }
 
+        // Мапа Lookup задана, але не покриває всі вжиті значення (або ціль мапи непридатна): нічого не пишемо.
+        if (LookupUnmappedValues > 0)
+        {
+            reasons.Add("lookupValuesNotMapped");
+        }
+
         // ⛔ Мапа веде в таблицю/колонку, що вже має відповідник за кодом (або двоє ведуть в одну): мовчки
         // вибрати котрусь означало б злити чужі дані в одне місце. Відмова, а не вгадування.
         if (RenameConflictCount > 0)
@@ -172,12 +196,16 @@ public static class VersionMigrationPlanner
     /// Мапа «було → стало» кодів таблиць (і колонок) для структури, перейменованої між версіями; <c>null</c> —
     /// без мапи (відповідність лише за однаковим кодом, як і раніше).
     /// </param>
+    /// <param name="lookup">
+    /// Мапи записів Lookup шапки з даними їхнього використання; <c>null</c> — без мап (план і SQL як раніше).
+    /// </param>
     public static VersionMigrationPlan Plan(
         TemplateVersionSnapshot source,
         TemplateVersionSnapshot target,
         IReadOnlyList<VersionMigrationCellUsage> cells,
         IReadOnlyDictionary<int, long> headerValues,
-        IReadOnlyList<VersionMigrationTableRename>? renames = null)
+        IReadOnlyList<VersionMigrationTableRename>? renames = null,
+        VersionMigrationLookupInput? lookup = null)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(target);
@@ -315,7 +343,8 @@ public static class VersionMigrationPlanner
             }
         }
 
-        var headerFields = CompareHeader(items, source, target, headerValues);
+        var lookupOutcome = new LookupOutcome();
+        var headerFields = CompareHeader(items, source, target, headerValues, lookup, lookupOutcome);
 
         // ⚠ Втрата значення рахується ПО КОМІРКАХ, а не сумою відмінностей:
         // значення в прибраній колонці прибраного рядка — одна втрата, а не
@@ -346,6 +375,11 @@ public static class VersionMigrationPlanner
             conflicts.Count == 0 ? null : conflicts, touched)
         {
             FormulaChanges = [.. formulaChanges.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)],
+            LookupRemaps = lookupOutcome.Rows,
+            LookupRemappedValues = lookupOutcome.Remapped,
+            LookupGuardedValues = lookupOutcome.Guarded,
+            LookupUnmappedValues = lookupOutcome.Unmapped,
+            LookupReport = lookupOutcome.Report,
             GuardedOverwrites =
             [
                 .. overwrites
@@ -690,7 +724,7 @@ public static class VersionMigrationPlanner
 
     private static Dictionary<int, int> CompareHeader(
         List<VersionMigrationItem> items, TemplateVersionSnapshot source, TemplateVersionSnapshot target,
-        IReadOnlyDictionary<int, long> headerValues)
+        IReadOnlyDictionary<int, long> headerValues, VersionMigrationLookupInput? lookup, LookupOutcome lookupOutcome)
     {
         var map = new Dictionary<int, int>();
         var targetFields = target.HeaderFields.Where(f => !f.IsDeleted).ToDictionary(f => f.Code, StringComparer.Ordinal);
@@ -708,7 +742,11 @@ public static class VersionMigrationPlanner
 
             map[field.Id] = other.Id;
             Guarded(items, path, values, nameof(HeaderFieldDef.DataType), field.DataType, other.DataType);
-            Guarded(items, path, values, nameof(HeaderFieldDef.LookupRegistryDefId), field.LookupRegistryDefId, other.LookupRegistryDefId);
+            if (!TryRemapLookup(items, path, field, other, values, lookup, lookupOutcome))
+            {
+                Guarded(items, path, values, nameof(HeaderFieldDef.LookupRegistryDefId), field.LookupRegistryDefId, other.LookupRegistryDefId);
+            }
+
             if (!field.IsRequired && other.IsRequired)
             {
                 items.Add(new(path, "Modified", ChangeClass.Guarded, values,
@@ -725,6 +763,92 @@ public static class VersionMigrationPlanner
         }
 
         return map;
+    }
+
+    /// <summary>Накопичувач результатів мап Lookup під час розбору шапки.</summary>
+    private sealed class LookupOutcome
+    {
+        public List<VersionMigrationLookupRemapRow> Rows { get; } = [];
+
+        public List<LookupRemapReportItem> Report { get; } = [];
+
+        public long Remapped { get; set; }
+
+        public long Guarded { get; set; }
+
+        public long Unmapped { get; set; }
+    }
+
+    /// <summary>
+    /// Мапа Lookup для поля шапки, чий довідник змінився. Повна мапа замінює пункт <c>Guarded</c> безпечним
+    /// <c>Remapped</c> (значення переписує SQL); неповна лишає <c>Guarded</c> і рахує значення без відповідника.
+    /// </summary>
+    /// <returns><c>true</c> — мапа повна, <c>Guarded</c> за довідник додавати не треба.</returns>
+    private static bool TryRemapLookup(
+        List<VersionMigrationItem> items, string path, HeaderFieldDef field, HeaderFieldDef other, long values,
+        VersionMigrationLookupInput? lookup, LookupOutcome outcome)
+    {
+        if (lookup is null
+            || field.LookupRegistryDefId == other.LookupRegistryDefId
+            || !lookup.Fields.TryGetValue(field.Id, out var data))
+        {
+            return false;
+        }
+
+        var mapped = new List<VersionMigrationLookupRemapRow>();
+        var unmappedIds = new List<long>();
+        long mappedValues = 0;
+        long unmappedValues = data.ValuesWithoutEntry;
+        foreach (var (entryId, count) in data.UsedEntries.OrderBy(e => e.Key))
+        {
+            if (data.Mappings.TryGetValue(entryId, out var newId) && !data.UnusableTargets.ContainsKey(newId))
+            {
+                mapped.Add(new VersionMigrationLookupRemapRow(field.Id, field.Code, entryId, newId));
+                mappedValues += count;
+            }
+            else
+            {
+                unmappedIds.Add(entryId);
+                unmappedValues += count;
+            }
+        }
+
+        var complete = unmappedValues == 0;
+        outcome.Report.Add(new LookupRemapReportItem(
+            new VersionMigrationLookupTarget(VersionMigrationLookupRemaps.HeaderKind, field.Code),
+            Applied: true,
+            MappedValues: mappedValues,
+            UnmappedValues: unmappedValues,
+            MappedEntries: mapped.Count,
+            UnmappedEntries: unmappedIds.Count,
+            UnmappedEntryIds: [.. unmappedIds.Take(VersionMigrationLookupRemaps.MaxListed)],
+            UnmappedTruncated: unmappedIds.Count > VersionMigrationLookupRemaps.MaxListed,
+            TargetNotUsable:
+            [
+                .. data.UnusableTargets
+                    .OrderBy(t => t.Key)
+                    .Take(VersionMigrationLookupRemaps.MaxListed)
+                    .Select(t => new LookupRemapNotUsable(t.Key, t.Value)),
+            ]));
+
+        if (!complete)
+        {
+            outcome.Unmapped += unmappedValues;
+            outcome.Guarded += values;
+            return false;
+        }
+
+        if (mappedValues == 0)
+        {
+            // Значень немає: переписувати нічого, але зміна довідника без даних нічого не псує.
+            return false;
+        }
+
+        outcome.Rows.AddRange(mapped);
+        outcome.Remapped += mappedValues;
+        items.Add(new(path, "Remapped", ChangeClass.Safe, mappedValues,
+            nameof(HeaderFieldDef.LookupRegistryDefId), Text(field.LookupRegistryDefId), Text(other.LookupRegistryDefId)));
+        return true;
     }
 
     /// <summary>

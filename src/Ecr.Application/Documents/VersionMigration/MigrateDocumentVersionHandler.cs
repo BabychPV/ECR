@@ -83,6 +83,12 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// введених значень у ній (по всіх документах і періодах проєкту).
 /// </param>
 /// <param name="GuardedOverwrittenItemsTruncated">ACC-OW: перелік обрізано стелею.</param>
+/// <param name="LookupRemapReport">
+/// Звіт мап Lookup по цілях запиту (<c>lookupRemaps</c>); <c>null</c> — мап у запиті не було. ⛔ Лише id записів і
+/// кількості. Причина відмови <c>lookupValuesNotMapped</c> з'являється в <c>Refusals</c>, коли є значення без
+/// придатного відповідника.
+/// </param>
+/// <param name="LookupRemapped">Скільки значень шапки переїде (сухий прогін) або переїхало; <c>null</c> — мап не було.</param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
     int ProjectId,
@@ -115,7 +121,9 @@ public sealed record DocumentVersionMigrationDto(
     long? GuardedOverwritable = null,
     bool? GuardedOverwriteAccepted = null,
     IReadOnlyList<GuardedOverwriteItem>? GuardedOverwrittenItems = null,
-    bool? GuardedOverwrittenItemsTruncated = null);
+    bool? GuardedOverwrittenItemsTruncated = null,
+    IReadOnlyList<LookupRemapReportItem>? LookupRemapReport = null,
+    long? LookupRemapped = null);
 
 /// <summary>Комірка, значення якої перезапише нова комірочна формула (ACC-OW).</summary>
 /// <param name="SheetCode">Код аркуша вихідної версії.</param>
@@ -177,6 +185,7 @@ public sealed class MigrateDocumentVersionHandler(
     IAccessProfileInvalidator profileCache,
     ISheetEditGate structureGate,
     IBackgroundJobScheduler jobs,
+    IRegistryStore registries,
     Microsoft.Extensions.Logging.ILogger<MigrateDocumentVersionHandler> log)
 {
     /// <summary>
@@ -200,6 +209,9 @@ public sealed class MigrateDocumentVersionHandler(
 
     /// <summary>Подія журналу безпеки.</summary>
     public const string EventType = "DocumentVersionMigrated";
+
+    /// <summary>Подія журналу безпеки: значення Lookup шапки документа перенесено на запис нового довідника.</summary>
+    public const string LookupRemapEventType = "DocumentHeaderLookupRemapped";
 
     /// <summary>Стеля переліку версій шаблону, серед яких обирається ціль.</summary>
     public const int MaxTargets = 200;
@@ -292,23 +304,49 @@ public sealed class MigrateDocumentVersionHandler(
     /// переносу замінює його результатом формули. Інші класи guarded і подані/затверджені аркуші прапор не знімає.
     /// </param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<DocumentVersionMigrationDto> HandleAsync(
+    public Task<DocumentVersionMigrationDto> HandleAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode, bool dryRun,
         IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite, CancellationToken ct)
+        => HandleAsync(documentId, targetVersionId, mode, dryRun, renames, acceptGuardedOverwrite, lookupRemaps: null, ct);
+
+    /// <summary>
+    /// Будує звіт і, якщо це не сухий прогін, переносить — з мапою перейменувань, згодою на перезапис похідних
+    /// значень і мапою записів Lookup шапки («було → стало» для поля, довідник якого змінився).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="targetVersionId">Цільова версія того самого шаблону.</param>
+    /// <param name="mode">Режим.</param>
+    /// <param name="dryRun"><c>true</c> — лише звіт.</param>
+    /// <param name="renames">Мапа перейменувань; <c>null</c> — без мапи.</param>
+    /// <param name="acceptGuardedOverwrite">Згода на перезапис похідних значень.</param>
+    /// <param name="lookupRemaps">
+    /// Мапи записів Lookup по полях шапки; <c>null</c> — без мап (поведінка й SQL як раніше). Мапа діє лише там,
+    /// де довідник поля між версіями змінився; повна мапа знімає з цього поля <c>guardedWithData</c>.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="BusinessRuleException">
+    /// Також <c>ECR-SCHM-0422</c>: <c>migrateLookupRemapInvalid</c> (форма або зміст мапи),
+    /// <c>migrateLookupNotMapped</c> (є значення без придатного відповідника; нічого не записано).
+    /// </exception>
+    public async Task<DocumentVersionMigrationDto> HandleAsync(
+        long documentId, int targetVersionId, VersionMigrationMode mode, bool dryRun,
+        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
+        IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps, CancellationToken ct)
     {
         var request = await ResolveAsync(documentId, targetVersionId, tolerateSame: false, ct).ConfigureAwait(false);
         VersionMigrationRenames.Validate(renames);
+        VersionMigrationLookupRemaps.Validate(lookupRemaps);
 
         if (dryRun)
         {
-            var (dto, _, _, _) = await PlanAsync(
+            var planned = await PlanAsync(
                 documentId, request.ProjectId, request.SourceVersionId, request.Target, mode, request.Archived,
-                dryRun: true, renames, acceptGuardedOverwrite, ct).ConfigureAwait(false);
-            return dto;
+                dryRun: true, renames, acceptGuardedOverwrite, lookupRemaps, ct).ConfigureAwait(false);
+            return planned.Dto;
         }
 
         // Синхронний шлях без приймача прогресу завжди дає звіт (збіг версій там — виняток, не "вже перенесено").
-        return (await ApplyAsync(request, documentId, mode, renames, acceptGuardedOverwrite, onProgress: null, ct)
+        return (await ApplyAsync(request, documentId, mode, renames, acceptGuardedOverwrite, lookupRemaps, onProgress: null, ct)
             .ConfigureAwait(false))!;
     }
 
@@ -363,12 +401,28 @@ public sealed class MigrateDocumentVersionHandler(
     /// <param name="acceptGuardedOverwrite">Згода: див. <see cref="HandleAsync(long, int, VersionMigrationMode, bool, IReadOnlyList{VersionMigrationTableRename}?, bool, CancellationToken)"/>.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Ідентифікатор задачі.</returns>
-    public async Task<string> EnqueueAsync(
+    public Task<string> EnqueueAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode,
         IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite, CancellationToken ct)
+        => EnqueueAsync(documentId, targetVersionId, mode, renames, acceptGuardedOverwrite, lookupRemaps: null, ct);
+
+    /// <summary>Ставить перенос у чергу з мапою перейменувань, згодою ACC-OW і мапою записів Lookup шапки.</summary>
+    /// <param name="documentId">Документ, з якого відкрили перенос.</param>
+    /// <param name="targetVersionId">Цільова версія того самого шаблону.</param>
+    /// <param name="mode">Режим.</param>
+    /// <param name="renames">Мапа перейменувань; <c>null</c> — без мапи.</param>
+    /// <param name="acceptGuardedOverwrite">Згода на перезапис похідних значень.</param>
+    /// <param name="lookupRemaps">Мапи Lookup; <c>null</c> — без мап (форма перевіряється одразу, зміст — у задачі).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатор задачі.</returns>
+    public async Task<string> EnqueueAsync(
+        long documentId, int targetVersionId, VersionMigrationMode mode,
+        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
+        IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps, CancellationToken ct)
     {
         var request = await ResolveAsync(documentId, targetVersionId, tolerateSame: false, ct).ConfigureAwait(false);
         VersionMigrationRenames.Validate(renames);
+        VersionMigrationLookupRemaps.Validate(lookupRemaps);
 
         if (request.Archived)
         {
@@ -385,7 +439,8 @@ public sealed class MigrateDocumentVersionHandler(
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            return await EnqueueLockedAsync(request, documentId, targetVersionId, mode, renames, acceptGuardedOverwrite, ct)
+            return await EnqueueLockedAsync(
+                    request, documentId, targetVersionId, mode, renames, acceptGuardedOverwrite, lookupRemaps, ct)
                 .ConfigureAwait(false);
         }
         finally
@@ -399,7 +454,8 @@ public sealed class MigrateDocumentVersionHandler(
 
     private async Task<string> EnqueueLockedAsync(
         Resolved request, long documentId, int targetVersionId, VersionMigrationMode mode,
-        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite, CancellationToken ct)
+        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
+        IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps, CancellationToken ct)
     {
         var documentIds = (await store.ListDocumentIdsAsync(request.ProjectId, ct).ConfigureAwait(false)).ToHashSet();
         var active = await FindActiveJobAsync(documentIds, ct).ConfigureAwait(false);
@@ -428,7 +484,8 @@ public sealed class MigrateDocumentVersionHandler(
                 new MigrateDocumentVersionTask(
                     documentId, targetVersionId, mode.ToString(), actor,
                     renames is { Count: > 0 } ? renames : null,
-                    acceptGuardedOverwrite),
+                    acceptGuardedOverwrite,
+                    lookupRemaps is { Count: > 0 } ? lookupRemaps : null),
                 ct,
                 currentUser.UserId)
             .ConfigureAwait(false);
@@ -504,13 +561,32 @@ public sealed class MigrateDocumentVersionHandler(
     /// <param name="onProgress">Приймач прогресу.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Звіт: що перенесено.</returns>
+    public Task<VersionMigrationRunResult> RunQueuedAsync(
+        long documentId, int targetVersionId, VersionMigrationMode mode,
+        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
+        VersionMigrationProgressReporter onProgress, CancellationToken ct)
+        => RunQueuedAsync(
+            documentId, targetVersionId, mode, renames, acceptGuardedOverwrite, lookupRemaps: null, onProgress, ct);
+
+    /// <summary>Виконує перенос у задачі черги з усіма необов'язковими мапами запиту (ACC-OW і Lookup шапки).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="targetVersionId">Цільова версія.</param>
+    /// <param name="mode">Режим.</param>
+    /// <param name="renames">Мапа перейменувань; <c>null</c> — без мапи.</param>
+    /// <param name="acceptGuardedOverwrite">Згода ACC-OW.</param>
+    /// <param name="lookupRemaps">Мапи записів Lookup шапки (їх поставив запит; ПЛАН у задачі перераховується з ними).</param>
+    /// <param name="onProgress">Приймач прогресу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Звіт: що перенесено.</returns>
     public async Task<VersionMigrationRunResult> RunQueuedAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode,
         IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
+        IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps,
         VersionMigrationProgressReporter onProgress, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(onProgress);
         VersionMigrationRenames.Validate(renames);
+        VersionMigrationLookupRemaps.Validate(lookupRemaps);
 
         await onProgress(StartedPercent, "jobs.migrateStarted", null, ct).ConfigureAwait(false);
 
@@ -525,7 +601,7 @@ public sealed class MigrateDocumentVersionHandler(
             return await AlreadyMigratedAsync(request, ct).ConfigureAwait(false);
         }
 
-        var dto = await ApplyAsync(request, documentId, mode, renames, acceptGuardedOverwrite, onProgress, ct)
+        var dto = await ApplyAsync(request, documentId, mode, renames, acceptGuardedOverwrite, lookupRemaps, onProgress, ct)
             .ConfigureAwait(false);
 
         return dto is null
@@ -625,6 +701,7 @@ public sealed class MigrateDocumentVersionHandler(
     private async Task<DocumentVersionMigrationDto?> ApplyAsync(
         Resolved request, long documentId, VersionMigrationMode mode,
         IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
+        IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps,
         VersionMigrationProgressReporter? onProgress, CancellationToken ct)
     {
         var profile = request.Profile;
@@ -673,10 +750,11 @@ public sealed class MigrateDocumentVersionHandler(
                 await onProgress(PlanningPercent, "jobs.migratePlanning", null, innerCt).ConfigureAwait(false);
             }
 
-            var (dto, plan, foreignKeys, extended) = await PlanAsync(
+            var planned = await PlanAsync(
                 documentId, projectId, current, target, mode, archived, dryRun: false, renames,
-                acceptGuardedOverwrite, innerCt).ConfigureAwait(false);
-            ThrowIfRefused(dto, foreignKeys, plan.RenameConflicts, acceptGuardedOverwrite);
+                acceptGuardedOverwrite, lookupRemaps, innerCt).ConfigureAwait(false);
+            var (dto, plan, foreignKeys, extended) = (planned.Dto, planned.Plan, planned.ForeignKeys, planned.Extended);
+            ThrowIfRefused(dto, foreignKeys, plan.RenameConflicts, acceptGuardedOverwrite, plan.LookupGuardedValues);
 
             grantedUsers = await store.ListUsersWithGrantsAsync(plan, MaxInvalidatedUsers, innerCt).ConfigureAwait(false);
 
@@ -708,6 +786,18 @@ public sealed class MigrateDocumentVersionHandler(
 
             await store.ApplyAsync(projectId, target.Id, plan, onStep, innerCt).ConfigureAwait(false);
             formulaTables = plan.FormulaChanges.Count;
+
+            // ⛔ Слід переносу значень Lookup шапки — на КОЖЕН документ, у ТІЙ САМІЙ транзакції (відкат переносу
+            // відкочує й аудит). Старі id взято ДО запису, під блоком проєкту. ⚠ Перерахунок тут НЕ ставиться: кількості
+            // комірок і результати не змінюються, а формули з HDR.<Lookup> ремап не охоплює (див. контракт).
+            if (plan.LookupRemaps.Count > 0)
+            {
+                var events = BuildLookupRemapEvents(planned.LookupRows, plan, projectId, current, target.Id, profile.UserId);
+                if (events.Count > 0)
+                {
+                    await audit.WriteSecurityEventsAsync(events, innerCt).ConfigureAwait(false);
+                }
+            }
 
             // ⛔ D-1: мапінги збору — в ТІЙ САМІЙ транзакції, що й документи й версія проєкту: збій відкочує все,
             // і збір не опиняється між версіями. Рахується те, що справді перенесено (мапінг могли додати між
@@ -760,6 +850,10 @@ public sealed class MigrateDocumentVersionHandler(
                         // комірках шаблону. ⛔ Лише кількості: ні адрес, ні значень.
                         guardedOverwritten = acceptGuardedOverwrite ? plan.GuardedOverwritableValues : 0L,
                         guardedOverwrittenCells = acceptGuardedOverwrite ? plan.GuardedOverwrites.Count : 0,
+
+                        // Мапи Lookup шапки: скільки значень переписано й по скількох полях. ⛔ Лише кількості.
+                        lookupRemapped = plan.LookupRemappedValues,
+                        lookupRemapTargets = plan.LookupRemaps.Select(r => r.HeaderFieldDefId).Distinct().Count(),
                     }),
                     profile.UserId, currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
@@ -782,6 +876,52 @@ public sealed class MigrateDocumentVersionHandler(
         }
 
         return result!;
+    }
+
+    /// <summary>
+    /// Події аудиту «значення Lookup шапки перенесено на запис нового довідника» — по одній на документ.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Лише id (старий/новий запис) і код поля; тексту дозволу в журналі немає. <c>locked</c> — інформативно:
+    /// у документа є подані/затверджені аркуші; на допуск переносу не впливає (шапка не дані аркуша).
+    /// </remarks>
+    private List<SecurityEventRecord> BuildLookupRemapEvents(
+        IReadOnlyList<HeaderLookupValueRow> rows, VersionMigrationPlan plan, int projectId,
+        int fromVersionId, int toVersionId, int userId)
+    {
+        var map = plan.LookupRemaps.ToDictionary(r => (r.HeaderFieldDefId, r.OldEntryId));
+        var codes = plan.LookupRemaps.GroupBy(r => r.HeaderFieldDefId).ToDictionary(g => g.Key, g => g.First().FieldCode);
+        var now = clock.UtcNow;
+        var events = new List<SecurityEventRecord>();
+
+        foreach (var document in rows.Where(r => r.EntryId is { } e && map.ContainsKey((r.HeaderFieldDefId, e)))
+                     .GroupBy(r => r.DocumentId).OrderBy(g => g.Key))
+        {
+            var fields = document
+                .OrderBy(r => codes[r.HeaderFieldDefId], StringComparer.Ordinal)
+                .Select(r => new
+                {
+                    code = codes[r.HeaderFieldDefId],
+                    oldEntryId = r.EntryId!.Value,
+                    newEntryId = map[(r.HeaderFieldDefId, r.EntryId!.Value)].NewEntryId,
+                    locked = r.Locked,
+                })
+                .ToList();
+
+            events.Add(new SecurityEventRecord(
+                now, LookupRemapEventType, TargetUserId: null, TargetRoleId: null,
+                JsonSerializer.Serialize(new
+                {
+                    documentId = document.Key,
+                    projectId,
+                    fromVersionId,
+                    toVersionId,
+                    fields,
+                }),
+                userId, currentUser.CorrelationId));
+        }
+
+        return events;
     }
 
     /// <summary>Перелік версій, на які можна перенести документ.</summary>
@@ -811,17 +951,35 @@ public sealed class MigrateDocumentVersionHandler(
         return new DocumentVersionMigrationTargetsDto(projectId, current.Id, current.Version, targets);
     }
 
-    private async Task<(DocumentVersionMigrationDto Dto, VersionMigrationPlan Plan, IReadOnlyList<string> ForeignKeys, ExtendedMappingRemap Extended)> PlanAsync(
+    /// <summary>План переносу разом зі звітом, мапінгами й значеннями шапки, які читав аудит мап Lookup.</summary>
+    private sealed record PlannedMigration(
+        DocumentVersionMigrationDto Dto,
+        VersionMigrationPlan Plan,
+        IReadOnlyList<string> ForeignKeys,
+        ExtendedMappingRemap Extended,
+        IReadOnlyList<HeaderLookupValueRow> LookupRows);
+
+    /// <summary>Підготовлені мапи Lookup: вхід планувальника, прочитані значення, цілі поза парою версій.</summary>
+    private sealed record LookupPrepared(
+        VersionMigrationLookupInput? Input,
+        IReadOnlyList<HeaderLookupValueRow> Rows,
+        IReadOnlyList<LookupRemapReportItem> NotApplied);
+
+    private async Task<PlannedMigration> PlanAsync(
         long documentId, int projectId, int sourceVersionId, TemplateVersion target,
         VersionMigrationMode mode, bool archived, bool dryRun,
-        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite, CancellationToken ct)
+        IReadOnlyList<VersionMigrationTableRename>? renames, bool acceptGuardedOverwrite,
+        IReadOnlyList<VersionMigrationLookupRemap>? lookupRemaps, CancellationToken ct)
     {
         var source = await versions.GetAsync(sourceVersionId, ct).ConfigureAwait(false);
         var from = await metadata.GetAsync(sourceVersionId, ct).ConfigureAwait(false);
         var to = await metadata.GetAsync(target.Id, ct).ConfigureAwait(false);
         var scope = await store.ReadScopeAsync(projectId, ct).ConfigureAwait(false);
 
-        var plan = VersionMigrationPlanner.Plan(from, to, scope.Cells, scope.HeaderValues, renames);
+        // Без мап нових читань немає: шлях і кількість запитів як до мап Lookup.
+        var lookup = await PrepareLookupAsync(projectId, from, to, lookupRemaps, ct).ConfigureAwait(false);
+
+        var plan = VersionMigrationPlanner.Plan(from, to, scope.Cells, scope.HeaderValues, renames, lookup.Input);
 
         // ACC-OW: прапор знімає guardedWithData лише для нової комірочної формули на комірці зі значенням.
         var refusals = plan.RefusalsFor(mode, acceptGuardedOverwrite).ToList();
@@ -954,10 +1112,134 @@ public sealed class MigrateDocumentVersionHandler(
             plan.GuardedOverwritableValues,
             acceptGuardedOverwrite,
             plan.GuardedOverwrites.Count == 0 ? null : [.. plan.GuardedOverwrites.Take(MaxGuardedOverwriteItems)],
-            plan.GuardedOverwrites.Count > MaxGuardedOverwriteItems);
+            plan.GuardedOverwrites.Count > MaxGuardedOverwriteItems,
+            LookupRemapReport: lookup.Input is null && lookup.NotApplied.Count == 0
+                ? null
+                : [.. plan.LookupReport.Concat(lookup.NotApplied).OrderBy(i => i.Target.Code, StringComparer.Ordinal)],
+            LookupRemapped: lookup.Input is null && lookup.NotApplied.Count == 0 ? null : plan.LookupRemappedValues);
 
-        return (dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds });
+        return new PlannedMigration(
+            dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds }, lookup.Rows);
     }
+
+    /// <summary>
+    /// Готує вхід планувальника з мап запиту: читає значення шапки (один запит), перевіряє, що старі записи з
+    /// вихідного довідника, і придатність нових (як <c>ECR-HDR-4223</c>). Без мап — нічого не читає.
+    /// </summary>
+    /// <remarks>
+    /// Ціль, якої нема в парі версій або чий довідник не змінився, мовчки пропускається (<c>applied = false</c>):
+    /// одну й ту саму мапу можна подавати на кожен проєкт. Пари, чий старий запис ніде не вжито, ігноруються.
+    /// </remarks>
+    private async Task<LookupPrepared> PrepareLookupAsync(
+        int projectId, TemplateVersionSnapshot from, TemplateVersionSnapshot to,
+        IReadOnlyList<VersionMigrationLookupRemap>? remaps, CancellationToken ct)
+    {
+        if (remaps is null || remaps.Count == 0)
+        {
+            return new LookupPrepared(null, [], []);
+        }
+
+        var sourceFields = from.HeaderFields.Where(f => !f.IsDeleted).ToDictionary(f => f.Code, StringComparer.Ordinal);
+        var targetFields = to.HeaderFields.Where(f => !f.IsDeleted).ToDictionary(f => f.Code, StringComparer.Ordinal);
+
+        var notApplied = new List<LookupRemapReportItem>();
+        var applied = new List<(VersionMigrationLookupRemap Remap, HeaderFieldDef Source, HeaderFieldDef Target)>();
+        foreach (var remap in remaps)
+        {
+            var code = remap.Target.Code;
+            if (sourceFields.TryGetValue(code, out var src) && targetFields.TryGetValue(code, out var dst)
+                && src.LookupRegistryDefId is not null && dst.LookupRegistryDefId is not null
+                && src.LookupRegistryDefId != dst.LookupRegistryDefId)
+            {
+                applied.Add((remap, src, dst));
+                continue;
+            }
+
+            notApplied.Add(new LookupRemapReportItem(
+                remap.Target, Applied: false, MappedValues: 0, UnmappedValues: 0, MappedEntries: 0, UnmappedEntries: 0,
+                UnmappedEntryIds: [], UnmappedTruncated: false, TargetNotUsable: []));
+        }
+
+        if (applied.Count == 0)
+        {
+            return new LookupPrepared(new VersionMigrationLookupInput(new Dictionary<int, LookupRemapField>()), [], notApplied);
+        }
+
+        var rows = await store
+            .ListHeaderLookupValuesAsync(
+                projectId, [.. applied.Select(a => a.Source.Id)], VersionMigrationLookupRemaps.MaxHeaderValues, ct)
+            .ConfigureAwait(false);
+        if (rows.Count > VersionMigrationLookupRemaps.MaxHeaderValues)
+        {
+            throw VersionMigrationLookupRemaps.Invalid(
+                $"Значень шапки в мапованих полях більше за {VersionMigrationLookupRemaps.MaxHeaderValues}.");
+        }
+
+        var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
+                      ?? throw new InvalidOperationException("Проєкт переносу зник під блоком.");
+        var windowStart = project.PeriodStart;
+        var windowEndExclusive = project.PeriodEnd.AddDays(1);
+
+        var standings = (await registries
+                .FindEntryStandingsAsync(
+                    [.. applied.SelectMany(a => a.Remap.Mappings).SelectMany(p => new[] { p.From, p.To }).Distinct()], ct)
+                .ConfigureAwait(false))
+            .ToDictionary(s => s.Id);
+
+        var fields = new Dictionary<int, LookupRemapField>();
+        foreach (var (remap, src, dst) in applied)
+        {
+            // ⛔ Старий запис мусить належати ВИХІДНОМУ довіднику поля (будь-якого стану): мапа з чужого довідника
+            // не повинна вдавати покриття. Перевіряються всі пари, у тому числі ті, що нічого не покривають.
+            foreach (var pair in remap.Mappings)
+            {
+                if (!standings.TryGetValue(pair.From, out var old) || old.RegistryDefId != src.LookupRegistryDefId)
+                {
+                    throw VersionMigrationLookupRemaps.Invalid(
+                        $"Мапа Lookup поля «{src.Code}»: запис {pair.From} не належить довіднику вихідної версії.");
+                }
+            }
+
+            var fieldRows = rows.Where(r => r.HeaderFieldDefId == src.Id).ToList();
+            var used = fieldRows
+                .Where(r => r.EntryId is not null)
+                .GroupBy(r => r.EntryId!.Value)
+                .ToDictionary(g => g.Key, g => (long)g.Count());
+            var mappings = remap.Mappings.ToDictionary(p => p.From, p => p.To);
+
+            var unusable = new Dictionary<long, string>();
+            foreach (var entryId in used.Keys.Where(mappings.ContainsKey))
+            {
+                var newId = mappings[entryId];
+                var reason = NotUsableReason(
+                    standings.GetValueOrDefault(newId), dst.LookupRegistryDefId!.Value, windowStart, windowEndExclusive);
+                if (reason is not null)
+                {
+                    unusable[newId] = reason;
+                }
+            }
+
+            fields[src.Id] = new LookupRemapField(
+                src.Code, mappings, used, fieldRows.Count(r => r.EntryId is null), unusable);
+        }
+
+        return new LookupPrepared(new VersionMigrationLookupInput(fields), rows, notApplied);
+    }
+
+    /// <summary>
+    /// Чому запис нового довідника не можна покласти в шапку; <c>null</c> — придатний. Те саме правило, що
+    /// <c>EnsureLookupEntriesUsableAsync</c> (<c>ECR-HDR-4223</c>): активний, не видалений, чинний бодай один день
+    /// вікна проєкту.
+    /// </summary>
+    private static string? NotUsableReason(
+        RegistryEntryStanding? standing, int registryDefId, DateOnly windowStart, DateOnly windowEndExclusive)
+        => standing is null ? "missing"
+            : standing.RegistryDefId != registryDefId ? "foreign"
+            : standing.IsDeleted ? "deleted"
+            : !standing.IsActive ? "inactive"
+            : !new Ecr.Domain.ValueObjects.ValidityWindow(standing.ValidFrom, standing.ValidTo)
+                .OverlapsSegment(windowStart, windowEndExclusive) ? "notValidInWindow"
+            : null;
 
     /// <summary>Розподіл поданих/затверджених пар «аркуш × період» на перенесені без змін і зачеплені планом.</summary>
     private sealed record LockedClassification(
@@ -1064,10 +1346,13 @@ public sealed class MigrateDocumentVersionHandler(
 
     private static void ThrowIfRefused(
         DocumentVersionMigrationDto dto, IReadOnlyList<string> foreignKeys, IReadOnlyList<string>? renameConflicts = null,
-        bool acceptGuardedOverwrite = false)
+        bool acceptGuardedOverwrite = false, long lookupGuardedValues = 0)
     {
         // ACC-OW: значення під новою формулою за згодою не «змінюють тлумачення» — у відмові лишається решта.
         var guardedValues = acceptGuardedOverwrite ? dto.GuardedValues - (dto.GuardedOverwritable ?? 0L) : dto.GuardedValues;
+
+        // Частина guarded, що лишилась через мапу Lookup без повного покриття: її називає окрема причина.
+        var otherGuardedValues = guardedValues - lookupGuardedValues;
 
         if (dto.Refusals.Contains("projectArchived") || dto.Refusals.Contains("sheetsLocked"))
         {
@@ -1120,6 +1405,8 @@ public sealed class MigrateDocumentVersionHandler(
                     ? "err.ECR-SCHM-0422.migrateStructural"
                     : dto.Refusals.Contains("renameConflict")
                     ? "err.ECR-SCHM-0422.migrateRenameConflict"
+                    : dto.Refusals.Contains("lookupValuesNotMapped") && dto.LostValues == 0 && otherGuardedValues == 0
+                        ? "err.ECR-SCHM-0422.migrateLookupNotMapped"
                     : dto.Refusals.Contains("grantsNotMapped") && dto.LostValues == 0 && guardedValues == 0
                         ? "err.ECR-SCHM-0422.migrateGrantsNotMapped"
                         : dto.Refusals.Contains("bindingsNotMapped") && dto.LostValues == 0 && guardedValues == 0

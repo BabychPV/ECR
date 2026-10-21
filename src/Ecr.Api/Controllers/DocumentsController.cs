@@ -384,14 +384,18 @@ public sealed class DocumentsController(
         if (request.Async && !request.DryRun)
         {
             var jobId = await migrateVersion
-                .EnqueueAsync(id, request.TargetVersionId, mode, request.TableRenames, request.AcceptGuardedOverwrite ?? false, ct)
+                .EnqueueAsync(
+                    id, request.TargetVersionId, mode, request.TableRenames, request.AcceptGuardedOverwrite ?? false,
+                    request.LookupRemaps, ct)
                 .ConfigureAwait(false);
 
             return Accepted(new Contracts.MigrationAcceptedResponse(jobId, id));
         }
 
         return Ok(await migrateVersion
-            .HandleAsync(id, request.TargetVersionId, mode, request.DryRun, request.TableRenames, request.AcceptGuardedOverwrite ?? false, ct)
+            .HandleAsync(
+                id, request.TargetVersionId, mode, request.DryRun, request.TableRenames,
+                request.AcceptGuardedOverwrite ?? false, request.LookupRemaps, ct)
             .ConfigureAwait(false));
     }
 
@@ -729,13 +733,23 @@ public sealed record ChangeDocumentKeyRequest(string? BusinessKey, string? Expec
 /// рядків) і подані/затверджені аркуші (<c>409 sheetsLocked</c>) прапор НЕ знімає. Те, що буде перезаписано,
 /// сухий прогін показує до згоди: <c>guardedOverwritable</c>, <c>guardedOverwrittenItems</c>.
 /// </param>
+/// <param name="LookupRemaps">
+/// Необов'язкові мапи записів Lookup по полях ШАПКИ: <c>[{target:{kind:"header",code}, mappings:[{from,to}]}]</c>, де
+/// <c>from</c> — запис вихідного довідника, <c>to</c> — запису довідника цільової версії. Діють лише для поля, чий
+/// довідник між версіями змінився (інакше ціль у звіті має <c>applied = false</c>). Повна мапа (кожне вжите значення
+/// має придатний відповідник: існує, у новому довіднику, активний, не видалений, чинний у вікні проєкту) знімає з поля
+/// <c>guardedWithData</c> і переписує значення в шапці в тій самій транзакції; часткова — <c>422 ECR-SCHM-0422</c>
+/// (<c>migrateLookupNotMapped</c>), нічого не записано. Зайві пари ігноруються. Колонки Lookup (<c>kind = column</c>)
+/// не підтримуються (<c>422 migrateLookupRemapInvalid</c>). Перерахунок не ставиться. Без поля поведінка незмінна.
+/// </param>
 public sealed record MigrateDocumentVersionRequest(
     int TargetVersionId,
     Application.Documents.VersionMigration.VersionMigrationMode? Mode,
     bool DryRun,
     bool Async = false,
     IReadOnlyList<Application.Documents.VersionMigration.VersionMigrationTableRename>? TableRenames = null,
-    bool? AcceptGuardedOverwrite = null);
+    bool? AcceptGuardedOverwrite = null,
+    IReadOnlyList<Application.Documents.VersionMigration.VersionMigrationLookupRemap>? LookupRemaps = null);
 
 /// <summary>Запит на експорт.</summary>
 /// <param name="IncludeFormulas">
