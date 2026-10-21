@@ -835,16 +835,14 @@ export function useSheetActions({
    * дає змогу змінити вже подані числа. Тому і дія окрема, і причина
    * обов'язкова.
    *
-   * ⚠ Тут навмисно ЛИШЕ право, без порога гранта, хоч сервер перевіряє
-   * обидва (`ReopenDocumentHandler`: `profile.Has("Document.Reopen")`,
-   * далі `CanReopenAsync` → `EditRules.CanReopen` з порогом
-   * `GrantLevel.Approve`). Це не та розбіжність, про яку F9: дія вже
-   * закрита правом, і вужчою за сервер вона не стає. Довести її до
-   * другої умови — окремий крок: `e2e/security.spec.ts` проводить
-   * `Document.Reopen` як штатну дію для приведення аркуша в `Draft`
-   * (`makeSheetEditable`), і зміна порога тут зачіпає той прохід.
+   * ✎ P3 пермітів: сервер перевіряє ОБИДВІ умови (`ReopenDocumentHandler`:
+   * `profile.Has("Document.Reopen")`, далі `CanReopenAsync` → `EditRules.CanReopen`
+   * з порогом `GrantLevel.Approve`, і не в симуляції). Раніше кнопка стояла лише за
+   * правом, і людина з `Document.Reopen`, але без гранта Approve на аркуш, діставала
+   * `403 reopenDenied`. Тепер, як для Approve/Reject, кнопки немає, коли гранта
+   * замало (`mayWorkflow('approve')`: не симуляція + поріг Approve).
    */
-  const canReopen = isAllowed('reopen', state) && can(me, 'Document.Reopen');
+  const canReopen = isAllowed('reopen', state) && can(me, 'Document.Reopen') && mayWorkflow('approve');
 
   const dialogs = (
     <>

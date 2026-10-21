@@ -370,3 +370,39 @@ describe('SheetActions: «Approve»/«Reject» — поріг Approve, а не S
     SlowEnvTimeout,
   );
 });
+
+describe('SheetActions: «Return for edits» закрито правом І порогом Approve, як у сервера (P3 пермітів)', () => {
+  const reopen = (): HTMLElement | null => screen.queryByRole('button', { name: /workflow\.reopen/ });
+
+  it(
+    'є Document.Reopen, але грант лише Submit — кнопки немає (сервер: 403 reopenDenied)',
+    async () => {
+      show({ grants: { 'Project:7': 'Submit' }, state: 'Approved' });
+      await anchor();
+
+      expect(reopen()).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'є Document.Reopen і грант Approve — кнопка є (поданий і затверджений)',
+    async () => {
+      show({ grants: { 'Project:7': 'Approve' }, state: 'Approved' });
+
+      expect(await screen.findByRole('button', { name: /workflow\.reopen/ }, { timeout: SlowEnvTimeout })).toBeTruthy();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'симуляція чужими правами — кнопки немає, навіть із грантом Approve',
+    async () => {
+      show({ grants: { 'Project:7': 'Approve' }, state: 'Submitted', isSimulation: true });
+      await anchor();
+
+      expect(reopen()).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+});
