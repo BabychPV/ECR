@@ -56,6 +56,14 @@ describe('SegmentBar', () => {
     expect(root.querySelector('[data-segment-summary]')?.getAttribute('data-segment-summary')).toBe('1/4');
   });
 
+  it('підпис має title з повним текстом: на вузькій картці він може бути обрізаний', () => {
+    const root = bar(<SegmentBar segments={sheets} total={19} />);
+    const label = root.querySelector('[data-segment-summary]');
+
+    expect(label?.getAttribute('title')).toBe(label?.textContent);
+    expect(label?.getAttribute('title')).toBeTruthy();
+  });
+
   it('невідомий стан — тон «увага», а не нейтральний', () => {
     const root = bar(<SegmentBar segments={[{ code: 'X', label: 'X', state: 'Returned' }]} />);
 
