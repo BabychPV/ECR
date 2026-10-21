@@ -29,7 +29,7 @@ export function endDateOutOfRangeText(error: unknown): string | null {
   const extensions = error.problem.extensions2;
   if (extensions?.['messageKey'] !== EndDateOutOfRangeKey) return null;
 
-  return t(EndDateOutOfRangeKey, {
+  return t('err.ECR-PRM-0422.endDateOutOfRange', {
     endDate: humanDate(extensions['endDate']),
     from: humanDate(extensions['from']),
     to: sentenceDate(humanDate(extensions['to'])),
