@@ -9120,6 +9120,9 @@ USING (VALUES
     ,(N'err.ECR-SCHM-0422.migrateLookupNotMapped', N'en', N'Nothing was moved: some header values point to entries that the Lookup remap map does not cover with a usable counterpart (the entry is not in the map, or its target is missing from the new registry, inactive, deleted or not valid in the project window). The report lists the entry ids; extend the map and retry.', 1)
     ,(N'err.ECR-SCHM-0422.migrateLookupLockedDocuments', N'en', N'Nothing was moved: the Lookup remap would rewrite header values in documents that have submitted or approved sheets ({lockedDocumentCount}). The dry run reports their number; confirm with allowLockedDocuments = true and retry.', 1)
     -- PERMITS: migrate-lookup-remap ── кінець секції ──
+    -- MIGRATE-FAST: ключі повідомлень переносу версії (маркер, відновлення, підтвердження бекапу)
+    ,(N'err.ECR-SCHM-0422.migrateResumeMismatch', N'en', N'The previous version migration of this project was interrupted. It can only be continued with the same mapping (columns, rows, header Lookup): the mapping differs from the saved one. Nothing was changed.', 1)
+    -- MIGRATE-FAST: кінець секції
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -23630,7 +23633,10 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-SCHM-0422.migrateLookupNotMapped', N'ru', N'Ничего не перенесено: часть значений шапки ссылается на записи, для которых в карте Lookup нет пригодного соответствия (записи нет в карте либо её цель отсутствует в новом справочнике, неактивна, удалена или не действует в окне проекта). Отчёт называет идентификаторы записей; дополните карту и повторите.'),
     (N'err.ECR-SCHM-0422.migrateLookupNotMapped', N'kz', N'Ештеңе көшірілмеді: тақырып мәндерінің бір бөлігі Lookup картасында жарамды сәйкестігі жоқ жазбаларға сілтейді (жазба картада жоқ немесе оның мақсаты жаңа анықтамалықта жоқ, белсенді емес, жойылған не жоба терезесінде жарамсыз). Есеп жазба идентификаторларын атайды; картаны толықтырып, қайталаңыз.'),
     (N'err.ECR-SCHM-0422.migrateLookupLockedDocuments', N'ru', N'Ничего не перенесено: карта Lookup переписала бы значения шапки в документах с поданными или утверждёнными листами ({lockedDocumentCount}). Их количество показывает пробный прогон; подтвердите параметром allowLockedDocuments = true и повторите.'),
-    (N'err.ECR-SCHM-0422.migrateLookupLockedDocuments', N'kz', N'Ештеңе көшірілмеді: Lookup картасы жіберілген немесе бекітілген парақтары бар құжаттардағы тақырып мәндерін қайта жазар еді ({lockedDocumentCount}). Олардың санын сынақ жүгіру көрсетеді; allowLockedDocuments = true арқылы растап, қайталаңыз.')
+    (N'err.ECR-SCHM-0422.migrateLookupLockedDocuments', N'kz', N'Ештеңе көшірілмеді: Lookup картасы жіберілген немесе бекітілген парақтары бар құжаттардағы тақырып мәндерін қайта жазар еді ({lockedDocumentCount}). Олардың санын сынақ жүгіру көрсетеді; allowLockedDocuments = true арқылы растап, қайталаңыз.'),
+    -- MIGRATE-FAST: ключі повідомлень переносу версії
+    (N'err.ECR-SCHM-0422.migrateResumeMismatch', N'ru', N'Предыдущий перенос версии этого проекта был прерван. Продолжить его можно только с той же картой (колонок, строк, Lookup шапки): карта отличается от сохранённой. Ничего не изменено.'),
+    (N'err.ECR-SCHM-0422.migrateResumeMismatch', N'kz', N'Бұл жобаның нұсқасын көшіру үзілді. Оны тек сол картамен (бағандар, жолдар, тақырып Lookup) жалғастыруға болады: карта сақталғаннан өзгеше. Ештеңе өзгертілген жоқ.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
