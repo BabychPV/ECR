@@ -9124,6 +9124,9 @@ USING (VALUES
     ,(N'err.ECR-SCHM-0422.migrateResumeMismatch', N'en', N'The previous version migration of this project was interrupted. It can only be continued with the same mapping (columns, rows, header Lookup): the mapping differs from the saved one. Nothing was changed.', 1)
     ,(N'err.ECR-SCHM-0422.migrateBackupRequired', N'en', N'Nothing was moved: this migration moves {transferredValues} values (the limit without a backup confirmation is {threshold}). Take a database backup and repeat the request with backupConfirmation (backup path and/or time).', 1)
     -- MIGRATE-FAST: кінець секції
+    -- PERMITS: p3-backlog ── en: PUI-4, значення списку вже прибране/змінене деінде; ru/kz — порцією PERMITS: p3-backlog нижче ──
+    ,(N'permits.lists.drawer.gone', N'en', N'This value is no longer in the list: it was changed elsewhere. The list has been refreshed.', 1)
+    -- PERMITS: p3-backlog ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -23644,6 +23647,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: migrate-lookup-remap ── кінець секції ──
+-- PERMITS: p3-backlog ── ru/kz: PUI-4, значення списку вже прибране/змінене деінде; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.lists.drawer.gone', N'ru', N'Этого значения больше нет в списке: его изменили в другом месте. Список обновлён.'),
+    (N'permits.lists.drawer.gone', N'kz', N'Бұл мән тізімде енді жоқ: оны басқа жерде өзгерткен. Тізім жаңартылды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: p3-backlog ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
