@@ -62,6 +62,13 @@ public interface IPermitTypeStore
     public Task<IReadOnlySet<int>> ListHiddenRegistryIdsAsync(CancellationToken ct);
 
     /// <summary>
+    /// Реєстри ШАПОК опублікованих типів дозволів - єдина підмножина прихованих реєстрів, яку можна обрати ціллю
+    /// Lookup (<c>includePermitHeaders</c> переліку довідників).
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlySet<int>> ListPublishedHeaderRegistryIdsAsync(CancellationToken ct);
+
+    /// <summary>
     /// Скільки живих записів у кожному з переданих реєстрів шапок (екземпляри дозволів); реєстр без записів
     /// у словнику відсутній.
     /// </summary>

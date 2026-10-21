@@ -38524,6 +38524,16 @@
     },
     "/api/v1/registries": {
       "get": {
+        "parameters": [
+          {
+            "description": "`true` - додатково віддати реєстри шапок опублікованих типів дозволів (код `PRM_` + код типу) як ціль Lookup\nполя шапки й колонки шаблону. Права ті самі; за замовчуванням ці реєстри приховані.",
+            "in": "query",
+            "name": "includePermitHeaders",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -39304,6 +39314,15 @@
             "description": "Обраний батьківський запис для каскаду.",
             "in": "query",
             "name": "parentEntryId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Документ, у шапку якого обирається запис: перелік звужується до записів, придатних у вікні проєкту документа\n(активні, чинні бодай один день вікна), а asOf не потрібен. Невидимий документ - 404.",
+            "in": "query",
+            "name": "documentId",
             "schema": {
               "format": "int64",
               "type": "integer"

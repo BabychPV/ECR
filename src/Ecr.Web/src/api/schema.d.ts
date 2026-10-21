@@ -11954,7 +11954,11 @@ export interface paths {
         /** Перелік довідників. Право `Registry.View`. */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description `true` - додатково віддати реєстри шапок опублікованих типів дозволів (код `PRM_` + код типу) як ціль Lookup
+                     *     поля шапки й колонки шаблону. Права ті самі; за замовчуванням ці реєстри приховані. */
+                    includePermitHeaders?: boolean;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -12504,6 +12508,9 @@ export interface paths {
                     asOf?: string;
                     /** @description Обраний батьківський запис для каскаду. */
                     parentEntryId?: number;
+                    /** @description Документ, у шапку якого обирається запис: перелік звужується до записів, придатних у вікні проєкту документа
+                     *     (активні, чинні бодай один день вікна), а asOf не потрібен. Невидимий документ - 404. */
+                    documentId?: number;
                 };
                 header?: never;
                 path: {
