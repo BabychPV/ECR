@@ -84,7 +84,8 @@ test.describe('Contract: шапка документа', () => {
         },
       });
     });
-    await page.route('**/api/v1/registries', (route) =>
+    // Цілі Lookup читаються з `?includePermitHeaders=true`: глоб без рядка запиту його не ловить.
+    await page.route(/\/api\/v1\/registries(\?.*)?$/, (route) =>
       route.request().method() === 'GET'
         ? route.fulfill({
             json: Object.keys(Dictionaries).map((code) => ({
