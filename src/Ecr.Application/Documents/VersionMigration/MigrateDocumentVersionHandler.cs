@@ -785,23 +785,42 @@ public sealed class MigrateDocumentVersionHandler(
         DocumentVersionMigrationDto? result = null;
         var grantedUsers = new GrantedUsers([], Overflow: false);
         var formulaTables = 0;
+
+        // ⛔ Б1 (P1-1/P1-2): ДВІ транзакції з зафіксованим маркером «міграція в процесі» між ними.
+        //  T1 — блок проєкту, структура документів, план, відмови; наприкінці ставить маркер і КОМІТИТЬСЯ: відтоді писарі
+        //      (`SheetEditGate`) і читачі (фільтр API) відмовляють 409 ECR-DOC-4091, тож напівстан діапазонів ніхто не бачить.
+        //  Важка частина — діапазонами з комітом, без відкритої транзакції (ні блокувань, ні закріпленого журналу).
+        //  T2 — повторний блок проєкту, шапка/склад/екземпляри/гранти, аудит і мапінги збору, ПЕРЕМИКАННЯ ВЕРСІЇ І ЗНЯТТЯ
+        //      МАРКЕРА однією командою. Обрив між ними лишає маркер; повторний запуск бачить його, планує заново (уже
+        //      перенесене рахується перенесеним) і доводить до кінця.
+        PlannedMigration planned = null!;
+        var current = 0;
+        var sameVersion = false;
+        VersionMigrationStepReporter? onStep = null;
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             // ⛔ План перераховується ПІД блоком рядка проєкту: між сухим
             // прогоном і підтвердженням у колонку, яку нова версія прибирає,
             // могли ввести значення. Перевірка на знімку з минулого запиту
             // пропустила б саме ту втрату, від якої вона захищає.
-            var current = await store.LockProjectVersionAsync(projectId, innerCt).ConfigureAwait(false)
+            current = await store.LockProjectVersionAsync(projectId, innerCt).ConfigureAwait(false)
                           ?? throw DocumentVisibility.NotFound(documentId);
             if (current == target.Id)
             {
                 // Фонова задача: інший перенос на ту саму ціль встиг раніше - це не помилка (див. RunQueuedAsync).
                 if (onProgress is not null)
                 {
+                    sameVersion = true;
                     return;
                 }
 
                 throw SameVersion(target.Id);
+            }
+
+            // Маркер іншого переносу (на іншу ціль) не перекриваємо; на ту саму ціль — це відновлення після обриву.
+            if (await store.ReadMigrationMarkerAsync(projectId, innerCt).ConfigureAwait(false) is { } marked && marked != target.Id)
+            {
+                throw MigrationInProgress(projectId);
             }
 
             // ⛔ L6-02: структура КОЖНОГО документа проєкту — винятково, за
@@ -823,15 +842,14 @@ public sealed class MigrateDocumentVersionHandler(
                 await onProgress(PlanningPercent, "jobs.migratePlanning", null, innerCt).ConfigureAwait(false);
             }
 
-            var planned = await PlanAsync(
+            planned = await PlanAsync(
                 documentId, projectId, current, target, mode, archived, dryRun: false, renames,
                 acceptGuardedOverwrite, lookupRemaps, allowLockedDocuments, innerCt).ConfigureAwait(false);
-            var (dto, plan, foreignKeys, extended) = (planned.Dto, planned.Plan, planned.ForeignKeys, planned.Extended);
+            var (dto, plan, foreignKeys) = (planned.Dto, planned.Plan, planned.ForeignKeys);
             ThrowIfRefused(dto, foreignKeys, plan.RenameConflicts, acceptGuardedOverwrite, plan.LookupGuardedValues);
 
             grantedUsers = await store.ListUsersWithGrantsAsync(plan, MaxInvalidatedUsers, innerCt).ConfigureAwait(false);
 
-            VersionMigrationStepReporter? onStep = null;
             if (onProgress is not null)
             {
                 var denominator = Math.Max(1L, plan.TransferredValues);
@@ -857,9 +875,37 @@ public sealed class MigrateDocumentVersionHandler(
                 };
             }
 
-            // ⛔ Б1: усе нижче (аудит, мапінги збору) може відмовити й мусить відкотитися разом із переносом, тому
-            // сховище викликає це ДО важкої частини — перенесення комірок діапазонами з окремими комітами. Інакше відмова
-            // журналу лишала б частину комірок уже перенесеною при старій версії проєкту.
+            // Маркер «міграція в процесі» — ОСТАННЄ в T1: комітиться разом з нею й відразу блокує писарів і читачів.
+            await store.BeginMigrationAsync(projectId, target.Id, innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+
+        if (sameVersion)
+        {
+            return null;
+        }
+
+        // ── Важка частина: діапазони з комітом, без транзакції ──
+        await store.MoveDataAsync(projectId, target.Id, planned.Plan, onStep, ct).ConfigureAwait(false);
+
+        // ── T2: решта переносу й перемикання версії; маркер знімається тією самою командою ──
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            var lockedVersion = await store.LockProjectVersionAsync(projectId, innerCt).ConfigureAwait(false)
+                                ?? throw DocumentVisibility.NotFound(documentId);
+            if (lockedVersion != current)
+            {
+                // Хтось довів перенос до кінця чи змінив версію між транзакціями: нічого не пишемо.
+                throw SameVersion(target.Id);
+            }
+
+            foreach (var id in await store.ListDocumentIdsAsync(projectId, innerCt).ConfigureAwait(false))
+            {
+                await structureGate.EnterStructureAsync(id, exclusive: true, innerCt).ConfigureAwait(false);
+            }
+
+            var (dto, plan, extended) = (planned.Dto, planned.Plan, planned.Extended);
+
+            // ⛔ Усе нижче (аудит, мапінги збору) може відмовити й відкочується разом з T2 — до перемикання версії.
             async Task BeforeCellsAsync(CancellationToken _)
             {
                 formulaTables = plan.FormulaChanges.Count;
@@ -936,7 +982,7 @@ public sealed class MigrateDocumentVersionHandler(
                     innerCt).ConfigureAwait(false);
             }
 
-            await store.ApplyAsync(projectId, target.Id, plan, onStep, BeforeCellsAsync, innerCt).ConfigureAwait(false);
+            await store.CompleteAsync(projectId, target.Id, plan, onStep, BeforeCellsAsync, innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
         // ⛔ Профіль у кеші не бачить зміни грантів, яка не рухає відбиток груп

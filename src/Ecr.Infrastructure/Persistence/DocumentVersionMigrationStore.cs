@@ -197,14 +197,88 @@ public sealed partial class DocumentVersionMigrationStore(
         => ApplyAsync(projectId, targetVersionId, plan, onStep, beforeCells: null, ct);
 
     /// <inheritdoc />
-    public async Task ApplyAsync(
+    public Task ApplyAsync(
         int projectId, int targetVersionId, VersionMigrationPlan plan, VersionMigrationStepReporter? onStep,
         Func<CancellationToken, Task>? beforeCells, CancellationToken ct)
+        => ApplyCoreAsync(projectId, targetVersionId, plan, onStep, beforeCells, MigrationPhase.All, ct);
+
+    /// <summary>Скільки чекати після фіксації маркера, поки читачі (кеш маркерів, оновлюється раз на 2 с) його побачать.</summary>
+    /// <remarks>Змінюється лише у тестах (там маркер перевіряється явно, а не очікуванням).</remarks>
+    public static TimeSpan MarkerPropagationDelay { get; set; } = TimeSpan.FromMilliseconds(3_000);
+
+    /// <inheritdoc />
+    public async Task<int?> ReadMigrationMarkerAsync(int projectId, CancellationToken ct)
+    {
+        var marker = await db.Database
+            .SqlQueryRaw<int>(
+                """
+                SELECT TOP (1) TRY_CAST(JSON_VALUE(ExternalSettingsJson, '$.migratingTo') AS int) AS Value
+                FROM   doc.Project
+                WHERE  Id = {0} AND ISJSON(ExternalSettingsJson) = 1
+                  AND  JSON_VALUE(ExternalSettingsJson, '$.migratingTo') IS NOT NULL
+                """,
+                projectId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return marker.Count == 0 ? null : marker[0];
+    }
+
+    /// <inheritdoc />
+    public async Task BeginMigrationAsync(int projectId, int targetVersionId, CancellationToken ct)
+    {
+        _ = db.Database.CurrentTransaction
+            ?? throw new InvalidOperationException("BeginMigrationAsync викликано поза транзакцією: маркер ставить перша транзакція.");
+
+        // ⛔ Маркер «міграція в процесі» — у вже наявній колонці проєкту (без DDL): JSON-властивість `migratingTo` =
+        // цільова версія. Його бачать писарі (`SheetEditGate`, в тому самому запиті, що читає версію) і читачі
+        // (фільтр API); знімає його лише фінальна транзакція переносу (`FinishSql`) разом з перемиканням версії.
+        await db.Database.ExecuteSqlAsync($"""
+            UPDATE doc.Project
+            SET    ExternalSettingsJson =
+                   CASE WHEN ExternalSettingsJson IS NULL OR ISJSON(ExternalSettingsJson) = 0
+                        THEN CONCAT(CHAR(123), '"migratingTo":', {targetVersionId}, CHAR(125))
+                        ELSE JSON_MODIFY(ExternalSettingsJson, '$.migratingTo', {targetVersionId}) END
+            WHERE  Id = {projectId}
+            """, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public Task MoveDataAsync(
+        int projectId, int targetVersionId, VersionMigrationPlan plan, VersionMigrationStepReporter? onStep,
+        CancellationToken ct)
+        => ApplyCoreAsync(projectId, targetVersionId, plan, onStep, null, MigrationPhase.Heavy, ct);
+
+    /// <inheritdoc />
+    public Task CompleteAsync(
+        int projectId, int targetVersionId, VersionMigrationPlan plan, VersionMigrationStepReporter? onStep,
+        Func<CancellationToken, Task>? beforeFinish, CancellationToken ct)
+        => ApplyCoreAsync(projectId, targetVersionId, plan, onStep, beforeFinish, MigrationPhase.Light, ct);
+
+    /// <summary>Яку частину переносу виконує виклик.</summary>
+    private enum MigrationPhase
+    {
+        /// <summary>Усе в транзакції виклику (тести, застарілий шлях).</summary>
+        All,
+
+        /// <summary>Лише комірки/індекс/валідація — діапазонами на власному з'єднанні, без транзакції виклику.</summary>
+        Heavy,
+
+        /// <summary>Шапка, склад, екземпляри, нові рядки, гранти, версія проєкту і зняття маркера — в транзакції виклику.</summary>
+        Light,
+    }
+
+    private async Task ApplyCoreAsync(
+        int projectId, int targetVersionId, VersionMigrationPlan plan, VersionMigrationStepReporter? onStep,
+        Func<CancellationToken, Task>? beforeCells, MigrationPhase phase, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(plan);
 
-        _ = db.Database.CurrentTransaction
-            ?? throw new InvalidOperationException("ApplyAsync викликано поза транзакцією: перенос мусить бути атомарним.");
+        if (phase != MigrationPhase.Heavy)
+        {
+            _ = db.Database.CurrentTransaction
+                ?? throw new InvalidOperationException("ApplyAsync викликано поза транзакцією: перенос мусить бути атомарним.");
+        }
 
         using var timeout = ExtendTimeout();
 
@@ -257,7 +331,7 @@ public sealed partial class DocumentVersionMigrationStore(
         var hasNewRows = plan.NewRows.Count > 0;
         // Комірки/рядки, індекс пошуку й валідація — по одному кроку (діапазони всередині), далі шапка, склад, екземпляри, фініш.
         var steps = 3 + 1 + (hasNewRows ? 1 : 0) + 1 + 1 + 1;
-        var stepsDone = 0;
+        var stepsDone = phase == MigrationPhase.Light ? 3 : 0;   // три важкі кроки вже зроблено фазою Heavy
         long totalBatches = 0;
         long totalRows = 0;
         long slowestMs = 0;
@@ -358,124 +432,139 @@ public sealed partial class DocumentVersionMigrationStore(
         // на власному з'єднанні; транзакція переносу весь цей час відкрита й тримає блокування структури документів
         // проєкту та рядка проєкту (писарі чекають і дістають 409 ECR-DOC-4091, версія проєкту не перемикається).
         // Нарешті — екземпляри таблиць, нові рядки, гранти й версія проєкту: коміт транзакції.
-        if (plan.LookupRemaps.Count > 0)
+        if (phase is MigrationPhase.All or MigrationPhase.Light)
         {
-            // ⛔ P2-2: SQL, що пише нові `ValueRegistryEntryId`, мусить зачепити РІВНО стільки значень, скільки обіцяв
-            // план (і показав сухий прогін). Інакше (менше — запис пропущено; більше — зачеплено зайве) відкат усього
-            // переносу: мовчки неповна або надлишкова мапа лишила б шапку на записах старого довідника.
-            var remapped = new SqlParameter("@lookupChanged", System.Data.SqlDbType.Int)
+            if (plan.LookupRemaps.Count > 0)
             {
-                Direction = System.Data.ParameterDirection.Output,
-            };
-            await db.Database.ExecuteSqlRawAsync(SingleCommand(HeaderSqlWithLookupRemap), Parameters(remapped), ct)
-                .ConfigureAwait(false);
-            stepsDone++;
-            await ReportAsync(VersionMigrationStages.Header, 0).ConfigureAwait(false);
-
-            var actual = remapped.Value is int changed ? changed : -1;
-            if (actual != plan.LookupRemappedValues)
-            {
-                throw new Application.Errors.ConcurrencyConflictException(
-                    "ECR-CELL-0409",
-                    $"Перенос значень Lookup шапки зачепив {actual} значень замість очікуваних {plan.LookupRemappedValues}: " +
-                    "перенос скасовано.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
-                        ["expected"] = plan.LookupRemappedValues.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        ["actual"] = actual.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    });
-            }
-        }
-        else
-        {
-            await SingleAsync(VersionMigrationStages.Header, HeaderSql).ConfigureAwait(false);
-        }
-
-        await SingleAsync(VersionMigrationStages.Workflow, WorkflowSql).ConfigureAwait(false);
-
-        // Усе, що може відмовити й мусить відкотитися разом із переносом (журнал, мапінги збору), — ДО важкої частини.
-        if (beforeCells is not null)
-        {
-            await beforeCells(ct).ConfigureAwait(false);
-        }
-
-        // ── Важка частина: власне з'єднання, коміт на кожен діапазон ───────────────────────────────────
-        var connectionString = db.Database.GetConnectionString()
-            ?? throw new InvalidOperationException("Рядок підключення контексту порожній: перенос комірок не має з'єднання.");
-        await using (var heavy = new SqlConnection(connectionString))
-        {
-            await heavy.OpenAsync(ct).ConfigureAwait(false);
-
-            // 1) Комірки, оформлення комірок і рядки: діапазони за ключем кластерного індексу (PeriodKey, TableRowId).
-            var rowRanges = await ReadRowRangesAsync(heavy, Parameters(), ct).ConfigureAwait(false);
-            long cellsTotal = 0;
-            foreach (var range in rowRanges)
-            {
-                cellsTotal += await RunRangeAsync(
-                        heavy, VersionMigrationStages.Cells, RangeCommand, "cells", range.Index, rowRanges.Count,
-                        Parameters(
-                            null, BatchRows,
-                            new SqlParameter("@p", range.PeriodKey),
-                            new SqlParameter("@lo", range.Lo),
-                            new SqlParameter("@hi", range.Hi)))
-                    .ConfigureAwait(false);
-                await ReportAsync(VersionMigrationStages.Cells, cellsTotal).ConfigureAwait(false);
-            }
-
-            stepsDone++;
-            await ReportAsync(VersionMigrationStages.Cells, 0).ConfigureAwait(false);
-
-            // 2) Похідний індекс пошуку: діапазони за первинним ключем Id.
-            var indexRanges = await ReadIndexRangesAsync(heavy, Parameters(), ct).ConfigureAwait(false);
-            long indexTotal = 0;
-            foreach (var range in indexRanges)
-            {
-                indexTotal += await RunRangeAsync(
-                        heavy, VersionMigrationStages.Index, IndexRangeCommand, "index", range.Index, indexRanges.Count,
-                        Parameters(
-                            null, BatchRows,
-                            new SqlParameter("@lo", range.Lo),
-                            new SqlParameter("@hi", range.Hi)))
-                    .ConfigureAwait(false);
-                await ReportAsync(VersionMigrationStages.Index, indexTotal).ConfigureAwait(false);
-            }
-
-            stepsDone++;
-            await ReportAsync(VersionMigrationStages.Index, 0).ConfigureAwait(false);
-
-            // 3) Результати валідації зникають повністю: пачки TOP без ключа не квадратичні (видалене не лишається в скані).
-            long validationTotal = 0;
-            long validationChanged;
-            var validationBatch = 0;
-            do
-            {
-                validationChanged = await RunRangeAsync(
-                        heavy, VersionMigrationStages.Validation, ValidationCommand, "validation", validationBatch++, 0,
-                        Parameters(null, ValidationBatchRows))
-                    .ConfigureAwait(false);
-                validationTotal += validationChanged;
-                if (validationChanged >= ValidationBatchRows)
+                // ⛔ P2-2: SQL, що пише нові `ValueRegistryEntryId`, мусить зачепити РІВНО стільки значень, скільки обіцяв
+                // план (і показав сухий прогін). Інакше (менше — запис пропущено; більше — зачеплено зайве) відкат усього
+                // переносу: мовчки неповна або надлишкова мапа лишила б шапку на записах старого довідника.
+                var remapped = new SqlParameter("@lookupChanged", System.Data.SqlDbType.Int)
                 {
-                    await ReportAsync(VersionMigrationStages.Validation, validationTotal).ConfigureAwait(false);
+                    Direction = System.Data.ParameterDirection.Output,
+                };
+                await db.Database.ExecuteSqlRawAsync(SingleCommand(HeaderSqlWithLookupRemap), Parameters(remapped), ct)
+                    .ConfigureAwait(false);
+                stepsDone++;
+                await ReportAsync(VersionMigrationStages.Header, 0).ConfigureAwait(false);
+
+                var actual = remapped.Value is int changed ? changed : -1;
+                if (actual != plan.LookupRemappedValues)
+                {
+                    throw new Application.Errors.ConcurrencyConflictException(
+                        "ECR-CELL-0409",
+                        $"Перенос значень Lookup шапки зачепив {actual} значень замість очікуваних {plan.LookupRemappedValues}: " +
+                        "перенос скасовано.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
+                            ["expected"] = plan.LookupRemappedValues.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["actual"] = actual.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        });
                 }
             }
-            while (validationChanged >= ValidationBatchRows);
+            else
+            {
+                await SingleAsync(VersionMigrationStages.Header, HeaderSql).ConfigureAwait(false);
+            }
 
-            stepsDone++;
-            await ReportAsync(VersionMigrationStages.Validation, 0).ConfigureAwait(false);
+            await SingleAsync(VersionMigrationStages.Workflow, WorkflowSql).ConfigureAwait(false);
+
+            // Усе, що може відмовити й мусить відкотитися разом із переносом (журнал, мапінги збору), — ДО важкої частини.
+            if (beforeCells is not null)
+            {
+                await beforeCells(ct).ConfigureAwait(false);
+            }
         }
 
-        // Далі — знову у транзакції переносу (атомарно з перемиканням версії проєкту).
-        await SingleAsync(VersionMigrationStages.Instances, InstancesSql).ConfigureAwait(false);
-
-        // Без нових рядків у плані команду не посилаємо зовсім.
-        if (hasNewRows)
+        if (phase is MigrationPhase.All or MigrationPhase.Heavy)
         {
-            await BatchesAsync(VersionMigrationStages.NewRows, NewRowsBatchSql).ConfigureAwait(false);
+            // ── Важка частина: власне з'єднання, коміт на кожен діапазон ───────────────────────────────────
+            var connectionString = db.Database.GetConnectionString()
+                ?? throw new InvalidOperationException("Рядок підключення контексту порожній: перенос комірок не має з'єднання.");
+            await using (var heavy = new SqlConnection(connectionString))
+            {
+                await heavy.OpenAsync(ct).ConfigureAwait(false);
+
+                if (phase == MigrationPhase.Heavy && MarkerPropagationDelay > TimeSpan.Zero)
+                {
+                    // Маркер (окрема зафіксована транзакція) мусить дійти до читачів ДО першого діапазону.
+                    await Task.Delay(MarkerPropagationDelay, ct).ConfigureAwait(false);
+                }
+
+                // 1) Комірки, оформлення комірок і рядки: діапазони за ключем кластерного індексу (PeriodKey, TableRowId).
+                var rowRanges = await ReadRowRangesAsync(heavy, Parameters(), ct).ConfigureAwait(false);
+                long cellsTotal = 0;
+                foreach (var range in rowRanges)
+                {
+                    cellsTotal += await RunRangeAsync(
+                            heavy, VersionMigrationStages.Cells, RangeCommand, "cells", range.Index, rowRanges.Count,
+                            Parameters(
+                                null, BatchRows,
+                                new SqlParameter("@p", range.PeriodKey),
+                                new SqlParameter("@lo", range.Lo),
+                                new SqlParameter("@hi", range.Hi)))
+                        .ConfigureAwait(false);
+                    await ReportAsync(VersionMigrationStages.Cells, cellsTotal).ConfigureAwait(false);
+                }
+
+                stepsDone++;
+                await ReportAsync(VersionMigrationStages.Cells, 0).ConfigureAwait(false);
+
+                // 2) Похідний індекс пошуку: діапазони за первинним ключем Id.
+                var indexRanges = await ReadIndexRangesAsync(heavy, Parameters(), ct).ConfigureAwait(false);
+                long indexTotal = 0;
+                foreach (var range in indexRanges)
+                {
+                    indexTotal += await RunRangeAsync(
+                            heavy, VersionMigrationStages.Index, IndexRangeCommand, "index", range.Index, indexRanges.Count,
+                            Parameters(
+                                null, BatchRows,
+                                new SqlParameter("@lo", range.Lo),
+                                new SqlParameter("@hi", range.Hi)))
+                        .ConfigureAwait(false);
+                    await ReportAsync(VersionMigrationStages.Index, indexTotal).ConfigureAwait(false);
+                }
+
+                stepsDone++;
+                await ReportAsync(VersionMigrationStages.Index, 0).ConfigureAwait(false);
+
+                // 3) Результати валідації зникають повністю: пачки TOP без ключа не квадратичні (видалене не лишається в скані).
+                long validationTotal = 0;
+                long validationChanged;
+                var validationBatch = 0;
+                do
+                {
+                    validationChanged = await RunRangeAsync(
+                            heavy, VersionMigrationStages.Validation, ValidationCommand, "validation", validationBatch++, 0,
+                            Parameters(null, ValidationBatchRows))
+                        .ConfigureAwait(false);
+                    validationTotal += validationChanged;
+                    if (validationChanged >= ValidationBatchRows)
+                    {
+                        await ReportAsync(VersionMigrationStages.Validation, validationTotal).ConfigureAwait(false);
+                    }
+                }
+                while (validationChanged >= ValidationBatchRows);
+
+                stepsDone++;
+                await ReportAsync(VersionMigrationStages.Validation, 0).ConfigureAwait(false);
+            }
         }
 
-        await SingleAsync(VersionMigrationStages.Finish, FinishSql).ConfigureAwait(false);
+        if (phase is MigrationPhase.All or MigrationPhase.Light)
+        {
+            // Далі — знову у транзакції переносу (атомарно з перемиканням версії проєкту).
+            await SingleAsync(VersionMigrationStages.Instances, InstancesSql).ConfigureAwait(false);
+
+            // Без нових рядків у плані команду не посилаємо зовсім.
+            if (hasNewRows)
+            {
+                await BatchesAsync(VersionMigrationStages.NewRows, NewRowsBatchSql).ConfigureAwait(false);
+            }
+
+            await SingleAsync(VersionMigrationStages.Finish, FinishSql).ConfigureAwait(false);
+        }
 
         if (logger is not null)
         {
@@ -1451,6 +1540,14 @@ public sealed partial class DocumentVersionMigrationStore(
                            WHERE t.RoleId = g.RoleId AND t.ResourceKind = g.ResourceKind AND t.ResourceId = m.n);
 
         -- 7. Нарешті — версія проєкту.
-        UPDATE doc.Project SET TemplateVersionId = @targetVersionId WHERE Id = @projectId;
+        -- ⛔ Маркер «міграція в процесі» (`migratingTo`) знімається ТІЄЮ САМОЮ командою, що перемикає версію: інакше
+        -- проєкт опинився б на новій версії з маркером (усе заблоковано) або на старій без нього (напівстан видно).
+        UPDATE doc.Project
+        SET    TemplateVersionId = @targetVersionId,
+               ExternalSettingsJson =
+                   CASE WHEN ISJSON(ExternalSettingsJson) = 1 AND JSON_VALUE(ExternalSettingsJson, '$.migratingTo') IS NOT NULL
+                        THEN NULLIF(JSON_MODIFY(ExternalSettingsJson, '$.migratingTo', NULL), CONCAT(CHAR(123), CHAR(125)))
+                        ELSE ExternalSettingsJson END
+        WHERE  Id = @projectId;
         """;
 }
