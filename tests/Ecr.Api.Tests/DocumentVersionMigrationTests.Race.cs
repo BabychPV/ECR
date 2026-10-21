@@ -206,6 +206,10 @@ public sealed partial class DocumentVersionMigrationTests
         public Task<VersionMigrationScope> ReadScopeAsync(int projectId, CancellationToken ct)
             => inner.ReadScopeAsync(projectId, ct);
 
+        public Task<IReadOnlyList<HeaderLookupValueRow>> ListHeaderLookupValuesAsync(
+            int projectId, IReadOnlyCollection<int> headerFieldDefIds, int max, CancellationToken ct)
+            => inner.ListHeaderLookupValuesAsync(projectId, headerFieldDefIds, max, ct);
+
         public Task<int> CountDenyGrantsAsync(
             IReadOnlyCollection<int> sheetIds, IReadOnlyCollection<int> tableIds, IReadOnlyCollection<int> columnIds,
             CancellationToken ct)

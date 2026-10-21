@@ -22,6 +22,13 @@ public sealed record VersionMigrationScope(
 /// <param name="Status"><c>Submitted</c> або <c>Approved</c>.</param>
 public sealed record VersionMigrationLockedSheet(long DocumentId, int SheetDefId, int PeriodKey, string Status);
 
+/// <summary>Непорожнє значення шапки документа проєкту (мапа Lookup: вхід планувальника й аудиту).</summary>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="HeaderFieldDefId">Поле шапки вихідної версії.</param>
+/// <param name="EntryId">Запис довідника; <c>null</c> — значення без запису (аномалія).</param>
+/// <param name="Locked">У документа є подані/затверджені аркуші (інформативно: на допуск не впливає).</param>
+public sealed record HeaderLookupValueRow(long DocumentId, int HeaderFieldDefId, long? EntryId, bool Locked);
+
 /// <summary>Мапінг збору, що адресує колонку вихідної версії шаблону (D-1 RC20).</summary>
 /// <param name="MappingId">Мапінг (<c>ext.EntityFieldMap.Id</c>).</param>
 /// <param name="ColumnDefId">Колонка вихідної версії, на яку він вказує.</param>
@@ -124,6 +131,17 @@ public interface IDocumentVersionMigrationStore
 
     /// <summary>Рахує, що лежить у документах проєкту.</summary>
     public Task<VersionMigrationScope> ReadScopeAsync(int projectId, CancellationToken ct);
+
+    /// <summary>
+    /// Непорожні значення шапки документів проєкту для вказаних полів: документ, поле, запис довідника та ознака
+    /// «у документа є подані/затверджені аркуші». Викликається ЛИШЕ коли запит несе мапу Lookup.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="headerFieldDefIds">Поля шапки вихідної версії.</param>
+    /// <param name="max">Стеля рядків: повертається не більше <c>max + 1</c> (надлишок — сигнал переповнення).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<HeaderLookupValueRow>> ListHeaderLookupValuesAsync(
+        int projectId, IReadOnlyCollection<int> headerFieldDefIds, int max, CancellationToken ct);
 
     /// <summary>
     /// Скільки грантів (будь-яких: заборона й дозвіл) стоїть на перелічених аркушах,

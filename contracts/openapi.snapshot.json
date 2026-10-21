@@ -4830,6 +4830,14 @@
             "description": "Перелік обрізано стелею int MigrateDocumentVersionHandler.MaxItems.",
             "type": "boolean"
           },
+          "lockedDocumentCount": {
+            "description": "Скільки документів із поданими/затвердженими аркушами мають значення шапки, яке перепише мапа Lookup; `null` —\nмап не було. Більше нуля без `allowLockedDocuments` — відмова `lookupLockedDocuments` (`ECR-SCHM-0422`).\n⛔ Лише кількість.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "lockedSheetItems": {
             "description": "LP-32: перелік поданих/затверджених пар (спершу зачеплені), не більше `MaxLockedItems`; `null` — таких\nаркушів немає. ⛔ Без імен користувачів і значень — лише код аркуша, період, статус.",
             "items": {
@@ -4861,6 +4869,24 @@
             "description": "LP-32: скільки поданих/затверджених пар «аркуш × період» перенесено БЕЗ змін — план їх не зачіпає: статус, значення\nй журнал погодження лишаються. Формульні колонки таких аркушів не перераховуються до повернення в роботу.",
             "format": "int32",
             "type": "integer"
+          },
+          "lookupRemapReport": {
+            "description": "Звіт мап Lookup по цілях запиту (`lookupRemaps`); `null` — мап у запиті не було. ⛔ Лише id записів і\nкількості. Причина відмови `lookupValuesNotMapped` з'являється в `Refusals`, коли є значення без\nпридатного відповідника.",
+            "items": {
+              "$ref": "#/components/schemas/LookupRemapReportItem"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "lookupRemapped": {
+            "description": "Скільки значень шапки переїде (сухий прогін) або переїхало; `null` — мап не було.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "lostValues": {
             "description": "Скільки введених значень зникло б.",
@@ -6983,6 +7009,89 @@
         ],
         "type": "object"
       },
+      "LookupRemapNotUsable": {
+        "description": "Запис цілі мапи, який не можна покласти в шапку.",
+        "properties": {
+          "entryId": {
+            "description": "Запис нового довідника з мапи.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "`missing`, `foreign`, `inactive`, `deleted`, `notValidInWindow`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entryId",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "LookupRemapReportItem": {
+        "description": "Звіт мапи Lookup по одній цілі. ⛔ Лише id записів і кількості: ні значень, ні назв, ні документів.",
+        "properties": {
+          "applied": {
+            "description": "`false` — ціль не стосується пари версій (поля немає або довідник не змінився).",
+            "type": "boolean"
+          },
+          "mappedEntries": {
+            "description": "Скільки різних старих записів має придатний відповідник.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "mappedValues": {
+            "description": "Скільки значень шапки переїде на нові записи.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "target": {
+            "$ref": "#/components/schemas/VersionMigrationLookupTarget",
+            "description": "Ціль."
+          },
+          "targetNotUsable": {
+            "description": "Записи нового довідника з мапи, які не можна використати (до стелі).",
+            "items": {
+              "$ref": "#/components/schemas/LookupRemapNotUsable"
+            },
+            "type": "array"
+          },
+          "unmappedEntries": {
+            "description": "Скільки різних старих записів його не має.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "unmappedEntryIds": {
+            "description": "Id старих записів без відповідника (до int VersionMigrationLookupRemaps.MaxListed).",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "unmappedTruncated": {
+            "description": "Перелік UnmappedEntryIds обрізано стелею.",
+            "type": "boolean"
+          },
+          "unmappedValues": {
+            "description": "Скільки значень без придатного відповідника (разом зі значеннями без запису).",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target",
+          "applied",
+          "mappedValues",
+          "unmappedValues",
+          "mappedEntries",
+          "unmappedEntries",
+          "unmappedEntryIds",
+          "unmappedTruncated",
+          "targetNotUsable"
+        ],
+        "type": "object"
+      },
       "MappedFieldPreview": {
         "description": "Підсумок одного мапінгу.",
         "properties": {
@@ -8797,6 +8906,13 @@
               "boolean"
             ]
           },
+          "allowLockedDocuments": {
+            "description": "Необов'язкове (відсутнє або `null` = `false`): згода переписати значення Lookup у ШАПЦІ документів, що мають\nподані чи затверджені аркуші (`lookupRemaps`). Без згоди такі документи — `422 ECR-SCHM-0422`\n(`migrateLookupLockedDocuments`), нічого не записано; їх кількість сухий прогін показує до згоди\n(`lockedDocumentCount`). Не впливає на подані/затверджені аркуші (`409 sheetsLocked`) і на перенос без мап.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "async": {
             "default": false,
             "description": "`true` — перенос (не сухий прогін) іде ФОНОВОЮ задачею: відповідь `202` з `jobId`, стан —\n`GET /jobs/{jobId}`. Типово `false` — як і раніше, синхронно з `200` і звітом\n(зворотна сумісність зовнішніх викликачів; веб-клієнт передає `true`).",
@@ -8805,6 +8921,16 @@
           "dryRun": {
             "description": "`true` — лише звіт, без змін (завжди синхронно: швидкий).",
             "type": "boolean"
+          },
+          "lookupRemaps": {
+            "description": "Необов'язкові мапи записів Lookup по полях ШАПКИ: `[{target:{kind:\"header\",code}, mappings:[{from,to}]}]`, де\n`from` — запис вихідного довідника, `to` — запису довідника цільової версії. Діють лише для поля, чий\nдовідник між версіями змінився (інакше ціль у звіті має `applied = false`). Повна мапа (кожне вжите значення\nмає придатний відповідник: існує, у новому довіднику, активний, не видалений, чинний у вікні проєкту) знімає з поля\n`guardedWithData` і переписує значення в шапці в тій самій транзакції; часткова — `422 ECR-SCHM-0422`\n(`migrateLookupNotMapped`), нічого не записано. Зайві пари ігноруються. Колонки Lookup (`kind = column`)\nне підтримуються (`422 migrateLookupRemapInvalid`). Перерахунок не ставиться. Без поля поведінка незмінна.",
+            "items": {
+              "$ref": "#/components/schemas/VersionMigrationLookupRemap"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "mode": {
             "oneOf": [
@@ -21862,6 +21988,65 @@
           "kind",
           "changeClass",
           "values"
+        ],
+        "type": "object"
+      },
+      "VersionMigrationLookupPair": {
+        "description": "Пара «запис старого довідника → запис нового».",
+        "properties": {
+          "from": {
+            "description": "Запис вихідного довідника.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "to": {
+            "description": "Запис довідника, який вказує цільова версія.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "VersionMigrationLookupRemap": {
+        "description": "Мапа Lookup однієї цілі: поле шапки, довідник якого змінився між версіями.",
+        "properties": {
+          "mappings": {
+            "description": "Пари «було → стало»; кілька `From` можуть вести в один `To` (злиття).",
+            "items": {
+              "$ref": "#/components/schemas/VersionMigrationLookupPair"
+            },
+            "type": "array"
+          },
+          "target": {
+            "$ref": "#/components/schemas/VersionMigrationLookupTarget",
+            "description": "Ціль."
+          }
+        },
+        "required": [
+          "target",
+          "mappings"
+        ],
+        "type": "object"
+      },
+      "VersionMigrationLookupTarget": {
+        "description": "Ціль мапи Lookup: поле шапки (`Kind = \"header\"`) за кодом у ВИХІДНІЙ версії.",
+        "properties": {
+          "code": {
+            "description": "Код поля шапки.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Вид цілі. У v1 підтримується лише `header`; колонки Lookup — окремим кроком.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "code"
         ],
         "type": "object"
       },
