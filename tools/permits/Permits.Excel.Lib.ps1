@@ -967,3 +967,85 @@ function ConvertTo-BatchItems {
     }
     return ,$items
 }
+
+# ---------------------------------------------------------------- header Permit remap (pure; used by Remap-HeaderPermit.ps1)
+
+function Get-NormalizedNumberKey {
+    # matching key: trimmed, lower-case, optionally without '-' / '_' (dash/underscore equivalence is for MATCHING only)
+    param([string]$Text, [bool]$Normalize = $true)
+    $k = $Text.Trim().ToLowerInvariant()
+    if ($Normalize) { $k = $k -replace '[-_]', '' }
+    return $k
+}
+
+function Resolve-HeaderPermitMap {
+    <#
+    .SYNOPSIS
+        Source entries (Id, Code, Docs) -> target entries (Id, Num, IsActive) 1:1 by number.
+        Returns @{ Map = list of ordered @{ oldId; oldCode; docs; newId; status; normalized };
+                   Counters = @{ entries; withDocs; matched; noMatch; ambiguous; normalized; inactiveTarget; docsMapped; docsBlocked } }.
+        status: matched | matched-inactive | no-match | ambiguous. normalized = matched only thanks to the '-'/'_' equivalence
+        (or letter case), i.e. the numbers are not byte-equal.
+    #>
+    param($Source, $Target, [bool]$Normalize = $true)
+    $byKey = @{}
+    foreach ($t in @($Target)) {
+        $k = Get-NormalizedNumberKey ([string]$t.Num) $Normalize
+        if (-not $byKey.ContainsKey($k)) { $byKey[$k] = New-Object System.Collections.ArrayList }
+        [void]$byKey[$k].Add($t)
+    }
+    $map = New-Object System.Collections.ArrayList
+    $c = [ordered]@{ entries = 0; withDocs = 0; matched = 0; noMatch = 0; ambiguous = 0; normalized = 0; inactiveTarget = 0; docsMapped = 0; docsBlocked = 0 }
+    foreach ($s in @($Source)) {
+        $c.entries++
+        $docs = [int]$s.Docs
+        if ($docs -gt 0) { $c.withDocs++ }
+        $hits = @()
+        $k = Get-NormalizedNumberKey ([string]$s.Code) $Normalize
+        if ($byKey.ContainsKey($k)) { $hits = @($byKey[$k]) }
+        $status = 'no-match'; $newId = $null; $norm = $false
+        if ($hits.Count -eq 1) {
+            $status = 'matched'; $newId = [int]$hits[0].Id
+            if (-not [bool]$hits[0].IsActive) { $status = 'matched-inactive'; $c.inactiveTarget++ }
+            if (([string]$s.Code).Trim() -cne ([string]$hits[0].Num).Trim()) { $norm = $true; $c.normalized++ }
+        }
+        elseif ($hits.Count -gt 1) { $status = 'ambiguous' }
+        if ($status -like 'matched*') { $c.matched++; $c.docsMapped += $docs }
+        elseif ($status -eq 'ambiguous') { $c.ambiguous++; $c.docsBlocked += $docs }
+        else { $c.noMatch++; $c.docsBlocked += $docs }
+        [void]$map.Add([ordered]@{ oldId = [int]$s.Id; oldCode = [string]$s.Code; docs = $docs; newId = $newId; status = $status; normalized = $norm })
+    }
+    return @{ Map = $map; Counters = $c }
+}
+
+function ConvertTo-LookupRemapsDocument {
+    <#
+    .SYNOPSIS
+        The body part of POST /documents/{id}/migrate-version for the Analiz plan MIGRATE-LOOKUP-REMAP:
+        { lookupRemaps:[{ target:{kind:'header',code}, mappings:[{from,to}] }], meta:{ generatedAt, database, docsPerFromId, normalized } }.
+        Only entries that are USED (docs > 0) and matched are mapped. Codes are written to meta.codesPerFromId only with -IncludeCodes.
+    #>
+    param(
+        [Parameter(Mandatory)]$Map,
+        [Parameter(Mandatory)][string]$Database,
+        [string]$HeaderFieldCode = 'Permit',
+        [switch]$IncludeCodes,
+        [datetime]$GeneratedAt = (Get-Date)
+    )
+    $pairs = @()
+    $docsPer = [ordered]@{}
+    $codes = [ordered]@{}
+    $normalized = 0
+    foreach ($m in @($Map | Where-Object { $_.docs -gt 0 -and $null -ne $_.newId })) {
+        $pairs += , ([ordered]@{ from = [long]$m.oldId; to = [long]$m.newId })
+        $docsPer[[string]$m.oldId] = [int]$m.docs
+        $codes[[string]$m.oldId] = $m.oldCode
+        if ($m.normalized) { $normalized++ }
+    }
+    $meta = [ordered]@{ generatedAt = $GeneratedAt.ToUniversalTime().ToString('o'); database = $Database; docsPerFromId = $docsPer; normalized = $normalized }
+    if ($IncludeCodes) { $meta['codesPerFromId'] = $codes }
+    return [ordered]@{
+        lookupRemaps = @([ordered]@{ target = [ordered]@{ kind = 'header'; code = $HeaderFieldCode }; mappings = @($pairs) })
+        meta         = $meta
+    }
+}
