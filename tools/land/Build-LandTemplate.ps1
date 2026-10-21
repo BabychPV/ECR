@@ -98,6 +98,8 @@ param(
     [int]$Year = 2026,
     [string]$ConfirmStand,
     [ValidateSet('LAND_PERMIT', 'PRM_AIR')][string]$PermitLookup,
+    [string]$PermitNumber,
+    [string]$PermitPickFile,
     [switch]$FillData,
     [switch]$PruneStaleTables,
     [switch]$KeepNumericMode,
@@ -2152,9 +2154,23 @@ function Set-DocumentHeader([int]$docId) {
     $h = (Api GET "/api/v1/documents/$docId/header").Json
     $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
     $pick = @{ Area = @('LAND_AREA', 'Island'); Contractor = @('LAND_CONTRACTOR', 'AGS'); Region = @('LAND_REGION', 'Mangistau'); Location = @('LAND_LOCATION', 'LQB')
-        OnOffshore = @('LAND_ONOFFSHORE', 'Onshore'); TypeOfActivity = @('LAND_ACTIVITY', 'Operation'); Permit = @('LAND_PERMIT', 'KZ06VCZ14825472') }
+        OnOffshore = @('LAND_ONOFFSHORE', 'Onshore'); TypeOfActivity = @('LAND_ACTIVITY', 'Operation'); Permit = @('LAND_PERMIT', '') }
+    # ⛔ Реальні номери дозволів у git не лежать: номер - параметр -PermitNumber (приклад: KZ01TEST0001) або ключ Permit
+    # у зовнішньому JSON -PermitPickFile ({"Permit":"<номер>"}, файл поза git, напр. .sync-local\permits\header-pick.json).
+    $permitNumber = $PermitNumber
+    if (-not $permitNumber -and $PermitPickFile) {
+        if (-not (Test-Path -LiteralPath $PermitPickFile)) { throw "Файл вибору шапки $PermitPickFile не знайдено." }
+        $permitNumber = [string](Get-Content -LiteralPath $PermitPickFile -Raw -Encoding UTF8 | ConvertFrom-Json).Permit
+    }
     # Permit -> PRM_AIR лише за явним -PermitLookup; записи шапки дозволу читаються у вікні документа (documentId).
-    if ($PermitLookup -eq 'PRM_AIR') { $pick.Permit = @('PRM_AIR', 'KZ06VCZ14825472') }
+    if ($PermitLookup -eq 'PRM_AIR') {
+        if (-not $permitNumber) {
+            throw 'Для -PermitLookup PRM_AIR потрібен номер дозволу: -PermitNumber <номер> (приклад KZ01TEST0001) або -PermitPickFile <json поза git>.'
+        }
+        $pick.Permit = @('PRM_AIR', $permitNumber)
+    }
+    elseif ($permitNumber) { $pick.Permit = @('LAND_PERMIT', $permitNumber) }
+    else { Log 'Permit: номер не задано (-PermitNumber / -PermitPickFile) - береться перший запис довідника.' }
     $fields = @()
     foreach ($k in $pick.Keys) {
         $entriesQuery = if ($pick[$k][0] -like 'PRM_*') { "documentId=$docId" } else { "asOf=$today" }
