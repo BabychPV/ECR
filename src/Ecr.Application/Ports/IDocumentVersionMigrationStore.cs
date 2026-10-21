@@ -298,4 +298,31 @@ public interface IDocumentVersionMigrationStore
     public Task ApplyAsync(
         int projectId, int targetVersionId, VersionMigrationPlan plan, VersionMigrationStepReporter? onStep, CancellationToken ct)
         => ApplyAsync(projectId, targetVersionId, plan, ct);
+
+    /// <summary>
+    /// Те саме, що п'ятиаргументний <c>ApplyAsync</c>, але перед ВАЖКОЮ частиною (перенос комірок діапазонами з окремими
+    /// комітами) викликає <paramref name="beforeCells"/> — усе, що може відмовити й має відкотитися разом із переносом
+    /// (журнал аудиту, мапінги збору), щоб відмова не лишила частину комірок уже перенесеною.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="targetVersionId">Цільова версія.</param>
+    /// <param name="plan">План переносу.</param>
+    /// <param name="onStep">Приймач прогресу; <c>null</c> — без прогресу.</param>
+    /// <param name="beforeCells">Дії в транзакції переносу до важкої частини; <c>null</c> — немає.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Типова реалізація (обгортки у тестах) викликає <paramref name="beforeCells"/> до всього переносу — для сховища
+    /// без діапазонних комітів різниці немає: все одно одна транзакція.
+    /// </remarks>
+    public async Task ApplyAsync(
+        int projectId, int targetVersionId, VersionMigrationPlan plan, VersionMigrationStepReporter? onStep,
+        Func<CancellationToken, Task>? beforeCells, CancellationToken ct)
+    {
+        if (beforeCells is not null)
+        {
+            await beforeCells(ct).ConfigureAwait(false);
+        }
+
+        await ApplyAsync(projectId, targetVersionId, plan, onStep, ct).ConfigureAwait(false);
+    }
 }
