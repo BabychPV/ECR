@@ -68,7 +68,7 @@ public sealed class MigrateDocumentVersionJob(
         var report = await handler
             .RunQueuedAsync(
                 task.DocumentId, task.TargetVersionId, mode, task.TableRenames, task.AcceptGuardedOverwrite,
-                reporter.ReportAsync, ct)
+                task.LookupRemaps, reporter.ReportAsync, ct)
             .ConfigureAwait(false);
 
         // ⚠ Результат — у повідомленні прогресу (структурований конверт, мовою читача при GET /jobs):
