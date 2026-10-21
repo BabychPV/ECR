@@ -231,6 +231,40 @@ try {
     Assert-Equal '2027-01-01' (ConvertTo-IsoDate $w.ValidTo) 'waste ValidTo = text end + 1 day'
     Assert-Equal 2 $w.Rows.Count 'waste rows'
 
+    # ------------------------------------------------------------ header Permit remap: matching + lookupRemaps JSON
+    $srcE = @(
+        [pscustomobject]@{ Id = 11; Code = 'KZ01TEST0001'; Docs = 3 },
+        [pscustomobject]@{ Id = 12; Code = 'KZ06TEST0006_2023_2030'; Docs = 5 },
+        [pscustomobject]@{ Id = 13; Code = 'permit_901'; Docs = 0 },
+        [pscustomobject]@{ Id = 14; Code = 'KZ09TEST0009'; Docs = 2 })
+    $tgtE = @(
+        [pscustomobject]@{ Id = 101; Num = 'KZ01TEST0001'; IsActive = $true },
+        [pscustomobject]@{ Id = 102; Num = 'KZ06TEST0006_2023-2030'; IsActive = $true },
+        [pscustomobject]@{ Id = 103; Num = 'permit_901'; IsActive = $true })
+    $hp = Resolve-HeaderPermitMap -Source $srcE -Target $tgtE -Normalize $true
+    Assert-Equal 3 $hp.Counters.matched 'remap: three entries matched'
+    Assert-Equal 1 $hp.Counters.noMatch 'remap: one entry without a target'
+    Assert-Equal 1 $hp.Counters.normalized 'remap: only the dash/underscore number counts as normalized'
+    Assert-Equal 2 $hp.Counters.docsBlocked 'remap: documents of the unmatched entry are blocked'
+    Assert-Equal 102 ($hp.Map | Where-Object { $_.oldId -eq 12 }).newId 'remap: dash/underscore entry maps to its target id'
+    $hpStrict = Resolve-HeaderPermitMap -Source $srcE -Target $tgtE -Normalize $false
+    Assert-Equal 2 $hpStrict.Counters.matched 'remap: without normalization the underscore number does not match'
+    $doc = ConvertTo-LookupRemapsDocument -Map $hp.Map -Database 'EcrTestDb' -GeneratedAt ([datetime]'2026-10-21T12:00:00Z')
+    $json = $doc | ConvertTo-Json -Depth 8
+    $obj = $json | ConvertFrom-Json
+    Assert-Equal 1 @($obj.lookupRemaps).Count 'lookupRemaps: one target'
+    Assert-Equal 'header' $obj.lookupRemaps[0].target.kind 'lookupRemaps: target.kind'
+    Assert-Equal 'Permit' $obj.lookupRemaps[0].target.code 'lookupRemaps: target.code'
+    Assert-Equal 2 @($obj.lookupRemaps[0].mappings).Count 'lookupRemaps: only USED matched entries are mapped (docs > 0)'
+    Assert-Equal '11:101,12:102' ((@($obj.lookupRemaps[0].mappings) | ForEach-Object { "$($_.from):$($_.to)" }) -join ',') 'lookupRemaps: from/to pairs'
+    Assert-Equal 'EcrTestDb' $obj.meta.database 'lookupRemaps: meta.database'
+    Assert-Equal 1 $obj.meta.normalized 'lookupRemaps: meta.normalized'
+    Assert-Equal 3 $obj.meta.docsPerFromId.'11' 'lookupRemaps: meta.docsPerFromId'
+    Assert-True ($null -ne $obj.meta.generatedAt) 'lookupRemaps: meta.generatedAt'
+    Assert-True ($null -eq $obj.meta.PSObject.Properties['codesPerFromId']) 'lookupRemaps: codes are written only with -IncludeCodes'
+    Assert-True ($json -notmatch 'KZ0') 'lookupRemaps: no permit number in the default file'
+    $withCodes = ConvertTo-LookupRemapsDocument -Map $hp.Map -Database 'EcrTestDb' -IncludeCodes
+    Assert-True ($null -ne $withCodes.meta['codesPerFromId']) 'lookupRemaps: -IncludeCodes adds codesPerFromId'
     # ------------------------------------------------------------ service entries: dates are never invented
     $svcFile = Join-Path $tmp 'svc.csv'
     [IO.File]::WriteAllText($svcFile, "# comment line: dates pending confirmation`nnumber;location;validFrom;validTo`npermit_901;;;`nAF_x;loc;2025-01-01;2026-01-01`n", (New-Object System.Text.UTF8Encoding($false)))
