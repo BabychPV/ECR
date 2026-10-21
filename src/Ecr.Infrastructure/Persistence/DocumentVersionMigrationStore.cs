@@ -4,6 +4,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Enums;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Ecr.Infrastructure.Persistence;
 
@@ -39,10 +40,7 @@ public sealed partial class DocumentVersionMigrationStore(
     /// <summary>
     /// Скільки рядків <c>doc.TableRow</c> (≈ ×3 комірок) входить в один діапазон переносу — одну команду й один коміт.
     /// </summary>
-    public const int DefaultRangeRows = 50_000;
-
-    /// <summary>Скільки рядків результатів валідації видаляє одна команда (вони зникають, тож скан не росте).</summary>
-    public const int ValidationBatchRows = 50_000;
+    public const int DefaultRangeRows = 20_000;
 
     /// <summary>Скільки рядків <c>doc.TableRow</c> у діапазоні (змінюється лише у тестах: малі діапазони на малих обсягах).</summary>
     public int RangeRows { get; init; } = DefaultRangeRows;
@@ -225,24 +223,104 @@ public sealed partial class DocumentVersionMigrationStore(
     }
 
     /// <inheritdoc />
-    public async Task BeginMigrationAsync(int projectId, int targetVersionId, CancellationToken ct)
+    public async Task BeginMigrationAsync(
+        int projectId, int targetVersionId, VersionMigrationPlan plan, int? startedByUserId, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(plan);
         _ = db.Database.CurrentTransaction
             ?? throw new InvalidOperationException("BeginMigrationAsync викликано поза транзакцією: маркер ставить перша транзакція.");
 
+        var hash = PlanHash(plan);
+
+        // Відновлення: маркер ЦІЄЇ цілі вже стоїть. Мапа мусить бути тією самою (хеш), інакше 422 - перенос, обірваний з
+        // однією мапою колонок/Lookup, не можна «дожати» з іншою: частину комірок уже переселено за старою.
+        var existing = await db.Database
+            .SqlQueryRaw<string>(
+                """
+                SELECT TOP (1) CONCAT(ISNULL(JSON_VALUE(ExternalSettingsJson, '$.planHash'), N''), N'|',
+                                      CASE WHEN TRY_CAST(JSON_VALUE(ExternalSettingsJson, '$.leaseUntil') AS datetime2) > SYSUTCDATETIME()
+                                           THEN 1 ELSE 0 END) AS Value
+                FROM   doc.Project
+                WHERE  Id = {0} AND ISJSON(ExternalSettingsJson) = 1
+                  AND  TRY_CAST(JSON_VALUE(ExternalSettingsJson, '$.migratingTo') AS int) = {1}
+                """,
+                projectId, targetVersionId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (existing.Count > 0)
+        {
+            var parts = existing[0].Split('|');
+            if (parts[0].Length > 0 && !string.Equals(parts[0], hash, StringComparison.Ordinal))
+            {
+                throw new Application.Errors.BusinessRuleException(
+                    Domain.Errors.ErrorCodes.GuardedChangeWithoutStrategy,
+                    "Перенос цього проєкту обірвано; продовжити його можна лише з тією самою мапою (колонок, рядків, Lookup шапки): " +
+                    "мапу змінено відносно збереженої.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-SCHM-0422.migrateResumeMismatch",
+                        ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
+            }
+
+            // Взаємне виключення: важку частину цього переносу вже виконує інший процес (оренда ще не минула).
+            if (parts.Length > 1 && parts[1] == "1")
+            {
+                throw MigrationRunning(projectId);
+            }
+
+            return;
+        }
+
         // ⛔ Маркер «міграція в процесі» — у вже наявній колонці проєкту (без DDL): JSON-властивість `migratingTo` =
-        // цільова версія. Його бачать писарі (`SheetEditGate`, в тому самому запиті, що читає версію) і читачі
-        // (фільтр API); знімає його лише фінальна транзакція переносу (`FinishSql`) разом з перемиканням версії.
+        // цільова версія, `planHash` - відбиток мапи, `startedAt`/`startedBy` - коли й ким розпочато, `owner`/`leaseUntil` -
+        // оренда виконавця важкої частини, `wm*` - watermark діапазонів (пишуть самі діапазони). Маркер бачать писарі
+        // (`SheetEditGate`, в тому самому запиті, що читає версію) і читачі (фільтр API); знімає його лише фінальна
+        // транзакція переносу (`FinishSql`) разом з перемиканням версії. Залишки старих запусків стираються.
         await db.Database.ExecuteSqlAsync($"""
             UPDATE doc.Project
             SET    ExternalSettingsJson =
-                   CASE WHEN ExternalSettingsJson IS NULL OR ISJSON(ExternalSettingsJson) = 0
-                        THEN CONCAT(CHAR(123), '"migratingTo":', {targetVersionId}, CHAR(125))
-                        ELSE JSON_MODIFY(ExternalSettingsJson, '$.migratingTo', {targetVersionId}) END
+                   JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(
+                       CASE WHEN ExternalSettingsJson IS NULL OR ISJSON(ExternalSettingsJson) = 0
+                            THEN CONCAT(CHAR(123), '"migratingTo":', {targetVersionId}, CHAR(125))
+                            ELSE JSON_MODIFY(ExternalSettingsJson, '$.migratingTo', {targetVersionId}) END,
+                       '$.planHash', {hash}),
+                       '$.startedAt', CONVERT(varchar(30), SYSUTCDATETIME(), 126)),
+                       '$.startedBy', {startedByUserId}),
+                       '$.owner', NULL), '$.leaseUntil', NULL),
+                       '$.wmCellsPeriod', NULL), '$.wmCellsHi', NULL), '$.wmIndexHi', NULL)
             WHERE  Id = {projectId}
             """, ct).ConfigureAwait(false);
     }
 
+    private static Application.Errors.ConcurrencyConflictException MigrationRunning(int projectId)
+        => new(
+            Domain.Errors.ErrorCodes.SheetBusy,
+            $"Важку частину переносу проєкту {projectId} уже виконує інший процес: повторіть після завершення або закінчення оренди.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-DOC-4091.structureChanging",
+                ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+
+    /// <summary>Відбиток мапи переносу (колонки, рядки, таблиці, аркуші, шапка, нові рядки, Lookup) - для звірки при відновленні.</summary>
+    private static string PlanHash(VersionMigrationPlan plan)
+    {
+        var payload = JsonSerializer.Serialize(new
+        {
+            s = plan.Sheets.OrderBy(p => p.Key).Select(p => new { p.Key, p.Value }),
+            t = plan.Tables.OrderBy(p => p.Key).Select(p => new { p.Key, p.Value }),
+            c = plan.Columns.OrderBy(c => c.SourceColumnDefId).Select(c => new { c.SourceColumnDefId, c.TargetColumnDefId, c.TargetTableDefId }),
+            r = plan.Rows.OrderBy(p => p.Key).Select(p => new { p.Key, p.Value }),
+            h = plan.HeaderFields.OrderBy(p => p.Key).Select(p => new { p.Key, p.Value }),
+            n = plan.NewRows.OrderBy(x => x.TargetTableDefId).ThenBy(x => x.RowKey, StringComparer.Ordinal)
+                .Select(x => new { x.TargetTableDefId, x.TargetRowDefId, x.RowKey, x.Ordinal }),
+            l = plan.LookupRemaps.OrderBy(x => x.HeaderFieldDefId).ThenBy(x => x.OldEntryId)
+                .Select(x => new { x.HeaderFieldDefId, x.OldEntryId, x.NewEntryId }),
+        });
+
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload)))[..32];
+    }
     /// <inheritdoc />
     public Task MoveDataAsync(
         int projectId, int targetVersionId, VersionMigrationPlan plan, VersionMigrationStepReporter? onStep,
@@ -330,8 +408,8 @@ public sealed partial class DocumentVersionMigrationStore(
         // Кроків усього (для прогресу): пачкові й одиничні команди; крок «нові рядки» — лише коли вони є в плані.
         var hasNewRows = plan.NewRows.Count > 0;
         // Комірки/рядки, індекс пошуку й валідація — по одному кроку (діапазони всередині), далі шапка, склад, екземпляри, фініш.
-        var steps = 3 + 1 + (hasNewRows ? 1 : 0) + 1 + 1 + 1;
-        var stepsDone = phase == MigrationPhase.Light ? 3 : 0;   // три важкі кроки вже зроблено фазою Heavy
+        var steps = 2 + 1 + (hasNewRows ? 1 : 0) + 1 + 1 + 1 + 1;
+        var stepsDone = phase == MigrationPhase.Light ? 2 : 0;   // два важкі кроки (комірки, індекс) вже зроблено фазою Heavy
         long totalBatches = 0;
         long totalRows = 0;
         long slowestMs = 0;
@@ -387,6 +465,9 @@ public sealed partial class DocumentVersionMigrationStore(
             await ReportAsync(stage, 0).ConfigureAwait(false);
         }
 
+        // Оренда виконавця важкої частини (власник - цей виклик); null - без маркера (тести, застарілий шлях).
+        string? leaseOwner = null;
+
         // Один діапазон = одна команда = одна транзакція на ВЛАСНОМУ з'єднанні (коміт одразу, не з транзакцією переносу).
         async Task<long> RunRangeAsync(
             SqlConnection heavy, string stage, string sql, string kind, int index, int count, SqlParameter[] commandParameters)
@@ -403,7 +484,31 @@ public sealed partial class DocumentVersionMigrationStore(
                 command.CommandTimeout = ApplyCommandTimeoutSeconds;
                 command.Parameters.AddRange(commandParameters);
                 command.Parameters.Add(output);
-                await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                command.Parameters.Add(new SqlParameter("@leaseOwner", System.Data.SqlDbType.NVarChar, 40) { Value = (object?)leaseOwner ?? DBNull.Value });
+                command.Parameters.Add(new SqlParameter("@leaseMinutes", LeaseMinutes));
+                try
+                {
+                    await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
+                catch (SqlException ex) when (ex.Number == LeaseLostError)
+                {
+                    // Оренду перехопив інший виконавець (наша минула) - діапазон відкотився, далі не йдемо.
+                    throw MigrationRunning(projectId);
+                }
+                catch (SqlException ex) when (ex.Number == RangeMismatchError)
+                {
+                    // P2-3: діапазон не переселив усе, що мав, - відкотився цілим; precedent P2-2 (Lookup шапки): ECR-CELL-0409.
+                    throw new Application.Errors.ConcurrencyConflictException(
+                        "ECR-CELL-0409",
+                        $"Діапазон {index} ({kind}) переносу не переселив усі значення: {ex.Message} Перенос зупинено, повторіть його.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
+                            ["expected"] = "0",
+                            ["actual"] = "-1",
+                        });
+                }
+
                 await tx.CommitAsync(ct).ConfigureAwait(false);
             }
 
@@ -486,6 +591,19 @@ public sealed partial class DocumentVersionMigrationStore(
             {
                 await heavy.OpenAsync(ct).ConfigureAwait(false);
 
+                // ⛔ Взаємне виключення важкої частини: оренда в маркері (власник + строк). Другий запуск тієї ж цілі (реклейм
+                // задачі, синхронний шлях) не входить, доки оренда не минула; після збою оренда знімається одразу
+                // (`LeaseGuard`), після обриву процесу - сама спливає за `LeaseMinutes`.
+                LeaseGuard? leaseGuard = null;
+                if (phase == MigrationPhase.Heavy)
+                {
+                    leaseOwner = Guid.NewGuid().ToString("N");
+                    await ClaimLeaseAsync(heavy, projectId, leaseOwner, ct).ConfigureAwait(false);
+                    leaseGuard = new LeaseGuard(heavy, projectId, leaseOwner);
+                }
+
+                await using var leaseHolder = leaseGuard;
+
                 if (phase == MigrationPhase.Heavy && MarkerPropagationDelay > TimeSpan.Zero)
                 {
                     // Маркер (окрема зафіксована транзакція) мусить дійти до читачів ДО першого діапазону.
@@ -494,9 +612,19 @@ public sealed partial class DocumentVersionMigrationStore(
 
                 // 1) Комірки, оформлення комірок і рядки: діапазони за ключем кластерного індексу (PeriodKey, TableRowId).
                 var rowRanges = await ReadRowRangesAsync(heavy, Parameters(), ct).ConfigureAwait(false);
+                var watermark = phase == MigrationPhase.Heavy
+                    ? await ReadWatermarkAsync(heavy, projectId, ct).ConfigureAwait(false)
+                    : default;
                 long cellsTotal = 0;
                 foreach (var range in rowRanges)
                 {
+                    // Відновлення після обриву: діапазон повністю ДО збереженої межі вже зафіксовано (предикати ідемпотентні,
+                    // тож діапазон, що лише перетинає межу, просто виконується ще раз).
+                    if (watermark.CellsPeriod is { } wp && (range.PeriodKey < wp || (range.PeriodKey == wp && range.Hi <= watermark.CellsHi)))
+                    {
+                        continue;
+                    }
+
                     cellsTotal += await RunRangeAsync(
                             heavy, VersionMigrationStages.Cells, RangeCommand, "cells", range.Index, rowRanges.Count,
                             Parameters(
@@ -516,6 +644,11 @@ public sealed partial class DocumentVersionMigrationStore(
                 long indexTotal = 0;
                 foreach (var range in indexRanges)
                 {
+                    if (watermark.IndexHi is { } wi && range.Hi <= wi)
+                    {
+                        continue;
+                    }
+
                     indexTotal += await RunRangeAsync(
                             heavy, VersionMigrationStages.Index, IndexRangeCommand, "index", range.Index, indexRanges.Count,
                             Parameters(
@@ -528,32 +661,48 @@ public sealed partial class DocumentVersionMigrationStore(
 
                 stepsDone++;
                 await ReportAsync(VersionMigrationStages.Index, 0).ConfigureAwait(false);
-
-                // 3) Результати валідації зникають повністю: пачки TOP без ключа не квадратичні (видалене не лишається в скані).
-                long validationTotal = 0;
-                long validationChanged;
-                var validationBatch = 0;
-                do
-                {
-                    validationChanged = await RunRangeAsync(
-                            heavy, VersionMigrationStages.Validation, ValidationCommand, "validation", validationBatch++, 0,
-                            Parameters(null, ValidationBatchRows))
-                        .ConfigureAwait(false);
-                    validationTotal += validationChanged;
-                    if (validationChanged >= ValidationBatchRows)
-                    {
-                        await ReportAsync(VersionMigrationStages.Validation, validationTotal).ConfigureAwait(false);
-                    }
-                }
-                while (validationChanged >= ValidationBatchRows);
-
-                stepsDone++;
-                await ReportAsync(VersionMigrationStages.Validation, 0).ConfigureAwait(false);
             }
         }
 
         if (phase is MigrationPhase.All or MigrationPhase.Light)
         {
+            // ⛔ Постумова важкої частини (замість звірки rowsAffected, якої не існує для переносу "скільки є"): жодної комірки
+            // проєкту не лишилося на колонці, якої немає в цільовій версії. Інакше діапазон щось пропустив би - версію
+            // проєкту не перемикаємо (T2 відкочується, маркер лишається, повтор доводить).
+            {
+                await using var verify = db.Database.GetDbConnection().CreateCommand();
+                verify.Transaction = db.Database.CurrentTransaction!.GetDbTransaction();
+                verify.CommandTimeout = ApplyCommandTimeoutSeconds;
+                verify.CommandText = Prelude + """
+                    SELECT COUNT_BIG(*)
+                    FROM   doc.CellValue cv
+                    JOIN   doc.TableRow r  ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
+                    JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+                    WHERE  cv.PeriodKey IN (SELECT PeriodKey FROM @periods)
+                      AND  NOT EXISTS (SELECT 1 FROM @columnMap m WHERE m.n = cv.ColumnDefId)
+                    OPTION (MAXDOP 1, RECOMPILE);
+                    """;
+                verify.Parameters.AddRange(Parameters());
+                var stray = Convert.ToInt64(
+                    await verify.ExecuteScalarAsync(ct).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+                if (stray != 0)
+                {
+                    throw new Application.Errors.ConcurrencyConflictException(
+                        "ECR-CELL-0409",
+                        $"Після переносу комірок {stray} комірок проєкту лишилося на колонках, яких немає в цільовій версії: " +
+                        "версію проєкту не перемкнуто, повторіть перенос.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
+                            ["expected"] = "0",
+                            ["actual"] = stray.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        });
+                }
+            }
+
+            // P2-1: результати валідації зникають лише тут, у транзакції перемикання версії.
+            await BatchesAsync(VersionMigrationStages.Validation, ValidationBatchSql).ConfigureAwait(false);
+
             // Далі — знову у транзакції переносу (атомарно з перемиканням версії проєкту).
             await SingleAsync(VersionMigrationStages.Instances, InstancesSql).ConfigureAwait(false);
 
@@ -577,6 +726,89 @@ public sealed partial class DocumentVersionMigrationStore(
     private static string SingleCommand(string body) => Prelude + body;
 
     private readonly record struct KeyRange(int Index, int PeriodKey, long Lo, long Hi);
+
+    /// <summary>На скільки хвилин береться (і щодіапазону подовжується) оренда виконавця важкої частини.</summary>
+    public const int LeaseMinutes = 10;
+
+    /// <summary>Номер помилки <c>THROW</c> у діапазоні: оренду втрачено.</summary>
+    private const int LeaseLostError = 51000;
+
+    /// <summary>Номер помилки <c>THROW</c> у діапазоні: розбіжність "очікувано переселене - факт".</summary>
+    private const int RangeMismatchError = 51001;
+
+    private static async Task ClaimLeaseAsync(SqlConnection connection, int projectId, string owner, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE doc.Project
+            SET    ExternalSettingsJson = JSON_MODIFY(JSON_MODIFY(ExternalSettingsJson, '$.owner', @owner),
+                       '$.leaseUntil', CONVERT(varchar(30), DATEADD(MINUTE, @minutes, SYSUTCDATETIME()), 126))
+            WHERE  Id = @projectId AND ISJSON(ExternalSettingsJson) = 1
+              AND  JSON_VALUE(ExternalSettingsJson, '$.migratingTo') IS NOT NULL
+              AND  (JSON_VALUE(ExternalSettingsJson, '$.leaseUntil') IS NULL
+                    OR TRY_CAST(JSON_VALUE(ExternalSettingsJson, '$.leaseUntil') AS datetime2) < SYSUTCDATETIME()
+                    OR JSON_VALUE(ExternalSettingsJson, '$.owner') = @owner);
+            """;
+        command.Parameters.Add(new SqlParameter("@owner", System.Data.SqlDbType.NVarChar, 40) { Value = owner });
+        command.Parameters.Add(new SqlParameter("@minutes", LeaseMinutes));
+        command.Parameters.Add(new SqlParameter("@projectId", projectId));
+        if (await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false) == 0)
+        {
+            throw MigrationRunning(projectId);
+        }
+    }
+
+    /// <summary>Знімає оренду, коли важка частина закінчилась (успіхом чи збоєм): повтор не чекає, доки вона спливе.</summary>
+    private sealed class LeaseGuard(SqlConnection connection, int projectId, string owner) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            try
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                    UPDATE doc.Project
+                    SET    ExternalSettingsJson = JSON_MODIFY(JSON_MODIFY(ExternalSettingsJson, '$.owner', NULL), '$.leaseUntil', NULL)
+                    WHERE  Id = @projectId AND ISJSON(ExternalSettingsJson) = 1 AND JSON_VALUE(ExternalSettingsJson, '$.owner') = @owner;
+                    """;
+                command.Parameters.Add(new SqlParameter("@owner", System.Data.SqlDbType.NVarChar, 40) { Value = owner });
+                command.Parameters.Add(new SqlParameter("@projectId", projectId));
+                await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // звільнення оренди - best effort: з'єднання могло обірватися, оренда тоді спливе сама
+            catch (Exception)
+#pragma warning restore CA1031
+            {
+                // оренда спливе за LeaseMinutes
+            }
+        }
+    }
+
+    /// <summary>Остання зафіксована межа важкої частини (watermark у маркері проєкту).</summary>
+    private readonly record struct Watermark(int? CellsPeriod, long CellsHi, long? IndexHi);
+
+    private static async Task<Watermark> ReadWatermarkAsync(SqlConnection connection, int projectId, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT TRY_CAST(JSON_VALUE(ExternalSettingsJson, '$.wmCellsPeriod') AS int),
+                   TRY_CAST(JSON_VALUE(ExternalSettingsJson, '$.wmCellsHi') AS bigint),
+                   TRY_CAST(JSON_VALUE(ExternalSettingsJson, '$.wmIndexHi') AS bigint)
+            FROM   doc.Project
+            WHERE  Id = @projectId AND ISJSON(ExternalSettingsJson) = 1
+            """;
+        command.Parameters.Add(new SqlParameter("@projectId", projectId));
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return default;
+        }
+
+        return new Watermark(
+            reader.IsDBNull(0) ? null : reader.GetInt32(0),
+            reader.IsDBNull(1) ? long.MinValue : reader.GetInt64(1),
+            reader.IsDBNull(2) ? null : reader.GetInt64(2));
+    }
 
     private static async Task<long> SessionReadsAsync(SqlConnection connection, CancellationToken ct)
     {
@@ -1340,6 +1572,43 @@ public sealed partial class DocumentVersionMigrationStore(
         OPTION (MAXDOP 1, RECOMPILE);
         SET @c += @@ROWCOUNT;
 
+        -- Watermark відновлення: остання виконана межа (період, TableRowId) - у ТІЙ САМІЙ транзакції, що й діапазон.
+        -- Рядок проєкту тут не заблоковано (зовнішньої транзакції в важкій частині немає); без маркера - нічого не пише.
+        -- Звірка діапазону (P2-3): жодна комірка/оформлення діапазону не лишилась на вихідній колонці, яку мапа переселяє.
+        -- Розбіжність - THROW: діапазон відкочується цілим, перенос зупиняється (ECR-CELL-0409), маркер лишається.
+        DECLARE @bad bigint;
+        SELECT @bad = COUNT_BIG(*)
+        FROM   doc.CellValue cv
+        JOIN   doc.TableRow r  ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        JOIN   @columnMap m    ON m.o = cv.ColumnDefId
+        WHERE  cv.PeriodKey = @p AND cv.TableRowId BETWEEN @lo AND @hi
+          AND  r.PeriodKey = @p AND r.Id BETWEEN @lo AND @hi
+          AND  m.o <> m.n
+        OPTION (MAXDOP 1, RECOMPILE);
+        IF @bad > 0 THROW 51001, N'Діапазон комірок: частина значень не переселена.', 1;
+
+        SELECT @bad = COUNT_BIG(*)
+        FROM   doc.CellStyle cs
+        JOIN   doc.TableRow r  ON r.PeriodKey = cs.PeriodKey AND r.Id = cs.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        JOIN   @columnMap m    ON m.o = cs.ColumnDefId
+        WHERE  cs.PeriodKey = @p AND cs.TableRowId BETWEEN @lo AND @hi
+          AND  r.PeriodKey = @p AND r.Id BETWEEN @lo AND @hi
+          AND  m.o <> m.n
+        OPTION (MAXDOP 1, RECOMPILE);
+        IF @bad > 0 THROW 51001, N'Діапазон оформлення комірок: частина записів не переселена.', 1;
+        IF @leaseOwner IS NOT NULL
+        BEGIN
+            UPDATE doc.Project
+            SET    ExternalSettingsJson = JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(ExternalSettingsJson, '$.wmCellsPeriod', @p), '$.wmCellsHi', @hi),
+                       '$.leaseUntil', CONVERT(varchar(30), DATEADD(MINUTE, @leaseMinutes, SYSUTCDATETIME()), 126))
+            WHERE  Id = @projectId AND ISJSON(ExternalSettingsJson) = 1
+              AND  JSON_VALUE(ExternalSettingsJson, '$.migratingTo') IS NOT NULL
+              AND  JSON_VALUE(ExternalSettingsJson, '$.owner') = @leaseOwner;
+            IF @@ROWCOUNT = 0 THROW 51000, N'Оренду важкої частини переносу втрачено.', 1;
+        END
+
         SET @changed = @c;
         """;
 
@@ -1384,16 +1653,29 @@ public sealed partial class DocumentVersionMigrationStore(
         OPTION (MAXDOP 1, RECOMPILE);
         SET @c += @@ROWCOUNT;
 
+        IF @leaseOwner IS NOT NULL
+        BEGIN
+            UPDATE doc.Project
+            SET    ExternalSettingsJson = JSON_MODIFY(JSON_MODIFY(ExternalSettingsJson, '$.wmIndexHi', @hi),
+                       '$.leaseUntil', CONVERT(varchar(30), DATEADD(MINUTE, @leaseMinutes, SYSUTCDATETIME()), 126))
+            WHERE  Id = @projectId AND ISJSON(ExternalSettingsJson) = 1
+              AND  JSON_VALUE(ExternalSettingsJson, '$.migratingTo') IS NOT NULL
+              AND  JSON_VALUE(ExternalSettingsJson, '$.owner') = @leaseOwner;
+            IF @@ROWCOUNT = 0 THROW 51000, N'Оренду важкої частини переносу втрачено.', 1;
+        END
+
         SET @changed = @c;
         """;
 
-    /// <summary>Результати валідації описували стару структуру: їх перераховують заново (їх багато — пачками, які зникають).</summary>
-    private static readonly string ValidationCommand = Prelude + """
+    /// <summary>
+    /// Результати валідації описували стару структуру: їх перераховують заново (їх багато — пачками, які зникають).
+    /// ⛔ Видаляються в ТРАНЗАКЦІЇ ПЕРЕМИКАННЯ версії (T2), а не в діапазонах: обрив/відмова до коміту T2 лишає результати
+    /// для ще чинної старої версії (P2-1), і вони зникають лише разом з перемиканням.
+    /// </summary>
+    private const string ValidationBatchSql = """
         DELETE TOP (@batch) v
         FROM   wf.ValidationResult v
-        JOIN   @docs d ON d.Id = v.DocumentId
-        OPTION (MAXDOP 1);
-        SET @changed = @@ROWCOUNT;
+        JOIN   @docs d ON d.Id = v.DocumentId;
         """;
 
     /// <summary>Екземпляри таблиць (їх мало: документи × таблиці × періоди) — одним оператором.</summary>
@@ -1546,7 +1828,13 @@ public sealed partial class DocumentVersionMigrationStore(
         SET    TemplateVersionId = @targetVersionId,
                ExternalSettingsJson =
                    CASE WHEN ISJSON(ExternalSettingsJson) = 1 AND JSON_VALUE(ExternalSettingsJson, '$.migratingTo') IS NOT NULL
-                        THEN NULLIF(JSON_MODIFY(ExternalSettingsJson, '$.migratingTo', NULL), CONCAT(CHAR(123), CHAR(125)))
+                        THEN NULLIF(
+                                 JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(
+                                     ExternalSettingsJson,
+                                     '$.migratingTo', NULL), '$.planHash', NULL), '$.startedAt', NULL), '$.startedBy', NULL),
+                                     '$.owner', NULL), '$.leaseUntil', NULL), '$.wmCellsPeriod', NULL),
+                                     '$.wmCellsHi', NULL), '$.wmIndexHi', NULL),
+                                 CONCAT(CHAR(123), CHAR(125)))
                         ELSE ExternalSettingsJson END
         WHERE  Id = @projectId;
         """;
