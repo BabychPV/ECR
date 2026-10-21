@@ -23655,6 +23655,15 @@ export interface components {
              * @default 0
              */
             lockedSheetsCarried: number;
+            /** @description Звіт мап Lookup по цілях запиту (`lookupRemaps`); `null` — мап у запиті не було. ⛔ Лише id записів і
+             *     кількості. Причина відмови `lookupValuesNotMapped` з'являється в `Refusals`, коли є значення без
+             *     придатного відповідника. */
+            lookupRemapReport?: null | components["schemas"]["LookupRemapReportItem"][];
+            /**
+             * Format: int64
+             * @description Скільки значень шапки переїде (сухий прогін) або переїхало; `null` — мап не було.
+             */
+            lookupRemapped?: null | number;
             /**
              * Format: int64
              * @description Скільки введених значень зникло б.
@@ -24640,6 +24649,49 @@ export interface components {
             /** @description `Submitted` або `Approved`. */
             status: string;
         };
+        /** @description Запис цілі мапи, який не можна покласти в шапку. */
+        LookupRemapNotUsable: {
+            /**
+             * Format: int64
+             * @description Запис нового довідника з мапи.
+             */
+            entryId: number;
+            /** @description `missing`, `foreign`, `inactive`, `deleted`, `notValidInWindow`. */
+            reason: string;
+        };
+        /** @description Звіт мапи Lookup по одній цілі. ⛔ Лише id записів і кількості: ні значень, ні назв, ні документів. */
+        LookupRemapReportItem: {
+            /** @description `false` — ціль не стосується пари версій (поля немає або довідник не змінився). */
+            applied: boolean;
+            /**
+             * Format: int32
+             * @description Скільки різних старих записів має придатний відповідник.
+             */
+            mappedEntries: number;
+            /**
+             * Format: int64
+             * @description Скільки значень шапки переїде на нові записи.
+             */
+            mappedValues: number;
+            /** @description Ціль. */
+            target: components["schemas"]["VersionMigrationLookupTarget"];
+            /** @description Записи нового довідника з мапи, які не можна використати (до стелі). */
+            targetNotUsable: components["schemas"]["LookupRemapNotUsable"][];
+            /**
+             * Format: int32
+             * @description Скільки різних старих записів його не має.
+             */
+            unmappedEntries: number;
+            /** @description Id старих записів без відповідника (до int VersionMigrationLookupRemaps.MaxListed). */
+            unmappedEntryIds: number[];
+            /** @description Перелік UnmappedEntryIds обрізано стелею. */
+            unmappedTruncated: boolean;
+            /**
+             * Format: int64
+             * @description Скільки значень без придатного відповідника (разом зі значеннями без запису).
+             */
+            unmappedValues: number;
+        };
         /** @description Підсумок одного мапінгу. */
         MappedFieldPreview: {
             /** @description Спосіб згортання точок періоду. */
@@ -25469,6 +25521,14 @@ export interface components {
             async: boolean;
             /** @description `true` — лише звіт, без змін (завжди синхронно: швидкий). */
             dryRun: boolean;
+            /** @description Необов'язкові мапи записів Lookup по полях ШАПКИ: `[{target:{kind:"header",code}, mappings:[{from,to}]}]`, де
+             *     `from` — запис вихідного довідника, `to` — запису довідника цільової версії. Діють лише для поля, чий
+             *     довідник між версіями змінився (інакше ціль у звіті має `applied = false`). Повна мапа (кожне вжите значення
+             *     має придатний відповідник: існує, у новому довіднику, активний, не видалений, чинний у вікні проєкту) знімає з поля
+             *     `guardedWithData` і переписує значення в шапці в тій самій транзакції; часткова — `422 ECR-SCHM-0422`
+             *     (`migrateLookupNotMapped`), нічого не записано. Зайві пари ігноруються. Колонки Lookup (`kind = column`)
+             *     не підтримуються (`422 migrateLookupRemapInvalid`). Перерахунок не ставиться. Без поля поведінка незмінна. */
+            lookupRemaps?: null | components["schemas"]["VersionMigrationLookupRemap"][];
             mode: null | components["schemas"]["VersionMigrationMode"];
             /** @description Необов'язкова мапа «було → стало» кодів таблиць (і колонок) для структури, перейменованої в цільовій версії
              *     (напр. `T9a_03 → T9a_17a`): без неї таблиця з новим кодом — «нова», а стара — «зникла», і введені в неї
@@ -31521,6 +31581,33 @@ export interface components {
              * @description Скільки введених значень зачіпає відмінність.
              */
             values: number;
+        };
+        /** @description Пара «запис старого довідника → запис нового». */
+        VersionMigrationLookupPair: {
+            /**
+             * Format: int64
+             * @description Запис вихідного довідника.
+             */
+            from: number;
+            /**
+             * Format: int64
+             * @description Запис довідника, який вказує цільова версія.
+             */
+            to: number;
+        };
+        /** @description Мапа Lookup однієї цілі: поле шапки, довідник якого змінився між версіями. */
+        VersionMigrationLookupRemap: {
+            /** @description Пари «було → стало»; кілька `From` можуть вести в один `To` (злиття). */
+            mappings: components["schemas"]["VersionMigrationLookupPair"][];
+            /** @description Ціль. */
+            target: components["schemas"]["VersionMigrationLookupTarget"];
+        };
+        /** @description Ціль мапи Lookup: поле шапки (`Kind = "header"`) за кодом у ВИХІДНІЙ версії. */
+        VersionMigrationLookupTarget: {
+            /** @description Код поля шапки. */
+            code: string;
+            /** @description Вид цілі. У v1 підтримується лише `header`; колонки Lookup — окремим кроком. */
+            kind: string;
         };
         /**
          * @description Режим переносу документів на нову версію шаблону (ФВ-7.5).
