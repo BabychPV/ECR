@@ -222,6 +222,18 @@ public static class VersionMigrationPlanner
         var formulaChanges = new List<string>();
         var overwrites = new List<GuardedOverwriteItem>();
 
+        // ⚠ Відновлення після обриву: комірки переносяться пачками з окремими комітами (див. `DocumentVersionMigrationStore`),
+        // тож повторний запуск бачить частину значень уже на колонках ЦІЛЬОВОЇ версії. Вони вже перенесені: у «втрачені» їх
+        // зараховувати не можна (режим Safe відмовив би), а до «перенесених» — можна, щоб звіт не залежав від обриву.
+        // Id колонок/рядків різних версій не перетинаються, тож збігу зі вихідними бути не може.
+        var targetColumnIds = target.Sheets.SelectMany(s => s.Tables).SelectMany(t => t.Columns).Select(c => c.Id).ToHashSet();
+        var targetRowIds = target.Sheets.SelectMany(s => s.Tables).SelectMany(t => t.Rows).Select(r => r.Id).ToHashSet();
+        var alreadyMoved = cells.Where(c => targetColumnIds.Contains(c.ColumnDefId)).Sum(c => c.Values);
+        if (alreadyMoved > 0)
+        {
+            cells = [.. cells.Where(c => !targetColumnIds.Contains(c.ColumnDefId))];
+        }
+
         var valuesByColumn = cells
             .GroupBy(c => c.ColumnDefId)
             .ToDictionary(g => g.Key, g => g.Sum(c => c.Values));
@@ -351,10 +363,10 @@ public static class VersionMigrationPlanner
         // дві. Інакше звіт казав би «втрачено 2», де людина бачить одне число.
         var mappedColumns = columns.ToDictionary(c => c.SourceColumnDefId);
         long lost = 0;
-        long transferred = 0;
+        long transferred = alreadyMoved;
         foreach (var usage in cells)
         {
-            var rowLost = usage.RowDefId is { } rowDefId && !rows.ContainsKey(rowDefId);
+            var rowLost = usage.RowDefId is { } rowDefId && !rows.ContainsKey(rowDefId) && !targetRowIds.Contains(rowDefId);
             if (!mappedColumns.ContainsKey(usage.ColumnDefId) || rowLost)
             {
                 lost += usage.Values;

@@ -857,79 +857,86 @@ public sealed class MigrateDocumentVersionHandler(
                 };
             }
 
-            await store.ApplyAsync(projectId, target.Id, plan, onStep, innerCt).ConfigureAwait(false);
-            formulaTables = plan.FormulaChanges.Count;
-
-            // ⛔ Слід переносу значень Lookup шапки — на КОЖЕН документ, у ТІЙ САМІЙ транзакції (відкат переносу
-            // відкочує й аудит). Старі id взято ДО запису, під блоком проєкту. ⚠ Перерахунок тут НЕ ставиться: кількості
-            // комірок і результати не змінюються, а формули з HDR.<Lookup> ремап не охоплює (див. контракт).
-            if (plan.LookupRemaps.Count > 0)
+            // ⛔ Б1: усе нижче (аудит, мапінги збору) може відмовити й мусить відкотитися разом із переносом, тому
+            // сховище викликає це ДО важкої частини — перенесення комірок діапазонами з окремими комітами. Інакше відмова
+            // журналу лишала б частину комірок уже перенесеною при старій версії проєкту.
+            async Task BeforeCellsAsync(CancellationToken _)
             {
-                var events = BuildLookupRemapEvents(planned.LookupRows, plan, projectId, current, target.Id, profile.UserId);
-                if (events.Count > 0)
+                formulaTables = plan.FormulaChanges.Count;
+
+                // ⛔ Слід переносу значень Lookup шапки — на КОЖЕН документ, у ТІЙ САМІЙ транзакції (відкат переносу
+                // відкочує й аудит). Старі id взято ДО запису, під блоком проєкту. ⚠ Перерахунок тут НЕ ставиться: кількості
+                // комірок і результати не змінюються, а формули з HDR.<Lookup> ремап не охоплює (див. контракт).
+                if (plan.LookupRemaps.Count > 0)
                 {
-                    await audit.WriteSecurityEventsAsync(events, innerCt).ConfigureAwait(false);
+                    var events = BuildLookupRemapEvents(planned.LookupRows, plan, projectId, current, target.Id, profile.UserId);
+                    if (events.Count > 0)
+                    {
+                        await audit.WriteSecurityEventsAsync(events, innerCt).ConfigureAwait(false);
+                    }
                 }
+
+                // ⛔ D-1: мапінги збору — в ТІЙ САМІЙ транзакції, що й документи й версія проєкту: збій відкочує все,
+                // і збір не опиняється між версіями. Рахується те, що справді перенесено (мапінг могли додати між
+                // планом і оновленням — він теж переїде, якщо його колонка є в мапі).
+                var remapped = await store
+                    .RemapCollectionMappingsAsync(
+                        plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId),
+                        extended.CollectionMappingIds ?? [], innerCt)
+                    .ConfigureAwait(false);
+
+                // ⛔ D-1b: мапінги подій джерела (документи проєкту) і прив'язки вікна — там само, тією ж транзакцією;
+                // рішення плану (відповідники, зайняті цілі) перераховано під блоком проєкту вище.
+                await store
+                    .RemapEventAndWindowMapsAsync(
+                        projectId, extended, plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId),
+                        innerCt)
+                    .ConfigureAwait(false);
+                result = dto with
+                {
+                    Applied = true,
+                    MappingsRemapped = remapped + extended.Events.Count + extended.Windows.Count,
+                };
+
+                // ⛔ F2-03 (аудит R11): журнал — В ТІЙ САМІЙ транзакції (`AuditWriter` бере поточну
+                // транзакцію контексту): перенос структури всіх документів проєкту не комітиться без
+                // сліду. Доти запис ішов після коміту й міг загубитися.
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        clock.UtcNow, EventType, TargetUserId: null, TargetRoleId: null,
+                        JsonSerializer.Serialize(new
+                        {
+                            documentId,
+                            projectId,
+                            fromVersionId = result.FromVersionId,
+                            toVersionId = result.ToVersionId,
+                            mode = result.Mode.ToString(),
+                            documents = result.DocumentCount,
+                            transferredValues = result.TransferredValues,
+                            mappingsRemapped = result.MappingsRemapped,
+                            renames = plan.Items.Count(i => i.Kind == "Renamed"),
+
+                            // LP-32: подані/затверджені пари «аркуш × період», перенесені без змін; «зачеплених» при
+                            // застосуванні немає (вони були б відмовою), поле лишається для єдиної форми запису.
+                            lockedSheetsCarried = result.LockedSheetsCarried,
+                            lockedSheetsAffected = result.LockedSheetsAffected,
+                            // LP-41: скільки таблиць додали/змінили формули; > 0 — після коміту ставиться перерахунок.
+                            formulaTables = plan.FormulaChanges.Count,
+
+                            // ACC-OW: скільки введених значень перезапише формула за згодою (0 без прапора) і в скількох
+                            // комірках шаблону. ⛔ Лише кількості: ні адрес, ні значень.
+                            guardedOverwritten = acceptGuardedOverwrite ? plan.GuardedOverwritableValues : 0L,
+                            guardedOverwrittenCells = acceptGuardedOverwrite ? plan.GuardedOverwrites.Count : 0,
+
+                            // Мапи Lookup шапки: скільки значень переписано й по скількох полях. ⛔ Лише кількості.
+                            lookupRemapped = plan.LookupRemappedValues,
+                            lookupRemapTargets = plan.LookupRemaps.Select(r => r.HeaderFieldDefId).Distinct().Count(),
+                        }),
+                        profile.UserId, currentUser.CorrelationId),
+                    innerCt).ConfigureAwait(false);
             }
 
-            // ⛔ D-1: мапінги збору — в ТІЙ САМІЙ транзакції, що й документи й версія проєкту: збій відкочує все,
-            // і збір не опиняється між версіями. Рахується те, що справді перенесено (мапінг могли додати між
-            // планом і оновленням — він теж переїде, якщо його колонка є в мапі).
-            var remapped = await store
-                .RemapCollectionMappingsAsync(
-                    plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId),
-                    extended.CollectionMappingIds ?? [], innerCt)
-                .ConfigureAwait(false);
-
-            // ⛔ D-1b: мапінги подій джерела (документи проєкту) і прив'язки вікна — там само, тією ж транзакцією;
-            // рішення плану (відповідники, зайняті цілі) перераховано під блоком проєкту вище.
-            await store
-                .RemapEventAndWindowMapsAsync(
-                    projectId, extended, plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId),
-                    innerCt)
-                .ConfigureAwait(false);
-            result = dto with
-            {
-                Applied = true,
-                MappingsRemapped = remapped + extended.Events.Count + extended.Windows.Count,
-            };
-
-            // ⛔ F2-03 (аудит R11): журнал — В ТІЙ САМІЙ транзакції (`AuditWriter` бере поточну
-            // транзакцію контексту): перенос структури всіх документів проєкту не комітиться без
-            // сліду. Доти запис ішов після коміту й міг загубитися.
-            await audit.WriteSecurityEventAsync(
-                new SecurityEventRecord(
-                    clock.UtcNow, EventType, TargetUserId: null, TargetRoleId: null,
-                    JsonSerializer.Serialize(new
-                    {
-                        documentId,
-                        projectId,
-                        fromVersionId = result.FromVersionId,
-                        toVersionId = result.ToVersionId,
-                        mode = result.Mode.ToString(),
-                        documents = result.DocumentCount,
-                        transferredValues = result.TransferredValues,
-                        mappingsRemapped = result.MappingsRemapped,
-                        renames = plan.Items.Count(i => i.Kind == "Renamed"),
-
-                        // LP-32: подані/затверджені пари «аркуш × період», перенесені без змін; «зачеплених» при
-                        // застосуванні немає (вони були б відмовою), поле лишається для єдиної форми запису.
-                        lockedSheetsCarried = result.LockedSheetsCarried,
-                        lockedSheetsAffected = result.LockedSheetsAffected,
-                        // LP-41: скільки таблиць додали/змінили формули; > 0 — після коміту ставиться перерахунок.
-                        formulaTables = plan.FormulaChanges.Count,
-
-                        // ACC-OW: скільки введених значень перезапише формула за згодою (0 без прапора) і в скількох
-                        // комірках шаблону. ⛔ Лише кількості: ні адрес, ні значень.
-                        guardedOverwritten = acceptGuardedOverwrite ? plan.GuardedOverwritableValues : 0L,
-                        guardedOverwrittenCells = acceptGuardedOverwrite ? plan.GuardedOverwrites.Count : 0,
-
-                        // Мапи Lookup шапки: скільки значень переписано й по скількох полях. ⛔ Лише кількості.
-                        lookupRemapped = plan.LookupRemappedValues,
-                        lookupRemapTargets = plan.LookupRemaps.Select(r => r.HeaderFieldDefId).Distinct().Count(),
-                    }),
-                    profile.UserId, currentUser.CorrelationId),
-                innerCt).ConfigureAwait(false);
+            await store.ApplyAsync(projectId, target.Id, plan, onStep, BeforeCellsAsync, innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
         // ⛔ Профіль у кеші не бачить зміни грантів, яка не рухає відбиток груп
