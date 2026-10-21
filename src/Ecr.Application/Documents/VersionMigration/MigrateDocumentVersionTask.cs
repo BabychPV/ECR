@@ -26,12 +26,18 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// Згода мігрувати шапку документів із поданими/затвердженими аркушами (із запиту); задачі, поставлені до цього поля,
 /// десеріалізуються з <c>false</c> і ведуть себе як раніше.
 /// </param>
+/// <param name="BackupConfirmation">
+/// Підтвердження резервної копії (шлях і/або час) із запиту; обов'язкове від 
+/// <c>MigrateDocumentVersionHandler.BackupConfirmationThreshold</c> значень, пишеться в журнал безпеки; 
+/// задачі, поставлені до цього поля, десеріалізуються з <c>null</c>.
+/// </param>
 public sealed record MigrateDocumentVersionTask(
     long DocumentId, int TargetVersionId, string Mode, JobActor? Actor = null,
     IReadOnlyList<VersionMigrationTableRename>? TableRenames = null,
     bool AcceptGuardedOverwrite = false,
     IReadOnlyList<VersionMigrationLookupRemap>? LookupRemaps = null,
-    bool AllowLockedDocuments = false);
+    bool AllowLockedDocuments = false,
+    string? BackupConfirmation = null);
 
 /// <summary>Підсумок фонового переносу.</summary>
 /// <param name="ToVersion">Цільова версія.</param>

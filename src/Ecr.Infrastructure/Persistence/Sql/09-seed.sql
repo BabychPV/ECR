@@ -9122,6 +9122,7 @@ USING (VALUES
     -- PERMITS: migrate-lookup-remap ── кінець секції ──
     -- MIGRATE-FAST: ключі повідомлень переносу версії (маркер, відновлення, підтвердження бекапу)
     ,(N'err.ECR-SCHM-0422.migrateResumeMismatch', N'en', N'The previous version migration of this project was interrupted. It can only be continued with the same mapping (columns, rows, header Lookup): the mapping differs from the saved one. Nothing was changed.', 1)
+    ,(N'err.ECR-SCHM-0422.migrateBackupRequired', N'en', N'Nothing was moved: this migration moves {transferredValues} values (the limit without a backup confirmation is {threshold}). Take a database backup and repeat the request with backupConfirmation (backup path and/or time).', 1)
     -- MIGRATE-FAST: кінець секції
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -23636,7 +23637,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-SCHM-0422.migrateLookupLockedDocuments', N'kz', N'Ештеңе көшірілмеді: Lookup картасы жіберілген немесе бекітілген парақтары бар құжаттардағы тақырып мәндерін қайта жазар еді ({lockedDocumentCount}). Олардың санын сынақ жүгіру көрсетеді; allowLockedDocuments = true арқылы растап, қайталаңыз.'),
     -- MIGRATE-FAST: ключі повідомлень переносу версії
     (N'err.ECR-SCHM-0422.migrateResumeMismatch', N'ru', N'Предыдущий перенос версии этого проекта был прерван. Продолжить его можно только с той же картой (колонок, строк, Lookup шапки): карта отличается от сохранённой. Ничего не изменено.'),
-    (N'err.ECR-SCHM-0422.migrateResumeMismatch', N'kz', N'Бұл жобаның нұсқасын көшіру үзілді. Оны тек сол картамен (бағандар, жолдар, тақырып Lookup) жалғастыруға болады: карта сақталғаннан өзгеше. Ештеңе өзгертілген жоқ.')
+    (N'err.ECR-SCHM-0422.migrateResumeMismatch', N'kz', N'Бұл жобаның нұсқасын көшіру үзілді. Оны тек сол картамен (бағандар, жолдар, тақырып Lookup) жалғастыруға болады: карта сақталғаннан өзгеше. Ештеңе өзгертілген жоқ.'),
+    (N'err.ECR-SCHM-0422.migrateBackupRequired', N'ru', N'Ничего не перенесено: перенос затрагивает {transferredValues} значений (лимит без подтверждения резервной копии — {threshold}). Сделайте резервную копию базы и повторите запрос с backupConfirmation (путь и/или время копии).'),
+    (N'err.ECR-SCHM-0422.migrateBackupRequired', N'kz', N'Ештеңе көшірілмеді: көшіру {transferredValues} мәнді қамтиды (сақтық көшірмені растамай рұқсат етілетін шек — {threshold}). Дерекқордың сақтық көшірмесін жасап, backupConfirmation (көшірменің жолы және/немесе уақыты) арқылы өтінімді қайталаңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

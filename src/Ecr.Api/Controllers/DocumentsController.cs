@@ -381,6 +381,7 @@ public sealed class DocumentsController(
 
         var mode = request.Mode ?? Application.Documents.VersionMigration.VersionMigrationMode.Safe;
 
+        migrateVersion.BackupConfirmation = request.BackupConfirmation;
         if (request.Async && !request.DryRun)
         {
             var jobId = await migrateVersion
@@ -742,6 +743,11 @@ public sealed record ChangeDocumentKeyRequest(string? BusinessKey, string? Expec
 /// (<c>migrateLookupNotMapped</c>), нічого не записано. Зайві пари ігноруються. Колонки Lookup (<c>kind = column</c>)
 /// не підтримуються (<c>422 migrateLookupRemapInvalid</c>). Перерахунок не ставиться. Без поля поведінка незмінна.
 /// </param>
+/// <param name="BackupConfirmation">
+/// Підтвердження резервної копії бази перед переносом (шлях і/або час бекапу, до 500 символів). Необов'язкове для малих
+/// проєктів; коли переноситься 500 000 значень і більше — обов'язкове: без нього <c>422 ECR-SCHM-0422</c>
+/// (<c>migrateBackupRequired</c>), нічого не записано. Значення пишеться в журнал безпеки (початок і завершення переносу).
+/// </param>
 /// <param name="AllowLockedDocuments">
 /// Необов'язкове (відсутнє або <c>null</c> = <c>false</c>): згода переписати значення Lookup у ШАПЦІ документів, що мають
 /// подані чи затверджені аркуші (<c>lookupRemaps</c>). Без згоди такі документи — <c>422 ECR-SCHM-0422</c>
@@ -756,7 +762,8 @@ public sealed record MigrateDocumentVersionRequest(
     IReadOnlyList<Application.Documents.VersionMigration.VersionMigrationTableRename>? TableRenames = null,
     bool? AcceptGuardedOverwrite = null,
     IReadOnlyList<Application.Documents.VersionMigration.VersionMigrationLookupRemap>? LookupRemaps = null,
-    bool? AllowLockedDocuments = null);
+    bool? AllowLockedDocuments = null,
+    string? BackupConfirmation = null);
 
 /// <summary>Запит на експорт.</summary>
 /// <param name="IncludeFormulas">
