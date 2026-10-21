@@ -150,6 +150,43 @@ public sealed partial class DocumentVersionMigrationTests
             .MoveDataAsync(s.Doc.ProjectId, s.TargetVersionId, plan, null, CancellationToken.None).ConfigureAwait(true);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.5")]
+    public async Task Прострочену_оренду_переймає_новий_виконавець_а_перший_втрачає_оренду_і_зупиняється()
+    {
+        var (s, targetRows) = await ArrangeRangeVolumeAsync(1_500).ConfigureAwait(true);
+        var plan = OnlyLabelsPlan(s, targetRows, 4_502);
+        await BeginAsync(s, plan).ConfigureAwait(true);
+
+        // Оренда чужого виконавця, що спливла (процес помер): новий виконавець її перехоплює.
+        ExecuteSql("UPDATE doc.Project SET ExternalSettingsJson = JSON_MODIFY(JSON_MODIFY(ExternalSettingsJson, '$.owner', 'dead'), '$.leaseUntil', '2000-01-01T00:00:00') WHERE Id = " + s.Doc.ProjectId);
+
+        var stolen = false;
+        await using var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        var store = new DocumentVersionMigrationStore(db)
+        {
+            RangeRows = 500,
+            RangeObserver = stat =>
+            {
+                if (!stolen && stat.Kind == "cells" && stat.Index == 0)
+                {
+                    // Після першого діапазону оренду «перехоплює» інший виконавець: наш наступний діапазон мусить відкотитись і зупинитись.
+                    stolen = true;
+                    ExecuteSql("UPDATE doc.Project SET ExternalSettingsJson = JSON_MODIFY(ExternalSettingsJson, '$.owner', 'thief') WHERE Id = " + s.Doc.ProjectId);
+                }
+            },
+        };
+
+        var lost = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => store.MoveDataAsync(s.Doc.ProjectId, s.TargetVersionId, plan, null, CancellationToken.None)).ConfigureAwait(true);
+        Assert.Equal("ECR-DOC-4091", lost.ErrorCode);
+        Assert.True(stolen);
+        // Другий діапазон відкотився цілим: зафіксовано рівно один діапазон (≈ 500 рядків × 3 комірки).
+        Assert.InRange(CountMovedCells(s), 1, 1_600);
+    }
+
     private async Task SetProjectJsonAsync(Scenario s, string? value)
     {
         await using var connection = new SqlConnection(sql.ConnectionString);

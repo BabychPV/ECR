@@ -62,6 +62,8 @@ public sealed partial class DocumentVersionMigrationTests
             LostValues: 0,
             GuardedValues: 0);
 
+        var volumeRangeRows = int.TryParse(Environment.GetEnvironmentVariable("ECR_MIGRATION_RANGE_ROWS"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var configuredRange) && configuredRange > 0 ? configuredRange : 4_000;
+        var promotionsBefore = await LockPromotionsAsync().ConfigureAwait(true);
         var recorder = new TimingRecorder();
         var rangeStats = new List<MigrationRangeStat>();
         await using (var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
@@ -70,7 +72,7 @@ public sealed partial class DocumentVersionMigrationTests
             .Options))
         {
             // Діапазон 4000 рядків TableRow (≈ 12 тис. комірок) — щоб обсяг тесту дав кілька діапазонів-комітів.
-            var store = new DocumentVersionMigrationStore(db) { RangeRows = 4_000, RangeObserver = rangeStats.Add };
+            var store = new DocumentVersionMigrationStore(db) { RangeRows = volumeRangeRows, RangeObserver = rangeStats.Add };
             await using var tx = await db.Database.BeginTransactionAsync().ConfigureAwait(true);
             var scopeWatch = System.Diagnostics.Stopwatch.StartNew();
             var scope = await store.ReadScopeAsync(s.Doc.ProjectId, CancellationToken.None).ConfigureAwait(true);
@@ -84,7 +86,7 @@ public sealed partial class DocumentVersionMigrationTests
             await tx.CommitAsync().ConfigureAwait(true);
 
             Console.WriteLine(FormattableString.Invariant(
-                $"N3-VOLUME values={expectedValues} applyMs={watch.ElapsedMilliseconds} commands={recorder.Commands.Count}"));
+                $"N3-VOLUME values={expectedValues} rangeRows={volumeRangeRows} ranges={rangeStats.Count} applyMs={watch.ElapsedMilliseconds} commands={recorder.Commands.Count} lockPromotions={await LockPromotionsAsync().ConfigureAwait(true) - promotionsBefore}"));
             foreach (var line in recorder.Summary())
             {
                 Console.WriteLine(line);
@@ -99,9 +101,9 @@ public sealed partial class DocumentVersionMigrationTests
         // ⛔ Предмет тесту 2: комірки йдуть діапазонами за ключем з окремим комітом на кожен. Стільки значень одним
         // оператором — це і був дефект. (Діапазони виконує власне з'єднання сховища, тож у перехоплювачі контексту їх немає.)
         var cellRanges = rangeStats.Count(r => r.Kind == "cells");
-        var minRanges = (int)Math.Ceiling((volumeRows + 2) / 4_000d);
+        var minRanges = (int)Math.Ceiling((volumeRows + 2) / (double)volumeRangeRows);
         Assert.True(cellRanges >= minRanges, $"Діапазонів комірок: {cellRanges}, а для {volumeRows} рядків мало бути ≥ {minRanges}.");
-        Assert.All(rangeStats.Where(r => r.Kind == "cells"), r => Assert.True(r.Rows <= 4_000 * 4L, $"Діапазон завеликий: {r.Rows} рядків."));
+        Assert.All(rangeStats.Where(r => r.Kind == "cells"), r => Assert.True(r.Rows <= volumeRangeRows * 4L, $"Діапазон завеликий: {r.Rows} рядків."));
         Assert.Equal(expectedValues + 1 + volumeRows, rangeStats.Where(r => r.Kind == "cells").Sum(r => r.Rows));   // комірки (+порожня C3) + рядки з описом
 
         // ⛔ Предмет тесту 3: пачки не порушили результат — усі значення на нових колонках, версія проєкту перемкнута.
@@ -230,6 +232,16 @@ public sealed partial class DocumentVersionMigrationTests
                                                            && !l.StartsWith("SET ", StringComparison.Ordinal)) ?? string.Empty;
             return line.Length > 90 ? line[..90] : line;
         }
+    }
+
+    /// <summary>Скільки разів SQL Server ескалював блокування на doc.CellValue до рівня таблиці/партиції (накопичувально).</summary>
+    private async Task<long> LockPromotionsAsync()
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT ISNULL(SUM(index_lock_promotion_count), 0) FROM sys.dm_db_index_operational_stats(DB_ID(), OBJECT_ID(N'doc.CellValue'), NULL, NULL)";
+        return Convert.ToInt64(await command.ExecuteScalarAsync().ConfigureAwait(false), CultureInfo.InvariantCulture);
     }
 
     private sealed record Seen(string Text, int TimeoutSeconds, long Millis, int Rows);

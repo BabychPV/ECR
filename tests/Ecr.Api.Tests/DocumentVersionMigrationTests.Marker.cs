@@ -95,6 +95,12 @@ public sealed partial class DocumentVersionMigrationTests
                          $"/api/v1/documents/{s.Doc.DocumentId}",
                          $"/api/v1/documents/{s.Doc.DocumentId}/header",
                          $"/api/v1/documents/{s.Doc.DocumentId}/tables",
+
+                         // P2-N1: префікс шляху охоплює й контролери з іншим ім'ям (версії, порівняння, історія процесу), а query
+                         // `documentId` - звіти/аудит комірок.
+                         $"/api/v1/documents/{s.Doc.DocumentId}/versions",
+                         $"/api/v1/documents/{s.Doc.DocumentId}/workflow/history",
+                         $"/api/v1/audit/cells?documentId={s.Doc.DocumentId}",
                      })
             {
                 using var otherRead = await client.GetAsync(new Uri(other, UriKind.Relative)).ConfigureAwait(true);
