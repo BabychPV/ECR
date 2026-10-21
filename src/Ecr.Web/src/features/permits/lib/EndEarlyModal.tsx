@@ -1,5 +1,6 @@
 import { useEffect, useState, type JSX } from 'react';
 import { Button, Group, Modal, Textarea } from '@mantine/core';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
 import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
 
@@ -43,6 +44,7 @@ export function EndEarlyModal({
 }: EndEarlyModalProps): JSX.Element {
   const [reason, setReason] = useState('');
   useRestoreFocus(opened, returnFocusTo);
+  const confirmLoading = usePendingLoading(isPending);
 
   useEffect(() => {
     if (opened) setReason('');
@@ -70,7 +72,7 @@ export function EndEarlyModal({
         <Button variant="default" onClick={onClose}>
           {t('common.cancel')}
         </Button>
-        <Button disabled={!enough} loading={isPending} onClick={() => onConfirm(reason.trim())}>
+        <Button disabled={!enough} loading={confirmLoading} onClick={() => onConfirm(reason.trim())}>
           {confirmLabel}
         </Button>
       </Group>
