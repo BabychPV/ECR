@@ -195,6 +195,35 @@ describe('EditAssignmentsDrawer — майстер', () => {
 
   const next = (): HTMLButtonElement => screen.getByTestId('wizard-next') as HTMLButtonElement;
 
+  // ⛔ Дефект 21.10 («не працює закриття або відміна»): `AssignWizard` віддавав `onExitUnsaved={() => false}` і НЕ показував
+  // власного підтвердження, тож після першого ж вибраного місяця (`dirty`) і «Cancel», і «X», і Esc мовчки нічого не робили.
+  // Усі три дороги мають закрити ЛИШЕ майстер: шторка лишається, `?dialog=` знято.
+  describe.each([
+    ['Cancel', () => fireEvent.click(screen.getByTestId('wizard-cancel'))],
+    ['хрестик X', () => fireEvent.click(document.querySelector('button.mantine-Modal-close') as HTMLElement)],
+    ['Esc', () => fireEvent.keyDown(screen.getByTestId('wizard-step-body'), { key: 'Escape' })],
+  ] as const)('закриття через %s', (_name, closeIt) => {
+    it('після введеного (місяць обрано) закриває майстер, шторка лишається', async () => {
+      await openWizard();
+      fireEvent.click(screen.getByRole('checkbox', { name: 'January' }));
+
+      closeIt();
+
+      await waitFor(() => expect(screen.queryByTestId('wizard-step-body')).toBeNull());
+      expect(screen.getByRole('dialog', { name: '⟦editAssign.title⟧' })).toBeDefined();
+      expect(screen.getByRole('button', { name: '⟦editAssign.assign⟧' })).toBeDefined();
+    });
+
+    it('без введеного теж закриває', async () => {
+      await openWizard();
+
+      closeIt();
+
+      await waitFor(() => expect(screen.queryByTestId('wizard-step-body')).toBeNull());
+      expect(screen.getByRole('dialog', { name: '⟦editAssign.title⟧' })).toBeDefined();
+    });
+  });
+
   it('місяць → набір/виконавець → підсумок → POST (upsert) з ексклюзивністю за замовчуванням', async () => {
     await openWizard();
 
