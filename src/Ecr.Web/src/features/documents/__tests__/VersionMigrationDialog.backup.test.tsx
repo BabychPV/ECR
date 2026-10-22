@@ -155,6 +155,28 @@ describe('VersionMigrationDialog: підтвердження резервної 
     expect(posts.find((p) => p['dryRun'] === false)).not.toHaveProperty('backupConfirmation');
   });
 
+  it('поле отримує фокус, коли з\'являється після сухого прогону', async () => {
+    transferred = BackupConfirmationThreshold;
+    await openAndDryRun();
+
+    expect(document.activeElement).toBe(screen.getByTestId('migrate-backup-confirmation'));
+  });
+
+  it('значення, введене для одного вибору, не потрапляє в запит після зміни режиму', async () => {
+    transferred = BackupConfirmationThreshold;
+    await openAndDryRun();
+
+    fireEvent.change(screen.getByTestId('migrate-backup-confirmation'), { target: { value: 'D:\\Backup\\old.bak' } });
+    fireEvent.click(screen.getByText('⟦documents.migrateModePresentation⟧'));
+
+    // Звіт скинуто разом з вибором - поля немає; новий сухий прогін показує його порожнім.
+    await waitFor(() => expect(screen.queryByTestId('migrate-backup-confirmation')).toBeNull());
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+    const field = (await screen.findByTestId('migrate-backup-confirmation')) as HTMLInputElement;
+    expect(field.value).toBe('');
+    expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('a11y: поле має доступне ім\'я й опис, критичних порушень axe немає', async () => {
     transferred = BackupConfirmationThreshold;
     const root = await openAndDryRun();
