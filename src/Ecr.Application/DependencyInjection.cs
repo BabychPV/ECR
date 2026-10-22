@@ -262,6 +262,7 @@ public static class DependencyInjection
         // Крок 8 — конструктор довідника (`ФВ-8.12`): поля, зв'язки, правила,
         // мапінг і історія опису.
         services.AddScoped<Registries.GetRegistryDefinitionHandler>();
+        services.AddScoped<Registries.GetRegistryTargetHandler>();
         services.AddScoped<Registries.SaveRegistryDefinitionHandler>();
         services.AddScoped<Registries.GetRegistryDefinitionDraftHandler>();
         services.AddScoped<Registries.SaveRegistryDefinitionDraftHandler>();

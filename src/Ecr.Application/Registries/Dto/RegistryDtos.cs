@@ -73,6 +73,24 @@ public sealed record RegistryDefDto(
     LocalizedText? DescriptionL10n = null,
     RegistryDefKind Kind = RegistryDefKind.Dictionary);
 
+/// <summary>
+/// Мінімальні відомості про довідник-ціль Lookup за ідентифікатором (<c>GET /registries/by-id/{id}</c>): для показу поточної цілі
+/// колонки чи поля шапки, якої немає в переліку цілей («unlisted»).
+/// </summary>
+/// <param name="Id">Ідентифікатор довідника (той, що зберігає колонка/поле).</param>
+/// <param name="Code">Код довідника.</param>
+/// <param name="NameL10n">Назва мовами каталогу.</param>
+/// <param name="DescriptionL10n">Опис групи типів дозволів; для решти <c>null</c>.</param>
+/// <param name="Kind"><c>Dictionary</c> / <c>PermitHeader</c> / <c>PermitGroup</c>.</param>
+/// <param name="IsActive">Чи довідник (група) активний.</param>
+public sealed record RegistryTargetDto(
+    int Id,
+    string Code,
+    LocalizedText NameL10n,
+    LocalizedText? DescriptionL10n,
+    RegistryDefKind Kind,
+    bool IsActive);
+
 /// <summary>Вид довідника як цілі Lookup (<see cref="RegistryDefDto.Kind"/>).</summary>
 public enum RegistryDefKind
 {

@@ -28,8 +28,25 @@ public sealed class RegistriesController(
     PublishRegistryDefinitionHandler publish,
     DiscardRegistryDefinitionDraftHandler discardDraft,
     ImportRegistryEntriesHandler importEntries,
-    IConfiguration configuration) : ControllerBase
+    IConfiguration configuration,
+    GetRegistryTargetHandler getTarget) : ControllerBase
 {
+    /// <summary>
+    /// Мінімальні відомості про довідник-ЦІЛЬ Lookup за Id - для показу поточної цілі колонки чи поля шапки, якої немає
+    /// в переліку (<c>unlisted</c>). Право <c>Registry.View</c> або грант <c>Read</c> на цей довідник.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ S18: неіснуючий Id і довідник під забороною дають ОДНУ <c>404 ECR-REG-0404</c> (у відповіді лише переданий Id);
+    /// без права й без гранта - <c>403</c> однаково для існуючого й неіснуючого Id.
+    /// </remarks>
+    /// <param name="id">Ідентифікатор довідника (<c>lookupRegistryDefId</c> колонки чи поля).</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("by-id/{id:int}")]
+    [ProducesResponseType<RegistryTargetDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<RegistryTargetDto>> Target(int id, CancellationToken ct)
+        => Ok(await getTarget.HandleAsync(id, ct).ConfigureAwait(false));
+
     /// <summary>Перелік довідників. Право <c>Registry.View</c>.</summary>
     /// <param name="includePermitHeaders">
     /// <c>true</c> - додатково віддати реєстри шапок опублікованих типів дозволів (код <c>PRM_</c> + код типу) як ціль Lookup
