@@ -117,6 +117,14 @@ export function VersionMigrationDialog({
   const [backupTouched, setBackupTouched] = useState(false);
   const backupRequired = report !== null && report.transferredValues >= BackupConfirmationThreshold;
   const backupMissing = backupRequired && backupConfirmation.trim() === '';
+  const backupRef = useRef<HTMLInputElement>(null);
+
+  // Поле з'являється після сухого прогону - фокус на нього, щоб нове обов'язкове поле не лишилося непоміченим.
+  useEffect(() => {
+    if (backupRequired) {
+      backupRef.current?.focus();
+    }
+  }, [backupRequired]);
 
   const targets = useQuery({
     queryKey: ['document', documentId, 'migrate-version-targets'],
@@ -169,6 +177,8 @@ export function VersionMigrationDialog({
     setReportState(null);
     setOverwriteDeclined(false);
     setBackupTouched(false);
+    // Підтвердження копії належить саме цьому вибору «версія × режим»: не переносити його в інший.
+    setBackupConfirmation('');
     resetApply();
   }, [targetId, mode, resetApply]);
 
@@ -250,6 +260,7 @@ export function VersionMigrationDialog({
               count: report.transferredValues,
               threshold: BackupConfirmationThreshold,
             })}
+            ref={backupRef}
             value={backupConfirmation}
             onChange={(event) => setBackupConfirmation(event.currentTarget.value)}
             onBlur={() => setBackupTouched(true)}
@@ -303,7 +314,7 @@ export function VersionMigrationDialog({
           <Button
             disabled={report === null || !report.canApply || backupMissing || busy}
             loading={apply.isPending || settled.settling || jobRunning}
-            onClick={() => settled.run(() => apply.mutateAsync({ accept: overwriteAccepted, backup: backupConfirmation }))}
+            onClick={() => settled.run(() => apply.mutateAsync({ accept: overwriteAccepted, backup: backupRequired ? backupConfirmation : '' }))}
             data-testid="migrate-apply"
           >
             {t('documents.migrateApply')}

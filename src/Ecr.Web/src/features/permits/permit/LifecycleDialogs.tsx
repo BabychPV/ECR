@@ -143,6 +143,8 @@ export function LifecycleDialogs({ permit, dialog, onClose }: LifecycleDialogsPr
           error={endError}
           onEdit={() => setEndError(null)}
           onConfirm={(reason) => {
+            // Спінер відкладено (usePendingLoading), кнопка ще клікабельна: другий клік не шле мутацію вдруге.
+            if (end.isPending) return;
             setEndError(null);
             end.mutate(reason);
           }}
