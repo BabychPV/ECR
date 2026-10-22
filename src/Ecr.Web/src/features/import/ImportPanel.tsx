@@ -704,6 +704,9 @@ function rejectionText(rejection: ImportRejection): string {
       return t('err.ECR-CELL-0422.importAmbiguousDate');
     case 'err.ECR-CELL-0422.importExpectsIdentifier':
       return t('err.ECR-CELL-0422.importExpectsIdentifier');
+    // Permits PRMG: номер дозволу збігається в кількох типах групи колонки - писати «номер — тип».
+    case 'err.ECR-CELL-0422.importAmbiguousPermitNumber':
+      return t('err.ECR-CELL-0422.importAmbiguousPermitNumber');
     // ⛔ Y5-03: запис довідника, який застосування відхилило б (C7), — у перегляді.
     case 'err.ECR-CELL-4223.importDeletedEntry':
       return t('err.ECR-CELL-4223.importDeletedEntry');
