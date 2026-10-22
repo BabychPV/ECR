@@ -265,8 +265,10 @@ public sealed class CreatePermitGroupHandler(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            // Реєстр-«ідентичність» групи: без полів і записів, не темпоральний; ревізія піднімається разом із групою.
-            var registry = new RegistryDef(EcrCode.Create(registryCode), name, isTemporal: false);
+            // Реєстр-«ідентичність» групи: без полів і записів; ТЕМПОРАЛЬНИЙ, бо піклер групи віддає дозволи станом на дату
+            // періоду (клієнт бере обов'язковість asOf з RegistryDefDto.AsOfRequired, як для шапок дозволів). Ревізія
+            // піднімається разом із групою.
+            var registry = new RegistryDef(EcrCode.Create(registryCode), name, isTemporal: true);
             registry.BumpDataRevision();
             registries.AddDefinition(registry);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);

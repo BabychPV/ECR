@@ -111,6 +111,10 @@ public sealed class InMemoryPermitGroupStore : IPermitGroupStore
     public Task<IReadOnlyList<PermitGroup>> ListAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<PermitGroup>>([.. _groups]);
 
     /// <inheritdoc />
+    public Task<IReadOnlyList<PermitGroupBrief>> ListBriefAsync(CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<PermitGroupBrief>>([.. _groups.Select(g => new PermitGroupBrief(g.RegistryDefId, g.IsActive, g.DescriptionL10n))]);
+
+    /// <inheritdoc />
     public Task<PermitGroup?> FindByCodeAsync(string code, CancellationToken ct)
         => Task.FromResult(_groups.Find(g => g.Code == code));
 
@@ -135,6 +139,15 @@ public sealed class InMemoryPermitGroupStore : IPermitGroupStore
         SnapshotLoads++;
         return Task.FromResult(new PermitGroupSnapshot(Revision, [.. Items]));
     }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<Ecr.Domain.Entities.Dictionaries.RegistryEntry>> ListMemberEntriesAsync(
+        IReadOnlyCollection<int> registryDefIds, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<Ecr.Domain.Entities.Dictionaries.RegistryEntry>>([]);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyDictionary<int, int>> GetDataRevisionsAsync(IReadOnlyCollection<int> registryDefIds, CancellationToken ct)
+        => Task.FromResult<IReadOnlyDictionary<int, int>>(new Dictionary<int, int>());
 
     /// <inheritdoc />
     public Task<long> GetSnapshotRevisionAsync(CancellationToken ct)

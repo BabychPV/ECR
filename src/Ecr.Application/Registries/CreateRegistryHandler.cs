@@ -62,6 +62,9 @@ public sealed class CreateRegistryHandler(
 
         var registryCode = EcrCode.Create(code);
 
+        // PRMG: префікс `PRMG_` зарезервований за прихованими реєстрами груп типів дозволів.
+        Permits.Groups.PermitGroupRegistryGuard.RequireNotReserved(registryCode.Value);
+
         // ⚠ Унікальність коду перевіряється ТУТ так само, як у
         // `CreateMethodologyHandler`: код — те, чим на довідник посилаються
         // поля-посилання інших довідників (`RefRegistryDefId`) і колонки

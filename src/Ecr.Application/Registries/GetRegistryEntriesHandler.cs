@@ -24,10 +24,13 @@ public sealed class GetRegistryEntriesHandler(
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IDocumentStore? documents = null,
-    IPeriodStore? periods = null)
+    IPeriodStore? periods = null,
+    IPermitGroupStore? groupStore = null,
+    Permits.Groups.IPermitGroupResolver? groups = null,
+    IPermitTypeStore? permitTypes = null)
 {
-    // ⚠ `documents` і `periods` потрібні лише режиму «вікно документа» (`documentId`); необов'язкові для тестів, що
-    // будують обробник руками, - контейнер підставляє їх завжди.
+    // ⚠ `documents` і `periods` потрібні лише режиму «вікно документа» (`documentId`); `groupStore`, `groups` і `permitTypes` -
+    // піклеру ГРУПИ типів дозволів (PRMG). Необов'язкові для тестів, що будують обробник руками, - контейнер підставляє їх завжди.
 
     /// <summary>Право на читання довідників (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.View";
@@ -107,6 +110,12 @@ public sealed class GetRegistryEntriesHandler(
         // Режим «вікно документа»: межі проєкту беруться з документа на сервері, а не від клієнта.
         var window = documentId is { } docId ? await ResolveWindowAsync(docId, ct).ConfigureAwait(false) : null;
 
+        // PRMG: піклер групи типів дозволів - обʼєднання дозволів типів складу, а не записи самого (порожнього) реєстру групи.
+        if (Permits.Groups.PermitGroupRegistryGuard.IsGroupRegistry(definition.Code) && groups is not null && groupStore is not null)
+        {
+            return await GroupEntriesAsync(definition, asOf, window, ct).ConfigureAwait(false);
+        }
+
         // ⚠ Дата потрібна й тоді, коли темпоральний не сам довідник, а його батько композиції:
         // перелік частин залежить від того, чи чинний батько на дату періоду.
         if (window is null && (definition.IsTemporal || chain.Exists(link => link.Parent.IsTemporal)) && asOf == default)
@@ -170,6 +179,89 @@ public sealed class GetRegistryEntriesHandler(
                 e.ValidFrom,
                 e.ValidTo))
             .ToList();
+    }
+
+    /// <summary>
+    /// Піклер ГРУПИ типів дозволів: активні й чинні дозволи (станом на <paramref name="asOf"/> або у вікні проєкту документа)
+    /// типів складу, до реєстрів яких у читача немає заборони (S18). Підпис «номер — тип»: <c>Display</c> лишається номером,
+    /// тип - у <c>TypeCode</c>/<c>TypeName</c>. Порядок - за складом групи, далі за номером.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Ключ кешу несе відфільтрований набір реєстрів-членів із їхніми <c>DataRevision</c>: читачі з різними забороною бачать різні
+    /// набори, тож спільний ключ віддав би чужий склад. Записи читаються ОДНИМ запитом <c>IN (члени)</c>. Деактивована група віддає
+    /// порожній перелік. Група з дозволом на реєстр групи, але без глобального права, бачить усіх не заборонених членів.
+    /// </remarks>
+    private async Task<IReadOnlyList<RegistryEntryDto>> GroupEntriesAsync(
+        RegistryDef group, DateOnly asOf, (DateOnly Start, DateOnly End)? window, CancellationToken ct)
+    {
+        if (window is null && asOf == default)
+        {
+            throw new BusinessRuleException(
+                Domain.Errors.ErrorCodes.RequestInvalid,
+                "Параметр asOf обов'язковий: перелік дозволів групи залежить від дати періоду, а не від «сьогодні».",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.asOfRequired",
+                    ["parameter"] = "asOf",
+                });
+        }
+
+        if (!group.IsActive)
+        {
+            return [];
+        }
+
+        await groups!.EnsureFreshAsync(ct).ConfigureAwait(false);
+        var profile = await access.BuildProfileAsync(currentUser.UserId!.Value, ct).ConfigureAwait(false);
+
+        var members = groups.MemberRegistryIds(group.Id).Where(id => !RegistryAccess.IsDenied(profile, id)).ToList();
+        if (members.Count == 0)
+        {
+            return [];
+        }
+
+        var revisions = await groupStore!.GetDataRevisionsAsync(members, ct).ConfigureAwait(false);
+        var when = window is { } w ? $"w{w.Start:yyyy-MM-dd}_{w.End:yyyy-MM-dd}" : $"{asOf:yyyy-MM-dd}";
+        var key = $"reg:{group.Code}:r{group.DataRevision}:m"
+            + string.Join(',', members.Select(m =>
+                $"{m.ToString(System.Globalization.CultureInfo.InvariantCulture)}.{revisions.GetValueOrDefault(m).ToString(System.Globalization.CultureInfo.InvariantCulture)}"))
+            + $":{when}";
+
+        var selected = await cache.GetOrAddAsync(
+            key,
+            async token =>
+            {
+                var entries = await groupStore.ListMemberEntriesAsync(members, token).ConfigureAwait(false);
+                var chosen = window is { } win
+                    ? resolver.SelectInWindow(entries, [], win.Start, win.End, null)
+                    : resolver.Select(entries, [], asOf, null);
+
+                // Порядок складу групи, далі номер; інакше запис першого типу тонув би серед решти за Ordinal=0.
+                var order = members.Select((id, index) => (id, index)).ToDictionary(x => x.id, x => x.index);
+                return (IReadOnlyList<RegistryEntry>)[.. chosen
+                    .OrderBy(e => order.GetValueOrDefault(e.RegistryDefId, int.MaxValue))
+                    .ThenBy(e => e.DisplayL10n.Get("en") ?? e.Code, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(e => e.Id)];
+            },
+            ct).ConfigureAwait(false);
+
+        var types = permitTypes is null
+            ? new Dictionary<int, PermitTypeSummary>()
+            : (await permitTypes.ListSummariesAsync(ct).ConfigureAwait(false)).ToDictionary(t => t.HeaderRegistryDefId);
+
+        return [.. selected.Select(e =>
+        {
+            var type = types.GetValueOrDefault(e.RegistryDefId);
+            return new RegistryEntryDto(
+                e.Id,
+                e.Code,
+                e.DisplayL10n.Get(currentUser.Language) ?? e.Code,
+                null,
+                e.ValidFrom,
+                e.ValidTo,
+                type?.Code,
+                type?.NameL10n.Get(currentUser.Language));
+        })];
     }
 
     /// <summary>Вікно проєкту документа; невидимий чи відсутній документ - 404 (як <c>GET …/header</c>, B-08).</summary>

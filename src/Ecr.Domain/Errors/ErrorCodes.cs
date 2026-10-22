@@ -949,7 +949,7 @@ public static class ErrorCodes
     /// <remarks>⚠ Кидається як <c>ConcurrencyConflictException</c> - 409 за типом.</remarks>
     public const string PermitGroupConflict = "ECR-PRM-4099";
 
-    // Прив'язки аркуша до дозволу (Permits, PM-09). 4095-4097 заброньовано за екземплярами дозволів (PM-04).
+    // Прив'язки аркуша до дозволу (Permits, PM-09). Екземпляри дозволів (PM-04) займають 4092, 4095 і 4096; 4097-4099 - групи типів дозволів (PRMG, вище).
     /// <summary>
     /// Прив'язка аркуша до дозволу дублює наявну (<c>ECR-PRM-4101</c>): таблицю аркуша версії вже зайняла інша прив'язка
     /// (<c>sheet</c>, <c>UQ_PermitSheetBinding_Sheet</c>) або код прив'язки зайнятий у системі (<c>code</c>,

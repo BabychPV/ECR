@@ -13,6 +13,13 @@ public interface IPermitGroupStore
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<PermitGroup>> ListAsync(CancellationToken ct);
 
+    /// <summary>
+    /// Короткі відомості про всі групи одним запитом без складу (перелік довідників: приховати <c>PRMG_*</c> із «Довідників» і
+    /// показати активні як цілі Lookup з описом).
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<PermitGroupBrief>> ListBriefAsync(CancellationToken ct);
+
     /// <summary>Група зі складом за кодом (відстежувана); <c>null</c> - немає.</summary>
     /// <param name="code">Код групи.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -43,12 +50,32 @@ public interface IPermitGroupStore
     public Task<PermitGroupSnapshot> LoadSnapshotAsync(CancellationToken ct);
 
     /// <summary>
+    /// Записи (дозволи) реєстрів шапок складу групи ОДНИМ запитом <c>WHERE RegistryDefId IN (…)</c>, без видалених і без
+    /// відстеження; чинність і стан відбирає <c>RegistryResolver</c>.
+    /// </summary>
+    /// <param name="registryDefIds">Реєстри шапок (вже відфільтровані за правами читача).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<Ecr.Domain.Entities.Dictionaries.RegistryEntry>> ListMemberEntriesAsync(
+        IReadOnlyCollection<int> registryDefIds, CancellationToken ct);
+
+    /// <summary><c>DataRevision</c> кожного з реєстрів одним запитом (частина ключа кешу піклера групи).</summary>
+    /// <param name="registryDefIds">Реєстри.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyDictionary<int, int>> GetDataRevisionsAsync(IReadOnlyCollection<int> registryDefIds, CancellationToken ct);
+
+    /// <summary>
     /// Дешева «ревізія» складу всіх груп (сума <c>DataRevision + 1</c> прихованих реєстрів груп):
     /// змінюється, коли будь-яку групу створили, видалили чи змінили склад. Один агрегатний запит.
     /// </summary>
     /// <param name="ct">Токен скасування.</param>
     public Task<long> GetSnapshotRevisionAsync(CancellationToken ct);
 }
+
+/// <summary>Короткі відомості про групу (без складу).</summary>
+/// <param name="RegistryDefId">Прихований реєстр-«ідентичність» групи.</param>
+/// <param name="IsActive">Чи група активна.</param>
+/// <param name="DescriptionL10n">Опис групи.</param>
+public sealed record PermitGroupBrief(int RegistryDefId, bool IsActive, Ecr.Domain.ValueObjects.LocalizedText DescriptionL10n);
 
 /// <summary>Група у знімку резолвера.</summary>
 /// <param name="GroupRegistryDefId">Прихований реєстр-«ідентичність» групи (ціль Lookup).</param>

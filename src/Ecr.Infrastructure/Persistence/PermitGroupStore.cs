@@ -10,10 +10,20 @@ public sealed class PermitGroupStore(EcrDbContext db) : IPermitGroupStore
     // Груп десятки; стеля захищає від вибірки без меж.
     private const int MaxRows = 5_000;
 
+    // Записів-дозволів у складі групи (усі типи разом).
+    private const int MaxMemberEntries = 200_000;
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<PermitGroup>> ListAsync(CancellationToken ct)
         => await db.PermitGroups.AsNoTracking().Include(g => g.Members)
             .OrderBy(g => g.Code).Take(MaxRows)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<PermitGroupBrief>> ListBriefAsync(CancellationToken ct)
+        => await db.PermitGroups.AsNoTracking()
+            .OrderBy(g => g.Id).Take(MaxRows)
+            .Select(g => new PermitGroupBrief(g.RegistryDefId, g.IsActive, g.DescriptionL10n))
             .ToListAsync(ct).ConfigureAwait(false);
 
     /// <inheritdoc />
@@ -75,6 +85,39 @@ public sealed class PermitGroupStore(EcrDbContext db) : IPermitGroupStore
             revision,
             [.. groups.Select(g => new PermitGroupSnapshotItem(
                 g.RegistryDefId, g.IsActive, byGroup.GetValueOrDefault(g.Id) ?? []))]);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<Ecr.Domain.Entities.Dictionaries.RegistryEntry>> ListMemberEntriesAsync(
+        IReadOnlyCollection<int> registryDefIds, CancellationToken ct)
+    {
+        if (registryDefIds.Count == 0)
+        {
+            return [];
+        }
+
+        // Дозволи типів складу (десятки-сотні на тип): стеля захищає від вибірки без меж.
+        return await db.RegistryEntries.AsNoTracking()
+            .Where(e => registryDefIds.Contains(e.RegistryDefId) && !e.IsDeleted)
+            .OrderBy(e => e.RegistryDefId).ThenBy(e => e.Code)
+            .Take(MaxMemberEntries)
+            .ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, int>> GetDataRevisionsAsync(IReadOnlyCollection<int> registryDefIds, CancellationToken ct)
+    {
+        if (registryDefIds.Count == 0)
+        {
+            return new Dictionary<int, int>();
+        }
+
+        return await db.RegistryDefs.AsNoTracking()
+            .Where(d => registryDefIds.Contains(d.Id))
+            .OrderBy(d => d.Id)
+            .Select(d => new { d.Id, d.DataRevision })
+            .Take(MaxRows)
+            .ToDictionaryAsync(x => x.Id, x => x.DataRevision, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
