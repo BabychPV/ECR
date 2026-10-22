@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Group, List, Stack, Text, TextInput } from '@mantine/core';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { language, t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { DetailDrawer } from '@/shared/ui/DetailDrawer';
 import { KeyValue } from '@/shared/ui/KeyValue';
-import { showApiError, showDone } from '@/shared/ui/notify';
+import { showApiError, showDone, showWarning } from '@/shared/ui/notify';
+import { EcrApiError } from '@/api/client';
 import { textOf } from '../typeEditor/labels';
 import { typeEditorPath } from '../shell/permitPaths';
 import { keptIn } from './ListsColumns';
+import { listsKeys } from './listsKeys';
 import type { PermitListChange, PermitListDetail, PermitListValue } from './listsApi';
 import { kindLabel, usedCountText, valueLabels, type ListRow, type ListUse } from './listsModel';
 import { useChangeListItems, useListDetail } from './useLists';
@@ -20,6 +23,9 @@ export const DrawerValueLimit = 12;
 
 /** Скільки значень показує шторка, де їх можна правити: без ліміту додане наприкінці значення не було б видно. */
 export const DrawerEditLimit = 200;
+
+/** `404 ECR-REG-0404`: запису (значення списку) з запиту вже немає (`RegistryAccess.EntryNotFound`). */
+const EntryGoneCode = 'ECR-REG-0404';
 
 function usedText(use: ListUse): string {
   return t('permits.lists.drawer.usedColumn', { type: use.typeName, table: use.tableName, column: use.columnName });
@@ -36,6 +42,7 @@ interface ValuesProps {
 
 /** Значення списку: читання, а з правом — додати, перейменувати, прибрати (кожна дія — окремий запит `PUT …/items`). */
 function ValueList({ row, detail }: ValuesProps): JSX.Element {
+  const client = useQueryClient();
   const change = useChangeListItems(row.id);
   const saving = usePendingLoading(change.isPending);
   const [editing, setEditing] = useState<number | null>(null);
@@ -62,7 +69,20 @@ function ValueList({ row, detail }: ValuesProps): JSX.Element {
         showDone(done);
         after();
       },
-      onError: showApiError,
+      // PUI-4: значення вже прибрали деінде (друга вкладка, застарілий екран) - людське пояснення, а не «Registry entry 30 was
+      // not found.», і перечитування списку, щоб рядка-привида не лишилось.
+      onError: (error) => {
+        if (!(error instanceof EcrApiError) || error.problem.errorCode !== EntryGoneCode) {
+          showApiError(error);
+
+          return;
+        }
+        showWarning(t('permits.lists.drawer.gone'));
+        pendingFocus.current = 'add';
+        setEditing(null);
+        void client.invalidateQueries({ queryKey: listsKeys.detail(row.id) });
+        void client.invalidateQueries({ queryKey: listsKeys.index });
+      },
     });
   }
 

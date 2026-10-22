@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createElement, type JSX } from 'react';
 import { MantineProvider } from '@mantine/core';
@@ -7,27 +7,35 @@ import { testTheme } from '@/test/render';
 /**
  * Палітра не входить у статичний бандл оболонки (бюджет `D-132`).
  *
- * ⚠ Чим це ловиться. Фабрика `vi.mock` виконується тоді, коли модуль
+ * ⚠ Чим це ловиться. Фабрика `vi.doMock` виконується тоді, коли модуль
  * ІМПОРТУЮТЬ уперше. Статичний `import { DataSearchPalette }` у
  * `SearchLauncher.tsx` обчислив би її разом із самим лаунчером — ще до
  * рендера, — і перша перевірка нижче почервоніла б. Лінивий `import()`
  * обчислює її лише на першому `Ctrl+K`.
  *
- * ⛔ Порядок тестів у файлі значущий: модуль обчислюється один раз на файл,
- * тож перевірки «ще не обчислено» стоять перед першим відкриттям.
+ * ⛔ Порядок тестів не значущий: `beforeEach` скидає реєстр модулів і прапорець,
+ * заново реєструє заглушку (`vi.doMock`) та імпортує `SearchLauncher`, тож
+ * кожен тест бачить «палітру ще не обчислено» (інакше перемішаний прогін
+ * `--sequence.shuffle` червонів, коли тест відкриття йшов раніше за перевірки
+ * «ще не обчислено»).
  */
 const probe = vi.hoisted(() => ({ evaluated: false }));
 
-vi.mock('@/features/search/DataSearchPalette', () => {
-  probe.evaluated = true;
+let SearchLauncher: typeof import('@/features/search/SearchLauncher').SearchLauncher;
 
-  return {
-    DataSearchPalette: ({ opened }: { opened: boolean }): JSX.Element | null =>
-      opened ? <div role="dialog" aria-label="palette-stub" /> : null,
-  };
+beforeEach(async () => {
+  vi.resetModules();
+  probe.evaluated = false;
+  vi.doMock('@/features/search/DataSearchPalette', () => {
+    probe.evaluated = true;
+
+    return {
+      DataSearchPalette: ({ opened }: { opened: boolean }): JSX.Element | null =>
+        opened ? <div role="dialog" aria-label="palette-stub" /> : null,
+    };
+  });
+  ({ SearchLauncher } = await import('@/features/search/SearchLauncher'));
 });
-
-import { SearchLauncher } from '@/features/search/SearchLauncher';
 
 afterEach(() => {
   cleanup();

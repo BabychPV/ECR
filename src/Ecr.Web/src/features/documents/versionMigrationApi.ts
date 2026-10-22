@@ -36,7 +36,22 @@ interface MigrateDocumentVersionParams {
   readonly dryRun: boolean;
   /** ACC-OW: `true` - згода людини перезаписати введені значення новою комірочною формулою (діалог «Перезаписати N значень»). */
   readonly acceptGuardedOverwrite?: boolean;
+  /** Шлях і/або час резервної копії бази; обов'язкове від `BackupConfirmationThreshold` значень (інакше 422 `migrateBackupRequired`). */
+  readonly backupConfirmation?: string;
 }
+
+/**
+ * Від скількох значень, що переносяться, сервер вимагає backupConfirmation - дзеркало
+ * `MigrateDocumentVersionHandler.DefaultBackupConfirmationThreshold` (рішення людини 21.10, варіант «б»).
+ * Звіт сухого прогону каже `transferredValues`, тож діалог показує поле до старту, а не після відмови задачі.
+ */
+export const BackupConfirmationThreshold = 500_000;
+
+const backupField = (value: string | undefined): { backupConfirmation?: string } => {
+  const trimmed = value?.trim() ?? '';
+
+  return trimmed === '' ? {} : { backupConfirmation: trimmed };
+};
 
 /**
  * Переносить документ на нову версію шаблону (ФВ-7.5) або, з `dryRun`,
@@ -78,6 +93,7 @@ export function startMigrateDocumentVersion(
       mode: params.mode,
       dryRun: false,
       ...(params.acceptGuardedOverwrite === true ? { acceptGuardedOverwrite: true } : {}),
+      ...backupField(params.backupConfirmation),
       async: true,
     } satisfies components['schemas']['MigrateDocumentVersionRequest']),
   });

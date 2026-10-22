@@ -33,6 +33,9 @@ beforeAll(async () => {
     await loadCatalog(lang, 'public');
     vi.unstubAllGlobals();
   }
+  // `loadCatalog` робить завантажену мову активною: без скидання перший тест у
+  // перемішаному порядку (`--sequence.shuffle`) стартує з `kz`, а не з `en`.
+  setLanguage('en');
 });
 
 afterEach(() => {

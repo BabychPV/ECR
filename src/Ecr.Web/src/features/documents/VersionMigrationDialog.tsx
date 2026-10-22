@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { useReturnFocusOnUnmount } from '@/shared/a11y/focus';
-import { Alert, Button, Group, Modal, Progress, SegmentedControl, Select, Stack, Table, Text } from '@mantine/core';
+import { Alert, Button, Group, Modal, Progress, SegmentedControl, Select, Stack, Table, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { t } from '@/shared/i18n';
@@ -8,6 +8,7 @@ import { useSettledAction } from '@/features/grid/settleEdits';
 import { isActiveJob } from '@/features/jobs/myTasks';
 import { useJobStatus } from '@/features/jobs/useJobStatus';
 import {
+  BackupConfirmationThreshold,
   getVersionMigrationTargets,
   migrateDocumentVersion,
   startMigrateDocumentVersion,
@@ -111,6 +112,11 @@ export function VersionMigrationDialog({
   // ACC-OW: людина відмовилася від перезапису для цього вибору (скидається разом зі звітом).
   const [overwriteDeclined, setOverwriteDeclined] = useState(false);
   const overwriteAccepted = report?.guardedOverwriteAccepted === true;
+  // KI-2: від порогу значень сервер вимагає підтвердження резервної копії (інакше 422/Failed migrateBackupRequired).
+  const [backupConfirmation, setBackupConfirmation] = useState('');
+  const [backupTouched, setBackupTouched] = useState(false);
+  const backupRequired = report !== null && report.transferredValues >= BackupConfirmationThreshold;
+  const backupMissing = backupRequired && backupConfirmation.trim() === '';
 
   const targets = useQuery({
     queryKey: ['document', documentId, 'migrate-version-targets'],
@@ -137,8 +143,14 @@ export function VersionMigrationDialog({
   // діалогу. Тут - лише показ стану і прогресу тією самою задачею (запит `['job', id]` спільний).
   const apply = useMutation({
     meta: { handled: true },
-    mutationFn: (accept: boolean) =>
-      startMigrateDocumentVersion({ documentId, targetVersionId: Number(targetId), mode, acceptGuardedOverwrite: accept }),
+    mutationFn: (args: { accept: boolean; backup: string }) =>
+      startMigrateDocumentVersion({
+        documentId,
+        targetVersionId: Number(targetId),
+        mode,
+        acceptGuardedOverwrite: args.accept,
+        backupConfirmation: args.backup,
+      }),
     onSuccess: (accepted) => onJobChange(accepted.jobId),
   });
 
@@ -156,6 +168,7 @@ export function VersionMigrationDialog({
   useEffect(() => {
     setReportState(null);
     setOverwriteDeclined(false);
+    setBackupTouched(false);
     resetApply();
   }, [targetId, mode, resetApply]);
 
@@ -230,6 +243,24 @@ export function VersionMigrationDialog({
           </Alert>
         )}
 
+        {report !== null && backupRequired && (
+          <TextInput
+            label={t('documents.migrateBackupLabel')}
+            description={t('documents.migrateBackupHint', {
+              count: report.transferredValues,
+              threshold: BackupConfirmationThreshold,
+            })}
+            value={backupConfirmation}
+            onChange={(event) => setBackupConfirmation(event.currentTarget.value)}
+            onBlur={() => setBackupTouched(true)}
+            error={backupMissing && backupTouched ? t('documents.migrateBackupMissing') : null}
+            required
+            maxLength={500}
+            disabled={busy}
+            data-testid="migrate-backup-confirmation"
+          />
+        )}
+
         {apply.error !== null && <ErrorAlert error={apply.error} />}
 
         {job.error !== null && <ErrorAlert error={job.error} />}
@@ -270,9 +301,9 @@ export function VersionMigrationDialog({
             {t('documents.migrateDryRun')}
           </Button>
           <Button
-            disabled={report === null || !report.canApply || busy}
+            disabled={report === null || !report.canApply || backupMissing || busy}
             loading={apply.isPending || settled.settling || jobRunning}
-            onClick={() => settled.run(() => apply.mutateAsync(overwriteAccepted))}
+            onClick={() => settled.run(() => apply.mutateAsync({ accept: overwriteAccepted, backup: backupConfirmation }))}
             data-testid="migrate-apply"
           >
             {t('documents.migrateApply')}

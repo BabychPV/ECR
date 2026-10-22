@@ -26,6 +26,12 @@ vi.mock('@/shared/session/useSession', async (importOriginal) => ({
   useSession: () => ({ data: { permissions: ['Registry.View', 'Permit.EditType'], isSimulation: false } }),
 }));
 
+const warned = vi.hoisted(() => ({ showWarning: vi.fn() }));
+vi.mock('@/shared/ui/notify', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/ui/notify')>()),
+  showWarning: warned.showWarning,
+}));
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -436,5 +442,44 @@ describe('Lists: довге значення (PA4-U-03)', () => {
 
     const text = await within(drawer).findByText(long);
     expect(text.className).toContain('pl-value-text');
+  });
+});
+describe('Lists: Remove значення, яке вже видалили деінде (PUI-4)', () => {
+  it('404 ECR-REG-0404: людське повідомлення (без id), список перечитано, рядка-привида немає', async () => {
+    // Друга вкладка вже видалила «Direct» (id 10): сервер на наш Remove відповідає 404, а GET віддає список без нього.
+    const items = { [SharedKey]: [value(1, 'Nitrogen oxides')], [TypeKey]: [value(10, 'Direct'), value(11, 'Calc')] };
+    stub({ items });
+    const real = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method !== 'PUT') return real(input, init);
+        items[TypeKey] = [value(11, 'Calc')];
+
+        return json(
+          {
+            title: 'Not found',
+            status: 404,
+            errorCode: 'ECR-REG-0404',
+            correlationId: 'c',
+            messageKey: 'err.ECR-REG-0404.registryEntry',
+            entryId: '10',
+            registryCode: 'PRM_Air_Emission_Method',
+            detail: 'Registry entry 10 was not found.',
+          },
+          404,
+        );
+      }),
+    );
+    show();
+    fireEvent.click(await screen.findByText('Method'));
+    const drawer = await screen.findByRole('dialog');
+    await within(drawer).findByText('Direct');
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'permits.lists.drawer.removeAria {"value":"Direct"}' }));
+
+    await waitFor(() => expect(warned.showWarning).toHaveBeenCalledWith('permits.lists.drawer.gone'));
+    await waitFor(() => expect(within(drawer).queryByText('Direct')).toBeNull());
+    expect(within(drawer).getByText('Calc')).toBeTruthy();
   });
 });
