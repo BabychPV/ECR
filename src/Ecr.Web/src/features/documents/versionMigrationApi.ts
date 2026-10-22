@@ -41,7 +41,7 @@ interface MigrateDocumentVersionParams {
 }
 
 /**
- * Від скількох значень, що переносяться, сервер вимагає ackupConfirmation - дзеркало
+ * Від скількох значень, що переносяться, сервер вимагає backupConfirmation - дзеркало
  * `MigrateDocumentVersionHandler.DefaultBackupConfirmationThreshold` (рішення людини 21.10, варіант «б»).
  * Звіт сухого прогону каже `transferredValues`, тож діалог показує поле до старту, а не після відмови задачі.
  */
