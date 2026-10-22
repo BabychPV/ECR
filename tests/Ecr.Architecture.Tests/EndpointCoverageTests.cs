@@ -1383,6 +1383,11 @@ public sealed partial class EndpointCoverageTests
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/methodologies`.
         "PUT /api/v1/methodologies/{p}/row-activity-filter",
 
+        // Permits PRMG («unlisted»): серверна частина `GET /registries/by-id/{id}` (lane permit-groups-server-c); клієнт
+        // (`features/registries`, опис/назва/вид цілі поза переліком) підключається наступним кроком у permit-groups-ui.
+        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у клієнті.
+        "GET /api/v1/registries/by-id/{p}",
+
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було
         // НЕПРАВДОЮ: жодне місце клієнта нічого не конвертувало.
