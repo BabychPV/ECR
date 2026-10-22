@@ -95,6 +95,17 @@ public sealed class GetRegistryEntryPermitGroupTests
             () => Handler().HandleAsync("PRMG_WATER", MemberEntry, CancellationToken.None));
 
         Assert.Equal("err.ECR-REG-0404.registryEntry", error.Details!["messageKey"]);
+
+        // Повна відповідь Deny-члена нерозрізнювана з неіснуючим записом (код, текст з точністю до Id, серіалізований Details).
+        var missing = await Assert.ThrowsAsync<NotFoundException>(
+            () => Handler().HandleAsync("PRMG_WATER", MemberEntry + 12345, CancellationToken.None));
+        Assert.Equal(missing.ErrorCode, error.ErrorCode);
+        Assert.Equal(
+            missing.Message.Replace((MemberEntry + 12345).ToString(System.Globalization.CultureInfo.InvariantCulture), "#", StringComparison.Ordinal),
+            error.Message.Replace(MemberEntry.ToString(System.Globalization.CultureInfo.InvariantCulture), "#", StringComparison.Ordinal));
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(missing.Details!.Where(d => d.Key != "entryId").OrderBy(d => d.Key, StringComparer.Ordinal)),
+            System.Text.Json.JsonSerializer.Serialize(error.Details!.Where(d => d.Key != "entryId").OrderBy(d => d.Key, StringComparer.Ordinal)));
     }
 
     [Fact]
