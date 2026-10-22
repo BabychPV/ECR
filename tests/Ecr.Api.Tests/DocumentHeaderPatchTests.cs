@@ -134,6 +134,43 @@ public sealed class DocumentHeaderPatchTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// Штатний optimistic-lock шапки: клієнт бере <c>version</c> з відповіді ПОПЕРЕДНЬОГО PATCH, а не з GET. Повторний PATCH
+    /// того самого значення з актуальною версією - <c>200</c>, версія не змінюється, у журналі нова подія не з'являється; зі
+    /// старою версією (з GET до першого PATCH) - <c>409 headerStale</c>.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Повторний_PATCH_того_самого_значення_з_актуальною_версією_200_без_зміни_версії_а_зі_старою_409()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var initial = await VersionAsync(client, app, s.DocumentId).ConfigureAwait(true);
+
+        var first = await PatchAsync(client, s.DocumentId, "Kashagan", initial).ConfigureAwait(true);
+        var firstBody = await first.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(first.StatusCode == HttpStatusCode.OK, $"{first.StatusCode}: {firstBody}\n{app.ErrorsText}");
+        var current = JsonDocument.Parse(firstBody).RootElement.GetProperty("version").GetString()!;
+        Assert.NotEqual(initial, current);
+
+        // Те саме значення з версією з відповіді попереднього PATCH: 200 і та сама версія.
+        var again = await PatchAsync(client, s.DocumentId, "Kashagan", current).ConfigureAwait(true);
+        var againBody = await again.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(again.StatusCode == HttpStatusCode.OK, $"{again.StatusCode}: {againBody}\n{app.ErrorsText}");
+        Assert.Equal(current, JsonDocument.Parse(againBody).RootElement.GetProperty("version").GetString());
+        Assert.Equal(1, await HeaderEventsAsync(s).ConfigureAwait(true));
+
+        // Те саме значення зі СТАРОЮ версією (взятою з GET до першого PATCH): 409 headerStale.
+        var stale = await PatchAsync(client, s.DocumentId, "Kashagan", initial).ConfigureAwait(true);
+        var problem = await ProblemAsync(stale, HttpStatusCode.Conflict, app).ConfigureAwait(true);
+        Assert.Equal("err.ECR-DOC-0409.headerStale", problem.GetProperty("messageKey").GetString());
+        Assert.Equal(1, await HeaderEventsAsync(s).ConfigureAwait(true));
+    }
+
+    /// <summary>
     /// Дві правки з однієї версії ОДНОЧАСНО: рівно одна проходить.
     /// </summary>
     /// <remarks>

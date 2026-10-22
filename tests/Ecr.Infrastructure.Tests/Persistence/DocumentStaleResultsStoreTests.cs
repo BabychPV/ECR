@@ -337,6 +337,50 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         Assert.DoesNotContain(mine, d => d.Id == chain.DocumentId);
     }
 
+    /// <summary>
+    /// Довідникова гілка застарілості (хеш-з'єднання <c>used</c>): документ застарілий ЛИШЕ коли довідник, який читає його
+    /// методологія, змінено після початку прогону. Довідник без ребра використання і довідник, змінений до прогону, документ не
+    /// застарюють; контроль - довідник із ребром, змінений після прогону, застарює.
+    /// Мутації: прибрати умову <c>rd.DataChangedAt &gt; …</c> - червоніє «змінений до прогону»; з'єднувати <c>rd</c> без <c>used</c>
+    /// (усі довідники) - червоніє «без ребра».
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Довідник_змінений_але_документ_його_не_читає_або_змінений_до_прогону_не_застарює_документ()
+    {
+        var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+
+        async Task<bool> StaleAsync(DateTime registryChangedAt, bool withEdge)
+        {
+            var builder = new TestDocumentBuilder(sql.ConnectionString);
+            var chain = await builder.BuildAsync(ct: CancellationToken.None);
+            var period = chain.PeriodKey.Value;
+            await using var db = builder.CreateContext();
+
+            var registry = new RegistryDef(EcrCode.Create($"NR{tag}{(withEdge ? "E" : "N")}{(registryChangedAt > Now ? "A" : "B")}"), Name("Registry"), isTemporal: false);
+            registry.MarkDataChanged(registryChangedAt);
+            db.RegistryDefs.Add(registry);
+            await db.SaveChangesAsync(CancellationToken.None);
+
+            var version = await VersionAsync(db);
+            if (withEdge)
+            {
+                db.RegistryUses.Add(RegistryUse.ForMethodologyFormula(version, "F1", registry.Id, "X"));
+                await db.SaveChangesAsync(CancellationToken.None);
+            }
+
+            await RunAsync(db, chain, version, Now, [chain.DocumentId]);
+
+            var stale = await ListAsync(db, chain, period, new DocumentListFilter(null, null, ResultsStale: true));
+            return stale.Any(d => d.Id == chain.DocumentId);
+        }
+
+        Assert.False(await StaleAsync(Now.AddHours(1), withEdge: false));   // змінено після прогону, але документ не читає
+        Assert.False(await StaleAsync(Now.AddHours(-1), withEdge: true));   // читає, але змінено до прогону
+        Assert.True(await StaleAsync(Now.AddHours(1), withEdge: true));     // контроль: читає і змінено після прогону
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

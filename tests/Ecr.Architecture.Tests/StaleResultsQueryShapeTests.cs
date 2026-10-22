@@ -31,4 +31,27 @@ public sealed class StaleResultsQueryShapeTests
                                         || l.Contains("OUTER APPLY", StringComparison.Ordinal));
         Assert.Contains(sql, l => l.Contains("JOIN AUD.CELLCHANGE", StringComparison.Ordinal));
     }
+
+    /// <summary>
+    /// rc30 (2026-10-22): довідникова гілка - множинний підзапит <c>used</c> + <c>INNER HASH JOIN</c>, а НЕ корельований
+    /// <c>EXISTS</c> на пару «документ × довідник». Занижена оцінка агрегату документів (2-3 рядки проти сотень) робила
+    /// <c>EXISTS</c> внутрішньою стороною вкладених циклів із <c>Table Spool</c> (7,7 млн рядків; 30 с таймаути на CI).
+    /// Мутація: повернути <c>AND EXISTS (SELECT 1 …)</c> або прибрати <c>INNER HASH JOIN</c> - тест червоний.
+    /// </summary>
+    [Fact]
+    public void Довідникова_гілка_через_хеш_з_єднання_а_не_корельований_EXISTS()
+    {
+        var file = SourceTree.Production("Ecr.Infrastructure").Single(f => f.Path == Path);
+
+        var sql = file.Text
+            .Split('\n')
+            .Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal))
+            .Select(l => l.ToUpperInvariant())
+            .ToArray();
+
+        Assert.DoesNotContain(sql, l => l.Contains("EXISTS", StringComparison.Ordinal));
+        Assert.Contains(sql, l => l.Contains("INNER HASH JOIN", StringComparison.Ordinal));
+        Assert.Contains(sql, l => l.Contains("AS USED", StringComparison.Ordinal));
+        Assert.Contains(sql, l => l.Contains("RD.ID = USED.REGISTRYDEFID", StringComparison.Ordinal));
+    }
 }
