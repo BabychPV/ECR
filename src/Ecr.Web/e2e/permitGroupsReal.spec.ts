@@ -258,6 +258,8 @@ test.describe('Permit groups real', () => {
 
     // N/5: вибір (по колу через типи) -> Save -> перезавантаження -> значення на місці.
     const picks = [types[0]!.numbers.a, types[1]!.numbers.b, types[2]!.numbers.a, types[0]!.numbers.b, types[1]!.numbers.a];
+    let lastBody: { fields: unknown[]; baseVersion: string } | null = null;
+    let lastVersion = '';
     for (const [index, number] of picks.entries()) {
       await open();
       const input = page.getByRole('textbox', { name: 'Permit number' });
@@ -269,6 +271,8 @@ test.describe('Permit groups real', () => {
       await page.getByTestId('document-header-panel').getByRole('button', { name: /^(Save|Зберегти|Сохранить|Сақтау)$/ }).click();
       const response = await saved;
       expect(response.ok(), `повтор ${String(index + 1)}/5: збереження шапки: ${response.status()} ${await response.text()}`).toBe(true);
+      lastBody = response.request().postDataJSON() as { fields: unknown[]; baseVersion: string };
+      lastVersion = ((await response.json()) as { version: string }).version;
       await page.reload();
       await open();
       await expect(page.getByRole('textbox', { name: 'Permit number' }), `повтор ${String(index + 1)}/5: значення не пережило перезавантаження`).toHaveValue(
@@ -277,6 +281,17 @@ test.describe('Permit groups real', () => {
       );
     }
 
+
+    // Optimistic-lock: baseVersion береться з ВІДПОВІДІ попереднього PATCH шапки. Повторне збереження ТОГО Ж значення з цією
+    // версією - 200, а версія (хеш значень) не змінюється; зі старою версією (з до-збереженого GET) було б 409 headerStale.
+    expect(lastBody, 'тіло останнього PATCH шапки').not.toBeNull();
+    expect(lastVersion, 'version у відповіді PATCH шапки').not.toBe('');
+    const headerPath = `/api/v1/documents/${String(doc.documentId)}/header`;
+    const resave = await page.request.patch(headerPath, { data: { ...lastBody, baseVersion: lastVersion } });
+    expect(resave.status(), `повторне збереження того ж значення: ${await resave.text()}`).toBe(200);
+    expect(((await resave.json()) as { version: string }).version, 'версія не змінилась').toBe(lastVersion);
+    const stale = await page.request.patch(headerPath, { data: { ...lastBody, baseVersion: `${lastVersion}0` } });
+    expect(stale.status(), 'чужа/застаріла версія - 409').toBe(409);
     // S18/без оракула: запис ІНШОГО типу (поза групою) у цьому ж полі - та сама відмова 422, що й для неіснуючого запису.
     const outsiderEntries = await ok<{ id: number; display: string }[]>(
       await page.request.get(`/api/v1/registries/PRM_${outsider.code}/entries?documentId=${String(doc.documentId)}`),
