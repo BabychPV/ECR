@@ -5,7 +5,7 @@ import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { UnitRef } from '@/api/types';
 import { LookupTargetSelect } from '@/features/registries/LookupTargetSelect';
-import { lookupTargetSelectData, lookupTargetsQuery } from '@/features/registries/lookupTargets';
+import { lookupTargetSelectData, lookupTargetsQuery, useUnlistedTarget } from '@/features/registries/lookupTargets';
 import { formatMonthName } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -101,9 +101,11 @@ export function ColumnEditor({
 
   // ⚠ Мемоізовано: `[]`-літерал у пропі `data` перебудовувався б щорендеру,
   // поки запит іще `pending`, — новий референс масиву на кожен рендер.
+  // Поточна ціль поза переліком: назва/опис/неактивність - з GET /registries/by-id/{id} (відмова - підпис з id).
+  const unlistedTarget = useUnlistedTarget(draft.lookupRegistryDefId, registries.data);
   const registryOptions = useMemo(
-    () => lookupTargetSelectData(registries.data ?? [], draft.lookupRegistryDefId),
-    [registries.data, draft.lookupRegistryDefId],
+    () => lookupTargetSelectData(registries.data ?? [], draft.lookupRegistryDefId, unlistedTarget),
+    [registries.data, draft.lookupRegistryDefId, unlistedTarget],
   );
 
   // ⛔ Директива registry-lookup / cell-style, PR B1: перелік стилів версії —

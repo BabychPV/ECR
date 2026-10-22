@@ -34,6 +34,9 @@ function useInvalidateGroups(): (code?: string) => Promise<void> {
       client.invalidateQueries({ queryKey: groupsKeys.all }),
       // Цілі Lookup (шапки + групи) читає `lookupTargetsQuery`: назва, опис і активність групи видимі й там.
       client.invalidateQueries({ queryKey: queryKeys.registries.lookupTargets() }),
+      // «Unlisted» поточна ціль (`GET /registries/by-id/{id}`, свіжість 5 хв): назва/опис/активність групи змінились -
+      // відкрите поле шапки чи колонки не має показувати старі. Префікс - усі id (група в запиті може бути будь-яка).
+      client.invalidateQueries({ queryKey: ['registries', 'target'] }),
     ]);
   };
 }

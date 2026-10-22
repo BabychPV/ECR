@@ -9210,6 +9210,7 @@ USING (VALUES
     ,(N'permits.groups.field.typesEmpty', N'en', N'No published permit types found', 1)
     ,(N'registries.lookupTargetUnlisted', N'en', N'Not in the list (registry #{id})', 1)
     ,(N'registries.lookupGroup.unlisted', N'en', N'Current value', 1)
+    ,(N'registries.lookupTargetInactive', N'en', N'{label} - inactive', 1)
     -- PERMITS: groups-ui ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -23916,7 +23917,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'registries.lookupTargetUnlisted', N'ru', N'Нет в списке (справочник #{id})'),
     (N'registries.lookupTargetUnlisted', N'kz', N'Тізімде жоқ (анықтамалық #{id})'),
     (N'registries.lookupGroup.unlisted', N'ru', N'Текущее значение'),
-    (N'registries.lookupGroup.unlisted', N'kz', N'Ағымдағы мән')
+    (N'registries.lookupGroup.unlisted', N'kz', N'Ағымдағы мән'),
+    (N'registries.lookupTargetInactive', N'ru', N'{label} - неактивна'),
+    (N'registries.lookupTargetInactive', N'kz', N'{label} - белсенді емес')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

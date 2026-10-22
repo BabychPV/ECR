@@ -37,6 +37,7 @@ const SeededStrings: Record<string, string> = {
   'registries.lookupGroup.dictionaries': 'Dictionaries',
   'registries.lookupGroup.unlisted': 'Current value',
   'registries.lookupTargetUnlisted': 'Not in the list (registry #{id})',
+  'registries.lookupTargetInactive': '{label} - inactive',
 };
 
 const registries = [
@@ -62,9 +63,13 @@ const permitHeaders = [
 ];
 
 const registryRequests: string[] = [];
+/** Запити `GET /registries/by-id/{id}` і відповідь на них (за замовчуванням 404 - «немає або заборонено»). */
+const byIdRequests: string[] = [];
+let byIdAnswer: { status: number; body: unknown } = { status: 404, body: { title: 'x', status: 404, errorCode: 'ECR-REG-0404' } };
 
 function mockFetch(): void {
   registryRequests.length = 0;
+  byIdRequests.length = 0;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -75,6 +80,12 @@ function mockFetch(): void {
           JSON.stringify({ languageCode: 'en', revision: 1, strings: SeededStrings }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
+      }
+
+      if (url.includes('/api/v1/registries/by-id/')) {
+        byIdRequests.push(url);
+
+        return new Response(JSON.stringify(byIdAnswer.body), { status: byIdAnswer.status, headers: { 'Content-Type': 'application/json' } });
       }
 
       if (url.includes('/api/v1/registries')) {
@@ -117,6 +128,7 @@ async function show(
 }
 
 afterEach(() => {
+  byIdAnswer = { status: 404, body: { title: 'x', status: 404, errorCode: 'ECR-REG-0404' } };
   vi.unstubAllGlobals();
 });
 
@@ -281,6 +293,51 @@ describe('HeaderFieldEditor: вибір довідника лише для ти�
     fireEvent.click(input);
     expect(await screen.findByText('Current value')).not.toBeNull();
     expect(onChange).not.toHaveBeenCalled();
+  }, 60000);
+
+  // `GET /registries/by-id/{id}`: відомості про поточну ціль поза переліком. Мутація: прибери `known` у `unlistedOption` -
+  // у полі лишиться «Not in the list…», тест почервоніє; зроби запит безумовним - тест «ціль у переліку» червоніє.
+  const unlistedDraft = (id: number): HeaderFieldDraft => ({
+    ...emptyHeaderFieldDraft(0),
+    code: 'Permit',
+    labelL10n: { en: 'Permit' },
+    dataType: 'Lookup',
+    lookupRegistryDefId: id,
+  });
+
+  it('by-id: неактивна група поза переліком - назва, код і позначка «inactive», опис другим рядком', async () => {
+    byIdAnswer = {
+      status: 200,
+      body: {
+        id: 555, code: 'PRMG_OLD', kind: 'PermitGroup', isActive: false,
+        nameL10n: { values: { en: 'Old water group' } }, descriptionL10n: { values: { en: 'Retired list' } },
+      },
+    };
+    await show(unlistedDraft(555), vi.fn());
+
+    const input = (await screen.findByLabelText('Registry')) as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe('Old water group (PRMG_OLD) - inactive'));
+    expect(byIdRequests.every((url) => url.endsWith('/api/v1/registries/by-id/555'))).toBe(true);
+    fireEvent.click(input);
+    const option = await screen.findByRole('option', { name: /Old water group \(PRMG_OLD\) - inactive/ });
+    expect(option.querySelector('[data-lookup-target-description]')?.textContent).toBe('Retired list');
+  }, 60000);
+
+  it.each([404, 403])('by-id: %i - лишається підпис «Not in the list», без пояснення причини й помилки', async (status) => {
+    byIdAnswer = { status, body: { title: 'x', status, errorCode: status === 404 ? 'ECR-REG-0404' : 'ECR-AUTH-0403' } };
+    await show(unlistedDraft(555), vi.fn());
+
+    const input = (await screen.findByLabelText('Registry')) as HTMLInputElement;
+    await waitFor(() => expect(byIdRequests.length).toBeGreaterThan(0));
+    expect(input.value).toBe('Not in the list (registry #555)');
+    expect(screen.queryByRole('alert')).toBeNull();
+  }, 60000);
+  it('by-id не викликається, коли ціль є в переліку', async () => {
+    await show(unlistedDraft(7), vi.fn());
+
+    const input = (await screen.findByLabelText('Registry')) as HTMLInputElement;
+    expect(input.value).toBe('Permits (PERMITS)');
+    expect(byIdRequests).toEqual([]);
   }, 60000);
 
   it('поточна ціль, що Є в переліку, не дає зайвої опції «unlisted»', async () => {

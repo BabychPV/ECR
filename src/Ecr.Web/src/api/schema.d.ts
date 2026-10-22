@@ -12366,6 +12366,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/by-id/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Мінімальні відомості про довідник-ЦІЛЬ Lookup за Id - для показу поточної цілі колонки чи поля шапки, якої немає
+         *     в переліку (`unlisted`). Право `Registry.View` або грант `Read` на цей довідник.
+         * @description ⛔ S18: неіснуючий Id і довідник під забороною дають ОДНУ `404 ECR-REG-0404` (у відповіді лише переданий Id);
+         *     без права й без гранта - `403` однаково для існуючого й неіснуючого Id.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор довідника (`lookupRegistryDefId` колонки чи поля). */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryTargetDto"];
+                        "text/json": components["schemas"]["RegistryTargetDto"];
+                        "text/plain": components["schemas"]["RegistryTargetDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries/source-kind": {
         parameters: {
             query?: never;
@@ -27811,7 +27868,6 @@ export interface components {
         };
         /**
          * @description Вид довідника як цілі Lookup (RegistryDefKind RegistryDefDto.Kind).
-         * @default Dictionary
          * @enum {unknown}
          */
         RegistryDefKind: "Dictionary" | "PermitHeader" | "PermitGroup";
@@ -28508,6 +28564,24 @@ export interface components {
          * @enum {unknown}
          */
         RegistrySourceKind: "External" | "Hybrid" | "Local";
+        /** @description Мінімальні відомості про довідник-ціль Lookup за ідентифікатором (`GET /registries/by-id/{id}`): для показу поточної цілі
+         *     колонки чи поля шапки, якої немає в переліку цілей («unlisted»). */
+        RegistryTargetDto: {
+            /** @description Код довідника. */
+            code: string;
+            descriptionL10n: null | components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Ідентифікатор довідника (той, що зберігає колонка/поле).
+             */
+            id: number;
+            /** @description Чи довідник (група) активний. */
+            isActive: boolean;
+            /** @description `Dictionary` / `PermitHeader` / `PermitGroup`. */
+            kind: components["schemas"]["RegistryDefKind"];
+            /** @description Назва мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+        };
         /** @description Новий код ролі — для перейменування і для клона. */
         RenameRoleRequest: {
             /** @description Код. */

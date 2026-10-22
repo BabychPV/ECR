@@ -38,6 +38,70 @@ public sealed class PublishGroupLookupFormulasTests
 
     private static readonly IReadOnlySet<int> Groups = new HashSet<int> { GroupRegistry };
 
+    private static void SetId(object entity, int id)
+        => typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(entity, id);
+
+    private static TemplateVersion WithRule(string expression, bool bindToGroupColumn, int lookupRegistry = GroupRegistry)
+    {
+        var (version, table) = Build(lookupRegistry, "1 + 1");
+        var column = table.Columns.First(c => c.Code == "PermitNumber");
+        SetId(column, 77);
+        table.AddValidationRule(new ValidationRule(
+            table.Id, EcrCode.Create("R1"), ValidationSeverity.Error, 0, expression, Name("m"),
+            bindToGroupColumn ? 77 : null));
+        return version;
+    }
+
+    /// <summary>
+    /// Правила валідації таблиці: REG* у правилі, що посилається на колонку-групу через [Код] або прив'язане до неї (ColumnDefId), не публікується.
+    /// Мутація: прибрати цикл по <c>table.ValidationRules</c> у <c>CheckGroupLookupFormulas</c> - червоніють перші два.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Правило_валідації_з_REGFIELD_над_колонкою_групи_за_посиланням_відхиляється()
+    {
+        var diagnostic = Assert.Single(PublishChecks.CheckGroupLookupFormulas(WithRule("REGFIELD([PermitNumber], 'Limit') > 0", false), Groups));
+
+        Assert.Equal("err.ECR-TMPL-0422.lookupGroupNoRegistryForms", diagnostic.MessageKey);
+        Assert.Contains("R1", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Правило_валідації_прив_язане_до_колонки_групи_з_REGFIELD_відхиляється()
+    {
+        var diagnostic = Assert.Single(PublishChecks.CheckGroupLookupFormulas(WithRule("REGFIELD(value, 'Limit') > 0", true), Groups));
+
+        Assert.Equal("T7.PermitNumber", diagnostic.MessageParams!["columnCode"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Правило_без_REG_або_над_звичайним_довідником_проходить()
+    {
+        Assert.Empty(PublishChecks.CheckGroupLookupFormulas(WithRule("ISBLANK([PermitNumber])", true), Groups));
+        Assert.Empty(PublishChecks.CheckGroupLookupFormulas(WithRule("REGFIELD([PermitNumber], 'Limit') > 0", true, PlainRegistry), Groups));
+    }
+
+    /// <summary>
+    /// Вимкнене правило (<c>IsActive = false</c>) із REG* над колонкою-групою не блокує публікацію: воно не виконується.
+    /// Мутація: прибрати <c>r.IsActive</c> у фільтрі правил - червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Вимкнене_правило_з_REG_над_колонкою_групи_не_блокує_публікацію()
+    {
+        const string expression = "REGFIELD([PermitNumber], 'Limit') > 0";
+        var version = WithRule(expression, true);
+        Assert.Single(PublishChecks.CheckGroupLookupFormulas(version, Groups)); // контроль: активне відхиляється
+
+        var rule = version.Sheets.SelectMany(s => s.Tables).SelectMany(t => t.ValidationRules).Single();
+        rule.Update(ValidationSeverity.Error, 0, expression, Name("m"), 77, isActive: false);
+
+        Assert.False(rule.IsActive);
+        Assert.Empty(PublishChecks.CheckGroupLookupFormulas(version, Groups));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Форма_REGFIELD_над_колонкою_групи_відхиляється_з_ключем_і_кодом_колонки()

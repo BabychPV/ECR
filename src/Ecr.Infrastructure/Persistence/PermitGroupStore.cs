@@ -43,6 +43,11 @@ public sealed class PermitGroupStore(EcrDbContext db) : IPermitGroupStore
     }
 
     /// <inheritdoc />
+    public async Task<bool> IsReferencedByTemplatesAsync(int registryDefId, CancellationToken ct)
+        => await db.ColumnDefs.AsNoTracking().AnyAsync(c => c.LookupRegistryDefId == registryDefId, ct).ConfigureAwait(false)
+           || await db.HeaderFieldDefs.AsNoTracking().AnyAsync(f => f.LookupRegistryDefId == registryDefId, ct).ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task RemoveAsync(PermitGroup group, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(group);

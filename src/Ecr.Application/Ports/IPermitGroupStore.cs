@@ -44,6 +44,14 @@ public interface IPermitGroupStore
     public Task RemoveAsync(PermitGroup group, CancellationToken ct);
 
     /// <summary>
+    /// Чи посилається на реєстр групи будь-яка колонка або поле шапки, ВКЛЮЧНО з м'яко видаленими (FK Restrict тримає й їх):
+    /// страховка від 500 при видаленні, коли лічильники використання (лише живі) показують 0.
+    /// </summary>
+    /// <param name="registryDefId">Реєстр групи.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<bool> IsReferencedByTemplatesAsync(int registryDefId, CancellationToken ct);
+
+    /// <summary>
     /// Знімок для <see cref="Permits.Groups.IPermitGroupResolver"/>: по рядку на групу з реєстрами шапок типів складу.
     /// </summary>
     /// <param name="ct">Токен скасування.</param>

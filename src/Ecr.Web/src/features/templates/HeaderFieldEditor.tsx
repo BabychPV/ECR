@@ -2,7 +2,7 @@ import { useMemo, type JSX } from 'react';
 import { Alert, Button, Group, NumberInput, Select, Skeleton, Stack, Switch, TextInput } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { LookupTargetSelect } from '@/features/registries/LookupTargetSelect';
-import { lookupTargetSelectData, lookupTargetsQuery } from '@/features/registries/lookupTargets';
+import { lookupTargetSelectData, lookupTargetsQuery, useUnlistedTarget } from '@/features/registries/lookupTargets';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput } from '@/shared/ui/LocalizedInput';
@@ -50,9 +50,11 @@ export function HeaderFieldEditor({
   // ✎ Permits: ціль Lookup може бути й шапкою типу дозволу (`PRM_<TYPE>`) — звичайний перелік їх ховає.
   const registries = useQuery({ ...lookupTargetsQuery(), enabled: isLookup });
 
+  // Поточна ціль поза переліком: назва/опис/неактивність - з GET /registries/by-id/{id} (відмова - підпис з id).
+  const unlistedTarget = useUnlistedTarget(draft.lookupRegistryDefId, registries.data);
   const registryOptions = useMemo(
-    () => lookupTargetSelectData(registries.data ?? [], draft.lookupRegistryDefId),
-    [registries.data, draft.lookupRegistryDefId],
+    () => lookupTargetSelectData(registries.data ?? [], draft.lookupRegistryDefId, unlistedTarget),
+    [registries.data, draft.lookupRegistryDefId, unlistedTarget],
   );
 
   return (

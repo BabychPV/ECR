@@ -737,6 +737,33 @@ public static class PublishChecks
                         new Dictionary<string, string> { ["columnCode"] = $"{table.Code}.{column}" }));
                 }
             }
+
+            // Правила валідації таблиці: форма REG* у правилі, прив'язаному до колонки-групи (ColumnDefId) або такому, що
+            // посилається на неї через [Код]. Рантайм (TableValidation) читає поле запису за реєстром ЦІЛІ колонки - для групи
+            // це порожній реєстр, тож правило мовчки не спрацювало б.
+            var groupColumnIds = table.Columns
+                .Where(c => !c.IsDeleted && c.DataType == CellDataType.Lookup
+                            && c.LookupRegistryDefId is { } id && groupRegistryIds.Contains(id))
+                .ToDictionary(c => c.Id, c => c.Code);
+            foreach (var rule in table.ValidationRules.Where(r => r.IsActive && RegistryFormRegex.IsMatch(r.Expression)))
+            {
+                var hit = groupColumns.Where(code => ReferencesColumn(rule.Expression, code)).ToList();
+                if (rule.ColumnDefId is { } bound && groupColumnIds.TryGetValue(bound, out var boundCode) && !hit.Contains(boundCode))
+                {
+                    hit.Add(boundCode);
+                }
+
+                foreach (var column in hit)
+                {
+                    diagnostics.Add(new ExpressionDiagnostic(
+                        "ECR-TMPL-0422",
+                        $"Колонка {table.Code}.{column} має ціллю групу дозволів: форми REG* у правилі {rule.Code} над нею не підтримуються.",
+                        0,
+                        1,
+                        "err.ECR-TMPL-0422.lookupGroupNoRegistryForms",
+                        new Dictionary<string, string> { ["columnCode"] = $"{table.Code}.{column}" }));
+                }
+            }
         }
 
         return diagnostics;

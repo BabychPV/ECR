@@ -111,6 +111,9 @@ const registries = {
   /** `GET /api/v1/registries/{code}/entries`. */
   entries: (code: string) => ['registries', 'entries', code] as const,
 
+  /** `GET /api/v1/registries/by-id/{id}` - відомості про поточну ціль Lookup, якої немає в переліку цілей («unlisted»). */
+  target: (id: number) => ['registries', 'target', id] as const,
+
   /** `GET /api/v1/registries/{code}/definition`. */
   definition: (code: string) => ['registries', 'definition', code] as const,
 
