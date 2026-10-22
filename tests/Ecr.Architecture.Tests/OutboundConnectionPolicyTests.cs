@@ -126,6 +126,7 @@ public sealed class OutboundConnectionPolicyTests
         OwnDb("src/Ecr.Infrastructure/Persistence/AuditReader.cs", 9),         // +1: підсумок журналу (UI-38 C2)
         OwnDb("src/Ecr.Infrastructure/Persistence/AuditWriter.cs", 1),
         OwnDb("src/Ecr.Infrastructure/Persistence/RuleCoverageReader.cs", 1),
+        OwnDb("src/Ecr.Infrastructure/Persistence/DocumentVersionMigrationStore.cs", 1),   // Б1: діапазони переносу комірок з комітом на власному з'єднанні
         OwnDb("src/Ecr.Infrastructure/Integration/IntegrationCellPatcher.cs", 1),
         OwnDb("src/Ecr.Infrastructure/Jobs/SourceEventSyncJob.cs", 1), // F2-04: видалення рядків подій — транзакція контексту, окреме підключення лишилось одне
         OwnDb("src/Ecr.Infrastructure/Persistence/BulkCellLoader.cs", 2,          // DependencyInjection: ConnectionStrings

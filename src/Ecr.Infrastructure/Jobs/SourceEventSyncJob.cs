@@ -479,6 +479,16 @@ public sealed partial class SourceEventSyncJob(
             return;
         }
 
+        // ⛔ Б1: проєкт під маркером «міграція в процесі» (діапазони комірок частково перенесені) — не пишемо: вставки пішли
+        // б повз стару/нову версію, а видалення рядків подій — повз структуру. Події лишаються нечитаними цим мапінгом і
+        // підуть наступним прогоном, коли перенос завершиться (так само, як для відсутнього документа).
+        if (await db.Projects.AsNoTracking()
+                .AnyAsync(p => p.Id == projectId && p.ExternalSettingsJson != null && p.ExternalSettingsJson.Contains("\"migratingTo\""), ct)
+                .ConfigureAwait(false))
+        {
+            return;
+        }
+
         var timeZoneId = await db.Projects
             .AsNoTracking()
             .Where(p => p.Id == projectId)

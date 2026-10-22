@@ -62,13 +62,17 @@ public sealed partial class DocumentVersionMigrationTests
             LostValues: 0,
             GuardedValues: 0);
 
+        var volumeRangeRows = int.TryParse(Environment.GetEnvironmentVariable("ECR_MIGRATION_RANGE_ROWS"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var configuredRange) && configuredRange > 0 ? configuredRange : 4_000;
+        var promotionsBefore = await LockPromotionsAsync().ConfigureAwait(true);
         var recorder = new TimingRecorder();
+        var rangeStats = new List<MigrationRangeStat>();
         await using (var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
             .UseSqlServer(sql.ConnectionString, o => o.CommandTimeout(GlobalCommandTimeoutSeconds))
             .AddInterceptors(recorder)
             .Options))
         {
-            var store = new DocumentVersionMigrationStore(db);
+            // Діапазон 4000 рядків TableRow (≈ 12 тис. комірок) — щоб обсяг тесту дав кілька діапазонів-комітів.
+            var store = new DocumentVersionMigrationStore(db) { RangeRows = volumeRangeRows, RangeObserver = rangeStats.Add };
             await using var tx = await db.Database.BeginTransactionAsync().ConfigureAwait(true);
             var scopeWatch = System.Diagnostics.Stopwatch.StartNew();
             var scope = await store.ReadScopeAsync(s.Doc.ProjectId, CancellationToken.None).ConfigureAwait(true);
@@ -82,7 +86,7 @@ public sealed partial class DocumentVersionMigrationTests
             await tx.CommitAsync().ConfigureAwait(true);
 
             Console.WriteLine(FormattableString.Invariant(
-                $"N3-VOLUME values={expectedValues} applyMs={watch.ElapsedMilliseconds} commands={recorder.Commands.Count}"));
+                $"N3-VOLUME values={expectedValues} rangeRows={volumeRangeRows} ranges={rangeStats.Count} applyMs={watch.ElapsedMilliseconds} commands={recorder.Commands.Count} lockPromotions={await LockPromotionsAsync().ConfigureAwait(true) - promotionsBefore}"));
             foreach (var line in recorder.Summary())
             {
                 Console.WriteLine(line);
@@ -94,12 +98,13 @@ public sealed partial class DocumentVersionMigrationTests
         Assert.All(recorder.Commands, c => Assert.Equal(DocumentVersionMigrationStore.ApplyCommandTimeoutSeconds, c.TimeoutSeconds));
         Assert.True(DocumentVersionMigrationStore.ApplyCommandTimeoutSeconds > GlobalCommandTimeoutSeconds);
 
-        // ⛔ Предмет тесту 2: UPDATE комірок іде пачками. Стільки значень одним оператором — це і був дефект.
-        var cellUpdates = recorder.Commands.Count(c => c.Text.Contains("UPDATE TOP", StringComparison.Ordinal)
-                                                       && c.Text.Contains("doc.CellValue", StringComparison.Ordinal)
-                                                       && c.Text.Contains("ColumnDefId = m.n", StringComparison.Ordinal));
-        var minBatches = (int)Math.Ceiling(expectedValues / (double)DocumentVersionMigrationStore.BatchRows);
-        Assert.True(cellUpdates >= minBatches, $"UPDATE комірок: {cellUpdates} команд, а для {expectedValues} значень мало бути ≥ {minBatches}.");
+        // ⛔ Предмет тесту 2: комірки йдуть діапазонами за ключем з окремим комітом на кожен. Стільки значень одним
+        // оператором — це і був дефект. (Діапазони виконує власне з'єднання сховища, тож у перехоплювачі контексту їх немає.)
+        var cellRanges = rangeStats.Count(r => r.Kind == "cells");
+        var minRanges = (int)Math.Ceiling((volumeRows + 2) / (double)volumeRangeRows);
+        Assert.True(cellRanges >= minRanges, $"Діапазонів комірок: {cellRanges}, а для {volumeRows} рядків мало бути ≥ {minRanges}.");
+        Assert.All(rangeStats.Where(r => r.Kind == "cells"), r => Assert.True(r.Rows <= volumeRangeRows * 4L, $"Діапазон завеликий: {r.Rows} рядків."));
+        Assert.Equal(expectedValues + 1 + volumeRows, rangeStats.Where(r => r.Kind == "cells").Sum(r => r.Rows));   // комірки (+порожня C3) + рядки з описом
 
         // ⛔ Предмет тесту 3: пачки не порушили результат — усі значення на нових колонках, версія проєкту перемкнута.
         await using var check = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
@@ -117,45 +122,6 @@ public sealed partial class DocumentVersionMigrationTests
             .CountAsync(r => r.PeriodKeyValue == s.Doc.PeriodKey.Value && r.TableInstanceId == s.Doc.TableInstanceId
                              && r.RowDefId == targetRows[0]).ConfigureAwait(true);
         Assert.Equal(volumeRows, movedRows);
-    }
-
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage8)]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-7.5")]
-    public async Task Збій_посеред_пачок_відкочує_весь_перенос()
-    {
-        var s = await ArrangeAsync(Target.OnlyLabels).ConfigureAwait(true);
-        var targetRows = await TargetRowDefsAsync(s).ConfigureAwait(true);
-        var volumeRows = DocumentVersionMigrationStore.BatchRows;   // 3 пачки комірок
-        await BulkInsertAsync(s, volumeRows).ConfigureAwait(true);
-        var before = await SnapshotCountsAsync(s).ConfigureAwait(true);
-
-        var plan = new VersionMigrationPlan(
-            new Dictionary<int, int> { [s.Doc.SheetDefId] = s.TargetSheetDefId },
-            new Dictionary<int, int> { [s.Doc.TableDefId] = s.TargetTableDefId },
-            [
-                new VersionMigrationColumn(s.Doc.ColumnDefIds[0], s.TargetColumns["C1"], s.TargetTableDefId),
-                new VersionMigrationColumn(s.Doc.ColumnDefIds[1], s.TargetColumns["C2"], s.TargetTableDefId),
-                new VersionMigrationColumn(s.Doc.ColumnDefIds[2], s.TargetColumns["C3"], s.TargetTableDefId),
-            ],
-            new Dictionary<int, int> { [s.Doc.RowDefIds[0]] = targetRows[0] },
-            new Dictionary<int, int>(), [], [], 0, 0, 0);
-
-        // Збій на третій пачці UPDATE комірок: перші дві вже виконані в транзакції.
-        var failing = new FailOnNthCellUpdate(3);
-        await using (var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
-            .UseSqlServer(sql.ConnectionString).AddInterceptors(failing).Options))
-        {
-            await using var tx = await db.Database.BeginTransactionAsync().ConfigureAwait(true);
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                new DocumentVersionMigrationStore(db).ApplyAsync(s.Doc.ProjectId, s.TargetVersionId, plan, CancellationToken.None))
-                .ConfigureAwait(true);
-            await tx.RollbackAsync().ConfigureAwait(true);
-        }
-
-        Assert.True(failing.Seen >= 3, "Перенос не дійшов до третьої пачки — тест нічого не довів.");
-        Assert.Equal(before, await SnapshotCountsAsync(s).ConfigureAwait(true));
     }
 
     private async Task<string> SnapshotCountsAsync(Scenario s)
@@ -268,26 +234,15 @@ public sealed partial class DocumentVersionMigrationTests
         }
     }
 
-    private sealed record Seen(string Text, int TimeoutSeconds, long Millis, int Rows);
-
-    /// <summary>Кидає виняток на N-му UPDATE комірок — імітація збою посеред пачок.</summary>
-    private sealed class FailOnNthCellUpdate(int n) : DbCommandInterceptor
+    /// <summary>Скільки разів SQL Server ескалював блокування на doc.CellValue до рівня таблиці/партиції (накопичувально).</summary>
+    private async Task<long> LockPromotionsAsync()
     {
-        private int _seen;
-
-        public int Seen => Volatile.Read(ref _seen);
-
-        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
-            DbCommand command, CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
-        {
-            if (command.CommandText.Contains("UPDATE TOP", StringComparison.Ordinal)
-                && command.CommandText.Contains("ColumnDefId = m.n", StringComparison.Ordinal)
-                && Interlocked.Increment(ref _seen) == n)
-            {
-                throw new InvalidOperationException("N-3: імітований збій посеред пачок.");
-            }
-
-            return base.NonQueryExecutingAsync(command, eventData, result, cancellationToken);
-        }
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT ISNULL(SUM(index_lock_promotion_count), 0) FROM sys.dm_db_index_operational_stats(DB_ID(), OBJECT_ID(N'doc.CellValue'), NULL, NULL)";
+        return Convert.ToInt64(await command.ExecuteScalarAsync().ConfigureAwait(false), CultureInfo.InvariantCulture);
     }
+
+    private sealed record Seen(string Text, int TimeoutSeconds, long Millis, int Rows);
 }

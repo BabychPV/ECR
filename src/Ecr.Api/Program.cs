@@ -101,8 +101,16 @@ builder.Services.AddSingleton<Ecr.Application.Ports.IConsistencyMetrics,
 builder.Services.AddSingleton<Ecr.Application.Ports.IJobStartMetrics,
     Ecr.Api.Observability.JobStartMetricsAdapter>();
 builder.Services.AddScoped<Ecr.Api.Observability.BudgetMetricsFilter>();
+// Б1 (P1-1): маркер «перенос версії в процесі» — один фільтр на всі читання/записи документа й проєкту.
+builder.Services.AddSingleton<Ecr.Api.Startup.MigratingProjects>();
+builder.Services.AddSingleton<Ecr.Api.Startup.MigrationMarkerFilter>();
+builder.Services.AddHostedService<Ecr.Api.Startup.MigratingProjectsRefresher>();
 builder.Services
-    .AddControllers(options => options.Filters.Add<Ecr.Api.Observability.BudgetMetricsFilter>())
+    .AddControllers(options =>
+    {
+        options.Filters.Add<Ecr.Api.Observability.BudgetMetricsFilter>();
+        options.Filters.AddService<Ecr.Api.Startup.MigrationMarkerFilter>();
+    })
     // ⚠ Перелік конвертерів — в `EcrJsonSerialization`, а не тут: ті самі
     // правила потрібні двом незалежним наборам опцій (нижче), і копія в
     // кожному розійшлася б непомітно.
