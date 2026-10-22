@@ -3179,6 +3179,49 @@
         ],
         "type": "object"
       },
+      "CreatePermitGroupRequest": {
+        "description": "Створення групи.",
+        "properties": {
+          "code": {
+            "description": "Код групи (не довше 59 символів: реєстр групи `PRMG_` + код вміщається в 64).",
+            "type": "string"
+          },
+          "descriptionL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Опис (до 1000 символів на мову); `null` - без опису.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва; хоча б одна мова непорожня.",
+            "type": "object"
+          },
+          "typeCodes": {
+            "description": "Початковий склад (опубліковані типи, без повторів); `null` - порожня група.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "nameL10n",
+          "descriptionL10n",
+          "typeCodes"
+        ],
+        "type": "object"
+      },
       "CreatePermitRequest": {
         "description": "Запит на заведення дозволу (чернеткою).",
         "properties": {
@@ -11030,6 +11073,113 @@
         ],
         "type": "object"
       },
+      "PermitGroupDto": {
+        "description": "Група типів дозволів: назва, опис, склад, використання.",
+        "properties": {
+          "code": {
+            "description": "Код групи; не змінюється.",
+            "type": "string"
+          },
+          "descriptionL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Опис мовами каталогу; показується під час вибору цілі Lookup; порожній словник - без опису.",
+            "type": "object"
+          },
+          "isActive": {
+            "description": "Чи групу можна обрати новою ціллю.",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва мовами каталогу (en/ru/kz).",
+            "type": "object"
+          },
+          "registryCode": {
+            "description": "Код прихованого реєстру-«ідентичності» групи (`PRMG_&lt;КОД&gt;`) - ціль Lookup колонки/поля.",
+            "type": "string"
+          },
+          "registryDefId": {
+            "description": "Його ідентифікатор (так ціль зберігає колонка).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rowVersion": {
+            "description": "Токен оптимістичної конкуренції (base64); повертається в наступному запиті зміни.",
+            "type": "string"
+          },
+          "types": {
+            "description": "Типи складу в порядку показу.",
+            "items": {
+              "$ref": "#/components/schemas/PermitGroupTypeDto"
+            },
+            "type": "array"
+          },
+          "updatedAt": {
+            "description": "Остання зміна, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "usedInColumns": {
+            "description": "Скільки колонок/полів шаблонів мають групу ціллю.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "usedInTemplates": {
+            "description": "У скількох шаблонах.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "nameL10n",
+          "descriptionL10n",
+          "isActive",
+          "registryCode",
+          "registryDefId",
+          "types",
+          "usedInColumns",
+          "usedInTemplates",
+          "rowVersion",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "PermitGroupTypeDto": {
+        "description": "Тип дозволу у складі групи.",
+        "properties": {
+          "category": {
+            "description": "`Air`, `Water`, `Waste` або `Other`.",
+            "type": "string"
+          },
+          "code": {
+            "description": "Код типу.",
+            "type": "string"
+          },
+          "headerRegistryCode": {
+            "description": "Код реєстру шапки типу (`PRM_&lt;TYPE&gt;`).",
+            "type": "string"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва мовами каталогу.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "code",
+          "nameL10n",
+          "category",
+          "headerRegistryCode"
+        ],
+        "type": "object"
+      },
       "PermitListDetailDto": {
         "description": "Список зі значеннями.",
         "properties": {
@@ -12806,6 +12956,17 @@
               "integer"
             ]
           },
+          "descriptionL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Опис мовами каталогу, який показується під час вибору цілі Lookup. Зараз заповнений лише для груп типів дозволів\n(`Kind = permitGroup`); для решти `null`."
+              }
+            ]
+          },
           "entryCount": {
             "description": "Чинних записів сьогодні (UTC): активні, не видалені, у вікні дії. Лише в переліку; в інших\nвідповідях `null`.",
             "format": "int32",
@@ -12840,6 +13001,10 @@
           "isTemporal": {
             "description": "Чи мають записи вікно дії; від цього залежить обов'язковість `asOf`.",
             "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RegistryDefKind",
+            "description": "Вид цілі Lookup, який визначає СЕРВЕР (клієнт не розпізнає за префіксом коду): `Dictionary` - звичайний довідник,\n`PermitHeader` - шапка типу дозволу (`PRM_&lt;TYPE&gt;`), `PermitGroup` - група типів дозволів (прихований\n`PRMG_&lt;КОД&gt;`). Віддається і в переліку, і в `GET {code}/definition`."
           },
           "nameL10n": {
             "$ref": "#/components/schemas/LocalizedText",
@@ -12891,6 +13056,15 @@
           "fields"
         ],
         "type": "object"
+      },
+      "RegistryDefKind": {
+        "default": "Dictionary",
+        "description": "Вид довідника як цілі Lookup (RegistryDefKind RegistryDefDto.Kind).",
+        "enum": [
+          "Dictionary",
+          "PermitHeader",
+          "PermitGroup"
+        ]
       },
       "RegistryDefinitionDraftDto": {
         "description": "Чернетка опису довідника.",
@@ -13019,6 +13193,17 @@
             "format": "int32",
             "type": "integer"
           },
+          "descriptionL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Опис групи типів дозволів; для решти `null`."
+              }
+            ]
+          },
           "fields": {
             "description": "Поля довідника в порядку показу.",
             "items": {
@@ -13044,6 +13229,10 @@
               "null",
               "array"
             ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RegistryDefKind",
+            "description": "Вид цілі Lookup, який визначає сервер (`Dictionary`, `PermitHeader`, `PermitGroup`): клієнт читає його тут для\nцілі, якої немає в переліку `GET /registries` (опція «unlisted»), а не розпізнає за префіксом коду."
           },
           "mappings": {
             "description": "Мапінг зовнішніх полів на поля довідника (`ФВ-8.11`).",
@@ -13167,23 +13356,42 @@
         "description": "Запис довідника для UI і резолвінгу. У комірці зберігається\nlong RegistryEntryDto.Id, а не string RegistryEntryDto.Display (`ФВ-8.8`) — саме тому\nперейменування не змінює історичні дані.",
         "properties": {
           "code": {
+            "description": "Стабільний код (для дозволу - його номер).",
             "type": "string"
           },
           "display": {
+            "description": "Локалізована назва для показу.",
             "type": "string"
           },
           "id": {
+            "description": "Ідентифікатор запису (це значення зберігається в комірці).",
             "format": "int64",
             "type": "integer"
           },
           "parentEntryId": {
+            "description": "Батьківський запис ієрархії.",
             "format": "int64",
             "type": [
               "null",
               "integer"
             ]
           },
+          "typeCode": {
+            "description": "Лише в піклері групи типів дозволів (`GET registries/PRMG_*/entries`): код типу дозволу запису; інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "typeName": {
+            "description": "Назва типу мовою користувача (підпис «номер — тип»); лише в піклері групи, інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "validFrom": {
+            "description": "Початок чинності.",
             "format": "date",
             "type": [
               "null",
@@ -13191,6 +13399,7 @@
             ]
           },
           "validTo": {
+            "description": "Кінець чинності.",
             "format": "date",
             "type": [
               "null",
@@ -14564,6 +14773,27 @@
         },
         "required": [
           "rules"
+        ],
+        "type": "object"
+      },
+      "ReplacePermitGroupTypesRequest": {
+        "description": "Заміна складу групи цілком.",
+        "properties": {
+          "rowVersion": {
+            "description": "Токен, прочитаний разом із групою.",
+            "type": "string"
+          },
+          "typeCodes": {
+            "description": "Коди опублікованих типів у порядку показу, без повторів; порожній список - склад очищено.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "typeCodes",
+          "rowVersion"
         ],
         "type": "object"
       },
@@ -21093,6 +21323,43 @@
           "graceOffsetDays",
           "hardCloseOffsetDays",
           "yearGraceOffsetDays"
+        ],
+        "type": "object"
+      },
+      "UpdatePermitGroupRequest": {
+        "description": "Зміна назви, опису й активності групи (деактивація - `IsActive = false`).",
+        "properties": {
+          "descriptionL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Опис; `null` - прибрати.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "isActive": {
+            "description": "Активність.",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва.",
+            "type": "object"
+          },
+          "rowVersion": {
+            "description": "Токен, прочитаний разом із групою.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nameL10n",
+          "descriptionL10n",
+          "isActive",
+          "rowVersion"
         ],
         "type": "object"
       },
@@ -35571,6 +35838,499 @@
         "summary": "Повний каталог системних прав, включно з тими, яких не має жодна роль.\nПраво `Security.ManageRoles`.",
         "tags": [
           "Security"
+        ]
+      }
+    },
+    "/api/v1/permit-groups": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PermitGroupDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PermitGroupDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PermitGroupDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Усі групи зі складом і використанням (їх десятки: без сторінок). Право `Registry.View`.",
+        "tags": [
+          "PermitGroups"
+        ]
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePermitGroupRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePermitGroupRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePermitGroupRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitGroupDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitGroupDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitGroupDto"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Створює групу (разом із прихованим реєстром `PRMG_&lt;КОД&gt;` і початковим складом). Право `Permit.EditType`.",
+        "tags": [
+          "PermitGroups"
+        ]
+      }
+    },
+    "/api/v1/permit-groups/{code}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Код групи.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Видаляє групу, яку не використовує жоден шаблон (інакше `409 ECR-PRM-4098`: лише деактивація).\nПраво `Permit.EditType`.",
+        "tags": [
+          "PermitGroups"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Код групи.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitGroupDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitGroupDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitGroupDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Група за кодом з токеном `rowVersion`. Право `Registry.View`.",
+        "tags": [
+          "PermitGroups"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Код групи.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePermitGroupRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePermitGroupRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePermitGroupRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitGroupDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitGroupDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitGroupDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює назву, опис і активність групи (деактивація - `isActive = false`; використану групу видаляти не можна).\nПраво `Permit.EditType`. Токен `rowVersion` - з останнього читання.",
+        "tags": [
+          "PermitGroups"
+        ]
+      }
+    },
+    "/api/v1/permit-groups/{code}/types": {
+      "put": {
+        "parameters": [
+          {
+            "description": "Код групи.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplacePermitGroupTypesRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplacePermitGroupTypesRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplacePermitGroupTypesRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitGroupDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitGroupDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermitGroupDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Замінює склад групи цілком (єдиний шлях зміни складу): коди ОПУБЛІКОВАНИХ типів у порядку показу. Тип може бути\nу кількох групах. Право `Permit.EditType`. Токен `rowVersion` - з останнього читання.",
+        "tags": [
+          "PermitGroups"
         ]
       }
     },
@@ -51836,6 +52596,9 @@
     },
     {
       "name": "PermitBindings"
+    },
+    {
+      "name": "PermitGroups"
     },
     {
       "name": "PermitLists"

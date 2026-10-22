@@ -925,6 +925,30 @@ public static class ErrorCodes
     /// <remarks>⚠ <c>ConcurrencyConflictException</c> - 409 за типом, власного арма в middleware не потрібно.</remarks>
     public const string PermitOverlap = "ECR-PRM-4092";
 
+    // Групи типів дозволів (Permits, PRMG). 0422 - наявний PermitTypeInvalid з новими messageKey (group*).
+    /// <summary>Групи дозволів з таким кодом немає (<c>ECR-PRM-0405</c>, <c>messageKey</c> <c>group</c>).</summary>
+    public const string PermitGroupNotFound = "ECR-PRM-0405";
+
+    /// <summary>
+    /// Група дозволів з таким кодом уже є (<c>ECR-PRM-4097</c>, <c>code</c>, <c>UQ_PermitGroup</c>) або код прихованого
+    /// реєстру групи <c>PRMG_&lt;КОД&gt;</c> зайнятий (<c>registryCode</c>, <c>UQ_RegistryDef</c>).
+    /// </summary>
+    /// <remarks>⚠ 409 за цифрами коду: <c>BusinessRuleException</c> без власного арма в <c>ExceptionHandlingMiddleware</c> доїхав би як 422.</remarks>
+    public const string PermitGroupDuplicate = "ECR-PRM-4097";
+
+    /// <summary>
+    /// Групу дозволів не видаляють, бо її використовують колонки/поля шаблонів (<c>ECR-PRM-4098</c>, <c>inUse</c>):
+    /// використану групу можна лише деактивувати.
+    /// </summary>
+    /// <remarks>⚠ 409 за цифрами коду: власний арм у <c>ExceptionHandlingMiddleware</c> обов'язковий.</remarks>
+    public const string PermitGroupInUse = "ECR-PRM-4098";
+
+    /// <summary>
+    /// Групу дозволів змінили після читання (<c>ECR-PRM-4099</c>, <c>changed</c>): <c>rowVersion</c> не збігся.
+    /// </summary>
+    /// <remarks>⚠ Кидається як <c>ConcurrencyConflictException</c> - 409 за типом.</remarks>
+    public const string PermitGroupConflict = "ECR-PRM-4099";
+
     // Прив'язки аркуша до дозволу (Permits, PM-09). 4095-4097 заброньовано за екземплярами дозволів (PM-04).
     /// <summary>
     /// Прив'язка аркуша до дозволу дублює наявну (<c>ECR-PRM-4101</c>): таблицю аркуша версії вже зайняла інша прив'язка

@@ -44,6 +44,15 @@ namespace Ecr.Application.Registries.Dto;
 /// <param name="AsOfRequired">
 /// Чи вимагає читання записів параметр <c>asOf</c>: довідник сам темпоральний або темпоральний його батько композиції. Лише в переліку.
 /// </param>
+/// <param name="DescriptionL10n">
+/// Опис мовами каталогу, який показується під час вибору цілі Lookup. Зараз заповнений лише для груп типів дозволів
+/// (<c>Kind = permitGroup</c>); для решти <c>null</c>.
+/// </param>
+/// <param name="Kind">
+/// Вид цілі Lookup, який визначає СЕРВЕР (клієнт не розпізнає за префіксом коду): <c>Dictionary</c> - звичайний довідник,
+/// <c>PermitHeader</c> - шапка типу дозволу (<c>PRM_&lt;TYPE&gt;</c>), <c>PermitGroup</c> - група типів дозволів (прихований
+/// <c>PRMG_&lt;КОД&gt;</c>). Віддається і в переліку, і в <c>GET {code}/definition</c>.
+/// </param>
 public sealed record RegistryDefDto(
     int Id,
     string Code,
@@ -60,7 +69,22 @@ public sealed record RegistryDefDto(
     bool? HasDraft = null,
     DateTime? UpdatedAt = null,
     string? UpdatedByDisplayName = null,
-    bool? AsOfRequired = null);
+    bool? AsOfRequired = null,
+    LocalizedText? DescriptionL10n = null,
+    RegistryDefKind Kind = RegistryDefKind.Dictionary);
+
+/// <summary>Вид довідника як цілі Lookup (<see cref="RegistryDefDto.Kind"/>).</summary>
+public enum RegistryDefKind
+{
+    /// <summary>Звичайний довідник.</summary>
+    Dictionary = 0,
+
+    /// <summary>Реєстр шапки типу дозволу (<c>PRM_&lt;TYPE&gt;</c>).</summary>
+    PermitHeader = 1,
+
+    /// <summary>Група типів дозволів (прихований реєстр <c>PRMG_&lt;КОД&gt;</c>).</summary>
+    PermitGroup = 2,
+}
 
 /// <summary>Поле довідника.</summary>
 /// <param name="Id">Ідентифікатор поля.</param>

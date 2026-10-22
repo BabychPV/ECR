@@ -1383,6 +1383,16 @@ public sealed partial class EndpointCoverageTests
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/methodologies`.
         "PUT /api/v1/methodologies/{p}/row-activity-filter",
 
+        // Permits PRMG: серверна частина груп типів дозволів (lane permit-groups-server); екран «Groups» і Select цілей Lookup -
+        // окрема клієнтська lane (permit-groups-ui), яка стартує від запушеного контракту.
+        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклики в `features/permits` (екран Groups).
+        "GET /api/v1/permit-groups",
+        "GET /api/v1/permit-groups/{p}",
+        "POST /api/v1/permit-groups",
+        "PUT /api/v1/permit-groups/{p}",
+        "PUT /api/v1/permit-groups/{p}/types",
+        "DELETE /api/v1/permit-groups/{p}",
+
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було
         // НЕПРАВДОЮ: жодне місце клієнта нічого не конвертувало.

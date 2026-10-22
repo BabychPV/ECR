@@ -9132,6 +9132,23 @@ USING (VALUES
     -- PERMITS: p3-backlog ── en: PUI-4, значення списку вже прибране/змінене деінде; ru/kz — порцією PERMITS: p3-backlog нижче ──
     ,(N'permits.lists.drawer.gone', N'en', N'This value is no longer in the list: it was changed elsewhere. The list has been refreshed.', 1)
     -- PERMITS: p3-backlog ── кінець секції ──
+    -- PERMITS: groups-api ── en: відмови груп типів дозволів (ECR-PRM-0405/4097/4098/4099, ECR-PRM-0422 group*; PRMG); ru/kz — порцією PERMITS: groups-api нижче ──
+    ,(N'err.ECR-PRM-0405', N'en', N'Permit group not found', 1)
+    ,(N'err.ECR-PRM-0405.group', N'en', N'Permit group "{code}" does not exist.', 1)
+    ,(N'err.ECR-PRM-4097', N'en', N'Permit group already exists', 1)
+    ,(N'err.ECR-PRM-4097.code', N'en', N'Permit group "{code}" already exists.', 1)
+    ,(N'err.ECR-PRM-4097.registryCode', N'en', N'The registry code "{registryCode}" needed by the group is already taken.', 1)
+    ,(N'err.ECR-PRM-4098', N'en', N'Permit group is in use', 1)
+    ,(N'err.ECR-PRM-4098.inUse', N'en', N'Permit group "{code}" is used by templates ({templates}) and cannot be deleted. Deactivate it instead.', 1)
+    ,(N'err.ECR-PRM-4099', N'en', N'Permit group was changed', 1)
+    ,(N'err.ECR-PRM-4099.changed', N'en', N'Permit group "{code}" was changed after you opened it. Reload it and repeat your edit.', 1)
+    ,(N'err.ECR-PRM-0422.permitGroupNameRequired', N'en', N'The permit group name is required in at least one language.', 1)
+    ,(N'err.ECR-PRM-0422.permitGroupCodeInvalid', N'en', N'The group code "{code}" is not valid: use letters, digits and underscore, starting with a letter, up to 59 characters.', 1)
+    ,(N'err.ECR-PRM-0422.permitGroupTextTooLong', N'en', N'The group {item} is longer than {max} characters.', 1)
+    ,(N'err.ECR-PRM-0422.permitGroupMemberDuplicate', N'en', N'The permit type "{typeCode}" is listed in the group more than once.', 1)
+    ,(N'err.ECR-PRM-0422.permitGroupMemberUnknown', N'en', N'The permit type "{typeCode}" does not exist.', 1)
+    ,(N'err.ECR-PRM-0422.permitGroupMemberNotPublished', N'en', N'The permit type "{typeCode}" is not published yet: only published types can be in a group.', 1)
+    -- PERMITS: groups-api ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -23672,6 +23689,44 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: p3-backlog ── кінець секції ──
+-- PERMITS: groups-api ── ru/kz: відмови груп типів дозволів (PRMG); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-0405', N'ru', N'Группа разрешений не найдена'),
+    (N'err.ECR-PRM-0405', N'kz', N'Рұқсаттар тобы табылмады'),
+    (N'err.ECR-PRM-0405.group', N'ru', N'Группы разрешений «{code}» не существует.'),
+    (N'err.ECR-PRM-0405.group', N'kz', N'«{code}» рұқсаттар тобы жоқ.'),
+    (N'err.ECR-PRM-4097', N'ru', N'Группа разрешений уже существует'),
+    (N'err.ECR-PRM-4097', N'kz', N'Рұқсаттар тобы бұрыннан бар'),
+    (N'err.ECR-PRM-4097.code', N'ru', N'Группа разрешений «{code}» уже существует.'),
+    (N'err.ECR-PRM-4097.code', N'kz', N'«{code}» рұқсаттар тобы бұрыннан бар.'),
+    (N'err.ECR-PRM-4097.registryCode', N'ru', N'Код реестра «{registryCode}», нужный группе, уже занят.'),
+    (N'err.ECR-PRM-4097.registryCode', N'kz', N'Топқа қажетті «{registryCode}» тізілім коды бос емес.'),
+    (N'err.ECR-PRM-4098', N'ru', N'Группа разрешений используется'),
+    (N'err.ECR-PRM-4098', N'kz', N'Рұқсаттар тобы қолданыста'),
+    (N'err.ECR-PRM-4098.inUse', N'ru', N'Группу разрешений «{code}» используют шаблоны ({templates}), удалить её нельзя. Деактивируйте её.'),
+    (N'err.ECR-PRM-4098.inUse', N'kz', N'«{code}» рұқсаттар тобын үлгілер пайдаланады ({templates}), оны жоюға болмайды. Оны өшіріп қойыңыз.'),
+    (N'err.ECR-PRM-4099', N'ru', N'Группа разрешений изменена'),
+    (N'err.ECR-PRM-4099', N'kz', N'Рұқсаттар тобы өзгертілді'),
+    (N'err.ECR-PRM-4099.changed', N'ru', N'Группу разрешений «{code}» изменили после того, как вы её открыли. Перечитайте её и повторите правку.'),
+    (N'err.ECR-PRM-4099.changed', N'kz', N'«{code}» рұқсаттар тобын сіз ашқаннан кейін өзгертті. Оны қайта оқып, түзетуді қайталаңыз.'),
+    (N'err.ECR-PRM-0422.permitGroupNameRequired', N'ru', N'Название группы разрешений обязательно хотя бы на одном языке.'),
+    (N'err.ECR-PRM-0422.permitGroupNameRequired', N'kz', N'Рұқсаттар тобының атауы кемінде бір тілде міндетті.'),
+    (N'err.ECR-PRM-0422.permitGroupCodeInvalid', N'ru', N'Код группы «{code}» недопустим: буквы, цифры и подчёркивание, начиная с буквы, до 59 символов.'),
+    (N'err.ECR-PRM-0422.permitGroupCodeInvalid', N'kz', N'«{code}» топ коды жарамсыз: әріптер, цифрлар және асты сызылған таңба, әріптен басталады, 59 таңбаға дейін.'),
+    (N'err.ECR-PRM-0422.permitGroupTextTooLong', N'ru', N'Текст группы ({item}) длиннее {max} символов.'),
+    (N'err.ECR-PRM-0422.permitGroupTextTooLong', N'kz', N'Топ мәтіні ({item}) {max} таңбадан ұзын.'),
+    (N'err.ECR-PRM-0422.permitGroupMemberDuplicate', N'ru', N'Тип разрешения «{typeCode}» указан в группе больше одного раза.'),
+    (N'err.ECR-PRM-0422.permitGroupMemberDuplicate', N'kz', N'«{typeCode}» рұқсат түрі топта бірнеше рет көрсетілген.'),
+    (N'err.ECR-PRM-0422.permitGroupMemberUnknown', N'ru', N'Типа разрешения «{typeCode}» не существует.'),
+    (N'err.ECR-PRM-0422.permitGroupMemberUnknown', N'kz', N'«{typeCode}» рұқсат түрі жоқ.'),
+    (N'err.ECR-PRM-0422.permitGroupMemberNotPublished', N'ru', N'Тип разрешения «{typeCode}» ещё не опубликован: в группу входят только опубликованные типы.'),
+    (N'err.ECR-PRM-0422.permitGroupMemberNotPublished', N'kz', N'«{typeCode}» рұқсат түрі әлі жарияланбаған: топқа тек жарияланған түрлер кіреді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: groups-api ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
