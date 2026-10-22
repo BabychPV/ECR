@@ -1,35 +1,85 @@
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
+using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
 
-/// <summary>
-/// Реалізація <see cref="IPermitGroupStore"/>. ⚠ Етап «контракт»: схеми груп (міграція <c>PRMG01</c>) ще немає, тому
-/// читання повертає «груп немає» (резолвер при цьому коректний - жодна ціль не є групою), а запис кидає
-/// <see cref="InvalidOperationException"/>. Наступний коміт lane замінює цей файл справжньою реалізацією.
-/// </summary>
-public sealed class PermitGroupStore : IPermitGroupStore
+/// <summary>Реалізація <see cref="IPermitGroupStore"/> над <see cref="EcrDbContext"/> (Permits, PRMG).</summary>
+public sealed class PermitGroupStore(EcrDbContext db) : IPermitGroupStore
 {
-    private const string NotReady = "Сховище груп дозволів ще не підключено: потрібна міграція PRMG01.";
+    // Груп десятки; стеля захищає від вибірки без меж.
+    private const int MaxRows = 5_000;
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<PermitGroup>> ListAsync(CancellationToken ct)
-        => Task.FromResult<IReadOnlyList<PermitGroup>>([]);
+    public async Task<IReadOnlyList<PermitGroup>> ListAsync(CancellationToken ct)
+        => await db.PermitGroups.AsNoTracking().Include(g => g.Members)
+            .OrderBy(g => g.Code).Take(MaxRows)
+            .ToListAsync(ct).ConfigureAwait(false);
 
     /// <inheritdoc />
     public Task<PermitGroup?> FindByCodeAsync(string code, CancellationToken ct)
-        => Task.FromResult<PermitGroup?>(null);
+        => db.PermitGroups.Include(g => g.Members).FirstOrDefaultAsync(g => g.Code == code, ct);
 
     /// <inheritdoc />
-    public void Add(PermitGroup group) => throw new InvalidOperationException(NotReady);
+    public void Add(PermitGroup group) => db.PermitGroups.Add(group);
 
     /// <inheritdoc />
-    public Task RemoveAsync(PermitGroup group, CancellationToken ct) => throw new InvalidOperationException(NotReady);
+    public void RemoveMembersNotIn(PermitGroup group, IReadOnlyCollection<int> keepPermitTypeDefIds)
+    {
+        ArgumentNullException.ThrowIfNull(group);
+        ArgumentNullException.ThrowIfNull(keepPermitTypeDefIds);
+
+        db.PermitGroupMembers.RemoveRange(group.Members.Where(m => !keepPermitTypeDefIds.Contains(m.PermitTypeDefId)).ToList());
+    }
 
     /// <inheritdoc />
-    public Task<PermitGroupSnapshot> LoadSnapshotAsync(CancellationToken ct)
-        => Task.FromResult(new PermitGroupSnapshot(0, []));
+    public async Task RemoveAsync(PermitGroup group, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(group);
+
+        var registry = await db.RegistryDefs.FirstOrDefaultAsync(d => d.Id == group.RegistryDefId, ct).ConfigureAwait(false);
+
+        // Усі FK - Restrict: спершу склад, потім група, потім реєстр-«ідентичність».
+        db.PermitGroupMembers.RemoveRange(group.Members.ToList());
+        db.PermitGroups.Remove(group);
+        if (registry is not null)
+        {
+            db.RegistryDefs.Remove(registry);
+        }
+    }
 
     /// <inheritdoc />
-    public Task<long> GetSnapshotRevisionAsync(CancellationToken ct) => Task.FromResult(0L);
+    public async Task<PermitGroupSnapshot> LoadSnapshotAsync(CancellationToken ct)
+    {
+        var revision = await GetSnapshotRevisionAsync(ct).ConfigureAwait(false);
+
+        var groups = await db.PermitGroups.AsNoTracking()
+            .OrderBy(g => g.Id).Take(MaxRows)
+            .Select(g => new { g.Id, g.RegistryDefId, g.IsActive })
+            .Take(MaxRows)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        // Реєстри шапок типів складу - одним запитом (join складу з типами), порядок - за позицією у складі.
+        var members = await (
+                from m in db.PermitGroupMembers.AsNoTracking()
+                join t in db.PermitTypeDefs.AsNoTracking() on m.PermitTypeDefId equals t.Id
+                orderby m.PermitGroupId, m.Ordinal
+                select new { m.PermitGroupId, t.HeaderRegistryDefId })
+            .Take(MaxRows * 100)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var byGroup = members.GroupBy(m => m.PermitGroupId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<int>)[.. g.Select(m => m.HeaderRegistryDefId)]);
+
+        return new PermitGroupSnapshot(
+            revision,
+            [.. groups.Select(g => new PermitGroupSnapshotItem(
+                g.RegistryDefId, g.IsActive, byGroup.GetValueOrDefault(g.Id) ?? []))]);
+    }
+
+    /// <inheritdoc />
+    public async Task<long> GetSnapshotRevisionAsync(CancellationToken ct)
+        => await db.PermitGroups.AsNoTracking()
+            .Join(db.RegistryDefs.AsNoTracking(), g => g.RegistryDefId, d => d.Id, (g, d) => (long)d.DataRevision + 1)
+            .SumAsync(ct).ConfigureAwait(false);
 }

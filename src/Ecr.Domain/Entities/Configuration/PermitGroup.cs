@@ -79,6 +79,12 @@ public sealed class PermitGroup : Entity<int>
     /// <summary>Хто змінив востаннє.</summary>
     public int UpdatedByUserId { get; private set; }
 
+    /// <summary>
+    /// Лічильник змін групи (назва, опис, активність, склад). Зростає при КОЖНІЙ зміні, тож рядок групи завжди змінюється
+    /// і база оновлює <see cref="RowVersion"/>, навіть коли час зміни збігся з попереднім (заміна складу в ту ж мілісекунду).
+    /// </summary>
+    public int Revision { get; private set; }
+
     /// <summary>Токен оптимістичної конкуренції (<c>If-Match</c>); ставить база.</summary>
     public byte[] RowVersion { get; private set; } = [];
 
@@ -141,6 +147,7 @@ public sealed class PermitGroup : Entity<int>
 
     private void MarkChanged(int userId, DateTime utcNow)
     {
+        Revision++;
         UpdatedAt = utcNow;
         UpdatedByUserId = userId;
     }

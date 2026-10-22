@@ -118,6 +118,11 @@ public sealed class InMemoryPermitGroupStore : IPermitGroupStore
     public void Add(PermitGroup group) => _groups.Add(group);
 
     /// <inheritdoc />
+    public void RemoveMembersNotIn(PermitGroup group, IReadOnlyCollection<int> keepPermitTypeDefIds)
+    {
+    }
+
+    /// <inheritdoc />
     public Task RemoveAsync(PermitGroup group, CancellationToken ct)
     {
         _groups.Remove(group);

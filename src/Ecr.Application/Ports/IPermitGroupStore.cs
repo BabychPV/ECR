@@ -22,6 +22,15 @@ public interface IPermitGroupStore
     /// <param name="group">Група.</param>
     public void Add(PermitGroup group);
 
+    /// <summary>
+    /// Позначає видаленими рядки складу, яких немає в <paramref name="keepPermitTypeDefIds"/>. ⛔ Кликати ДО
+    /// <c>PermitGroup.ReplaceMembers</c>: усі FK - Restrict, і рядок, прибраний з колекції раніше за позначку, EF вважає
+    /// розірваним обовʼязковим зв'язком.
+    /// </summary>
+    /// <param name="group">Група (відстежувана, зі складом).</param>
+    /// <param name="keepPermitTypeDefIds">Типи, що лишаються у складі.</param>
+    public void RemoveMembersNotIn(PermitGroup group, IReadOnlyCollection<int> keepPermitTypeDefIds);
+
     /// <summary>Прибирає групу разом зі складом і прихованим реєстром-«ідентичністю».</summary>
     /// <param name="group">Група.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -34,7 +43,7 @@ public interface IPermitGroupStore
     public Task<PermitGroupSnapshot> LoadSnapshotAsync(CancellationToken ct);
 
     /// <summary>
-    /// Дешева «ревізія» складу всіх груп (сума <c>DataRevision</c> прихованих реєстрів груп і їхня кількість):
+    /// Дешева «ревізія» складу всіх груп (сума <c>DataRevision + 1</c> прихованих реєстрів груп):
     /// змінюється, коли будь-яку групу створили, видалили чи змінили склад. Один агрегатний запит.
     /// </summary>
     /// <param name="ct">Токен скасування.</param>

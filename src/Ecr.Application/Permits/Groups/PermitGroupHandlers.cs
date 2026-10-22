@@ -435,7 +435,9 @@ public sealed class ReplacePermitGroupTypesHandler(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            group.ReplaceMembers([.. members.Select(m => m.Id)], userId, now);
+            var keep = members.Select(m => m.Id).ToList();
+            groups.RemoveMembersNotIn(group, keep);
+            group.ReplaceMembers(keep, userId, now);
 
             // Ревізія реєстру групи - сигнал іншим вузлам перечитати знімок складу.
             if (await registries.FindDefinitionByIdAsync(group.RegistryDefId, innerCt).ConfigureAwait(false) is { } registry)
