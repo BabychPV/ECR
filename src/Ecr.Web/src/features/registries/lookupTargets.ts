@@ -37,3 +37,32 @@ export function lookupTargetLabel(registry: RegistryDefDto): string {
     ? t('registries.permitHeaderOption', { name, code: registry.code })
     : `${name} (${registry.code})`;
 }
+
+export interface LookupTargetOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * Дані `Select` вибору цілі Lookup: група «Permits» ПЕРШОЮ (шапки типів дозволів, `PRM_*`), далі «Dictionaries».
+ *
+ * ⚠ Без дозволів у відповіді (немає опублікованих типів або немає права) - плаский список довідників, як було:
+ * порожня група не малюється. Це не помилка і не окреме повідомлення.
+ */
+export function lookupTargetSelectData(
+  registries: readonly RegistryDefDto[],
+): LookupTargetOption[] | { group: string; items: LookupTargetOption[] }[] {
+  const toOption = (registry: RegistryDefDto): LookupTargetOption => ({
+    value: String(registry.id),
+    label: lookupTargetLabel(registry),
+  });
+  const permits = registries.filter((registry) => isPermitHeaderRegistry(registry.code)).map(toOption);
+  const dictionaries = registries.filter((registry) => !isPermitHeaderRegistry(registry.code)).map(toOption);
+
+  if (permits.length === 0) return dictionaries;
+
+  return [
+    { group: t('registries.lookupGroup.permits'), items: permits },
+    { group: t('registries.lookupGroup.dictionaries'), items: dictionaries },
+  ];
+}

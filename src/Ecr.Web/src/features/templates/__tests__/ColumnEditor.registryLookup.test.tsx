@@ -28,6 +28,8 @@ const SeededStrings: Record<string, string> = {
   'common.cancel': 'Cancel',
   'columns.save': 'Save',
   'registries.permitHeaderOption': 'Permits: {name} ({code})',
+  'registries.lookupGroup.permits': 'Permits',
+  'registries.lookupGroup.dictionaries': 'Dictionaries',
 };
 
 /**
@@ -130,6 +132,20 @@ describe('ColumnEditor: вибір довідника за назвою (ауд�
     fireEvent.click(await screen.findByRole('option', { name: 'Permits: Air permit (PRM_AIR)' }));
 
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ lookupRegistryDefId: 77 }));
+  }, 60000);
+
+  // ✎ Permits (template-picker): група «Permits» першою, потім «Dictionaries». Мутаційний доказ: плаский список.
+  it('шапки дозволів - окрема група «Permits» перед «Dictionaries»', async () => {
+    await show({ ...emptyColumnDraft(1), dataType: 'Lookup' }, vi.fn());
+
+    fireEvent.click(await screen.findByLabelText('Registry'));
+    const permitsGroup = await screen.findByText('Permits');
+    const dictionariesGroup = await screen.findByText('Dictionaries');
+    const air = await screen.findByRole('option', { name: 'Permits: Air permit (PRM_AIR)' });
+
+    const before = (a: Element, b: Element): boolean => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(before(permitsGroup, air)).toBe(true);
+    expect(before(air, dictionariesGroup)).toBe(true);
   }, 60000);
 
   it('наявна колонка з уже заданим (сирим) ідентифікатором показує правильно вибраний довідник', async () => {

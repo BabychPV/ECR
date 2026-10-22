@@ -9114,6 +9114,8 @@ USING (VALUES
     -- PERMITS: add-value ── кінець секції ──
     -- PERMITS: lookup-prm ── en: шапка типу дозволу як ціль Lookup поля шапки й колонки шаблону; ru/kz — порцією PERMITS: lookup-prm нижче ──
     ,(N'registries.permitHeaderOption', N'en', N'Permits: {name} ({code})', 1)
+    ,(N'registries.lookupGroup.permits', N'en', N'Permits', 1)
+    ,(N'registries.lookupGroup.dictionaries', N'en', N'Dictionaries', 1)
     -- PERMITS: lookup-prm ── кінець секції ──
     -- PERMITS: migrate-lookup-remap ── перенос версії: мапа записів Lookup шапки (ECR-SCHM-0422 migrateLookup*); ru/kz — порцією PERMITS: migrate-lookup-remap нижче ──
     ,(N'err.ECR-SCHM-0422.migrateLookupRemapInvalid', N'en', N'The Lookup remap map is malformed: only header fields are supported (kind "header"), the field code must be non-empty, entry ids must be positive, a source entry may be listed once, and every source entry must belong to the registry of the version being moved from. At most {maxTargets} fields with at most {maxPairs} pairs each are allowed.', 1)
@@ -23626,7 +23628,11 @@ INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'registries.permitHeaderOption', N'ru', N'Разрешения: {name} ({code})'),
-    (N'registries.permitHeaderOption', N'kz', N'Рұқсаттар: {name} ({code})')
+    (N'registries.permitHeaderOption', N'kz', N'Рұқсаттар: {name} ({code})'),
+    (N'registries.lookupGroup.permits', N'ru', N'Разрешения'),
+    (N'registries.lookupGroup.permits', N'kz', N'Рұқсаттар'),
+    (N'registries.lookupGroup.dictionaries', N'ru', N'Справочники'),
+    (N'registries.lookupGroup.dictionaries', N'kz', N'Анықтамалықтар')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
