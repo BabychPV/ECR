@@ -41,6 +41,17 @@ public sealed record StaleDocumentRow(long DocumentId, DateTime? Since);
 /// 0,6–1,7 с у плоскій формі, ті самі рядки). Семантика не змінена: <c>MIN</c> по тому самому об'єднанні («правки
 /// після прогону» + «довідник після входів прогону»). Сторож — <c>DocumentStaleResultsStoreTests</c>.
 ///
+/// ⛔ Довідникова гілка (2026-10-22, rc30): «які довідники читали результати цього прогону» береться ОДНИМ множинним
+/// підзапитом <c>used</c> (RegistryUse × CalculationResult періоду, GROUP BY) з <c>INNER HASH JOIN</c>, а не корельованим
+/// <c>EXISTS</c> на кожну пару «документ × довідник» і не нерівністю <c>rd.DataChangedAt &gt; …</c> як ведучим з'єднанням. Причина -
+/// ЗАНИЖЕНА оцінка: агрегат <c>x</c> (документи періоду) оптимізатор рахує у 2-3 рядки при фактичних сотнях (результати
+/// зосереджені в кількох документах), тому ставив <c>used</c> внутрішньою стороною вкладених циклів із <c>Table Spool</c>
+/// (виміряно: 77 виконань × 100 тис. рядків = 7,7 млн рядків спулу, 1,2-25 с замість 0,15 с; на Linux CI SQL Server 2019 -
+/// 30 с таймаути <c>DocumentStaleResultsStoreTests</c>). Хеш-з'єднання не залежить від оцінки кількості документів.
+/// Семантика та сама: <c>MIN</c> по тих самих парах (документ, довідник), дублі прибирає <c>GROUP BY</c> (перевірено
+/// збігом кількості рядків і <c>CHECKSUM_AGG</c> з колишньою формою на двох базах). ⚠ <c>INNER HASH JOIN</c> фіксує порядок
+/// з'єднань усього запиту - порядок у тексті (x, r, used, rd; першою гілкою x, r, c) зберігати.
+///
 /// ⚠ Сирий SQL: <c>aud.*</c> поза моделлю EF. Результат лишається <c>IQueryable</c> — компонується в
 /// підзапит <c>IN</c> до <c>Take</c> (фільтр) або звужується до сторінки (позначка).
 /// </remarks>
@@ -86,17 +97,17 @@ internal static class StaleResultsQuery
                                    AND r0.Status = N'Current'
                                  GROUP BY cr.DocumentId) AS x
                           JOIN calc.CalculationRun AS r ON r.Id = x.RunId
+                          INNER HASH JOIN (SELECT cr2.CalculationRunId AS RunId, cr2.DocumentId AS DocumentId, u.RegistryDefId AS RegistryDefId
+                                             FROM cfg.RegistryUse AS u
+                                             JOIN calc.CalculationResult AS cr2 ON cr2.MethodologyVersionId = u.SourceId
+                                            WHERE u.SourceKind = 1
+                                              AND cr2.PeriodKey = {periodKey}
+                                            GROUP BY cr2.CalculationRunId, cr2.DocumentId, u.RegistryDefId) AS used
+                            ON used.RunId = x.RunId AND used.DocumentId = x.DocumentId
                           JOIN cfg.RegistryDef AS rd
-                            ON rd.DataChangedAt > COALESCE(r.InputsAsOfUtc, r.StartedAt)
+                            ON rd.Id = used.RegistryDefId
+                           AND rd.DataChangedAt > COALESCE(r.InputsAsOfUtc, r.StartedAt)
                          WHERE {hasBy} = 0
-                           AND EXISTS (SELECT 1
-                                         FROM cfg.RegistryUse AS u
-                                         JOIN calc.CalculationResult AS cr2 ON cr2.MethodologyVersionId = u.SourceId
-                                        WHERE u.RegistryDefId = rd.Id
-                                          AND u.SourceKind = 1
-                                          AND cr2.CalculationRunId = x.RunId
-                                          AND cr2.PeriodKey = {periodKey}
-                                          AND cr2.DocumentId = x.DocumentId)
                        ) AS t
                  GROUP BY t.DocumentId
                 """);
