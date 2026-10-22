@@ -676,7 +676,8 @@ public sealed class RegistryEntryWriter(
                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
     private async Task<RegistryDef> RequireDefinitionAsync(int registryDefId, CancellationToken ct)
-        => await registries.FindDefinitionByIdAsync(registryDefId, ct).ConfigureAwait(false)
+    {
+        var definition = await registries.FindDefinitionByIdAsync(registryDefId, ct).ConfigureAwait(false)
            ?? throw new NotFoundException(
                "ECR-REG-0404",
                $"Довідника {registryDefId} не існує.",
@@ -685,6 +686,12 @@ public sealed class RegistryEntryWriter(
                    ["messageKey"] = "err.ECR-REG-0404.registryId",
                    ["registryDefId"] = registryDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                });
+
+        // PRMG: записів у прихованому реєстрі групи типів дозволів немає й бути не може - інакше запис, доданий повз групу,
+        // збігся б за RegistryDefId із ціллю колонки і PATCH прийняв би його.
+        Permits.Groups.PermitGroupRegistryGuard.RequireNotManaged(definition.Code);
+        return definition;
+    }
 
     /// <summary>Новий запис довідника, уже доданий у сховище.</summary>
     /// <remarks>

@@ -130,6 +130,67 @@ public sealed class PermitFieldMetaConfiguration : IEntityTypeConfiguration<Perm
     }
 }
 
+/// <summary>Конфігурація <see cref="PermitGroup"/> — груп типів дозволів (міграція <c>PRMG01_PermitGroups</c>).</summary>
+public sealed class PermitGroupConfiguration : IEntityTypeConfiguration<PermitGroup>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<PermitGroup> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("PermitGroup", "cfg");
+        builder.HasKey(x => x.Id).HasName("PK_PermitGroup");
+        builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
+        builder.LocalizedText(x => x.NameL10n);
+        builder.LocalizedText(x => x.DescriptionL10n);
+        builder.Property(x => x.CreatedAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.UpdatedAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.RowVersion).IsRowVersion();
+        builder.Property(x => x.Revision).HasDefaultValue(0, "DF_PermitGroup_Rev").ValueGeneratedNever();
+
+        // `ValueGeneratedNever`: false - законне значення (деактивована група), а DEFAULT схеми не має підмінити його при вставці.
+        builder.Property(x => x.IsActive).HasDefaultValue(true, "DF_PermitGroup_Act").ValueGeneratedNever();
+
+        builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_PermitGroup");
+
+        // Реєстр - ідентичність рівно однієї групи.
+        builder.HasIndex(x => x.RegistryDefId).IsUnique().HasDatabaseName("UQ_PermitGroup_Registry");
+
+        builder.HasOne<RegistryDef>().WithMany().HasForeignKey(x => x.RegistryDefId)
+               .HasConstraintName("FK_PermitGroup_Reg");
+        builder.HasOne<User>().WithMany().HasForeignKey(x => x.CreatedByUserId)
+               .HasConstraintName("FK_PermitGroup_CreatedBy");
+        builder.HasOne<User>().WithMany().HasForeignKey(x => x.UpdatedByUserId)
+               .HasConstraintName("FK_PermitGroup_UpdatedBy");
+
+        // Каскаду немає (усі FK - Restrict, EcrDbContext.OnModelCreating): склад видаляє й замінює сховище явно,
+        // спершу позначаючи зайві рядки видаленими (IPermitGroupStore.RemoveMembersNotIn / RemoveAsync).
+        builder.HasMany(x => x.Members).WithOne().HasForeignKey(m => m.PermitGroupId)
+               .HasConstraintName("FK_PermitGroupMember_Group");
+        builder.Navigation(x => x.Members).UsePropertyAccessMode(PropertyAccessMode.Field);
+    }
+}
+
+/// <summary>Конфігурація <see cref="PermitGroupMember"/> — типів у складі групи.</summary>
+public sealed class PermitGroupMemberConfiguration : IEntityTypeConfiguration<PermitGroupMember>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<PermitGroupMember> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("PermitGroupMember", "cfg");
+        builder.HasKey(x => new { x.PermitGroupId, x.PermitTypeDefId }).HasName("PK_PermitGroupMember");
+
+        // Зворотний пошук «у яких групах тип» (ForeignKeyIndexConvention вимкнено).
+        builder.HasIndex(x => x.PermitTypeDefId).HasDatabaseName("IX_PermitGroupMember_Type");
+
+        // Опублікований тип не видаляється (ECR-PRM-4094), чернетка в групі бути не може: Restrict.
+        builder.HasOne<PermitTypeDef>().WithMany().HasForeignKey(x => x.PermitTypeDefId)
+               .HasConstraintName("FK_PermitGroupMember_Type");
+    }
+}
+
 /// <summary>Конфігурація <see cref="PermitSheetBinding"/> — прив'язок таблиць аркуша до дозволів.</summary>
 public sealed class PermitSheetBindingConfiguration : IEntityTypeConfiguration<PermitSheetBinding>
 {

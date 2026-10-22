@@ -69,7 +69,12 @@ public sealed partial class PatchCellsHandler(
     IRowActivityFilterSource? rowActivity = null,
 
     // ⛔ PA2-S-02: ключ рядка дозволу (роль RowKey) людина не править; `null` (прямий конструктор у тестах) - без цієї перевірки.
-    IPermitBindingStore? permitBindings = null)
+    IPermitBindingStore? permitBindings = null,
+
+    // ⛔ PRMG: ціль Lookup може бути ГРУПОЮ типів дозволів (прихований `PRMG_*`): запис належить цілі за членством,
+    // а не за збігом реєстру. Порівняння - лише через `LookupTargetMatcher`; збіг реєстру (Land) резолвера не кличе.
+    // `null` (прямий конструктор у тестах) - груп немає.
+    Permits.Groups.ILookupTargetResolver? groups = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -1847,8 +1852,22 @@ public sealed partial class PatchCellsHandler(
             .FindPeriodBoundsAsync(context.Instance.DocumentId, context.PeriodKey.Value, ct)
             .ConfigureAwait(false);
 
-        CheckLookupStandings(context, changed, standings, bounds);
+        await Permits.Groups.LookupTargetMatcher.EnsureFreshOnMismatchAsync(
+            groups, LookupPairs(context, changed, standings), ct).ConfigureAwait(false);
+
+        CheckLookupStandings(context, changed, standings, bounds, groups);
     }
+
+    /// <summary>Пари (ціль колонки, реєстр запису) змінених посилань - для оновлення знімка груп лише при незбігу.</summary>
+    private static IEnumerable<(int? Target, int EntryRegistryId)> LookupPairs(
+        RequestContext context,
+        List<(CellAddress Address, long? EntryId)> changed,
+        Dictionary<long, RegistryEntryStanding> standings)
+        => changed
+            .Where(cell => standings.ContainsKey(cell.EntryId!.Value))
+            .Select(cell => (
+                context.Snapshot.ColumnsById[cell.Address.ColumnDefId].LookupRegistryDefId,
+                standings[cell.EntryId!.Value].RegistryDefId));
 
     /// <summary><c>Lookup</c>-комірки батчу з непорожнім посиланням.</summary>
     private static List<(CellAddress Address, long? EntryId)> LookupCells(
@@ -1917,7 +1936,8 @@ public sealed partial class PatchCellsHandler(
         RequestContext context,
         List<(CellAddress Address, long? EntryId)> changed,
         Dictionary<long, RegistryEntryStanding> standings,
-        PeriodBounds? bounds)
+        PeriodBounds? bounds,
+        Permits.Groups.ILookupTargetResolver? groups)
     {
         // Дата чинності — останній день періоду: D-158 (10-decisions.md), як пікер сітки, OrphanScanner і знімок розрахунку.
         var asOf = bounds?.PeriodEnd;
@@ -1927,7 +1947,9 @@ public sealed partial class PatchCellsHandler(
             var standing = standings[cell.EntryId!.Value];
             var column = context.Snapshot.ColumnsById[cell.Address.ColumnDefId];
 
-            if (standing.RegistryDefId != column.LookupRegistryDefId)
+            // PRMG: ціль-група приймає записи реєстрів складу (збіг реєстру - швидкий шлях без резолвера; Deny - як «немає»).
+            if (!Permits.Groups.LookupTargetMatcher.Belongs(
+                    groups, context.Profile, column.LookupRegistryDefId, standing.RegistryDefId))
             {
                 return LookupRejection.ForeignRegistry;
             }

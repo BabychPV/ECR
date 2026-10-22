@@ -201,8 +201,11 @@ export function mountListEditor(host: HTMLElement, props: MountListEditorProps):
       item.dataset['value'] = option.value ?? '';
 
       const label = doc.createElement('span');
+      label.className = 'ecr-list-editor-label';
       label.textContent = option.label;
       item.append(label);
+      // PA4-U-03: обрізана трикрапкою мітка лишається доступною повністю.
+      item.title = option.hint !== undefined && option.hint.length > 0 ? `${option.label} (${option.hint})` : option.label;
 
       if (option.hint !== undefined && option.hint.length > 0) {
         const hint = doc.createElement('span');

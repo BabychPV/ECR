@@ -169,4 +169,16 @@ public sealed class RegistryDef : Entity<int>
     /// перевірка виконується в use-case, тут лише зміна стану (ФВ-8.9).
     /// </summary>
     public void SwitchSource(RegistrySourceKind kind) => SourceKind = kind;
+
+    /// <summary>Вмикає чи вимикає довідник (для прихованого реєстру групи дозволів - разом із групою).</summary>
+    /// <param name="isActive">Новий стан.</param>
+    public void SetActive(bool isActive) => IsActive = isActive;
+
+    /// <summary>Змінює назву (для прихованого реєстру групи дозволів - разом із групою).</summary>
+    /// <param name="name">Нова назва.</param>
+    public void Rename(LocalizedText name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        NameL10n = name;
+    }
 }

@@ -227,6 +227,8 @@ public sealed class EcrApiFactory(
                     return new CacheLifetimes(configured.Metadata, configured.AccessProfile, window);
                 });
             }
+
+            ExtraServices?.Invoke(services);
         });
     }
 
@@ -240,6 +242,13 @@ public sealed class EcrApiFactory(
 
         base.Dispose(disposing);
     }
+
+    /// <summary>
+    /// Додаткові підміни сервісів для окремого тесту (виконуються ПІСЛЯ типових; пізніша реєстрація виграє).
+    /// Напр. підставити <c>FakePermitGroupResolver</c> із <c>ThrowOnUse</c> - довести, що гарячий шлях Land
+    /// резолвер груп не кличе.
+    /// </summary>
+    public Action<IServiceCollection>? ExtraServices { get; init; }
 
     /// <summary>Каталог джерела з однієї позиції; у мережу не ходить.</summary>
     /// <param name="calls">Куди записати адресу спроби.</param>

@@ -166,6 +166,23 @@ describe('mountListEditor — клавіатура', () => {
   });
 });
 
+describe('mountListEditor — довгі мітки (PA4-U-03)', () => {
+  // Мутаційний доказ: прибери `item.title`/клас `ecr-list-editor-label` - тест почервоніє, довга мітка піклера групи
+  // знову виштовхувала б код за край списку без повного тексту.
+  it('опція має клас обрізання мітки і title з повним текстом (мітка + код)', () => {
+    const long = 'KZ79-0001 — Hot and cold water intake from surface sources (2026-01-01)';
+    mountListEditor(host(), {
+      options: [{ value: '1', label: long, hint: 'KZ79-0001' }, { value: '2', label: 'Short' }],
+      selected: null, initialQuery: '', ariaLabel: 'Permit', onCommit: vi.fn(),
+    });
+
+    const [first, second] = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+    expect(first?.title).toBe(`${long} (KZ79-0001)`);
+    expect(first?.firstElementChild?.className).toBe('ecr-list-editor-label');
+    expect(second?.title).toBe('Short');
+  });
+});
+
 describe('mountListEditor — великий довідник і завантаження', () => {
   it('показує не більше MaxShownOptions і каже, скільки лишилось', () => {
     const many: ListOption[] = Array.from({ length: 50_000 }, (_, index) => ({

@@ -63,6 +63,10 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<PermitFieldMeta> PermitFieldMetas => Set<PermitFieldMeta>();
     public DbSet<PermitSheetBinding> PermitSheetBindings => Set<PermitSheetBinding>();
     public DbSet<PermitSheetBindingColumn> PermitSheetBindingColumns => Set<PermitSheetBindingColumn>();
+
+    /// <summary>Групи типів дозволів і їхній склад (Permits, PRMG).</summary>
+    public DbSet<PermitGroup> PermitGroups => Set<PermitGroup>();
+    public DbSet<PermitGroupMember> PermitGroupMembers => Set<PermitGroupMember>();
     public DbSet<CalculationBinding> CalculationBindings => Set<CalculationBinding>();
 
     // uom

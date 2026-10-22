@@ -78,7 +78,8 @@ public sealed class DocumentDataExporter(
     ICalculationResultStore? results = null,
     IDocumentHeaderStore? headers = null,
     IFormulaEngine? formulaEngine = null,
-    Microsoft.Extensions.Logging.ILogger<Calculations.CalculatedCellOverlay>? overlayLog = null)
+    Microsoft.Extensions.Logging.ILogger<Calculations.CalculatedCellOverlay>? overlayLog = null,
+    Permits.Groups.IPermitGroupResolver? groups = null)
 {
     private const string RowKeyHeader = "rowKey";
 
@@ -185,7 +186,7 @@ public sealed class DocumentDataExporter(
         // документа (див. `DocumentHeaderExport`), окремого рівня Deny для поля
         // шапки в системі немає.
         var header = await DocumentHeaderExport
-            .ReadAsync(headers, registries, snapshot, documentId, language, ct).ConfigureAwait(false);
+            .ReadAsync(headers, registries, snapshot, documentId, language, ct, groups).ConfigureAwait(false);
 
         return format == DocumentExportFormat.Csv
             ? Zip(tables, header)
@@ -533,8 +534,10 @@ public sealed class DocumentDataExporter(
                      .Select(c => c.LookupRegistryDefId!.Value)
                      .Distinct())
         {
-            var entries = await registries.ListEntriesAsync(registryId, ct).ConfigureAwait(false);
-            result[registryId] = entries.GroupBy(e => e.Id).ToDictionary(g => g.Key, g => g.First().Code);
+            // Permits PRMG: ціль-група - записи реєстрів-членів, підпис «номер — тип»; решта - код запису, як раніше.
+            var entries = await Permits.Groups.LookupTargetEntries.ListAsync(registries, groups, registryId, ct).ConfigureAwait(false);
+            result[registryId] = entries.GroupBy(e => e.Entry.Id)
+                .ToDictionary(g => g.Key, g => Permits.Groups.LookupTargetEntries.Label(g.First().Entry.Code, g.First().TypeCode));
         }
 
         return result;

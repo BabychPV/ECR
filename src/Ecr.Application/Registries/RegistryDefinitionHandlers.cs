@@ -29,8 +29,13 @@ public sealed class GetRegistryDefinitionHandler(
     IRegistryStore registries,
     IRegistryKeyStore keys,
     Security.IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IPermitTypeStore? permits = null,
+    IPermitGroupStore? permitGroups = null)
 {
+    // ⚠ `permits`/`permitGroups` (Permits, PRMG) потрібні лише для ознаки `Kind` (шапка дозволу / група); необов'язкові
+    // для тестів, що будують обробник руками, - контейнер підставляє їх завжди.
+
     /// <summary>Право на читання довідників (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.View";
 
@@ -63,6 +68,24 @@ public sealed class GetRegistryDefinitionHandler(
         var fields = definition.Fields.OrderBy(f => f.Ordinal).ToList();
         var fieldCodeById = fields.ToDictionary(f => f.Id, f => f.Code);
         var keyDefs = await keys.ListKeysForUpdateAsync(definition.Id, ct).ConfigureAwait(false);
+
+        // Вид цілі Lookup (PRMG): лише для реєстрів з префіксом PRM - решта довідників не платить за зайві запити.
+        var kind = RegistryDefKind.Dictionary;
+        LocalizedText? groupDescription = null;
+        if (definition.Code.StartsWith("PRM", StringComparison.Ordinal))
+        {
+            if (permitGroups is not null
+                && (await permitGroups.ListBriefAsync(ct).ConfigureAwait(false)).FirstOrDefault(g => g.RegistryDefId == definition.Id) is { } group)
+            {
+                kind = RegistryDefKind.PermitGroup;
+                groupDescription = group.DescriptionL10n;
+            }
+            else if (permits is not null
+                     && (await permits.ListPublishedHeaderRegistryIdsAsync(ct).ConfigureAwait(false)).Contains(definition.Id))
+            {
+                kind = RegistryDefKind.PermitHeader;
+            }
+        }
 
         return new RegistryDefinitionDto(
             definition.Id,
@@ -99,7 +122,9 @@ public sealed class GetRegistryDefinitionHandler(
                 .ToList(),
             [.. keyDefs.Select(k => new RegistryKeyDto(
                 k.Id, k.Code, k.NameL10n, KeyFieldCodes(k, fieldCodeById), k.IsPrimary, k.IgnoreCase, k.IsActive))],
-            definition.CodeMode);
+            definition.CodeMode,
+            kind,
+            groupDescription);
     }
 
     /// <summary>Коди полів ключа в порядку частин.</summary>
@@ -410,6 +435,9 @@ public sealed class SaveRegistryDefinitionHandler(
 
         // ⛔ S18: заборона на довідник виграє і над правом на опис — 404, як неіснуючий.
         RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
+
+        // PRMG: прихований реєстр групи типів дозволів не має опису, що редагується.
+        Permits.Groups.PermitGroupRegistryGuard.RequireNotManaged(definition.Code);
 
         RequireCurrentVersion(definition, ifMatch);
 

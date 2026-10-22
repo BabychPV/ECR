@@ -196,6 +196,10 @@ public sealed class ImportRegistryEntriesHandler(
         // якого не буде.
         ExternalRegistryGuard.EnsureManualEditAllowed(definition);
 
+        // PRMG: імпорт не йде через RegistryEntryWriter.WriteAsync, тож guard прихованого реєстру групи типів дозволів тут
+        // окремо - і для прев'ю, і для застосування (запис у PRMG_ збігся б за RegistryDefId із ціллю колонки).
+        Permits.Groups.PermitGroupRegistryGuard.RequireNotManaged(definition.Code);
+
         // ⛔ L5-11: файл не в UTF-8 (cp1251 із Excel) контролер раніше декодував із підстановкою «�» і
         // тихо псував кирилицю; тепер він лише позначає це, а відмову (після перевірки права) дає тут.
         if (contentNotUtf8)

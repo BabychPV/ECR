@@ -9,13 +9,27 @@ namespace Ecr.Application.Registries.Dto;
 /// <see cref="Id"/>, а не <see cref="Display"/> (`ФВ-8.8`) — саме тому
 /// перейменування не змінює історичні дані.
 /// </summary>
+/// <param name="Id">Ідентифікатор запису (це значення зберігається в комірці).</param>
+/// <param name="Code">Стабільний код (для дозволу - його номер).</param>
+/// <param name="Display">Локалізована назва для показу.</param>
+/// <param name="ParentEntryId">Батьківський запис ієрархії.</param>
+/// <param name="ValidFrom">Початок чинності.</param>
+/// <param name="ValidTo">Кінець чинності.</param>
+/// <param name="TypeCode">
+/// Лише в піклері групи типів дозволів (<c>GET registries/PRMG_*/entries</c>): код типу дозволу запису; інакше <c>null</c>.
+/// </param>
+/// <param name="TypeName">
+/// Назва типу мовою користувача (підпис «номер — тип»); лише в піклері групи, інакше <c>null</c>.
+/// </param>
 public sealed record RegistryEntryDto(
     long Id,
     string Code,
     string Display,
     long? ParentEntryId,
     DateOnly? ValidFrom,
-    DateOnly? ValidTo);
+    DateOnly? ValidTo,
+    string? TypeCode = null,
+    string? TypeName = null);
 
 /// <summary>Створення або оновлення запису довідника.</summary>
 /// <param name="Id"><c>null</c> — створення нового запису; інакше — оновлення наявного.</param>

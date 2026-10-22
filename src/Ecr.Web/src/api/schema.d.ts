@@ -9697,6 +9697,339 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/permit-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Усі групи зі складом і використанням (їх десятки: без сторінок). Право `Registry.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitGroupDto"][];
+                        "text/json": components["schemas"]["PermitGroupDto"][];
+                        "text/plain": components["schemas"]["PermitGroupDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Створює групу (разом із прихованим реєстром `PRMG_&lt;КОД&gt;` і початковим складом). Право `Permit.EditType`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreatePermitGroupRequest"];
+                    "application/json": components["schemas"]["CreatePermitGroupRequest"];
+                    "text/json": components["schemas"]["CreatePermitGroupRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitGroupDto"];
+                        "text/json": components["schemas"]["PermitGroupDto"];
+                        "text/plain": components["schemas"]["PermitGroupDto"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permit-groups/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Група за кодом з токеном `rowVersion`. Право `Registry.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код групи. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitGroupDto"];
+                        "text/json": components["schemas"]["PermitGroupDto"];
+                        "text/plain": components["schemas"]["PermitGroupDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Змінює назву, опис і активність групи (деактивація - `isActive = false`; використану групу видаляти не можна).
+         *     Право `Permit.EditType`. Токен `rowVersion` - з останнього читання. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код групи. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UpdatePermitGroupRequest"];
+                    "application/json": components["schemas"]["UpdatePermitGroupRequest"];
+                    "text/json": components["schemas"]["UpdatePermitGroupRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitGroupDto"];
+                        "text/json": components["schemas"]["PermitGroupDto"];
+                        "text/plain": components["schemas"]["PermitGroupDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Видаляє групу, яку не використовує жоден шаблон (інакше `409 ECR-PRM-4098`: лише деактивація).
+         *     Право `Permit.EditType`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код групи. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permit-groups/{code}/types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Замінює склад групи цілком (єдиний шлях зміни складу): коди ОПУБЛІКОВАНИХ типів у порядку показу. Тип може бути
+         *     у кількох групах. Право `Permit.EditType`. Токен `rowVersion` - з останнього читання. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код групи. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ReplacePermitGroupTypesRequest"];
+                    "application/json": components["schemas"]["ReplacePermitGroupTypesRequest"];
+                    "text/json": components["schemas"]["ReplacePermitGroupTypesRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermitGroupDto"];
+                        "text/json": components["schemas"]["PermitGroupDto"];
+                        "text/plain": components["schemas"]["PermitGroupDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/permit-lists": {
         parameters: {
             query?: never;
@@ -22834,6 +23167,21 @@ export interface components {
              */
             yearGraceOffsetDays: number;
         };
+        /** @description Створення групи. */
+        CreatePermitGroupRequest: {
+            /** @description Код групи (не довше 59 символів: реєстр групи `PRMG_` + код вміщається в 64). */
+            code: string;
+            /** @description Опис (до 1000 символів на мову); `null` - без опису. */
+            descriptionL10n: null | {
+                [key: string]: string;
+            };
+            /** @description Назва; хоча б одна мова непорожня. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /** @description Початковий склад (опубліковані типи, без повторів); `null` - порожня група. */
+            typeCodes: null | string[];
+        };
         /** @description Запит на заведення дозволу (чернеткою). */
         CreatePermitRequest: {
             /**
@@ -26536,6 +26884,60 @@ export interface components {
              */
             validTo: null | string;
         };
+        /** @description Група типів дозволів: назва, опис, склад, використання. */
+        PermitGroupDto: {
+            /** @description Код групи; не змінюється. */
+            code: string;
+            /** @description Опис мовами каталогу; показується під час вибору цілі Lookup; порожній словник - без опису. */
+            descriptionL10n: {
+                [key: string]: string;
+            };
+            /** @description Чи групу можна обрати новою ціллю. */
+            isActive: boolean;
+            /** @description Назва мовами каталогу (en/ru/kz). */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /** @description Код прихованого реєстру-«ідентичності» групи (`PRMG_&lt;КОД&gt;`) - ціль Lookup колонки/поля. */
+            registryCode: string;
+            /**
+             * Format: int32
+             * @description Його ідентифікатор (так ціль зберігає колонка).
+             */
+            registryDefId: number;
+            /** @description Токен оптимістичної конкуренції (base64); повертається в наступному запиті зміни. */
+            rowVersion: string;
+            /** @description Типи складу в порядку показу. */
+            types: components["schemas"]["PermitGroupTypeDto"][];
+            /**
+             * Format: date-time
+             * @description Остання зміна, UTC.
+             */
+            updatedAt: string;
+            /**
+             * Format: int32
+             * @description Скільки колонок/полів шаблонів мають групу ціллю.
+             */
+            usedInColumns: number;
+            /**
+             * Format: int32
+             * @description У скількох шаблонах.
+             */
+            usedInTemplates: number;
+        };
+        /** @description Тип дозволу у складі групи. */
+        PermitGroupTypeDto: {
+            /** @description `Air`, `Water`, `Waste` або `Other`. */
+            category: string;
+            /** @description Код типу. */
+            code: string;
+            /** @description Код реєстру шапки типу (`PRM_&lt;TYPE&gt;`). */
+            headerRegistryCode: string;
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+        };
         /** @description Список зі значеннями. */
         PermitListDetailDto: {
             /** @description Чинні значення в порядку показу. */
@@ -27356,6 +27758,7 @@ export interface components {
              * @description Версія опису довідника.
              */
             definitionVersion?: null | number;
+            descriptionL10n?: null | components["schemas"]["LocalizedText"];
             /**
              * Format: int32
              * @description Чинних записів сьогодні (UTC): активні, не видалені, у вікні дії. Лише в переліку; в інших
@@ -27375,6 +27778,10 @@ export interface components {
             isHierarchical: boolean;
             /** @description Чи мають записи вікно дії; від цього залежить обов'язковість `asOf`. */
             isTemporal: boolean;
+            /** @description Вид цілі Lookup, який визначає СЕРВЕР (клієнт не розпізнає за префіксом коду): `Dictionary` - звичайний довідник,
+             *     `PermitHeader` - шапка типу дозволу (`PRM_&lt;TYPE&gt;`), `PermitGroup` - група типів дозволів (прихований
+             *     `PRMG_&lt;КОД&gt;`). Віддається і в переліку, і в `GET {code}/definition`. */
+            kind?: components["schemas"]["RegistryDefKind"];
             /** @description Назва мовами каталогу. */
             nameL10n: components["schemas"]["LocalizedText"];
             /** @description Хто master (`ФВ-8.9`). Потрібен тому, хто складає набір для
@@ -27402,6 +27809,12 @@ export interface components {
              */
             usedInTemplates?: null | number;
         };
+        /**
+         * @description Вид довідника як цілі Lookup (RegistryDefKind RegistryDefDto.Kind).
+         * @default Dictionary
+         * @enum {unknown}
+         */
+        RegistryDefKind: "Dictionary" | "PermitHeader" | "PermitGroup";
         /** @description Чернетка опису довідника. */
         RegistryDefinitionDraftDto: {
             /**
@@ -27456,6 +27869,7 @@ export interface components {
              * @description Версія опису; росте від зміни складу полів і правил.
              */
             definitionVersion: number;
+            descriptionL10n?: null | components["schemas"]["LocalizedText"];
             /** @description Поля довідника в порядку показу. */
             fields: components["schemas"]["RegistryFieldDto"][];
             /**
@@ -27468,6 +27882,9 @@ export interface components {
             /** @description Складені ключі довідника (`D-151`, RT-11), і вимкнені теж: вимкнений ключ пояснює, чому
              *     колись діяла саме така унікальність. */
             keys?: null | components["schemas"]["RegistryKeyDto"][];
+            /** @description Вид цілі Lookup, який визначає сервер (`Dictionary`, `PermitHeader`, `PermitGroup`): клієнт читає його тут для
+             *     цілі, якої немає в переліку `GET /registries` (опція «unlisted»), а не розпізнає за префіксом коду. */
+            kind?: components["schemas"]["RegistryDefKind"];
             /** @description Мапінг зовнішніх полів на поля довідника (`ФВ-8.11`). */
             mappings: components["schemas"]["RegistryMappingDto"][];
             /** @description Назва мовами каталогу. */
@@ -27524,15 +27941,33 @@ export interface components {
          *     long RegistryEntryDto.Id, а не string RegistryEntryDto.Display (`ФВ-8.8`) — саме тому
          *     перейменування не змінює історичні дані. */
         RegistryEntryDto: {
+            /** @description Стабільний код (для дозволу - його номер). */
             code: string;
+            /** @description Локалізована назва для показу. */
             display: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Ідентифікатор запису (це значення зберігається в комірці).
+             */
             id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Батьківський запис ієрархії.
+             */
             parentEntryId: null | number;
-            /** Format: date */
+            /** @description Лише в піклері групи типів дозволів (`GET registries/PRMG_*\/entries`): код типу дозволу запису; інакше `null`. */
+            typeCode?: null | string;
+            /** @description Назва типу мовою користувача (підпис «номер — тип»); лише в піклері групи, інакше `null`. */
+            typeName?: null | string;
+            /**
+             * Format: date
+             * @description Початок чинності.
+             */
             validFrom: null | string;
-            /** Format: date */
+            /**
+             * Format: date
+             * @description Кінець чинності.
+             */
             validTo: null | string;
         };
         /** @description Рядок історії запису довідника (`GET /registries/{code}/entries/{id}/history`, RT-15). */
@@ -28143,6 +28578,13 @@ export interface components {
         ReplaceNotificationRulesRequest: {
             /** @description Заповнені клітинки; порожній перелік прибирає всі правила. */
             rules: components["schemas"]["NotificationRuleView"][];
+        };
+        /** @description Заміна складу групи цілком. */
+        ReplacePermitGroupTypesRequest: {
+            /** @description Токен, прочитаний разом із групою. */
+            rowVersion: string;
+            /** @description Коди опублікованих типів у порядку показу, без повторів; порожній список - склад очищено. */
+            typeCodes: string[];
         };
         /** @description Запит на заміну чернетки визначення типу. */
         ReplacePermitTypeRequest: {
@@ -31199,6 +31641,21 @@ export interface components {
              * @description Пільговий строк після кінця року.
              */
             yearGraceOffsetDays: number;
+        };
+        /** @description Зміна назви, опису й активності групи (деактивація - `IsActive = false`). */
+        UpdatePermitGroupRequest: {
+            /** @description Опис; `null` - прибрати. */
+            descriptionL10n: null | {
+                [key: string]: string;
+            };
+            /** @description Активність. */
+            isActive: boolean;
+            /** @description Назва. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /** @description Токен, прочитаний разом із групою. */
+            rowVersion: string;
         };
         /** @description Запит на зміну шапки дозволу (чернетка чи чинний). */
         UpdatePermitRequest: {

@@ -428,6 +428,12 @@ public sealed partial class PatchCellsHandler
             // ⚠ Межі — лише якщо є що перевіряти на дату, як і в поштучного.
             var periodBounds = changed.Any(c => c.Count > 0) ? await bounds().ConfigureAwait(false) : null;
 
+            // PRMG: знімок груп оновлюється лише при незбігу реєстру (Land - гілка недосяжна, 0 звернень).
+            await Permits.Groups.LookupTargetMatcher.EnsureFreshOnMismatchAsync(
+                groups,
+                active.SelectMany((x, i) => LookupPairs(x.Context, changed[i], standings)),
+                ct).ConfigureAwait(false);
+
             for (var i = 0; i < active.Count; i++)
             {
                 if (lookups[i].Count == 0)
@@ -441,7 +447,7 @@ public sealed partial class PatchCellsHandler
                     CheckLookupsExist(item.Context, own, standings);
                     if (ownChanged.Count > 0)
                     {
-                        CheckLookupStandings(item.Context, ownChanged, standings, periodBounds);
+                        CheckLookupStandings(item.Context, ownChanged, standings, periodBounds, groups);
                     }
                 });
             }

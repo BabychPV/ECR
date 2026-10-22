@@ -32,7 +32,8 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
-import { isPermitHeaderRegistry, lookupTargetsQuery } from '@/features/registries/lookupTargets';
+import { entryLabelsOf } from '@/features/registries/lookupEntryLabels';
+import { lookupTargetsQuery, usesDocumentWindow } from '@/features/registries/lookupTargets';
 import {
   bilingualLabel,
   ContractOrder,
@@ -410,10 +411,15 @@ export function DocumentHeaderPanel({
     return lookupRegistryDefIds
       .map((id) => {
         const registry = byId.get(id);
-        return { id, code: registry?.code, isTemporal: registry?.isTemporal ?? false };
+        return {
+          id,
+          code: registry?.code,
+          isTemporal: registry?.isTemporal ?? false,
+          inProjectWindow: registry !== undefined && usesDocumentWindow(registry),
+        };
       })
       .filter(
-        (entry): entry is { id: number; code: string; isTemporal: boolean } =>
+        (entry): entry is { id: number; code: string; isTemporal: boolean; inProjectWindow: boolean } =>
           entry.code !== undefined,
       );
   }, [lookupRegistryDefIds, registriesList.data]);
@@ -437,10 +443,11 @@ export function DocumentHeaderPanel({
   const lookupAsOf = todayDateOnly();
 
   const lookupEntriesQueries = useQueries({
-    queries: lookupRegistryCodes.map(({ code, isTemporal }) => {
+    queries: lookupRegistryCodes.map(({ code, isTemporal, inProjectWindow }) => {
       // ✎ Permits: перелік дозволів — у ВІКНІ проєкту документа (сервер бере межі з документа): лише активні й чинні
       // бодай день вікна, як і приймає збереження шапки (`ECR-HDR-4223`). Чернетки (Draft) не пропонуються ніколи.
-      if (isPermitHeaderRegistry(code)) {
+      // Те саме для групи типів (`PRMG_*`): її піклер — обʼєднання дозволів складу у тому ж вікні. Вид цілі — `kind` сервера.
+      if (inProjectWindow) {
         const permitsUrl = `/api/v1/registries/${encodeURIComponent(code)}/entries`;
 
         return {
@@ -1160,8 +1167,9 @@ function HeaderFieldInput({
     // для нового вибору недоступна. Mantine `Select` показує підпис лише для значення, яке Є
     // в `data` — тому такий запис і додається синтетичною опцією.
     const known = selectedIdValid && lookupEntries.some((entry) => entry.id === selectedId);
+    const entryLabels = entryLabelsOf(lookupEntries);
     const options = [
-      ...lookupEntries.map((entry) => ({ value: String(entry.id), label: entry.display })),
+      ...lookupEntries.map((entry) => ({ value: String(entry.id), label: entryLabels.get(entry.id) ?? entry.display })),
       ...(selectedIdValid && !known
         ? [{ value: String(selectedId), label: lookupCellDisplay(selectedId, lookupEntries, unlistedLabels), disabled: true }]
         : []),

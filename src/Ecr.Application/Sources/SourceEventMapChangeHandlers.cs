@@ -25,7 +25,8 @@ public sealed class UpdateSourceEventMapHandler(
     ICurrentUser currentUser,
     IUnitOfWork uow,
     IAuditWriter audit,
-    IClock clock)
+    IClock clock,
+    Permits.Groups.ILookupTargetResolver? groups = null)
 {
     /// <summary>Операція в журналі структурних змін.</summary>
     public const string AuditOperation = "UpdateSourceEventMap";
@@ -69,7 +70,7 @@ public sealed class UpdateSourceEventMapHandler(
             command.VolumeMode, command.FilterAttribute, command.FilterScope, command.FilterValue, command.Fields);
 
         var old = IntegrationConfigAudit.Snapshot(SourceEventMapSupport.ToDto(map));
-        var built = await SourceEventMapSupport.BuildSpecsAsync(store, sources, command.Fields, ct).ConfigureAwait(false);
+        var built = await SourceEventMapSupport.BuildSpecsAsync(store, sources, command.Fields, ct, groups).ConfigureAwait(false);
 
         var specs = built.Select(b => b.Spec).ToList();
 

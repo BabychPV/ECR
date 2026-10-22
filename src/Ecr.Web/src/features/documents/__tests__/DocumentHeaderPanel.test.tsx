@@ -67,6 +67,8 @@ interface RegistryDef {
   isHierarchical: boolean;
   isTemporal: boolean;
   nameL10n: { values: Record<string, string> };
+  /** Вид цілі за ознакою сервера; без поля - звичайний довідник. */
+  kind?: 'Dictionary' | 'PermitHeader' | 'PermitGroup';
 }
 
 function registryDef(patch: Partial<RegistryDef> & { id: number; code: string }): RegistryDef {
@@ -87,6 +89,9 @@ interface RegistryEntry {
   parentEntryId: number | null;
   validFrom: string | null;
   validTo: string | null;
+  /** Лише в піклері групи типів дозволів. */
+  typeCode?: string;
+  typeName?: string;
 }
 
 function registryEntry(patch: Partial<RegistryEntry> & { id: number; display: string }): RegistryEntry {
@@ -793,7 +798,7 @@ describe('DocumentHeaderPanel: Lookup-поле — picker за довідник�
         field({ code: 'Permit', dataType: 'Lookup', value: null, lookupRegistryDefId: 77, label: { values: { en: 'Permit' } } }),
       ],
       registries: {
-        list: [registryDef({ id: 77, code: 'PRM_AIR', isTemporal: true })],
+        list: [registryDef({ id: 77, code: 'PRM_AIR', isTemporal: true, kind: 'PermitHeader' })],
         entries: { PRM_AIR: [registryEntry({ id: 501, display: 'KZ79-0001' })] },
       },
     });
@@ -810,7 +815,7 @@ describe('DocumentHeaderPanel: Lookup-поле — picker за довідник�
         field({ code: 'Permit', dataType: 'Lookup', value: null, lookupRegistryDefId: 77, label: { values: { en: 'Permit' } } }),
       ],
       registries: {
-        list: [registryDef({ id: 77, code: 'PRM_AIR', isTemporal: true })],
+        list: [registryDef({ id: 77, code: 'PRM_AIR', isTemporal: true, kind: 'PermitHeader' })],
         entries: { PRM_AIR: [registryEntry({ id: 501, display: 'KZ79-0001' })] },
       },
     });
@@ -825,6 +830,56 @@ describe('DocumentHeaderPanel: Lookup-поле — picker за довідник�
 
     await waitFor(() => expect(sent.length).toBe(1));
     expect(JSON.stringify(sent[0]?.body)).toContain('501');
+  });
+
+  /*
+   * ✎ Групи типів (PRMG). Піклер групи - обʼєднання дозволів складу: записи читаються так само у вікні документа
+   * (`?documentId=`), вид цілі - `kind` сервера (код `PRMG_` НЕ `PRM_`-префіксний, тож за префіксом піклер пішов би з
+   * `asOf`). Підпис - «номер — тип»; однакові номер і тип (перевидані дозволи) розрізняє «(початок чинності)».
+   * Мутаційний доказ: поверни розпізнавання за префіксом `PRM_` - запит піде з `asOf`, і перший тест почервоніє;
+   * прибери `entryLabelsOf` у `DocumentHeaderPanel.tsx` - підпис лишиться голим номером, і другий почервоніє.
+   */
+  it('група PRMG_*: записи читаються з documentId у вікні документа, без asOf', async () => {
+    show({
+      fields: [
+        field({ code: 'Permit', dataType: 'Lookup', value: null, lookupRegistryDefId: 91, label: { values: { en: 'Permit' } } }),
+      ],
+      registries: {
+        list: [registryDef({ id: 91, code: 'PRMG_WATER', isTemporal: true, kind: 'PermitGroup' })],
+        entries: { PRMG_WATER: [registryEntry({ id: 601, display: 'KZ10-0001', typeCode: 'WaterIntake', typeName: 'Water intake' })] },
+      },
+    });
+
+    await screen.findByLabelText('Permit');
+    await waitFor(() => expect(entriesRequests.some((r) => r.code === 'PRMG_WATER')).toBe(true));
+
+    expect(entriesRequests.find((r) => r.code === 'PRMG_WATER')?.query).toBe(`documentId=${String(DocumentId)}`);
+  });
+
+  it('група PRMG_*: підпис «номер — тип», а однакові номер і тип розрізняє початок чинності', async () => {
+    show({
+      fields: [
+        field({ code: 'Permit', dataType: 'Lookup', value: null, lookupRegistryDefId: 91, label: { values: { en: 'Permit' } } }),
+      ],
+      registries: {
+        list: [registryDef({ id: 91, code: 'PRMG_WATER', isTemporal: true, kind: 'PermitGroup' })],
+        entries: {
+          PRMG_WATER: [
+            registryEntry({ id: 601, display: 'KZ10-0001', typeCode: 'WaterIntake', typeName: 'Water intake', validFrom: '2025-01-01' }),
+            registryEntry({ id: 602, display: 'KZ10-0001', typeCode: 'WaterIntake', typeName: 'Water intake', validFrom: '2026-01-01' }),
+            registryEntry({ id: 603, display: 'KZ10-0001', typeCode: 'Discharge', typeName: 'Discharge', validFrom: '2026-01-01' }),
+          ],
+        },
+      },
+    });
+
+    const select = await screen.findByLabelText('Permit');
+    await waitFor(() => expect(select.hasAttribute('disabled')).toBe(false));
+
+    fireEvent.click(select);
+    expect(await screen.findByRole('option', { name: 'KZ10-0001 — Water intake (2025-01-01)' })).not.toBeNull();
+    expect(screen.getByRole('option', { name: 'KZ10-0001 — Water intake (2026-01-01)' })).not.toBeNull();
+    expect(screen.getByRole('option', { name: 'KZ10-0001 — Discharge' })).not.toBeNull();
   });
 });
 

@@ -58,7 +58,11 @@ public sealed class IntegrationCellPatcher(
     ICellStore cellStore,
     PatchCellsHandler patch,
     IAccessDecisionService access,
-    ICurrentUser currentUser) : ICellPatcher
+    ICurrentUser currentUser,
+
+    // ⛔ PRMG: ціль Lookup-колонки може бути ГРУПОЮ типів дозволів; порівняння цілі - лише через `LookupTargetMatcher`.
+    // `null` (прямий конструктор у тестах) - груп немає.
+    Application.Permits.Groups.ILookupTargetResolver? groups = null) : ICellPatcher
 {
     /// <summary>Скільки разів пробувати запис, якщо рядок змінили між читанням і записом.</summary>
     public const int MaxAttempts = 3;
@@ -389,10 +393,18 @@ public sealed class IntegrationCellPatcher(
             .FindPeriodBoundsAsync(documentId, periodKey.Value, ct)
             .ConfigureAwait(false);
 
+        // PRMG: знімок груп оновлюється лише при незбігу реєстру (Land - недосяжно).
+        await Application.Permits.Groups.LookupTargetMatcher.EnsureFreshOnMismatchAsync(
+            groups,
+            lookups.Where(l => standings.ContainsKey(l.EntryId)).Select(l => (l.RegistryDefId, standings[l.EntryId].RegistryDefId)),
+            ct).ConfigureAwait(false);
+
         foreach (var (address, entryId, registryDefId) in lookups)
         {
+            // ⚠ Без профілю (null): Deny реєстру запису тут не відсіюється - запис від імені інтеграції; обробник
+            // PatchCells перевіряє ще раз із профілем виконавця (S18).
             if (!standings.TryGetValue(entryId, out var standing)
-                || standing.RegistryDefId != registryDefId
+                || !Application.Permits.Groups.LookupTargetMatcher.Belongs(groups, null, registryDefId, standing.RegistryDefId)
                 || standing.IsDeleted
                 || !standing.IsActive
                 || (bounds is { } period && !standing.IsValidOn(period.PeriodEnd)))

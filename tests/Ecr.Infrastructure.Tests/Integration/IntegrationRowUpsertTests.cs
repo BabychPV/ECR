@@ -161,6 +161,51 @@ public sealed class IntegrationRowUpsertTests(SqlServerFixture sql)
         Assert.False(cells.ContainsKey(stand.Lookup));
     }
 
+    private FakePermitGroupResolver? _groups;
+
+    /// <summary>
+    /// PRMG: ціль колонки Lookup - ГРУПА (реєстр <c>own</c> зі складом [<c>foreign</c>]): запис реєстру-члена пишеться
+    /// (патчер не відсіює його, обробник приймає), запис поза складом - у Rejected, як чужий довідник.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: у <c>RejectedValuesAsync</c> повернути пряме порівняння <c>RegistryDefId</c> - перша частина
+    /// червоніє (запис члена потрапляє в Rejected).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PRMG")]
+    public async Task Lookup_запис_реєстру_члена_групи_пишеться_а_поза_складом_йде_в_Rejected()
+    {
+        var stand = await ArrangeAsync();
+        int ownRegistry, foreignRegistry;
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            ownRegistry = await db.RegistryEntries.Where(e => e.Id == stand.OwnEntryId).Select(e => e.RegistryDefId).SingleAsync();
+            foreignRegistry = await db.RegistryEntries.Where(e => e.Id == stand.ForeignEntryId).Select(e => e.RegistryDefId).SingleAsync();
+        }
+
+        _groups = new FakePermitGroupResolver().WithGroup(ownRegistry, [foreignRegistry]);
+        var key = IntegrationRowUpsert.EventRowKey(Guid.NewGuid().ToString());
+        var member = await RunAsync(
+            stand, new RowStoreHook(),
+            new IntegrationRowUpsert(key, [Cell(stand.Lookup, IntegrationValue.Lookup(stand.ForeignEntryId))]));
+
+        Assert.Null(member.Rejected);
+        Assert.Equal(1, member.Applied);
+        Assert.Equal(stand.ForeignEntryId, (await CellsAsync(stand, key))[stand.Lookup].EntryId);
+
+        // Склад змінено: реєстр запису більше не член.
+        _groups.WithGroup(ownRegistry, [foreignRegistry + 1_000_000]);
+        var key2 = IntegrationRowUpsert.EventRowKey(Guid.NewGuid().ToString());
+        var outside = await RunAsync(
+            stand, new RowStoreHook(),
+            new IntegrationRowUpsert(key2, [Cell(stand.Number, IntegrationValue.Number(5m)), Cell(stand.Lookup, IntegrationValue.Lookup(stand.ForeignEntryId))]));
+
+        Assert.Equal($"{key2}:{stand.LookupCode}", Assert.Single(outside.Rejected ?? []));
+        Assert.False((await CellsAsync(stand, key2)).ContainsKey(stand.Lookup));
+    }
+
     /// <remarks>
     /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати відсів незмінних значень у <c>PlanAsync</c>
     /// → другий виклик пише ті самі комірки: версія рядка росте, тест червоний.
@@ -541,6 +586,12 @@ public sealed class IntegrationRowUpsertTests(SqlServerFixture sql)
         // ⚠ Черга перерахунку — підробка: Quartz тримає планувальник у
         // глобальному репозиторії процесу (див. MaterializeIntegrationActorTests).
         services.AddScoped(_ => Substitute.For<IBackgroundJobScheduler>());
+
+        // PRMG: фейк резолвера груп (схема груп - окрема міграція); патчер і обробник беруть ОДИН екземпляр.
+        if (_groups is not null)
+        {
+            services.AddSingleton<Ecr.Application.Permits.Groups.ILookupTargetResolver>(_groups);
+        }
 
         return services.BuildServiceProvider();
     }

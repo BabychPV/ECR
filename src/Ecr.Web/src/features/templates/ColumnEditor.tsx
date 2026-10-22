@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { UnitRef } from '@/api/types';
+import { LookupTargetSelect } from '@/features/registries/LookupTargetSelect';
 import { lookupTargetSelectData, lookupTargetsQuery } from '@/features/registries/lookupTargets';
 import { formatMonthName } from '@/shared/format';
 import { t } from '@/shared/i18n';
@@ -101,8 +102,8 @@ export function ColumnEditor({
   // ⚠ Мемоізовано: `[]`-літерал у пропі `data` перебудовувався б щорендеру,
   // поки запит іще `pending`, — новий референс масиву на кожен рендер.
   const registryOptions = useMemo(
-    () => lookupTargetSelectData(registries.data ?? []),
-    [registries.data],
+    () => lookupTargetSelectData(registries.data ?? [], draft.lookupRegistryDefId),
+    [registries.data, draft.lookupRegistryDefId],
   );
 
   // ⛔ Директива registry-lookup / cell-style, PR B1: перелік стилів версії —
@@ -326,22 +327,16 @@ export function ColumnEditor({
       )}
 
       {isLookup && registries.error === null && !registries.isPending && (
-        <Select
+        <LookupTargetSelect
           label={t('columns.lookupRegistryDefId')}
           description={t('columns.lookupRegistryDefIdHint')}
           disabled={disabled}
-          searchable
           nothingFoundMessage={t('columns.lookupRegistryDefIdEmpty')}
           data={registryOptions}
-          // ⚠ Рядок, не число: Mantine `Select` завжди працює з текстовим
-          // `value`. Наявні колонки з уже заданим (сирим) ідентифікатором
-          // і далі показують правильно вибраний довідник — досить, щоб він
-          // був серед завантажених `data` (зворотна сумісність, не міграція
-          // даних).
-          value={draft.lookupRegistryDefId === null ? null : String(draft.lookupRegistryDefId)}
-          onChange={(value) =>
-            onChange({ ...draft, lookupRegistryDefId: value === null ? null : Number(value) })
-          }
+          // ⚠ Наявні колонки з уже заданим (сирим) ідентифікатором і далі показують вибрану ціль; якщо її немає серед
+          // завантажених цілей (група деактивована, права немає) - окрема опція «unlisted» (`lookupTargetSelectData`).
+          value={draft.lookupRegistryDefId}
+          onChange={(value) => onChange({ ...draft, lookupRegistryDefId: value })}
         />
       )}
 

@@ -54,7 +54,10 @@ public sealed partial class SourceEventSyncJob(
     IntegrationActor actor,
     IClock clock,
     ICalculationTrigger? recalculation = null,
-    ILogger<SourceEventSyncJob>? logger = null) : ISourceEventSyncJob
+    ILogger<SourceEventSyncJob>? logger = null,
+
+    // Permits PRMG: автопідбір запису для колонки-групи - з реєстрів-членів складу. `null` - груп немає.
+    Application.Permits.Groups.ILookupTargetResolver? groups = null) : ISourceEventSyncJob
 {
     private readonly ILogger _logger = (ILogger?)logger ?? NullLogger.Instance;
 
@@ -1767,11 +1770,20 @@ public sealed partial class SourceEventSyncJob(
             .ToDictionaryAsync(c => c.Id, ct)
             .ConfigureAwait(false);
 
-        var registryIds = columns.Values
+        var targetIds = columns.Values
             .Where(c => c.DataType == CellDataType.Lookup && c.LookupRegistryDefId is not null)
             .Select(c => c.LookupRegistryDefId!.Value)
             .Distinct()
             .ToList();
+
+        // Permits PRMG: ціль-група не має власних записів - читаються записи реєстрів її складу
+        // (`ExpandRegistryIds`: для не-групи це [ціль], тож Land читає рівно ті самі записи).
+        if (groups is not null && targetIds.Count > 0)
+        {
+            await groups.EnsureFreshAsync(ct).ConfigureAwait(false);
+        }
+
+        List<int> registryIds = [.. targetIds.SelectMany(id => groups?.ExpandRegistryIds(id) ?? [id]).Distinct()];
 
         var entries = (await db.RegistryEntries
                 .AsNoTracking()
@@ -1796,7 +1808,9 @@ public sealed partial class SourceEventSyncJob(
                     f.ValueKind,
                     f.SourceUnitId,
                     f.TargetUnitId,
-                    column.LookupRegistryDefId is { } registryId ? [.. entries[registryId]] : [],
+                    column.LookupRegistryDefId is { } registryId
+                        ? [.. (groups?.ExpandRegistryIds(registryId) ?? [registryId]).SelectMany(member => entries[member])]
+                        : [],
                     f.Values.ToDictionary(v => v.SourceValue, v => v.RegistryEntryId, StringComparer.OrdinalIgnoreCase));
             })];
     }

@@ -38,7 +38,10 @@ public sealed class ExcelExporter(
 
     // CELL-STYLE L3b: користувацька заливка/колір тексту/жирність комірок. Необов'язковий лише заради
     // тестів, що конструюють експортер вручну; у контейнері розв'язується завжди.
-    ICellStyleStore? cellStyles = null) : IExcelExporter
+    ICellStyleStore? cellStyles = null,
+
+    // Permits PRMG: колонка-група друкує «номер — тип» записів реєстрів-членів. `null` - груп немає.
+    Ecr.Application.Permits.Groups.ILookupTargetResolver? groups = null) : IExcelExporter
 {
     /// <summary>Рядок, з якого починається перший блок аркуша.</summary>
     private const int FirstRow = 1;
@@ -295,7 +298,7 @@ public sealed class ExcelExporter(
         HashSet<string> usedNames, CancellationToken ct)
     {
         var rows = await Ecr.Application.Documents.DocumentHeaderExport
-            .ReadAsync(headers, registries, snapshot, documentId, options.Language, ct).ConfigureAwait(false);
+            .ReadAsync(headers, registries, snapshot, documentId, options.Language, ct, groups).ConfigureAwait(false);
 
         if (rows.Count == 0)
         {
@@ -1146,11 +1149,15 @@ public sealed class ExcelExporter(
 
         foreach (var registryId in registryIds)
         {
-            var entries = await registries.ListEntriesAsync(registryId, ct).ConfigureAwait(false);
+            // Permits PRMG: для цілі-групи - записи реєстрів-членів із підписом «номер — тип» (номер унікальний лише в типі).
+            var entries = await Ecr.Application.Permits.Groups.LookupTargetEntries
+                .ListAsync(registries, groups, registryId, ct).ConfigureAwait(false);
 
             result[registryId] = entries
-                .GroupBy(e => e.Id)
-                .ToDictionary(g => g.Key, g => g.First().Code);
+                .GroupBy(e => e.Entry.Id)
+                .ToDictionary(
+                    g => g.Key,
+                    g => Ecr.Application.Permits.Groups.LookupTargetEntries.Label(g.First().Entry.Code, g.First().TypeCode));
         }
 
         return result;

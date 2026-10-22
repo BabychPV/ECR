@@ -82,13 +82,15 @@ public static class DocumentHeaderExport
     /// <param name="documentId">Документ.</param>
     /// <param name="language">Мова підписів; <c>null</c> — англійська.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="groups">Резолвер груп пермітів: поле-група друкує «номер — тип» (PRMG); <c>null</c> - груп немає.</param>
     public static async Task<IReadOnlyList<HeaderExportRow>> ReadAsync(
         IDocumentHeaderStore? headers,
         IRegistryStore registries,
         TemplateVersionSnapshot snapshot,
         long documentId,
         string? language,
-        CancellationToken ct)
+        CancellationToken ct,
+        Permits.Groups.IPermitGroupResolver? groups = null)
     {
         ArgumentNullException.ThrowIfNull(registries);
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -108,8 +110,10 @@ public static class DocumentHeaderExport
                      .Select(f => f.LookupRegistryDefId!.Value)
                      .Distinct())
         {
-            var entries = await registries.ListEntriesAsync(registryId, ct).ConfigureAwait(false);
-            codes[registryId] = entries.GroupBy(e => e.Id).ToDictionary(g => g.Key, g => g.First().Code);
+            // Permits PRMG: ціль-група - записи реєстрів-членів, підпис «номер — тип»; решта - код запису.
+            var entries = await Permits.Groups.LookupTargetEntries.ListAsync(registries, groups, registryId, ct).ConfigureAwait(false);
+            codes[registryId] = entries.GroupBy(e => e.Entry.Id)
+                .ToDictionary(g => g.Key, g => Permits.Groups.LookupTargetEntries.Label(g.First().Entry.Code, g.First().TypeCode));
         }
 
         var rows = new List<HeaderExportRow>(fields.Count);

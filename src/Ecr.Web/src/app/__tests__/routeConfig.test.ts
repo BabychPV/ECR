@@ -128,6 +128,7 @@ describe('app/routes — реєстр маршрутів', () => {
         '/admin/permits',
         '/admin/permits/types',
         '/admin/permits/lists',
+        '/admin/permits/groups',
         '/admin/permits/bindings',
         '/admin/methodologies',
         '/admin/units',

@@ -54,6 +54,9 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 2, 5, 9, 0, 0, DateTimeKind.Utc);
+
+    // Permits PRMG: резолвер груп цього тесту (xunit створює екземпляр класу на кожен тест).
+    private Application.Permits.Groups.ILookupTargetResolver? _groupsOverride;
     private static readonly DateTime From = new(2026, 1, 20, 0, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime Start = new(2026, 1, 28, 9, 9, 20, DateTimeKind.Utc);
     private static readonly DateTime End = new(2026, 1, 28, 9, 24, 50, DateTimeKind.Utc);
@@ -108,6 +111,65 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         Assert.Single(await LinksAsync(stand));
         Assert.Equal(version, await RowVersionAsync(stand, "EF-E1"));
         Assert.Equal(audit, await AuditCountAsync(stand));
+    }
+
+    /// <summary>
+    /// Permits PRMG: колонка, ціль якої - ГРУПА (прихований реєстр без записів), у автопідборі за кодом бере записи реєстру-члена
+    /// складу; патчер приймає запис члена. Мутація: у <c>FieldPlansAsync</c> прибрати <c>ExpandRegistryIds</c> - клітинка не
+    /// заповнюється (код не знаходиться), тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "PRMG-expand")]
+    public async Task Колонка_група_автопідбір_бере_записи_реєстру_члена_складу()
+    {
+        var groups = new FakePermitGroupResolver();
+        _groupsOverride = groups;
+        await using var stand = await ArrangeAsync();
+
+        await using (var db = sql.CreateContext())
+        {
+            var memberRegistryId = await db.ColumnDefs.AsNoTracking()
+                .Where(c => c.Id == stand.CategoryColumn)
+                .Select(c => c.LookupRegistryDefId!.Value)
+                .SingleAsync();
+            var group = new RegistryDef(
+                EcrCode.Create($"PRMG_{Guid.NewGuid():N}"[..20]), Name("group"), isTemporal: false);
+            db.RegistryDefs.Add(group);
+            await db.SaveChangesAsync();
+            await ExecuteAsync($"UPDATE cfg.ColumnDef SET LookupRegistryDefId = {group.Id} WHERE Id = {stand.CategoryColumn}");
+            groups.WithGroup(group.Id, [memberRegistryId]);
+        }
+
+        var source = new FakeEventSource(Ev("E1", Start, End, category: "V8", volume: 269.258m));
+
+        await RunAsync(stand, source, freshContainer: true, groups: groups);
+
+        var cells = await CellsAsync(stand, "EF-E1");
+        Assert.Equal(stand.V8EntryId, cells[stand.CategoryColumn].EntryId);
+    }
+
+    /// <summary>
+    /// Land-регресія тієї ж синхронізації: звичайна ціль (реєстр колонки = реєстр запису) - запис підбирається як раніше, а
+    /// <c>Accepts</c> не кликається ні в задачі, ні в патчері (збіг реєстру - швидкий шлях).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "PRMG-expand")]
+    public async Task Звичайна_ціль_підбирається_як_раніше_і_Accepts_не_кликається()
+    {
+        var groups = new FakePermitGroupResolver();
+        _groupsOverride = groups;
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End, category: "V8", volume: 269.258m));
+
+        await RunAsync(stand, source, freshContainer: true, groups: groups);
+
+        var cells = await CellsAsync(stand, "EF-E1");
+        Assert.Equal(stand.V8EntryId, cells[stand.CategoryColumn].EntryId);
+        Assert.Equal(0, groups.Calls);
     }
 
     [Theory]
@@ -1584,7 +1646,8 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         Stand stand, FakeEventSource source, bool freshContainer = false, ICalculationTrigger? trigger = null,
         ILogger<SourceEventSyncJob>? logger = null, int? entityId = null,
         DateTime? from = null, DateTime? to = null, bool confirm = false, bool clearTrackerOnWrite = false,
-        Func<Task>? afterRemovalDecision = null, ICellPatcher? patcherOverride = null)
+        Func<Task>? afterRemovalDecision = null, ICellPatcher? patcherOverride = null,
+        Application.Permits.Groups.ILookupTargetResolver? groups = null)
     {
         // ⚠ Метадані таблиці кешуються в контейнері: зміна стелі рядків у базі видна лише новому контейнеру.
         await using var fresh = freshContainer ? BuildProvider() : null;
@@ -1612,7 +1675,8 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
             services.GetRequiredService<IntegrationActor>(),
             clock,
             trigger,
-            logger);
+            logger,
+            groups);
 
         await job.ExecuteAsync(
             new SourceEventSyncRequest(entityId ?? stand.EntityId, from ?? From, to ?? Now, confirm),
@@ -1882,6 +1946,13 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
 
         // ⚠ Черга перерахунку — підробка: Quartz тримає планувальник у глобальному репозиторії процесу.
         services.AddScoped(_ => Substitute.For<IBackgroundJobScheduler>());
+
+        // Permits PRMG: тест колонки-групи підміняє резолвер (справжнє сховище груп - заглушка до міграції PRMG01).
+        if (_groupsOverride is { } groups)
+        {
+            services.AddScoped<Application.Permits.Groups.IPermitGroupResolver>(_ => groups);
+            services.AddScoped<Application.Permits.Groups.ILookupTargetResolver>(_ => groups);
+        }
 
         return services.BuildServiceProvider();
     }

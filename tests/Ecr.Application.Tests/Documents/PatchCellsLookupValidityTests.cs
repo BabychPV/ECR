@@ -49,6 +49,7 @@ public sealed class PatchCellsLookupValidityTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly FakePermitGroupResolver _groups = new();
 
     public PatchCellsLookupValidityTests()
     {
@@ -132,7 +133,7 @@ public sealed class PatchCellsLookupValidityTests
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _methodologies, _registries, _headers, Substitute.For<IAuditWriter>(),
                Substitute.For<IAuditReader>(), Substitute.For<IBackgroundJobScheduler>(), _uow, _user, _clock,
-               Substitute.For<ISheetEditGate>(), Substitute.For<IUnitCatalog>());
+               Substitute.For<ISheetEditGate>(), Substitute.For<IUnitCatalog>(), groups: _groups);
 
     private void Entry(
         int registryDefId = ColumnRegistryDefId,
@@ -293,6 +294,132 @@ public sealed class PatchCellsLookupValidityTests
         await _rows.DidNotReceive().CreateRowsAsync(
             Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(),
             Arg.Any<CancellationToken>());
+    }
+
+    // ── PRMG: ціль колонки — ГРУПА типів дозволів (колонка тримає id прихованого реєстру групи = ColumnRegistryDefId).
+    // Запис належить цілі за членством, а не за збігом реєстру. Мутація: прибрати LookupTargetMatcher.Belongs із
+    // CheckLookupStandings (повернути пряме порівняння) — перший же тест членства червоніє.
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG")]
+    public async Task Група_запис_реєстру_члена_приймається()
+    {
+        _groups.WithGroup(ColumnRegistryDefId, [OtherRegistryDefId]);
+        Entry(registryDefId: OtherRegistryDefId);
+
+        await AssertWritten();
+        Assert.Equal(1, _groups.Calls);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG")]
+    public async Task Група_запис_реєстру_не_члена_відхиляється_як_немає_запису()
+    {
+        _groups.WithGroup(ColumnRegistryDefId, [OtherRegistryDefId]);
+        Entry(registryDefId: 3);
+
+        await AssertRejected("err.ECR-CELL-4223.missingEntry");
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG")]
+    public async Task Група_тип_вийшов_зі_складу_новий_вибір_відхиляється()
+    {
+        _groups.WithGroup(ColumnRegistryDefId, [OtherRegistryDefId]);
+        Entry(registryDefId: OtherRegistryDefId);
+        await AssertWritten();
+
+        // Знімок оновлено: тип OtherRegistryDefId більше не у складі.
+        _groups.WithGroup(ColumnRegistryDefId, [3]);
+        _cells.ClearReceivedCalls();
+
+        await AssertRejected("err.ECR-CELL-4223.missingEntry");
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG")]
+    public async Task Група_тип_вийшов_зі_складу_незмінене_значення_проходить()
+    {
+        _groups.WithGroup(ColumnRegistryDefId, [3]);
+        Entry(registryDefId: OtherRegistryDefId);
+        StoredValue(EntryId);
+
+        await AssertWritten();
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG")]
+    public async Task Група_деактивована_новий_вибір_відхиляється()
+    {
+        _groups.WithGroup(ColumnRegistryDefId, [OtherRegistryDefId], isActive: false);
+        Entry(registryDefId: OtherRegistryDefId);
+
+        await AssertRejected("err.ECR-CELL-4223.missingEntry");
+    }
+
+    /// <summary>S18: реєстр запису під Deny — та сама відповідь «немає запису», а не окрема (оракул існування).</summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG")]
+    public async Task Група_реєстр_члена_під_Deny_відхиляється_як_немає_запису()
+    {
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessProfile
+        {
+            CacheKey = "p2", UserId = 9, SecurityStamp = "s",
+            Permissions = new HashSet<string>(), Grants = new Dictionary<string, GrantLevel>(),
+            Denies = new HashSet<string> { "Registry:2" }, RoleIds = new HashSet<int>(),
+        });
+        _groups.WithGroup(ColumnRegistryDefId, [OtherRegistryDefId]);
+        Entry(registryDefId: OtherRegistryDefId);
+
+        await AssertRejected("err.ECR-CELL-4223.missingEntry");
+
+        // ПОВНИЙ details (код, ключ, кількість, перелік комірок) побайтно збігається з відповіддю на запис, якого немає.
+        var denied = await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(new List<RegistryEntryStanding>());
+        var absent = await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+
+        Assert.Equal(absent.ErrorCode, denied.ErrorCode);
+        Assert.Equal(absent.Message, denied.Message);
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(absent.Details),
+            System.Text.Json.JsonSerializer.Serialize(denied.Details));
+    }
+
+    /// <summary>Не-член і неактивна група - теж повністю однаковий details з «запису немає» (членство не розкривається).</summary>
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Група_відмова_не_розкриває_членство_details_збігається_з_неіснуючим_записом(bool inactiveGroup)
+    {
+        _groups.WithGroup(ColumnRegistryDefId, inactiveGroup ? [OtherRegistryDefId] : [3], isActive: !inactiveGroup);
+        Entry(registryDefId: OtherRegistryDefId);
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(new List<RegistryEntryStanding>());
+        var absent = await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+
+        Assert.Equal(absent.Message, refused.Message);
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(absent.Details),
+            System.Text.Json.JsonSerializer.Serialize(refused.Details));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG")]
+    public async Task Група_прийнятий_запис_все_одно_проходить_решту_причин_видалений_відхиляється()
+    {
+        _groups.WithGroup(ColumnRegistryDefId, [OtherRegistryDefId]);
+        Entry(registryDefId: OtherRegistryDefId, isActive: false, isDeleted: true);
+
+        await AssertRejected("err.ECR-CELL-4223.deletedEntry");
+    }
+
+    /// <summary>Land / звичайна ціль: реєстр збігся — резолвер не кличеться взагалі (ні Accepts, ні оновлення знімка).</summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG")]
+    public async Task Збіг_реєстру_не_кличе_резолвер_груп()
+    {
+        _groups.ThrowOnUse = true;
+        Entry();
+
+        await AssertWritten();
+
+        Assert.Equal(0, _groups.Calls);
+        Assert.Equal(0, _groups.EnsureFreshCalls);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "C7")]
