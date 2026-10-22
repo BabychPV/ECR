@@ -1,4 +1,4 @@
-import { useMemo, type JSX } from 'react';
+import { useEffect, useMemo, type JSX } from 'react';
 import { Box, Button, Stack, Text } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { DataTable } from '@/shared/ui/DataTable';
@@ -7,6 +7,7 @@ import { FilterBar } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatStrip } from '@/shared/ui/StatStrip';
 import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
+import { useSession } from '@/shared/session/useSession';
 import { useMayEditPermitTypes } from '../permitRights';
 import { PermitsSubnav } from '../shell/PermitsSubnav';
 import { GroupDrawer } from './GroupDrawer';
@@ -42,6 +43,16 @@ export function GroupsPage(): JSX.Element {
   const opened: PermitGroupDto | undefined = all.find((group) => group.code === panel);
   const hasGroups = all.length > 0;
   const openNew = (): void => setParams({ panel: NewGroupPanel });
+
+  // Мертвий `?panel=` (`_new` без права, неіснуючий код, групу видалили деінде) не лишається в адресі: шторки немає,
+  // а повернення по історії давало б той самий порожній екран. Чекаємо, доки приїдуть і групи, і профіль:
+  // до профілю `canEdit` хибно-`false`, і чинний `?panel=_new` було б знято передчасно.
+  const session = useSession();
+  const profileKnown = session.data !== undefined;
+  const dead = panel !== null && opened === undefined && !(panel === NewGroupPanel && canEdit);
+  useEffect(() => {
+    if (dead && groups.data !== undefined && profileKnown) setParams({ panel: null });
+  }, [dead, groups.data, profileKnown, setParams]);
 
   return (
     <Stack gap="md" data-list-page="" data-groups-page="">

@@ -24,11 +24,13 @@ export function usePermitGroups() {
 }
 
 /** Скидає перелік груп і цілі Lookup шаблону: склад, назва, опис та активність групи видимі в обох. */
-function useInvalidateGroups(): () => Promise<void> {
+function useInvalidateGroups(): (code?: string) => Promise<void> {
   const client = useQueryClient();
 
-  return async () => {
+  return async (code) => {
     await Promise.all([
+      // Піклер групи (записи `PRMG_<код>`, свіжість 5 хв): склад змінився - відкритий документ не має показувати старий.
+      ...(code === undefined ? [] : [client.invalidateQueries({ queryKey: queryKeys.registries.entries(`PRMG_${code}`) })]),
       client.invalidateQueries({ queryKey: groupsKeys.all }),
       // Цілі Lookup (шапки + групи) читає `lookupTargetsQuery`: назва, опис і активність групи видимі й там.
       client.invalidateQueries({ queryKey: queryKeys.registries.lookupTargets() }),
@@ -42,7 +44,7 @@ export function useCreateGroup() {
   return useMutation<PermitGroupDto, Error, CreatePermitGroupRequest>({
     mutationKey: ['permits', 'groups', 'create'],
     mutationFn: (body) => createPermitGroup(body),
-    onSuccess: invalidate,
+    onSuccess: () => invalidate(),
   });
 }
 
@@ -57,7 +59,7 @@ export function useUpdateGroup() {
   return useMutation<PermitGroupDto, Error, UpdateGroupVariables>({
     mutationKey: ['permits', 'groups', 'update'],
     mutationFn: ({ code, body }) => updatePermitGroup(code, body),
-    onSuccess: invalidate,
+    onSuccess: (_saved, { code }) => invalidate(code),
   });
 }
 
@@ -72,7 +74,7 @@ export function useReplaceGroupTypes() {
   return useMutation<PermitGroupDto, Error, ReplaceTypesVariables>({
     mutationKey: ['permits', 'groups', 'types'],
     mutationFn: ({ code, body }) => replacePermitGroupTypes(code, body),
-    onSuccess: invalidate,
+    onSuccess: (_saved, { code }) => invalidate(code),
   });
 }
 
@@ -82,6 +84,6 @@ export function useDeleteGroup() {
   return useMutation<void, Error, string>({
     mutationKey: ['permits', 'groups', 'delete'],
     mutationFn: (code) => deletePermitGroup(code),
-    onSuccess: invalidate,
+    onSuccess: (_done, code) => invalidate(code),
   });
 }

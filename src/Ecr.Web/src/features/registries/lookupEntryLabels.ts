@@ -18,21 +18,23 @@ function typeOf(entry: RegistryEntryDto): string {
 }
 
 function build(entries: readonly RegistryEntryDto[]): ReadonlyMap<number, string> {
-  const base = new Map<number, string>();
+  // ОДИН прохід по записах (довідник - до 50 тис.; `rowIndex.test` лічить звернення): далі працюємо зі знімком.
+  const items: { id: number; label: string; typed: boolean; validFrom: string | null }[] = [];
   const seen = new Map<string, number>();
+  const result = new Map<number, string>();
 
   for (const entry of entries) {
     const type = typeOf(entry);
     const label = type === '' ? entry.display : `${entry.display} — ${type}`;
-    base.set(entry.id, label);
+    items.push({ id: entry.id, label, typed: type !== '', validFrom: entry.validFrom });
     if (type !== '') seen.set(label, (seen.get(label) ?? 0) + 1);
   }
 
-  const result = new Map<number, string>();
-  for (const entry of entries) {
-    const label = base.get(entry.id) ?? entry.display;
-    const ambiguous = typeOf(entry) !== '' && (seen.get(label) ?? 0) > 1 && entry.validFrom !== null;
-    result.set(entry.id, ambiguous ? `${label} (${entry.validFrom ?? ''})` : label);
+  for (const item of items) {
+    // Перший запис з тим самим id виграє - як у `find()`.
+    if (result.has(item.id)) continue;
+    const ambiguous = item.typed && (seen.get(item.label) ?? 0) > 1 && item.validFrom !== null;
+    result.set(item.id, ambiguous ? `${item.label} (${item.validFrom ?? ''})` : item.label);
   }
 
   return result;

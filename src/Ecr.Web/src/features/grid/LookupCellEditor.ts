@@ -150,13 +150,8 @@ function displayIndexOf(entries: readonly RegistryEntryDto[]): ReadonlyMap<numbe
   const known = displayCache.get(entries);
   if (known !== undefined) return known;
 
-  const index = new Map<number, string>();
-  const labels = entryLabelsOf(entries);
-
-  // ⚠ Перший запис виграє — та сама поведінка, що й у `find()`.
-  for (const entry of entries) {
-    if (!index.has(entry.id)) index.set(entry.id, labels.get(entry.id) ?? entry.display);
-  }
+  // ⚠ Перший запис виграє (як у `find()`) - це гарантує `entryLabelsOf`, який і є єдиним проходом по записах.
+  const index = entryLabelsOf(entries);
 
   displayCache.set(entries, index);
 

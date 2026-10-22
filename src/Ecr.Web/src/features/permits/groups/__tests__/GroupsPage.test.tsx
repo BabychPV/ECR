@@ -146,11 +146,11 @@ function Where(): null {
   return null;
 }
 
-function show(entry = '/admin/permits/groups'): void {
+function show(entry = '/admin/permits/groups', client = new QueryClient({ defaultOptions: { queries: { retry: false } } })): void {
   render(
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={[entry]}>
-        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <QueryClientProvider client={client}>
           <Where />
           <Routes>
             <Route path="/admin/permits/groups" element={<PermitGroupsPage />} />
@@ -350,6 +350,47 @@ describe('Groups: редагування, конкурентність, деак
     fireEvent.click(screen.getByRole('button', { name: 'permits.groups.drawer.save' }));
     await waitFor(() => expect(backend.sent).toHaveLength(2));
     expect(backend.sent[1]?.body).toMatchObject({ rowVersion: 'w9' });
+  });
+
+  // Мутаційний доказ: прибери `invalidateQueries(entries(PRMG_…))` у `useInvalidateGroups` - запис піклера лишиться свіжим
+  // (5 хв) і тест почервоніє: відкритий документ показував би старий склад.
+  it('збереження групи скидає кеш піклера PRMG_<код> (склад у відкритому документі не застаріває)', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const pickerKey = ['registries', 'entries', 'PRMG_WATER', '2026-10-31'];
+    const otherKey = ['registries', 'entries', 'PRMG_OTHER', '2026-10-31'];
+    client.setQueryData(pickerKey, [{ id: 1 }]);
+    client.setQueryData(otherKey, [{ id: 2 }]);
+    stub([water]);
+    show('/admin/permits/groups?panel=WATER', client);
+
+    fireEvent.click(await screen.findByRole('switch'));
+    fireEvent.click(screen.getByRole('button', { name: 'permits.groups.drawer.save' }));
+
+    await waitFor(() => expect(client.getQueryState(pickerKey)?.isInvalidated).toBe(true));
+    expect(client.getQueryState(otherKey)?.isInvalidated).toBe(false);
+  });
+
+  it('мертвий ?panel (неіснуючий код) знімається з адреси, живий лишається', async () => {
+    stub([water]);
+    show('/admin/permits/groups?panel=NOPE');
+
+    await screen.findByText('Water permits');
+    await waitFor(() => expect(where()).not.toContain('panel='));
+    cleanup();
+
+    show('/admin/permits/groups?panel=WATER');
+    await screen.findByRole('dialog');
+    expect(where()).toContain('panel=WATER');
+  });
+
+  it('?panel=_new без права знімається з адреси, а з правом лишається', async () => {
+    session.permissions = ['Registry.View'];
+    stub([water]);
+    show('/admin/permits/groups?panel=_new');
+
+    await screen.findByText('Water permits');
+    await waitFor(() => expect(where()).not.toContain('panel='));
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('використана група: видалення недоступне, є пояснення «лише деактивувати»', async () => {
