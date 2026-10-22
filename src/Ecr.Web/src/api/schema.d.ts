@@ -25538,6 +25538,10 @@ export interface components {
              * @default false
              */
             async: boolean;
+            /** @description Підтвердження резервної копії бази перед переносом (шлях і/або час бекапу, до 500 символів). Необов'язкове для малих
+             *     проєктів; коли переноситься 500 000 значень і більше — обов'язкове: без нього `422 ECR-SCHM-0422`
+             *     (`migrateBackupRequired`), нічого не записано. Значення пишеться в журнал безпеки (початок і завершення переносу). */
+            backupConfirmation?: null | string;
             /** @description `true` — лише звіт, без змін (завжди синхронно: швидкий). */
             dryRun: boolean;
             /** @description Необов'язкові мапи записів Lookup по полях ШАПКИ: `[{target:{kind:"header",code}, mappings:[{from,to}]}]`, де

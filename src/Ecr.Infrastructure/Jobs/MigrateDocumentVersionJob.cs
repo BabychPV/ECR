@@ -65,6 +65,7 @@ public sealed class MigrateDocumentVersionJob(
 
         var reporter = new ThrottledReporter(progress, scopes, clock);
 
+        handler.BackupConfirmation = task.BackupConfirmation;
         var report = await handler
             .RunQueuedAsync(
                 task.DocumentId, task.TargetVersionId, mode, task.TableRenames, task.AcceptGuardedOverwrite,

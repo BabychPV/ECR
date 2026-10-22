@@ -1,4 +1,4 @@
-﻿using System.Data;
+using System.Data;
 using System.Globalization;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -133,12 +133,30 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     {
         var mode = exclusive ? ExclusiveMode : SharedMode;
         var resource = StructureResourceOf(documentId);
-        var (code, version) = await GetAppLockAsync(resource, mode, documentId, _lockTimeout, ct).ConfigureAwait(false);
+        var (code, version, migrating) = await GetAppLockAsync(resource, mode, documentId, _lockTimeout, ct).ConfigureAwait(false);
 
         // ⚠ Хто чекав, той і читає відмову: перенос — на записи документа, запис — на перенос.
         ThrowIfRefused(code, resource, mode, () => DocumentBusy(
             documentId, mode, code,
             exclusive ? "err.ECR-DOC-4091.documentBeingEdited" : "err.ECR-DOC-4091.structureChanging"));
+
+        // ⛔ Б1 (P1-2): проєкт під незавершеним (або виконуваним) переносом версії — діапазони комірок уже частково на
+        // колонках цільової версії, а версія проєкту ще стара. Писар (спільне блокування) відмовляє 409 ECR-DOC-4091.
+        // Виняткове (сам перенос, видалення документа) не відмовляє: перенос мусить мати змогу довести справу до кінця.
+        // Маркер приходить тим самим запитом, що й версія, — зайвого звернення до бази немає.
+        if (migrating && !exclusive)
+        {
+            throw new ConcurrencyConflictException(
+                ErrorCodes.SheetBusy,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"Документ {documentId} належить проєкту, що переноситься на іншу версію шаблону: нічого не записано, повторіть після завершення."),
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-4091.structureChanging",
+                    ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
+                });
+        }
 
         // ⛔ X8-05 (R6): документа під блокуванням уже немає — видалення (бере структуру
         // ВИНЯТКОВО, `DeleteDocumentHandler`) зафіксувалося, поки писар готував запит поза
@@ -163,7 +181,7 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
         ThrowIfGone(documentId);
         var mode = exclusive ? ExclusiveMode : SharedMode;
         var resource = string.Create(CultureInfo.InvariantCulture, $"ecr:doc-header:{documentId}");
-        var (code, _) = await GetAppLockAsync(resource, mode, versionOfDocument: null, _lockTimeout, ct).ConfigureAwait(false);
+        var (code, _, _) = await GetAppLockAsync(resource, mode, versionOfDocument: null, _lockTimeout, ct).ConfigureAwait(false);
 
         // ⚠ Хто чекав, той і читає відмову: правка шапки — на подання, подання — на правку шапки.
         ThrowIfRefused(code, resource, mode, () => DocumentBusy(
@@ -175,7 +193,7 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
         long documentId, int sheetDefId, PeriodKey periodKey, string mode, TimeSpan lockTimeout, CancellationToken ct)
     {
         var resource = ResourceOf(documentId, sheetDefId, periodKey.Value);
-        var (code, _) = await GetAppLockAsync(resource, mode, versionOfDocument: null, lockTimeout, ct).ConfigureAwait(false);
+        var (code, _, _) = await GetAppLockAsync(resource, mode, versionOfDocument: null, lockTimeout, ct).ConfigureAwait(false);
         ThrowIfRefused(code, resource, mode, () => Busy(documentId, sheetDefId, periodKey, mode, code));
     }
 
@@ -225,7 +243,7 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     /// після <c>EXEC</c>, а під RCSI знімок береться на початку оператора — тож він
     /// бачить перенос, що зафіксувався, поки ми чекали на блокування.
     /// </remarks>
-    private async Task<(int Code, int? Version)> GetAppLockAsync(
+    private async Task<(int Code, int? Version, bool Migrating)> GetAppLockAsync(
         string resource, string mode, long? versionOfDocument, TimeSpan lockTimeout, CancellationToken ct)
     {
         var transaction = db.Database.CurrentTransaction
@@ -243,10 +261,11 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
                                        @LockOwner = 'Transaction', @LockTimeout = @LockTimeout;
             SET @Result = @code;
             IF @code >= 0 AND @DocumentId IS NOT NULL
-                SET @Version = (SELECT p.TemplateVersionId
-                                FROM   doc.Document d
-                                JOIN   doc.Project  p ON p.Id = d.ProjectId
-                                WHERE  d.Id = @DocumentId);
+                SELECT @Version = p.TemplateVersionId,
+                       @Migrating = CASE WHEN p.ExternalSettingsJson LIKE '%"migratingTo"%' THEN 1 ELSE 0 END
+                FROM   doc.Document d
+                JOIN   doc.Project  p ON p.Id = d.ProjectId
+                WHERE  d.Id = @DocumentId;
             """;
 
         command.Parameters.Add(new SqlParameter("@Resource", SqlDbType.NVarChar, 255) { Value = resource });
@@ -261,8 +280,10 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
         });
         var result = new SqlParameter("@Result", SqlDbType.Int) { Direction = ParameterDirection.Output };
         var version = new SqlParameter("@Version", SqlDbType.Int) { Direction = ParameterDirection.Output };
+        var migrating = new SqlParameter("@Migrating", SqlDbType.Int) { Direction = ParameterDirection.Output };
         command.Parameters.Add(result);
         command.Parameters.Add(version);
+        command.Parameters.Add(migrating);
 
         // ⚠ Таймаут команди — більший за таймаут блокування: інакше клієнт
         // обірвав би очікування раніше, ніж сервер відповів би кодом відмови.
@@ -271,7 +292,7 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
         // 0 — узято одразу, 1 — узято після очікування; від'ємне — відмова.
-        return ((int)result.Value!, version.Value is int v ? v : null);
+        return ((int)result.Value!, version.Value is int v ? v : null, migrating.Value is 1);
     }
 
     /// <summary>Відмова «документ зайнятий» для блокувань рівня документа — <c>409 ECR-DOC-4091</c>.</summary>
