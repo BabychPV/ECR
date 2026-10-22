@@ -57,17 +57,27 @@
 # job ≈ 14–15 хв). `Seconds` нижче — суми тривалостей за префіксами з того ж журналу.
 # Частини 1–4 — об'єднання префіксів, частина 5 (залишок) — D* (крім
 # DocumentVersionMigration) 137 + P* 146 + S* 256 = 539 с + Security.F/I (0 с) і майбутні класи.
+#
+# ✎ 2026-10-22 (третя ітерація, повний CI run 39840575446 на п'яти частинах): факт кроку
+# «Складання, тести, розгортання» / сума тривалостей тестів: api-1 1299/890 с (job 22.3 хв,
+# >20), api-2 950/556, api-3 449/251, api-4 669/375, api-5 643/332. Модель за п'ятьма
+# точками: крок ≈ 184 + 1.286 × сума, job ≈ крок + ~55 с; `Seconds` частин 1 і 2 раніше
+# були занижені майже вдвічі. Для job ≤ ~15 хв сума на частину ≤ ~500 с (усього 2404 с →
+# ~480 с). Перенесено: `Security.D`, `I`, `J`, `W` частина 1 → 3; `N` частина 1 → залишок
+# (частина 5); `M` частина 2 → 4. Нові суми 492 / 454 / 499 / 477 / 481 с, прогноз job
+# 14.6 / 13.3 / 14.7 / 14.0 / 14.2 хв. `Seconds` — суми за префіксами з журналів цього run;
+# залишок = 332 с (колишній) + N 149 с.
 @{
     Measured = '2026-10-22'
     Shards   = @(
-        @{ Id = 1; Part = 1; Seconds = 291; Prefixes = @('R', 'N') }
-        @{ Id = 2; Part = 1; Seconds = 210; Prefixes = @('Security.D', 'F', 'I', 'O', 'V', 'W', 'B', 'G', 'J', 'A') }
-        @{ Id = 3; Part = 2; Seconds = 273; Prefixes = @('C', 'M', 'T') }
-        @{ Id = 4; Part = 2; Seconds = 235; Prefixes = @('Security.H', 'Security.S', 'L', 'U') }
-        @{ Id = 5; Part = 3; Seconds = 356; Prefixes = @('DocumentVersionMigration') }
-        @{ Id = 6; Part = 3; Seconds = 175; Prefixes = @('H', 'Security.P', 'Security.U', 'Security.T', 'Security.V', 'Security.M', 'Security.G', 'Security.A', 'Security.L') }
-        @{ Id = 7; Part = 4; Seconds = 224; Prefixes = @('E') }
-        @{ Id = 8; Part = 4; Seconds = 298; Prefixes = @('Security.C', 'Security.R', 'Security.E', 'Security.N') }
-        @{ Id = 9; Part = 5; Seconds = 539; Rest = $true }
+        @{ Id = 1; Part = 1; Seconds = 405; Prefixes = @('R') }
+        @{ Id = 2; Part = 1; Seconds = 87; Prefixes = @('F', 'O', 'V', 'B', 'G', 'A') }
+        @{ Id = 3; Part = 2; Seconds = 187; Prefixes = @('C', 'T') }
+        @{ Id = 4; Part = 2; Seconds = 267; Prefixes = @('Security.H', 'Security.S', 'L', 'U') }
+        @{ Id = 5; Part = 3; Seconds = 183; Prefixes = @('DocumentVersionMigration') }
+        @{ Id = 6; Part = 3; Seconds = 316; Prefixes = @('H', 'I', 'J', 'W', 'Security.D', 'Security.P', 'Security.U', 'Security.T', 'Security.V', 'Security.M', 'Security.G', 'Security.A', 'Security.L') }
+        @{ Id = 7; Part = 4; Seconds = 153; Prefixes = @('E') }
+        @{ Id = 8; Part = 4; Seconds = 324; Prefixes = @('Security.C', 'Security.R', 'Security.E', 'Security.N', 'M') }
+        @{ Id = 9; Part = 5; Seconds = 481; Rest = $true }
     )
 }
