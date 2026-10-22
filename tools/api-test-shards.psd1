@@ -37,15 +37,23 @@
 # Частини 1–3 — об'єднання префіксів своїх шардів; частина 4 (шард-залишок) —
 # заперечення префіксів усіх шардів частин 1–3. Сторож
 # `ApiTestShardsTests` (Architecture) звіряє це з дійсними класами в `tests/Ecr.Api.Tests`.
+#
+# ✎ 2026-10-22 (rc30, run 39807105785): замір 2026-10-12 застарів — api-3 (D, N, E, P, T, H)
+# ішла 27:06 при 661 тесті (сума тривалостей 1089 с; один `DocumentVersionMigrationTests`
+# дає 371 с, `EditAssignmentsApiTests` 124 с), тоді як api-1/2/4 — 11–13 хв (суми 365 / 428 / 386 с).
+# Фіксовані накладні на частину ~280–370 с. Нові `Seconds` — суми тривалостей тестів за
+# префіксами з того ж журналу; прогноз сум на частину: api-1 542, api-2 475, api-3 595, api-4 656
+# (≈ 14.5–15.6 хв стіни, ціль правила — ≤ 20 хв). Префікс `D` розкрито в
+# `DocumentVersionMigration` (решта `D*` — у залишок), `N` → частина 1, `T` → частина 2, `P` → залишок.
 @{
-    Measured = '2026-10-12'
+    Measured = '2026-10-22'
     Shards   = @(
-        @{ Id = 1; Part = 1; Seconds = 417; Prefixes = @('R') }
-        @{ Id = 2; Part = 1; Seconds = 273; Prefixes = @('Security.D', 'F', 'I', 'O', 'V', 'W', 'B', 'G') }
-        @{ Id = 3; Part = 2; Seconds = 349; Prefixes = @('C', 'M') }
-        @{ Id = 4; Part = 2; Seconds = 377; Prefixes = @('Security.H', 'Security.S', 'J', 'L') }
-        @{ Id = 5; Part = 3; Seconds = 381; Prefixes = @('D', 'N') }
-        @{ Id = 6; Part = 3; Seconds = 296; Prefixes = @('E', 'P', 'T', 'H') }
-        @{ Id = 7; Part = 4; Seconds = 710; Rest = $true }
+        @{ Id = 1; Part = 1; Seconds = 384; Prefixes = @('R', 'N') }
+        @{ Id = 2; Part = 1; Seconds = 158; Prefixes = @('Security.D', 'F', 'I', 'O', 'V', 'W', 'B', 'G') }
+        @{ Id = 3; Part = 2; Seconds = 288; Prefixes = @('C', 'M', 'T') }
+        @{ Id = 4; Part = 2; Seconds = 187; Prefixes = @('Security.H', 'Security.S', 'J', 'L') }
+        @{ Id = 5; Part = 3; Seconds = 563; Prefixes = @('DocumentVersionMigration', 'E') }
+        @{ Id = 6; Part = 3; Seconds = 32; Prefixes = @('H') }
+        @{ Id = 7; Part = 4; Seconds = 656; Rest = $true }
     )
 }

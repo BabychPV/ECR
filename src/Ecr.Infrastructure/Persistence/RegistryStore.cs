@@ -177,7 +177,21 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // Поля шапки (Lookup) теж посилаються на довідник/групу (FK Restrict): без них група, використана лише шапкою,
+        // виглядала б невикористаною, а видалення давало 500 замість 409 (F13 P2-1).
+        var headers = await (
+            from field in db.HeaderFieldDefs.AsNoTracking()
+            where field.LookupRegistryDefId != null && !field.IsDeleted
+            join version in db.TemplateVersions.AsNoTracking() on field.TemplateVersionId equals version.Id
+            group field by new { RegistryDefId = field.LookupRegistryDefId!.Value, version.TemplateId } into g
+            select new { g.Key.RegistryDefId, g.Key.TemplateId, Columns = g.Count() })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
         return groups
+            .Concat(headers)
+            .GroupBy(g => (g.RegistryDefId, g.TemplateId))
+            .Select(g => new { g.Key.RegistryDefId, g.Key.TemplateId, Columns = g.Sum(x => x.Columns) })
             .GroupBy(g => g.RegistryDefId)
             .ToDictionary(g => g.Key, g => new RegistryTemplateUsage(g.Sum(x => x.Columns), g.Count()));
     }

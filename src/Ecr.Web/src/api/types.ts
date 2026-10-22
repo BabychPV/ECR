@@ -224,6 +224,8 @@ export type RowKind = Schemas['RowKind'];
 
 /** Довідник. */
 export type RegistryDefDto = Schemas['RegistryDefDto'];
+/** Відомості про ціль Lookup за id (`GET /registries/by-id/{id}`): поточна ціль, якої немає в переліку. */
+export type RegistryTargetDto = Schemas['RegistryTargetDto'];
 export type RegistrySourceKind = Schemas['RegistrySourceKind'];
 
 /** Запис довідника. */

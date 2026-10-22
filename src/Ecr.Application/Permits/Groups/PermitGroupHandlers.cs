@@ -514,9 +514,16 @@ public sealed class DeletePermitGroupHandler(
         }
 
         var usage = await registries.CountTemplateUsageAsync(ct).ConfigureAwait(false);
-        if (usage.GetValueOrDefault(group.RegistryDefId) is { } used && (used.Columns > 0 || used.Templates > 0))
+        var used = usage.GetValueOrDefault(group.RegistryDefId);
+        if (used is { } && (used.Columns > 0 || used.Templates > 0))
         {
             throw PermitGroupErrors.InUse(group.Code, used.Columns, used.Templates);
+        }
+
+        // ⛔ Лічильники рахують лише живі колонки/поля; FK (Restrict) тримає й м'яко видалені - без цієї перевірки 500.
+        if (await groups.IsReferencedByTemplatesAsync(group.RegistryDefId, ct).ConfigureAwait(false))
+        {
+            throw PermitGroupErrors.InUse(group.Code, 0, 0);
         }
 
         var types = (await permits.ListSummariesAsync(ct).ConfigureAwait(false)).ToDictionary(t => t.Id);

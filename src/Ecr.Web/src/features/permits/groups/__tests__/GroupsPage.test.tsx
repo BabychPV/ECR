@@ -363,6 +363,9 @@ describe('Groups: редагування, конкурентність, деак
     const otherKey = ['registries', 'entries', 'PRMG_OTHER', '2026-10-31'];
     client.setQueryData(pickerKey, [{ id: 1 }]);
     client.setQueryData(otherKey, [{ id: 2 }]);
+    // «Unlisted» ціль (`by-id`) теж не має лишатись старою після зміни групи. Мутація: прибери скидання ['registries','target'].
+    const targetKey = ['registries', 'target', 90];
+    client.setQueryData(targetKey, { id: 90, code: 'PRMG_WATER', isActive: true });
     stub([water]);
     show('/admin/permits/groups?panel=WATER', client);
 
@@ -371,6 +374,7 @@ describe('Groups: редагування, конкурентність, деак
 
     await waitFor(() => expect(client.getQueryState(pickerKey)?.isInvalidated).toBe(true));
     expect(client.getQueryState(otherKey)?.isInvalidated).toBe(false);
+    await waitFor(() => expect(client.getQueryState(targetKey)?.isInvalidated).toBe(true));
   });
 
   it('мертвий ?panel (неіснуючий код) знімається з адреси, живий лишається', async () => {

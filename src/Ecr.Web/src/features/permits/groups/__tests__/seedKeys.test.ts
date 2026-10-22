@@ -33,7 +33,7 @@ function usedKeys(): Set<string> {
   for (const file of [...sources(groupsDir), targetsFile]) {
     const text = readFileSync(file, 'utf8');
     for (const match of text.matchAll(/permits\.groups\.[A-Za-z.]+[A-Za-z]/g)) keys.add(match[0]);
-    for (const match of text.matchAll(/registries\.(?:lookupTargetUnlisted|lookupGroup\.unlisted)/g)) keys.add(match[0]);
+    for (const match of text.matchAll(/registries\.(?:lookupTargetUnlisted|lookupTargetInactive|lookupGroup\.unlisted)/g)) keys.add(match[0]);
   }
 
   return keys;

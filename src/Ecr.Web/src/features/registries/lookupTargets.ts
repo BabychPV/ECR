@@ -1,6 +1,7 @@
-import { apiFetch } from '@/api/client';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import type { RegistryDefDto } from '@/api/types';
+import type { RegistryDefDto, RegistryTargetDto } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 
@@ -45,7 +46,7 @@ export function lookupTargetsQuery(): {
 }
 
 /** Підпис цілі у списку вибору: «Назва (КОД)»; для шапки дозволу — «Permits: Назва (PRM_КОД)». */
-export function lookupTargetLabel(registry: RegistryDefDto): string {
+export function lookupTargetLabel(registry: Pick<RegistryDefDto, 'code' | 'nameL10n' | 'kind'>): string {
   const name = localized(registry.nameL10n);
 
   return lookupTargetKind(registry) === 'PermitHeader'
@@ -68,6 +69,49 @@ export interface LookupTargetGroup {
 export type LookupTargetData = LookupTargetOption[] | LookupTargetGroup[];
 
 /**
+ * Опція поточної цілі, якої немає в переліку. Відомості з `GET /registries/by-id/{id}` (`known`) дають назву і код (для
+ * групи ще й опис; неактивна - з позначкою); без них (404/403 однаково, без пояснення чому - S18) лишається підпис з id.
+ */
+function unlistedOption(id: number, known: RegistryTargetDto | null): LookupTargetOption {
+  if (known === null) return { value: String(id), label: t('registries.lookupTargetUnlisted', { id: String(id) }) };
+
+  const label = lookupTargetLabel(known);
+  const option: LookupTargetOption = {
+    value: String(id),
+    label: known.isActive ? label : t('registries.lookupTargetInactive', { label }),
+  };
+  if (known.kind === 'PermitGroup') {
+    const description = localized(known.descriptionL10n).trim();
+    if (description !== '') option.description = description;
+  }
+
+  return option;
+}
+
+/** Відомості про поточну ціль за id: лише коли її НЕМАЄ в переліку цілей; відмова (404/403) - `null`, без помилки. */
+export function unlistedTargetQuery(id: number): {
+  queryKey: ReturnType<typeof queryKeys.registries.target>;
+  queryFn: () => Promise<RegistryTargetDto | null>;
+  staleTime: number;
+  retry: false;
+} {
+  return {
+    queryKey: queryKeys.registries.target(id),
+    // ⛔ 404 (немає або заборонено - та сама відповідь) і 403 не розкриваються: підпис лишається «Not in the list».
+    queryFn: async () => {
+      try {
+        return await apiFetch<RegistryTargetDto>(`/api/v1/registries/by-id/${String(id)}`);
+      } catch (error) {
+        if (error instanceof EcrApiError && (error.problem.status === 404 || error.problem.status === 403)) return null;
+        throw error;
+      }
+    },
+    staleTime: 5 * 60_000,
+    retry: false,
+  };
+}
+
+/**
  * Дані `Select` вибору цілі Lookup: група «Permits» ПЕРШОЮ (шапки типів дозволів і групи типів — за `kind` сервера),
  * далі «Dictionaries».
  *
@@ -81,6 +125,7 @@ export type LookupTargetData = LookupTargetOption[] | LookupTargetGroup[];
 export function lookupTargetSelectData(
   registries: readonly RegistryDefDto[],
   currentId: number | null = null,
+  known: RegistryTargetDto | null = null,
 ): LookupTargetData {
   const toOption = (registry: RegistryDefDto): LookupTargetOption => {
     const option: LookupTargetOption = { value: String(registry.id), label: lookupTargetLabel(registry) };
@@ -93,9 +138,9 @@ export function lookupTargetSelectData(
   };
   const permits = registries.filter(isPermitTarget).map(toOption);
   const dictionaries = registries.filter((registry) => !isPermitTarget(registry)).map(toOption);
-  const unlisted =
+  const unlisted: LookupTargetOption | null =
     currentId !== null && !registries.some((registry) => registry.id === currentId)
-      ? { value: String(currentId), label: t('registries.lookupTargetUnlisted', { id: String(currentId) }) }
+      ? unlistedOption(currentId, known?.id === currentId ? known : null)
       : null;
 
   if (permits.length === 0 && unlisted === null) return dictionaries;
@@ -106,4 +151,15 @@ export function lookupTargetSelectData(
   if (unlisted !== null) groups.push({ group: t('registries.lookupGroup.unlisted'), items: [unlisted] });
 
   return groups;
+}
+
+/**
+ * Відомості про поточну ціль, якої немає в переліку цілей (`GET /registries/by-id/{id}`). Запит ЛІНИВИЙ: лише коли
+ * перелік уже приїхав, ціль задана і її в ньому немає; ціль у списку - жодного запиту. Відмова - `null` (підпис з id).
+ */
+export function useUnlistedTarget(currentId: number | null, targets: readonly RegistryDefDto[] | undefined): RegistryTargetDto | null {
+  const outside = currentId !== null && targets !== undefined && !targets.some((registry) => registry.id === currentId);
+  const query = useQuery({ ...unlistedTargetQuery(currentId ?? 0), enabled: outside });
+
+  return outside ? (query.data ?? null) : null;
 }

@@ -45,6 +45,13 @@ public sealed class LookupTargetComparisonGuardTests
             ["c.LookupRegistryDefId == registryId"] =
                 "SQL-вибір колонок, прив'язаних до КОНКРЕТНОГО довідника статусів Land (registryId), а не перевірка належності запису",
         },
+        ["src/Ecr.Infrastructure/Persistence/PermitGroupStore.cs"] = new(StringComparer.Ordinal)
+        {
+            ["c.LookupRegistryDefId == registryDefId"] =
+                "SQL «чи є посилання на реєстр групи» (колонки, включно з м'яко видаленими, - FK Restrict); вибірка за цілю, а не перевірка належності запису",
+            ["f.LookupRegistryDefId == registryDefId"] =
+                "те саме для полів шапки",
+        },
         ["src/Ecr.Infrastructure/Persistence/RegistryStore.cs"] = new(StringComparer.Ordinal)
         {
             ["where column.LookupRegistryDefId == registryDefId"] =

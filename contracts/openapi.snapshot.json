@@ -13058,7 +13058,6 @@
         "type": "object"
       },
       "RegistryDefKind": {
-        "default": "Dictionary",
         "description": "Вид довідника як цілі Lookup (RegistryDefKind RegistryDefDto.Kind).",
         "enum": [
           "Dictionary",
@@ -14607,6 +14606,52 @@
           "Hybrid",
           "Local"
         ]
+      },
+      "RegistryTargetDto": {
+        "description": "Мінімальні відомості про довідник-ціль Lookup за ідентифікатором (`GET /registries/by-id/{id}`): для показу поточної цілі\nколонки чи поля шапки, якої немає в переліку цілей («unlisted»).",
+        "properties": {
+          "code": {
+            "description": "Код довідника.",
+            "type": "string"
+          },
+          "descriptionL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Опис групи типів дозволів; для решти `null`."
+              }
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор довідника (той, що зберігає колонка/поле).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isActive": {
+            "description": "Чи довідник (група) активний.",
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RegistryDefKind",
+            "description": "`Dictionary` / `PermitHeader` / `PermitGroup`."
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва мовами каталогу."
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "nameL10n",
+          "descriptionL10n",
+          "kind",
+          "isActive"
+        ],
+        "type": "object"
       },
       "RenameRoleRequest": {
         "description": "Новий код ролі — для перейменування і для клона.",
@@ -39588,6 +39633,70 @@
           }
         },
         "summary": "Заводить довідник-контейнер, без жодного поля. Право\n`Registry.EditDefinition`.",
+        "tags": [
+          "Registries"
+        ]
+      }
+    },
+    "/api/v1/registries/by-id/{id}": {
+      "get": {
+        "description": "⛔ S18: неіснуючий Id і довідник під забороною дають ОДНУ `404 ECR-REG-0404` (у відповіді лише переданий Id);\nбез права й без гранта - `403` однаково для існуючого й неіснуючого Id.",
+        "parameters": [
+          {
+            "description": "Ідентифікатор довідника (`lookupRegistryDefId` колонки чи поля).",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryTargetDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryTargetDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryTargetDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Мінімальні відомості про довідник-ЦІЛЬ Lookup за Id - для показу поточної цілі колонки чи поля шапки, якої немає\nв переліку (`unlisted`). Право `Registry.View` або грант `Read` на цей довідник.",
         "tags": [
           "Registries"
         ]
