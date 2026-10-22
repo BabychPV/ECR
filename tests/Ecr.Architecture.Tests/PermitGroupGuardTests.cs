@@ -79,13 +79,28 @@ public sealed partial class PermitGroupGuardTests
         // Порт має споживачів: сторож не повинен зеленіти на порожньому наборі.
         Assert.NotEmpty(consumers);
 
+        // Свіжість знімка гарантує сам споживач (EnsureFreshAsync) або спільні помічники порту, що кличуть її всередині:
+        // `LookupTargetMatcher.EnsureFreshOnMismatchAsync` (перевірки належності) і `LookupTargetEntries.ListAsync` (читання складу).
+        // `SourceEventMapSupport.BuildSpecsAsync(` - лише пересилає резолвер у `SourceEventMapHandlers`, де є `EnsureFreshOnMismatchAsync`.
+        var freshness = new Regex(
+            @"EnsureFreshAsync\(|EnsureFreshOnMismatchAsync\(|LookupTargetEntries\s*\.ListAsync\(|SourceEventMapSupport\s*\.BuildSpecsAsync\(",
+            RegexOptions.None,
+            TimeSpan.FromSeconds(5));
         var offenders = consumers
-            .Where(f => !WithoutLineComments(f.Text).Contains("EnsureFreshAsync(", StringComparison.Ordinal))
+            .Where(f => !freshness.IsMatch(WithoutLineComments(f.Text)))
             .Select(f => f.Path)
             .Order(StringComparer.Ordinal)
             .ToList();
 
         Assert.Empty(offenders);
+
+        // Помічники лежать у каталозі, який сторож пропускає, тож їхню свіжість перевіряємо окремо: без неї спільні споживачі читали б застарілий знімок.
+        var helpers = SourceTree.Production()
+            .Where(f => f.Path.EndsWith("/Permits/Groups/LookupTargetMatcher.cs", StringComparison.Ordinal)
+                        || f.Path.EndsWith("/Permits/Groups/LookupTargetEntries.cs", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(2, helpers.Count);
+        Assert.All(helpers, f => Assert.Contains("EnsureFreshAsync(", WithoutLineComments(f.Text), StringComparison.Ordinal));
     }
 
     [Fact]
