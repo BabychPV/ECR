@@ -9,6 +9,7 @@ import * as permitsApi from '../../api/permitsApi';
 import { PermitLifecycleDialogs } from '../../list/PermitLifecycleDialogs';
 import { makePermit } from '../../list/__tests__/permitFixture';
 import { LifecycleDialogs } from '../LifecycleDialogs';
+import type { Permit } from '../../api/types';
 import { permit } from './permitFixtures';
 
 /**
@@ -117,6 +118,28 @@ describe('PUI-5: End early у день старту (екран дозволу)'
     fireEvent.click(within(dialog).getByRole('button', { name: 'permits.page.end.verb' }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe('P3-2: подвійний клік «Підтвердити» в End early (екран дозволу)', () => {
+  it('другий клік до завершення запиту не шле мутацію вдруге', async () => {
+    // Мутаційний доказ (вручну, відновлено): без `if (end.isPending) return` endPermit викликається двічі.
+    let finish: (value: Permit) => void = () => undefined;
+    endPermit.mockImplementation(() => new Promise<Permit>((resolve) => { finish = resolve; }));
+    render(wrap(<LifecycleDialogs permit={permit({ status: 'Active' })} dialog="end" onClose={vi.fn()} />));
+
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /permits\.page\.end\.reason/ }), {
+      target: { value: 'Operations stopped for good' },
+    });
+    const confirm = within(dialog).getByRole('button', { name: 'permits.page.end.verb' });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(endPermit).toHaveBeenCalledTimes(1));
+    fireEvent.click(confirm);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(endPermit).toHaveBeenCalledTimes(1);
+    finish(permit({ status: 'Ended' }));
   });
 });
 
