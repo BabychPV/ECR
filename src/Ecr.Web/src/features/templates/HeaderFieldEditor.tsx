@@ -1,7 +1,7 @@
 import { useMemo, type JSX } from 'react';
 import { Alert, Button, Group, NumberInput, Select, Skeleton, Stack, Switch, TextInput } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { lookupTargetLabel, lookupTargetsQuery } from '@/features/registries/lookupTargets';
+import { lookupTargetSelectData, lookupTargetsQuery } from '@/features/registries/lookupTargets';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput } from '@/shared/ui/LocalizedInput';
@@ -50,11 +50,7 @@ export function HeaderFieldEditor({
   const registries = useQuery({ ...lookupTargetsQuery(), enabled: isLookup });
 
   const registryOptions = useMemo(
-    () =>
-      (registries.data ?? []).map((registry) => ({
-        value: String(registry.id),
-        label: lookupTargetLabel(registry),
-      })),
+    () => lookupTargetSelectData(registries.data ?? []),
     [registries.data],
   );
 

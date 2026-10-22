@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { UnitRef } from '@/api/types';
-import { lookupTargetLabel, lookupTargetsQuery } from '@/features/registries/lookupTargets';
+import { lookupTargetSelectData, lookupTargetsQuery } from '@/features/registries/lookupTargets';
 import { formatMonthName } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -101,11 +101,7 @@ export function ColumnEditor({
   // ⚠ Мемоізовано: `[]`-літерал у пропі `data` перебудовувався б щорендеру,
   // поки запит іще `pending`, — новий референс масиву на кожен рендер.
   const registryOptions = useMemo(
-    () =>
-      (registries.data ?? []).map((registry) => ({
-        value: String(registry.id),
-        label: lookupTargetLabel(registry),
-      })),
+    () => lookupTargetSelectData(registries.data ?? []),
     [registries.data],
   );
 
