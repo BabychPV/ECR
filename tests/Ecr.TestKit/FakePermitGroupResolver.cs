@@ -127,6 +127,9 @@ public sealed class InMemoryPermitGroupStore : IPermitGroupStore
     }
 
     /// <inheritdoc />
+    public Task<bool> IsReferencedByTemplatesAsync(int registryDefId, CancellationToken ct) => Task.FromResult(false);
+
+    /// <inheritdoc />
     public Task RemoveAsync(PermitGroup group, CancellationToken ct)
     {
         _groups.Remove(group);

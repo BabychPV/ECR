@@ -308,6 +308,72 @@ public sealed class PermitGroupTests(SqlServerFixture sql)
         await Assert.ThrowsAsync<NotFoundException>(() => new Handlers(d2, cache).Get.HandleAsync(GroupCode + "F", default));
     }
 
+    /// <summary>
+    /// F13 P2-1: група, яку використовує ЛИШЕ поле шапки (Lookup), мусить мати лічильники &gt; 0 і не видалятися (409 4098, а не 500 через FK);
+    /// після м'якого видалення поля лічильники 0, але FK тримає - все одно 4098. Деактивація використаної групи дозволена.
+    /// Мутації: прибрати HeaderFieldDefs у <c>CountTemplateUsageAsync</c> - червоніє перша половина; прибрати
+    /// <c>IsReferencedByTemplatesAsync</c> у <c>DeletePermitGroupHandler</c> - друга (FK-виняток).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Група_використана_лише_полем_шапки_рахується_і_не_видаляється_а_деактивується()
+    {
+        await using var h = await PermitHarness.CreateAsync(sql, PermitHarness.EverythingWithData);
+        await PermitFixtures.PublishTypeAsync(h, Type(1));
+        var cache = new PermitGroupSnapshotCache();
+
+        await using var a = await h.NextRequestAsync();
+        var group = await new Handlers(a, cache).Create.HandleAsync(NewGroup(GroupCode, Type(1)), default);
+
+        int fieldId;
+        await using (var db = sql.CreateContext())
+        {
+            var template = new Template(EcrCode.Create($"TPLH{_tag}"), new LocalizedText(Name("t")), 1, DateTime.UtcNow);
+            db.Templates.Add(template);
+            await db.SaveChangesAsync();
+            var version = new TemplateVersion(template.Id, "1.0.0.0", 1, DateTime.UtcNow);
+            db.TemplateVersions.Add(version);
+            await db.SaveChangesAsync();
+            var field = new HeaderFieldDef(version.Id, EcrCode.Create("PGRP"), new LocalizedText(Name("Permit")), 1, CellDataType.Lookup);
+            field.SetLookup(group.RegistryDefId);
+            db.HeaderFieldDefs.Add(field);
+            await db.SaveChangesAsync();
+            fieldId = field.Id;
+        }
+
+        await using var b = await h.NextRequestAsync();
+        var listed = (await new Handlers(b, cache).List.HandleAsync(default)).Single(g => g.Code == GroupCode);
+        Assert.Equal((1, 1), (listed.UsedInColumns, listed.UsedInTemplates));
+
+        await using var c = await h.NextRequestAsync();
+        var inUse = await Assert.ThrowsAsync<BusinessRuleException>(() => new Handlers(c, cache).Delete.HandleAsync(GroupCode, default));
+        Assert.Equal(("ECR-PRM-4098", "err.ECR-PRM-4098.inUse"), (inUse.ErrorCode, inUse.Details!["messageKey"]));
+
+        // Деактивація використаної групи дозволена.
+        await using var d = await h.NextRequestAsync();
+        var read = await new Handlers(d, cache).Get.HandleAsync(GroupCode, default);
+        await using var d2 = await h.NextRequestAsync();
+        var off = await new Handlers(d2, cache).Update.HandleAsync(
+            GroupCode, new UpdatePermitGroupRequest(Name("Water permits"), null, false, read.RowVersion), default);
+        Assert.False(off.IsActive);
+
+        // М'яко видалене поле: лічильники 0, але FK Restrict тримає - відмова все одно 4098, а не 500.
+        await using (var db = sql.CreateContext())
+        {
+            var field = await db.HeaderFieldDefs.SingleAsync(f => f.Id == fieldId);
+            field.SoftDelete(1, DateTime.UtcNow);
+            await db.SaveChangesAsync();
+        }
+
+        await using var e = await h.NextRequestAsync();
+        var stillUsed = await Assert.ThrowsAsync<BusinessRuleException>(() => new Handlers(e, cache).Delete.HandleAsync(GroupCode, default));
+        Assert.Equal("ECR-PRM-4098", stillUsed.ErrorCode);
+
+        await using var verify = sql.CreateContext();
+        Assert.True(await verify.PermitGroups.AnyAsync(g => g.Code == GroupCode));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
