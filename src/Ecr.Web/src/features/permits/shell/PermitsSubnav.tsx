@@ -7,7 +7,7 @@ import { PermitsPaths } from './permitPaths';
 import './permitsShell.css';
 
 /** Розділ Permits, на якому стоїть людина. */
-export type PermitsSection = 'permits' | 'types' | 'lists' | 'bindings';
+export type PermitsSection = 'permits' | 'types' | 'lists' | 'groups' | 'bindings';
 
 interface SubnavItem {
   readonly id: PermitsSection;
@@ -23,6 +23,7 @@ const items: readonly SubnavItem[] = [
   { id: 'permits', to: PermitsPaths.permits, label: () => t('nav.permits') },
   { id: 'types', to: PermitsPaths.types, label: () => t('permits.types.title'), permission: PermitTypesPermission },
   { id: 'lists', to: PermitsPaths.lists, label: () => t('permits.lists.title') },
+  { id: 'groups', to: PermitsPaths.groups, label: () => t('permits.groups.title') },
   { id: 'bindings', to: PermitsPaths.bindings, label: () => t('permits.bindings.title') },
 ];
 

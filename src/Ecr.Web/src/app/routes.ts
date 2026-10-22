@@ -403,6 +403,17 @@ export const routes = {
       crumb: { ancestorIds: ['admin-permits'] },
     },
   },
+  // Групи типів дозволів: читання - `Registry.View` (як списки); керування (кнопки) - `Permit.EditType`, перевіряє екран.
+  adminPermitGroups: {
+    id: 'admin-permit-groups',
+    path: '/admin/permits/groups',
+    handle: {
+      labelKey: 'permits.groups.title',
+      permission: 'Registry.View',
+      descriptionKey: 'permits.groups.description',
+      crumb: { ancestorIds: ['admin-permits'] },
+    },
+  },
   adminPermitBindings: {
     id: 'admin-permit-bindings',
     path: '/admin/permits/bindings',
