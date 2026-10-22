@@ -333,6 +333,50 @@ public sealed partial class DocumentVersionMigrationTests
         Assert.Equal("foreign", bad.GetProperty("reason").GetString());
     }
 
+    /// <summary>
+    /// PRMG, бік <c>from</c>: ціль СТАРОГО поля - ГРУПА (прихований реєстр без записів), а вжитий запис належить реєстру-члену.
+    /// Запис члена - законний <c>from</c> (без групи був би «чужий» і 422); після виходу реєстру зі складу - знову
+    /// <c>migrateLookupRemapInvalid</c>. Мутація: у <c>MigrateDocumentVersionHandler</c> повернути пряме порівняння
+    /// <c>old.RegistryDefId != src.LookupRegistryDefId</c> - перша частина червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PRMG")]
+    public async Task Ціль_старого_поля_група_from_із_реєстру_члена_законний_а_поза_складом_ні()
+    {
+        var l = await ArrangeLookupAsync().ConfigureAwait(true);
+        int member, groupRegistry;
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            member = await db.RegistryEntries.Where(e => e.Id == l.OldEntry).Select(e => e.RegistryDefId).SingleAsync().ConfigureAwait(true);
+            var group = new RegistryDef(EcrCode.Create($"OLDG_{Guid.NewGuid():N}"[..20]), Name("OLDG"), isTemporal: false);
+            db.RegistryDefs.Add(group);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            groupRegistry = group.Id;
+
+            var oldField = await db.HeaderFieldDefs.SingleAsync(f => f.Id == l.OldField).ConfigureAwait(true);
+            oldField.SetLookup(groupRegistry);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var groups = new FakePermitGroupResolver().WithGroup(groupRegistry, [member]);
+        using var app = new EcrApiFactory(sql)
+        {
+            ExtraServices = services => services.AddSingleton<Ecr.Application.Permits.Groups.ILookupTargetResolver>(groups),
+        };
+        using var client = await SignedInAsync(app, l.S.UserName).ConfigureAwait(true);
+
+        var inGroup = await ReadJsonAsync(await PostRemapAsync(client, l, dryRun: true, pairs: [(l.OldEntry, l.GoodNew)]).ConfigureAwait(true))
+            .ConfigureAwait(true);
+        Assert.True(inGroup.GetProperty("canApply").GetBoolean(), inGroup.ToString());
+
+        groups.WithGroup(groupRegistry, [member + 1_000_000]);
+        var response = await PostRemapAsync(client, l, dryRun: false, pairs: [(l.OldEntry, l.GoodNew)]).ConfigureAwait(true);
+        await AssertProblemAsync(response, HttpStatusCode.UnprocessableEntity, "ECR-SCHM-0422", "err.ECR-SCHM-0422.migrateLookupRemapInvalid")
+            .ConfigureAwait(true);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

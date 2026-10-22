@@ -18,7 +18,7 @@ namespace Ecr.Architecture.Tests;
 /// <c>*.LookupRegistryDefId</c>.
 /// </para>
 /// <para>
-/// Виняткові файли - ЯВНИЙ список нижче з причиною; сторож порожнього результату не вимагає (жодних «NotEmpty»-пасток):
+/// Виняткові файли (лише LookupTargetMatcher) і виняткові РЯДКИ - ЯВНІ списки нижче з причиною; сторож порожнього результату не вимагає (жодних «NotEmpty»-пасток):
 /// самоперевірка шаблонів іде окремим тестом на прикладах рядків.
 /// </para>
 /// <para>
@@ -33,10 +33,23 @@ public sealed class LookupTargetComparisonGuardTests
     {
         ["src/Ecr.Application/Permits/Groups/LookupTargetMatcher.cs"] =
             "єдина точка порівняння: збіг реєстру - швидкий шлях до звернення до резолвера",
-        ["src/Ecr.Infrastructure/Persistence/RowActivityFilterSource.cs"] =
-            "SQL-вибір колонок, прив'язаних до КОНКРЕТНОГО довідника статусів Land (registryId), а не перевірка належності запису",
-        ["src/Ecr.Infrastructure/Persistence/RegistryStore.cs"] =
-            "SQL «де використовується довідник» (колонки шаблонів з ціллю = registryDefId); це вибірка за цілю, а не перевірка належності запису",
+    };
+
+    /// <summary>
+    /// Виняткові РЯДКИ (не файли): шлях -> (уривок рядка -> причина). Інше пряме порівняння в тому ж файлі сторож побачить.
+    /// </summary>
+    private static readonly Dictionary<string, Dictionary<string, string>> AllowedLines = new(StringComparer.Ordinal)
+    {
+        ["src/Ecr.Infrastructure/Persistence/RowActivityFilterSource.cs"] = new(StringComparer.Ordinal)
+        {
+            ["c.LookupRegistryDefId == registryId"] =
+                "SQL-вибір колонок, прив'язаних до КОНКРЕТНОГО довідника статусів Land (registryId), а не перевірка належності запису",
+        },
+        ["src/Ecr.Infrastructure/Persistence/RegistryStore.cs"] = new(StringComparer.Ordinal)
+        {
+            ["where column.LookupRegistryDefId == registryDefId"] =
+                "SQL «де використовується довідник» (колонки шаблонів з ціллю = registryDefId); вибірка за цілю, а не перевірка належності запису",
+        },
     };
 
     private static readonly Regex[] Patterns =
@@ -79,7 +92,9 @@ public sealed class LookupTargetComparisonGuardTests
                     continue;
                 }
 
-                if (Patterns.Any(p => p.IsMatch(text)))
+                if (Patterns.Any(p => p.IsMatch(text))
+                    && !(AllowedLines.TryGetValue(relative, out var lines)
+                         && lines.Keys.Any(fragment => text.Contains(fragment, StringComparison.Ordinal))))
                 {
                     offenders.Add($"{relative}:{line}: {text.Trim()}");
                 }
