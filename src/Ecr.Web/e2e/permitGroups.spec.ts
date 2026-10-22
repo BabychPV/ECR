@@ -163,7 +163,7 @@ test.describe('Permit groups', () => {
       const backend = await installBackend(page, [Water, Used]);
       await page.goto('/admin/permits/groups');
       await expect(page.getByRole('heading', { name: 'Groups' }).first(), `прогін ${run}: заголовок`).toBeVisible({ timeout: 30_000 });
-      await expect(page.getByText('Water permits')).toBeVisible();
+      await expect(page.getByText('Water permits', { exact: true })).toBeVisible();
       await expect(page.getByText('Water intake · Discharge')).toBeVisible();
       if (run === 1) await shoot(page, 'groups-list');
 
@@ -186,7 +186,8 @@ test.describe('Permit groups', () => {
         method: 'POST',
         body: { code: `E2E_G${String(run)}`, nameL10n: { en: `E2E group ${String(run)}` }, descriptionL10n: { en: 'Group for the e2e run' }, typeCodes: ['WaterIntake'] },
       });
-      await expect(page.getByText(`E2E group ${String(run)}`)).toBeVisible();
+      // Нова група з'явилась у таблиці (а не лише в тості «created»).
+      await expect(page.getByRole('row', { name: new RegExp(`E2E group ${String(run)}`) })).toBeVisible();
 
       // Esc у шторці закриває лише її, фокус - на рядок, що її відкрив.
       const row = page.getByRole('row', { name: /Water permits/ });
@@ -306,7 +307,7 @@ test.describe('Permit groups', () => {
         await installBackend(page, [Water, Used]);
 
         await page.goto('/admin/permits/groups');
-        await expect(page.getByText('Water permits')).toBeVisible({ timeout: 30_000 });
+        await expect(page.getByText('Water permits', { exact: true })).toBeVisible({ timeout: 30_000 });
         await shoot(page, `groups-list-${scheme}-${String(width)}`);
 
         await page.goto('/admin/permits/groups?panel=WATER');

@@ -188,6 +188,8 @@ describe('Groups: перелік і права', () => {
     show();
 
     expect(await screen.findByText('Water permits')).not.toBeNull();
+    // Той, хто може правити, бачить «New group» у шапці (лінивий чанк): без цього перевірка «немає кнопки» в тесті прав нічого б не доводила.
+    expect(await screen.findByRole('button', { name: 'permits.groups.new' })).not.toBeNull();
     expect(screen.getByText('WATER')).not.toBeNull();
     expect(screen.getByText('All water permits')).not.toBeNull();
     expect(screen.getByText('Water intake · Discharge')).not.toBeNull();
@@ -209,6 +211,8 @@ describe('Groups: перелік і права', () => {
     show('/admin/permits/groups?panel=WATER');
 
     await screen.findByText('permits.groups.drawer.readOnly');
+    // Кнопка шапки живе в лінивому чанку `PageHeaderActions`: даємо йому з'явитися, інакше «немає кнопки» було б хибно-зеленим.
+    await new Promise((resolve) => setTimeout(resolve, 500));
     expect(screen.queryByRole('button', { name: 'permits.groups.new' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'permits.groups.drawer.save' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'permits.groups.drawer.delete' })).toBeNull();
