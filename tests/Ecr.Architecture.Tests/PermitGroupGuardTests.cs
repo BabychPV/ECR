@@ -51,6 +51,8 @@ public sealed partial class PermitGroupGuardTests
             ["src/Ecr.Application/Registries/RegistryDefinitionDraftHandlers.cs"] = ("PermitGroupRegistryGuard.RequireNotManaged", 3),
             ["src/Ecr.Application/Registries/RegistryAdminHandlers.cs"] = ("PermitGroupRegistryGuard.RequireNotManaged", 1),
             ["src/Ecr.Application/Registries/CreateRegistryHandler.cs"] = ("PermitGroupRegistryGuard.RequireNotReserved", 1),
+            ["src/Ecr.Application/Registries/RegistryEntryCsvHandlers.cs"] = ("PermitGroupRegistryGuard.RequireNotManaged", 1),
+            ["src/Ecr.Application/Registries/ExternalRegistryGuard.cs"] = ("PermitGroupRegistryGuard.RequireNotManaged", 1),
             ["src/Ecr.Application/Calculations/MethodologyAuthoringHandlers.cs"] = ("PermitGroupRegistryGuard.RequireNotRowActivityTarget", 1),
             ["src/Ecr.Application/Templates/PublishTemplateVersionHandler.cs"] = ("PublishChecks.CheckGroupLookupFormulas", 1),
         };

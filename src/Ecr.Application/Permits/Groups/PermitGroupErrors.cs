@@ -55,6 +55,19 @@ internal static class PermitGroupErrors
                 ["registryCode"] = registryCode,
             });
 
+    /// <summary><c>409 ECR-PRM-4097 registryReserved</c>: префікс <c>PRMG_</c> зарезервований за групами дозволів.</summary>
+    /// <param name="registryCode">Код нового довідника.</param>
+    internal static BusinessRuleException RegistryPrefixReserved(string registryCode)
+        => new(
+            ErrorCodes.PermitGroupDuplicate,
+            $"Префікс «{RegistryPrefix}» зарезервований за групами дозволів: код «{registryCode}» не можна використати.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-4097.registryReserved",
+                ["registryCode"] = registryCode,
+                ["prefix"] = RegistryPrefix,
+            });
+
     /// <summary><c>409 ECR-PRM-4098 inUse</c>: групу використовують колонки/поля шаблонів - лише деактивація.</summary>
     /// <param name="code">Код групи.</param>
     /// <param name="columns">Скільки колонок/полів.</param>

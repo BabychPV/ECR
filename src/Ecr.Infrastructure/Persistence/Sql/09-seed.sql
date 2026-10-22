@@ -9149,6 +9149,7 @@ USING (VALUES
     ,(N'err.ECR-PRM-0422.permitGroupMemberUnknown', N'en', N'The permit type "{typeCode}" does not exist.', 1)
     ,(N'err.ECR-PRM-0422.permitGroupMemberNotPublished', N'en', N'The permit type "{typeCode}" is not published yet: only published types can be in a group.', 1)
     ,(N'err.ECR-PRM-0422.permitGroupRegistryManaged', N'en', N'The registry "{registryCode}" belongs to a permit group and can only be changed through the group.', 1)
+    ,(N'err.ECR-PRM-4097.registryReserved', N'en', N'The code prefix "{prefix}" is reserved for permit groups: the registry code "{registryCode}" cannot be used.', 1)
     ,(N'err.ECR-CALC-0422.rowActivityFilterPermitGroup', N'en', N'The row activity filter cannot point to the permit group "{registryCode}": a group has no entries.', 1)
     ,(N'err.ECR-TMPL-0422.lookupGroupNoRegistryForms', N'en', N'Column {columnCode} uses a permit group as its list: REG* functions over it are not supported yet.', 1)
     -- PERMITS: groups-api ── кінець секції ──
@@ -23786,6 +23787,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-PRM-0422.permitGroupMemberNotPublished', N'kz', N'«{typeCode}» рұқсат түрі әлі жарияланбаған: топқа тек жарияланған түрлер кіреді.'),
     (N'err.ECR-PRM-0422.permitGroupRegistryManaged', N'ru', N'Реестр «{registryCode}» принадлежит группе разрешений и меняется только через группу.'),
     (N'err.ECR-PRM-0422.permitGroupRegistryManaged', N'kz', N'«{registryCode}» тізілімі рұқсаттар тобына тиесілі және тек топ арқылы өзгереді.'),
+    (N'err.ECR-PRM-4097.registryReserved', N'ru', N'Префикс кода «{prefix}» зарезервирован за группами разрешений: код реестра «{registryCode}» использовать нельзя.'),
+    (N'err.ECR-PRM-4097.registryReserved', N'kz', N'«{prefix}» код префиксі рұқсаттар топтарына резервтелген: «{registryCode}» тізілім кодын пайдалануға болмайды.'),
     (N'err.ECR-CALC-0422.rowActivityFilterPermitGroup', N'ru', N'Фильтр активности строк не может указывать на группу разрешений «{registryCode}»: в группе нет записей.'),
     (N'err.ECR-CALC-0422.rowActivityFilterPermitGroup', N'kz', N'Жолдардың белсенділік сүзгісі «{registryCode}» рұқсаттар тобына сілтей алмайды: топта жазбалар жоқ.'),
     (N'err.ECR-TMPL-0422.lookupGroupNoRegistryForms', N'ru', N'Колонка {columnCode} использует группу разрешений как список: функции REG* над ней пока не поддерживаются.'),

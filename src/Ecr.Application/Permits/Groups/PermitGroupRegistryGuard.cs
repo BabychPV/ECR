@@ -68,7 +68,7 @@ internal static class PermitGroupRegistryGuard
     {
         if (IsGroupRegistry(registryCode))
         {
-            throw PermitGroupErrors.RegistryCodeTaken(registryCode);
+            throw PermitGroupErrors.RegistryPrefixReserved(registryCode);
         }
     }
 }

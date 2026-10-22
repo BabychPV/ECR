@@ -108,6 +108,29 @@ public sealed class PermitGroupPickerTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Дата_відсікається_в_SQL_півінтервал_початок_включно_кінець_виключно_а_вікно_документа_перетинається()
+    {
+        await using var h = await PermitHarness.CreateAsync(sql, PermitHarness.EverythingWithData);
+        var snapshot = new PermitGroupSnapshotCache();
+        var seed = await SeedAsync(h, snapshot);
+
+        async Task<IReadOnlyList<long>> IdsAsync(DateOnly asOf)
+        {
+            await using var r = await h.NextRequestAsync();
+            return [.. (await Entries(r, snapshot).HandleAsync("PRMG_" + GroupCode, asOf, null, default)).Select(e => e.Id)];
+        }
+
+        // P1/P2 чинні [2026-01-01, 2027-01-01): початок включно, кінець виключно; P4 - [2024, 2025).
+        Assert.Equal([seed.P1, seed.P2], await IdsAsync(new DateOnly(2026, 1, 1)));
+        Assert.Empty(await IdsAsync(new DateOnly(2025, 12, 31)));
+        Assert.Equal([seed.P1, seed.P2], await IdsAsync(new DateOnly(2026, 12, 31)));
+        Assert.Empty(await IdsAsync(new DateOnly(2027, 1, 1)));
+        Assert.Equal([seed.P4], await IdsAsync(new DateOnly(2024, 6, 1)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Піклер_не_віддає_чужий_склад_читачеві_із_забороною_на_реєстр_типу_і_кеш_не_протікає()
     {
         await using var editor = await PermitHarness.CreateAsync(sql, PermitHarness.EverythingWithData);
@@ -242,7 +265,30 @@ public sealed class PermitGroupPickerTests(SqlServerFixture sql)
         var create = await Assert.ThrowsAsync<BusinessRuleException>(() => new CreateRegistryHandler(
                 c.Registries, c.Uow, c.Access, c.User)
             .HandleAsync("PRMG_OTHER" + _tag, new Dictionary<string, string> { ["en"] = "x" }, false, default));
-        Assert.Equal(("ECR-PRM-4097", "err.ECR-PRM-4097.registryCode"), (create.ErrorCode, create.Details!["messageKey"]));
+        Assert.Equal(("ECR-PRM-4097", "err.ECR-PRM-4097.registryReserved"), (create.ErrorCode, create.Details!["messageKey"]));
+
+        await using var db = sql.CreateContext();
+        Assert.False(db.RegistryEntries.Any(e => e.RegistryDefId == seed.GroupRegistryId));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Імпорт_CSV_у_прихований_реєстр_групи_відмовляє_і_у_превю_і_при_застосуванні(bool dryRun)
+    {
+        await using var h = await PermitHarness.CreateAsync(sql, [.. PermitHarness.EverythingWithData]);
+        var snapshot = new PermitGroupSnapshotCache();
+        var seed = await SeedAsync(h, snapshot);
+
+        await using var r = await h.NextRequestAsync();
+        var import = new ImportRegistryEntriesHandler(r.Registries, r.Audit, r.Access, r.User, r.Clock, r.Writer, r.Uow);
+        const string csv = "code\nX-1\n";
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => import.HandleAsync("PRMG_" + GroupCode, csv, csv.Length, 1024 * 1024, dryRun, default));
+        Assert.Equal(("ECR-PRM-0422", "err.ECR-PRM-0422.permitGroupRegistryManaged"), (ex.ErrorCode, ex.Details!["messageKey"]));
 
         await using var db = sql.CreateContext();
         Assert.False(db.RegistryEntries.Any(e => e.RegistryDefId == seed.GroupRegistryId));
