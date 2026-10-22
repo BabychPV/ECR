@@ -231,6 +231,9 @@ public static class PermitBindingValidator
             return;
         }
 
+        // PRMG (v1): це порівняння ДВОХ цілей (поле дозволу ↔ колонка), а не запису з ціллю. Колонка-група ≠ реєстр поля
+        // дозволу, тож привʼязка поля `PRM_X` до колонки-групи відхиляється як і раніше (покрито DocumentTablesPermitBindingTests/
+        // PermitBindingValidatorTests); розширювати на членство не потрібно - ліміти v1 не тягнемо.
         if (field.DataType == CellDataType.Lookup && (field.LookupRegistryDefId is null || field.LookupRegistryDefId != column.LookupRegistryDefId))
         {
             errors.Add(Issue(

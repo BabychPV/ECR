@@ -257,7 +257,8 @@ internal static class SourceEventMapSupport
         ISourceEventMapStore store,
         ICollectionStore sources,
         IReadOnlyList<SourceEventFieldInput> fields,
-        CancellationToken ct)
+        CancellationToken ct,
+        Permits.Groups.ILookupTargetResolver? groups = null)
     {
         ArgumentNullException.ThrowIfNull(fields);
 
@@ -269,6 +270,14 @@ internal static class SourceEventMapSupport
         var entryDefs = entryIds.Count == 0
             ? new Dictionary<long, int>()
             : new Dictionary<long, int>(await store.FindRegistryEntryDefsAsync(entryIds, ct).ConfigureAwait(false));
+
+        // PRMG: знімок груп оновлюється лише при незбігу реєстру цілі колонки й запису (Land - недосяжно).
+        await Permits.Groups.LookupTargetMatcher.EnsureFreshOnMismatchAsync(
+            groups,
+            fields.Where(f => columns.ContainsKey(f.TargetColumnDefId)).SelectMany(f => (f.Values ?? [])
+                .Where(v => entryDefs.ContainsKey(v.RegistryEntryId))
+                .Select(v => (columns[f.TargetColumnDefId].LookupRegistryDefId, entryDefs[v.RegistryEntryId]))),
+            ct).ConfigureAwait(false);
 
         var result = new List<(SourceEventFieldSpec, IReadOnlyList<SourceEventValueInput>)>();
         foreach (var field in fields)
@@ -304,7 +313,7 @@ internal static class SourceEventMapSupport
             foreach (var value in values)
             {
                 if (!entryDefs.TryGetValue(value.RegistryEntryId, out var registryDefId)
-                    || column.LookupRegistryDefId != registryDefId)
+                    || !Permits.Groups.LookupTargetMatcher.Belongs(groups, null, column.LookupRegistryDefId, registryDefId))
                 {
                     throw new NotFoundException(
                         ErrorCodes.EntityFieldMapTargetNotFound,
@@ -412,7 +421,8 @@ public sealed class CreateSourceEventMapHandler(
     ICurrentUser currentUser,
     IUnitOfWork uow,
     IAuditWriter audit,
-    IClock clock)
+    IClock clock,
+    Permits.Groups.ILookupTargetResolver? groups = null)
 {
     /// <summary>Операція в журналі структурних змін.</summary>
     public const string AuditOperation = "CreateSourceEventMap";
@@ -487,7 +497,7 @@ public sealed class CreateSourceEventMapHandler(
                 });
         }
 
-        var built = await SourceEventMapSupport.BuildSpecsAsync(store, sources, command.Fields, ct).ConfigureAwait(false);
+        var built = await SourceEventMapSupport.BuildSpecsAsync(store, sources, command.Fields, ct, groups).ConfigureAwait(false);
 
         var map = SourceEventMap.Create(
             command.SourceEntityId, command.DocumentId, target.Table, built.Select(b => b.Spec), command.VolumeMode);
