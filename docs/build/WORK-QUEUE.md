@@ -201,7 +201,7 @@
 | AN-54 | `simulate-trace` не залежить від прав на колонки документа — ⚠ потрібне уточнення предмета | «Аналіз» | todo |
 | AN-55 | Вимір на scratch-базі `EcrMeasureLate`: `late` у `/audit/cells/summary`, вартість `totalCount` — ⚠ потрібен вимір на scratch-базі | «Аналіз» | todo |
 | AN-56 | Індекс `CollectionRun` (`IX_CollectionRun_SourceEntityId_StartedAt`) — лише за виміром — ⚠ потрібен вимір на scratch-базі | «Аналіз» | todo |
-| AN-57 | Нестабільність `gridPasteAfterEditor`: діагноз без доказу, бісекція на CI-раннері | «Аналіз» | todo |
+| AN-57 | Нестабільність `gridPasteAfterEditor`: не відтворюється після фіксів a7cc2cd32/f48b35ed3/f3a4342ca (07.10); 30/30 зелених у 5 повних прогонах e2e-stand 21–22.10 (39702208940, 39713892329, 39731217260, 39777351153, 39807156715), 0 retry; перевідкрити при першому червоному чи flaky цього spec | «Аналіз» | done f3a4342ca |
 | AN-58 | Теоретична гонка в один кадр у `LazyHint` | «Аналіз» | todo |
 | AN-59 | Approver, варіанти C/D (імена тих, хто МАЄ право на кроці; призначений затверджувач) — питання людині RC8+ | людина | todo |
 | AN-60 | Ім'я «хто затвердив» скидається після Reopen/Reject/Recall (за дизайном B) | — | decision: за дизайном |
@@ -214,7 +214,7 @@
 | AN-67 | Немає тестів кореляції на Outbox/Notification/Recalc/Schedule/CollectionRunner — ⚠ потрібне уточнення предмета | «Аналіз» | todo |
 | AN-68 | Бюджет клієнта після `fix-period-close-date` не міряно — ⚠ потрібен вимір на scratch-базі | «Аналіз» | todo |
 | AN-69 | calculation-issues для RC12+: таблиця `calc.CalculationIssue` (міграція, токен міграцій), запис «рядок без рулу» під час перерахунку (джерело — повідомлення `jobs.recalcNoMatchingRule` із lane c070cf0b), `GET /documents/{id}/calculation-issues` з видимістю за аркушами (`DocumentReadScope`), контракт; причина: у RC11 лише повідомлення задачі | «Аналіз» | todo |
-| AN-70 | Decimal scale для Land-колонок: нові колонки/версії зі scale 18 (перевірити `decimal(38,18)`), без зміни scale наявних колонок; перевірити експорт/відображення | «Аналіз» | todo |
+| AN-70 | Decimal scale для Land-колонок: передумова «`decimal(38,18)`» хибна — сховище значень `decimal(34,16)`, `38,18` лише множники одиниць; розбіжності ≤9.3e-13 (максимум на 169 826 компонентах), `ColumnDef.Scale` Land=12 достатній; варіант A (Scale 15–16 у новій версії шаблону Land, без DDL) — у беклог за потреби; варіант B (scale 18, ALTER на 4,87 млн) не робити | «Аналіз» | done-by-analysis |
 | AN-71 | D-PS: Submit відмовляє при порожній обов'язковій шапці (`ECR-HDR-0422`) + перевірка в Validate (R-B3); lane `lane/analiz/fix-submit-required-header` | «Аналіз» | done 1c3a17e2 |
 | P3-N8 | axe heading-order на сторінці документа: шапка h4/h5 -> h2/h3 (`DocumentHeaderPanel`, TESTER-PASS-B-RC19); lane `lane/an-analiz/p3-n8-heading-order` | «Аналіз» | doing a847d72b |
 | L1-09, L1-18 | Закрито рішенням людини 05.10 (`D-286`). Окремо лишається борг P2 (AN-31 L1-18): ліміт 200 у версіях і історії застосовується ДО фільтра — чи входить у закриття `D-286`, уточнити | — | закрито рішенням людини 05.10 (`D-286`); борг ліміту 200 — уточнити |
