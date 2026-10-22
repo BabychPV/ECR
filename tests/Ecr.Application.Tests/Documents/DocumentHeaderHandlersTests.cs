@@ -127,10 +127,12 @@ public sealed class DocumentHeaderHandlersTests
 
     private PatchDocumentHeaderHandler Patch() => PatchWith(Substitute.For<IRegistryStore>());
 
+    private readonly FakePermitGroupResolver _groups = new();
+
     private PatchDocumentHeaderHandler PatchWith(IRegistryStore registries) => new(
         _documents, _metadataCache, _headers, _access, _user,
         _periods, _documentLock, _workflowFacts, _uow, _audit, _jobs, _clock, Substitute.For<ISheetEditGate>(),
-        registries);
+        registries, _groups);
 
     /// <summary>Версія, яку клієнт отримав би з <c>GET</c> на цьому стані шапки.</summary>
     private async Task<string> VersionOfAsync(Dictionary<int, DocumentHeaderValueData> values)
@@ -342,6 +344,89 @@ public sealed class DocumentHeaderHandlersTests
         Assert.Equal("Permit", error.Details["headerFieldCode"]);
 
         await AssertNothingWrittenAsync();
+    }
+
+    private IRegistryStore EntryOf(long entryId, int registryDefId)
+    {
+        var registries = Substitute.For<IRegistryStore>();
+        registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<RegistryEntryStanding> { new(entryId, registryDefId, true, false, null, null) });
+        return registries;
+    }
+
+    // ── PRMG: ціль поля шапки — ГРУПА типів дозволів (PermitRegistryDefId = id прихованого реєстру групи).
+    // Мутація: прибрати LookupTargetMatcher.Belongs із D-12/N1-08 (повернути пряме порівняння) — перший тест червоніє.
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_група_запис_реєстру_члена_приймається()
+    {
+        const long entryId = 777;
+        const int memberRegistry = PermitRegistryDefId + 1;
+        _groups.WithGroup(PermitRegistryDefId, [memberRegistry]);
+        var version = await VersionOfAsync([]);
+        Values([], new() { [_permit.Id] = new() { ValueRegistryEntryId = entryId } });
+
+        await PatchWith(EntryOf(entryId, memberRegistry)).HandleAsync(
+            DocumentId,
+            Request(version, new PatchHeaderField("Permit", entryId.ToString(System.Globalization.CultureInfo.InvariantCulture), false)),
+            CancellationToken.None);
+
+        await _headers.Received(1).SaveValuesAsync(
+            DocumentId,
+            Arg.Is<IReadOnlyDictionary<int, DocumentHeaderValueData>>(d => d[_permit.Id].ValueRegistryEntryId == entryId),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [InlineData("nonMember")]
+    [InlineData("inactiveGroup")]
+    [InlineData("deny")]
+    public async Task PATCH_група_запис_поза_складом_неактивна_група_чи_Deny_дає_ту_саму_відповідь_lookupEntryMissing(string kind)
+    {
+        const long entryId = 777;
+        const int memberRegistry = PermitRegistryDefId + 1;
+        _groups.WithGroup(
+            PermitRegistryDefId,
+            kind == "nonMember" ? [memberRegistry + 1] : [memberRegistry],
+            isActive: kind != "inactiveGroup");
+        if (kind == "deny")
+        {
+            _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+                .Returns(new AccessBuilder { UserId = 9 }
+                    .Permission("Document.View")
+                    .Grant(ResourceKind.Project, ProjectId, GrantLevel.Write)
+                    .Deny(ResourceKind.Registry, memberRegistry)
+                    .Build());
+        }
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => PatchWith(EntryOf(entryId, memberRegistry)).HandleAsync(
+            DocumentId,
+            Request("v", new PatchHeaderField("Permit", entryId.ToString(System.Globalization.CultureInfo.InvariantCulture), false)),
+            CancellationToken.None));
+
+        Assert.Equal("err.ECR-HDR-0422.lookupEntryMissing", error.Details!["messageKey"]);
+        await AssertNothingWrittenAsync();
+    }
+
+    /// <summary>Збіг реєстру цілі й запису (Land / звичайна ціль) - резолвер груп не кличеться.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_збіг_реєстру_не_кличе_резолвер_груп()
+    {
+        const long entryId = 777;
+        _groups.ThrowOnUse = true;
+        var version = await VersionOfAsync([]);
+        Values([], new() { [_permit.Id] = new() { ValueRegistryEntryId = entryId } });
+
+        await PatchWith(EntryOf(entryId, PermitRegistryDefId)).HandleAsync(
+            DocumentId,
+            Request(version, new PatchHeaderField("Permit", entryId.ToString(System.Globalization.CultureInfo.InvariantCulture), false)),
+            CancellationToken.None);
+
+        Assert.Equal(0, _groups.Calls);
+        Assert.Equal(0, _groups.EnsureFreshCalls);
     }
 
     [Fact]
