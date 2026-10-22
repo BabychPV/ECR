@@ -103,7 +103,10 @@ public sealed class PermitBindingValidatorTests
         var field = new PermitFieldInfo("Substance", CellDataType.Lookup, null, null, null, 5);
         var groupColumn = new SheetColumnInfo(11, "KeyCol", CellDataType.Lookup, null, null, null, true, GroupRegistry);
 
-        Refused("bindingLookupMismatch", Input(Key("Substance"), Limit()), Ctx(keyColumn: groupColumn, keyField: field));
+        var result = Validate(Input(Key("Substance"), Limit()), Ctx(keyColumn: groupColumn, keyField: field));
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Case == "bindingLookupMismatch");
     }
 
     [Fact]
