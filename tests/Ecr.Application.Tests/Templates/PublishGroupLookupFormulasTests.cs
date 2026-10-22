@@ -77,10 +77,29 @@ public sealed class PublishGroupLookupFormulasTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    public void Правило_без_REG_або_над_звичайним_довідником_або_неактивне_проходить()
+    public void Правило_без_REG_або_над_звичайним_довідником_проходить()
     {
         Assert.Empty(PublishChecks.CheckGroupLookupFormulas(WithRule("ISBLANK([PermitNumber])", true), Groups));
         Assert.Empty(PublishChecks.CheckGroupLookupFormulas(WithRule("REGFIELD([PermitNumber], 'Limit') > 0", true, PlainRegistry), Groups));
+    }
+
+    /// <summary>
+    /// Вимкнене правило (<c>IsActive = false</c>) із REG* над колонкою-групою не блокує публікацію: воно не виконується.
+    /// Мутація: прибрати <c>r.IsActive</c> у фільтрі правил - червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Вимкнене_правило_з_REG_над_колонкою_групи_не_блокує_публікацію()
+    {
+        const string expression = "REGFIELD([PermitNumber], 'Limit') > 0";
+        var version = WithRule(expression, true);
+        Assert.Single(PublishChecks.CheckGroupLookupFormulas(version, Groups)); // контроль: активне відхиляється
+
+        var rule = version.Sheets.SelectMany(s => s.Tables).SelectMany(t => t.ValidationRules).Single();
+        rule.Update(ValidationSeverity.Error, 0, expression, Name("m"), 77, isActive: false);
+
+        Assert.False(rule.IsActive);
+        Assert.Empty(PublishChecks.CheckGroupLookupFormulas(version, Groups));
     }
 
     [Fact]
