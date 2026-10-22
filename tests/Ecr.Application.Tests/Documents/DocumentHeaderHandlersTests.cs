@@ -408,6 +408,20 @@ public sealed class DocumentHeaderHandlersTests
 
         Assert.Equal("err.ECR-HDR-0422.lookupEntryMissing", error.Details!["messageKey"]);
         await AssertNothingWrittenAsync();
+
+        // ПОВНИЙ details і текст збігаються з відповіддю на запис, якого немає (членство не розкривається).
+        var empty = Substitute.For<IRegistryStore>();
+        empty.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<RegistryEntryStanding>());
+        var absent = await Assert.ThrowsAsync<BusinessRuleException>(() => PatchWith(empty).HandleAsync(
+            DocumentId,
+            Request("v", new PatchHeaderField("Permit", entryId.ToString(System.Globalization.CultureInfo.InvariantCulture), false)),
+            CancellationToken.None));
+        Assert.Equal(absent.ErrorCode, error.ErrorCode);
+        Assert.Equal(absent.Message, error.Message);
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(absent.Details),
+            System.Text.Json.JsonSerializer.Serialize(error.Details));
     }
 
     /// <summary>Збіг реєстру цілі й запису (Land / звичайна ціль) - резолвер груп не кличеться.</summary>

@@ -366,6 +366,38 @@ public sealed class PatchCellsLookupValidityTests
         Entry(registryDefId: OtherRegistryDefId);
 
         await AssertRejected("err.ECR-CELL-4223.missingEntry");
+
+        // ПОВНИЙ details (код, ключ, кількість, перелік комірок) побайтно збігається з відповіддю на запис, якого немає.
+        var denied = await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(new List<RegistryEntryStanding>());
+        var absent = await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+
+        Assert.Equal(absent.ErrorCode, denied.ErrorCode);
+        Assert.Equal(absent.Message, denied.Message);
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(absent.Details),
+            System.Text.Json.JsonSerializer.Serialize(denied.Details));
+    }
+
+    /// <summary>Не-член і неактивна група - теж повністю однаковий details з «запису немає» (членство не розкривається).</summary>
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Група_відмова_не_розкриває_членство_details_збігається_з_неіснуючим_записом(bool inactiveGroup)
+    {
+        _groups.WithGroup(ColumnRegistryDefId, inactiveGroup ? [OtherRegistryDefId] : [3], isActive: !inactiveGroup);
+        Entry(registryDefId: OtherRegistryDefId);
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(new List<RegistryEntryStanding>());
+        var absent = await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+
+        Assert.Equal(absent.Message, refused.Message);
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(absent.Details),
+            System.Text.Json.JsonSerializer.Serialize(refused.Details));
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG")]

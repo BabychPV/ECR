@@ -13,6 +13,7 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -290,6 +291,46 @@ public sealed partial class DocumentVersionMigrationTests
             .ConfigureAwait(true);
         Assert.Equal(before, await SnapshotAsync(l.S).ConfigureAwait(true));
         Assert.Equal((l.OldField, (long?)l.OldEntry), await StoredLookupAsync(l).ConfigureAwait(true));
+    }
+
+    /// <summary>
+    /// PRMG: ціль поля нової версії - ГРУПА (прихований реєстр <c>NEWR</c> зі складом [реєстр <c>FORR</c>]): запис реєстру-члена
+    /// придатний (без групи був би <c>foreign</c>), запис поза складом - як раніше. Резолвер підставлено фейком (схема груп - окрема міграція).
+    /// Мутація: у <c>NotUsableReason</c> повернути пряме порівняння <c>RegistryDefId</c> - перша частина червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PRMG")]
+    public async Task Ціль_нового_поля_група_запис_реєстру_члена_придатний_а_поза_складом_ні()
+    {
+        var l = await ArrangeLookupAsync().ConfigureAwait(true);
+        int newTarget, member;
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            newTarget = await db.RegistryEntries.Where(e => e.Id == l.GoodNew).Select(e => e.RegistryDefId).SingleAsync().ConfigureAwait(true);
+            member = await db.RegistryEntries.Where(e => e.Id == l.ForeignNew).Select(e => e.RegistryDefId).SingleAsync().ConfigureAwait(true);
+        }
+
+        var groups = new FakePermitGroupResolver().WithGroup(newTarget, [member]);
+        using var app = new EcrApiFactory(sql)
+        {
+            ExtraServices = services => services.AddSingleton<Ecr.Application.Permits.Groups.ILookupTargetResolver>(groups),
+        };
+        using var client = await SignedInAsync(app, l.S.UserName).ConfigureAwait(true);
+
+        var inGroup = await ReadJsonAsync(await PostRemapAsync(client, l, dryRun: true, pairs: [(l.OldEntry, l.ForeignNew)]).ConfigureAwait(true))
+            .ConfigureAwait(true);
+        Assert.True(inGroup.GetProperty("canApply").GetBoolean(), inGroup.ToString());
+        Assert.Empty(Assert.Single(inGroup.GetProperty("lookupRemapReport").EnumerateArray()).GetProperty("targetNotUsable").EnumerateArray());
+
+        // Склад змінено: реєстр запису більше не член - ціль непридатна як чужа.
+        groups.WithGroup(newTarget, [member + 1_000_000]);
+        var outOfGroup = await ReadJsonAsync(await PostRemapAsync(client, l, dryRun: true, pairs: [(l.OldEntry, l.ForeignNew)]).ConfigureAwait(true))
+            .ConfigureAwait(true);
+        Assert.False(outOfGroup.GetProperty("canApply").GetBoolean(), outOfGroup.ToString());
+        var bad = Assert.Single(Assert.Single(outOfGroup.GetProperty("lookupRemapReport").EnumerateArray()).GetProperty("targetNotUsable").EnumerateArray());
+        Assert.Equal("foreign", bad.GetProperty("reason").GetString());
     }
 
     [Fact]

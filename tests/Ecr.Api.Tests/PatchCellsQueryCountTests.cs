@@ -283,10 +283,26 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "WR-04")]
-    public async Task PATCH_Lookup_комірок_Land_не_кличе_резолвер_груп_і_тримає_стелю_звернень()
+    public Task PATCH_Lookup_комірок_Land_не_кличе_резолвер_груп_і_тримає_стелю_звернень() => LookupScenarioAsync(asGroup: false);
+
+    /// <summary>
+    /// PRMG: колонка <c>Lookup</c> з ціллю-ГРУПОЮ (прихований реєстр без записів, записи - реєстру-члена): та сама стеля, що в Land
+    /// (<see cref="MaxLookupCommands"/>) - ПЕРЕВІРКА НЕ ДОДАЄ запитів: членство читається зі знімка в памʼяті, а 10 комірок - це 10
+    /// звернень до <c>Accepts</c> (синхронних), без SQL. Єдиний допустимий +запит у проді - оновлення знімка
+    /// (<c>EnsureFreshAsync</c>: один агрегатний запит ревізії не частіше за раз на 5 с на вузол, не на PATCH); у тесті резолвер -
+    /// фейк, тож цей запит тут не міряється (його частота - у <c>PermitGroupResolverTests</c>).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "WR-04")]
+    public Task PATCH_Lookup_комірок_цілі_група_приймає_члена_і_не_перевищує_стелю_Land() => LookupScenarioAsync(asGroup: true);
+
+    private async Task LookupScenarioAsync(bool asGroup)
     {
         var scenario = await ArrangeAsync().ConfigureAwait(true);
         var entryIds = new List<long>();
+        var groups = new FakePermitGroupResolver { ThrowOnUse = !asGroup };
         await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
         {
             var registry = new Ecr.Domain.Entities.Configuration.RegistryDef(
@@ -306,13 +322,26 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
                 entryIds.Add(entry.Id);
             }
 
+            var target = registry.Id;
+            if (asGroup)
+            {
+                // Ціль колонки - прихований реєстр групи БЕЗ записів; склад - реєстр з entryIds.
+                var hidden = new Ecr.Domain.Entities.Configuration.RegistryDef(
+                    EcrCode.Create($"PRMGQ_{Guid.NewGuid():N}"[..20]),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "Group query count" }),
+                    isTemporal: false);
+                db.RegistryDefs.Add(hidden);
+                await db.SaveChangesAsync().ConfigureAwait(true);
+                target = hidden.Id;
+                groups.WithGroup(hidden.Id, [registry.Id]);
+            }
+
             await db.ColumnDefs.Where(c => c.Id == scenario.ColumnDefIds[2])
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(c => c.DataType, CellDataType.Lookup)
-                    .SetProperty(c => c.LookupRegistryDefId, registry.Id)).ConfigureAwait(true);
+                    .SetProperty(c => c.LookupRegistryDefId, target)).ConfigureAwait(true);
         }
 
-        var groups = new FakePermitGroupResolver { ThrowOnUse = true };
         using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5))
         {
             ExtraServices = services => services.AddSingleton<Ecr.Application.Permits.Groups.ILookupTargetResolver>(groups),
@@ -390,6 +419,14 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
         Assert.True(
             worst.Total <= MaxLookupCommands,
             $"PATCH Lookup ({Rows} комірок): {worst.Total} звернень, стеля {MaxLookupCommands}.\n{worst.Detail}");
+
+        if (asGroup)
+        {
+            // Група справді питалась (інакше «мало запитів» доводило б, що перевірка не виконувалась): по одному Accepts на комірку.
+            Assert.True(groups.Calls >= Rows * MeasuredRounds, $"Accepts викликано {groups.Calls} разів.");
+            Assert.True(groups.EnsureFreshCalls >= 1);
+            return;
+        }
 
         // ⛔ Збіг реєстру цілі й запису: груп не питали взагалі.
         Assert.Equal(0, groups.Calls);
