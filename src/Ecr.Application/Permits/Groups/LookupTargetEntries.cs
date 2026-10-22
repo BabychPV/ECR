@@ -1,5 +1,6 @@
 // src/Ecr.Application/Permits/Groups/LookupTargetEntries.cs
 using Ecr.Application.Ports;
+using Ecr.Application.Security;
 using Ecr.Domain.Entities.Dictionaries;
 
 namespace Ecr.Application.Permits.Groups;
@@ -40,8 +41,13 @@ public static class LookupTargetEntries
     /// <param name="groups">Резолвер груп; <c>null</c> - груп немає.</param>
     /// <param name="targetRegistryId">Ціль колонки/поля.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="profile">
+    /// Профіль користувача (S18): члени складу під Deny пропускаються - їх номери й назви типів не розкриваються (імпорт Excel).
+    /// <c>null</c> - без перевірки (експорт, системні шляхи).
+    /// </param>
     public static async Task<IReadOnlyList<LookupTargetEntry>> ListAsync(
-        IRegistryStore registries, IPermitGroupResolver? groups, int targetRegistryId, CancellationToken ct)
+        IRegistryStore registries, IPermitGroupResolver? groups, int targetRegistryId, CancellationToken ct,
+        AccessProfile? profile = null)
     {
         ArgumentNullException.ThrowIfNull(registries);
 
@@ -59,6 +65,11 @@ public static class LookupTargetEntries
         var result = new List<LookupTargetEntry>();
         foreach (var memberId in groups.ExpandRegistryIds(targetRegistryId))
         {
+            if (profile is not null && Registries.RegistryAccess.IsDenied(profile, memberId))
+            {
+                continue;
+            }
+
             var definition = await registries.FindDefinitionByIdAsync(memberId, ct).ConfigureAwait(false);
             var typeCode = definition is null
                 ? memberId.ToString(System.Globalization.CultureInfo.InvariantCulture)
@@ -101,7 +112,9 @@ public static class LookupTargetEntries
 
             foreach (var e in distinct.Where(e => e.TypeCode is not null))
             {
+                // Імпорт приймає обидва тире: «—» (підпис експорту) і «-» (те, що набирають руками).
                 codes.TryAdd(Label(e.Entry.Code, e.TypeCode), e.Entry.Id);
+                codes.TryAdd(e.Entry.Code + " - " + e.TypeCode, e.Entry.Id);
             }
         }
     }

@@ -159,7 +159,7 @@ public sealed class ExcelImporter(
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        var (lookups, unusableLookups, ambiguousLookups) = await LookupsAsync(snapshot, documentId, map.PeriodKey, ct).ConfigureAwait(false);
+        var (lookups, unusableLookups, ambiguousLookups) = await LookupsAsync(snapshot, documentId, map.PeriodKey, profile, ct).ConfigureAwait(false);
 
         // ⛔ S6 (ФВ-6.6): межі читання того, хто імпортує. Перегляд порівнює
         // книгу з ПОТОЧНИМИ значеннями, і будь-яка відповідь, що залежить від
@@ -1183,7 +1183,7 @@ public sealed class ExcelImporter(
     private async Task<(IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> Codes,
         IReadOnlyDictionary<long, string> Unusable,
         IReadOnlyDictionary<int, IReadOnlyDictionary<string, string>> Ambiguous)> LookupsAsync(
-        TemplateVersionSnapshot snapshot, long documentId, int periodKey, CancellationToken ct)
+        TemplateVersionSnapshot snapshot, long documentId, int periodKey, AccessProfile profile, CancellationToken ct)
     {
         var registryIds = snapshot.ColumnsById.Values
             .Where(c => !c.IsDeleted && c.LookupRegistryDefId is not null)
@@ -1210,7 +1210,7 @@ public sealed class ExcelImporter(
         {
             // Permits PRMG: ціль-група = обʼєднання записів реєстрів-членів; для решти - записи самого реєстру.
             var targetEntries = await Ecr.Application.Permits.Groups.LookupTargetEntries
-                .ListAsync(registries, groups, registryId, ct).ConfigureAwait(false);
+                .ListAsync(registries, groups, registryId, ct, profile).ConfigureAwait(false);
             Ecr.Application.Permits.Groups.LookupTargetEntries.BuildImportCodes(targetEntries, out var codes, out var ambiguous);
             result[registryId] = codes;
             if (ambiguous.Count > 0)

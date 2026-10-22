@@ -393,7 +393,7 @@ public sealed class ImportDiffBuilder
                     {
                         rejected.Add(new ImportRejection(
                             row.RowKey, column.Code, CellValueReader.TypeMismatch,
-                            "The permit number matches several permit types of the group; write it as 'number - type'. Candidates: " + candidates + ".",
+                            "The permit number matches several permit types of the group; write it as 'number \u2014 type'. Candidates: " + candidates + ".",
                             table.Code, table.NameL10n, ImportMessageKeys.AmbiguousPermitNumber, excelCell));
 
                         continue;
