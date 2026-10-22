@@ -9155,6 +9155,10 @@ USING (VALUES
     -- PERMITS: groups-expand ── en: імпорт Excel - номер дозволу збігається в кількох типах групи (PRMG); ru/kz — порцією PERMITS: groups-expand нижче ──
     ,(N'err.ECR-CELL-0422.importAmbiguousPermitNumber', N'en', N'This permit number exists in several permit types of the column''s group. Write it as "number — type" (the candidates are listed in the message).', 1)
     -- PERMITS: groups-expand ── кінець секції ──
+    -- PERMITS: groups-ui ── en: екран Groups (групи типів дозволів), цілі Lookup з описом групи й «unlisted»; ru/kz — порцією PERMITS: groups-ui нижче ──
+    ,(N'registries.lookupTargetUnlisted', N'en', N'Not in the list (registry #{id})', 1)
+    ,(N'registries.lookupGroup.unlisted', N'en', N'Current value', 1)
+    -- PERMITS: groups-ui ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -23749,6 +23753,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: groups-expand ── кінець секції ──
+-- PERMITS: groups-ui ── ru/kz: екран Groups (групи типів дозволів), цілі Lookup з описом групи й «unlisted»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'registries.lookupTargetUnlisted', N'ru', N'Нет в списке (справочник #{id})'),
+    (N'registries.lookupTargetUnlisted', N'kz', N'Тізімде жоқ (анықтамалық #{id})'),
+    (N'registries.lookupGroup.unlisted', N'ru', N'Текущее значение'),
+    (N'registries.lookupGroup.unlisted', N'kz', N'Ағымдағы мән')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: groups-ui ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

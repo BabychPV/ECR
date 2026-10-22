@@ -30,6 +30,8 @@ const SeededStrings: Record<string, string> = {
   'registries.permitHeaderOption': 'Permits: {name} ({code})',
   'registries.lookupGroup.permits': 'Permits',
   'registries.lookupGroup.dictionaries': 'Dictionaries',
+  'registries.lookupGroup.unlisted': 'Current value',
+  'registries.lookupTargetUnlisted': 'Not in the list (registry #{id})',
 };
 
 /**
@@ -61,7 +63,18 @@ function mockFetch(): void {
         const listed = url.includes('includePermitHeaders=true')
           ? [
               ...registries,
-              { id: 77, code: 'PRM_AIR', nameL10n: { values: { en: 'Air permit' } }, fields: [], isHierarchical: false, isTemporal: true, sourceKind: 'Master' },
+              { id: 77, code: 'PRM_AIR', nameL10n: { values: { en: 'Air permit' } }, fields: [], isHierarchical: false, isTemporal: true, sourceKind: 'Master', kind: 'PermitHeader' },
+              {
+                id: 91,
+                code: 'PRMG_WATER',
+                nameL10n: { values: { en: 'Water permits' } },
+                descriptionL10n: { values: { en: 'All water permits of the site' } },
+                fields: [],
+                isHierarchical: false,
+                isTemporal: true,
+                sourceKind: 'Master',
+                kind: 'PermitGroup',
+              },
             ]
           : registries;
 
@@ -146,6 +159,28 @@ describe('ColumnEditor: вибір довідника за назвою (ауд�
     const before = (a: Element, b: Element): boolean => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
     expect(before(permitsGroup, air)).toBe(true);
     expect(before(air, dictionariesGroup)).toBe(true);
+  }, 60000);
+
+  // ✎ Групи типів (PRMG): колонка обирає групу тим самим компонентом, що й поле шапки (KIT §6.8.1).
+  it('група типів дозволів PRMG_* - з описом другим рядком, вибір виставляє її id', async () => {
+    const onChange = vi.fn();
+    await show({ ...emptyColumnDraft(1), dataType: 'Lookup' }, onChange);
+
+    fireEvent.click(await screen.findByLabelText('Registry'));
+    const water = await screen.findByRole('option', { name: /Water permits \(PRMG_WATER\)/ });
+    expect(water.querySelector('[data-lookup-target-description]')?.textContent).toBe('All water permits of the site');
+    fireEvent.click(water);
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ lookupRegistryDefId: 91 }));
+  }, 60000);
+
+  it('поточна ціль, якої немає в переліку, лишається видимою (не порожнє поле)', async () => {
+    await show({ ...emptyColumnDraft(1), dataType: 'Lookup', lookupRegistryDefId: 555 }, vi.fn());
+
+    const select = (await screen.findByLabelText('Registry')) as HTMLInputElement;
+    await waitFor(() => {
+      expect(select.value).toBe('Not in the list (registry #555)');
+    });
   }, 60000);
 
   it('наявна колонка з уже заданим (сирим) ідентифікатором показує правильно вибраний довідник', async () => {

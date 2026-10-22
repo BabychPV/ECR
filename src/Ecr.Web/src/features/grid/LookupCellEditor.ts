@@ -1,4 +1,5 @@
 import type { RegistryEntryDto } from '@/api/types';
+import { entryLabelsOf } from '@/features/registries/lookupEntryLabels';
 import { t } from '@/shared/i18n';
 import { createListCellEditor, type ListOption } from './listCellEditor';
 
@@ -39,9 +40,11 @@ function lookupOptionsOf(entries: readonly RegistryEntryDto[]): readonly ListOpt
   const known = optionsCache.get(entries);
   if (known !== undefined) return known;
 
+  // ✎ Permits: піклер групи типів - «номер — тип» (`entryLabelsOf`); звичайний довідник - `display` як було.
+  const labels = entryLabelsOf(entries);
   const built: ListOption[] = [
     { value: null, label: t('grid.listClear') },
-    ...entries.map((entry) => ({ value: String(entry.id), label: entry.display, hint: entry.code })),
+    ...entries.map((entry) => ({ value: String(entry.id), label: labels.get(entry.id) ?? entry.display, hint: entry.code })),
   ];
   optionsCache.set(entries, built);
 
@@ -148,10 +151,11 @@ function displayIndexOf(entries: readonly RegistryEntryDto[]): ReadonlyMap<numbe
   if (known !== undefined) return known;
 
   const index = new Map<number, string>();
+  const labels = entryLabelsOf(entries);
 
   // ⚠ Перший запис виграє — та сама поведінка, що й у `find()`.
   for (const entry of entries) {
-    if (!index.has(entry.id)) index.set(entry.id, entry.display);
+    if (!index.has(entry.id)) index.set(entry.id, labels.get(entry.id) ?? entry.display);
   }
 
   displayCache.set(entries, index);
