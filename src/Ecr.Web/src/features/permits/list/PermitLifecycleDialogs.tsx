@@ -62,7 +62,6 @@ export function PermitLifecycleDialogs({
   const lang = language();
   const [endError, setEndError] = useState<string | null>(null);
   const activatePending = usePendingLoading(activate.isPending);
-  const endPending = usePendingLoading(end.isPending);
   const renewPending = usePendingLoading(renew.isPending);
   const removePending = usePendingLoading(remove.isPending);
   // ⛔ Запобіжник від подвійного кліку - у ref, а не в isPending: другий клік приходить до перемальовування.
@@ -128,7 +127,7 @@ export function PermitLifecycleDialogs({
         description={t("permits.list.end.text")}
         confirmLabel={t("permits.list.end.verb")}
         minLength={MinEndReasonLength}
-        isPending={endPending}
+        isPending={end.isPending}
         error={endError}
         onEdit={() => setEndError(null)}
         onConfirm={(reason) => {
