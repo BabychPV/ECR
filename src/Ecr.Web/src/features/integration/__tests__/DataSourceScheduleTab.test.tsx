@@ -158,6 +158,8 @@ async function openScheduleTab(): Promise<HTMLElement> {
  */
 beforeAll(async () => {
   await import('@/features/integration/DataSourceScheduleTab');
+  // Фільтр дати журналу запусків на сторінці — теж lazy() (CollectionRunsPanel).
+  await import('@/shared/dates/DateInputWithStyles');
 });
 
 afterEach(() => {

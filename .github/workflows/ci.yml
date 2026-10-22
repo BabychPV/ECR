@@ -254,6 +254,40 @@ jobs:
           dotnet tool install --global dotnet-ef --version 10.0.13
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
+      # ✎ 2026-10-22: проба pwsh-ДИТИНИ. Run 39584163913 (ubuntu-24.04, образ 20261012.601):
+      # кожен НОВИЙ процес pwsh падав SIGSEGV (exit 139) на старті, а батьківський жив, — тож
+      # 347 архітектурних тестів, що запускають pwsh-дитину, червоніли «Expected 1/Actual 139»,
+      # а «Розгортання під sqlcmd» виходило 139 за 0,6 с. Дефект раннера ubuntu-24.04,
+      # лікується перезапуском job (gh run rerun --failed). Проба падає ОДРАЗУ з діагностикою
+      # замість сотень хибних падінь тестів. Два підходи з паузою 1 с — щоб не червоніти на
+      # одиничному збої.
+      # ⛔ Це лише проба: verify-all НЕ повторюється, а його коди 1 нічим не маскуються.
+      # Частота ≈ 1 з 27 прогонів server-part (core).
+      - name: Проба pwsh-дитини (раннер)
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          rc=0
+          for attempt in 1 2; do
+            rc=0
+            pwsh -NoProfile -Command 'exit 0' || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              echo "pwsh OK: $(pwsh --version) ${ImageOS:-?} ${ImageVersion:-?}"
+              exit 0
+            fi
+            echo "Спроба ${attempt}: pwsh-дитина вийшла з кодом ${rc}."
+            sleep 1
+          done
+          echo "::error::pwsh-дитина вийшла з кодом ${rc} - несправний раннер (дефект раннера; дивись коментар кроку). Перезапустіть job (gh run rerun --failed)."
+          uname -a
+          pwsh --version || true
+          head -5 /etc/os-release
+          ulimit -a
+          free -m
+          dmesg 2>/dev/null | tail -20 || true
+          echo "Runner image: ${ImageOS:-?} ${ImageVersion:-?}"
+          exit 1
+
       # ⛔ Три гейти — ОДИН виклик спільного скрипта. Кликати
       # `verify-sql-scripts.ps1` повз нього було б коротше і давало б такий
       # самий зелений прогін — але кожна наступна зміна в тому, ЯК скрипт

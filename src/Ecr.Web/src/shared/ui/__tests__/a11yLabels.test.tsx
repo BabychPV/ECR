@@ -1,14 +1,6 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MantineProvider, Modal, PasswordInput } from '@mantine/core';
-import { loadCatalog } from '@/shared/i18n';
-import { theme } from '@/shared/theme/theme';
-import {
-  closeNotificationButtonProps,
-  closeNotificationLabel,
-  passwordToggleProps,
-  undoLabel,
-} from '@/shared/ui/a11yLabels';
 
 /**
  * `X-26`: доступні імена службових кнопок ішли англійськими ЛІТЕРАЛАМИ в
@@ -18,6 +10,29 @@ import {
  * ⚠ Каталог тут завантажується насправді: без нього відрізнити «з каталогу»
  * від «запасний літерал» неможливо.
  */
+
+type Fresh = {
+  loadCatalog: typeof import('@/shared/i18n').loadCatalog;
+  theme: typeof import('@/shared/theme/theme').theme;
+  labels: typeof import('@/shared/ui/a11yLabels');
+};
+
+/**
+ * ⛔ Каталог i18n живе в стані модуля й не скидається: тест, що завантажив ru,
+ * ламав б «до каталогу» в іншому порядку (--sequence.shuffle). Тому кожен тест
+ * бере СВІЖІ копії модулів після vi.resetModules().
+ */
+let fresh: Fresh;
+
+beforeEach(async () => {
+  vi.resetModules();
+  const [i18n, themeModule, labels] = await Promise.all([
+    import('@/shared/i18n'),
+    import('@/shared/theme/theme'),
+    import('@/shared/ui/a11yLabels'),
+  ]);
+  fresh = { loadCatalog: i18n.loadCatalog, theme: themeModule.theme, labels };
+});
 
 function catalog(strings: Record<string, string>): void {
   vi.stubGlobal(
@@ -40,29 +55,29 @@ afterEach(() => {
 
 describe('a11yLabels: доступні імена — з каталогу', () => {
   it('до каталогу — англійський запасний, а не ⟦ключ⟧', () => {
-    expect(closeNotificationLabel()).toBe('Close notification');
-    expect(undoLabel()).toBe('Undo');
-    expect(passwordToggleProps()).toEqual({ 'aria-label': 'Toggle password visibility', tabIndex: 0 });
+    expect(fresh.labels.closeNotificationLabel()).toBe('Close notification');
+    expect(fresh.labels.undoLabel()).toBe('Undo');
+    expect(fresh.labels.passwordToggleProps()).toEqual({ 'aria-label': 'Toggle password visibility', tabIndex: 0 });
   });
 
   it('з каталогом — текст каталогу, і геттер читає його в момент звернення', async () => {
     // Об'єкт узято ДО завантаження каталогу — так його імпортують тема й тости.
-    const props = closeNotificationButtonProps;
+    const props = fresh.labels.closeNotificationButtonProps;
 
     catalog({
       'common.closeNotification': 'Закрыть уведомление',
       'common.togglePasswordVisibility': 'Показать или скрыть пароль',
       'common.undo': 'Отменить',
     });
-    await loadCatalog('ru', 'public');
+    await fresh.loadCatalog('ru', 'public');
 
     // ⛔ Мутація «повернути літерал» (стара поведінка) дає тут англійську.
     expect({ ...props }).toEqual({ 'aria-label': 'Закрыть уведомление' });
-    expect(undoLabel()).toBe('Отменить');
+    expect(fresh.labels.undoLabel()).toBe('Отменить');
 
     render(
       <MantineProvider>
-        <PasswordInput label="Password" visibilityToggleButtonProps={passwordToggleProps()} />
+        <PasswordInput label="Password" visibilityToggleButtonProps={fresh.labels.passwordToggleProps()} />
       </MantineProvider>,
     );
 
@@ -74,7 +89,7 @@ describe('a11yLabels: доступні імена — з каталогу', () =
   it('хрестик модалки: до каталогу - Close, з каталогом ru - Закрыть', async () => {
     const open = (): void => {
       render(
-        <MantineProvider theme={theme}>
+        <MantineProvider theme={fresh.theme}>
           <Modal opened onClose={() => undefined} title="Title" transitionProps={{ duration: 0 }}>
             body
           </Modal>
@@ -86,7 +101,7 @@ describe('a11yLabels: доступні імена — з каталогу', () =
     cleanup();
 
     catalog({ 'common.close': 'Закрыть' });
-    await loadCatalog('ru', 'public');
+    await fresh.loadCatalog('ru', 'public');
     open();
 
     expect(screen.getByRole('button', { name: 'Закрыть' })).toBeTruthy();

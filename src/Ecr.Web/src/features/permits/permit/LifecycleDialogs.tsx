@@ -1,13 +1,14 @@
-import type { JSX } from 'react';
+import { useState, type JSX } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { formatDate } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
-import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { activatePermit, deletePermit, endPermit, renewPermit } from '../api/permitsApi';
 import type { Permit } from '../api/types';
+import { EndEarlyModal } from '../lib/EndEarlyModal';
+import { endDateOutOfRangeText, sentenceDate } from '../lib/lifecycleText';
 import { PermitsPaths } from '../shell/permitPaths';
 import { type LifecycleDialogId } from './lifecycleDialogIds';
 import { focusHeadingAfterNavigation, pageHeading } from './focusHeadingAfterNavigation';
@@ -32,6 +33,7 @@ export interface LifecycleDialogsProps {
 export function LifecycleDialogs({ permit, dialog, onClose }: LifecycleDialogsProps): JSX.Element {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [endError, setEndError] = useState<string | null>(null);
 
   function refresh(next?: Permit): void {
     if (next !== undefined) queryClient.setQueryData(permitKeys.item(permit.id), next);
@@ -64,7 +66,12 @@ export function LifecycleDialogs({ permit, dialog, onClose }: LifecycleDialogsPr
       showDone(t('permits.page.done.ended', { number: permit.number }));
       onClose();
     },
-    onError: fail,
+    // PUI-5: дата завершення поза вікном (дозвіл почався сьогодні) - причина показується в діалозі, він лишається відкритим.
+    onError: (error) => {
+      const text = endDateOutOfRangeText(error);
+      if (text === null) fail(error);
+      else setEndError(text);
+    },
   });
 
   const renew = useMutation<Permit, Error, void>({
@@ -97,6 +104,8 @@ export function LifecycleDialogs({ permit, dialog, onClose }: LifecycleDialogsPr
 
   const from = formatDate(permit.validFrom ?? '');
   const to = formatDate(permit.validTo ?? '');
+  // PUI-10: `{to}` стоїть наприкінці речення «…по {to}.» - крапка скорочення «г.» не має подвоюватись.
+  const toEnd = sentenceDate(to);
 
   // P3-F2: «End this permit early…» і «Delete draft…» відкриваються пунктами меню «More»; пункт зникає разом із випадним
   // списком, тож після Esc фокус повертається на кнопку «More» (її позначає `data-permit-more` на сторінці дозволу).
@@ -110,7 +119,7 @@ export function LifecycleDialogs({ permit, dialog, onClose }: LifecycleDialogsPr
           danger={false}
           title={t('permits.page.activate.title', { number: permit.number })}
           consequences={[
-            t('permits.page.activate.reads', { type: permit.typeCode, from, to }),
+            t('permits.page.activate.reads', { type: permit.typeCode, from, to: toEnd }),
             { text: t('permits.page.activate.edits'), note: true },
             { text: t('permits.page.activate.overlap'), note: true },
           ]}
@@ -123,7 +132,7 @@ export function LifecycleDialogs({ permit, dialog, onClose }: LifecycleDialogsPr
       );
     case 'end':
       return (
-        <ReasonModal
+        <EndEarlyModal
           opened
           title={t('permits.page.end.title', { number: permit.number })}
           label={t('permits.page.end.reason')}
@@ -131,9 +140,17 @@ export function LifecycleDialogs({ permit, dialog, onClose }: LifecycleDialogsPr
           confirmLabel={t('permits.page.end.verb')}
           minLength={MinEndReasonLength}
           isPending={end.isPending}
-          onConfirm={(reason) => end.mutate(reason)}
+          error={endError}
+          onEdit={() => setEndError(null)}
+          onConfirm={(reason) => {
+            setEndError(null);
+            end.mutate(reason);
+          }}
           returnFocusTo={moreButton}
-          onClose={onClose}
+          onClose={() => {
+            setEndError(null);
+            onClose();
+          }}
         />
       );
     case 'renew':
