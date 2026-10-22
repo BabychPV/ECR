@@ -1,4 +1,4 @@
-﻿# Розбиття `Ecr.Api.Tests` на сім шардів у чотирьох частинах для `tools/verify-all.ps1`.
+﻿# Розбиття `Ecr.Api.Tests` на шарди у п'яти частинах (з 2026-10-22; раніше сім шардів у чотирьох) для `tools/verify-all.ps1`.
 #
 # ⚠ Дані, а не код: скрипт читає цей файл і будує з нього фільтри
 # `dotnet test --filter`. Префікси — початок імені класу ПІСЛЯ
@@ -45,15 +45,29 @@
 # префіксами з того ж журналу; прогноз сум на частину: api-1 542, api-2 475, api-3 595, api-4 656
 # (≈ 14.5–15.6 хв стіни, ціль правила — ≤ 20 хв). Префікс `D` розкрито в
 # `DocumentVersionMigration` (решта `D*` — у залишок), `N` → частина 1, `T` → частина 2, `P` → залишок.
+#
+# ✎ 2026-10-22 (повторне перебалансування, push-CI run 39829052322): попередній замір
+# недооцінив залишок — api-4 (Rest) ішла 26.1 хв при сумі тривалостей 1101 с (а не 656 с):
+# залишок містив ВСІ `S*`, `P*`, `D*` (крім DocumentVersionMigration), `A*`, `U*` і майже
+# весь `Security.*` (C/R/P/L/E/N/U/G/T/A/V/M). Факт по частинах (крок «Складання, тести,
+# розгортання» / сума тривалостей тестів): api-1 665/404 с, api-2 820/480, api-3 918/616,
+# api-4 1512/1101. Тести йдуть послідовно (одна колекція), тож стіна кроку ≈ 175 + 1.215 × сума,
+# стіна job ≈ крок + ~55 с. Сума по всіх класах 2601 с → ЧОТИРИ частини дають ≥ 17 хв при
+# ідеальному балансі, тому ПЯТЬ частин (api-1…api-5, ≈ 500–540 с суми, прогноз стіни
+# job ≈ 14–15 хв). `Seconds` нижче — суми тривалостей за префіксами з того ж журналу.
+# Частини 1–4 — об'єднання префіксів, частина 5 (залишок) — D* (крім
+# DocumentVersionMigration) 137 + P* 146 + S* 256 = 539 с + Security.F/I (0 с) і майбутні класи.
 @{
     Measured = '2026-10-22'
     Shards   = @(
-        @{ Id = 1; Part = 1; Seconds = 384; Prefixes = @('R', 'N') }
-        @{ Id = 2; Part = 1; Seconds = 158; Prefixes = @('Security.D', 'F', 'I', 'O', 'V', 'W', 'B', 'G') }
-        @{ Id = 3; Part = 2; Seconds = 288; Prefixes = @('C', 'M', 'T') }
-        @{ Id = 4; Part = 2; Seconds = 187; Prefixes = @('Security.H', 'Security.S', 'J', 'L') }
-        @{ Id = 5; Part = 3; Seconds = 563; Prefixes = @('DocumentVersionMigration', 'E') }
-        @{ Id = 6; Part = 3; Seconds = 32; Prefixes = @('H') }
-        @{ Id = 7; Part = 4; Seconds = 656; Rest = $true }
+        @{ Id = 1; Part = 1; Seconds = 291; Prefixes = @('R', 'N') }
+        @{ Id = 2; Part = 1; Seconds = 210; Prefixes = @('Security.D', 'F', 'I', 'O', 'V', 'W', 'B', 'G', 'J', 'A') }
+        @{ Id = 3; Part = 2; Seconds = 273; Prefixes = @('C', 'M', 'T') }
+        @{ Id = 4; Part = 2; Seconds = 235; Prefixes = @('Security.H', 'Security.S', 'L', 'U') }
+        @{ Id = 5; Part = 3; Seconds = 356; Prefixes = @('DocumentVersionMigration') }
+        @{ Id = 6; Part = 3; Seconds = 175; Prefixes = @('H', 'Security.P', 'Security.U', 'Security.T', 'Security.V', 'Security.M', 'Security.G', 'Security.A', 'Security.L') }
+        @{ Id = 7; Part = 4; Seconds = 224; Prefixes = @('E') }
+        @{ Id = 8; Part = 4; Seconds = 298; Prefixes = @('Security.C', 'Security.R', 'Security.E', 'Security.N') }
+        @{ Id = 9; Part = 5; Seconds = 539; Rest = $true }
     )
 }
