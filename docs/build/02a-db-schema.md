@@ -1055,6 +1055,45 @@ CREATE TABLE cfg.PermitSheetBindingColumn
 );
 GO
 
+-- Групи типів дозволів (Permits, PRMG; міграція PRMG01_PermitGroups). Група - ціль Lookup через прихований
+-- реєстр PRMG_<код> (RegistryDefId, без полів і записів); значення в комірці - id запису реєстру шапки PRM_<TYPE> типу
+-- зі складу. Тип може бути в кількох групах. Використану групу видаляти не можна - лише деактивувати (IsActive = 0).
+CREATE TABLE cfg.PermitGroup
+(
+    Id              int           IDENTITY(1,1) NOT NULL,
+    Code            nvarchar(64)  NOT NULL,       -- не довше 59: PRMG_ + код вміщається в код довідника
+    NameL10n        nvarchar(max) NOT NULL,
+    DescriptionL10n nvarchar(max) NOT NULL,       -- JSON; '{}' - без опису
+    RegistryDefId   int           NOT NULL,
+    IsActive        bit           NOT NULL CONSTRAINT DF_PermitGroup_Act DEFAULT(1),
+    Revision        int           NOT NULL CONSTRAINT DF_PermitGroup_Rev DEFAULT(0),  -- +1 при кожній зміні: рядок завжди змінюється, RowVersion оновлюється
+    CreatedAt       datetime2(3)  NOT NULL,
+    CreatedByUserId int           NOT NULL,
+    UpdatedAt       datetime2(3)  NOT NULL,
+    UpdatedByUserId int           NOT NULL,
+    RowVersion      rowversion    NOT NULL,
+    CONSTRAINT PK_PermitGroup PRIMARY KEY (Id),
+    CONSTRAINT UQ_PermitGroup UNIQUE (Code),
+    CONSTRAINT UQ_PermitGroup_Registry UNIQUE (RegistryDefId),
+    CONSTRAINT FK_PermitGroup_Reg       FOREIGN KEY (RegistryDefId)   REFERENCES cfg.RegistryDef (Id),
+    CONSTRAINT FK_PermitGroup_CreatedBy FOREIGN KEY (CreatedByUserId) REFERENCES sec.[User] (Id),
+    CONSTRAINT FK_PermitGroup_UpdatedBy FOREIGN KEY (UpdatedByUserId) REFERENCES sec.[User] (Id)
+);
+GO
+
+-- Склад групи. Усі FK - NO ACTION (правило ФВ-7.6): склад при видаленні групи прибирає сховище явно; опублікований тип не видаляється.
+CREATE TABLE cfg.PermitGroupMember
+(
+    PermitGroupId   int NOT NULL,
+    PermitTypeDefId int NOT NULL,
+    Ordinal         int NOT NULL,
+    CONSTRAINT PK_PermitGroupMember PRIMARY KEY (PermitGroupId, PermitTypeDefId),
+    CONSTRAINT FK_PermitGroupMember_Group FOREIGN KEY (PermitGroupId) REFERENCES cfg.PermitGroup (Id),
+    CONSTRAINT FK_PermitGroupMember_Type  FOREIGN KEY (PermitTypeDefId) REFERENCES cfg.PermitTypeDef (Id)
+);
+CREATE INDEX IX_PermitGroupMember_Type ON cfg.PermitGroupMember (PermitTypeDefId);
+GO
+
 -- Результат методології → колонка документа. Значення НЕ копіюється
 -- у doc.CellValue: воно читається за посиланням (D-69, П-33).
 CREATE TABLE cfg.CalculationBinding

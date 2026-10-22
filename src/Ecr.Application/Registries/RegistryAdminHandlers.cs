@@ -22,10 +22,11 @@ public sealed class ListRegistriesHandler(
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock,
-    IPermitTypeStore? permits = null)
+    IPermitTypeStore? permits = null,
+    IPermitGroupStore? permitGroups = null)
 {
-    // ⚠ `permits` (Permits, PM-03) необов'язковий лише для тестів, що будують обробник руками; контейнер
-    // підставляє його завжди. Він прибирає з переліку приховані реєстри типів дозволів (шапки, таблиці,
+    // ⚠ `permits` (Permits, PM-03) і `permitGroups` (PRMG) необов'язкові лише для тестів, що будують обробник руками;
+    // контейнер підставляє їх завжди. Він прибирає з переліку приховані реєстри типів дозволів (шапки, таблиці,
     // списки «лише для типу»): користувач бачить їх тільки через «Permits».
 
     /// <summary>Право на читання довідників (`02-contracts.md` §9).</summary>
@@ -87,14 +88,25 @@ public sealed class ListRegistriesHandler(
             ? new HashSet<int>()
             : await permits.ListHiddenRegistryIdsAsync(ct).ConfigureAwait(false);
 
+        IReadOnlySet<int> headerIds = new HashSet<int>();
         if (includePermitHeaders && permits is not null && hidden.Count > 0)
         {
-            var headers = await permits.ListPublishedHeaderRegistryIdsAsync(ct).ConfigureAwait(false);
-            hidden = hidden.Where(id => !headers.Contains(id)).ToHashSet();
+            headerIds = await permits.ListPublishedHeaderRegistryIdsAsync(ct).ConfigureAwait(false);
+            hidden = hidden.Where(id => !headerIds.Contains(id)).ToHashSet();
         }
 
+        // PRMG: прихований реєстр групи - ціль Lookup, а не довідник. Без прапора його в переліку немає; з прапором віддаються
+        // лише АКТИВНІ групи (деактивована не обирається новою ціллю), з описом для вибору цілі.
+        var groupBriefs = permitGroups is null
+            ? new Dictionary<int, PermitGroupBrief>()
+            : (await permitGroups.ListBriefAsync(ct).ConfigureAwait(false)).ToDictionary(g => g.RegistryDefId);
+        hidden = hidden.Concat(groupBriefs.Keys).ToHashSet();
+        var shownGroups = includePermitHeaders
+            ? groupBriefs.Values.Where(g => g.IsActive).Select(g => g.RegistryDefId).ToHashSet()
+            : [];
+
         return definitions
-            .Where(d => !hidden.Contains(d.Id))
+            .Where(d => !hidden.Contains(d.Id) || shownGroups.Contains(d.Id))
             .Where(d => !RegistryAccess.IsDenied(profile, d.Id))
             .Select(d => new RegistryDefDto(
                 d.Id,
@@ -132,7 +144,11 @@ public sealed class ListRegistriesHandler(
                 UpdatedByDisplayName: d.DefinitionUpdatedByUserId is { } updater
                     ? updaterNames?.GetValueOrDefault(updater)
                     : null,
-                AsOfRequired: RequiresAsOf(d, byId)))
+                AsOfRequired: RequiresAsOf(d, byId),
+                DescriptionL10n: groupBriefs.TryGetValue(d.Id, out var brief) ? brief.DescriptionL10n : null,
+                Kind: brief is not null
+                    ? RegistryDefKind.PermitGroup
+                    : headerIds.Contains(d.Id) ? RegistryDefKind.PermitHeader : RegistryDefKind.Dictionary))
             .ToList();
     }
 
@@ -302,6 +318,12 @@ public sealed class SwitchRegistrySourceHandler(
         // сутності зробили б перемикання порожньою операцією — причому
         // МОВЧКИ: `changed.Count` рахує доменні об'єкти в пам'яті й лишився б
         // тим самим, аудит записався б, а таблиця не змінилася б.
+        // PRMG: master прихованого реєстру групи типів дозволів не перемикається (він не має зовнішнього джерела).
+        foreach (var managedCode in registryCodes)
+        {
+            Permits.Groups.PermitGroupRegistryGuard.RequireNotManaged(managedCode.Trim());
+        }
+
         var found = await registries.FindDefinitionsAsync(registryCodes, ct).ConfigureAwait(false);
 
         var byCode = new Dictionary<string, RegistryDef>(

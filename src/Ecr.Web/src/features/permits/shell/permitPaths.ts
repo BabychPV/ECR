@@ -9,6 +9,7 @@ export const PermitsPaths = {
   permits: '/admin/permits',
   types: '/admin/permits/types',
   lists: '/admin/permits/lists',
+  groups: '/admin/permits/groups',
   bindings: '/admin/permits/bindings',
 } as const;
 

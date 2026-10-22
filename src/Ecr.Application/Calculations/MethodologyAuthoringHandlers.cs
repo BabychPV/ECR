@@ -922,6 +922,9 @@ public sealed class SetMethodologyRowActivityFilterHandler(
                     ["methodologyId"] = methodologyId.ToString(CultureInfo.InvariantCulture),
                 });
 
+        // PRMG: група типів дозволів - порожній реєстр без записів; фільтр над нею мовчки не діяв би.
+        Permits.Groups.PermitGroupRegistryGuard.RequireNotRowActivityTarget(filter);
+
         methodology.SetRowActivityFilter(string.IsNullOrWhiteSpace(filter) ? null : filter.Trim());
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);

@@ -192,7 +192,11 @@ public sealed class MigrateDocumentVersionHandler(
     ISheetEditGate structureGate,
     IBackgroundJobScheduler jobs,
     IRegistryStore registries,
-    Microsoft.Extensions.Logging.ILogger<MigrateDocumentVersionHandler> log)
+    Microsoft.Extensions.Logging.ILogger<MigrateDocumentVersionHandler> log,
+
+    // ⛔ PRMG: ціль Lookup-поля може бути ГРУПОЮ типів дозволів; порівняння цілі - лише через `LookupTargetMatcher`.
+    // `null` (прямий конструктор у тестах) - груп немає.
+    Permits.Groups.ILookupTargetResolver? groups = null)
 {
     /// <summary>
     /// Скільки активна (<c>Queued</c>/<c>Running</c>) задача переносу може не оновлюватися, щоб ще вважатися
@@ -1385,6 +1389,16 @@ public sealed class MigrateDocumentVersionHandler(
                 .ConfigureAwait(false))
             .ToDictionary(s => s.Id);
 
+        // PRMG: знімок груп оновлюється лише при незбігу реєстру (мапи між звичайними довідниками - без резолвера).
+        await Permits.Groups.LookupTargetMatcher.EnsureFreshOnMismatchAsync(
+            groups,
+            applied.SelectMany(a => a.Remap.Mappings.SelectMany(m => new[]
+            {
+                (a.Source.LookupRegistryDefId, standings.TryGetValue(m.From, out var o) ? o.RegistryDefId : 0),
+                (a.Target.LookupRegistryDefId, standings.TryGetValue(m.To, out var n) ? n.RegistryDefId : 0),
+            })),
+            ct).ConfigureAwait(false);
+
         var fields = new Dictionary<int, LookupRemapField>();
         foreach (var (remap, src, dst) in applied)
         {
@@ -1392,7 +1406,8 @@ public sealed class MigrateDocumentVersionHandler(
             // не повинна вдавати покриття. Перевіряються всі пари, у тому числі ті, що нічого не покривають.
             foreach (var pair in remap.Mappings)
             {
-                if (!standings.TryGetValue(pair.From, out var old) || old.RegistryDefId != src.LookupRegistryDefId)
+                if (!standings.TryGetValue(pair.From, out var old)
+                    || !Permits.Groups.LookupTargetMatcher.Belongs(groups, null, src.LookupRegistryDefId, old.RegistryDefId))
                 {
                     throw VersionMigrationLookupRemaps.Invalid(
                         $"Мапа Lookup поля «{src.Code}»: запис {pair.From} не належить довіднику вихідної версії.");
@@ -1411,7 +1426,7 @@ public sealed class MigrateDocumentVersionHandler(
             {
                 var newId = mappings[entryId];
                 var reason = NotUsableReason(
-                    standings.GetValueOrDefault(newId), dst.LookupRegistryDefId!.Value, windowStart, windowEndExclusive);
+                    standings.GetValueOrDefault(newId), dst.LookupRegistryDefId!.Value, windowStart, windowEndExclusive, groups);
                 if (reason is not null)
                 {
                     unusable[newId] = reason;
@@ -1431,9 +1446,10 @@ public sealed class MigrateDocumentVersionHandler(
     /// вікна проєкту.
     /// </summary>
     private static string? NotUsableReason(
-        RegistryEntryStanding? standing, int registryDefId, DateOnly windowStart, DateOnly windowEndExclusive)
+        RegistryEntryStanding? standing, int registryDefId, DateOnly windowStart, DateOnly windowEndExclusive,
+        Permits.Groups.ILookupTargetResolver? groups)
         => standing is null ? "missing"
-            : standing.RegistryDefId != registryDefId ? "foreign"
+            : !Permits.Groups.LookupTargetMatcher.Belongs(groups, null, registryDefId, standing.RegistryDefId) ? "foreign"
             : standing.IsDeleted ? "deleted"
             : !standing.IsActive ? "inactive"
             : !new Ecr.Domain.ValueObjects.ValidityWindow(standing.ValidFrom, standing.ValidTo)

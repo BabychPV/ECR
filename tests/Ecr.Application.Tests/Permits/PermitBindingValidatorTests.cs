@@ -91,6 +91,24 @@ public sealed class PermitBindingValidatorTests
         Refused("bindingLookupMismatch", Input(Key("Substance"), Limit()), Ctx(keyColumn: other, keyField: field));
     }
 
+    /// <summary>
+    /// Permits PRMG, обмеження v1: колонка-ГРУПА (ціль - прихований реєстр <c>PRMG_*</c>) не прив'язується до поля дозволу
+    /// <c>PRM_&lt;TYPE&gt;</c> - цілі різні, відмова <c>bindingLookupMismatch</c>, як і для будь-якого іншого довідника.
+    /// Мутація: зарахувати склад групи в порівнянні цілей - тест червоний.
+    /// </summary>
+    [Fact]
+    public void Колонка_група_не_прив_язується_до_поля_дозволу_типу()
+    {
+        const int GroupRegistry = 900;
+        var field = new PermitFieldInfo("Substance", CellDataType.Lookup, null, null, null, 5);
+        var groupColumn = new SheetColumnInfo(11, "KeyCol", CellDataType.Lookup, null, null, null, true, GroupRegistry);
+
+        var result = Validate(Input(Key("Substance"), Limit()), Ctx(keyColumn: groupColumn, keyField: field));
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Case == "bindingLookupMismatch");
+    }
+
     [Fact]
     public void Невідомі_колонка_і_поле_відхиляються()
     {

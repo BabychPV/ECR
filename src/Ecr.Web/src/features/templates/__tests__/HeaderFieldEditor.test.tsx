@@ -35,14 +35,30 @@ const SeededStrings: Record<string, string> = {
   'registries.permitHeaderOption': 'Permits: {name} ({code})',
   'registries.lookupGroup.permits': 'Permits',
   'registries.lookupGroup.dictionaries': 'Dictionaries',
+  'registries.lookupGroup.unlisted': 'Current value',
+  'registries.lookupTargetUnlisted': 'Not in the list (registry #{id})',
 };
 
 const registries = [
   { id: 7, code: 'PERMITS', nameL10n: { values: { en: 'Permits' } }, fields: [], isHierarchical: false, isTemporal: true, sourceKind: 'Master' },
 ];
 
+// Вид цілі - ознака СЕРВЕРА (`kind`), а не префікс коду: `PRM_AIR` без `kind` лишився б довідником.
 const permitHeaders = [
-  { id: 77, code: 'PRM_AIR', nameL10n: { values: { en: 'Air permit' } }, fields: [], isHierarchical: false, isTemporal: true, sourceKind: 'Master' },
+  { id: 77, code: 'PRM_AIR', nameL10n: { values: { en: 'Air permit' } }, fields: [], isHierarchical: false, isTemporal: true, sourceKind: 'Master', kind: 'PermitHeader' },
+  {
+    id: 91,
+    code: 'PRMG_WATER',
+    nameL10n: { values: { en: 'Water permits' } },
+    descriptionL10n: { values: { en: 'All water permits of the site' } },
+    fields: [],
+    isHierarchical: false,
+    isTemporal: true,
+    sourceKind: 'Master',
+    kind: 'PermitGroup',
+  },
+  // Довідник, який випадково зветься як група: за `kind` він лишається в «Dictionaries».
+  { id: 8, code: 'PRMG_LEGACY', nameL10n: { values: { en: 'Legacy dictionary' } }, fields: [], isHierarchical: false, isTemporal: false, sourceKind: 'Master', kind: 'Dictionary' },
 ];
 
 const registryRequests: string[] = [];
@@ -196,6 +212,93 @@ describe('HeaderFieldEditor: вибір довідника лише для ти�
     expect(before(permitsGroup, air)).toBe(true);
     expect(before(air, dictionariesGroup)).toBe(true);
     expect(before(dictionariesGroup, plain)).toBe(true);
+  }, 60000);
+
+  // ✎ Групи типів дозволів (PRMG). Вид цілі - `kind` СЕРВЕРА. Мутаційний доказ: поверни розпізнавання за префіксом
+  // (`code.startsWith('PRM')`) - довідник `PRMG_LEGACY` потрапить у «Permits», а тест нижче почервоніє; прибери `PermitGroup`
+  // з `isPermitTarget` - група впаде в «Dictionaries».
+  it('група PRMG_* - у «Permits» (перед «Dictionaries»), довідник з тим самим префіксом - у «Dictionaries»', async () => {
+    const draft: HeaderFieldDraft = { ...emptyHeaderFieldDraft(0), code: 'Permit', labelL10n: { en: 'Permit' }, dataType: 'Lookup' };
+
+    await show(draft, vi.fn());
+
+    fireEvent.click(await screen.findByLabelText('Registry'));
+    const permitsGroup = await screen.findByText('Permits');
+    const dictionariesGroup = await screen.findByText('Dictionaries');
+    const water = await screen.findByRole('option', { name: /Water permits \(PRMG_WATER\)/ });
+    const legacy = await screen.findByRole('option', { name: 'Legacy dictionary (PRMG_LEGACY)' });
+
+    const before = (a: Element, b: Element): boolean => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(before(permitsGroup, water)).toBe(true);
+    expect(before(water, dictionariesGroup)).toBe(true);
+    expect(before(dictionariesGroup, legacy)).toBe(true);
+  }, 60000);
+
+  it('опція групи двохрядкова: назва і приглушений опис; у звичайної цілі опису немає', async () => {
+    const draft: HeaderFieldDraft = { ...emptyHeaderFieldDraft(0), code: 'Permit', labelL10n: { en: 'Permit' }, dataType: 'Lookup' };
+
+    await show(draft, vi.fn());
+
+    fireEvent.click(await screen.findByLabelText('Registry'));
+    const water = await screen.findByRole('option', { name: /Water permits \(PRMG_WATER\)/ });
+    expect(water.querySelector('[data-lookup-target-description]')?.textContent).toBe('All water permits of the site');
+    expect((await screen.findByRole('option', { name: 'Permits: Air permit (PRM_AIR)' })).querySelector('[data-lookup-target-description]')).toBeNull();
+    expect((await screen.findByRole('option', { name: 'Permits (PERMITS)' })).querySelector('[data-lookup-target-description]')).toBeNull();
+  }, 60000);
+
+  it('пошук знаходить групу по опису, регістр не важить; група без збігів зникає', async () => {
+    const draft: HeaderFieldDraft = { ...emptyHeaderFieldDraft(0), code: 'Permit', labelL10n: { en: 'Permit' }, dataType: 'Lookup' };
+
+    await show(draft, vi.fn());
+
+    const input = await screen.findByLabelText('Registry');
+    fireEvent.click(input);
+    fireEvent.change(input, { target: { value: 'OF THE SITE' } });
+
+    expect(await screen.findByRole('option', { name: /Water permits \(PRMG_WATER\)/ })).not.toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByRole('option', { name: 'Permits (PERMITS)' })).toBeNull();
+    });
+    expect(screen.queryByText('Dictionaries')).toBeNull();
+  }, 60000);
+
+  // P3-2: поточної цілі немає в переліку (групу деактивовано / права немає) - порожнє значення вводило б в оману.
+  // Мутаційний доказ: прибери `currentId` у `lookupTargetSelectData` - у полі буде порожньо, тест почервоніє.
+  it('поточна ціль, якої немає в переліку, лишається видимою окремою опцією «unlisted»', async () => {
+    const onChange = vi.fn();
+    const draft: HeaderFieldDraft = {
+      ...emptyHeaderFieldDraft(0),
+      code: 'Permit',
+      labelL10n: { en: 'Permit' },
+      dataType: 'Lookup',
+      lookupRegistryDefId: 555,
+    };
+
+    await show(draft, onChange);
+
+    const input = (await screen.findByLabelText('Registry')) as HTMLInputElement;
+    expect(input.value).toBe('Not in the list (registry #555)');
+    fireEvent.click(input);
+    expect(await screen.findByText('Current value')).not.toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  }, 60000);
+
+  it('поточна ціль, що Є в переліку, не дає зайвої опції «unlisted»', async () => {
+    const draft: HeaderFieldDraft = {
+      ...emptyHeaderFieldDraft(0),
+      code: 'Permit',
+      labelL10n: { en: 'Permit' },
+      dataType: 'Lookup',
+      lookupRegistryDefId: 7,
+    };
+
+    await show(draft, vi.fn());
+
+    const input = (await screen.findByLabelText('Registry')) as HTMLInputElement;
+    expect(input.value).toBe('Permits (PERMITS)');
+    fireEvent.click(input);
+    await screen.findByText('Dictionaries');
+    expect(screen.queryByText('Current value')).toBeNull();
   }, 60000);
 
   /**

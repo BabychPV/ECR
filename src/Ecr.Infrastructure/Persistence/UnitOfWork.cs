@@ -446,6 +446,31 @@ public sealed class UnitOfWork(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRM-4091.registryCode", ["registryCode"] = permitRegistry.Code, ["concurrent"] = "true" });
         }
 
+        // ⛔ Permits PRMG: той самий клас, що й `PRM_` вище. Два одночасні `POST /permit-groups` з тим самим кодом проходять
+        // перевірку обробника обидва, і другий відбиває `UQ_RegistryDef` (прихований реєстр `PRMG_<код>` створюється ПЕРШИМ)
+        // або `UQ_PermitGroup` - голий 500. Та сама відмова, що й перевірка обробника (`409 ECR-PRM-4097`). Лише ці індекси.
+        if (SqlConflict.ViolatesIndex(ex, "UQ_PermitGroup")
+            && ex.Entries.FirstOrDefault(e => e.State == EntityState.Added && e.Entity is Domain.Entities.Configuration.PermitGroup)
+                is { Entity: Domain.Entities.Configuration.PermitGroup permitGroup })
+        {
+            return new BusinessRuleException(
+                ErrorCodes.PermitGroupDuplicate,
+                $"Група дозволів «{permitGroup.Code}» уже існує.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRM-4097.code", ["code"] = permitGroup.Code, ["concurrent"] = "true" });
+        }
+
+        if (SqlConflict.ViolatesIndex(ex, "UQ_RegistryDef")
+            && ex.Entries.FirstOrDefault(e =>
+                e.State == EntityState.Added
+                && e.Entity is Domain.Entities.Configuration.RegistryDef { Code: var groupCode } && groupCode.StartsWith("PRMG_", StringComparison.Ordinal))
+                is { Entity: Domain.Entities.Configuration.RegistryDef groupRegistry })
+        {
+            return new BusinessRuleException(
+                ErrorCodes.PermitGroupDuplicate,
+                $"Код реєстру «{groupRegistry.Code}» зайнятий.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRM-4097.registryCode", ["registryCode"] = groupRegistry.Code, ["concurrent"] = "true" });
+        }
+
         // ⛔ Permits PA-A-06/PA-A-11 (аудит, прохід A). Десять паралельних `PUT …/permit-bindings/{код}` на ту саму таблицю
         // аркуша проходять `EnsureNoDuplicateAsync` обидва (check-then-insert ДО блоку чернетки), і програвших відбивав лише
         // `UQ_PermitSheetBinding_Sheet` - голий 500 `ECR-SYS-0500` (7-9 з 10). Та сама відмова, що й перевірка обробника

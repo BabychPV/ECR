@@ -26,6 +26,7 @@ export const Routes = [
   { path: '/admin/permits', name: 'permits' },
   { path: '/admin/permits/types', name: 'permit-types' },
   { path: '/admin/permits/lists', name: 'permit-lists' },
+  { path: '/admin/permits/groups', name: 'permit-groups' },
   { path: '/admin/permits/bindings', name: 'permit-bindings' },
   { path: '/admin/methodologies', name: 'methodologies' },
   { path: '/admin/expressions', name: 'expressions' },

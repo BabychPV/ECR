@@ -142,6 +142,9 @@ public sealed class SaveRegistryDefinitionDraftHandler(
         // ⛔ S18: заборона на довідник виграє і над правом на опис — 404, як неіснуючий.
         RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
+        // PRMG: прихований реєстр групи типів дозволів не має опису, що редагується.
+        Permits.Groups.PermitGroupRegistryGuard.RequireNotManaged(definition.Code);
+
         // ⛔ L5-02: збереження перебазовує чернетку на ПОТОЧНУ версію опису (`Replace(definition.DefinitionVersion…)`),
         // а клієнт будував форму з якоїсь давнішої. Без звірки версії пряма публікація сусіда між читанням
         // і збереженням лишалась непоміченою, і подальша публікація чернетки мовчки вимикала його правила/ключі.
@@ -223,6 +226,9 @@ public sealed class DiscardRegistryDefinitionDraftHandler(
         // ⛔ S18: заборона на довідник виграє і над правом на опис — 404, як неіснуючий.
         RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
 
+        // PRMG: прихований реєстр групи типів дозволів не має опису, що редагується.
+        Permits.Groups.PermitGroupRegistryGuard.RequireNotManaged(definition.Code);
+
         var draft = await drafts.FindAsync(definition.Id, ct).ConfigureAwait(false)
             ?? throw RegistryDraft.NotFound(definition.Code);
 
@@ -286,6 +292,9 @@ public sealed class PublishRegistryDefinitionHandler(
 
         // ⛔ S18: заборона на довідник виграє і над правом на опис — 404, як неіснуючий.
         RegistryAccess.EnsureNotDenied(profile, definition.Id, code);
+
+        // PRMG: прихований реєстр групи типів дозволів не має опису, що редагується.
+        Permits.Groups.PermitGroupRegistryGuard.RequireNotManaged(definition.Code);
 
         var draft = await drafts.FindAsync(definition.Id, ct).ConfigureAwait(false)
             ?? throw RegistryDraft.NotFound(definition.Code);

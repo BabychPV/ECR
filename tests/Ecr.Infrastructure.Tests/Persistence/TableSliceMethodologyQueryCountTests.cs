@@ -160,6 +160,8 @@ public sealed class TableSliceMethodologyQueryCountTests(SqlServerFixture sql)
 
         services.AddSingleton(db);
         services.AddScoped<IMethodologyStore>(sp => new MethodologyStore(sp.GetRequiredService<EcrDbContext>()));
+        // Слайс тепер кличе резолвер цілей Lookup (групи пермітів, PRMG) - йому потрібне сховище груп.
+        services.AddScoped<IPermitGroupStore>(sp => new PermitGroupStore(sp.GetRequiredService<EcrDbContext>()));
 
         services.AddSingleton(Rows(seeded));
         services.AddSingleton(Cells());

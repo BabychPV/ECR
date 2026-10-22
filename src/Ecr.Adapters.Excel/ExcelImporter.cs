@@ -48,7 +48,10 @@ public sealed class ExcelImporter(
 
     // ⛔ Permits PM-10: таблиці з прив'язкою «рядки з дозволу» не приймають нових рядків і зіставлених колонок з книги
     // (`PermitBoundImportGuard`). Необов'язковий лише заради тестів, що конструюють імпортер вручну; `null` - без охоронця.
-    IPermitBindingStore? permitBindings = null) : IExcelImporter
+    IPermitBindingStore? permitBindings = null,
+
+    // Permits PRMG: ціль-група читається як обʼєднання записів реєстрів-членів (`LookupTargetEntries`). `null` - груп немає.
+    Ecr.Application.Permits.Groups.ILookupTargetResolver? groups = null) : IExcelImporter
 {
     /// <summary>Порожній зріз — таблиця без жодного рядка чи непорожньої комірки.</summary>
     private static readonly IReadOnlyDictionary<string, long> EmptyRowIds =
@@ -156,7 +159,7 @@ public sealed class ExcelImporter(
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        var (lookups, unusableLookups) = await LookupsAsync(snapshot, documentId, map.PeriodKey, ct).ConfigureAwait(false);
+        var (lookups, unusableLookups, ambiguousLookups) = await LookupsAsync(snapshot, documentId, map.PeriodKey, profile, ct).ConfigureAwait(false);
 
         // ⛔ S6 (ФВ-6.6): межі читання того, хто імпортує. Перегляд порівнює
         // книгу з ПОТОЧНИМИ значеннями, і будь-яка відповідь, що залежить від
@@ -307,7 +310,8 @@ public sealed class ExcelImporter(
                 worksheet, block, map.PeriodKey, table, decisions, lookups, rowIds, versions, current,
                 readable.CanReadColumn,
                 Ecr.Application.Localization.NumberCulture.ForLanguage(currentUser.Language),
-                unusableLookups);
+                unusableLookups,
+                ambiguousLookups);
 
             if (permitLocked.TryGetValue(table.Id, out var lockedCodes))
             {
@@ -1177,8 +1181,9 @@ public sealed class ExcelImporter(
     /// порівняння з поточним раніше.
     /// </remarks>
     private async Task<(IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> Codes,
-        IReadOnlyDictionary<long, string> Unusable)> LookupsAsync(
-        TemplateVersionSnapshot snapshot, long documentId, int periodKey, CancellationToken ct)
+        IReadOnlyDictionary<long, string> Unusable,
+        IReadOnlyDictionary<int, IReadOnlyDictionary<string, string>> Ambiguous)> LookupsAsync(
+        TemplateVersionSnapshot snapshot, long documentId, int periodKey, AccessProfile profile, CancellationToken ct)
     {
         var registryIds = snapshot.ColumnsById.Values
             .Where(c => !c.IsDeleted && c.LookupRegistryDefId is not null)
@@ -1188,10 +1193,11 @@ public sealed class ExcelImporter(
 
         var result = new Dictionary<int, IReadOnlyDictionary<string, long>>();
         var unusable = new Dictionary<long, string>();
+        var ambiguousByTarget = new Dictionary<int, IReadOnlyDictionary<string, string>>();
 
         if (registryIds.Count == 0)
         {
-            return (result, unusable);
+            return (result, unusable, ambiguousByTarget);
         }
 
         // Дата чинності — останній день періоду (D-158), як у пікері сітки й у C7.
@@ -1202,13 +1208,17 @@ public sealed class ExcelImporter(
 
         foreach (var registryId in registryIds)
         {
-            var entries = await registries.ListEntriesAsync(registryId, ct).ConfigureAwait(false);
+            // Permits PRMG: ціль-група = обʼєднання записів реєстрів-членів; для решти - записи самого реєстру.
+            var targetEntries = await Ecr.Application.Permits.Groups.LookupTargetEntries
+                .ListAsync(registries, groups, registryId, ct, profile).ConfigureAwait(false);
+            Ecr.Application.Permits.Groups.LookupTargetEntries.BuildImportCodes(targetEntries, out var codes, out var ambiguous);
+            result[registryId] = codes;
+            if (ambiguous.Count > 0)
+            {
+                ambiguousByTarget[registryId] = ambiguous;
+            }
 
-            result[registryId] = entries
-                .GroupBy(e => e.Code, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
-
-            foreach (var entry in entries)
+            foreach (var entry in targetEntries.Select(e => e.Entry))
             {
                 var reason = entry.IsDeleted ? ImportMessageKeys.LookupDeleted
                     : !entry.IsActive ? ImportMessageKeys.LookupInactive
@@ -1222,7 +1232,7 @@ public sealed class ExcelImporter(
             }
         }
 
-        return (result, unusable);
+        return (result, unusable, ambiguousByTarget);
     }
 }
 

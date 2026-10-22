@@ -656,6 +656,14 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.PermitTypeInUse =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ Permits PRMG: «група з таким кодом уже є» (`ECR-PRM-4097`) і «групу використовують, лише деактивація»
+        // (`ECR-PRM-4098`) - конфлікти стану, а не невірні дані. ⚠ Без явних арм BusinessRuleException їде як 422.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.PermitGroupDuplicate =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.PermitGroupInUse =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // ⛔ Permits PM-09: «прив'язка вже є» (`ECR-PRM-4101`) — конфлікт стану: таблицю аркуша вже зайнято чи код зайнятий.
         BusinessRuleException e when e.ErrorCode == ErrorCodes.PermitBindingDuplicate =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),

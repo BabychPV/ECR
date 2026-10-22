@@ -30,12 +30,13 @@ function resolve(pathname: string, entries: readonly RouteEntry[] = permitRoutes
 }
 
 describe('Permits: маршрути', () => {
-  it('у реєстрі рівно сім маршрутів Permits', () => {
+  it('у реєстрі рівно вісім маршрутів Permits', () => {
     expect(permitRoutes.map((route) => route.path)).toEqual([
       '/admin/permits',
       '/admin/permits/types',
       '/admin/permits/types/:code',
       '/admin/permits/lists',
+      '/admin/permits/groups',
       '/admin/permits/bindings',
       '/admin/permits/bindings/:id',
       '/admin/permits/:id',
@@ -47,6 +48,7 @@ describe('Permits: маршрути', () => {
     ['/admin/permits/types', 'admin-permit-types'],
     ['/admin/permits/types/WaterDischarge', 'admin-permit-type-editor'],
     ['/admin/permits/lists', 'admin-permit-lists'],
+    ['/admin/permits/groups', 'admin-permit-groups'],
     ['/admin/permits/bindings', 'admin-permit-bindings'],
     ['/admin/permits/bindings/B-01', 'admin-permit-binding'],
     ['/admin/permits/P-0001', 'admin-permit'],
@@ -57,7 +59,7 @@ describe('Permits: маршрути', () => {
 
   it('статичні маршрути виграють у `:id` за будь-якого порядку оголошення', () => {
     const reversed = [...permitRoutes].reverse();
-    for (const pathname of ['/admin/permits/types', '/admin/permits/lists', '/admin/permits/bindings']) {
+    for (const pathname of ['/admin/permits/types', '/admin/permits/lists', '/admin/permits/groups', '/admin/permits/bindings']) {
       expect(resolve(pathname, reversed)).not.toBe('admin-permit');
       expect(resolve(pathname, reversed)).toBe(resolve(pathname));
     }
@@ -69,6 +71,7 @@ describe('Permits: маршрути', () => {
       permits: routes.adminPermits.path,
       types: routes.adminPermitTypes.path,
       lists: routes.adminPermitLists.path,
+      groups: routes.adminPermitGroups.path,
       bindings: routes.adminPermitBindings.path,
     });
   });
@@ -79,6 +82,7 @@ describe('Permits: маршрути', () => {
       ['admin-permit-types', PermitTypesPermission],
       ['admin-permit-type-editor', PermitTypesPermission],
       ['admin-permit-lists', 'Registry.View'],
+      ['admin-permit-groups', 'Registry.View'],
       ['admin-permit-bindings', 'Registry.View'],
       ['admin-permit-binding', 'Registry.View'],
       ['admin-permit', 'Registry.View'],
@@ -104,10 +108,16 @@ describe('Permits: маршрути', () => {
     expect(container.querySelector('svg')).not.toBeNull();
   });
 
-  it('пояснення є в чотирьох розділів (список, типи, списки, привʼязки), решти — немає', () => {
+  it('пояснення є в п’яти розділів (список, типи, списки, групи, привʼязки), решти — немає', () => {
     expect(
       permitRoutes.filter((route) => route.handle.descriptionKey !== undefined).map((route) => route.path),
-    ).toEqual(['/admin/permits', '/admin/permits/types', '/admin/permits/lists', '/admin/permits/bindings']);
+    ).toEqual([
+      '/admin/permits',
+      '/admin/permits/types',
+      '/admin/permits/lists',
+      '/admin/permits/groups',
+      '/admin/permits/bindings',
+    ]);
   });
 
   it('предки крихт існують у реєстрі', () => {

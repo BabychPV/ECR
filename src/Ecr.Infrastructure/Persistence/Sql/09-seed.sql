@@ -9132,6 +9132,85 @@ USING (VALUES
     -- PERMITS: p3-backlog ── en: PUI-4, значення списку вже прибране/змінене деінде; ru/kz — порцією PERMITS: p3-backlog нижче ──
     ,(N'permits.lists.drawer.gone', N'en', N'This value is no longer in the list: it was changed elsewhere. The list has been refreshed.', 1)
     -- PERMITS: p3-backlog ── кінець секції ──
+    -- PERMITS: groups-api ── en: відмови груп типів дозволів (ECR-PRM-0405/4097/4098/4099, ECR-PRM-0422 group*; PRMG); ru/kz — порцією PERMITS: groups-api нижче ──
+    ,(N'err.ECR-PRM-0405', N'en', N'Permit group not found', 1)
+    ,(N'err.ECR-PRM-0405.group', N'en', N'Permit group "{code}" does not exist.', 1)
+    ,(N'err.ECR-PRM-4097', N'en', N'Permit group already exists', 1)
+    ,(N'err.ECR-PRM-4097.code', N'en', N'Permit group "{code}" already exists.', 1)
+    ,(N'err.ECR-PRM-4097.registryCode', N'en', N'The registry code "{registryCode}" needed by the group is already taken.', 1)
+    ,(N'err.ECR-PRM-4098', N'en', N'Permit group is in use', 1)
+    ,(N'err.ECR-PRM-4098.inUse', N'en', N'Permit group "{code}" is used by templates ({templates}) and cannot be deleted. Deactivate it instead.', 1)
+    ,(N'err.ECR-PRM-4099', N'en', N'Permit group was changed', 1)
+    ,(N'err.ECR-PRM-4099.changed', N'en', N'Permit group "{code}" was changed after you opened it. Reload it and repeat your edit.', 1)
+    ,(N'err.ECR-PRM-0422.permitGroupNameRequired', N'en', N'The permit group name is required in at least one language.', 1)
+    ,(N'err.ECR-PRM-0422.permitGroupCodeInvalid', N'en', N'The group code "{code}" is not valid: use letters, digits and underscore, starting with a letter, up to 59 characters.', 1)
+    ,(N'err.ECR-PRM-0422.permitGroupTextTooLong', N'en', N'The group {item} is longer than {max} characters.', 1)
+    ,(N'err.ECR-PRM-0422.permitGroupMemberDuplicate', N'en', N'The permit type "{typeCode}" is listed in the group more than once.', 1)
+    ,(N'err.ECR-PRM-0422.permitGroupMemberUnknown', N'en', N'The permit type "{typeCode}" does not exist.', 1)
+    ,(N'err.ECR-PRM-0422.permitGroupMemberNotPublished', N'en', N'The permit type "{typeCode}" is not published yet: only published types can be in a group.', 1)
+    ,(N'err.ECR-PRM-0422.permitGroupRegistryManaged', N'en', N'The registry "{registryCode}" belongs to a permit group and can only be changed through the group.', 1)
+    ,(N'err.ECR-PRM-4097.registryReserved', N'en', N'The code prefix "{prefix}" is reserved for permit groups: the registry code "{registryCode}" cannot be used.', 1)
+    ,(N'err.ECR-CALC-0422.rowActivityFilterPermitGroup', N'en', N'The row activity filter cannot point to the permit group "{registryCode}": a group has no entries.', 1)
+    ,(N'err.ECR-TMPL-0422.lookupGroupNoRegistryForms', N'en', N'Column {columnCode} uses a permit group as its list: REG* functions over it are not supported yet.', 1)
+    -- PERMITS: groups-api ── кінець секції ──
+    -- PERMITS: groups-expand ── en: імпорт Excel - номер дозволу збігається в кількох типах групи (PRMG); ru/kz — порцією PERMITS: groups-expand нижче ──
+    ,(N'err.ECR-CELL-0422.importAmbiguousPermitNumber', N'en', N'This permit number exists in several permit types of the column''s group. Write it as "number — type" (the candidates are listed in the message).', 1)
+    -- PERMITS: groups-expand ── кінець секції ──
+    -- PERMITS: groups-ui ── en: екран Groups (групи типів дозволів), цілі Lookup з описом групи й «unlisted»; ru/kz — порцією PERMITS: groups-ui нижче ──
+    ,(N'permits.groups.title', N'en', N'Groups', 1)
+    ,(N'permits.groups.description', N'en', N'Named sets of published permit types. A group becomes a selection list in templates and sheets.', 1)
+    ,(N'permits.groups.new', N'en', N'New group', 1)
+    ,(N'permits.groups.readOnly', N'en', N'You can view groups. Changing them needs the right to edit permit types.', 1)
+    ,(N'permits.groups.stats.aria', N'en', N'Group indicators', 1)
+    ,(N'permits.groups.stat.all', N'en', N'groups', 1)
+    ,(N'permits.groups.stat.active', N'en', N'active', 1)
+    ,(N'permits.groups.stat.inactive', N'en', N'inactive', 1)
+    ,(N'permits.groups.search.label', N'en', N'Search groups', 1)
+    ,(N'permits.groups.search.placeholder', N'en', N'Search by name, code, description or permit type', 1)
+    ,(N'permits.groups.empty.title', N'en', N'No permit groups yet', 1)
+    ,(N'permits.groups.empty.hint', N'en', N'Create a group to offer several permit types as one selection list.', 1)
+    ,(N'permits.groups.noMatches', N'en', N'No groups match the filters', 1)
+    ,(N'permits.groups.noTypes', N'en', N'No permit types', 1)
+    ,(N'permits.groups.col.group', N'en', N'Group', 1)
+    ,(N'permits.groups.col.description', N'en', N'Description', 1)
+    ,(N'permits.groups.col.types', N'en', N'Permit types', 1)
+    ,(N'permits.groups.col.used', N'en', N'Used in templates', 1)
+    ,(N'permits.groups.col.state', N'en', N'Status', 1)
+    ,(N'permits.groups.col.updated', N'en', N'Updated', 1)
+    ,(N'permits.groups.used', N'en', N'{templates} templates · {columns} columns', 1)
+    ,(N'permits.groups.usedNone', N'en', N'Not used', 1)
+    ,(N'permits.groups.state.active', N'en', N'Active', 1)
+    ,(N'permits.groups.state.inactive', N'en', N'Inactive', 1)
+    ,(N'permits.groups.drawer.close', N'en', N'Close', 1)
+    ,(N'permits.groups.drawer.newTitle', N'en', N'New permit group', 1)
+    ,(N'permits.groups.drawer.cancel', N'en', N'Cancel', 1)
+    ,(N'permits.groups.drawer.create', N'en', N'Create group', 1)
+    ,(N'permits.groups.drawer.save', N'en', N'Save', 1)
+    ,(N'permits.groups.drawer.delete', N'en', N'Delete group', 1)
+    ,(N'permits.groups.drawer.deleteTitle', N'en', N'Delete group "{name}"?', 1)
+    ,(N'permits.groups.drawer.deleteText', N'en', N'No template uses this group, so it will be removed. This cannot be undone.', 1)
+    ,(N'permits.groups.drawer.deleteVerb', N'en', N'Delete group', 1)
+    ,(N'permits.groups.drawer.created', N'en', N'Group "{name}" created', 1)
+    ,(N'permits.groups.drawer.saved', N'en', N'Group "{name}" saved', 1)
+    ,(N'permits.groups.drawer.deleted', N'en', N'Group "{name}" deleted', 1)
+    ,(N'permits.groups.drawer.conflict', N'en', N'The group was changed by someone else. The latest version is loaded; repeat your edit.', 1)
+    ,(N'permits.groups.drawer.readOnly', N'en', N'View only: changing groups needs the right to edit permit types.', 1)
+    ,(N'permits.groups.drawer.usedNote', N'en', N'Used in {templates} templates ({columns} columns). A used group cannot be deleted; deactivate it instead.', 1)
+    ,(N'permits.groups.drawer.shrinkNote', N'en', N'Removing a type does not clear values already entered in documents; only new entries are checked against the new composition.', 1)
+    ,(N'permits.groups.field.code', N'en', N'Code', 1)
+    ,(N'permits.groups.field.codeHint', N'en', N'Letters, digits and underscore, starting with a letter, up to 59 characters. Cannot be changed later.', 1)
+    ,(N'permits.groups.field.name', N'en', N'Name', 1)
+    ,(N'permits.groups.field.nameHint', N'en', N'Shown in the list of lookup targets; at least one language is required.', 1)
+    ,(N'permits.groups.field.description', N'en', N'Description', 1)
+    ,(N'permits.groups.field.descriptionHint', N'en', N'Shown under the group name when choosing which list a template column uses.', 1)
+    ,(N'permits.groups.field.active', N'en', N'Active', 1)
+    ,(N'permits.groups.field.activeHint', N'en', N'An inactive group is not offered as a new lookup target; columns that already use it keep working.', 1)
+    ,(N'permits.groups.field.types', N'en', N'Permit types in the group', 1)
+    ,(N'permits.groups.field.typesHint', N'en', N'Only published permit types can be added.', 1)
+    ,(N'permits.groups.field.typesEmpty', N'en', N'No published permit types found', 1)
+    ,(N'registries.lookupTargetUnlisted', N'en', N'Not in the list (registry #{id})', 1)
+    ,(N'registries.lookupGroup.unlisted', N'en', N'Current value', 1)
+    -- PERMITS: groups-ui ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -23672,6 +23751,176 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: p3-backlog ── кінець секції ──
+-- PERMITS: groups-api ── ru/kz: відмови груп типів дозволів (PRMG); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-PRM-0405', N'ru', N'Группа разрешений не найдена'),
+    (N'err.ECR-PRM-0405', N'kz', N'Рұқсаттар тобы табылмады'),
+    (N'err.ECR-PRM-0405.group', N'ru', N'Группы разрешений «{code}» не существует.'),
+    (N'err.ECR-PRM-0405.group', N'kz', N'«{code}» рұқсаттар тобы жоқ.'),
+    (N'err.ECR-PRM-4097', N'ru', N'Группа разрешений уже существует'),
+    (N'err.ECR-PRM-4097', N'kz', N'Рұқсаттар тобы бұрыннан бар'),
+    (N'err.ECR-PRM-4097.code', N'ru', N'Группа разрешений «{code}» уже существует.'),
+    (N'err.ECR-PRM-4097.code', N'kz', N'«{code}» рұқсаттар тобы бұрыннан бар.'),
+    (N'err.ECR-PRM-4097.registryCode', N'ru', N'Код реестра «{registryCode}», нужный группе, уже занят.'),
+    (N'err.ECR-PRM-4097.registryCode', N'kz', N'Топқа қажетті «{registryCode}» тізілім коды бос емес.'),
+    (N'err.ECR-PRM-4098', N'ru', N'Группа разрешений используется'),
+    (N'err.ECR-PRM-4098', N'kz', N'Рұқсаттар тобы қолданыста'),
+    (N'err.ECR-PRM-4098.inUse', N'ru', N'Группу разрешений «{code}» используют шаблоны ({templates}), удалить её нельзя. Деактивируйте её.'),
+    (N'err.ECR-PRM-4098.inUse', N'kz', N'«{code}» рұқсаттар тобын үлгілер пайдаланады ({templates}), оны жоюға болмайды. Оны өшіріп қойыңыз.'),
+    (N'err.ECR-PRM-4099', N'ru', N'Группа разрешений изменена'),
+    (N'err.ECR-PRM-4099', N'kz', N'Рұқсаттар тобы өзгертілді'),
+    (N'err.ECR-PRM-4099.changed', N'ru', N'Группу разрешений «{code}» изменили после того, как вы её открыли. Перечитайте её и повторите правку.'),
+    (N'err.ECR-PRM-4099.changed', N'kz', N'«{code}» рұқсаттар тобын сіз ашқаннан кейін өзгертті. Оны қайта оқып, түзетуді қайталаңыз.'),
+    (N'err.ECR-PRM-0422.permitGroupNameRequired', N'ru', N'Название группы разрешений обязательно хотя бы на одном языке.'),
+    (N'err.ECR-PRM-0422.permitGroupNameRequired', N'kz', N'Рұқсаттар тобының атауы кемінде бір тілде міндетті.'),
+    (N'err.ECR-PRM-0422.permitGroupCodeInvalid', N'ru', N'Код группы «{code}» недопустим: буквы, цифры и подчёркивание, начиная с буквы, до 59 символов.'),
+    (N'err.ECR-PRM-0422.permitGroupCodeInvalid', N'kz', N'«{code}» топ коды жарамсыз: әріптер, цифрлар және асты сызылған таңба, әріптен басталады, 59 таңбаға дейін.'),
+    (N'err.ECR-PRM-0422.permitGroupTextTooLong', N'ru', N'Текст группы ({item}) длиннее {max} символов.'),
+    (N'err.ECR-PRM-0422.permitGroupTextTooLong', N'kz', N'Топ мәтіні ({item}) {max} таңбадан ұзын.'),
+    (N'err.ECR-PRM-0422.permitGroupMemberDuplicate', N'ru', N'Тип разрешения «{typeCode}» указан в группе больше одного раза.'),
+    (N'err.ECR-PRM-0422.permitGroupMemberDuplicate', N'kz', N'«{typeCode}» рұқсат түрі топта бірнеше рет көрсетілген.'),
+    (N'err.ECR-PRM-0422.permitGroupMemberUnknown', N'ru', N'Типа разрешения «{typeCode}» не существует.'),
+    (N'err.ECR-PRM-0422.permitGroupMemberUnknown', N'kz', N'«{typeCode}» рұқсат түрі жоқ.'),
+    (N'err.ECR-PRM-0422.permitGroupMemberNotPublished', N'ru', N'Тип разрешения «{typeCode}» ещё не опубликован: в группу входят только опубликованные типы.'),
+    (N'err.ECR-PRM-0422.permitGroupMemberNotPublished', N'kz', N'«{typeCode}» рұқсат түрі әлі жарияланбаған: топқа тек жарияланған түрлер кіреді.'),
+    (N'err.ECR-PRM-0422.permitGroupRegistryManaged', N'ru', N'Реестр «{registryCode}» принадлежит группе разрешений и меняется только через группу.'),
+    (N'err.ECR-PRM-0422.permitGroupRegistryManaged', N'kz', N'«{registryCode}» тізілімі рұқсаттар тобына тиесілі және тек топ арқылы өзгереді.'),
+    (N'err.ECR-PRM-4097.registryReserved', N'ru', N'Префикс кода «{prefix}» зарезервирован за группами разрешений: код реестра «{registryCode}» использовать нельзя.'),
+    (N'err.ECR-PRM-4097.registryReserved', N'kz', N'«{prefix}» код префиксі рұқсаттар топтарына резервтелген: «{registryCode}» тізілім кодын пайдалануға болмайды.'),
+    (N'err.ECR-CALC-0422.rowActivityFilterPermitGroup', N'ru', N'Фильтр активности строк не может указывать на группу разрешений «{registryCode}»: в группе нет записей.'),
+    (N'err.ECR-CALC-0422.rowActivityFilterPermitGroup', N'kz', N'Жолдардың белсенділік сүзгісі «{registryCode}» рұқсаттар тобына сілтей алмайды: топта жазбалар жоқ.'),
+    (N'err.ECR-TMPL-0422.lookupGroupNoRegistryForms', N'ru', N'Колонка {columnCode} использует группу разрешений как список: функции REG* над ней пока не поддерживаются.'),
+    (N'err.ECR-TMPL-0422.lookupGroupNoRegistryForms', N'kz', N'{columnCode} бағаны тізім ретінде рұқсаттар тобын пайдаланады: оның үстінде REG* функциялары әзірге қолдау таппайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: groups-api ── кінець секції ──
+-- PERMITS: groups-expand ── ru/kz: імпорт Excel - неоднозначний номер дозволу в групі (PRMG); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CELL-0422.importAmbiguousPermitNumber', N'ru', N'Такой номер разрешения есть в нескольких типах разрешений группы столбца. Укажите его как «номер — тип» (кандидаты перечислены в сообщении).'),
+    (N'err.ECR-CELL-0422.importAmbiguousPermitNumber', N'kz', N'Бұл рұқсат нөмірі баған тобының бірнеше рұқсат түрінде бар. Оны «нөмір — түр» түрінде жазыңыз (үміткерлер хабарламада көрсетілген).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: groups-expand ── кінець секції ──
+-- PERMITS: groups-ui ── ru/kz: екран Groups (групи типів дозволів), цілі Lookup з описом групи й «unlisted»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.groups.title', N'ru', N'Группы'),
+    (N'permits.groups.title', N'kz', N'Топтар'),
+    (N'permits.groups.description', N'ru', N'Именованные наборы опубликованных типов разрешений. Группа становится списком выбора в шаблонах и листах.'),
+    (N'permits.groups.description', N'kz', N'Жарияланған рұқсат түрлерінің аталған жиынтықтары. Топ үлгілер мен парақтарда таңдау тізіміне айналады.'),
+    (N'permits.groups.new', N'ru', N'Новая группа'),
+    (N'permits.groups.new', N'kz', N'Жаңа топ'),
+    (N'permits.groups.readOnly', N'ru', N'Группы можно только просматривать. Для изменения нужно право редактировать типы разрешений.'),
+    (N'permits.groups.readOnly', N'kz', N'Топтарды тек қарауға болады. Өзгерту үшін рұқсат түрлерін өңдеу құқығы қажет.'),
+    (N'permits.groups.stats.aria', N'ru', N'Показатели групп'),
+    (N'permits.groups.stats.aria', N'kz', N'Топ көрсеткіштері'),
+    (N'permits.groups.stat.all', N'ru', N'групп'),
+    (N'permits.groups.stat.all', N'kz', N'топ'),
+    (N'permits.groups.stat.active', N'ru', N'активных'),
+    (N'permits.groups.stat.active', N'kz', N'белсенді'),
+    (N'permits.groups.stat.inactive', N'ru', N'неактивных'),
+    (N'permits.groups.stat.inactive', N'kz', N'белсенді емес'),
+    (N'permits.groups.search.label', N'ru', N'Поиск групп'),
+    (N'permits.groups.search.label', N'kz', N'Топтарды іздеу'),
+    (N'permits.groups.search.placeholder', N'ru', N'Поиск по названию, коду, описанию или типу разрешения'),
+    (N'permits.groups.search.placeholder', N'kz', N'Атауы, коды, сипаттамасы немесе рұқсат түрі бойынша іздеу'),
+    (N'permits.groups.empty.title', N'ru', N'Групп разрешений пока нет'),
+    (N'permits.groups.empty.title', N'kz', N'Рұқсат топтары әлі жоқ'),
+    (N'permits.groups.empty.hint', N'ru', N'Создайте группу, чтобы предложить несколько типов разрешений одним списком выбора.'),
+    (N'permits.groups.empty.hint', N'kz', N'Бірнеше рұқсат түрін бір таңдау тізімі ретінде ұсыну үшін топ жасаңыз.'),
+    (N'permits.groups.noMatches', N'ru', N'Нет групп, подходящих под фильтры'),
+    (N'permits.groups.noMatches', N'kz', N'Сүзгілерге сәйкес топ жоқ'),
+    (N'permits.groups.noTypes', N'ru', N'Нет типов разрешений'),
+    (N'permits.groups.noTypes', N'kz', N'Рұқсат түрлері жоқ'),
+    (N'permits.groups.col.group', N'ru', N'Группа'),
+    (N'permits.groups.col.group', N'kz', N'Топ'),
+    (N'permits.groups.col.description', N'ru', N'Описание'),
+    (N'permits.groups.col.description', N'kz', N'Сипаттама'),
+    (N'permits.groups.col.types', N'ru', N'Типы разрешений'),
+    (N'permits.groups.col.types', N'kz', N'Рұқсат түрлері'),
+    (N'permits.groups.col.used', N'ru', N'Используется в шаблонах'),
+    (N'permits.groups.col.used', N'kz', N'Үлгілерде қолданылады'),
+    (N'permits.groups.col.state', N'ru', N'Статус'),
+    (N'permits.groups.col.state', N'kz', N'Күйі'),
+    (N'permits.groups.col.updated', N'ru', N'Изменена'),
+    (N'permits.groups.col.updated', N'kz', N'Өзгертілген'),
+    (N'permits.groups.used', N'ru', N'Шаблонов: {templates} · колонок: {columns}'),
+    (N'permits.groups.used', N'kz', N'Үлгілер: {templates} · бағандар: {columns}'),
+    (N'permits.groups.usedNone', N'ru', N'Не используется'),
+    (N'permits.groups.usedNone', N'kz', N'Қолданылмайды'),
+    (N'permits.groups.state.active', N'ru', N'Активна'),
+    (N'permits.groups.state.active', N'kz', N'Белсенді'),
+    (N'permits.groups.state.inactive', N'ru', N'Неактивна'),
+    (N'permits.groups.state.inactive', N'kz', N'Белсенді емес'),
+    (N'permits.groups.drawer.close', N'ru', N'Закрыть'),
+    (N'permits.groups.drawer.close', N'kz', N'Жабу'),
+    (N'permits.groups.drawer.newTitle', N'ru', N'Новая группа разрешений'),
+    (N'permits.groups.drawer.newTitle', N'kz', N'Жаңа рұқсат тобы'),
+    (N'permits.groups.drawer.cancel', N'ru', N'Отмена'),
+    (N'permits.groups.drawer.cancel', N'kz', N'Бас тарту'),
+    (N'permits.groups.drawer.create', N'ru', N'Создать группу'),
+    (N'permits.groups.drawer.create', N'kz', N'Топ жасау'),
+    (N'permits.groups.drawer.save', N'ru', N'Сохранить'),
+    (N'permits.groups.drawer.save', N'kz', N'Сақтау'),
+    (N'permits.groups.drawer.delete', N'ru', N'Удалить группу'),
+    (N'permits.groups.drawer.delete', N'kz', N'Топты жою'),
+    (N'permits.groups.drawer.deleteTitle', N'ru', N'Удалить группу «{name}»?'),
+    (N'permits.groups.drawer.deleteTitle', N'kz', N'«{name}» тобын жою керек пе?'),
+    (N'permits.groups.drawer.deleteText', N'ru', N'Ни один шаблон не использует эту группу, поэтому она будет удалена. Отменить это нельзя.'),
+    (N'permits.groups.drawer.deleteText', N'kz', N'Бұл топты ешбір үлгі пайдаланбайды, сондықтан ол жойылады. Мұны болдырмауға болмайды.'),
+    (N'permits.groups.drawer.deleteVerb', N'ru', N'Удалить группу'),
+    (N'permits.groups.drawer.deleteVerb', N'kz', N'Топты жою'),
+    (N'permits.groups.drawer.created', N'ru', N'Группа «{name}» создана'),
+    (N'permits.groups.drawer.created', N'kz', N'«{name}» тобы жасалды'),
+    (N'permits.groups.drawer.saved', N'ru', N'Группа «{name}» сохранена'),
+    (N'permits.groups.drawer.saved', N'kz', N'«{name}» тобы сақталды'),
+    (N'permits.groups.drawer.deleted', N'ru', N'Группа «{name}» удалена'),
+    (N'permits.groups.drawer.deleted', N'kz', N'«{name}» тобы жойылды'),
+    (N'permits.groups.drawer.conflict', N'ru', N'Группу изменил кто-то другой. Загружена последняя версия; повторите правку.'),
+    (N'permits.groups.drawer.conflict', N'kz', N'Топты басқа біреу өзгертті. Соңғы нұсқа жүктелді; түзетуді қайталаңыз.'),
+    (N'permits.groups.drawer.readOnly', N'ru', N'Только просмотр: для изменения групп нужно право редактировать типы разрешений.'),
+    (N'permits.groups.drawer.readOnly', N'kz', N'Тек қарау: топтарды өзгерту үшін рұқсат түрлерін өңдеу құқығы қажет.'),
+    (N'permits.groups.drawer.usedNote', N'ru', N'Используется в шаблонах: {templates} (колонок: {columns}). Используемую группу удалить нельзя; деактивируйте её.'),
+    (N'permits.groups.drawer.usedNote', N'kz', N'Үлгілерде қолданылады: {templates} (бағандар: {columns}). Қолданыстағы топты жоюға болмайды; оны өшіріп қойыңыз.'),
+    (N'permits.groups.drawer.shrinkNote', N'ru', N'Удаление типа не очищает значения, уже введённые в документах; по новому составу проверяются только новые вводы.'),
+    (N'permits.groups.drawer.shrinkNote', N'kz', N'Түрді алып тастау құжаттарда енгізілген мәндерді тазаламайды; жаңа құрам бойынша тек жаңа енгізулер тексеріледі.'),
+    (N'permits.groups.field.code', N'ru', N'Код'),
+    (N'permits.groups.field.code', N'kz', N'Коды'),
+    (N'permits.groups.field.codeHint', N'ru', N'Латинские буквы, цифры и подчёркивание, начиная с буквы, до 59 символов. Позже изменить нельзя.'),
+    (N'permits.groups.field.codeHint', N'kz', N'Әріптен басталатын латын әріптері, цифрлар және асты сызылған таңба, 59 таңбаға дейін. Кейін өзгертуге болмайды.'),
+    (N'permits.groups.field.name', N'ru', N'Название'),
+    (N'permits.groups.field.name', N'kz', N'Атауы'),
+    (N'permits.groups.field.nameHint', N'ru', N'Показывается в списке целей Lookup; название нужно хотя бы на одном языке.'),
+    (N'permits.groups.field.nameHint', N'kz', N'Lookup мақсаттары тізімінде көрсетіледі; кемінде бір тіл қажет.'),
+    (N'permits.groups.field.description', N'ru', N'Описание'),
+    (N'permits.groups.field.description', N'kz', N'Сипаттама'),
+    (N'permits.groups.field.descriptionHint', N'ru', N'Показывается под названием группы при выборе списка для колонки шаблона.'),
+    (N'permits.groups.field.descriptionHint', N'kz', N'Үлгі бағаны үшін тізім таңдағанда топ атауының астында көрсетіледі.'),
+    (N'permits.groups.field.active', N'ru', N'Активна'),
+    (N'permits.groups.field.active', N'kz', N'Белсенді'),
+    (N'permits.groups.field.activeHint', N'ru', N'Неактивная группа не предлагается как новая цель Lookup; колонки, которые её уже используют, продолжают работать.'),
+    (N'permits.groups.field.activeHint', N'kz', N'Белсенді емес топ жаңа Lookup мақсаты ретінде ұсынылмайды; оны пайдаланып жатқан бағандар жұмысын жалғастырады.'),
+    (N'permits.groups.field.types', N'ru', N'Типы разрешений в группе'),
+    (N'permits.groups.field.types', N'kz', N'Топтағы рұқсат түрлері'),
+    (N'permits.groups.field.typesHint', N'ru', N'Добавлять можно только опубликованные типы разрешений.'),
+    (N'permits.groups.field.typesHint', N'kz', N'Тек жарияланған рұқсат түрлерін қосуға болады.'),
+    (N'permits.groups.field.typesEmpty', N'ru', N'Опубликованных типов разрешений не найдено'),
+    (N'permits.groups.field.typesEmpty', N'kz', N'Жарияланған рұқсат түрлері табылмады'),
+    (N'registries.lookupTargetUnlisted', N'ru', N'Нет в списке (справочник #{id})'),
+    (N'registries.lookupTargetUnlisted', N'kz', N'Тізімде жоқ (анықтамалық #{id})'),
+    (N'registries.lookupGroup.unlisted', N'ru', N'Текущее значение'),
+    (N'registries.lookupGroup.unlisted', N'kz', N'Ағымдағы мән')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: groups-ui ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

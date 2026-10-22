@@ -168,7 +168,11 @@ public sealed class PatchDocumentHeaderHandler(
     IBackgroundJobScheduler jobs,
     Domain.Abstractions.IClock clock,
     ISheetEditGate documentGate,
-    IRegistryStore registries)
+    IRegistryStore registries,
+
+    // ⛔ PRMG: поле шапки може мати ціллю ГРУПУ типів дозволів; порівняння цілі - лише через `LookupTargetMatcher`.
+    // `null` (прямий конструктор у тестах) - груп немає.
+    Permits.Groups.ILookupTargetResolver? groups = null)
 {
     /// <summary>Тип події журналу безпеки.</summary>
     public const string EventType = "DocumentHeaderChanged";
@@ -301,9 +305,20 @@ public sealed class PatchDocumentHeaderHandler(
                 [.. lookupEntries.Select(e => e.EntryId).Distinct()], ct).ConfigureAwait(false))
                 .ToDictionary(standing => standing.Id);
             var fieldsOfEntries = snapshot.HeaderFields.ToDictionary(f => f.Id);
+
+            // PRMG: знімок груп оновлюється лише при незбігу реєстру (Land - недосяжно).
+            await Permits.Groups.LookupTargetMatcher.EnsureFreshOnMismatchAsync(
+                groups,
+                lookupEntries
+                    .Where(e => standings.ContainsKey(e.EntryId))
+                    .Select(e => (fieldsOfEntries[e.FieldId].LookupRegistryDefId, standings[e.EntryId].RegistryDefId)),
+                ct).ConfigureAwait(false);
+
             var missing = lookupEntries.FirstOrDefault(e =>
                 !standings.TryGetValue(e.EntryId, out var standing)
-                || fieldsOfEntries[e.FieldId].LookupRegistryDefId is { } registryId && standing.RegistryDefId != registryId);
+                || fieldsOfEntries[e.FieldId].LookupRegistryDefId is not null
+                   && !Permits.Groups.LookupTargetMatcher.Belongs(
+                       groups, profile, fieldsOfEntries[e.FieldId].LookupRegistryDefId, standing.RegistryDefId));
             if (missing != default)
             {
                 var missingCode = fieldsOfEntries[missing.FieldId].Code;
@@ -456,7 +471,7 @@ public sealed class PatchDocumentHeaderHandler(
             return 0;
         }
 
-        await EnsureLookupEntriesUsableAsync(project, changes, fieldsById, ct).ConfigureAwait(false);
+        await EnsureLookupEntriesUsableAsync(project, profile, changes, fieldsById, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
         await headers.SaveValuesAsync(documentId, changes, ct).ConfigureAwait(false);
@@ -502,6 +517,7 @@ public sealed class PatchDocumentHeaderHandler(
     /// </remarks>
     private async Task EnsureLookupEntriesUsableAsync(
         Domain.Entities.Documents.Project project,
+        AccessProfile profile,
         Dictionary<int, Domain.ValueObjects.DocumentHeaderValueData> changes,
         IReadOnlyDictionary<int, HeaderFieldDef> fieldsById,
         CancellationToken ct)
@@ -523,6 +539,13 @@ public sealed class PatchDocumentHeaderHandler(
 
         var windowEnd = project.PeriodEnd.AddDays(1);
 
+        await Permits.Groups.LookupTargetMatcher.EnsureFreshOnMismatchAsync(
+            groups,
+            lookups
+                .Where(l => standings.ContainsKey(l.EntryId))
+                .Select(l => (l.Field.LookupRegistryDefId, standings[l.EntryId].RegistryDefId)),
+            ct).ConfigureAwait(false);
+
         foreach (var (field, entryId) in lookups.OrderBy(l => l.Field.Code, StringComparer.Ordinal))
         {
             // Немає запису чи він з чужого довідника — це вже відхилив D-12/N1-08 (`ECR-HDR-0422`) до транзакції.
@@ -534,7 +557,8 @@ public sealed class PatchDocumentHeaderHandler(
             // ⚠ N1-08: чужий довідник до сюди не доходить (відхилено вище як `lookupEntryMissing`, щоб не розкривати,
             // чи існує запис у чужому довіднику); гілка `foreignRegistry` лишається другим рубежем.
             var messageKey =
-                field.LookupRegistryDefId is { } registryId && standing.RegistryDefId != registryId
+                field.LookupRegistryDefId is not null
+                && !Permits.Groups.LookupTargetMatcher.Belongs(groups, profile, field.LookupRegistryDefId, standing.RegistryDefId)
                     ? "err.ECR-HDR-4223.foreignRegistry"
                 : standing.IsDeleted ? "err.ECR-HDR-4223.deletedEntry"
                 : !standing.IsActive ? "err.ECR-HDR-4223.inactiveEntry"

@@ -73,7 +73,15 @@
   color: var(--mantine-primary-color-contrast);
 }
 
+/* PA4-U-03: довга мітка («номер — тип (початок)» піклера групи) обрізається трикрапкою, повний текст - у `title` опції. */
+.ecr-list-editor-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .ecr-list-editor-hint {
+  flex-shrink: 0;
   color: var(--mantine-color-dimmed);
   font-size: 0.85em;
 }

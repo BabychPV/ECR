@@ -30,6 +30,11 @@ namespace Ecr.Application.Registries.Dto;
 /// колись діяла саме така унікальність.
 /// </param>
 /// <param name="CodeMode">Звідки береться код нового запису (<c>D-157</c>).</param>
+/// <param name="Kind">
+/// Вид цілі Lookup, який визначає сервер (<c>Dictionary</c>, <c>PermitHeader</c>, <c>PermitGroup</c>): клієнт читає його тут для
+/// цілі, якої немає в переліку <c>GET /registries</c> (опція «unlisted»), а не розпізнає за префіксом коду.
+/// </param>
+/// <param name="DescriptionL10n">Опис групи типів дозволів; для решти <c>null</c>.</param>
 /// <remarks>
 /// ⚠ <paramref name="Keys"/> і <paramref name="CodeMode"/> мають типові значення лише заради
 /// сумісності контракту (у схемі вони необов'язкові); сервер заповнює їх завжди.
@@ -47,7 +52,9 @@ public sealed record RegistryDefinitionDto(
     IReadOnlyList<RegistryRuleDto> Rules,
     IReadOnlyList<RegistryMappingDto> Mappings,
     IReadOnlyList<RegistryKeyDto>? Keys = null,
-    Domain.Enums.RegistryCodeMode? CodeMode = null);
+    Domain.Enums.RegistryCodeMode? CodeMode = null,
+    RegistryDefKind Kind = RegistryDefKind.Dictionary,
+    LocalizedText? DescriptionL10n = null);
 
 /// <summary>Складений ключ довідника в описі (<c>D-151</c>, FEATURE-REGISTRY-TABLES §4.1).</summary>
 /// <param name="Id">Ідентифікатор ключа.</param>

@@ -58,6 +58,10 @@ namespace Ecr.Application.Documents;
 /// Журнал накладення результатів методологій (D-401: попередження про неоднозначні комірки).
 /// Необов'язковий лише заради тестів.
 /// </param>
+/// <param name="groups">
+/// Permits PRMG: резолвер груп - для колонки-довідника з ціллю-ГРУПОЮ правило умовного форматування читає КОД запису реєстру-члена.
+/// <c>null</c> - груп немає (тести).
+/// </param>
 public sealed class GetTableSliceHandler(
     IRowStore rowStore,
     ICellStore cellStore,
@@ -75,7 +79,8 @@ public sealed class GetTableSliceHandler(
     IColumnPathMapper? columnMapper = null,
     ICellStyleStore? cellStyles = null,
     IRegistryStore? registries = null,
-    Microsoft.Extensions.Logging.ILogger<Calculations.CalculatedCellOverlay>? overlayLog = null)
+    Microsoft.Extensions.Logging.ILogger<Calculations.CalculatedCellOverlay>? overlayLog = null,
+    Permits.Groups.IPermitGroupResolver? groups = null)
 {
     private readonly MethodologyRequiredColumnsCache _required = new(memory);
 
@@ -517,10 +522,12 @@ public sealed class GetTableSliceHandler(
             {
                 if (visible.TryGetValue(reference, out var source) && source.LookupRegistryDefId is { } registryId)
                 {
-                    var entries = await registries.ListEntriesAsync(registryId, ct).ConfigureAwait(false);
+                    // Permits PRMG: ціль-група - записи реєстрів-членів; правило порівнює КОД (номер) запису.
+                    var entries = await Permits.Groups.LookupTargetEntries.ListAsync(registries, groups, registryId, ct)
+                        .ConfigureAwait(false);
                     codeByColumn[reference] = entries
-                        .GroupBy(e => e.Id)
-                        .ToDictionary(g => g.Key, g => g.First().Code);
+                        .GroupBy(e => e.Entry.Id)
+                        .ToDictionary(g => g.Key, g => g.First().Entry.Code);
                 }
             }
         }

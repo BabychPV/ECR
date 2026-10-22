@@ -323,6 +323,17 @@ public static class DependencyInjection
         services.AddScoped<Permits.Bindings.IPermitResolver, Permits.Bindings.PermitResolver>();
         services.AddScoped<Permits.Bindings.PreviewPermitBindingHandler>();
         services.AddScoped<Permits.Bindings.RefreshPermitBindingHandler>();
+        // PERMITS: groups — групи типів дозволів як ціль Lookup (PRMG)
+        services.AddSingleton<Permits.Groups.PermitGroupSnapshotCache>();
+        services.AddScoped<Permits.Groups.PermitGroupResolver>();
+        services.AddScoped<Permits.Groups.IPermitGroupResolver>(sp => sp.GetRequiredService<Permits.Groups.PermitGroupResolver>());
+        services.AddScoped<Permits.Groups.ILookupTargetResolver>(sp => sp.GetRequiredService<Permits.Groups.PermitGroupResolver>());
+        services.AddScoped<Permits.Groups.ListPermitGroupsHandler>();
+        services.AddScoped<Permits.Groups.GetPermitGroupHandler>();
+        services.AddScoped<Permits.Groups.CreatePermitGroupHandler>();
+        services.AddScoped<Permits.Groups.UpdatePermitGroupHandler>();
+        services.AddScoped<Permits.Groups.ReplacePermitGroupTypesHandler>();
+        services.AddScoped<Permits.Groups.DeletePermitGroupHandler>();
 
         // RT: expressions
 

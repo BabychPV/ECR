@@ -686,6 +686,75 @@ public static class PublishChecks
     }
 
     /// <summary>
+    /// PRMG: формула таблиці з формою <c>REG*</c> (<c>REGFIELD</c>, <c>REGFIND</c>, <c>REGONE</c>, <c>REGSUM</c>, <c>REGAVG</c>,
+    /// <c>REGMIN</c>, <c>REGMAX</c>, <c>REGCOUNT</c>), яка посилається на колонку, що має ціллю ГРУПУ типів дозволів, не
+    /// публікується (<c>ECR-TMPL-0422</c>, <c>lookupGroupNoRegistryForms</c>).
+    /// </summary>
+    /// <param name="version">Версія зі структурою.</param>
+    /// <param name="groupRegistryIds">Серед цілей версії - ідентифікатори прихованих реєстрів груп.</param>
+    /// <remarks>
+    /// ⛔ Реєстр групи порожній, а комірка тримає id запису реєстру-ЧЛЕНА (шапка типу): форми <c>REG*</c> читають поле запису за
+    /// реєстром ЦІЛІ колонки, тож над групою дали б порожній результат без помилки. У v1 це відмова на публікації (розширення -
+    /// брати реєстр із запису). ⚠ Перевірка текстова: формула, що містить форму <c>REG*</c> і посилається на колонку-групу через
+    /// <c>[Код]</c>, відхиляється; хибнопозитив можливий лише для формули, де форма й колонка не пов'язані, і лікується
+    /// винесенням у окрему формулу. Правила активності рядка й правила таблиці над колонкою-групою поки не перевіряються.
+    /// </remarks>
+    /// <returns>Зауваження публікації; порожньо - усе гаразд.</returns>
+    public static IReadOnlyList<ExpressionDiagnostic> CheckGroupLookupFormulas(
+        TemplateVersion version, IReadOnlySet<int> groupRegistryIds)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(groupRegistryIds);
+
+        var diagnostics = new List<ExpressionDiagnostic>();
+        if (groupRegistryIds.Count == 0)
+        {
+            return diagnostics;
+        }
+
+        foreach (var table in LiveTables(version.Sheets))
+        {
+            var groupColumns = table.Columns
+                .Where(c => !c.IsDeleted && c.DataType == CellDataType.Lookup
+                            && c.LookupRegistryDefId is { } id && groupRegistryIds.Contains(id))
+                .Select(c => c.Code)
+                .ToList();
+            if (groupColumns.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (var formula in table.Formulas.Where(f => !f.IsDeleted && RegistryFormRegex.IsMatch(f.Expression)))
+            {
+                foreach (var column in groupColumns.Where(code => ReferencesColumn(formula.Expression, code)))
+                {
+                    diagnostics.Add(new ExpressionDiagnostic(
+                        "ECR-TMPL-0422",
+                        $"Колонка {table.Code}.{column} має ціллю групу дозволів: форми REG* над нею не підтримуються.",
+                        0,
+                        1,
+                        "err.ECR-TMPL-0422.lookupGroupNoRegistryForms",
+                        new Dictionary<string, string> { ["columnCode"] = $"{table.Code}.{column}" }));
+                }
+            }
+        }
+
+        return diagnostics;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex RegistryFormRegex = new(
+        @"\bREG(FIELD|FIND|ONE|SUM|AVG|MIN|MAX|COUNT)\s*\(",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
+
+    private static bool ReferencesColumn(string expression, string columnCode)
+        => System.Text.RegularExpressions.Regex.IsMatch(
+            expression,
+            @"\[\s*" + System.Text.RegularExpressions.Regex.Escape(columnCode) + @"\s*\]",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+            TimeSpan.FromSeconds(1));
+
+    /// <summary>
     /// Активна прив'язка до методології без опублікованої версії (<c>ECR-CALC-0422</c>,
     /// <c>bindingMethodologyNotPublished</c>) — одне зауваження на методологію.
     /// </summary>

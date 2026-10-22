@@ -29,8 +29,12 @@ namespace Ecr.Application.Registries;
 public sealed class GetRegistryEntryHandler(
     IRegistryStore registries,
     Security.IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    Permits.Groups.IPermitGroupResolver? groups = null)
 {
+    // ⚠ `groups` (PRMG) потрібен лише для запису, адресованого під кодом ГРУПИ типів дозволів (опція «unlisted» клієнта);
+    // необов'язковий для тестів, що будують обробник руками, - контейнер підставляє його завжди.
+
     /// <summary>Право на читання довідників (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.View";
 
@@ -57,9 +61,25 @@ public sealed class GetRegistryEntryHandler(
 
         var entry = await registries.FindEntryAsync(entryId, ct).ConfigureAwait(false);
 
+        // PRMG: під кодом ГРУПИ типів дозволів запис віддається, коли його реєстр - у складі групи, а читач не має на цей
+        // РЕАЛЬНИЙ реєстр заборони (S18). Усе інше - та сама «не знайдено», що й для чужого реєстру (без оракула існування).
+        var entryDefinition = definition;
+        if (entry is { IsDeleted: false } && entry.RegistryDefId != definition.Id
+            && groups is not null && Permits.Groups.PermitGroupRegistryGuard.IsGroupRegistry(definition.Code)
+            && currentUser.UserId is { } readerId)
+        {
+            await groups.EnsureFreshAsync(ct).ConfigureAwait(false);
+            var profile = await access.BuildProfileAsync(readerId, ct).ConfigureAwait(false);
+            if (groups.MemberRegistryIds(definition.Id).Contains(entry.RegistryDefId)
+                && !RegistryAccess.IsDenied(profile, entry.RegistryDefId))
+            {
+                entryDefinition = await registries.FindDefinitionByIdAsync(entry.RegistryDefId, ct).ConfigureAwait(false) ?? definition;
+            }
+        }
+
         // ⚠ Запис чужого довідника — «не знайдено», а не відповідь: адреса
         // несе код довідника, і збіг самого Id нічого не означає.
-        if (entry is null || entry.IsDeleted || entry.RegistryDefId != definition.Id)
+        if (entry is null || entry.IsDeleted || entry.RegistryDefId != entryDefinition.Id)
         {
             throw new NotFoundException(
                 "ECR-REG-0404",
@@ -71,7 +91,7 @@ public sealed class GetRegistryEntryHandler(
                 });
         }
 
-        var fields = definition.Fields.ToDictionary(f => f.Id);
+        var fields = entryDefinition.Fields.ToDictionary(f => f.Id);
         var values = new Dictionary<string, string?>(StringComparer.Ordinal);
 
         foreach (var value in await registries.ListValuesAsync(entry.Id, ct).ConfigureAwait(false))

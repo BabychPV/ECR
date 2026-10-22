@@ -29,7 +29,8 @@ public sealed partial class PublishTemplateVersionHandler(
     IReportViewGenerator reportViews,
     ILogger<PublishTemplateVersionHandler>? logger = null,
     IReportViewStatus? viewStatus = null,
-    IRegistryStore? registries = null)
+    IRegistryStore? registries = null,
+    Permits.Groups.IPermitGroupResolver? permitGroups = null)
 {
     /// <summary>Право на публікацію версії шаблону (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Publish";
@@ -206,6 +207,19 @@ public sealed partial class PublishTemplateVersionHandler(
         }
 
         diagnostics = [.. diagnostics, .. PublishChecks.CheckLookupRegistries(version, usable)];
+
+        // PRMG: форми REG* над колонкою, що має ціллю групу типів дозволів, не підтримуються (v1). Публікація - рідка дія,
+        // тож `EnsureFreshAsync` (≤ 1 запит на 5 с) тут не на гарячому шляху.
+        if (permitGroups is not null)
+        {
+            var lookupTargets = PublishChecks.LookupRegistryIds(version);
+            if (lookupTargets.Count > 0)
+            {
+                await permitGroups.EnsureFreshAsync(ct).ConfigureAwait(false);
+                var groupTargets = lookupTargets.Where(permitGroups.IsGroup).ToHashSet();
+                diagnostics = [.. diagnostics, .. PublishChecks.CheckGroupLookupFormulas(version, groupTargets)];
+            }
+        }
 
         // RC14 (Land): конфлікт, де вибір методології робиться правилами, не блокує — лише журнал.
         if (logger is not null)

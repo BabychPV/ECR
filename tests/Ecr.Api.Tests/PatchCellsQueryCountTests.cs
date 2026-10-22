@@ -12,6 +12,7 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -263,6 +264,175 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>Стеля звернень на теплий <c>PATCH</c> 10 Lookup-комірок Land (звичайна ціль, без групи).</summary>
+    /// <remarks>
+    /// Замір 22.10 (Permits PRMG, перевірки належності): ДО вбудування <c>LookupTargetMatcher</c> - 26, ПІСЛЯ - 26: збіг реєстру цілі й запису резолвер груп не кличе. Лише знижується.
+    /// </remarks>
+    private const int MaxLookupCommands = 26;
+
+    /// <summary>
+    /// PRMG: Land-колонка <c>Lookup</c> (ціль - звичайний довідник): теплий <c>PATCH</c> не платить нічого за групи.
+    /// Резолвер підставлено з <c>ThrowOnUse</c>: будь-яке звернення (<c>Accepts</c>, <c>IsGroup</c>, оновлення знімка) - провал.
+    /// Кількість запитів фіксується і не залежить від того, що група існує чи ні.
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ (запущений): у <c>LookupTargetMatcher.EnsureFreshOnMismatchAsync</c> кликати <c>EnsureFreshAsync</c>
+    /// безумовно - червоніє (<c>EnsureFreshCalls &gt; 0</c>); у <c>Belongs</c> прибрати швидкий шлях збігу - падає на <c>ThrowOnUse</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "WR-04")]
+    public Task PATCH_Lookup_комірок_Land_не_кличе_резолвер_груп_і_тримає_стелю_звернень() => LookupScenarioAsync(asGroup: false);
+
+    /// <summary>
+    /// PRMG: колонка <c>Lookup</c> з ціллю-ГРУПОЮ (прихований реєстр без записів, записи - реєстру-члена): та сама стеля, що в Land
+    /// (<see cref="MaxLookupCommands"/>) - ПЕРЕВІРКА НЕ ДОДАЄ запитів: членство читається зі знімка в памʼяті, а 10 комірок - це 10
+    /// звернень до <c>Accepts</c> (синхронних), без SQL. Єдиний допустимий +запит у проді - оновлення знімка
+    /// (<c>EnsureFreshAsync</c>: один агрегатний запит ревізії не частіше за раз на 5 с на вузол, не на PATCH); у тесті резолвер -
+    /// фейк, тож цей запит тут не міряється (його частота - у <c>PermitGroupResolverTests</c>).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "WR-04")]
+    public Task PATCH_Lookup_комірок_цілі_група_приймає_члена_і_не_перевищує_стелю_Land() => LookupScenarioAsync(asGroup: true);
+
+    private async Task LookupScenarioAsync(bool asGroup)
+    {
+        var scenario = await ArrangeAsync().ConfigureAwait(true);
+        var entryIds = new List<long>();
+        var groups = new FakePermitGroupResolver { ThrowOnUse = !asGroup };
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var registry = new Ecr.Domain.Entities.Configuration.RegistryDef(
+                EcrCode.Create($"LANDQ_{Guid.NewGuid():N}"[..20]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Land query count" }),
+                isTemporal: false);
+            db.RegistryDefs.Add(registry);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+
+            for (var i = 1; i <= 2; i++)
+            {
+                var entry = new Ecr.Domain.Entities.Dictionaries.RegistryEntry(
+                    registry.Id, EcrCode.Create($"E{i}"),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = $"Entry {i}" }));
+                db.RegistryEntries.Add(entry);
+                await db.SaveChangesAsync().ConfigureAwait(true);
+                entryIds.Add(entry.Id);
+            }
+
+            var target = registry.Id;
+            if (asGroup)
+            {
+                // Ціль колонки - прихований реєстр групи БЕЗ записів; склад - реєстр з entryIds.
+                var hidden = new Ecr.Domain.Entities.Configuration.RegistryDef(
+                    EcrCode.Create($"PRMGQ_{Guid.NewGuid():N}"[..20]),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "Group query count" }),
+                    isTemporal: false);
+                db.RegistryDefs.Add(hidden);
+                await db.SaveChangesAsync().ConfigureAwait(true);
+                target = hidden.Id;
+                groups.WithGroup(hidden.Id, [registry.Id]);
+            }
+
+            await db.ColumnDefs.Where(c => c.Id == scenario.ColumnDefIds[2])
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(c => c.DataType, CellDataType.Lookup)
+                    .SetProperty(c => c.LookupRegistryDefId, target)).ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5))
+        {
+            ExtraServices = services => services.AddSingleton<Ecr.Application.Permits.Groups.ILookupTargetResolver>(groups),
+        };
+        app.Server.PreserveExecutionContext = true;
+        using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
+
+        var sliceUri = new Uri($"/api/v1/documents/{scenario.DocumentId}/tables/{scenario.TableInstanceId}", UriKind.Relative);
+        var patchUri = new Uri($"/api/v1/documents/{scenario.DocumentId}/cells", UriKind.Relative);
+        var (columnCodes, versions) = await OpenSliceAsync(client, sliceUri, app).ConfigureAwait(true);
+        var lookupCode = columnCodes[2];
+
+        async Task<Dictionary<string, string>> PatchLookupAsync(IReadOnlyDictionary<string, string> current, long entryId)
+        {
+            var response = await client.PatchAsJsonAsync(patchUri, new
+            {
+                tableInstanceId = scenario.TableInstanceId,
+                periodKey = scenario.PeriodKey,
+                origin = "UserEdit",
+                rows = current.Keys.Order(StringComparer.Ordinal).Select(rowKey => new
+                {
+                    rowKey,
+                    baseVersion = current[rowKey],
+                    cells = new[] { new { columnCode = lookupCode, value = (object)entryId } },
+                }).ToArray(),
+            }).ConfigureAwait(false);
+
+            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            Assert.True(response.StatusCode == HttpStatusCode.OK, $"PATCH Lookup: {response.StatusCode}\n{body}\n{app.ErrorsText}");
+
+            return JsonDocument.Parse(body).RootElement.GetProperty("rowVersions").EnumerateObject()
+                .ToDictionary(p => p.Name, p => p.Value.GetString()!, StringComparer.Ordinal);
+        }
+
+        versions = await PatchLookupAsync(versions, entryIds[0]).ConfigureAwait(true);
+
+        var texts = new ConcurrentQueue<string>();
+        using var counter = new SqlClientCommandCounter(new CommandTally(), command =>
+        {
+            if (Measuring.Value is not { Value: true })
+            {
+                return false;
+            }
+
+            texts.Enqueue(command.CommandText ?? string.Empty);
+            return true;
+        });
+
+        var rounds = new List<(int Total, string Detail)>();
+        for (var round = 1; round <= MeasuredRounds; round++)
+        {
+            counter.Tally.Reset();
+            texts.Clear();
+            var flag = new StrongBox<bool>(true);
+            Measuring.Value = flag;
+            try
+            {
+                // Значення чергується між двома записами: кожен раунд ЗМІНЮЄ комірки (перевірка належності виконується).
+                versions = await PatchLookupAsync(versions, entryIds[round % 2]).ConfigureAwait(true);
+            }
+            finally
+            {
+                flag.Value = false;
+                Measuring.Value = null;
+            }
+
+            counter.AssertObserved();
+            rounds.Add((counter.Tally.Snapshot().Total, Describe(counter.Tally.Snapshot(), texts)));
+        }
+
+        var worst = rounds.MaxBy(r => r.Total);
+        Assert.True(
+            rounds.All(r => r.Total == worst.Total),
+            $"Теплі заміри розходяться: {string.Join(", ", rounds.Select(r => r.Total))}.\n{worst.Detail}");
+        Assert.True(
+            worst.Total <= MaxLookupCommands,
+            $"PATCH Lookup ({Rows} комірок): {worst.Total} звернень, стеля {MaxLookupCommands}.\n{worst.Detail}");
+
+        if (asGroup)
+        {
+            // Група справді питалась (інакше «мало запитів» доводило б, що перевірка не виконувалась): по одному Accepts на комірку.
+            Assert.True(groups.Calls >= Rows * MeasuredRounds, $"Accepts викликано {groups.Calls} разів.");
+            Assert.True(groups.EnsureFreshCalls >= 1);
+            return;
+        }
+
+        // ⛔ Збіг реєстру цілі й запису: груп не питали взагалі.
+        Assert.Equal(0, groups.Calls);
+        Assert.Equal(0, groups.EnsureFreshCalls);
+    }
+
     /// <summary>Один <c>PATCH</c> однієї комірки одного рядка; повертає нову версію рядка.</summary>
     private static async Task<string> PatchRowAsync(
         HttpClient client, Uri patchUri, Scenario scenario, string rowKey, string baseVersion, string columnCode, string value, EcrApiFactory app)
@@ -441,8 +611,9 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
 
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        return new Scenario(document.DocumentId, document.TableInstanceId, userName, periodKey, document.RowIds);
+        return new Scenario(document.DocumentId, document.TableInstanceId, userName, periodKey, document.RowIds, document.ColumnDefIds);
     }
 
-    private sealed record Scenario(long DocumentId, long TableInstanceId, string UserName, int PeriodKey, IReadOnlyList<long> RowIds);
+    private sealed record Scenario(
+        long DocumentId, long TableInstanceId, string UserName, int PeriodKey, IReadOnlyList<long> RowIds, IReadOnlyList<int> ColumnDefIds);
 }

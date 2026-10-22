@@ -1,6 +1,7 @@
 import { useMemo, type JSX } from 'react';
 import { Alert, Button, Group, NumberInput, Select, Skeleton, Stack, Switch, TextInput } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
+import { LookupTargetSelect } from '@/features/registries/LookupTargetSelect';
 import { lookupTargetSelectData, lookupTargetsQuery } from '@/features/registries/lookupTargets';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -50,8 +51,8 @@ export function HeaderFieldEditor({
   const registries = useQuery({ ...lookupTargetsQuery(), enabled: isLookup });
 
   const registryOptions = useMemo(
-    () => lookupTargetSelectData(registries.data ?? []),
-    [registries.data],
+    () => lookupTargetSelectData(registries.data ?? [], draft.lookupRegistryDefId),
+    [registries.data, draft.lookupRegistryDefId],
   );
 
   return (
@@ -121,17 +122,14 @@ export function HeaderFieldEditor({
         `SetLookup` однаково відхилив би.
       */}
       {isLookup && registries.error === null && !registries.isPending && (
-        <Select
+        <LookupTargetSelect
           label={t('headerFields.lookupRegistryDefId')}
           description={t('headerFields.lookupRegistryDefIdHint')}
           disabled={disabled}
-          searchable
           nothingFoundMessage={t('headerFields.lookupRegistryDefIdEmpty')}
           data={registryOptions}
-          value={draft.lookupRegistryDefId === null ? null : String(draft.lookupRegistryDefId)}
-          onChange={(value) =>
-            onChange({ ...draft, lookupRegistryDefId: value === null ? null : Number(value) })
-          }
+          value={draft.lookupRegistryDefId}
+          onChange={(value) => onChange({ ...draft, lookupRegistryDefId: value })}
         />
       )}
 

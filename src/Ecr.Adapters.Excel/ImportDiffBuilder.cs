@@ -60,6 +60,10 @@ public sealed class ImportDiffBuilder
     /// (видалений, вимкнений, нечинний на кінець періоду): <c>Id</c> → ключ тексту
     /// відмови перегляду; <c>null</c> — немає таких (або викликач їх не рахує).
     /// </param>
+    /// <param name="ambiguousLookups">
+    /// Permits PRMG: ціль-група, голий номер дозволу якої збігається в кількох типах: ціль → номер → кандидати
+    /// («номер — тип; …»). Такий код ВІДМОВЛЯЄТЬСЯ з переліком кандидатів, без пріоритету типу; `null` - немає.
+    /// </param>
     /// <remarks>
     /// ⛔ Q-168 (аудит фази 2, продуктивність). Метод БІЛЬШЕ НЕ ходить у базу
     /// сам — <paramref name="rowIds"/>, <paramref name="versions"/> і
@@ -80,7 +84,8 @@ public sealed class ImportDiffBuilder
         IReadOnlyList<CellRecord> current,
         Func<int, bool>? canReadColumn = null,
         CultureInfo? culture = null,
-        IReadOnlyDictionary<long, string>? unusableLookups = null)
+        IReadOnlyDictionary<long, string>? unusableLookups = null,
+        IReadOnlyDictionary<int, IReadOnlyDictionary<string, string>>? ambiguousLookups = null)
     {
         ArgumentNullException.ThrowIfNull(worksheet);
 
@@ -381,6 +386,18 @@ public sealed class ImportDiffBuilder
                 // (експорт пише його числом) відсіяв `Same` вище.
                 if (definition.DataType == CellDataType.Lookup && incoming is string)
                 {
+                    if (ambiguousLookups is not null
+                        && definition.LookupRegistryDefId is { } ambiguousTarget
+                        && ambiguousLookups.TryGetValue(ambiguousTarget, out var ambiguousCodes)
+                        && ambiguousCodes.TryGetValue(incoming.ToString()!, out var candidates))
+                    {
+                        rejected.Add(new ImportRejection(
+                            row.RowKey, column.Code, CellValueReader.TypeMismatch,
+                            "The permit number matches several permit types of the group; write it as 'number \u2014 type'. Candidates: " + candidates + ".",
+                            table.Code, table.NameL10n, ImportMessageKeys.AmbiguousPermitNumber, excelCell));
+
+                        continue;
+                    }
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, CellValueReader.TypeMismatch,
                         "No entry with this code in the column's registry.",
@@ -1022,6 +1039,9 @@ public static class ImportMessageKeys
 
     /// <summary>Код із книги не знайдено серед записів довідника (або одиниць) колонки.</summary>
     public const string ExpectsIdentifier = "err.ECR-CELL-0422.importExpectsIdentifier";
+
+    /// <summary>Номер дозволу з книги збігається в кількох типах групи: потрібен підпис «номер — тип» (PRMG).</summary>
+    public const string AmbiguousPermitNumber = "err.ECR-CELL-0422.importAmbiguousPermitNumber";
 
     /// <summary>Код із книги не знайдено серед одиниць виміру (колонка Unit).</summary>
     public const string ExpectsUnit = "err.ECR-CELL-0422.importExpectsUnit";

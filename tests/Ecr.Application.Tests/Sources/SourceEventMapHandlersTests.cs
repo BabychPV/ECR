@@ -186,5 +186,43 @@ public sealed class SourceEventMapHandlersTests : SourceEventMapTestBase
         await Audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
     }
 
-    private CreateSourceEventMapHandler Create() => new(Store, Sources, Access, User, Uow, Audit, Clock);
+    private CreateSourceEventMapHandler Create(Ecr.Application.Permits.Groups.ILookupTargetResolver? groups = null)
+        => new(Store, Sources, Access, User, Uow, Audit, Clock, groups);
+
+    /// <summary>
+    /// PRMG: ціль колонки Category - ГРУПА (RegistryId) зі складом [RegistryId + 1]: явна відповідність на запис реєстру-члена
+    /// (888) приймається, на запис поза складом - 404 як і раніше.
+    /// Мутація: повернути пряме порівняння `column.LookupRegistryDefId != registryDefId` у BuildSpecsAsync - перший виклик 404.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "PRMG")]
+    public async Task Явна_відповідність_на_запис_реєстру_члена_групи_приймається_а_поза_складом_ні()
+    {
+        var groups = new FakePermitGroupResolver().WithGroup(RegistryId, [RegistryId + 1]);
+
+        var member = await Create(groups).HandleAsync(
+            Command(category: Category(SourceEventValueKind.ValueMap, new SourceEventValueInput("зима", 888))), default);
+        Assert.Equal(888L, Assert.Single(member.Fields.Single(f => f.SourceAttribute == "Category").Values).RegistryEntryId);
+
+        groups.WithGroup(RegistryId, [RegistryId + 2]);
+        var outside = await Assert.ThrowsAsync<NotFoundException>(() => Create(groups).HandleAsync(
+            Command(category: Category(SourceEventValueKind.ValueMap, new SourceEventValueInput("літо", 888))), default));
+        Assert.Equal("err.ECR-INT-0405.registryEntry", outside.Details!["messageKey"]);
+    }
+
+    /// <summary>Збіг реєстру цілі (501) - резолвер груп не кличеться (Land: 0 звернень).</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "PRMG")]
+    public async Task Явна_відповідність_зі_збігом_реєстру_цілі_не_кличе_резолвер_груп()
+    {
+        var groups = new FakePermitGroupResolver { ThrowOnUse = true };
+
+        await Create(groups).HandleAsync(
+            Command(category: Category(SourceEventValueKind.ValueMap, new SourceEventValueInput("зима", 501))), default);
+
+        Assert.Equal(0, groups.Calls);
+        Assert.Equal(0, groups.EnsureFreshCalls);
+    }
 }

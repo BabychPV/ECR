@@ -36,6 +36,10 @@ public static class ExternalRegistryGuard
     {
         ArgumentNullException.ThrowIfNull(definition);
 
+        // PRMG: єдина точка ручної зміни записів (upsert, пакет, CSV, видалення, вікно чинності): прихований реєстр групи
+        // типів дозволів записів не має й не матиме.
+        Permits.Groups.PermitGroupRegistryGuard.RequireNotManaged(definition.Code);
+
         if (definition.SourceKind != RegistrySourceKind.External)
         {
             return;
