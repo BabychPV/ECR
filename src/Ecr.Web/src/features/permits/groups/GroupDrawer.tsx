@@ -318,7 +318,6 @@ export function GroupDrawer({ group, canEdit }: GroupDrawerProps): JSX.Element {
               data={typeOptions}
               value={[...draft.typeCodes]}
               searchable
-              hidePickedOptions
               disabled={readOnly}
               nothingFoundMessage={t('permits.groups.field.typesEmpty')}
               error={errors.types}

@@ -244,6 +244,9 @@ describe('Groups: створення', () => {
     fireEvent.click(await screen.findByRole('option', { name: 'Water intake' }));
     fireEvent.click(types);
     fireEvent.click(await screen.findByRole('option', { name: 'Discharge' }));
+    // Живий e2e: коли обрано ВСІ типи, список не має показувати оманливе «опублікованих типів не знайдено»
+    // (воно ще й перекривало кнопку Create). Мутація: поверни `hidePickedOptions` - тест почервоніє.
+    expect(screen.queryByText('permits.groups.field.typesEmpty')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'permits.groups.drawer.create' }));
 
