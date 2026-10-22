@@ -142,7 +142,7 @@ public sealed class InMemoryPermitGroupStore : IPermitGroupStore
 
     /// <inheritdoc />
     public Task<IReadOnlyList<Ecr.Domain.Entities.Dictionaries.RegistryEntry>> ListMemberEntriesAsync(
-        IReadOnlyCollection<int> registryDefIds, CancellationToken ct)
+        IReadOnlyCollection<int> registryDefIds, DateOnly windowStart, DateOnly windowEndInclusive, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<Ecr.Domain.Entities.Dictionaries.RegistryEntry>>([]);
 
     /// <inheritdoc />

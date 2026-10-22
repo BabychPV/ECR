@@ -231,7 +231,9 @@ public sealed class GetRegistryEntriesHandler(
             key,
             async token =>
             {
-                var entries = await groupStore.ListMemberEntriesAsync(members, token).ConfigureAwait(false);
+                var entries = window is { } span
+                    ? await groupStore.ListMemberEntriesAsync(members, span.Start, span.End, token).ConfigureAwait(false)
+                    : await groupStore.ListMemberEntriesAsync(members, asOf, asOf, token).ConfigureAwait(false);
                 var chosen = window is { } win
                     ? resolver.SelectInWindow(entries, [], win.Start, win.End, null)
                     : resolver.Select(entries, [], asOf, null);

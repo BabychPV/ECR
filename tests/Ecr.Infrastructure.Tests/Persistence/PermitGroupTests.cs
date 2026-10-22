@@ -373,11 +373,20 @@ public sealed class PermitGroupTests(SqlServerFixture sql)
         var created = await new Handlers(a, cache).Create.HandleAsync(NewGroup(GroupCode, Type(1)), default);
         await using var b = await h.NextRequestAsync();
         var afterCreate = await new PermitGroupStore(b.Db).GetSnapshotRevisionAsync(default);
-        Assert.True(afterCreate > before);
+        Assert.NotEqual(before, afterCreate);
 
         await using var c = await h.NextRequestAsync();
         await new Handlers(c, cache).Replace.HandleAsync(GroupCode, new ReplacePermitGroupTypesRequest([], created.RowVersion), default);
         await using var d = await h.NextRequestAsync();
-        Assert.True(await new PermitGroupStore(d.Db).GetSnapshotRevisionAsync(default) > afterCreate);
+        var afterReplace = await new PermitGroupStore(d.Db).GetSnapshotRevisionAsync(default);
+        Assert.NotEqual(afterCreate, afterReplace);
+
+        // Видалення групи теж міняє ревізію (хеш пар Id+ревізія, а не сума: колізія створення/видалення неможлива).
+        await using var e = await h.NextRequestAsync();
+        await new Handlers(e, cache).Delete.HandleAsync(GroupCode, default);
+        await using var f = await h.NextRequestAsync();
+        var afterDelete = await new PermitGroupStore(f.Db).GetSnapshotRevisionAsync(default);
+        Assert.NotEqual(afterReplace, afterDelete);
+        Assert.NotEqual(afterCreate, afterDelete);
     }
 }

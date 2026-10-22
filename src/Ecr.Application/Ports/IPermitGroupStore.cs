@@ -50,13 +50,16 @@ public interface IPermitGroupStore
     public Task<PermitGroupSnapshot> LoadSnapshotAsync(CancellationToken ct);
 
     /// <summary>
-    /// Записи (дозволи) реєстрів шапок складу групи ОДНИМ запитом <c>WHERE RegistryDefId IN (…)</c>, без видалених і без
-    /// відстеження; чинність і стан відбирає <c>RegistryResolver</c>.
+    /// Активні й чинні бодай один день вікна записи (дозволи) реєстрів шапок складу групи ОДНИМ запитом
+    /// <c>WHERE RegistryDefId IN (…)</c>; відсікання за датою - у SQL (півінтервал <c>[ValidFrom, ValidTo)</c> перетинає вікно),
+    /// без відстеження. Остаточний відбір - <c>RegistryResolver</c> (те саме правило).
     /// </summary>
     /// <param name="registryDefIds">Реєстри шапок (вже відфільтровані за правами читача).</param>
+    /// <param name="windowStart">Перший день вікна (для дати періоду - вона сама).</param>
+    /// <param name="windowEndInclusive">Останній день вікна включно (для дати періоду - вона сама).</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<Ecr.Domain.Entities.Dictionaries.RegistryEntry>> ListMemberEntriesAsync(
-        IReadOnlyCollection<int> registryDefIds, CancellationToken ct);
+        IReadOnlyCollection<int> registryDefIds, DateOnly windowStart, DateOnly windowEndInclusive, CancellationToken ct);
 
     /// <summary><c>DataRevision</c> кожного з реєстрів одним запитом (частина ключа кешу піклера групи).</summary>
     /// <param name="registryDefIds">Реєстри.</param>
@@ -64,8 +67,9 @@ public interface IPermitGroupStore
     public Task<IReadOnlyDictionary<int, int>> GetDataRevisionsAsync(IReadOnlyCollection<int> registryDefIds, CancellationToken ct);
 
     /// <summary>
-    /// Дешева «ревізія» складу всіх груп (сума <c>DataRevision + 1</c> прихованих реєстрів груп):
-    /// змінюється, коли будь-яку групу створили, видалили чи змінили склад. Один агрегатний запит.
+    /// Дешева «ревізія» складу всіх груп (хеш пар «Id групи, <c>DataRevision</c> прихованого реєстру» в порядку Id):
+    /// змінюється, коли будь-яку групу створили, видалили чи змінили склад (видалення однієї й створення іншої з тим самим
+    /// внеском теж). Один запит по десятках рядків.
     /// </summary>
     /// <param name="ct">Токен скасування.</param>
     public Task<long> GetSnapshotRevisionAsync(CancellationToken ct);

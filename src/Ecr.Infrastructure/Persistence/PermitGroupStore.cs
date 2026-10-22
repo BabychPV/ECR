@@ -89,16 +89,19 @@ public sealed class PermitGroupStore(EcrDbContext db) : IPermitGroupStore
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<Ecr.Domain.Entities.Dictionaries.RegistryEntry>> ListMemberEntriesAsync(
-        IReadOnlyCollection<int> registryDefIds, CancellationToken ct)
+        IReadOnlyCollection<int> registryDefIds, DateOnly windowStart, DateOnly windowEndInclusive, CancellationToken ct)
     {
         if (registryDefIds.Count == 0)
         {
             return [];
         }
 
-        // Дозволи типів складу (десятки-сотні на тип): стеля захищає від вибірки без меж.
+        // Дозволи типів складу (десятки-сотні на тип): стеля захищає від вибірки без меж. Дата відсікається в SQL:
+        // запис [ValidFrom, ValidTo) перетинає вікно [windowStart, windowEndInclusive], коли ValidFrom <= кінця і ValidTo > початку.
         return await db.RegistryEntries.AsNoTracking()
-            .Where(e => registryDefIds.Contains(e.RegistryDefId) && !e.IsDeleted)
+            .Where(e => registryDefIds.Contains(e.RegistryDefId) && !e.IsDeleted && e.IsActive
+                        && (e.ValidFrom == null || e.ValidFrom <= windowEndInclusive)
+                        && (e.ValidTo == null || e.ValidTo > windowStart))
             .OrderBy(e => e.RegistryDefId).ThenBy(e => e.Code)
             .Take(MaxMemberEntries)
             .ToListAsync(ct).ConfigureAwait(false);
@@ -122,7 +125,21 @@ public sealed class PermitGroupStore(EcrDbContext db) : IPermitGroupStore
 
     /// <inheritdoc />
     public async Task<long> GetSnapshotRevisionAsync(CancellationToken ct)
-        => await db.PermitGroups.AsNoTracking()
-            .Join(db.RegistryDefs.AsNoTracking(), g => g.RegistryDefId, d => d.Id, (g, d) => (long)d.DataRevision + 1)
-            .SumAsync(ct).ConfigureAwait(false);
+    {
+        // Кочування хешу по парах (Id групи, DataRevision реєстру) в порядку Id: видалення однієї групи й створення іншої з тим самим
+        // внеском більше не дає ту саму ревізію (раніше SUM(DataRevision+1) міг збігтися). Груп десятки - рядки малі.
+        var rows = await db.PermitGroups.AsNoTracking()
+            .Join(db.RegistryDefs.AsNoTracking(), g => g.RegistryDefId, d => d.Id, (g, d) => new { g.Id, d.DataRevision })
+            .OrderBy(x => x.Id)
+            .Take(MaxRows)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var hash = 17L;
+        foreach (var row in rows)
+        {
+            hash = unchecked((hash * 31) + (row.Id * 1_000_003L) + row.DataRevision + 1);
+        }
+
+        return hash;
+    }
 }
