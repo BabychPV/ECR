@@ -33,6 +33,8 @@ const SeededStrings: Record<string, string> = {
   'headerFields.errLookupRequired': 'Pick a registry for a Lookup field.',
   'common.cancel': 'Cancel',
   'registries.permitHeaderOption': 'Permits: {name} ({code})',
+  'registries.lookupGroup.permits': 'Permits',
+  'registries.lookupGroup.dictionaries': 'Dictionaries',
 };
 
 const registries = [
@@ -169,6 +171,31 @@ describe('HeaderFieldEditor: вибір довідника лише для ти�
 
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ lookupRegistryDefId: 77 }));
     expect(registryRequests.every((url) => url.endsWith('/api/v1/registries?includePermitHeaders=true'))).toBe(true);
+  }, 60000);
+
+  // ✎ Permits (template-picker): група «Permits» стоїть ПЕРШОЮ, перед «Dictionaries» - у довгому списку (Land: 54+
+  // довідників) плаский хвіст `PRM_*` не потрапляв людині на очі. Мутаційний доказ: поверни плаский список
+  // (`registries.data.map(...)`) - груп не буде і тест почервоніє.
+  it('шапки дозволів - окрема група «Permits» перед «Dictionaries»', async () => {
+    const draft: HeaderFieldDraft = {
+      ...emptyHeaderFieldDraft(0),
+      code: 'Permit',
+      labelL10n: { en: 'Permit' },
+      dataType: 'Lookup',
+    };
+
+    await show(draft, vi.fn());
+
+    fireEvent.click(await screen.findByLabelText('Registry'));
+    const permitsGroup = await screen.findByText('Permits');
+    const dictionariesGroup = await screen.findByText('Dictionaries');
+    const air = await screen.findByRole('option', { name: 'Permits: Air permit (PRM_AIR)' });
+    const plain = await screen.findByRole('option', { name: 'Permits (PERMITS)' });
+
+    const before = (a: Element, b: Element): boolean => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(before(permitsGroup, air)).toBe(true);
+    expect(before(air, dictionariesGroup)).toBe(true);
+    expect(before(dictionariesGroup, plain)).toBe(true);
   }, 60000);
 
   /**
