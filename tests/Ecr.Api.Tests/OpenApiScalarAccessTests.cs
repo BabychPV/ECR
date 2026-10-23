@@ -1,6 +1,7 @@
 using Ecr.TestKit;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
@@ -72,6 +73,9 @@ public sealed class OpenApiScalarAccessTests(SqlServerFixture sql)
                 // лишився від попереднього застосунку в цьому ж процесі.
                 logging.ClearProviders();
             });
+
+            // Розклади стоять, але не спрацьовують (RecurringTriggerVeto, як у EcrApiFactory).
+            builder.ConfigureTestServices(RecurringTriggerVeto.Register);
         }
     }
 }
