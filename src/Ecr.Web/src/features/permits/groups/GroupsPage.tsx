@@ -55,7 +55,7 @@ export function GroupsPage(): JSX.Element {
   };
   // Адреса змінилась (інший запис, закриття, мертвий `?panel=`) - запит на перемикання застарів.
   useEffect(() => setSwitchTo(null), [panel]);
-  const answerSwitch =(discard: boolean): void => {
+  const answerSwitch = (discard: boolean): void => {
     const next = switchTo;
     setSwitchTo(null);
     if (discard && next !== null) setParams({ panel: next });
