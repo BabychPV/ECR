@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Button, Group, MultiSelect, Skeleton, Stack, Switch, Text, TextInput } from '@mantine/core';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { serverMessage } from '@/features/registries/rc816/serverMessage';
@@ -46,6 +46,11 @@ export interface GroupDrawerProps {
   readonly group: PermitGroupDto | null;
   /** Право керувати групами (`Permit.EditType`, без симуляції); без нього шторка лише для читання. */
   readonly canEdit: boolean;
+  /**
+   * Чи є в шторці незбережене, що не можна кинути мовчки (`guarded`): сторінка питає «Discard», коли людина
+   * клікає по рядку ІНШОГО запису (на широкому екрані без затемнення), бо шторка перемонтується `key={code}`.
+   */
+  readonly onDirtyChange?: (dirty: boolean) => void;
 }
 
 /**
@@ -57,7 +62,7 @@ export interface GroupDrawerProps {
  * ⚠ Збереження існуючої групи - до двох запитів (`PUT permit-groups/{code}` для назви/опису/активності і
  * `PUT …/types` для складу); другий іде з токеном, який повернув перший.
  */
-export function GroupDrawer({ group, canEdit }: GroupDrawerProps): JSX.Element {
+export function GroupDrawer({ group, canEdit, onDirtyChange }: GroupDrawerProps): JSX.Element {
   const isNew = group === null;
   const [, setPanel] = useDetailPanel();
   const panelId = isNew ? NewGroupPanel : group.code;
@@ -117,6 +122,14 @@ export function GroupDrawer({ group, canEdit }: GroupDrawerProps): JSX.Element {
   // ⛔ Не `onExitUnsaved => false` без підтвердження: введене пропало б мовчки (клас дефекту «Assign month»).
   const guarded = canEdit && dirty && !busy;
   useDirtyDrawerExit(panelId, guarded && !confirmingDelete && !discarding, () => setDiscarding(true));
+
+  const reportDirty = useRef(onDirtyChange);
+  reportDirty.current = onDirtyChange;
+  useEffect(() => {
+    reportDirty.current?.(guarded);
+
+    return () => reportDirty.current?.(false);
+  }, [guarded]);
 
   function requestClose(): void {
     if (guarded) setDiscarding(true);
