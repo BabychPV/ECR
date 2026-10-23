@@ -255,9 +255,10 @@ test.describe('Permit groups', () => {
     }
   });
 
-  test('незбережене у шторці на вузькому екрані: клік по затемненню питає «Discard» - N/5', async ({ page }) => {
+  test('незбережене у шторці поза широким екраном (1000 px): клік по затемненню питає «Discard» - N/5', async ({ page }) => {
     test.setTimeout(240_000);
-    await page.setViewportSize({ width: 500, height: 900 });
+    // Нижче 1200 px є затемнення; шторка `lg` (50rem = 800 px) лишає ліворуч 200 px видимого затемнення.
+    await page.setViewportSize({ width: 1000, height: 900 });
     await signIn(page);
 
     for (let run = 1; run <= 5; run += 1) {

@@ -10,6 +10,12 @@ import { useEffect, useRef } from 'react';
  *
  * ⛔ Перехоплення - у фазі захоплення на `document`: воно раніше за обробники Mantine/React і гасить подію цілком.
  * Без `active` хук нічого не слухає, тож чиста форма закривається без питань.
+ *
+ * ⛔ Esc, що ЗАКРИВАЄ підтвердження, не має одразу відкрити його знову (живий e2e, run 39921583289): `Modal` Mantine слухає
+ * Esc на `window` у фазі захоплення, закриває підтвердження, React синхронно перемальовує (дискретна подія) і ВМИКАЄ цей
+ * хук - а та сама подія ще їде вгору до `document` і потрапляла б у щойно доданий слухач. У jsdom цього не видно:
+ * синхронна `dispatchEvent` не пускає мікрозадачі між слухачами. Тому слухач Esc глухий до кінця задачі, в якій його
+ * ввімкнули (`fresh`).
  */
 export function useDirtyDrawerExit(panelId: string, active: boolean, onAttempt: () => void): void {
   const attempt = useRef(onAttempt);
@@ -17,6 +23,11 @@ export function useDirtyDrawerExit(panelId: string, active: boolean, onAttempt: 
 
   useEffect(() => {
     if (!active) return undefined;
+
+    let fresh = true;
+    const settle = window.setTimeout(() => {
+      fresh = false;
+    }, 0);
 
     const inThisDrawer = (target: EventTarget | null): target is Element =>
       target instanceof Element && target.closest('[data-panel]')?.getAttribute('data-panel') === panelId;
@@ -32,7 +43,7 @@ export function useDirtyDrawerExit(panelId: string, active: boolean, onAttempt: 
     };
 
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (event.key !== 'Escape' || event.defaultPrevented || fresh) return;
       // Esc у відкритому списку вибору закриває список, а не шторку.
       const target = event.target;
       if (target instanceof Element && target.closest('[aria-expanded="true"]') !== null) return;
@@ -44,6 +55,7 @@ export function useDirtyDrawerExit(panelId: string, active: boolean, onAttempt: 
     document.addEventListener('keydown', onKeyDown);
 
     return () => {
+      window.clearTimeout(settle);
       document.removeEventListener('click', onClick, true);
       document.removeEventListener('keydown', onKeyDown);
     };

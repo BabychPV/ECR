@@ -182,6 +182,8 @@ describe('Групи пермітів - доступність', { timeout: 120_
       const name = await within(drawer).findByRole('textbox', { name: /Name · English/ });
       fireEvent.change(name, { target: { value: 'Water 2' } });
       name.focus();
+      // Слухач Esc глухий до кінця задачі, в якій його ввімкнули (`useDirtyDrawerExit`): людина натискає Esc уже в наступній.
+      await new Promise((resolve) => setTimeout(resolve, 5));
 
       fireEvent.keyDown(name, { key: 'Escape' });
       const keep = await screen.findByTestId('confirm-cancel');
@@ -198,6 +200,7 @@ describe('Групи пермітів - доступність', { timeout: 120_
       await waitFor(() => expect(document.activeElement).toBe(name));
       expect((name as HTMLInputElement).value).toBe('Water 2');
 
+      await new Promise((resolve) => setTimeout(resolve, 5));
       fireEvent.keyDown(name, { key: 'Escape' });
       fireEvent.click(await screen.findByTestId('confirm-verb'));
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());

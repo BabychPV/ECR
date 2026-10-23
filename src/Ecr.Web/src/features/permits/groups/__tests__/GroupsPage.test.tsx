@@ -450,6 +450,8 @@ describe('Groups: вихід зі шторки з незбереженим (Disc
     const name = await nameField();
     fireEvent.change(name, { target: { value: 'Water 2' } });
     name.focus();
+    // Слухач Esc глухий до кінця задачі, в якій його ввімкнули (`useDirtyDrawerExit`): людина натискає Esc уже в наступній.
+    await new Promise((resolve) => setTimeout(resolve, 5));
 
     return name;
   }
@@ -469,6 +471,7 @@ describe('Groups: вихід зі шторки з незбереженим (Disc
     expect((await nameField()).value).toBe('Water 2');
 
     // Esc у вкладеному підтвердженні: закривається воно, шторка лишається.
+    await new Promise((resolve) => setTimeout(resolve, 5));
     fireEvent.keyDown(name, { key: 'Escape' });
     const cancel = await screen.findByTestId('confirm-cancel');
     fireEvent.keyDown(cancel, { key: 'Escape' });
