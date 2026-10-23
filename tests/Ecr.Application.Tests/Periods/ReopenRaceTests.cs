@@ -301,6 +301,10 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
             long documentId, PeriodKey periodKey, CancellationToken ct)
             => inner.GetSheetsAsync(documentId, periodKey, ct);
 
+        public Task<Ecr.Application.Ports.SubmissionCalendar?> GetSubmissionCalendarAsync(
+            long documentId, int sheetDefId, DateTime utcNow, CancellationToken ct)
+            => inner.GetSubmissionCalendarAsync(documentId, sheetDefId, utcNow, ct);
+
         public Task<long> SaveSnapshotAsync(
             Ecr.Application.Ports.SubmissionSnapshotRecord snapshot, CancellationToken ct)
             => inner.SaveSnapshotAsync(snapshot, ct);

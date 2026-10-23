@@ -4544,6 +4544,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/submission-target": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Що подасть «Подати» на аркуші (D-441): найраніший неподаний період у стані `Open`/`Grace`, наступний неподаний, відкриті періоди для вибору і статуси місячних колонок. Право `Document.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Аркуш. */
+                    sheetDefId?: number;
+                    /** @description Період, відкритий на екрані; його рік задає місяці колонок. */
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SubmissionTargetDto"];
+                        "text/json": components["schemas"]["SubmissionTargetDto"];
+                        "text/plain": components["schemas"]["SubmissionTargetDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/submit": {
         parameters: {
             query?: never;
@@ -23791,6 +23848,11 @@ export interface components {
             /** @description Стан робочого процесу; аркуш без рядка стану — `Draft`. */
             state: string;
         };
+        /**
+         * @description Стан документа у робочому процесі.
+         * @enum {unknown}
+         */
+        DocumentStatus: "Draft" | "Submitted" | "Approved" | "Rejected";
         /** @description Документ у переліку. */
         DocumentSummary: {
             /** @description К6: «хто затвердив» — відображуване ім'я (`D-86`) того, хто останнім затвердив аркуш документа
@@ -25983,6 +26045,28 @@ export interface components {
             documentId: number;
             /** @description Задача: `GET /jobs/{jobId}` дає прогрес і підсумок. */
             jobId: string;
+        };
+        /** @description Статус місячної колонки (D-441): стан аркуша за період місяця колонки. */
+        MonthColumnStatusDto: {
+            /** @description Код колонки. */
+            columnCode: string;
+            /**
+             * Format: uint8
+             * @description Місяць колонки 1..12.
+             */
+            monthNumber: number;
+            /**
+             * Format: int32
+             * @description Період, якому відповідає колонка.
+             */
+            periodKey: number;
+            /** @description Стан аркуша за цей період. */
+            sheetStatus: components["schemas"]["DocumentStatus"];
+            /**
+             * Format: int32
+             * @description Таблиця.
+             */
+            tableDefId: number;
         };
         /** @description Моя задача як виконавця або очікування валідації як власника. */
         MyEditAssignmentDto: {
@@ -30764,6 +30848,37 @@ export interface components {
             /** Format: uint8 */
             verticalAlign: null | number;
             wrapText: boolean;
+        };
+        /** @description Відкритий (`Open`/`Grace`) період у виборі подання. */
+        SubmissionPeriodDto: {
+            /**
+             * Format: int32
+             * @description Ключ періоду.
+             */
+            periodKey: number;
+            /** @description Стан аркуша за цей період. */
+            sheetStatus: components["schemas"]["DocumentStatus"];
+            /** @description Ефективний стан періоду. */
+            state: components["schemas"]["PeriodState"];
+            /** @description Аркуш за цей період можна подати зараз (неподаний, проєкт не архівний). */
+            submittable: boolean;
+        };
+        /** @description Цільовий період подання аркуша і статуси місячних колонок (D-441). */
+        SubmissionTargetDto: {
+            /** @description Місячні колонки таблиць `MonthsInColumns` аркуша зі станом свого періоду. */
+            monthColumns: components["schemas"]["MonthColumnStatusDto"][];
+            /**
+             * Format: int32
+             * @description Наступний неподаний після цільового — для попередження «наступний — …».
+             */
+            nextPeriodKey: null | number;
+            /** @description Відкриті періоди проєкту за зростанням (вибір іншого періоду — серед `Submittable`). */
+            periods: components["schemas"]["SubmissionPeriodDto"][];
+            /**
+             * Format: int32
+             * @description Період, який подасть «Подати»: найраніший неподаний `Open`/`Grace`; `null` — подавати нічого.
+             */
+            targetPeriodKey: null | number;
         };
         /** @description Запит на перемикання master-джерела набору довідників. */
         SwitchSourceKindRequest: {

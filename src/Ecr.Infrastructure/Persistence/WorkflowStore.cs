@@ -219,6 +219,68 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<SubmissionCalendar?> GetSubmissionCalendarAsync(
+        long documentId, int sheetDefId, DateTime utcNow, CancellationToken ct)
+    {
+        var project = await (
+                from d in db.Documents.AsNoTracking()
+                where d.Id == documentId
+                join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                select new
+                {
+                    p.Id,
+                    p.Status,
+                    p.IsArchiving,
+                    p.PeriodKind,
+                    p.PeriodEnd,
+                    p.YearGraceOffsetDays,
+                    p.TimeZoneId,
+                })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (project is null)
+        {
+            return null;
+        }
+
+        var periods = await db.Periods
+            .AsNoTracking()
+            .Where(p => p.ProjectId == project.Id)
+            .OrderBy(p => p.PeriodKeyValue)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var statuses = await db.ApprovalStates
+            .AsNoTracking()
+            .Where(s => s.DocumentId == documentId && s.SheetDefId == sheetDefId)
+            .Select(s => new { s.PeriodKey, s.Status })
+            .ToDictionaryAsync(s => s.PeriodKey, s => s.Status, ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Те саме правило, що й `EffectivePeriodStateAsync` вище та `AccessDecisionService.BuildContextAsync`:
+        // за датами — лише для АКТИВНОГО проєкту (`A7-25`), інакше збережений стан.
+        Domain.Services.YearGraceWindow? window = project.Status == Domain.Enums.ProjectStatus.Active
+            ? Domain.Services.YearGraceWindow.For(
+                project.PeriodEnd,
+                project.YearGraceOffsetDays,
+                SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo())
+            : null;
+
+        return new SubmissionCalendar(
+            project.Status,
+            project.IsArchiving,
+            project.PeriodKind,
+            [
+                .. periods.Select(p => new SubmissionCalendarPeriod(
+                    p.PeriodKeyValue,
+                    window is null ? p.State : PeriodStates.Effective(p, utcNow, window),
+                    statuses.TryGetValue(p.PeriodKeyValue, out var status)
+                        ? status
+                        : Domain.Enums.DocumentStatus.Draft)),
+            ]);
+    }
+
+    /// <inheritdoc />
     public async Task<Period> LockPeriodAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
     {
         // ⚠ UPDLOCK береться ДО будь-яких змін і тримається до кінця

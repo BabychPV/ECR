@@ -80,6 +80,12 @@ public sealed class SubmitSheetHandler(
     /// </summary>
     public const string SubmitInsufficientLevelReasonKey = "deny.InsufficientGrantLevel.Submit";
 
+    /// <summary>
+    /// Ключ тексту відмови подання з причиною <c>PeriodNotOpenYet</c> (D-441): період у стані
+    /// <c>Scheduled</c> подати не можна.
+    /// </summary>
+    public const string SubmitPeriodNotOpenReasonKey = "deny.PeriodNotOpenYet.Submit";
+
     /// <summary>Ключ каталогу відмови «обов'язкове поле шапки порожнє» (D-PS, <c>ECR-HDR-0422</c>).</summary>
     public const string RequiredHeaderMessageKey = Validation.RequiredHeaderCheck.MessageKey;
 
@@ -229,9 +235,14 @@ public sealed class SubmitSheetHandler(
                     // ✎ D-285: «рівень замалий» для ПОДАННЯ має власний текст — він
                     // називає право Document.Submit; загальний `deny.InsufficientGrantLevel`
                     // бачать і при вставці в комірку, і при погодженні.
-                    ["reasonKey"] = decision.Reason == EditDenyReason.InsufficientGrantLevel
-                        ? SubmitInsufficientLevelReasonKey
-                        : $"deny.{decision.Reason}",
+                    // ✎ D-441: «період ще не відкрито» для ПОДАННЯ теж має власний текст —
+                    // загальний `deny.PeriodNotOpenYet` говорить про введення даних.
+                    ["reasonKey"] = decision.Reason switch
+                    {
+                        EditDenyReason.InsufficientGrantLevel => SubmitInsufficientLevelReasonKey,
+                        EditDenyReason.PeriodNotOpenYet => SubmitPeriodNotOpenReasonKey,
+                        _ => $"deny.{decision.Reason}",
+                    },
                 });
         }
 

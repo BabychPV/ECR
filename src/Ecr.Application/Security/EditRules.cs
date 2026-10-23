@@ -313,9 +313,20 @@ public static class EditRules
             return EditDecision.Deny(EditDenyReason.ArchivingInProgress);
         }
 
-        if (context.PeriodState == PeriodState.Closed)
+        // ⛔ D-441 (AN-128): подати можна лише період у стані Open або Grace. Доти відмова стояла лише
+        // на Closed, і ще не відкритий (Scheduled) період — зокрема відсутній, який `BuildContextAsync`
+        // трактує як Scheduled, — подавався: аркуш ішов на погодження раніше, ніж у нього можна було
+        // ввести хоч одне число (`CanEdit` той самий Scheduled відхиляє тією самою причиною).
+        switch (context.PeriodState)
         {
-            return EditDecision.Deny(EditDenyReason.PeriodClosed);
+            case PeriodState.Scheduled:
+                return EditDecision.Deny(EditDenyReason.PeriodNotOpenYet);
+
+            case PeriodState.Closed:
+                return EditDecision.Deny(EditDenyReason.PeriodClosed);
+
+            default:
+                break;
         }
 
         if (context.SheetStatus is DocumentStatus.Submitted or DocumentStatus.Approved)

@@ -6933,6 +6933,9 @@ USING (VALUES
     -- COLL:an43fix ── D-285: окремий текст відмови подання (reasonKey deny.InsufficientGrantLevel.Submit); ru/kz — порцією COLL:an43fix у блоці I18N нижче ──
     (N'deny.InsufficientGrantLevel.Submit', N'en', N'Your access level is too low to submit this sheet: you need the Submit level, or the Write level together with the Submit documents right in this project. Ask an administrator to raise the level or grant the right.', 1),
     -- COLL:an43fix ── кінець секції ──
+    -- COLL:an128 ── D-441 (AN-128): подання ще не відкритого (Scheduled) періоду — окремий текст відмови (reasonKey deny.PeriodNotOpenYet.Submit); ru/kz — порцією COLL:an128 у блоці I18N нижче ──
+    (N'deny.PeriodNotOpenYet.Submit', N'en', N'This period is not open yet: a sheet can be submitted only for a period that is Open or in the Grace period.', 1),
+    -- COLL:an128 ── кінець секції ──
     -- COLL:a1date ── A1-02: строгий розбір набраної дати в полі дати (StrictDateInput); ru/kz — порцією COLL:a1date у блоці I18N нижче ──
     (N'dates.invalid', N'en', N'"{value}" is not a valid date. Enter the date as YYYY-MM-DD.', 1),
     (N'dates.outOfRange', N'en', N'The date {value} is outside the allowed range.', 1),
@@ -18463,6 +18466,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an43fix ── кінець секції ──
+-- COLL:an128 ── ru/kz D-441 (AN-128): подання ще не відкритого періоду; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'deny.PeriodNotOpenYet.Submit', N'ru', N'Период ещё не открыт: подать лист можно только за период в состоянии «Открыт» или «Льготный период».'),
+    (N'deny.PeriodNotOpenYet.Submit', N'kz', N'Кезең әлі ашылмаған: парақты тек «Ашық» немесе «Жеңілдік кезеңі» күйіндегі кезең үшін тапсыруға болады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an128 ── кінець секції ──
 -- COLL:a1date ── ru/kz A1-02: строгий розбір набраної дати; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val

@@ -14,8 +14,21 @@ namespace Ecr.Api.Controllers;
 [Authorize]
 public sealed class DocumentWorkflowHistoryController(
     GetWorkflowHistoryHandler history,
-    RecallSheetHandler recall) : ControllerBase
+    RecallSheetHandler recall,
+    GetSubmissionTargetHandler submissionTarget) : ControllerBase
 {
+    /// <summary>Що подасть «Подати» на аркуші (D-441): найраніший неподаний період у стані <c>Open</c>/<c>Grace</c>, наступний неподаний, відкриті періоди для вибору і статуси місячних колонок. Право <c>Document.View</c>.</summary>
+    /// <param name="id">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період, відкритий на екрані; його рік задає місяці колонок.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:long}/submission-target")]
+    [ProducesResponseType<SubmissionTargetDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SubmissionTarget(
+        long id, [FromQuery] int sheetDefId, [FromQuery] int periodKey, CancellationToken ct)
+        => Ok(await submissionTarget.HandleAsync(id, sheetDefId, periodKey, ct).ConfigureAwait(false));
+
     /// <summary>
     /// Хто й коли подав, погодив, відхилив або повернув аркуші документа за
     /// період; найновіші перші, не більше 200 подій. Право <c>Document.View</c>.

@@ -220,6 +220,7 @@ public static class DependencyInjection
         services.AddScoped<Documents.ListDocumentVersionsHandler>();
         services.AddScoped<Documents.CompareDocumentVersionsHandler>();
         services.AddScoped<Workflow.RecallSheetHandler>();
+        services.AddScoped<Workflow.GetSubmissionTargetHandler>(); // D-441 / AN-128: цільовий період подання
 
         // EA-C: передача місяця третій стороні — керування й переходи станів.
         services.AddScoped<Documents.EditAssignments.ListEditAssignmentsHandler>();

@@ -33,7 +33,11 @@ public sealed class SubmitDecisionIgnoresStaleValidationTests(SqlServerFixture s
     [Trait("Finding", "T2-01")]
     public async Task Збережена_помилка_валідації_не_блокує_рішення_про_подання()
     {
-        var document = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync();
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await builder.BuildAsync();
+
+        // D-441 (AN-128): Scheduled-період не подається — предмет тесту інший, тож період відкрито.
+        await builder.OpenPeriodAsync(document);
         await using (var seed = sql.CreateContext())
         {
             seed.ValidationResults.Add(new ValidationResult(

@@ -4415,6 +4415,15 @@
         ],
         "type": "object"
       },
+      "DocumentStatus": {
+        "description": "Стан документа у робочому процесі.",
+        "enum": [
+          "Draft",
+          "Submitted",
+          "Approved",
+          "Rejected"
+        ]
+      },
       "DocumentSummary": {
         "description": "Документ у переліку.",
         "properties": {
@@ -9039,6 +9048,42 @@
         "required": [
           "jobId",
           "documentId"
+        ],
+        "type": "object"
+      },
+      "MonthColumnStatusDto": {
+        "description": "Статус місячної колонки (D-441): стан аркуша за період місяця колонки.",
+        "properties": {
+          "columnCode": {
+            "description": "Код колонки.",
+            "type": "string"
+          },
+          "monthNumber": {
+            "description": "Місяць колонки 1..12.",
+            "format": "uint8",
+            "type": "integer"
+          },
+          "periodKey": {
+            "description": "Період, якому відповідає колонка.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetStatus": {
+            "$ref": "#/components/schemas/DocumentStatus",
+            "description": "Стан аркуша за цей період."
+          },
+          "tableDefId": {
+            "description": "Таблиця.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tableDefId",
+          "columnCode",
+          "monthNumber",
+          "periodKey",
+          "sheetStatus"
         ],
         "type": "object"
       },
@@ -19582,6 +19627,77 @@
         ],
         "type": "object"
       },
+      "SubmissionPeriodDto": {
+        "description": "Відкритий (`Open`/`Grace`) період у виборі подання.",
+        "properties": {
+          "periodKey": {
+            "description": "Ключ періоду.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetStatus": {
+            "$ref": "#/components/schemas/DocumentStatus",
+            "description": "Стан аркуша за цей період."
+          },
+          "state": {
+            "$ref": "#/components/schemas/PeriodState",
+            "description": "Ефективний стан періоду."
+          },
+          "submittable": {
+            "description": "Аркуш за цей період можна подати зараз (неподаний, проєкт не архівний).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "periodKey",
+          "state",
+          "sheetStatus",
+          "submittable"
+        ],
+        "type": "object"
+      },
+      "SubmissionTargetDto": {
+        "description": "Цільовий період подання аркуша і статуси місячних колонок (D-441).",
+        "properties": {
+          "monthColumns": {
+            "description": "Місячні колонки таблиць `MonthsInColumns` аркуша зі станом свого періоду.",
+            "items": {
+              "$ref": "#/components/schemas/MonthColumnStatusDto"
+            },
+            "type": "array"
+          },
+          "nextPeriodKey": {
+            "description": "Наступний неподаний після цільового — для попередження «наступний — …».",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "periods": {
+            "description": "Відкриті періоди проєкту за зростанням (вибір іншого періоду — серед `Submittable`).",
+            "items": {
+              "$ref": "#/components/schemas/SubmissionPeriodDto"
+            },
+            "type": "array"
+          },
+          "targetPeriodKey": {
+            "description": "Період, який подасть «Подати»: найраніший неподаний `Open`/`Grace`; `null` — подавати нічого.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "targetPeriodKey",
+          "nextPeriodKey",
+          "periods",
+          "monthColumns"
+        ],
+        "type": "object"
+      },
       "SwitchSourceKindRequest": {
         "description": "Запит на перемикання master-джерела набору довідників.",
         "properties": {
@@ -28930,6 +29046,87 @@
         "summary": "Відкриває поданий документ. Право `Document.Reopen`.",
         "tags": [
           "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/submission-target": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Аркуш.",
+            "in": "query",
+            "name": "sheetDefId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Період, відкритий на екрані; його рік задає місяці колонок.",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionTargetDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionTargetDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionTargetDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Що подасть «Подати» на аркуші (D-441): найраніший неподаний період у стані `Open`/`Grace`, наступний неподаний, відкриті періоди для вибору і статуси місячних колонок. Право `Document.View`.",
+        "tags": [
+          "DocumentWorkflowHistory"
         ]
       }
     },

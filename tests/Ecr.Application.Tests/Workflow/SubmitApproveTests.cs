@@ -590,6 +590,7 @@ public sealed class SubmitApproveTests
     /// </summary>
     [Theory]
     [InlineData(EditDenyReason.InsufficientGrantLevel, "deny.InsufficientGrantLevel.Submit")]
+    [InlineData(EditDenyReason.PeriodNotOpenYet, "deny.PeriodNotOpenYet.Submit")] // D-441 (AN-128)
     [InlineData(EditDenyReason.NoGrant, "deny.NoGrant")]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Decision", "D-285")]
