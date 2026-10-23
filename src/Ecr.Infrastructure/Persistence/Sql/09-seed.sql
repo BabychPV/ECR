@@ -9212,6 +9212,10 @@ USING (VALUES
     ,(N'registries.lookupTargetUnlisted', N'en', N'Not in the list (registry #{id})', 1)
     ,(N'registries.lookupGroup.unlisted', N'en', N'Current value', 1)
     ,(N'registries.lookupTargetInactive', N'en', N'{label} - inactive', 1)
+    ,(N'permits.groups.drawer.discardTitle', N'en', N'Discard unsaved changes?', 1)
+    ,(N'permits.groups.drawer.discardText', N'en', N'What you entered for this group will be lost.', 1)
+    ,(N'permits.groups.drawer.discardVerb', N'en', N'Discard', 1)
+    ,(N'permits.groups.drawer.keepEditing', N'en', N'Keep editing', 1)
     -- PERMITS: groups-ui ── кінець секції ──
     -- PERMITS: ui-p3-small ── en: KI-04 підказка мінімальної довжини причини в End early; ru/kz — порцією PERMITS: ui-p3-small нижче ──
     ,(N'permits.endEarly.minLengthHint', N'en', N'Enter at least {min} characters.', 1)
@@ -23925,7 +23929,15 @@ SELECT v.[Key], v.Lang, v.Val
     (N'registries.lookupGroup.unlisted', N'ru', N'Текущее значение'),
     (N'registries.lookupGroup.unlisted', N'kz', N'Ағымдағы мән'),
     (N'registries.lookupTargetInactive', N'ru', N'{label} - неактивна'),
-    (N'registries.lookupTargetInactive', N'kz', N'{label} - белсенді емес')
+    (N'registries.lookupTargetInactive', N'kz', N'{label} - белсенді емес'),
+    (N'permits.groups.drawer.discardTitle', N'ru', N'Отбросить несохранённые изменения?'),
+    (N'permits.groups.drawer.discardTitle', N'kz', N'Сақталмаған өзгерістерді тастау керек пе?'),
+    (N'permits.groups.drawer.discardText', N'ru', N'Введённое для этой группы будет потеряно.'),
+    (N'permits.groups.drawer.discardText', N'kz', N'Осы топ үшін енгізілгені жоғалады.'),
+    (N'permits.groups.drawer.discardVerb', N'ru', N'Отбросить'),
+    (N'permits.groups.drawer.discardVerb', N'kz', N'Тастау'),
+    (N'permits.groups.drawer.keepEditing', N'ru', N'Продолжить редактирование'),
+    (N'permits.groups.drawer.keepEditing', N'kz', N'Түзетуді жалғастыру')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

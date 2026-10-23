@@ -168,5 +168,39 @@ describe('Групи пермітів - доступність', { timeout: 120_
       await waitFor(() => expect(screen.queryByTestId('confirm-cancel')).toBeNull());
       expect(screen.getAllByRole('dialog').length).toBeGreaterThan(0);
     });
+
+    it(`${colorScheme}: правка -> Esc -> діалог «Discard» без порушень, фокус на «Keep editing»; Keep вертає фокус у поле, Discard - на рядок`, async () => {
+      stub(groups);
+      render(
+        <Shell colorScheme={colorScheme}>
+          <PermitGroupsPage />
+        </Shell>,
+      );
+      const row = await screen.findByText('Water permits');
+      fireEvent.click(row);
+      const drawer = await screen.findByRole('dialog');
+      const name = await within(drawer).findByRole('textbox', { name: /Name · English/ });
+      fireEvent.change(name, { target: { value: 'Water 2' } });
+      name.focus();
+
+      fireEvent.keyDown(name, { key: 'Escape' });
+      const keep = await screen.findByTestId('confirm-cancel');
+      expect(keep.textContent).toBe(Catalog['permits.groups.drawer.keepEditing']);
+      await waitFor(() => expect(document.activeElement).toBe(keep));
+      const dialogs = screen.getAllByRole('dialog');
+      const confirm = dialogs[dialogs.length - 1] as HTMLElement;
+      expect(confirm.textContent).not.toContain('⟦');
+      const violations = await findViolations(confirm);
+      expect(violations, describeViolations(violations)).toHaveLength(0);
+
+      fireEvent.click(keep);
+      await waitFor(() => expect(screen.queryByTestId('confirm-cancel')).toBeNull());
+      await waitFor(() => expect(document.activeElement).toBe(name));
+      expect((name as HTMLInputElement).value).toBe('Water 2');
+
+      fireEvent.keyDown(name, { key: 'Escape' });
+      fireEvent.click(await screen.findByTestId('confirm-verb'));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    });
   }
 });
