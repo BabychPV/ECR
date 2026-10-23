@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { openDocumentMore } from './documentMore';
 
 /**
  * Застарілі числа методологій (лінія B) на живому стенді: бейдж у шапці документа і пункт
@@ -44,7 +45,7 @@ test.describe('застарілі результати методологій', 
     await expect(badge).toBeVisible({ timeout: 60_000 });
 
     // Дія: пункт з новою назвою в «More».
-    await page.getByTestId('document-more').click();
+    await openDocumentMore(page);
     await page.getByRole('menuitem', { name: /Recalculate calculations|Пересчитать расчёты|Есептеулерді қайта есептеу/ }).click();
 
     // Кінцевий стан: перерахунок поставлено, числа перечитано — бейджа немає.

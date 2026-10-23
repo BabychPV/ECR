@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Browser, type BrowserContext } from '@playwright/test';
+import { openDocumentMore } from './documentMore';
 
 /**
  * ФВ-12.5: черга «До погодження» (`GET /api/v1/me/approval-queue`) проти РЕАЛЬНОГО сервера стенда
@@ -230,7 +231,7 @@ test.describe('approvalQueue: черга «До погодження» на ре
       // ── 6б. UI: «More → History» показує позначку ─────────────────────────────────
       const adminPage = await admin.newPage();
       await adminPage.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
-      await adminPage.getByTestId('document-more').click({ timeout: 60_000 });
+      await openDocumentMore(adminPage);
       await adminPage.getByRole('menuitem', { name: /^(History|История|Тарих)$/ }).click();
       await expect(
         adminPage.getByTestId('workflow-history-approved-by-submitter').first(),

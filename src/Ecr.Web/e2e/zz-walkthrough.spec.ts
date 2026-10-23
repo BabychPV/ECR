@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { openDocumentMore } from './documentMore';
 
 /**
  * Прохід системою «як реальний користувач», від входу до адміністративних
@@ -860,7 +861,7 @@ test.describe('WALK: прохід системою від А до Я', () => {
       // ✎ UI-14: експорт — пунктом «More ▾ → Export → Excel» (макет `renderActions`),
       // а не окремою кнопкою з перемикачем формату.
       const more = page.getByTestId('document-more');
-      if ((await more.count()) > 0) await more.click();
+      if ((await more.count()) > 0) await openDocumentMore(page);
       const exportButton = page.getByRole('menuitem', { name: /^Excel$/ }).first();
       const present = (await exportButton.count()) > 0;
 
