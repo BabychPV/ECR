@@ -1242,7 +1242,10 @@ UPDATE t
     (N'search.open', N'kz', N'Деректерді іздеу', N'Іздеу немесе пәрмен'),
     (N'search.placeholder', N'en', N'Documents, templates, registries…', N'Type a screen, a document key or an action…'),
     (N'search.placeholder', N'ru', N'Документы, шаблоны, справочники…', N'Экран, ключ документа или действие…'),
-    (N'search.placeholder', N'kz', N'Құжаттар, үлгілер, анықтамалықтар…', N'Экран, құжат кілті немесе әрекет…')
+    (N'search.placeholder', N'kz', N'Құжаттар, үлгілер, анықтамалықтар…', N'Экран, құжат кілті немесе әрекет…'),
+    -- PERMITS:ui-p3-small PUI-7: приклад назви таблиці в майстрі «Add a table» був англійським у ru/kz.
+    (N'permits.editor.dialogs.addTable.namePlaceholder', N'ru', N'Monitoring points', N'Точки мониторинга'),
+    (N'permits.editor.dialogs.addTable.namePlaceholder', N'kz', N'Monitoring points', N'Мониторинг нүктелері')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -22439,8 +22442,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.editor.dialogs.addTable.stepTableHint', N'kz', N'Кесте — рұқсат ішіндегі жолдар тізімі: лимиттер, көлемдер, сақтау орындары.'),
     (N'permits.editor.dialogs.addTable.nameEn', N'ru', N'Название (английское)'),
     (N'permits.editor.dialogs.addTable.nameEn', N'kz', N'Атауы (ағылшынша)'),
-    (N'permits.editor.dialogs.addTable.namePlaceholder', N'ru', N'Monitoring points'),
-    (N'permits.editor.dialogs.addTable.namePlaceholder', N'kz', N'Monitoring points'),
+    (N'permits.editor.dialogs.addTable.namePlaceholder', N'ru', N'Точки мониторинга'),
+    (N'permits.editor.dialogs.addTable.namePlaceholder', N'kz', N'Мониторинг нүктелері'),
     (N'permits.editor.dialogs.addTable.nameRu', N'ru', N'Название (русское)'),
     (N'permits.editor.dialogs.addTable.nameRu', N'kz', N'Атауы (орысша)'),
     (N'permits.editor.dialogs.addTable.from', N'ru', N'Начать с'),
