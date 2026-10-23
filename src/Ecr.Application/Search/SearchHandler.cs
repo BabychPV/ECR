@@ -46,6 +46,14 @@ public sealed class SearchHandler(ISearchStore store, IAccessDecisionService acc
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
+        // ✎ D-444 (AN-131, п.3): документ, відкритий наданням учасника, шукається так само, як він є в переліку
+        // (`ListDocumentsHandler`, `DocumentParticipationFilter`): діюче надання, поза проєктами із забороною ролі.
+        // Шукаються лише поля САМОГО документа (код, назва) — аркуші й таблиці поза наданням не називаються.
+        // Без ознаки профілю — без бази (бюджет решти користувачів не змінюється).
+        var participations = profile.HasDocumentParticipations
+            ? await access.ActiveParticipationsAsync(profile, ct).ConfigureAwait(false)
+            : null;
+
         var scope = new SearchScope(
             profile.HasInAnyProject(Documents.ListDocumentsHandler.Permission)
                 ? Documents.ListDocumentsHandler.ReadableProjects(profile, Documents.ListDocumentsHandler.Permission)
@@ -54,7 +62,9 @@ public sealed class SearchHandler(ISearchStore store, IAccessDecisionService acc
             PermissionCheck.IsGranted(profile, Registries.ListRegistriesHandler.Permission),
 
             // ⛔ S18: довідник із явною забороною не шукається (як і в його переліку).
-            Registries.RegistryAccess.DeniedIds(profile));
+            Registries.RegistryAccess.DeniedIds(profile),
+            participations is { Count: > 0 } ? [.. participations.Keys] : null,
+            participations is { Count: > 0 } ? profile.DeniedProjectIds() : null);
 
         var take = limit <= 0 ? DefaultLimit : Math.Min(limit, MaxLimit);
         var rows = await store.SearchAsync(term, scope, take, ct).ConfigureAwait(false);
