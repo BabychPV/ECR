@@ -13,13 +13,18 @@ function Probe({ active, onAttempt }: { active: boolean; onAttempt: () => void }
   useDirtyDrawerExit('P', active, onAttempt);
 
   return (
-    <div data-panel="P">
+    <>
+      <div data-panel="P">
       <button type="button" className="mantine-Drawer-close">
         x
       </button>
       <input aria-expanded="false" data-testid="plain" />
       <input aria-expanded="true" data-testid="open-list" />
-    </div>
+      </div>
+      <div role="dialog" data-testid="foreign-modal">
+        <input data-testid="foreign-input" />
+      </div>
+    </>
   );
 }
 
@@ -52,6 +57,21 @@ describe('useDirtyDrawerExit', () => {
     esc(view.getByTestId('open-list'));
 
     expect(onAttempt).not.toHaveBeenCalled();
+  });
+
+  it('Esc поза шторкою (чужий модальний, тіло сторінки) не питає й не гаситься', async () => {
+    const onAttempt = vi.fn();
+    const view = render(<Probe active onAttempt={onAttempt} />);
+    await settled();
+
+    const foreign = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    view.getByTestId('foreign-input').dispatchEvent(foreign);
+    const body = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    document.body.dispatchEvent(body);
+
+    expect(onAttempt).not.toHaveBeenCalled();
+    expect(foreign.defaultPrevented).toBe(false);
+    expect(body.defaultPrevented).toBe(false);
   });
 
   it('клік по хрестику гаситься й питає; без active - нічого не слухає', async () => {
