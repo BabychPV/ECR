@@ -232,8 +232,10 @@ final for this period and go into regulatory reports. To change them later,
 the sheet has to be returned for edits.» Після підтвердження — «The sheet
 has been approved.»
 
-⚠ Затвердити **власне** подання не можна: «Sheet … cannot be approved by the
-same person who submitted it.» Відхилити власне подання можна.
+Власне подання можна і затвердити, і відхилити (✎ 2026-10-23, `D-440`: правила
+«чотирьох очей» немає — достатньо рівня `Approve` і ролі кроку маршруту). У
+журналі аркуша («More → History») таке затвердження позначене «approved by the
+submitter».
 
 ⚠ залежить від налаштувань: якщо для проєкту задано маршрут погодження з
 кількох кроків (**«Approval route»**), аркуш проходить кроки по черзі, і
@@ -409,7 +411,6 @@ sheet: there is nothing to apply.»
 | «There are issues outside your visibility — submission is blocked. Contact the project owner.» | помилки в таблицях, яких ви не бачите | зверніться до власника проєкту |
 | «Only a draft or rejected sheet can be submitted; the sheet is {status}.» | аркуш уже подано або затверджено | оновіть сторінку; для правок потрібне повернення (розділ 2.5) |
 | «Your access level is too low to submit this sheet…» після «Submit» | у вас рівень `Write` без права `Document.Submit` | попросіть адміністратора видати рівень `Submit` або право `Document.Submit` |
-| «… cannot be approved by the same person who submitted it.» | правило «чотирьох очей» | затверджує інший погоджувач |
 | «A comment is required to reject the sheet.» / «A reason is required…» | порожня причина | заповніть **«Reason»** |
 | «The sheet can no longer be recalled: approval has already started.» | перший крок погодження вже підписано | попросіть погоджувача відхилити аркуш |
 | «Only the person who submitted the sheet can recall it.» | подавали не ви | відкликає той, хто подав |
