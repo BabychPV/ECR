@@ -94,6 +94,20 @@ public readonly record struct CellAccessContext(
     /// перерахунок затер би введене без жодного слова.
     /// </summary>
     public bool CellIsComputed { get; init; }
+
+    /// <summary>
+    /// D-442: користувач — погоджувач ПОТОЧНОГО кроку маршруту цього аркуша, тобто
+    /// <see cref="EditRules.CanApprove"/> для нього зараз дозволяє (роль кроку, якщо маршрут є,
+    /// плюс грант <see cref="GrantLevel.Approve"/> у видимому проєкті). Рахує служба (вона знає
+    /// маршрут і поточний крок); за замовчуванням — ні.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Знімає ЛИШЕ заборону <see cref="EditDenyReason.DocumentSubmitted"/> і лише в стані
+    /// <see cref="DocumentStatus.Submitted"/>: архів, симуляція, період, вікно доступу, ознаки
+    /// колонки/рядка/комірки й грант на саму комірку перевіряються далі як для всіх.
+    /// <see cref="DocumentStatus.Approved"/> він не відкриває ніколи.
+    /// </remarks>
+    public bool IsCurrentApprover { get; init; }
 }
 
 /// <summary>
@@ -168,8 +182,18 @@ public static class EditRules
         // ⚠ Grace дає час на правки НЕПОДАНИХ документів, а не право змінити
         // подану форму (D-67). Тому стан аркуша перевіряється незалежно від
         // стану періоду.
+        //
+        // ✎ D-442: поданий аркуш править ЛИШЕ погоджувач поточного кроку маршруту — без нового
+        // статусу (аркуш лишається Submitted). Автор і решта, як і доти, — DocumentSubmitted.
+        // Погоджувач проходить далі ВСІ перевірки нижче (ознаки колонки, грант на комірку):
+        // роль кроку знімає лише заборону «подано», а не решту правил.
+        var byApprover = false;
         switch (context.SheetStatus)
         {
+            case DocumentStatus.Submitted when context.IsCurrentApprover:
+                byApprover = true;
+                break;
+
             case DocumentStatus.Submitted:
                 return EditDecision.Deny(EditDenyReason.DocumentSubmitted);
 
@@ -249,7 +273,12 @@ public static class EditRules
             return EditDecision.Deny(EditDenyReason.LockedByOwner);
         }
 
-        return lifted ? EditDecision.AllowViaAssignment() : EditDecision.Allow();
+        if (lifted)
+        {
+            return EditDecision.AllowViaAssignment();
+        }
+
+        return byApprover ? EditDecision.AllowByApprover() : EditDecision.Allow();
     }
 
     /// <summary>

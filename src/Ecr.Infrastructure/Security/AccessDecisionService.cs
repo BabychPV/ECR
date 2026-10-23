@@ -736,7 +736,7 @@ public sealed class AccessDecisionService(
     /// </remarks>
     public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> CanEditSlicesAsync(
         AccessProfile profile, IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct)
-        => SliceDecisionsAsync(profile, tableInstanceIds, ignoreColumnFlags: false, ct);
+        => SliceDecisionsAsync(profile, tableInstanceIds, ignoreColumnFlags: false, approverEdits: true, ct);
 
     /// <inheritdoc />
     /// <remarks>
@@ -750,14 +750,17 @@ public sealed class AccessDecisionService(
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        var all = await SliceDecisionsAsync(profile, [tableInstanceId], ignoreColumnFlags: true, ct)
+        // ⚠ D-442: правка погоджувача — лише ЗНАЧЕННЯ; колір комірок поданого аркуша лишається закритим
+        // (`PatchCellStylesHandler` під блокуванням відмовляє Submitted), тож і рішення без ролі погоджувача.
+        var all = await SliceDecisionsAsync(profile, [tableInstanceId], ignoreColumnFlags: true, approverEdits: false, ct)
             .ConfigureAwait(false);
 
         return all[tableInstanceId];
     }
 
     private async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> SliceDecisionsAsync(
-        AccessProfile profile, IReadOnlyCollection<long> tableInstanceIds, bool ignoreColumnFlags, CancellationToken ct)
+        AccessProfile profile, IReadOnlyCollection<long> tableInstanceIds, bool ignoreColumnFlags, bool approverEdits,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(tableInstanceIds);
@@ -769,7 +772,7 @@ public sealed class AccessDecisionService(
             return result;
         }
 
-        var slices = await SliceContextsAsync(profile, tableInstanceIds, ct).ConfigureAwait(false);
+        var slices = await SliceContextsAsync(profile, tableInstanceIds, approverEdits, ct).ConfigureAwait(false);
 
         foreach (var byPeriod in slices.GroupBy(s => s.Value.PeriodKey))
         {
@@ -850,7 +853,7 @@ public sealed class AccessDecisionService(
     /// </remarks>
     public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> CanEditCellsBatchAsync(
         AccessProfile profile, IReadOnlyCollection<CellsAccessRequest> requests, CancellationToken ct)
-        => CanEditCellsCoreAsync(profile, requests, ignoreColumnFlags: false, ct);
+        => CanEditCellsCoreAsync(profile, requests, ignoreColumnFlags: false, approverEdits: true, ct);
 
     /// <inheritdoc />
     public async Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanClearCellsAsync(
@@ -861,7 +864,8 @@ public sealed class AccessDecisionService(
         ArgumentNullException.ThrowIfNull(addresses);
 
         var all = await CanEditCellsCoreAsync(
-                profile, [new CellsAccessRequest(tableInstanceId, periodKey, addresses)], ignoreColumnFlags: true, ct)
+                profile, [new CellsAccessRequest(tableInstanceId, periodKey, addresses)], ignoreColumnFlags: true,
+                approverEdits: false, ct)
             .ConfigureAwait(false);
 
         return all[tableInstanceId];
@@ -869,7 +873,7 @@ public sealed class AccessDecisionService(
 
     private async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> CanEditCellsCoreAsync(
         AccessProfile profile, IReadOnlyCollection<CellsAccessRequest> requests, bool ignoreColumnFlags,
-        CancellationToken ct)
+        bool approverEdits, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(requests);
@@ -892,7 +896,8 @@ public sealed class AccessDecisionService(
             return result;
         }
 
-        var slices = await SliceContextsAsync(profile, [.. asked.Select(r => r.TableInstanceId)], ct).ConfigureAwait(false);
+        var slices = await SliceContextsAsync(profile, [.. asked.Select(r => r.TableInstanceId)], approverEdits, ct)
+            .ConfigureAwait(false);
 
         foreach (var byPeriod in asked.GroupBy(r => r.PeriodKey))
         {
@@ -1059,7 +1064,9 @@ public sealed class AccessDecisionService(
             return result;
         }
 
-        var slices = await SliceContextsAsync(profile, asked, ct).ConfigureAwait(false);
+        // ⚠ D-442: рядки поданого аркуша погоджувач НЕ створює й не видаляє — правка лише значень
+        // (`CreateRowHandler`/`DeleteRowHandler` під блокуванням відмовляють Submitted).
+        var slices = await SliceContextsAsync(profile, asked, approverEdits: false, ct).ConfigureAwait(false);
 
         foreach (var tableInstanceId in asked)
         {
@@ -1194,6 +1201,7 @@ public sealed class AccessDecisionService(
 
         var decision = EditRules.CanEdit(profile, context);
         var viaAssignment = decision.ViaAssignment;
+        var byApprover = decision.ByApprover;
 
         // ⚠ Правила періоду перевіряються ЛИШЕ там, де решта дозволила.
         // Інакше комірка в закритому періоді доповідала б про вікно дозволу
@@ -1255,6 +1263,13 @@ public sealed class AccessDecisionService(
         if (viaAssignment && decision.IsAllowed)
         {
             decision = decision with { ViaAssignment = true };
+        }
+
+        // ✎ D-442: так само «правка погоджувача» — інакше запис не повторив би перевірку погоджувача
+        // під блокуванням і не поставив би позначку в журнал.
+        if (byApprover && decision.IsAllowed)
+        {
+            decision = decision with { ByApprover = true };
         }
 
         return slice.DocumentHasAssignments ? decision with { AssignmentsPresent = true } : decision;
@@ -1357,6 +1372,11 @@ public sealed class AccessDecisionService(
     /// </summary>
     /// <param name="profile">Профіль прав: чиї передачі зрізу (EA-B) читати.</param>
     /// <param name="tableInstanceIds">Екземпляри таблиць.</param>
+    /// <param name="approverEdits">
+    /// D-442: рахувати для поданих аркушів, чи користувач — погоджувач поточного кроку
+    /// (<see cref="CellAccessContext.IsCurrentApprover"/>). Лише для рішень про ЗНАЧЕННЯ комірок; колір,
+    /// очищення й рядки — без цього (<c>false</c>).
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Екземпляр → умови його зрізу; кожен запитаний екземпляр присутній.</returns>
     /// <remarks>
@@ -1372,7 +1392,7 @@ public sealed class AccessDecisionService(
     /// групи (1, лише коли аркушів більше одного), правила періоду (1–3).
     /// </remarks>
     private async Task<IReadOnlyDictionary<long, SliceContext>> SliceContextsAsync(
-        AccessProfile profile, IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct)
+        AccessProfile profile, IReadOnlyCollection<long> tableInstanceIds, bool approverEdits, CancellationToken ct)
     {
         var ids = tableInstanceIds.Distinct().ToList();
 
@@ -1447,6 +1467,9 @@ public sealed class AccessDecisionService(
                     snapshot.TemplateVersionId, projectId, [.. group.Select(i => i.Id)], periodKey, ct)
                 .ConfigureAwait(false);
 
+            // ✎ D-442: погоджувач поточного кроку — ОДИН раз на поданий аркуш групи, не на комірку.
+            var approverOf = new Dictionary<int, bool>();
+
             foreach (var instance in group)
             {
                 var sheetDefId = sheetOf[instance.Id];
@@ -1458,6 +1481,18 @@ public sealed class AccessDecisionService(
                 // ⚠ D-214: код аркуша — зі знімка, що вже в руках; без нього
                 // роль, звужена аркушами, у рішеннях зрізу не діяла б.
                 var shared = sharedBySheet[sheetDefId] with { SheetCode = SheetCodeOf(snapshot, sheetDefId) };
+
+                if (approverEdits && shared.SheetStatus == DocumentStatus.Submitted)
+                {
+                    if (!approverOf.TryGetValue(sheetDefId, out var isApprover))
+                    {
+                        isApprover = await IsCurrentApproverAsync(profile, documentId, periodKey, shared, ct)
+                            .ConfigureAwait(false);
+                        approverOf[sheetDefId] = isApprover;
+                    }
+
+                    shared = shared with { IsCurrentApprover = isApprover };
+                }
 
                 DelegationFacts? delegation = null;
                 if (assignments.TryGetValue(documentId, out var owned))
@@ -1718,6 +1753,44 @@ public sealed class AccessDecisionService(
                      && sourceColumns.Contains(cell.ColumnDefId)
                select new SourceWindowRow(
                    cell.TableRowId, cell.ColumnDefId, entry.ValidFrom, entry.ValidTo);
+    }
+
+    /// <summary>
+    /// D-442: чи користувач — погоджувач ПОТОЧНОГО кроку маршруту поданого аркуша (те саме рішення,
+    /// що <see cref="CanApproveAsync"/>: видимість, роль кроку, грант <see cref="GrantLevel.Approve"/>).
+    /// </summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="shared">Спільні умови аркуша (код аркуша заповнено).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Одне правило «чия черга» на затвердження, чергу «До погодження» і правку поданого:
+    /// <see cref="EditRules.CanApprove"/> з роллю кроку з <see cref="CurrentApprovalStepAsync"/>.
+    /// Друга копія розійшлася б із першою, і правив би не той, хто погоджує.
+    ///
+    /// ⚠ Маршрут читається ЛИШЕ коли грант на аркуш сягає <see cref="GrantLevel.Approve"/> (чиста перевірка
+    /// без бази): автор із <c>Write</c>/<c>Submit</c> на поданому аркуші не платить жодним запитом.
+    /// </remarks>
+    private async Task<bool> IsCurrentApproverAsync(
+        AccessProfile profile, long documentId, PeriodKey periodKey, CellAccessContext shared, CancellationToken ct)
+    {
+        if (profile.IsSimulation || profile.IsIntegrationWriter)
+        {
+            return false;
+        }
+
+        var sheetContext = shared with { TableDefId = 0, ColumnDefId = 0 };
+        if (DenyIfInvisible(profile, sheetContext) is not null
+            || EditRules.Effective(profile, sheetContext) < GrantLevel.Approve)
+        {
+            return false;
+        }
+
+        var step = await CurrentApprovalStepAsync(documentId, sheetContext.SheetDefId, periodKey, ct)
+            .ConfigureAwait(false);
+
+        return EditRules.CanApprove(profile, sheetContext, step?.RoleId).IsAllowed;
     }
 
     /// <inheritdoc />

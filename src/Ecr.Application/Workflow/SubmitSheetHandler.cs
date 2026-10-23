@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -971,45 +969,18 @@ public sealed class SubmitSheetHandler(
     /// порожнеча, але сюди різниця не проведена, бо шапка й так необов'язкова
     /// в переважній більшості шаблонів).
     /// </remarks>
-    private async Task<string> SnapshotPayloadAsync(
+    private Task<string> SnapshotPayloadAsync(
         long documentId,
         IReadOnlyList<TableInstanceRef> instances,
         PeriodKey periodKey,
         IReadOnlyDictionary<int, string> headerFieldCodes,
         CancellationToken ct)
-    {
         // ⛔ P3 (перф-аудит): ОДИН пакетний запит на всі екземпляри замість
         // запиту на кожен — під винятковим блокуванням аркуша це ~90
-        // послідовних походів у базу на типовому документі. Порядок, у якому
-        // пакет повертає комірки, на payload не впливає: `SubmissionPayload.Write`
-        // сам сортує за (рядок, колонка), тож `ContentHash` для тих самих даних
-        // той самий байт-у-байт. Храповик — `SubmitSheetQueryCountTests`.
-        var cells = new List<CellRecord>();
+        // послідовних походів у базу на типовому документі. Храповик —
+        // `SubmitSheetQueryCountTests`. ✎ D-442: побудова спільна із зрізом
+        // затвердження після правки погоджувача (`SubmissionPayloadSource`).
+        => SubmissionPayloadSource.ReadAsync(cellStore, headers, documentId, instances, periodKey, headerFieldCodes, ct);
 
-        if (instances.Count > 0)
-        {
-            var slices = await cellStore
-                .ReadSlicesAsync([.. instances.Select(i => i.TableInstanceId)], periodKey, ct)
-                .ConfigureAwait(false);
-            foreach (var instance in instances)
-            {
-                if (slices.TryGetValue(instance.TableInstanceId, out var slice))
-                {
-                    cells.AddRange(slice);
-                }
-            }
-        }
-
-        var headerRaw = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);
-        var headerByCode = headerRaw
-            .Where(kv => headerFieldCodes.ContainsKey(kv.Key))
-            .ToDictionary(kv => headerFieldCodes[kv.Key], kv => kv.Value, StringComparer.Ordinal);
-
-        return SubmissionPayload.Write(
-            cells.Where(c => c.Address.PeriodKey.Value == periodKey.Value),
-            headerByCode);
-    }
-
-    private static string Hash(string payload)
-        => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+    private static string Hash(string payload) => SubmissionPayloadSource.Hash(payload);
 }

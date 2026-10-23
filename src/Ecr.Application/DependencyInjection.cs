@@ -211,6 +211,9 @@ public static class DependencyInjection
         // нього має бути одна (`H-23b`).
         services.AddScoped<Reporting.ReportSnapshotSync>();
         services.AddScoped<Workflow.SubmitSheetHandler>();
+
+        // ✎ D-442: блокування аркуша під затвердження й новий зріз після правки погоджувача.
+        services.AddScoped<Workflow.ApprovalSnapshotRefresh>();
         services.AddScoped<Workflow.ApproveSheetHandler>();
         services.AddScoped<Workflow.ReopenDocumentHandler>();
         services.AddScoped<Documents.DeleteDocumentHandler>();

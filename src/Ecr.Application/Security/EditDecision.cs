@@ -43,7 +43,19 @@ public readonly record struct EditDecision(
     /// </summary>
     public bool AssignmentsPresent { get; init; }
 
+    /// <summary>
+    /// D-442: дозвіл на ПОДАНИЙ аркуш дала САМЕ роль погоджувача поточного кроку маршруту
+    /// (<see cref="CellAccessContext.IsCurrentApprover"/>): без неї рішення було б
+    /// <see cref="EditDenyReason.DocumentSubmitted"/>. Запис повторює перевірку погоджувача під
+    /// блокуванням аркуша (крок міг змінитися між рішенням і комітом) і пише в журнал
+    /// походження «правка погоджувача».
+    /// </summary>
+    public bool ByApprover { get; init; }
+
     public static EditDecision Allow() => new(true, EditDenyReason.None);
+
+    /// <summary>Дозволено погоджувачеві поточного кроку правити поданий аркуш (D-442).</summary>
+    public static EditDecision AllowByApprover() => new(true, EditDenyReason.None) { ByApprover = true };
 
     /// <summary>Дозволено завдяки передачі зрізу (підйом <c>Read → Write</c>).</summary>
     public static EditDecision AllowViaAssignment() => new(true, EditDenyReason.None) { ViaAssignment = true };

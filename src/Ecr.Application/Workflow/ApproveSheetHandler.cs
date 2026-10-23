@@ -17,7 +17,11 @@ public sealed class ApproveSheetHandler(
     ICurrentUser currentUser,
     IClock clock,
     IAuditWriter audit,
-    IDocumentStore documents)
+    IDocumentStore documents,
+
+    // ✎ D-442: блокування аркуша під затвердження і новий зріз після правки погоджувача. У проді вприснуте
+    // завжди (`DependencyInjection`); `null` — лише тестові фабрики обробника без сховищ комірок.
+    ApprovalSnapshotRefresh? snapshotRefresh = null)
 {
     /// <summary>Затверджує або відхиляє аркуш.</summary>
     /// <param name="documentId">Документ.</param>
@@ -77,6 +81,14 @@ public sealed class ApproveSheetHandler(
         await uow.ExecuteInTransactionAsync(
             async innerCt =>
             {
+                // ✎ D-442: ВИНЯТКОВЕ блокування аркуша — ПЕРШОЮ дією транзакції (порядок як у подання):
+                // правка погоджувача, що вже пише, зафіксується до зрізу нижче, а нова чекатиме коміту
+                // і під своїм спільним блокуванням побачить новий крок чи `Approved` — і відмову.
+                if (snapshotRefresh is not null)
+                {
+                    await snapshotRefresh.EnterAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
+                }
+
                 var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
 
                 // ⛔ R5-W1 / W1-05 (TOCTOU): роль кроку маршруту — ПІСЛЯ читання
@@ -149,6 +161,14 @@ public sealed class ApproveSheetHandler(
             var step = await access
                 .CurrentApprovalStepAsync(documentId, sheetDefId, key, ct)
                 .ConfigureAwait(false);
+
+            // ✎ D-442: знімок даних — заново при погодженні, якщо погоджувач правив поданий аркуш (зріз
+            // подання його правок не містить). ДО зміни стану: зріз не зберігся — аркуш не погоджено.
+            // Автору на ознайомлення аркуш не повертається.
+            if (snapshotRefresh is not null)
+            {
+                await snapshotRefresh.RefreshAsync(documentId, sheetDefId, key, userId, now, ct).ConfigureAwait(false);
+            }
 
             state.ApproveStep(userId, now, step?.NextStepId);
 

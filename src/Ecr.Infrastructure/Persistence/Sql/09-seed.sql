@@ -9241,6 +9241,9 @@ USING (VALUES
     -- D440:approved-by-submitter ── en: позначка в історії аркуша «погоджено автором подання» (D-440, AN-127); ru/kz — порцією D440:approved-by-submitter нижче ──
     ,(N'workflow.historyApprovedBySubmitter', N'en', N'approved by the submitter', 1)
     -- D440:approved-by-submitter ── кінець секції ──
+    -- D442:approver-edit ── en: позначка журналу «правка погоджувача» (D-442, AN-129); ru/kz — порцією D442:approver-edit нижче ──
+    ,(N'audit.originLabel.ApproverEdit', N'en', N'Approver''s edit before approval', 1)
+    -- D442:approver-edit ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -23993,6 +23996,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- D440:approved-by-submitter ── кінець секції ──
+-- D442:approver-edit ── ru/kz: позначка журналу «правка погоджувача» (D-442); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'audit.originLabel.ApproverEdit', N'ru', N'Правка согласующего до утверждения'),
+    (N'audit.originLabel.ApproverEdit', N'kz', N'Бекітуге дейінгі келісушінің түзетуі')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- D442:approver-edit ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

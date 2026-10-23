@@ -72,6 +72,19 @@ public static class CellChangeOrigins
     public const string ImportOverwrite = "ImportOverwrite";
 
     /// <summary>
+    /// «Правка погоджувача» (D-442): правка в сітці ПОДАНОГО аркуша, яку зробив погоджувач
+    /// поточного кроку маршруту до погодження (аркуш лишається <c>Submitted</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Позначка — власним походженням у <c>aud.CellChange.Origin</c> (<c>nvarchar(32)</c>), без
+    /// міграції — так само, як <see cref="ImportOverwrite"/>. Ставить її СЕРВЕР під блокуванням аркуша
+    /// (<c>PatchCellsHandler</c>), коли рішення дозволило запис саме роллю погоджувача; клієнт заявити
+    /// її не може (<see cref="RequireClientOrigin"/>). Для сторожів «правка людини» — людина
+    /// (<see cref="HumanOriginsSql"/>, <see cref="IsHuman"/>).
+    /// </remarks>
+    public const string ApproverEdit = "ApproverEdit";
+
+    /// <summary>
     /// Походження, які сторожі інтеграції вважають рішенням людини, — готовим
     /// списком для <c>IN (…)</c> у сирому SQL над <c>aud.CellChange</c> (журнал
     /// не є сутністю EF).
@@ -90,7 +103,8 @@ public static class CellChangeOrigins
     /// «людина чи система».
     /// </para>
     /// </remarks>
-    public const string HumanOriginsSql = "N'" + UserEdit + "', N'" + Import + "', N'" + ImportOverwrite + "'";
+    public const string HumanOriginsSql =
+        "N'" + UserEdit + "', N'" + Import + "', N'" + ImportOverwrite + "', N'" + ApproverEdit + "'";
 
     /// <summary>
     /// Чи зробила зміну з цим походженням ЛЮДИНА: <see cref="UserEdit"/>,
@@ -107,7 +121,8 @@ public static class CellChangeOrigins
     public static bool IsHuman(string? origin) =>
         string.Equals(origin, UserEdit, StringComparison.Ordinal)
         || string.Equals(origin, Import, StringComparison.Ordinal)
-        || string.Equals(origin, ImportOverwrite, StringComparison.Ordinal);
+        || string.Equals(origin, ImportOverwrite, StringComparison.Ordinal)
+        || string.Equals(origin, ApproverEdit, StringComparison.Ordinal);
 
     /// <summary>Скільки символів значення повертається в тексті відмови.</summary>
     private const int EchoLength = 32;
