@@ -312,5 +312,134 @@ public sealed class PublishGroupLookupFormulasTests
     public void Фільтр_активності_рядків_над_звичайним_довідником_і_без_фільтра_проходить(string? filter)
         => Ecr.Application.Permits.Groups.PermitGroupRegistryGuard.RequireNotRowActivityTarget(filter);
 
+    // ---- PG-P3b №1: транзитивне замикання (колонка, похідна від колонки-групи) ----
+
+    private static int _nextColumnId = 100;
+
+    /// <summary>Додає до таблиці T7 Decimal-колонку <paramref name="code"/> з формулою колонки <paramref name="expression"/>.</summary>
+    private static void AddDerived(Fixture fixture, string code, string expression)
+    {
+        var column = new ColumnDef(fixture.Table.Id, EcrCode.Create(code), Name(code), 10, CellDataType.Decimal);
+        SetId(column, Interlocked.Increment(ref _nextColumnId));
+        fixture.Table.AddColumn(column);
+        var formula = new FormulaDef(fixture.Table.Id, FormulaScope.Column, expression, ExpressionDialect.Template);
+        fixture.Table.AddFormula(formula);
+        formula.AssignColumn(column.Id);
+    }
+
+    /// <summary>
+    /// Обхід: <c>B = [PermitNumber]</c> копіює id запису групи в B, а <c>REGFIELD([B], ...)</c> читає його за порожнім реєстром групи.
+    /// Мутація: прибрати цикл замикання (<c>do ... while (changed)</c> у <c>CheckGroupLookupFormulas</c>) - червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Пряма_копія_колонки_групи_і_REG_над_копією_відхиляються_з_джерелом()
+    {
+        var fixture = Build(GroupRegistry, "1 + 1");
+        AddDerived(fixture, "B", "[PermitNumber]");
+        AddDerived(fixture, "Out", "REGFIELD([B], 'Limit')");
+
+        var diagnostic = Assert.Single(Check(fixture.Version));
+
+        Assert.Equal("err.ECR-TMPL-0422.lookupGroupNoRegistryForms", diagnostic.MessageKey);
+        Assert.Equal("T7.B", diagnostic.MessageParams!["columnCode"]);
+        Assert.Contains("T7.PermitNumber", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Ланцюжок_A_B_C_відхиляє_REG_над_кінцем_ланцюжка()
+    {
+        var fixture = Build(GroupRegistry, "1 + 1");
+        AddDerived(fixture, "B", "[PermitNumber]");
+        AddDerived(fixture, "C", "[B] + 0");
+        AddDerived(fixture, "Out", "REGFIELD([C], 'Limit')");
+
+        var diagnostic = Assert.Single(Check(fixture.Version));
+
+        Assert.Equal("T7.C", diagnostic.MessageParams!["columnCode"]);
+        Assert.Contains("T7.PermitNumber", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>Цикл між похідними колонками не зависає, а колонка, що походить від групи через цикл, відхиляється.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Цикл_B_C_з_входом_від_групи_не_зависає_і_відхиляється()
+    {
+        var fixture = Build(GroupRegistry, "1 + 1");
+        AddDerived(fixture, "B", "[C]");
+        AddDerived(fixture, "C", "[B] + [PermitNumber]");
+        AddDerived(fixture, "Out", "REGFIELD([B], 'Limit')");
+
+        var diagnostic = Assert.Single(Check(fixture.Version));
+
+        Assert.Equal("T7.B", diagnostic.MessageParams!["columnCode"]);
+    }
+
+    /// <summary>Цикл за участі самої колонки-групи (A &lt;-&gt; B): перевірка завершується.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Цикл_через_саму_колонку_групи_завершується()
+    {
+        var fixture = Build(GroupRegistry, "1 + 1");
+        AddDerived(fixture, "B", "[PermitNumber]");
+        var formula = new FormulaDef(fixture.Table.Id, FormulaScope.Column, "[B]", ExpressionDialect.Template);
+        fixture.Table.AddFormula(formula);
+        formula.AssignColumn(GroupColumnId);
+        AddDerived(fixture, "Out", "REGFIELD([B], 'Limit')");
+
+        var diagnostic = Assert.Single(Check(fixture.Version));
+
+        Assert.Equal("T7.B", diagnostic.MessageParams!["columnCode"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Цикл_колонок_без_зв_язку_з_групою_не_відхиляється_і_не_зависає()
+    {
+        var fixture = Build(GroupRegistry, "1 + 1");
+        AddDerived(fixture, "B", "[C]");
+        AddDerived(fixture, "C", "[B] + [Other]");
+        AddDerived(fixture, "Out", "REGFIELD([B], 'Limit')");
+
+        Assert.Empty(Check(fixture.Version));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Колонка_не_пов_язана_з_групою_і_REG_над_нею_проходять()
+    {
+        var fixture = Build(GroupRegistry, "1 + 1");
+        AddDerived(fixture, "B", "[Other] * 2");
+        AddDerived(fixture, "Out", "REGFIELD([B], 'Limit')");
+
+        Assert.Empty(Check(fixture.Version));
+    }
+
+    /// <summary>Група лише ЧИТАЄТЬСЯ в B, але REG стоїть над іншою (не похідною) колонкою - не відмовляє.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void REG_над_колонкою_що_не_походить_від_групи_проходить_попри_наявність_похідної()
+    {
+        var fixture = Build(GroupRegistry, "1 + 1");
+        AddDerived(fixture, "B", "[PermitNumber]");
+        AddDerived(fixture, "Out", "REGFIELD([Other], 'Limit')");
+
+        Assert.Empty(Check(fixture.Version));
+    }
+
+    /// <summary>Дві форми над тією самою похідною колонкою в різних формулах - одне зауваження на колонку.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Дві_формули_з_REG_над_однією_похідною_колонкою_дають_одне_зауваження()
+    {
+        var fixture = Build(GroupRegistry, "1 + 1");
+        AddDerived(fixture, "B", "[PermitNumber]");
+        AddDerived(fixture, "Out1", "REGFIELD([B], 'A')");
+        AddDerived(fixture, "Out2", "REGFIELD([B], 'B')");
+
+        Assert.Single(Check(fixture.Version));
+    }
+
     private static LocalizedText Name(string value) => new(new Dictionary<string, string> { ["en"] = value });
 }
