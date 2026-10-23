@@ -337,8 +337,8 @@
 **Відкрито (звірено з origin/main 20ae9f1f7):**
 
 - PA3-U-04 - done: `e8200bb89` (#582, мерж 72d9a5353, у origin/main).
-- kz-місяць «2026 M10» (календар/заголовки місяців) - у origin/main виправлення не знайдено; відкрито (виконавець: «Permits»).
-- heading-order (порядок заголовків h1→h2 в екранах Permits) - у origin/main виправлення не знайдено; відкрито (виконавець: «Permits»).
+- kz-місяць «2026 M10» (календар/заголовки місяців) - закрито: виправлено `a2c53d810` (P3-N9, `shared/format/datetime.ts`, `kkMonthsUsable()`), в origin/main і origin/dev/integration; e2e-доказ `e2e/permitsKzHeading.spec.ts` (реальний ICU + емуляція ICU), lane `lane/permits/p3-kz-heading` (`cdde39174`, у lane, чекає зведення).
+- heading-order (порядок заголовків h1→h2 в екранах Permits) - закрито: єдине справжнє порушення (вкладка таблиці порожнього дозволу, EmptyState h4 під h1) - `80d4eb78d` `headingOrder={2}` у `features/permits/permit/TableTab.tsx`; e2e-свіп `cdde39174` по екранах Permits; lane `lane/permits/p3-kz-heading` (у lane, чекає зведення).
 - PM-P3-A - у `src/Ecr.Web/src/features/permits` `ECR-CFG-0422` уже немає (лише `ECR-PRM-0422`), але окремого коміту немає; статус лишається `todo` до підтвердження виконавцем.
 - `DataSourceScheduleTab` - livelock рендера: тест з прогрівом lazy DateInput `1910f2267` (20/20) у origin/main; виконавець: «Аналіз», НЕ «Permits».
 
