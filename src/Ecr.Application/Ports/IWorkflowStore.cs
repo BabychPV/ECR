@@ -207,6 +207,10 @@ public sealed record SubmissionSnapshotRecord(
 /// <param name="At">Момент дії, UTC.</param>
 /// <param name="Reason">Причина відхилення або повернення в роботу.</param>
 /// <param name="StepOrdinal">Крок маршруту, якщо маршрут є.</param>
+/// <param name="ApprovedBySubmitter">
+/// Погодження (<c>Approve</c>/<c>ApproveStep</c>), яке виконав той самий користувач, що й останнє
+/// подання (<c>Submit</c>) цього аркуша за період перед ним (<c>D-440</c>); для інших дій — <c>false</c>.
+/// </param>
 public sealed record ApprovalEventRecord(
     string SheetCode,
     Ecr.Domain.Enums.DocumentStatus FromStatus,
@@ -216,4 +220,5 @@ public sealed record ApprovalEventRecord(
     string? ByDisplayName,
     DateTime At,
     string? Reason,
-    int? StepOrdinal);
+    int? StepOrdinal,
+    bool ApprovedBySubmitter = false);

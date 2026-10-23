@@ -192,7 +192,19 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             orderby e.At descending, e.Id descending
             select new ApprovalEventRecord(
                 sheet.Code, e.FromStatus, e.ToStatus, e.Action, e.ByUserId,
-                user == null ? null : user.DisplayName, e.At, e.Reason, e.StepOrdinal);
+                user == null ? null : user.DisplayName, e.At, e.Reason, e.StepOrdinal,
+                // ⛔ D-440: «погоджено автором подання» — з ЖУРНАЛУ, а не з `ApprovalState.SubmittedByUserId`:
+                // рядок стану тримає лише останнє подання, і після повторного подання іншою людиною стара
+                // подія погодження змінила б позначку заднім числом. Подання — найближче ПЕРЕД цією подією
+                // (`Id` — порядок вставки) того самого аркуша й періоду; той самий запит, без N+1.
+                (e.Action == ApprovalAction.Approve || e.Action == ApprovalAction.ApproveStep)
+                && e.ByUserId != null
+                && db.ApprovalEvents
+                    .Where(s => s.DocumentId == e.DocumentId && s.SheetDefId == e.SheetDefId
+                                && s.PeriodKey == e.PeriodKey && s.Action == ApprovalAction.Submit && s.Id < e.Id)
+                    .OrderByDescending(s => s.Id)
+                    .Select(s => s.ByUserId)
+                    .FirstOrDefault() == e.ByUserId);
 
         return await query.Take(limit).ToListAsync(ct).ConfigureAwait(false);
     }

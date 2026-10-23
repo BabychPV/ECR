@@ -485,38 +485,53 @@ public sealed class SubmitApproveTests
     }
 
     // ──────────────────────────── Погодження ──────────────────────────
-    // F-25 (пряме рішення людини, UX-PASS R4): та сама людина не може бути
-    // тим, хто подав аркуш, і тим, хто його погоджує.
+    // D-440 (BRIEF-1021 П.4): правило чотирьох очей (F-25, D-278) скасоване
+    // безумовно — та сама людина подає й погоджує, якщо роль і грант дають
+    // обидві дії. Межу тримає лише рішення доступу (`CanApproveAsync`).
+
+    /// <summary>
+    /// ⛔ Мутація: повернути заборону самопогодження в <c>ApproveSheetHandler</c> — тест червоний
+    /// (403 замість <c>Approved</c>).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-440")]
+    public async Task D440_той_самий_користувач_подає_і_погоджує_аркуш()
+    {
+        // Той самий користувач (`_user.UserId` == 9) подає аркуш і сам його затверджує.
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+        Assert.Equal(9, _sheets[Water].SubmittedByUserId);
+
+        await Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Approved, _sheets[Water].Status);
+        Assert.Equal(9, _sheets[Water].ApprovedByUserId);
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Finding", "F-25")]
-    [Trait("Decision", "D-278")]
-    public async Task Погодження_власного_подання_відхиляється()
+    [Trait("Decision", "D-440")]
+    public async Task D440_автор_подання_без_права_погодження_як_і_раніше_отримує_відмову()
     {
-        // Той самий користувач (`_user.UserId` == 9), що подав аркуш,
-        // намагається сам його затвердити.
+        // Без ролі відмова лишається: рішення доступу (роль кроку, грант Approve) не змінилось.
         _sheets[Water].Submit(userId: 9, Now);
+        _access.CanApproveAsync(Arg.Any<AccessProfile>(), Document, Water, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+               .Returns(EditDecision.Deny(EditDenyReason.InsufficientGrantLevel, "рівень гранту"));
 
         var error = await Assert.ThrowsAsync<AccessDeniedException>(
             () => Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None));
 
         Assert.Equal("ECR-ACCS-0403", error.ErrorCode);
-        Assert.Equal("err.ECR-ACCS-0403.approveOwnSubmission", error.Details!["messageKey"]);
-
-        // Стан не зрушив: перевірку зупиняє ДО будь-якого запису.
+        Assert.Equal("err.ECR-ACCS-0403.approveDenied", error.Details!["messageKey"]);
         Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Finding", "F-25")]
-    [Trait("Decision", "D-278")]
+    [Trait("Decision", "D-440")]
     public async Task Погодження_подання_іншого_користувача_дозволене()
     {
-        // ⚠ Контроль до тесту вище: наявна поведінка (хтось ІНШИЙ подав,
-        // поточний користувач погоджує) не ламається новим правилом.
         _sheets[Water].Submit(userId: 999, Now);
 
         await Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None);
@@ -527,54 +542,14 @@ public sealed class SubmitApproveTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Finding", "F-25")]
-    [Trait("Decision", "D-278")]
+    [Trait("Decision", "D-440")]
     public async Task Відхилення_власного_подання_дозволене()
     {
-        // ⚠ Заборона стосується лише ЗАТВЕРДЖЕННЯ (`approved: true`):
-        // відхилити власне подання — не конфлікт інтересів, а штатне
-        // повернення собі ж на доопрацювання.
         _sheets[Water].Submit(userId: 9, Now);
 
         await Approve().HandleAsync(Document, Water, Period, approved: false, reason: "помилка у сумі", CancellationToken.None);
 
         Assert.Equal(DocumentStatus.Rejected, _sheets[Water].Status);
-    }
-
-    /// <summary>
-    /// D-278: заборона йде за ОСТАННІМ автором подання, а не за першим. Після
-    /// відхилення й повторного подання іншим користувачем перший автор вже не
-    /// «подавач» і погоджувати може (поточний користувач — 9); нового подавача
-    /// закриває `Погодження_власного_подання_відхиляється`.
-    /// </summary>
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Finding", "F-25")]
-    [Trait("Decision", "D-278")]
-    public async Task Заборона_самопогодження_йде_за_останнім_автором_подання()
-    {
-        _sheets[Water].Submit(userId: 9, Now);
-        _sheets[Water].Reject(userId: 999, "доопрацювати", Now);
-        _sheets[Water].Submit(userId: 999, Now);
-
-        // Автор №2 (999) — останній подавач: самопогодження йому заборонене.
-        _user.UserId.Returns(999);
-        _access.BuildProfileAsync(999, Arg.Any<CancellationToken>()).Returns(Profile());
-
-        var error = await Assert.ThrowsAsync<AccessDeniedException>(
-            () => Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None));
-
-        Assert.Equal("ECR-ACCS-0403", error.ErrorCode);
-        Assert.Equal("err.ECR-ACCS-0403.approveOwnSubmission", error.Details!["messageKey"]);
-        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
-
-        // Автор №1 (9) більше не подавач і погоджує вільно.
-        _user.UserId.Returns(9);
-
-        await Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None);
-
-        Assert.Equal(DocumentStatus.Approved, _sheets[Water].Status);
-        Assert.Equal(9, _sheets[Water].ApprovedByUserId);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]

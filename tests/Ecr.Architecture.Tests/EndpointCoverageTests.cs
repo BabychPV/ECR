@@ -685,7 +685,7 @@ public sealed partial class EndpointCoverageTests
             + "правила довідника (RegistryRuleViolationDto) у редакторі master-detail — відкритий набір сервера."),
         new("features/workflow/sheetDenial.ts", "key", 1, null, [],
             "A2-08: messageKey відмови ECR-ACCS-0403 про аркуш (submitDenied/approveDenied/"
-            + "approveOwnSubmission/reopenDenied) — речення перескладається з назвою аркуша."),
+            + "reopenDenied) — речення перескладається з назвою аркуша."),
         new("features/workflow/sheetDenial.ts", "reasonKey", 1, null, [],
             "A2-08: reasonKey тієї самої відмови (deny.*) — відкритий набір сервера, як WithLocalizedReason."),
 

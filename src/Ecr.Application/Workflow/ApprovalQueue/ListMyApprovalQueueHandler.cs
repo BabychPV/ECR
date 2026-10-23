@@ -19,7 +19,8 @@ namespace Ecr.Application.Workflow.ApprovalQueue;
 /// ⛔ Рішення «чи його черга» — ТЕ САМЕ, що в <see cref="ApproveSheetHandler"/>: <c>EditRules.CanApprove</c>
 /// (видимість проєкту, роль поточного кроку чинного маршруту <c>ApprovalRoute.Resolve</c>, рівень гранта на
 /// аркуш у періоді ≥ <c>Approve</c>, стан <c>Submitted</c>, проєкт не архівний) плюс видимість аркуша читачеві
-/// (як <c>RequireSheetVisibleAsync</c>) і правило чотирьох очей (F-25: власне подання не затвердити).
+/// (як <c>RequireSheetVisibleAsync</c>). Власне подання в черзі ЛИШАЄТЬСЯ: правило чотирьох очей скасоване
+/// (<c>D-440</c>), доступ розподіляють лише ролі.
 /// Друга реалізація правил розійшлася б із першою — користувач бачив би в черзі те, що сервер відмовляється
 /// затвердити.
 ///
@@ -107,7 +108,7 @@ public sealed class ListMyApprovalQueueHandler(
                     snapshots[project.TemplateVersionId] = snapshot;
                 }
 
-                var item = Evaluate(row, project, snapshot, profile, userId, restricted, routes, scopes, resolved);
+                var item = Evaluate(row, project, snapshot, profile, restricted, routes, scopes, resolved);
                 if (item is null)
                 {
                     continue;
@@ -148,18 +149,11 @@ public sealed class ListMyApprovalQueueHandler(
         ApprovalQueueProject project,
         TemplateVersionSnapshot snapshot,
         AccessProfile profile,
-        int userId,
         bool restricted,
         ApprovalQueueRoutes routes,
         Dictionary<int, DocumentReadScope> scopes,
         Dictionary<int, ApprovalRoute?> resolved)
     {
-        // F-25: власне подання викликач затвердити не може (відхилити — може, але це не «чекає погодження»).
-        if (row.SubmittedByUserId == userId)
-        {
-            return null;
-        }
-
         var sheet = snapshot.Sheets.FirstOrDefault(s => s.Id == row.SheetDefId);
         if (sheet is null)
         {

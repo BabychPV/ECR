@@ -1216,9 +1216,6 @@ UPDATE t
     (N'err.ECR-REG-0422.lookupRetargetInUse', N'en', N'The link of field "{fieldCode}" cannot be changed: records already hold values pointing to the current target.', N'The link of field "{fieldCode}" cannot be changed: records already hold values pointing to the current target. Clear or change those values first, then change the link.'),
     (N'err.ECR-REG-0422.lookupRetargetInUse', N'ru', N'Связь поля «{fieldCode}» нельзя изменить: в записях уже есть значения, указывающие на текущий справочник.', N'Связь поля «{fieldCode}» нельзя изменить: в записях уже есть значения, указывающие на текущий справочник. Сначала очистите или измените эти значения, затем меняйте связь.'),
     (N'err.ECR-REG-0422.lookupRetargetInUse', N'kz', N'«{fieldCode}» өрісінің байланысын өзгерту мүмкін емес: жазбаларда ағымдағы анықтамалыққа сілтейтін мәндер бар.', N'«{fieldCode}» өрісінің байланысын өзгерту мүмкін емес: жазбаларда ағымдағы анықтамалыққа сілтейтін мәндер бар. Алдымен осы мәндерді тазалаңыз немесе өзгертіңіз, содан кейін байланысты өзгертіңіз.'),
-    (N'err.ECR-CALC-0409.authorCannotPublish', N'en', N'You are the author of version {version}: a second pair of eyes is required, so another user has to publish it.', N'You are the author of version {version}: a second pair of eyes is required, so another user has to publish it. The author is the user who created the version, not the last editor.'),
-    (N'err.ECR-CALC-0409.authorCannotPublish', N'ru', N'Вы автор версии {version}: требуется вторая пара глаз, поэтому опубликовать её должен другой пользователь.', N'Вы автор версии {version}: требуется вторая пара глаз, поэтому опубликовать её должен другой пользователь. Автор — тот, кто создал версию, а не тот, кто правил её последним.'),
-    (N'err.ECR-CALC-0409.authorCannotPublish', N'kz', N'Сіз {version} нұсқасының авторысыз: екінші тексеруші қажет, сондықтан оны басқа пайдаланушы жариялауы керек.', N'Сіз {version} нұсқасының авторысыз: екінші тексеруші қажет, сондықтан оны басқа пайдаланушы жариялауы керек. Автор — нұсқаны жасаған пайдаланушы, соңғы өңдеген адам емес.'),
     (N'err.ECR-REQ-0429.tooManyRecalculations', N'en', N'Too many recalculation requests in a short time. Wait a moment and try again.', N'Too many recalculation requests in a short time (limit: 6 per minute for one document from one user). Wait a moment and try again.'),
     (N'err.ECR-REQ-0429.tooManyRecalculations', N'ru', N'Слишком много запросов на пересчёт за короткое время. Подождите немного и повторите попытку.', N'Слишком много запросов на пересчёт за короткое время (предел: 6 в минуту на один документ от одного пользователя). Подождите немного и повторите попытку.'),
     (N'err.ECR-REQ-0429.tooManyRecalculations', N'kz', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз.', N'Қысқа уақыт ішінде қайта есептеуге сұраныстар тым көп (шек: бір пайдаланушыдан бір құжат бойынша минутына 6). Біраз күтіп, қайталап көріңіз.'),
@@ -1245,7 +1242,11 @@ UPDATE t
     (N'search.placeholder', N'kz', N'Құжаттар, үлгілер, анықтамалықтар…', N'Экран, құжат кілті немесе әрекет…'),
     -- PERMITS:ui-p3-small PUI-7: приклад назви таблиці в майстрі «Add a table» був англійським у ru/kz.
     (N'permits.editor.dialogs.addTable.namePlaceholder', N'ru', N'Monitoring points', N'Точки мониторинга'),
-    (N'permits.editor.dialogs.addTable.namePlaceholder', N'kz', N'Monitoring points', N'Мониторинг нүктелері')
+    (N'permits.editor.dialogs.addTable.namePlaceholder', N'kz', N'Monitoring points', N'Мониторинг нүктелері'),
+    -- D-440 (AN-127): чотири очі скасовано — свій запит може підтвердити сам ініціатор із грантом Manage.
+    (N'recalcApprovals.requestHint', N'en', N'Another person with Manage access to the project must confirm the request. The approval is valid for 24 hours, can be used once, and only by you.', N'A user with Manage access to the project must confirm the request; if you have that access, you can confirm it yourself. The approval is valid for 24 hours, can be used once, and only by you.'),
+    (N'recalcApprovals.requestHint', N'ru', N'Запрос должен подтвердить другой человек с уровнем доступа «Управление» к проекту. Согласование действует 24 часа, его можно использовать один раз и только вам.', N'Запрос должен подтвердить пользователь с уровнем доступа «Управление» к проекту; если у вас есть этот доступ, вы можете подтвердить его сами. Согласование действует 24 часа, его можно использовать один раз и только вам.'),
+    (N'recalcApprovals.requestHint', N'kz', N'Сұрауды жобаға «Басқару» қолжетімділігі бар басқа адам растауы тиіс. Келісім 24 сағат жарамды, оны бір рет және тек Сіз ғана пайдалана аласыз.', N'Сұрауды жобаға «Басқару» қолжетімділігі бар пайдаланушы растауы тиіс; егер сізде бұл қолжетімділік болса, оны өзіңіз растай аласыз. Келісім 24 сағат жарамды, оны бір рет және тек Сіз ғана пайдалана аласыз.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1327,7 +1328,20 @@ DELETE t
     -- ФВ-6.16: розріз доступу має єдиний підпис `effectiveAccess.hintAll` (довідник, проєкт, аркуш, таблиця, колонка).
     (N'effectiveAccess.hint',                      N'en', N'Pick a registry or a project to see the resulting level and which grant of which role gives it. This only explains the decision; it changes nothing.'),
     (N'effectiveAccess.hint',                      N'ru', N'Выберите справочник или проект, чтобы увидеть итоговый уровень и какой грант какой роли его даёт. Это лишь объяснение решения, ничего не меняется.'),
-    (N'effectiveAccess.hint',                      N'kz', N'Түпкілікті деңгейді және оны қай рөлдің қай гранты беретінін көру үшін анықтамалықты немесе жобаны таңдаңыз. Бұл тек шешімнің түсіндірмесі, ештеңе өзгермейді.')
+    (N'effectiveAccess.hint',                      N'kz', N'Түпкілікті деңгейді және оны қай рөлдің қай гранты беретінін көру үшін анықтамалықты немесе жобаны таңдаңыз. Бұл тек шешімнің түсіндірмесі, ештеңе өзгермейді.'),
+    -- D-440 (AN-127): правило чотирьох очей скасовано — відмов «власне подання / власна версія / власний перерахунок» більше немає.
+    (N'err.ECR-ACCS-0403.approveOwnSubmission', N'en', N'Sheet {sheetDefId} cannot be approved by the same person who submitted it.'),
+    (N'err.ECR-ACCS-0403.approveOwnSubmission', N'ru', N'Лист {sheetDefId} не может утвердить тот же человек, который его подал.'),
+    (N'err.ECR-ACCS-0403.approveOwnSubmission', N'kz', N'{sheetDefId} парағын оны тапсырған адамның өзі бекіте алмайды.'),
+    (N'err.ECR-CALC-0409.authorCannotPublish', N'en', N'You are the author of version {version}: a second pair of eyes is required, so another user has to publish it.'),
+    (N'err.ECR-CALC-0409.authorCannotPublish', N'en', N'You are the author of version {version}: a second pair of eyes is required, so another user has to publish it. The author is the user who created the version, not the last editor.'),
+    (N'err.ECR-CALC-0409.authorCannotPublish', N'ru', N'Вы автор версии {version}: требуется вторая пара глаз, поэтому опубликовать её должен другой пользователь.'),
+    (N'err.ECR-CALC-0409.authorCannotPublish', N'ru', N'Вы автор версии {version}: требуется вторая пара глаз, поэтому опубликовать её должен другой пользователь. Автор — тот, кто создал версию, а не тот, кто правил её последним.'),
+    (N'err.ECR-CALC-0409.authorCannotPublish', N'kz', N'Сіз {version} нұсқасының авторысыз: екінші тексеруші қажет, сондықтан оны басқа пайдаланушы жариялауы керек.'),
+    (N'err.ECR-CALC-0409.authorCannotPublish', N'kz', N'Сіз {version} нұсқасының авторысыз: екінші тексеруші қажет, сондықтан оны басқа пайдаланушы жариялауы керек. Автор — нұсқаны жасаған пайдаланушы, соңғы өңдеген адам емес.'),
+    (N'err.ECR-CALC-0409.ownRecalculationApproval', N'en', N'You cannot approve your own recalculation of a closed period: a second pair of eyes is required.'),
+    (N'err.ECR-CALC-0409.ownRecalculationApproval', N'ru', N'Нельзя подтвердить собственный запрос на пересчёт закрытого периода: требуется вторая пара глаз.'),
+    (N'err.ECR-CALC-0409.ownRecalculationApproval', N'kz', N'Жабық кезеңді қайта есептеуге өз сұрауыңызды өзіңіз растай алмайсыз: екінші тексеруші қажет.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -2069,8 +2083,6 @@ USING (VALUES
     (N'err.ECR-AUTH-0403.noProjectManageGrant', N'en', N'You have no Manage grant on project {projectId}.', 1),
     (N'err.ECR-ACCS-0403.submitDenied',         N'en', N'Sheet {sheetDefId} cannot be submitted: {reason}.', 1),
     (N'err.ECR-ACCS-0403.approveDenied',        N'en', N'Sheet {sheetDefId} cannot be approved or rejected: {reason}.', 1),
-    -- F-25: the same person cannot both submit and approve a sheet (four-eyes rule).
-    (N'err.ECR-ACCS-0403.approveOwnSubmission', N'en', N'Sheet {sheetDefId} cannot be approved by the same person who submitted it.', 1),
     (N'err.ECR-ACCS-0403.reopenDenied',         N'en', N'Sheet {sheetDefId} cannot be returned to work: {reason}.', 1),
     (N'err.ECR-ACCS-0403.addRowDenied',         N'en', N'A row cannot be added to this table: {reason}.', 1),
     (N'err.ECR-SUB-4221.orphanedRows',          N'en', N'The sheet cannot be submitted: {rowCount} row(s) lost their registry entry.', 1),
@@ -2152,9 +2164,6 @@ USING (VALUES
     (N'err.ECR-TMPL-0404.column',               N'en', N'Column {columnDefId} does not exist or has been deleted.', 1),
     (N'err.ECR-CALC-0409.versionNotDraft',      N'en', N'Only a draft methodology version can be deleted; version {version} is {reason}.', 1),
     (N'err.ECR-CALC-0409.versionUsedInCalculations', N'en', N'Methodology version {version} has already been used in calculations and cannot be deleted.', 1),
-    -- D-40: with a neutral code title, the four-eyes refusals carry their own detail.
-    (N'err.ECR-CALC-0409.authorCannotPublish',  N'en', N'You are the author of version {version}: a second pair of eyes is required, so another user has to publish it. The author is the user who created the version, not the last editor.', 1),
-    (N'err.ECR-CALC-0409.ownRecalculationApproval', N'en', N'You cannot approve your own recalculation of a closed period: a second pair of eyes is required.', 1),
     -- Round 3 of the localization debt (Methodology authoring): container code
     -- clash, ambiguous constant narrowing, clone source mismatch, version
     -- number/effective-date clashes, draft-only edits, and child ownership.
@@ -6306,7 +6315,7 @@ USING (VALUES
     (N'recalcApprovals.empty', N'en', N'No open recalculation approvals.', 1),
     (N'recalcApprovals.request', N'en', N'Request recalculation', 1),
     (N'recalcApprovals.requestTitle', N'en', N'Request recalculation of closed period {period}', 1),
-    (N'recalcApprovals.requestHint', N'en', N'Another person with Manage access to the project must confirm the request. The approval is valid for 24 hours, can be used once, and only by you.', 1),
+    (N'recalcApprovals.requestHint', N'en', N'A user with Manage access to the project must confirm the request; if you have that access, you can confirm it yourself. The approval is valid for 24 hours, can be used once, and only by you.', 1),
     (N'recalcApprovals.requested', N'en', N'Recalculation request sent for confirmation.', 1),
     (N'recalcApprovals.reason', N'en', N'Reason', 1),
     (N'recalcApprovals.period', N'en', N'Period', 1),
@@ -9223,6 +9232,9 @@ USING (VALUES
     -- PERMITS: ui-p3-small ── en: KI-04 підказка мінімальної довжини причини в End early; ru/kz — порцією PERMITS: ui-p3-small нижче ──
     ,(N'permits.endEarly.minLengthHint', N'en', N'Enter at least {min} characters.', 1)
     -- PERMITS: ui-p3-small ── кінець секції ──
+    -- D440:approved-by-submitter ── en: позначка в історії аркуша «погоджено автором подання» (D-440, AN-127); ru/kz — порцією D440:approved-by-submitter нижче ──
+    ,(N'workflow.historyApprovedBySubmitter', N'en', N'approved by the submitter', 1)
+    -- D440:approved-by-submitter ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -9703,7 +9715,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-AUTH-0403.noProjectManageGrant', N'ru', N'У вас нет доступа уровня Manage к проекту {projectId}.'),
     (N'err.ECR-ACCS-0403.submitDenied', N'ru', N'Лист {sheetDefId} нельзя подать: {reason}.'),
     (N'err.ECR-ACCS-0403.approveDenied', N'ru', N'Лист {sheetDefId} нельзя утвердить или вернуть в работу: {reason}.'),
-    (N'err.ECR-ACCS-0403.approveOwnSubmission', N'ru', N'Лист {sheetDefId} не может утвердить тот же человек, который его подал.'),
     (N'err.ECR-ACCS-0403.reopenDenied', N'ru', N'Лист {sheetDefId} нельзя вернуть в работу: {reason}.'),
     (N'err.ECR-ACCS-0403.addRowDenied', N'ru', N'В эту таблицу нельзя добавить строку: {reason}.'),
     (N'err.ECR-SUB-4221.orphanedRows', N'ru', N'Лист нельзя подать: строки потеряли запись справочника (строк: {rowCount}).'),
@@ -9767,8 +9778,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-TMPL-0404.column', N'ru', N'Столбец {columnDefId} не существует или удалён.'),
     (N'err.ECR-CALC-0409.versionNotDraft', N'ru', N'Удалить можно только черновую версию методики; версия {version} — {reason}.'),
     (N'err.ECR-CALC-0409.versionUsedInCalculations', N'ru', N'Версия методики {version} уже использовалась в расчётах и не может быть удалена.'),
-    (N'err.ECR-CALC-0409.authorCannotPublish', N'ru', N'Вы автор версии {version}: требуется вторая пара глаз, поэтому опубликовать её должен другой пользователь. Автор — тот, кто создал версию, а не тот, кто правил её последним.'),
-    (N'err.ECR-CALC-0409.ownRecalculationApproval', N'ru', N'Нельзя подтвердить собственный запрос на пересчёт закрытого периода: требуется вторая пара глаз.'),
     (N'err.ECR-CALC-0409.codeTaken', N'ru', N'Код методики «{code}» уже используется методикой {existingId}.'),
     (N'err.ECR-CALC-0409.constantVariantsAmbiguous', N'ru', N'У константы «{constantCode}» в версии {methodologyVersionId} есть суженные варианты ({variantCount}): по одному коду нельзя понять, какой из них редактировать.'),
     (N'err.ECR-CALC-0409.versionWrongMethodology', N'ru', N'Версия {versionId} принадлежит методике {sourceMethodologyId}, а не {targetMethodologyId}: её нельзя клонировать сюда.'),
@@ -12322,7 +12331,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'recalcApprovals.empty', N'ru', N'Нет открытых согласований пересчёта.'),
     (N'recalcApprovals.request', N'ru', N'Запросить пересчёт'),
     (N'recalcApprovals.requestTitle', N'ru', N'Запрос пересчёта закрытого периода {period}'),
-    (N'recalcApprovals.requestHint', N'ru', N'Запрос должен подтвердить другой человек с уровнем доступа «Управление» к проекту. Согласование действует 24 часа, его можно использовать один раз и только вам.'),
+    (N'recalcApprovals.requestHint', N'ru', N'Запрос должен подтвердить пользователь с уровнем доступа «Управление» к проекту; если у вас есть этот доступ, вы можете подтвердить его сами. Согласование действует 24 часа, его можно использовать один раз и только вам.'),
     (N'recalcApprovals.requested', N'ru', N'Запрос на пересчёт отправлен на подтверждение.'),
     (N'recalcApprovals.reason', N'ru', N'Причина'),
     (N'recalcApprovals.period', N'ru', N'Период'),
@@ -12738,7 +12747,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-AUTH-0403.noProjectManageGrant', N'kz', N'Сізде {projectId} жобасына Manage деңгейіндегі қолжетімділік жоқ.'),
     (N'err.ECR-ACCS-0403.submitDenied', N'kz', N'{sheetDefId} парағын тапсыруға болмайды: {reason}.'),
     (N'err.ECR-ACCS-0403.approveDenied', N'kz', N'{sheetDefId} парағын бекітуге немесе жұмысқа қайтаруға болмайды: {reason}.'),
-    (N'err.ECR-ACCS-0403.approveOwnSubmission', N'kz', N'{sheetDefId} парағын оны тапсырған адамның өзі бекіте алмайды.'),
     (N'err.ECR-ACCS-0403.reopenDenied', N'kz', N'{sheetDefId} парағын жұмысқа қайтаруға болмайды: {reason}.'),
     (N'err.ECR-ACCS-0403.addRowDenied', N'kz', N'Бұл кестеге жол қосуға болмайды: {reason}.'),
     (N'err.ECR-SUB-4221.orphanedRows', N'kz', N'Парақты тапсыруға болмайды: {rowCount} жол анықтамалық жазбасынан айырылды.'),
@@ -12802,8 +12810,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-TMPL-0404.column', N'kz', N'{columnDefId} бағаны жоқ немесе жойылған.'),
     (N'err.ECR-CALC-0409.versionNotDraft', N'kz', N'Тек әдістеменің нобай нұсқасын жоюға болады; {version} нұсқасы — {reason}.'),
     (N'err.ECR-CALC-0409.versionUsedInCalculations', N'kz', N'{version} әдістеме нұсқасы есептеулерде қолданылған, оны жоюға болмайды.'),
-    (N'err.ECR-CALC-0409.authorCannotPublish', N'kz', N'Сіз {version} нұсқасының авторысыз: екінші тексеруші қажет, сондықтан оны басқа пайдаланушы жариялауы керек. Автор — нұсқаны жасаған пайдаланушы, соңғы өңдеген адам емес.'),
-    (N'err.ECR-CALC-0409.ownRecalculationApproval', N'kz', N'Жабық кезеңді қайта есептеуге өз сұрауыңызды өзіңіз растай алмайсыз: екінші тексеруші қажет.'),
     (N'err.ECR-CALC-0409.codeTaken', N'kz', N'«{code}» әдістеме кодын {existingId} әдістемесі пайдаланып отыр.'),
     (N'err.ECR-CALC-0409.constantVariantsAmbiguous', N'kz', N'{methodologyVersionId} нұсқасында «{constantCode}» константасының {variantCount} тарылтылған варианты бар: тек код бойынша қайсысын өңдеу керектігі белгісіз.'),
     (N'err.ECR-CALC-0409.versionWrongMethodology', N'kz', N'{versionId} нұсқасы {targetMethodologyId} әдістемесіне емес, {sourceMethodologyId} әдістемесіне тиесілі: оны мұнда клондауға болмайды.'),
@@ -15357,7 +15363,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'recalcApprovals.empty', N'kz', N'Қайта есептеудің ашық келісімдері жоқ.'),
     (N'recalcApprovals.request', N'kz', N'Қайта есептеуді сұрау'),
     (N'recalcApprovals.requestTitle', N'kz', N'{period} жабық кезеңін қайта есептеуді сұрау'),
-    (N'recalcApprovals.requestHint', N'kz', N'Сұрауды жобаға «Басқару» қолжетімділігі бар басқа адам растауы тиіс. Келісім 24 сағат жарамды, оны бір рет және тек Сіз ғана пайдалана аласыз.'),
+    (N'recalcApprovals.requestHint', N'kz', N'Сұрауды жобаға «Басқару» қолжетімділігі бар пайдаланушы растауы тиіс; егер сізде бұл қолжетімділік болса, оны өзіңіз растай аласыз. Келісім 24 сағат жарамды, оны бір рет және тек Сіз ғана пайдалана аласыз.'),
     (N'recalcApprovals.requested', N'kz', N'Қайта есептеу сұрауы растауға жіберілді.'),
     (N'recalcApprovals.reason', N'kz', N'Себеп'),
     (N'recalcApprovals.period', N'kz', N'Кезең'),
@@ -23955,6 +23961,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: ui-p3-small ── кінець секції ──
+-- D440:approved-by-submitter ── ru/kz: позначка «погоджено автором подання» в історії аркуша (D-440); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'workflow.historyApprovedBySubmitter', N'ru', N'утверждено автором подачи'),
+    (N'workflow.historyApprovedBySubmitter', N'kz', N'тапсырған автор бекітті')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- D440:approved-by-submitter ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

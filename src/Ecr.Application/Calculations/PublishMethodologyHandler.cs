@@ -82,14 +82,6 @@ public sealed class PublishMethodologyHandler(
 
         var version = methodology.Versions.Single(v => v.Id == methodologyVersionId);
 
-        // ⛔ F-14 (четвертий раунд UX): «чотири ока» — ПЕРШОЮ відмовою, до золотого
-        // набору. Правило живе в домені (`MethodologyVersion.Publish`), але той
-        // стоїть у самому кінці, і автор, що публікує свою версію, спершу
-        // отримував відмову золотого тесту («Period not found · ECR-PRD-0404»), а
-        // про справжню причину дізнавався лише після того, як виправляв тести.
-        // Доменну перевірку не знято: вона лишається останньою лінією.
-        RejectAuthor(version, userId);
-
         // ⛔ Дата набуття чинності обов'язкова і перевіряється ПЕРШОЮ. Без неї
         // версія не має місця в часі: незрозуміло, які періоди рахувати нею, а
         // які — попередньою, і `VersionOn` не має відповіді. У схемі це
@@ -923,33 +915,6 @@ public sealed class PublishMethodologyHandler(
                     ["problems"] = problems,
                 });
         }
-    }
-
-    /// <summary>Автор версії не публікує її сам (<c>D-40</c>, F-14).</summary>
-    /// <param name="version">Версія, яку публікують.</param>
-    /// <param name="userId">Хто публікує.</param>
-    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0409</c>, <c>authorCannotPublish</c>.</exception>
-    /// <remarks>
-    /// ⚠ Лише для чернетки: повторна публікація опублікованої версії — інша
-    /// відмова (<c>RequireDraft</c> домену), і підміняти її «чотирма очима»
-    /// означало б назвати не ту причину.
-    /// </remarks>
-    private static void RejectAuthor(MethodologyVersion version, int userId)
-    {
-        if (version.IsPublished || version.CreatedByUserId != userId)
-        {
-            return;
-        }
-
-        throw new BusinessRuleException(
-            "ECR-CALC-0409",
-            $"Користувач {userId.ToString(CultureInfo.InvariantCulture)} є автором версії {version.Version} "
-            + "і не може її опублікувати (правило чотирьох очей, D-40).",
-            new Dictionary<string, object?>
-            {
-                ["messageKey"] = "err.ECR-CALC-0409.authorCannotPublish",
-                ["version"] = version.Version,
-            });
     }
 
     /// <summary>Кожен тест золотого набору має справжній період (B-13).</summary>

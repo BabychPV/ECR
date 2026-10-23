@@ -10,7 +10,8 @@ namespace Ecr.Domain.Entities.Calculations;
 /// <remarks>
 /// ⛔ Аудит безпеки S1. Доти «друга людина» була полем <c>approvedByUserId</c>
 /// у тілі запиту перерахунку: ініціатор вписував будь-кого. Тепер погодження —
-/// окремий запис: створює ініціатор, підтверджує ІНША людина власною сесією,
+/// окремий запис: створює ініціатор, підтверджує власною сесією користувач із
+/// грантом Manage (ним може бути й сам ініціатор — <c>D-440</c> скасував чотири очі),
 /// використати можна один раз, лише ініціатору, лише для цього проєкту й
 /// періоду, і не пізніше <see cref="ExpiresAt"/>.
 /// <para>
@@ -82,7 +83,7 @@ public sealed class RecalculationApproval : Entity<long>
     public DateTime RequestedAt { get; private set; }
     public DateTime ExpiresAt { get; private set; }
 
-    /// <summary>Хто підтвердив; <c>null</c> — ще чекає. Ніколи не ініціатор (CHECK у базі).</summary>
+    /// <summary>Хто підтвердив; <c>null</c> — ще чекає. Може збігатися з ініціатором (<c>D-440</c>).</summary>
     public int? ConfirmedByUserId { get; private set; }
 
     public DateTime? ConfirmedAt { get; private set; }

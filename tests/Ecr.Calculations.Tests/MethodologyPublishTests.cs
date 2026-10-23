@@ -109,26 +109,35 @@ public sealed class MethodologyPublishTests
                .Returns(call => Output(call.Arg<CalculationInput>(), 0.912688m));
     }
 
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    public async Task Публікація_автором_останньої_правки_відхиляється_ECR_CALC_0409()
+    /// <remarks>
+    /// D-440: правило чотирьох очей скасоване — автор версії публікує її сам, якщо має право
+    /// <c>Calculation.Publish</c>. Мутація: повернути відмову автору в обробник або перевірку
+    /// автора в <c>MethodologyVersion.Publish</c> — <c>ECR-CALC-0409</c> замість публікації, тест червоний.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)] [Trait("Decision", "D-440")]
+    public async Task D440_автор_версії_публікує_її_сам()
     {
         _user.UserId.Returns(Author);
+        _access.BuildProfileAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+               .Returns(AuthorProfile("Calculation.Publish"));
+        Assert.Equal(Author, _version.CreatedByUserId);
 
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+        await Handler().HandleAsync(VersionId, "Уточнено коефіцієнт", From, CancellationToken.None);
+
+        Assert.True(_version.IsPublished);
+        Assert.Equal(Author, _version.PublishedByUserId);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)] [Trait("Decision", "D-440")]
+    public async Task D440_автор_без_права_Calculation_Publish_як_і_раніше_отримує_відмову()
+    {
+        _user.UserId.Returns(Author);
+        _access.BuildProfileAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+               .Returns(AuthorProfile("Calculation.Edit"));
+
+        await Assert.ThrowsAsync<AccessDeniedException>(
             () => Handler().HandleAsync(VersionId, "Уточнено коефіцієнт", From, CancellationToken.None));
 
-        // ⛔ Той, хто писав формулу, дивиться на неї як автор і саме тому не
-        // бачить у ній того, що побачить інший. Правило тримається системно —
-        // і в базі теж (CK_MV_FourEyes), а не інструкцією (D-40).
-        Assert.Equal("ECR-CALC-0409", error.ErrorCode);
-        Assert.Equal("err.ECR-CALC-0409.authorCannotPublish", error.Details!["messageKey"]);
-
-        // ⛔ F-14 (четвертий раунд UX): «чотири ока» — ПЕРШОЮ відмовою. Золотий
-        // набір автора не проганяється взагалі: доти він біг раніше і відповідав
-        // «Period not found», а про справжню причину автор дізнавався останнім.
-        // Мутація: прибрати `RejectAuthor` з обробника — відмова приходить від
-        // домену (`DomainException`) уже ПІСЛЯ прогону модуля, тест червоний.
-        await _module.DidNotReceiveWithAnyArgs().ExecuteAsync(default!, default);
         Assert.False(_version.IsPublished);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
@@ -674,6 +683,18 @@ public sealed class MethodologyPublishTests
 
         Assert.True(_version.IsPublished);
     }
+
+    /// <summary>Профіль автора версії з названим правом (D-440: розподіляють лише ролі).</summary>
+    private static AccessProfile AuthorProfile(string permission) => new()
+    {
+        CacheKey = "p-author",
+        UserId = Author,
+        SecurityStamp = "s",
+        Permissions = new HashSet<string>(StringComparer.Ordinal) { permission },
+        Grants = new Dictionary<string, GrantLevel>(),
+        Denies = new HashSet<string>(),
+        RoleIds = new HashSet<int>(),
+    };
 
     /// <summary>Профіль із небезпечним правом публікації методології.</summary>
     private static AccessProfile Profile() => new()

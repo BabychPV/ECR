@@ -128,8 +128,9 @@ public sealed class MethodologyVersion : Entity<int>
     }
 
     /// <summary>
-    /// Публікація. **Чотири очі** (D-40): публікувати власну правку заборонено
-    /// системно, а не інструкцією.
+    /// Публікація. Хто може публікувати, вирішують лише ролі (право
+    /// <c>Calculation.Publish</c>): правило чотирьох очей скасоване (<c>D-440</c>),
+    /// і автор версії публікує її сам.
     /// </summary>
     /// <param name="publishedByUserId">Хто публікує.</param>
     /// <param name="changeReason">Причина зміни; обов'язкова (ФВ-14.7).</param>
@@ -137,8 +138,7 @@ public sealed class MethodologyVersion : Entity<int>
     /// <param name="testsPassed">Чи зелений останній прогін тестів (ФВ-9.12).</param>
     /// <param name="utcNow">Час публікації в UTC.</param>
     /// <exception cref="DomainException">
-    /// <c>ECR-CALC-0409</c> — публікує автор; <c>ECR-CALC-0422</c> — немає
-    /// зеленого тесту або порожня причина.
+    /// <c>ECR-CALC-0422</c> — немає зеленого тесту або порожня причина.
     /// </exception>
     /// <remarks>
     /// Перевірку перетину вікон робить <see cref="Methodology.PublishVersion"/>:
@@ -153,25 +153,6 @@ public sealed class MethodologyVersion : Entity<int>
         DateTime utcNow)
     {
         RequireDraft("публікацію");
-
-        // ⛔ Чотири очі. Це не бюрократія: публікація версії методології —
-        // найнебезпечніша операція в системі, бо змінює вже подані числа. Той,
-        // хто писав формулу, дивиться на неї як автор, і саме тому не бачить
-        // у ній того, що побачить інший.
-        if (publishedByUserId == CreatedByUserId)
-        {
-            // Власний messageKey обов'язковий: заголовок коду нейтральний, і без
-            // подробиці людина не дізналась би, що відмовило саме правило D-40.
-            throw new DomainException(
-                "ECR-CALC-0409",
-                $"Користувач {publishedByUserId} є автором версії {Version} і не може її опублікувати "
-                + "(правило чотирьох очей, D-40).",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-CALC-0409.authorCannotPublish",
-                    ["version"] = Version,
-                });
-        }
 
         // Причина обов'язкова (ФВ-14.7). Порожній рядок і пробіли — те саме,
         // що її відсутність: за півроку «оновлення» пояснює рівно нічого.
