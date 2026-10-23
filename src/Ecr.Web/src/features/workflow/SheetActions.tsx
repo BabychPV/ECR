@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Divider, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -14,7 +14,6 @@ import type {
 } from '@/api/types';
 import { allSheetsLocked, locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
 import { invalidateSlices } from '@/features/grid/sliceCache';
-import { JobFailure } from '@/features/jobs/JobFacts';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { LazyConfirmModal, LazyReasonModal } from './lazyDialogs';
 import { Hint } from '@/shared/ui/Hint';
@@ -29,6 +28,12 @@ import { isAllowed, type WorkflowAction } from './transitions';
 import { t } from '@/shared/i18n';
 import { formatPeriodKey } from '@/shared/format';
 import { DisabledReason } from '@/features/common/DisabledReason';
+
+/**
+ * Причина невдалого перерахунку в тості — окремим чанком (`D-132`): з'являється лише на відмові
+ * фонової задачі, а `SheetActions` сидить у бюджеті `DocumentPage`/`PeriodsPage`.
+ */
+const JobFailure = lazy(async () => ({ default: (await import('@/features/jobs/JobFacts')).JobFailure }));
 
 /**
  * Відмова дії над аркушем — з назвою аркуша (A2-08), окремим чанком.
@@ -707,11 +712,13 @@ export function useSheetActions({
       color: 'statusError',
       title: t('workflow.recalcFailed'),
       message: (
-        <JobFailure
-          state="Failed"
-          errorCode={recalcJob.data?.errorCode}
-          correlationId={recalcJob.data?.correlationId}
-        />
+        <Suspense fallback={null}>
+          <JobFailure
+            state="Failed"
+            errorCode={recalcJob.data?.errorCode}
+            correlationId={recalcJob.data?.correlationId}
+          />
+        </Suspense>
       ),
     });
   }, [recalc, outcome, recalcJob.data?.errorCode, recalcJob.data?.correlationId, queryClient]);

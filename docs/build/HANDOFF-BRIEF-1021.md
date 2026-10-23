@@ -16,6 +16,16 @@
 
 Актуальний стан кожного рядка — у `WORK-QUEUE.md` (статус `todo` → `doing (гілка)` → `done (хеш)`), а не тут.
 
+## Борги клієнта після брифу (`lane/integ-debt-client`)
+
+| Борг | Було | Стало | Як |
+|---|---|---|---|
+| Бюджет маршруту `DocumentPage` (`D-132`, межа 250 КБ gzip) | 249.5 КБ (запас 0.5) | **237.8 КБ** (запас 12.2) | з графа маршруту винесено: модуль правок сітки (`edits`/буфер/округлення/права — автозбереженню треба лише `knownVersions.ts`), хук сітки й стеження за перерахунком (`cellPatchRequest.ts` — те, що треба автозбереженню), шторку `DetailDrawer` (пункт «Edit access» читає `?panel=` напряму), діалог зміни ключа (`BusinessKeyChangeDialog`, лінивий), кнопку експорту (монтується з першим запуском, `exportFormat.ts` — пункти меню), банер «результати застаріли», причину невдалого перерахунку в тості (`JobFailure`), модель інспектора (`headerFinding.ts`). Поведінка та сама |
+| Побічно | `PeriodsPage` 241.0 | 240.1 | той самий `SheetActions` (`JobFailure` лінивий) |
+| Позначка «погоджено автором подання» (`D-440`) лише в «More → History» | — | і в швидкому перегляді документа («Latest changes», три останні події), той самий ключ `workflow.historyApprovedBySubmitter` | `DocumentQuickLook.tsx`, тест `DocumentsPage.quickLook.test.tsx` |
+
+Найближчі до межі після цього — `PermitGroupsPage` 247.4 і `RegistryDataPage` 246.9 КБ: наступний кандидат на той самий розбір.
+
 ## Як продовжити на іншому ПК
 
 1. `git fetch origin`; подивитись, які з `lane/integ-brief1021-*` існують і їхній CI: `gh run list -R BabychPV/ECR -b <lane> -L 5`.

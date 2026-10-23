@@ -1,11 +1,10 @@
-import { lazy, Suspense, useRef, type JSX, type ReactNode, type RefObject } from 'react';
+import { lazy, Suspense, useRef, useState, type JSX, type ReactNode, type RefObject } from 'react';
 import { Button, Menu, Text } from '@mantine/core';
-import { ExportButton, exportFormatOptions, type ExportFormat } from '@/features/export/ExportButton';
+import { exportFormatOptions, type ExportFormat } from '@/features/export/exportFormat';
 import { RecalculateKbd, submitLabel, useSheetActions, type SheetActionsModel } from '@/features/workflow/SheetActions';
 import type { DocumentLock } from './documentLock';
 import { DocumentSheetBanner } from './DocumentSheetBanner';
 import { DocumentToolbar } from './DocumentToolbar';
-import { StaleResultsBanner } from './StaleResultsBanner';
 import { useStaleResultsReminder, type StaleReminderState } from './useStaleResultsReminder';
 import { t } from '@/shared/i18n';
 
@@ -14,6 +13,11 @@ import { t } from '@/shared/i18n';
 // ✎ D-441: вибір періоду подання — окремим чанком (бюджет маршруту `D-132`); потрібен лише коли неподаних кілька.
 const SubmitPeriodPicker = lazy(async () => ({ default: (await import('./SubmitPeriodPicker')).SubmitPeriodPicker }));
 const ImportPanel = lazy(async () => ({ default: (await import('@/features/import/ImportPanel')).ImportPanel }));
+// Банер «результати застаріли» — лише коли сервер так каже (`resultsStale === true`), тож окремим чанком (`D-132`).
+const StaleResultsBanner = lazy(async () => ({ default: (await import('./StaleResultsBanner')).StaleResultsBanner }));
+// Експорт (задача, опитування, тост із посиланням) — окремим чанком, з першим запуском (`D-132`).
+const loadExportButton = () => import('@/features/export/ExportButton');
+const ExportButton = lazy(async () => ({ default: (await loadExportButton()).ExportButton }));
 
 /** Що сторінка знає про документ і аркуш для рядка дій. */
 interface DocumentActionBarProps {
@@ -84,7 +88,7 @@ export function DocumentActionBar({
   const actions = useSheetActions({ documentId, sheetDefId, sheetName, periodKey, state, lock });
   useStaleResultsReminder(documentId, resultsStale === true, actions.recalculate !== null, staleReminderHost);
   const openImport = useRef<((returnTo?: HTMLElement | null) => void) | null>(null);
-  const startExport = useRef<((format: ExportFormat) => void) | null>(null);
+  const startExport = useExportStarter();
 
   const showImport = canImport && !readOnly;
 
@@ -120,7 +124,11 @@ export function DocumentActionBar({
       ? [
           <Menu.Label key="export-label">{t('document.export')}</Menu.Label>,
           ...exportFormatOptions().map((option) => (
-            <Menu.Item key={`export-${option.value}`} onClick={() => startExport.current?.(option.value)}>
+            <Menu.Item
+              key={`export-${option.value}`}
+              onClick={() => startExport.start(option.value)}
+              onPointerEnter={() => void loadExportButton()}
+            >
               {option.label}
             </Menu.Item>
           )),
@@ -188,14 +196,16 @@ export function DocumentActionBar({
           <>
             {status}
             {/* Задача експорту триває — «Building…» тут, поруч зі станом. */}
-            {canExport && (
-              <ExportButton
-                documentId={documentId}
-                periodKey={periodKey}
-                language={language}
-                withTrigger={false}
-                startRef={startExport}
-              />
+            {canExport && startExport.mounted && (
+              <Suspense fallback={null}>
+                <ExportButton
+                  documentId={documentId}
+                  periodKey={periodKey}
+                  language={language}
+                  withTrigger={false}
+                  startRef={startExport.ref}
+                />
+              </Suspense>
             )}
           </>
         }
@@ -236,7 +246,9 @@ export function DocumentActionBar({
 
       {/* ✎ resultsStale: входи змінилися після прогону - банер і кнопка «Recalculate» (автоперерахунку немає). */}
       {resultsStale === true && (
-        <StaleResultsBanner since={resultsStaleSince ?? null} recalculate={actions.recalculate} />
+        <Suspense fallback={null}>
+          <StaleResultsBanner since={resultsStaleSince ?? null} recalculate={actions.recalculate} />
+        </Suspense>
       )}
 
       {showImport && (
@@ -248,6 +260,59 @@ export function DocumentActionBar({
       {actions.dialogs}
     </>
   );
+}
+
+/**
+ * «Почати експорт у формат» для пунктів «More», коли сама кнопка експорту — лінивий чанк (`D-132`).
+ *
+ * ⚠ До першого запуску `ExportButton` не змонтована (стежити ще нема за чим): пункт меню запам'ятовує
+ * формат і монтує її, а щойно кнопка покладе свій запуск у `ref` (ефект `ExportButton`), запам'ятований
+ * формат іде в нього — рівно один раз. Далі кнопка лишається змонтованою: задача, «Building…» і тост
+ * живуть у ній, як і доти.
+ */
+function useExportStarter(): {
+  readonly mounted: boolean;
+  readonly ref: { current: ((format: ExportFormat) => void) | null };
+  readonly start: (format: ExportFormat) => void;
+} {
+  const [mounted, setMounted] = useState(false);
+  const [state] = useState(() => {
+    let current: ((format: ExportFormat) => void) | null = null;
+    let queued: ExportFormat | null = null;
+
+    const ref = {
+      get current(): ((format: ExportFormat) => void) | null {
+        return current;
+      },
+      set current(next: ((format: ExportFormat) => void) | null) {
+        current = next;
+        if (next === null || queued === null) return;
+
+        const format = queued;
+        queued = null;
+        next(format);
+      },
+    };
+
+    const enqueue = (format: ExportFormat): boolean => {
+      if (current !== null) {
+        current(format);
+        return true;
+      }
+      queued = format;
+      return false;
+    };
+
+    return { ref, enqueue };
+  });
+
+  return {
+    mounted,
+    ref: state.ref,
+    start: (format) => {
+      if (!state.enqueue(format)) setMounted(true);
+    },
+  };
 }
 
 /**
