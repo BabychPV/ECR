@@ -413,6 +413,22 @@ public sealed class PatchCellsLookupValidityTests
             System.Text.Json.JsonSerializer.Serialize(denied.Details));
     }
 
+    /// <summary>
+    /// S18 (час, P3-1): відмова за Deny/чужим довідником настає ДО читання меж періоду - як і «запису немає» - тож
+    /// відповідь не коштує ще одного запиту. Мутація: повернути <c>FindPeriodBoundsAsync</c> перед <c>CheckLookupsBelong</c> - червоніє.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG-DENY")]
+    public async Task Пряма_ціль_під_Deny_відмова_до_читання_меж_періоду()
+    {
+        DenyRegistry(ColumnRegistryDefId);
+        Entry(registryDefId: ColumnRegistryDefId);
+        _periods.ClearReceivedCalls();
+
+        await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+
+        await _periods.DidNotReceiveWithAnyArgs().FindPeriodBoundsAsync(default, default, default);
+    }
+
     /// <summary>Deny на видалений/нечинний запис прямої цілі не розкриває причину: теж `missingEntry`.</summary>
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG-DENY")]
     public async Task Пряма_ціль_під_Deny_видалений_запис_теж_missingEntry()
