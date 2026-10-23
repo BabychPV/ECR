@@ -3119,6 +3119,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(true, "DF_EditAssignment_Excl");
 
+                    b.Property<byte>("Level")
+                        .HasColumnType("tinyint")
+                        .HasDefaultValue((byte)2, "DF_EditAssignment_Level");
+
                     b.Property<DateTime>("ModifiedAt")
                         .HasColumnType("datetime2(3)");
 
@@ -3181,6 +3185,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.ToTable("EditAssignment", "doc", t =>
                         {
+                            t.HasCheckConstraint("CK_EditAssignment_Level", "[Level] BETWEEN 1 AND 4");
+
+                            t.HasCheckConstraint("CK_EditAssignment_LevelSlice", "[Level] = 2 OR (MonthNumber IS NULL AND PeriodKey IS NULL AND IsExclusive = 0)");
+
                             t.HasCheckConstraint("CK_EditAssignment_Month", "MonthNumber IS NULL OR MonthNumber BETWEEN 1 AND 12");
 
                             t.HasCheckConstraint("CK_EditAssignment_Note", "Note IS NULL OR LEN(Note) > 0");

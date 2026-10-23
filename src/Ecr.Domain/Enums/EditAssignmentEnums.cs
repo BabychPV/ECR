@@ -36,3 +36,16 @@ public enum EditAssignmentValidationStatus : byte
     /// <summary>Валідовано: усі виконавці зрізу «Заповнено», власник підтвердив.</summary>
     Validated = 1,
 }
+
+/// <summary>Область надання учасникові документа (D-443) — похідна від селекторів зрізу, не колонка.</summary>
+public enum EditAssignmentScope : byte
+{
+    /// <summary>Увесь документ (аркуш не задано).</summary>
+    Document = 0,
+
+    /// <summary>Один аркуш (усі його таблиці).</summary>
+    Sheet = 1,
+
+    /// <summary>Одна таблиця аркуша.</summary>
+    Table = 2,
+}

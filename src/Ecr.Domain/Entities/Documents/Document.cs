@@ -74,6 +74,32 @@ public sealed class Document : Entity<long>
     }
 
     /// <summary>
+    /// Передає власність документа (D-443): власник — <see cref="CreatedByUserId"/>, тож передача його й
+    /// змінює. Правила (хто може, кому) і журнал безпеки — у <c>TransferDocumentOwnerHandler</c>; попередній
+    /// власник лишається в журналі (подія <c>DocumentOwnerTransferred</c> з обома ідентифікаторами).
+    /// </summary>
+    /// <param name="newOwnerUserId">Новий власник.</param>
+    /// <param name="byUserId">Хто передає.</param>
+    /// <param name="utcNow">Момент з <c>IClock.UtcNow</c>.</param>
+    /// <returns>Попередній власник.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Ідентифікатор не додатний.</exception>
+    /// <exception cref="InvalidOperationException">Новий власник — той самий.</exception>
+    public int TransferOwnership(int newOwnerUserId, int byUserId, DateTime utcNow)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(newOwnerUserId);
+
+        if (newOwnerUserId == CreatedByUserId)
+        {
+            throw new InvalidOperationException("Користувач уже є власником документа.");
+        }
+
+        var previous = CreatedByUserId;
+        CreatedByUserId = newOwnerUserId;
+        Touch(byUserId, utcNow);
+        return previous;
+    }
+
+    /// <summary>
     /// Задає людське ім'я документа — підпис ПОРУЧ із <see cref="BusinessKey"/>,
     /// а не замість нього (директива "людське ім'я документа").
     /// </summary>
