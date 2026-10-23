@@ -59,7 +59,7 @@
 
 .PARAMETER ApiParallel
     Скільки паралельних процесів `dotnet test` запускає КОЖЕН із кроків
-    «Тести API (частина 1/2/3/4)». Типово — `ECR_API_PARALLEL` з оточення, без
+    «Тести API (частина 1/2/3/4/5)». Типово — `ECR_API_PARALLEL` з оточення, без
     нього 1.
 
     1 — рівно один процес на крок, як і раніше (так іде конвеєр, доки його
@@ -493,6 +493,8 @@ Step 'Тести API (частина 2)' { Invoke-ApiPart -Part 2 }
 Step 'Тести API (частина 3)' { Invoke-ApiPart -Part 3 }
 
 Step 'Тести API (частина 4)' { Invoke-ApiPart -Part 4 }
+
+Step 'Тести API (частина 5)' { Invoke-ApiPart -Part 5 }
 
 Step 'Сценарії директиви №09 (довідково)' {
     if ($TestSql) {
