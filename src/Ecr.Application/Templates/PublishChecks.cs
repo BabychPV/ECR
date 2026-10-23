@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
@@ -8,6 +9,7 @@ using Ecr.Expressions.Ast;
 using Ecr.Expressions.Binding;
 using Ecr.Expressions.Graph;
 using Ecr.Expressions.Parsing;
+using RegistryForms = Ecr.Expressions.Evaluation.RegistryForms;
 
 namespace Ecr.Application.Templates;
 
@@ -686,25 +688,36 @@ public static class PublishChecks
     }
 
     /// <summary>
-    /// PRMG: формула таблиці з формою <c>REG*</c> (<c>REGFIELD</c>, <c>REGFIND</c>, <c>REGONE</c>, <c>REGSUM</c>, <c>REGAVG</c>,
-    /// <c>REGMIN</c>, <c>REGMAX</c>, <c>REGCOUNT</c>), яка посилається на колонку, що має ціллю ГРУПУ типів дозволів, не
-    /// публікується (<c>ECR-TMPL-0422</c>, <c>lookupGroupNoRegistryForms</c>).
+    /// PRMG: вираз (формула таблиці або правило валідації таблиці) з формою <c>REG*</c> (<c>REGFIELD</c>, <c>REGFIND</c>,
+    /// <c>REGONE</c>, <c>REGSUM</c>, <c>REGAVG</c>, <c>REGMIN</c>, <c>REGMAX</c>, <c>REGCOUNT</c>), у чиїх аргументах є
+    /// посилання на колонку, що має ціллю ГРУПУ типів дозволів, не публікується (<c>ECR-TMPL-0422</c>,
+    /// <c>lookupGroupNoRegistryForms</c>).
     /// </summary>
     /// <param name="version">Версія зі структурою.</param>
     /// <param name="groupRegistryIds">Серед цілей версії - ідентифікатори прихованих реєстрів груп.</param>
+    /// <param name="formulaEngine">Рушій - розбір виразів (той самий кеш розбору, що й у решти перевірок публікації).</param>
     /// <remarks>
     /// ⛔ Реєстр групи порожній, а комірка тримає id запису реєстру-ЧЛЕНА (шапка типу): форми <c>REG*</c> читають поле запису за
     /// реєстром ЦІЛІ колонки, тож над групою дали б порожній результат без помилки. У v1 це відмова на публікації (розширення -
-    /// брати реєстр із запису). ⚠ Перевірка текстова: формула, що містить форму <c>REG*</c> і посилається на колонку-групу через
-    /// <c>[Код]</c>, відхиляється; хибнопозитив можливий лише для формули, де форма й колонка не пов'язані, і лікується
-    /// винесенням у окрему формулу. Правила активності рядка й правила таблиці над колонкою-групою поки не перевіряються.
+    /// брати реєстр із запису).
+    ///
+    /// ⚠ Перевірка йде по AST (<c>Parser</c> + <c>ReferenceResolver</c>), а не по тексту: посилання на колонку впізнається в
+    /// усіх формах, які резолвить рантайм (<c>[Код]</c> без урахування регістру, <c>[Таблиця.Код]</c>, <c>[Аркуш.Таблиця.Код]</c>,
+    /// <c>[Таблиця.Рядок.Код]</c>, <c>{Month}</c> у формулі місячної колонки, посилання в предикаті рядків і в умовах вкладених
+    /// форм), а також з ІНШОЇ таблиці. Текст у рядкових літералах і лексема <c>REGSUM(</c> у літералі форм не утворюють.
+    /// Хибнопозитив: посилання на колонку-групу ПОЗА аргументами форми <c>REG*</c> (наприклад, <c>REGSUM(...) + [Група]</c>)
+    /// не відхиляється - форма її не читає. Вираз, що не розібрався, тут мовчки пропускається: синтаксис звітує перевірка
+    /// виразів (формули) і рантайм (правила, <c>ECR-VAL-RULE</c>), нової помилки ця перевірка не додає.
+    /// Правило, прив'язане до колонки-групи (<c>ColumnDefId</c>), з будь-якою формою <c>REG*</c> відхиляється: його значення -
+    /// сама комірка колонки. Неактивне правило не перевіряється: воно не виконується.
     /// </remarks>
     /// <returns>Зауваження публікації; порожньо - усе гаразд.</returns>
     public static IReadOnlyList<ExpressionDiagnostic> CheckGroupLookupFormulas(
-        TemplateVersion version, IReadOnlySet<int> groupRegistryIds)
+        TemplateVersion version, IReadOnlySet<int> groupRegistryIds, IFormulaEngine formulaEngine)
     {
         ArgumentNullException.ThrowIfNull(version);
         ArgumentNullException.ThrowIfNull(groupRegistryIds);
+        ArgumentNullException.ThrowIfNull(formulaEngine);
 
         var diagnostics = new List<ExpressionDiagnostic>();
         if (groupRegistryIds.Count == 0)
@@ -712,56 +725,70 @@ public static class PublishChecks
             return diagnostics;
         }
 
-        foreach (var table in LiveTables(version.Sheets))
-        {
-            var groupColumns = table.Columns
-                .Where(c => !c.IsDeleted && c.DataType == CellDataType.Lookup
-                            && c.LookupRegistryDefId is { } id && groupRegistryIds.Contains(id))
-                .Select(c => c.Code)
-                .ToList();
-            if (groupColumns.Count == 0)
-            {
-                continue;
-            }
+        var liveTables = LiveTables(version.Sheets).ToList();
 
-            foreach (var formula in table.Formulas.Where(f => !f.IsDeleted && RegistryFormRegex.IsMatch(f.Expression)))
+        // Колонки-групи УСІЄЇ версії: форма в одній таблиці може читати колонку іншої.
+        var groupColumns = new Dictionary<int, (string TableCode, string Code)>();
+        foreach (var table in liveTables)
+        {
+            foreach (var column in table.Columns.Where(c => !c.IsDeleted && c.DataType == CellDataType.Lookup
+                         && c.LookupRegistryDefId is { } id && groupRegistryIds.Contains(id)))
             {
-                foreach (var column in groupColumns.Where(code => ReferencesColumn(formula.Expression, code)))
+                groupColumns[column.Id] = (table.Code, column.Code);
+            }
+        }
+
+        if (groupColumns.Count == 0)
+        {
+            return diagnostics;
+        }
+
+        var resolver = new ReferenceResolver(Snapshot(version));
+
+        foreach (var table in liveTables)
+        {
+            foreach (var formula in table.Formulas.Where(f => !f.IsDeleted))
+            {
+                var root = formulaEngine.Parse(formula.Expression, formula.Dialect).Expression?.Root;
+                if (root is null)
                 {
-                    diagnostics.Add(new ExpressionDiagnostic(
-                        "ECR-TMPL-0422",
-                        $"Колонка {table.Code}.{column} має ціллю групу дозволів: форми REG* над нею не підтримуються.",
-                        0,
-                        1,
-                        "err.ECR-TMPL-0422.lookupGroupNoRegistryForms",
-                        new Dictionary<string, string> { ["columnCode"] = $"{table.Code}.{column}" }));
+                    continue;
+                }
+
+                var scan = ScanRegistryForms(root, resolver, table.Id, RowKeyOf(table, formula), formula.ColumnDefId, groupColumns);
+                foreach (var column in scan.GroupColumnIds)
+                {
+                    var (tableCode, code) = groupColumns[column];
+                    diagnostics.Add(GroupLookupDiagnostic(
+                        $"Колонка {tableCode}.{code} має ціллю групу дозволів: форми REG* над нею не підтримуються.",
+                        $"{tableCode}.{code}"));
                 }
             }
 
-            // Правила валідації таблиці: форма REG* у правилі, прив'язаному до колонки-групи (ColumnDefId) або такому, що
-            // посилається на неї через [Код]. Рантайм (TableValidation) читає поле запису за реєстром ЦІЛІ колонки - для групи
-            // це порожній реєстр, тож правило мовчки не спрацювало б.
-            var groupColumnIds = table.Columns
-                .Where(c => !c.IsDeleted && c.DataType == CellDataType.Lookup
-                            && c.LookupRegistryDefId is { } id && groupRegistryIds.Contains(id))
-                .ToDictionary(c => c.Id, c => c.Code);
-            foreach (var rule in table.ValidationRules.Where(r => r.IsActive && RegistryFormRegex.IsMatch(r.Expression)))
+            // Правила валідації таблиці: форма REG* над колонкою-групою (посилання в аргументах) або правило, прив'язане до
+            // колонки-групи (ColumnDefId). Рантайм (TableValidation) читає поле запису за реєстром ЦІЛІ колонки - для групи це
+            // порожній реєстр, тож правило мовчки не спрацювало б.
+            foreach (var rule in table.ValidationRules.Where(r => r.IsActive))
             {
-                var hit = groupColumns.Where(code => ReferencesColumn(rule.Expression, code)).ToList();
-                if (rule.ColumnDefId is { } bound && groupColumnIds.TryGetValue(bound, out var boundCode) && !hit.Contains(boundCode))
+                var root = formulaEngine.Parse(rule.Expression, ExpressionDialect.Template).Expression?.Root;
+                if (root is null)
                 {
-                    hit.Add(boundCode);
+                    continue;
+                }
+
+                var scan = ScanRegistryForms(root, resolver, table.Id, null, null, groupColumns);
+                var hit = scan.GroupColumnIds.ToList();
+                if (scan.HasRegistryForm && rule.ColumnDefId is { } bound && groupColumns.ContainsKey(bound) && !hit.Contains(bound))
+                {
+                    hit.Add(bound);
                 }
 
                 foreach (var column in hit)
                 {
-                    diagnostics.Add(new ExpressionDiagnostic(
-                        "ECR-TMPL-0422",
-                        $"Колонка {table.Code}.{column} має ціллю групу дозволів: форми REG* у правилі {rule.Code} над нею не підтримуються.",
-                        0,
-                        1,
-                        "err.ECR-TMPL-0422.lookupGroupNoRegistryForms",
-                        new Dictionary<string, string> { ["columnCode"] = $"{table.Code}.{column}" }));
+                    var (tableCode, code) = groupColumns[column];
+                    diagnostics.Add(GroupLookupDiagnostic(
+                        $"Колонка {tableCode}.{code} має ціллю групу дозволів: форми REG* у правилі {rule.Code} над нею не підтримуються.",
+                        $"{tableCode}.{code}"));
                 }
             }
         }
@@ -769,17 +796,95 @@ public static class PublishChecks
         return diagnostics;
     }
 
-    private static readonly System.Text.RegularExpressions.Regex RegistryFormRegex = new(
-        @"\bREG(FIELD|FIND|ONE|SUM|AVG|MIN|MAX|COUNT)\s*\(",
-        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
-        TimeSpan.FromSeconds(1));
+    private static ExpressionDiagnostic GroupLookupDiagnostic(string message, string columnCode)
+        => new(
+            "ECR-TMPL-0422",
+            message,
+            0,
+            1,
+            "err.ECR-TMPL-0422.lookupGroupNoRegistryForms",
+            new Dictionary<string, string> { ["columnCode"] = columnCode });
 
-    private static bool ReferencesColumn(string expression, string columnCode)
-        => System.Text.RegularExpressions.Regex.IsMatch(
-            expression,
-            @"\[\s*" + System.Text.RegularExpressions.Regex.Escape(columnCode) + @"\s*\]",
-            System.Text.RegularExpressions.RegexOptions.CultureInvariant,
-            TimeSpan.FromSeconds(1));
+    /// <summary>Імена форм довідників шаблону (без урахування регістру - як у <c>FunctionRegistry</c>).</summary>
+    private static readonly System.Collections.Frozen.FrozenSet<string> RegistryFormNames =
+        new[]
+        {
+            RegistryForms.Field, RegistryForms.Find, RegistryForms.One, RegistryForms.Sum,
+            RegistryForms.Average, RegistryForms.Minimum, RegistryForms.Maximum, RegistryForms.Count,
+        }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    private sealed record RegistryFormScan(bool HasRegistryForm, IReadOnlyList<int> GroupColumnIds);
+
+    /// <summary>
+    /// Обхід AST (ітеративний - глибину вкладеності тримає окрема перевірка, а не стек цього методу): шукає виклики форм
+    /// <c>REG*</c> і колонки-групи, на які посилаються їхні аргументи на будь-якій глибині, зокрема в предикатах рядків.
+    /// </summary>
+    private static RegistryFormScan ScanRegistryForms(
+        AstNode root,
+        ReferenceResolver resolver,
+        int tableDefId,
+        string? rowKey,
+        int? columnDefId,
+        Dictionary<int, (string TableCode, string Code)> groupColumns)
+    {
+        var hasForm = false;
+        var hits = new List<int>();
+        var stack = new Stack<(AstNode Node, bool UnderForm)>();
+        stack.Push((root, false));
+
+        while (stack.Count > 0)
+        {
+            var (node, underForm) = stack.Pop();
+            switch (node)
+            {
+                case FunctionNode function:
+                    var isForm = RegistryFormNames.Contains(function.Name);
+                    hasForm |= isForm;
+                    foreach (var argument in function.Arguments)
+                    {
+                        stack.Push((argument, underForm || isForm));
+                    }
+
+                    break;
+
+                case UnaryNode unary:
+                    stack.Push((unary.Operand, underForm));
+                    break;
+
+                case BinaryNode binary:
+                    stack.Push((binary.Right, underForm));
+                    stack.Push((binary.Left, underForm));
+                    break;
+
+                case ConditionalNode conditional:
+                    stack.Push((conditional.WhenFalse, underForm));
+                    stack.Push((conditional.WhenTrue, underForm));
+                    stack.Push((conditional.Condition, underForm));
+                    break;
+
+                case CellReferenceNode reference:
+                    if (underForm
+                        && resolver.Resolve(reference, tableDefId, rowKey, null, columnDefId) is { } resolved
+                        && groupColumns.ContainsKey(resolved.ColumnDefId)
+                        && !hits.Contains(resolved.ColumnDefId))
+                    {
+                        hits.Add(resolved.ColumnDefId);
+                    }
+
+                    if (reference.Row is RowSelector.Predicate predicate)
+                    {
+                        stack.Push((predicate.Condition, underForm));
+                    }
+
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        return new RegistryFormScan(hasForm, hits);
+    }
 
     /// <summary>
     /// Активна прив'язка до методології без опублікованої версії (<c>ECR-CALC-0422</c>,
