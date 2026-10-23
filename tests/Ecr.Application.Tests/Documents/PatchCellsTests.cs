@@ -1972,6 +1972,96 @@ public sealed class PatchCellsTests
         Assert.Null(Assert.Single(Audited()).CorrelationId);
     }
 
+    /// <summary>Рішення на комірку <c>Volume</c> рядка 1001 — правка погоджувача поданого аркуша (D-442).</summary>
+    private void VolumeDecision(EditDecision decision)
+        => _access.CanEditCellsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+               .Returns(new Dictionary<CellAddress, EditDecision>
+               {
+                   [new CellAddress(PeriodKey.Parse(Period), 1001L, VolumeColumnId)] = decision,
+               });
+
+    /// <summary>
+    /// D-442: погоджувач поточного кроку править поданий аркуш — під блокуванням аркуш <c>Submitted</c>,
+    /// рішення «чия черга» перечитано й досі його, журнал — <c>ApproverEdit</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: у <c>BuildAuditRecords</c> лишити <c>request.Origin</c> — у журналі <c>UserEdit</c>, тест
+    /// червоний; у <c>EnsureSheetStillEditableAsync</c> прибрати гілку погоджувача — 403 DocumentSubmitted.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-442")]
+    public async Task D442_погоджувач_поточного_кроку_пише_з_позначкою_правки_погоджувача()
+    {
+        VolumeDecision(EditDecision.AllowByApprover());
+        _gate.EnterEditAsync(700, 1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(DocumentStatus.Submitted);
+        _access.CanApproveAsync(Arg.Any<AccessProfile>(), 700, 1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+               .Returns(EditDecision.Allow());
+        _cells.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<long, string> { [1001L] = "0x0B" });
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 7m)])),
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+        Assert.Equal(CellChangeOrigins.ApproverEdit, Assert.Single(Audited()).Origin);
+    }
+
+    /// <summary>
+    /// D-442: між рішенням і блокуванням крок погоджено (черга перейшла далі) — повторна перевірка під
+    /// блокуванням відхиляє правку тією самою відмовою <c>DocumentSubmitted</c>; ні запису, ні журналу.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: у <c>EnsureSheetStillEditableAsync</c> не кликати <c>CanApproveAsync</c> (довіряти рішенню
+    /// поза транзакцією) — правка проходить, тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-442")]
+    public async Task D442_черга_перейшла_під_блокуванням_правку_погоджувача_відхилено()
+    {
+        VolumeDecision(EditDecision.AllowByApprover());
+        _gate.EnterEditAsync(700, 1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(DocumentStatus.Submitted);
+        _access.CanApproveAsync(Arg.Any<AccessProfile>(), 700, 1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+               .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 7m)])),
+            CancellationToken.None));
+
+        Assert.Equal(nameof(EditDenyReason.DocumentSubmitted), ex.Details?["reason"]?.ToString());
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+        await _audit.DidNotReceive().WriteCellChangesAsync(
+            Arg.Any<IReadOnlyList<CellChangeRecord>>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// D-442: звичайний дозвіл (не роль погоджувача) на аркуш, що під блокуванням виявився поданим, —
+    /// відмова, як і доти, без читання маршруту.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-442")]
+    public async Task D442_не_погоджувач_на_поданому_під_блокуванням_відхиляється_без_читання_маршруту()
+    {
+        VolumeDecision(EditDecision.Allow());
+        _gate.EnterEditAsync(700, 1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(DocumentStatus.Submitted);
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 7m)])),
+            CancellationToken.None));
+
+        Assert.Equal(nameof(EditDenyReason.DocumentSubmitted), ex.Details?["reason"]?.ToString());
+        await _access.DidNotReceive().CanApproveAsync(
+            Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
+
     /// <summary>Записи, які обробник віддав у журнал аудиту.</summary>
     private IReadOnlyList<CellChangeRecord> Audited()
     {

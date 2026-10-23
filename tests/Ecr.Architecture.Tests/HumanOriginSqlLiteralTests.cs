@@ -51,6 +51,8 @@ public sealed class HumanOriginSqlLiteralTests
     public void Перелік_людських_походжень_містить_сітку_й_імпорт()
     {
         // ✎ AN-114: свідомий перезапис імпортом — теж правка людини.
-        Assert.Equal("N'UserEdit', N'Import', N'ImportOverwrite'", CellChangeOrigins.HumanOriginsSql);
+        // ✎ D-442: правка погоджувача на поданому аркуші — теж людина (інтеграція її не перезаписує).
+        Assert.Equal(
+            "N'UserEdit', N'Import', N'ImportOverwrite', N'ApproverEdit'", CellChangeOrigins.HumanOriginsSql);
     }
 }
