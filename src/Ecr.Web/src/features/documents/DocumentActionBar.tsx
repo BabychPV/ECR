@@ -1,7 +1,7 @@
 import { lazy, Suspense, useRef, type JSX, type ReactNode, type RefObject } from 'react';
 import { Button, Menu, Text } from '@mantine/core';
 import { ExportButton, exportFormatOptions, type ExportFormat } from '@/features/export/ExportButton';
-import { RecalculateKbd, useSheetActions } from '@/features/workflow/SheetActions';
+import { periodLabel, RecalculateKbd, submitLabel, useSheetActions, type SheetActionsModel } from '@/features/workflow/SheetActions';
 import type { DocumentLock } from './documentLock';
 import { DocumentSheetBanner } from './DocumentSheetBanner';
 import { DocumentToolbar } from './DocumentToolbar';
@@ -158,14 +158,15 @@ export function DocumentActionBar({
   const rare = documentItems.filter((item) => item !== null);
   if (rare.length > 0) items.push(<Menu.Divider key="document-divider" />, ...rare);
 
-  // ⛔ Одна головна дія (`L1`): подання або затвердження — ніколи обидва
-  // (подати можна лише чернетку, затвердити — лише подане).
+  // ⛔ Одна головна дія (`L1`): подання або затвердження — ніколи обидві `filled`.
+  // ✎ D-441: подання йде в НАЙРАНІШИЙ неподаний період, а не у відкритий, тож на поданому аркуші
+  // погоджувач-автор може мати обидві дії: тоді головна — затвердження (воно про те, що на екрані),
+  // а подання — другорядною кнопкою поруч.
+  const submitPrimary = actions.submit !== null && actions.approve === null;
   const primary =
-    actions.submit !== null ? (
+    actions.submit !== null && submitPrimary ? (
       // ⚠ `variant="filled"` явно: за ним екранний тест рахує головні дії (`L1`).
-      <Button variant="filled" loading={actions.submit.loading} onClick={actions.submit.run}>
-        {t('document.submit')}
-      </Button>
+      <SubmitAction submit={actions.submit} variant="filled" />
     ) : actions.approve !== null ? (
       // ⛔ `X-05`: `statusSuccess` підібрано до AA 4.5:1 (`theme.ts`, `contrast.test.ts`).
       <Button
@@ -200,6 +201,8 @@ export function DocumentActionBar({
         primary={primary}
       >
         {validateVisible && validateButton}
+
+        {actions.submit !== null && !submitPrimary && <SubmitAction submit={actions.submit} variant="default" />}
 
         {/* ⛔ Затвердження і відхилення — пара: «Reject» поруч з «Approve». */}
         {actions.reject !== null && (
@@ -241,6 +244,62 @@ export function DocumentActionBar({
       )}
 
       {actions.dialogs}
+    </>
+  );
+}
+
+/**
+ * «Подати: <період>» (D-441): кнопка називає період, який подасть, — найраніший неподаний Open/Grace;
+ * ▾ поруч дає вибрати інший неподаний відкритий період, а «Наступний — …» попереджає, що за цим чекає ще один.
+ *
+ * ⚠ Вибір — `Menu`, а не `Select`: меню вже в чанку рядка дій (`D-132`), а комбобокс додав би свій код.
+ */
+function SubmitAction({
+  submit,
+  variant,
+}: {
+  readonly submit: NonNullable<SheetActionsModel['submit']>;
+  readonly variant: 'filled' | 'default';
+}): JSX.Element {
+  return (
+    <>
+      {submit.nextPeriodKey !== null && (
+        <Text size="xs" c="dimmed" role="status" data-testid="submit-next-period">
+          {t('workflow.submitNextPeriod', { period: periodLabel(submit.nextPeriodKey) })}
+        </Text>
+      )}
+      <Button
+        variant={variant}
+        loading={submit.loading}
+        onClick={submit.run}
+        data-testid="document-submit"
+        data-period-key={submit.periodKey}
+      >
+        {submitLabel(submit.periodKey)}
+      </Button>
+      {submit.options.length > 1 && (
+        <Menu shadow="md" position="bottom-end" withinPortal>
+          <Menu.Target>
+            <Button variant="default" px="xs" aria-label={t('workflow.submitPeriodPick')} data-testid="submit-period-pick">
+              <span aria-hidden="true">▾</span>
+            </Button>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Label>{t('workflow.submitPeriodPick')}</Menu.Label>
+            {submit.options.map((key) => (
+              <Menu.Item
+                key={key}
+                data-submit-period={key}
+                onClick={() => submit.pick(key)}
+                aria-current={key === submit.periodKey ? 'true' : undefined}
+                rightSection={key === submit.periodKey ? <span aria-hidden="true">✓</span> : null}
+              >
+                {periodLabel(key)}
+              </Menu.Item>
+            ))}
+          </Menu.Dropdown>
+        </Menu>
+      )}
     </>
   );
 }

@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Response } from '@playwright/test';
 import { expectFocusRing, expectFocusTrapped, expectFocusVisible, focusState } from './focus';
+import { chooseSubmitPeriod } from './submitPeriod';
 
 /**
  * Прохід оператора **без миші** від входу до виходу (`ФВ-14.16`, `D-141`).
@@ -255,8 +256,8 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     // `Ecr.Application.Tests/Workflow`) доводять, що ендпоінти
     // `submit`/`approve` працюють; жоден тест не доводив, що до них веде
     // КНОПКА в браузері й що екран показує результат.
-    const submit = page.getByRole('button', { name: /Submit|Подати/i }).first();
-    await expect(submit, 'у шапці немає кнопки подання').toBeVisible({ timeout: 10_000 });
+    // ✎ D-441: «Подати» подає найраніший неподаний Open/Grace — відкритий період вибирається явно, клавіатурою.
+    const submit = await chooseSubmitPeriod(page, Number(PeriodKey), { keyboard: true });
 
     await expectFocusRing(page, submit, 'кнопка подання');
     const submitted = waitForWrite(page, 'POST', 'submit');

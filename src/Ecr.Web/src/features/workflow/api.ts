@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
@@ -53,4 +54,81 @@ export function useRecallAvailability(
       ),
     enabled,
   });
+}
+
+/** Що подасть «Подати» на аркуші (D-441); тип — зі згенерованої схеми. */
+export type SubmissionTarget = components['schemas']['SubmissionTargetDto'];
+
+/** Стан аркуша за період місячної колонки — `Submitted`/`Approved` позначаються в заголовку. */
+export type MonthColumnStatus = components['schemas']['MonthColumnStatusDto'];
+
+/**
+ * Ключ відповіді `GET …/submission-target` для аркуша й відкритого на екрані періоду.
+ *
+ * ⚠ Окремий префікс, а не `['document', id, period]`: подання іде в ІНШИЙ період, ніж відкритий (D-441),
+ * і скидання ключа відкритого періоду цю відповідь не оновило б. `SheetActions` скидає
+ * `['submission-target', id]` після кожної дії робочого процесу.
+ */
+export function submissionTargetKey(documentId: number, sheetDefId: number, periodKey: number): readonly unknown[] {
+  return ['submission-target', documentId, sheetDefId, periodKey];
+}
+
+function fetchSubmissionTarget(documentId: number, sheetDefId: number, periodKey: number): Promise<SubmissionTarget> {
+  return apiFetch<SubmissionTarget>(
+    `/api/v1/documents/${String(documentId)}/submission-target?sheetDefId=${String(sheetDefId)}&periodKey=${String(periodKey)}`,
+  );
+}
+
+/**
+ * Цільовий період подання (D-441): найраніший неподаний `Open`/`Grace`, наступний, відкриті періоди для вибору
+ * і статуси місячних колонок. Рішення — сервера: стан періоду для подання ЕФЕКТИВНИЙ (за датами).
+ */
+export function useSubmissionTarget(
+  documentId: number,
+  sheetDefId: number,
+  periodKey: number,
+): UseQueryResult<SubmissionTarget> {
+  return useQuery({
+    queryKey: submissionTargetKey(documentId, sheetDefId, periodKey),
+    queryFn: () => fetchSubmissionTarget(documentId, sheetDefId, periodKey),
+  });
+}
+
+/** Стан місячної колонки, який позначається в заголовку (D-441): подано чи затверджено. */
+export type MarkedMonthStatus = 'Submitted' | 'Approved';
+
+/**
+ * Статуси місячних колонок ОДНІЄЇ таблиці: код колонки → `Submitted`/`Approved` (D-441).
+ *
+ * ⚠ Лише ЧИТАЄ відповідь, яку вже запитав рядок дій (`useSheetActions`): `enabled: false`, тож сітка не
+ * робить власного запиту на кожну таблицю, а оновлюється разом із кешем після дії робочого процесу.
+ * Чернетка й відхилене не позначаються — колонка без позначки і є «ще не подано».
+ */
+export function useMonthColumnStatuses(
+  documentId: number,
+  sheetDefId: number | undefined,
+  periodKey: number,
+  tableDefId: number,
+): ReadonlyMap<string, MarkedMonthStatus> {
+  const { data } = useQuery({
+    queryKey: submissionTargetKey(documentId, sheetDefId ?? 0, periodKey),
+    queryFn: () => fetchSubmissionTarget(documentId, sheetDefId ?? 0, periodKey),
+    enabled: false,
+  });
+
+  return useMemo(() => markedMonthColumns(data?.monthColumns, tableDefId), [data, tableDefId]);
+}
+
+/** Код колонки → `Submitted`/`Approved` для однієї таблиці. */
+export function markedMonthColumns(
+  months: readonly MonthColumnStatus[] | undefined,
+  tableDefId: number,
+): ReadonlyMap<string, MarkedMonthStatus> {
+  const marked = new Map<string, MarkedMonthStatus>();
+  for (const month of months ?? []) {
+    if (month.tableDefId !== tableDefId) continue;
+    if (month.sheetStatus === 'Submitted' || month.sheetStatus === 'Approved') marked.set(month.columnCode, month.sheetStatus);
+  }
+
+  return marked;
 }

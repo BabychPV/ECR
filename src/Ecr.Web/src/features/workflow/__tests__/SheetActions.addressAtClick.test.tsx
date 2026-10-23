@@ -42,6 +42,18 @@ function mockFetch(): void {
 
       if (url.includes('/api/v1/me')) return json(CurrentUser);
 
+      // ✎ D-441: ціль подання — період із запиту, аркуш неподаний (так рахує сервер для чернетки).
+      if (url.includes('/submission-target')) {
+        const period = Number(new URL(url, 'http://localhost').searchParams.get('periodKey'));
+
+        return json({
+          targetPeriodKey: period,
+          nextPeriodKey: null,
+          periods: [{ periodKey: period, state: 'Open', sheetStatus: 'Draft', submittable: true }],
+          monthColumns: [],
+        });
+      }
+
       if (init?.method === 'POST') {
         posts.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> });
 

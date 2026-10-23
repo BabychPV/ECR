@@ -180,3 +180,23 @@
   background-color: var(--ecr-sunken);
   color: var(--ecr-cell-fg-dark, var(--ecr-grid-text));
 }
+
+/*
+ * ✎ D-441 (AN-128): стан періоду місячної колонки в заголовку — «Подано» / «Затверджено» після назви.
+ * Колонка місяця k таблиці `MonthsInColumns` відповідає періоду k; сервер віддає стан аркуша за нього
+ * (`GET …/submission-target`, `monthColumns`). Кольори — змінні теми: обидві схеми без власного контрасту.
+ */
+:root revo-grid[theme] revogr-header .rgHeaderCell .ecr-header-month-status {
+  margin-inline-start: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+:root revo-grid[theme] revogr-header .rgHeaderCell .ecr-header-month-status--submitted {
+  color: var(--mantine-color-statusWarning-text);
+}
+
+:root revo-grid[theme] revogr-header .rgHeaderCell .ecr-header-month-status--approved {
+  color: var(--mantine-color-statusSuccess-text);
+}

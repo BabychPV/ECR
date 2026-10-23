@@ -1114,7 +1114,7 @@ test.describe('WALK: прохід системою від А до Я', () => {
     });
 
     await record('workflow-submit', async () => {
-      const submit = page.getByRole('button', { name: /^Submit$/i }).first();
+      const submit = page.getByRole('button', { name: /^Submit(:|$)/i }).first(); // ✎ D-441: «Submit: <період>»
       const present = (await submit.count()) > 0;
       if (present) await submit.click();
       await page.waitForTimeout(4_000);

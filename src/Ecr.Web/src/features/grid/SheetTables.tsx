@@ -412,6 +412,7 @@ export function SheetTables({
                 documentId={documentId}
                 tableInstanceId={id}
                 tableDefId={table.tableDefId}
+                sheetDefId={table.sheetDefId}
                 periodKey={periodKey}
                 periodEnd={periodEnd}
                 readOnly={readOnly}

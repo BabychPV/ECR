@@ -141,6 +141,7 @@ import { useAddRow } from './useAddRow';
 import { DeleteRowControl } from './DeleteRowControl';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
+import { useMonthColumnStatuses, type MarkedMonthStatus } from '@/features/workflow/api';
 // ⚠ Порядок стилів збережений: `cell-states.css` (раніше — у `App.tsx`) іде
 // РАНІШЕ за `cellEditors.css`, як і було в єдиному бандлі. Причина, чому файл
 // тут, а не у вхідному чанку, — бюджет маршруту (`D-132`).
@@ -160,6 +161,11 @@ interface DocumentGridProps {
   tableDefId: number;
   /** Ключ періоду. */
   periodKey: number;
+  /**
+   * Аркуш таблиці — ключ статусів місячних колонок (D-441, `useMonthColumnStatuses`). Не задано — колонки
+   * без позначок (сітка поза сторінкою документа).
+   */
+  sheetDefId?: number;
   /**
    * Останній день періоду документа (`PeriodDto.periodEnd`, `YYYY-MM-DD`) —
    * `asOf` темпоральних Lookup-довідників комірок (ФВ-8.5). `null` — календар
@@ -361,6 +367,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     tableInstanceId,
     tableDefId,
     periodKey,
+    sheetDefId,
     periodEnd = null,
     readOnly,
     allowsDynamicRows,
@@ -1225,6 +1232,9 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [],
   );
 
+  // ✎ D-441: колонка місяця k таблиці `MonthsInColumns` позначається станом аркуша за період k.
+  const monthStatus = useMonthColumnStatuses(documentId, sheetDefId, periodKey, tableDefId);
+
   const columns = useMemo(
     () =>
       data === undefined
@@ -1243,6 +1253,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             navigatedCell,
             outOfWindow,
             unlistedLabelsByRegistryId,
+            monthStatus,
           ),
     [
       data,
@@ -1258,6 +1269,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       navigatedCell,
       outOfWindow,
       unlistedLabelsByRegistryId,
+      monthStatus,
     ],
   );
 
@@ -2825,6 +2837,9 @@ export function gridColumns(
   // ✎ PS-P2: підписи закритих записів довідників (`registryId → id → підпис`);
   // лише для показу — у переліку вибору їх немає.
   unlistedLabelsByRegistryId: ReadonlyMap<number, ReadonlyMap<number, string>> = new Map(),
+
+  // ✎ D-441: код місячної колонки → стан аркуша за її період (`Submitted`/`Approved`); решта без позначки.
+  monthStatus: ReadonlyMap<string, MarkedMonthStatus> = new Map(),
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -2840,6 +2855,7 @@ export function gridColumns(
     // до подання».
     const isRequired = column.isRequired || column.isRequiredByMethodology;
     const requiredHint = isRequired ? t('grid.columnRequiredHint') : null;
+    const monthState = monthStatus.get(column.code) ?? null;
 
     /*
      * ⛔ `U-05`: вирівнювання числа вирішує ТИП КОЛОНКИ з сервера
@@ -2912,14 +2928,33 @@ export function gridColumns(
       // («Назва, одиниця *») — його читають сортування, підказки й тести;
       // шаблон лише розкладає ту саму розмітку на два рядки, а кома для
       // читалки лишається прихованою, тож озвучується «Назва, одиниця».
-      ...(column.unitSymbol === null
+      // ✎ D-441: стан періоду місячної колонки («Подано»/«Затверджено») — у рядку назви, після неї; читалка
+      // чує «Назва, Подано». Колонка без позначки і без одиниці лишається звичайним заголовком.
+      ...(column.unitSymbol === null && monthState === null
         ? {}
         : {
             columnTemplate: (h) =>
               h('span', { class: 'ecr-header-two-line' }, [
-                h('span', { class: 'ecr-header-name' }, column.header + (isRequired ? ' *' : '')),
-                h('span', { class: 'ecr-header-sr' }, ', '),
-                h('span', { class: 'ecr-header-unit' }, column.unitSymbol ?? ''),
+                monthState === null
+                  ? h('span', { class: 'ecr-header-name' }, column.header + (isRequired ? ' *' : ''))
+                  : h('span', { class: 'ecr-header-name' }, [
+                      h('span', {}, column.header + (isRequired ? ' *' : '')),
+                      h('span', { class: 'ecr-header-sr' }, ', '),
+                      h(
+                        'span',
+                        {
+                          class: `ecr-header-month-status ecr-header-month-status--${monthState.toLowerCase()}`,
+                          'data-month-status': monthState,
+                        },
+                        t(`status.sheet.${monthState}`),
+                      ),
+                    ]),
+                ...(column.unitSymbol === null
+                  ? []
+                  : [
+                      h('span', { class: 'ecr-header-sr' }, ', '),
+                      h('span', { class: 'ecr-header-unit' }, column.unitSymbol),
+                    ]),
               ]),
           }),
 
