@@ -1,7 +1,7 @@
 import { lazy, Suspense, useRef, type JSX, type ReactNode, type RefObject } from 'react';
 import { Button, Menu, Text } from '@mantine/core';
 import { ExportButton, exportFormatOptions, type ExportFormat } from '@/features/export/ExportButton';
-import { RecalculateKbd, useSheetActions } from '@/features/workflow/SheetActions';
+import { RecalculateKbd, submitLabel, useSheetActions, type SheetActionsModel } from '@/features/workflow/SheetActions';
 import type { DocumentLock } from './documentLock';
 import { DocumentSheetBanner } from './DocumentSheetBanner';
 import { DocumentToolbar } from './DocumentToolbar';
@@ -11,6 +11,8 @@ import { t } from '@/shared/i18n';
 
 // ⚠ `import()` — той самий чанк, що й раніше в `DocumentPage` (`D-132`): імпорт
 // не потрібен у мить першого малюнка сторінки.
+// ✎ D-441: вибір періоду подання — окремим чанком (бюджет маршруту `D-132`); потрібен лише коли неподаних кілька.
+const SubmitPeriodPicker = lazy(async () => ({ default: (await import('./SubmitPeriodPicker')).SubmitPeriodPicker }));
 const ImportPanel = lazy(async () => ({ default: (await import('@/features/import/ImportPanel')).ImportPanel }));
 
 /** Що сторінка знає про документ і аркуш для рядка дій. */
@@ -158,14 +160,15 @@ export function DocumentActionBar({
   const rare = documentItems.filter((item) => item !== null);
   if (rare.length > 0) items.push(<Menu.Divider key="document-divider" />, ...rare);
 
-  // ⛔ Одна головна дія (`L1`): подання або затвердження — ніколи обидва
-  // (подати можна лише чернетку, затвердити — лише подане).
+  // ⛔ Одна головна дія (`L1`): подання або затвердження — ніколи обидві `filled`.
+  // ✎ D-441: подання йде в НАЙРАНІШИЙ неподаний період, а не у відкритий, тож на поданому аркуші
+  // погоджувач-автор може мати обидві дії: тоді головна — затвердження (воно про те, що на екрані),
+  // а подання — другорядною кнопкою поруч.
+  const submitPrimary = actions.submit !== null && actions.approve === null;
   const primary =
-    actions.submit !== null ? (
+    actions.submit !== null && submitPrimary ? (
       // ⚠ `variant="filled"` явно: за ним екранний тест рахує головні дії (`L1`).
-      <Button variant="filled" loading={actions.submit.loading} onClick={actions.submit.run}>
-        {t('document.submit')}
-      </Button>
+      <SubmitAction submit={actions.submit} variant="filled" />
     ) : actions.approve !== null ? (
       // ⛔ `X-05`: `statusSuccess` підібрано до AA 4.5:1 (`theme.ts`, `contrast.test.ts`).
       <Button
@@ -200,6 +203,8 @@ export function DocumentActionBar({
         primary={primary}
       >
         {validateVisible && validateButton}
+
+        {actions.submit !== null && !submitPrimary && <SubmitAction submit={actions.submit} variant="default" />}
 
         {/* ⛔ Затвердження і відхилення — пара: «Reject» поруч з «Approve». */}
         {actions.reject !== null && (
@@ -241,6 +246,40 @@ export function DocumentActionBar({
       )}
 
       {actions.dialogs}
+    </>
+  );
+}
+
+/**
+ * «Подати: <період>» (D-441): кнопка називає період, який подасть, — найраніший неподаний Open/Grace;
+ * ▾ поруч дає вибрати інший неподаний відкритий період, а «Наступний — …» попереджає, що за цим чекає ще один.
+ *
+ * ⚠ Вибір — `Menu`, а не `Select`: меню вже в чанку рядка дій (`D-132`), а комбобокс додав би свій код.
+ */
+function SubmitAction({
+  submit,
+  variant,
+}: {
+  readonly submit: NonNullable<SheetActionsModel['submit']>;
+  readonly variant: 'filled' | 'default';
+}): JSX.Element {
+  return (
+    <>
+      <Button
+        variant={variant}
+        loading={submit.loading}
+        onClick={submit.run}
+        data-testid="document-submit"
+        data-period-key={submit.periodKey}
+      >
+        {submitLabel(submit.periodKey)}
+      </Button>
+      {/* ⚠ «Наступний — …» буває лише тоді, коли неподаних кілька, — тобто разом із вибором ▾. */}
+      {submit.options.length > 1 && (
+        <Suspense fallback={null}>
+          <SubmitPeriodPicker submit={submit} />
+        </Suspense>
+      )}
     </>
   );
 }

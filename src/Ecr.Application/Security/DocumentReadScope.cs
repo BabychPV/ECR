@@ -1,4 +1,5 @@
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Security;
@@ -30,6 +31,8 @@ public sealed class DocumentReadScope
     private readonly int _projectId;
     private readonly PeriodKey? _period;
     private readonly TemplateVersionSnapshot _snapshot;
+    private readonly IReadOnlyList<ParticipationGrant> _grants;
+    private readonly Dictionary<int, string> _tableCodes = [];
     private readonly Dictionary<int, string> _sheetCodes = [];
     private readonly Dictionary<int, int> _sheetOfTable = [];
     private readonly Dictionary<int, List<int>> _tablesOfSheet = [];
@@ -39,12 +42,15 @@ public sealed class DocumentReadScope
     private readonly Dictionary<int, bool> _columns = [];
     private readonly Dictionary<(int TableDefId, string Code), int> _columnByCode = [];
 
-    private DocumentReadScope(AccessProfile profile, int projectId, TemplateVersionSnapshot snapshot, PeriodKey? period)
+    private DocumentReadScope(
+        AccessProfile profile, int projectId, TemplateVersionSnapshot snapshot, PeriodKey? period,
+        IReadOnlyList<ParticipationGrant> grants)
     {
         _profile = profile;
         _projectId = projectId;
         _period = period;
         _snapshot = snapshot;
+        _grants = grants;
 
         foreach (var sheet in snapshot.Sheets)
         {
@@ -54,6 +60,7 @@ public sealed class DocumentReadScope
             foreach (var table in sheet.Tables)
             {
                 _sheetOfTable[table.Id] = sheet.Id;
+                _tableCodes[table.Id] = table.Code;
                 var columns = new List<int>(table.Columns.Count);
 
                 foreach (var column in table.Columns)
@@ -77,12 +84,29 @@ public sealed class DocumentReadScope
     /// документа не відкриває нічого — період називає <see cref="InPeriod"/>.
     /// </remarks>
     public static DocumentReadScope For(AccessProfile profile, int projectId, TemplateVersionSnapshot snapshot)
+        => ForParticipant(profile, projectId, snapshot, grants: null);
+
+    /// <summary>Те саме з наданнями учасника цього документа (D-443).</summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="projectId">Проєкт документа.</param>
+    /// <param name="snapshot">Знімок структури версії шаблону документа.</param>
+    /// <param name="grants">
+    /// Діючі надання користувача В ЦЬОМУ документі (<see cref="DocumentParticipation.Active"/>); <c>null</c> чи
+    /// порожньо — лише ролі. ⛔ Межі з наданнями — межі ОДНОГО документа: ділити їх між документами проєкту не можна.
+    /// </param>
+    public static DocumentReadScope ForParticipant(
+        AccessProfile profile, int projectId, TemplateVersionSnapshot snapshot, IReadOnlyList<ParticipationGrant>? grants)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(snapshot);
 
-        return new DocumentReadScope(profile, projectId, snapshot, period: null);
+        return new DocumentReadScope(profile, projectId, snapshot, period: null, grants ?? NoGrants);
     }
+
+    private static readonly IReadOnlyList<ParticipationGrant> NoGrants = [];
+
+    /// <summary>Чи враховано в межах надання учасника документа (D-443).</summary>
+    public bool HasParticipation => _grants.Count > 0;
 
     /// <summary>Ті самі межі, але про дані конкретного періоду (D-214).</summary>
     /// <param name="period">Період, про дані якого питають.</param>
@@ -94,12 +118,39 @@ public sealed class DocumentReadScope
     /// закритим — безпечний бік.
     /// </remarks>
     public DocumentReadScope InPeriod(PeriodKey period)
-        => new(_profile, _projectId, _snapshot, period);
+        => new(_profile, _projectId, _snapshot, period, _grants);
 
-    /// <summary>Чи бачить профіль ресурс аркуша — з кодом аркуша й періодом (D-214).</summary>
+    /// <summary>Чи бачить профіль ресурс аркуша — з кодом аркуша й періодом (D-214) і наданнями учасника (D-443).</summary>
     private bool Readable(int sheetDefId, int tableDefId, int columnDefId)
-        => EditRules.CanReadIn(
-            _profile, _projectId, sheetDefId, _sheetCodes.GetValueOrDefault(sheetDefId), tableDefId, columnDefId, _period);
+    {
+        var sheetCode = _sheetCodes.GetValueOrDefault(sheetDefId);
+        return EditRules.CanReadIn(
+            _profile, _projectId, sheetDefId, sheetCode, tableDefId, columnDefId, _period,
+            ParticipationAt(sheetCode, tableDefId));
+    }
+
+    /// <summary>
+    /// D-443: рівень з надань учасника для ресурсу: аркуш цілком (<paramref name="tableDefId"/> = 0) відкриває
+    /// будь-яке надання на аркуш чи його таблицю — щоб аркуш з'явився; таблицю й колонку — лише надання, що
+    /// покриває саме цю таблицю (решта таблиць аркуша лишається схованою).
+    /// </summary>
+    private GrantLevel ParticipationAt(string? sheetCode, int tableDefId)
+    {
+        if (_grants.Count == 0)
+        {
+            return GrantLevel.None;
+        }
+
+        if (tableDefId == 0)
+        {
+            return DocumentParticipation.OpensSheet(_grants, sheetCode, _period) ? GrantLevel.Read : GrantLevel.None;
+        }
+
+        var tableCode = _tableCodes.GetValueOrDefault(tableDefId);
+        return tableCode is null
+            ? GrantLevel.None
+            : DocumentParticipation.LevelAt(_grants, sheetCode, tableCode, _period);
+    }
 
     /// <summary>Чи бачить профіль колонку (і, отже, її значення).</summary>
     /// <param name="columnDefId">Колонка версії шаблону.</param>

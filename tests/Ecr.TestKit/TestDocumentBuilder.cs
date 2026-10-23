@@ -165,6 +165,28 @@ public sealed class TestDocumentBuilder(string connectionString)
             RowIds: [.. rows.Select(r => r.Id)]);
     }
 
+    /// <summary>
+    /// Переводить період документа зі <c>Scheduled</c> (стан будівника за замовчуванням) в <c>Open</c>.
+    /// </summary>
+    /// <param name="document">Ланцюг, створений <see cref="BuildAsync"/>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ D-441 (AN-128): <c>EditRules.CanSubmit</c> відхиляє ще не відкритий період
+    /// (<c>PeriodNotOpenYet</c>), тож тест, що подає аркуш через справжню службу доступу, відкриває
+    /// період явно. Проєкт будівника — чернетка, і рішення бере ЗБЕРЕЖЕНИЙ стан, не дати.
+    /// </remarks>
+    public async Task OpenPeriodAsync(TestDocument document, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+
+        await using var db = CreateContext();
+        var period = await db.Periods
+            .SingleAsync(p => p.ProjectId == document.ProjectId && p.PeriodKeyValue == document.PeriodKey.Value, ct)
+            .ConfigureAwait(false);
+        period.AdvanceTo(PeriodState.Open, new DateTime(2026, 1, 15, 10, 0, 0, DateTimeKind.Utc));
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
     /// <summary>Контекст на ту саму базу — для тестів, яким потрібен EF напряму.</summary>
     public EcrDbContext CreateContext()
         => new(new DbContextOptionsBuilder<EcrDbContext>()

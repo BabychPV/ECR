@@ -1,7 +1,29 @@
 import { formatMonthName } from '@/shared/format';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
-import type { AssignmentSlice, EditAssignment, MyEditAssignmentsView } from './types';
+import type { AssignmentLevel, AssignmentSlice, EditAssignment, MyEditAssignmentsView } from './types';
+
+/** Рівень передачі; відповідь без поля (старий сервер) — `Write`, тобто передача місяця. */
+export function levelOf(a: Pick<EditAssignment, 'level'>): AssignmentLevel {
+  return a.level ?? 'Write';
+}
+
+/**
+ * Підпис рівня учасника. ⛔ Ключі — літералами в кожній гілці (сторож `EndpointCoverageTests` не бачить ключів,
+ * складених шаблонним рядком).
+ */
+export function levelLabel(level: AssignmentLevel): string {
+  if (level === 'Read') return t('editAssign.level.Read');
+  if (level === 'Submit') return t('editAssign.level.Submit');
+  if (level === 'Approve') return t('editAssign.level.Approve');
+
+  return t('editAssign.level.Write');
+}
+
+/** Передача місяця (цикл «Заповнено → Валідовано/Повернуто», «наступний місяць»), а не учасник іншого рівня. */
+export function isHandoff(a: Pick<EditAssignment, 'level'>): boolean {
+  return levelOf(a) === 'Write';
+}
 
 /** Зріз із усіма чотирма селекторами (схема вимагає всі ключі; `null` = не обмежено). */
 export function makeSlice(parts: Partial<AssignmentSlice> = {}): AssignmentSlice {

@@ -1,0 +1,139 @@
+import { expect, test, type Browser, type BrowserContext } from '@playwright/test';
+import { chooseSubmitPeriod } from './submitPeriod';
+
+/**
+ * D-441 (AN-128): «Подати» на РЕАЛЬНОМУ стенді (`tools/e2e-stand.ps1`, workflow `e2e-stand`,
+ * `grep=submissionTargetLive`) називає й подає НАЙРАНІШИЙ неподаний період у стані Open/Grace, а не відкритий на
+ * екрані; ▾ дає вибрати інший; `Scheduled` сервер не приймає.
+ *
+ * ⚠ Стенд живе за датами: політика `ECR-Standard` (Grace — з 15-го дня після кінця місяця до 45-го) дає поруч
+ * із поточним Open-місяцем попередній у Grace лише частину місяця. Тому очікування не зашиті числами: ціль
+ * звіряється з відповіддю сервера (`GET …/submission-target`) і календарем проєкту — найраніший неподаний
+ * відкритий період, і він не пізніший за відкритий на екрані.
+ *
+ * ⚠ Сам клік подання перехоплюється (`page.route`, відповідь 204): прогін доводить, ЩО шле кнопка, і не міняє
+ * базову лінію стенда для сусідніх прогонів (подання реального періоду перевіряють `keyboardPath`/`cellColor*`).
+ *
+ * ⚠ Написано без локального прогону (на машині автора немає стенда): перший живий прогін — CI.
+ */
+const Admin = { userName: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
+
+const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
+const DocumentId = process.env['ECR_E2E_DOCUMENT'] ?? '';
+
+interface SubmissionTarget {
+  targetPeriodKey: number | null;
+  nextPeriodKey: number | null;
+  periods: { periodKey: number; state: string; sheetStatus: string; submittable: boolean }[];
+  monthColumns: { tableDefId: number; columnCode: string; monthNumber: number; periodKey: number; sheetStatus: string }[];
+}
+
+interface Calendar {
+  periods: { periodKey: number; state: string }[];
+}
+
+async function signedIn(browser: Browser): Promise<BrowserContext> {
+  const context = await browser.newContext();
+  const login = await context.request.post('/api/v1/login/local', {
+    data: { userName: Admin.userName, password: Admin.password },
+  });
+  expect(login.ok(), `вхід ${Admin.userName}: ${String(login.status())} ${await login.text()}`).toBe(true);
+
+  return context;
+}
+
+test.describe('submissionTarget: «Подати: <період>» на реальному стенді (D-441)', () => {
+  test.beforeAll(() => {
+    if (PeriodKey === '' || DocumentId === '') {
+      throw new Error('стенда немає: в оточенні немає ECR_E2E_PERIOD/ECR_E2E_DOCUMENT (tools/e2e-stand.ps1)');
+    }
+  });
+
+  test.describe.configure({ mode: 'serial', timeout: 180_000 });
+
+  test('кнопка називає й подає найраніший неподаний Open/Grace; вибір іншого періоду; Scheduled — 403', async ({
+    browser,
+  }) => {
+    const context = await signedIn(browser);
+    const page = await context.newPage();
+
+    try {
+      const targetResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === 'GET' &&
+          new URL(response.url()).pathname === `/api/v1/documents/${DocumentId}/submission-target`,
+        { timeout: 90_000 },
+      );
+      await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
+      const reply = await targetResponse;
+      expect(reply.status(), `GET submission-target: ${await reply.text()}`).toBe(200);
+      const target = (await reply.json()) as SubmissionTarget;
+
+      // ── 1. Ціль — найраніший неподаний відкритий період, не пізніший за відкритий на екрані ──────────
+      const submittable = target.periods.filter((period) => period.submittable).map((period) => period.periodKey);
+      expect(submittable.length, 'на стенді немає жодного неподаного відкритого періоду').toBeGreaterThan(0);
+      expect(target.targetPeriodKey).toBe(submittable[0]);
+      expect(target.targetPeriodKey ?? Number.MAX_SAFE_INTEGER).toBeLessThanOrEqual(Number(PeriodKey));
+      expect(target.periods.every((period) => period.state === 'Open' || period.state === 'Grace')).toBe(true);
+
+      // Календар проєкту: кожен Open/Grace-період, раніший за ціль, у переліку сервера — уже поданий.
+      const summary = await context.request.get(`/api/v1/documents/${DocumentId}?periodKey=${PeriodKey}`);
+      const projectId = ((await summary.json()) as { projectId: number }).projectId;
+      const calendar = (await (await context.request.get(`/api/v1/projects/${String(projectId)}/periods`)).json()) as Calendar;
+      const targetKey = target.targetPeriodKey ?? 0;
+      for (const period of target.periods.filter((p) => p.periodKey < targetKey)) {
+        expect(period.submittable, `період ${String(period.periodKey)} раніший за ціль і не поданий`).toBe(false);
+      }
+
+      // ── 2. Кнопка «Подати: <період>» називає ЦІЛЬ; попередження «наступний — …», коли за нею чекає ще один ──
+      const submit = page.getByTestId('document-submit');
+      await expect(submit, 'у шапці немає кнопки подання').toBeVisible({ timeout: 30_000 });
+      await expect(submit).toHaveAttribute('data-period-key', String(target.targetPeriodKey));
+      await expect(submit).toHaveText(/^(Submit|Подать|Тапсыру): .+/);
+      await expect(submit).toContainText(String(Math.trunc(targetKey / 100)));
+      if (target.nextPeriodKey !== null) {
+        await expect(page.getByTestId('submit-next-period'), 'немає попередження «наступний — …»').toBeVisible();
+      } else {
+        await expect(page.getByTestId('submit-next-period')).toHaveCount(0);
+      }
+
+      // ── 3. Клік шле САМЕ ціль (перехоплено: базова лінія стенда не змінюється) ─────────────────────────
+      const sent: { body: { sheetDefId?: number; periodKey?: number } | null } = { body: null };
+      await page.route(`**/api/v1/documents/${DocumentId}/submit`, async (route) => {
+        sent.body = route.request().postDataJSON() as { sheetDefId?: number; periodKey?: number };
+        await route.fulfill({ status: 204, body: '' });
+      });
+      await submit.click();
+      await expect.poll(() => sent.body?.periodKey, { message: 'кнопка не надіслала подання', timeout: 30_000 }).toBe(
+        target.targetPeriodKey,
+      );
+      await page.unroute(`**/api/v1/documents/${DocumentId}/submit`);
+
+      // ── 4. Вибір іншого відкритого періоду ▾ переводить кнопку на нього ───────────────────────────────
+      const other = submittable.find((key) => key !== target.targetPeriodKey);
+      if (other !== undefined) {
+        await chooseSubmitPeriod(page, other);
+        await expect(submit).toHaveAttribute('data-period-key', String(other));
+      }
+
+      // ── 5. Scheduled-період сервер не приймає (EditRules.CanSubmit, D-441) ─────────────────────────────
+      const scheduled = calendar.periods.find((period) => period.state === 'Scheduled');
+      if (scheduled !== undefined) {
+        const tables = (await (
+          await context.request.get(`/api/v1/documents/${DocumentId}/tables?periodKey=${PeriodKey}`)
+        ).json()) as { sheetDefId: number }[];
+        const sheetDefId = tables[0]?.sheetDefId;
+        if (sheetDefId === undefined) throw new Error('у документа стенда немає таблиць');
+
+        const refused = await context.request.post(`/api/v1/documents/${DocumentId}/submit`, {
+          data: { sheetDefId, periodKey: scheduled.periodKey },
+        });
+        const body = await refused.text();
+        expect(refused.status(), `submit Scheduled ${String(scheduled.periodKey)}: ${body}`).toBe(403);
+        expect(body).toContain('PeriodNotOpenYet');
+      }
+    } finally {
+      await context.close();
+    }
+  });
+});

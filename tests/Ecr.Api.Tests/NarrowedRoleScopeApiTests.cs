@@ -323,7 +323,11 @@ public sealed class NarrowedRoleScopeApiTests(SqlServerFixture sql)
     /// <summary>Документ за 202601 зі своїм аркушем у складі; у проєкті ще й період 202602.</summary>
     private async Task<TestDocument> ArrangeAsync()
     {
-        var b = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync().ConfigureAwait(false);
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var b = await builder.BuildAsync().ConfigureAwait(false);
+
+        // D-441 (AN-128): Scheduled-період не подається — період документа відкрито.
+        await builder.OpenPeriodAsync(b).ConfigureAwait(false);
 
         await using var db = Context();
         db.DocumentSheets.Add(new DocumentSheet(b.DocumentId, b.SheetDefId));

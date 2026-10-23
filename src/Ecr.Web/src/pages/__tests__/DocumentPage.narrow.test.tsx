@@ -88,6 +88,19 @@ function mockFetch(options: { projectStatus: string; periodState: string; sheetS
         ]);
       }
 
+      // ✎ D-441: ціль подання — як рахує сервер: відкритий/пільговий період і неподаний аркуш, проєкт не архівний.
+      if (url.includes('/submission-target')) {
+        const open = options.periodState === 'Open' || options.periodState === 'Grace';
+        const submittable =
+          open && options.projectStatus !== 'Archived' && (options.sheetState === 'Draft' || options.sheetState === 'Rejected');
+        return jsonResponse({
+          targetPeriodKey: submittable ? Period : null,
+          nextPeriodKey: null,
+          periods: open ? [{ periodKey: Period, state: options.periodState, sheetStatus: options.sheetState, submittable }] : [],
+          monthColumns: [],
+        });
+      }
+
       if (url.includes('/api/v1/documents/1')) {
         return jsonResponse({
           businessKey: 'DOC-0001',
@@ -156,7 +169,7 @@ describe('DocumentPage: вузький екран — лише читання (U
       expect(banner.textContent).toContain('document.narrow.title');
 
       const row = screen.getByTestId('document-actions');
-      await within(row).findByRole('button', { name: '⟦document.submit⟧' }, { timeout: SlowEnvTimeout });
+      await within(row).findByRole('button', { name: /workflow\.submitPeriod/ }, { timeout: SlowEnvTimeout });
       expect(within(row).queryByRole('button', { name: /workflow\.recalculate/ })).toBeNull();
       expect(screen.queryByRole('button', { name: 'import-stub' })).toBeNull();
       // ✎ Пачка batch-3: після `UI-14` перерахунок — пункт «More»; на вузькому екрані його немає й там.

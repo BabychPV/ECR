@@ -71,7 +71,10 @@ export function RequestRecalculationButton({
   );
 }
 
-/** Живі погодження проєкту: підтвердження чужих і запуск власних підтверджених. */
+/**
+ * Живі погодження проєкту: підтвердження (з грантом Manage — і власних, D-440: правило
+ * чотирьох очей скасоване) і запуск власних підтверджених.
+ */
 export function RecalculationApprovalsPanel({ projectId }: { projectId: number }): JSX.Element | null {
   const queryClient = useQueryClient();
   const session = useSession();
@@ -158,7 +161,7 @@ export function RecalculationApprovalsPanel({ projectId }: { projectId: number }
                       <Table.Td>{formatDateTime(a.expiresAt)}</Table.Td>
                       <Table.Td>
                         <Group gap="xs" justify="flex-end">
-                          {!confirmed && !mine && manages && (
+                          {!confirmed && manages && (
                             <Button
                               size="xs"
                               variant="subtle"

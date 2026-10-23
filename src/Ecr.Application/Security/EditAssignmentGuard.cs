@@ -30,6 +30,10 @@ public enum AssigneeProgress : byte
 /// <param name="DelegatedByUserId">Хто передав.</param>
 /// <param name="ExpiresAt">Строк дії; <c>null</c> — безстроково.</param>
 /// <param name="MyProgress">Стан САМЕ цього користувача; <c>null</c> — не виконавець.</param>
+/// <param name="Level">
+/// Рівень учасника (D-443). Правило запису цього класу (підйом, «Заповнено», ексклюзивність) стосується лише
+/// <see cref="GrantLevel.Write"/> — передачі місяця; решту рівнів читає <see cref="DocumentParticipation"/>.
+/// </param>
 public sealed record EditAssignmentFact(
     string? SheetCode,
     string? TableCode,
@@ -40,7 +44,8 @@ public sealed record EditAssignmentFact(
     bool DelegatorActive,
     int DelegatedByUserId,
     DateTime? ExpiresAt,
-    AssigneeProgress? MyProgress);
+    AssigneeProgress? MyProgress,
+    GrantLevel Level = GrantLevel.Write);
 
 /// <summary>Факти комірки (зрізу), з якими звіряються селектори передачі.</summary>
 /// <param name="SheetCode">Код аркуша; <c>null</c> — невідомий.</param>
@@ -164,7 +169,10 @@ public static class EditAssignmentGuard
         foreach (var a in assignments)
         {
             // R7: передача діє, лише поки делегатор активний.
-            if (!a.DelegatorActive)
+            // ⛔ D-443: правило передачі місяця — лише для рівня Write. Учасник Read/Submit/Approve не
+            // піднімається тут, не замикається «Заповнено» й ексклюзивним не буває (CHECK бази): його рівень
+            // рахує `DocumentParticipation` і діє через `EditRules.Effective`.
+            if (!a.DelegatorActive || a.Level != GrantLevel.Write)
             {
                 continue;
             }

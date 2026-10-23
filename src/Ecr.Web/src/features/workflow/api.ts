@@ -54,3 +54,41 @@ export function useRecallAvailability(
     enabled,
   });
 }
+
+/** Що подасть «Подати» на аркуші (D-441); тип — зі згенерованої схеми. */
+export type SubmissionTarget = components['schemas']['SubmissionTargetDto'];
+
+/** Стан аркуша за період місячної колонки — `Submitted`/`Approved` позначаються в заголовку. */
+export type MonthColumnStatus = components['schemas']['MonthColumnStatusDto'];
+
+/**
+ * Ключ відповіді `GET …/submission-target` для аркуша й відкритого на екрані періоду.
+ *
+ * ⚠ Окремий префікс, а не `['document', id, period]`: подання іде в ІНШИЙ період, ніж відкритий (D-441),
+ * і скидання ключа відкритого періоду цю відповідь не оновило б. `SheetActions` скидає
+ * `['submission-target', id]` після кожної дії робочого процесу.
+ */
+export function submissionTargetKey(documentId: number, sheetDefId: number, periodKey: number): readonly unknown[] {
+  return ['submission-target', documentId, sheetDefId, periodKey];
+}
+
+export function fetchSubmissionTarget(documentId: number, sheetDefId: number, periodKey: number): Promise<SubmissionTarget> {
+  return apiFetch<SubmissionTarget>(
+    `/api/v1/documents/${String(documentId)}/submission-target?sheetDefId=${String(sheetDefId)}&periodKey=${String(periodKey)}`,
+  );
+}
+
+/**
+ * Цільовий період подання (D-441): найраніший неподаний `Open`/`Grace`, наступний, відкриті періоди для вибору
+ * і статуси місячних колонок. Рішення — сервера: стан періоду для подання ЕФЕКТИВНИЙ (за датами).
+ */
+export function useSubmissionTarget(
+  documentId: number,
+  sheetDefId: number,
+  periodKey: number,
+): UseQueryResult<SubmissionTarget> {
+  return useQuery({
+    queryKey: submissionTargetKey(documentId, sheetDefId, periodKey),
+    queryFn: () => fetchSubmissionTarget(documentId, sheetDefId, periodKey),
+  });
+}

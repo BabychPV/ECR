@@ -6,8 +6,9 @@ import { expect, test, type APIRequestContext, type Browser, type BrowserContext
  *
  * Основні сценарії йдуть через API (плюс крок 2б - блок «До погодження» у My tasks) під справжніми сесіями
  * трьох користувачів стенда:
- *  - `e2e-admin` (Manage на проєкт 1) подає аркуш: подавач - не погоджувач власного подання (F-25);
- *  - `e2e-reviewer` (та сама роль, інша людина) - погоджувач: бачить аркуш у черзі, затверджує, аркуш зникає;
+ *  - `e2e-admin` (Manage на проєкт 1) подає аркуш і, з D-440 (чотири очі скасовано), бачить власне подання
+ *    у своїй черзі й сам його затверджує; журнал аркуша позначає це «погоджено автором подання»;
+ *  - `e2e-reviewer` (та сама роль, інша людина) - теж погоджувач: бачить аркуш у черзі, після рішення він зникає;
  *  - `e2e-operator` (Write) - права затвердження немає: черга порожня, чужого подання не бачить.
  *
  * ⛔ Без стенда файл ПАДАЄ (`beforeAll`), а не пропускається: пропуск червонить Evidence (honesty-guard), а
@@ -123,7 +124,7 @@ test.describe('approvalQueue: черга «До погодження» на ре
     }
   });
 
-  test('approvalQueue: подання -> черга погоджувача -> затвердження -> аркуш зникає; без права й подавач - порожньо', async ({
+  test('approvalQueue: подання -> черга погоджувачів (і подавача, D-440) -> затвердження подавачем -> аркуш зникає; без права - порожньо', async ({
     browser,
   }) => {
     const admin = await signedIn(browser, Admin);
@@ -199,8 +200,8 @@ test.describe('approvalQueue: черга «До погодження» на ре
       );
       await page.close();
 
-      // ── 3. Подавач (F-25) і оператор без права затвердження - порожньо ─────────────
-      expect(mine(await wholeQueue(admin.request), sheetDefId), 'власне подання в черзі подавача').toEqual([]);
+      // ── 3. D-440: подавач із правом затвердження бачить власне подання; оператор без права - ні ─────
+      expect(mine(await wholeQueue(admin.request), sheetDefId), 'власного подання немає в черзі подавача (D-440)').toHaveLength(1);
       expect(mine(await wholeQueue(operator.request), sheetDefId), 'аркуш без права Approve у черзі оператора').toEqual([]);
 
       // ── 4. Зіпсований курсор - 422 з ключем каталогу ─────────────────────────────
@@ -210,13 +211,32 @@ test.describe('approvalQueue: черга «До погодження» на ре
         'err.ECR-REQ-0422.approvalQueueCursorInvalid',
       );
 
-      // ── 5. Затвердження: аркуш зникає з черги ──────────────────────────────────
-      const approve = await reviewer.request.post(`/api/v1/documents/${DocumentId}/approve`, {
+      // ── 5. D-440: затверджує сам подавач - аркуш зникає з черги в усіх ─────────────
+      const approve = await admin.request.post(`/api/v1/documents/${DocumentId}/approve`, {
         data: { sheetDefId, periodKey: Number(PeriodKey), approved: true, reason: null },
       });
-      expect(approve.status(), `approve: ${await approve.text()}`).toBe(204);
+      expect(approve.status(), `approve подавачем (D-440): ${await approve.text()}`).toBe(204);
 
       expect(mine(await wholeQueue(reviewer.request), sheetDefId), 'затверджений аркуш лишився в черзі').toEqual([]);
+      expect(mine(await wholeQueue(admin.request), sheetDefId), 'затверджений аркуш лишився в черзі подавача').toEqual([]);
+
+      // ── 6. Журнал аркуша: останнє погодження позначене «погоджено автором подання» ────────
+      const historyResponse = await admin.request.get(`/api/v1/documents/${DocumentId}/workflow/history?periodKey=${PeriodKey}`);
+      expect(historyResponse.ok(), `GET workflow/history: ${String(historyResponse.status())}`).toBe(true);
+      const history = (await historyResponse.json()) as { sheetCode: string; action: string; approvedBySubmitter: boolean }[];
+      const lastApprove = history.find((event) => event.sheetCode === table.sheetCode && event.action === 'Approve');
+      expect(lastApprove?.approvedBySubmitter, 'погодження подавачем без позначки в журналі').toBe(true);
+
+      // ── 6б. UI: «More → History» показує позначку ─────────────────────────────────
+      const adminPage = await admin.newPage();
+      await adminPage.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
+      await adminPage.getByTestId('document-more').click({ timeout: 60_000 });
+      await adminPage.getByRole('menuitem', { name: /^(History|История|Тарих)$/ }).click();
+      await expect(
+        adminPage.getByTestId('workflow-history-approved-by-submitter').first(),
+        'у журналі аркуша немає позначки «погоджено автором подання»',
+      ).toBeVisible({ timeout: 30_000 });
+      await adminPage.close();
     } finally {
       await admin.close();
       await reviewer.close();

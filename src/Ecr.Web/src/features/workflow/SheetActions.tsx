@@ -19,7 +19,7 @@ import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { LazyConfirmModal, LazyReasonModal } from './lazyDialogs';
 import { Hint } from '@/shared/ui/Hint';
 import { showApiError, showDone, showWarning } from '@/shared/ui/notify';
-import { useRecallAvailability, type RecallSheetRequest } from './api';
+import { useRecallAvailability, useSubmissionTarget, type RecallSheetRequest } from './api';
 import { outcomeOf, pollInterval } from './jobFollow';
 import { useSettledAction } from '@/features/grid/settleEdits';
 import { isRecalculateKey, isTypingOrDialogTarget } from '@/features/grid/shortcutKey';
@@ -236,7 +236,7 @@ export function SheetActions(props: SheetActionsProps): JSX.Element {
 
       {submit !== null && (
         <Button loading={submit.loading} onClick={submit.run}>
-          {t('document.submit')}
+          {submitLabel(submit.periodKey)}
         </Button>
       )}
 
@@ -317,6 +317,16 @@ export function RecalculateKbd(): JSX.Element {
   );
 }
 
+/** Назва періоду для кнопки й попередження; невідомий ключ — сам ключ. */
+export function periodLabel(periodKey: number): string {
+  return formatPeriodKey(periodKey) || String(periodKey);
+}
+
+/** ✎ D-441: «Подати: <період>» — кнопка називає період, який подасть. */
+export function submitLabel(periodKey: number): string {
+  return t('workflow.submitPeriod', { period: periodLabel(periodKey) });
+}
+
 /** Дія, що виконується одразу (з очікуванням збереження набраного). */
 export interface RunnableSheetAction {
   readonly loading: boolean;
@@ -336,7 +346,15 @@ export interface RunnableSheetAction {
 export interface SheetActionsModel {
   /** `blockedReason` - чому перерахунок зараз неможливий (поданий сусідній аркуш); `null` - можна. */
   readonly recalculate: (RunnableSheetAction & { readonly running: boolean; readonly blockedReason: string | null }) | null;
-  readonly submit: RunnableSheetAction | null;
+  /** ✎ D-441: `periodKey` — період, який подасть кнопка; `options` — неподані відкриті періоди для вибору. */
+  readonly submit:
+    | (RunnableSheetAction & {
+        readonly periodKey: number;
+        readonly nextPeriodKey: number | null;
+        readonly options: readonly number[];
+        readonly pick: (periodKey: number) => void;
+      })
+    | null;
   readonly approve: { readonly loading: boolean; readonly ask: () => void } | null;
   readonly reject: { readonly ask: () => void } | null;
   readonly reopen: { readonly ask: () => void } | null;
@@ -387,6 +405,8 @@ export function useSheetActions({
     // перезапиту на фокус. Без цього після Recall/Return/Reopen сітка лишалась
     // сірою до F5. Зрізи ЦЬОГО аркуша перезапитуються, решта лише позначається.
     await invalidateSlices(queryClient, { documentId, periodKey: at.periodKey, sheetDefId: at.sheetDefId });
+    // ✎ D-441: ціль подання й статуси місячних колонок залежать від станів аркуша в УСІХ періодах.
+    await queryClient.invalidateQueries({ queryKey: ['submission-target', documentId] });
   };
 
   // ФВ-5.19: попередження, які сервер попросив підтвердити; `null` — діалог закритий.
@@ -395,7 +415,11 @@ export function useSheetActions({
   const warnedAt = useRef<ActionTarget>(here);
 
   const submit = useMutation({
-    mutationFn: ({ sheetDefId: sheet, periodKey: period, acknowledgeWarnings }: ActionTarget & { acknowledgeWarnings: boolean }) =>
+    mutationFn: ({
+      sheetDefId: sheet,
+      periodKey: period,
+      acknowledgeWarnings,
+    }: ActionTarget & { acknowledgeWarnings: boolean }) =>
       apiFetch(`/api/v1/documents/${documentId}/submit`, {
         method: 'POST',
         body: JSON.stringify({
@@ -407,6 +431,8 @@ export function useSheetActions({
     onSuccess: async (_result, at) => {
       setWarnings(null);
       await refresh(at);
+      // ✎ D-441: попередження «наступний — …» стоїть поруч із кнопкою ДО подання (`SubmitPeriodPicker`); після
+      // нього кнопка сама переходить на наступний період.
       showDone(t('document.submitted'));
     },
     // ⚠ Причина показується як є: Submit при осиротілих рядках
@@ -740,23 +766,48 @@ export function useSheetActions({
   // відмову, — це обіцянка, якої система не виконає; причину каже банер.
   const dataLocked = locksDataActions(lock);
 
-  const canSubmit = !dataLocked && isAllowed('submit', state) && mayWorkflow('submit');
+  /*
+   * ⛔ D-441 (AN-128): «Подати» подає НАЙРАНІШИЙ неподаний період у стані Open/Grace (рішення сервера,
+   * `GET …/submission-target`), а не відкритий на екрані: у лютому з неподаним січнем кнопка подає січень.
+   * Інший відкритий період оператор вибирає сам (`pick`). Доки відповіді немає — кнопки немає: інакше клік
+   * до відповіді подав би відкритий період, тобто саме те, що D-441 скасовує. Збій запиту — стара поведінка
+   * (відкритий на екрані період), щоб робочий процес не зупинявся через недоступну підказку.
+   */
+  const submissionTarget = useSubmissionTarget(documentId, sheetDefId, periodKey);
+  // ⚠ Відповідь без переліку періодів (старіший сервер, проксі, порожнє тіло) — та сама невідомість, що й збій.
+  const target = Array.isArray(submissionTarget.data?.periods) ? submissionTarget.data : undefined;
+  const targetUnknown = submissionTarget.isError || (submissionTarget.isSuccess && target === undefined);
+  const [picked, setPicked] = useState<{ readonly sheetDefId: number; readonly periodKey: number } | null>(null);
+  const submittable = (target?.periods ?? [])
+    .filter((period) => period.submittable)
+    .map((period) => period.periodKey);
+  const pickedHere = picked !== null && picked.sheetDefId === sheetDefId && submittable.includes(picked.periodKey)
+    ? picked.periodKey
+    : null;
+  const submitPeriod: number | null =
+    target !== undefined
+      ? (pickedHere ?? target.targetPeriodKey ?? null)
+      : targetUnknown && !dataLocked && isAllowed('submit', state)
+        ? periodKey
+        : null;
+  const nextPeriodKey: number | null =
+    submitPeriod === null || target === undefined
+      ? null
+      : submitPeriod === target.targetPeriodKey
+        ? (target.nextPeriodKey ?? null)
+        : (submittable.find((key) => key > submitPeriod) ?? null);
+
+  // ⚠ Архівний проєкт блокує подання будь-якого періоду; стан ВІДКРИТОГО періоду (закритий, не відкритий) —
+  // ні: подається інший період, і його стан уже врахував сервер.
+  const canSubmit = submitPeriod !== null && lock !== 'projectArchived' && mayWorkflow('submit');
 
   /*
-   * ⛔ A2-08 (F-25 / D-285): автор подання не погоджує власний аркуш — сервер
-   * відповідає `403 approveOwnSubmission`. «Автора» клієнт сам не знає (`/me`
-   * і стан аркуша не кажуть, хто подав), тож ознака — СЕРВЕРНА: `canRecall`
-   * (`GET …/recall`) істинне лише для того, хто подав, і доки жоден крок не
-   * підписано. Тоді замість Approve/Reject лишається «Recall» — штатний для
-   * автора шлях забрати подання (Reject власного подання сервер пропускає, але
-   * поруч із Recall це друга кнопка для тієї самої дії).
-   * ⚠ Прогалина: якщо крок уже підписав інший погоджувач, `canRecall` хибне і
-   * кнопка автору видна — тоді відмову з назвою аркуша дає сервер.
+   * ⚠ D-440: правило чотирьох очей скасоване — автор подання з потрібною роллю
+   * погоджує власний аркуш, тож Approve/Reject НЕ ховаються на власному поданні
+   * (доти ознакою «автора» був `canRecall`). Видимість — лише стан і права.
    */
-  const isOwnSubmission = canRecall;
-
-  const canApprove = !isOwnSubmission && isAllowed('approve', state) && mayWorkflow('approve');
-  const canReject = !isOwnSubmission && isAllowed('reject', state) && mayWorkflow('reject');
+  const canApprove = isAllowed('approve', state) && mayWorkflow('approve');
+  const canReject = isAllowed('reject', state) && mayWorkflow('reject');
 
   // ⛔ Аудит Етапу 3, лана "Documents core" (`lane3-workflow-buttons-not-grouped`,
   // знахідка людини зі скріншотом): `DocumentPage.tsx` рендерить ОДИН
@@ -915,10 +966,18 @@ export function useSheetActions({
             recalcBlockedReason !== null ? showWarning(recalcBlockedReason) : settled.run(() => recalculate.mutateAsync(here)),
         }
       : null,
-    submit: canSubmit
+    submit: canSubmit && submitPeriod !== null
       ? {
           loading: submitLoading || settled.settling,
-          run: () => settled.run(() => submit.mutateAsync({ ...here, acknowledgeWarnings: false })),
+          periodKey: submitPeriod,
+          nextPeriodKey,
+          options: submittable,
+          pick: (key: number) => setPicked({ sheetDefId, periodKey: key }),
+          // N3-01: адреса — знята в мить кліку; період — ЦІЛЬ подання, а не відкритий на екрані (D-441).
+          run: () =>
+            settled.run(() =>
+              submit.mutateAsync({ ...here, periodKey: submitPeriod, acknowledgeWarnings: false }),
+            ),
         }
       : null,
     approve: canApprove ? { loading: decideLoading || settled.settling, ask: () => ask('approve') } : null,
@@ -951,6 +1010,18 @@ export function isEditable(state: string): boolean {
   // Подане і затверджене не редагується: щоб змінити числа, аркуш повертають
   // у роботу окремою дією з причиною (`ФВ-5.20a`).
   return !isAllowed('approve', state) && !isAllowed('reopen', state);
+}
+
+/**
+ * ✎ D-442: чи правку значень у цьому стані вирішує СЕРВЕР по комірці, а не стан аркуша цілком.
+ *
+ * ⛔ Поданий аркуш править лише погоджувач поточного кроку маршруту — і знає це лише сервер (маршрут,
+ * крок, роль, грант). Тому сітку поданого аркуша не замикають на клієнті: погоджувачеві рішення
+ * зрізу приходять редаговними, решті — з причиною `DocumentSubmitted` (штриховка, замок, підказка).
+ * Дії зі зміни даних (подання, імпорт, перерахунок, рядки) лишаються закриті за `isEditable`.
+ */
+export function editsDeferToServer(state: string): boolean {
+  return state === 'Submitted';
 }
 
 export type { WorkflowAction };

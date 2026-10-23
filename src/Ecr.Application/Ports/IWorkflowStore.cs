@@ -27,6 +27,22 @@ public interface IWorkflowStore
     public Task<IReadOnlyList<ApprovalState>> GetSheetsAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct);
 
+    /// <summary>
+    /// Календар подання аркуша (D-441): усі періоди проєкту документа з ЕФЕКТИВНИМ станом на
+    /// <paramref name="utcNow"/> і станом аркуша в кожному; <c>null</c> — документа немає.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="utcNow">Поточний момент.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Стан періоду — те саме правило, що й у рішенні про подання (<c>AccessDecisionService.BuildContextAsync</c>,
+    /// F-08): <c>PeriodStateCalculator.Effective</c> лише для активного проєкту, інакше збережений. Інакше кнопка
+    /// пропонувала б період, який <c>EditRules.CanSubmit</c> відхилить (чи навпаки).
+    /// </remarks>
+    public Task<SubmissionCalendar?> GetSubmissionCalendarAsync(
+        long documentId, int sheetDefId, DateTime utcNow, CancellationToken ct);
+
     /// <summary>Додає запис у журнал переходів стану (<c>wf.ApprovalEvent</c>).</summary>
     /// <remarks>
     /// ⛔ Лише додає в ту саму одиницю роботи, що й зміна стану, і НЕ зберігає
@@ -207,6 +223,10 @@ public sealed record SubmissionSnapshotRecord(
 /// <param name="At">Момент дії, UTC.</param>
 /// <param name="Reason">Причина відхилення або повернення в роботу.</param>
 /// <param name="StepOrdinal">Крок маршруту, якщо маршрут є.</param>
+/// <param name="ApprovedBySubmitter">
+/// Погодження (<c>Approve</c>/<c>ApproveStep</c>), яке виконав той самий користувач, що й останнє
+/// подання (<c>Submit</c>) цього аркуша за період перед ним (<c>D-440</c>); для інших дій — <c>false</c>.
+/// </param>
 public sealed record ApprovalEventRecord(
     string SheetCode,
     Ecr.Domain.Enums.DocumentStatus FromStatus,
@@ -216,4 +236,25 @@ public sealed record ApprovalEventRecord(
     string? ByDisplayName,
     DateTime At,
     string? Reason,
-    int? StepOrdinal);
+    int? StepOrdinal,
+    bool ApprovedBySubmitter = false);
+
+/// <summary>Календар подання аркуша (D-441): проєкт документа і стани періодів × аркуша.</summary>
+/// <param name="ProjectStatus">Стан проєкту.</param>
+/// <param name="IsArchiving">Чи триває архівація проєкту.</param>
+/// <param name="PeriodKind">Вид календаря проєкту.</param>
+/// <param name="Periods">Усі періоди проєкту за зростанням ключа.</param>
+public sealed record SubmissionCalendar(
+    Ecr.Domain.Enums.ProjectStatus ProjectStatus,
+    bool IsArchiving,
+    Ecr.Domain.Enums.PeriodKind PeriodKind,
+    IReadOnlyList<SubmissionCalendarPeriod> Periods);
+
+/// <summary>Період календаря подання.</summary>
+/// <param name="PeriodKey">Ключ періоду.</param>
+/// <param name="State">Ефективний стан періоду.</param>
+/// <param name="SheetStatus">Стан аркуша за цей період; рядка стану немає — <c>Draft</c>.</param>
+public sealed record SubmissionCalendarPeriod(
+    int PeriodKey,
+    Ecr.Domain.Enums.PeriodState State,
+    Ecr.Domain.Enums.DocumentStatus SheetStatus);

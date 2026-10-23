@@ -27,7 +27,7 @@ public sealed class MethodologyImportController(ImportMethodologyPackageHandler 
     /// <param name="timeZone">Пояс майданчика (IANA) для дат AF; за замовчуванням <c>Asia/Atyrau</c>.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
-    /// ⛔ Лише чернетки: публікує інша людина звичайною дією публікації (чотири ока, золотий
+    /// ⛔ Лише чернетки: публікує носій <c>Calculation.Publish</c> звичайною дією публікації (золотий
     /// набір). Блокери — <c>422</c>, розбіжність із наявною версією — <c>409</c>; обидва зі
     /// звітом у <c>report</c> і без жодного запису. Повторний імпорт того самого пакета —
     /// <c>200</c> з <c>outcome = unchanged</c>.

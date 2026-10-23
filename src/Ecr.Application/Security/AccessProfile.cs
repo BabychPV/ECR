@@ -132,6 +132,76 @@ public sealed class AccessProfile
     }
 
     /// <summary>
+    /// D-443: користувач — виконавець хоча б однієї передачі (учасник якогось документа). Ознака кешованого
+    /// профілю: САМІ надання читаються з бази на кожне рішення (<c>IAccessDecisionService</c>), а ця ознака лише
+    /// вмикає для профілю шлях «доступ через надання» — межі читання документа (<c>DocumentSheetVisibility</c>
+    /// не пропускає такого читача як «без обмежень»), вхід у перелік документів.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Закрито за замовчуванням: застаріла ознака <c>false</c> (профіль у кеші до видачі надання) лише ХОВАЄ
+    /// документ до перебудови профілю — служба відмовляє наданням без ознаки; застаріла <c>true</c> коштує лише
+    /// зайвого обчислення меж. Видача й зняття надання скидають кешований профіль виконавця
+    /// (<c>InvalidateProfileAsync</c>).
+    /// </remarks>
+    public bool HasDocumentParticipations { get; init; }
+
+    /// <summary>
+    /// Той самий профіль БЕЗ ознаки учасника (D-443): межі «лише за ролями» для фільтрів переліку, що діють на
+    /// весь проєкт (межа одного документа-надання на інші документи проєкту не поширюється).
+    /// </summary>
+    public AccessProfile WithoutParticipations()
+        => !HasDocumentParticipations
+            ? this
+            : new AccessProfile
+            {
+                CacheKey = CacheKey + "|roles-only",
+                UserId = UserId,
+                SecurityStamp = SecurityStamp,
+                Permissions = Permissions,
+                Grants = Grants,
+                Denies = Denies,
+                RoleIds = RoleIds,
+                UnscopedRoleIds = UnscopedRoleIds,
+                Scoped = Scoped,
+                IsSimulation = IsSimulation,
+                IsIntegrationWriter = IsIntegrationWriter,
+                SimulatedForUserId = SimulatedForUserId,
+                SimulationActorUserId = SimulationActorUserId,
+                HasDocumentParticipations = false,
+            };
+
+    /// <summary>Проєкти з забороною ролі на сам проєкт (D-443: надання учасника їх не відкриває).</summary>
+    public IReadOnlyList<int> DeniedProjectIds()
+    {
+        var prefix = $"{ResourceKind.Project}:";
+        var ids = new SortedSet<int>();
+        foreach (var key in Denies.Concat(Scoped.Values.SelectMany(s => s.Denies.Concat(s.Narrowed.SelectMany(l => l.Denies)))))
+        {
+            if (key.StartsWith(prefix, StringComparison.Ordinal)
+                && int.TryParse(key.AsSpan(prefix.Length), System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var id))
+            {
+                ids.Add(id);
+            }
+        }
+
+        return [.. ids];
+    }
+
+    /// <summary>
+    /// Чи заборонено користувачеві проєкт цілком (<c>IsDeny</c> на <c>Project:{id}</c> від будь-якої ролі — без
+    /// області, з областю, звуженої). D-443: така заборона перемагає й надання учасника документа.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    public bool DeniesProject(int projectId)
+    {
+        var key = $"{ResourceKind.Project}:{projectId}";
+        return Denies.Contains(key)
+               || (Scoped.TryGetValue(projectId, out var scoped)
+                   && (scoped.Denies.Contains(key) || scoped.Narrowed.Any(l => l.Denies.Contains(key))));
+    }
+
+    /// <summary>
     /// Профіль побудований у сеансі симуляції «очима користувача» (D-96).
     /// Права беруться повністю від <see cref="SimulatedForUserId"/>, але
     /// <b>будь-яка</b> дія запису відхиляється з
@@ -201,10 +271,16 @@ public sealed class AccessProfile
     /// <see cref="Has(string, int)"/>. Сама по собі дала б оператору проєкту A
     /// бачити B. Сторож вимагає реєструвати кожне використання.
     /// </remarks>
+    /// <remarks>
+    /// ✎ D-443: учасник документа (<see cref="HasDocumentParticipations"/>) має вхід і в права, які надання дає
+    /// в його документі (<see cref="DocumentParticipation.ImpliedPermissions"/>, <c>Document.View</c>): далі
+    /// кожен документ перевіряється окремо (<c>DocumentVisibility.RequireVisibleAsync</c>).
+    /// </remarks>
     public bool HasInAnyProject(string permissionCode)
         => Permissions.Contains(permissionCode)
            || Scoped.Values.Any(s => s.Permissions.Contains(permissionCode)
-                                     || s.Narrowed.Any(l => l.Permissions.Contains(permissionCode)));
+                                     || s.Narrowed.Any(l => l.Permissions.Contains(permissionCode)))
+           || (HasDocumentParticipations && DocumentParticipation.ImpliedPermissions.Contains(permissionCode));
 
     /// <summary>Ефективний рівень гранта на ресурс з урахуванням заборон.</summary>
     public GrantLevel LevelFor(ResourceKind kind, int resourceId)

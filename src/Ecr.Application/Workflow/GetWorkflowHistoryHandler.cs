@@ -16,6 +16,7 @@ namespace Ecr.Application.Workflow;
 /// <param name="At">Момент дії, UTC.</param>
 /// <param name="Reason">Причина відхилення або повернення в роботу.</param>
 /// <param name="StepOrdinal">Крок маршруту, якщо маршрут є.</param>
+/// <param name="ApprovedBySubmitter">Погодження виконав той самий користувач, що й подання перед ним: позначка «погоджено автором подання» (<c>D-440</c>).</param>
 public sealed record WorkflowEventDto(
     string SheetCode,
     string FromState,
@@ -24,7 +25,8 @@ public sealed record WorkflowEventDto(
     string ByDisplayName,
     DateTime At,
     string? Reason,
-    int? StepOrdinal);
+    int? StepOrdinal,
+    bool ApprovedBySubmitter);
 
 /// <summary>
 /// Журнал переходів документа за період. Право <c>Document.View</c>.
@@ -91,7 +93,8 @@ public sealed class GetWorkflowHistoryHandler(
             var profile = await Security.PermissionCheck
                 .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
                 .ConfigureAwait(false);
-            Security.PermissionCheck.RequireIn(profile, Permission, document.ProjectId);
+            await Documents.DocumentVisibility
+                .RequireInDocumentAsync(access, profile, documentId, document.ProjectId, Permission, ct).ConfigureAwait(false);
             var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(key);
             events = [.. events.Where(e => readable.CanReadSheetCode(e.SheetCode))];
         }
@@ -105,7 +108,8 @@ public sealed class GetWorkflowHistoryHandler(
                 ActorName(e),
                 e.At,
                 e.Reason,
-                e.StepOrdinal))
+                e.StepOrdinal,
+                e.ApprovedBySubmitter))
             .ToList();
     }
 

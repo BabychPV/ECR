@@ -77,6 +77,29 @@ public sealed class SimulationAwareAccessDecisionService(
         => inner.ReadScopeAsync(profile, documentId, ct);
 
     /// <inheritdoc />
+    public Task<IReadOnlyDictionary<long, DocumentReadScope>> ReadScopesAsync(
+        AccessProfile profile, IReadOnlyCollection<long> documentIds, CancellationToken ct)
+        => inner.ReadScopesAsync(profile, documentIds, ct);
+
+    /// <inheritdoc />
+    public Task<bool> ParticipatesAsync(AccessProfile profile, long documentId, CancellationToken ct)
+        => inner.ParticipatesAsync(profile, documentId, ct);
+
+    /// <inheritdoc />
+    public Task<IReadOnlySet<long>> ParticipatedDocumentsAsync(
+        AccessProfile profile, IReadOnlyCollection<long> documentIds, CancellationToken ct)
+        => inner.ParticipatedDocumentsAsync(profile, documentIds, ct);
+
+    /// <inheritdoc />
+    public Task<bool> ParticipatesInProjectAsync(AccessProfile profile, int projectId, CancellationToken ct)
+        => inner.ParticipatesInProjectAsync(profile, projectId, ct);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyDictionary<long, IReadOnlyList<ParticipationGrant>>> ActiveParticipationsAsync(
+        AccessProfile profile, CancellationToken ct)
+        => inner.ActiveParticipationsAsync(profile, ct);
+
+    /// <inheritdoc />
     public Task<EditDecision> CanEditCellAsync(
         AccessProfile profile, long documentId, CellAddress address, CancellationToken ct)
         => inner.CanEditCellAsync(profile, documentId, address, ct);

@@ -58,6 +58,7 @@ const event = (sheetCode: string, at: string, toState: string) => ({
   reason: null,
   sheetCode,
   stepOrdinal: null,
+  approvedBySubmitter: false,
 });
 
 const history = [

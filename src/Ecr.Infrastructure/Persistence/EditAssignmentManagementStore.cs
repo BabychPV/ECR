@@ -34,6 +34,12 @@ public sealed class EditAssignmentManagementStore(EcrDbContext db) : IEditAssign
             .ToListAsync(ct).ConfigureAwait(false)).Count > 0;
 
     /// <inheritdoc />
+    public Task<Document?> FindDocumentForOwnerChangeAsync(long documentId, CancellationToken ct)
+        => db.Documents
+            .FromSql($"SELECT * FROM doc.Document WITH (UPDLOCK, ROWLOCK) WHERE Id = {documentId}")
+            .FirstOrDefaultAsync(ct);
+
+    /// <inheritdoc />
     public Task LimitLockWaitAsync(CancellationToken ct)
         => db.Database.ExecuteSqlRawAsync(LimitLockWaitSql, ct);
 
@@ -137,6 +143,7 @@ public sealed class EditAssignmentManagementStore(EcrDbContext db) : IEditAssign
                 a.DelegatedByUserId,
                 a.ValidationStatus,
                 a.RowVersion,
+                a.Level,
                 Recipients = a.Recipients
                     .Select(r => new { r.UserId, r.Status, r.ReturnReason, r.StatusChangedAt })
                     .ToList(),
@@ -166,7 +173,8 @@ public sealed class EditAssignmentManagementStore(EcrDbContext db) : IEditAssign
                     IsOwnerOf: r.DelegatedByUserId == userId || r.CreatedByUserId == userId,
                     r.Recipients.Count,
                     r.Recipients.Count(x => x.Status == EditAssignmentRecipientStatus.Filled),
-                    r.RowVersion);
+                    r.RowVersion,
+                    r.Level);
             })
             .OrderBy(r => r.DocumentId).ThenBy(r => r.AssignmentId)];
     }

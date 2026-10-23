@@ -93,6 +93,19 @@ function mockFetch(options: { projectStatus: string; periodState: string; sheetS
         ]);
       }
 
+      // ✎ D-441: ціль подання — як рахує сервер: відкритий/пільговий період і неподаний аркуш, проєкт не архівний.
+      if (url.includes('/submission-target')) {
+        const open = options.periodState === 'Open' || options.periodState === 'Grace';
+        const submittable =
+          open && options.projectStatus !== 'Archived' && (options.sheetState === 'Draft' || options.sheetState === 'Rejected');
+        return jsonResponse({
+          targetPeriodKey: submittable ? Period : null,
+          nextPeriodKey: null,
+          periods: open ? [{ periodKey: Period, state: options.periodState, sheetStatus: options.sheetState, submittable }] : [],
+          monthColumns: [],
+        });
+      }
+
       if (url.includes('/api/v1/documents/1')) {
         return jsonResponse({
           businessKey: 'DOC-0001',
@@ -158,7 +171,7 @@ describe('DocumentPage: банер причини і жодної прирече
       expect(banner.textContent).toContain(`period=${String(Period)}`);
 
       const row = screen.getByTestId('document-actions');
-      expect(within(row).queryByRole('button', { name: '⟦document.submit⟧' })).toBeNull();
+      expect(within(row).queryByRole('button', { name: /workflow\.submitPeriod/ })).toBeNull();
       expect(within(row).queryByRole('button', { name: /workflow\.recalculate/ })).toBeNull();
       expect(screen.queryByRole('button', { name: 'import-stub' })).toBeNull();
 
@@ -195,7 +208,7 @@ describe('DocumentPage: банер причини і жодної прирече
       show({ projectStatus: 'Active', periodState: 'Open', sheetState: 'Draft' });
 
       const row = await screen.findByTestId('document-actions', {}, { timeout: SlowEnvTimeout });
-      await within(row).findByRole('button', { name: '⟦document.submit⟧' }, { timeout: SlowEnvTimeout });
+      await within(row).findByRole('button', { name: /workflow\.submitPeriod/ }, { timeout: SlowEnvTimeout });
 
       expect(screen.queryByText(/document\.lock\./)).toBeNull();
       expect(screen.getByRole('button', { name: 'import-stub' })).toBeTruthy();

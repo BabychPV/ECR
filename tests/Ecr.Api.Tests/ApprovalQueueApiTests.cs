@@ -22,7 +22,7 @@ namespace Ecr.Api.Tests;
 /// <remarks>
 /// ⛔ Мутаційні докази (локально, не в коміті): (1) перевірку <c>EditRules.CanApprove</c> в обробнику вимкнено —
 /// «без права/чужий крок» і «маршрут» червоні; (2) вимкнено <c>CanReadSheet</c> — «усі таблиці аркуша сховані»
-/// червоний; (3) вимкнено правило F-25 — «власне подання погоджувача» червоний; (4) вимкнено фільтр
+/// червоний; (3) повернуто фільтр власних подань F-25 (скасований D-440) — «власне подання погоджувача» червоний; (4) вимкнено фільтр
 /// <c>SeesDocumentsOf</c> — тести лишаються ЗЕЛЕНИМИ: його випадок («проєкт не видимий») закриває й
 /// <c>CanApprove</c> (немає гранта → <c>None</c>), фільтр — попередній відбір кандидатів, а не межа безпеки.
 /// </remarks>
@@ -75,7 +75,7 @@ public sealed class ApprovalQueueApiTests(SqlServerFixture sql)
         Assert.False(string.IsNullOrEmpty(item.GetProperty("documentKey").GetString()));
         Assert.True(item.GetProperty("submittedAt").GetDateTime() > DateTime.UtcNow.AddMinutes(-10));
 
-        // Без права Approve, без гранта і сам автор подання — порожньо; жодних слідів схованого.
+        // Без рівня Approve (автор подання тут має лише Submit), без гранта — порожньо; жодних слідів схованого.
         foreach (var client in new[] { writerClient, readerClient, strangerClient, submitterClient })
         {
             Assert.Empty(await ItemsAsync(app, client).ConfigureAwait(true));
@@ -94,9 +94,11 @@ public sealed class ApprovalQueueApiTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-12.5")]
-    public async Task Власне_подання_погоджувача_не_його_черга_а_колеги()
+    public async Task D440_власне_подання_погоджувача_в_його_черзі_і_він_сам_його_затверджує()
     {
-        // F-25: той, хто подав, не затверджує власного подання, хоч рівень гранта в нього Approve.
+        // D-440: правило чотирьох очей скасоване — автор із рівнем Approve бачить власне подання в черзі
+        // (як і колега) і затверджує його сам. Мутація: повернути фільтр `row.SubmittedByUserId == userId`
+        // у `ListMyApprovalQueueHandler` — черга автора порожня, тест червоний.
         var b = await ArrangeDocumentAsync().ConfigureAwait(true);
         var author = await NewUserAsync(b, GrantLevel.Approve).ConfigureAwait(true);
         var colleague = await NewUserAsync(b, GrantLevel.Approve).ConfigureAwait(true);
@@ -110,8 +112,17 @@ public sealed class ApprovalQueueApiTests(SqlServerFixture sql)
             Assert.Equal(HttpStatusCode.NoContent, submitted.StatusCode);
         }
 
-        Assert.Empty(await ItemsAsync(app, authorClient).ConfigureAwait(true));
+        var own = Assert.Single(await ItemsAsync(app, authorClient).ConfigureAwait(true));
+        Assert.Equal(author.Name, own.GetProperty("submittedByDisplayName").GetString());
         Assert.Single(await ItemsAsync(app, colleagueClient).ConfigureAwait(true));
+
+        using (var approved = await ApproveAsync(authorClient, b, approved: true).ConfigureAwait(true))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, approved.StatusCode);
+        }
+
+        Assert.Empty(await ItemsAsync(app, authorClient).ConfigureAwait(true));
+        Assert.Empty(await ItemsAsync(app, colleagueClient).ConfigureAwait(true));
     }
 
     [Fact]
@@ -321,7 +332,11 @@ public sealed class ApprovalQueueApiTests(SqlServerFixture sql)
 
     private async Task<TestDocument> ArrangeDocumentAsync()
     {
-        var b = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync().ConfigureAwait(false);
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var b = await builder.BuildAsync().ConfigureAwait(false);
+
+        // D-441 (AN-128): Scheduled-період не подається — період документа відкрито.
+        await builder.OpenPeriodAsync(b).ConfigureAwait(false);
 
         await using var db = Context();
         db.DocumentSheets.Add(new DocumentSheet(b.DocumentId, b.SheetDefId));

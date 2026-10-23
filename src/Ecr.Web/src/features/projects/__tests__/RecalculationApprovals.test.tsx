@@ -43,7 +43,7 @@ const approval = (id: number, requestedBy: number, confirmedBy: number | null) =
 
 const sent: { url: string; method: string; body: unknown }[] = [];
 
-function server(options: { confirmStatus?: number } = {}): void {
+function server(options: { confirmStatus?: number; grant?: string } = {}): void {
   sent.length = 0;
 
   vi.stubGlobal(
@@ -60,7 +60,7 @@ function server(options: { confirmStatus?: number } = {}): void {
       if (url.includes('/api/v1/me')) {
         return json({
           denies: [],
-          grants: { 'Project:7': 'Manage' },
+          grants: { 'Project:7': options.grant ?? 'Manage' },
           isSimulation: false,
           language: 'en',
           mustChangePassword: false,
@@ -143,7 +143,7 @@ describe('RequestRecalculationButton', () => {
 });
 
 describe('RecalculationApprovalsPanel', () => {
-  it('«Підтвердити» — лише на чужому очікуваному; на власному її немає', async () => {
+  it('D-440: «Підтвердити» — на кожному очікуваному, і на власному теж (грант Manage)', async () => {
     server();
     show(<RecalculationApprovalsPanel projectId={7} />);
 
@@ -153,9 +153,22 @@ describe('RecalculationApprovalsPanel', () => {
     await waitFor(() =>
       expect(within(others).getByRole('button', { name: '⟦recalcApprovals.confirm⟧' })).toBeTruthy(),
     );
-    // ⛔ Мутація «без умови mine» показує кнопку й тут — сервер дав би 409.
-    expect(within(mine).queryByRole('button', { name: '⟦recalcApprovals.confirm⟧' })).toBeNull();
+    // ⛔ Мутація: повернути умову `!mine` — кнопки на власному запиті немає, тест червоний.
+    expect(within(mine).getByRole('button', { name: '⟦recalcApprovals.confirm⟧' })).toBeTruthy();
     expect(within(mine).queryByRole('button', { name: '⟦workflow.recalculate⟧' })).toBeNull();
+  });
+
+  it('без гранта Manage «Підтвердити» немає ні на чужому, ні на власному', async () => {
+    server({ grant: 'Read' });
+    show(<RecalculationApprovalsPanel projectId={7} />);
+
+    const others = await rowOf('reason 11');
+    const mine = await rowOf('reason 12');
+    // Власне підтверджене — запуск є: сесія й таблиця вже прочитані, отже відсутність «Підтвердити» не поспіх.
+    await within(await rowOf('reason 13')).findByRole('button', { name: '⟦workflow.recalculate⟧' });
+
+    expect(within(others).queryByRole('button', { name: '⟦recalcApprovals.confirm⟧' })).toBeNull();
+    expect(within(mine).queryByRole('button', { name: '⟦recalcApprovals.confirm⟧' })).toBeNull();
   });
 
   it('підтвердження чужого — POST …/confirm без тіла', async () => {

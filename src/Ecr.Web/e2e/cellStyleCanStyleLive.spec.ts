@@ -1,4 +1,5 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import { chooseSubmitPeriod } from './submitPeriod';
 
 /**
  * CELL-STYLE P1A: ознака «можна фарбувати» (`styleAccess` у зрізі) РІВНА рішенню запису `PATCH …/cell-styles` на
@@ -427,8 +428,8 @@ async function submitSheet(page: Page): Promise<void> {
     await page.waitForTimeout(1_500);
   }
 
-  const submit = page.getByRole('button', { name: /Submit|Подати/i }).first();
-  await expect(submit, 'у шапці немає кнопки подання').toBeVisible({ timeout: 10_000 });
+  // ✎ D-441: «Подати» подає найраніший неподаний Open/Grace — відкритий період вибирається явно.
+  const submit = await chooseSubmitPeriod(page, Number(PeriodKey));
   const submitted = page.waitForResponse(
     (response) =>
       response.request().method() === 'POST' &&

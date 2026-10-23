@@ -211,6 +211,9 @@ public static class DependencyInjection
         // нього має бути одна (`H-23b`).
         services.AddScoped<Reporting.ReportSnapshotSync>();
         services.AddScoped<Workflow.SubmitSheetHandler>();
+
+        // ✎ D-442: блокування аркуша під затвердження й новий зріз після правки погоджувача.
+        services.AddScoped<Workflow.ApprovalSnapshotRefresh>();
         services.AddScoped<Workflow.ApproveSheetHandler>();
         services.AddScoped<Workflow.ReopenDocumentHandler>();
         services.AddScoped<Documents.DeleteDocumentHandler>();
@@ -220,6 +223,7 @@ public static class DependencyInjection
         services.AddScoped<Documents.ListDocumentVersionsHandler>();
         services.AddScoped<Documents.CompareDocumentVersionsHandler>();
         services.AddScoped<Workflow.RecallSheetHandler>();
+        services.AddScoped<Workflow.GetSubmissionTargetHandler>(); // D-441 / AN-128: цільовий період подання
 
         // EA-C: передача місяця третій стороні — керування й переходи станів.
         services.AddScoped<Documents.EditAssignments.ListEditAssignmentsHandler>();
@@ -233,6 +237,9 @@ public static class DependencyInjection
         services.AddScoped<Workflow.ApprovalQueue.ListMyApprovalQueueHandler>();
         services.AddScoped<Documents.EditAssignments.EditorSetsHandler>();
         services.AddScoped<Documents.EditAssignments.BatchEditAssignmentsHandler>();
+
+        // D-443: передача власника документа (учасники документа).
+        services.AddScoped<Documents.EditAssignments.TransferDocumentOwnerHandler>();
 
         // Локалізація (модуль 3.7)
         services.AddScoped<Localization.GetUiStringsHandler>();

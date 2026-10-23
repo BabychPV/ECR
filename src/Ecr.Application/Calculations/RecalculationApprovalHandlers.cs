@@ -50,7 +50,7 @@ public static class RecalculationApprovalPolicy
     /// <summary>Грант на проєкт, з якого можна запускати перерахунок і просити погодження.</summary>
     public const GrantLevel InitiatorGrant = GrantLevel.Read;
 
-    /// <summary>Грант на проєкт, з якого можна підтверджувати чужі погодження.</summary>
+    /// <summary>Грант на проєкт, з якого можна підтверджувати погодження (і власні, <c>D-440</c>).</summary>
     public const GrantLevel ApproverGrant = GrantLevel.Manage;
 
     /// <summary>Вимагає гранта на проєкт не нижче <paramref name="level"/>.</summary>
@@ -86,9 +86,9 @@ public static class RecalculationApprovalPolicy
 /// (ФВ-9.7, аудит безпеки S1).
 /// </summary>
 /// <remarks>
-/// ⛔ Друга людина — це <see cref="ICurrentUser"/> ЇЇ запиту, а не число в тілі
-/// чужого. Право — те саме <c>Calculation.Recalculate</c>; пороги грантів —
-/// <see cref="RecalculationApprovalPolicy"/>.
+/// ⛔ Той, хто підтверджує, — це <see cref="ICurrentUser"/> ЙОГО запиту, а не число в
+/// тілі чужого. Право — те саме <c>Calculation.Recalculate</c>; пороги грантів —
+/// <see cref="RecalculationApprovalPolicy"/>. Ініціатором він може бути сам (<c>D-440</c>).
 /// </remarks>
 public sealed class RecalculationApprovalHandlers(
     IRecalculationApprovalStore approvals,
@@ -151,7 +151,7 @@ public sealed class RecalculationApprovalHandlers(
                ?? throw new InvalidOperationException($"Щойно збережене погодження {approval.Id} не читається.");
     }
 
-    /// <summary>Живі погодження проєкту — те, що бачить друга людина.</summary>
+    /// <summary>Живі погодження проєкту — те, що бачить той, хто підтверджує.</summary>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="ct">Токен скасування.</param>
     public async Task<IReadOnlyList<RecalculationApprovalDto>> ListAsync(int projectId, CancellationToken ct)
@@ -160,7 +160,7 @@ public sealed class RecalculationApprovalHandlers(
         return await approvals.ListActiveAsync(projectId, clock.UtcNow, ct).ConfigureAwait(false);
     }
 
-    /// <summary>Підтверджує чужий запит під сесією поточного користувача.</summary>
+    /// <summary>Підтверджує запит (чужий або власний, <c>D-440</c>) під сесією поточного користувача.</summary>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="id">Погодження.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -168,14 +168,9 @@ public sealed class RecalculationApprovalHandlers(
     {
         var userId = await RequireAsync(projectId, RecalculationApprovalPolicy.ApproverGrant, ct).ConfigureAwait(false);
 
+        // ⚠ D-440: правило чотирьох очей скасоване — ініціатор із грантом Manage на проєкт
+        // підтверджує власний запит сам. Межу тримають лише права й гранти (`RequireAsync`).
         var approval = await approvals.FindAsync(id, projectId, ct).ConfigureAwait(false);
-        if (approval is not null && approval.RequestedByUserId == userId)
-        {
-            throw new BusinessRuleException(
-                "ECR-CALC-0409",
-                "Погодити власний перерахунок закритого періоду не можна (правило чотирьох очей, D-40).",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0409.ownRecalculationApproval" });
-        }
 
         var now = clock.UtcNow;
         if (approval is null || !await approvals.TryConfirmAsync(id, projectId, userId, now, ct).ConfigureAwait(false))

@@ -11,6 +11,25 @@ namespace Ecr.Application.Documents.EditAssignments;
 /// <param name="PeriodKey">Ключ періоду <c>Рік*100+№</c>.</param>
 public sealed record EditAssignmentSliceDto(string? SheetCode, string? TableCode, byte? MonthNumber, int? PeriodKey);
 
+/// <summary>
+/// Рівень учасника документа (D-443): <c>Read</c> — бачить область; <c>Write</c> — передача місяця (заповнює зріз);
+/// <c>Submit</c> — ще й подає аркуш; <c>Approve</c> — ще й погоджує. Видати рівень, вищий за власний на області, не можна.
+/// </summary>
+public enum EditAssignmentLevel
+{
+    /// <summary>Перегляд області.</summary>
+    Read = 1,
+
+    /// <summary>Заповнення зрізу (передача місяця, як до D-443).</summary>
+    Write = 2,
+
+    /// <summary>Заповнення й подання аркуша області.</summary>
+    Submit = 3,
+
+    /// <summary>Заповнення, подання й погодження аркуша області.</summary>
+    Approve = 4,
+}
+
 /// <summary>Чи бачить виконавець документ (і аркуш передачі) за прямими призначеннями ролей (RC20 D-2).</summary>
 public enum RecipientVisibility
 {
@@ -65,6 +84,8 @@ public sealed record EditAssignmentRecipientDto(
 /// <param name="ModifiedAt">Коли змінено.</param>
 /// <param name="Version">Версія для <c>baseVersion</c>.</param>
 /// <param name="ExpiresAt">Термін дії передачі (UTC); <c>null</c> — безстроково.</param>
+/// <param name="Level">Рівень учасника (D-443); наявні передачі місяця — <c>Write</c>.</param>
+/// <param name="Scope">Область надання (D-443): <c>Document</c> | <c>Sheet</c> | <c>Table</c> — з селекторів зрізу.</param>
 public sealed record EditAssignmentDto(
     long Id,
     EditAssignmentSliceDto Slice,
@@ -80,7 +101,9 @@ public sealed record EditAssignmentDto(
     IReadOnlyList<EditAssignmentRecipientDto> Recipients,
     DateTime ModifiedAt,
     string Version,
-    DateTime? ExpiresAt = null);
+    DateTime? ExpiresAt = null,
+    EditAssignmentLevel Level = EditAssignmentLevel.Write,
+    EditAssignmentScope Scope = EditAssignmentScope.Document);
 
 /// <summary>Перелік передач документа для менеджера.</summary>
 /// <param name="OwnerDisplayName">Автор документа.</param>
@@ -130,7 +153,24 @@ public sealed record UpsertEditAssignmentRequest(
     /// <summary>Чи було поле <see cref="ExpiresAt"/> у тілі запиту (навіть зі значенням <c>null</c>).</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool ExpiresAtSpecified => _expiresAtSpecified;
+
+    /// <summary>
+    /// Рівень учасника (D-443); відсутнє поле — <c>Write</c> (передача місяця, як до D-443). Для рівнів, відмінних
+    /// від <c>Write</c>, місяць і період у зрізі заборонені (422), а ексклюзивність ігнорується.
+    /// </summary>
+    public EditAssignmentLevel? Level { get; init; }
 }
+
+/// <summary>Тіло передачі власності документа (D-443).</summary>
+/// <param name="NewOwnerUserId">Новий власник: активний користувач із правом запису в проєкті документа.</param>
+public sealed record TransferDocumentOwnerRequest(int NewOwnerUserId);
+
+/// <summary>Власник документа після передачі.</summary>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="OwnerUserId">Новий власник.</param>
+/// <param name="OwnerDisplayName">Його ім'я.</param>
+/// <param name="PreviousOwnerUserId">Попередній власник.</param>
+public sealed record DocumentOwnerDto(long DocumentId, int OwnerUserId, string OwnerDisplayName, int PreviousOwnerUserId);
 
 /// <summary>Тіло валідації.</summary>
 /// <param name="BaseVersion">Версія передачі, яку бачив власник.</param>

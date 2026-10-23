@@ -3052,6 +3052,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{documentId}/owner": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Передає власність документа.
+         * @description `403` — викликач не власник і не менеджер проєкту; `409` — власника змінили одночасно;
+         *     `422` — нового власника не можна призначити.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["TransferDocumentOwnerRequest"];
+                    "application/json": components["schemas"]["TransferDocumentOwnerRequest"];
+                    "text/json": components["schemas"]["TransferDocumentOwnerRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentOwnerDto"];
+                        "text/json": components["schemas"]["DocumentOwnerDto"];
+                        "text/plain": components["schemas"]["DocumentOwnerDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{documentId}/permit-bindings/{code}/refresh": {
         parameters: {
             query?: never;
@@ -4538,6 +4632,63 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/submission-target": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Що подасть «Подати» на аркуші (D-441): найраніший неподаний період у стані `Open`/`Grace`, наступний неподаний, відкриті періоди для вибору і статуси місячних колонок. Право `Document.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Аркуш. */
+                    sheetDefId?: number;
+                    /** @description Період, відкритий на екрані; його рік задає місяці колонок. */
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SubmissionTargetDto"];
+                        "text/json": components["schemas"]["SubmissionTargetDto"];
+                        "text/plain": components["schemas"]["SubmissionTargetDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6694,7 +6845,7 @@ export interface paths {
          * Імпортує пакет `ecr-methodology-package` v1: методології, версії-чернетки,
          *     формули, константи, імпорти між методологіями. Права `Calculation.EditFormula` і
          *     `Calculation.EditConstant`.
-         * @description ⛔ Лише чернетки: публікує інша людина звичайною дією публікації (чотири ока, золотий
+         * @description ⛔ Лише чернетки: публікує носій `Calculation.Publish` звичайною дією публікації (золотий
          *     набір). Блокери — `422`, розбіжність із наявною версією — `409`; обидва зі
          *     звітом у `report` і без жодного запису. Повторний імпорт того самого пакета —
          *     `200` з `outcome = unchanged`.
@@ -8200,10 +8351,10 @@ export interface paths {
         /**
          * Публікує версію методології. Право `Calculation.Publish`.
          * @description ⚠ <b>Найнебезпечніша операція в системі</b> (ФВ-9.6): вона тихо змінює
-         *     числа у вже поданих формах. Тому обов'язкові: причина зміни (ФВ-14.7),
-         *     зелений тест (ФВ-9.12, інакше `ECR-CALC-0422`) і правило чотирьох
-         *     очей — публікувати власну правку заборонено системно
-         *     (`D-40`, `ECR-CALC-0409`).
+         *     числа у вже поданих формах. Тому обов'язкові: причина зміни (ФВ-14.7)
+         *     і зелений тест (ФВ-9.12, інакше `ECR-CALC-0422`). Хто публікує,
+         *     вирішує лише право `Calculation.Publish`: автор версії публікує її
+         *     сам (`D-440`, чотири очі скасовано).
          */
         post: {
             parameters: {
@@ -23774,6 +23925,26 @@ export interface components {
              */
             withIssues: number;
         };
+        /** @description Власник документа після передачі. */
+        DocumentOwnerDto: {
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /** @description Його ім'я. */
+            ownerDisplayName: string;
+            /**
+             * Format: int32
+             * @description Новий власник.
+             */
+            ownerUserId: number;
+            /**
+             * Format: int32
+             * @description Попередній власник.
+             */
+            previousOwnerUserId: number;
+        };
         /** @description Дія над документом у межах одного періоду. */
         DocumentPeriodRequest: {
             /**
@@ -23791,6 +23962,11 @@ export interface components {
             /** @description Стан робочого процесу; аркуш без рядка стану — `Draft`. */
             state: string;
         };
+        /**
+         * @description Стан документа у робочому процесі.
+         * @enum {unknown}
+         */
+        DocumentStatus: "Draft" | "Submitted" | "Approved" | "Rejected";
         /** @description Документ у переліку. */
         DocumentSummary: {
             /** @description К6: «хто затвердив» — відображуване ім'я (`D-86`) того, хто останнім затвердив аркуш документа
@@ -24209,6 +24385,8 @@ export interface components {
             id: number;
             /** @description Інші за ролями не можуть писати в зріз. */
             isExclusive: boolean;
+            /** @description Рівень учасника (D-443); наявні передачі місяця — `Write`. */
+            level?: components["schemas"]["EditAssignmentLevel"];
             /**
              * Format: date-time
              * @description Коли змінено.
@@ -24218,6 +24396,8 @@ export interface components {
             note: null | string;
             /** @description Виконавці. */
             recipients: components["schemas"]["EditAssignmentRecipientDto"][];
+            /** @description Область надання (D-443): `Document` | `Sheet` | `Table` — з селекторів зрізу. */
+            scope?: components["schemas"]["EditAssignmentScope"];
             /** @description Зріз. */
             slice: components["schemas"]["EditAssignmentSliceDto"];
             /** @description Похідний: `Open` | `Assigned` | `InProgress` | `Filled` | `Returned` | `Validated`. */
@@ -24232,6 +24412,13 @@ export interface components {
             /** @description Версія для `baseVersion`. */
             version: string;
         };
+        /**
+         * @description Рівень учасника документа (D-443): `Read` — бачить область; `Write` — передача місяця (заповнює зріз);
+         *     `Submit` — ще й подає аркуш; `Approve` — ще й погоджує. Видати рівень, вищий за власний на області, не можна.
+         * @default Write
+         * @enum {unknown}
+         */
+        EditAssignmentLevel: "Read" | "Write" | "Submit" | "Approve";
         /** @description Перелік передач документа для менеджера. */
         EditAssignmentListDto: {
             /** @description Передачі (без аркушів, схованих від викликача). */
@@ -24276,6 +24463,12 @@ export interface components {
              *     переліком передач, не обчислюється). RC20 D-2. */
             visibility?: components["schemas"]["RecipientVisibility"];
         };
+        /**
+         * @description Область надання учасникові документа (D-443) — похідна від селекторів зрізу, не колонка.
+         * @default Document
+         * @enum {unknown}
+         */
+        EditAssignmentScope: "Document" | "Sheet" | "Table";
         /** @description Зріз передачі: усі селектори необов'язкові; жодного — «весь документ». */
         EditAssignmentSliceDto: {
             /**
@@ -25983,6 +26176,28 @@ export interface components {
             documentId: number;
             /** @description Задача: `GET /jobs/{jobId}` дає прогрес і підсумок. */
             jobId: string;
+        };
+        /** @description Статус місячної колонки (D-441): стан аркуша за період місяця колонки. */
+        MonthColumnStatusDto: {
+            /** @description Код колонки. */
+            columnCode: string;
+            /**
+             * Format: uint8
+             * @description Місяць колонки 1..12.
+             */
+            monthNumber: number;
+            /**
+             * Format: int32
+             * @description Період, якому відповідає колонка.
+             */
+            periodKey: number;
+            /** @description Стан аркуша за цей період. */
+            sheetStatus: components["schemas"]["DocumentStatus"];
+            /**
+             * Format: int32
+             * @description Таблиця.
+             */
+            tableDefId: number;
         };
         /** @description Моя задача як виконавця або очікування валідації як власника. */
         MyEditAssignmentDto: {
@@ -30765,6 +30980,37 @@ export interface components {
             verticalAlign: null | number;
             wrapText: boolean;
         };
+        /** @description Відкритий (`Open`/`Grace`) період у виборі подання. */
+        SubmissionPeriodDto: {
+            /**
+             * Format: int32
+             * @description Ключ періоду.
+             */
+            periodKey: number;
+            /** @description Стан аркуша за цей період. */
+            sheetStatus: components["schemas"]["DocumentStatus"];
+            /** @description Ефективний стан періоду. */
+            state: components["schemas"]["PeriodState"];
+            /** @description Аркуш за цей період можна подати зараз (неподаний, проєкт не архівний). */
+            submittable: boolean;
+        };
+        /** @description Цільовий період подання аркуша і статуси місячних колонок (D-441). */
+        SubmissionTargetDto: {
+            /** @description Місячні колонки таблиць `MonthsInColumns` аркуша зі станом свого періоду. */
+            monthColumns: components["schemas"]["MonthColumnStatusDto"][];
+            /**
+             * Format: int32
+             * @description Наступний неподаний після цільового — для попередження «наступний — …».
+             */
+            nextPeriodKey: null | number;
+            /** @description Відкриті періоди проєкту за зростанням (вибір іншого періоду — серед `Submittable`). */
+            periods: components["schemas"]["SubmissionPeriodDto"][];
+            /**
+             * Format: int32
+             * @description Період, який подасть «Подати»: найраніший неподаний `Open`/`Grace`; `null` — подавати нічого.
+             */
+            targetPeriodKey: null | number;
+        };
         /** @description Запит на перемикання master-джерела набору довідників. */
         SwitchSourceKindRequest: {
             /** @description Причина. Обов'язкова: через рік питання «навіщо перемикали цей набір
@@ -31388,6 +31634,14 @@ export interface components {
          * @enum {unknown}
          */
         TraceLevel: "Off" | "ErrorsOnly" | "Full";
+        /** @description Тіло передачі власності документа (D-443). */
+        TransferDocumentOwnerRequest: {
+            /**
+             * Format: int32
+             * @description Новий власник: активний користувач із правом запису в проєкті документа.
+             */
+            newOwnerUserId: number;
+        };
         UiStringCatalog: {
             /** @description Мова зрізу. */
             languageCode: string;
@@ -31873,6 +32127,7 @@ export interface components {
              * @default true
              */
             isExclusive: boolean;
+            level?: null | components["schemas"]["EditAssignmentLevel"];
             /** @description Інструкція (≤ 500). */
             note?: null | string;
             /** @description Виконавці (1..100). */
@@ -32188,6 +32443,8 @@ export interface components {
         WorkflowEventDto: {
             /** @description Дія (`ApprovalAction`). */
             action: string;
+            /** @description Погодження виконав той самий користувач, що й подання перед ним: позначка «погоджено автором подання» (`D-440`). */
+            approvedBySubmitter: boolean;
             /**
              * Format: date-time
              * @description Момент дії, UTC.

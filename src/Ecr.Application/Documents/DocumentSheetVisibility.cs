@@ -29,12 +29,18 @@ public static class DocumentSheetVisibility
 
     /// <summary>Чи має профіль хоч одне обмеження нижче рівня проєкту (дешево, без бази).</summary>
     /// <param name="profile">Профіль прав.</param>
+    /// <remarks>
+    /// ⛔ D-443: учасник документа (<see cref="AccessProfile.HasDocumentParticipations"/>) — ЗАВЖДИ з обмеженням:
+    /// документ, відкритий наданням, видно лише в області надання, і пропустити його як «читача без обмежень»
+    /// означало б віддати всі аркуші документа.
+    /// </remarks>
     public static bool HasRestrictions(AccessProfile profile)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
         return !profile.IsIntegrationWriter
-               && (AnyBelowProject(profile.Denies) || AnyBelowProject(profile.Grants.Keys)
+               && (profile.HasDocumentParticipations
+                   || AnyBelowProject(profile.Denies) || AnyBelowProject(profile.Grants.Keys)
                    || profile.Scoped.Values.Any(s => s.Narrowed.Count > 0
                                                     || AnyBelowProject(s.Denies) || AnyBelowProject(s.Grants.Keys)));
     }
@@ -74,6 +80,45 @@ public static class DocumentSheetVisibility
         }
 
         return scopes;
+    }
+
+    /// <summary>
+    /// D-444 (AN-131): межі КОЖНОГО документа, відкритого читачеві наданням учасника (з наданнями саме в ньому), у
+    /// періоді — для зведення переліку й фільтра стану. Межі документа-надання власні: ділити їх між документами
+    /// проєкту не можна (<see cref="DocumentReadScope.ForParticipant"/>).
+    /// </summary>
+    /// <param name="access">Служба доступу.</param>
+    /// <param name="profile">Профіль читача.</param>
+    /// <param name="periodKey">Період; недійсний — межі без періоду.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Документ → межі; порожньо — надань немає.</returns>
+    /// <remarks>
+    /// ⚠ Без ознаки <see cref="AccessProfile.HasDocumentParticipations"/> (чи для інтеграції) — порожньо БЕЗ бази;
+    /// учасник — сталу кількість звернень (надання, документи, факти), а не на документ. ⛔ Документи проєктів із
+    /// забороною ролі тут лишаються (межі в них закриті): відкидає їх запит викликача за <c>DeniedProjectIds</c>.
+    /// </remarks>
+    public static async Task<IReadOnlyDictionary<long, DocumentReadScope>> ParticipantScopesAsync(
+        IAccessDecisionService access, AccessProfile profile, int periodKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(profile);
+
+        if (!profile.HasDocumentParticipations || profile.IsIntegrationWriter)
+        {
+            return new Dictionary<long, DocumentReadScope>();
+        }
+
+        var participations = await access.ActiveParticipationsAsync(profile, ct).ConfigureAwait(false);
+        if (participations.Count == 0)
+        {
+            return new Dictionary<long, DocumentReadScope>();
+        }
+
+        var scopes = await access.ReadScopesAsync(profile, [.. participations.Keys], ct).ConfigureAwait(false);
+        var period = new PeriodKey(periodKey);
+        return period.IsValid
+            ? scopes.ToDictionary(s => s.Key, s => s.Value.InPeriod(period))
+            : scopes;
     }
 
     /// <summary>
@@ -257,6 +302,18 @@ public static class DocumentSheetVisibility
         if (documents.Count == 0 || !HasRestrictions(profile))
         {
             return [.. documents];
+        }
+
+        // ⛔ D-443: у профілю-учасника межі — ПО ДОКУМЕНТУ (надання діє в одному документі), одним викликом на сторінку.
+        if (profile.HasDocumentParticipations)
+        {
+            var own = await access.ReadScopesAsync(profile, [.. documents.Select(d => d.Id)], ct).ConfigureAwait(false);
+            if (periodKey is { } value && new PeriodKey(value).IsValid)
+            {
+                own = own.ToDictionary(p => p.Key, p => p.Value.InPeriod(new PeriodKey(value)));
+            }
+
+            return [.. documents.Where(d => own.ContainsKey(d.Id)).Select(d => For(d, own[d.Id]))];
         }
 
         var scopes = known is null

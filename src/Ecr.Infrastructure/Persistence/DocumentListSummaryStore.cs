@@ -55,6 +55,15 @@ public sealed class DocumentListSummaryStore(
         var restrict = allowed is null ? 0 : 1;
         var projectsJson = JsonSerializer.Serialize(allowed ?? []);
 
+        // ✎ D-444 (AN-131): документи учасника — ДОДАТКОВО до проєктів (поза забороненими й у межах фільтра проєкту),
+        // кожен зі СВОЇМИ схованими аркушами. Без учасника — порожні масиви: та сама кількість запитів.
+        var participants = restrictions?.Participants;
+        var participantDocsJson = JsonSerializer.Serialize(participants?.DocumentIds ?? []);
+        var participantDeniedJson = JsonSerializer.Serialize(participants?.DeniedProjectIds ?? []);
+        var participantHiddenJson = JsonSerializer.Serialize(
+            (participants?.HiddenSheets ?? []).Select(h => new { d = h.DocumentId, c = h.SheetCode }));
+        var participantProject = projectId ?? 0;
+
         var row = await db.Database
             .SqlQuery<SummaryRow>($"""
                 SELECT
@@ -76,6 +85,8 @@ public sealed class DocumentListSummaryStore(
                             FROM wf.ValidationResult v
                             WHERE v.DocumentId = d.Id AND v.PeriodKey = {periodKey}
                               AND d.ProjectId NOT IN (SELECT CAST(n.value AS int) FROM OPENJSON({narrowedJson}) n)
+                              AND ({restrict} = 0
+                                   OR d.ProjectId IN (SELECT CAST(j2.value AS int) FROM OPENJSON({projectsJson}) j2))
                             ORDER BY v.RunAt DESC) AS LastErrorCount
                     FROM doc.Document d
                     LEFT JOIN doc.DocumentSheet s
@@ -85,10 +96,18 @@ public sealed class DocumentListSummaryStore(
                                      JOIN OPENJSON({hiddenJson}) WITH (p int '$.p', c nvarchar(200) '$.c') h
                                        ON h.p = d.ProjectId AND h.c = sd.Code COLLATE DATABASE_DEFAULT
                                      WHERE sd.Id = s.SheetDefId)
+                     AND NOT EXISTS (SELECT 1
+                                     FROM cfg.SheetDef sdp
+                                     JOIN OPENJSON({participantHiddenJson}) WITH (d bigint '$.d', c nvarchar(200) '$.c') hp
+                                       ON hp.d = d.Id AND hp.c = sdp.Code COLLATE DATABASE_DEFAULT
+                                     WHERE sdp.Id = s.SheetDefId)
                     LEFT JOIN wf.ApprovalState a
                       ON a.DocumentId = s.DocumentId AND a.SheetDefId = s.SheetDefId AND a.PeriodKey = {periodKey}
                     WHERE {restrict} = 0
                        OR d.ProjectId IN (SELECT CAST(j.value AS int) FROM OPENJSON({projectsJson}) j)
+                       OR (d.Id IN (SELECT CAST(pd.value AS bigint) FROM OPENJSON({participantDocsJson}) pd)
+                           AND ({participantProject} = 0 OR d.ProjectId = {participantProject})
+                           AND d.ProjectId NOT IN (SELECT CAST(dn.value AS int) FROM OPENJSON({participantDeniedJson}) dn))
                     GROUP BY d.Id, d.ProjectId
                 ) x
                 """)

@@ -26,6 +26,10 @@ const CurrentUser = {
 /** Хронологія подій: збереження незбереженого і мережеві дії. */
 const log: string[] = [];
 
+function respond(body: unknown): Response {
+  return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+}
+
 function mockFetch(): void {
   vi.stubGlobal(
     'fetch',
@@ -39,6 +43,17 @@ function mockFetch(): void {
         });
       }
 
+      // ✎ D-441: ціль подання — період із запиту, аркуш неподаний (так рахує сервер для чернетки).
+      if (url.includes('/submission-target')) {
+        const period = Number(new URL(url, 'http://localhost').searchParams.get('periodKey'));
+
+        return respond({
+          targetPeriodKey: period,
+          nextPeriodKey: null,
+          periods: [{ periodKey: period, state: 'Open', sheetStatus: 'Draft', submittable: true }],
+          monthColumns: [],
+        });
+      }
       if (url.includes('/submit')) {
         log.push('POST submit');
 

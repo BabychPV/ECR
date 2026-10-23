@@ -39,6 +39,13 @@ public sealed class EditAssignmentConfiguration : IEntityTypeConfiguration<EditA
                 "(ValidationStatus = 0 AND ValidatedAt IS NULL AND ValidatedByUserId IS NULL) "
                 + "OR (ValidationStatus = 1 AND ValidatedAt IS NOT NULL AND ValidatedByUserId IS NOT NULL)");
             t.HasCheckConstraint("CK_EditAssignment_SliceKey", "LEN(SliceKey) > 0");
+
+            // D-443: рівень учасника — Read(1)/Write(2)/Submit(3)/Approve(4); місяць, період і ексклюзивність —
+            // лише для Write (передача місяця). Те саме, що інваріант домену `EditAssignment.RequireLevelFits`.
+            t.HasCheckConstraint("CK_EditAssignment_Level", "[Level] BETWEEN 1 AND 4");
+            t.HasCheckConstraint(
+                "CK_EditAssignment_LevelSlice",
+                "[Level] = 2 OR (MonthNumber IS NULL AND PeriodKey IS NULL AND IsExclusive = 0)");
             t.HasCheckConstraint("CK_EditAssignment_Note", "Note IS NULL OR LEN(Note) > 0");
         });
 
@@ -54,6 +61,14 @@ public sealed class EditAssignmentConfiguration : IEntityTypeConfiguration<EditA
         builder.Property(x => x.SliceKey).HasMaxLength(EditAssignmentSlice.MaxKeyLength).IsRequired();
 
         builder.Property(x => x.ValidationStatus).HasConversion<byte>();
+
+        // D-443: наявні передачі — Write (2), тобто поведінка до міграції без змін. ⚠ ValueGeneratedNever: рівень
+        // завжди пише домен (без «сторожового» значення EF: None = 0 інакше підмінявся б значенням бази), а значення
+        // за замовчуванням колонки — лише для рядків, що існували до міграції.
+        builder.Property(x => x.Level).HasConversion<byte>()
+               .HasDefaultValue(Domain.Enums.GrantLevel.Write, "DF_EditAssignment_Level")
+               .ValueGeneratedNever();
+        builder.Ignore(x => x.Scope);
         builder.Property(x => x.IsExclusive).HasDefaultValue(true, "DF_EditAssignment_Excl");
         builder.Property(x => x.ValidationStatus).HasDefaultValue(
             Domain.Enums.EditAssignmentValidationStatus.NotValidated, "DF_EditAssignment_Valid");

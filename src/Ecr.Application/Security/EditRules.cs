@@ -94,6 +94,37 @@ public readonly record struct CellAccessContext(
     /// перерахунок затер би введене без жодного слова.
     /// </summary>
     public bool CellIsComputed { get; init; }
+
+    /// <summary>
+    /// D-442: користувач — погоджувач ПОТОЧНОГО кроку маршруту цього аркуша, тобто
+    /// <see cref="EditRules.CanApprove"/> для нього зараз дозволяє (роль кроку, якщо маршрут є,
+    /// плюс грант <see cref="GrantLevel.Approve"/> у видимому проєкті). Рахує служба (вона знає
+    /// маршрут і поточний крок); за замовчуванням — ні.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Знімає ЛИШЕ заборону <see cref="EditDenyReason.DocumentSubmitted"/> і лише в стані
+    /// <see cref="DocumentStatus.Submitted"/>: архів, симуляція, період, вікно доступу, ознаки
+    /// колонки/рядка/комірки й грант на саму комірку перевіряються далі як для всіх.
+    /// <see cref="DocumentStatus.Approved"/> він не відкриває ніколи.
+    /// </remarks>
+    public bool IsCurrentApprover { get; init; }
+
+    /// <summary>
+    /// D-443: рівень, який надання учасника документа (<see cref="DocumentParticipation.LevelAt"/>) дає цьому
+    /// користувачеві в області рішення; <see cref="GrantLevel.None"/> — надань немає (за замовчуванням).
+    /// Рахує служба з фактів передач документа.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <see cref="EditRules.Effective"/> бере його ПІСЛЯ заборон: <c>IsDeny</c> ролі на проєкт, аркуш, таблицю
+    /// чи колонку перемагає будь-яке надання. До рівня ролей додається як максимум (надання лише розширює).
+    /// </remarks>
+    public GrantLevel ParticipationLevel { get; init; }
+
+    /// <summary>
+    /// D-443: у користувача є діюче надання учасника в ЦЬОМУ документі (будь-якої області) — документ йому видимий
+    /// навіть без ролі на проєкт. Лише ознака для перевірки видимості служби; правила <see cref="EditRules"/> її не читають.
+    /// </summary>
+    public bool ParticipatesInDocument { get; init; }
 }
 
 /// <summary>
@@ -168,8 +199,18 @@ public static class EditRules
         // ⚠ Grace дає час на правки НЕПОДАНИХ документів, а не право змінити
         // подану форму (D-67). Тому стан аркуша перевіряється незалежно від
         // стану періоду.
+        //
+        // ✎ D-442: поданий аркуш править ЛИШЕ погоджувач поточного кроку маршруту — без нового
+        // статусу (аркуш лишається Submitted). Автор і решта, як і доти, — DocumentSubmitted.
+        // Погоджувач проходить далі ВСІ перевірки нижче (ознаки колонки, грант на комірку):
+        // роль кроку знімає лише заборону «подано», а не решту правил.
+        var byApprover = false;
         switch (context.SheetStatus)
         {
+            case DocumentStatus.Submitted when context.IsCurrentApprover:
+                byApprover = true;
+                break;
+
             case DocumentStatus.Submitted:
                 return EditDecision.Deny(EditDenyReason.DocumentSubmitted);
 
@@ -249,7 +290,12 @@ public static class EditRules
             return EditDecision.Deny(EditDenyReason.LockedByOwner);
         }
 
-        return lifted ? EditDecision.AllowViaAssignment() : EditDecision.Allow();
+        if (lifted)
+        {
+            return EditDecision.AllowViaAssignment();
+        }
+
+        return byApprover ? EditDecision.AllowByApprover() : EditDecision.Allow();
     }
 
     /// <summary>
@@ -313,9 +359,20 @@ public static class EditRules
             return EditDecision.Deny(EditDenyReason.ArchivingInProgress);
         }
 
-        if (context.PeriodState == PeriodState.Closed)
+        // ⛔ D-441 (AN-128): подати можна лише період у стані Open або Grace. Доти відмова стояла лише
+        // на Closed, і ще не відкритий (Scheduled) період — зокрема відсутній, який `BuildContextAsync`
+        // трактує як Scheduled, — подавався: аркуш ішов на погодження раніше, ніж у нього можна було
+        // ввести хоч одне число (`CanEdit` той самий Scheduled відхиляє тією самою причиною).
+        switch (context.PeriodState)
         {
-            return EditDecision.Deny(EditDenyReason.PeriodClosed);
+            case PeriodState.Scheduled:
+                return EditDecision.Deny(EditDenyReason.PeriodNotOpenYet);
+
+            case PeriodState.Closed:
+                return EditDecision.Deny(EditDenyReason.PeriodClosed);
+
+            default:
+                break;
         }
 
         if (context.SheetStatus is DocumentStatus.Submitted or DocumentStatus.Approved)
@@ -528,9 +585,13 @@ public static class EditRules
     /// <param name="tableDefId">Таблиця.</param>
     /// <param name="columnDefId">Колонка; <c>0</c> — рішення про таблицю цілком.</param>
     /// <param name="period">Період; <c>null</c> — рішення не про період.</param>
+    /// <param name="participation">
+    /// D-443: рівень, який у цій області дають надання учасника документа (<see cref="CellAccessContext.ParticipationLevel"/>);
+    /// за замовчуванням — жодного.
+    /// </param>
     public static bool CanReadIn(
         AccessProfile profile, int projectId, int sheetDefId, string? sheetCode, int tableDefId, int columnDefId,
-        PeriodKey? period)
+        PeriodKey? period, GrantLevel participation = GrantLevel.None)
         => Effective(profile, default(CellAccessContext) with
         {
             ProjectId = projectId,
@@ -539,6 +600,7 @@ public static class EditRules
             ColumnDefId = columnDefId,
             SheetCode = sheetCode,
             Period = period,
+            ParticipationLevel = participation,
         }) >= GrantLevel.Read;
 
     /// <summary>
@@ -633,9 +695,11 @@ public static class EditRules
             (profile.Grants.TryGetValue(projectKey, out var projectLevel) && projectLevel >= GrantLevel.Read)
             || layers.Exists(l => l.Grants.TryGetValue(projectKey, out var layerLevel) && layerLevel >= GrantLevel.Read);
 
+        // ✎ D-443: учасник документа без ролі на проєкт — рівно рівень надання в області рішення (документ йому
+        // видимий наданням, а не проєктом). Заборони вище вже відпрацювали: сюди доходить лише незаборонене.
         if (!projectVisible)
         {
-            return GrantLevel.None;
+            return context.ParticipationLevel;
         }
 
         // Від найдрібнішого до найширшого: перший оголошений і виграє. На
@@ -665,10 +729,11 @@ public static class EditRules
 
             if (found)
             {
-                return level;
+                // ✎ D-443: надання учасника лише РОЗШИРЮЄ рівень ролей (максимум), ніколи не звужує.
+                return level > context.ParticipationLevel ? level : context.ParticipationLevel;
             }
         }
 
-        return GrantLevel.None;
+        return context.ParticipationLevel;
     }
 }

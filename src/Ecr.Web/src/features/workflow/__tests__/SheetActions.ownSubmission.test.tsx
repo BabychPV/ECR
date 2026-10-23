@@ -5,12 +5,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SheetActions } from '../SheetActions';
 
 /**
- * A2-08 (F-25 / D-285): автор подання бачив «Approve»/«Reject» на власному
- * аркуші, а сервер на погодження відповідає `403 approveOwnSubmission`.
+ * D-440 (BRIEF-1021 П.4): правило чотирьох очей скасоване — автор подання з
+ * грантом `Approve` бачить «Approve»/«Reject» на власному аркуші (доти A2-08
+ * ховав їх за ознакою сервера `canRecall`). Без гранта `Approve` кнопок, як і
+ * раніше, немає: доступ розподіляють лише ролі.
  *
- * ⛔ «Автор» — ознака СЕРВЕРА (`GET …/recall` → `canRecall`), не здогад
- * клієнта. Кожен тест ставить грант `Approve`, за якого кнопки МУСЯТЬ бути;
- * різниться лише відповідь сервера, тож зникнення означає саме авторство.
+ * ⛔ Мутація: повернути приховування за `canRecall` у `canApprove`/`canReject` —
+ * червоніє перший тест.
  */
 
 const DocumentId = 1;
@@ -45,13 +46,13 @@ const json = (body: unknown): Response =>
 
 let availabilityAsked = 0;
 
-function show(canRecall: boolean): void {
+function show(canRecall: boolean, grant: 'Approve' | 'Write' = 'Approve'): void {
   availabilityAsked = 0;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes('/api/v1/me')) return json(Me);
+      if (url.includes('/api/v1/me')) return json({ ...Me, grants: { 'Project:7': grant } });
       if (url.includes('/recall?')) {
         availabilityAsked += 1;
         return json({ canRecall });
@@ -87,13 +88,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('SheetActions: автор подання не бачить Approve/Reject (A2-08)', () => {
-  it('сервер каже «це твоє подання» (canRecall) — Approve/Reject немає, є Recall', async () => {
+describe('SheetActions: автор подання погоджує сам (D-440)', () => {
+  it('власне подання (canRecall) — Approve і Reject є поруч із Recall', async () => {
     show(true);
 
     expect(await screen.findByRole('button', { name: RecallButton })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: ApproveButton })).toBeNull();
-    expect(screen.queryByRole('button', { name: RejectButton })).toBeNull();
+    expect(await screen.findByRole('button', { name: ApproveButton })).toBeTruthy();
+    expect(screen.getByRole('button', { name: RejectButton })).toBeTruthy();
   });
 
   it('не автор (canRecall = false) — погоджувач бачить обидві кнопки', async () => {
@@ -105,5 +106,13 @@ describe('SheetActions: автор подання не бачить Approve/Reje
     expect(await screen.findByRole('button', { name: ApproveButton })).toBeTruthy();
     expect(screen.getByRole('button', { name: RejectButton })).toBeTruthy();
     expect(screen.queryByRole('button', { name: RecallButton })).toBeNull();
+  });
+
+  it('автор без гранта Approve (лише Write) — Approve/Reject немає, Recall є', async () => {
+    show(true, 'Write');
+
+    expect(await screen.findByRole('button', { name: RecallButton })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: ApproveButton })).toBeNull();
+    expect(screen.queryByRole('button', { name: RejectButton })).toBeNull();
   });
 });

@@ -60,17 +60,15 @@ internal static class EditAssignmentAccess
         }
     }
 
-    /// <summary>Межі читання документа для профілю (приховані аркуші, S6/D-214).</summary>
-    public static async Task<DocumentReadScope> ReadScopeAsync(
-        IDocumentStore documents, IMetadataCache metadata, AccessProfile profile, int projectId, long documentId,
-        CancellationToken ct)
+    /// <summary>
+    /// Межі читання документа для профілю (приховані аркуші, S6/D-214) — з наданнями учасника в цьому документі
+    /// (D-443): виконавець без ролі на проєкт бачить аркуш своєї передачі.
+    /// </summary>
+    public static Task<DocumentReadScope> ReadScopeAsync(
+        IAccessDecisionService access, AccessProfile profile, long documentId, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(documents);
-        ArgumentNullException.ThrowIfNull(metadata);
-
-        var templateVersionId = await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
-        var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
-        return DocumentReadScope.For(profile, projectId, snapshot);
+        ArgumentNullException.ThrowIfNull(access);
+        return access.ReadScopeAsync(profile, documentId, ct);
     }
 
     /// <summary>Аркуш передачі схований від викликача — «передачі немає» (аудит P1-S1).</summary>
@@ -166,17 +164,34 @@ internal static class EditAssignmentAccess
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
     }
 
-    /// <summary>Документ видимий профілю або «не знайдено».</summary>
+    /// <summary>
+    /// Документ видимий профілю або «не знайдено»: за ролями або (D-443) за діючим наданням учасника саме в цьому
+    /// документі без заборони проєкту.
+    /// </summary>
     public static async Task<EditAssignmentDocumentRef> RequireVisibleDocumentAsync(
-        IEditAssignmentManagementStore store, AccessProfile profile, long documentId, CancellationToken ct)
+        IEditAssignmentManagementStore store, IAccessDecisionService access, AccessProfile profile, long documentId,
+        CancellationToken ct)
     {
-        var document = await store.FindDocumentAsync(documentId, ct).ConfigureAwait(false);
-        if (document is null || !profile.SeesDocumentsOf(document.ProjectId))
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(profile);
+
+        var document = await store.FindDocumentAsync(documentId, ct).ConfigureAwait(false)
+                       ?? throw NotFound(documentId);
+
+        if (profile.SeesDocumentsOf(document.ProjectId))
         {
-            throw NotFound(documentId);
+            return document;
         }
 
-        return document;
+        if (profile.HasDocumentParticipations
+            && !profile.DeniesProject(document.ProjectId)
+            && await access.ParticipatesAsync(profile, documentId, ct).ConfigureAwait(false))
+        {
+            return document;
+        }
+
+        throw NotFound(documentId);
     }
 
     /// <summary>Помилка «не знайдено» (спільна для документа й передачі).</summary>
@@ -187,6 +202,101 @@ internal static class EditAssignmentAccess
             {
                 ["messageKey"] = DocumentNotFoundMessageKey,
                 ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
+            });
+
+    /// <summary>
+    /// D-443: найнижчий власний рівень передавача на області зрізу — за РОЛЯМИ (надання самого передавача не
+    /// враховуються): для кожного аркуша області — рівень на аркуш (подання й погодження — дії аркуша) і на кожну
+    /// таблицю області. Видати рівень, вищий за цей, не можна (<c>Approve</c> видає лише той, хто має <c>Approve</c>).
+    /// </summary>
+    /// <param name="profile">Профіль передавача.</param>
+    /// <param name="projectId">Проєкт документа.</param>
+    /// <param name="snapshot">Знімок шаблону документа.</param>
+    /// <param name="slice">Зріз (область) надання.</param>
+    /// <returns>Найнижчий рівень на області; <see cref="GrantLevel.None"/> — щось в області передавачеві сховане чи заборонене.</returns>
+    /// <exception cref="BusinessRuleException">Області в документі немає чи вона вся схована (<c>unknownSlice</c>).</exception>
+    /// <remarks>
+    /// ⛔ Заборона (<c>IsDeny</c>) передавача на будь-якому ресурсі області дає <see cref="GrantLevel.None"/> — і відмову:
+    /// не можна відкрити іншому те, чого сам не маєш.
+    /// </remarks>
+    public static GrantLevel OwnLevelOver(
+        AccessProfile profile, int projectId, TemplateVersionSnapshot snapshot, EditAssignmentSlice slice)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(slice);
+
+        var roles = profile.WithoutParticipations();
+        var scope = DocumentReadScope.For(roles, projectId, snapshot);
+        var period = slice.PeriodKey is { } key ? new PeriodKey(key) : (PeriodKey?)null;
+        var own = GrantLevel.Manage;
+        var matched = false;
+
+        foreach (var sheet in snapshot.Sheets)
+        {
+            if (sheet.IsDeleted
+                || (slice.SheetCode is not null && !string.Equals(sheet.Code, slice.SheetCode, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            if (!scope.CanReadSheetCode(sheet.Code))
+            {
+                // Схований аркуш області не називається, але й не видається (власних прав на нього немає).
+                own = GrantLevel.None;
+                continue;
+            }
+
+            var context = new CellAccessContext(
+                projectId, sheet.Id, 0, 0,
+                ProjectStatus.Active, IsArchiving: false, PeriodState.Open, OutOfAccessWindow: false,
+                DocumentStatus.Draft, ColumnIsComputed: false, ColumnIsReadOnly: false, RowIsReadOnly: false)
+            {
+                SheetCode = sheet.Code,
+                Period = period,
+            };
+
+            if (slice.TableCode is null)
+            {
+                own = Min(own, EditRules.Effective(roles, context));
+            }
+
+            foreach (var table in sheet.Tables)
+            {
+                if (table.IsDeleted
+                    || (slice.TableCode is not null && !string.Equals(table.Code, slice.TableCode, StringComparison.Ordinal)))
+                {
+                    continue;
+                }
+
+                matched = true;
+                own = Min(own, EditRules.Effective(roles, context with { TableDefId = table.Id }));
+            }
+        }
+
+        if (!matched)
+        {
+            throw Invalid("err.ECR-REQ-0422.editAssignmentUnknownSlice", "Зрізу з такими параметрами в документі немає.");
+        }
+
+        return own;
+    }
+
+    private static GrantLevel Min(GrantLevel a, GrantLevel b) => a < b ? a : b;
+
+    /// <summary>
+    /// 403 <c>editAssignmentLevelAboveOwn</c>: рівень надання вищий за власний рівень передавача на області (D-443).
+    /// </summary>
+    /// <param name="requested">Запитаний рівень.</param>
+    /// <param name="own">Власний рівень передавача (<see cref="OwnLevelOver"/>).</param>
+    public static AccessDeniedException LevelAboveOwn(GrantLevel requested, GrantLevel own)
+        => new(
+            ErrorCodes.AccessDenied, "Видати рівень, вищий за власний на цій області, не можна.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-ACCS-0403.editAssignmentLevelAboveOwn",
+                ["level"] = requested.ToString(),
+                ["ownLevel"] = own.ToString(),
             });
 
     /// <summary>

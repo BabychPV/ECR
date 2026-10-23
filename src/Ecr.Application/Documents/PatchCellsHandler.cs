@@ -288,6 +288,19 @@ public sealed partial class PatchCellsHandler(
         /// передач, повторного читання немає.
         /// </summary>
         public bool AssignmentsPresent { get; set; }
+
+        /// <summary>
+        /// D-442: запис дозволило рішення погоджувача поточного кроку (<see cref="EditDecision.ByApprover"/>) —
+        /// під блокуванням аркуша погоджувач перевіряється знову (<see cref="EnsureSheetStillEditableAsync"/>).
+        /// </summary>
+        public bool ByApprover { get; set; }
+
+        /// <summary>
+        /// D-442: під блокуванням аркуш виявився <c>Submitted</c>, а користувач — і далі погоджувач поточного
+        /// кроку: журнал пише <see cref="CellChangeOrigins.ApproverEdit"/> замість <c>UserEdit</c>.
+        /// Ставиться ЛИШЕ під блокуванням (скидається на кожній спробі транзакції).
+        /// </summary>
+        public bool ApproverEdit { get; set; }
     }
 
     /// <summary>Розподіл змін по upsert/delete разом із супутнім станом.</summary>
@@ -1030,6 +1043,11 @@ public sealed partial class PatchCellsHandler(
                 if (decision.IsAllowed && decision.AssignmentsPresent)
                 {
                     context.AssignmentsPresent = true;
+                }
+
+                if (decision.IsAllowed && decision.ByApprover)
+                {
+                    context.ByApprover = true;
                 }
             }
         }
@@ -2485,7 +2503,31 @@ public sealed partial class PatchCellsHandler(
             .EnterEditAsync(context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
             .ConfigureAwait(false);
 
+        // ✎ D-442: поданий аркуш править лише погоджувач ПОТОЧНОГО кроку. Рішення поза транзакцією
+        // бачило крок N; затвердження бере ВИНЯТКОВЕ блокування цього самого ключа
+        // (`ApproveSheetHandler`), тож тут або воно ще не почалося, або вже зафіксоване — і рішення
+        // «чия черга» читається заново (`CanApproveAsync`): крок N+1 чи `Approved` правку відхиляють.
+        // ⚠ Позначка скидається на кожній спробі: стратегія повторів виконує тіло транзакції вдруге.
+        context.ApproverEdit = false;
+        if (status == DocumentStatus.Submitted
+            && context.ByApprover
+            && await StillCurrentApproverAsync(context, ct).ConfigureAwait(false))
+        {
+            context.ApproverEdit = true;
+            return;
+        }
+
         CheckSheetStatus(status, changes);
+    }
+
+    /// <summary>D-442: користувач і далі погоджувач поточного кроку цього аркуша — під блокуванням.</summary>
+    private async Task<bool> StillCurrentApproverAsync(RequestContext context, CancellationToken ct)
+    {
+        var decision = await access
+            .CanApproveAsync(context.Profile, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
+            .ConfigureAwait(false);
+
+        return decision.IsAllowed;
     }
 
     /// <summary>
@@ -2698,7 +2740,8 @@ public sealed partial class PatchCellsHandler(
         await audit.WriteCellChangesAsync(
             BuildAuditRecords(
                 request, changes.Upserts, changes.Deletes, context.UserId, now, context.Instance.DocumentId,
-                changes.RowKeyById, previous, isLateEdit, AuditCorrelationId(), context.OutOfWindow),
+                changes.RowKeyById, previous, isLateEdit, AuditCorrelationId(), context.OutOfWindow,
+                approverEdit: context.ApproverEdit),
             ct).ConfigureAwait(false);
     }
 
@@ -3098,9 +3141,16 @@ public sealed partial class PatchCellsHandler(
         bool isLateEdit,
         string? correlationId,
         HashSet<CellAddress>? outOfWindow = null,
-        IReadOnlySet<string>? overwrittenRowKeys = null)
+        IReadOnlySet<string>? overwrittenRowKeys = null,
+        bool approverEdit = false)
     {
         var records = new List<CellChangeRecord>(upserts.Count + deletes.Count);
+
+        // ✎ D-442: правка погоджувача на поданому аркуші — позначка «правка погоджувача» в журналі
+        // (`Origin = ApproverEdit`). Лише замість `UserEdit`: інші походження погоджувачем не бувають.
+        var batchOrigin = approverEdit && string.Equals(request.Origin, UserEditOrigin, StringComparison.Ordinal)
+            ? CellChangeOrigins.ApproverEdit
+            : request.Origin;
 
         // ✎ AN-114 (D-338): свідомий перезапис чужої правки (рядок змінено після
         // експорту книги, людина позначила «перезаписати») — власним походженням
@@ -3109,7 +3159,7 @@ public sealed partial class PatchCellsHandler(
         string OriginOf(string rowKey) =>
             overwrittenRowKeys is not null && overwrittenRowKeys.Contains(rowKey)
                 ? CellChangeOrigins.ImportOverwrite
-                : request.Origin;
+                : batchOrigin;
 
         foreach (var u in upserts)
         {

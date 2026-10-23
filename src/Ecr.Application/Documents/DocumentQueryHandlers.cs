@@ -10,7 +10,7 @@ namespace Ecr.Application.Documents;
 /// <summary>Перелік документів. Право <c>Document.View</c>.</summary>
 public sealed class ListDocumentsHandler(
     IDocumentStore documents, IAccessDecisionService access, ICurrentUser currentUser,
-    IDocumentListSummaryStore samples)
+    IDocumentListSummaryStore samples, Domain.Abstractions.IClock? clock = null)
 {
     /// <summary>Право перегляду документів.</summary>
     public const string Permission = "Document.View";
@@ -111,9 +111,40 @@ public sealed class ListDocumentsHandler(
         // ⛔ N1-01: межі ідуть ПАРАМИ «проєкт, Id» (версія шаблону спільна для кількох проєктів).
         // ⛔ N1-02: межі рахуються лише для `projectId` (якщо задано) і ті самі йдуть в `ApplyAsync` нижче —
         // без другого кола `ReadScopeAsync` по тих самих проєктах.
+        // ✎ D-443: межі-фільтри цілого проєкту — лише за РОЛЯМИ: надання учасника відкриває один документ, і
+        // його межі не поширюються на інші документи проєкту (інакше фільтр за станом знаходив би їх за аркушем,
+        // відкритим лише в документі-наданні).
+        var roleProfile = profile.WithoutParticipations();
         (filter, var scopes) = await DocumentSheetVisibility
-            .HiddenFilterAsync(samples, access, profile, visibleProjects, projectId, periodKey, filter, ct)
+            .HiddenFilterAsync(samples, access, roleProfile, visibleProjects, projectId, periodKey, filter, ct)
             .ConfigureAwait(false);
+
+        // ✎ D-443: документи, відкриті наданням учасника, — у тому самому запиті, поза проєктами із забороною.
+        // ⛔ Фільтри пізніх правок і застарілих результатів рахують межі ПРОЄКТУ (пари «проєкт, аркуш»), а
+        // документ-надання має власні: з такими фільтрами документи поза проєктами з грантом не додаються
+        // (закрито за замовчуванням — фільтр не стає оракулом схованого аркуша; смуга зведення їх так само не лічить).
+        // ✎ D-444 (AN-131): фільтр СТАНУ документи-надання додає — з їхніми власними межами (пари «документ, аркуш»,
+        // `DocumentSheetVisibility.ParticipantScopesAsync`), тими самими, що смуга зведення: лічильник стану над
+        // таблицею і таблиця під фільтром цього стану не розходяться.
+        var participant = profile.HasDocumentParticipations
+                          && clock is not null
+                          && filter.HasLateEdits is null && filter.ResultsStale is null;
+        if (participant)
+        {
+            IReadOnlyCollection<(long DocumentId, int SheetDefId)>? ownHidden = null;
+            if (filter.State is not null && periodKey is { } statePeriod)
+            {
+                var own = await DocumentSheetVisibility.ParticipantScopesAsync(access, profile, statePeriod, ct)
+                    .ConfigureAwait(false);
+                ownHidden = [.. own.OrderBy(s => s.Key).SelectMany(s => s.Value.HiddenSheetIds().Select(id => (s.Key, id)))];
+            }
+
+            filter = filter with
+            {
+                Participation = new DocumentParticipationFilter(
+                    profile.UserId, clock!.UtcNow, profile.DeniedProjectIds(), ownHidden),
+            };
+        }
 
         var all = await documents
             .ListAsync(projectId, new PeriodKeyFilter(periodKey), filter, page, visibleProjects, ct)
@@ -122,13 +153,29 @@ public sealed class ListDocumentsHandler(
         // ⚠ Постфільтр лишається другим рубежем: перелік документів чужого
         // проєкту — це вже відомості про те, які об'єкти звітують і як часто, і
         // помилка в побудові фільтра запиту не має цього відкривати.
-        var visible = all.Items
+        // ✎ D-443: документ поза проєктами з грантом проходить лише з ДІЮЧИМ наданням (один запит на сторінку).
+        var byRoles = all.Items
             .Where(d => profile.SeesDocumentsOf(d.ProjectId) && PermissionCheck.IsGrantedIn(profile, Permission, d.ProjectId))
+            .Select(d => d.Id)
+            .ToHashSet();
+        var others = all.Items.Where(d => !byRoles.Contains(d.Id)).Select(d => d.Id).ToList();
+        var participated = participant && others.Count > 0
+            ? await access.ParticipatedDocumentsAsync(profile, others, ct).ConfigureAwait(false)
+            : new HashSet<long>();
+        var visible = all.Items
+            .Where(d => byRoles.Contains(d.Id) || (participated.Contains(d.Id) && !profile.DeniesProject(d.ProjectId)))
             .ToList();
 
         // ⛔ Аркуші, схована від читача (Deny / звуження ролі аркушами), не називаються ні кодом,
         // ні назвою, ні станом, ні лічильниками: фільтр — у `DocumentSheetVisibility`.
         visible = await DocumentSheetVisibility.ApplyAsync(access, profile, visible, periodKey, scopes, ct).ConfigureAwait(false);
+
+        // ⛔ D-443: позначка пізніх правок документа поза проєктами з грантом рахувалась без меж (пар проєкту для
+        // нього немає) — розкрила б активність схованого аркуша. Не віддається (як і лічильники звуженого читача).
+        if (participated.Count > 0)
+        {
+            visible = [.. visible.Select(d => participated.Contains(d.Id) && !byRoles.Contains(d.Id) ? d with { HasLateEdits = false } : d)];
+        }
 
         // ⛔ `all.TotalCount` НЕ проводиться далі як є — саме це й було дірою:
         // обробник не може перевірити, що число зі сховища враховує гранти, а
@@ -325,11 +372,22 @@ public sealed class GetDocumentHandler(
         // Різниця між 403 і 404 тут сама по собі є відомістю: за нею видно,
         // які документи існують у проєктах, доступу до яких немає.
         // ⛔ ФВ-6.14: без права перегляду В ЦЬОМУ проєкті — так само невидимий.
-        if (document is null
-            || !profile.SeesDocumentsOf(document.ProjectId)
-            || !PermissionCheck.IsGrantedIn(profile, ListDocumentsHandler.Permission, document.ProjectId))
+        if (document is null)
         {
             return null;
+        }
+
+        // ✎ D-443: без ролі на проєкт документ видно лише з ДІЮЧИМ наданням учасника саме в ньому (і без заборони
+        // проєкту) — `RequireInDocumentAsync` робить цю перевірку одним запитом лише для профілю-учасника.
+        if (!profile.SeesDocumentsOf(document.ProjectId)
+            || !PermissionCheck.IsGrantedIn(profile, ListDocumentsHandler.Permission, document.ProjectId))
+        {
+            if (!profile.HasDocumentParticipations
+                || profile.DeniesProject(document.ProjectId)
+                || !await access.ParticipatesAsync(profile, document.Id, ct).ConfigureAwait(false))
+            {
+                return null;
+            }
         }
 
         // ⛔ Приховані від читача аркуші не потрапляють у склад, стан і лічильники картки.

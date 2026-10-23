@@ -17,7 +17,11 @@ public sealed class ApproveSheetHandler(
     ICurrentUser currentUser,
     IClock clock,
     IAuditWriter audit,
-    IDocumentStore documents)
+    IDocumentStore documents,
+
+    // ✎ D-442: блокування аркуша під затвердження і новий зріз після правки погоджувача. У проді вприснуте
+    // завжди (`DependencyInjection`); `null` — лише тестові фабрики обробника без сховищ комірок.
+    ApprovalSnapshotRefresh? snapshotRefresh = null)
 {
     /// <summary>Затверджує або відхиляє аркуш.</summary>
     /// <param name="documentId">Документ.</param>
@@ -77,6 +81,14 @@ public sealed class ApproveSheetHandler(
         await uow.ExecuteInTransactionAsync(
             async innerCt =>
             {
+                // ✎ D-442: ВИНЯТКОВЕ блокування аркуша — ПЕРШОЮ дією транзакції (порядок як у подання):
+                // правка погоджувача, що вже пише, зафіксується до зрізу нижче, а нова чекатиме коміту
+                // і під своїм спільним блокуванням побачить новий крок чи `Approved` — і відмову.
+                if (snapshotRefresh is not null)
+                {
+                    await snapshotRefresh.EnterAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
+                }
+
                 var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
 
                 // ⛔ R5-W1 / W1-05 (TOCTOU): роль кроку маршруту — ПІСЛЯ читання
@@ -90,7 +102,9 @@ public sealed class ApproveSheetHandler(
                 // (409). На повторі після 1205 рішення теж перевиконується.
                 await RequireApproveAllowedAsync(profile, documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
 
-                RejectOwnSubmission(state, approved, userId, sheetDefId);
+                // ⚠ D-440: правило чотирьох очей (F-25, заборона самопогодження) скасоване безумовно —
+                // той, хто подав, погоджує сам, якщо роль поточного кроку і грант це дають (рішення вище).
+                // Слід лишається в журналі: `GetWorkflowHistoryHandler` позначає таке погодження.
                 await ApproveCoreAsync(state, documentId, sheetDefId, periodKey, approved, reason, userId, innerCt)
                     .ConfigureAwait(false);
             },
@@ -114,39 +128,6 @@ public sealed class ApproveSheetHandler(
                     ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["reason"] = decision.Reason.ToString(),
                     ["reasonKey"] = $"deny.{decision.Reason}",
-                });
-        }
-    }
-
-    /// <summary>F-25: той самий користувач не подає й не затверджує один аркуш.</summary>
-    private static void RejectOwnSubmission(ApprovalState state, bool approved, int userId, int sheetDefId)
-    {
-        // ⛔ F-25 (пряме рішення людини): та сама людина не може бути тим, хто
-        // подав аркуш (`Submit`), і тим, хто його погоджує (`Approve`) —
-        // правило чотирьох очей, той самий клас перевірки, що
-        // `RunCalculationHandler.RequireValidApproval` (`ECR-CALC-0409`) уже
-        // застосовує до погодження перерахунку закритого періоду.
-        //
-        // ⚠ Стан читає викликач — усередині транзакції (L6-15): `IAccessDecisionService`
-        // не знає, хто подав аркуш (лише статус), і заводити цю обізнаність
-        // туди заради одного правила означало б тягнути `SubmittedByUserId`
-        // крізь `CellAccessContext`/`EditRules`, якими користуються ще п'ять
-        // інших рішень. `ApproveCoreAsync` отримує той самий завантажений
-        // стан, а не читає його вдруге.
-        //
-        // ⛔ Перевірка лише для ЗАТВЕРДЖЕННЯ (`approved == true`): відхилити
-        // власне подання — не конфлікт інтересів, а штатна дія (повернути
-        // собі ж на доопрацювання), і забороняти її означало б зайву відмову
-        // там, де ризику немає.
-        if (approved && state.SubmittedByUserId == userId)
-        {
-            throw new AccessDeniedException(
-                "ECR-ACCS-0403",
-                $"Затвердження аркуша {sheetDefId} відхилено: той самий користувач подав і погоджує аркуш.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-ACCS-0403.approveOwnSubmission",
-                    ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
         }
     }
@@ -180,6 +161,14 @@ public sealed class ApproveSheetHandler(
             var step = await access
                 .CurrentApprovalStepAsync(documentId, sheetDefId, key, ct)
                 .ConfigureAwait(false);
+
+            // ✎ D-442: знімок даних — заново при погодженні, якщо погоджувач правив поданий аркуш (зріз
+            // подання його правок не містить). ДО зміни стану: зріз не зберігся — аркуш не погоджено.
+            // Автору на ознайомлення аркуш не повертається.
+            if (snapshotRefresh is not null)
+            {
+                await snapshotRefresh.RefreshAsync(documentId, sheetDefId, key, userId, now, ct).ConfigureAwait(false);
+            }
 
             state.ApproveStep(userId, now, step?.NextStepId);
 

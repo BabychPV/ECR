@@ -21,26 +21,19 @@ public sealed class MethodologyVersionTests
     private static readonly DateTime Now = new(2026, 2, 10, 12, 0, 0, DateTimeKind.Utc);
     private static readonly DateOnly From = new(2026, 1, 1);
 
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    public void Публікація_автором_останньої_правки_відхиляється()
+    /// <remarks>
+    /// D-440: правило чотирьох очей (D-40) скасоване — хто публікує, вирішують лише права.
+    /// Мутація: повернути перевірку <c>publishedByUserId == CreatedByUserId</c> — тест червоний.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)] [Trait("Decision", "D-440")]
+    public void D440_автор_публікує_власну_версію()
     {
         var version = Version();
 
-        var error = Assert.Throws<DomainException>(
-            () => version.Publish(Author, "Уточнено коефіцієнт ХСК", From, testsPassed: true, Now));
-
-        // ⛔ Не бюрократія: той, хто писав формулу, дивиться на неї як автор і
-        // саме тому не бачить у ній того, що побачить інший. Правило тримається
-        // системно — і в базі теж (CK_MV_FourEyes).
-        Assert.Equal("ECR-CALC-0409", error.ErrorCode);
-        Assert.False(version.IsPublished);
-        Assert.Null(version.PublishedAt);
-
-        // Інший користувач публікує ту саму версію без жодних змін у ній.
-        version.Publish(Reviewer, "Уточнено коефіцієнт ХСК", From, testsPassed: true, Now);
+        version.Publish(Author, "Уточнено коефіцієнт ХСК", From, testsPassed: true, Now);
 
         Assert.True(version.IsPublished);
-        Assert.Equal(Reviewer, version.PublishedByUserId);
+        Assert.Equal(Author, version.PublishedByUserId);
         Assert.Equal(Author, version.CreatedByUserId);
     }
 

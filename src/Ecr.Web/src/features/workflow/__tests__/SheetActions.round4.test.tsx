@@ -149,7 +149,7 @@ describe('D-285: «Submit» при гранті Write — активна, від
     async () => {
       show({ grants: { 'Project:7': 'Write' }, state: 'Draft', submitDenied: true });
 
-      const submit = await screen.findByRole('button', { name: /document\.submit/ }, { timeout: SlowEnvTimeout });
+      const submit = await screen.findByRole('button', { name: /workflow\.submitPeriod/ }, { timeout: SlowEnvTimeout });
 
       expect(submit.getAttribute('aria-disabled')).not.toBe('true');
       expect(screen.queryByTestId('submit-needs-grant')).toBeNull();
@@ -168,7 +168,7 @@ describe('D-285: «Submit» при гранті Write — активна, від
     async () => {
       show({ grants: { 'Project:7': 'Submit' }, state: 'Draft' });
 
-      await screen.findByRole('button', { name: /document\.submit/ }, { timeout: SlowEnvTimeout });
+      await screen.findByRole('button', { name: /workflow\.submitPeriod/ }, { timeout: SlowEnvTimeout });
       expect(screen.queryByTestId('submit-needs-grant')).toBeNull();
     },
     SlowEnvTimeout,
@@ -181,7 +181,7 @@ describe('D-285: «Submit» при гранті Write — активна, від
 
       await screen.findByRole('button', { name: /workflow\.recalculate/ }, { timeout: SlowEnvTimeout });
       expect(screen.queryByTestId('submit-needs-grant')).toBeNull();
-      expect(screen.queryByRole('button', { name: /document\.submit/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /workflow\.submitPeriod/ })).toBeNull();
     },
     SlowEnvTimeout,
   );
@@ -197,7 +197,7 @@ describe('F-18: закритий період і архівний проєкт �
       await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
       await new Promise((resolve) => setTimeout(resolve, 200));
 
-      expect(screen.queryByRole('button', { name: /document\.submit/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /workflow\.submitPeriod/ })).toBeNull();
       expect(screen.queryByRole('button', { name: /workflow\.recalculate/ })).toBeNull();
       expect(screen.queryByTestId('submit-needs-grant')).toBeNull();
     },
@@ -209,7 +209,7 @@ describe('F-18: закритий період і архівний проєкт �
     async () => {
       show({ grants: { 'Project:7': 'Manage' }, state: 'Draft', lock: null });
 
-      expect(await screen.findByRole('button', { name: /document\.submit/ }, { timeout: SlowEnvTimeout })).toBeTruthy();
+      expect(await screen.findByRole('button', { name: /workflow\.submitPeriod/ }, { timeout: SlowEnvTimeout })).toBeTruthy();
       expect(screen.getByRole('button', { name: /workflow\.recalculate/ })).toBeTruthy();
     },
     SlowEnvTimeout,

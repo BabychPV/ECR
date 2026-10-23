@@ -19,7 +19,8 @@ namespace Ecr.Application.Workflow.ApprovalQueue;
 /// ⛔ Рішення «чи його черга» — ТЕ САМЕ, що в <see cref="ApproveSheetHandler"/>: <c>EditRules.CanApprove</c>
 /// (видимість проєкту, роль поточного кроку чинного маршруту <c>ApprovalRoute.Resolve</c>, рівень гранта на
 /// аркуш у періоді ≥ <c>Approve</c>, стан <c>Submitted</c>, проєкт не архівний) плюс видимість аркуша читачеві
-/// (як <c>RequireSheetVisibleAsync</c>) і правило чотирьох очей (F-25: власне подання не затвердити).
+/// (як <c>RequireSheetVisibleAsync</c>). Власне подання в черзі ЛИШАЄТЬСЯ: правило чотирьох очей скасоване
+/// (<c>D-440</c>), доступ розподіляють лише ролі.
 /// Друга реалізація правил розійшлася б із першою — користувач бачив би в черзі те, що сервер відмовляється
 /// затвердити.
 ///
@@ -49,6 +50,9 @@ public sealed class ListMyApprovalQueueHandler(
 
     private static readonly ApprovalQueueDto Empty = new([], null);
 
+    private static readonly IReadOnlyDictionary<long, IReadOnlyList<ParticipationGrant>> NoParticipations =
+        new Dictionary<long, IReadOnlyList<ParticipationGrant>>();
+
     /// <summary>Сторінка черги.</summary>
     /// <param name="limit">Розмір сторінки 1..200; <c>null</c> — 50.</param>
     /// <param name="cursor">Курсор попередньої відповіді; <c>null</c> — з початку.</param>
@@ -68,10 +72,18 @@ public sealed class ListMyApprovalQueueHandler(
             return Empty;
         }
 
-        var projects = (await store.ListProjectsAsync(ct).ConfigureAwait(false))
+        // ✎ D-444 (AN-131, п.3): учасник документа з наданням — кандидат і поза проєктами з роллю. Надання — з тих
+        // самих фактів, що й рішення затвердження (`AccessDecisionService.WithParticipationAsync`); без ознаки
+        // профілю — порожньо без бази (бюджет решти користувачів не змінюється).
+        var participations = profile.HasDocumentParticipations
+            ? await access.ActiveParticipationsAsync(profile, ct).ConfigureAwait(false)
+            : NoParticipations;
+
+        var allProjects = (await store.ListProjectsAsync(ct).ConfigureAwait(false)).ToDictionary(p => p.ProjectId);
+        var projects = allProjects.Values
             .Where(p => profile.SeesDocumentsOf(p.ProjectId))
             .ToDictionary(p => p.ProjectId);
-        if (projects.Count == 0)
+        if (projects.Count == 0 && participations.Count == 0)
         {
             return Empty;
         }
@@ -79,6 +91,7 @@ public sealed class ListMyApprovalQueueHandler(
         var routes = await store.ListActiveRoutesAsync(ct).ConfigureAwait(false);
         var restricted = DocumentSheetVisibility.HasRestrictions(profile);
         var projectIds = projects.Keys.ToList();
+        var participatedIds = participations.Keys.ToList();
 
         var snapshots = new Dictionary<int, TemplateVersionSnapshot>();
         var scopes = new Dictionary<int, DocumentReadScope>();
@@ -92,7 +105,7 @@ public sealed class ListMyApprovalQueueHandler(
 
         while (found.Count <= take && scanned < MaxScanned)
         {
-            var batch = await store.ListSubmittedAsync(projectIds, restricted, position, BatchSize, ct)
+            var batch = await store.ListSubmittedAsync(projectIds, restricted, position, BatchSize, participatedIds, ct)
                 .ConfigureAwait(false);
 
             foreach (var row in batch)
@@ -100,14 +113,25 @@ public sealed class ListMyApprovalQueueHandler(
                 scanned++;
                 position = lastScanned = new ApprovalQueueCursor(row.SubmittedAt.Ticks, row.StateId);
 
-                var project = projects[row.ProjectId];
+                // ⛔ Надання — лише без заборони проєкту (як `CanReadDocumentAsync`/`WithParticipationAsync`); документ
+                // проєкту без ролі й без надання (або архівного проєкту) — не кандидат.
+                var grants = !profile.DeniesProject(row.ProjectId)
+                             && participations.TryGetValue(row.DocumentId, out var mine)
+                    ? mine
+                    : null;
+                if (!allProjects.TryGetValue(row.ProjectId, out var project)
+                    || (!projects.ContainsKey(row.ProjectId) && grants is null))
+                {
+                    continue;
+                }
+
                 if (!snapshots.TryGetValue(project.TemplateVersionId, out var snapshot))
                 {
                     snapshot = await metadata.GetAsync(project.TemplateVersionId, ct).ConfigureAwait(false);
                     snapshots[project.TemplateVersionId] = snapshot;
                 }
 
-                var item = Evaluate(row, project, snapshot, profile, userId, restricted, routes, scopes, resolved);
+                var item = Evaluate(row, project, snapshot, profile, restricted, routes, scopes, resolved, grants);
                 if (item is null)
                 {
                     continue;
@@ -148,18 +172,12 @@ public sealed class ListMyApprovalQueueHandler(
         ApprovalQueueProject project,
         TemplateVersionSnapshot snapshot,
         AccessProfile profile,
-        int userId,
         bool restricted,
         ApprovalQueueRoutes routes,
         Dictionary<int, DocumentReadScope> scopes,
-        Dictionary<int, ApprovalRoute?> resolved)
+        Dictionary<int, ApprovalRoute?> resolved,
+        IReadOnlyList<ParticipationGrant>? grants)
     {
-        // F-25: власне подання викликач затвердити не може (відхилити — може, але це не «чекає погодження»).
-        if (row.SubmittedByUserId == userId)
-        {
-            return null;
-        }
-
         var sheet = snapshot.Sheets.FirstOrDefault(s => s.Id == row.SheetDefId);
         if (sheet is null)
         {
@@ -170,9 +188,16 @@ public sealed class ListMyApprovalQueueHandler(
         PeriodKey? period = key.IsValid ? key : null;
 
         // Аркуш, схований від читача (Deny/звуження) — для нього не існує: ні в черзі, ні в підрахунку.
+        // ✎ D-444: межі документа з наданням — ВЛАСНІ (ті самі, що `ReadScopeAsync` дає затвердженню через
+        // `RequireSheetVisibleAsync`), а не межі проєкту за ролями: ділити їх між документами проєкту не можна.
         if (restricted)
         {
-            if (!scopes.TryGetValue(project.ProjectId, out var scope))
+            DocumentReadScope? scope;
+            if (grants is not null)
+            {
+                scope = DocumentReadScope.ForParticipant(profile, project.ProjectId, snapshot, grants);
+            }
+            else if (!scopes.TryGetValue(project.ProjectId, out scope))
             {
                 scope = DocumentReadScope.For(profile, project.ProjectId, snapshot);
                 scopes[project.ProjectId] = scope;
@@ -210,6 +235,14 @@ public sealed class ListMyApprovalQueueHandler(
         {
             SheetCode = sheet.Code,
             Period = period,
+
+            // ✎ D-444 (AN-131): рівень надання на аркуш — ТА САМА формула, що в `WithParticipationAsync` служби
+            // (`DocumentParticipation.LevelAt`, таблиця = null: надання на таблицю аркуша не погоджує). Роль кроку
+            // маршруту `CanApprove` перевіряє ДО рівня — надання маршрут не обходить (D-444 п.2).
+            ParticipatesInDocument = grants is not null,
+            ParticipationLevel = grants is null
+                ? GrantLevel.None
+                : DocumentParticipation.LevelAt(grants, sheet.Code, null, period),
         };
 
         if (!EditRules.CanApprove(profile, context, step?.RoleId).IsAllowed)

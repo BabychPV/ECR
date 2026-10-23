@@ -10,10 +10,18 @@ namespace Ecr.Domain.Entities.Documents;
 /// </summary>
 /// <remarks>
 /// <para>
-/// ⛔ Це НЕ «обмеження прав» і НЕ грант ролі: передача лише піднімає виконавцю <c>Read → Write</c>
-/// у комірках зрізу, які він уже бачить, і (за <see cref="IsExclusive"/>) закриває зріз іншим.
-/// Читання вона не дає ніколи. Правила застосування — <c>AccessDecisionService</c> / <c>EditRules</c>
-/// (EA-2); тут лише дані й інваріанти.
+/// ✎ D-443 (AN-130): передача — це ще й «учасник документа» з РІВНЕМ <see cref="Level"/>
+/// (<c>Read</c>/<c>Write</c>/<c>Submit</c>/<c>Approve</c>) в ОБЛАСТІ документ/аркуш/таблиця
+/// (<see cref="Scope"/>, з селекторів зрізу). Надання ДАЄ видимість: документ з'являється в переліку
+/// виконавця, при відкритті доступні лише аркуші й таблиці області. Колишнє правило «передача читання
+/// не дає ніколи» скасовано. Заборона ролі (<c>IsDeny</c>) перемагає будь-яке надання. Правила
+/// застосування — <c>AccessDecisionService</c> / <c>EditRules</c> / <c>DocumentParticipation</c>; тут лише
+/// дані й інваріанти.
+/// </para>
+/// <para>
+/// ⚠ Рівень <c>Write</c> — колишня «передача місяця» без змін: підйом запису лише в комірках зрізу
+/// (місяць/період), ексклюзивність, цикл «Заповнено → Валідовано/Повернуто». Інші рівні — без
+/// місяця й періоду і не ексклюзивні (CHECK <c>CK_EditAssignment_LevelSlice</c>).
 /// </para>
 /// <para>
 /// ⚠ Стан виконавця — <see cref="EditAssignmentRecipient"/> (по кожному окремо), стан валідації —
@@ -52,6 +60,9 @@ public sealed class EditAssignment : Entity<long>
     /// <param name="utcNow">Момент з <c>IClock.UtcNow</c>.</param>
     /// <param name="expiresAt">Необов'язковий термін дії передачі (UTC).</param>
     /// <param name="note">Інструкція виконавцям (звичайний текст).</param>
+    /// <param name="level">
+    /// Рівень учасника (D-443); за замовчуванням <see cref="GrantLevel.Write"/> — колишня передача місяця.
+    /// </param>
     public EditAssignment(
         long documentId,
         EditAssignmentSlice slice,
@@ -61,10 +72,12 @@ public sealed class EditAssignment : Entity<long>
         int createdByUserId,
         DateTime utcNow,
         DateTime? expiresAt = null,
-        string? note = null)
+        string? note = null,
+        GrantLevel level = GrantLevel.Write)
     {
         ArgumentNullException.ThrowIfNull(slice);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(documentId);
+        RequireLevelFits(level, slice, isExclusive);
 
         if (handoffId == Guid.Empty)
         {
@@ -90,7 +103,8 @@ public sealed class EditAssignment : Entity<long>
         TableCode = slice.TableCode;
         MonthNumber = slice.MonthNumber;
         PeriodKeyValue = slice.PeriodKey;
-        SliceKey = slice.Key;
+        Level = level;
+        SliceKey = KeyOf(slice, level);
         IsExclusive = isExclusive;
         ValidationStatus = EditAssignmentValidationStatus.NotValidated;
         DelegatedByUserId = delegatedByUserId;
@@ -118,8 +132,22 @@ public sealed class EditAssignment : Entity<long>
     /// <summary>Ключ періоду <c>Рік*100+№</c> (колонка <c>PeriodKey</c>); <c>null</c> — будь-який.</summary>
     public int? PeriodKeyValue { get; private set; }
 
-    /// <summary>Канонічний ключ зрізу; унікальний у межах документа.</summary>
+    /// <summary>
+    /// Канонічний ключ зрізу разом із рівнем (<see cref="KeyOf"/>); унікальний у межах документа.
+    /// </summary>
     public string SliceKey { get; private set; } = null!;
+
+    /// <summary>
+    /// Рівень учасника (D-443): <see cref="GrantLevel.Read"/>, <see cref="GrantLevel.Write"/>,
+    /// <see cref="GrantLevel.Submit"/> або <see cref="GrantLevel.Approve"/>. Наявні до D-443 передачі —
+    /// <see cref="GrantLevel.Write"/> (значення за замовчуванням колонки).
+    /// </summary>
+    public GrantLevel Level { get; private set; } = GrantLevel.Write;
+
+    /// <summary>Область надання: документ, аркуш чи таблиця — з селекторів зрізу.</summary>
+    public EditAssignmentScope Scope => TableCode is not null
+        ? EditAssignmentScope.Table
+        : SheetCode is not null ? EditAssignmentScope.Sheet : EditAssignmentScope.Document;
 
     /// <summary>Чи недоступний зріз тим, хто не виконавець (D1; зняття — «Дозволити й іншим за ролями»).</summary>
     public bool IsExclusive { get; private set; }
@@ -336,8 +364,10 @@ public sealed class EditAssignment : Entity<long>
     }
 
     /// <summary>Змінює ексклюзивність і примітку (склад і зріз — окремо).</summary>
+    /// <exception cref="ArgumentException">Ексклюзивність для рівня, відмінного від <c>Write</c>.</exception>
     public void Reconfigure(bool isExclusive, string? note, int byUserId, DateTime utcNow)
     {
+        RequireLevelFits(Level, Slice, isExclusive);
         IsExclusive = isExclusive;
         Note = NormalizeNote(note);
         Touch(byUserId, utcNow);
@@ -355,6 +385,42 @@ public sealed class EditAssignment : Entity<long>
     {
         DelegatedByUserId = delegatedByUserId;
         Touch(delegatedByUserId, utcNow);
+    }
+
+    /// <summary>
+    /// Канонічний ключ зрізу з рівнем: для <see cref="GrantLevel.Write"/> — рівно <see cref="EditAssignmentSlice.Key"/>
+    /// (ключі наявних передач не змінюються), для решти — з суфіксом <c>|L=&lt;рівень&gt;</c>, щоб на тій самій
+    /// області могли співіснувати, наприклад, читачі й погоджувачі.
+    /// </summary>
+    /// <param name="slice">Зріз.</param>
+    /// <param name="level">Рівень.</param>
+    public static string KeyOf(EditAssignmentSlice slice, GrantLevel level)
+    {
+        ArgumentNullException.ThrowIfNull(slice);
+        return level == GrantLevel.Write ? slice.Key : $"{slice.Key}|L={level}";
+    }
+
+    /// <summary>Чи допустимий рівень учасника (D-443).</summary>
+    /// <param name="level">Рівень.</param>
+    public static bool IsAssignableLevel(GrantLevel level)
+        => level is GrantLevel.Read or GrantLevel.Write or GrantLevel.Submit or GrantLevel.Approve;
+
+    /// <summary>
+    /// Інваріант D-443: рівень із переліку <see cref="IsAssignableLevel"/>; місяць, період і ексклюзивність —
+    /// лише для <see cref="GrantLevel.Write"/> (передача місяця). Той самий CHECK, що в базі.
+    /// </summary>
+    private static void RequireLevelFits(GrantLevel level, EditAssignmentSlice slice, bool isExclusive)
+    {
+        if (!IsAssignableLevel(level))
+        {
+            throw new ArgumentOutOfRangeException(nameof(level), level, "Рівень учасника — Read, Write, Submit або Approve.");
+        }
+
+        if (level != GrantLevel.Write && (slice.MonthNumber is not null || slice.PeriodKey is not null || isExclusive))
+        {
+            throw new ArgumentException(
+                "Місяць, період і ексклюзивність задаються лише для рівня Write (передача місяця).", nameof(level));
+        }
     }
 
     private void ResetValidation(int byUserId, DateTime utcNow)

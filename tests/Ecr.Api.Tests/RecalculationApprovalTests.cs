@@ -15,8 +15,9 @@ using Xunit;
 namespace Ecr.Api.Tests;
 
 /// <summary>
-/// «Чотири ока» на перерахунок закритого періоду (ФВ-9.7, аудит безпеки S1):
-/// погодження — окрема сутність, друга людина підтверджує ВЛАСНОЮ сесією.
+/// Погодження перерахунку закритого періоду (ФВ-9.7, аудит безпеки S1): окрема сутність, той, хто
+/// підтверджує, робить це ВЛАСНОЮ сесією. Чотири ока скасовано (D-440): ініціатор із грантом Manage
+/// підтверджує власний запит сам.
 /// </summary>
 /// <remarks>
 /// ⛔ До фіксу <c>POST /projects/{id}/recalculate</c> брав <c>approvedByUserId</c>
@@ -49,13 +50,45 @@ public sealed partial class RecalculationApprovalTests(SqlServerFixture sql)
         await AssertRecalculationDeniedAsync(response, app).ConfigureAwait(true);
     }
 
+    /// <summary>
+    /// D-440: правило чотирьох очей скасоване — ініціатор із грантом Manage підтверджує власний запит
+    /// і перераховує. ⛔ Мутації: повернути перевірку <c>RequestedByUserId == userId</c> у
+    /// <c>RecalculationApprovalHandlers.ConfirmAsync</c> — 409 замість 200; лишити
+    /// <c>CK_RecalcApproval_FourEyes</c> у базі — підтвердження падає на CHECK.
+    /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.7")]
-    public async Task Ініціатор_не_підтверджує_власне_погодження()
+    [Trait("Decision", "D-440")]
+    public async Task D440_ініціатор_з_Manage_підтверджує_власне_погодження_і_перераховує()
     {
         var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var initiator = await SignedInAsync(app, s.Initiator).ConfigureAwait(true);
+
+        var id = await RequestAsync(initiator, app, s.ProjectId, Closed).ConfigureAwait(true);
+        var confirm = await ConfirmAsync(initiator, s.ProjectId, id).ConfigureAwait(true);
+        var body = await confirm.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(confirm.IsSuccessStatusCode, $"{confirm.StatusCode}: {body}\n{app.ErrorsText}");
+        var confirmed = JsonDocument.Parse(body).RootElement;
+        Assert.Equal(s.InitiatorId, confirmed.GetProperty("requestedByUserId").GetInt32());
+        Assert.Equal(s.InitiatorId, confirmed.GetProperty("confirmedByUserId").GetInt32());
+
+        var run = await RunAsync(initiator, s.ProjectId, Closed, id).ConfigureAwait(true);
+        Assert.True(run.StatusCode == HttpStatusCode.Accepted, $"{run.StatusCode}: {await run.Content.ReadAsStringAsync().ConfigureAwait(true)}\n{app.ErrorsText}");
+    }
+
+    /// <summary>D-440: без гранта Manage власне (як і чуже) погодження не підтвердити — відмова лишається.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.7")]
+    [Trait("Decision", "D-440")]
+    public async Task D440_ініціатор_без_Manage_власне_погодження_не_підтверджує()
+    {
+        var s = await ArrangeAsync(RecalculationApprovalPolicy.InitiatorGrant).ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
         using var initiator = await SignedInAsync(app, s.Initiator).ConfigureAwait(true);
 
@@ -63,10 +96,8 @@ public sealed partial class RecalculationApprovalTests(SqlServerFixture sql)
         var response = await ConfirmAsync(initiator, s.ProjectId, id).ConfigureAwait(true);
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
 
-        Assert.True(response.StatusCode == HttpStatusCode.Conflict, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
-        var problem = JsonDocument.Parse(body).RootElement;
-        Assert.Equal("ECR-CALC-0409", problem.GetProperty("errorCode").GetString());
-        Assert.Equal("err.ECR-CALC-0409.ownRecalculationApproval", problem.GetProperty("messageKey").GetString());
+        Assert.True(response.StatusCode == HttpStatusCode.Forbidden, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
+        Assert.Equal("ECR-AUTH-0403", JsonDocument.Parse(body).RootElement.GetProperty("errorCode").GetString());
 
         // І непідтверджене погодження перерахунку не відкриває.
         await AssertRecalculationDeniedAsync(

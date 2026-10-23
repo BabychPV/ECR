@@ -201,7 +201,7 @@ public sealed class TableSliceMethodologyQueryCountTests(SqlServerFixture sql)
             var rule = version.AddRule(EcrCode.Create("all"), "{}", 100);
             var requiredInput = version.AddRequiredInput(requiredColumnId, RequiredInputSeverity.Block, hint: null);
 
-            // Чотири очі (D-40) — перевірка є і в схемі (`CK_MV_FourEyes`).
+            // Публікує інший користувач (до D-440 цього вимагали чотири очі); предмет тесту — не автор.
             version.Publish(publishedByUserId: 2, "RD-04", new DateOnly(2026, 1, 1), testsPassed: true, Now);
 
             db.MethodologyRules.Add(rule);

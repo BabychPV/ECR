@@ -138,23 +138,51 @@ public sealed class SubmitRightApiTests(SqlServerFixture sql)
         Assert.Equal(DocumentStatus.Submitted, await StatusAsync(b).ConfigureAwait(true));
     }
 
-    /// <summary>Той, хто подав (рівень Approve + право), власне подання не затверджує (D-278).</summary>
+    /// <summary>
+    /// D-440: той, хто подав (рівень Approve + право), сам затверджує власне подання, а журнал аркуша
+    /// позначає це погодження «погоджено автором подання» (<c>approvedBySubmitter</c>).
+    /// ⛔ Мутації: повернути заборону самопогодження в <c>ApproveSheetHandler</c> — 403 замість 204; прибрати обчислення
+    /// <c>ApprovedBySubmitter</c> у <c>WorkflowStore.GetHistoryAsync</c> — позначки немає.
+    /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Decision", "D-285")]
-    [Trait("Decision", "D-278")]
-    public async Task Подавець_з_Approve_і_правом_власне_подання_не_затверджує()
+    [Trait("Decision", "D-440")]
+    public async Task D440_подавець_з_Approve_і_правом_сам_затверджує_власне_подання_з_позначкою_в_журналі()
     {
         var b = await ArrangeAsync().ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, b, GrantLevel.Approve, permissions: [Right]).ConfigureAwait(true);
         await ExpectAsync(app, HttpStatusCode.NoContent, SubmitAsync(client, b)).ConfigureAwait(true);
 
-        var body = await ExpectAsync(app, HttpStatusCode.Forbidden, ApproveAsync(client, b)).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(client, b)).ConfigureAwait(true);
 
-        Assert.Contains("approveOwnSubmission", body, StringComparison.Ordinal);
-        Assert.Equal(DocumentStatus.Submitted, await StatusAsync(b).ConfigureAwait(true));
+        Assert.Equal(DocumentStatus.Approved, await StatusAsync(b).ConfigureAwait(true));
+
+        var history = await HistoryAsync(app, client, b).ConfigureAwait(true);
+        Assert.Equal(["Approve", "Submit"], history.Select(e => e.Action));
+        Assert.Equal([true, false], history.Select(e => e.ApprovedBySubmitter));
+    }
+
+    /// <summary>D-440: погодження чужого подання позначки «погоджено автором подання» не має.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-440")]
+    public async Task D440_погодження_чужого_подання_без_позначки_в_журналі()
+    {
+        var b = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var author = await SignedInAsync(app, b, GrantLevel.Write, permissions: [Right]).ConfigureAwait(true);
+        using var approver = await SignedInAsync(app, b, GrantLevel.Approve, permissions: []).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, SubmitAsync(author, b)).ConfigureAwait(true);
+
+        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(approver, b)).ConfigureAwait(true);
+
+        var history = await HistoryAsync(app, approver, b).ConfigureAwait(true);
+        Assert.Equal(["Approve", "Submit"], history.Select(e => e.Action));
+        Assert.All(history, e => Assert.False(e.ApprovedBySubmitter));
     }
 
     /// <summary>Автор-Write з правом відкликає своє подання до першого погодження.</summary>
@@ -272,6 +300,21 @@ public sealed class SubmitRightApiTests(SqlServerFixture sql)
             new Uri($"/api/v1/documents/{b.DocumentId}/approve", UriKind.Relative),
             new { sheetDefId = b.SheetDefId, periodKey = b.PeriodKey.Value, approved = true, reason = (string?)null });
 
+    private static async Task<List<(string Action, bool ApprovedBySubmitter)>> HistoryAsync(
+        EcrApiFactory app, HttpClient client, TestDocument b)
+    {
+        var body = await ExpectAsync(
+                app, HttpStatusCode.OK,
+                client.GetAsync(new Uri(
+                    $"/api/v1/documents/{b.DocumentId}/workflow/history?periodKey={b.PeriodKey.Value}", UriKind.Relative)))
+            .ConfigureAwait(false);
+
+        using var json = JsonDocument.Parse(body);
+        return [.. json.RootElement.EnumerateArray().Select(e => (
+            e.GetProperty("action").GetString() ?? string.Empty,
+            e.GetProperty("approvedBySubmitter").GetBoolean()))];
+    }
+
     private static Task<HttpResponseMessage> RecallAsync(HttpClient client, TestDocument b)
         => client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{b.DocumentId}/recall", UriKind.Relative),
@@ -279,7 +322,11 @@ public sealed class SubmitRightApiTests(SqlServerFixture sql)
 
     private async Task<TestDocument> ArrangeAsync()
     {
-        var b = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync().ConfigureAwait(false);
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var b = await builder.BuildAsync().ConfigureAwait(false);
+
+        // D-441 (AN-128): Scheduled-період не подається — період документа відкрито.
+        await builder.OpenPeriodAsync(b).ConfigureAwait(false);
 
         await using var db = Context();
         db.DocumentSheets.Add(new DocumentSheet(b.DocumentId, b.SheetDefId));

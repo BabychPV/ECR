@@ -32,10 +32,14 @@ public interface IApprovalQueueStore
     /// </param>
     /// <param name="after">Курсор (виключно); <c>null</c> — з початку.</param>
     /// <param name="take">Розмір порції.</param>
+    /// <param name="participatedDocumentIds">
+    /// D-444 (AN-131): документи, відкриті викликачеві наданням учасника, — кандидати ДОДАТКОВО до проєктів
+    /// <paramref name="projectIds"/>; порожньо — лише проєкти (попередній предикат).
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<ApprovalQueueCandidate>> ListSubmittedAsync(
         IReadOnlyCollection<int> projectIds, bool requireIncludedSheet, ApprovalQueueCursor? after, int take,
-        CancellationToken ct);
+        IReadOnlyCollection<long> participatedDocumentIds, CancellationToken ct);
 }
 
 /// <summary>Проєкт для черги.</summary>

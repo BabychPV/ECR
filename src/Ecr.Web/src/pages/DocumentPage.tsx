@@ -28,15 +28,13 @@ import { useDocumentLogActions } from '@/features/documents/DocumentLogActions';
 import { useStaleResultsReminderHost } from '@/features/documents/useStaleResultsReminder';
 import { useVersionMigrationAction } from '@/features/documents/VersionMigrationAction';
 import { useEditAssignmentsAction } from '@/features/editAssignments/EditAssignmentsAction';
-import { ExecutorStrip } from '@/features/editAssignments/ExecutorStrip';
 import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
 import { DocumentProgress } from '@/features/documents/DocumentProgress';
 import { useDocumentPending } from '@/features/grid/autosave';
 import type { HeldEdit } from '@/features/grid/pendingStore';
-import { isEditable } from '@/features/workflow/SheetActions';
+import { editsDeferToServer, isEditable } from '@/features/workflow/SheetActions';
 import { useCalculationsStale } from '@/features/methodologies/staleCalculations';
-import { UnmatchedRowsBanner } from '@/features/documents/UnmatchedRowsBanner';
 import { useUnmatchedRows } from '@/features/documents/useUnmatchedRows';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
@@ -115,6 +113,16 @@ const DocumentInspector = lazy(async () => ({
 const loadPeriodPicker = () => import('@/shared/ui/PeriodPicker');
 void loadPeriodPicker();
 const PeriodPicker = lazy(async () => ({ default: (await loadPeriodPicker()).PeriodPicker }));
+
+// ✎ D-442 / AN-129: банер невідповідних рядків (D-14) — окремий чанк: він малюється лише за наявності таких
+// рядків, а маршрут після П.1 і П.3 стояв рівно на межі 250 КБ (`D-132`).
+// ✎ AN-129: смуга виконавців (EA-5b) — окремий чанк: без призначень вона нічого не малює (`return null`).
+const ExecutorStrip = lazy(async () => ({
+  default: (await import('@/features/editAssignments/ExecutorStrip')).ExecutorStrip,
+}));
+const UnmatchedRowsBanner = lazy(async () => ({
+  default: (await import('@/features/documents/UnmatchedRowsBanner')).UnmatchedRowsBanner,
+}));
 
 // PM-11: «З дозволу» + «Оновити з дозволу» — окремий чанк (бюджет маршруту D-132).
 const PermitRefreshStrip = lazy(async () => ({
@@ -507,6 +515,12 @@ export function DocumentPage(): JSX.Element {
    */
   const narrow = useNarrowScreen();
   const readOnly = !isEditable(state) || locksDataActions(lock) || narrow;
+  /*
+   * ✎ D-442: значення ПОДАНОГО аркуша править погоджувач поточного кроку — це знає лише сервер, тож сітку
+   * не замикаємо цілком: рішення зрізу дають погоджувачеві редаговні комірки, решті — `DocumentSubmitted`
+   * (штриховка, замок, підказка, як і доти). Дії зі зміни даних (`readOnly` вище) лишаються закриті.
+   */
+  const gridReadOnly = readOnly && !(editsDeferToServer(state) && !locksDataActions(lock) && !narrow);
 
   // ⚠ Викликається БЕЗУМОВНО і до будь-якого розгалуження показу: правило
   // хуків не знає про `AsyncBoundary` нижче.
@@ -551,7 +565,7 @@ export function DocumentPage(): JSX.Element {
   const editAssignments = useEditAssignmentsAction({
     documentId,
     document: summary.data,
-    sheets: sheets.map((s) => ({ code: s.code, name: s.name })),
+    sheets,
   });
 
   // «History» і «Compare versions» — пункти «More» + лінивий діалог (макет: блоків між шапкою й сіткою немає).
@@ -671,7 +685,7 @@ export function DocumentPage(): JSX.Element {
                 issues={null}
                 onShowIssues={() => undefined}
               />
-              <DocumentSaveState readOnly={readOnly} />
+              <DocumentSaveState readOnly={gridReadOnly} />
               {/* RC15-C: банер «результати застаріли» під рядком уже каже те саме - бейдж за нього не дублюється. */}
               {calculationsStale && document.resultsStale !== true && (
                 <Badge color="statusWarning" variant="light" role="status" data-testid="document-methodology-stale">
@@ -683,7 +697,11 @@ export function DocumentPage(): JSX.Element {
         />
       )}
 
-      {unmatchedRows !== null && <UnmatchedRowsBanner rows={unmatchedRows} />}
+      {unmatchedRows !== null && (
+        <Suspense fallback={null}>
+          <UnmatchedRowsBanner rows={unmatchedRows} />
+        </Suspense>
+      )}
 
       {/* ⛔ `F-18`: ЧОМУ тут нічого не змінити — одразу під рядком дій, до
           будь-якої сітки: сірі комірки без пояснення читаються як збій.
@@ -691,7 +709,9 @@ export function DocumentPage(): JSX.Element {
       {active === undefined && <DocumentLockBanner lock={lock} periodKey={periodKey} />}
 
       {/* EA-5b: передача місяця - «Місяць передано вам», «Заповнено», коментар повернення. Права комірок рішає сервер. */}
-      <ExecutorStrip documentId={documentId} periodKey={periodKey} />
+      <Suspense fallback={null}>
+        <ExecutorStrip documentId={documentId} periodKey={periodKey} />
+      </Suspense>
 
       {/* PM-11: таблиці активного аркуша, що читають дозвіл (permitBinding у відповіді …/tables), — позначка і
           «Оновити з дозволу». Чанк вантажиться лише коли така таблиця є; додаткових запитів немає. */}
@@ -909,7 +929,8 @@ export function DocumentPage(): JSX.Element {
                   documentId={documentId}
                   periodKey={periodKey}
                   periodEnd={periodEnd}
-                  readOnly={readOnly}
+                  readOnly={gridReadOnly}
+                  sheetState={state}
                   tables={active.tables}
                 />
               )}

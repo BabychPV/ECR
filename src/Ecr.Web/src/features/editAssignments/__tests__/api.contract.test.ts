@@ -13,6 +13,7 @@ import {
   getEditorSets,
   getMyEditAssignments,
   returnEditAssignment,
+  transferDocumentOwner,
   updateEditorSet,
   upsertEditAssignment,
   validateEditAssignment,
@@ -100,6 +101,9 @@ const slice = makeSlice({ monthNumber: 1 });
 async function callEverything(): Promise<void> {
   await getEditAssignments(7);
   await upsertEditAssignment(7, { slice, recipientUserIds: [1], isExclusive: true, note: 'n', appliedSetId: 3, baseVersion: 'v' });
+  // D-443: учасник з рівнем і областю «таблиця»; передача власника.
+  await upsertEditAssignment(7, { slice: makeSlice({ sheetCode: 'S', tableCode: 'T' }), recipientUserIds: [1], isExclusive: false, level: 'Approve' });
+  await transferDocumentOwner(7, 5);
   await deleteEditAssignment(7, 2);
   await validateEditAssignment(7, 2, 'v');
   await returnEditAssignment(7, 2, { reason: 'r', baseVersion: 'v', userIds: null });
@@ -124,7 +128,7 @@ describe('api.ts передач ↔ openapi.snapshot.json', () => {
     stubFetch();
     await callEverything();
 
-    expect(calls.length).toBe(14);
+    expect(calls.length).toBe(16);
     for (const call of calls) {
       const template = templateOf(call.path);
       expect(template, `${call.method} ${call.path}: такого шляху в контракті немає`).toBeDefined();
@@ -160,7 +164,7 @@ describe('api.ts передач ↔ openapi.snapshot.json', () => {
 
     const covered = new Set(calls.map((c) => `${c.method.toLowerCase()} ${templateOf(c.path)}`));
     const server = Object.entries(spec.paths)
-      .filter(([path]) => path.includes('/edit-assignments') || path.includes('/editor-sets'))
+      .filter(([path]) => path.includes('/edit-assignments') || path.includes('/editor-sets') || path.endsWith('/owner'))
       .flatMap(([path, methods]) => Object.keys(methods).map((m) => `${m} ${path}`));
 
     expect(server.filter((action) => !covered.has(action))).toEqual([]);

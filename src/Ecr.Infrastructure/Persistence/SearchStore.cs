@@ -25,17 +25,35 @@ public sealed class SearchStore(EcrDbContext db) : ISearchStore
         var pattern = "%" + Escape(term) + "%";
         var result = new List<SearchRow>();
 
-        if (scope.DocumentProjects is { Count: > 0 } projects)
+        var projects = scope.DocumentProjects ?? [];
+        var participated = scope.ParticipatedDocuments ?? [];
+        if (projects.Count > 0 || participated.Count > 0)
         {
             var projectsJson = JsonSerializer.Serialize(projects);
-            var documents = db.Database.SqlQuery<Row>($"""
-                SELECT d.Id, d.BusinessKey AS Code, d.NameL10n AS Name
-                FROM doc.Document d
-                WHERE d.ProjectId IN (SELECT CAST(j.value AS int) FROM OPENJSON({projectsJson}) j)
-                  AND (d.BusinessKey LIKE {pattern} ESCAPE N'\'
-                       OR EXISTS (SELECT 1 FROM OPENJSON(CASE WHEN ISJSON(d.NameL10n) = 1 THEN d.NameL10n END) n
-                                  WHERE n.value COLLATE DATABASE_DEFAULT LIKE {pattern} ESCAPE N'\'))
-                """);
+
+            // ✎ D-444 (AN-131): документи учасника — ДОДАТКОВО до проєктів, поза проєктами із забороною ролі (та
+            // сама множина, що в переліку). Без учасника — рівно попередній запит (той самий план із seek за проєктом).
+            var participatedJson = JsonSerializer.Serialize(participated);
+            var deniedProjectsJson = JsonSerializer.Serialize(scope.ParticipationDeniedProjects ?? []);
+            var documents = participated.Count == 0
+                ? db.Database.SqlQuery<Row>($"""
+                    SELECT d.Id, d.BusinessKey AS Code, d.NameL10n AS Name
+                    FROM doc.Document d
+                    WHERE d.ProjectId IN (SELECT CAST(j.value AS int) FROM OPENJSON({projectsJson}) j)
+                      AND (d.BusinessKey LIKE {pattern} ESCAPE N'\'
+                           OR EXISTS (SELECT 1 FROM OPENJSON(CASE WHEN ISJSON(d.NameL10n) = 1 THEN d.NameL10n END) n
+                                      WHERE n.value COLLATE DATABASE_DEFAULT LIKE {pattern} ESCAPE N'\'))
+                    """)
+                : db.Database.SqlQuery<Row>($"""
+                    SELECT d.Id, d.BusinessKey AS Code, d.NameL10n AS Name
+                    FROM doc.Document d
+                    WHERE (d.ProjectId IN (SELECT CAST(j.value AS int) FROM OPENJSON({projectsJson}) j)
+                           OR (d.Id IN (SELECT CAST(pd.value AS bigint) FROM OPENJSON({participatedJson}) pd)
+                               AND d.ProjectId NOT IN (SELECT CAST(dn.value AS int) FROM OPENJSON({deniedProjectsJson}) dn)))
+                      AND (d.BusinessKey LIKE {pattern} ESCAPE N'\'
+                           OR EXISTS (SELECT 1 FROM OPENJSON(CASE WHEN ISJSON(d.NameL10n) = 1 THEN d.NameL10n END) n
+                                      WHERE n.value COLLATE DATABASE_DEFAULT LIKE {pattern} ESCAPE N'\'))
+                    """);
             result.AddRange(await FirstAsync(documents, "document", perKind, ct).ConfigureAwait(false));
         }
 

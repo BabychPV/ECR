@@ -112,6 +112,18 @@ function mockFetch(
         ]);
       }
 
+      // ✎ D-441: ціль подання — період сторінки, поки аркуш неподаний (як рахує сервер).
+      if (url.includes('/submission-target')) {
+        const state = (options.sheetStates ?? { GEN: 'Draft' })['GEN'] ?? 'Draft';
+        const submittable = state === 'Draft' || state === 'Rejected';
+        return jsonResponse({
+          targetPeriodKey: submittable ? 202401 : null,
+          nextPeriodKey: null,
+          periods: [{ periodKey: 202401, state: 'Open', sheetStatus: state, submittable }],
+          monthColumns: [],
+        });
+      }
+
       if (url.includes('/api/v1/documents/1')) {
         return jsonResponse({
           businessKey: 'DOC-0001',
@@ -156,7 +168,7 @@ const ChangeKey = { name: '⟦documents.changeKey⟧' };
 /** Рядок дій — коли в ньому вже є «Submit» (профіль доїхав). */
 async function actionsRow(): Promise<HTMLElement> {
   const row = await screen.findByTestId('document-actions', {}, { timeout: SlowEnvTimeout });
-  await within(row).findByRole('button', { name: '⟦document.submit⟧' }, { timeout: SlowEnvTimeout });
+  await within(row).findByRole('button', { name: /workflow\.submitPeriod/ }, { timeout: SlowEnvTimeout });
 
   return row;
 }
@@ -182,13 +194,13 @@ describe('DocumentPage: рядок дій (UI-14)', () => {
 
       // ⛔ Мутаційний доказ: поверни `ExportButton` з тригером у рядок — тут
       // з'явиться «Export», і рівність почервоніє.
-      expect(visibleActions(row)).toEqual(['⟦document.validate⟧', '⟦document.moreActions⟧', '⟦document.submit⟧']);
+      expect(visibleActions(row)).toEqual(['⟦document.validate⟧', '⟦document.moreActions⟧', expect.stringMatching(/^⟦workflow\.submitPeriod/)]);
 
       // `L1`: одна заповнена (primary) кнопка в рядку.
       const filled = within(row)
         .getAllByRole('button')
         .filter((button) => button.getAttribute('data-variant') === 'filled');
-      expect(filled.map((button) => button.textContent)).toEqual(['⟦document.submit⟧']);
+      expect(filled.map((button) => button.textContent)).toEqual([expect.stringMatching(/^⟦workflow\.submitPeriod/)]);
 
       // На поданому аркуші головна — «Approve», і вона теж одна (наступний тест).
     },
@@ -252,9 +264,9 @@ describe('DocumentPage: рядок дій (UI-14)', () => {
         expect(status.querySelector('[data-export-state]')?.getAttribute('data-export-state')).toBe('running'),
       );
 
-      fireEvent.click(within(row).getByRole('button', { name: '⟦document.submit⟧' }));
+      fireEvent.click(within(row).getByRole('button', { name: /workflow\.submitPeriod/ }));
       await waitFor(() =>
-        expect(within(row).getByRole('button', { name: /document\.submit/ }).hasAttribute('data-loading')).toBe(
+        expect(within(row).getByRole('button', { name: /workflow\.submitPeriod/ }).hasAttribute('data-loading')).toBe(
           true,
         ),
       );

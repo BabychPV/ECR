@@ -117,7 +117,7 @@ describe('SheetActions: подання з попередженнями (ФВ-5.1
     mockFetch();
     show();
 
-    fireEvent.click(await screen.findByRole('button', { name: '⟦document.submit⟧' }));
+    fireEvent.click(await screen.findByRole('button', { name: /workflow\.submitPeriod/ }));
 
     expect(await screen.findByText(WarningText)).toBeTruthy();
     expect(submitBodies).toHaveLength(1);
@@ -132,7 +132,7 @@ describe('SheetActions: подання з попередженнями (ФВ-5.1
     mockFetch();
     show();
 
-    fireEvent.click(await screen.findByRole('button', { name: '⟦document.submit⟧' }));
+    fireEvent.click(await screen.findByRole('button', { name: /workflow\.submitPeriod/ }));
     await screen.findByText(WarningText);
 
     fireEvent.click(await screen.findByRole('button', { name: '⟦workflow.submitAnyway⟧' }));
@@ -152,7 +152,7 @@ describe('SheetActions: подання з попередженнями (ФВ-5.1
     mockFetch();
     show();
 
-    fireEvent.click(await screen.findByRole('button', { name: '⟦document.submit⟧' }));
+    fireEvent.click(await screen.findByRole('button', { name: /workflow\.submitPeriod/ }));
     await screen.findByText(WarningText);
 
     fireEvent.click(await screen.findByRole('button', { name: '⟦common.cancel⟧' }));
@@ -168,7 +168,7 @@ describe('SheetActions: подання з попередженнями (ФВ-5.1
     mockFetch(true);
     show();
 
-    fireEvent.click(await screen.findByRole('button', { name: '⟦document.submit⟧' }));
+    fireEvent.click(await screen.findByRole('button', { name: /workflow\.submitPeriod/ }));
 
     await waitFor(() => {
       expect(spy).toHaveBeenCalled();

@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Response } from '@playwright/test';
 import { expectFocusRing, expectFocusTrapped, expectFocusVisible, focusState } from './focus';
+import { chooseSubmitPeriod } from './submitPeriod';
 
 /**
  * Прохід оператора **без миші** від входу до виходу (`ФВ-14.16`, `D-141`).
@@ -23,21 +24,6 @@ import { expectFocusRing, expectFocusTrapped, expectFocusVisible, focusState } f
  */
 const Operator = { user: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
 
-/**
- * `F-25` (пряме рішення людини, `ApproveSheetHandler.cs`): та сама людина
- * не може подати аркуш і сама ж його погодити — правило чотирьох очей.
- * `Operator` подає (крок 9), а затверджує (крок 10) — цей, окремий обліковий
- * запис із тим самим грантом (роль `E2EAdmin`, `tools/e2e-stand.ps1`).
- *
- * ⛔ Ім'я НЕ `e2e-approver` навмисно — живцем зловлено на стенді (кілька
- * прогонів, доки не з'ясувалось). `getByRole('button', { name: /Approve|
- * Затвердити/i })` звіряє `name` ПІДРЯДКОМ: `e2e-approver` містить
- * `approve`, тож `.first()` того самого локатора резолвився в кнопку МЕНЮ
- * КОРИСТУВАЧА (доступне ім'я якої — юзернейм), а не в кнопку робочого
- * процесу. Фокус і Enter проходили без жодної помилки — відкривалося меню
- * «Тема/Пароль/Вийти» замість діалогу підтвердження.
- */
-const Reviewer = { user: 'e2e-reviewer', password: 'E2E-Rev1ewer-Work-2026!' };
 
 /** Період і документ приходять зі стенда: зашите число ламалося б у січні. */
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
@@ -53,7 +39,7 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     'ECR_E2E_OPTIONAL: стенда немає, перевіряти нічого. Стенд: tools/e2e-stand.ps1.',
   );
 
-  test('від входу до виходу самою лише клавіатурою', async ({ page, browser }, testInfo) => {
+  test('від входу до виходу самою лише клавіатурою', async ({ page }) => {
     // ⚠ Явний бюджет замість `test.slow()` (30 с × 3 = 90 с). На спокійній
     // машині прохід іде 84 с — упритул до стелі; на завантаженій (десятки
     // процесів `dotnet` паралельних сесій) один лише `GET …/tables/730` ішов
@@ -270,8 +256,8 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     // `Ecr.Application.Tests/Workflow`) доводять, що ендпоінти
     // `submit`/`approve` працюють; жоден тест не доводив, що до них веде
     // КНОПКА в браузері й що екран показує результат.
-    const submit = page.getByRole('button', { name: /Submit|Подати/i }).first();
-    await expect(submit, 'у шапці немає кнопки подання').toBeVisible({ timeout: 10_000 });
+    // ✎ D-441: «Подати» подає найраніший неподаний Open/Grace — відкритий період вибирається явно, клавіатурою.
+    const submit = await chooseSubmitPeriod(page, Number(PeriodKey), { keyboard: true });
 
     await expectFocusRing(page, submit, 'кнопка подання');
     const submitted = waitForWrite(page, 'POST', 'submit');
@@ -297,92 +283,37 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     });
 
     // ── 10. Затвердження ─────────────────────────────────────────────────
-    // ⛔ `F-25` (пряме рішення людини, `ApproveSheetHandler.cs`): той самий
-    // користувач не може подати аркуш і сам же його погодити — правило
-    // чотирьох очей. `Operator` щойно подав (крок 9): грант дозволяє
-    // (`Manage` ⩾ `Approve`), але з A2-08 кнопки «Затвердити» автору не видно
-    // (`SheetActions`: `canRecall`), а підтвердження сервер відхилив би `403 ECR-ACCS-0403`
-    // (`err.ECR-ACCS-0403.approveOwnSubmission`) — перевірено живцем, не
-    // здогадано. Затверджує ДРУГИЙ обліковий запис (`Reviewer`,
-    // `tools/e2e-stand.ps1`), в ОКРЕМОМУ контексті браузера: другий вхід у
-    // ТІЙ САМІЙ вкладці означав би вихід `Operator` і зламав би єдину особу
-    // проходу до самого кінця (крок 11 — саме `Operator` виходить).
-    const reviewBaseURL = testInfo.project.use.baseURL;
-    if (reviewBaseURL === undefined) {
-      throw new Error('у конфігурації немає baseURL — затвердити другим користувачем нема де');
-    }
+    // ⛔ D-440 (BRIEF-1021 П.4): правило чотирьох очей скасоване — той самий
+    // `Operator`, що подав аркуш (крок 9), сам його й затверджує: грант
+    // дозволяє (`Manage` ⩾ `Approve`), і кнопку «Затвердити» автору більше не
+    // ховають (доти F-25 вимагав другого облікового запису). Якби заборону
+    // повернули, тут не було б кнопки або сервер відповів би `403`.
+    const approve = page.getByRole('button', { name: /Approve|Затвердити/i }).first();
+    await expect(approve, 'автор подання не бачить кнопки затвердження').toBeVisible({ timeout: 10_000 });
 
-    const reviewerContext = await browser.newContext({ baseURL: reviewBaseURL });
-    const reviewerPage = await reviewerContext.newPage();
+    await expectFocusRing(page, approve, 'кнопка затвердження');
+    await page.keyboard.press('Enter');
 
-    try {
-      await reviewerPage.goto('/login');
-      await expect(
-        reviewerPage.getByRole('heading').first(),
-        'сторінка входу (затвердження) не відрендерилася',
-      ).toBeVisible({ timeout: 30_000 });
-      await reviewerPage.getByLabel(/User name|Ім'я/i).fill(Reviewer.user);
-      await reviewerPage.getByRole('textbox', { name: /Password|Пароль/i }).fill(Reviewer.password);
-      await reviewerPage.keyboard.press('Enter');
-      await reviewerPage.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
+    // ⛔ `X-25`: Enter на кнопці «Затвердити» не подає запит сам — він
+    // ВІДКРИВАЄ `ConfirmModal` (`SheetActions.tsx`), і фокус у ній навмисно
+    // на «Скасувати» (`L6`: Enter не має виконувати незворотне, не читаючи
+    // заголовка).
+    const approveDialog = page.getByRole('dialog');
+    await expect(approveDialog, 'діалог підтвердження затвердження не відкрився').toBeVisible({
+      timeout: 10_000,
+    });
 
-      const reviewerDocumentLoaded = reviewerPage.waitForResponse(
-        (response) =>
-          response.request().method() === 'GET' &&
-          new URL(response.url()).pathname === `/api/v1/documents/${DocumentId}`,
-        { timeout: 90_000 },
-      );
-      await reviewerPage.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
-      await expect(reviewerPage.getByRole('heading').first()).toBeVisible({ timeout: 30_000 });
-      await reviewerDocumentLoaded;
+    // ⚠ Локатор — усередині ДІАЛОГУ: кнопка тригера ззовні має той самий
+    // напис (`verb` = `t('workflow.approve')`), і без цього звуження
+    // `getByRole('button', { name: /Approve|Затвердити/i })` резолвився б
+    // у ДВА елементи.
+    const confirmApprove = approveDialog.getByRole('button', { name: /Approve|Затвердити/i });
+    await expectFocusRing(page, confirmApprove, 'кнопка підтвердження затвердження');
 
-      // ⚠ Той самий сигнал стабільності, що й у `Operator` після власного
-      // подання (нижче) — аркуш дійсно `Submitted`, а не «сторінка
-      // завантажилась узагалі».
-      const reviewerActiveTab = reviewerPage.getByRole('tab', { selected: true });
-      await expect(
-        reviewerActiveTab,
-        'аркуш (сторінка затвердження) не показує Submitted',
-      ).toContainText('Submitted', { timeout: 30_000 });
+    const approved = waitForWrite(page, 'POST', 'approve');
+    await page.keyboard.press('Enter');
+    expect((await approved).status(), 'сервер не прийняв затвердження автором подання').toBe(204);
 
-      const approve = reviewerPage.getByRole('button', { name: /Approve|Затвердити/i }).first();
-      await expect(approve, 'у шапці немає кнопки затвердження').toBeVisible({ timeout: 10_000 });
-
-      await expectFocusRing(reviewerPage, approve, 'кнопка затвердження');
-      await reviewerPage.keyboard.press('Enter');
-
-      // ⛔ `X-25`: Enter на кнопці «Затвердити» більше не подає запит сам —
-      // він ВІДКРИВАЄ `ConfirmModal` (`SheetActions.tsx`), і фокус у ній
-      // навмисно на «Скасувати» (`L6`: Enter не має виконувати незворотне,
-      // не читаючи заголовка).
-      const approveDialog = reviewerPage.getByRole('dialog');
-      await expect(
-        approveDialog,
-        'діалог підтвердження затвердження не відкрився',
-      ).toBeVisible({ timeout: 10_000 });
-
-      // ⚠ Локатор — усередині ДІАЛОГУ: кнопка тригера ззовні має той самий
-      // напис (`verb` = `t('workflow.approve')`), і без цього звуження
-      // `getByRole('button', { name: /Approve|Затвердити/i })` резолвився б
-      // у ДВА елементи.
-      const confirmApprove = approveDialog.getByRole('button', { name: /Approve|Затвердити/i });
-      await expectFocusRing(reviewerPage, confirmApprove, 'кнопка підтвердження затвердження');
-
-      const approved = waitForWrite(reviewerPage, 'POST', 'approve');
-      await reviewerPage.keyboard.press('Enter');
-      expect((await approved).status(), 'сервер не прийняв затвердження').toBe(204);
-    } finally {
-      await reviewerContext.close();
-    }
-
-    // ⚠ Стан на сторінці `Operator` сам не оновлюється — затвердження щойно
-    // сталося в ІНШІЙ сесії (`Reviewer`). Перезавантаження — спосіб
-    // побачити щойно записане чужою сесією значення.
-    await page.reload();
-    await expect(
-      page.getByRole('heading').first(),
-      'сторінка не відрендерилася після перезавантаження',
-    ).toBeVisible({ timeout: 30_000 });
     await expect(activeTab, 'аркуш не перейшов у Approved').toContainText('Approved', {
       timeout: 30_000,
     });

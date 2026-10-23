@@ -1768,8 +1768,8 @@ CREATE TABLE calc.MethodologyVersion
     CONSTRAINT PK_MethodologyVersion PRIMARY KEY (Id),
     CONSTRAINT UQ_MethodologyVersion UNIQUE (MethodologyId, Version),
     CONSTRAINT FK_MV_Methodology FOREIGN KEY (MethodologyId) REFERENCES calc.Methodology (Id),
-    -- Публікація автором останньої правки заборонена системно (D-40)
-    CONSTRAINT CK_MV_FourEyes CHECK (PublishedByUserId IS NULL OR PublishedByUserId <> CreatedByUserId),
+    -- ✎ 2026-10-23: CK_MV_FourEyes (автор ≠ публікатор, D-40) знято міграцією D440DropFourEyes —
+    -- чотири очі скасовано (D-440); публікацію розподіляє лише право Calculation.Publish.
     CONSTRAINT CK_MV_Published CHECK (Status <> 1 OR
         (PublishedAt IS NOT NULL AND EffectiveFrom IS NOT NULL AND ChangeReason IS NOT NULL))
 );

@@ -8,11 +8,18 @@ namespace Ecr.Application.Ports;
 /// <param name="Templates">Чи шукати шаблони.</param>
 /// <param name="Registries">Чи шукати довідники.</param>
 /// <param name="DeniedRegistries">Довідники з явною забороною (S18): їх не шукати; <c>null</c> — заборон немає.</param>
+/// <param name="ParticipatedDocuments">
+/// D-444 (AN-131): документи, відкриті наданням учасника, — шукаються ДОДАТКОВО до <paramref name="DocumentProjects"/>
+/// (поза проєктами з <paramref name="ParticipationDeniedProjects"/>); <c>null</c> — немає.
+/// </param>
+/// <param name="ParticipationDeniedProjects">Проєкти з забороною ролі: їхніх документів жодне надання не відкриває.</param>
 public sealed record SearchScope(
     IReadOnlyCollection<int>? DocumentProjects,
     bool Templates,
     bool Registries,
-    IReadOnlyCollection<int>? DeniedRegistries = null);
+    IReadOnlyCollection<int>? DeniedRegistries = null,
+    IReadOnlyCollection<long>? ParticipatedDocuments = null,
+    IReadOnlyCollection<int>? ParticipationDeniedProjects = null);
 
 /// <summary>Сирий збіг пошуку до локалізації назви.</summary>
 /// <param name="Kind">Тип сутності: <c>document</c>, <c>template</c>, <c>registry</c>.</param>

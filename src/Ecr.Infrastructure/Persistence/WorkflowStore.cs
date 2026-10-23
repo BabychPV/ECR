@@ -192,7 +192,19 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             orderby e.At descending, e.Id descending
             select new ApprovalEventRecord(
                 sheet.Code, e.FromStatus, e.ToStatus, e.Action, e.ByUserId,
-                user == null ? null : user.DisplayName, e.At, e.Reason, e.StepOrdinal);
+                user == null ? null : user.DisplayName, e.At, e.Reason, e.StepOrdinal,
+                // ⛔ D-440: «погоджено автором подання» — з ЖУРНАЛУ, а не з `ApprovalState.SubmittedByUserId`:
+                // рядок стану тримає лише останнє подання, і після повторного подання іншою людиною стара
+                // подія погодження змінила б позначку заднім числом. Подання — найближче ПЕРЕД цією подією
+                // (`Id` — порядок вставки) того самого аркуша й періоду; той самий запит, без N+1.
+                (e.Action == ApprovalAction.Approve || e.Action == ApprovalAction.ApproveStep)
+                && e.ByUserId != null
+                && db.ApprovalEvents
+                    .Where(s => s.DocumentId == e.DocumentId && s.SheetDefId == e.SheetDefId
+                                && s.PeriodKey == e.PeriodKey && s.Action == ApprovalAction.Submit && s.Id < e.Id)
+                    .OrderByDescending(s => s.Id)
+                    .Select(s => s.ByUserId)
+                    .FirstOrDefault() == e.ByUserId);
 
         return await query.Take(limit).ToListAsync(ct).ConfigureAwait(false);
     }
@@ -205,6 +217,68 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             .OrderBy(s => s.SheetDefId)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<SubmissionCalendar?> GetSubmissionCalendarAsync(
+        long documentId, int sheetDefId, DateTime utcNow, CancellationToken ct)
+    {
+        var project = await (
+                from d in db.Documents.AsNoTracking()
+                where d.Id == documentId
+                join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                select new
+                {
+                    p.Id,
+                    p.Status,
+                    p.IsArchiving,
+                    p.PeriodKind,
+                    p.PeriodEnd,
+                    p.YearGraceOffsetDays,
+                    p.TimeZoneId,
+                })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (project is null)
+        {
+            return null;
+        }
+
+        var periods = await db.Periods
+            .AsNoTracking()
+            .Where(p => p.ProjectId == project.Id)
+            .OrderBy(p => p.PeriodKeyValue)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var statuses = await db.ApprovalStates
+            .AsNoTracking()
+            .Where(s => s.DocumentId == documentId && s.SheetDefId == sheetDefId)
+            .Select(s => new { s.PeriodKey, s.Status })
+            .ToDictionaryAsync(s => s.PeriodKey, s => s.Status, ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Те саме правило, що й `EffectivePeriodStateAsync` вище та `AccessDecisionService.BuildContextAsync`:
+        // за датами — лише для АКТИВНОГО проєкту (`A7-25`), інакше збережений стан.
+        Domain.Services.YearGraceWindow? window = project.Status == Domain.Enums.ProjectStatus.Active
+            ? Domain.Services.YearGraceWindow.For(
+                project.PeriodEnd,
+                project.YearGraceOffsetDays,
+                SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo())
+            : null;
+
+        return new SubmissionCalendar(
+            project.Status,
+            project.IsArchiving,
+            project.PeriodKind,
+            [
+                .. periods.Select(p => new SubmissionCalendarPeriod(
+                    p.PeriodKeyValue,
+                    window is null ? p.State : PeriodStates.Effective(p, utcNow, window),
+                    statuses.TryGetValue(p.PeriodKeyValue, out var status)
+                        ? status
+                        : Domain.Enums.DocumentStatus.Draft)),
+            ]);
+    }
 
     /// <inheritdoc />
     public async Task<Period> LockPeriodAsync(long documentId, PeriodKey periodKey, CancellationToken ct)

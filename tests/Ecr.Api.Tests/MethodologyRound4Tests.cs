@@ -78,27 +78,29 @@ public sealed class MethodologyRound4Tests(SqlServerFixture sql)
             problem.GetProperty("detail").GetString());
     }
 
-    // ── F-14 ──────────────────────────────────────────────────────────────
+    // ── F-14 → D-440 ──────────────────────────────────────────────────────
 
     /// <remarks>
-    /// Мутація: прибрати <c>RejectAuthor</c> з <c>PublishMethodologyHandler</c> —
-    /// відповідь про порожній золотий набір (<c>goldenSetEmpty</c>), а не про
-    /// «чотири ока».
+    /// D-440: правило чотирьох очей скасоване — автор, що публікує свою версію, проходить далі до
+    /// справжніх перевірок публікації (тут — порожній золотий набір), а не отримує відмову
+    /// «чотири ока». Мутація: повернути відмову автору в <c>PublishMethodologyHandler</c> —
+    /// 409 замість 422, тест червоний.
     /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Автор_що_публікує_свою_версію_отримує_пояснення_про_чотири_ока()
+    [Trait("Decision", "D-440")]
+    public async Task D440_автор_що_публікує_свою_версію_доходить_до_перевірок_публікації()
     {
         using var app = new EcrApiFactory(sql);
         var signedIn = await SignedInAsync(app).ConfigureAwait(true);
         using var client = signedIn.Client;
         var stand = await StandAsync(authorUserId: signedIn.UserId).ConfigureAwait(true);
 
-        var problem = await PublishExpecting(client, stand, HttpStatusCode.Conflict).ConfigureAwait(true);
+        var problem = await PublishExpecting(client, stand, HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
 
-        Assert.Equal("ECR-CALC-0409", problem.GetProperty("errorCode").GetString());
-        Assert.Equal("err.ECR-CALC-0409.authorCannotPublish", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("ECR-CALC-0422", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-CALC-0422.goldenSetEmpty", problem.GetProperty("messageKey").GetString());
     }
 
     // ── F-15 / B-12 ───────────────────────────────────────────────────────

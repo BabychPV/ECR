@@ -16,11 +16,8 @@ public sealed class RecalculationApprovalConfiguration : IEntityTypeConfiguratio
 
         builder.ToTable("RecalculationApproval", "calc", t =>
         {
-            // ⛔ Чотири очі — на рівні БАЗИ, як `CK_MV_FourEyes`: правило, яке
-            // тримає лише застосунок, обходиться будь-яким скриптом.
-            t.HasCheckConstraint(
-                "CK_RecalcApproval_FourEyes",
-                "ConfirmedByUserId IS NULL OR ConfirmedByUserId <> RequestedByUserId");
+            // ⚠ `CK_RecalcApproval_FourEyes` (ініціатор ≠ той, хто підтверджує) знято
+            // міграцією `D440DropFourEyes`: чотири очі скасовано (D-440).
 
             // Використане без підтвердження — стан, якого не має бути ніколи.
             t.HasCheckConstraint(

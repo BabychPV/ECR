@@ -50,31 +50,41 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
     /// </remarks>
     public async Task<IReadOnlyList<ApprovalQueueCandidate>> ListSubmittedAsync(
         IReadOnlyCollection<int> projectIds, bool requireIncludedSheet, ApprovalQueueCursor? after, int take,
-        CancellationToken ct)
+        IReadOnlyCollection<long> participatedDocumentIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(projectIds);
+        ArgumentNullException.ThrowIfNull(participatedDocumentIds);
 
-        if (projectIds.Count == 0)
+        // Масив, а не інтерфейс: `Contains` над масивом EF перекладає в `IN (...)`.
+        var participated = participatedDocumentIds.ToArray();
+        if (projectIds.Count == 0 && participated.Length == 0)
         {
             return [];
         }
 
-        var query =
+        var submitted =
             from a in db.ApprovalStates.AsNoTracking()
             join d in db.Documents.AsNoTracking() on a.DocumentId equals d.Id
-            where a.Status == DocumentStatus.Submitted && projectIds.Contains(d.ProjectId)
-            select new
-            {
-                a.Id,
-                a.DocumentId,
-                d.ProjectId,
-                d.BusinessKey,
-                a.SheetDefId,
-                a.PeriodKey,
-                SubmittedAt = a.SubmittedAt ?? DateTime.MinValue,
-                a.SubmittedByUserId,
-                a.CurrentStepId,
-            };
+            where a.Status == DocumentStatus.Submitted
+            select new { a, d };
+
+        // ✎ D-444 (AN-131): документи учасника — ДОДАТКОВО до проєктів; без надань — попередній предикат.
+        submitted = participated.Length == 0
+            ? submitted.Where(x => projectIds.Contains(x.d.ProjectId))
+            : submitted.Where(x => projectIds.Contains(x.d.ProjectId) || participated.Contains(x.d.Id));
+
+        var query = submitted.Select(x => new
+        {
+            x.a.Id,
+            x.a.DocumentId,
+            x.d.ProjectId,
+            x.d.BusinessKey,
+            x.a.SheetDefId,
+            x.a.PeriodKey,
+            SubmittedAt = x.a.SubmittedAt ?? DateTime.MinValue,
+            x.a.SubmittedByUserId,
+            x.a.CurrentStepId,
+        });
 
         if (requireIncludedSheet)
         {

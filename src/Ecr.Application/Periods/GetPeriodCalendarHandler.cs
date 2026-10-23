@@ -48,13 +48,25 @@ public sealed class GetPeriodCalendarHandler(
         // ⛔ S17: і відмова на чужий проєкт — та сама, що на неіснуючий
         // (`ECR-PRJ-0404`, `ProjectVisibility`), а не `403`: різниця 404/403
         // розповідала, які id проєктів існують.
-        ProjectVisibility.RequireVisible(profile, projectId);
+        // ✎ D-443: учасник документа без ролі на проєкт бачить календар проєкту свого документа (сторінка документа
+        // вибирає за ним період) — лише з діючим наданням у документі цього проєкту і без заборони проєкту. Відмова —
+        // та сама 404, що й на чужий проєкт.
+        var byParticipation = !profile.SeesDocumentsOf(projectId)
+                              && profile.HasDocumentParticipations
+                              && await access.ParticipatesInProjectAsync(profile, projectId, ct).ConfigureAwait(false);
+        if (!byParticipation)
+        {
+            ProjectVisibility.RequireVisible(profile, projectId);
+        }
 
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
                       ?? throw ProjectVisibility.NotFound(projectId);
 
-        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
-        Security.PermissionCheck.RequireIn(profile, "Document.View", projectId);
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті (учасник документа — правом, яке дає надання, D-443).
+        if (!byParticipation)
+        {
+            Security.PermissionCheck.RequireIn(profile, "Document.View", projectId);
+        }
 
         var zone = TimeZoneInfo.FindSystemTimeZoneById(project.TimeZoneId);
 

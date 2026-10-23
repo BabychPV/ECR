@@ -21,6 +21,12 @@ public interface IEditAssignmentManagementStore
     public Task<EditAssignmentDocumentRef?> FindDocumentAsync(long documentId, CancellationToken ct);
 
     /// <summary>
+    /// D-443: рядок документа (відстежуваний) під <c>UPDLOCK, ROWLOCK</c> — для передачі власника. Викликається
+    /// ВСЕРЕДИНІ транзакції; немає — <c>null</c>.
+    /// </summary>
+    public Task<Document?> FindDocumentForOwnerChangeAsync(long documentId, CancellationToken ct);
+
+    /// <summary>
     /// Блокує рядок документа (<c>UPDLOCK</c>) до коміту транзакції; <c>false</c> — документа вже немає.
     /// Створення/зміна передачі йде під цим блокуванням: видалення документа (воно бере те саме)
     /// не може проскочити між перевіркою і вставкою (аудит P2).
@@ -103,6 +109,7 @@ public sealed record EditAssignmentUserRef(
 /// <param name="RecipientCount">Кількість виконавців (без імен).</param>
 /// <param name="FilledCount">Скільки виконавців заповнили.</param>
 /// <param name="Version">Версія передачі (для <c>baseVersion</c>).</param>
+/// <param name="Level">Рівень учасника (D-443): «мені на заповнення» й «очікує валідації» — лише <c>Write</c>.</param>
 public sealed record MyEditAssignmentRow(
     long AssignmentId,
     long DocumentId,
@@ -123,4 +130,5 @@ public sealed record MyEditAssignmentRow(
     bool IsOwnerOf,
     int RecipientCount,
     int FilledCount,
-    byte[] Version);
+    byte[] Version,
+    GrantLevel Level = GrantLevel.Write);

@@ -106,12 +106,9 @@ public sealed class MethodologyVersionConfiguration : IEntityTypeConfiguration<M
 
         builder.ToTable("MethodologyVersion", "calc", t =>
         {
-            // ⛔ Чотири очі — на рівні БАЗИ, а не лише коду (D-40). Публікація
-            // версії методології змінює вже подані числа; правило, яке тримає
-            // тільки застосунок, обходиться будь-яким скриптом.
-            t.HasCheckConstraint(
-                "CK_MV_FourEyes",
-                "PublishedByUserId IS NULL OR PublishedByUserId <> CreatedByUserId");
+            // ⚠ `CK_MV_FourEyes` (автор ≠ публікатор, D-40) знято міграцією
+            // `D440DropFourEyes`: чотири очі скасовано (D-440), публікацію
+            // розподіляють лише ролі (`Calculation.Publish`).
 
             // Опублікована версія без дати чинності, часу публікації або
             // причини — стан, який неможливо ні пояснити, ні відтворити.

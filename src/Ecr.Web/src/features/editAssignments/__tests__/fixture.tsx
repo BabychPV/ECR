@@ -143,6 +143,12 @@ export function mockServer(sent: Sent[], options: ServerOptions = {}): void {
         return method === 'DELETE' ? new Response(null, { status: 204 }) : jsonResponse({ ...January, id: 99 });
       }
 
+      // D-443: передача власника документа.
+      if (url.endsWith('/owner') && method === 'POST') {
+        sent.push({ method, url, body });
+        return jsonResponse({ documentId: DocumentId, ownerUserId: Number(body?.newOwnerUserId), ownerDisplayName: 'Koval', previousOwnerUserId: 1 });
+      }
+
       throw new Error(`неочікуваний запит у тесті: ${method} ${url}`);
     }),
   );

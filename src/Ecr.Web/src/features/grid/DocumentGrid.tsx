@@ -35,7 +35,7 @@ import {
 } from './edits';
 import { captureRange, isRangeEdit, type RangeEditDetail } from './rangeEdit';
 import { ConflictPanel, hasCurrentVersion, type OpenConflict } from './ConflictPanel';
-import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
+import { cellStateClass, cellStateOf, rowsLockedBySheet, sheetLockClass, type LocalCellFlags } from './cellState';
 import { isMissingColumns, isSliceEmpty } from './emptiness';
 import { columnWidth, widthsFromEvent } from './columnWidths';
 import { createLookupCellEditor, lookupCellDisplay, lookupIdOfText } from './LookupCellEditor';
@@ -141,6 +141,7 @@ import { useAddRow } from './useAddRow';
 import { DeleteRowControl } from './DeleteRowControl';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
+import { useMonthColumnStatuses, type MarkedMonthStatus } from '@/features/grid/monthColumnStatus';
 // ⚠ Порядок стилів збережений: `cell-states.css` (раніше — у `App.tsx`) іде
 // РАНІШЕ за `cellEditors.css`, як і було в єдиному бандлі. Причина, чому файл
 // тут, а не у вхідному чанку, — бюджет маршруту (`D-132`).
@@ -161,6 +162,11 @@ interface DocumentGridProps {
   /** Ключ періоду. */
   periodKey: number;
   /**
+   * Аркуш таблиці — ключ статусів місячних колонок (D-441, `useMonthColumnStatuses`). Не задано — колонки
+   * без позначок (сітка поза сторінкою документа).
+   */
+  sheetDefId?: number;
+  /**
    * Останній день періоду документа (`PeriodDto.periodEnd`, `YYYY-MM-DD`) —
    * `asOf` темпоральних Lookup-довідників комірок (ФВ-8.5). `null` — календар
    * проєкту ще не завантажено (або сітка поза сторінкою документа): тоді
@@ -176,6 +182,13 @@ interface DocumentGridProps {
   periodEnd?: string | null;
   /** Чи доступне редагування на рівні всієї таблиці. */
   readOnly: boolean;
+
+  /**
+   * ✎ D-442: стан аркуша. Затверджений — «лише читання» без штриховки (`sheetLockClass`, замок лишається);
+   * поданий і затверджений — без додавання й видалення рядків (`rowsLockedBySheet`): погоджувач править
+   * лише значення. Не задано — як доти.
+   */
+  sheetState?: string | undefined;
 
   /**
    * Чи додає рядки користувач.
@@ -361,13 +374,16 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     tableInstanceId,
     tableDefId,
     periodKey,
+    sheetDefId,
     periodEnd = null,
     readOnly,
+    sheetState,
     allowsDynamicRows,
     maxDynamicRows,
     navigateTo = null,
     hidden = false,
   } = props;
+  const rowsReadOnly = readOnly || rowsLockedBySheet(sheetState);
 
   const slice = useQuery({
     // ⚠ Період лишається в КЛЮЧІ КЕШУ, але не в адресі. Екземпляр таблиці
@@ -1225,6 +1241,9 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [],
   );
 
+  // ✎ D-441: колонка місяця k таблиці `MonthsInColumns` позначається станом аркуша за період k.
+  const monthStatus = useMonthColumnStatuses(documentId, sheetDefId, periodKey, tableDefId);
+
   const columns = useMemo(
     () =>
       data === undefined
@@ -1243,6 +1262,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             navigatedCell,
             outOfWindow,
             unlistedLabelsByRegistryId,
+            monthStatus,
           ),
     [
       data,
@@ -1258,6 +1278,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       navigatedCell,
       outOfWindow,
       unlistedLabelsByRegistryId,
+      monthStatus,
     ],
   );
 
@@ -2506,7 +2527,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             досягненні стелі. Показана в `Fixed` таблиці, вона обіцяла б те,
             що сервер відхилить: склад рядків там заданий шаблоном, і «зайвий»
             рядок зламав би і формули з діапазонами, і звірку з еталоном. */}
-        {allowsDynamicRows && !readOnly && (
+        {allowsDynamicRows && !rowsReadOnly && (
           <Button
             variant="default"
             loading={addRowLoading}
@@ -2528,7 +2549,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
         {/* ✎ D3-A: видалення рядка, доданого користувачем (діє на рядок фокусної комірки); підтвердження в
             самому компоненті. Той самий предикат видимості, що й «Додати рядок». */}
-        {allowsDynamicRows && !readOnly && data !== undefined && (
+        {allowsDynamicRows && !rowsReadOnly && data !== undefined && (
           <DeleteRowControl
             documentId={documentId}
             tableInstanceId={tableInstanceId}
@@ -2655,7 +2676,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         />
       )}
 
-      <div ref={gridContainerRef} style={{ display: 'contents' }}>
+      <div ref={gridContainerRef} className={sheetLockClass(sheetState)} style={{ display: 'contents' }}>
         <RevoGrid
           theme="compact"
           rowSize={rowSize}
@@ -2825,6 +2846,9 @@ export function gridColumns(
   // ✎ PS-P2: підписи закритих записів довідників (`registryId → id → підпис`);
   // лише для показу — у переліку вибору їх немає.
   unlistedLabelsByRegistryId: ReadonlyMap<number, ReadonlyMap<number, string>> = new Map(),
+
+  // ✎ D-441: код місячної колонки → стан аркуша за її період (`Submitted`/`Approved`); решта без позначки.
+  monthStatus: ReadonlyMap<string, MarkedMonthStatus> = new Map(),
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -2840,6 +2864,7 @@ export function gridColumns(
     // до подання».
     const isRequired = column.isRequired || column.isRequiredByMethodology;
     const requiredHint = isRequired ? t('grid.columnRequiredHint') : null;
+    const monthState = monthStatus.get(column.code) ?? null;
 
     /*
      * ⛔ `U-05`: вирівнювання числа вирішує ТИП КОЛОНКИ з сервера
@@ -2912,14 +2937,33 @@ export function gridColumns(
       // («Назва, одиниця *») — його читають сортування, підказки й тести;
       // шаблон лише розкладає ту саму розмітку на два рядки, а кома для
       // читалки лишається прихованою, тож озвучується «Назва, одиниця».
-      ...(column.unitSymbol === null
+      // ✎ D-441: стан періоду місячної колонки («Подано»/«Затверджено») — у рядку назви, після неї; читалка
+      // чує «Назва, Подано». Колонка без позначки і без одиниці лишається звичайним заголовком.
+      ...(column.unitSymbol === null && monthState === null
         ? {}
         : {
             columnTemplate: (h) =>
               h('span', { class: 'ecr-header-two-line' }, [
-                h('span', { class: 'ecr-header-name' }, column.header + (isRequired ? ' *' : '')),
-                h('span', { class: 'ecr-header-sr' }, ', '),
-                h('span', { class: 'ecr-header-unit' }, column.unitSymbol ?? ''),
+                monthState === null
+                  ? h('span', { class: 'ecr-header-name' }, column.header + (isRequired ? ' *' : ''))
+                  : h('span', { class: 'ecr-header-name' }, [
+                      h('span', {}, column.header + (isRequired ? ' *' : '')),
+                      h('span', { class: 'ecr-header-sr' }, ', '),
+                      h(
+                        'span',
+                        {
+                          class: `ecr-header-month-status ecr-header-month-status--${monthState.toLowerCase()}`,
+                          'data-month-status': monthState,
+                        },
+                        monthState === 'Approved' ? t('status.sheet.Approved') : t('status.sheet.Submitted'),
+                      ),
+                    ]),
+                ...(column.unitSymbol === null
+                  ? []
+                  : [
+                      h('span', { class: 'ecr-header-sr' }, ', '),
+                      h('span', { class: 'ecr-header-unit' }, column.unitSymbol),
+                    ]),
               ]),
           }),
 

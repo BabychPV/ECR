@@ -24,6 +24,20 @@ export type ApplyEditorSetRequest = Schemas['ApplyEditorSetRequest'];
 export type SaveEditorSetRequest = Schemas['SaveEditorSetRequest'];
 export type EditAssignmentBatch = Schemas['EditAssignmentBatchDto'];
 
+/**
+ * D-443: рівень учасника документа (`Read` | `Write` | `Submit` | `Approve`) і область (`Document` | `Sheet` |
+ * `Table`). `Write` — колишня передача місяця (цикл «Заповнено → Валідовано»); решта — без місяця й періоду.
+ */
+export type AssignmentLevel = Schemas['EditAssignmentLevel'];
+export type AssignmentScope = Schemas['EditAssignmentScope'];
+
+/** Рівні в порядку зростання (порядок кнопок вибору). */
+export const AssignmentLevels: readonly AssignmentLevel[] = ['Read', 'Write', 'Submit', 'Approve'];
+
+/** D-443: передача власника документа. */
+export type TransferOwnerRequest = Schemas['TransferDocumentOwnerRequest'];
+export type DocumentOwner = Schemas['DocumentOwnerDto'];
+
 /** Рядок «моїх» передач (шухляда «My tasks», смуга виконавця). */
 export type MyEditAssignment = Schemas['MyEditAssignmentDto'];
 export type MyEditAssignmentsView = Schemas['MyEditAssignmentsDto'];

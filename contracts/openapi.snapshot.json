@@ -4378,6 +4378,37 @@
         ],
         "type": "object"
       },
+      "DocumentOwnerDto": {
+        "description": "Власник документа після передачі.",
+        "properties": {
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "ownerDisplayName": {
+            "description": "Його ім'я.",
+            "type": "string"
+          },
+          "ownerUserId": {
+            "description": "Новий власник.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "previousOwnerUserId": {
+            "description": "Попередній власник.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "documentId",
+          "ownerUserId",
+          "ownerDisplayName",
+          "previousOwnerUserId"
+        ],
+        "type": "object"
+      },
       "DocumentPeriodRequest": {
         "description": "Дія над документом у межах одного періоду.",
         "properties": {
@@ -4414,6 +4445,15 @@
           "state"
         ],
         "type": "object"
+      },
+      "DocumentStatus": {
+        "description": "Стан документа у робочому процесі.",
+        "enum": [
+          "Draft",
+          "Submitted",
+          "Approved",
+          "Rejected"
+        ]
       },
       "DocumentSummary": {
         "description": "Документ у переліку.",
@@ -5142,6 +5182,10 @@
             "description": "Інші за ролями не можуть писати в зріз.",
             "type": "boolean"
           },
+          "level": {
+            "$ref": "#/components/schemas/EditAssignmentLevel",
+            "description": "Рівень учасника (D-443); наявні передачі місяця — `Write`."
+          },
           "modifiedAt": {
             "description": "Коли змінено.",
             "format": "date-time",
@@ -5160,6 +5204,10 @@
               "$ref": "#/components/schemas/EditAssignmentRecipientDto"
             },
             "type": "array"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/EditAssignmentScope",
+            "description": "Область надання (D-443): `Document` | `Sheet` | `Table` — з селекторів зрізу."
           },
           "slice": {
             "$ref": "#/components/schemas/EditAssignmentSliceDto",
@@ -5206,6 +5254,16 @@
           "version"
         ],
         "type": "object"
+      },
+      "EditAssignmentLevel": {
+        "default": "Write",
+        "description": "Рівень учасника документа (D-443): `Read` — бачить область; `Write` — передача місяця (заповнює зріз);\n`Submit` — ще й подає аркуш; `Approve` — ще й погоджує. Видати рівень, вищий за власний на області, не можна.",
+        "enum": [
+          "Read",
+          "Write",
+          "Submit",
+          "Approve"
+        ]
       },
       "EditAssignmentListDto": {
         "description": "Перелік передач документа для менеджера.",
@@ -5297,6 +5355,15 @@
           "isActive"
         ],
         "type": "object"
+      },
+      "EditAssignmentScope": {
+        "default": "Document",
+        "description": "Область надання учасникові документа (D-443) — похідна від селекторів зрізу, не колонка.",
+        "enum": [
+          "Document",
+          "Sheet",
+          "Table"
+        ]
       },
       "EditAssignmentSliceDto": {
         "description": "Зріз передачі: усі селектори необов'язкові; жодного — «весь документ».",
@@ -9039,6 +9106,42 @@
         "required": [
           "jobId",
           "documentId"
+        ],
+        "type": "object"
+      },
+      "MonthColumnStatusDto": {
+        "description": "Статус місячної колонки (D-441): стан аркуша за період місяця колонки.",
+        "properties": {
+          "columnCode": {
+            "description": "Код колонки.",
+            "type": "string"
+          },
+          "monthNumber": {
+            "description": "Місяць колонки 1..12.",
+            "format": "uint8",
+            "type": "integer"
+          },
+          "periodKey": {
+            "description": "Період, якому відповідає колонка.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetStatus": {
+            "$ref": "#/components/schemas/DocumentStatus",
+            "description": "Стан аркуша за цей період."
+          },
+          "tableDefId": {
+            "description": "Таблиця.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tableDefId",
+          "columnCode",
+          "monthNumber",
+          "periodKey",
+          "sheetStatus"
         ],
         "type": "object"
       },
@@ -19582,6 +19685,77 @@
         ],
         "type": "object"
       },
+      "SubmissionPeriodDto": {
+        "description": "Відкритий (`Open`/`Grace`) період у виборі подання.",
+        "properties": {
+          "periodKey": {
+            "description": "Ключ періоду.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetStatus": {
+            "$ref": "#/components/schemas/DocumentStatus",
+            "description": "Стан аркуша за цей період."
+          },
+          "state": {
+            "$ref": "#/components/schemas/PeriodState",
+            "description": "Ефективний стан періоду."
+          },
+          "submittable": {
+            "description": "Аркуш за цей період можна подати зараз (неподаний, проєкт не архівний).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "periodKey",
+          "state",
+          "sheetStatus",
+          "submittable"
+        ],
+        "type": "object"
+      },
+      "SubmissionTargetDto": {
+        "description": "Цільовий період подання аркуша і статуси місячних колонок (D-441).",
+        "properties": {
+          "monthColumns": {
+            "description": "Місячні колонки таблиць `MonthsInColumns` аркуша зі станом свого періоду.",
+            "items": {
+              "$ref": "#/components/schemas/MonthColumnStatusDto"
+            },
+            "type": "array"
+          },
+          "nextPeriodKey": {
+            "description": "Наступний неподаний після цільового — для попередження «наступний — …».",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "periods": {
+            "description": "Відкриті періоди проєкту за зростанням (вибір іншого періоду — серед `Submittable`).",
+            "items": {
+              "$ref": "#/components/schemas/SubmissionPeriodDto"
+            },
+            "type": "array"
+          },
+          "targetPeriodKey": {
+            "description": "Період, який подасть «Подати»: найраніший неподаний `Open`/`Grace`; `null` — подавати нічого.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "targetPeriodKey",
+          "nextPeriodKey",
+          "periods",
+          "monthColumns"
+        ],
+        "type": "object"
+      },
       "SwitchSourceKindRequest": {
         "description": "Запит на перемикання master-джерела набору довідників.",
         "properties": {
@@ -20751,6 +20925,20 @@
           "Full"
         ]
       },
+      "TransferDocumentOwnerRequest": {
+        "description": "Тіло передачі власності документа (D-443).",
+        "properties": {
+          "newOwnerUserId": {
+            "description": "Новий власник: активний користувач із правом запису в проєкті документа.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "newOwnerUserId"
+        ],
+        "type": "object"
+      },
       "UiStringCatalog": {
         "properties": {
           "languageCode": {
@@ -21707,6 +21895,17 @@
             "description": "Закрити зріз іншим за ролями; за замовчуванням `true`.",
             "type": "boolean"
           },
+          "level": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EditAssignmentLevel",
+                "description": "Рівень учасника (D-443); відсутнє поле — `Write` (передача місяця, як до D-443). Для рівнів, відмінних\nвід `Write`, місяць і період у зрізі заборонені (422), а ексклюзивність ігнорується."
+              }
+            ]
+          },
           "note": {
             "description": "Інструкція (≤ 500).",
             "type": [
@@ -22425,6 +22624,10 @@
             "description": "Дія (`ApprovalAction`).",
             "type": "string"
           },
+          "approvedBySubmitter": {
+            "description": "Погодження виконав той самий користувач, що й подання перед ним: позначка «погоджено автором подання» (`D-440`).",
+            "type": "boolean"
+          },
           "at": {
             "description": "Момент дії, UTC.",
             "format": "date-time",
@@ -22470,7 +22673,8 @@
           "byDisplayName",
           "at",
           "reason",
-          "stepOrdinal"
+          "stepOrdinal",
+          "approvedBySubmitter"
         ],
         "type": "object"
       }
@@ -26852,6 +27056,149 @@
         ]
       }
     },
+    "/api/v1/documents/{documentId}/owner": {
+      "post": {
+        "description": "`403` — викликач не власник і не менеджер проєкту; `409` — власника змінили одночасно;\n`422` — нового власника не можна призначити.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferDocumentOwnerRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferDocumentOwnerRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferDocumentOwnerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOwnerDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOwnerDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOwnerDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Передає власність документа.",
+        "tags": [
+          "DocumentOwner"
+        ]
+      }
+    },
     "/api/v1/documents/{documentId}/permit-bindings/{code}/refresh": {
       "post": {
         "description": "⚠ Право - те саме, що на додавання рядка в цю таблицю; закритий період і поданий чи затверджений аркуш\nвідхиляються `403 ECR-ACCS-0403` (`addRowDenied`). Значення переписуються лише там, де остання зміна\nкомірки - від дозволу. Рядки, яких у дозволі більше немає, лишаються й повертаються в `removedFromPermit`.",
@@ -28925,6 +29272,87 @@
         "summary": "Відкриває поданий документ. Право `Document.Reopen`.",
         "tags": [
           "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/submission-target": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Аркуш.",
+            "in": "query",
+            "name": "sheetDefId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Період, відкритий на екрані; його рік задає місяці колонок.",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionTargetDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionTargetDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionTargetDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Що подасть «Подати» на аркуші (D-441): найраніший неподаний період у стані `Open`/`Grace`, наступний неподаний, відкриті періоди для вибору і статуси місячних колонок. Право `Document.View`.",
+        "tags": [
+          "DocumentWorkflowHistory"
         ]
       }
     },
@@ -31509,7 +31937,7 @@
     },
     "/api/v1/methodologies/import": {
       "post": {
-        "description": "⛔ Лише чернетки: публікує інша людина звичайною дією публікації (чотири ока, золотий\nнабір). Блокери — `422`, розбіжність із наявною версією — `409`; обидва зі\nзвітом у `report` і без жодного запису. Повторний імпорт того самого пакета —\n`200` з `outcome = unchanged`.",
+        "description": "⛔ Лише чернетки: публікує носій `Calculation.Publish` звичайною дією публікації (золотий\nнабір). Блокери — `422`, розбіжність із наявною версією — `409`; обидва зі\nзвітом у `report` і без жодного запису. Повторний імпорт того самого пакета —\n`200` з `outcome = unchanged`.",
         "parameters": [
           {
             "description": "`true` — нічого не писати, лише звіт (зокрема з блокерами).",
@@ -33741,7 +34169,7 @@
     },
     "/api/v1/methodologies/{id}/versions/{vid}/publish": {
       "post": {
-        "description": "⚠ <b>Найнебезпечніша операція в системі</b> (ФВ-9.6): вона тихо змінює\nчисла у вже поданих формах. Тому обов'язкові: причина зміни (ФВ-14.7),\nзелений тест (ФВ-9.12, інакше `ECR-CALC-0422`) і правило чотирьох\nочей — публікувати власну правку заборонено системно\n(`D-40`, `ECR-CALC-0409`).",
+        "description": "⚠ <b>Найнебезпечніша операція в системі</b> (ФВ-9.6): вона тихо змінює\nчисла у вже поданих формах. Тому обов'язкові: причина зміни (ФВ-14.7)\nі зелений тест (ФВ-9.12, інакше `ECR-CALC-0422`). Хто публікує,\nвирішує лише право `Calculation.Publish`: автор версії публікує її\nсам (`D-440`, чотири очі скасовано).",
         "parameters": [
           {
             "description": "Методологія.",
@@ -52649,6 +53077,9 @@
     },
     {
       "name": "DocumentEditAssignments"
+    },
+    {
+      "name": "DocumentOwner"
     },
     {
       "name": "DocumentPermitBindings"
