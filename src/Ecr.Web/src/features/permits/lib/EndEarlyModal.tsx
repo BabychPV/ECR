@@ -1,5 +1,5 @@
 import { useEffect, useState, type JSX } from 'react';
-import { Button, Group, Modal, Text, Textarea } from '@mantine/core';
+import { Button, Group, Modal, Text, Textarea, VisuallyHidden } from '@mantine/core';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
 import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
@@ -79,6 +79,12 @@ export function EndEarlyModal({
         autosize
         data-autofocus
       />
+      {/* Підказка в описі поля читається при фокусі (`aria-describedby`), але її ЗНИКНЕННЯ читалка не озвучить. Тому окремий
+          постійний живий регіон: його текст змінюється лише на переході «замало» ⇄ «досить» (не на кожну літеру), тож
+          читалка оголошує перехід один раз. Не дублює опис: той не живий, а цей невидимий. */}
+      <VisuallyHidden role="status" aria-live="polite" aria-atomic data-testid="end-reason-status">
+        {enough ? t('permits.endEarly.minLengthReached') : t('permits.endEarly.minLengthHint', { min: String(required) })}
+      </VisuallyHidden>
 
       <Group justify="flex-end" mt="md">
         <Button variant="default" onClick={onClose}>

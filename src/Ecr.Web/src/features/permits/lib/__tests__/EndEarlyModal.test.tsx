@@ -73,6 +73,30 @@ describe('EndEarlyModal: підказка мінімальної довжини 
     expect(confirm.disabled).toBe(false);
   });
 
+  it('постійний живий регіон: role=status/polite; текст міняється лише на переході поріг-недосяг ⇄ досягнуто', async () => {
+    open();
+    const dialog = await screen.findByRole('dialog');
+    const field = within(dialog).getByRole('textbox', { name: /Reason/ });
+
+    const status = within(dialog).getByRole('status');
+    expect(status.getAttribute('aria-live')).toBe('polite');
+    expect(status.getAttribute('aria-atomic')).toBe('true');
+    expect(status.textContent).toContain('permits.endEarly.minLengthHint');
+    // Регіон НЕ всередині опису поля: опис читається через aria-describedby, регіон - окремо, без подвійного читання.
+    expect(field.getAttribute('aria-describedby') ?? '').not.toContain(status.id === '' ? 'no-id' : status.id);
+
+    fireEvent.change(field, { target: { value: '12345' } });
+    expect(within(dialog).getByRole('status')).toBe(status);
+    expect(status.textContent).toContain('permits.endEarly.minLengthHint');
+
+    fireEvent.change(field, { target: { value: '1234567890' } });
+    expect(within(dialog).getByRole('status')).toBe(status);
+    expect(status.textContent).toBe('permits.endEarly.minLengthReached');
+
+    fireEvent.change(field, { target: { value: '123' } });
+    expect(status.textContent).toContain('permits.endEarly.minLengthHint');
+  });
+
   it('пробіли не рахуються: 10 пробілів - підказка лишається', async () => {
     open();
     const dialog = await screen.findByRole('dialog');
