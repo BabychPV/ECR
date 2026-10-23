@@ -229,8 +229,8 @@ public sealed class AdminListQueryCountTests(SqlServerFixture sql)
         // порожній перелік версій означав би не «Include не спрацював», а
         // «обробник відфільтрував правильно».
         //
-        // ⚠ Публікує ІНШИЙ користувач: `CK_MV_FourEyes` тримає чотири ока на
-        // рівні бази, і рівність авторів відхилив би сам SQL Server.
+        // Публікує інший користувач — історично (до D-440 це вимагала й база); для
+        // предмета тесту (кількість запитів) байдуже, хто публікує.
         foreach (var methodology in seeded)
         {
             var version = new MethodologyVersion(

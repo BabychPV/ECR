@@ -754,8 +754,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.ToTable("MethodologyVersion", "calc", t =>
                         {
-                            t.HasCheckConstraint("CK_MV_FourEyes", "PublishedByUserId IS NULL OR PublishedByUserId <> CreatedByUserId");
-
                             t.HasCheckConstraint("CK_MV_Published", "Status <> 1 OR (PublishedAt IS NOT NULL AND EffectiveFrom IS NOT NULL AND ChangeReason IS NOT NULL)");
                         });
                 });
@@ -810,8 +808,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.ToTable("RecalculationApproval", "calc", t =>
                         {
-                            t.HasCheckConstraint("CK_RecalcApproval_FourEyes", "ConfirmedByUserId IS NULL OR ConfirmedByUserId <> RequestedByUserId");
-
                             t.HasCheckConstraint("CK_RecalcApproval_UsedConfirmed", "UsedAt IS NULL OR ConfirmedByUserId IS NOT NULL");
                         });
                 });
