@@ -368,10 +368,69 @@ public sealed class PermitGroupTests(SqlServerFixture sql)
 
         await using var e = await h.NextRequestAsync();
         var stillUsed = await Assert.ThrowsAsync<BusinessRuleException>(() => new Handlers(e, cache).Delete.HandleAsync(GroupCode, default));
-        Assert.Equal("ECR-PRM-4098", stillUsed.ErrorCode);
+        Assert.Equal(("ECR-PRM-4098", "err.ECR-PRM-4098.referencedByHistory"), (stillUsed.ErrorCode, stillUsed.Details!["messageKey"]));
 
         await using var verify = sql.CreateContext();
         Assert.True(await verify.PermitGroups.AnyAsync(g => g.Code == GroupCode));
+    }
+
+    /// <summary>
+    /// F13 P3-в (TOCTOU): посилання на реєстр групи з'являється МІЖ перевіркою використання і DELETE (хук у порту, без таймінгу) -
+    /// FK Restrict дає SQL 547, обробник віддає 409 4098 (а не 500), транзакцію відкотило, група й реєстр цілі. Живе поле - ключ
+    /// <c>inUse</c> з лічильниками, м'яко видалене - <c>referencedByHistory</c>.
+    /// Мутація: прибрати <c>catch … IsForeignKeyViolation</c> у <c>DeletePermitGroupHandler</c> - червоніють обидва випадки (DbUpdateException).
+    /// </summary>
+    [Theory]
+    [InlineData(false, "err.ECR-PRM-4098.inUse")]
+    [InlineData(true, "err.ECR-PRM-4098.referencedByHistory")]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Посилання_що_зʼявилось_між_перевіркою_і_видаленням_дає_409_а_не_500(bool softDeleted, string expectedKey)
+    {
+        await using var h = await PermitHarness.CreateAsync(sql, PermitHarness.EverythingWithData);
+        await PermitFixtures.PublishTypeAsync(h, Type(1));
+        var cache = new PermitGroupSnapshotCache();
+
+        await using var a = await h.NextRequestAsync();
+        var group = await new Handlers(a, cache).Create.HandleAsync(NewGroup(GroupCode, Type(1)), default);
+
+        await using var c = await h.NextRequestAsync();
+        var inner = new PermitGroupStore(c.Db);
+        var racing = Substitute.For<IPermitGroupStore>();
+        racing.FindByCodeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(ci => inner.FindByCodeAsync(ci.Arg<string>(), ci.Arg<CancellationToken>()));
+        racing.RemoveAsync(Arg.Any<PermitGroup>(), Arg.Any<CancellationToken>()).Returns(ci => inner.RemoveAsync(ci.Arg<PermitGroup>(), ci.Arg<CancellationToken>()));
+        racing.IsForeignKeyViolation(Arg.Any<Exception>()).Returns(ci => inner.IsForeignKeyViolation(ci.Arg<Exception>()));
+        racing.IsReferencedByTemplatesAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(async ci =>
+        {
+            // Перевірка бачить «вільно»; потім - до DELETE - інша сесія встигає послатися на групу.
+            var referenced = await inner.IsReferencedByTemplatesAsync(ci.Arg<int>(), ci.Arg<CancellationToken>());
+            await using var other = sql.CreateContext();
+            var template = new Template(EcrCode.Create($"TPLR{_tag}"), new LocalizedText(Name("t")), 1, DateTime.UtcNow);
+            other.Templates.Add(template);
+            await other.SaveChangesAsync();
+            var version = new TemplateVersion(template.Id, "1.0.0.0", 1, DateTime.UtcNow);
+            other.TemplateVersions.Add(version);
+            await other.SaveChangesAsync();
+            var field = new HeaderFieldDef(version.Id, EcrCode.Create("PGRP"), new LocalizedText(Name("Permit")), 1, CellDataType.Lookup);
+            field.SetLookup(group.RegistryDefId);
+            other.HeaderFieldDefs.Add(field);
+            await other.SaveChangesAsync();
+            if (softDeleted)
+            {
+                field.SoftDelete(1, DateTime.UtcNow);
+                await other.SaveChangesAsync();
+            }
+
+            return referenced;
+        });
+
+        var handler = new DeletePermitGroupHandler(racing, c.Permits, c.Registries, c.Uow, c.Audit, cache, c.Access, c.User, c.Clock);
+        var conflict = await Assert.ThrowsAsync<BusinessRuleException>(() => handler.HandleAsync(GroupCode, default));
+        Assert.Equal(("ECR-PRM-4098", expectedKey), (conflict.ErrorCode, conflict.Details!["messageKey"]));
+
+        await using var verify = sql.CreateContext();
+        Assert.True(await verify.PermitGroups.AnyAsync(g => g.Code == GroupCode));
+        Assert.True(await verify.RegistryDefs.AnyAsync(d => d.Id == group.RegistryDefId));
     }
 
     [Fact]
