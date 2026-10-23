@@ -64,6 +64,8 @@ public sealed class RecalculationWriteScopeTests
     private int _c1Id;
     private int _c2Id;
     private int _c3Id;
+    private int _sheetId;
+    private readonly ISheetEditGate _gate = Substitute.For<ISheetEditGate>();
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
@@ -201,6 +203,40 @@ public sealed class RecalculationWriteScopeTests
         await _uow.DidNotReceiveWithAnyArgs().ExecuteInTransactionAsync(null!, default);
     }
 
+    /// <summary>
+    /// ✎ D-442 (борг AN-129): поданий аркуш каскад пише лише тоді, коли саме ЦЕЙ аркуш названо аркушем правки
+    /// погоджувача; позначка іншого аркуша поданий не відкриває, без позначки — пропуск, як і доти.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: у <c>EnterSheetsAsync</c> пускати поданий за будь-якої непорожньої позначки — червоніє
+    /// «інший аркуш»; прибрати гілку позначки — червоніє «свій аркуш».
+    /// </remarks>
+    [Theory]
+    [InlineData("свій аркуш", 1)]
+    [InlineData("інший аркуш", 0)]
+    [InlineData("без позначки", 0)]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-442")]
+    public async Task D442_поданий_аркуш_пишеться_лише_за_позначкою_правки_погоджувача_саме_цього_аркуша(
+        string marker, int expected)
+    {
+        Arrange();
+        _gate.EnterEditAsync(DocumentId, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(DocumentStatus.Submitted);
+
+        IReadOnlySet<int>? sheets = marker switch
+        {
+            "свій аркуш" => new HashSet<int> { _sheetId },
+            "інший аркуш" => new HashSet<int> { _sheetId + 1000 },
+            _ => null,
+        };
+
+        var written = await Service().RecalculateAsync(
+            TableInstance, Dirty(), CancellationToken.None, approverEditSheets: sheets);
+
+        Assert.Equal(expected, written);
+    }
+
     /// <summary>Змінена комірка <c>C1</c> першого рядка.</summary>
     private DirtySet Dirty()
     {
@@ -261,7 +297,7 @@ public sealed class RecalculationWriteScopeTests
             _headers,
             _audit,
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
-            _uow, Substitute.For<Ecr.Application.Ports.ISheetEditGate>());
+            _uow, _gate);
     }
 
     /// <summary>
@@ -277,6 +313,7 @@ public sealed class RecalculationWriteScopeTests
     {
         var builder = new TemplateBuilder { TemplateVersionId = Version };
         var sheet = builder.Sheet("S");
+        _sheetId = sheet.Id;
         var table = builder.Table(sheet, "Main");
 
         var c1 = builder.Column(table, "C1", isMonthColumn: true);

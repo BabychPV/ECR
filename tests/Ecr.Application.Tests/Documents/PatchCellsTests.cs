@@ -2009,6 +2009,39 @@ public sealed class PatchCellsTests
 
         Assert.Equal(1, response.AppliedCells);
         Assert.Equal(CellChangeOrigins.ApproverEdit, Assert.Single(Audited()).Origin);
+
+        // ✎ D-442 (борг AN-129): насіння каскаду несе аркуш правки погоджувача — лише з ним задача перерахує
+        // формули поданого аркуша до затвердження. Мутація: не передати `context.ApproverEdit` у
+        // `BuildRecalculationSeeds` — поля немає, тест червоний.
+        var seed = Assert.Single(RecalculationSeedsJson());
+        Assert.Equal(1, seed.GetProperty("ApproverSheetDefId").GetInt32());
+    }
+
+    /// <summary>D-442: звичайна правка чернетки — насіння без позначки погоджувача, форма JSON та сама.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-442")]
+    public async Task D442_звичайна_правка_ставить_насіння_без_позначки_погоджувача()
+    {
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 7m)])),
+            CancellationToken.None);
+
+        var seed = Assert.Single(RecalculationSeedsJson());
+        Assert.False(seed.TryGetProperty("ApproverSheetDefId", out _));
+    }
+
+    /// <summary>Елементи масиву <c>Cells</c> останньої постановки перерахунку, як їх серіалізує черга.</summary>
+    private List<System.Text.Json.JsonElement> RecalculationSeedsJson()
+    {
+        var payload = _jobs.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync))
+            .Select(c => c.GetArguments()[1])
+            .Last();
+
+        using var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(payload));
+
+        return [.. json.RootElement.GetProperty("Cells").EnumerateArray().Select(e => e.Clone())];
     }
 
     /// <summary>

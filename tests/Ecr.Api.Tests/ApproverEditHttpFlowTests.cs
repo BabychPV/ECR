@@ -1,7 +1,10 @@
 // tests/Ecr.Api.Tests/ApproverEditHttpFlowTests.cs
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using ClosedXML.Excel;
+using Ecr.Adapters.Excel;
 using Ecr.Application.Documents;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Entities.Documents;
@@ -43,6 +46,7 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
     private const string Password = "Approver-Edit-D442!";
 
     private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Atyrau").ToTimeZoneInfo();
+    private static readonly JsonSerializerOptions MapJson = new(JsonSerializerDefaults.Web);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -158,6 +162,96 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
 
         Assert.Equal(DocumentStatus.Approved, await StatusAsync(s).ConfigureAwait(true));
         Assert.Equal(submitted, await SnapshotsAsync(s).ConfigureAwait(true));
+    }
+
+    /// <summary>
+    /// ✎ D-442 (борг AN-129): Excel-імпорт поданий аркуш не пише — ні в перегляді, ні в застосуванні. Перегляд
+    /// погоджувача на поданому аркуші показує відмову <c>deny.DocumentSubmitted</c> (а не «буде змінено»), і
+    /// застосування плану, побудованого ще на чернетці, відмовляє тією самою причиною; значення не змінюється.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: прибрати <c>SubmittedSheetImportGuard.Close</c> у <c>ExcelImporter.PreviewAsync</c> — перегляд
+    /// на поданому знову показує зміну як дозволену, тест червоний (застосування ж і далі 403 — та сама розбіжність).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-442")]
+    [Trait("Requirement", "ФВ-4.3")]
+    public async Task Імпорт_погоджувача_на_поданому_аркуші_перегляд_і_застосування_відмовляють_однаково()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var submitter = await NewUserAsync(s, GrantLevel.Submit).ConfigureAwait(true);
+        var approver = await NewUserAsync(s, GrantLevel.Approve, "Document.Import").ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var author = await SignInAsync(app, submitter.Name).ConfigureAwait(true);
+        using var approverClient = await SignInAsync(app, approver.Name).ConfigureAwait(true);
+
+        var column = await NumberColumnCodeAsync(author, s).ConfigureAwait(true);
+        var rowKey = $"AI{Guid.NewGuid():N}"[..12];
+
+        await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(author, s, rowKey, column, 10m, null)).ConfigureAwait(true);
+
+        // Чернетка: перегляд погоджувача (грант Approve ≥ Write) показує зміну — план застосовний.
+        var draft = await PreviewAsync(app, approverClient, s, Book(s, column, rowKey, 55m)).ConfigureAwait(true);
+        Assert.Equal(1, draft.GetProperty("changes").GetArrayLength());
+
+        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+
+        // Поданий: та сама книга — жодної зміни, відмова з причиною «подано».
+        var submitted = await PreviewAsync(app, approverClient, s, Book(s, column, rowKey, 55m)).ConfigureAwait(true);
+        Assert.Equal(0, submitted.GetProperty("changes").GetArrayLength());
+        var rejected = Assert.Single(submitted.GetProperty("rejected").EnumerateArray());
+        Assert.Equal(rowKey, rejected.GetProperty("rowKey").GetString());
+        Assert.Equal("ECR-ACCS-0403", rejected.GetProperty("reasonCode").GetString());
+        Assert.Equal($"deny.{nameof(EditDenyReason.DocumentSubmitted)}", rejected.GetProperty("messageKey").GetString());
+
+        // Застосування плану чернетки — та сама причина під блокуванням аркуша; значення не змінилося.
+        var denied = await ExpectAsync(
+                app, HttpStatusCode.Forbidden,
+                approverClient.PostAsJsonAsync(
+                    new Uri($"/api/v1/documents/{s.Document.DocumentId}/import/apply", UriKind.Relative),
+                    new { previewToken = draft.GetProperty("previewToken").GetString() }))
+            .ConfigureAwait(true);
+        Assert.Contains(nameof(EditDenyReason.DocumentSubmitted), denied, StringComparison.Ordinal);
+        Assert.Equal(10m, await StoredValueAsync(s, rowKey).ConfigureAwait(true));
+    }
+
+    private static async Task<JsonElement> PreviewAsync(EcrApiFactory app, HttpClient client, Scenario s, byte[] book)
+    {
+        using var content = new MultipartFormDataContent();
+        using var file = new ByteArrayContent(book);
+        file.Headers.ContentType = new MediaTypeHeaderValue(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        content.Add(file, "file", "book.xlsx");
+
+        var body = await ExpectAsync(
+                app, HttpStatusCode.OK,
+                client.PostAsync(
+                    new Uri($"/api/v1/documents/{s.Document.DocumentId}/import/preview", UriKind.Relative), content))
+            .ConfigureAwait(false);
+
+        return JsonDocument.Parse(body).RootElement.Clone();
+    }
+
+    /// <summary>Книга з одним рядком (<paramref name="rowKey"/>) і одним значенням числової колонки.</summary>
+    private static byte[] Book(Scenario s, string columnCode, string rowKey, decimal value)
+    {
+        using var workbook = new XLWorkbook();
+        workbook.Worksheets.Add("MAIN").Cell(2, 1).Value = value;
+
+        var block = new ExcelTableBlock(
+            s.Document.TableInstanceId, s.Document.TableDefId, "MAIN_FILE", "MAIN", HeaderRow: 1,
+            Columns: [new ExcelColumnRef(s.Document.ColumnDefIds[1], columnCode, 1, false, null)],
+            Rows: [new ExcelRowRef(rowKey, 2)]);
+
+        var map = new ExcelWorkbookMap(s.Document.DocumentId, s.PeriodKey, s.Document.TemplateVersionId, [block]);
+        workbook.Worksheets.Add(ExcelWorkbookMap.SheetName).Cell(1, 1).Value = JsonSerializer.Serialize(map, MapJson);
+
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return stream.ToArray();
     }
 
     // ───────────────────────────── допоміжне ─────────────────────────────
@@ -354,7 +448,7 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
     }
 
     /// <summary>Користувач із власною роллю: грант <paramref name="level"/> на проєкт документа.</summary>
-    private async Task<(string Name, int RoleId)> NewUserAsync(Scenario s, GrantLevel level)
+    private async Task<(string Name, int RoleId)> NewUserAsync(Scenario s, GrantLevel level, params string[] extraPermissions)
     {
         var name = $"d442_{Guid.NewGuid():N}"[..20];
 
@@ -370,6 +464,11 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         db.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
+        foreach (var permission in extraPermissions)
+        {
+            db.RolePermissions.Add(new RolePermission(role.Id, permission));
+        }
+
         db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
         db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, s.Document.ProjectId, level));
         await db.SaveChangesAsync().ConfigureAwait(false);

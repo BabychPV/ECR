@@ -159,6 +159,85 @@ public sealed class CrossPeriodRecalculationSqlTests(SqlServerFixture sql)
         Assert.Equal(33m, await OutputAsync(world, July));
     }
 
+    /// <summary>
+    /// ✎ D-442 (борг AN-129): правка погоджувача поточного кроку на ПОДАНОМУ аркуші — каскад перераховує формули
+    /// саме цього аркуша одразу, а не лише на затвердженні. Справжній <c>SheetEditGate</c> читає <c>Submitted</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: у <c>RecalculationService.EnterSheetsAsync</c> прибрати гілку <c>approverEditSheets</c> — OUT
+    /// лишається −1, тест червоний. Насіння — з JSON (<c>approverSheetDefId</c>), тієї самої форми, яку ставить
+    /// <c>PatchCellsHandler</c>: розійдеться ім'я поля — позначка загубиться, і тест так само червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-442")]
+    public async Task D442_правка_погоджувача_перераховує_формули_поданого_аркуша_до_затвердження()
+    {
+        var world = await ArrangeAsync();
+        await SetSheetStateAsync(world, approved: false);
+
+        await ExecuteAsync(
+            $"UPDATE doc.CellValue SET ValueNumeric = 33 WHERE PeriodKey = 202603 AND TableRowId = {world.Doc.RowIds[0]} " +
+            $"AND ColumnDefId = {world.Doc.ColumnDefIds[1]}");
+
+        var request = JsonSerializer.Deserialize<FormulaRecalculationRequest>(
+            $$"""
+            {"tableInstanceId":{{world.Doc.TableInstanceId}},"periodKey":202603,
+             "cells":[{"rowId":{{world.Doc.RowIds[0]}},"columnDefId":{{world.Doc.ColumnDefIds[1]}},"approverSheetDefId":{{world.Doc.SheetDefId}}}]}
+            """,
+            WebOptions)!;
+
+        await RunJobAsync(world, [], request);
+
+        Assert.Equal(33m, await OutputAsync(world, 202603));
+    }
+
+    /// <summary>
+    /// D-442: поданий аркуш, який ніхто не правив (насіння без позначки погоджувача), каскад і далі пропускає;
+    /// затверджений не пишеться навіть із позначкою (затвердження вже перерахувало його під своїм блокуванням).
+    /// </summary>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-442")]
+    public async Task D442_поданий_без_правки_погоджувача_і_затверджений_каскад_пропускає(bool approved, bool marked)
+    {
+        var world = await ArrangeAsync();
+        await SetSheetStateAsync(world, approved);
+
+        await ExecuteAsync(
+            $"UPDATE doc.CellValue SET ValueNumeric = 33 WHERE PeriodKey = 202603 AND TableRowId = {world.Doc.RowIds[0]} " +
+            $"AND ColumnDefId = {world.Doc.ColumnDefIds[1]}");
+
+        await RunJobAsync(
+            world, [],
+            new FormulaRecalculationRequest(
+                world.Doc.TableInstanceId, 202603,
+                [new DirtyCell(
+                    world.Doc.RowIds[0], world.Doc.ColumnDefIds[1],
+                    ApproverSheetDefId: marked ? world.Doc.SheetDefId : null)]));
+
+        Assert.Equal(StaleOutput, await OutputAsync(world, 202603));
+    }
+
+    /// <summary>Аркуш документа за березень — поданий (або затверджений).</summary>
+    private static async Task SetSheetStateAsync(World world, bool approved)
+    {
+        await using var setup = world.Builder.CreateContext();
+        var state = new ApprovalState(world.Doc.DocumentId, world.Doc.SheetDefId, 202603);
+        state.Submit(userId: 5, DateTime.UtcNow);
+        if (approved)
+        {
+            state.Approve(userId: 5, DateTime.UtcNow);
+        }
+
+        setup.ApprovalStates.Add(state);
+        await setup.SaveChangesAsync();
+    }
+
     private async Task RunJobAsync(World world, List<(string Target, string Payload)> enqueued, FormulaRecalculationRequest request)
     {
         await using var db = world.Builder.CreateContext();
