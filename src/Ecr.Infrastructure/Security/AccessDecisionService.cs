@@ -677,6 +677,26 @@ public sealed class AccessDecisionService(
         new Dictionary<long, IReadOnlyList<ParticipationGrant>>();
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<long, IReadOnlyList<ParticipationGrant>>> ActiveParticipationsAsync(
+        AccessProfile profile, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        if (!profile.HasDocumentParticipations || profile.IsIntegrationWriter)
+        {
+            return NoGrants;
+        }
+
+        var ids = await EditAssignmentFactsReader.ParticipatedDocuments(db, profile.UserId, clock.UtcNow)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var grants = await ParticipationGrantsAsync(profile, [.. ids], ct).ConfigureAwait(false);
+        return grants.Where(g => g.Value.Count > 0).ToDictionary(g => g.Key, g => g.Value);
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⚠ Один запит (проєкт і версія шаблону разом) плюс знімок із кешу
     /// метаданих; самі рішення — чиста функція <see cref="EditRules.CanRead"/>

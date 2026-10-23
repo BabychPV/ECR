@@ -120,6 +120,22 @@ public interface IAccessDecisionService
     /// <param name="ct">Токен скасування.</param>
     public Task<bool> ParticipatesInProjectAsync(AccessProfile profile, int projectId, CancellationToken ct);
 
+    /// <summary>
+    /// D-444 (AN-131): УСІ документи, де користувач має діюче надання учасника, з наданнями кожного — для черги
+    /// «До погодження», зведення переліку й пошуку. Ті самі факти й умови, що й рішення про доступ
+    /// (<see cref="DocumentParticipation.Active"/>).
+    /// </summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Документ → діючі надання (лише непорожні).</returns>
+    /// <remarks>
+    /// ⚠ Без ознаки <see cref="AccessProfile.HasDocumentParticipations"/> чи для інтеграції — порожньо БЕЗ бази (бюджет
+    /// запитів решти користувачів не змінюється); учасник — два запити. ⛔ Заборону проєкту не враховує: це робить
+    /// викликач (<see cref="AccessProfile.DeniesProject"/>), бо проєкт документа знає він.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, IReadOnlyList<ParticipationGrant>>> ActiveParticipationsAsync(
+        AccessProfile profile, CancellationToken ct);
+
     /// <summary>Чи може користувач редагувати конкретну комірку.</summary>
     public Task<EditDecision> CanEditCellAsync(
         AccessProfile profile, long documentId, CellAddress address, CancellationToken ct);

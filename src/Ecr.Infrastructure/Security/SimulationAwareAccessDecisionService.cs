@@ -95,6 +95,11 @@ public sealed class SimulationAwareAccessDecisionService(
         => inner.ParticipatesInProjectAsync(profile, projectId, ct);
 
     /// <inheritdoc />
+    public Task<IReadOnlyDictionary<long, IReadOnlyList<ParticipationGrant>>> ActiveParticipationsAsync(
+        AccessProfile profile, CancellationToken ct)
+        => inner.ActiveParticipationsAsync(profile, ct);
+
+    /// <inheritdoc />
     public Task<EditDecision> CanEditCellAsync(
         AccessProfile profile, long documentId, CellAddress address, CancellationToken ct)
         => inner.CanEditCellAsync(profile, documentId, address, ct);
