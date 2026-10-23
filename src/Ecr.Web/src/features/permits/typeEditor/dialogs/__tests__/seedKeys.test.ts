@@ -99,11 +99,10 @@ describe('каталог діалогів конструктора типу', ()
   it('англійський текст без кирилиці, ru/kz не порожні й справді перекладені', () => {
     expect([...en.entries()].filter(([, text]) => /[Ѐ-ӿ]/.test(text)).map(([key]) => key)).toEqual([]);
 
-    // Назва таблиці-прикладу й коди лишаються латиницею; усе інше мусить містити кирилицю.
-    const latinOnly = new Set(['permits.editor.dialogs.addTable.namePlaceholder']);
+    // PUI-7: приклад назви таблиці теж перекладений (раніше був виняток «латиницею»).
     for (const map of [ru, kz]) {
       const untranslated = [...map.entries()]
-        .filter(([key, text]) => text.trim().length === 0 || (!latinOnly.has(key) && !/[Ѐ-ӿ]/.test(text)))
+        .filter(([, text]) => text.trim().length === 0 || !/[Ѐ-ӿ]/.test(text))
         .map(([key]) => key);
       expect(untranslated).toEqual([]);
     }

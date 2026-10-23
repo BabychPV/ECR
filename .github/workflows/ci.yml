@@ -145,6 +145,9 @@ jobs:
     name: server-part (${{ matrix.part }})
     if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
     runs-on: ubuntu-24.04
+    # ✎ 2026-10-23 (правило 7 CLAUDE.md 12.10: завислі > 45 хв скасовувати): ліміт від зависань;
+    # api-N ≤ ~18 хв, core-persistence ~13 хв. Без ключа діє типові 360 хв.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:

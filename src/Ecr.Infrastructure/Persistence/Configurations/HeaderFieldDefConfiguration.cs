@@ -32,6 +32,10 @@ public sealed class HeaderFieldDefConfiguration : IEntityTypeConfiguration<Heade
         builder.HasIndex(x => new { x.TemplateVersionId, x.Code })
                .IsUnique().HasDatabaseName("UQ_HeaderFieldDef");
 
+        // PM-GRP-IDX: "які поля шапки посилаються на реєстр R" (група пермітів, перевірка
+        // видалення, PermitGroupRegistryGuard) - аналог IX_ColumnDef_LookupRegistryDefId.
+        builder.HasIndex(x => x.LookupRegistryDefId).HasDatabaseName("IX_HeaderFieldDef_LookupRegistryDefId");
+
         builder.HasOne<RegistryDef>()
                .WithMany()
                .HasForeignKey(x => x.LookupRegistryDefId)

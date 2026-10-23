@@ -217,7 +217,7 @@ public sealed partial class PublishTemplateVersionHandler(
             {
                 await permitGroups.EnsureFreshAsync(ct).ConfigureAwait(false);
                 var groupTargets = lookupTargets.Where(permitGroups.IsGroup).ToHashSet();
-                diagnostics = [.. diagnostics, .. PublishChecks.CheckGroupLookupFormulas(version, groupTargets)];
+                diagnostics = [.. diagnostics, .. PublishChecks.CheckGroupLookupFormulas(version, groupTargets, formulaEngine)];
             }
         }
 

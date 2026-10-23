@@ -433,3 +433,140 @@ describe('Groups: редагування, конкурентність, деак
     expect(where()).toContain('panel=WATER');
   });
 });
+
+/**
+ * Вихід зі шторки з незбереженим: Esc, хрестик, затемнення й Cancel питають «Discard»; чиста форма закривається без питань.
+ *
+ * Мутаційний доказ (вручну, відновлено): прибрати виклик `useDirtyDrawerExit` - Esc/хрестик/затемнення закривають шторку
+ * без питання (валить перший, другий, третій і п'ятий тести); `onClick={close}` замість `requestClose` на Cancel - валить
+ * четвертий; `closeOnEscape={!confirmingDelete}` без `&& !guarded` - Esc закриває шторку, ще й питає (валить перший).
+ */
+describe('Groups: вихід зі шторки з незбереженим (Discard)', () => {
+  const nameField = async (): Promise<HTMLInputElement> =>
+    (await screen.findByLabelText(/permits\.groups\.field\.name · English/)) as HTMLInputElement;
+  const discardTitle = (): HTMLElement | null => screen.queryByText('permits.groups.drawer.discardTitle');
+
+  async function editName(): Promise<HTMLInputElement> {
+    const name = await nameField();
+    fireEvent.change(name, { target: { value: 'Water 2' } });
+    name.focus();
+    // Слухач Esc глухий до кінця задачі, в якій його ввімкнули (`useDirtyDrawerExit`): людина натискає Esc уже в наступній.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    return name;
+  }
+
+  it('Esc: питає «Discard», шторка лишається; «Keep editing» зберігає введене; Esc у підтвердженні закриває лише його', async () => {
+    stub([water]);
+    show('/admin/permits/groups?panel=WATER');
+    const name = await editName();
+
+    fireEvent.keyDown(name, { key: 'Escape' });
+    expect(await screen.findByText('permits.groups.drawer.discardTitle')).not.toBeNull();
+    expect(where()).toContain('panel=WATER');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'permits.groups.drawer.keepEditing' }));
+    await waitFor(() => expect(discardTitle()).toBeNull());
+    expect(where()).toContain('panel=WATER');
+    expect((await nameField()).value).toBe('Water 2');
+
+    // Esc у вкладеному підтвердженні: закривається воно, шторка лишається.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    fireEvent.keyDown(name, { key: 'Escape' });
+    const cancel = await screen.findByTestId('confirm-cancel');
+    fireEvent.keyDown(cancel, { key: 'Escape' });
+    await waitFor(() => expect(discardTitle()).toBeNull());
+    expect(where()).toContain('panel=WATER');
+    expect(backend.sent).toHaveLength(0);
+  });
+
+  it('«Discard» закриває шторку без запису', async () => {
+    stub([water]);
+    show('/admin/permits/groups?panel=WATER');
+    const name = await editName();
+
+    fireEvent.keyDown(name, { key: 'Escape' });
+    fireEvent.click(await screen.findByTestId('confirm-verb'));
+
+    await waitFor(() => expect(where()).not.toContain('panel='));
+    expect(backend.sent).toHaveLength(0);
+  });
+
+  it('хрестик у шапці питає так само', async () => {
+    stub([water]);
+    show('/admin/permits/groups?panel=WATER');
+    await editName();
+
+    fireEvent.click(screen.getByRole('button', { name: 'permits.groups.drawer.close' }));
+
+    expect(await screen.findByText('permits.groups.drawer.discardTitle')).not.toBeNull();
+    expect(where()).toContain('panel=WATER');
+  });
+
+  it('Cancel у підвалі питає так само', async () => {
+    stub([water]);
+    show('/admin/permits/groups?panel=WATER');
+    await editName();
+
+    fireEvent.click(screen.getByRole('button', { name: 'permits.groups.drawer.cancel' }));
+
+    expect(await screen.findByText('permits.groups.drawer.discardTitle')).not.toBeNull();
+    expect(where()).toContain('panel=WATER');
+  });
+
+  it('клік по затемненню питає так само', async () => {
+    stub([water]);
+    show('/admin/permits/groups?panel=WATER');
+    await editName();
+
+    const overlay = document.querySelector('.mantine-Drawer-overlay');
+    expect(overlay, 'на вузькому екрані є затемнення').not.toBeNull();
+    fireEvent.click(overlay as Element);
+
+    expect(await screen.findByText('permits.groups.drawer.discardTitle')).not.toBeNull();
+    expect(where()).toContain('panel=WATER');
+  });
+
+  it('без правок: Esc, хрестик і Cancel закривають одразу, без питання', async () => {
+    stub([water]);
+    show('/admin/permits/groups?panel=WATER');
+    const name = await nameField();
+    name.focus();
+
+    fireEvent.keyDown(name, { key: 'Escape' });
+    await waitFor(() => expect(where()).not.toContain('panel='));
+    expect(discardTitle()).toBeNull();
+    cleanup();
+
+    show('/admin/permits/groups?panel=WATER');
+    await nameField();
+    fireEvent.click(screen.getByRole('button', { name: 'permits.groups.drawer.close' }));
+    await waitFor(() => expect(where()).not.toContain('panel='));
+    expect(discardTitle()).toBeNull();
+    cleanup();
+
+    show('/admin/permits/groups?panel=WATER');
+    await nameField();
+    fireEvent.click(screen.getByRole('button', { name: 'permits.groups.drawer.cancel' }));
+    await waitFor(() => expect(where()).not.toContain('panel='));
+    expect(discardTitle()).toBeNull();
+  });
+
+  it('нова група: введений код робить форму «брудною», порожня закривається без питання', async () => {
+    stub([]);
+    show('/admin/permits/groups?panel=_new');
+    const code = (await screen.findByLabelText(/^permits\.groups\.field\.code/)) as HTMLInputElement;
+    fireEvent.change(code, { target: { value: 'WATER' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'permits.groups.drawer.cancel' }));
+    expect(await screen.findByText('permits.groups.drawer.discardTitle')).not.toBeNull();
+    fireEvent.click(await screen.findByTestId('confirm-verb'));
+    await waitFor(() => expect(where()).not.toContain('panel='));
+    cleanup();
+
+    show('/admin/permits/groups?panel=_new');
+    await screen.findByLabelText(/^permits\.groups\.field\.code/);
+    fireEvent.click(screen.getByRole('button', { name: 'permits.groups.drawer.cancel' }));
+    await waitFor(() => expect(where()).not.toContain('panel='));
+  });
+});

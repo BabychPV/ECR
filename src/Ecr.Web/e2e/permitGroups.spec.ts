@@ -200,6 +200,83 @@ test.describe('Permit groups', () => {
     }
   });
 
+  test('незбережене у шторці: Esc, хрестик і Cancel питають «Discard»; Keep editing лишає, Discard закриває без запису, фокус на рядку - N/5', async ({ page }) => {
+    test.setTimeout(240_000);
+    await signIn(page);
+
+    for (let run = 1; run <= 5; run += 1) {
+      const backend = await installBackend(page, [{ ...Water }, Used]);
+      await page.goto('/admin/permits/groups');
+      const row = page.getByRole('row', { name: /Water permits/ });
+      await expect(row, `прогін ${run}: перелік`).toBeVisible({ timeout: 30_000 });
+      await row.focus();
+      await row.press('Enter');
+      const drawer = page.getByRole('dialog').first();
+      await expect(drawer).toBeVisible();
+      const name = drawer.getByRole('textbox', { name: /^Name · English/ });
+      await name.fill(`Edited ${String(run)}`);
+      const confirm = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+
+      // Esc, хрестик і Cancel: кожен питає, шторка лишається, введене не губиться.
+      const triggers: Record<string, () => Promise<void>> = {
+        Escape: async () => name.press('Escape'),
+        Close: async () => drawer.getByRole('button', { name: 'Close' }).click(),
+        Cancel: async () => drawer.getByRole('button', { name: 'Cancel' }).click(),
+      };
+      for (const [how, trigger] of Object.entries(triggers)) {
+        await trigger();
+        await expect(confirm, `прогін ${run}: ${how} питає`).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Keep editing' })).toBeFocused();
+        if (run === 1 && how === 'Escape') await shoot(page, 'groups-discard-confirm');
+        await page.getByRole('button', { name: 'Keep editing' }).click();
+        await expect(confirm, `прогін ${run}: ${how} - Keep editing`).toBeHidden();
+        await expect(drawer).toBeVisible();
+        await expect(name).toHaveValue(`Edited ${String(run)}`);
+      }
+
+      // Esc у самому підтвердженні закриває лише його.
+      await name.press('Escape');
+      await expect(confirm).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(confirm, `прогін ${run}: Esc у підтвердженні`).toBeHidden();
+      await expect(drawer).toBeVisible();
+
+      await name.press('Escape');
+      await page.getByRole('button', { name: 'Discard', exact: true }).click();
+      await expect(drawer, `прогін ${run}: Discard закриває`).toBeHidden({ timeout: 15_000 });
+      expect(backend.sent, `прогін ${run}: нічого не записано`).toHaveLength(0);
+      await expect(row, `прогін ${run}: фокус не повернувся на рядок`).toBeFocused();
+
+      // Чиста форма закривається без питання.
+      await row.press('Enter');
+      await expect(page.getByRole('dialog').first()).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog')).toBeHidden();
+    }
+  });
+
+  test('незбережене у шторці поза широким екраном (1000 px): клік по затемненню питає «Discard» - N/5', async ({ page }) => {
+    test.setTimeout(240_000);
+    // Нижче 1200 px є затемнення; шторка `lg` (50rem = 800 px) лишає ліворуч 200 px видимого затемнення.
+    await page.setViewportSize({ width: 1000, height: 900 });
+    await signIn(page);
+
+    for (let run = 1; run <= 5; run += 1) {
+      await installBackend(page, [{ ...Water }]);
+      await page.goto('/admin/permits/groups?panel=WATER');
+      const drawer = page.getByRole('dialog').first();
+      await expect(drawer).toBeVisible({ timeout: 30_000 });
+      await drawer.getByRole('textbox', { name: /^Name · English/ }).fill(`Edited ${String(run)}`);
+
+      await page.mouse.click(5, 450);
+      const confirm = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+      await expect(confirm, `прогін ${run}: затемнення питає`).toBeVisible();
+      await page.getByRole('button', { name: 'Keep editing' }).click();
+      await expect(confirm).toBeHidden();
+      await expect(drawer).toBeVisible();
+    }
+  });
+
   test('4097 біля поля коду; 4099 перечитує групу і повторна правка йде зі свіжим токеном - N/5', async ({ page }) => {
     test.setTimeout(240_000);
     await signIn(page);

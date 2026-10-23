@@ -103,6 +103,73 @@ public sealed partial class ApiTestShardsTests
         }
     }
 
+    /// <summary>
+    /// ⛔ Дефект 8521f457c: <c>…текст коментаря.@{</c> — відкривний <c>@{</c> опинився в кінці
+    /// коментарного рядка, і <c>Import-PowerShellDataFile</c> бачив порожній файл, а Windows
+    /// PowerShell 5.1 без BOM читає кирилицю як ANSI. Регекси інших тестів цього класу такого
+    /// не помічають (вони шукають рядки шардів), тому окремий сторож тексту.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Файл_шардів_має_BOM_LF_і_жодного_коментаря_з_відкривним_блоком()
+    {
+        var bytes = File.ReadAllBytes(Path.Combine(Root(), "tools", "api-test-shards.psd1"));
+        Assert.True(bytes is [0xEF, 0xBB, 0xBF, ..], "api-test-shards.psd1 без BOM UTF-8: Windows PowerShell 5.1 прочитає кирилицю як ANSI.");
+        Assert.DoesNotContain((byte)'\r', bytes);
+
+        var lines = System.Text.Encoding.UTF8.GetString(bytes).TrimStart('﻿').Split('\n');
+        var bad = lines
+            .Select((l, i) => (Line: l, No: i + 1))
+            .Where(x => x.Line.TrimStart().StartsWith('#') && x.Line.Contains("@{", StringComparison.Ordinal))
+            .Select(x => $"{x.No}: {x.Line}")
+            .ToList();
+        Assert.Empty(bad);
+
+        var first = lines.First(l => l.Trim().Length > 0 && !l.TrimStart().StartsWith('#'));
+        Assert.Equal("@{", first.Trim());
+        Assert.Equal("}", lines.Last(l => l.Trim().Length > 0).Trim());
+    }
+
+    /// <summary>Файл справді розбирається PowerShell як Data File (<c>Import-PowerShellDataFile</c>).</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public async Task Файл_шардів_розбирається_як_PowerShell_Data_File()
+    {
+        var path = Path.Combine(Root(), "tools", "api-test-shards.psd1");
+        var start = new System.Diagnostics.ProcessStartInfo(DeployScriptHarness.FindPowerShell())
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-Command",
+                     $"$d = Import-PowerShellDataFile -LiteralPath '{path.Replace("'", "''", StringComparison.Ordinal)}'; if ($d.Count -lt 1) {{ exit 3 }}; Write-Output ('keys=' + $d.Count)" })
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using var process = System.Diagnostics.Process.Start(start) ?? throw new InvalidOperationException("PowerShell не запустився");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            process.Kill(entireProcessTree: true);
+            throw new TimeoutException("PowerShell не завершився за 2 хв");
+        }
+
+        var output = await stdout;
+        var error = await stderr;
+        Assert.True(process.ExitCode == 0, $"Import-PowerShellDataFile: код {process.ExitCode}\n{error}\n{output}");
+        Assert.Contains("keys=", output, StringComparison.Ordinal);
+    }
+
     private static bool Matches(string fqn, string prefix)
         => fqn.Contains("Ecr.Api.Tests." + prefix, StringComparison.Ordinal);
 
