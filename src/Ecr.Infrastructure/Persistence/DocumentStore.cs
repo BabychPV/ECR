@@ -90,8 +90,10 @@ public sealed class DocumentStore(
                 TemplateVersion = db.Projects.Where(p => p.Id == d.ProjectId)
                     .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id, (p, v) => v.Version)
                     .FirstOrDefault(),
+                // AN-63: періодичність проєкту - підзапит у тому самому запиті (без додаткового роундтрипу); (PeriodKind?) - null, якщо проєкту немає.
+                ProjectPeriodKind = db.Projects.Where(p => p.Id == d.ProjectId).Select(p => (PeriodKind?)p.PeriodKind).FirstOrDefault(),
                 ModifiedBy = db.Users.Where(u => u.Id == d.ModifiedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
-                Owner = db.Users.Where(u => u.Id == d.CreatedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
+                Owner =db.Users.Where(u => u.Id == d.CreatedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
                 // К6: «хто затвердив» - у тому самому запиті (без додаткового роундтрипу).
                 Approver = db.Users.Where(u => u.Id ==
                     (db.ApprovalEvents
@@ -143,7 +145,8 @@ public sealed class DocumentStore(
             ResultsStaleSince: stale?.GetValueOrDefault(documentId),
             TemplateVersion: document.TemplateVersion,
             OwnerUserId: document.CreatedByUserId,
-            ProjectIsReadOnly: document.ProjectReadOnly);
+            ProjectIsReadOnly: document.ProjectReadOnly,
+            PeriodKind: document.ProjectPeriodKind?.ToString());
     }
 
 
@@ -295,7 +298,9 @@ public sealed class DocumentStore(
                         .OrderByDescending(a => a.ApprovedAt)
                         .Select(a => a.ApprovedByUserId)
                         .FirstOrDefault()))
-                .Select(u => u.DisplayName).FirstOrDefault()))
+                .Select(u => u.DisplayName).FirstOrDefault(),
+                // AN-63: періодичність проєкту - скалярний підзапит у тому самому запиті сторінки (запитів не додається).
+                db.Projects.Where(p => p.Id == d.ProjectId).Select(p => (PeriodKind?)p.PeriodKind).FirstOrDefault()))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -338,7 +343,8 @@ public sealed class DocumentStore(
                 late.Contains(d.Id), sheets, includedByDocument.GetValueOrDefault(d.Id), d.OwnerDisplayName,
                 d.ApproverDisplayName,
                 staleByDocument is null ? null : staleByDocument.ContainsKey(d.Id),
-                staleByDocument?.GetValueOrDefault(d.Id)));
+                staleByDocument?.GetValueOrDefault(d.Id),
+                PeriodKind: d.ProjectPeriodKind?.ToString()));
         }
 
         return new PagedResult<DocumentSummary>(
@@ -1212,7 +1218,7 @@ public sealed class DocumentStore(
     private sealed record DocumentRow(
         long Id, int ProjectId, string BusinessKey, DateTime CreatedAt, int SheetCount,
         Domain.ValueObjects.LocalizedText? NameL10n, DateTime ModifiedAt, string? ModifiedByDisplayName,
-        string? OwnerDisplayName, string? ApproverDisplayName);
+        string? OwnerDisplayName, string? ApproverDisplayName, PeriodKind? ProjectPeriodKind);
 
     /// <summary>Стеля кількості правил складу в одній версії.</summary>
     private const int MaxRules = 500;
