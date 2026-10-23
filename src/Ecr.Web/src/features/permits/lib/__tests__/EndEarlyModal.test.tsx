@@ -81,13 +81,14 @@ describe('EndEarlyModal: підказка мінімальної довжини 
     const status = within(dialog).getByRole('status');
     expect(status.getAttribute('aria-live')).toBe('polite');
     expect(status.getAttribute('aria-atomic')).toBe('true');
-    expect(status.textContent).toContain('permits.endEarly.minLengthHint');
+    // Початково порожній: підказка вже читається з опису поля, подвійного читання немає.
+    expect(status.textContent).toBe('');
     // Регіон НЕ всередині опису поля: опис читається через aria-describedby, регіон - окремо, без подвійного читання.
     expect(field.getAttribute('aria-describedby') ?? '').not.toContain(status.id === '' ? 'no-id' : status.id);
 
     fireEvent.change(field, { target: { value: '12345' } });
     expect(within(dialog).getByRole('status')).toBe(status);
-    expect(status.textContent).toContain('permits.endEarly.minLengthHint');
+    expect(status.textContent, 'без переходу регіон мовчить').toBe('');
 
     fireEvent.change(field, { target: { value: '1234567890' } });
     expect(within(dialog).getByRole('status')).toBe(status);

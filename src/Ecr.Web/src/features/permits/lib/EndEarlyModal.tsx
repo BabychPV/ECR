@@ -43,11 +43,15 @@ export function EndEarlyModal({
   onClose,
 }: EndEarlyModalProps): JSX.Element {
   const [reason, setReason] = useState('');
+  const [note, setNote] = useState('');
   useRestoreFocus(opened, returnFocusTo);
   const confirmLoading = usePendingLoading(isPending);
 
   useEffect(() => {
-    if (opened) setReason('');
+    if (opened) {
+      setReason('');
+      setNote('');
+    }
   }, [opened]);
 
   const required = Math.max(1, minLength);
@@ -71,7 +75,13 @@ export function EndEarlyModal({
         }
         value={reason}
         onChange={(event) => {
-          setReason(event.currentTarget.value);
+          const value = event.currentTarget.value;
+          setReason(value);
+          // Регіон мовчить, доки немає ПЕРЕХОДУ: початковий текст підказки вже читається з опису поля (без подвійного читання).
+          const nextEnough = value.trim().length >= required;
+          if (nextEnough !== enough) {
+            setNote(nextEnough ? t('permits.endEarly.minLengthReached') : t('permits.endEarly.minLengthHint', { min: String(required) }));
+          }
           if (error !== null) onEdit();
         }}
         error={error}
@@ -80,10 +90,10 @@ export function EndEarlyModal({
         data-autofocus
       />
       {/* Підказка в описі поля читається при фокусі (`aria-describedby`), але її ЗНИКНЕННЯ читалка не озвучить. Тому окремий
-          постійний живий регіон: його текст змінюється лише на переході «замало» ⇄ «досить» (не на кожну літеру), тож
-          читалка оголошує перехід один раз. Не дублює опис: той не живий, а цей невидимий. */}
+          постійний живий регіон: ПОРОЖНІЙ, доки не було переходу, а далі його текст змінюється лише на переході «замало» ⇄
+          «досить» (не на кожну літеру), тож читалка оголошує перехід один раз і не дублює опис. */}
       <VisuallyHidden role="status" aria-live="polite" aria-atomic data-testid="end-reason-status">
-        {enough ? t('permits.endEarly.minLengthReached') : t('permits.endEarly.minLengthHint', { min: String(required) })}
+        {note}
       </VisuallyHidden>
 
       <Group justify="flex-end" mt="md">

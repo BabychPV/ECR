@@ -54,6 +54,10 @@ describe('End early: підказка довжини причини - досту
       // Зникнення підказки оголошує живий регіон (role=status), а не лишається німим; текст - справжній ключ сіду.
       const status = screen.getByRole('status');
       expect(status.textContent).toBe('The reason is long enough.');
+      fireEvent.change(field, { target: { value: '123' } });
+      expect(status.textContent).toBe('Enter at least 10 characters.');
+      fireEvent.change(field, { target: { value: '1234567890' } });
+      expect(status.textContent).toBe('The reason is long enough.');
       expect(status.getAttribute('aria-live')).toBe('polite');
       const afterViolations = await findViolations(dialog);
       expect(afterViolations, describeViolations(afterViolations)).toHaveLength(0);
