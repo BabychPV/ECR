@@ -492,5 +492,54 @@ public sealed class PublishGroupLookupFormulasTests
         Assert.Equal("T7.PermitNumber", diagnostic.MessageParams!["columnCode"]);
     }
 
+    // ---- PG-P3b №3: нерозібраний вираз над колонкою-групою ловить розбір, а не ця перевірка ----
+
+    private const string GroupKey = "err.ECR-TMPL-0422.lookupGroupNoRegistryForms";
+
+    /// <summary>Усі ворота розбору обробника публікації, у його порядку: <c>Run</c>, <c>RuleExpressionChecks</c>, потім перевірка груп.</summary>
+    private static List<ExpressionDiagnostic> HandlerGates(TemplateVersion version)
+    {
+        var snapshot = PublishChecks.Snapshot(version);
+        var diagnostics = PublishChecks.Run(
+            version, Engine, new SnapshotTypeContext(snapshot), new SnapshotUnitContext(snapshot, UnitCatalogSnapshot.Empty)).ToList();
+        diagnostics.AddRange(RuleExpressionChecks.Check(version, Engine));
+        diagnostics.AddRange(Check(version));
+        return diagnostics;
+    }
+
+    /// <summary>
+    /// Публікація з нерозібраною ФОРМУЛОЮ над колонкою-групою відмовляє помилкою розбору (з <c>Run</c>), а НЕ зауваженням
+    /// <c>lookupGroupNoRegistryForms</c>, і не проходить: перевірка груп її мовчки пропускає, бо розбір ловить раніше.
+    /// Порядок воріт у обробнику тримає сторож в Architecture (<c>Ворота_публікації_розбирають_вирази_раніше_за_перевірку_груп</c>).
+    /// </summary>
+    [Theory]
+    [InlineData("REGFIELD([PermitNumber], ")]
+    [InlineData("REGSUM('PRM_WATER', ROW.Limit, ROW.Id = [PermitNumber]")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Нерозібрана_формула_над_колонкою_групи_відхиляється_помилкою_розбору_а_не_перевіркою_груп(string expression)
+    {
+        var version = Build(GroupRegistry, expression).Version;
+
+        Assert.Empty(Check(version));
+        var gates = HandlerGates(version);
+
+        Assert.NotEmpty(gates);
+        Assert.DoesNotContain(gates, d => d.MessageKey == GroupKey);
+    }
+
+    /// <summary>Те саме для правила валідації: розбір правила (<c>RuleExpressionChecks</c>, V-19) відмовляє, перевірка груп - ні.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Нерозібране_правило_над_колонкою_групи_відхиляється_помилкою_розбору_а_не_перевіркою_груп()
+    {
+        var version = WithRule("REGFIELD([PermitNumber], ", true);
+
+        Assert.Empty(Check(version));
+        var parse = RuleExpressionChecks.Check(version, Engine);
+
+        Assert.NotEmpty(parse);
+        Assert.DoesNotContain(HandlerGates(version), d => d.MessageKey == GroupKey);
+    }
+
     private static LocalizedText Name(string value) => new(new Dictionary<string, string> { ["en"] = value });
 }
