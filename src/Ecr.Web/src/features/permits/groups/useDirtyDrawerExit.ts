@@ -8,7 +8,10 @@ import { useEffect, useRef } from 'react';
  * тож зсередини відмовити вже нічого. Правка `shared/ui` виходила за межі цієї задачі, тому перехоплення живе тут, а
  * `closeOnEscape` шторка отримує `false`, поки `active` (Esc обробляє цей хук).
  *
- * ⛔ Перехоплення - у фазі захоплення на `document`: воно раніше за обробники Mantine/React і гасить подію цілком.
+ * ⛔ Esc обробляється, лише коли його ціль усередині ЦІЄЇ шторки (`[data-panel=panelId]`): Esc у чужому модальному, у
+ * списку/календарі в порталі чи з фокусом на сторінці хук не чіпає й не гасить.
+ *
+ * ⛔ Перехоплення кліку - у фазі захоплення на `document`: воно раніше за обробники Mantine/React і гасить подію цілком.
  * Без `active` хук нічого не слухає, тож чиста форма закривається без питань.
  *
  * ⛔ Esc, що ЗАКРИВАЄ підтвердження, не має одразу відкрити його знову (живий e2e, run 39921583289): `Modal` Mantine слухає
@@ -44,9 +47,11 @@ export function useDirtyDrawerExit(panelId: string, active: boolean, onAttempt: 
 
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape' || event.defaultPrevented || fresh) return;
-      // Esc у відкритому списку вибору закриває список, а не шторку.
+      // Esc поза шторкою (інший Modal, випадний список чи календар у порталі, тіло сторінки) - не наш: ні питання, ні поглинання.
       const target = event.target;
-      if (target instanceof Element && target.closest('[aria-expanded="true"]') !== null) return;
+      if (!inThisDrawer(target)) return;
+      // Esc у відкритому списку вибору закриває список, а не шторку.
+      if (target.closest('[aria-expanded="true"]') !== null) return;
 
       attempt.current();
     };
