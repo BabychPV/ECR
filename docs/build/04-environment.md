@@ -167,7 +167,7 @@ CI — виключно ubuntu-latest). Версії — у `Directory.Packages.
 | `@tanstack/react-query` | 5.62.11 | MIT | серверний стан |
 | `zustand` | 5.0.2 | MIT | клієнтський стан |
 | `react-hook-form` | 7.54.2 | MIT | форми |
-| `zod` | 3.24.1 | MIT | схеми |
+| ~~`zod`~~ | ~~3.24.1~~ | MIT | ✎ 2026-10-24: прибрано — у `src/` не імпортувався (`W-10`), а `GHSA-mrhx-c7xc-m3w5` (high) червонив гейт «Безпека залежностей» |
 | `react-router-dom` | 7.1.1 | MIT | маршрутизація |
 | `@formulajs/formulajs` | 4.4.9 | MIT | клієнтські формули — **лише підказка** (`D-20`) |
 | `openapi-typescript` | 7.5.0 | MIT | типи з нашого OpenAPI |
