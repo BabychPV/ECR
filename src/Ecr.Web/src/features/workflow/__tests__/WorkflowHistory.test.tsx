@@ -47,6 +47,20 @@ const Rejected: WorkflowEvent = {
   sheetCode: 'S1',
   stepOrdinal: null,
   toState: 'Rejected',
+  approvedBySubmitter: false,
+};
+
+/** D-440: той самий користувач подав і погодив — у журналі позначка. */
+const SelfApproved: WorkflowEvent = {
+  action: 'Approve',
+  at: '2026-04-01T07:00:00Z',
+  byDisplayName: 'Olena Koval',
+  fromState: 'Submitted',
+  reason: null,
+  sheetCode: 'S1',
+  stepOrdinal: null,
+  toState: 'Approved',
+  approvedBySubmitter: true,
 };
 
 afterEach(() => {
@@ -73,6 +87,18 @@ describe('WorkflowHistory', () => {
     expect(row.querySelector('time')?.getAttribute('dateTime')).toBe(Rejected.at);
     expect(row.textContent).toContain('Olena Koval');
     expect(row.textContent).toContain('total mismatch');
+  });
+
+  it('D-440: погодження автором подання позначене «погоджено автором подання», інші події — ні', async () => {
+    respond([SelfApproved, Rejected]);
+    show();
+
+    fireEvent.click(screen.getByRole('button', { name: '⟦workflow.history⟧' }));
+
+    const rows = await screen.findAllByTestId('workflow-history-event');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.textContent).toContain('⟦workflow.historyApprovedBySubmitter⟧');
+    expect(rows[1]?.textContent).not.toContain('⟦workflow.historyApprovedBySubmitter⟧');
   });
 
   it('порожня історія прибирає блок зовсім, разом із кнопкою', async () => {

@@ -743,20 +743,12 @@ export function useSheetActions({
   const canSubmit = !dataLocked && isAllowed('submit', state) && mayWorkflow('submit');
 
   /*
-   * ⛔ A2-08 (F-25 / D-285): автор подання не погоджує власний аркуш — сервер
-   * відповідає `403 approveOwnSubmission`. «Автора» клієнт сам не знає (`/me`
-   * і стан аркуша не кажуть, хто подав), тож ознака — СЕРВЕРНА: `canRecall`
-   * (`GET …/recall`) істинне лише для того, хто подав, і доки жоден крок не
-   * підписано. Тоді замість Approve/Reject лишається «Recall» — штатний для
-   * автора шлях забрати подання (Reject власного подання сервер пропускає, але
-   * поруч із Recall це друга кнопка для тієї самої дії).
-   * ⚠ Прогалина: якщо крок уже підписав інший погоджувач, `canRecall` хибне і
-   * кнопка автору видна — тоді відмову з назвою аркуша дає сервер.
+   * ⚠ D-440: правило чотирьох очей скасоване — автор подання з потрібною роллю
+   * погоджує власний аркуш, тож Approve/Reject НЕ ховаються на власному поданні
+   * (доти ознакою «автора» був `canRecall`). Видимість — лише стан і права.
    */
-  const isOwnSubmission = canRecall;
-
-  const canApprove = !isOwnSubmission && isAllowed('approve', state) && mayWorkflow('approve');
-  const canReject = !isOwnSubmission && isAllowed('reject', state) && mayWorkflow('reject');
+  const canApprove = isAllowed('approve', state) && mayWorkflow('approve');
+  const canReject = isAllowed('reject', state) && mayWorkflow('reject');
 
   // ⛔ Аудит Етапу 3, лана "Documents core" (`lane3-workflow-buttons-not-grouped`,
   // знахідка людини зі скріншотом): `DocumentPage.tsx` рендерить ОДИН

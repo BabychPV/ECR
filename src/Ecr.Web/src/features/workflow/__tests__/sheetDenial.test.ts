@@ -14,8 +14,6 @@ import { sheetDenialText } from '../sheetDenial';
 
 const Strings = {
   'err.ECR-ACCS-0403.approveDenied': 'Лист {sheetDefId} нельзя утвердить или вернуть в работу: {reason}.',
-  'err.ECR-ACCS-0403.approveOwnSubmission':
-    'Лист {sheetDefId} не может утвердить тот же человек, который его подал.',
   'err.ECR-ACCS-0403.submitDenied': 'Лист {sheetDefId} нельзя подать: {reason}.',
   'err.ECR-ACCS-0403.reopenDenied': 'Лист {sheetDefId} нельзя вернуть в работу: {reason}.',
   'deny.InsufficientGrantLevel': 'Недостаточный уровень доступа.',
@@ -56,10 +54,13 @@ function denial(messageKey: string, extra: Record<string, unknown> = {}, errorCo
 }
 
 describe('sheetDenialText: відмова називає аркуш назвою (A2-08)', () => {
-  it('approveOwnSubmission — назва замість id', () => {
-    const text = sheetDenialText(denial('err.ECR-ACCS-0403.approveOwnSubmission'), 'Выбросы');
+  it('submitDenied — назва замість id', () => {
+    const text = sheetDenialText(
+      denial('err.ECR-ACCS-0403.submitDenied', { reason: 'PeriodClosed', reasonKey: 'deny.PeriodClosed' }),
+      'Выбросы',
+    );
 
-    expect(text).toBe('Лист «Выбросы» не может утвердить тот же человек, который его подал.');
+    expect(text).toBe('Лист «Выбросы» нельзя подать: Период закрыт.');
   });
 
   it('approveDenied — назва і причина з каталогу за reasonKey, без подвійної крапки', () => {

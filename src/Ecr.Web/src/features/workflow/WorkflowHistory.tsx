@@ -85,6 +85,12 @@ export function WorkflowHistory({ documentId, periodKey, embedded = false }: Wor
                   {t('workflow.historyStep', { step: event.stepOrdinal })}
                 </Text>
               )}
+              {/* D-440: чотири очі скасовано, але самопогодження лишається видимим у журналі. */}
+              {event.approvedBySubmitter && (
+                <Text size="sm" c="dimmed" data-testid="workflow-history-approved-by-submitter">
+                  {t('workflow.historyApprovedBySubmitter')}
+                </Text>
+              )}
               {event.reason !== null && <Text size="sm">{event.reason}</Text>}
             </Group>
           ))}

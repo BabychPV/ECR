@@ -17,7 +17,6 @@ import { notificationCloseButtonProps, showApiError } from '@/shared/ui/notify';
 const SheetDenialKeys: ReadonlySet<string> = new Set([
   'err.ECR-ACCS-0403.submitDenied',
   'err.ECR-ACCS-0403.approveDenied',
-  'err.ECR-ACCS-0403.approveOwnSubmission',
   'err.ECR-ACCS-0403.reopenDenied',
 ]);
 
