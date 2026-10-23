@@ -258,6 +258,13 @@ describe('вкладки', () => {
     expect(await screen.findByText('This permit is read-only here, so rows cannot be added.')).toBeTruthy();
   });
 
+  it('порожня таблиця: заголовок стану - h2 під h1 (axe heading-order, P3-N8)', async () => {
+    getRows.mockResolvedValue(page([]));
+    await open('/admin/permits/5?tab=Limits');
+    const title = await screen.findByText('No rows in Limits yet');
+    expect(title.tagName).toBe('H2');
+  });
+
   it('Overview: підсумки таблиць, Read by без листів, смуга чернетки', async () => {
     await open();
     expect(screen.getByText('Draft - sheets do not read this permit yet')).toBeTruthy();

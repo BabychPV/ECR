@@ -34,6 +34,7 @@ import {
   type GroupField,
 } from './groupsModel';
 import { LocalizedTextarea } from './LocalizedTextarea';
+import { useDirtyDrawerExit } from './useDirtyDrawerExit';
 import { useCreateGroup, useDeleteGroup, useReplaceGroupTypes, useUpdateGroup } from './useGroups';
 
 const FormId = 'permit-group-form';
@@ -68,6 +69,7 @@ export function GroupDrawer({ group, canEdit }: GroupDrawerProps): JSX.Element {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
 
   const create = useCreateGroup();
   const update = useUpdateGroup();
@@ -109,6 +111,16 @@ export function GroupDrawer({ group, canEdit }: GroupDrawerProps): JSX.Element {
 
   function close(): void {
     setPanel(null);
+  }
+
+  // Вийти з незбереженим - лише через підтвердження «Discard» (Esc, хрестик, затемнення й Cancel); чиста форма закривається одразу.
+  // ⛔ Не `onExitUnsaved => false` без підтвердження: введене пропало б мовчки (клас дефекту «Assign month»).
+  const guarded = canEdit && dirty && !busy;
+  useDirtyDrawerExit(panelId, guarded && !confirmingDelete && !discarding, () => setDiscarding(true));
+
+  function requestClose(): void {
+    if (guarded) setDiscarding(true);
+    else close();
   }
 
   function change(next: Partial<GroupDraft>, field?: GroupField | 'description'): void {
@@ -228,7 +240,8 @@ export function GroupDrawer({ group, canEdit }: GroupDrawerProps): JSX.Element {
       closeLabel={t('permits.groups.drawer.close')}
       size="lg"
       // Esc у підтвердженні видалення закриває лише його (обидва Modal слухають keydown на window).
-      closeOnEscape={!confirmingDelete}
+      // З незбереженим Esc обробляє `useDirtyDrawerExit` (підтвердження), а не шторка.
+      closeOnEscape={!confirmingDelete && !guarded}
       footer={
         canEdit ? (
           <Group justify="space-between" gap="xs" w="100%" wrap="nowrap">
@@ -240,7 +253,7 @@ export function GroupDrawer({ group, canEdit }: GroupDrawerProps): JSX.Element {
               <span />
             )}
             <Group gap="xs" wrap="nowrap">
-              <Button variant="default" onClick={close}>
+              <Button variant="default" onClick={requestClose}>
                 {t('permits.groups.drawer.cancel')}
               </Button>
               <Button type="submit" form={FormId} loading={saving} disabled={!isNew && !dirty}>
@@ -338,6 +351,19 @@ export function GroupDrawer({ group, canEdit }: GroupDrawerProps): JSX.Element {
           )}
         </Stack>
       </form>
+
+      <ConfirmModal
+        opened={discarding}
+        title={t('permits.groups.drawer.discardTitle')}
+        text={t('permits.groups.drawer.discardText')}
+        verb={t('permits.groups.drawer.discardVerb')}
+        cancelLabel={t('permits.groups.drawer.keepEditing')}
+        onConfirm={() => {
+          setDiscarding(false);
+          close();
+        }}
+        onClose={() => setDiscarding(false)}
+      />
 
       {!isNew && (
         <ConfirmModal

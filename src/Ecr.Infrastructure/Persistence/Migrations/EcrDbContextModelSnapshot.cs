@@ -1254,6 +1254,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("LookupRegistryDefId")
+                        .HasDatabaseName("IX_HeaderFieldDef_LookupRegistryDefId");
+
                     b.HasIndex("TemplateVersionId", "Code")
                         .IsUnique()
                         .HasDatabaseName("UQ_HeaderFieldDef");
