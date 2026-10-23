@@ -91,8 +91,12 @@ test.describe('approverEdit: правка погоджувача поданог�
       const response = await admin.request.post(`/api/v1/documents/${DocumentId}/reopen`, {
         data: { sheetDefId, periodKey: Number(PeriodKey), reason },
       });
-      // 204 — повернуто; 409 — аркуш уже не Submitted/Approved (Draft): це теж базова лінія.
-      expect([204, 409], `reopen: ${String(response.status())} ${await response.text()}`).toContain(response.status());
+      // 204 — повернуто. Аркуш уже не Submitted/Approved (Draft) — це теж базова лінія: сервер відповідає
+      // 403 з причиною `BusinessRule` (`EditRules.CanReopen`, живий прогін CI) або 409.
+      const text = await response.text();
+      const alreadyDraft =
+        response.status() === 409 || (response.status() === 403 && text.includes('"reason":"BusinessRule"'));
+      expect(response.status() === 204 || alreadyDraft, `reopen: ${String(response.status())} ${text}`).toBe(true);
     } finally {
       await admin.close();
     }
