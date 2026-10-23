@@ -290,6 +290,7 @@ test.describe('Permit groups', () => {
       const name = drawer.getByRole('textbox', { name: /^Name · English/ });
       await name.fill(`Edited ${String(run)}`);
       const confirm = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+      // Шторка lg (800 px) вкриває праву частину рядка: клікаємо в його ліву, видиму частину.
       const other = page.getByRole('row', { name: /Air used/ });
 
       // Esc, натиснутий поза шторкою (фокус на сторінці), не відкриває «Discard» і шторку не закриває.
@@ -300,7 +301,7 @@ test.describe('Permit groups', () => {
       await expect(name).toHaveValue(`Edited ${String(run)}`);
 
       // Клік по іншому рядку: питає; Keep editing лишає запис і введене.
-      await other.click();
+      await other.click({ position: { x: 24, y: 10 } });
       await expect(confirm, `прогін ${run}: клік по іншому рядку питає`).toBeVisible();
       expect(page.url()).toContain('panel=WATER');
       await expect(page.getByRole('button', { name: 'Keep editing' })).toBeFocused();
@@ -310,7 +311,7 @@ test.describe('Permit groups', () => {
       expect(page.url()).toContain('panel=WATER');
 
       // Discard перемикає на інший запис без запису на сервер, фокус - у новій шторці.
-      await other.click();
+      await other.click({ position: { x: 24, y: 10 } });
       await expect(confirm).toBeVisible();
       await page.getByRole('button', { name: 'Discard', exact: true }).click();
       await expect(confirm).toBeHidden();
@@ -320,7 +321,7 @@ test.describe('Permit groups', () => {
       expect(backend.sent, `прогін ${run}: нічого не записано`).toHaveLength(0);
 
       // Чиста форма: клік по іншому рядку перемикає без питання.
-      await page.getByRole('row', { name: /Water permits/ }).click();
+      await page.getByRole('row', { name: /Water permits/ }).click({ position: { x: 24, y: 10 } });
       await expect(page).toHaveURL(/panel=WATER/);
       await expect(confirm).toBeHidden();
     }
