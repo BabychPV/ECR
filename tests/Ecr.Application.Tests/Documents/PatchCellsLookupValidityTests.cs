@@ -380,6 +380,59 @@ public sealed class PatchCellsLookupValidityTests
             System.Text.Json.JsonSerializer.Serialize(denied.Details));
     }
 
+    private void DenyRegistry(params int[] registryIds)
+        => _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessProfile
+        {
+            CacheKey = "p-deny", UserId = 9, SecurityStamp = "s",
+            Permissions = new HashSet<string>(), Grants = new Dictionary<string, GrantLevel>(),
+            Denies = new HashSet<string>(registryIds.Select(id => "Registry:" + id)), RoleIds = new HashSet<int>(),
+        });
+
+    /// <summary>
+    /// P2 (рішення людини 23.10: «Deny блокує і вибір запису»): Deny на ПРЯМУ ціль колонки забороняє вибір її запису -
+    /// та сама відповідь, що й для неіснуючого запису (без оракула існування id).
+    /// Мутація: прибрати перевірку Deny на прямому збігу в <c>LookupTargetMatcher.Belongs</c> - тест червоніє (запис проходить).
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG-DENY")]
+    public async Task Пряма_ціль_під_Deny_відхиляється_як_немає_запису_побайтно()
+    {
+        DenyRegistry(ColumnRegistryDefId);
+        Entry(registryDefId: ColumnRegistryDefId);
+
+        await AssertRejected("err.ECR-CELL-4223.missingEntry");
+
+        var denied = await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(new List<RegistryEntryStanding>());
+        var absent = await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+
+        Assert.Equal(absent.ErrorCode, denied.ErrorCode);
+        Assert.Equal(absent.Message, denied.Message);
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(absent.Details),
+            System.Text.Json.JsonSerializer.Serialize(denied.Details));
+    }
+
+    /// <summary>Deny на видалений/нечинний запис прямої цілі не розкриває причину: теж `missingEntry`.</summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG-DENY")]
+    public async Task Пряма_ціль_під_Deny_видалений_запис_теж_missingEntry()
+    {
+        DenyRegistry(ColumnRegistryDefId);
+        Entry(registryDefId: ColumnRegistryDefId, isDeleted: true);
+
+        await AssertRejected("err.ECR-CELL-4223.missingEntry");
+    }
+
+    /// <summary>Deny на ІНШИЙ довідник вибору запису цієї цілі не заважає.</summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG-DENY")]
+    public async Task Пряма_ціль_Deny_на_інший_довідник_запис_приймається()
+    {
+        DenyRegistry(OtherRegistryDefId);
+        Entry(registryDefId: ColumnRegistryDefId);
+
+        await AssertWritten();
+    }
+
     /// <summary>Не-член і неактивна група - теж повністю однаковий details з «запису немає» (членство не розкривається).</summary>
     [Theory] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG")]
     [InlineData(false)]
