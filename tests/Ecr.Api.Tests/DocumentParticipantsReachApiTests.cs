@@ -116,8 +116,9 @@ public sealed class DocumentParticipantsReachApiTests(SqlServerFixture sql)
         var withRole = await NewParticipantAsync(s, "rrw").ConfigureAwait(true);
         await RouteAsync(s, withRole.RoleId).ConfigureAwait(true);
 
-        await GrantAsync(app, manager, s, null, null, withoutRole, "Approve").ConfigureAwait(true);
-        await GrantAsync(app, manager, s, null, null, withRole, "Approve").ConfigureAwait(true);
+        // Одна область й один рівень — одне надання з двома виконавцями (друга видача тієї самої області була б
+        // правкою наявного надання й вимагала б baseVersion).
+        await GrantAsync(app, manager, s, null, null, [withoutRole, withRole], "Approve").ConfigureAwait(true);
         await SubmitAsync(app, s, s.Sheet1).ConfigureAwait(true);
 
         // Надання Approve без ролі кроку: ні в черзі, ні затвердження (403 з причиною — документ і аркуш він бачить).
@@ -230,15 +231,19 @@ public sealed class DocumentParticipantsReachApiTests(SqlServerFixture sql)
 
     private static string Num(long value) => value.ToString(CultureInfo.InvariantCulture);
 
-    private static async Task GrantAsync(
+    private static Task GrantAsync(
         EcrApiFactory app, HttpClient manager, Scenario s, string? sheet, string? table, Person recipient, string level)
+        => GrantAsync(app, manager, s, sheet, table, [recipient], level);
+
+    private static async Task GrantAsync(
+        EcrApiFactory app, HttpClient manager, Scenario s, string? sheet, string? table, Person[] recipients, string level)
     {
         using var response = await manager.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{Num(s.DocumentId)}/edit-assignments", UriKind.Relative),
             new
             {
                 slice = new { sheetCode = sheet, tableCode = table },
-                recipientUserIds = new[] { recipient.Id },
+                recipientUserIds = recipients.Select(r => r.Id).ToArray(),
                 isExclusive = false,
                 level,
             }).ConfigureAwait(false);
