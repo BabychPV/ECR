@@ -92,6 +92,7 @@ export function TableTab({ permit, table, type, units, caps }: TableTabProps): J
           loaded.length === 0 ? (
             <EmptyState
               title={t('permits.page.table.emptyTitle', { name })}
+              headingOrder={2}
               hint={caps.editRows ? t('permits.page.table.emptyHint') : t('permits.page.table.emptyReadOnly')}
             />
           ) : (
