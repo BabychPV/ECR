@@ -424,6 +424,70 @@ public sealed class DocumentHeaderHandlersTests
             System.Text.Json.JsonSerializer.Serialize(error.Details));
     }
 
+    private void DenyRegistry(int registryDefId)
+        => _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }
+                .Permission("Document.View")
+                .Grant(ResourceKind.Project, ProjectId, GrantLevel.Write)
+                .Deny(ResourceKind.Registry, registryDefId)
+                .Build());
+
+    /// <summary>
+    /// P2 (рішення людини 23.10: «Deny блокує і вибір запису»): Deny на ПРЯМУ ціль поля (PRM_AIR) -
+    /// `lookupEntryMissing`, побайтно як для неіснуючого запису; нічого не записано.
+    /// Мутація: прибрати перевірку Deny на прямому збігу в <c>LookupTargetMatcher.Belongs</c> - червоніє (200 замість 422).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_пряма_ціль_під_Deny_дає_ту_саму_відповідь_що_й_неіснуючий_запис()
+    {
+        const long entryId = 777;
+        DenyRegistry(PermitRegistryDefId);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => PatchWith(EntryOf(entryId, PermitRegistryDefId)).HandleAsync(
+            DocumentId,
+            Request("v", new PatchHeaderField("Permit", entryId.ToString(System.Globalization.CultureInfo.InvariantCulture), false)),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-HDR-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-HDR-0422.lookupEntryMissing", error.Details!["messageKey"]);
+        await AssertNothingWrittenAsync();
+
+        var empty = Substitute.For<IRegistryStore>();
+        empty.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<RegistryEntryStanding>());
+        var absent = await Assert.ThrowsAsync<BusinessRuleException>(() => PatchWith(empty).HandleAsync(
+            DocumentId,
+            Request("v", new PatchHeaderField("Permit", entryId.ToString(System.Globalization.CultureInfo.InvariantCulture), false)),
+            CancellationToken.None));
+        Assert.Equal(absent.ErrorCode, error.ErrorCode);
+        Assert.Equal(absent.Message, error.Message);
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(absent.Details),
+            System.Text.Json.JsonSerializer.Serialize(error.Details));
+    }
+
+    /// <summary>Deny на ІНШИЙ довідник вибору запису прямої цілі не заважає (200).</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_пряма_ціль_Deny_на_інший_довідник_запис_приймається()
+    {
+        const long entryId = 777;
+        DenyRegistry(PermitRegistryDefId + 5);
+        var version = await VersionOfAsync([]);
+        Values([], new() { [_permit.Id] = new() { ValueRegistryEntryId = entryId } });
+
+        await PatchWith(EntryOf(entryId, PermitRegistryDefId)).HandleAsync(
+            DocumentId,
+            Request(version, new PatchHeaderField("Permit", entryId.ToString(System.Globalization.CultureInfo.InvariantCulture), false)),
+            CancellationToken.None);
+
+        await _headers.Received(1).SaveValuesAsync(
+            DocumentId,
+            Arg.Is<IReadOnlyDictionary<int, DocumentHeaderValueData>>(d => d[_permit.Id].ValueRegistryEntryId == entryId),
+            Arg.Any<CancellationToken>());
+    }
+
     /// <summary>Збіг реєстру цілі й запису (Land / звичайна ціль) - резолвер груп не кличеться.</summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
