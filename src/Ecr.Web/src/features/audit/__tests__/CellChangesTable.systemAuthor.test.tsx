@@ -45,7 +45,8 @@ function authorCell(origin: string): HTMLElement {
 }
 
 describe('CellChangesTable: автор — людина чи система (AN-115)', () => {
-  it.each(['UserEdit', 'Import', 'ImportOverwrite'])('%s — ім’я того, хто змінив', (origin) => {
+  // ✎ D-442: правка погоджувача на поданому аркуші — теж людина.
+  it.each(['UserEdit', 'ApproverEdit', 'Import', 'ImportOverwrite'])('%s — ім’я того, хто змінив', (origin) => {
     const cell = authorCell(origin);
 
     expect(cell.textContent).toBe('D. Nurlanova');
