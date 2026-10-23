@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Box, Button, Stack, Text } from '@mantine/core';
 import { t } from '@/shared/i18n';
-import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { DataTable } from '@/shared/ui/DataTable';
 import { useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { FilterBar } from '@/shared/ui/FilterBar';
@@ -53,6 +52,13 @@ export function GroupsPage(): JSX.Element {
     if (code === panel) return;
     if (dirtyRef.current) setSwitchTo(code);
     else setParams({ panel: code });
+  };
+  // Адреса змінилась (інший запис, закриття, мертвий `?panel=`) - запит на перемикання застарів.
+  useEffect(() => setSwitchTo(null), [panel]);
+  const answerSwitch =(discard: boolean): void => {
+    const next = switchTo;
+    setSwitchTo(null);
+    if (discard && next !== null) setParams({ panel: next });
   };
   const onDirtyChange = useCallback((dirty: boolean): void => {
     dirtyRef.current = dirty;
@@ -127,22 +133,8 @@ export function GroupsPage(): JSX.Element {
         />
       </Box>
 
-      {panel === NewGroupPanel && canEdit && <GroupDrawer key={NewGroupPanel} group={null} canEdit onDirtyChange={onDirtyChange} />}
-      {opened !== undefined && <GroupDrawer key={opened.code} group={opened} canEdit={canEdit} onDirtyChange={onDirtyChange} />}
-
-      <ConfirmModal
-        opened={switchTo !== null}
-        title={t('permits.groups.drawer.discardTitle')}
-        text={t('permits.groups.drawer.discardText')}
-        verb={t('permits.groups.drawer.discardVerb')}
-        cancelLabel={t('permits.groups.drawer.keepEditing')}
-        onConfirm={() => {
-          const next = switchTo;
-          setSwitchTo(null);
-          if (next !== null) setParams({ panel: next });
-        }}
-        onClose={() => setSwitchTo(null)}
-      />
+      {panel === NewGroupPanel && canEdit && <GroupDrawer key={NewGroupPanel} group={null} canEdit onDirtyChange={onDirtyChange} switchRequested={switchTo !== null} onSwitchAnswer={answerSwitch} />}
+      {opened !== undefined && <GroupDrawer key={opened.code} group={opened} canEdit={canEdit} onDirtyChange={onDirtyChange} switchRequested={switchTo !== null} onSwitchAnswer={answerSwitch} />}
     </Stack>
   );
 }
