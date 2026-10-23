@@ -285,7 +285,7 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
                 where c.PeriodKeyValue == s.PeriodKey
                       && c.ColumnDefId == s.Document.ColumnDefIds[1]
                       && r.TableInstanceId == s.Document.TableInstanceId
-                      && r.RowKey == rowKey
+                      && r.RowKeyValue == rowKey
                 select c.ValueNumeric)
             .SingleAsync()
             .ConfigureAwait(false);
