@@ -136,8 +136,22 @@ test.describe('Permits P3 backlog', () => {
     const dialog = page.getByRole('dialog', { name: /End permit .* early/ });
     await expect(dialog).toBeVisible({ timeout: 30_000 });
     const reason = dialog.getByRole('textbox', { name: /Reason/ });
+
+    // KI-04: поріг довжини причини видно людині; N/5 перемикань 9 -> 10 символів (підказка в описі поля, кнопка слідом).
+    const hint = dialog.getByText('Enter at least 10 characters.');
+    const confirm = dialog.getByRole('button', { name: 'End permit' });
+    for (let run = 1; run <= 5; run += 1) {
+      await reason.fill('123456789');
+      await expect(hint, `прогін ${String(run)}: підказка при 9 символах`).toBeVisible();
+      await expect(confirm).toBeDisabled();
+      await reason.fill('1234567890');
+      await expect(hint, `прогін ${String(run)}: підказка зникла при 10`).toBeHidden();
+      await expect(confirm).toBeEnabled();
+    }
+    await expect(reason).toHaveAttribute('aria-describedby', /-description/);
+
     await reason.fill('UI pass P3 ended early');
-    await dialog.getByRole('button', { name: 'End permit' }).click();
+    await confirm.click();
 
     // Причина - у діалозі, людськими датами (не сирі ISO-дати сервера); діалог не закрився, причина введена не втрачена.
     await expect(dialog.getByText(/must be after the start/)).toBeVisible({ timeout: 15_000 });

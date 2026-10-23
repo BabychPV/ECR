@@ -9213,6 +9213,9 @@ USING (VALUES
     ,(N'registries.lookupGroup.unlisted', N'en', N'Current value', 1)
     ,(N'registries.lookupTargetInactive', N'en', N'{label} - inactive', 1)
     -- PERMITS: groups-ui ── кінець секції ──
+    -- PERMITS: ui-p3-small ── en: KI-04 підказка мінімальної довжини причини в End early; ru/kz — порцією PERMITS: ui-p3-small нижче ──
+    ,(N'permits.endEarly.minLengthHint', N'en', N'Enter at least {min} characters.', 1)
+    -- PERMITS: ui-p3-small ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -23927,6 +23930,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- PERMITS: groups-ui ── кінець секції ──
+-- PERMITS: ui-p3-small ── ru/kz: KI-04 підказка мінімальної довжини причини в End early; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.endEarly.minLengthHint', N'ru', N'Введите не менее {min} символов.'),
+    (N'permits.endEarly.minLengthHint', N'kz', N'Кемінде {min} таңба енгізіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERMITS: ui-p3-small ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

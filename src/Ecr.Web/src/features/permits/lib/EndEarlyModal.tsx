@@ -1,5 +1,5 @@
 import { useEffect, useState, type JSX } from 'react';
-import { Button, Group, Modal, Textarea } from '@mantine/core';
+import { Button, Group, Modal, Text, Textarea } from '@mantine/core';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
 import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
@@ -50,13 +50,25 @@ export function EndEarlyModal({
     if (opened) setReason('');
   }, [opened]);
 
-  const enough = reason.trim().length >= Math.max(1, minLength);
+  const required = Math.max(1, minLength);
+  const enough = reason.trim().length >= required;
 
   return (
     <Modal opened={opened} onClose={onClose} title={title} returnFocus={false}>
       <Textarea
         label={label}
-        description={description}
+        description={
+          <>
+            {description}
+            {/* KI-04: порогу `minLength` людина не бачила - кнопка просто не вмикалась. Підказка лежить в ОПИСІ поля (Mantine
+                зв'язує його з полем через `aria-describedby`) і зникає, щойно порогу досягнуто. */}
+            {enough ? null : (
+              <Text component="span" display="block" inherit data-testid="end-reason-hint">
+                {t('permits.endEarly.minLengthHint', { min: String(required) })}
+              </Text>
+            )}
+          </>
+        }
         value={reason}
         onChange={(event) => {
           setReason(event.currentTarget.value);
