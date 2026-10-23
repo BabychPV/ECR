@@ -131,13 +131,13 @@ public sealed class ParticipantGrantUnderSheetLockTests(SqlServerFixture sql) : 
 
         var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);
         var clock = new TestClock(Now);
-        var documents = new DocumentStore(db);
+        var documents = Composition(scene);
         var metadata = new MetadataCache(_memory, db);
         var handler = new ApproveSheetHandler(
             new WorkflowStore(db), access, Reports(documents), new UnitOfWork(db), User(scene.ParticipantId), clock,
             new AuditWriter(db), documents,
             new ApprovalSnapshotRefresh(
-                new SheetEditGate(db), new NormalizedCellStore(db), new RowStore(db, bulk, clock), documents, metadata,
+                new SheetEditGate(db), new NormalizedCellStore(db), new RowStore(db, bulk, clock), new DocumentStore(db), metadata,
                 Substitute.For<IDocumentHeaderStore>(), new WorkflowStore(db),
                 Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>()));
 
@@ -191,7 +191,7 @@ public sealed class ParticipantGrantUnderSheetLockTests(SqlServerFixture sql) : 
 
         var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);
         var clock = new TestClock(Now);
-        var documents = new DocumentStore(db);
+        var documents = Composition(scene);
         var headers = Substitute.For<IDocumentHeaderStore>();
         headers.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
                .Returns(new Dictionary<string, ExpressionValue>());
@@ -310,6 +310,20 @@ public sealed class ParticipantGrantUnderSheetLockTests(SqlServerFixture sql) : 
             new TestClock(Now),
             Substitute.For<ICurrentUser>(),
             new WorkflowStore(db));
+
+    /// <summary>
+    /// Склад документа: <c>TestDocumentBuilder</c> не наповнює склад аркушів, тож <c>HasSheetAsync</c> — підміна
+    /// (як у <c>SubmitEditRaceTests</c>); предмет тесту — рішення про права, не склад.
+    /// </summary>
+    private static IDocumentStore Composition(Scene scene)
+    {
+        var documents = Substitute.For<IDocumentStore>();
+        documents.HasSheetAsync(scene.Doc.DocumentId, scene.Doc.SheetDefId, Arg.Any<CancellationToken>()).Returns(true);
+        documents.FindProjectIdAsync(scene.Doc.DocumentId, Arg.Any<CancellationToken>()).Returns(scene.Doc.ProjectId);
+        documents.GetTemplateVersionIdAsync(scene.Doc.DocumentId, Arg.Any<CancellationToken>())
+                 .Returns(scene.Doc.TemplateVersionId);
+        return documents;
+    }
 
     private static ReportSnapshotSync Reports(IDocumentStore documents)
     {
