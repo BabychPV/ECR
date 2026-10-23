@@ -8,6 +8,18 @@ export function levelOf(a: Pick<EditAssignment, 'level'>): AssignmentLevel {
   return a.level ?? 'Write';
 }
 
+/**
+ * Підпис рівня учасника. ⛔ Ключі — літералами в кожній гілці (сторож `EndpointCoverageTests` не бачить ключів,
+ * складених шаблонним рядком).
+ */
+export function levelLabel(level: AssignmentLevel): string {
+  if (level === 'Read') return t('editAssign.level.Read');
+  if (level === 'Submit') return t('editAssign.level.Submit');
+  if (level === 'Approve') return t('editAssign.level.Approve');
+
+  return t('editAssign.level.Write');
+}
+
 /** Передача місяця (цикл «Заповнено → Валідовано/Повернуто», «наступний місяць»), а не учасник іншого рівня. */
 export function isHandoff(a: Pick<EditAssignment, 'level'>): boolean {
   return levelOf(a) === 'Write';

@@ -3,7 +3,7 @@ import { ActionIcon, Group, Menu, Stack, Table, Text, VisuallyHidden } from '@ma
 import { formatMonthName } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { AssignmentBadge } from './AssignmentBadge';
-import { compareAssignments, isHandoff, levelOf, nextMonthSlice, sliceLabel } from './model';
+import { compareAssignments, isHandoff, levelLabel, levelOf, nextMonthSlice, sliceLabel } from './model';
 import type { EditAssignment, RecipientStatus } from './types';
 
 export type MatrixView = 'months' | 'people';
@@ -44,10 +44,6 @@ function MonthsTable({
             <Table.Tr key={a.id} data-assignment-id={a.id}>
               <Table.Th scope="row" fw={500}>
                 {sliceLabel(a.slice)}
-                {/* D-443: рівень учасника — словом (не лише кольором), окремим рядком під областю. */}
-                <Text size="xs" c="dimmed" fw={400} data-testid="assignment-level" data-level={levelOf(a)}>
-                  {t('editAssign.levelLabel', { level: t(`editAssign.level.${levelOf(a)}`) })}
-                </Text>
               </Table.Th>
               <Table.Td>
                 <Stack gap="xs">
@@ -86,6 +82,10 @@ function MonthsTable({
               </Table.Td>
               <Table.Td>
                 <AssignmentBadge state={a.status} />
+                {/* D-443: рівень учасника — словом (не лише кольором); поза заголовком рядка, щоб ім'я рядка лишалось областю. */}
+                <Text size="xs" c="dimmed" mt="xs" data-testid="assignment-level" data-level={levelOf(a)}>
+                  {t('editAssign.levelLabel', { level: levelLabel(levelOf(a)) })}
+                </Text>
               </Table.Td>
               <Table.Td>{actions === undefined ? null : <RowMenu assignment={a} actions={actions} />}</Table.Td>
             </Table.Tr>

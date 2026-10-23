@@ -6,8 +6,10 @@ import { queryKeys } from '@/api/queryKeys';
 import type { components } from '@/api/schema';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { MinCandidateQuery, getCandidates } from './api';
+import { levelLabel } from './model';
 import { AssignmentLevels, type AssignmentLevel, type Candidate } from './types';
 
 type LocalizedText = components['schemas']['LocalizedText'];
@@ -25,11 +27,6 @@ export interface ParticipantChoice {
   readonly level: AssignmentLevel;
   readonly sheetCode: string | null;
   readonly tableCode: string | null;
-}
-
-/** Підпис рівня (ключ каталогу `editAssign.level.<рівень>`). */
-export function levelLabel(level: AssignmentLevel): string {
-  return t(`editAssign.level.${level}`);
 }
 
 /** Пошук одного користувача серед кандидатів документа (≥ 2 символи; сервер повертає ≤ 20, без email/SID). */
@@ -111,6 +108,7 @@ export function ParticipantModal({
   const [level, setLevel] = useState<AssignmentLevel>('Read');
   const [sheetCode, setSheetCode] = useState<string | null>(null);
   const [tableCode, setTableCode] = useState<string | null>(null);
+  const loading = usePendingLoading(isPending);
 
   const tables = sheets.find((s) => s.code === sheetCode)?.tables ?? [];
 
@@ -163,7 +161,7 @@ export function ParticipantModal({
           </Button>
           <Button
             disabled={user === null}
-            loading={isPending}
+            loading={loading}
             onClick={() => {
               if (user !== null) onSubmit({ user, level, sheetCode, tableCode });
             }}
@@ -193,6 +191,7 @@ export function OwnerTransferModal({
   readonly onClose: () => void;
 }): JSX.Element {
   const [user, setUser] = useState<Candidate | null>(null);
+  const loading = usePendingLoading(isPending);
 
   return (
     <Modal opened={opened} onClose={onClose} title={t('editAssign.owner.title')}>
@@ -208,7 +207,7 @@ export function OwnerTransferModal({
           </Button>
           <Button
             disabled={user === null}
-            loading={isPending}
+            loading={loading}
             onClick={() => {
               if (user !== null) onSubmit(user);
             }}
