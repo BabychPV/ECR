@@ -20,11 +20,13 @@ import {
   getEditorSets,
   upsertEditAssignment,
   returnEditAssignment,
+  transferDocumentOwner,
   validateEditAssignment,
 } from './api';
+import { OwnerTransferModal, ParticipantModal, type ParticipantChoice, type ParticipantSheet } from './ParticipantDialogs';
 import { AssignWizard, emptyAssignData, resolveUsers, type AssignWizardData } from './AssignWizard';
 import { AssignmentsMatrix, type MatrixActions, type MatrixView } from './AssignmentsMatrix';
-import { awaitingValidationCount, makeSlice, nextMonthSlice, sameSlice, sliceLabel } from './model';
+import { awaitingValidationCount, isHandoff, levelOf, makeSlice, nextMonthSlice, sameSlice, sliceLabel } from './model';
 import { ReturnReasonMaxLength, type EditAssignment, type EditAssignmentsList } from './types';
 
 /** Значення `?panel=` шторки (одне місце — меню й шторка читають звідси). */
@@ -43,7 +45,8 @@ function returnableNames(a: EditAssignment): string {
 
 export interface EditAssignmentsDrawerProps {
   readonly documentId: number;
-  readonly sheets: readonly { readonly code: string; readonly name: string }[];
+  /** Аркуші документа (і їхні таблиці — для області учасника, D-443). */
+  readonly sheets: readonly ParticipantSheet[];
 }
 
 /**
@@ -66,6 +69,8 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
   const [validating, setValidating] = useState<EditAssignment | null>(null);
   const [returning, setReturning] = useState<EditAssignment | null>(null);
   const [removing, setRemoving] = useState<EditAssignment | null>(null);
+  const [participantOpen, setParticipantOpen] = useState(false);
+  const [ownerOpen, setOwnerOpen] = useState(false);
 
   // Симуляція «очима користувача» - лише перегляд: жодних переходів (дизайн §2.4: ¬симуляція).
   const session = useSession();
@@ -139,6 +144,44 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
     onSettled: refresh,
   });
 
+  /**
+   * D-443: учасник документа — upsert за (зріз, рівень): наявний учасник того самого рівня на тій самій області
+   * отримує ще одного виконавця (склад — множина, `baseVersion` наявного), інакше — новий.
+   */
+  const grant = useMutation({
+    meta: handled,
+    mutationFn: (choice: ParticipantChoice) => {
+      const slice = makeSlice({ sheetCode: choice.sheetCode, tableCode: choice.tableCode });
+      const existing = assignments.find((a) => sameSlice(a.slice, slice) && levelOf(a) === choice.level);
+      const recipients = [...new Set([...(existing?.recipients.map((r) => r.userId) ?? []), choice.user.userId])];
+
+      return upsertEditAssignment(documentId, {
+        slice,
+        recipientUserIds: recipients,
+        isExclusive: false,
+        level: choice.level,
+        ...(existing === undefined ? {} : { baseVersion: existing.version }),
+      });
+    },
+    onSuccess: (_, choice) => {
+      setParticipantOpen(false);
+      done(t('editAssign.done.granted', { name: choice.user.displayName }));
+    },
+    onSettled: refresh,
+  });
+
+  /** D-443: передача власника; картка документа перечитується (власник і право керування змінились). */
+  const transfer = useMutation({
+    meta: handled,
+    mutationFn: (newOwnerUserId: number) => transferDocumentOwner(documentId, newOwnerUserId),
+    onSuccess: async (owner) => {
+      setOwnerOpen(false);
+      done(t('editAssign.done.ownerTransferred', { name: owner.ownerDisplayName }));
+      await queryClient.invalidateQueries({ queryKey: ['document', documentId] });
+    },
+    onSettled: refresh,
+  });
+
   /** Застосування майстра: набір (за потреби) → по одному POST (upsert) на місяць; зупиняється на першій відмові. */
   const apply = useMutation({
     meta: handled,
@@ -153,7 +196,7 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
 
       for (const month of d.months) {
         const slice = makeSlice({ monthNumber: month, sheetCode: d.sheetCode });
-        const existing = assignments.find((a) => sameSlice(a.slice, slice));
+        const existing = assignments.find((a) => sameSlice(a.slice, slice) && isHandoff(a));
 
         await upsertEditAssignment(documentId, {
           slice,
@@ -198,9 +241,14 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
         size="xl"
         footer={
           data?.canManage === true && !simulating ? (
-            <Button onClick={() => openWizard(emptyAssignData)} data-autofocus>
-              {t('editAssign.assign')}
-            </Button>
+            <Group gap="sm">
+              <Button onClick={() => openWizard(emptyAssignData)} data-autofocus>
+                {t('editAssign.assign')}
+              </Button>
+              <Button variant="default" onClick={() => setParticipantOpen(true)} data-testid="add-participant">
+                {t('editAssign.addParticipant')}
+              </Button>
+            </Group>
           ) : undefined
         }
       >
@@ -218,7 +266,14 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
               <Text size="sm" c="dimmed">
                 {t('editAssign.hint')}
               </Text>
-              <Text size="sm">{t('editAssign.owner', { name: d.ownerDisplayName })}</Text>
+              <Group gap="sm">
+                <Text size="sm">{t('editAssign.owner', { name: d.ownerDisplayName })}</Text>
+                {d.canManage && !simulating ? (
+                  <Button size="xs" variant="subtle" onClick={() => setOwnerOpen(true)} data-testid="transfer-owner">
+                    {t('editAssign.owner.transfer')}
+                  </Button>
+                ) : null}
+              </Group>
               {awaiting > 0 ? (
                 <Text size="sm" fw={500} data-testid="edit-assignments-awaiting">
                   {t('editAssign.awaiting', { count: awaiting })}
@@ -265,6 +320,35 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
               },
             })
           }
+        />
+      ) : null}
+
+      {participantOpen ? (
+        <ParticipantModal
+          opened
+          documentId={documentId}
+          sheets={sheets}
+          isPending={grant.isPending}
+          error={grant.error}
+          onSubmit={(choice) => grant.mutate(choice)}
+          onClose={() => {
+            setParticipantOpen(false);
+            grant.reset();
+          }}
+        />
+      ) : null}
+
+      {ownerOpen ? (
+        <OwnerTransferModal
+          opened
+          documentId={documentId}
+          isPending={transfer.isPending}
+          error={transfer.error}
+          onSubmit={(user) => transfer.mutate(user.userId)}
+          onClose={() => {
+            setOwnerOpen(false);
+            transfer.reset();
+          }}
         />
       ) : null}
 

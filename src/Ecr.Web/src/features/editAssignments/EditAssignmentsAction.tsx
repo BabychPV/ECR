@@ -4,6 +4,7 @@ import type { DocumentSummary } from '@/api/types';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { t } from '@/shared/i18n';
 import { useDetailPanel } from '@/shared/ui/DetailDrawer';
+import type { ParticipantSheet } from './ParticipantDialogs';
 
 /**
  * Сама шторка (і майстер, матриця) — окремим чанком: `DocumentPage` під межею бюджету (`D-132`),
@@ -18,7 +19,8 @@ const PanelId = 'edit-assignments';
 interface EditAssignmentsActionArgs {
   readonly documentId: number;
   readonly document: DocumentSummary | undefined;
-  readonly sheets: readonly { readonly code: string; readonly name: string }[];
+  /** Аркуші з таблицями (D-443: область учасника — документ, аркуш або таблиця). */
+  readonly sheets: readonly ParticipantSheet[];
 }
 
 interface EditAssignmentsAction {

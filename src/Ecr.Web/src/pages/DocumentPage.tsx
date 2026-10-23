@@ -565,7 +565,7 @@ export function DocumentPage(): JSX.Element {
   const editAssignments = useEditAssignmentsAction({
     documentId,
     document: summary.data,
-    sheets: sheets.map((s) => ({ code: s.code, name: s.name })),
+    sheets,
   });
 
   // «History» і «Compare versions» — пункти «More» + лінивий діалог (макет: блоків між шапкою й сіткою немає).

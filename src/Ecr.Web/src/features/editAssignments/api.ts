@@ -6,6 +6,7 @@ import type {
   ApplyEditorSetRequest,
   Candidate,
   CopyAssignmentRequest,
+  DocumentOwner,
   EditAssignment,
   EditAssignmentBatch,
   EditAssignmentsList,
@@ -13,6 +14,7 @@ import type {
   MyEditAssignmentsView,
   ReturnAssignmentRequest,
   SaveEditorSetRequest,
+  TransferOwnerRequest,
   UpsertAssignmentRequest,
   ValidateAssignmentRequest,
 } from './types';
@@ -79,6 +81,16 @@ export function getCandidates(documentId: number, q: string): Promise<readonly C
   return apiFetch<readonly Candidate[]>(
     `/api/v1/documents/${String(documentId)}/edit-assignments/candidates?q=${encodeURIComponent(q)}`,
   );
+}
+
+/** D-443: передача власності документа (власник або менеджер проєкту; сервер перевіряє й нового власника). */
+export function transferDocumentOwner(documentId: number, newOwnerUserId: number): Promise<DocumentOwner> {
+  const body: TransferOwnerRequest = { newOwnerUserId };
+
+  return apiFetch<DocumentOwner>(`/api/v1/documents/${String(documentId)}/owner`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 export function getEditorSets(): Promise<readonly EditorSet[]> {

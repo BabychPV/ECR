@@ -3,7 +3,7 @@ import { ActionIcon, Group, Menu, Stack, Table, Text, VisuallyHidden } from '@ma
 import { formatMonthName } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { AssignmentBadge } from './AssignmentBadge';
-import { compareAssignments, nextMonthSlice, sliceLabel } from './model';
+import { compareAssignments, isHandoff, levelOf, nextMonthSlice, sliceLabel } from './model';
 import type { EditAssignment, RecipientStatus } from './types';
 
 export type MatrixView = 'months' | 'people';
@@ -44,6 +44,10 @@ function MonthsTable({
             <Table.Tr key={a.id} data-assignment-id={a.id}>
               <Table.Th scope="row" fw={500}>
                 {sliceLabel(a.slice)}
+                {/* D-443: рівень учасника — словом (не лише кольором), окремим рядком під областю. */}
+                <Text size="xs" c="dimmed" fw={400} data-testid="assignment-level" data-level={levelOf(a)}>
+                  {t('editAssign.levelLabel', { level: t(`editAssign.level.${levelOf(a)}`) })}
+                </Text>
               </Table.Th>
               <Table.Td>
                 <Stack gap="xs">
@@ -94,7 +98,9 @@ function MonthsTable({
 
 function RowMenu({ assignment, actions }: { readonly assignment: EditAssignment; readonly actions: MatrixActions }): JSX.Element {
   const label = sliceLabel(assignment.slice);
-  const canRepeat = nextMonthSlice(assignment.slice) !== null;
+  // D-443: цикл «Заповнено → Валідовано/Повернуто», «наступний місяць» і майстер — лише для передачі місяця (Write).
+  const handoff = isHandoff(assignment);
+  const canRepeat = handoff && nextMonthSlice(assignment.slice) !== null;
 
   return (
     <Menu position="bottom-end" withinPortal>
@@ -104,13 +110,13 @@ function RowMenu({ assignment, actions }: { readonly assignment: EditAssignment;
         </ActionIcon>
       </Menu.Target>
       <Menu.Dropdown>
-        {assignment.status === 'Filled' ? (
+        {handoff && assignment.status === 'Filled' ? (
           <Menu.Item onClick={() => actions.onValidate(assignment)}>{t('editAssign.validate')}</Menu.Item>
         ) : null}
-        {assignment.status === 'Filled' || assignment.status === 'Validated' ? (
+        {handoff && (assignment.status === 'Filled' || assignment.status === 'Validated') ? (
           <Menu.Item onClick={() => actions.onReturn(assignment)}>{t('editAssign.return')}</Menu.Item>
         ) : null}
-        <Menu.Item onClick={() => actions.onEdit(assignment)}>{t('editAssign.edit')}</Menu.Item>
+        {handoff ? <Menu.Item onClick={() => actions.onEdit(assignment)}>{t('editAssign.edit')}</Menu.Item> : null}
         {canRepeat ? <Menu.Item onClick={() => actions.onRepeat(assignment)}>{t('editAssign.repeatNext')}</Menu.Item> : null}
         <Menu.Item color="statusError" onClick={() => actions.onRemove(assignment)}>
           {t('editAssign.remove')}
