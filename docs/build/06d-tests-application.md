@@ -470,11 +470,17 @@ namespace Ecr.Calculations.Tests;
 /// <summary>
 /// Публікація версії методології — **найнебезпечніша операція в системі**:
 /// вона тихо змінює числа у вже поданих формах (ФВ-9.6).
+/// ✎ 2026-10-23: чотири очі скасовано `D-440` (`ECR-CALC-0409` прибрано) —
+/// публікацію розподіляє лише право `Calculation.Publish`.
 /// </summary>
 public sealed class MethodologyPublishTests
 {
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    public void Публікація_автором_останньої_правки_відхиляється_ECR_CALC_0409()
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)] [Trait("Decision", "D-440")]
+    public void D440_автор_версії_публікує_її_сам()
+        => Assert.Fail("not implemented");
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)] [Trait("Decision", "D-440")]
+    public void D440_автор_без_права_Calculation_Publish_як_і_раніше_отримує_відмову()
         => Assert.Fail("not implemented");
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]

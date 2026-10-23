@@ -192,6 +192,33 @@ describe('DocumentsPage: швидкий перегляд (UI-29)', () => {
   );
 
   it(
+    '«Latest changes»: самопогодження (D-440) позначене тим самим ключем, що й у «More → History», і лише на своїй події',
+    async () => {
+      mockFetch([
+        event('GEN', '2026-10-01T09:00:00Z', 'Submitted'),
+        { ...event('GEN', '2026-10-02T09:00:00Z', 'Approved'), action: 'Approve', fromState: 'Submitted', approvedBySubmitter: true },
+        event('AIR', '2026-10-03T09:00:00Z', 'Submitted'),
+      ]);
+      show(`/?periodKey=${String(Period)}&panel=11`);
+
+      const drawer = await screen.findByRole('dialog', {}, { timeout: SlowEnvTimeout });
+      await waitFor(() => expect(drawer.querySelectorAll('[data-quick-look-event]')).toHaveLength(3), {
+        timeout: SlowEnvTimeout,
+      });
+
+      // Новіші першими: AIR Submitted, GEN Approved (самопогодження), GEN Submitted.
+      const rows = [...drawer.querySelectorAll('[data-quick-look-event]')];
+      // ⛔ Мутаційний доказ: прибери позначку з `LatestChanges` — рядок GEN Approved її не матиме.
+      expect(rows[1]?.querySelector('[data-quick-look-approved-by-submitter]')?.textContent).toBe(
+        '⟦workflow.historyApprovedBySubmitter⟧',
+      );
+      expect(rows[0]?.querySelector('[data-quick-look-approved-by-submitter]')).toBeNull();
+      expect(rows[2]?.querySelector('[data-quick-look-approved-by-submitter]')).toBeNull();
+    },
+    TestTimeout,
+  );
+
+  it(
     'історії немає — блоку «Latest changes» немає (D15-06), а не порожній заголовок',
     async () => {
       mockFetch([]);

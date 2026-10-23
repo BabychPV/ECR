@@ -10,6 +10,7 @@ import { notificationCloseButtonProps, showApiError } from '@/shared/ui/notify';
 import { errorCodeText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
 import { useSettledAction } from '@/features/grid/settleEdits';
+import { exportFormatOptions, type ExportFormat } from './exportFormat';
 
 /** Що і за який період експортувати. */
 interface ExportButtonProps {
@@ -33,14 +34,8 @@ interface ExportButtonProps {
   startRef?: { current: ((format: ExportFormat) => void) | null };
 }
 
-/**
- * Формат вивантаження (ФВ-4.2). Ті самі три значення, що приймає сервер
- * (`POST …/export` тіло `ExportRequest.format`); четвертого немає й додавати
- * нема звідки — перелік валідних значень визначає СЕРВЕР (422
- * `err.ECR-REQ-0422.exportFormatUnknown` на будь-яке інше), тому клієнт не
- * дублює цю перевірку — він лише не дає обрати нічого поза цими трьома.
- */
-export type ExportFormat = 'xlsx' | 'csv' | 'json';
+// Формати й підписи — у `exportFormat.ts` (меню сторінки документа без коду кнопки, `D-132`).
+export { exportFormatOptions, type ExportFormat } from './exportFormat';
 
 /**
  * Підпис посилання на готовий файл — ЗА ФОРМАТОМ, у якому його будували.
@@ -60,19 +55,6 @@ function exportReadyLabel(format: ExportFormat): string {
     default:
       return t('document.exportReady');
   }
-}
-
-/**
- * Підписи перемикача формату — самі значення, а не переклад лейблів, беруться
- * з каталогу (`t()`), щоб не заводити четвертий літерал в UI поруч із трьома
- * дозволеними значеннями контракту.
- */
-export function exportFormatOptions(): { value: ExportFormat; label: string }[] {
-  return [
-    { value: 'xlsx', label: t('document.exportFormatXlsx') },
-    { value: 'csv', label: t('document.exportFormatCsv') },
-    { value: 'json', label: t('document.exportFormatJson') },
-  ];
 }
 
 /**

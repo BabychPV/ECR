@@ -228,6 +228,13 @@ public sealed class EcrApiFactory(
                 });
             }
 
+            // ⛔ Розклади (cron) стоять, але не спрацьовують: хост, що прожив межу hh:05 чи 02:15,
+            // інакше виконував справжній NotificationJob/PeriodStateJob/нічні перевірки проти спільної
+            // бази колекції (23.10: зведення failures = 2, sent = 0 жовтило /health/ready). Разові
+            // задачі й явний запуск (TriggerJob, постановка в чергу) виконуються — див. RecurringTriggerVeto
+            // і RecurringTriggersInTestHostTests.
+            RecurringTriggerVeto.Register(services);
+
             ExtraServices?.Invoke(services);
         });
     }

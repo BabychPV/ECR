@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Ecr.TestKit;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Logging;
 
 namespace Ecr.Scenarios.Tests;
@@ -78,6 +79,13 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
             logging.ClearProviders();
             logging.AddProvider(new CapturingLoggerProvider(ServerErrors, ServerLog));
         });
+
+        // ⛔ Розклади (cron) стоять, але не спрацьовують — та сама причина й той самий засіб, що в
+        // `tests/Ecr.Api.Tests/EcrApiFactory.cs`: інакше сценарій, що прожив межу hh:05 чи 02:15,
+        // виконував би справжній NotificationJob/PeriodStateJob проти бази. ⚠ Другий (після
+        // SqlServerFixture) тип із Ecr.TestKit тут — обв'язка хоста, а не шлях до обробників:
+        // Правило 1 він не обходить (сценарій і далі ходить лише через HTTP).
+        builder.ConfigureTestServices(RecurringTriggerVeto.Register);
     }
 
     private sealed class CapturingLoggerProvider(

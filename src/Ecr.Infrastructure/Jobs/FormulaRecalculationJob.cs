@@ -54,6 +54,10 @@ public sealed class FormulaRecalculationJob(
         var sources = new List<CrossPeriodSource>();
         var hops = 0;
 
+        // ✎ D-442: подані аркуші, правлені погоджувачем поточного кроку (позначка з насіння PATCH). Лише їх
+        // каскад пише попри `Submitted`; решту поданих/затверджених пропускає, як і доти.
+        var approverSheets = new HashSet<int>();
+
         foreach (var cell in request.Cells)
         {
             if (cell.TableDefId is { } sourceTable && cell.SourcePeriod is { } sourcePeriod)
@@ -64,6 +68,11 @@ public sealed class FormulaRecalculationJob(
             }
 
             dirty.Add(new CellAddress(periodKey, cell.RowId, cell.ColumnDefId));
+
+            if (cell.ApproverSheetDefId is { } approverSheet)
+            {
+                approverSheets.Add(approverSheet);
+            }
         }
 
         // ⛔ Порожній набір змінених комірок — це не «перерахувати все», а
@@ -102,7 +111,7 @@ public sealed class FormulaRecalculationJob(
             if (!dirty.IsEmpty)
             {
                 written = await recalculation
-                    .RecalculateAsync(request.TableInstanceId, dirty, ct, changed)
+                    .RecalculateAsync(request.TableInstanceId, dirty, ct, changed, approverSheets)
                     .ConfigureAwait(false);
             }
 
@@ -222,5 +231,10 @@ public sealed record FormulaRecalculationRequest(
 /// WW-03: скільки задач-читачів уже пройшов ланцюжок; стеля (<see cref="CrossPeriodFanOut.MaxHops"/>)
 /// не дає розбіжному міжперіодному циклу ставити задачі безкінечно.
 /// </param>
+/// <param name="ApproverSheetDefId">
+/// ✎ D-442: аркуш, на якому цю комірку змінив погоджувач поточного кроку (<c>RecalculationSeed</c>); лише його,
+/// поданий, прогін має право перерахувати. <c>null</c> — звичайна правка.
+/// </param>
 public sealed record DirtyCell(
-    long RowId, int ColumnDefId, int? TableDefId = null, int? SourcePeriod = null, int? Hops = null);
+    long RowId, int ColumnDefId, int? TableDefId = null, int? SourcePeriod = null, int? Hops = null,
+    int? ApproverSheetDefId = null);

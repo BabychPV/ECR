@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Ecr.TestKit;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Logging;
 
 namespace Ecr.Api.Tests;
@@ -84,6 +85,10 @@ public sealed class SecondNodeApiFactory : WebApplicationFactory<Program>
             logging.ClearProviders();
             logging.AddProvider(new NodeLoggerProvider(ServerErrors));
         });
+
+        // ⛔ Розклади стоять, але не спрацьовують — та сама причина, що в `EcrApiFactory`
+        // (RecurringTriggerVeto): другий вузол так само ставить cron-розклади проти спільної бази.
+        builder.ConfigureTestServices(RecurringTriggerVeto.Register);
     }
 
     /// <inheritdoc />

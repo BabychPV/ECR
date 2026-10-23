@@ -269,7 +269,34 @@ public sealed class HealthTests(SqlServerFixture sql)
         // саме цей ендпоінт і вимагає ЗЕЛЕНОГО, не «не червоного» (`D-139`).
         // Індикатор, жовтий завжди, навчає не помічати себе — і в день, коли
         // пожовтіє по справі, ніхто не подивиться.
-        using var app = new EcrApiFactory(sql);
+        //
+        // ⛔ ВЛАСНА база, не спільна база колекції. Прогін 40007519316 (api-2, 23.10, 19:06:45Z) упав
+        // «jobs: Degraded — The last failure digest reached no one: 2 failures, 0 sent»: о 19:05 у
+        // застосунку якогось тесту колекції спрацював справжній щогодинний `NotificationJob`
+        // (`RecurringScheduleService.HourlyCron` = «0 5 * * * ?»; Quartz у EcrApiFactory живий), звів
+        // збої задач, які лишили інші тести, нікому їх не надіслав (транспорту на стенді немає) і
+        // записав у спільну базу зведення `Succeeded` із failures = 2, sent = 0. Таке зведення
+        // жовтить `jobs` на добу (`JobsHealthCheck.NotificationDigestWindow`, CL-5) — тобто тест
+        // падав лише тоді, коли виконувався після межі hh:05, і виглядав плаваючим. Те саме могли б
+        // зробити завислі/вичерпані/повільні задачі інших тестів (штучні годинники 2032–2037 тут ні
+        // до чого — це справжній «зараз»). На порожній базі чужих збоїв немає, тож і зведення о hh:05
+        // (якщо спрацює посеред тесту) не має failures > 0 — асерт «зелений» не послаблено, а
+        // вимога D-139 перевіряється на тому стані, для якого вона сформульована: свіжа інсталяція.
+        var database = SqlServerFixture.WithOwnDatabase("_health");
+        await database.InitializeAsync();
+        try
+        {
+            await AssertReadyGreenWithFullCheckListAsync(database);
+        }
+        finally
+        {
+            await database.DisposeAsync();
+        }
+    }
+
+    private static async Task AssertReadyGreenWithFullCheckListAsync(SqlServerFixture database)
+    {
+        using var app = new EcrApiFactory(database);
         using var client = app.CreateClient();
 
         var response = await client.GetAsync(new Uri("/health/ready", UriKind.Relative));
@@ -283,8 +310,8 @@ public sealed class HealthTests(SqlServerFixture sql)
 
         Assert.Equal(ExpectedChecks, names);
 
-        // ⚠ Падіння в CI (прогін 37286945514) дало лише «Degraded» без назви перевірки: база спільна для всієї
-        // колекції SqlServer, і жовтою перевірку робить стан, що лишили інші тести. Тому при падінні — хто і чому.
+        // ⚠ Падіння в CI (прогін 37286945514) дало лише «Degraded» без назви перевірки: тоді база була спільна для
+        // всієї колекції SqlServer, і жовтою перевірку робив стан, що лишили інші тести. При падінні — хто і чому.
         var notHealthy = report.GetProperty("checks")
             .EnumerateArray()
             .Where(c => c.GetProperty("status").GetString() != "Healthy")

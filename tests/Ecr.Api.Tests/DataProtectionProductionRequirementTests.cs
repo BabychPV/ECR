@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -289,6 +290,9 @@ public sealed class DataProtectionProductionStartupTests(SqlServerFixture sql)
 
             builder.UseEnvironment("Production");
             builder.ConfigureLogging(logging => logging.ClearProviders());
+
+            // Розклади стоять, але не спрацьовують (RecurringTriggerVeto, як у EcrApiFactory).
+            builder.ConfigureTestServices(RecurringTriggerVeto.Register);
         }
     }
 }

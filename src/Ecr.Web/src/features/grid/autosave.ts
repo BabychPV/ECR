@@ -31,7 +31,7 @@ import {
 export { hasFailedSave, noteSaveSucceeded, resetFailedSaves, useFailedSave } from './pendingStore';
 import { queryKeys } from '@/api/queryKeys';
 import type { TableSliceDto } from '@/api/types';
-import { withKnownVersions } from './edits';
+import { withKnownVersions } from './knownVersions';
 import { rejectionMarksOf } from './saveErrors';
 import { beginInFlight, deferUntilInFlightSettles, hasInFlight, splitByInFlight } from './inFlightEdits';
 import {
@@ -41,7 +41,7 @@ import {
   patchCells,
   sendPatchBeacon,
   type PendingEdit,
-} from './useCellPatch';
+} from './cellPatchRequest';
 
 /**
  * Оркестрація автозбереження grid (`B-35`, `#38`).

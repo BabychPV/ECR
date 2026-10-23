@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { isHeaderFinding } from '@/features/documents/inspector/inspectorModel';
+import { isHeaderFinding } from '@/features/documents/inspector/headerFinding';
 import { Alert, Badge, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';

@@ -1,5 +1,5 @@
-import { useEffect, useId, useState, type JSX } from 'react';
-import { Button, Group, Menu, Modal, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import { lazy, Suspense, useEffect, useId, useState, type JSX } from 'react';
+import { Menu, Stack, Text } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
 import type { DocumentSummary } from '@/api/types';
@@ -14,6 +14,15 @@ import {
   ChangeDocumentKeyPermission,
   changeDocumentBusinessKey,
 } from './api';
+
+/**
+ * Діалог — окремим чанком (`D-132`); вантажиться з першим відкриттям, на наведенні на пункт —
+ * заздалегідь. Стиль — `loadX`/`lazy(async () => ...)`, як у `DocumentPage.tsx`.
+ */
+const loadBusinessKeyChangeDialog = () => import('./BusinessKeyChangeDialog');
+const BusinessKeyChangeDialog = lazy(async () => ({
+  default: (await loadBusinessKeyChangeDialog()).BusinessKeyChangeDialog,
+}));
 
 /**
  * Чи має користувач ефективний грант **Write** (чи вищий) на проєкт.
@@ -164,6 +173,10 @@ export function useBusinessKeyChangeAction({
   const me = session.data;
 
   const [opened, setOpened] = useState(false);
+  // ⚠ Чанк діалогу — лише після першого відкриття; потім діалог лишається змонтованим, щоб закриття
+  // йшло тим самим переходом `Modal`, що й доти.
+  const [everOpened, setEverOpened] = useState(false);
+  if (opened && !everOpened) setEverOpened(true);
   const [newKey, setNewKey] = useState('');
   const [reason, setReason] = useState('');
 
@@ -270,6 +283,7 @@ export function useBusinessKeyChangeAction({
       aria-label={t('documents.changeKey')}
       aria-describedby={locked ? lockedReasonId : undefined}
       onClick={() => setOpened(true)}
+      onPointerEnter={() => void loadBusinessKeyChangeDialog()}
       data-change-business-key=""
     >
       {/* ⚠ Лише `span`-и: пункт меню — це `<button>`, і блоковий `div`/`p`
@@ -292,49 +306,25 @@ export function useBusinessKeyChangeAction({
     </Menu.Item>
   ) : null;
 
-  const dialog = allowed ? (
-    <Modal
-      opened={opened}
-      onClose={() => setOpened(false)}
-      title={t('documents.changeKeyTitle')}
-    >
-      <Stack gap="sm">
-        <TextInput
-          label={t('documents.newBusinessKey')}
-          description={t('documents.newBusinessKeyHint', { max: BusinessKeyMaxLength })}
-          value={newKey}
-          onChange={(event) => setNewKey(event.currentTarget.value)}
-          error={keyServerError}
-          data-autofocus
+  const dialog =
+    allowed && everOpened ? (
+      <Suspense fallback={null}>
+        <BusinessKeyChangeDialog
+          opened={opened}
+          onClose={() => setOpened(false)}
+          newKey={newKey}
+          onNewKeyChange={setNewKey}
+          reason={reason}
+          onReasonChange={setReason}
+          keyError={keyServerError}
+          reasonError={reasonServerError}
+          bannerError={dialogBannerError}
+          canSubmit={canSubmit}
+          isPending={change.isPending}
+          onConfirm={() => change.mutate()}
         />
-
-        <Textarea
-          label={t('workflow.reason')}
-          value={reason}
-          onChange={(event) => setReason(event.currentTarget.value)}
-          error={reasonServerError}
-          minRows={3}
-          autosize
-        />
-
-        {dialogBannerError !== null && <ErrorAlert error={dialogBannerError} />}
-
-        <Group justify="flex-end" mt="xs">
-          <Button variant="default" onClick={() => setOpened(false)} data-testid="business-key-cancel">
-            {t('common.cancel')}
-          </Button>
-          <Button
-            disabled={!canSubmit}
-            loading={change.isPending}
-            onClick={() => change.mutate()}
-            data-testid="business-key-confirm"
-          >
-            {t('documents.changeKey')}
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
-  ) : null;
+      </Suspense>
+    ) : null;
 
   const refusal =
     change.error !== null && isRekeyStale(change.error) ? (

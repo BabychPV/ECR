@@ -1,5 +1,6 @@
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
+import { isHeaderFinding } from './headerFinding';
 
 /**
  * Модель вкладки Issues інспектора документа (`UI-25`, макет
@@ -43,16 +44,11 @@ export interface InspectorIssueCounts {
   readonly warnings: number;
 }
 
-/** Правило знахідки шапки документа (`tableDefId` 0) — веде до панелі шапки. */
-export const HeaderFindingRule = 'ECR-HDR-0422';
+// Знахідка шапки — у власному модулі: її потребує й сама сторінка документа (`D-132`).
+export { HeaderFindingRule, isHeaderFinding } from './headerFinding';
 
 /** Підсумкова відмова подання з прихованими зауваженнями (`tableDefId` 0) — без переходу. */
 const SubmitBlockedRule = 'ECR-SUB-4221';
-
-/** Знахідка шапки документа: адреса — панель шапки, а не клітинка. */
-export function isHeaderFinding(finding: ValidationFindingDto): boolean {
-  return finding.tableDefId === 0 && finding.ruleCode === HeaderFindingRule;
-}
 
 /** Назва таблиці для заголовка групи: номер (код) і локалізована назва. */
 export function tableTitleOf(table: DocumentTableDto): string {

@@ -405,8 +405,8 @@ public sealed class RoleAssignmentScopeTests(SqlServerFixture sql)
 
         if (state is not null)
         {
-            // Подав bootstrap (Id 1): інакше затвердження зупинило б правило
-            // чотирьох очей, а не область дії.
+            // Подав bootstrap (Id 1), не тестовий користувач: до D-440 інакше затвердження
+            // зупинило б правило чотирьох очей, а не область дії (тепер його скасовано).
             var approval = new ApprovalState(b.DocumentId, b.SheetDefId, b.PeriodKey.Value);
             approval.Submit(1, Now);
             db.ApprovalStates.Add(approval);

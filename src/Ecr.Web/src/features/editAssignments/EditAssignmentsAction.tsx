@@ -3,7 +3,7 @@ import { Menu } from '@mantine/core';
 import type { DocumentSummary } from '@/api/types';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { t } from '@/shared/i18n';
-import { useDetailPanel } from '@/shared/ui/DetailDrawer';
+import { useUrlState } from '@/shared/ui/useUrlState';
 import type { ParticipantSheet } from './ParticipantDialogs';
 
 /**
@@ -15,6 +15,9 @@ const EditAssignmentsDrawer = lazy(async () => ({ default: (await loadDrawer()).
 
 /** `?panel=` шторки; константа дубльована свідомо, щоб не тягнути чанк у статичний граф сторінки. */
 const PanelId = 'edit-assignments';
+
+/** Параметр адреси шторки — той самий, що `DetailPanelParam` у `shared/ui/DetailDrawer.tsx`. */
+const DetailPanelParam = 'panel';
 
 interface EditAssignmentsActionArgs {
   readonly documentId: number;
@@ -48,7 +51,9 @@ export function canOpenEditAssignments(me: MeDto | undefined, document: Document
  */
 export function useEditAssignmentsAction({ documentId, document, sheets }: EditAssignmentsActionArgs): EditAssignmentsAction {
   const session = useSession();
-  const [panel, setPanel] = useDetailPanel();
+  // ⚠ `?panel=` напряму, а не `useDetailPanel` з `shared/ui/DetailDrawer`: той модуль несе саму шторку (Mantine
+  // `Drawer`), і пункт меню тягнув її в чанк маршруту документа (`D-132`), хоча шторка — лінива.
+  const [panel, setPanel] = useUrlState(DetailPanelParam);
   const [everOpened, setEverOpened] = useState(false);
 
   const allowed = canOpenEditAssignments(session.data, document);
