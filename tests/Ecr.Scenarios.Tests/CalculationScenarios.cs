@@ -1275,9 +1275,8 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
                     "Calculation.EditRule", "Calculation.Recalculate", "System.ViewHealth",
                 ]);
 
-            // ⛔ Другий користувач не для повноти сценарію: `MethodologyVersion.Publish`
-            // системно забороняє публікувати ВЛАСНУ правку (правило чотирьох очей,
-            // `D-40`). Одним обліковим записом цей ланцюг не проходиться взагалі.
+            // Другий користувач — розподіл ролями: у `admin` немає `Calculation.Publish`.
+            // (Доти його вимагали ще й чотири очі `D-40`; `D-440` їх скасував.)
             publisher = await Provisioning.AdministratorAsync(
                 setup, $"{prefix}Pub", ["Calculation.Publish", "Calculation.View"]);
 

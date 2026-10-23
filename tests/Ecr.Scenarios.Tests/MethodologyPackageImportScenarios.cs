@@ -10,11 +10,11 @@ namespace Ecr.Scenarios.Tests;
 /// <summary>
 /// Крок V (FEATURE-HSE301-VIEW §11.6): малий синтетичний пакет <c>ecr-methodology-package</c>
 /// створює версію-чернетку через <c>POST /api/v1/methodologies/import</c>, і ця версія
-/// публікується ЗВИЧАЙНОЮ дією публікації іншої людини — без обходу правил.
+/// публікується ЗВИЧАЙНОЮ дією публікації — без обходу правил.
 /// </summary>
 /// <remarks>
 /// ⛔ Імпорт пише лише чернетку. Золотий набір, правило відбору, вихід і прив'язку методолог
-/// додає звичайними діями конфігуратора, а публікує інший користувач (<c>D-40</c>). Тест
+/// додає звичайними діями конфігуратора і сам же публікує (<c>D-440</c>: чотири очі скасовано). Тест
 /// доводить, що імпортований вміст (формула з <c>@A</c> і <c>CST.K</c>, константа з вікном
 /// чинності) проходить усі перевірки публікації і рахує правильне число на золотому наборі.
 /// <para>
@@ -29,7 +29,7 @@ public sealed class MethodologyPackageImportScenarios(SqlServerFixture sql)
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Scenario", "MIMP")]
-    public async Task Імпортований_пакет_створює_чернетку_яку_публікує_інша_людина()
+    public async Task Імпортований_пакет_створює_чернетку_яку_публікує_сам_автор_D440()
     {
         using var app = new EcrApiFactory(sql);
 
@@ -41,9 +41,6 @@ public sealed class MethodologyPackageImportScenarios(SqlServerFixture sql)
                 "Template.Publish", "Calculation.View", "Calculation.EditFormula", "Calculation.EditConstant",
                 "Calculation.EditRule", "Calculation.Recalculate", "Calculation.Publish", "System.ViewHealth",
             ]);
-        var publisher = await Provisioning.AdministratorAsync(
-            app, "MIMPPub", ["Calculation.Publish", "Calculation.View"]);
-
         var doc = await DataEntryScenarios.ArrangeRealDocumentAsync(app, admin, "MIMP", calculatedColumns: ["OUT1"]);
         admin = doc.Admin;
 
@@ -131,13 +128,9 @@ public sealed class MethodologyPackageImportScenarios(SqlServerFixture sql)
             new { inputJson = Input(doc, tableInstanceId, 4m), expectedJson = """{"OUT1RESULT":8}""", tolerance = 0.0001m });
         await PutAsync(admin.Client, $"/api/v1/methodologies/{methodologyId}/bindings/{columnId}/OUT1RESULT", new { matchJson = "{}", isActive = true });
 
-        // ⛔ Автор імпорту опублікувати не може — чотири ока діють і для імпортованого.
-        var own = await admin.Client.PostAsJsonAsync(
-            new Uri($"/api/v1/methodologies/{methodologyId}/versions/{versionId}/publish", UriKind.Relative),
-            new { changeReason = "MIMP", effectiveFrom = from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) });
-        Assert.Equal(HttpStatusCode.Conflict, own.StatusCode);
-
-        var published = await publisher.Client.PostAsJsonAsync(
+        // ⛔ D-440: автор імпорту з правом Calculation.Publish публікує власну версію сам
+        // (доти — 409, чотири очі). Мутація: повернути відмову автору — 409, тест червоний.
+        var published = await admin.Client.PostAsJsonAsync(
             new Uri($"/api/v1/methodologies/{methodologyId}/versions/{versionId}/publish", UriKind.Relative),
             new { changeReason = "MIMP: імпорт з AF", effectiveFrom = from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) });
         Assert.True(
