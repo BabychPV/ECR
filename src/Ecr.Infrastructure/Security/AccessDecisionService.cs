@@ -657,8 +657,15 @@ public sealed class AccessDecisionService(
     /// D-443: діючі надання учасника в документах — з тих самих фактів, що й рішення про запис
     /// (<see cref="EditAssignmentFactsReader"/>). Без ознаки профілю чи для інтеграції — порожньо без бази.
     /// </summary>
+    /// <param name="profile">Профіль учасника.</param>
+    /// <param name="documentIds">Документи; для <paramref name="locked"/> — рівно один.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <param name="locked">
+    /// <c>true</c> — факти під <c>REPEATABLEREAD, ROWLOCK</c> (<see cref="EditAssignmentFactsReader"/>, той самий шлях,
+    /// що гейт запису <c>DelegatedWrite</c>): лише всередині транзакції дії, див. <see cref="WithParticipationAsync"/>.
+    /// </param>
     private async Task<IReadOnlyDictionary<long, IReadOnlyList<ParticipationGrant>>> ParticipationGrantsAsync(
-        AccessProfile profile, IReadOnlyCollection<long> documentIds, CancellationToken ct)
+        AccessProfile profile, IReadOnlyCollection<long> documentIds, CancellationToken ct, bool locked = false)
     {
         if (!profile.HasDocumentParticipations || profile.IsIntegrationWriter || documentIds.Count == 0)
         {
@@ -666,7 +673,7 @@ public sealed class AccessDecisionService(
         }
 
         var facts = await EditAssignmentFactsReader
-            .LoadAsync(db, documentIds, profile.UserId, forUpdate: false, ct)
+            .LoadAsync(db, documentIds, profile.UserId, forUpdate: locked, ct)
             .ConfigureAwait(false);
 
         var now = clock.UtcNow;
@@ -2299,6 +2306,14 @@ public sealed class AccessDecisionService(
     /// <remarks>
     /// ⚠ Лише для профілю-учасника, документа з передачами (ознака з того самого запиту умов) і без заборони
     /// проєкту; решта не платить нічого. Знімок шаблону — лише заради коду аркуша, якщо його ще немає.
+    ///
+    /// ⛔ D-443 debt: усередині транзакції дії (подання, затвердження, повернення в роботу, правка погоджувача —
+    /// усі приймають рішення ще раз ПІСЛЯ блокування аркуша) надання читаються під спільними
+    /// <c>REPEATABLEREAD, ROWLOCK</c>, як факти гейта запису (<c>IEditAssignmentStore.ReadFactsForGateAsync</c>).
+    /// Доти читання йшло знімком RCSI: відкликання чи зниження рівня, зафіксоване ПІСЛЯ рішення під блокуванням і
+    /// ДО коміту дії, лишалось непоміченим — подання/підпис фіксувались за наданням, якого вже не було. Тепер
+    /// зафіксоване раніше видно (блокуюче читання не бере знімок), а зняття, що приходить пізніше, чекає коміту дії.
+    /// Поза транзакцією (швидка відмова до блокування, читання) — знімок, як і доти: там нічого не пишеться.
     /// </remarks>
     private async Task<CellAccessContext> WithParticipationAsync(
         AccessProfile profile, long documentId, CellAccessContext context, CancellationToken ct)
@@ -2311,7 +2326,8 @@ public sealed class AccessDecisionService(
             return context;
         }
 
-        var grants = (await ParticipationGrantsAsync(profile, [documentId], ct).ConfigureAwait(false))
+        var locked = db.Database.CurrentTransaction is not null;
+        var grants = (await ParticipationGrantsAsync(profile, [documentId], ct, locked).ConfigureAwait(false))
             .TryGetValue(documentId, out var mine) ? mine : [];
         if (grants.Count == 0)
         {
