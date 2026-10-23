@@ -84,12 +84,9 @@ public sealed partial class PermitGroupGuardTests
         // Свіжість знімка гарантує сам споживач (EnsureFreshAsync) або спільні помічники порту, що кличуть її всередині:
         // `LookupTargetMatcher.EnsureFreshOnMismatchAsync` (перевірки належності) і `LookupTargetEntries.ListAsync` (читання складу).
         // `SourceEventMapSupport.BuildSpecsAsync(` - лише пересилає резолвер у `SourceEventMapHandlers`, де є `EnsureFreshOnMismatchAsync`.
-        var freshness = new Regex(
-            @"EnsureFreshAsync\(|EnsureFreshOnMismatchAsync\(|LookupTargetEntries\s*\.ListAsync\(|SourceEventMapSupport\s*\.BuildSpecsAsync\(",
-            RegexOptions.None,
-            TimeSpan.FromSeconds(5));
+        // ⛔ Виклик, а не підрядок: коментарі (`//`, `///`, `/* */`) і рядкові літерали вирізаються, імена - з межею слова (`\b`).
         var offenders = consumers
-            .Where(f => !freshness.IsMatch(WithoutLineComments(f.Text)))
+            .Where(f => !CallsFreshness(f.Text))
             .Select(f => f.Path)
             .Order(StringComparer.Ordinal)
             .ToList();
@@ -102,8 +99,131 @@ public sealed partial class PermitGroupGuardTests
                         || f.Path.EndsWith("/Permits/Groups/LookupTargetEntries.cs", StringComparison.Ordinal))
             .ToList();
         Assert.Equal(2, helpers.Count);
-        Assert.All(helpers, f => Assert.Contains("EnsureFreshAsync(", WithoutLineComments(f.Text), StringComparison.Ordinal));
+        Assert.All(helpers, f => Assert.True(FreshCall().IsMatch(CodeOnly(f.Text)), $"{f.Path}: немає виклику EnsureFreshAsync("));
     }
+
+    /// <summary>
+    /// Самоперевірка сторожа свіжості: коментар, документ-коментар, блок-коментар, рядковий літерал і суфіксне ім'я НЕ є викликом;
+    /// справжній виклик (також з пробілом перед дужкою і через помічник) - так. Без цього сторож зеленів би на підрядку в коментарі.
+    /// </summary>
+    [Theory]
+    [InlineData("// await resolver.EnsureFreshAsync(ct);", false)]
+    [InlineData("/// <see cref=\"X.EnsureFreshAsync(System.Threading.CancellationToken)\"/>", false)]
+    [InlineData("/* await r.EnsureFreshAsync(ct); */ var x = 1;", false)]
+    [InlineData("var s = \"EnsureFreshAsync(\"; var v = @\"EnsureFreshOnMismatchAsync(\";", false)]
+    [InlineData("await r.NotEnsureFreshAsync(ct);", false)]
+    [InlineData("await r.EnsureFreshAsync(ct);", true)]
+    [InlineData("await r.EnsureFreshAsync (ct);", true)]
+    [InlineData("await LookupTargetMatcher.EnsureFreshOnMismatchAsync(r, ct);", true)]
+    [InlineData("var e = await LookupTargetEntries\n    .ListAsync(r, ct);", true)]
+    [InlineData("// x\nawait r.EnsureFreshAsync(ct); // y", true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Сторож_свіжості_бачить_лише_виклик_у_коді(string source, bool expected)
+        => Assert.Equal(expected, CallsFreshness(source));
+
+    private static bool CallsFreshness(string text)
+    {
+        var code = CodeOnly(text);
+        return FreshCall().IsMatch(code)
+               || FreshOnMismatchCall().IsMatch(code)
+               || HelperCall().IsMatch(code);
+    }
+
+    /// <summary>Код без коментарів (<c>//</c>, <c>///</c>, <c>/* */</c>) і рядкових/символьних літералів; переноси рядків лишаються.</summary>
+    private static string CodeOnly(string text)
+    {
+        var sb = new System.Text.StringBuilder(text.Length);
+        var i = 0;
+        while (i < text.Length)
+        {
+            var c = text[i];
+            var next = i + 1 < text.Length ? text[i + 1] : '\0';
+            if (c == '/' && next == '/')
+            {
+                while (i < text.Length && text[i] != '\n')
+                {
+                    i++;
+                }
+            }
+            else if (c == '/' && next == '*')
+            {
+                i += 2;
+                while (i < text.Length && !(text[i] == '*' && i + 1 < text.Length && text[i + 1] == '/'))
+                {
+                    if (text[i] == '\n')
+                    {
+                        sb.Append('\n');
+                    }
+
+                    i++;
+                }
+
+                i = Math.Min(text.Length, i + 2);
+            }
+            else if (c == '"' || ((c == '@' || c == '$') && (next == '"' || (i + 2 < text.Length && text[i + 2] == '"' && (next == '@' || next == '$')))))
+            {
+                // Рядок: `"..."`, `@"..."` (подвоєні лапки), `$"..."`, `$@"..."`; сирі `"""` читаються як порожній + решта (достатньо для сторожа).
+                var verbatim = false;
+                while (text[i] != '"')
+                {
+                    verbatim |= text[i] == '@';
+                    i++;
+                }
+
+                i++;
+                while (i < text.Length)
+                {
+                    if (!verbatim && text[i] == '\\')
+                    {
+                        i += 2;
+                        continue;
+                    }
+
+                    if (text[i] == '"')
+                    {
+                        if (verbatim && i + 1 < text.Length && text[i + 1] == '"')
+                        {
+                            i += 2;
+                            continue;
+                        }
+
+                        break;
+                    }
+
+                    if (text[i] == '\n')
+                    {
+                        sb.Append('\n');
+                    }
+
+                    i++;
+                }
+
+                i++;
+            }
+            else if (c == '\'' && next != '\0')
+            {
+                // Символьний літерал `'x'` / `'\n'`; апостроф у решті коду трапляється лише так.
+                i += next == '\\' ? 4 : 3;
+            }
+            else
+            {
+                sb.Append(c);
+                i++;
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    [GeneratedRegex(@"\bEnsureFreshAsync\s*\(")]
+    private static partial Regex FreshCall();
+
+    [GeneratedRegex(@"\bEnsureFreshOnMismatchAsync\s*\(")]
+    private static partial Regex FreshOnMismatchCall();
+
+    [GeneratedRegex(@"\b(?:LookupTargetEntries\s*\.\s*ListAsync|SourceEventMapSupport\s*\.\s*BuildSpecsAsync)\s*\(")]
+    private static partial Regex HelperCall();
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
