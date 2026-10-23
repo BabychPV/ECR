@@ -23845,6 +23845,11 @@ export interface components {
              *     тож для звуженого читача — `null` (`DocumentSheetVisibility.For`). Заповнює лише шлях картки (`FindAsync`).
              */
             ownerUserId?: null | number;
+            /** @description AN-63: періодичність проєкту документа — ім'я `Project.PeriodKind`: Monthly/Quarterly/Yearly/Custom (рядок, а не enum:
+             *     nullable-enum у схемі додає `null` у спільний `PeriodKind` і ламає типи клієнта) — адитивне поле;
+             *     метадані проєкту не секрет, звуження читача його не знімає. Документ власної періодичності не має; `periodKey` не віддається
+             *     (це вісь запиту). Заповнюють і картка, і перелік; `null` лише коли проєкт не знайдено. */
+            periodKind?: null | string;
             /**
              * Format: int32
              * @description Проєкт.

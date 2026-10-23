@@ -48,6 +48,10 @@ public sealed class PermitGroupStore(EcrDbContext db) : IPermitGroupStore
            || await db.HeaderFieldDefs.AsNoTracking().AnyAsync(f => f.LookupRegistryDefId == registryDefId, ct).ConfigureAwait(false);
 
     /// <inheritdoc />
+    public bool IsForeignKeyViolation(Exception failure)
+        => failure is DbUpdateException { InnerException: Microsoft.Data.SqlClient.SqlException { Number: 547 } };
+
+    /// <inheritdoc />
     public async Task RemoveAsync(PermitGroup group, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(group);

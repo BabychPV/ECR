@@ -84,6 +84,21 @@ internal static class PermitGroupErrors
                 ["templates"] = templates.ToString(CultureInfo.InvariantCulture),
             });
 
+    /// <summary>
+    /// <c>409 ECR-PRM-4098 referencedByHistory</c>: живих колонок/полів немає (лічильники 0), але групу тримають історичні посилання -
+    /// м'яко видалені колонки/поля шаблонів (FK Restrict) або інші об'єкти; свій ключ, щоб не казати «шаблони (0)».
+    /// </summary>
+    /// <param name="code">Код групи.</param>
+    internal static BusinessRuleException ReferencedByHistory(string code)
+        => new(
+            ErrorCodes.PermitGroupInUse,
+            $"Групу дозволів «{code}» не можна видалити: на неї лишились історичні посилання (м'яко видалені колонки/поля шаблонів). Її можна лише деактивувати.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRM-4098.referencedByHistory",
+                ["code"] = code,
+            });
+
     /// <summary><c>409 ECR-PRM-4099 changed</c>: групу змінили після читання.</summary>
     /// <param name="code">Код групи.</param>
     /// <param name="rowVersion">Актуальний токен.</param>

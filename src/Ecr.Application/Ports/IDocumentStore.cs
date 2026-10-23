@@ -81,6 +81,12 @@ namespace Ecr.Application.Ports;
 /// та сама функція, що в обробниках <c>edit-assignments</c>). Клієнт показує пункт меню лише за ним. Лише картка.
 /// </param>
 /// <param name="ProjectIsReadOnly">Проєкт архівується/в архіві; не контракт (<c>JsonIgnore</c>), потрібне для <paramref name="CanManageEditAccess"/>.</param>
+/// <param name="PeriodKind">
+/// AN-63: періодичність проєкту документа — ім'я <c>Project.PeriodKind</c>: Monthly/Quarterly/Yearly/Custom (рядок, а не enum:
+/// nullable-enum у схемі додає <c>null</c> у спільний <c>PeriodKind</c> і ламає типи клієнта) — адитивне поле;
+/// метадані проєкту не секрет, звуження читача його не знімає. Документ власної періодичності не має; <c>periodKey</c> не віддається
+/// (це вісь запиту). Заповнюють і картка, і перелік; <c>null</c> лише коли проєкт не знайдено.
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -103,7 +109,8 @@ public sealed record DocumentSummary(
     string? TemplateVersion = null,
     int? OwnerUserId = null,
     bool? CanManageEditAccess = null,
-    [property: System.Text.Json.Serialization.JsonIgnore] bool ProjectIsReadOnly = false);
+    [property: System.Text.Json.Serialization.JsonIgnore] bool ProjectIsReadOnly = false,
+    string? PeriodKind = null);
 
 /// <summary>Аркуш складу документа в переліку: код, назва, стан за період.</summary>
 /// <param name="Code">Код аркуша (<c>SheetDef.Code</c>); він же ключ у <c>DocumentSummary.SheetStates</c>.</param>
