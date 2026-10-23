@@ -37,10 +37,21 @@ public sealed class AccessDecisionService(
     /// <inheritdoc />
     public async Task<AccessProfile> BuildProfileAsync(int userId, CancellationToken ct)
     {
+        // ⛔ D-443 debt (кеш на кількох вузлах): ознака «учасник документа» читається ТУТ, на кожен запит, у тому
+        // самому зверненні, що й штамп (підзапит EXISTS по IX_EditAssignmentRecipient_User, 0 нових звернень), і
+        // входить у ключ кешу — як ревізія групових призначень (`GroupsFingerprintAsync`). Доти вона рахувалась лише
+        // при побудові профілю: надання, видане на ІНШОМУ вузлі, скидало кеш лише там (`InvalidateUser` — пам'ять
+        // процесу), і тут новий учасник не бачив документа до сплину профілю (до 60 хв). Тепер перший же запит після
+        // коміту надання (чи зняття останнього) адресує інший запис кешу — на кожному вузлі, без спільного лічильника.
         var account = await db.Users
             .AsNoTracking()
             .Where(u => u.Id == userId)
-            .Select(u => new { u.SecurityStamp, u.IsActive })
+            .Select(u => new
+            {
+                u.SecurityStamp,
+                u.IsActive,
+                Participates = db.EditAssignmentRecipients.Any(r => r.UserId == u.Id),
+            })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -63,10 +74,15 @@ public sealed class AccessDecisionService(
         var groupSids = GroupSidsFor(userId);
         var groupsFingerprint = await GroupsFingerprintAsync(groupSids, ct).ConfigureAwait(false);
 
+        // ⚠ Ознака учасника — у ТОЙ САМИЙ третій компонент ключа, що й відбиток груп: і ключ `IMemoryCache`, і
+        // `AccessProfile.CacheKey` будуються з одного рядка (`Q-187`), а профіль — саме з цього значення ознаки.
+        var participates = account.Participates;
+        var cacheVariant = ParticipationKeyed(groupsFingerprint, participates);
+
         var profile = await profileCache
             .GetOrCreateAsync(
-                userId, account.SecurityStamp, groupsFingerprint,
-                token => LoadAsync(userId, account.SecurityStamp, groupSids, groupsFingerprint, token), ct)
+                userId, account.SecurityStamp, cacheVariant,
+                token => LoadAsync(userId, account.SecurityStamp, groupSids, cacheVariant, participates, token), ct)
             .ConfigureAwait(false);
 
         // ⛔ Право запису інтеграції — ПОВЕРХ кешованого профілю, на кожен
@@ -183,6 +199,18 @@ public sealed class AccessDecisionService(
             : $"{Fingerprint(groupSids)}.{revision.Assignments}.{revision.LastAssignment}.{revision.Grants}.{revision.LastGrant}";
     }
 
+    /// <summary>
+    /// Третій компонент ключа кешу профілю: відбиток груп плюс ознака учасника документа (D-443 debt).
+    /// </summary>
+    /// <param name="groupsFingerprint">Відбиток груп із ревізією (<see cref="GroupsFingerprintAsync"/>).</param>
+    /// <param name="participates">Чи має користувач бодай один рядок виконавця передачі/надання.</param>
+    /// <remarks>
+    /// ⚠ Без учасника — рядок відбитку БЕЗ змін: ключі наявних профілів не зсуваються, а «так» і «ні» не можуть
+    /// дати однаковий ключ (суфікс містить `|`, якого в шістнадцятковому відбитку груп немає).
+    /// </remarks>
+    private static string ParticipationKeyed(string groupsFingerprint, bool participates)
+        => participates ? groupsFingerprint + "|participant" : groupsFingerprint;
+
     /// <inheritdoc />
     public Task InvalidateProfileAsync(int userId, CancellationToken ct)
     {
@@ -246,11 +274,14 @@ public sealed class AccessDecisionService(
     /// тут означало б друге формулювання того самого правила поруч із
     /// ключем кешу, який на ньому й тримається.
     /// </param>
-    /// <param name="groupsFingerprint">Той самий відбиток, під яким запис ляже в кеш.</param>
+    /// <param name="groupsFingerprint">Той самий третій компонент ключа, під яким запис ляже в кеш.</param>
+    /// <param name="participates">
+    /// Ознака учасника, прочитана разом зі штампом (<see cref="BuildProfileAsync"/>) — та сама, що в ключі кешу.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     private async Task<AccessProfile> LoadAsync(
         int userId, string securityStamp, IReadOnlyList<string> groupSids, string groupsFingerprint,
-        CancellationToken ct)
+        bool participates, CancellationToken ct)
     {
         // ⚠ «Сьогодні» тут — у UTC, і це СВІДОМО, а не забутий переклад у пояс
         // майданчика (`H-13`, `D2-78`). Строкове призначення ролі належить
@@ -440,13 +471,9 @@ public sealed class AccessDecisionService(
             };
         }
 
-        // ✎ D-443: ознака «учасник якогось документа» — ОДИН EXISTS по IX_EditAssignmentRecipient_User на побудову
-        // профілю (кешується разом із профілем). Самі надання читаються з бази на кожне рішення.
-        var participates = await db.EditAssignmentRecipients
-            .AsNoTracking()
-            .AnyAsync(r => r.UserId == userId, ct)
-            .ConfigureAwait(false);
-
+        // ✎ D-443: ознака «учасник якогось документа» — з `BuildProfileAsync` (EXISTS у запиті штампа, на кожен
+        // запит) і в ключі кешу: профіль ніколи не лежить у кеші з ознакою, що розійшлася з базою (D-443 debt).
+        // Самі надання читаються з бази на кожне рішення.
         // ⛔ Успадкування Project → Sheet → Table → Column тут НЕ розгортається
         // в мапу: його робить EditRules.Effective на кожному рішенні. Причина
         // не в економії — розгорнута мапа зафіксувала б структуру шаблону на
