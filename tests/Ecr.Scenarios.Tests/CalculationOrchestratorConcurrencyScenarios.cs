@@ -66,8 +66,9 @@ public sealed class CalculationOrchestratorConcurrencyScenarios(SqlServerFixture
                 "Calculation.EditRule", "Calculation.Recalculate", "System.ViewHealth",
             ]);
 
-        // ⛔ Публікує ІНШИЙ користувач — правило чотирьох очей (`D-40`)
-        // забороняє публікувати власну правку.
+        // Публікує окремий користувач із правом `Calculation.Publish`: у адміністратора
+        // вище цього права немає. ✎ 2026-10-23: чотири очі (`D-40`) скасовано `D-440` —
+        // автор із цим правом опублікував би сам.
         var publisher = await Provisioning.AdministratorAsync(
             app, "Q249Pub", ["Calculation.Publish", "Calculation.View"]);
 

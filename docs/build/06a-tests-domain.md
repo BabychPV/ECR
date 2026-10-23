@@ -567,7 +567,7 @@ public sealed class PeriodAccessRuleTests
 | `Dictionaries/RegistryEntryTests.cs` | 4 | темпоральність: `IsValidOn` для дат усередині і поза інтервалом |
 | `Documents/TableRowTests.cs` | 1 | `Touch` піднімає `ModifiedAt`; soft delete не видаляє |
 | `Documents/CellValueTests.cs` | 1 | `Apply` замінює значення; `ToData` віддає рівно те, що записано |
-| `Calculations/MethodologyVersionTests.cs` | 4 | публікація автором останньої правки відхиляється (`ECR-CALC-0409`); публікація без `ChangeReason` і `EffectiveFrom` неможлива |
+| `Calculations/MethodologyVersionTests.cs` | 4 | ✎ 2026-10-23 (`D-440`): автор публікує власну версію (чотири очі скасовано, `ECR-CALC-0409` прибрано); публікація без `ChangeReason` і `EffectiveFrom` неможлива |
 | `Security/ResourceGrantTests.cs` | 3 | `IsDeny` виграє над будь-яким рівнем |
 | `Workflow/ApprovalStateTests.cs` | 3 | `Reopen` без причини відхиляється; перехід `Approved → Draft` лише через `Reopen` |
 
@@ -757,13 +757,13 @@ namespace Ecr.Domain.Tests.Calculations;
 
 /// <summary>
 /// Публікація версії методології — найнебезпечніша операція в системі, бо
-/// змінює вже подані числа. Тому правило чотирьох очей перевіряється
-/// **системно** (D-40), а не інструкцією.
+/// змінює вже подані числа. ✎ 2026-10-23: правило чотирьох очей (D-40)
+/// скасовано `D-440` — хто публікує, вирішують лише права (`Calculation.Publish`).
 /// </summary>
 public sealed class MethodologyVersionTests
 {
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    public void Публікація_автором_останньої_правки_відхиляється()
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)] [Trait("Decision", "D-440")]
+    public void D440_автор_публікує_власну_версію()
         => Assert.Fail("not implemented");
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]

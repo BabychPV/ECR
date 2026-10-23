@@ -300,8 +300,8 @@ public sealed class SubProjectGrantScopeTests(SqlServerFixture sql)
 
         if (state is { } target)
         {
-            // Подав bootstrap (Id 1), не тестовий користувач: інакше
-            // затвердження зупинило б правило чотирьох очей, а не S2.
+            // Подав bootstrap (Id 1), не тестовий користувач: до D-440 інакше
+            // затвердження зупинило б правило чотирьох очей, а не S2 (тепер його скасовано).
             var approval = new ApprovalState(b.DocumentId, b.SheetDefId, b.PeriodKey.Value);
             approval.Submit(1, Now);
             if (target == DocumentStatus.Approved)

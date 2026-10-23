@@ -563,8 +563,10 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
     /// документі. Ланцюг тут повний і жоден крок не підмінено фікстурою:
     /// шаблон → проєкт → документ → значення в комірці → методологія →
     /// константа → формула → вихід → правило відбору → золотий набір →
-    /// прив'язка до колонки → публікація іншим користувачем (чотири очі,
-    /// `D-40`) → перерахунок → число.
+    /// прив'язка до колонки → публікація користувачем із правом
+    /// `Calculation.Publish` → перерахунок → число. ✎ 2026-10-23: чотири очі
+    /// (`D-40`) скасовано `D-440`; публікатор тут окремий лише тому, що права
+    /// розділено між ролями, а не тому, що автор не може опублікувати сам.
     ///
     /// ⚠ Число вибране так, щоб його не можна було отримати випадково:
     /// <c>4 × 2.5 = 10</c> — жодне з двох джерел не дорівнює результату, тож ані
@@ -1564,7 +1566,10 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         Assert.True(response.StatusCode == HttpStatusCode.OK, $"прив'язка {outputCode}: {response.StatusCode}: {app.ErrorsText}");
     }
 
-    /// <summary>Публікує версію ІНШИМ користувачем — чотири очі (<c>D-40</c>).</summary>
+    /// <summary>
+    /// Публікує версію клієнтом із правом <c>Calculation.Publish</c>. ✎ 2026-10-23: чотири очі
+    /// (<c>D-40</c>) скасовано <c>D-440</c> — окремий публікатор тут через розподіл ролей, не через заборону.
+    /// </summary>
     private static async Task PublishAsync(
         EcrApiFactory app, HttpClient publisher, int methodologyId, int versionId, string effectiveFrom)
     {
