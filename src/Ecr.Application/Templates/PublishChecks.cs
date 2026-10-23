@@ -859,11 +859,9 @@ public static class PublishChecks
     public static IReadOnlySet<string> GuardedRegistryFormNames => RegistryFormNames;
 
     private static readonly FrozenSet<string> RegistryFormNames =
-        new[]
-        {
-            RegistryForms.Field, RegistryForms.Find, RegistryForms.One, RegistryForms.Sum,
-            RegistryForms.Average, RegistryForms.Minimum, RegistryForms.Maximum, RegistryForms.Count,
-        }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+        Ecr.Expressions.Functions.FunctionRegistry.Names
+            .Where(n => n.StartsWith("REG", StringComparison.OrdinalIgnoreCase))
+            .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Результат обходу виразу: чи є форма <c>REG*</c>; колонки, на які посилаються АРГУМЕНТИ форм; усі колонки, на які

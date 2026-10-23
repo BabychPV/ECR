@@ -441,5 +441,56 @@ public sealed class PublishGroupLookupFormulasTests
         Assert.Single(Check(fixture.Version));
     }
 
+    // ---- PG-P3b №2: перелік REG*-форм - з реєстру функцій, а не зашитий ----
+
+    public static TheoryData<string> RegistryFunctionNames()
+    {
+        var data = new TheoryData<string>();
+        foreach (var name in Ecr.Expressions.Functions.FunctionRegistry.Names.Where(
+                     n => n.StartsWith("REG", StringComparison.OrdinalIgnoreCase)).Order(StringComparer.Ordinal))
+        {
+            data.Add(name);
+        }
+
+        return data;
+    }
+
+    /// <summary>
+    /// Сторож: перелік форм, що їх перевіряє публікація, збігається з УСІМА <c>REG*</c>-функціями реєстру діалекту шаблонів і
+    /// містить усі константи <c>RegistryForms</c>. Нова <c>REG*</c>-функція в реєстрі без оновлення перевірки -> червоний.
+    /// Мутація: повернути зашиті вісім імен у <c>RegistryFormNames</c> і додати в реєстр дев'яту - червоніє
+    /// <see cref="Кожна_REG_функція_реєстру_над_колонкою_групи_відхиляється"/> (для REGX); без нової функції - червоніє, якщо видалити ім'я.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Перелік_форм_REG_береться_з_реєстру_функцій()
+    {
+        var registry = Ecr.Expressions.Functions.FunctionRegistry.Names
+            .Where(n => n.StartsWith("REG", StringComparison.OrdinalIgnoreCase)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.NotEmpty(registry);
+        Assert.True(registry.SetEquals(PublishChecks.GuardedRegistryFormNames),
+            $"реєстр: {string.Join(",", registry.Order())}; перевірка: {string.Join(",", PublishChecks.GuardedRegistryFormNames.Order())}");
+
+        var constants = new[]
+        {
+            Ecr.Expressions.Evaluation.RegistryForms.Field, Ecr.Expressions.Evaluation.RegistryForms.Find,
+            Ecr.Expressions.Evaluation.RegistryForms.One, Ecr.Expressions.Evaluation.RegistryForms.Sum,
+            Ecr.Expressions.Evaluation.RegistryForms.Average, Ecr.Expressions.Evaluation.RegistryForms.Minimum,
+            Ecr.Expressions.Evaluation.RegistryForms.Maximum, Ecr.Expressions.Evaluation.RegistryForms.Count,
+        };
+        Assert.All(constants, c => Assert.Contains(c, PublishChecks.GuardedRegistryFormNames));
+    }
+
+    [Theory]
+    [MemberData(nameof(RegistryFunctionNames))]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Кожна_REG_функція_реєстру_над_колонкою_групи_відхиляється(string function)
+    {
+        var diagnostic = Assert.Single(Check(Build(GroupRegistry, $"{function}('PRM_WATER', [PermitNumber])").Version));
+
+        Assert.Equal("T7.PermitNumber", diagnostic.MessageParams!["columnCode"]);
+    }
+
     private static LocalizedText Name(string value) => new(new Dictionary<string, string> { ["en"] = value });
 }
