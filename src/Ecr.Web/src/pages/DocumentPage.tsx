@@ -34,7 +34,7 @@ import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/doc
 import { DocumentProgress } from '@/features/documents/DocumentProgress';
 import { useDocumentPending } from '@/features/grid/autosave';
 import type { HeldEdit } from '@/features/grid/pendingStore';
-import { isEditable } from '@/features/workflow/SheetActions';
+import { editsDeferToServer, isEditable } from '@/features/workflow/SheetActions';
 import { useCalculationsStale } from '@/features/methodologies/staleCalculations';
 import { UnmatchedRowsBanner } from '@/features/documents/UnmatchedRowsBanner';
 import { useUnmatchedRows } from '@/features/documents/useUnmatchedRows';
@@ -507,6 +507,12 @@ export function DocumentPage(): JSX.Element {
    */
   const narrow = useNarrowScreen();
   const readOnly = !isEditable(state) || locksDataActions(lock) || narrow;
+  /*
+   * ✎ D-442: значення ПОДАНОГО аркуша править погоджувач поточного кроку — це знає лише сервер, тож сітку
+   * не замикаємо цілком: рішення зрізу дають погоджувачеві редаговні комірки, решті — `DocumentSubmitted`
+   * (штриховка, замок, підказка, як і доти). Дії зі зміни даних (`readOnly` вище) лишаються закриті.
+   */
+  const gridReadOnly = readOnly && !(editsDeferToServer(state) && !locksDataActions(lock) && !narrow);
 
   // ⚠ Викликається БЕЗУМОВНО і до будь-якого розгалуження показу: правило
   // хуків не знає про `AsyncBoundary` нижче.
@@ -671,7 +677,7 @@ export function DocumentPage(): JSX.Element {
                 issues={null}
                 onShowIssues={() => undefined}
               />
-              <DocumentSaveState readOnly={readOnly} />
+              <DocumentSaveState readOnly={gridReadOnly} />
               {/* RC15-C: банер «результати застаріли» під рядком уже каже те саме - бейдж за нього не дублюється. */}
               {calculationsStale && document.resultsStale !== true && (
                 <Badge color="statusWarning" variant="light" role="status" data-testid="document-methodology-stale">
@@ -909,7 +915,8 @@ export function DocumentPage(): JSX.Element {
                   documentId={documentId}
                   periodKey={periodKey}
                   periodEnd={periodEnd}
-                  readOnly={readOnly}
+                  readOnly={gridReadOnly}
+                  sheetState={state}
                   tables={active.tables}
                 />
               )}

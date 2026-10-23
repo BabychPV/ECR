@@ -95,6 +95,8 @@ function columnText(change: CellChange): string {
 /** Походження зміни: піктограма + слово макета (`ORIGIN_LABEL`/`ORIGIN_ICON`). */
 const OriginIcons: Readonly<Record<string, string>> = {
   UserEdit: 'M4 20l4-1L19 8l-3-3L5 16z',
+  // ✎ D-442: правка погоджувача — олівець із галочкою: та сама правка людини, позначена погодженням.
+  ApproverEdit: 'M4 20l4-1L15 8l-3-3L1 16zM14 18l2.5 2.5L21 16',
   Import: 'M12 16V4M7 9l5-5 5 5M4 20h16',
   // ✎ AN-114: імпорт, що свідомо перезаписав пізнішу чужу правку, — та сама
   // стрілка імпорту, назва з каталогу каже решту.

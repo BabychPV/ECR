@@ -70,6 +70,11 @@ export function cellStateOf(
   // робив: ні заштрихованого фону, ні `cursor: not-allowed`, ні підказки,
   // ЖОДНОГО сигналу в самій комірці (єдині натяки — бейдж статусу аркуша і
   // зниклий тулбар імпорту, обидва ПОЗА сіткою).
+  //
+  // ✎ D-442: для ПОДАНОГО аркуша сітку цілком більше не замикають (`DocumentPage`): погоджувачеві
+  // поточного кроку сервер віддає комірки редаговними, решті — відмову `DocumentSubmitted`, і стан
+  // `readOnly` тоді приходить із `decide()`. Прапорець лишається для затвердженого аркуша й закритого
+  // періоду/архіву.
   gridReadOnly = false,
 
   // ⛔ `CL-03`: тут стояв `slice.rows.find(...)` — лінійний пошук на КОЖНУ
@@ -110,6 +115,29 @@ export function cellStateClass(state: CellStateName | null): string {
   if (state === null) return '';
 
   return `ecr-cell ecr-cell--${kebab(state)}`;
+}
+
+/**
+ * ✎ D-442: клас сітки аркуша, у якому «лише читання» показується БЕЗ штриховки — затверджений аркуш
+ * (макет `docs/design/hybrid/screen-document.js`: «Figures keep full contrast; nothing is hatched»).
+ *
+ * ⛔ Знімається ЛИШЕ штриховка (`cell-states.css`, `.ecr-sheet-locked`): замок у куті комірки й
+ * `cursor: not-allowed` лишаються — це другий носій стану за `D-128`, без якого «лише читання»
+ * трималося б на самому сірому фоні.
+ *
+ * ⚠ Поданий аркуш сюди не входить: погоджувачеві поточного кроку сервер віддає комірки редаговними
+ * (штриховки там і так немає), а решті — `DocumentSubmitted`, і для них штриховка лишається.
+ */
+export function sheetLockClass(sheetState: string | undefined): string | undefined {
+  return sheetState === 'Approved' ? 'ecr-sheet-locked' : undefined;
+}
+
+/**
+ * ✎ D-442: чи закритий СКЛАД рядків аркуша (додати / видалити рядок) за станом аркуша. Погоджувач править
+ * лише значення поданого аркуша — створення й видалення рядків сервер на `Submitted` відхиляє.
+ */
+export function rowsLockedBySheet(sheetState: string | undefined): boolean {
+  return sheetState === 'Submitted' || sheetState === 'Approved';
 }
 
 /** `readOnly` → `read-only`; решта імен уже в потрібному вигляді. */

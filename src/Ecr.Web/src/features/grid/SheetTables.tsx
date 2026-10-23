@@ -91,6 +91,11 @@ export interface SheetTablesProps {
   /** Останній день періоду (`PeriodDto.periodEnd`) — `asOf` Lookup-пікерів сітки (D1-02); `null` — ще невідомий. */
   readonly periodEnd?: string | null;
   readonly readOnly: boolean;
+  /**
+   * ✎ D-442: стан аркуша (`Draft`/`Submitted`/`Approved`/…) — сітка бере з нього лише ВИГЛЯД (затверджений —
+   * без штриховки) і склад рядків (поданий/затверджений — без додавання й видалення рядків).
+   */
+  readonly sheetState?: string | undefined;
   readonly tables: readonly DocumentTableDto[];
   /**
    * `stack` — усі таблиці аркуша стосом із лінивим монтуванням (як до `UI-22`);
@@ -165,6 +170,7 @@ export function SheetTables({
   periodKey,
   periodEnd = null,
   readOnly,
+  sheetState,
   tables,
   layout = 'stack',
   selectedTableInstanceId,
@@ -416,6 +422,7 @@ export function SheetTables({
                 periodKey={periodKey}
                 periodEnd={periodEnd}
                 readOnly={readOnly}
+                sheetState={sheetState}
                 allowsDynamicRows={table.allowsDynamicRows}
                 maxDynamicRows={table.maxDynamicRows}
                 navigateTo={navigateTo}

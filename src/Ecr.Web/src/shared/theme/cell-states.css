@@ -144,6 +144,18 @@
     no-repeat center / contain;
 }
 
+/*
+ * ✎ D-442 (BRIEF-1021 П.3, макет `docs/design/hybrid/`, екран документа): у ЗАТВЕРДЖЕНОМУ аркуші
+ * «лише читання» — стан усього аркуша, і штриховка кожної комірки перетворювала б звіт на рябу сітку.
+ * Числа — повний контраст, без штриховки; аркушевий клас ставить `DocumentGrid` (`sheetLockClass`).
+ *
+ * ⛔ D-128: колір не єдиний носій. Знімається ЛИШЕ штриховка — замок у куті (`::after` вище) і
+ * `cursor: not-allowed` лишаються формою стану; фон `--ecr-cell-read-only-bg` теж.
+ */
+.ecr-sheet-locked .ecr-cell--read-only {
+  background-image: none;
+}
+
 /* ── calculated: рахує система ─────────────────────────────────────────── */
 .ecr-cell--calculated {
   background: var(--ecr-cell-calculated-bg);

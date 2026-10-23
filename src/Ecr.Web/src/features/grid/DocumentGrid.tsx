@@ -35,7 +35,7 @@ import {
 } from './edits';
 import { captureRange, isRangeEdit, type RangeEditDetail } from './rangeEdit';
 import { ConflictPanel, hasCurrentVersion, type OpenConflict } from './ConflictPanel';
-import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
+import { cellStateClass, cellStateOf, rowsLockedBySheet, sheetLockClass, type LocalCellFlags } from './cellState';
 import { isMissingColumns, isSliceEmpty } from './emptiness';
 import { columnWidth, widthsFromEvent } from './columnWidths';
 import { createLookupCellEditor, lookupCellDisplay, lookupIdOfText } from './LookupCellEditor';
@@ -182,6 +182,13 @@ interface DocumentGridProps {
   periodEnd?: string | null;
   /** Чи доступне редагування на рівні всієї таблиці. */
   readOnly: boolean;
+
+  /**
+   * ✎ D-442: стан аркуша. Затверджений — «лише читання» без штриховки (`sheetLockClass`, замок лишається);
+   * поданий і затверджений — без додавання й видалення рядків (`rowsLockedBySheet`): погоджувач править
+   * лише значення. Не задано — як доти.
+   */
+  sheetState?: string | undefined;
 
   /**
    * Чи додає рядки користувач.
@@ -370,11 +377,13 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     sheetDefId,
     periodEnd = null,
     readOnly,
+    sheetState,
     allowsDynamicRows,
     maxDynamicRows,
     navigateTo = null,
     hidden = false,
   } = props;
+  const rowsReadOnly = readOnly || rowsLockedBySheet(sheetState);
 
   const slice = useQuery({
     // ⚠ Період лишається в КЛЮЧІ КЕШУ, але не в адресі. Екземпляр таблиці
@@ -2518,7 +2527,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             досягненні стелі. Показана в `Fixed` таблиці, вона обіцяла б те,
             що сервер відхилить: склад рядків там заданий шаблоном, і «зайвий»
             рядок зламав би і формули з діапазонами, і звірку з еталоном. */}
-        {allowsDynamicRows && !readOnly && (
+        {allowsDynamicRows && !rowsReadOnly && (
           <Button
             variant="default"
             loading={addRowLoading}
@@ -2540,7 +2549,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
         {/* ✎ D3-A: видалення рядка, доданого користувачем (діє на рядок фокусної комірки); підтвердження в
             самому компоненті. Той самий предикат видимості, що й «Додати рядок». */}
-        {allowsDynamicRows && !readOnly && data !== undefined && (
+        {allowsDynamicRows && !rowsReadOnly && data !== undefined && (
           <DeleteRowControl
             documentId={documentId}
             tableInstanceId={tableInstanceId}
@@ -2667,7 +2676,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         />
       )}
 
-      <div ref={gridContainerRef} style={{ display: 'contents' }}>
+      <div ref={gridContainerRef} className={sheetLockClass(sheetState)} style={{ display: 'contents' }}>
         <RevoGrid
           theme="compact"
           rowSize={rowSize}

@@ -1012,4 +1012,16 @@ export function isEditable(state: string): boolean {
   return !isAllowed('approve', state) && !isAllowed('reopen', state);
 }
 
+/**
+ * ✎ D-442: чи правку значень у цьому стані вирішує СЕРВЕР по комірці, а не стан аркуша цілком.
+ *
+ * ⛔ Поданий аркуш править лише погоджувач поточного кроку маршруту — і знає це лише сервер (маршрут,
+ * крок, роль, грант). Тому сітку поданого аркуша не замикають на клієнті: погоджувачеві рішення
+ * зрізу приходять редаговними, решті — з причиною `DocumentSubmitted` (штриховка, замок, підказка).
+ * Дії зі зміни даних (подання, імпорт, перерахунок, рядки) лишаються закриті за `isEditable`.
+ */
+export function editsDeferToServer(state: string): boolean {
+  return state === 'Submitted';
+}
+
 export type { WorkflowAction };
