@@ -1,4 +1,5 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import { openDocumentMore } from './documentMore';
 
 /**
  * EA-5g: «передача місяця» проти РЕАЛЬНОГО сервера стенда (`tools/e2e-stand.ps1`, workflow `e2e-stand`): шторка
@@ -37,7 +38,7 @@ async function asUser(browser: Browser, user: { user: string; password: string }
 
 async function openDrawer(page: Page): Promise<void> {
   await page.goto(DocumentUrl);
-  await page.getByTestId('document-more').click({ timeout: 60_000 });
+  await openDocumentMore(page);
   await page.getByRole('menuitem', { name: /Edit access|Доступ к редактированию/ }).click();
   await expect(page.getByRole('dialog').first()).toBeVisible({ timeout: 15_000 });
 }
