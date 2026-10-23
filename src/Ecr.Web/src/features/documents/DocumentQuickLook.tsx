@@ -284,6 +284,12 @@ function LatestChanges({
                   {labelOf.get(event.sheetCode)}
                 </Text>
                 <StatusBadge kind="sheet" state={event.toState} quiet />
+                {/* D-440: самопогодження видно і тут, тим самим текстом, що в «More → History» (`WorkflowHistory`). */}
+                {event.approvedBySubmitter && (
+                  <Text size="xs" c="dimmed" data-quick-look-approved-by-submitter="">
+                    {t('workflow.historyApprovedBySubmitter')}
+                  </Text>
+                )}
               </Group>
               <Text size="xs" c="dimmed">
                 {event.byDisplayName} · <Timestamp value={event.at} />
