@@ -185,6 +185,45 @@ public sealed class EditAssignmentAccessDecisionTests(SqlServerFixture sql) : ID
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-443")]
+    public async Task Учасник_без_ролі_передача_місяця_дає_видимість_і_запис_свого_місяця_а_Deny_перемагає()
+    {
+        // ✎ D-443 (AN-130): надання саме дає видимість (рівень Read з передачі Write), тож передача місяця діє й для
+        // виконавця без ролі на проєкт; заборона ролі на колонку, як і доти, перемагає.
+        // Мутація: повернути `GrantLevel.None` для невидимого проєкту в `EditRules.Effective` — червоніє перша частина;
+        // перенести надання вище заборон — червоніє друга.
+        var w = await ArrangeAsync();
+        var participant = new AccessBuilder { UserId = w.ExecutorUserId, Participant = true }.Build();
+
+        var decisions = await BatchAsync(w, participant, w.Cell(w.OwnMonthColumn), w.Cell(w.PlainColumn));
+        Assert.True(decisions[w.Cell(w.OwnMonthColumn)].IsAllowed);
+        Assert.True(decisions[w.Cell(w.OwnMonthColumn)].ViaAssignment);
+        Assert.Equal(EditDenyReason.NotAssignedToYou, decisions[w.Cell(w.PlainColumn)].Reason);
+
+        await using (var db = w.Builder.CreateContext())
+        {
+            var scope = await Service(db).ReadScopeAsync(participant, w.Doc.DocumentId, CancellationToken.None);
+            Assert.True(scope.InPeriod(w.Doc.PeriodKey).CanReadTable(w.Doc.TableDefId));
+            Assert.True(await Service(db).ParticipatesAsync(participant, w.Doc.DocumentId, CancellationToken.None));
+            Assert.True((await Service(db).CanReadDocumentAsync(participant, w.Doc.DocumentId, CancellationToken.None)).IsAllowed);
+        }
+
+        var denied = new AccessBuilder { UserId = w.ExecutorUserId, Participant = true }
+            .Deny(ResourceKind.Column, w.OwnMonthColumn)
+            .Build();
+        Assert.Equal(EditDenyReason.NoGrant, (await BatchAsync(w, denied, w.Cell(w.OwnMonthColumn)))[w.Cell(w.OwnMonthColumn)].Reason);
+
+        // Сторонній (не виконавець) з ознакою учасника — документа не бачить.
+        var stranger = new AccessBuilder { UserId = w.StrangerUserId, Participant = true }.Build();
+        await using (var db = w.Builder.CreateContext())
+        {
+            Assert.False((await Service(db).CanReadDocumentAsync(stranger, w.Doc.DocumentId, CancellationToken.None)).IsAllowed);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "EA-B")]
     public async Task Цикл_Заповнено_Повернуто_Валідовано_змінює_рішення_виконавця()
     {

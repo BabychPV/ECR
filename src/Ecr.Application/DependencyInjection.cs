@@ -238,6 +238,9 @@ public static class DependencyInjection
         services.AddScoped<Documents.EditAssignments.EditorSetsHandler>();
         services.AddScoped<Documents.EditAssignments.BatchEditAssignmentsHandler>();
 
+        // D-443: передача власника документа (учасники документа).
+        services.AddScoped<Documents.EditAssignments.TransferDocumentOwnerHandler>();
+
         // Локалізація (модуль 3.7)
         services.AddScoped<Localization.GetUiStringsHandler>();
 

@@ -29,12 +29,18 @@ public static class DocumentSheetVisibility
 
     /// <summary>Чи має профіль хоч одне обмеження нижче рівня проєкту (дешево, без бази).</summary>
     /// <param name="profile">Профіль прав.</param>
+    /// <remarks>
+    /// ⛔ D-443: учасник документа (<see cref="AccessProfile.HasDocumentParticipations"/>) — ЗАВЖДИ з обмеженням:
+    /// документ, відкритий наданням, видно лише в області надання, і пропустити його як «читача без обмежень»
+    /// означало б віддати всі аркуші документа.
+    /// </remarks>
     public static bool HasRestrictions(AccessProfile profile)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
         return !profile.IsIntegrationWriter
-               && (AnyBelowProject(profile.Denies) || AnyBelowProject(profile.Grants.Keys)
+               && (profile.HasDocumentParticipations
+                   || AnyBelowProject(profile.Denies) || AnyBelowProject(profile.Grants.Keys)
                    || profile.Scoped.Values.Any(s => s.Narrowed.Count > 0
                                                     || AnyBelowProject(s.Denies) || AnyBelowProject(s.Grants.Keys)));
     }
@@ -257,6 +263,18 @@ public static class DocumentSheetVisibility
         if (documents.Count == 0 || !HasRestrictions(profile))
         {
             return [.. documents];
+        }
+
+        // ⛔ D-443: у профілю-учасника межі — ПО ДОКУМЕНТУ (надання діє в одному документі), одним викликом на сторінку.
+        if (profile.HasDocumentParticipations)
+        {
+            var own = await access.ReadScopesAsync(profile, [.. documents.Select(d => d.Id)], ct).ConfigureAwait(false);
+            if (periodKey is { } value && new PeriodKey(value).IsValid)
+            {
+                own = own.ToDictionary(p => p.Key, p => p.Value.InPeriod(new PeriodKey(value)));
+            }
+
+            return [.. documents.Where(d => own.ContainsKey(d.Id)).Select(d => For(d, own[d.Id]))];
         }
 
         var scopes = known is null

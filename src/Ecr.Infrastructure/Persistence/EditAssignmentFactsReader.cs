@@ -66,7 +66,8 @@ internal static class EditAssignmentFactsReader
                     db.EditAssignmentRecipients
                         .Where(r => r.AssignmentId == a.Id && r.UserId == userId)
                         .Select(r => (EditAssignmentRecipientStatus?)r.Status)
-                        .FirstOrDefault()))
+                        .FirstOrDefault(),
+                    a.Level))
             // ⚠ Межа — стеля передач на документ (200) на кожен запитаний документ: легітимне не відсікається.
             .Take(EditAssignment.MaxPerDocument * documentIds.Count)
             .ToListAsync(ct)
@@ -87,7 +88,8 @@ internal static class EditAssignmentFactsReader
         DateTime? ExpiresAt,
         bool DelegatorActive,
         int OwnerUserId,
-        EditAssignmentRecipientStatus? Mine);
+        EditAssignmentRecipientStatus? Mine,
+        GrantLevel Level);
 
     /// <summary>
     /// Читання під блокуванням запису: передачі документа і рядок виконавця — кожне під
@@ -178,7 +180,8 @@ internal static class EditAssignmentFactsReader
             a.ExpiresAt,
             active.GetValueOrDefault(a.DelegatedByUserId),
             ownerUserId,
-            statusById.TryGetValue(a.Id, out var status) ? status : (EditAssignmentRecipientStatus?)null));
+            statusById.TryGetValue(a.Id, out var status) ? status : (EditAssignmentRecipientStatus?)null,
+            a.Level));
 
         return Group(rows);
     }
@@ -200,13 +203,38 @@ internal static class EditAssignmentFactsReader
                     r.DelegatorActive,
                     r.DelegatedByUserId,
                     r.ExpiresAt,
-                    r.Mine is { } status ? ToProgress(status) : null))
+                    r.Mine is { } status ? ToProgress(status) : null,
+                    r.Level))
                 .ToList();
 
             result[group.Key] = (group.First().OwnerUserId, facts);
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// D-443: документи, у яких користувач має ДІЮЧЕ надання учасника — виконавець передачі, строк не минув,
+    /// делегатор активний (ті самі умови, що <c>DocumentParticipation.Active</c> над фактами).
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="userId">Учасник.</param>
+    /// <param name="utcNow">Поточний час (строк дії).</param>
+    /// <returns>Незавершений запит ідентифікаторів документів — для підзапиту переліку й перевірок видимості.</returns>
+    /// <remarks>
+    /// ⚠ Пошук іде від <c>IX_EditAssignmentRecipient_User (UserId, Status) INCLUDE (AssignmentId)</c> до передачі за
+    /// ключем: учасник має одиниці-десятки надань, тож підзапит у переліку документів не сканує передачі.
+    /// </remarks>
+    public static IQueryable<long> ParticipatedDocuments(EcrDbContext db, int userId, DateTime utcNow)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        return from r in db.EditAssignmentRecipients.AsNoTracking()
+               where r.UserId == userId
+               join a in db.EditAssignments.AsNoTracking() on r.AssignmentId equals a.Id
+               where (a.ExpiresAt == null || a.ExpiresAt > utcNow)
+                     && db.Users.Any(u => u.Id == a.DelegatedByUserId && u.IsActive)
+               select a.DocumentId;
     }
 
     private static AssigneeProgress ToProgress(EditAssignmentRecipientStatus status) => status switch

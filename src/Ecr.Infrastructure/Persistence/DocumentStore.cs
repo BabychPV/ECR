@@ -194,11 +194,28 @@ public sealed class DocumentStore(
         // перекладає в `IN (...)`, над інтерфейсом — не гарантовано.
         var allowedProjects = visibleProjectIds?.ToArray();
 
-        var documents = db.Documents
-            .AsNoTracking()
-            .Where(d => d.Id > after
-                        && (projectId == null || d.ProjectId == projectId)
-                        && (allowedProjects == null || allowedProjects.Contains(d.ProjectId)));
+        IQueryable<Document> documents;
+        if (filter.Participation is { } participation && allowedProjects is not null)
+        {
+            // ✎ D-443: документи, відкриті наданням учасника, — ПІДЗАПИТОМ у тому самому запиті (0 нових звернень),
+            // поза проєктами з забороною ролі. Без учасника — рівно попередній запит (гілка нижче).
+            var participated = EditAssignmentFactsReader.ParticipatedDocuments(db, participation.UserId, participation.AsOfUtc);
+            var denied = participation.DeniedProjectIds.ToArray();
+            documents = db.Documents
+                .AsNoTracking()
+                .Where(d => d.Id > after
+                            && (projectId == null || d.ProjectId == projectId)
+                            && (allowedProjects.Contains(d.ProjectId)
+                                || (!denied.Contains(d.ProjectId) && participated.Contains(d.Id))));
+        }
+        else
+        {
+            documents = db.Documents
+                .AsNoTracking()
+                .Where(d => d.Id > after
+                            && (projectId == null || d.ProjectId == projectId)
+                            && (allowedProjects == null || allowedProjects.Contains(d.ProjectId)));
+        }
 
         // BE-09b: фільтри — у ЗАПИТІ, до `Take`; межа грантів вище лишається.
         if (filter.MineUserId is { } me)

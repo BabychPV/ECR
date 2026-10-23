@@ -73,7 +73,8 @@ public sealed class ListDocumentVersionsHandler(
         var profile = await Security.PermissionCheck
             .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
-        Security.PermissionCheck.RequireIn(profile, Permission, document.ProjectId);
+        await DocumentVisibility
+            .RequireInDocumentAsync(access, profile, documentId, document.ProjectId, Permission, ct).ConfigureAwait(false);
         var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(key);
 
         var list = await versions.ListAsync(documentId, key, MaxVersions, ct).ConfigureAwait(false);
@@ -120,7 +121,8 @@ public sealed class CompareDocumentVersionsHandler(
         var profile = await Security.PermissionCheck
             .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
-        Security.PermissionCheck.RequireIn(profile, Permission, document.ProjectId);
+        await DocumentVisibility
+            .RequireInDocumentAsync(access, profile, documentId, document.ProjectId, Permission, ct).ConfigureAwait(false);
         var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
 
         long? toId = null;

@@ -93,7 +93,8 @@ public sealed class GetWorkflowHistoryHandler(
             var profile = await Security.PermissionCheck
                 .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
                 .ConfigureAwait(false);
-            Security.PermissionCheck.RequireIn(profile, Permission, document.ProjectId);
+            await Documents.DocumentVisibility
+                .RequireInDocumentAsync(access, profile, documentId, document.ProjectId, Permission, ct).ConfigureAwait(false);
             var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(key);
             events = [.. events.Where(e => readable.CanReadSheetCode(e.SheetCode))];
         }

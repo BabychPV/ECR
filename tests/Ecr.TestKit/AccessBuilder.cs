@@ -35,6 +35,9 @@ public sealed class AccessBuilder
     /// <summary>Користувач, чиї права описуються.</summary>
     public int UserId { get; init; } = 7;
 
+    /// <summary>D-443: профіль — учасник якогось документа (<see cref="AccessProfile.HasDocumentParticipations"/>).</summary>
+    public bool Participant { get; init; }
+
     /// <summary>Дає грант на ресурс.</summary>
     public AccessBuilder Grant(ResourceKind kind, int id, GrantLevel level)
     {
@@ -91,6 +94,7 @@ public sealed class AccessBuilder
             IsSimulation = simulation,
             SimulatedForUserId = simulatedFor,
             SimulationActorUserId = simulation ? UserId : null,
+            HasDocumentParticipations = Participant,
         };
 
     /// <summary>Умови комірки; за замовчуванням усе дозволяє.</summary>

@@ -282,8 +282,6 @@ public sealed class BatchEditAssignmentsHandler(
     IEditAssignmentStore assignments,
     IEditAssignmentManagementStore store,
     IEditorSetStore sets,
-    IDocumentStore documents,
-    IMetadataCache metadata,
     IAccessDecisionService access,
     Common.ICurrentUser currentUser)
 {
@@ -336,7 +334,7 @@ public sealed class BatchEditAssignmentsHandler(
 
         // ⛔ Аудит P1-S1: зріз-джерело з аркушем, схованим від викликача, — та сама відповідь, що й «немає».
         var scope = await EditAssignmentAccess
-            .ReadScopeAsync(documents, metadata, profile, document.ProjectId, documentId, ct).ConfigureAwait(false);
+            .ReadScopeAsync(access, profile, documentId, ct).ConfigureAwait(false);
         EditAssignmentAccess.RequireSheetVisible(scope, source, documentId);
 
         var members = source.Recipients.Select(r => r.UserId).ToList();
@@ -351,7 +349,11 @@ public sealed class BatchEditAssignmentsHandler(
         {
             prepared.Add(await upsert.PrepareAsync(
                 documentId,
-                new UpsertEditAssignmentRequest(slice, members, source.IsExclusive, Note: null, source.AppliedSetId),
+                new UpsertEditAssignmentRequest(slice, members, source.IsExclusive, Note: null, source.AppliedSetId)
+                {
+                    // D-443: копія — того самого рівня (рівень, відмінний від Write, на місячний зріз — 422).
+                    Level = (EditAssignmentLevel)(byte)source.Level,
+                },
                 overwrite: true, snapshot, ct, keepExpiresAt: true, keepNote: true).ConfigureAwait(false));
         }
 
@@ -390,7 +392,7 @@ public sealed class BatchEditAssignmentsHandler(
     {
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var document = await EditAssignmentAccess
-            .RequireVisibleDocumentAsync(store, profile, documentId, ct).ConfigureAwait(false);
+            .RequireVisibleDocumentAsync(store, access, profile, documentId, ct).ConfigureAwait(false);
         EditAssignmentAccess.RequireManager(profile, document);
         return (profile, document);
     }

@@ -81,6 +81,45 @@ public static class DocumentVisibility
         var projectId = await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false)
                         ?? throw NotFound(documentId);
 
+        await RequireInDocumentAsync(access, profile, documentId, projectId, permission, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Вимагає проєктне право в проєкті документа АБО (D-443) надання учасника саме в цьому документі для прав,
+    /// які надання дає (<see cref="DocumentParticipation.ImpliedPermissions"/>, <c>Document.View</c>).
+    /// </summary>
+    /// <param name="access">Служба рішень доступу.</param>
+    /// <param name="profile">Профіль користувача.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="projectId">Його проєкт.</param>
+    /// <param name="permission">Проєктне право дії.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="AccessDeniedException"><c>ECR-AUTH-0403</c> — ні права, ні надання.</exception>
+    /// <remarks>
+    /// ⛔ Надання НЕ дає інших прав (експорт, імпорт, видалення, ключ, повернення в роботу): для них — лише роль.
+    /// Заборона проєкту перемагає (<see cref="AccessProfile.DeniesProject"/>). Запит до бази — лише тоді, коли
+    /// права за ролями немає і профіль узагалі є учасником.
+    /// </remarks>
+    public static async Task RequireInDocumentAsync(
+        IAccessDecisionService access, AccessProfile profile, long documentId, int projectId, string permission,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(profile);
+
+        if (PermissionCheck.IsGrantedIn(profile, permission, projectId))
+        {
+            return;
+        }
+
+        if (profile.HasDocumentParticipations
+            && DocumentParticipation.ImpliedPermissions.Contains(permission)
+            && !profile.DeniesProject(projectId)
+            && await access.ParticipatesAsync(profile, documentId, ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
         PermissionCheck.RequireIn(profile, permission, projectId);
     }
 

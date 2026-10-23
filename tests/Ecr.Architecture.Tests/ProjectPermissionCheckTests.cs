@@ -75,6 +75,8 @@ public sealed class ProjectPermissionCheckTests
         ("Ecr.Application.Documents.ListDocumentsHandler", "ProfileAsync", 4, CheckKind.Anywhere),
         ("Ecr.Application.Documents.ListDocumentsHandler", "ReadableProjects", 2, CheckKind.Project),
         ("Ecr.Application.Documents.DocumentVisibility", "RequireVisibleAsync", 5, CheckKind.Project),
+        // D-443: право в проєкті документа АБО надання учасника саме в цьому документі (лише Document.View).
+        ("Ecr.Application.Documents.DocumentVisibility", "RequireInDocumentAsync", 6, CheckKind.Project),
         ("Ecr.Application.Registries.RegistryAccess", "RequireAsync", AnyArity, CheckKind.Global),
         ("Ecr.Application.Security.UserAdministration", "ResolveAsync", AnyArity, CheckKind.Global),
         ("Ecr.Application.Templates.ListTemplatesHandler", "RequireAsync", AnyArity, CheckKind.Global),

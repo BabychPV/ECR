@@ -4378,6 +4378,37 @@
         ],
         "type": "object"
       },
+      "DocumentOwnerDto": {
+        "description": "Власник документа після передачі.",
+        "properties": {
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "ownerDisplayName": {
+            "description": "Його ім'я.",
+            "type": "string"
+          },
+          "ownerUserId": {
+            "description": "Новий власник.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "previousOwnerUserId": {
+            "description": "Попередній власник.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "documentId",
+          "ownerUserId",
+          "ownerDisplayName",
+          "previousOwnerUserId"
+        ],
+        "type": "object"
+      },
       "DocumentPeriodRequest": {
         "description": "Дія над документом у межах одного періоду.",
         "properties": {
@@ -5151,6 +5182,10 @@
             "description": "Інші за ролями не можуть писати в зріз.",
             "type": "boolean"
           },
+          "level": {
+            "$ref": "#/components/schemas/EditAssignmentLevel",
+            "description": "Рівень учасника (D-443); наявні передачі місяця — `Write`."
+          },
           "modifiedAt": {
             "description": "Коли змінено.",
             "format": "date-time",
@@ -5169,6 +5204,10 @@
               "$ref": "#/components/schemas/EditAssignmentRecipientDto"
             },
             "type": "array"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/EditAssignmentScope",
+            "description": "Область надання (D-443): `Document` | `Sheet` | `Table` — з селекторів зрізу."
           },
           "slice": {
             "$ref": "#/components/schemas/EditAssignmentSliceDto",
@@ -5215,6 +5254,16 @@
           "version"
         ],
         "type": "object"
+      },
+      "EditAssignmentLevel": {
+        "default": "Write",
+        "description": "Рівень учасника документа (D-443): `Read` — бачить область; `Write` — передача місяця (заповнює зріз);\n`Submit` — ще й подає аркуш; `Approve` — ще й погоджує. Видати рівень, вищий за власний на області, не можна.",
+        "enum": [
+          "Read",
+          "Write",
+          "Submit",
+          "Approve"
+        ]
       },
       "EditAssignmentListDto": {
         "description": "Перелік передач документа для менеджера.",
@@ -5306,6 +5355,15 @@
           "isActive"
         ],
         "type": "object"
+      },
+      "EditAssignmentScope": {
+        "default": "Document",
+        "description": "Область надання учасникові документа (D-443) — похідна від селекторів зрізу, не колонка.",
+        "enum": [
+          "Document",
+          "Sheet",
+          "Table"
+        ]
       },
       "EditAssignmentSliceDto": {
         "description": "Зріз передачі: усі селектори необов'язкові; жодного — «весь документ».",
@@ -20867,6 +20925,20 @@
           "Full"
         ]
       },
+      "TransferDocumentOwnerRequest": {
+        "description": "Тіло передачі власності документа (D-443).",
+        "properties": {
+          "newOwnerUserId": {
+            "description": "Новий власник: активний користувач із правом запису в проєкті документа.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "newOwnerUserId"
+        ],
+        "type": "object"
+      },
       "UiStringCatalog": {
         "properties": {
           "languageCode": {
@@ -21822,6 +21894,17 @@
             "default": true,
             "description": "Закрити зріз іншим за ролями; за замовчуванням `true`.",
             "type": "boolean"
+          },
+          "level": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EditAssignmentLevel",
+                "description": "Рівень учасника (D-443); відсутнє поле — `Write` (передача місяця, як до D-443). Для рівнів, відмінних\nвід `Write`, місяць і період у зрізі заборонені (422), а ексклюзивність ігнорується."
+              }
+            ]
           },
           "note": {
             "description": "Інструкція (≤ 500).",
@@ -26970,6 +27053,149 @@
         "summary": "Валідація власником: усі виконавці мають бути «Заповнено».",
         "tags": [
           "DocumentEditAssignments"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/owner": {
+      "post": {
+        "description": "`403` — викликач не власник і не менеджер проєкту; `409` — власника змінили одночасно;\n`422` — нового власника не можна призначити.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferDocumentOwnerRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferDocumentOwnerRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferDocumentOwnerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOwnerDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOwnerDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOwnerDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Передає власність документа.",
+        "tags": [
+          "DocumentOwner"
         ]
       }
     },
@@ -52851,6 +53077,9 @@
     },
     {
       "name": "DocumentEditAssignments"
+    },
+    {
+      "name": "DocumentOwner"
     },
     {
       "name": "DocumentPermitBindings"

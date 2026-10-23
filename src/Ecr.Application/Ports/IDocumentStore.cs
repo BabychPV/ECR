@@ -158,6 +158,9 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// </param>
 /// <param name="StaleByUserId">Лише застарілі через правки цього користувача (<c>ChangedByUserId</c>); діє разом із <paramref name="ResultsStale"/>.</param>
 /// <param name="NarrowedProjectIds">Проєкти, де читач не бачить хоч щось (аркуш, таблицю, колонку): їхні документи поза фільтром <paramref name="ResultsStale"/>.</param>
+/// <param name="Participation">
+/// D-443: документи, відкриті наданням учасника, — ДОДАТКОВО до проєктів із грантом; <c>null</c> — лише проєкти.
+/// </param>
 public readonly record struct DocumentListFilter(
     DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null,
     IReadOnlyCollection<(int ProjectId, int Id)>? HiddenSheetDefIds = null,
@@ -166,7 +169,14 @@ public readonly record struct DocumentListFilter(
     string? Query = null,
     bool? ResultsStale = null,
     int? StaleByUserId = null,
-    IReadOnlyCollection<int>? NarrowedProjectIds = null);
+    IReadOnlyCollection<int>? NarrowedProjectIds = null,
+    DocumentParticipationFilter? Participation = null);
+
+/// <summary>D-443: що з документів учасника потрапляє в перелік поза проєктами з грантом.</summary>
+/// <param name="UserId">Учасник (виконавець передачі).</param>
+/// <param name="AsOfUtc">Момент перевірки строку дії надання.</param>
+/// <param name="DeniedProjectIds">Проєкти з забороною ролі: їхні документи не відкриває жодне надання.</param>
+public sealed record DocumentParticipationFilter(int UserId, DateTime AsOfUtc, IReadOnlyCollection<int> DeniedProjectIds);
 
 /// <summary>Порушення правила складу документа.</summary>
 /// <param name="SheetGroup">Група аркушів.</param>

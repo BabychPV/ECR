@@ -82,6 +82,44 @@ public interface IAccessDecisionService
     /// <param name="ct">Токен скасування.</param>
     public Task<DocumentReadScope> ReadScopeAsync(AccessProfile profile, long documentId, CancellationToken ct);
 
+    /// <summary>
+    /// D-443: межі читання КІЛЬКОХ документів одним викликом — для переліку, де документи, відкриті наданням
+    /// учасника, мають кожен свої межі (межі одного проєкту на них не годяться).
+    /// </summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="documentIds">Документи; відсутні в результаті не повертаються.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Документ → межі (з наданнями учасника цього документа).</returns>
+    /// <remarks>⚠ Сталу кількість звернень до бази на весь виклик, а не на документ.</remarks>
+    public Task<IReadOnlyDictionary<long, DocumentReadScope>> ReadScopesAsync(
+        AccessProfile profile, IReadOnlyCollection<long> documentIds, CancellationToken ct);
+
+    /// <summary>
+    /// D-443: чи має користувач ДІЮЧЕ надання учасника в документі (виконавець передачі, не прострочене, делегатор
+    /// активний). Без ознаки <see cref="AccessProfile.HasDocumentParticipations"/> — <c>false</c> без бази.
+    /// </summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>⛔ Заборону проєкту не враховує: це робить викликач (<see cref="AccessProfile.DeniesProject"/>).</remarks>
+    public Task<bool> ParticipatesAsync(AccessProfile profile, long documentId, CancellationToken ct);
+
+    /// <summary>D-443: з поданих документів — ті, у яких користувач має діюче надання учасника (один запит).</summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="documentIds">Документи.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlySet<long>> ParticipatedDocumentsAsync(
+        AccessProfile profile, IReadOnlyCollection<long> documentIds, CancellationToken ct);
+
+    /// <summary>
+    /// D-443: чи має користувач діюче надання хоча б в одному документі проєкту (календар періодів проєкту для
+    /// сторінки документа учасника).
+    /// </summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<bool> ParticipatesInProjectAsync(AccessProfile profile, int projectId, CancellationToken ct);
+
     /// <summary>Чи може користувач редагувати конкретну комірку.</summary>
     public Task<EditDecision> CanEditCellAsync(
         AccessProfile profile, long documentId, CellAddress address, CancellationToken ct);

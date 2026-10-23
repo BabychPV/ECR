@@ -163,29 +163,30 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Одержувач_без_Read_чи_неіснуючий_дає_однакове_422()
+    public async Task Одержувач_без_ролі_тепер_допустимий_а_неіснуючий_дає_422()
     {
+        // ✎ D-443 (AN-130): надання саме дає видимість — колишня відмова «одержувач без Read» (Q1) скасована.
+        // Неіснуючий одержувач, як і доти, — 422 без розкриття, що саме не так.
         var s = await ArrangeAsync().ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
         using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
 
-        var noRead = await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Stranger.Id)).ConfigureAwait(true);
         var missing = await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, 987_654_321)).ConfigureAwait(true);
-
-        var a = await noRead.Content.ReadAsStringAsync().ConfigureAwait(true);
         var b = await missing.Content.ReadAsStringAsync().ConfigureAwait(true);
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, noRead.StatusCode);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, missing.StatusCode);
         Assert.Equal(
             "err.ECR-REQ-0422.editAssignmentRecipientInvalid",
-            JsonDocument.Parse(a).RootElement.GetProperty("messageKey").GetString());
-        Assert.Equal(
-            JsonDocument.Parse(a).RootElement.GetProperty("messageKey").GetString(),
             JsonDocument.Parse(b).RootElement.GetProperty("messageKey").GetString());
 
-        // Нічого не створено.
+        var noRole = await JsonAsync(
+            await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Stranger.Id)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Equal("Write", noRole.GetProperty("level").GetString());
+
         var list = await JsonAsync(await owner.GetAsync(ListUri(s)).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
-        Assert.Empty(list.GetProperty("assignments").EnumerateArray());
+        var recipient = Assert.Single(Assert.Single(list.GetProperty("assignments").EnumerateArray()).GetProperty("recipients").EnumerateArray());
+        Assert.Equal(s.Stranger.Id, recipient.GetProperty("userId").GetInt32());
+        Assert.Equal("Visible", recipient.GetProperty("visibility").GetString());
     }
 
     [Fact]
@@ -559,7 +560,7 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "RC20-D2")]
-    public async Task Перелік_віддає_visibility_виконавця_а_NotVisible_лише_для_того_хто_втратив_доступ()
+    public async Task Перелік_віддає_visibility_виконавця_і_надання_лишає_видимим_того_хто_втратив_роль()
     {
         var s = await ArrangeAsync().ConfigureAwait(true);
 
@@ -593,7 +594,10 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         var recipients = Assert.Single(list.GetProperty("assignments").EnumerateArray()).GetProperty("recipients").EnumerateArray()
             .ToDictionary(r => r.GetProperty("userId").GetInt32(), r => r.GetProperty("visibility").GetString());
         Assert.Equal("Visible", recipients[s.Executor.Id]);
-        Assert.Equal("NotVisible", recipients[s.OtherExecutor.Id]);
+
+        // ✎ D-443: надання саме дає видимість аркуша передачі — втрата ролі його не забирає (NotVisible лишився для
+        // заборони проєкту/аркуша, `RecipientVisibilityTests`).
+        Assert.Equal("Visible", recipients[s.OtherExecutor.Id]);
     }
 
     [Fact]
@@ -998,7 +1002,7 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Набори_виконавців_лише_для_тих_хто_має_Write_а_кандидати_лише_з_Read()
+    public async Task Набори_виконавців_лише_для_тих_хто_має_Write_а_кандидати_й_без_ролі()
     {
         var s = await ArrangeAsync().ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
@@ -1010,12 +1014,13 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         var create = await reader.PostAsJsonAsync(sets, new { name = "x", memberUserIds = new[] { s.Stranger.Id } }).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.Forbidden, create.StatusCode);
 
-        // Кандидати: користувач без доступу до проєкту (Stranger) у відповіді не з'являється.
+        // ✎ D-443: учасником стає й користувач без ролі на проєкт — кандидати його показують (без email/SID).
         var found = await owner.GetAsync(
             new Uri($"{ListUri(s)}/candidates?q={Uri.EscapeDataString(s.Stranger.UserName[..6])}", UriKind.Relative)).ConfigureAwait(true);
         var body = await found.Content.ReadAsStringAsync().ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.OK, found.StatusCode);
-        Assert.DoesNotContain(s.Stranger.Id.ToString(CultureInfo.InvariantCulture), body, StringComparison.Ordinal);
+        Assert.Contains(s.Stranger.Id.ToString(CultureInfo.InvariantCulture), body, StringComparison.Ordinal);
+        Assert.DoesNotContain("email", body, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

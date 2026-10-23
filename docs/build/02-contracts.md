@@ -4163,6 +4163,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/edit-assignments/apply-set` | — (автор документа ∨ `Manage` проєкту; обробник) | 8 |
 | `POST` | `/api/v1/documents/{id}/edit-assignments/copy` | — (автор документа ∨ `Manage` проєкту; обробник) | 8 |
 | `GET` | `/api/v1/me/edit-assignments` | — (лише рядки самого викликача) | 8 |
+| `POST` | `/api/v1/documents/{id}/owner` | — (власник документа ∨ `Manage` проєкту; обробник; D-443: передача власника, подія `DocumentOwnerTransferred`) | 8 |
 | `GET` | `/api/v1/me/approval-queue` | — (лише аркуші, які викликач може затвердити зараз; обробник) | 8 |
 | `GET` | `/api/v1/me/editor-sets` | — (лише власні набори) | 8 |
 | `POST` | `/api/v1/me/editor-sets` | — (лише власні набори) | 8 |

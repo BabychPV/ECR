@@ -108,6 +108,23 @@ public readonly record struct CellAccessContext(
     /// <see cref="DocumentStatus.Approved"/> він не відкриває ніколи.
     /// </remarks>
     public bool IsCurrentApprover { get; init; }
+
+    /// <summary>
+    /// D-443: рівень, який надання учасника документа (<see cref="DocumentParticipation.LevelAt"/>) дає цьому
+    /// користувачеві в області рішення; <see cref="GrantLevel.None"/> — надань немає (за замовчуванням).
+    /// Рахує служба з фактів передач документа.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <see cref="EditRules.Effective"/> бере його ПІСЛЯ заборон: <c>IsDeny</c> ролі на проєкт, аркуш, таблицю
+    /// чи колонку перемагає будь-яке надання. До рівня ролей додається як максимум (надання лише розширює).
+    /// </remarks>
+    public GrantLevel ParticipationLevel { get; init; }
+
+    /// <summary>
+    /// D-443: у користувача є діюче надання учасника в ЦЬОМУ документі (будь-якої області) — документ йому видимий
+    /// навіть без ролі на проєкт. Лише ознака для перевірки видимості служби; правила <see cref="EditRules"/> її не читають.
+    /// </summary>
+    public bool ParticipatesInDocument { get; init; }
 }
 
 /// <summary>
@@ -568,9 +585,13 @@ public static class EditRules
     /// <param name="tableDefId">Таблиця.</param>
     /// <param name="columnDefId">Колонка; <c>0</c> — рішення про таблицю цілком.</param>
     /// <param name="period">Період; <c>null</c> — рішення не про період.</param>
+    /// <param name="participation">
+    /// D-443: рівень, який у цій області дають надання учасника документа (<see cref="CellAccessContext.ParticipationLevel"/>);
+    /// за замовчуванням — жодного.
+    /// </param>
     public static bool CanReadIn(
         AccessProfile profile, int projectId, int sheetDefId, string? sheetCode, int tableDefId, int columnDefId,
-        PeriodKey? period)
+        PeriodKey? period, GrantLevel participation = GrantLevel.None)
         => Effective(profile, default(CellAccessContext) with
         {
             ProjectId = projectId,
@@ -579,6 +600,7 @@ public static class EditRules
             ColumnDefId = columnDefId,
             SheetCode = sheetCode,
             Period = period,
+            ParticipationLevel = participation,
         }) >= GrantLevel.Read;
 
     /// <summary>
@@ -673,9 +695,11 @@ public static class EditRules
             (profile.Grants.TryGetValue(projectKey, out var projectLevel) && projectLevel >= GrantLevel.Read)
             || layers.Exists(l => l.Grants.TryGetValue(projectKey, out var layerLevel) && layerLevel >= GrantLevel.Read);
 
+        // ✎ D-443: учасник документа без ролі на проєкт — рівно рівень надання в області рішення (документ йому
+        // видимий наданням, а не проєктом). Заборони вище вже відпрацювали: сюди доходить лише незаборонене.
         if (!projectVisible)
         {
-            return GrantLevel.None;
+            return context.ParticipationLevel;
         }
 
         // Від найдрібнішого до найширшого: перший оголошений і виграє. На
@@ -705,10 +729,11 @@ public static class EditRules
 
             if (found)
             {
-                return level;
+                // ✎ D-443: надання учасника лише РОЗШИРЮЄ рівень ролей (максимум), ніколи не звужує.
+                return level > context.ParticipationLevel ? level : context.ParticipationLevel;
             }
         }
 
-        return GrantLevel.None;
+        return context.ParticipationLevel;
     }
 }

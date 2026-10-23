@@ -9244,6 +9244,12 @@ USING (VALUES
     -- D442:approver-edit ── en: позначка журналу «правка погоджувача» (D-442, AN-129); ru/kz — порцією D442:approver-edit нижче ──
     ,(N'audit.originLabel.ApproverEdit', N'en', N'Approver''s edit before approval', 1)
     -- D442:approver-edit ── кінець секції ──
+    -- D443:participants ── en: учасники документа — рівень/область, стеля «не вище власного», передача власника (D-443, AN-130); ru/kz — порцією D443:participants нижче ──
+    ,(N'err.ECR-ACCS-0403.editAssignmentLevelAboveOwn', N'en', N'You cannot grant {level}: it is higher than your own access ({ownLevel}) on part of this scope. Choose a lower level or a narrower scope.', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentLevelSliceInvalid', N'en', N'A month and a period can be set only for the Write level (filling a month).', 1)
+    ,(N'err.ECR-ACCS-0403.documentOwnerTransferForbidden', N'en', N'Only the document owner or a project manager can transfer ownership.', 1)
+    ,(N'err.ECR-REQ-0422.documentOwnerInvalid', N'en', N'This user cannot become the document owner. The new owner needs write access to the project.', 1)
+    -- D443:participants ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -24006,6 +24012,22 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- D442:approver-edit ── кінець секції ──
+-- D443:participants ── ru/kz: учасники документа (D-443, AN-130); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-ACCS-0403.editAssignmentLevelAboveOwn', N'ru', N'Нельзя выдать {level}: это выше вашего собственного доступа ({ownLevel}) на части этой области. Выберите уровень ниже или область уже.'),
+    (N'err.ECR-ACCS-0403.editAssignmentLevelAboveOwn', N'kz', N'{level} беруге болмайды: бұл аймақтың бір бөлігінде өз қолжетімділігіңізден ({ownLevel}) жоғары. Төменірек деңгейді немесе тарырақ аймақты таңдаңыз.'),
+    (N'err.ECR-REQ-0422.editAssignmentLevelSliceInvalid', N'ru', N'Месяц и период задаются только для уровня Write (заполнение месяца).'),
+    (N'err.ECR-REQ-0422.editAssignmentLevelSliceInvalid', N'kz', N'Ай мен кезең тек Write деңгейі үшін беріледі (айды толтыру).'),
+    (N'err.ECR-ACCS-0403.documentOwnerTransferForbidden', N'ru', N'Передать владение может только владелец документа или менеджер проекта.'),
+    (N'err.ECR-ACCS-0403.documentOwnerTransferForbidden', N'kz', N'Иелікті тек құжат иесі немесе жоба менеджері бере алады.'),
+    (N'err.ECR-REQ-0422.documentOwnerInvalid', N'ru', N'Этого пользователя нельзя назначить владельцем документа. Новому владельцу нужно право записи в проекте.'),
+    (N'err.ECR-REQ-0422.documentOwnerInvalid', N'kz', N'Бұл пайдаланушыны құжат иесі етіп тағайындау мүмкін емес. Жаңа иеге жобада жазу құқығы қажет.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- D443:participants ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

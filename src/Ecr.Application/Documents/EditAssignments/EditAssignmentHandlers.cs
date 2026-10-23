@@ -23,7 +23,8 @@ public sealed class ListEditAssignmentsHandler(
     IAccessDecisionService access,
     IDocumentStore documents,
     IMetadataCache metadata,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    Domain.Abstractions.IClock clock)
 {
     /// <summary>Стеля профілів виконавців, які перелік будує для позначки видимості (решта — <c>Unknown</c>).</summary>
     private const int MaxVisibilityProfiles = 200;
@@ -36,7 +37,7 @@ public sealed class ListEditAssignmentsHandler(
         var userId = EditAssignmentAccess.RequireUser(currentUser);
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var document = await EditAssignmentAccess
-            .RequireVisibleDocumentAsync(store, profile, documentId, ct).ConfigureAwait(false);
+            .RequireVisibleDocumentAsync(store, access, profile, documentId, ct).ConfigureAwait(false);
         EditAssignmentAccess.RequireManager(profile, document);
 
         var templateVersionId = await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
@@ -94,10 +95,21 @@ public sealed class ListEditAssignmentsHandler(
                 continue;
             }
 
-            recipientScopes[recipientId] = recipientProfile.SeesDocumentsOf(document.ProjectId)
-                && PermissionCheck.IsGrantedIn(recipientProfile, "Document.View", document.ProjectId)
-                    ? DocumentReadScope.For(recipientProfile, document.ProjectId, snapshot)
-                    : null;
+            // ✎ D-443: надання саме ДАЄ видимість — межі виконавця з його діючими наданнями в цьому документі
+            // (строк, активний делегатор); заборона проєкту перемагає — тоді «не бачить».
+            var grants = visible
+                .Where(a => a.FindRecipient(recipientId) is not null
+                            && (a.ExpiresAt is not { } until || until > clock.UtcNow)
+                            && users.TryGetValue(a.DelegatedByUserId, out var delegator) && delegator.IsActive)
+                .Select(a => new ParticipationGrant(
+                    a.Level, a.SheetCode, a.TableCode,
+                    a.PeriodKeyValue is { } p ? new Domain.ValueObjects.PeriodKey(p) : null))
+                .ToList();
+            var byRoles = recipientProfile.SeesDocumentsOf(document.ProjectId)
+                          && PermissionCheck.IsGrantedIn(recipientProfile, "Document.View", document.ProjectId);
+            recipientScopes[recipientId] = recipientProfile.DeniesProject(document.ProjectId) || (!byRoles && grants.Count == 0)
+                ? null
+                : DocumentReadScope.ForParticipant(recipientProfile, document.ProjectId, snapshot, grants);
         }
 
         var items = visible.Select(a => EditAssignmentMapper.ToDto(a, users, recipientScopes)).ToList();
@@ -173,7 +185,9 @@ internal static class EditAssignmentMapper
             recipients,
             a.ModifiedAt,
             EditAssignmentVersion.Of(a),
-            a.ExpiresAt);
+            a.ExpiresAt,
+            (EditAssignmentLevel)(byte)a.Level,
+            a.Scope);
     }
 
     /// <summary>Текст листа: подробиці зрізу людською мовою (англійська — базова мова каталогу).</summary>
@@ -290,10 +304,28 @@ public sealed class UpsertEditAssignmentHandler(
         var userId = EditAssignmentAccess.RequireUser(currentUser);
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var document = await EditAssignmentAccess
-            .RequireVisibleDocumentAsync(store, profile, documentId, ct).ConfigureAwait(false);
+            .RequireVisibleDocumentAsync(store, access, profile, documentId, ct).ConfigureAwait(false);
         EditAssignmentAccess.RequireManager(profile, document);
 
         var slice = EditAssignmentAccess.ToSlice(request.Slice);
+
+        // ✎ D-443: рівень учасника. Відсутній — Write (передача місяця, як до D-443). Місяць і період — лише для
+        // Write (422); ексклюзивність для інших рівнів не має сенсу й ігнорується (за замовчуванням у запиті true).
+        var level = request.Level is { } requestedLevel ? (GrantLevel)(byte)requestedLevel : GrantLevel.Write;
+        if (!EditAssignment.IsAssignableLevel(level))
+        {
+            throw EditAssignmentAccess.Invalid(
+                "err.ECR-REQ-0422.editAssignmentLevelSliceInvalid", "Рівень учасника — Read, Write, Submit або Approve.");
+        }
+
+        if (level != GrantLevel.Write && (slice.MonthNumber is not null || slice.PeriodKey is not null))
+        {
+            throw EditAssignmentAccess.Invalid(
+                "err.ECR-REQ-0422.editAssignmentLevelSliceInvalid",
+                "Місяць і період задаються лише для рівня Write (передача місяця).");
+        }
+
+        var isExclusive = level == GrantLevel.Write && request.IsExclusive;
 
         var note = request.Note?.Trim();
         if (note is { Length: > EditAssignment.MaxNoteLength })
@@ -323,16 +355,30 @@ public sealed class UpsertEditAssignmentHandler(
         // «Лише в межах власних прав»: з даних шаблону, у сесії того, хто передає.
         var templateVersionId = await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
-        var own = EditAssignmentAccess.SheetsBeyondOwnRights(profile, document.ProjectId, snapshot, slice);
-        if (own.Exceeds)
+        if (level == GrantLevel.Write)
         {
-            throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentDelegationExceedsOwnRights",
-                "Передавати можна лише комірки, які ви самі можете редагувати.",
-                new Dictionary<string, object?> { ["sheetCodes"] = own.VisibleSheetCodes });
+            var own = EditAssignmentAccess.SheetsBeyondOwnRights(profile, document.ProjectId, snapshot, slice);
+            if (own.Exceeds)
+            {
+                throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentDelegationExceedsOwnRights",
+                    "Передавати можна лише комірки, які ви самі можете редагувати.",
+                    new Dictionary<string, object?> { ["sheetCodes"] = own.VisibleSheetCodes });
+            }
+        }
+        else
+        {
+            // ⛔ D-443: видати рівень, вищий за власний на області, не можна — `Approve` видає лише той, хто сам має
+            // `Approve` на кожному аркуші й таблиці області (за ролями; заборона будь-де в області — відмова).
+            var ownLevel = EditAssignmentAccess.OwnLevelOver(profile, document.ProjectId, snapshot, slice);
+            if (ownLevel < level)
+            {
+                throw EditAssignmentAccess.LevelAboveOwn(level, ownLevel);
+            }
         }
 
-        // Одержувач мусить мати Read (Q1) — інакше передача не дасть жодного ефекту, а ознака «є/нема»
-        // не розкривається: однакова відповідь для відсутнього, вимкненого й без видимості.
+        // ✎ D-443: одержувачеві більше НЕ потрібна роль на проєкт — надання саме дає видимість (скасовано Q1 «одержувач
+        // має Read»). Лишається: існує й активний; ознака «є/нема» не розкривається — однакова відповідь.
+        // Заборона ролі одержувача перемагає надання під час рішення (`EditRules.Effective`), тож тут не перевіряється.
         var users = await store.GetUsersAsync(recipientIds, ct).ConfigureAwait(false);
         foreach (var id in recipientIds)
         {
@@ -341,10 +387,7 @@ public sealed class UpsertEditAssignmentHandler(
                 throw RecipientInvalid();
             }
 
-            var recipientProfile = await EditAssignmentAccess.TryBuildProfileAsync(access, id, ct).ConfigureAwait(false);
-            if (recipientProfile is null
-                || !recipientProfile.SeesDocumentsOf(document.ProjectId)
-                || !PermissionCheck.IsGrantedIn(recipientProfile, "Document.View", document.ProjectId))
+            if (await EditAssignmentAccess.TryBuildProfileAsync(access, id, ct).ConfigureAwait(false) is null)
             {
                 throw RecipientInvalid();
             }
@@ -360,9 +403,10 @@ public sealed class UpsertEditAssignmentHandler(
         }
 
         return new PreparedUpsert(
-            document, userId, slice, recipientIds, request.IsExclusive, note, appliedSet, users,
+            document, userId, slice, recipientIds, isExclusive, note, appliedSet, users,
             request.BaseVersion, overwrite)
         {
+            Level = level,
             ExpiresAt = expiresAt,
             // Поле відсутнє в запиті (або пакетна дія) — термін наявної передачі не змінюється.
             KeepExpiresAt = keepExpiresAt || !request.ExpiresAtSpecified,
@@ -379,6 +423,7 @@ public sealed class UpsertEditAssignmentHandler(
         var documentId = document.Id;
         var userId = p.UserId;
         var slice = p.Slice;
+        var sliceKey = EditAssignment.KeyOf(slice, p.Level);
         var recipientIds = p.RecipientIds;
         var requestedNote = p.Note;
         var users = p.Users;
@@ -398,7 +443,7 @@ public sealed class UpsertEditAssignmentHandler(
                 // блокує (аудит P1-C1): U на передачі не дає видалити документ, а блокування doc.Document
                 // дало б інверсію із записом комірки (S передача → U документ).
                 var documentLocked = false;
-                if (!await store.SliceExistsAsync(documentId, slice.Key, innerCt).ConfigureAwait(false))
+                if (!await store.SliceExistsAsync(documentId, sliceKey, innerCt).ConfigureAwait(false))
                 {
                     if (!await store.LockDocumentAsync(documentId, innerCt).ConfigureAwait(false))
                     {
@@ -409,7 +454,7 @@ public sealed class UpsertEditAssignmentHandler(
                 }
 
                 var existing = await store
-                    .FindBySliceKeyForUpdateAsync(documentId, slice.Key, innerCt).ConfigureAwait(false);
+                    .FindBySliceKeyForUpdateAsync(documentId, sliceKey, innerCt).ConfigureAwait(false);
 
                 // RC20 D-4: копія примітку не переносить — вона писана про місяць джерела.
                 var note = p.KeepNote ? existing?.Note : requestedNote;
@@ -434,7 +479,8 @@ public sealed class UpsertEditAssignmentHandler(
                     var assignment = new EditAssignment(
                         documentId, slice, p.IsExclusive, delegatedByUserId: userId, Guid.NewGuid(), userId, now,
                         expiresAt: p.KeepExpiresAt ? null : EditAssignmentAccess.RequireValidExpiryOrNull(p.ExpiresAt, now),
-                        note: note);
+                        note: note,
+                        level: p.Level);
                     foreach (var id in recipientIds)
                     {
                         assignment.AddRecipient(id, userId, now);
@@ -551,6 +597,14 @@ public sealed class UpsertEditAssignmentHandler(
             throw EditAssignmentAccess.Stale(string.Empty);
         }
 
+        // ✎ D-443: кешований профіль НОВОГО виконавця не знає, що він учасник (`HasDocumentParticipations`) — без
+        // скидання документ з'явився б у нього лише після сплину кешу. Зняття не скидає: застаріла ознака «учасник»
+        // нічого не відкриває (надання читаються з бази на кожне рішення).
+        foreach (var id in p.RecipientIds)
+        {
+            await access.InvalidateProfileAsync(id, ct).ConfigureAwait(false);
+        }
+
         var ids = new HashSet<int> { result!.DelegatedByUserId };
         ids.UnionWith(result.Recipients.Select(r => r.UserId));
         var names = await store.GetUsersAsync(ids, ct).ConfigureAwait(false);
@@ -570,6 +624,10 @@ public sealed class UpsertEditAssignmentHandler(
             ["slice"] = a.SliceKey,
             ["isExclusive"] = a.IsExclusive,
             ["via"] = via,
+
+            // ✎ D-443: рівень і область учасника — у журналі безпеки кожної видачі/зміни/зняття.
+            ["level"] = a.Level.ToString(),
+            ["scope"] = a.Scope.ToString(),
         };
 
         if (includeExpiry)
@@ -632,6 +690,9 @@ internal sealed record PreparedUpsert(
     /// <summary>Термін дії (UTC, уже нормалізований); <c>null</c> — безстроково.</summary>
     public DateTime? ExpiresAt { get; init; }
 
+    /// <summary>Рівень учасника (D-443); за замовчуванням — передача місяця.</summary>
+    public GrantLevel Level { get; init; } = GrantLevel.Write;
+
     /// <summary>Не чіпати термін наявної передачі (apply-set/copy).</summary>
     public bool KeepExpiresAt { get; init; }
 }
@@ -640,8 +701,6 @@ internal sealed record PreparedUpsert(
 public sealed class DeleteEditAssignmentHandler(
     IEditAssignmentStore assignments,
     IEditAssignmentManagementStore store,
-    IDocumentStore documents,
-    IMetadataCache metadata,
     IAccessDecisionService access,
     IUnitOfWork uow,
     IAuditWriter audit,
@@ -654,10 +713,10 @@ public sealed class DeleteEditAssignmentHandler(
         var userId = EditAssignmentAccess.RequireUser(currentUser);
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var document = await EditAssignmentAccess
-            .RequireVisibleDocumentAsync(store, profile, documentId, ct).ConfigureAwait(false);
+            .RequireVisibleDocumentAsync(store, access, profile, documentId, ct).ConfigureAwait(false);
         EditAssignmentAccess.RequireManager(profile, document);
         var scope = await EditAssignmentAccess
-            .ReadScopeAsync(documents, metadata, profile, document.ProjectId, documentId, ct).ConfigureAwait(false);
+            .ReadScopeAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
         await EditAssignmentAccess.InTransactionAsync(uow, async innerCt =>
@@ -708,8 +767,6 @@ public sealed class DeleteEditAssignmentHandler(
 public sealed class FillEditAssignmentHandler(
     IEditAssignmentStore assignments,
     IEditAssignmentManagementStore store,
-    IDocumentStore documents,
-    IMetadataCache metadata,
     IAccessDecisionService access,
     IUnitOfWork uow,
     IAuditWriter audit,
@@ -729,9 +786,9 @@ public sealed class FillEditAssignmentHandler(
         var userId = EditAssignmentAccess.RequireUser(currentUser);
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var document = await EditAssignmentAccess
-            .RequireVisibleDocumentAsync(store, profile, documentId, ct).ConfigureAwait(false);
+            .RequireVisibleDocumentAsync(store, access, profile, documentId, ct).ConfigureAwait(false);
         var scope = await EditAssignmentAccess
-            .ReadScopeAsync(documents, metadata, profile, document.ProjectId, documentId, ct).ConfigureAwait(false);
+            .ReadScopeAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         if (profile.IsSimulation || document.ProjectStatus == ProjectStatus.Archived || document.IsArchiving)
         {
@@ -755,6 +812,12 @@ public sealed class FillEditAssignmentHandler(
 
             await store.LockRecipientsAsync(assignment.Id, innerCt).ConfigureAwait(false);
             EditAssignmentAccess.RequireSheetVisible(scope, assignment, documentId);
+
+            // ✎ D-443: «Заповнено» — лише для передачі місяця (Write); учасник інших рівнів зрізу не заповнює.
+            if (assignment.Level != GrantLevel.Write)
+            {
+                throw EditAssignmentAccess.WrongState("NotHandoff");
+            }
 
             result = assignment;
             if (!assignment.FillRecipient(userId, now))
@@ -798,8 +861,6 @@ public sealed class FillEditAssignmentHandler(
 public sealed class ValidateEditAssignmentHandler(
     IEditAssignmentStore assignments,
     IEditAssignmentManagementStore store,
-    IDocumentStore documents,
-    IMetadataCache metadata,
     IAccessDecisionService access,
     IUnitOfWork uow,
     IAuditWriter audit,
@@ -822,10 +883,10 @@ public sealed class ValidateEditAssignmentHandler(
         var userId = EditAssignmentAccess.RequireUser(currentUser);
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var document = await EditAssignmentAccess
-            .RequireVisibleDocumentAsync(store, profile, documentId, ct).ConfigureAwait(false);
+            .RequireVisibleDocumentAsync(store, access, profile, documentId, ct).ConfigureAwait(false);
         EditAssignmentAccess.RequireManager(profile, document);
         var scope = await EditAssignmentAccess
-            .ReadScopeAsync(documents, metadata, profile, document.ProjectId, documentId, ct).ConfigureAwait(false);
+            .ReadScopeAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
         EditAssignment? result = null;
@@ -899,8 +960,6 @@ public sealed class ValidateEditAssignmentHandler(
 public sealed class ReturnEditAssignmentHandler(
     IEditAssignmentStore assignments,
     IEditAssignmentManagementStore store,
-    IDocumentStore documents,
-    IMetadataCache metadata,
     IAccessDecisionService access,
     IUnitOfWork uow,
     IAuditWriter audit,
@@ -923,10 +982,10 @@ public sealed class ReturnEditAssignmentHandler(
         var userId = EditAssignmentAccess.RequireUser(currentUser);
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var document = await EditAssignmentAccess
-            .RequireVisibleDocumentAsync(store, profile, documentId, ct).ConfigureAwait(false);
+            .RequireVisibleDocumentAsync(store, access, profile, documentId, ct).ConfigureAwait(false);
         EditAssignmentAccess.RequireManager(profile, document);
         var scope = await EditAssignmentAccess
-            .ReadScopeAsync(documents, metadata, profile, document.ProjectId, documentId, ct).ConfigureAwait(false);
+            .ReadScopeAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         // Причина йде в журнал безпеки й лист: керувальні символи (переноси, NUL) прибираються (аудит P3).
         var reason = request.Reason is null
@@ -1061,7 +1120,7 @@ public sealed class ListEditAssignmentCandidatesHandler(
         var userId = EditAssignmentAccess.RequireUser(currentUser);
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var document = await EditAssignmentAccess
-            .RequireVisibleDocumentAsync(store, profile, documentId, ct).ConfigureAwait(false);
+            .RequireVisibleDocumentAsync(store, access, profile, documentId, ct).ConfigureAwait(false);
         EditAssignmentAccess.RequireManager(profile, document);
 
         var q = query?.Trim();
@@ -1070,8 +1129,9 @@ public sealed class ListEditAssignmentCandidatesHandler(
             throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentQueryTooShort", "Запит має містити щонайменше два символи.");
         }
 
-        // Лише користувачі, які ВЖЕ мають Read на проєкт документа (інакше передача їм відмовила б, а список
-        // не повинен бути переліком усіх облікових записів — аудит S3).
+        // ✎ D-443: учасником може стати користувач БЕЗ ролі на проєкт (надання саме дає видимість), тож кандидати —
+        // усі активні облікові записи за частиною імені. Межі аудиту S3 лишаються: ≥ 2 символи, ≤ 20 відповідей, без
+        // email і SID, ліміт частоти на користувача; невидимість облікового запису (профіль не будується) — пропуск.
         var result = new List<EditAssignmentCandidateDto>();
 
         // Сторінки по MaxResults*3 доти, доки не набрано MaxResults або кандидати не скінчились (межа сторінок —
@@ -1082,10 +1142,7 @@ public sealed class ListEditAssignmentCandidatesHandler(
                 .SearchCandidatesAsync(q, page * PageSize, PageSize, ct).ConfigureAwait(false);
             foreach (var u in batch.Where(u => u.Id != userId && u.Id != document.CreatedByUserId))
             {
-                var candidate = await EditAssignmentAccess.TryBuildProfileAsync(access, u.Id, ct).ConfigureAwait(false);
-                if (candidate is not null
-                    && candidate.SeesDocumentsOf(document.ProjectId)
-                    && PermissionCheck.IsGrantedIn(candidate, "Document.View", document.ProjectId))
+                if (u.IsActive)
                 {
                     result.Add(new EditAssignmentCandidateDto(u.Id, u.DisplayName));
                     if (result.Count == MaxResults)
@@ -1110,8 +1167,6 @@ public sealed class ListEditAssignmentCandidatesHandler(
 /// </summary>
 public sealed class ListMyEditAssignmentsHandler(
     IEditAssignmentManagementStore store,
-    IDocumentStore documents,
-    IMetadataCache metadata,
     IAccessDecisionService access,
     Common.ICurrentUser currentUser)
 {
@@ -1129,7 +1184,12 @@ public sealed class ListMyEditAssignmentsHandler(
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var rows = await store.ListMineAsync(userId, documentId, ct).ConfigureAwait(false);
-        var projectVisible = rows.Where(r => profile.SeesDocumentsOf(r.ProjectId)).ToList();
+
+        // ✎ D-443: власні рядки виконавця видно й без ролі на проєкт (надання дає видимість), крім заборони проєкту.
+        var projectVisible = rows
+            .Where(r => profile.SeesDocumentsOf(r.ProjectId)
+                        || (r.MyStatus is not null && profile.HasDocumentParticipations && !profile.DeniesProject(r.ProjectId)))
+            .ToList();
 
         // ⛔ Аудит S4: код аркуша/таблиці не віддається, якщо користувач не читає аркуш зрізу (Deny/звуження):
         // така передача в його «Моїх задачах» не з'являється. Межі читання — один раз на документ.
@@ -1142,7 +1202,7 @@ public sealed class ListMyEditAssignmentsHandler(
                 if (!scopes.TryGetValue(row.DocumentId, out var scope))
                 {
                     scope = await EditAssignmentAccess
-                        .ReadScopeAsync(documents, metadata, profile, row.ProjectId, row.DocumentId, ct)
+                        .ReadScopeAsync(access, profile, row.DocumentId, ct)
                         .ConfigureAwait(false);
                     scopes[row.DocumentId] = scope;
                 }
@@ -1156,9 +1216,12 @@ public sealed class ListMyEditAssignmentsHandler(
             visible.Add(row);
         }
 
+        // ✎ D-443: «Мені на заповнення» — лише передачі місяця (рівень Write); учасник-читач чи погоджувач — не задача
+        // на заповнення.
         var assigned = wantAssignee
             ? visible
-                .Where(r => r.MyStatus is EditAssignmentRecipientStatus.Assigned or EditAssignmentRecipientStatus.Returned)
+                .Where(r => r.Level == GrantLevel.Write
+                            && r.MyStatus is EditAssignmentRecipientStatus.Assigned or EditAssignmentRecipientStatus.Returned)
                 .Select(r => ToDto(r, r.MyStatus!.Value.ToString()))
                 .ToList()
             : [];
@@ -1166,6 +1229,7 @@ public sealed class ListMyEditAssignmentsHandler(
         var awaiting = wantOwner
             ? visible
                 .Where(r => r.IsOwnerOf
+                    && r.Level == GrantLevel.Write
                     && r.ValidationStatus == EditAssignmentValidationStatus.NotValidated
                     && r.RecipientCount > 0 && r.FilledCount == r.RecipientCount)
                 .Select(r => ToDto(r, "Filled"))

@@ -440,6 +440,13 @@ public sealed class AccessDecisionService(
             };
         }
 
+        // ✎ D-443: ознака «учасник якогось документа» — ОДИН EXISTS по IX_EditAssignmentRecipient_User на побудову
+        // профілю (кешується разом із профілем). Самі надання читаються з бази на кожне рішення.
+        var participates = await db.EditAssignmentRecipients
+            .AsNoTracking()
+            .AnyAsync(r => r.UserId == userId, ct)
+            .ConfigureAwait(false);
+
         // ⛔ Успадкування Project → Sheet → Table → Column тут НЕ розгортається
         // в мапу: його робить EditRules.Effective на кожному рішенні. Причина
         // не в економії — розгорнута мапа зафіксувала б структуру шаблону на
@@ -458,6 +465,7 @@ public sealed class AccessDecisionService(
             // упав би на `RoleIds`, а там ролі з областю — в усіх проєктах.
             UnscopedRoleIds = scopedProjects.Count == 0 && narrowedScopes.Count == 0 ? null : unscopedRoleIds,
             Scoped = scoped,
+            HasDocumentParticipations = participates,
         };
     }
 
@@ -579,8 +587,94 @@ public sealed class AccessDecisionService(
 
         var projectId = await ProjectIdAsync(documentId, ct).ConfigureAwait(false);
 
-        return ReadDecision(profile, projectId);
+        var byRoles = ReadDecision(profile, projectId, participates: false);
+        if (byRoles.IsAllowed || !profile.HasDocumentParticipations || profile.DeniesProject(projectId))
+        {
+            return byRoles;
+        }
+
+        // ✎ D-443: надання учасника дає видимість документа без ролі на проєкт. Запит — лише тоді, коли ролі
+        // документ не відкривають і профіль узагалі є учасником: решта читачів не платить нічого.
+        return await ParticipatesAsync(profile, documentId, ct).ConfigureAwait(false)
+            ? EditDecision.Allow()
+            : byRoles;
     }
+
+    /// <inheritdoc />
+    public async Task<bool> ParticipatesAsync(AccessProfile profile, long documentId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        if (!profile.HasDocumentParticipations || profile.IsIntegrationWriter)
+        {
+            return false;
+        }
+
+        var documents = EditAssignmentFactsReader.ParticipatedDocuments(db, profile.UserId, clock.UtcNow);
+        return await documents.AnyAsync(id => id == documentId, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlySet<long>> ParticipatedDocumentsAsync(
+        AccessProfile profile, IReadOnlyCollection<long> documentIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(documentIds);
+
+        if (!profile.HasDocumentParticipations || profile.IsIntegrationWriter || documentIds.Count == 0)
+        {
+            return new HashSet<long>();
+        }
+
+        var ids = documentIds.Distinct().ToArray();
+        var found = await EditAssignmentFactsReader.ParticipatedDocuments(db, profile.UserId, clock.UtcNow)
+            .Where(id => ids.Contains(id))
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return found.ToHashSet();
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> ParticipatesInProjectAsync(AccessProfile profile, int projectId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        if (!profile.HasDocumentParticipations || profile.IsIntegrationWriter || profile.DeniesProject(projectId))
+        {
+            return false;
+        }
+
+        var documents = EditAssignmentFactsReader.ParticipatedDocuments(db, profile.UserId, clock.UtcNow);
+        return await db.Documents
+            .AsNoTracking()
+            .AnyAsync(d => d.ProjectId == projectId && documents.Contains(d.Id), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// D-443: діючі надання учасника в документах — з тих самих фактів, що й рішення про запис
+    /// (<see cref="EditAssignmentFactsReader"/>). Без ознаки профілю чи для інтеграції — порожньо без бази.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<long, IReadOnlyList<ParticipationGrant>>> ParticipationGrantsAsync(
+        AccessProfile profile, IReadOnlyCollection<long> documentIds, CancellationToken ct)
+    {
+        if (!profile.HasDocumentParticipations || profile.IsIntegrationWriter || documentIds.Count == 0)
+        {
+            return NoGrants;
+        }
+
+        var facts = await EditAssignmentFactsReader
+            .LoadAsync(db, documentIds, profile.UserId, forUpdate: false, ct)
+            .ConfigureAwait(false);
+
+        var now = clock.UtcNow;
+        return facts.ToDictionary(f => f.Key, f => DocumentParticipation.Active(f.Value.Facts, now));
+    }
+
+    private static readonly IReadOnlyDictionary<long, IReadOnlyList<ParticipationGrant>> NoGrants =
+        new Dictionary<long, IReadOnlyList<ParticipationGrant>>();
 
     /// <inheritdoc />
     /// <remarks>
@@ -610,7 +704,59 @@ public sealed class AccessDecisionService(
 
         var snapshot = await metadata.GetAsync(scope.TemplateVersionId, ct).ConfigureAwait(false);
 
-        return DocumentReadScope.For(profile, scope.ProjectId, snapshot);
+        // ✎ D-443: межі документа з наданнями учасника саме в ньому (лише для профілю-учасника; заборона проєкту
+        // перемагає — тоді межі як за ролями, тобто закриті).
+        var grants = profile.DeniesProject(scope.ProjectId)
+            ? NoGrants
+            : await ParticipationGrantsAsync(profile, [documentId], ct).ConfigureAwait(false);
+
+        return DocumentReadScope.ForParticipant(
+            profile, scope.ProjectId, snapshot, grants.TryGetValue(documentId, out var mine) ? mine : null);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Один запит на документи (проєкт і версія), один — на надання (лише для профілю-учасника), знімки — з кешу
+    /// метаданих раз на версію: стала кількість звернень на будь-яку сторінку переліку.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<long, DocumentReadScope>> ReadScopesAsync(
+        AccessProfile profile, IReadOnlyCollection<long> documentIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(documentIds);
+
+        var result = new Dictionary<long, DocumentReadScope>();
+        if (documentIds.Count == 0)
+        {
+            return result;
+        }
+
+        var ids = documentIds.Distinct().ToArray();
+        var rows = await db.Documents
+            .AsNoTracking()
+            .Where(d => ids.Contains(d.Id))
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.Id, d.ProjectId, p.TemplateVersionId })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var grants = await ParticipationGrantsAsync(
+                profile, [.. rows.Where(r => !profile.DeniesProject(r.ProjectId)).Select(r => r.Id)], ct)
+            .ConfigureAwait(false);
+
+        var snapshots = new Dictionary<int, TemplateVersionSnapshot>();
+        foreach (var row in rows)
+        {
+            if (!snapshots.TryGetValue(row.TemplateVersionId, out var snapshot))
+            {
+                snapshot = await metadata.GetAsync(row.TemplateVersionId, ct).ConfigureAwait(false);
+                snapshots[row.TemplateVersionId] = snapshot;
+            }
+
+            result[row.Id] = DocumentReadScope.ForParticipant(
+                profile, row.ProjectId, snapshot, grants.TryGetValue(row.Id, out var mine) ? mine : null);
+        }
+
+        return result;
     }
 
     /// <summary>Чи бачить профіль документи проєкту — без походу в базу.</summary>
@@ -623,7 +769,11 @@ public sealed class AccessDecisionService(
     /// проєкт уже мають із <see cref="BuildContextAsync"/> і другого запиту не
     /// платять.
     /// </remarks>
-    private static EditDecision ReadDecision(AccessProfile profile, int projectId)
+    /// <param name="participates">
+    /// D-443: у користувача є діюче надання учасника в документі (<see cref="CellAccessContext.ParticipatesInDocument"/>).
+    /// Відкриває документ лише профілю-учаснику й лише без заборони проєкту.
+    /// </param>
+    private static EditDecision ReadDecision(AccessProfile profile, int projectId, bool participates)
     {
         // Читання не залежить ні від стану періоду, ні від статусу аркуша:
         // закритий період і подана форма лишаються видимими — інакше звіт
@@ -637,7 +787,12 @@ public sealed class AccessDecisionService(
         //
         // ⚠ D-214: роль, звужена аркушами чи періодами, документ відкриває
         // (`SeesDocumentsOf`), але рівня проєкту не піднімає.
-        return integrationReads || profile.SeesDocumentsOf(projectId)
+        var byParticipation = participates
+                              && profile.HasDocumentParticipations
+                              && !profile.IsIntegrationWriter
+                              && !profile.DeniesProject(projectId);
+
+        return integrationReads || profile.SeesDocumentsOf(projectId) || byParticipation
             ? EditDecision.Allow()
             : EditDecision.Deny(EditDenyReason.NoGrant);
     }
@@ -663,7 +818,7 @@ public sealed class AccessDecisionService(
     /// </remarks>
     private static EditDecision? DenyIfInvisible(AccessProfile profile, CellAccessContext context)
     {
-        var read = ReadDecision(profile, context.ProjectId);
+        var read = ReadDecision(profile, context.ProjectId, context.ParticipatesInDocument);
         return read.IsAllowed ? null : read;
     }
 
@@ -1459,6 +1614,14 @@ public sealed class AccessDecisionService(
                 ? await EditAssignmentsAsync(profile, [documentId], ct).ConfigureAwait(false)
                 : EmptyAssignments;
 
+            // ✎ D-443: надання учасника — з тих самих фактів, 0 нових звернень; лише для профілю-учасника і без
+            // заборони проєкту (заборона перемагає й тут, і в `EditRules.Effective`).
+            var grants = profile.HasDocumentParticipations
+                         && !profile.DeniesProject(projectId)
+                         && assignments.TryGetValue(documentId, out var forGrants)
+                ? DocumentParticipation.Active(forGrants.Facts, clock.UtcNow)
+                : [];
+
             // ⛔ Правила доступу до періоду (`ФВ-2.15`) і все, що їм потрібно,
             // читається ОДИН раз на групу — див. `PeriodRuleContextAsync`.
             // Вікна чинності ключовані `TableRow.Id`, а він унікальний, тож
@@ -1480,7 +1643,19 @@ public sealed class AccessDecisionService(
 
                 // ⚠ D-214: код аркуша — зі знімка, що вже в руках; без нього
                 // роль, звужена аркушами, у рішеннях зрізу не діяла б.
-                var shared = sharedBySheet[sheetDefId] with { SheetCode = SheetCodeOf(snapshot, sheetDefId) };
+                var sheetCode = SheetCodeOf(snapshot, sheetDefId);
+                var instanceTableCode = snapshot.Sheets
+                    .SelectMany(s => s.Tables)
+                    .FirstOrDefault(t => t.Id == instance.TableDefId)?.Code;
+
+                // ✎ D-443: рівень надання — на аркуш (погоджувач поточного кроку, як `CanApproveAsync`) і на таблицю
+                // зрізу (рішення комірок).
+                var shared = sharedBySheet[sheetDefId] with
+                {
+                    SheetCode = sheetCode,
+                    ParticipatesInDocument = grants.Count > 0,
+                    ParticipationLevel = DocumentParticipation.LevelAt(grants, sheetCode, null, periodKey),
+                };
 
                 if (approverEdits && shared.SheetStatus == DocumentStatus.Submitted)
                 {
@@ -1494,12 +1669,15 @@ public sealed class AccessDecisionService(
                     shared = shared with { IsCurrentApprover = isApprover };
                 }
 
+                shared = shared with
+                {
+                    ParticipationLevel = DocumentParticipation.LevelAt(grants, sheetCode, instanceTableCode, periodKey),
+                };
+
                 DelegationFacts? delegation = null;
                 if (assignments.TryGetValue(documentId, out var owned))
                 {
-                    var tableCode = snapshot.Sheets
-                        .SelectMany(s => s.Tables)
-                        .FirstOrDefault(t => t.Id == instance.TableDefId)?.Code;
+                    var tableCode = instanceTableCode;
 
                     var narrowed = EditAssignmentGuard.Narrow(
                         owned.Facts,
@@ -1803,6 +1981,7 @@ public sealed class AccessDecisionService(
                 documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
             .ConfigureAwait(false);
         context = await WithSheetCodeAsync(profile, documentId, context, ct).ConfigureAwait(false);
+        context = await WithParticipationAsync(profile, documentId, context, ct).ConfigureAwait(false);
 
         if (DenyIfInvisible(profile, context) is { } invisible)
         {
@@ -1833,6 +2012,7 @@ public sealed class AccessDecisionService(
                 documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
             .ConfigureAwait(false);
         context = await WithSheetCodeAsync(profile, documentId, context, ct).ConfigureAwait(false);
+        context = await WithParticipationAsync(profile, documentId, context, ct).ConfigureAwait(false);
 
         if (DenyIfInvisible(profile, context) is { } invisible)
         {
@@ -1857,6 +2037,7 @@ public sealed class AccessDecisionService(
                 documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
             .ConfigureAwait(false);
         context = await WithSheetCodeAsync(profile, documentId, context, ct).ConfigureAwait(false);
+        context = await WithParticipationAsync(profile, documentId, context, ct).ConfigureAwait(false);
 
         return DenyIfInvisible(profile, context) ?? EditRules.CanReopen(profile, context);
     }
@@ -2089,6 +2270,43 @@ public sealed class AccessDecisionService(
 
         var snapshot = await SnapshotAsync(documentId, ct).ConfigureAwait(false);
         return context with { SheetCode = SheetCodeOf(snapshot, context.SheetDefId) };
+    }
+
+    /// <summary>
+    /// D-443: додає до умов аркуша надання учасника документа — рівень на аркуш (надання на документ чи на цей аркуш;
+    /// надання на таблицю подавати/погоджувати аркуш не дає) і ознаку видимості.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Лише для профілю-учасника, документа з передачами (ознака з того самого запиту умов) і без заборони
+    /// проєкту; решта не платить нічого. Знімок шаблону — лише заради коду аркуша, якщо його ще немає.
+    /// </remarks>
+    private async Task<CellAccessContext> WithParticipationAsync(
+        AccessProfile profile, long documentId, CellAccessContext context, CancellationToken ct)
+    {
+        if (!profile.HasDocumentParticipations
+            || profile.IsIntegrationWriter
+            || !context.HasEditAssignments
+            || profile.DeniesProject(context.ProjectId))
+        {
+            return context;
+        }
+
+        var grants = (await ParticipationGrantsAsync(profile, [documentId], ct).ConfigureAwait(false))
+            .TryGetValue(documentId, out var mine) ? mine : [];
+        if (grants.Count == 0)
+        {
+            return context;
+        }
+
+        var sheetCode = context.SheetCode
+                        ?? SheetCodeOf(await SnapshotAsync(documentId, ct).ConfigureAwait(false), context.SheetDefId);
+
+        return context with
+        {
+            SheetCode = sheetCode,
+            ParticipatesInDocument = true,
+            ParticipationLevel = DocumentParticipation.LevelAt(grants, sheetCode, null, context.Period),
+        };
     }
 
     /// <summary>Аркуш, якому належить таблиця.</summary>
