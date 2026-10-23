@@ -4500,6 +4500,13 @@
               "integer"
             ]
           },
+          "periodKind": {
+            "description": "AN-63: періодичність проєкту документа — ім'я `Project.PeriodKind`: Monthly/Quarterly/Yearly/Custom (рядок, а не enum:\nnullable-enum у схемі додає `null` у спільний `PeriodKind` і ламає типи клієнта) — адитивне поле;\nметадані проєкту не секрет, звуження читача його не знімає. Документ власної періодичності не має; `periodKey` не віддається\n(це вісь запиту). Заповнюють і картка, і перелік; `null` лише коли проєкт не знайдено.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "projectId": {
             "description": "Проєкт.",
             "format": "int32",

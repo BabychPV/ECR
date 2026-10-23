@@ -52,6 +52,13 @@ public interface IPermitGroupStore
     public Task<bool> IsReferencedByTemplatesAsync(int registryDefId, CancellationToken ct);
 
     /// <summary>
+    /// Чи виняток - порушення зовнішнього ключа (SQL 547) на видаленні групи/реєстру: між перевіркою використання і DELETE
+    /// з'явилось посилання (гонка) або тримає інший FK на реєстр; обробник віддає 409 <c>ECR-PRM-4098</c> замість 500.
+    /// </summary>
+    /// <param name="failure">Виняток збереження.</param>
+    public bool IsForeignKeyViolation(Exception failure);
+
+    /// <summary>
     /// Знімок для <see cref="Permits.Groups.IPermitGroupResolver"/>: по рядку на групу з реєстрами шапок типів складу.
     /// </summary>
     /// <param name="ct">Токен скасування.</param>
