@@ -202,9 +202,15 @@ public sealed class RecalculationService(
     /// №11 (T12, `#26`) — <see cref="SliceEvaluationContext.Read"/> тепер уміє
     /// його обчислити, і виключення нижче зняте.
     /// </remarks>
+    /// <param name="approverEditSheets">
+    /// ✎ D-442: подані аркуші, у яких насіння прогону — правка погоджувача поточного кроку (перевірена під
+    /// блокуванням у <c>PatchCellsHandler</c>). Лише ці аркуші прогін пише попри <c>Submitted</c> (див.
+    /// <see cref="EnterSheetsAsync"/>); <c>null</c>/порожньо — подані пропускаються всі, як і доти.
+    /// </param>
     public async Task<int> RecalculateAsync(
         long tableInstanceId, DirtySet dirty, CancellationToken ct,
-        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null)
+        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null,
+        IReadOnlySet<int>? approverEditSheets = null)
     {
         ArgumentNullException.ThrowIfNull(dirty);
 
@@ -219,7 +225,9 @@ public sealed class RecalculationService(
 
         var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
 
-        return await RunAsync(instance, dirty, ct, changedColumns: changedColumns).ConfigureAwait(false);
+        return await RunAsync(
+                instance, dirty, ct, changedColumns: changedColumns, approverEditSheets: approverEditSheets)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -375,11 +383,13 @@ public sealed class RecalculationService(
     /// WW-03: прогін по зміні ІНШОГО періоду — цілі лише формули з міжперіодним ребром на ці колонки
     /// (<see cref="CrossPeriodReaders.Targets"/>); <c>null</c> — звичайний вхід.
     /// </param>
+    /// <param name="approverEditSheets">D-442: подані аркуші правки погоджувача (лише інкрементний вхід).</param>
     private async Task<int> RunAsync(
         TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null,
         int? heldSheetDefId = null, IReadOnlyList<TableInstanceRef>? knownInstances = null,
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null,
-        IReadOnlyCollection<CrossPeriodSource>? crossPeriodSources = null)
+        IReadOnlyCollection<CrossPeriodSource>? crossPeriodSources = null,
+        IReadOnlySet<int>? approverEditSheets = null)
     {
         var periodKey = new PeriodKey(instance.PeriodKey);
 
@@ -885,7 +895,8 @@ public sealed class RecalculationService(
                 instance.DocumentId);
 
             var writable = await EnterSheetsAsync(
-                instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheetDefId, token).ConfigureAwait(false);
+                    instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheetDefId, token, approverEditSheets)
+                .ConfigureAwait(false);
 
             // ⛔ O2 (ФВ-9.8, замір I2). Доти тіло нижче виконувалося НА КОЖЕН
             // екземпляр: `ReadCellsAsync` → `MERGE doc.CellValue` →
@@ -1081,8 +1092,17 @@ public sealed class RecalculationService(
     /// все взяте; фонова задача повторює прогін пізніше (<c>FormulaRecalculationJob</c>
     /// відкладає себе, <c>RecalculationJob</c> — теж відкладає себе, Y1-02).
     /// </remarks>
+    /// <param name="approverEditSheets">
+    /// ✎ D-442 (борг AN-129): аркуші, у яких правку зробив погоджувач поточного кроку. Такий аркуш пишеться,
+    /// якщо під спільним блокуванням він і досі <c>Submitted</c>: формули оновлюються одразу, як у чернетці,
+    /// а не лише на затвердженні. Хто погоджувач, перевірено під блокуванням у момент правки
+    /// (<c>PatchCellsHandler.EnsureSheetStillEditableAsync</c>); прогін лише виводить обчислені числа з уже
+    /// записаних входів. <c>Approved</c> не пишеться ніколи (затвердження бере ВИНЯТКОВЕ блокування й
+    /// перераховує аркуш саме, <c>ApprovalSnapshotRefresh</c>); інші подані аркуші — так само пропускаються.
+    /// </param>
     private async Task<IReadOnlySet<int>> EnterSheetsAsync(
-        long documentId, PeriodKey periodKey, IEnumerable<int> sheetDefIds, int? heldSheetDefId, CancellationToken ct)
+        long documentId, PeriodKey periodKey, IEnumerable<int> sheetDefIds, int? heldSheetDefId, CancellationToken ct,
+        IReadOnlySet<int>? approverEditSheets = null)
     {
         var writable = new HashSet<int>();
         var holdsAny = false;
@@ -1103,7 +1123,8 @@ public sealed class RecalculationService(
                 : await sheetGate.EnterEditAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false);
             holdsAny = true;
 
-            if (status is not (Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved))
+            if (status is not (Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved)
+                || (status == Domain.Enums.DocumentStatus.Submitted && approverEditSheets?.Contains(sheetDefId) == true))
             {
                 writable.Add(sheetDefId);
             }

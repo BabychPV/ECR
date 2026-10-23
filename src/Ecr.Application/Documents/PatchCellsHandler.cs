@@ -180,9 +180,15 @@ public sealed partial class PatchCellsHandler(
 
         // ⚠ Насіння — лише зі `changes` зі СПРАВЖНІМИ ідентифікаторами нових
         // рядків: тимчасові від'ємні адреси вказували б у нікуди.
+        // ✎ D-442: правка погоджувача (позначка виставлена під блокуванням аркуша, тут уже відома) несе аркуш
+        // у насінні — інакше каскад пропустив би поданий аркуш, і формули оновилися б лише на затвердженні.
         async Task EnqueueAsync(CellChangeLists applied, CancellationToken token)
             => recalculationJobId = await EnqueueRecalculationAsync(
-                    request, context.Instance.DocumentId, BuildRecalculationSeeds(applied), context.UserId, token)
+                    request,
+                    context.Instance.DocumentId,
+                    BuildRecalculationSeeds(applied, context.ApproverEdit ? context.Table.SheetDefId : null),
+                    context.UserId,
+                    token)
                 .ConfigureAwait(false);
 
         // ⛔ MI-02 (в): черга в базі — постановка ВСЕРЕДИНІ транзакції запису,
@@ -2819,11 +2825,17 @@ public sealed partial class PatchCellsHandler(
     /// одна задача на книгу в <c>ExcelImporter</c>) брали насіння з ОДНОГО місця.
     /// Два обчислення того самого переліку — це два переліки, які колись розійдуться.
     /// </remarks>
-    private static List<RecalculationSeed> BuildRecalculationSeeds(CellChangeLists changes)
+    /// <param name="changes">Застосовані зміни.</param>
+    /// <param name="approverSheetDefId">
+    /// ✎ D-442: аркуш правки погоджувача (<see cref="RequestContext.ApproverEdit"/>) — позначка, з якою каскад
+    /// перераховує саме цей поданий аркуш; <c>null</c> — звичайна правка.
+    /// </param>
+    private static List<RecalculationSeed> BuildRecalculationSeeds(
+        CellChangeLists changes, int? approverSheetDefId = null)
         => changes.Upserts
             .Select(u => u.Address)
             .Concat(changes.Deletes)
-            .Select(a => new RecalculationSeed(a.TableRowId, a.ColumnDefId))
+            .Select(a => new RecalculationSeed(a.TableRowId, a.ColumnDefId, approverSheetDefId))
             .Distinct()
             .ToList();
 
@@ -3272,5 +3284,15 @@ public sealed partial class PatchCellsHandler(
 /// ОДНУ задачу на книгу після коміту. Форма серіалізації не змінилася
 /// (<c>{ rowId, columnDefId }</c>), тож <c>DirtyCell</c> у
 /// <c>FormulaRecalculationJob</c> читає її так само, як читав анонімний тип.
+///
+/// ✎ D-442 (борг AN-129): <paramref name="ApproverSheetDefId"/> — аркуш, на якому правку зробив погоджувач
+/// поточного кроку (<c>Origin = ApproverEdit</c>, перевірено під блокуванням аркуша). Лише цей поданий аркуш
+/// каскад має право перерахувати; без позначки (<c>null</c>) — поле в JSON не пишеться, форма та сама.
 /// </remarks>
-public sealed record RecalculationSeed(long RowId, int ColumnDefId);
+/// <param name="ApproverSheetDefId">Аркуш правки погоджувача; <c>null</c> — звичайна правка.</param>
+public sealed record RecalculationSeed(
+    long RowId,
+    int ColumnDefId,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    int? ApproverSheetDefId = null);
