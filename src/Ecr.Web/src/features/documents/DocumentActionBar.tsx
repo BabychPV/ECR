@@ -1,7 +1,7 @@
 import { lazy, Suspense, useRef, type JSX, type ReactNode, type RefObject } from 'react';
 import { Button, Menu, Text } from '@mantine/core';
 import { ExportButton, exportFormatOptions, type ExportFormat } from '@/features/export/ExportButton';
-import { periodLabel, RecalculateKbd, submitLabel, useSheetActions, type SheetActionsModel } from '@/features/workflow/SheetActions';
+import { RecalculateKbd, submitLabel, useSheetActions, type SheetActionsModel } from '@/features/workflow/SheetActions';
 import type { DocumentLock } from './documentLock';
 import { DocumentSheetBanner } from './DocumentSheetBanner';
 import { DocumentToolbar } from './DocumentToolbar';
@@ -11,6 +11,8 @@ import { t } from '@/shared/i18n';
 
 // ⚠ `import()` — той самий чанк, що й раніше в `DocumentPage` (`D-132`): імпорт
 // не потрібен у мить першого малюнка сторінки.
+// ✎ D-441: вибір періоду подання — окремим чанком (бюджет маршруту `D-132`); потрібен лише коли неподаних кілька.
+const SubmitPeriodPicker = lazy(async () => ({ default: (await import('./SubmitPeriodPicker')).SubmitPeriodPicker }));
 const ImportPanel = lazy(async () => ({ default: (await import('@/features/import/ImportPanel')).ImportPanel }));
 
 /** Що сторінка знає про документ і аркуш для рядка дій. */
@@ -263,11 +265,6 @@ function SubmitAction({
 }): JSX.Element {
   return (
     <>
-      {submit.nextPeriodKey !== null && (
-        <Text size="xs" c="dimmed" role="status" data-testid="submit-next-period">
-          {t('workflow.submitNextPeriod', { period: periodLabel(submit.nextPeriodKey) })}
-        </Text>
-      )}
       <Button
         variant={variant}
         loading={submit.loading}
@@ -277,28 +274,11 @@ function SubmitAction({
       >
         {submitLabel(submit.periodKey)}
       </Button>
+      {/* ⚠ «Наступний — …» буває лише тоді, коли неподаних кілька, — тобто разом із вибором ▾. */}
       {submit.options.length > 1 && (
-        <Menu shadow="md" position="bottom-end" withinPortal>
-          <Menu.Target>
-            <Button variant="default" aria-label={t('workflow.pickSubmitPeriod')} data-testid="submit-period-pick">
-              <span aria-hidden="true">▾</span>
-            </Button>
-          </Menu.Target>
-          <Menu.Dropdown>
-            <Menu.Label>{t('workflow.pickSubmitPeriod')}</Menu.Label>
-            {submit.options.map((key) => (
-              <Menu.Item
-                key={key}
-                data-submit-period={key}
-                onClick={() => submit.pick(key)}
-                aria-current={key === submit.periodKey ? 'true' : undefined}
-                rightSection={key === submit.periodKey ? <span aria-hidden="true">✓</span> : null}
-              >
-                {periodLabel(key)}
-              </Menu.Item>
-            ))}
-          </Menu.Dropdown>
-        </Menu>
+        <Suspense fallback={null}>
+          <SubmitPeriodPicker submit={submit} />
+        </Suspense>
       )}
     </>
   );

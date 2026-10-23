@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
@@ -73,7 +72,7 @@ export function submissionTargetKey(documentId: number, sheetDefId: number, peri
   return ['submission-target', documentId, sheetDefId, periodKey];
 }
 
-function fetchSubmissionTarget(documentId: number, sheetDefId: number, periodKey: number): Promise<SubmissionTarget> {
+export function fetchSubmissionTarget(documentId: number, sheetDefId: number, periodKey: number): Promise<SubmissionTarget> {
   return apiFetch<SubmissionTarget>(
     `/api/v1/documents/${String(documentId)}/submission-target?sheetDefId=${String(sheetDefId)}&periodKey=${String(periodKey)}`,
   );
@@ -92,47 +91,4 @@ export function useSubmissionTarget(
     queryKey: submissionTargetKey(documentId, sheetDefId, periodKey),
     queryFn: () => fetchSubmissionTarget(documentId, sheetDefId, periodKey),
   });
-}
-
-/** Стан місячної колонки, який позначається в заголовку (D-441): подано чи затверджено. */
-export type MarkedMonthStatus = 'Submitted' | 'Approved';
-
-/**
- * Статуси місячних колонок ОДНІЄЇ таблиці: код колонки → `Submitted`/`Approved` (D-441).
- *
- * ⚠ Лише ЧИТАЄ відповідь, яку вже запитав рядок дій (`useSheetActions`): `enabled: false`, тож сітка не
- * робить власного запиту на кожну таблицю, а оновлюється разом із кешем після дії робочого процесу.
- * Чернетка й відхилене не позначаються — колонка без позначки і є «ще не подано».
- */
-export function useMonthColumnStatuses(
-  documentId: number,
-  sheetDefId: number | undefined,
-  periodKey: number,
-  tableDefId: number,
-): ReadonlyMap<string, MarkedMonthStatus> {
-  const { data } = useQuery({
-    queryKey: submissionTargetKey(documentId, sheetDefId ?? 0, periodKey),
-    queryFn: () => fetchSubmissionTarget(documentId, sheetDefId ?? 0, periodKey),
-    enabled: false,
-  });
-
-  // ⚠ Відповідь без переліку (порожнє тіло, старіший сервер) — колонки без позначок, а не падіння сітки.
-  return useMemo(
-    () => markedMonthColumns(Array.isArray(data?.monthColumns) ? data.monthColumns : undefined, tableDefId),
-    [data, tableDefId],
-  );
-}
-
-/** Код колонки → `Submitted`/`Approved` для однієї таблиці. */
-export function markedMonthColumns(
-  months: readonly MonthColumnStatus[] | undefined,
-  tableDefId: number,
-): ReadonlyMap<string, MarkedMonthStatus> {
-  const marked = new Map<string, MarkedMonthStatus>();
-  for (const month of months ?? []) {
-    if (month.tableDefId !== tableDefId) continue;
-    if (month.sheetStatus === 'Submitted' || month.sheetStatus === 'Approved') marked.set(month.columnCode, month.sheetStatus);
-  }
-
-  return marked;
 }

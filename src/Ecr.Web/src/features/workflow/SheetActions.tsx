@@ -419,7 +419,7 @@ export function useSheetActions({
       sheetDefId: sheet,
       periodKey: period,
       acknowledgeWarnings,
-    }: ActionTarget & { acknowledgeWarnings: boolean; nextPeriodKey?: number | null }) =>
+    }: ActionTarget & { acknowledgeWarnings: boolean }) =>
       apiFetch(`/api/v1/documents/${documentId}/submit`, {
         method: 'POST',
         body: JSON.stringify({
@@ -431,11 +431,9 @@ export function useSheetActions({
     onSuccess: async (_result, at) => {
       setWarnings(null);
       await refresh(at);
+      // ✎ D-441: попередження «наступний — …» стоїть поруч із кнопкою ДО подання (`SubmitPeriodPicker`); після
+      // нього кнопка сама переходить на наступний період.
       showDone(t('document.submitted'));
-      // ✎ D-441: подано найраніший неподаний період, а за ним чекає ще один — попередження «наступний — …».
-      if (at.nextPeriodKey != null) {
-        showWarning(t('workflow.submitNextPeriod', { period: periodLabel(at.nextPeriodKey) }));
-      }
     },
     // ⚠ Причина показується як є: Submit при осиротілих рядках
     // (`ECR-SUB-4221`) — це не «помилка сервера», а перелік того, що треба
@@ -978,7 +976,7 @@ export function useSheetActions({
           // N3-01: адреса — знята в мить кліку; період — ЦІЛЬ подання, а не відкритий на екрані (D-441).
           run: () =>
             settled.run(() =>
-              submit.mutateAsync({ ...here, periodKey: submitPeriod, nextPeriodKey, acknowledgeWarnings: false }),
+              submit.mutateAsync({ ...here, periodKey: submitPeriod, acknowledgeWarnings: false }),
             ),
         }
       : null,

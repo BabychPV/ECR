@@ -141,7 +141,7 @@ import { useAddRow } from './useAddRow';
 import { DeleteRowControl } from './DeleteRowControl';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
-import { useMonthColumnStatuses, type MarkedMonthStatus } from '@/features/workflow/api';
+import { useMonthColumnStatuses, type MarkedMonthStatus } from '@/features/grid/monthColumnStatus';
 // ⚠ Порядок стилів збережений: `cell-states.css` (раніше — у `App.tsx`) іде
 // РАНІШЕ за `cellEditors.css`, як і було в єдиному бандлі. Причина, чому файл
 // тут, а не у вхідному чанку, — бюджет маршруту (`D-132`).

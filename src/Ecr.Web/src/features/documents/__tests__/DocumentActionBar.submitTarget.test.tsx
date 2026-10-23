@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DocumentActionBar } from '../DocumentActionBar';
-import { markedMonthColumns } from '@/features/workflow/api';
+import { markedMonthColumns } from '@/features/grid/monthColumnStatus';
 
 /**
  * D-441 (AN-128): «Подати» подає НАЙРАНІШИЙ неподаний період у стані Open/Grace (`GET …/submission-target`),
@@ -120,7 +120,7 @@ describe('DocumentActionBar: «Подати: <період>» (D-441)', () => {
     const submit = await screen.findByRole('button', { name: /workflow\.submitPeriod/ });
     expect(submit.getAttribute('data-period-key')).toBe(String(Jan));
     expect(submit.getAttribute('data-variant')).toBe('filled');
-    expect(screen.getByTestId('submit-next-period').textContent).toContain('workflow.submitNextPeriod');
+    expect((await screen.findByTestId('submit-next-period')).textContent).toContain('workflow.submitNextPeriod');
 
     fireEvent.click(submit);
 
@@ -132,7 +132,7 @@ describe('DocumentActionBar: «Подати: <період>» (D-441)', () => {
     show();
 
     const submit = await screen.findByRole('button', { name: /workflow\.submitPeriod/ });
-    fireEvent.click(screen.getByRole('button', { name: '⟦workflow.pickSubmitPeriod⟧' }));
+    fireEvent.click(await screen.findByRole('button', { name: '⟦workflow.pickSubmitPeriod⟧' }));
     const february = await waitFor(() => {
       const item = document.querySelector<HTMLElement>(`[data-submit-period="${String(Feb)}"]`);
       expect(item).not.toBeNull();
