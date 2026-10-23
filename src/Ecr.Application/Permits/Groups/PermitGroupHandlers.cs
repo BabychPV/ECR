@@ -523,34 +523,48 @@ public sealed class DeletePermitGroupHandler(
         // ⛔ Лічильники рахують лише живі колонки/поля; FK (Restrict) тримає й м'яко видалені - без цієї перевірки 500.
         if (await groups.IsReferencedByTemplatesAsync(group.RegistryDefId, ct).ConfigureAwait(false))
         {
-            throw PermitGroupErrors.InUse(group.Code, 0, 0);
+            throw PermitGroupErrors.ReferencedByHistory(group.Code);
         }
 
         var types = (await permits.ListSummariesAsync(ct).ConfigureAwait(false)).ToDictionary(t => t.Id);
         var before = PermitGroupAssembler.MembersJson(group, types);
         var groupId = group.Id;
+        var groupRegistryDefId = group.RegistryDefId;
         var now = clock.UtcNow;
 
-        await uow.ExecuteInTransactionAsync(async innerCt =>
+        try
         {
-            await groups.RemoveAsync(group, innerCt).ConfigureAwait(false);
-            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            await uow.ExecuteInTransactionAsync(async innerCt =>
+            {
+                await groups.RemoveAsync(group, innerCt).ConfigureAwait(false);
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
-            await audit.WriteStructureChangeAsync(
-                new StructureChangeRecord(
-                    ChangedAt: now,
-                    TemplateVersionId: 0,
-                    EntityType: "cfg.PermitGroup",
-                    EntityId: groupId,
-                    ChangeClass: ChangeClass.Guarded,
-                    Operation: "DeletePermitGroup",
-                    OldJson: before,
-                    NewJson: null,
-                    ChangeReason: null,
-                    ChangedByUserId: userId,
-                    CorrelationId: currentUser.CorrelationId),
-                innerCt).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
+                await audit.WriteStructureChangeAsync(
+                    new StructureChangeRecord(
+                        ChangedAt: now,
+                        TemplateVersionId: 0,
+                        EntityType: "cfg.PermitGroup",
+                        EntityId: groupId,
+                        ChangeClass: ChangeClass.Guarded,
+                        Operation: "DeletePermitGroup",
+                        OldJson: before,
+                        NewJson: null,
+                        ChangeReason: null,
+                        ChangedByUserId: userId,
+                        CorrelationId: currentUser.CorrelationId),
+                    innerCt).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
+        }
+        catch (Exception failure) when (groups.IsForeignKeyViolation(failure))
+        {
+            // ⛔ TOCTOU: між перевірками вище і DELETE з'явилось посилання на реєстр групи (колонка/поле шаблону, RegistryUse, ключі,
+            // профілі тощо) - FK Restrict дав SQL 547. Це конфлікт стану (409 4098), а не 500; транзакцію відкотило.
+            var recount = await registries.CountTemplateUsageAsync(ct).ConfigureAwait(false);
+            var current = recount.GetValueOrDefault(groupRegistryDefId);
+            throw current is { } && (current.Columns > 0 || current.Templates > 0)
+                ? PermitGroupErrors.InUse(group.Code, current.Columns, current.Templates)
+                : PermitGroupErrors.ReferencedByHistory(group.Code);
+        }
 
         cache.Invalidate();
     }

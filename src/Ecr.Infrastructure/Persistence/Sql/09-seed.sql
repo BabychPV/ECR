@@ -9140,6 +9140,7 @@ USING (VALUES
     ,(N'err.ECR-PRM-4097.registryCode', N'en', N'The registry code "{registryCode}" needed by the group is already taken.', 1)
     ,(N'err.ECR-PRM-4098', N'en', N'Permit group is in use', 1)
     ,(N'err.ECR-PRM-4098.inUse', N'en', N'Permit group "{code}" is used by templates ({templates}) and cannot be deleted. Deactivate it instead.', 1)
+    ,(N'err.ECR-PRM-4098.referencedByHistory', N'en', N'Permit group "{code}" cannot be deleted: it is still referenced by historical (soft-deleted) template columns or fields. Deactivate it instead.', 1)
     ,(N'err.ECR-PRM-4099', N'en', N'Permit group was changed', 1)
     ,(N'err.ECR-PRM-4099.changed', N'en', N'Permit group "{code}" was changed after you opened it. Reload it and repeat your edit.', 1)
     ,(N'err.ECR-PRM-0422.permitGroupNameRequired', N'en', N'The permit group name is required in at least one language.', 1)
@@ -23770,6 +23771,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-PRM-4098', N'kz', N'Рұқсаттар тобы қолданыста'),
     (N'err.ECR-PRM-4098.inUse', N'ru', N'Группу разрешений «{code}» используют шаблоны ({templates}), удалить её нельзя. Деактивируйте её.'),
     (N'err.ECR-PRM-4098.inUse', N'kz', N'«{code}» рұқсаттар тобын үлгілер пайдаланады ({templates}), оны жоюға болмайды. Оны өшіріп қойыңыз.'),
+    (N'err.ECR-PRM-4098.referencedByHistory', N'ru', N'Группу разрешений «{code}» удалить нельзя: на неё остались исторические ссылки (мягко удалённые колонки или поля шаблонов). Деактивируйте её.'),
+    (N'err.ECR-PRM-4098.referencedByHistory', N'kz', N'«{code}» рұқсаттар тобын жоюға болмайды: оған тарихи сілтемелер қалды (үлгілердің жұмсақ жойылған бағандары немесе өрістері). Оны өшіріп қойыңыз.'),
     (N'err.ECR-PRM-4099', N'ru', N'Группа разрешений изменена'),
     (N'err.ECR-PRM-4099', N'kz', N'Рұқсаттар тобы өзгертілді'),
     (N'err.ECR-PRM-4099.changed', N'ru', N'Группу разрешений «{code}» изменили после того, как вы её открыли. Перечитайте её и повторите правку.'),
