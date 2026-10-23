@@ -116,7 +116,11 @@ export function useMonthColumnStatuses(
     enabled: false,
   });
 
-  return useMemo(() => markedMonthColumns(data?.monthColumns, tableDefId), [data, tableDefId]);
+  // ⚠ Відповідь без переліку (порожнє тіло, старіший сервер) — колонки без позначок, а не падіння сітки.
+  return useMemo(
+    () => markedMonthColumns(Array.isArray(data?.monthColumns) ? data.monthColumns : undefined, tableDefId),
+    [data, tableDefId],
+  );
 }
 
 /** Код колонки → `Submitted`/`Approved` для однієї таблиці. */

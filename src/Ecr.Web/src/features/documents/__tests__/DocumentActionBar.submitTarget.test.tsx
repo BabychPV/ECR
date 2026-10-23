@@ -132,7 +132,7 @@ describe('DocumentActionBar: «Подати: <період>» (D-441)', () => {
     show();
 
     const submit = await screen.findByRole('button', { name: /workflow\.submitPeriod/ });
-    fireEvent.click(screen.getByRole('button', { name: '⟦workflow.submitPeriodPick⟧' }));
+    fireEvent.click(screen.getByRole('button', { name: '⟦workflow.pickSubmitPeriod⟧' }));
     const february = await waitFor(() => {
       const item = document.querySelector<HTMLElement>(`[data-submit-period="${String(Feb)}"]`);
       expect(item).not.toBeNull();
@@ -155,7 +155,7 @@ describe('DocumentActionBar: «Подати: <період>» (D-441)', () => {
 
     const submit = await screen.findByRole('button', { name: /workflow\.submitPeriod/ });
     await waitFor(() => expect(submit.getAttribute('data-period-key')).toBe(String(Feb)));
-    expect(screen.queryByRole('button', { name: '⟦workflow.submitPeriodPick⟧' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '⟦workflow.pickSubmitPeriod⟧' })).toBeNull();
     expect(screen.queryByTestId('submit-next-period')).toBeNull();
   });
 

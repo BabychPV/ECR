@@ -776,24 +776,27 @@ export function useSheetActions({
    * (відкритий на екрані період), щоб робочий процес не зупинявся через недоступну підказку.
    */
   const submissionTarget = useSubmissionTarget(documentId, sheetDefId, periodKey);
+  // ⚠ Відповідь без переліку періодів (старіший сервер, проксі, порожнє тіло) — та сама невідомість, що й збій.
+  const target = Array.isArray(submissionTarget.data?.periods) ? submissionTarget.data : undefined;
+  const targetUnknown = submissionTarget.isError || (submissionTarget.isSuccess && target === undefined);
   const [picked, setPicked] = useState<{ readonly sheetDefId: number; readonly periodKey: number } | null>(null);
-  const submittable = (submissionTarget.data?.periods ?? [])
+  const submittable = (target?.periods ?? [])
     .filter((period) => period.submittable)
     .map((period) => period.periodKey);
   const pickedHere = picked !== null && picked.sheetDefId === sheetDefId && submittable.includes(picked.periodKey)
     ? picked.periodKey
     : null;
   const submitPeriod: number | null =
-    submissionTarget.data !== undefined
-      ? (pickedHere ?? submissionTarget.data.targetPeriodKey ?? null)
-      : submissionTarget.isError && !dataLocked && isAllowed('submit', state)
+    target !== undefined
+      ? (pickedHere ?? target.targetPeriodKey ?? null)
+      : targetUnknown && !dataLocked && isAllowed('submit', state)
         ? periodKey
         : null;
   const nextPeriodKey: number | null =
-    submitPeriod === null
+    submitPeriod === null || target === undefined
       ? null
-      : submitPeriod === submissionTarget.data?.targetPeriodKey
-        ? (submissionTarget.data.nextPeriodKey ?? null)
+      : submitPeriod === target.targetPeriodKey
+        ? (target.nextPeriodKey ?? null)
         : (submittable.find((key) => key > submitPeriod) ?? null);
 
   // ⚠ Архівний проєкт блокує подання будь-якого періоду; стан ВІДКРИТОГО періоду (закритий, не відкритий) —

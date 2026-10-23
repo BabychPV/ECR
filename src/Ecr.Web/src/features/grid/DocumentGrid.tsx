@@ -2946,7 +2946,7 @@ export function gridColumns(
                           class: `ecr-header-month-status ecr-header-month-status--${monthState.toLowerCase()}`,
                           'data-month-status': monthState,
                         },
-                        t(`status.sheet.${monthState}`),
+                        monthState === 'Approved' ? t('status.sheet.Approved') : t('status.sheet.Submitted'),
                       ),
                     ]),
                 ...(column.unitSymbol === null

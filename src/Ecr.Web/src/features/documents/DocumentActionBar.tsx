@@ -280,12 +280,12 @@ function SubmitAction({
       {submit.options.length > 1 && (
         <Menu shadow="md" position="bottom-end" withinPortal>
           <Menu.Target>
-            <Button variant="default" px="xs" aria-label={t('workflow.submitPeriodPick')} data-testid="submit-period-pick">
+            <Button variant="default" aria-label={t('workflow.pickSubmitPeriod')} data-testid="submit-period-pick">
               <span aria-hidden="true">▾</span>
             </Button>
           </Menu.Target>
           <Menu.Dropdown>
-            <Menu.Label>{t('workflow.submitPeriodPick')}</Menu.Label>
+            <Menu.Label>{t('workflow.pickSubmitPeriod')}</Menu.Label>
             {submit.options.map((key) => (
               <Menu.Item
                 key={key}
