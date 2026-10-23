@@ -39,6 +39,28 @@ public interface IDocumentListSummaryStore
 /// <summary>Обмеження читача для зведення: приховані аркуші й проєкти зі звуженням.</summary>
 /// <param name="HiddenSheets">Пари «проєкт, код аркуша», яких читач не бачить.</param>
 /// <param name="NarrowedProjects">Проєкти, де читач не бачить хоч щось (аркуш, таблицю чи колонку).</param>
+/// <param name="Participants">
+/// D-444 (AN-131): документи, відкриті читачеві наданням учасника, — ДОДАТКОВО до проєктів; <c>null</c> — немає.
+/// </param>
 public sealed record SummaryRestrictions(
     IReadOnlyCollection<(int ProjectId, string SheetCode)> HiddenSheets,
-    IReadOnlyCollection<int> NarrowedProjects);
+    IReadOnlyCollection<int> NarrowedProjects,
+    ParticipantSummaryScope? Participants = null);
+
+/// <summary>
+/// D-444 (AN-131): документи учасника в зведенні — та сама множина, що додає перелік (<c>DocumentParticipationFilter</c>).
+/// </summary>
+/// <param name="DocumentIds">Документи з діючим наданням учасника.</param>
+/// <param name="DeniedProjectIds">Проєкти з забороною ролі: їхніх документів жодне надання не відкриває.</param>
+/// <param name="HiddenSheets">
+/// Пари «документ, код аркуша», яких учасник у ЦЬОМУ документі не бачить: межі документа-надання власні (не проєкту).
+/// </param>
+/// <remarks>
+/// ⛔ Документ, видимий лише наданням, не потрапляє ні в «З зауваженнями», ні в застарілі результати: збережений
+/// підсумок і застарілість — по ВСЬОМУ документу (як для проєктів зі звуженням); перелік так само не віддає для нього
+/// позначки пізніх правок і не додає його під фільтрами <c>hasLateEdits</c>/<c>resultsStale</c>.
+/// </remarks>
+public sealed record ParticipantSummaryScope(
+    IReadOnlyCollection<long> DocumentIds,
+    IReadOnlyCollection<int> DeniedProjectIds,
+    IReadOnlyCollection<(long DocumentId, string SheetCode)> HiddenSheets);

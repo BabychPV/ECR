@@ -176,7 +176,14 @@ public readonly record struct DocumentListFilter(
 /// <param name="UserId">Учасник (виконавець передачі).</param>
 /// <param name="AsOfUtc">Момент перевірки строку дії надання.</param>
 /// <param name="DeniedProjectIds">Проєкти з забороною ролі: їхні документи не відкриває жодне надання.</param>
-public sealed record DocumentParticipationFilter(int UserId, DateTime AsOfUtc, IReadOnlyCollection<int> DeniedProjectIds);
+/// <param name="HiddenSheets">
+/// D-444 (AN-131): пари «документ, аркуш», яких учасник у ЦЬОМУ документі-наданні не бачить, — для фільтра
+/// <see cref="DocumentListFilter.State"/> (зведений стан лише по видимих аркушах, як у смузі зведення); <c>null</c> —
+/// фільтра стану немає.
+/// </param>
+public sealed record DocumentParticipationFilter(
+    int UserId, DateTime AsOfUtc, IReadOnlyCollection<int> DeniedProjectIds,
+    IReadOnlyCollection<(long DocumentId, int SheetDefId)>? HiddenSheets = null);
 
 /// <summary>Порушення правила складу документа.</summary>
 /// <param name="SheetGroup">Група аркушів.</param>

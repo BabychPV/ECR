@@ -226,7 +226,7 @@ public sealed class DocumentStore(
 
         if (filter.State is { } state && period.Value is { } periodKey)
         {
-            documents = WhereState(documents, state, periodKey, filter.HiddenSheetDefIds);
+            documents = WhereState(documents, state, periodKey, filter.HiddenSheetDefIds, filter.Participation?.HiddenSheets);
         }
 
         // BE-09b: та сама умова, що дає позначку в рядку (`LateEditDocumentIds`),
@@ -949,7 +949,8 @@ public sealed class DocumentStore(
     /// </remarks>
     private IQueryable<Document> WhereState(
         IQueryable<Document> documents, DocumentStatus state, int periodKey,
-        IReadOnlyCollection<(int ProjectId, int Id)>? hiddenSheetDefIds)
+        IReadOnlyCollection<(int ProjectId, int Id)>? hiddenSheetDefIds,
+        IReadOnlyCollection<(long DocumentId, int SheetDefId)>? hiddenParticipantSheets)
     {
         // ⛔ Схований від читача аркуш не бере участі в зведеному стані (ту саму межу накладає смуга):
         // інакше `state=Rejected` знаходив би документ, відхилений лише схованим аркушем.
@@ -960,6 +961,14 @@ public sealed class DocumentStore(
         {
             var hiddenRows = HiddenSheetRows(hiddenSheetDefIds);
             sheets = sheets.Where(s => !hiddenRows.Contains(s.Id));
+        }
+
+        // ✎ D-444 (AN-131): документ-надання учасника має ВЛАСНІ межі — пари «документ, аркуш» (та сама межа, що
+        // `ParticipantSummaryScope.HiddenSheets` смуги). Для документа проєкту з роллю вони не ширші за межі проєкту.
+        if (hiddenParticipantSheets is { Count: > 0 })
+        {
+            var participantRows = HiddenParticipantSheetRows(hiddenParticipantSheets);
+            sheets = sheets.Where(s => !participantRows.Contains(s.Id));
         }
 
         var states = db.ApprovalStates.Where(a => a.PeriodKey == periodKey);
@@ -1006,6 +1015,20 @@ public sealed class DocumentStore(
                   JOIN doc.Document AS d ON d.Id = ds.DocumentId
                   JOIN OPENJSON({pairs}) WITH (p int '$.p', i int '$.i') AS h
                     ON h.p = d.ProjectId AND h.i = ds.SheetDefId
+                """);
+    }
+
+    /// <summary>D-444: рядки складу (<c>doc.DocumentSheet.Id</c>) за парами «документ, аркуш», схованими від учасника.</summary>
+    private IQueryable<long> HiddenParticipantSheetRows(IReadOnlyCollection<(long DocumentId, int SheetDefId)> hidden)
+    {
+        var pairs = JsonSerializer.Serialize(hidden.Select(x => new { d = x.DocumentId, i = x.SheetDefId }));
+
+        return db.Database
+            .SqlQuery<long>($"""
+                SELECT ds.Id AS Value
+                  FROM doc.DocumentSheet AS ds
+                  JOIN OPENJSON({pairs}) WITH (d bigint '$.d', i int '$.i') AS h
+                    ON h.d = ds.DocumentId AND h.i = ds.SheetDefId
                 """);
     }
 

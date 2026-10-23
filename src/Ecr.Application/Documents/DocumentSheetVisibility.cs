@@ -83,6 +83,45 @@ public static class DocumentSheetVisibility
     }
 
     /// <summary>
+    /// D-444 (AN-131): межі КОЖНОГО документа, відкритого читачеві наданням учасника (з наданнями саме в ньому), у
+    /// періоді — для зведення переліку й фільтра стану. Межі документа-надання власні: ділити їх між документами
+    /// проєкту не можна (<see cref="DocumentReadScope.ForParticipant"/>).
+    /// </summary>
+    /// <param name="access">Служба доступу.</param>
+    /// <param name="profile">Профіль читача.</param>
+    /// <param name="periodKey">Період; недійсний — межі без періоду.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Документ → межі; порожньо — надань немає.</returns>
+    /// <remarks>
+    /// ⚠ Без ознаки <see cref="AccessProfile.HasDocumentParticipations"/> (чи для інтеграції) — порожньо БЕЗ бази;
+    /// учасник — сталу кількість звернень (надання, документи, факти), а не на документ. ⛔ Документи проєктів із
+    /// забороною ролі тут лишаються (межі в них закриті): відкидає їх запит викликача за <c>DeniedProjectIds</c>.
+    /// </remarks>
+    public static async Task<IReadOnlyDictionary<long, DocumentReadScope>> ParticipantScopesAsync(
+        IAccessDecisionService access, AccessProfile profile, int periodKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(profile);
+
+        if (!profile.HasDocumentParticipations || profile.IsIntegrationWriter)
+        {
+            return new Dictionary<long, DocumentReadScope>();
+        }
+
+        var participations = await access.ActiveParticipationsAsync(profile, ct).ConfigureAwait(false);
+        if (participations.Count == 0)
+        {
+            return new Dictionary<long, DocumentReadScope>();
+        }
+
+        var scopes = await access.ReadScopesAsync(profile, [.. participations.Keys], ct).ConfigureAwait(false);
+        var period = new PeriodKey(periodKey);
+        return period.IsValid
+            ? scopes.ToDictionary(s => s.Key, s => s.Value.InPeriod(period))
+            : scopes;
+    }
+
+    /// <summary>
     /// Фільтр переліку з тим, чого читач не бачить: аркуші, таблиці й колонки (R-7: пізня правка схованого
     /// не дає позначки) — ПАРАМИ «проєкт, ідентифікатор» (N1-01). Читач без обмежень — <paramref name="filter"/>
     /// без змін, без запитів.

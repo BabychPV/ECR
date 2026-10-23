@@ -120,17 +120,29 @@ public sealed class ListDocumentsHandler(
             .ConfigureAwait(false);
 
         // ✎ D-443: документи, відкриті наданням учасника, — у тому самому запиті, поза проєктами із забороною.
-        // ⛔ Фільтри стану, пізніх правок і застарілих результатів рахують межі ПРОЄКТУ (пари «проєкт, аркуш»), а
+        // ⛔ Фільтри пізніх правок і застарілих результатів рахують межі ПРОЄКТУ (пари «проєкт, аркуш»), а
         // документ-надання має власні: з такими фільтрами документи поза проєктами з грантом не додаються
-        // (закрито за замовчуванням — фільтр не стає оракулом схованого аркуша).
+        // (закрито за замовчуванням — фільтр не стає оракулом схованого аркуша; смуга зведення їх так само не лічить).
+        // ✎ D-444 (AN-131): фільтр СТАНУ документи-надання додає — з їхніми власними межами (пари «документ, аркуш»,
+        // `DocumentSheetVisibility.ParticipantScopesAsync`), тими самими, що смуга зведення: лічильник стану над
+        // таблицею і таблиця під фільтром цього стану не розходяться.
         var participant = profile.HasDocumentParticipations
                           && clock is not null
-                          && filter.State is null && filter.HasLateEdits is null && filter.ResultsStale is null;
+                          && filter.HasLateEdits is null && filter.ResultsStale is null;
         if (participant)
         {
+            IReadOnlyCollection<(long DocumentId, int SheetDefId)>? ownHidden = null;
+            if (filter.State is not null && periodKey is { } statePeriod)
+            {
+                var own = await DocumentSheetVisibility.ParticipantScopesAsync(access, profile, statePeriod, ct)
+                    .ConfigureAwait(false);
+                ownHidden = [.. own.OrderBy(s => s.Key).SelectMany(s => s.Value.HiddenSheetIds().Select(id => (s.Key, id)))];
+            }
+
             filter = filter with
             {
-                Participation = new DocumentParticipationFilter(profile.UserId, clock!.UtcNow, profile.DeniedProjectIds()),
+                Participation = new DocumentParticipationFilter(
+                    profile.UserId, clock!.UtcNow, profile.DeniedProjectIds(), ownHidden),
             };
         }
 

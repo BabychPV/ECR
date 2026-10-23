@@ -49,10 +49,12 @@ public sealed class GetDocumentListSummaryHandler(
             return null;
         }
 
+        // ⛔ D-444: межі ПРОЄКТУ — лише за ролями (як `ListDocumentsHandler.HiddenFilterAsync`): зразок проєкту може
+        // бути документом-наданням учасника, і його межі розкрили б схований аркуш в інших документах проєкту.
         var projects = visibleProjects.Where(p => projectId is null || p == projectId).ToList();
         var samples = await summary.SampleDocumentPerProjectAsync(projects, ct).ConfigureAwait(false);
         var scopes = await DocumentSheetVisibility
-            .ScopesAsync(access, profile, samples.Select(s => (s.Key, s.Value)), periodKey, ct)
+            .ScopesAsync(access, profile.WithoutParticipations(), samples.Select(s => (s.Key, s.Value)), periodKey, ct)
             .ConfigureAwait(false);
 
         var hidden = new List<(int ProjectId, string SheetCode)>();
@@ -67,6 +69,31 @@ public sealed class GetDocumentListSummaryHandler(
             }
         }
 
-        return new SummaryRestrictions(hidden, narrowed);
+        return new SummaryRestrictions(
+            hidden, narrowed, await ParticipantsAsync(access, profile, periodKey, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// D-444 (AN-131): документи учасника для зведення — з ВЛАСНИМИ межами кожного (схований аркуш документа-надання
+    /// не вносить стан); <c>null</c> — надань немає (без ознаки профілю — без бази). Та сама множина й ті самі межі,
+    /// що в переліку (<c>ListDocumentsHandler</c>, фільтр стану).
+    /// </summary>
+    /// <param name="access">Служба доступу.</param>
+    /// <param name="profile">Профіль читача.</param>
+    /// <param name="periodKey">Період зведення.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private static async Task<ParticipantSummaryScope?> ParticipantsAsync(
+        IAccessDecisionService access, AccessProfile profile, int periodKey, CancellationToken ct)
+    {
+        var scopes = await DocumentSheetVisibility.ParticipantScopesAsync(access, profile, periodKey, ct).ConfigureAwait(false);
+        if (scopes.Count == 0)
+        {
+            return null;
+        }
+
+        return new ParticipantSummaryScope(
+            [.. scopes.Keys],
+            profile.DeniedProjectIds(),
+            [.. scopes.SelectMany(s => s.Value.HiddenSheetCodes().Select(code => (s.Key, code)))]);
     }
 }
