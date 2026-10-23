@@ -1,4 +1,5 @@
 // src/Ecr.Application/Permits/Groups/LookupTargetMatcher.cs
+using Ecr.Application.Registries;
 using Ecr.Application.Security;
 
 namespace Ecr.Application.Permits.Groups;
@@ -39,7 +40,10 @@ public static class LookupTargetMatcher
 
         if (entryRegistryId == target)
         {
-            return true;
+            // P2 (рішення людини 23.10: «Deny блокує і вибір запису»): Deny на ПРЯМУ ціль так само відсікає запис, як і
+            // реєстр члена групи (AcceptsFor) - «не належить» = та сама відповідь, що й для неіснуючого запису.
+            // Перевірка у пам'яті (profile.Denies): нових запитів у гарячому шляху Land немає.
+            return profile is null || !RegistryAccess.IsDenied(profile, target);
         }
 
         if (groups is null)

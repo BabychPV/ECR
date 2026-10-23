@@ -210,6 +210,9 @@ public sealed partial class PublishTemplateVersionHandler(
 
         // PRMG: форми REG* над колонкою, що має ціллю групу типів дозволів, не підтримуються (v1). Публікація - рідка дія,
         // тож `EnsureFreshAsync` (≤ 1 запит на 5 с) тут не на гарячому шляху.
+        // ⚠ ПОРЯДОК ВОРІТ: ця перевірка мовчки пропускає нерозібраний вираз - його відхиляють `PublishChecks.Run` і
+        // `RuleExpressionChecks.Check` вище. Не переставляти її перед ними (сторож порядку -
+        // `PermitGroupGuardTests.Ворота_публікації_розбирають_вирази_раніше_за_перевірку_груп`).
         if (permitGroups is not null)
         {
             var lookupTargets = PublishChecks.LookupRegistryIds(version);

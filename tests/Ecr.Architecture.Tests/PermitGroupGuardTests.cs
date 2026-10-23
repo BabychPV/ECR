@@ -67,6 +67,29 @@ public sealed partial class PermitGroupGuardTests
         Assert.Empty(failures);
     }
 
+    /// <summary>
+    /// PG-P3b №3: <c>CheckGroupLookupFormulas</c> мовчки пропускає нерозібраний вираз - це безпечно лише тому, що <c>PublishChecks.Run</c>
+    /// (синтаксис формул) і <c>RuleExpressionChecks.Check</c> (V-19, правила) йдуть у <c>PublishTemplateVersionHandler</c> РАНІШЕ.
+    /// Сторож порядку: перестановка воріт робить нерозібраний вираз над колонкою-групою непоміченим.
+    /// Мутація: перенести виклик <c>CheckGroupLookupFormulas</c> вище за <c>Run</c> - червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Ворота_публікації_розбирають_вирази_раніше_за_перевірку_груп()
+    {
+        var handler = SourceTree.Production("Ecr.Application")
+            .Single(f => f.Path == "src/Ecr.Application/Templates/PublishTemplateVersionHandler.cs");
+        var code = WithoutLineComments(handler.Text);
+
+        var run = code.IndexOf("PublishChecks.Run(", StringComparison.Ordinal);
+        var rules = code.IndexOf("RuleExpressionChecks.Check(", StringComparison.Ordinal);
+        var groups = code.IndexOf("PublishChecks.CheckGroupLookupFormulas(", StringComparison.Ordinal);
+
+        Assert.True(run >= 0 && rules >= 0 && groups >= 0, "обробник має викликати Run, RuleExpressionChecks.Check і CheckGroupLookupFormulas");
+        Assert.True(run < groups && rules < groups, "CheckGroupLookupFormulas має йти ПІСЛЯ Run і RuleExpressionChecks.Check");
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
