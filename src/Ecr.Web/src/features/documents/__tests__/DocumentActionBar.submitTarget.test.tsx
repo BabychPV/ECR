@@ -114,6 +114,18 @@ afterEach(() => {
 });
 
 describe('DocumentActionBar: «Подати: <період>» (D-441)', () => {
+  // ⛔ Перший у файлі навмисно: `React.lazy` кешує свій модуль на рівні файла, тож лише перший рендер показав би,
+  // що ▾ і «Next to submit» домальовуються ПІЗНІШЕ за кнопку. Так і було з лінивим `SubmitPeriodPicker`: група дій
+  // розширювалась і переносилась уже після появи «Подати», «More» з'їжджав з-під курсора, клік губився (e2e-stand
+  // 39994116932, 40023308269: «Edit access» не з'являвся 45 с). Тепер — один коміт: усе є в ту ж мить, що й кнопка.
+  it('▾ і «наступний — …» з\'являються в тому ж коміті, що й кнопка «Подати» (без пізнього зсуву рядка дій)', async () => {
+    show();
+
+    await screen.findByRole('button', { name: /workflow\.submitPeriod/ });
+    expect(screen.getByRole('button', { name: '⟦workflow.pickSubmitPeriod⟧' })).toBeTruthy();
+    expect(screen.getByTestId('submit-next-period')).toBeTruthy();
+  });
+
   it('у лютому з неподаним січнем кнопка подає СІЧЕНЬ і попереджає «наступний — лютий»', async () => {
     show();
 
