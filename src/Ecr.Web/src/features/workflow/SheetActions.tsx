@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentProps, type JSX } from 'react';
 import { Button, Divider, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -33,7 +33,16 @@ import { DisabledReason } from '@/features/common/DisabledReason';
  * Причина невдалого перерахунку в тості — окремим чанком (`D-132`): з'являється лише на відмові
  * фонової задачі, а `SheetActions` сидить у бюджеті `DocumentPage`/`PeriodsPage`.
  */
-const JobFailure = lazy(async () => ({ default: (await import('@/features/jobs/JobFacts')).JobFailure }));
+const LazyJobFailureView = lazy(async () => ({ default: (await import('@/features/jobs/JobFacts')).JobFailure }));
+
+/** Ті самі пропи, що `JobFailure`: тост несе код і кореляцію (`X-04`), а код компонента — лише на відмові. */
+function JobFailure(props: ComponentProps<typeof LazyJobFailureView>): JSX.Element {
+  return (
+    <Suspense fallback={null}>
+      <LazyJobFailureView {...props} />
+    </Suspense>
+  );
+}
 
 /**
  * Відмова дії над аркушем — з назвою аркуша (A2-08), окремим чанком.
@@ -712,13 +721,11 @@ export function useSheetActions({
       color: 'statusError',
       title: t('workflow.recalcFailed'),
       message: (
-        <Suspense fallback={null}>
-          <JobFailure
-            state="Failed"
-            errorCode={recalcJob.data?.errorCode}
-            correlationId={recalcJob.data?.correlationId}
-          />
-        </Suspense>
+        <JobFailure
+          state="Failed"
+          errorCode={recalcJob.data?.errorCode}
+          correlationId={recalcJob.data?.correlationId}
+        />
       ),
     });
   }, [recalc, outcome, recalcJob.data?.errorCode, recalcJob.data?.correlationId, queryClient]);
