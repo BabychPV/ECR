@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { openDocumentMore } from './documentMore';
 
 /**
  * CL-8 / ACC-OW: діалог «Перезаписати N значень» у «Перенести на нову версію шаблону» - справжній клієнт на стенді
@@ -108,7 +109,7 @@ async function openDialog(page: Page, posted: Posted[], dryOverrides: Record<str
 
   await mockMigration(page, posted, dryOverrides);
   await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
-  await page.getByTestId('document-more').click();
+  await openDocumentMore(page);
   await page.locator('[data-migrate-version]').click();
 
   await page.getByTestId('migrate-target').click();

@@ -5,13 +5,17 @@ import { RecalculateKbd, submitLabel, useSheetActions, type SheetActionsModel } 
 import type { DocumentLock } from './documentLock';
 import { DocumentSheetBanner } from './DocumentSheetBanner';
 import { DocumentToolbar } from './DocumentToolbar';
+// ⛔ Статично, НЕ `lazy()`: ▾ і «Next to submit: …» розширюють групу дій, і з лінивим чанком вона
+// переносилась на другий рядок через ~0,5 с ПІСЛЯ появи «Подати», зсуваючи «More» під курсором. Клік,
+// що припадав на зсув (натиск на старому місці «More», відпуск — уже поза нею), губився: меню не
+// відкривалось (e2e-stand 39994116932, 40023308269 — «Edit access» не з'являвся 45 с). Модуль — кілька
+// сотень байтів із `Menu`/`Button`/`Text`, що вже в чанку маршруту (`D-132`).
+import { SubmitPeriodPicker } from './SubmitPeriodPicker';
 import { useStaleResultsReminder, type StaleReminderState } from './useStaleResultsReminder';
 import { t } from '@/shared/i18n';
 
 // ⚠ `import()` — той самий чанк, що й раніше в `DocumentPage` (`D-132`): імпорт
 // не потрібен у мить першого малюнка сторінки.
-// ✎ D-441: вибір періоду подання — окремим чанком (бюджет маршруту `D-132`); потрібен лише коли неподаних кілька.
-const SubmitPeriodPicker = lazy(async () => ({ default: (await import('./SubmitPeriodPicker')).SubmitPeriodPicker }));
 const ImportPanel = lazy(async () => ({ default: (await import('@/features/import/ImportPanel')).ImportPanel }));
 // Банер «результати застаріли» — лише коли сервер так каже (`resultsStale === true`), тож окремим чанком (`D-132`).
 const StaleResultsBanner = lazy(async () => ({ default: (await import('./StaleResultsBanner')).StaleResultsBanner }));
@@ -340,11 +344,8 @@ function SubmitAction({
         {submitLabel(submit.periodKey)}
       </Button>
       {/* ⚠ «Наступний — …» буває лише тоді, коли неподаних кілька, — тобто разом із вибором ▾. */}
-      {submit.options.length > 1 && (
-        <Suspense fallback={null}>
-          <SubmitPeriodPicker submit={submit} />
-        </Suspense>
-      )}
+      {/* ⛔ В одному коміті з кнопкою: рядок дій з'являється одразу в остаточній формі (див. імпорт). */}
+      {submit.options.length > 1 && <SubmitPeriodPicker submit={submit} />}
     </>
   );
 }

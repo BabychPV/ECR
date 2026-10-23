@@ -1,4 +1,5 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { openDocumentMore } from './documentMore';
 
 /**
  * D-443 (AN-130, BRIEF-1021 П.2) на РЕАЛЬНОМУ стенді (`tools/e2e-stand.ps1`, workflow `e2e-stand`): учасник документа.
@@ -53,23 +54,34 @@ async function tablesOf(context: BrowserContext): Promise<DocumentTable[]> {
 
 async function openDrawer(page: Page): Promise<void> {
   await page.goto(DocumentUrl);
-  await page.getByTestId('document-more').click({ timeout: 60_000 });
+  await openDocumentMore(page);
   await page.getByRole('menuitem', { name: /Edit access|Доступ к редактированию/ }).click();
   await expect(page.getByTestId('add-participant')).toBeVisible({ timeout: 20_000 });
 }
 
 test.describe('Учасники документа (D-443) на реальному стенді', () => {
-  test.beforeAll(() => {
-    if (PeriodKey === '' || DocumentId === '') {
-      throw new Error('стенда немає: в оточенні немає ECR_E2E_PERIOD/ECR_E2E_DOCUMENT (tools/e2e-stand.ps1)');
-    }
-  });
-
   test.describe.configure({ mode: 'serial', timeout: 240_000 });
 
   let granted: DocumentTable | undefined;
   let other: DocumentTable | undefined;
   let participantId = 0;
+  /** Власник документа ДО файла — до нього `afterAll` повертає документ, хоч би на якому кроці файл зупинився. */
+  let originalOwner: number | null = null;
+
+  test.beforeAll(async ({ browser }) => {
+    if (PeriodKey === '' || DocumentId === '') {
+      throw new Error('стенда немає: в оточенні немає ECR_E2E_PERIOD/ECR_E2E_DOCUMENT (tools/e2e-stand.ps1)');
+    }
+
+    const admin = await signedIn(browser, Admin);
+    try {
+      const document = await admin.request.get(`/api/v1/documents/${DocumentId}?periodKey=${PeriodKey}`);
+      expect(document.ok(), `GET document: ${String(document.status())}`).toBe(true);
+      originalOwner = ((await document.json()) as { ownerUserId: number | null }).ownerUserId;
+    } finally {
+      await admin.close();
+    }
+  });
 
   test('учасник без ролі отримує одну таблицю через шторку: бачить документ і лише цю таблицю', async ({ browser }) => {
     const admin = await signedIn(browser, Admin);
@@ -154,10 +166,7 @@ test.describe('Учасники документа (D-443) на реальном
 
   test('Approve не видає той, хто сам Approve не має; власника передано й повернуто через шторку', async ({ browser }) => {
     const admin = await signedIn(browser, Admin);
-    const original = ((await (await admin.request.get(`/api/v1/documents/${DocumentId}?periodKey=${PeriodKey}`)).json()) as {
-      ownerUserId: number | null;
-    }).ownerUserId;
-    expect(original, 'власник документа стенда невідомий').not.toBeNull();
+    expect(originalOwner, 'власник документа стенда невідомий').not.toBeNull();
 
     const operator = await signedIn(browser, Operator);
     try {
@@ -183,23 +192,45 @@ test.describe('Учасники документа (D-443) на реальном
       expect(refused.status(), await refused.text()).toBe(403);
       expect(((await refused.json()) as { messageKey?: string }).messageKey).toBe('err.ECR-ACCS-0403.editAssignmentLevelAboveOwn');
     } finally {
-      // Власника повертаємо (менеджер лишається менеджером), надання знімаємо — стенд як був. Якщо попередній власник
-      // сам документом керувати не може (сервер 422 — без права запису в проєкті), власником стає `e2e-admin`.
-      let back = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: original } });
-      if (back.status() === 422) {
-        const me = (await (await admin.request.get('/api/v1/me')).json()) as { userId: number };
-        back = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: me.userId } });
+      // Повернення власника й зняття надань — у `afterAll`: воно мусить відбутися й тоді, коли цей тест не стартував.
+      await operator.close();
+      await admin.close();
+    }
+  });
+
+  /*
+   * ⛔ Прибирання — НЕ в `finally` другого тесту, як було: режим `serial` пропускає решту файла після першого падіння,
+   * тож упалий перший тест (надання «View» уже видано) лишав учасника в документі стенда для всіх наступних
+   * специфікацій (`editAssignments` іде одразу за цим файлом і рахує рядки шторки). `afterAll` виконується завжди.
+   * Власника повертаємо (менеджер лишається менеджером); якщо попередній власник сам документом керувати не може
+   * (сервер 422 — без права запису в проєкті), власником стає `e2e-admin`.
+   */
+  test.afterAll(async ({ browser }, testInfo) => {
+    if (PeriodKey === '' || DocumentId === '') return;
+    testInfo.setTimeout(60_000);
+
+    const admin = await signedIn(browser, Admin);
+    try {
+      const current = ((await (await admin.request.get(`/api/v1/documents/${DocumentId}?periodKey=${PeriodKey}`)).json()) as {
+        ownerUserId: number | null;
+      }).ownerUserId;
+      if (originalOwner !== null && current !== originalOwner) {
+        let back = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: originalOwner } });
+        if (back.status() === 422) {
+          const me = (await (await admin.request.get('/api/v1/me')).json()) as { userId: number };
+          back = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: me.userId } });
+        }
+        expect(back.ok(), `повернення власника: ${String(back.status())} ${await back.text()}`).toBe(true);
       }
-      expect(back.ok(), `повернення власника: ${String(back.status())} ${await back.text()}`).toBe(true);
 
       const list = (await (await admin.request.get(`/api/v1/documents/${DocumentId}/edit-assignments`)).json()) as {
         assignments: { id: number; level?: string }[];
       };
       for (const a of list.assignments.filter((x) => (x.level ?? 'Write') !== 'Write')) {
-        await admin.request.delete(`/api/v1/documents/${DocumentId}/edit-assignments/${String(a.id)}`);
+        const removed = await admin.request.delete(`/api/v1/documents/${DocumentId}/edit-assignments/${String(a.id)}`);
+        expect(removed.ok(), `зняття надання ${String(a.id)}: ${String(removed.status())}`).toBe(true);
       }
-
-      await operator.close();
+    } finally {
       await admin.close();
     }
   });
