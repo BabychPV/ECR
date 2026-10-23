@@ -727,14 +727,19 @@ public static class PublishChecks
 
         var liveTables = LiveTables(version.Sheets).ToList();
 
-        // Колонки-групи УСІЄЇ версії: форма в одній таблиці може читати колонку іншої.
-        var groupColumns = new Dictionary<int, (string TableCode, string Code)>();
+        // Усі живі колонки версії (імена для зауважень) і колонки-групи УСІЄЇ версії: форма в одній таблиці може читати
+        // колонку іншої.
+        var columnNames = new Dictionary<int, (string TableCode, string Code)>();
+        var groupColumns = new HashSet<int>();
         foreach (var table in liveTables)
         {
-            foreach (var column in table.Columns.Where(c => !c.IsDeleted && c.DataType == CellDataType.Lookup
-                         && c.LookupRegistryDefId is { } id && groupRegistryIds.Contains(id)))
+            foreach (var column in table.Columns.Where(c => !c.IsDeleted))
             {
-                groupColumns[column.Id] = (table.Code, column.Code);
+                columnNames[column.Id] = (table.Code, column.Code);
+                if (column.DataType == CellDataType.Lookup && column.LookupRegistryDefId is { } id && groupRegistryIds.Contains(id))
+                {
+                    groupColumns.Add(column.Id);
+                }
             }
         }
 
@@ -745,23 +750,20 @@ public static class PublishChecks
 
         var resolver = new ReferenceResolver(Snapshot(version));
 
+        // ⚠ Нерозібраний вираз тут МОВЧКИ пропускається (root is null) - і це безпечно лише через ПОРЯДОК воріт у
+        // `PublishTemplateVersionHandler.Handle`: `PublishChecks.Run` (синтаксис формул) і `RuleExpressionChecks.Check` (V-19, правила)
+        // йдуть РАНІШЕ і відхиляють нерозібраний вираз помилкою розбору, зауваження зливаються в один 0422 publishRejected.
+        // Тест порядку: `Нерозібрана_формула_над_колонкою_групи_відхиляється_помилкою_розбору_а_не_цією_перевіркою`.
+        // Переставляти ворота так, щоб ця перевірка йшла ПЕРЕД Run/RuleExpressionChecks, не можна.
+        var entries = new List<(TableDef Table, FormulaDef? Formula, ValidationRule? Rule, ExpressionScan Scan)>();
         foreach (var table in liveTables)
         {
             foreach (var formula in table.Formulas.Where(f => !f.IsDeleted))
             {
                 var root = formulaEngine.Parse(formula.Expression, formula.Dialect).Expression?.Root;
-                if (root is null)
+                if (root is not null)
                 {
-                    continue;
-                }
-
-                var scan = ScanRegistryForms(root, resolver, table.Id, RowKeyOf(table, formula), formula.ColumnDefId, groupColumns);
-                foreach (var column in scan.GroupColumnIds)
-                {
-                    var (tableCode, code) = groupColumns[column];
-                    diagnostics.Add(GroupLookupDiagnostic(
-                        $"Колонка {tableCode}.{code} має ціллю групу дозволів: форми REG* над нею не підтримуються.",
-                        $"{tableCode}.{code}"));
+                    entries.Add((table, formula, null, ScanRegistryForms(root, resolver, table.Id, RowKeyOf(table, formula), formula.ColumnDefId)));
                 }
             }
 
@@ -771,23 +773,66 @@ public static class PublishChecks
             foreach (var rule in table.ValidationRules.Where(r => r.IsActive))
             {
                 var root = formulaEngine.Parse(rule.Expression, ExpressionDialect.Template).Expression?.Root;
-                if (root is null)
+                if (root is not null)
+                {
+                    entries.Add((table, null, rule, ScanRegistryForms(root, resolver, table.Id, null, null)));
+                }
+            }
+        }
+
+        // PG-P3b №1: транзитивне замикання. Колонка, у чиїй формулі є БУДЬ-ЯКЕ посилання на колонку-групу (або на вже похідну
+        // колонку), сама вважається похідною від групи: `B = [A_group]` копіює id запису, і `REGFIELD([B], ...)` читав би його за
+        // порожнім реєстром групи так само, як над самою A. Значення - джерело (колонка-група), від якої колонка походить.
+        // Ітеративно до нерухомої точки: цикли A <-> B скінченні (кожна колонка позначається один раз).
+        var flagged = groupColumns.ToDictionary(c => c, c => c);
+        bool changed;
+        do
+        {
+            changed = false;
+            foreach (var (_, formula, _, scan) in entries)
+            {
+                if (formula?.ColumnDefId is not { } target || flagged.ContainsKey(target))
                 {
                     continue;
                 }
 
-                var scan = ScanRegistryForms(root, resolver, table.Id, null, null, groupColumns);
-                var hit = scan.GroupColumnIds.ToList();
-                if (scan.HasRegistryForm && rule.ColumnDefId is { } bound && groupColumns.ContainsKey(bound) && !hit.Contains(bound))
+                foreach (var referenced in scan.AllColumns)
                 {
-                    hit.Add(bound);
+                    if (flagged.TryGetValue(referenced, out var origin))
+                    {
+                        flagged[target] = origin;
+                        changed = true;
+                        break;
+                    }
                 }
+            }
+        }
+        while (changed);
 
-                foreach (var column in hit)
+        var reportedDerived = new HashSet<int>();
+        foreach (var (_, _, rule, scan) in entries)
+        {
+            var hits = scan.FormColumns.Where(flagged.ContainsKey).ToList();
+            if (rule?.ColumnDefId is { } bound && scan.HasRegistryForm && groupColumns.Contains(bound) && !hits.Contains(bound))
+            {
+                hits.Add(bound);
+            }
+
+            foreach (var column in hits)
+            {
+                var (tableCode, code) = columnNames[column];
+                var where = rule is null ? string.Empty : $" у правилі {rule.Code}";
+                if (groupColumns.Contains(column))
                 {
-                    var (tableCode, code) = groupColumns[column];
                     diagnostics.Add(GroupLookupDiagnostic(
-                        $"Колонка {tableCode}.{code} має ціллю групу дозволів: форми REG* у правилі {rule.Code} над нею не підтримуються.",
+                        $"Колонка {tableCode}.{code} має ціллю групу дозволів: форми REG*{where} над нею не підтримуються.",
+                        $"{tableCode}.{code}"));
+                }
+                else if (reportedDerived.Add(column))
+                {
+                    var (sourceTable, sourceCode) = columnNames[flagged[column]];
+                    diagnostics.Add(GroupLookupDiagnostic(
+                        $"Колонка {tableCode}.{code} походить від колонки-групи дозволів {sourceTable}.{sourceCode} (її формула посилається на неї): форми REG*{where} над нею не підтримуються.",
                         $"{tableCode}.{code}"));
                 }
             }
@@ -805,30 +850,41 @@ public static class PublishChecks
             "err.ECR-TMPL-0422.lookupGroupNoRegistryForms",
             new Dictionary<string, string> { ["columnCode"] = columnCode });
 
-    /// <summary>Імена форм довідників шаблону (без урахування регістру - як у <c>FunctionRegistry</c>).</summary>
-    private static readonly System.Collections.Frozen.FrozenSet<string> RegistryFormNames =
+    /// <summary>
+    /// Імена форм довідників шаблону, що їх перевіряє <see cref="CheckGroupLookupFormulas"/>: УСІ функції реєстру діалекту
+    /// шаблонів з префіксом <c>REG</c> (без урахування регістру - як у <c>FunctionRegistry</c>). Перелік береться з реєстру, а не
+    /// зашитий: нова <c>REG*</c>-функція потрапляє під заборону автоматично (PG-P3b №2; сторож -
+    /// <c>PublishGroupLookupFormulasTests.Перелік_форм_REG_береться_з_реєстру_функцій</c>).
+    /// </summary>
+    public static IReadOnlySet<string> GuardedRegistryFormNames => RegistryFormNames;
+
+    private static readonly FrozenSet<string> RegistryFormNames =
         new[]
         {
             RegistryForms.Field, RegistryForms.Find, RegistryForms.One, RegistryForms.Sum,
             RegistryForms.Average, RegistryForms.Minimum, RegistryForms.Maximum, RegistryForms.Count,
         }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-    private sealed record RegistryFormScan(bool HasRegistryForm, IReadOnlyList<int> GroupColumnIds);
+    /// <summary>
+    /// Результат обходу виразу: чи є форма <c>REG*</c>; колонки, на які посилаються АРГУМЕНТИ форм; усі колонки, на які
+    /// посилається вираз (для транзитивного замикання).
+    /// </summary>
+    private sealed record ExpressionScan(bool HasRegistryForm, IReadOnlyList<int> FormColumns, IReadOnlyList<int> AllColumns);
 
     /// <summary>
     /// Обхід AST (ітеративний - глибину вкладеності тримає окрема перевірка, а не стек цього методу): шукає виклики форм
     /// <c>REG*</c> і колонки-групи, на які посилаються їхні аргументи на будь-якій глибині, зокрема в предикатах рядків.
     /// </summary>
-    private static RegistryFormScan ScanRegistryForms(
+    private static ExpressionScan ScanRegistryForms(
         AstNode root,
         ReferenceResolver resolver,
         int tableDefId,
         string? rowKey,
-        int? columnDefId,
-        Dictionary<int, (string TableCode, string Code)> groupColumns)
+        int? columnDefId)
     {
         var hasForm = false;
         var hits = new List<int>();
+        var all = new List<int>();
         var stack = new Stack<(AstNode Node, bool UnderForm)>();
         stack.Push((root, false));
 
@@ -863,12 +919,17 @@ public static class PublishChecks
                     break;
 
                 case CellReferenceNode reference:
-                    if (underForm
-                        && resolver.Resolve(reference, tableDefId, rowKey, null, columnDefId) is { } resolved
-                        && groupColumns.ContainsKey(resolved.ColumnDefId)
-                        && !hits.Contains(resolved.ColumnDefId))
+                    if (resolver.Resolve(reference, tableDefId, rowKey, null, columnDefId) is { } resolved)
                     {
-                        hits.Add(resolved.ColumnDefId);
+                        if (!all.Contains(resolved.ColumnDefId))
+                        {
+                            all.Add(resolved.ColumnDefId);
+                        }
+
+                        if (underForm && !hits.Contains(resolved.ColumnDefId))
+                        {
+                            hits.Add(resolved.ColumnDefId);
+                        }
                     }
 
                     if (reference.Row is RowSelector.Predicate predicate)
@@ -883,7 +944,7 @@ public static class PublishChecks
             }
         }
 
-        return new RegistryFormScan(hasForm, hits);
+        return new ExpressionScan(hasForm, hits, all);
     }
 
     /// <summary>
