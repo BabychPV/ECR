@@ -26,8 +26,11 @@ namespace Ecr.Application.Tests.Documents;
 /// таблиць і колонок аркуша, а межа лише за аркушами їх би не закрила);</item>
 /// <item>прибрати <c>NarrowedDocumentIds</c> → червоніє <c>Під_resultsStale_частково_схований_документ_виключається</c>;</item>
 /// <item>повернути безумовне <c>HasLateEdits = false</c> для документа-надання → червоніє
-/// <c>Позначка_документа_надання_лишається_а_без_меж_знімається</c>; прибрати умову <c>!bounded.Contains</c> так, щоб
-/// позначка завжди лишалась, → той самий тест (документ без меж зберіг би позначку).</item>
+/// <c>Позначка_документа_надання_лишається_а_документ_без_меж_не_віддається</c>; прибрати умову
+/// <c>bounded.Contains</c> у постфільтрі <c>visible</c> → той самий тест (документ 57 без меж на сторінці);</item>
+/// <item>не передати <c>DocumentIds</c> у <c>DocumentParticipationFilter</c> → червоніє
+/// <c>Запит_сторінки_бере_документи_надань_лише_з_порахованими_межами</c> (сховище брало б 57 запитом). Гілку
+/// <c>DocumentIds</c> у SQL <c>DocumentStore.ListAsync</c> гонкою в CI не відтворити — її тримає цей контракт обробника.</item>
 /// </list>
 /// </remarks>
 public sealed class ListDocumentsParticipantFiltersTests
@@ -138,7 +141,24 @@ public sealed class ListDocumentsParticipantFiltersTests
 
     [Fact]
     [Trait("Decision", "D-446")]
-    public async Task Позначка_документа_надання_лишається_а_без_меж_знімається()
+    public async Task Запит_сторінки_бере_документи_надань_лише_з_порахованими_межами()
+    {
+        Page([]);
+
+        await Handler().HandleAsync(null, Period, null, mine: false, hasLateEdits: null, new CursorRequest(50), default);
+
+        // 57 має діюче надання (`ParticipatedDocumentsAsync`), але межі для нього не пораховані — у запит не йде.
+        await _documents.Received(1).ListAsync(
+            Arg.Any<int?>(), Arg.Any<PeriodKeyFilter>(),
+            Arg.Is<DocumentListFilter>(f => f.Participation != null
+                                            && f.Participation.DocumentIds != null
+                                            && f.Participation.DocumentIds.SequenceEqual(new[] { Partial, Whole })),
+            Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait("Decision", "D-446")]
+    public async Task Позначка_документа_надання_лишається_а_документ_без_меж_не_віддається()
     {
         Page([Doc(Partial), Doc(Whole), Doc(Unbounded)]);
 
@@ -148,8 +168,9 @@ public sealed class ListDocumentsParticipantFiltersTests
         Assert.True(result.Items.Single(d => d.Id == Partial).HasLateEdits);
         Assert.True(result.Items.Single(d => d.Id == Whole).HasLateEdits);
 
-        // ⛔ Межі для 57 не пораховані — позначка рахувалась без них, тож не віддається.
-        Assert.False(result.Items.Single(d => d.Id == Unbounded).HasLateEdits);
+        // ⛔ Межі для 57 не пораховані (надання з'явилось посеред запиту) — документа на сторінці немає: з'явиться з
+        // наступним запитом, а не з позначками без меж.
+        Assert.DoesNotContain(result.Items, d => d.Id == Unbounded);
 
         // Застарілість: цілком видимий — як є; частково схований — не визначена (`DocumentSheetVisibility.For`).
         Assert.True(result.Items.Single(d => d.Id == Whole).ResultsStale);
