@@ -1,7 +1,7 @@
 import { useState, type JSX } from 'react';
 import { Button, Checkbox, Group, Modal, SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
-import { meetsGrant, type GrantLevelName } from '@/features/workflow/SheetActions';
+import { meetsGrant, type GrantLevelName } from '@/features/workflow/grantLevels';
 import { t } from '@/shared/i18n';
 import { can, type MeDto } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
