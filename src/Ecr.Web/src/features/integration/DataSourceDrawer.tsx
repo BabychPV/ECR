@@ -8,25 +8,16 @@ import { t } from '@/shared/i18n';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { DetailDrawer, useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
-import { localized } from '@/shared/i18n/localized';
 import { KeyValue, type KeyValueItem } from '@/shared/ui/KeyValue';
 import { DataSourceFormModal, DataSourceScheduleTab, SourceEntitiesTab, SourceEventsTab } from './lazyDataSourceForm';
 import { TestDataSourceModal } from './TestDataSourceModal';
 import { hasDialogAbovePanel } from './nestedDialog';
 import { deleteDataSource, type DataSource } from './dataSourceApi';
 import { DataSourcesQueryKey } from './dataSourcesKey';
+import { dataSourceName } from './dataSourceName';
 
-/**
- * Назва з'єднання мовою користувача; немає жодної — код.
- *
- * ⚠ `nameL10n` у `DataSourceView` — ПЛОСКА мапа мов, а не `{ values }`, як
- * у решті `…L10n`; тому обгортка тут, а не зміна `localized`.
- */
-export function dataSourceName(source: DataSource): string {
-  const name = localized({ values: source.nameL10n });
-
-  return name.length > 0 ? name : source.code;
-}
+/** Назва з'єднання — у `dataSourceName.ts` (`D-132`); реекспорт, щоб наявні імпорти й тести не змінювались. */
+export { dataSourceName };
 
 /**
  * `409 dataSourceChanged` → чинна версія рядка з тіла відмови; `null` — відмова

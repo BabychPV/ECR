@@ -1,11 +1,10 @@
-import { Suspense, lazy, type JSX } from 'react';
+import { Suspense, lazy, useEffect, type JSX } from 'react';
 import { Badge, Button, Group, Stack, Text, Title } from '@mantine/core';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { formatDateOnly, parseDateOnly } from '@/shared/format';
 import type { SourceEntityStatus } from '@/api/types';
 import { CollectionRunStateBadge } from './CollectionRunStateBadge';
-import { CollectionRunDetailDrawer } from './CollectionRunDetailDrawer';
 import {
   CollectionRunStates,
   collectionRunsQueryKey,
@@ -13,12 +12,11 @@ import {
   type CollectionRunFilters,
   type CollectionRunView,
 } from './collectionRunsApi';
-import { dataSourceName } from './DataSourceDrawer';
+import { dataSourceName } from './dataSourceName';
 import { listDataSources } from './dataSourceApi';
 import { DataSourcesQueryKey } from './dataSourcesKey';
 import { DataTable } from '@/shared/ui/DataTable';
 import { FilterBar, type FilterOption, FilterRow } from '@/shared/ui/FilterBar';
-import { useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
@@ -85,6 +83,15 @@ const DateInput = lazy(async () => {
   return { default: module.DateInput };
 });
 
+/**
+ * Шухляда прогону — окремим чанком (`D-132`): відкривається кліком по рядку журналу, а тягнула в маршрут Mantine
+ * `Drawer` і `DetailDrawer`. Вантажиться заздалегідь, щойно в журналі є рядки (див. `useEffect` нижче).
+ */
+const loadRunDetailDrawer = () => import('./CollectionRunDetailDrawer');
+const CollectionRunDetailDrawer = lazy(async () => ({
+  default: (await loadRunDetailDrawer()).CollectionRunDetailDrawer,
+}));
+
 /** Префікс `panelId` шухляди прогону — див. коментар угорі файлу. */
 const RunPanelPrefix = 'run:';
 
@@ -98,7 +105,9 @@ export function CollectionRunsPanel(): JSX.Element {
   const [state] = useUrlState('state');
   const [fromDate, setFromDate] = useUrlState('from');
   const [toDate, setToDate] = useUrlState('to');
-  const [panel, setPanel] = useDetailPanel();
+  // ⚠ `?panel=` — через `useUrlState`, а не `useDetailPanel` з `DetailDrawer`: той тягнув Mantine `Drawer` у
+  // маршрут, хоча шухляда лінива. Ключ той самий — `panel`.
+  const [panel, setPanel] = useUrlState('panel');
 
   const sources = useQuery({ queryKey: DataSourcesQueryKey, queryFn: listDataSources });
   const entities = useQuery({
@@ -136,6 +145,12 @@ export function CollectionRunsPanel(): JSX.Element {
   });
 
   const rows: readonly CollectionRunView[] = (runs.data?.pages ?? []).flatMap((page) => page?.items ?? []);
+
+  // Чанк шухляди прогону — заздалегідь, щойно є рядки: перший клік відкриває її без очікування мережі.
+  const hasRows = rows.length > 0;
+  useEffect(() => {
+    if (hasRows) void loadRunDetailDrawer();
+  }, [hasRows]);
 
   /*
    * ⚠ Підпис варіанта — НАЗВА З КОДОМ в одному текстовому вузлі, а не сама
@@ -305,7 +320,9 @@ export function CollectionRunsPanel(): JSX.Element {
       )}
 
       {openRun !== undefined && (
-        <CollectionRunDetailDrawer run={openRun} panelId={runPanelId(openRun.id)} />
+        <Suspense fallback={null}>
+          <CollectionRunDetailDrawer run={openRun} panelId={runPanelId(openRun.id)} />
+        </Suspense>
       )}
     </Stack>
   );

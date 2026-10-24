@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState, type JSX } from 'react';
+import { Suspense, lazy, useEffect, useState, type JSX } from 'react';
 import { useMediaQuery } from '@mantine/hooks';
 import {
   Alert,
@@ -67,15 +67,13 @@ import {
 } from '@/features/templates/validationRuleApi';
 import { emptyValidationRuleDraft, type ValidationRuleDraft } from '@/features/templates/validationRule';
 import { LocalDraft } from '@/features/templates/LocalDraft';
-import { PublishProblemsAlert, publishProblemsOf } from '@/features/templates/PublishProblems';
-import { VersionDiff } from '@/features/templates/VersionDiff';
+import { publishProblemsOf } from '@/features/templates/publishProblemsOf';
+import { VersionDiffButton } from '@/features/templates/VersionDiffButton';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
-import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
-import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
@@ -208,6 +206,53 @@ const TableWorkspace = lazy(async () => ({
 const PresentationEditor = lazy(async () => ({
   default: (await import('@/features/templates/PresentationEditor')).PresentationEditor,
 }));
+
+/**
+ * Діалоги причини (публікація, виведення з обігу), підтвердження видалення і блок «версію не
+ * опубліковано» — теж за `import()` (`D-132`: маршрут 244.9 КБ, тягнули `Textarea` з autosize, `List`,
+ * `useRestoreFocus`). Кожен відкривається лише дією або відмовою сервера.
+ *
+ * ⚠ Ті самі правила, що для `PresentationEditor` вище: ці компоненти самі носять `<Modal opened>`, тож
+ * гейт — ОДНОСТОРОННІЙ (`useEverOpened`): доки не відкривали, у дереві нічого (закрита `Modal` і так
+ * нічого не малює); відкрили раз — компонент лишається, і закриття анімується, як доти. Фокус після
+ * закриття повертає `useRestoreFocus` усередині обох модалок — він і зроблений для діалогів, що
+ * монтуються вже відкритими.
+ *
+ * ⛔ Матриця доступу лишилася статичною навмисно: вона покладається на власний `returnFocus` Mantine,
+ * а той запам'ятовує елемент лише на зміні `opened` false → true — діалог, змонтований уже відкритим,
+ * після закриття лишив би фокус на `BODY`.
+ *
+ * ⚠ Чанки вантажаться заздалегідь, щойно приїхала структура (`preloadDialogs`): кнопка публікації й
+ * видалення — головні дії конструктора, і перше натискання не має чекати мережі.
+ */
+const loadReasonModal = () => import('@/shared/ui/ReasonModal');
+const loadConfirmModal = () => import('@/shared/ui/ConfirmModal');
+
+const ReasonModal = lazy(async () => ({ default: (await loadReasonModal()).ReasonModal }));
+
+const ConfirmModal = lazy(async () => ({ default: (await loadConfirmModal()).ConfirmModal }));
+
+const PublishProblemsAlert = lazy(async () => ({
+  default: (await import('@/features/templates/PublishProblems')).PublishProblemsAlert,
+}));
+
+/** Передзавантаження чанків діалогів; невдача мовчить — `lazy` при відкритті спробує сам. */
+function preloadDialogs(): void {
+  void loadReasonModal().catch(() => undefined);
+  void loadConfirmModal().catch(() => undefined);
+}
+
+/**
+ * «Цей діалог уже відкривали»: `true` з першого відкриття і назавжди (односторонній гейт ледачого
+ * діалогу — див. коментар над `ReasonModal`). Той самий прийом, що `everOpened` у
+ * `BusinessKeyChangeAction.tsx`.
+ */
+function useEverOpened(opened: boolean): boolean {
+  const [ever, setEver] = useState(false);
+  if (opened && !ever) setEver(true);
+
+  return opened || ever;
+}
 
 /** Стан форми «правка правила доступу за id». */
 
@@ -429,6 +474,17 @@ function TemplateVersionEditor(): JSX.Element {
     queryKey: queryKeys.templates.version(id),
     queryFn: () => apiFetch<TemplateStructureDto>(`/api/v1/template-versions/${id}/structure`),
   });
+
+  // ⚠ Структура приїхала — сторінка робоча: підтягнути чанки діалогів публікації й видалення
+  // (коментар над `ReasonModal`).
+  const structureLoaded = structure.data !== undefined;
+  useEffect(() => {
+    if (structureLoaded) preloadDialogs();
+  }, [structureLoaded]);
+
+  const publishMounted = useEverOpened(publishing);
+  const deprecateMounted = useEverOpened(deprecating);
+  const confirmMounted = useEverOpened(pendingDelete !== null);
 
   const node: CtorNode =
     structure.data === undefined ? { kind: 'root' } : parseNode(search.get('node'), structure.data);
@@ -901,7 +957,9 @@ function TemplateVersionEditor(): JSX.Element {
             {/* ⚠ Порівняння версій доступне за правом ПЕРЕГЛЯДУ: питання
                 «що зміниться» законне й для того, хто нічого не править —
                 саме з нього починається рішення про міграцію. */}
-            {can(session.data, 'Template.View') && <VersionDiff templateVersionId={id} versions={versionsList.data?.items} />}
+            {can(session.data, 'Template.View') && (
+              <VersionDiffButton templateVersionId={id} versions={versionsList.data?.items} />
+            )}
 
             <VersionMoreMenu
               items={[
@@ -985,7 +1043,9 @@ function TemplateVersionEditor(): JSX.Element {
         користуються, було б шумом.
       */}
       {publishProblems.length > 0 && (
-        <PublishProblemsAlert problems={publishProblems} onClose={() => setPublishProblems([])} />
+        <Suspense fallback={null}>
+          <PublishProblemsAlert problems={publishProblems} onClose={() => setPublishProblems([])} />
+        </Suspense>
       )}
 
       {can(session.data, 'Template.Publish') && versionsList.error !== null && (
@@ -1232,27 +1292,35 @@ function TemplateVersionEditor(): JSX.Element {
         </Suspense>
       )}
 
-      <ReasonModal
-        opened={publishing}
-        title={t('version.publish')}
-        label={t('workflow.reason')}
-        description={t('version.publishHint')}
-        confirmLabel={t('version.publish')}
-        isPending={publish.isPending}
-        onConfirm={(reason) => publish.mutate(reason)}
-        onClose={() => setPublishing(false)}
-      />
+      {publishMounted && (
+        <Suspense fallback={null}>
+          <ReasonModal
+            opened={publishing}
+            title={t('version.publish')}
+            label={t('workflow.reason')}
+            description={t('version.publishHint')}
+            confirmLabel={t('version.publish')}
+            isPending={publish.isPending}
+            onConfirm={(reason) => publish.mutate(reason)}
+            onClose={() => setPublishing(false)}
+          />
+        </Suspense>
+      )}
 
-      <ReasonModal
-        opened={deprecating}
-        title={t('version.deprecate')}
-        label={t('workflow.reason')}
-        description={t('version.deprecateHint')}
-        confirmLabel={t('version.deprecate')}
-        isPending={deprecate.isPending}
-        onConfirm={(reason) => deprecate.mutate(reason)}
-        onClose={() => setDeprecating(false)}
-      />
+      {deprecateMounted && (
+        <Suspense fallback={null}>
+          <ReasonModal
+            opened={deprecating}
+            title={t('version.deprecate')}
+            label={t('workflow.reason')}
+            description={t('version.deprecateHint')}
+            confirmLabel={t('version.deprecate')}
+            isPending={deprecate.isPending}
+            onConfirm={(reason) => deprecate.mutate(reason)}
+            onClose={() => setDeprecating(false)}
+          />
+        </Suspense>
+      )}
 
       <Modal opened={cloning} onClose={() => setCloning(false)} title={t('version.clone')}>
         <LocalDraft initial="">
@@ -1584,41 +1652,45 @@ function TemplateVersionEditor(): JSX.Element {
         </Suspense>
       </Modal>
 
-      <ConfirmModal
-        opened={pendingDelete !== null}
-        title={deleteTitle(pendingDelete)}
-        text={pendingDelete?.kind === 'rule' ? t('validationRules.deleteText') : t('structure.deleteText')}
-        verb={deleteVerb(pendingDelete)}
-        isPending={
-          deleteSheetMutation.isPending ||
-          deleteTableMutation.isPending ||
-          deleteColumnMutation.isPending ||
-          deleteRowMutation.isPending ||
-          deleteValidationRuleMutation.isPending
-        }
-        onConfirm={() => {
-          if (pendingDelete === null) return;
+      {confirmMounted && (
+        <Suspense fallback={null}>
+          <ConfirmModal
+            opened={pendingDelete !== null}
+            title={deleteTitle(pendingDelete)}
+            text={pendingDelete?.kind === 'rule' ? t('validationRules.deleteText') : t('structure.deleteText')}
+            verb={deleteVerb(pendingDelete)}
+            isPending={
+              deleteSheetMutation.isPending ||
+              deleteTableMutation.isPending ||
+              deleteColumnMutation.isPending ||
+              deleteRowMutation.isPending ||
+              deleteValidationRuleMutation.isPending
+            }
+            onConfirm={() => {
+              if (pendingDelete === null) return;
 
-          switch (pendingDelete.kind) {
-            case 'sheet':
-              deleteSheetMutation.mutate(pendingDelete.code);
-              break;
-            case 'table':
-              deleteTableMutation.mutate({ sheetCode: pendingDelete.sheetCode, code: pendingDelete.code });
-              break;
-            case 'column':
-              deleteColumnMutation.mutate({ tableId: pendingDelete.tableId, code: pendingDelete.code });
-              break;
-            case 'row':
-              deleteRowMutation.mutate({ tableId: pendingDelete.tableId, rowKey: pendingDelete.rowKey });
-              break;
-            case 'rule':
-              deleteValidationRuleMutation.mutate({ tableId: pendingDelete.tableId, code: pendingDelete.code });
-              break;
-          }
-        }}
-        onClose={() => setPendingDelete(null)}
-      />
+              switch (pendingDelete.kind) {
+                case 'sheet':
+                  deleteSheetMutation.mutate(pendingDelete.code);
+                  break;
+                case 'table':
+                  deleteTableMutation.mutate({ sheetCode: pendingDelete.sheetCode, code: pendingDelete.code });
+                  break;
+                case 'column':
+                  deleteColumnMutation.mutate({ tableId: pendingDelete.tableId, code: pendingDelete.code });
+                  break;
+                case 'row':
+                  deleteRowMutation.mutate({ tableId: pendingDelete.tableId, rowKey: pendingDelete.rowKey });
+                  break;
+                case 'rule':
+                  deleteValidationRuleMutation.mutate({ tableId: pendingDelete.tableId, code: pendingDelete.code });
+                  break;
+              }
+            }}
+            onClose={() => setPendingDelete(null)}
+          />
+        </Suspense>
+      )}
     </>
   );
 }

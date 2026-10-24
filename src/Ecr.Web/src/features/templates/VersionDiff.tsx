@@ -5,6 +5,7 @@ import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { TemplateDiffDto, TemplateVersionPage } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
 import { t } from '@/shared/i18n';
 import { changeClassLabel, diffKindLabel } from './enumLabels';
 
@@ -43,6 +44,41 @@ export function VersionDiff({
   versions: readonly VersionSummary[] | undefined;
 }): JSX.Element {
   const [opened, setOpened] = useState(false);
+
+  return (
+    <>
+      <Button variant="default" onClick={() => setOpened(true)}>
+        {t('version.diff')}
+      </Button>
+
+      <VersionDiffDialog
+        templateVersionId={templateVersionId}
+        versions={versions}
+        opened={opened}
+        onClose={() => setOpened(false)}
+      />
+    </>
+  );
+}
+
+/**
+ * Сам діалог порівняння — без кнопки.
+ *
+ * ⚠ Окремим експортом заради бюджету маршруту (`D-132`): шапка конструктора версії тримає лише кнопку
+ * (`VersionDiffButton.tsx`), а цей діалог разом із `Select` вантажить за `import()`, коли його відкрили.
+ * Обрана друга версія живе тут і переживає закриття — як і доти, коли діалог стояв поруч із кнопкою.
+ */
+export function VersionDiffDialog({
+  templateVersionId,
+  versions,
+  opened,
+  onClose,
+}: {
+  templateVersionId: number;
+  versions: readonly VersionSummary[] | undefined;
+  opened: boolean;
+  onClose: () => void;
+}): JSX.Element {
   const [otherId, setOtherId] = useState<number | null>(null);
 
   const options = useMemo(
@@ -63,99 +99,98 @@ export function VersionDiff({
     enabled: opened && otherId !== null,
   });
 
+  // ⛔ Фокус після закриття повертає `useRestoreFocus`, а не `returnFocus` Mantine: той запам'ятовує кнопку
+  // лише на зміні `opened` false → true, а з `VersionDiffButton` діалог монтується вже відкритим (лінивий чанк
+  // після кліку) — фокус падав би на `BODY`.
+  useRestoreFocus(opened);
+
   return (
-    <>
-      <Button variant="default" onClick={() => setOpened(true)}>
-        {t('version.diff')}
-      </Button>
+    <Modal opened={opened} onClose={onClose} title={t('version.diff')} size="xl" returnFocus={false}>
+      <Select
+        label={t('version.diffOther')}
+        description={t('version.diffOtherHint')}
+        data={options}
+        value={otherId === null ? null : String(otherId)}
+        onChange={(value) => setOtherId(value === null ? null : Number(value))}
+        nothingFoundMessage={t('version.diffNoOther')}
+        searchable
+        data-autofocus
+      />
 
-      <Modal opened={opened} onClose={() => setOpened(false)} title={t('version.diff')} size="xl">
-        <Select
-          label={t('version.diffOther')}
-          description={t('version.diffOtherHint')}
-          data={options}
-          value={otherId === null ? null : String(otherId)}
-          onChange={(value) => setOtherId(value === null ? null : Number(value))}
-          nothingFoundMessage={t('version.diffNoOther')}
-          searchable
-          data-autofocus
-        />
+      {/*
+       * ⚠ Доки друга версія не задана, `data` — `undefined`: запиту ще не
+       * було, і обгортка каже саме це, а не «розбіжностей немає».
+       */}
+      <AsyncBoundary<TemplateDiffDto>
+        isPending={otherId !== null && diff.isPending}
+        error={diff.error}
+        data={otherId === null ? undefined : diff.data}
+        isEmpty={(result) => result.changes.length === 0}
+        emptyTitle={otherId === null ? t('version.diffPick') : t('version.diffSame')}
+        emptyHint={otherId === null ? undefined : t('version.diffSameHint')}
+        onRetry={() => void diff.refetch()}
+      >
+        {(result) => (
+          <>
+            {/* ⛔ R-08: напрям — завжди від старшої версії до новішої (його
+                задає сервер), і його видно: «v1.0 → v2.0». Доти стовпці
+                «Was / Becomes» не казали, котра версія де. */}
+            <Text mt="md" fw={600} data-diff-direction>
+              {t('version.diffDirection', {
+                from: numberOf(result.fromVersionId),
+                to: numberOf(result.toVersionId),
+              })}
+            </Text>
 
-        {/*
-         * ⚠ Доки друга версія не задана, `data` — `undefined`: запиту ще не
-         * було, і обгортка каже саме це, а не «розбіжностей немає».
-         */}
-        <AsyncBoundary<TemplateDiffDto>
-          isPending={otherId !== null && diff.isPending}
-          error={diff.error}
-          data={otherId === null ? undefined : diff.data}
-          isEmpty={(result) => result.changes.length === 0}
-          emptyTitle={otherId === null ? t('version.diffPick') : t('version.diffSame')}
-          emptyHint={otherId === null ? undefined : t('version.diffSameHint')}
-          onRetry={() => void diff.refetch()}
-        >
-          {(result) => (
-            <>
-              {/* ⛔ R-08: напрям — завжди від старшої версії до новішої (його
-                  задає сервер), і його видно: «v1.0 → v2.0». Доти стовпці
-                  «Was / Becomes» не казали, котра версія де. */}
-              <Text mt="md" fw={600} data-diff-direction>
-                {t('version.diffDirection', {
-                  from: numberOf(result.fromVersionId),
-                  to: numberOf(result.toVersionId),
-                })}
-              </Text>
+            {/* ⛔ Ця смуга — головне, що екран має сказати. Зміна класу
+                `Breaking` на версії з документами не пройде взагалі, і
+                дізнатися про це з відмови публікації означає витратити на
+                правку час, який можна було не витрачати. */}
+            {result.affectedDocumentCount > 0 && (
+              <Alert mt="md" color="statusWarning" title={t('version.diffAffected')}>
+                {t('version.diffAffectedHint', { count: result.affectedDocumentCount })}
+              </Alert>
+            )}
 
-              {/* ⛔ Ця смуга — головне, що екран має сказати. Зміна класу
-                  `Breaking` на версії з документами не пройде взагалі, і
-                  дізнатися про це з відмови публікації означає витратити на
-                  правку час, який можна було не витрачати. */}
-              {result.affectedDocumentCount > 0 && (
-                <Alert mt="md" color="statusWarning" title={t('version.diffAffected')}>
-                  {t('version.diffAffectedHint', { count: result.affectedDocumentCount })}
-                </Alert>
-              )}
-
-              <Table striped withTableBorder mt="md" className="ecr-sticky-head">
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>{t('version.diffElement')}</Table.Th>
-                    <Table.Th>{t('version.diffKind')}</Table.Th>
-                    <Table.Th>{t('version.diffClass')}</Table.Th>
-                    <Table.Th>{t('import.was')}</Table.Th>
-                    <Table.Th>{t('import.becomes')}</Table.Th>
+            <Table striped withTableBorder mt="md" className="ecr-sticky-head">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>{t('version.diffElement')}</Table.Th>
+                  <Table.Th>{t('version.diffKind')}</Table.Th>
+                  <Table.Th>{t('version.diffClass')}</Table.Th>
+                  <Table.Th>{t('import.was')}</Table.Th>
+                  <Table.Th>{t('import.becomes')}</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {result.changes.map((change) => (
+                  <Table.Tr key={`${change.elementPath}:${change.kind}`}>
+                    <Table.Td>
+                      <Text size="xs">{change.elementPath}</Text>
+                    </Table.Td>
+                    <Table.Td>{diffKindLabel(change.kind)}</Table.Td>
+                    <Table.Td>
+                      <Badge size="sm" color={classColor(change.changeClass)} variant="light">
+                        {changeClassLabel(change.changeClass)}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>{change.oldValue ?? '—'}</Table.Td>
+                    <Table.Td>{change.newValue ?? '—'}</Table.Td>
                   </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {result.changes.map((change) => (
-                    <Table.Tr key={`${change.elementPath}:${change.kind}`}>
-                      <Table.Td>
-                        <Text size="xs">{change.elementPath}</Text>
-                      </Table.Td>
-                      <Table.Td>{diffKindLabel(change.kind)}</Table.Td>
-                      <Table.Td>
-                        <Badge size="sm" color={classColor(change.changeClass)} variant="light">
-                          {changeClassLabel(change.changeClass)}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>{change.oldValue ?? '—'}</Table.Td>
-                      <Table.Td>{change.newValue ?? '—'}</Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            </>
-          )}
-        </AsyncBoundary>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </>
+        )}
+      </AsyncBoundary>
 
-        <Group justify="flex-end" mt="md">
-          {/* ⛔ X-18: діалог лише для читання — скасовувати нічого, тож «Close». */}
-          <Button variant="default" onClick={() => setOpened(false)}>
-            {t('common.close')}
-          </Button>
-        </Group>
-      </Modal>
-    </>
+      <Group justify="flex-end" mt="md">
+        {/* ⛔ X-18: діалог лише для читання — скасовувати нічого, тож «Close». */}
+        <Button variant="default" onClick={onClose}>
+          {t('common.close')}
+        </Button>
+      </Group>
+    </Modal>
   );
 }
 

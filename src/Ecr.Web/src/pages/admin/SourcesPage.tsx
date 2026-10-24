@@ -12,12 +12,15 @@ import { listDataSources } from '@/features/integration/dataSourceApi';
 import { DataSourcesQueryKey } from '@/features/integration/dataSourcesKey';
 import type { CollectRequest, SourceEntityStatus } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
-import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { DataTable } from '@/shared/ui/DataTable';
 import { ListPage } from '@/shared/ui/ListPage';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
+import { humanizeJobId } from '@/features/workflow/jobLabel';
+
+// ✎ Людський вигляд `jobId` для тосту збору — статично: лінивий варіант (~0.8 КБ виграшу) тримав спінер «Collect»
+// до підвантаження чанка, тобто змінював поведінку. Маршрут і так під ціллю (≈237.4 КБ при межі 250, `D-132`).
 
 /**
  * Конфігуратор джерел і ручний запуск збору.
@@ -82,6 +85,9 @@ export function SourcesPage(): JSX.Element {
   const hasEntities = sources.data !== undefined && sources.data.length > 0;
 
   const showSubordinate = hasConnections || hasEntities;
+
+  // L9-18: під симуляцією збір (POST) сервер однаково відхилить — кнопок «Collect» тоді немає.
+  const mayCollect = can(session.data, 'Integration.Manage') && session.data?.isSimulation !== true;
 
   const collect = useMutation({
     mutationFn: (id: number) => {
@@ -227,8 +233,8 @@ export function SourcesPage(): JSX.Element {
               label: '',
               sortable: false,
               render: (source) =>
-                // L9-18: під симуляцією збір (POST) сервер однаково відхилить.
-                can(session.data, 'Integration.Manage') && session.data?.isSimulation !== true ? (
+                // L9-18: див. `mayCollect` вище.
+                mayCollect ? (
                   <Button
                     size="xs"
                     variant="default"
