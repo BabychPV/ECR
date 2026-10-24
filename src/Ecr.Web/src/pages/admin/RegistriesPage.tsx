@@ -1,20 +1,17 @@
 import { useMemo, useRef, useState, type JSX } from 'react';
-import { Badge, Button, Group, List, Select, Stack, Text } from '@mantine/core';
+import { Badge, Button, Group, Select, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { RegistryDefDto, RegistryEntryDto } from '@/api/types';
+import { useDeleteRegistryEntry } from '@/features/registries/api';
+import { isExternalRegistry } from '@/features/registries/externalRegistry';
 import {
-  entryReferenceKinds,
-  entryReferences,
-  useDeleteRegistryEntry,
-} from '@/features/registries/api';
-import { CreateRegistryModal } from '@/features/registries/CreateRegistryModal';
-import {
-  RegistryEntryEditor,
-  ValidityEditor,
-  isExternalRegistry,
-} from '@/features/registries/RegistryEntryEditor';
+  LazyCreateRegistryModal,
+  LazyDeleteEntryDialog,
+  LazyRegistryEntryEditor,
+  LazyValidityEditor,
+} from '@/features/registries/lazyDialogs';
 import { RegistryImportPanel, type RegistryImportHandle } from '@/features/registries/RegistryImportPanel';
 import { RegistriesList } from '@/features/registries/list/RegistriesList';
 import { RegistryExportButton } from '@/features/registries/export/RegistryExportButton';
@@ -24,14 +21,12 @@ import { todayDateOnly } from '@/shared/format';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
-import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { FilterBar, FilterRow } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
-import { problemText } from '@/shared/ui/problemText';
 
 /**
  * Що стоїть у межі вікна чинності запису, коли межі НЕМАЄ.
@@ -153,13 +148,6 @@ function RegistryOverview(): JSX.Element {
   });
 
   const remove = useDeleteRegistryEntry(code ?? '');
-
-  // ⛔ Не `null` означає «відмовлено, бо на запис посилаються N комірок». Саме
-  // це число, а не текст відмови, вирішує, ЩО показати замість «повторити».
-  const blocked = entryReferences(remove.error);
-
-  // ⛔ V-08: ХТО посилається — комірки, інші записи, константи методологій.
-  const blockedBy = entryReferenceKinds(remove.error);
 
   const needle = (query ?? '').trim().toLowerCase();
 
@@ -547,7 +535,7 @@ function RegistryOverview(): JSX.Element {
       )}
 
       {selected !== undefined && (
-        <RegistryEntryEditor
+        <LazyRegistryEntryEditor
           registry={selected}
           entry={editing ?? null}
           opened={editing !== undefined}
@@ -555,84 +543,29 @@ function RegistryOverview(): JSX.Element {
         />
       )}
 
-      <ValidityEditor
+      <LazyValidityEditor
         registryCode={code ?? ''}
         entry={validity}
         onClose={() => setValidity(null)}
       />
 
-      {/*
-       * Підтвердження видалення запису і — на відмову `ECR-REG-0409` — той
-       * самий діалог у стані «заблоковано».
-       *
-       * ⛔ Двох діалогів тут немає навмисно: «підтвердьте» і «не можна, бо на
-       * запис посилаються N комірок» — це два стани однієї розмови, і людина
-       * не має шукати причину в плашці, що з'їхала кудись у куток.
-       */}
-      {/*
-       * ⛔ X-23: тут стояв голий `<Modal>` із заголовком «Remove» без назви
-       * запису й фокусом на хрестику. Тепер — `ConfirmModal`: назва запису в
-       * заголовку, фокус на «Cancel». Стан «заблоковано» — той самий діалог
-       * із недоступним підтвердженням і дією, яка справді можлива.
-       */}
-      <ConfirmModal
-        opened={deleting !== null}
-        title={t('registries.deleteEntryTitle', { code: deleting?.code ?? '' })}
-        text={blocked === null ? deleting?.display : undefined}
-        verb={t('common.delete')}
-        confirmDisabled={blocked !== null}
+      {/* Підтвердження видалення запису і стан «заблоковано» — `DeleteEntryDialog` (лінивий чанк). */}
+      <LazyDeleteEntryDialog
+        entry={deleting}
+        error={remove.error}
         isPending={remove.isPending}
-        onConfirm={() => {
-          if (deleting !== null) {
-            remove.mutate(deleting.id, { onSuccess: () => setDeleting(null) });
-          }
-        }}
+        isTemporal={selected?.isTemporal === true}
+        onConfirm={(entry) => remove.mutate(entry.id, { onSuccess: () => setDeleting(null) })}
         onClose={() => setDeleting(null)}
-      >
-        {blocked !== null && (
-          <Stack gap="sm">
-            {/* ⚠ Текст відмови — СЕРВЕРНИЙ, якщо сервер його локалізував
-                (`messageKey`), інакше назва з каталогу (`ФВ-14.9a`). Поруч — саме число посилань, бо
-                воно і є мірою наслідку. */}
-            <Group gap="xs">
-              <Badge color="statusWarning">{blocked}</Badge>
-              <Text size="sm">{problemText(remove.error).detail ?? problemText(remove.error).title}</Text>
-            </Group>
-
-            {/* ⛔ V-08: розклад посилань за видами — куди йти виправляти. */}
-            {blockedBy.length > 0 && (
-              <List size="sm" aria-label={t('registries.referencedBy')}>
-                {blockedBy.map(({ kind, count }) => (
-                  <List.Item key={kind}>
-                    {t(`registries.referenceKind.${kind}`)}: {count}
-                  </List.Item>
-                ))}
-              </List>
-            )}
-
-            {/* ⛔ Замість «повторити». Повтор дасть ту саму відмову: змінити
-                треба не запит, а намір — запис виводять з обігу датою
-                (`ФВ-8.5`), і тоді історичні документи лишаються читабельними. */}
-            {selected?.isTemporal === true && (
-              <Group justify="flex-start">
-                <Button
-                  variant="light"
-                  onClick={() => {
-                    setValidity(deleting);
-                    setDeleting(null);
-                  }}
-                >
-                  {t('registries.validity')}
-                </Button>
-              </Group>
-            )}
-          </Stack>
-        )}
-      </ConfirmModal>
+        onValidity={(entry) => {
+          setValidity(entry);
+          setDeleting(null);
+        }}
+      />
 
       {/* ⛔ U-18: діалог винесено в `CreateRegistryModal` — той самий
           контракт, що й «New project» (зірочки, «Still needed», Cancel/Save). */}
-      <CreateRegistryModal
+      <LazyCreateRegistryModal
         opened={creating}
         onClose={() => setCreating(false)}
         onCreated={setCode}

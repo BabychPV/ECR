@@ -1,8 +1,8 @@
-import { lazy, Suspense, useRef, useState, type JSX, type ReactNode, type RefObject } from 'react';
+import { lazy, Suspense, useRef, useState, type JSX, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { Button, Menu, Text } from '@mantine/core';
 import { exportFormatOptions, type ExportFormat } from '@/features/export/exportFormat';
 import { RecalculateKbd, submitLabel, useSheetActions, type SheetActionsModel } from '@/features/workflow/SheetActions';
-import { useSubmissionTarget } from '@/features/workflow/api';
+import { Hint } from '@/shared/ui/Hint';
 import type { DocumentLock } from './documentLock';
 import { DocumentSheetBanner } from './DocumentSheetBanner';
 import { DocumentToolbar } from './DocumentToolbar';
@@ -94,12 +94,13 @@ export function DocumentActionBar({
   useStaleResultsReminder(documentId, resultsStale === true, actions.recalculate !== null, staleReminderHost);
   // ✎ D-441 CLS: доки сервер не відповів, ЧИ і ЯКИЙ період подавати, остаточна форма рядка дій невідома
   // (кнопка «Подати: <період>», ▾, «Next to submit: …» або нічого) — скелет замість дій (`DocumentToolbar`,
-  // `ActionsPlaceholder`). Той самий ключ, що в `useSheetActions`: запит один (кеш TanStack Query).
-  // ⚠ Лише ПЕРША спроба запиту: збій сервера з повторами (до двох, з паузами) не тримає дії схованими —
-  // після першої відмови рядок малюється як є, а «Подати» з'являється за `useSheetActions`. `isLoading`, а не
-  // `isPending`: без мережі запит стоїть на паузі (`fetchStatus = paused`) і скелет висів би вічно.
-  const submissionTarget = useSubmissionTarget(documentId, sheetDefId, periodKey);
-  const actionsPending = submissionTarget.isLoading && submissionTarget.failureCount === 0;
+  // `ActionsPlaceholder`). Рішення — у моделі (`useSheetActions().submitPending`):
+  // - лише ПЕРША відповідь і лише перша спроба: збій із повторами не тримає дії схованими; `isLoading`, а не
+  //   `isPending`: без мережі запит стоїть на паузі і скелет висів би вічно;
+  // - ✎ зміна аркуша/періоду скелета НЕ дає: лишається відповідь попереднього ключа (`keepPreviousData`), рядок на
+  //   місці, а «Подати» недоступна (`submit.checking`), доки не прийде ціль нового;
+  // - ✎ людина без права подання скелета не бачить: «Подати» їй не буде за будь-якої відповіді.
+  const actionsPending = actions.submitPending;
   const openImport = useRef<((returnTo?: HTMLElement | null) => void) | null>(null);
   const startExport = useExportStarter();
 
@@ -342,17 +343,30 @@ function SubmitAction({
   readonly submit: NonNullable<SheetActionsModel['submit']>;
   readonly variant: 'filled' | 'default';
 }): JSX.Element {
+  // ✎ D-441 «миготіння скелета»: аркуш/період щойно змінився, ціль ще від попереднього (`submit.checking`) —
+  // кнопка лишається ТІЄЮ САМОЮ (той самий текст і ширина: «More» не рухається), але недоступна: `aria-disabled`
+  // + `data-disabled` (не `disabled`: фокус і наведення лишаються) і підказка «Loading…» в описі; клік гаситься,
+  // а `run` моделі й сам нічого не шле. ⚠ `Hint` — завжди (лише `disabled`), а не умовна обгортка: та
+  // перемонтовувала б кнопку при кожному перемиканні, і фокус клавіатури падав би на `body` (WCAG 2.4.3).
+  // ⚠ `data-period-key` — лише підтверджена ціль: під час перевірки атрибута немає.
+  const checking = submit.checking;
   return (
     <>
-      <Button
-        variant={variant}
-        loading={submit.loading}
-        onClick={submit.run}
-        data-testid="document-submit"
-        data-period-key={submit.periodKey}
-      >
-        {submitLabel(submit.periodKey)}
-      </Button>
+      <Hint label={t('common.loading')} disabled={!checking}>
+        <Button
+          variant={variant}
+          loading={submit.loading}
+          onClick={checking ? (event: MouseEvent<HTMLButtonElement>) => event.preventDefault() : submit.run}
+          data-disabled={checking}
+          aria-disabled={checking || undefined}
+          aria-busy={checking || undefined}
+          data-testid="document-submit"
+          data-period-key={checking ? undefined : submit.periodKey}
+          data-checking={checking || undefined}
+        >
+          {submitLabel(submit.periodKey)}
+        </Button>
+      </Hint>
       {/* ⚠ «Наступний — …» буває лише тоді, коли неподаних кілька, — тобто разом із вибором ▾. */}
       {/* ⛔ В одному коміті з кнопкою: рядок дій з'являється одразу в остаточній формі (див. імпорт). */}
       {submit.options.length > 1 && <SubmitPeriodPicker submit={submit} />}

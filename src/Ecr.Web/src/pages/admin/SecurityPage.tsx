@@ -18,8 +18,7 @@ import type {
   UserPage,
   UserView,
 } from '@/api/types';
-import { CreateRoleModal } from '@/features/security/CreateRoleModal';
-import { CreateUserModal } from '@/features/security/CreateUserModal';
+import { LazyCreateRoleModal, LazyCreateUserModal } from '@/features/security/lazyCreateModals';
 import { StartSimulationButton } from '@/features/security/SimulationPanel';
 import { UserAdminActions } from '@/features/security/UserAdminActions';
 import { useOpenerFocusReturn } from '@/features/projects/useOpenerFocusReturn';
@@ -519,7 +518,7 @@ export function SecurityPage(): JSX.Element {
         </Tabs.Panel>
       </Tabs>
 
-      <CreateRoleModal
+      <LazyCreateRoleModal
         opened={creatingRole}
         onClose={() => setCreatingRole(false)}
         permissions={permissions}
@@ -540,7 +539,7 @@ export function SecurityPage(): JSX.Element {
         </Suspense>
       )}
 
-      <CreateUserModal
+      <LazyCreateUserModal
         opened={creatingUser}
         onClose={() => setCreatingUser(false)}
         roles={roles.data ?? []}

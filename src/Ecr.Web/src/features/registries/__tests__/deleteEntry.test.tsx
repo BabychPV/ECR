@@ -239,7 +239,7 @@ describe('Видалення запису довідника з інтерфей
     fireEvent.click(confirmButton(dialog));
 
     // ⛔ Число посилань із `details.references` доходить до екрана. Це і є
-    // мутаційна точка: прибрати гілку `entryReferences` у `RegistriesPage.tsx`
+    // мутаційна точка: прибрати гілку `entryReferences` у `DeleteEntryDialog.tsx`
     // — і замість пояснення користувач побачить кнопку «видалити» ще раз.
     expect(await screen.findByText('7')).toBeDefined();
 
@@ -247,7 +247,7 @@ describe('Видалення запису довідника з інтерфей
     expect(screen.getByText('Entry «KG» is referenced by 7 cells.')).toBeDefined();
 
     // ⛔ V-08: ХТО посилається — переліком за видами. Мутація: прибрати
-    // `blockedBy` у `RegistriesPage.tsx` — рядків переліку немає.
+    // `blockedBy` у `DeleteEntryDialog.tsx` — рядків переліку немає.
     const kinds = within(dialog).getByRole('list', { name: 'Referenced by' });
     expect(within(kinds).getByText('Document cells: 5')).toBeDefined();
     expect(within(kinds).getByText('Methodology constants: 2')).toBeDefined();
