@@ -60,9 +60,9 @@ const SecurityEventsPanel = lazy(async () => ({
 
 /** Чанки вкладок «Structure»/«Security» — заздалегідь, щоб перемикач не чекав мережі. */
 function preloadAuditTabs(): void {
-  void loadStructureChangesPanel();
-  void loadStructureExportButton();
-  void loadSecurityEventsPanel();
+  void loadStructureChangesPanel().catch(() => undefined);
+  void loadStructureExportButton().catch(() => undefined);
+  void loadSecurityEventsPanel().catch(() => undefined);
 }
 
 /**
