@@ -28,6 +28,9 @@ interface SubmissionTarget {
   monthColumns: { tableDefId: number; columnCode: string; monthNumber: number; periodKey: number; sheetStatus: string }[];
 }
 
+/** Тіло перехопленого `POST …/submit`. */
+type Body = { sheetDefId?: number; periodKey?: number };
+
 interface Calendar {
   periods: { periodKey: number; state: string }[];
 }
@@ -199,6 +202,173 @@ test.describe('submissionTarget: «Подати: <період>» на реал�
         `«More» зсунулась: (${first.x.toFixed(0)},${first.y.toFixed(0)}) → (${settled.x.toFixed(0)},${settled.y.toFixed(0)})`,
       ).toEqual({ x: Math.round(first.x), y: Math.round(first.y) });
       expect(await skeletonSeen, 'немає скелета рядка дій до відповіді submission-target').toBe(true);
+    } finally {
+      await context.close();
+    }
+  });
+
+  /*
+   * ✎ D-441 «миготіння скелета» (HANDOFF-2026-10-24 §4): зміна періоду міняє ключ `submission-target`, і на старому
+   * коді ВЕСЬ рядок дій на один запит підмінявся скелетом — «More» зникала й поверталась. Тепер лишається відповідь
+   * попереднього ключа: кнопки на місці, а «Подати» недоступна, доки не прийде ціль нового періоду, і клік під час
+   * очікування нічого не шле.
+   *
+   * ⚠ Документ стенда має ОДИН аркуш (`Ecr.DataGen`), тож ключ міняється періодом. Перший захід на період
+   * притримується до кінця тесту: зведення й таблиці того періоду вже в кеші (сторінка не провалюється в скелет
+   * сторінки), а запит `submission-target` ще в дорозі — рівно стан «перемкнули, відповідь іде». Перемикання —
+   * клієнтське (історія браузера), як вибір періоду в шапці: повне перезавантаження скинуло б кеш.
+   */
+  test('перемкнули період: рядок дій без скелета, «More» на місці, «Подати» вимкнена до відповіді й нічого не шле', async ({
+    browser,
+  }) => {
+    const context = await signedIn(browser);
+    const page = await context.newPage();
+    const targetPath = `/api/v1/documents/${DocumentId}/submission-target`;
+
+    try {
+      // ── Інший період того самого документа: є аркуш, той самий стан аркушів (рядок дій тієї ж форми) ──────
+      const summaryOf = async (key: number): Promise<{ projectId: number; sheetStates: Record<string, string> } | null> => {
+        const response = await context.request.get(`/api/v1/documents/${DocumentId}?periodKey=${String(key)}`);
+        return response.ok() ? ((await response.json()) as { projectId: number; sheetStates: Record<string, string> }) : null;
+      };
+      const here = await summaryOf(Number(PeriodKey));
+      if (here === null) throw new Error(`зведення документа за ${PeriodKey} недоступне`);
+      const calendar = (await (await context.request.get(`/api/v1/projects/${String(here.projectId)}/periods`)).json()) as Calendar;
+      const candidates = calendar.periods
+        .map((period) => period.periodKey)
+        .filter((key) => key !== Number(PeriodKey))
+        .sort((a, b) => Math.abs(a - Number(PeriodKey)) - Math.abs(b - Number(PeriodKey)));
+      let other: number | undefined;
+      for (const key of candidates) {
+        const summary = await summaryOf(key);
+        if (summary === null || JSON.stringify(summary.sheetStates) !== JSON.stringify(here.sheetStates)) continue;
+        const tables = await context.request.get(`/api/v1/documents/${DocumentId}/tables?periodKey=${String(key)}`);
+        if (tables.ok() && ((await tables.json()) as unknown[]).length > 0) {
+          other = key;
+          break;
+        }
+      }
+      if (other === undefined) throw new Error('у календарі стенда немає другого періоду з тим самим станом аркушів');
+      const otherKey = String(other);
+
+      // ── Відповідь submission-target за інший період тримається, доки тест не відпустить ─────────────────
+      let releaseOther: () => void = () => undefined;
+      const otherHeld = new Promise<void>((resolve) => {
+        releaseOther = resolve;
+      });
+      let otherAsked = 0;
+      await page.route(
+        (url) => url.pathname === targetPath && url.searchParams.get('periodKey') === otherKey,
+        async (route) => {
+          otherAsked += 1;
+          await otherHeld;
+          await route.continue();
+        },
+      );
+      const sent: Body[] = [];
+      await page.route(`**/api/v1/documents/${DocumentId}/submit`, async (route) => {
+        sent.push(route.request().postDataJSON() as Body);
+        await route.fulfill({ status: 204, body: '' });
+      });
+
+      // 1. Інший період: зведення й таблиці стають у кеш, ціль — у дорозі (притримана).
+      await page.goto(`/documents/${DocumentId}?periodKey=${otherKey}`);
+      await expect(page.getByTestId('document-toolbar')).toBeVisible({ timeout: 60_000 });
+      await expect.poll(() => otherAsked, { message: 'запиту submission-target за інший період немає', timeout: 30_000 }).toBeGreaterThan(0);
+
+      // 2. Клієнтом — на період стенда: ціль приходить, рядок дій остаточний.
+      const switchTo = async (key: string): Promise<void> => {
+        await page.evaluate((periodKey) => {
+          const url = new URL(window.location.href);
+          url.searchParams.set('periodKey', periodKey);
+          window.history.pushState(window.history.state, '', url);
+          window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }));
+        }, key);
+      };
+      await switchTo(PeriodKey);
+      const submit = page.getByTestId('document-submit');
+      const more = page.getByTestId('document-more');
+      await expect(submit, 'на періоді стенда немає «Подати»').toHaveAttribute('data-period-key', /\d+/, { timeout: 60_000 });
+      await page.evaluate(
+        () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+      );
+      await page.waitForTimeout(500);
+      const before = await more.boundingBox();
+      if (before === null) throw new Error('«More» видима, але без розмірів');
+
+      // Кожен кадр: чи з'являвся скелет, чи зникала або рухалась «More» (звіряється наприкінці).
+      await page.evaluate(
+        ({ x, y }) => {
+          const watch = { pending: false, missing: false, shift: 0, stop: false };
+          (window as unknown as { __actionsWatch: typeof watch }).__actionsWatch = watch;
+          const frame = (): void => {
+            if (document.querySelector('[data-testid="document-actions-pending"]') !== null) watch.pending = true;
+            const node = document.querySelector('[data-testid="document-more"]');
+            if (node === null) watch.missing = true;
+            else {
+              const rect = node.getBoundingClientRect();
+              watch.shift = Math.max(watch.shift, Math.abs(rect.x - x), Math.abs(rect.y - y));
+            }
+            if (!watch.stop) requestAnimationFrame(frame);
+          };
+          requestAnimationFrame(frame);
+        },
+        { x: before.x, y: before.y },
+      );
+
+      // 3. Назад на інший період — його ціль ще притримана.
+      await switchTo(otherKey);
+      await page.waitForTimeout(1_500);
+
+      await expect(page.getByTestId('document-actions-pending'), 'скелет рядка дій під час перемикання').toHaveCount(0);
+      await expect(more).toBeVisible();
+      await expect(submit).toBeVisible();
+      await expect(submit, '«Подати» доступна, поки ціль нового періоду не прийшла').toBeDisabled();
+      await expect(submit).toHaveAttribute('aria-disabled', 'true');
+      await expect(submit).not.toHaveAttribute('data-period-key', /.*/);
+      const during = await more.boundingBox();
+      expect(during && { x: Math.round(during.x), y: Math.round(during.y) }, '«More» зсунулась під час перемикання').toEqual({
+        x: Math.round(before.x),
+        y: Math.round(before.y),
+      });
+
+      // ⛔ Клік під час очікування не шле ціль попереднього періоду (і жодну).
+      await submit.click({ force: true });
+      await page.waitForTimeout(1_000);
+      expect(sent, 'клік «Подати» під час перемикання надіслав подання').toEqual([]);
+
+      // 4. Відповідь нового періоду: кнопка доступна і називає ЙОГО ціль.
+      const otherResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === 'GET' &&
+          new URL(response.url()).pathname === targetPath &&
+          new URL(response.url()).searchParams.get('periodKey') === otherKey,
+        { timeout: 60_000 },
+      );
+      releaseOther();
+      const reply = await otherResponse;
+      expect(reply.status(), `GET submission-target ${otherKey}: ${await reply.text()}`).toBe(200);
+      const target = (await reply.json()) as SubmissionTarget;
+
+      const seen = await page.evaluate(() => {
+        const state = (window as unknown as { __actionsWatch: { pending: boolean; missing: boolean; shift: number; stop: boolean } })
+          .__actionsWatch;
+        state.stop = true;
+        return { pending: state.pending, missing: state.missing, shift: state.shift };
+      });
+      expect(seen.pending, 'скелет рядка дій з\'являвся під час перемикання періоду').toBe(false);
+      expect(seen.missing, '«More» зникала під час перемикання періоду').toBe(false);
+      expect(seen.shift, '«More» рухалась під час перемикання періоду (px)').toBeLessThanOrEqual(1);
+
+      if (target.targetPeriodKey !== null) {
+        await expect(submit).toHaveAttribute('data-period-key', String(target.targetPeriodKey), { timeout: 30_000 });
+        await expect(submit).toBeEnabled();
+        await submit.click();
+        await expect.poll(() => sent.length, { message: 'кнопка не надіслала подання', timeout: 30_000 }).toBe(1);
+        expect(sent[0]?.periodKey).toBe(target.targetPeriodKey);
+      } else {
+        await expect(submit).toHaveCount(0, { timeout: 30_000 });
+      }
     } finally {
       await context.close();
     }
