@@ -6831,6 +6831,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/returned-sheets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Відхилені погоджувачем аркуші (стан `Rejected`), над якими працює поточний користувач: він власник
+         *     документа або учасник із наданням `Write`/`Submit` на цей аркуш; проєкт не заборонений, аркуш
+         *     видимий йому. Повторне подання прибирає аркуш із переліку. Найдавніші повернення першими; без імен схованого. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Розмір сторінки 1..200 (за замовчуванням 50). */
+                    limit?: number;
+                    /** @description Курсор попередньої відповіді. */
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReturnedSheetsDto"];
+                        "text/json": components["schemas"]["ReturnedSheetsDto"];
+                        "text/plain": components["schemas"]["ReturnedSheetsDto"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies": {
         parameters: {
             query?: never;
@@ -29298,6 +29354,50 @@ export interface components {
             reason: string;
             /** @description Кого повернути; порожньо — усіх «Заповнено». */
             userIds: null | number[];
+        };
+        /** @description ✎ D-449: аркуш, який погоджувач повернув на доопрацювання і який чекає ПОТОЧНОГО користувача
+         *     («Повернуто на доопрацювання» у «My tasks»). */
+        ReturnedSheetItemDto: {
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /** @description Бізнес-ключ документа. */
+            documentKey: string;
+            documentNameL10n: null | components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Ключ періоду `Рік*100+№`.
+             */
+            periodKey: number;
+            /** @description Код проєкту документа. */
+            projectCode: string;
+            /** @description Причина повернення (обов'язкова при відхиленні); може бути багаторядковою. */
+            reason: string;
+            /**
+             * Format: date-time
+             * @description Коли повернуто, UTC.
+             */
+            returnedAt: string;
+            /** @description Хто повернув; `null` — користувача вже немає. */
+            returnedByDisplayName: null | string;
+            /** @description Код аркуша (для посилання на аркуш). */
+            sheetCode: string;
+            /**
+             * Format: int32
+             * @description Аркуш.
+             */
+            sheetDefId: number;
+            /** @description Назва аркуша. */
+            sheetNameL10n: components["schemas"]["LocalizedText"];
+        };
+        /** @description Сторінка блоку «Повернуто на доопрацювання»: найдавніші повернення першими. */
+        ReturnedSheetsDto: {
+            /** @description Повернені аркуші, над якими має працювати поточний користувач. */
+            items: components["schemas"]["ReturnedSheetItemDto"][];
+            /** @description Непрозорий курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
         };
         /** @description Створена роль. */
         RoleIdResponse: {

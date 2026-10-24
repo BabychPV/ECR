@@ -15630,6 +15630,107 @@
         ],
         "type": "object"
       },
+      "ReturnedSheetItemDto": {
+        "description": "✎ D-449: аркуш, який погоджувач повернув на доопрацювання і який чекає ПОТОЧНОГО користувача\n(«Повернуто на доопрацювання» у «My tasks»).",
+        "properties": {
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "documentKey": {
+            "description": "Бізнес-ключ документа.",
+            "type": "string"
+          },
+          "documentNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва документа; `null` — не задана (показується ключ)."
+              }
+            ]
+          },
+          "periodKey": {
+            "description": "Ключ періоду `Рік*100+№`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "projectCode": {
+            "description": "Код проєкту документа.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Причина повернення (обов'язкова при відхиленні); може бути багаторядковою.",
+            "type": "string"
+          },
+          "returnedAt": {
+            "description": "Коли повернуто, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "returnedByDisplayName": {
+            "description": "Хто повернув; `null` — користувача вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sheetCode": {
+            "description": "Код аркуша (для посилання на аркуш).",
+            "type": "string"
+          },
+          "sheetDefId": {
+            "description": "Аркуш.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetNameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва аркуша."
+          }
+        },
+        "required": [
+          "documentId",
+          "documentKey",
+          "documentNameL10n",
+          "projectCode",
+          "sheetDefId",
+          "sheetCode",
+          "sheetNameL10n",
+          "periodKey",
+          "returnedAt",
+          "returnedByDisplayName",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ReturnedSheetsDto": {
+        "description": "Сторінка блоку «Повернуто на доопрацювання»: найдавніші повернення першими.",
+        "properties": {
+          "items": {
+            "description": "Повернені аркуші, над якими має працювати поточний користувач.",
+            "items": {
+              "$ref": "#/components/schemas/ReturnedSheetItemDto"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Непрозорий курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
       "RoleIdResponse": {
         "description": "Створена роль.",
         "properties": {
@@ -32011,6 +32112,75 @@
         "summary": "Створює або замінює налаштування; тіло — саме JSON-значення.",
         "tags": [
           "Preferences"
+        ]
+      }
+    },
+    "/api/v1/me/returned-sheets": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Розмір сторінки 1..200 (за замовчуванням 50).",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Курсор попередньої відповіді.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnedSheetsDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnedSheetsDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnedSheetsDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Відхилені погоджувачем аркуші (стан `Rejected`), над якими працює поточний користувач: він власник\nдокумента або учасник із наданням `Write`/`Submit` на цей аркуш; проєкт не заборонений, аркуш\nвидимий йому. Повторне подання прибирає аркуш із переліку. Найдавніші повернення першими; без імен схованого.",
+        "tags": [
+          "MeReturnedSheets"
         ]
       }
     },
@@ -53342,6 +53512,9 @@
     },
     {
       "name": "MeEditorSets"
+    },
+    {
+      "name": "MeReturnedSheets"
     },
     {
       "name": "Methodologies"

@@ -239,6 +239,8 @@ public static class DependencyInjection
         services.AddScoped<Documents.EditAssignments.ListEditAssignmentCandidatesHandler>();
         services.AddScoped<Documents.EditAssignments.ListMyEditAssignmentsHandler>();
         services.AddScoped<Workflow.ApprovalQueue.ListMyApprovalQueueHandler>();
+        // ✎ D-449: «Повернуто на доопрацювання» у «My tasks».
+        services.AddScoped<Workflow.ReturnedSheets.ListMyReturnedSheetsHandler>();
         services.AddScoped<Documents.EditAssignments.EditorSetsHandler>();
         services.AddScoped<Documents.EditAssignments.BatchEditAssignmentsHandler>();
 

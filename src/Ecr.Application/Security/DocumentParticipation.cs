@@ -123,6 +123,36 @@ public static class DocumentParticipation
         return false;
     }
 
+    /// <summary>
+    /// ✎ D-449: чи ПРАЦЮЄ учасник над аркушем — має діюче надання рівня <see cref="GrantLevel.Write"/> чи
+    /// <see cref="GrantLevel.Submit"/>, що відкриває цей аркуш (на документ, аркуш або його таблицю) у періоді.
+    /// Повернений на доопрацювання аркуш — його задача («Повернуто на доопрацювання»).
+    /// </summary>
+    /// <param name="grants">Діючі надання користувача в документі.</param>
+    /// <param name="sheetCode">Код аркуша; <c>null</c> — невідомий (не працює).</param>
+    /// <param name="period">Період; <c>null</c> — невідомий.</param>
+    /// <remarks>
+    /// ⚠ Збіг області — ТІ САМІ правила, що <see cref="OpensSheet"/> (аркуш, період); рівень — сирий рівень надання, а
+    /// не <see cref="LevelAt"/> (там <c>Write</c> зводиться до <c>Read</c> рішення). <c>Read</c> — лише перегляд, а
+    /// <c>Approve</c> — погоджувач: повернення від погоджувача не є задачею погоджувача (рішення D-449).
+    /// </remarks>
+    public static bool WorksOnSheet(IReadOnlyList<ParticipationGrant> grants, string? sheetCode, PeriodKey? period)
+    {
+        ArgumentNullException.ThrowIfNull(grants);
+
+        foreach (var grant in grants)
+        {
+            if (grant.Level is GrantLevel.Write or GrantLevel.Submit
+                && SheetMatches(grant, sheetCode)
+                && PeriodMatches(grant, period))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool SheetMatches(ParticipationGrant grant, string? sheetCode)
         => grant.SheetCode is null
            || (sheetCode is not null && string.Equals(grant.SheetCode, sheetCode, StringComparison.OrdinalIgnoreCase));

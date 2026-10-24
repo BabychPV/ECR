@@ -137,4 +137,112 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
                 x.CurrentStepId)),
         ];
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ D-449. ⚠ ОДИН запит на порцію (ім'я того, хто повернув, — підзапитом у тому ж зверненні): без N+1. Хто й коли
+    /// повернув — поля стану, які ставить <c>ApprovalState.Reject</c> (<c>ApprovedByUserId</c>/<c>ApprovedAt</c>), причина —
+    /// <c>RejectedReason</c>; повторне подання переводить стан у <c>Submitted</c>, і рядок випадає з вибірки сам.
+    /// Порядок «момент повернення, ключ стану» детермінований; курсор — keyset.
+    /// </remarks>
+    public async Task<IReadOnlyList<ReturnedSheetCandidate>> ListReturnedAsync(
+        int userId,
+        IReadOnlyCollection<int> ownedProjectIds,
+        bool requireIncludedSheet,
+        ReturnedSheetsCursor? after,
+        int take,
+        IReadOnlyCollection<long> participatedDocumentIds,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(ownedProjectIds);
+        ArgumentNullException.ThrowIfNull(participatedDocumentIds);
+
+        // Масиви, а не інтерфейси: `Contains` над масивом EF перекладає в `IN (...)`.
+        var projects = ownedProjectIds.ToArray();
+        var participated = participatedDocumentIds.ToArray();
+        if (projects.Length == 0 && participated.Length == 0)
+        {
+            return [];
+        }
+
+        var rejected =
+            from a in db.ApprovalStates.AsNoTracking()
+            join d in db.Documents.AsNoTracking() on a.DocumentId equals d.Id
+            where a.Status == DocumentStatus.Rejected
+            select new { a, d };
+
+        // Власник — у видимих за ролями проєктах; учасник — у своїх документах. Без надань — лише власні документи.
+        rejected = participated.Length == 0
+            ? rejected.Where(x => x.d.CreatedByUserId == userId && projects.Contains(x.d.ProjectId))
+            : rejected.Where(x => (x.d.CreatedByUserId == userId && projects.Contains(x.d.ProjectId))
+                                  || participated.Contains(x.d.Id));
+
+        var query = rejected.Select(x => new
+        {
+            x.a.Id,
+            x.a.DocumentId,
+            x.d.ProjectId,
+            x.d.BusinessKey,
+            x.d.NameL10n,
+            x.d.CreatedByUserId,
+            x.a.SheetDefId,
+            x.a.PeriodKey,
+            ReturnedAt = x.a.ApprovedAt ?? DateTime.MinValue,
+            x.a.ApprovedByUserId,
+            x.a.RejectedReason,
+        });
+
+        if (requireIncludedSheet)
+        {
+            query = query.Where(x => db.DocumentSheets.Any(
+                s => s.DocumentId == x.DocumentId && s.SheetDefId == x.SheetDefId && s.IsIncluded));
+        }
+
+        if (after is not null)
+        {
+            var at = new DateTime(after.ReturnedAtTicks, DateTimeKind.Utc);
+            var id = after.StateId;
+            query = query.Where(x => x.ReturnedAt > at || (x.ReturnedAt == at && x.Id > id));
+        }
+
+        var page = await query
+            .OrderBy(x => x.ReturnedAt)
+            .ThenBy(x => x.Id)
+            .Take(take)
+            .Select(x => new
+            {
+                x.Id,
+                x.DocumentId,
+                x.ProjectId,
+                x.BusinessKey,
+                x.NameL10n,
+                x.CreatedByUserId,
+                x.SheetDefId,
+                x.PeriodKey,
+                x.ReturnedAt,
+                x.RejectedReason,
+                ReturnedByDisplayName = db.Users
+                    .Where(u => u.Id == x.ApprovedByUserId)
+                    .Select(u => u.DisplayName)
+                    .FirstOrDefault(),
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return
+        [
+            .. page.Select(x => new ReturnedSheetCandidate(
+                x.Id,
+                x.DocumentId,
+                x.ProjectId,
+                x.BusinessKey,
+                x.NameL10n,
+                x.CreatedByUserId,
+                x.SheetDefId,
+                x.PeriodKey,
+                DateTime.SpecifyKind(x.ReturnedAt, DateTimeKind.Utc),
+                x.ReturnedByDisplayName,
+                x.RejectedReason ?? string.Empty)),
+        ];
+    }
 }
