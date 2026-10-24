@@ -1,15 +1,23 @@
-import { Suspense, useState, type JSX, type MouseEvent } from 'react';
+import { Suspense, lazy, useEffect, useState, type JSX, type MouseEvent } from 'react';
 import { Alert, Anchor, Badge, Button, Group, Stack, Title } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { DataTable } from '@/shared/ui/DataTable';
-import { useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { TwoLine } from '@/shared/ui/TwoLine';
-import { DataSourceDrawer, dataSourceName } from './DataSourceDrawer';
+import { useUrlState } from '@/shared/ui/useUrlState';
+import { dataSourceName } from './dataSourceName';
 import { DataSourceFormModal } from './lazyDataSourceForm';
 import { listDataSources, type DataSource } from './dataSourceApi';
 import { DataSourcesQueryKey } from './dataSourcesKey';
+
+/**
+ * Шухляда з'єднання — окремим чанком (`D-132`): відкривається кліком по рядку, а тягнула в маршрут Mantine
+ * `Drawer`/`Tabs`, підтвердження, пробу з'єднання (`Textarea`). Вантажиться заздалегідь, щойно приїхав перелік
+ * (див. `useEffect` нижче). Стиль — `loadX`/`lazy(async () => ...)`, як `GroupsPage.tsx`.
+ */
+const loadDataSourceDrawer = () => import('./DataSourceDrawer');
+const DataSourceDrawer = lazy(async () => ({ default: (await loadDataSourceDrawer()).DataSourceDrawer }));
 
 /**
  * Перелік З'ЄДНАНЬ (джерел даних, `ФВ-14.3`) на екрані `/admin/sources`
@@ -19,12 +27,14 @@ import { DataSourcesQueryKey } from './dataSourcesKey';
  * тобто що саме збирається; тут — звідки й через що. Одна сутність належить
  * одному з'єднанню, тож лічильник `sourceEntities` — міст між двома таблицями.
  *
- * ⚠ Подробиці рядка — у шухляді за `?panel=<code>` (`useDetailPanel`), а не в
+ * ⚠ Подробиці рядка — у шухляді за `?panel=<code>` (`useUrlState('panel')`), а не в
  * локальному стані: посилання на з'єднання можна надіслати колезі.
  */
 export function DataSourcesTable(): JSX.Element {
   const session = useSession();
-  const [panel, setPanel] = useDetailPanel();
+  // ⚠ `?panel=` — через `useUrlState`, а не `useDetailPanel` з `DetailDrawer`: той тягнув Mantine `Drawer` у
+  // маршрут, хоча шухляда лінива. Ключ той самий — `panel`.
+  const [panel, setPanel] = useUrlState('panel');
   const [creating, setCreating] = useState(false);
 
   // ⛔ `Integration.Manage`: без нього кнопок правки НЕМАЄ, а не вимкнені —
@@ -44,6 +54,12 @@ export function DataSourcesTable(): JSX.Element {
   const canEditSchedule = canSchedule && !simulated;
 
   const sources = useQuery({ queryKey: DataSourcesQueryKey, queryFn: listDataSources });
+
+  // Чанк шухляди — заздалегідь, щойно є перелік: перший клік відкриває її без очікування мережі.
+  const listed = sources.data !== undefined;
+  useEffect(() => {
+    if (listed) void loadDataSourceDrawer();
+  }, [listed]);
 
   // ⛔ Шухляда відкривається лише для з'єднання, яке справді є в переліку:
   // застарілий `?panel=` не дає порожньої шухляди з назвою-кодом.
@@ -150,18 +166,20 @@ export function DataSourcesTable(): JSX.Element {
       />
 
       {opened !== undefined && (
-        <DataSourceDrawer
-          // AN-40 / L9-27: інше з'єднання — інша шухляда. Без ключа React перевикористовував її разом зі станом
-          // вкладок і форми «Додати сутність», і шлях каталогу A їхав на сервер із `dataSourceId` B.
-          key={opened.code}
-          source={opened}
-          canView={canView}
-          canManage={canManage}
-          canSchedule={canSchedule}
-          canEditSchedule={canEditSchedule}
-          // Видалене з'єднання — закрита шухляда, а не застарілий `?panel=`.
-          onDeleted={() => setPanel(null)}
-        />
+        <Suspense fallback={null}>
+          <DataSourceDrawer
+            // AN-40 / L9-27: інше з'єднання — інша шухляда. Без ключа React перевикористовував її разом зі станом
+            // вкладок і форми «Додати сутність», і шлях каталогу A їхав на сервер із `dataSourceId` B.
+            key={opened.code}
+            source={opened}
+            canView={canView}
+            canManage={canManage}
+            canSchedule={canSchedule}
+            canEditSchedule={canEditSchedule}
+            // Видалене з'єднання — закрита шухляда, а не застарілий `?panel=`.
+            onDeleted={() => setPanel(null)}
+          />
+        </Suspense>
       )}
 
       {canManage && creating && (

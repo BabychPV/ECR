@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import { useEffect, type JSX } from 'react';
 import { Anchor, Badge, Button, Group, Stack, Text, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useNavigate } from 'react-router-dom';
@@ -12,12 +12,17 @@ import { listDataSources } from '@/features/integration/dataSourceApi';
 import { DataSourcesQueryKey } from '@/features/integration/dataSourcesKey';
 import type { CollectRequest, SourceEntityStatus } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
-import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { DataTable } from '@/shared/ui/DataTable';
 import { ListPage } from '@/shared/ui/ListPage';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
+
+/**
+ * Людський вигляд `jobId` для тосту збору — за `import()` (`D-132`): потрібен лише після кліку «Collect», а перелік
+ * типів задач тягнувся в маршрут із кожним відкриттям. Вантажиться заздалегідь, щойно на екрані є кнопки збору.
+ */
+const loadJobLabel = () => import('@/features/workflow/jobLabel');
 
 /**
  * Конфігуратор джерел і ручний запуск збору.
@@ -83,6 +88,15 @@ export function SourcesPage(): JSX.Element {
 
   const showSubordinate = hasConnections || hasEntities;
 
+  // L9-18: під симуляцією збір (POST) сервер однаково відхилить — кнопок «Collect» тоді немає.
+  const mayCollect = can(session.data, 'Integration.Manage') && session.data?.isSimulation !== true;
+
+  // Чанк підпису задачі — заздалегідь, щойно є кнопки збору: тост після кліку не чекає мережі.
+  const collectable = mayCollect && hasEntities;
+  useEffect(() => {
+    if (collectable) void loadJobLabel();
+  }, [collectable]);
+
   const collect = useMutation({
     mutationFn: (id: number) => {
       const to = new Date();
@@ -93,11 +107,17 @@ export function SourcesPage(): JSX.Element {
         toUtc: to.toISOString(),
       } satisfies CollectRequest);
     },
-    onSuccess: (job) => {
+    onSuccess: async (job) => {
       // ⚠ 202 з jobId: збір ходить по мережі до чужої системи, і його
       // тривалість визначає не наш код.
       // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у тості, сам `jobId` — не.
-      const message = t('sources.queued', { job: humanizeJobId(job.jobId) });
+      // ⚠ Чанк не доїхав (мережа впала саме зараз) — сирий `jobId`, як і для невпізнаного формату в
+      // `humanizeJobId`: збір уже поставлено, і тост «не вдалося» замість «поставлено» збрехав би.
+      const label = await loadJobLabel().then(
+        (module) => module.humanizeJobId(job.jobId),
+        () => job.jobId,
+      );
+      const message = t('sources.queued', { job: label });
 
       // P3 живого проходу: тост без шляху до задачі — людина не бачила, чим збір скінчився.
       // ⚠ Тости живуть ПОЗА `RouterProvider` (`App.tsx`), тож `Link` там без контексту —
@@ -227,8 +247,8 @@ export function SourcesPage(): JSX.Element {
               label: '',
               sortable: false,
               render: (source) =>
-                // L9-18: під симуляцією збір (POST) сервер однаково відхилить.
-                can(session.data, 'Integration.Manage') && session.data?.isSimulation !== true ? (
+                // L9-18: див. `mayCollect` вище.
+                mayCollect ? (
                   <Button
                     size="xs"
                     variant="default"

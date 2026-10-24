@@ -1,15 +1,24 @@
-import type { JSX } from 'react';
+import { Suspense, lazy, useEffect, type JSX } from 'react';
 import { Select, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { SourceEntityStatus } from '@/api/types';
 import { routes } from '@/app/routes';
-import { EntityPipeline } from '@/features/pipeline/EntityPipeline';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+
+/**
+ * Конвеєр сутності — окремим чанком (`D-132`): без обраної сутності екран показує лише вибір, а конвеєр тягнув у
+ * маршрут редактор розкладу (`NumberInput`/`Switch`), рядки й прогалини мапінгу, діалог нового мапінгу з каталогом
+ * PI AF. Вантажиться заздалегідь — щойно в адресі є `?entity=` або приїхав перелік сутностей (див. `useEffect`
+ * нижче), тобто паралельно із запитом переліку, а не після нього. Стиль — `loadX`/`lazy(async () => ...)`, як
+ * `GroupsPage.tsx`.
+ */
+const loadEntityPipeline = () => import('@/features/pipeline/EntityPipeline');
+const EntityPipeline = lazy(async () => ({ default: (await loadEntityPipeline()).EntityPipeline }));
 
 /**
  * Редактор конвеєра даних (`ФВ-14.3`, область 9; `B21` §7).
@@ -38,6 +47,12 @@ export function PipelinePage(): JSX.Element {
   });
 
   const entity = (sources.data ?? []).find((source) => source.id === entityId);
+
+  // Чанк конвеєра — заздалегідь: сутність уже обрана в адресі або перелік для вибору приїхав.
+  const likely = entityId !== null || sources.data !== undefined;
+  useEffect(() => {
+    if (likely) void loadEntityPipeline();
+  }, [likely]);
 
   return (
     <>
@@ -76,12 +91,14 @@ export function PipelinePage(): JSX.Element {
       {entity === undefined ? (
         <Text c="dimmed">{t('pipeline.pickHint')}</Text>
       ) : (
-        <EntityPipeline
-          key={entity.id}
-          entity={entity}
-          allowed={mayManage}
-          sourcesHref={routes.adminSources.path}
-        />
+        <Suspense fallback={null}>
+          <EntityPipeline
+            key={entity.id}
+            entity={entity}
+            allowed={mayManage}
+            sourcesHref={routes.adminSources.path}
+          />
+        </Suspense>
       )}
     </>
   );
