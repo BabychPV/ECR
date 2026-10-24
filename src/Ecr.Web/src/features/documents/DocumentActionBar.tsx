@@ -2,6 +2,7 @@ import { lazy, Suspense, useRef, useState, type JSX, type ReactNode, type RefObj
 import { Button, Menu, Text } from '@mantine/core';
 import { exportFormatOptions, type ExportFormat } from '@/features/export/exportFormat';
 import { RecalculateKbd, submitLabel, useSheetActions, type SheetActionsModel } from '@/features/workflow/SheetActions';
+import { useSubmissionTarget } from '@/features/workflow/api';
 import type { DocumentLock } from './documentLock';
 import { DocumentSheetBanner } from './DocumentSheetBanner';
 import { DocumentToolbar } from './DocumentToolbar';
@@ -91,6 +92,14 @@ export function DocumentActionBar({
 }: DocumentActionBarProps): JSX.Element {
   const actions = useSheetActions({ documentId, sheetDefId, sheetName, periodKey, state, lock });
   useStaleResultsReminder(documentId, resultsStale === true, actions.recalculate !== null, staleReminderHost);
+  // ✎ D-441 CLS: доки сервер не відповів, ЧИ і ЯКИЙ період подавати, остаточна форма рядка дій невідома
+  // (кнопка «Подати: <період>», ▾, «Next to submit: …» або нічого) — скелет замість дій (`DocumentToolbar`,
+  // `ActionsPlaceholder`). Той самий ключ, що в `useSheetActions`: запит один (кеш TanStack Query).
+  // ⚠ Лише ПЕРША спроба запиту: збій сервера з повторами (до двох, з паузами) не тримає дії схованими —
+  // після першої відмови рядок малюється як є, а «Подати» з'являється за `useSheetActions`. `isLoading`, а не
+  // `isPending`: без мережі запит стоїть на паузі (`fetchStatus = paused`) і скелет висів би вічно.
+  const submissionTarget = useSubmissionTarget(documentId, sheetDefId, periodKey);
+  const actionsPending = submissionTarget.isLoading && submissionTarget.failureCount === 0;
   const openImport = useRef<((returnTo?: HTMLElement | null) => void) | null>(null);
   const startExport = useExportStarter();
 
@@ -215,6 +224,7 @@ export function DocumentActionBar({
         }
         more={items}
         primary={primary}
+        pending={actionsPending}
       >
         {validateVisible && validateButton}
 

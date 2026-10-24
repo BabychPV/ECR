@@ -183,7 +183,8 @@ describe('DocumentPage: застарілі числа методологій', (
       const badge = await screen.findByTestId(BadgeId, undefined, { timeout: Slow });
       expect(badge.textContent).toBe('⟦documents.methodologyResultsStale⟧');
 
-      fireEvent.click(screen.getByRole('button', MoreButton));
+      // ✎ D-441 CLS: дії — після відповіді `submission-target` (до того скелет).
+      fireEvent.click(await screen.findByRole('button', MoreButton, { timeout: Slow }));
       expect(await screen.findByRole('menuitem', { name: /⟦workflow\.recalculateCalculations⟧/ })).toBeDefined();
     },
     Slow,
@@ -266,7 +267,8 @@ describe('DocumentPage: застарілі числа методологій', (
       const probe = show(['Document.View', 'Calculation.View'], [true, false]);
 
       await screen.findByTestId(BadgeId, undefined, { timeout: Slow });
-      fireEvent.click(screen.getByRole('button', MoreButton));
+      // ✎ D-441 CLS: дії — після відповіді `submission-target` (до того скелет).
+      fireEvent.click(await screen.findByRole('button', MoreButton, { timeout: Slow }));
       fireEvent.click(await screen.findByRole('menuitem', { name: /⟦workflow\.recalculateCalculations⟧/ }));
 
       await waitFor(() => {
@@ -284,7 +286,8 @@ describe('DocumentPage: застарілі числа методологій', (
       const probe = show(['Document.View', 'Calculation.View'], [true], true);
 
       await screen.findByTestId(BadgeId, undefined, { timeout: Slow });
-      fireEvent.click(screen.getByRole('button', MoreButton));
+      // ✎ D-441 CLS: дії — після відповіді `submission-target` (до того скелет).
+      fireEvent.click(await screen.findByRole('button', MoreButton, { timeout: Slow }));
       fireEvent.click(await screen.findByRole('menuitem', { name: /⟦workflow\.recalculateCalculations⟧/ }));
 
       await waitFor(() => expect(probe.posts()).toBe(1), { timeout: Slow });

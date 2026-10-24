@@ -296,8 +296,9 @@ describe('DocumentPage: невдале читання підсумку пере�
 
       // ⚠ Сторінка при цьому змальована, а не «ще вантажиться»: інакше
       // відсутність банера нічого не доводила б.
+      // ✎ D-441 CLS: дії з'являються, щойно сервер відповів про ціль подання (до того — скелет), тож чекати.
       expect(
-        screen.getByRole('button', { name: '⟦document.validate⟧' }),
+        await screen.findByRole('button', { name: '⟦document.validate⟧' }, { timeout: SettleTimeout }),
       ).toBeTruthy();
     },
     SlowEnvTimeout,
@@ -313,8 +314,9 @@ describe('DocumentPage: невдале читання підсумку пере�
 
       expect(screen.queryByRole('alert')).toBeNull();
       expect(screen.queryByText('⟦document.validationCleanHint⟧')).toBeNull();
+      // ✎ D-441 CLS: дії з'являються, щойно сервер відповів про ціль подання (до того — скелет), тож чекати.
       expect(
-        screen.getByRole('button', { name: '⟦document.validate⟧' }),
+        await screen.findByRole('button', { name: '⟦document.validate⟧' }, { timeout: SettleTimeout }),
       ).toBeTruthy();
     },
     SlowEnvTimeout,
