@@ -194,12 +194,18 @@ public readonly record struct DocumentListFilter(
 /// виключає такі документи в обох напрямках (як <see cref="DocumentListFilter.NarrowedProjectIds"/>). <c>null</c> —
 /// фільтра застарілості немає.
 /// </param>
+/// <param name="DocumentIds">
+/// ✎ D-446: документи-надання, для яких обробник ПОРАХУВАВ межі учасника: поза проєктами з грантом перелік бере лише їх
+/// (закрито за замовчуванням — надання, що з'явилось посеред запиту, видно з наступним запитом, а не без меж).
+/// <c>null</c> — без обмеження.
+/// </param>
 public sealed record DocumentParticipationFilter(
     int UserId, DateTime AsOfUtc, IReadOnlyCollection<int> DeniedProjectIds,
     IReadOnlyCollection<(long DocumentId, int SheetDefId)>? HiddenSheets = null,
     IReadOnlyCollection<(long DocumentId, int TableDefId)>? HiddenTables = null,
     IReadOnlyCollection<(long DocumentId, int ColumnDefId)>? HiddenColumns = null,
-    IReadOnlyCollection<long>? NarrowedDocumentIds = null);
+    IReadOnlyCollection<long>? NarrowedDocumentIds = null,
+    IReadOnlyCollection<long>? DocumentIds = null);
 
 /// <summary>Порушення правила складу документа.</summary>
 /// <param name="SheetGroup">Група аркушів.</param>

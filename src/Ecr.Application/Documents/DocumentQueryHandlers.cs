@@ -131,6 +131,9 @@ public sealed class ListDocumentsHandler(
         //    сховища (BE-09b), що й для пар проєкту; картка рахує ті самі межі (R-7, `HasVisibleLateEditsAsync`);
         //  • застарілість — по ВСЬОМУ документу: видимий учасникові цілком документ — у фільтрі як звичайний, частково
         //    схований — поза фільтром в обох напрямках (рядок — `null`, `DocumentSheetVisibility.For`).
+        //  • поза проєктами з грантом — лише документи з ПОРАХОВАНИМИ межами (`DocumentIds`, закрито за замовчуванням).
+        // ✎ D-446: документ проєкту з роллю, що має ще й надання, звужується і парами проєкту (лише роль), і власними —
+        // свідомо, як фільтр стану D-444: лише недолік позначки (надання, що відкриває схований роллю аркуш), не витік.
         var participant = profile.HasDocumentParticipations && clock is not null;
         HashSet<long> bounded = [];
         if (participant)
@@ -152,7 +155,8 @@ public sealed class ListDocumentsHandler(
                     HiddenColumns: [.. own.SelectMany(s => s.Value.HiddenColumnIds().Select(id => (s.Key, id)))],
                     NarrowedDocumentIds: filter.ResultsStale is null
                         ? null
-                        : [.. own.Where(s => DocumentSheetVisibility.IsProjectNarrowed(s.Value)).Select(s => s.Key)]),
+                        : [.. own.Where(s => DocumentSheetVisibility.IsProjectNarrowed(s.Value)).Select(s => s.Key)],
+                    DocumentIds: [.. bounded.Order()]),
             };
         }
 
@@ -172,23 +176,16 @@ public sealed class ListDocumentsHandler(
         var participated = participant && others.Count > 0
             ? await access.ParticipatedDocumentsAsync(profile, others, ct).ConfigureAwait(false)
             : new HashSet<long>();
+        // ✎ D-446: і лише з ПОРАХОВАНИМИ межами (другий рубіж до `DocumentParticipationFilter.DocumentIds` у запиті):
+        // надання, що з'явилось між читанням меж і запитом, видно з наступним запитом, а не з позначками без меж.
         var visible = all.Items
-            .Where(d => byRoles.Contains(d.Id) || (participated.Contains(d.Id) && !profile.DeniesProject(d.ProjectId)))
+            .Where(d => byRoles.Contains(d.Id)
+                        || (participated.Contains(d.Id) && bounded.Contains(d.Id) && !profile.DeniesProject(d.ProjectId)))
             .ToList();
 
         // ⛔ Аркуші, схована від читача (Deny / звуження ролі аркушами), не називаються ні кодом,
         // ні назвою, ні станом, ні лічильниками: фільтр — у `DocumentSheetVisibility`.
         visible = await DocumentSheetVisibility.ApplyAsync(access, profile, visible, periodKey, scopes, ct).ConfigureAwait(false);
-
-        // ✎ D-446: позначка пізніх правок документа-надання вже порахована сховищем у власних межах учасника. Другий рубіж:
-        // документ-надання, для якого межі НЕ пораховані (надання з'явилось між читанням меж і запитом), — без позначки
-        // (закрито за замовчуванням: без меж вона розкрила б активність схованого аркуша).
-        if (participated.Count > 0)
-        {
-            visible = [.. visible.Select(d => participated.Contains(d.Id) && !byRoles.Contains(d.Id) && !bounded.Contains(d.Id)
-                ? d with { HasLateEdits = false }
-                : d)];
-        }
 
         // ⛔ `all.TotalCount` НЕ проводиться далі як є — саме це й було дірою:
         // обробник не може перевірити, що число зі сховища враховує гранти, а

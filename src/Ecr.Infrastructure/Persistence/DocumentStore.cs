@@ -207,6 +207,14 @@ public sealed class DocumentStore(
                             && (projectId == null || d.ProjectId == projectId)
                             && (allowedProjects.Contains(d.ProjectId)
                                 || (!denied.Contains(d.ProjectId) && participated.Contains(d.Id))));
+
+            // ✎ D-446: поза проєктами з грантом — лише документи, для яких межі учасника пораховані (закрито за
+            // замовчуванням: надання, що з'явилось посеред запиту, видно з наступним запитом, а не без меж).
+            if (participation.DocumentIds is { } boundedIds)
+            {
+                var bounded = boundedIds.ToArray();
+                documents = documents.Where(d => allowedProjects.Contains(d.ProjectId) || bounded.Contains(d.Id));
+            }
         }
         else
         {
