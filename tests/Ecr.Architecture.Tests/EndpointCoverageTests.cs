@@ -549,8 +549,8 @@ public sealed partial class EndpointCoverageTests
         new("pages/admin/ExpressionsPage.tsx", "`expressions.check.${check}`", 1, "pages/admin/ExpressionsPage.tsx",
             ["expressions.check.Cycle", "expressions.check.References", "expressions.check.Types", "expressions.check.Units"],
             "SkippedChecks перевірки виразу."),
-        new("pages/admin/RegistriesPage.tsx", "`registries.referenceKind.${kind}`", 1,
-            "pages/admin/RegistriesPage.tsx",
+        new("features/registries/DeleteEntryDialog.tsx", "`registries.referenceKind.${kind}`", 1,
+            "features/registries/DeleteEntryDialog.tsx",
             [
                 "registries.referenceKind.cells", "registries.referenceKind.headerValues",
                 "registries.referenceKind.registryValues", "registries.referenceKind.childEntries",
