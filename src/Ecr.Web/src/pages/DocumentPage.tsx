@@ -518,9 +518,11 @@ export function DocumentPage(): JSX.Element {
   /*
    * ✎ D-442: значення ПОДАНОГО аркуша править погоджувач поточного кроку — це знає лише сервер, тож сітку
    * не замикаємо цілком: рішення зрізу дають погоджувачеві редаговні комірки, решті — `DocumentSubmitted`
-   * (штриховка, замок, підказка, як і доти). Дії зі зміни даних (`readOnly` вище) лишаються закриті.
+   * (штриховка, замок, підказка, як і доти). Дії зі зміни даних (`readOnly` вище) лишаються закриті —
+   * крім імпорту Excel погоджувачем (✎ D-445, `approverImport` у `DocumentActionBar`).
    */
-  const gridReadOnly = readOnly && !(editsDeferToServer(state) && !locksDataActions(lock) && !narrow);
+  const approverEditable = editsDeferToServer(state) && !locksDataActions(lock) && !narrow;
+  const gridReadOnly = readOnly && !approverEditable;
 
   // ⚠ Викликається БЕЗУМОВНО і до будь-якого розгалуження показу: правило
   // хуків не знає про `AsyncBoundary` нижче.
@@ -658,9 +660,10 @@ export function DocumentPage(): JSX.Element {
           lock={lock}
           readOnly={readOnly}
           language={session.data?.language ?? 'en'}
-          // ⛔ Імпорт лише туди, куди можна писати (`ФВ-5.20a`): пункт над
-          // поданим аркушем обіцяв би заміну чисел, яку сервер відхилить.
+          // ⛔ Імпорт лише туди, куди можна писати (`ФВ-5.20a`). ✎ D-445: поданий аркуш імпортує погоджувач
+          // поточного кроку — як править його в сітці; хто саме — вирішує сервер (перегляд покаже відмову решті).
           canImport={can(session.data, 'Document.Import')}
+          approverImport={approverEditable}
           canExport={can(session.data, 'Document.Export')}
           validate={{
             loading: validateLoading || validateAction.settling,

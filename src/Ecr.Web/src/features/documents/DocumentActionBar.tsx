@@ -40,6 +40,11 @@ interface DocumentActionBarProps {
   /** Мова книги експорту. */
   readonly language: string;
   readonly canImport: boolean;
+  /**
+   * ✎ D-445: аркуш поданий і правки в ньому вирішує сервер (погоджувач поточного кроку, без замка й вузького
+   * екрана) — імпорт показується тому, хто може погоджувати, попри `readOnly`.
+   */
+  readonly approverImport?: boolean;
   readonly canExport: boolean;
   /** Числа методологій застаріли: пункт перерахунку в «More» називається «Recalculate calculations». */
   readonly calculationsStale?: boolean;
@@ -81,6 +86,7 @@ export function DocumentActionBar({
   readOnly,
   language,
   canImport,
+  approverImport = false,
   canExport,
   calculationsStale = false,
   validate,
@@ -104,7 +110,9 @@ export function DocumentActionBar({
   const openImport = useRef<((returnTo?: HTMLElement | null) => void) | null>(null);
   const startExport = useExportStarter();
 
-  const showImport = canImport && !readOnly;
+  // ✎ D-445: поданий аркуш імпортує погоджувач поточного кроку (як править у сітці, D-442). Клієнт знає лише
+  // право погоджувати (`actions.approve`), а не крок маршруту — остаточне «так/ні» дає перегляд імпорту на сервері.
+  const showImport = canImport && (!readOnly || (approverImport && actions.approve !== null));
 
   // ⚠ «Validate» ховається в меню лише там, де панель зайнята рішенням
   // погоджувача чи поверненням у роботу (макет: «Reject · More · Approve»,
