@@ -110,8 +110,10 @@ interface DocumentListParams {
   cursor?: string | null;
   /** ⚠ Лише разом із `periodKey`: без періоду стан не визначений (`D-93`), сервер відповість `422`. */
   state?: DocumentStateFilter | null;
-  /** Лише документи, де я автор або подавав аркуш. */
+  /** Лише документи, де я автор або подавав аркуш. ⛔ Не разом з `ownerUserId` — сервер відповість `422`. */
   mine?: boolean;
+  /** ✎ D-450: лише документи цієї людини (власник = автор, `CreatedByUserId`); `null` — будь-чиї. */
+  ownerUserId?: number | null;
   /**
    * Лише документи з пізніми правками (`IsLateEdit`, `D-70`).
    *
@@ -146,7 +148,9 @@ export function listDocuments(params: DocumentListParams): Promise<DocumentListP
   if (params.periodKey !== null) query.set('periodKey', String(params.periodKey));
   if (params.cursor) query.set('cursor', params.cursor);
   if (params.state) query.set('state', params.state);
-  if (params.mine) query.set('mine', 'true');
+  // ✎ D-450: «мої» і конкретна людина — взаємовиключні (сервер: `422 ownerWithMine`); людина важить більше.
+  if (params.ownerUserId) query.set('ownerUserId', String(params.ownerUserId));
+  else if (params.mine) query.set('mine', 'true');
   if (params.hasLateEdits) query.set('hasLateEdits', 'true');
   if (params.resultsStale) query.set('resultsStale', 'true');
   if (params.q) query.set('q', params.q);
@@ -154,6 +158,31 @@ export function listDocuments(params: DocumentListParams): Promise<DocumentListP
   if (params.staleBy) query.set('staleBy', params.staleBy);
 
   return apiFetch<DocumentListPage>(`/api/v1/documents?${query.toString()}`);
+}
+
+/** ✎ D-450: власник документів у виборі фільтра «Власник»; тип — зі згенерованої схеми. */
+export type DocumentOwnerOption = components['schemas']['DocumentOwnerOption'];
+
+/**
+ * ✎ D-450: власники документів, які я бачу (та сама межа видимості, що й перелік), — до 50 осіб; решту знаходить
+ * `q` (підрядок імені).
+ *
+ * ⚠ Адреса — через `URLSearchParams` у шаблоні з одним літералом, як у `listDocuments`: сторож споживачів бере весь
+ * вміст між лапками.
+ */
+export function listDocumentOwners(params: {
+  readonly projectId: number | null;
+  readonly periodKey: number | null;
+  readonly q: string;
+}): Promise<readonly DocumentOwnerOption[]> {
+  const query = new URLSearchParams();
+  if (params.projectId !== null) query.set('projectId', String(params.projectId));
+  if (params.periodKey !== null) query.set('periodKey', String(params.periodKey));
+  if (params.q !== '') query.set('q', params.q);
+
+  return apiFetch<components['schemas']['DocumentOwnersResponse']>(`/api/v1/documents/owners?${query.toString()}`).then(
+    (response) => response.items,
+  );
 }
 
 /** Лічильники над переліком документів (`BE-09`); тип — зі згенерованої схеми. */

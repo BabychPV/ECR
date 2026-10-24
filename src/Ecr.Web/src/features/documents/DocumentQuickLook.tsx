@@ -54,9 +54,11 @@ interface DocumentQuickLookProps {
  * `workflow/history`). Шторка нічого не рахує «по всіх аркушах»: аркуш, якого
  * немає в `sheets`, не з'являється ні рядком, ні числом.
  *
- * ⚠ «Owner» з макета тут немає: сервер не віддає автора документа, а
+ * ~~⚠ «Owner» з макета тут немає: сервер не віддає автора документа, а
  * `modifiedByDisplayName` — це останній, хто змінював. Тому підпис чесний —
- * «Last changed by» (картка `UI-29`).
+ * «Last changed by» (картка `UI-29`).~~
+ * ✎ D-450: сервер віддає власника (`ownerDisplayName`) — рядок «Owner» стоїть ПЕРЕД «Last changed by», і це різні
+ * люди: власник відповідає за документ, останній редактор — лише останній, хто правив.
  *
  * ⚠ Запити — лише відкритої шторки (компонент монтується за `?panel=`), і
  * лише з періодом: без нього аркуші не мають станів, а таблиці — екземплярів.
@@ -160,6 +162,7 @@ function QuickLookBody({
         <KeyValue
           wide
           items={[
+            { label: t('documents.owner'), value: document.ownerDisplayName ?? null },
             { label: t('documents.lastChangedBy'), value: document.modifiedByDisplayName ?? null },
             {
               label: t('documents.updated'),
