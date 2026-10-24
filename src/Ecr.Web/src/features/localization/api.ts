@@ -1,7 +1,7 @@
 import { apiFetch, apiFetchResponse } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { LanguageDto } from '@/api/types';
-import { fileNameOf } from '@/features/audit/api';
+import { fileNameOf } from '@/features/audit/fileName';
 import { DefaultLanguage, t } from '@/shared/i18n';
 
 /**

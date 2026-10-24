@@ -117,7 +117,10 @@ describe('DocumentPage: роль зі scope на один аркуш (P1 при�
       expect(within(toolbar).queryByTestId('document-issues-link')).toBeNull();
       expect(toolbar.textContent).not.toMatch(/Submitted/);
 
-      fireEvent.click(within(toolbar).getByRole('button', { name: '⟦document.moreActions⟧' }));
+      // ✎ D-441 CLS: рядок дій спершу — скелет, доки не відповіла `submission-target`.
+      fireEvent.click(
+        await within(toolbar).findByRole('button', { name: '⟦document.moreActions⟧' }, { timeout: SlowEnvTimeout }),
+      );
       fireEvent.click(await screen.findByRole('menuitem', { name: '⟦documents.delete⟧' }, { timeout: SlowEnvTimeout }));
 
       const dialog = await screen.findByRole('dialog', {}, { timeout: SlowEnvTimeout });

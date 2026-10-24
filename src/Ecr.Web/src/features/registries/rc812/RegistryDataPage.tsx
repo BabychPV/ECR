@@ -4,7 +4,7 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { queryKeys } from '@/api/queryKeys';
-import { isExternalRegistry } from '@/features/registries/RegistryEntryEditor';
+import { isExternalRegistry } from '@/features/registries/externalRegistry';
 import { RegistryExportButton } from '@/features/registries/export/RegistryExportButton';
 import { saveBatch, type RegistryBatchResult, type RegistryRow } from '@/features/registries/rows/api';
 import { formatDateOnly, formatTime, parseDateOnly, todayDateOnly } from '@/shared/format';
@@ -13,7 +13,6 @@ import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Banner } from '@/shared/ui/Banner';
-import { useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
@@ -25,7 +24,7 @@ import {
   useRegistryRows,
   useUnits,
 } from './data';
-import { EntryDrawer, entryPanelId } from './EntryDrawer';
+import { entryPanelId } from './entryPanel';
 import { RegistryDataGrid, type GridRow } from './RegistryDataGrid';
 import { FilterRow } from '@/shared/ui/FilterBar';
 import {
@@ -49,6 +48,15 @@ import {
 } from './rowModel';
 
 const DateInput = lazy(async () => ({ default: (await import('@/shared/dates/DateInputWithStyles')).DateInput }));
+
+/**
+ * Шторка запису — окремим чанком (`D-132`): вона відкривається кліком/Enter по рядку, а тягнула в маршрут
+ * Mantine `Drawer`/`Tabs`, редактор запису і зовнішні ключі. Вантажиться заздалегідь, щойно приїхали рядки
+ * (див. `useEffect` нижче), тож перше відкриття не чекає мережі. Стиль — `loadX`/`lazy(async () => ...)`,
+ * як `BusinessKeyChangeAction.tsx`.
+ */
+const loadEntryDrawer = () => import('./EntryDrawer');
+const EntryDrawer = lazy(async () => ({ default: (await loadEntryDrawer()).EntryDrawer }));
 
 /** Пауза перед живою перевіркою `dryRun` (§8.4). */
 export const LiveCheckDelayMs = 600;
@@ -84,7 +92,9 @@ export function RegistryDataPage(): JSX.Element {
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [unmatched, setUnmatched] = useState(0);
   const seq = useRef(0);
-  const [panel, setPanel] = useDetailPanel();
+  // ⚠ `?panel=` — через `useUrlState`, а не `useDetailPanel` з `DetailDrawer`: той тягнув Mantine `Drawer` у
+  // маршрут, хоча шторка лінива (той самий прийом, що «Edit access» на `DocumentPage`). Ключ той самий — `panel`.
+  const [panel, setPanel] = useUrlState('panel');
 
   const fields = useMemo<readonly RegistryField[]>(() => definition.data?.fields ?? [], [definition.data]);
   const keys = useMemo(() => definition.data?.keys ?? [], [definition.data]);
@@ -308,6 +318,12 @@ export function RegistryDataPage(): JSX.Element {
     [],
   );
 
+  // Чанк шторки — заздалегідь, щойно є рядки: перший клік по рядку відкриває її без очікування мережі.
+  const hasRows = rows.data !== undefined;
+  useEffect(() => {
+    if (hasRows) void loadEntryDrawer();
+  }, [hasRows]);
+
   const name = registry ? localized(registry.nameL10n) : code;
   const openRow = panel?.startsWith('entry-') ? loaded.find((r) => entryPanelId(r.id) === panel) : undefined;
   const status = savedAt !== null
@@ -442,7 +458,9 @@ export function RegistryDataPage(): JSX.Element {
       </AsyncBoundary>
 
       {openRow !== undefined && registry !== undefined && (
-        <EntryDrawer registry={registry} row={openRow} fields={fields} asOf={asOf} readOnly={readOnly} />
+        <Suspense fallback={null}>
+          <EntryDrawer registry={registry} row={openRow} fields={fields} asOf={asOf} readOnly={readOnly} />
+        </Suspense>
       )}
     </Stack>
   );

@@ -171,12 +171,15 @@ describe('DocumentPage: банер причини і жодної прирече
       expect(banner.textContent).toContain(`period=${String(Period)}`);
 
       const row = screen.getByTestId('document-actions');
+      // ⚠ Кнопка «Validate» лишається: перевірка нічого не змінює.
+      // ✎ D-441 CLS: спершу дочекатися остаточних дій (до відповіді `submission-target` — скелет), інакше
+      // «немає Submit» нижче було б правдою лише через недомальований рядок.
+      expect(
+        await within(row).findByRole('button', { name: '⟦document.validate⟧' }, { timeout: SlowEnvTimeout }),
+      ).toBeTruthy();
       expect(within(row).queryByRole('button', { name: /workflow\.submitPeriod/ })).toBeNull();
       expect(within(row).queryByRole('button', { name: /workflow\.recalculate/ })).toBeNull();
       expect(screen.queryByRole('button', { name: 'import-stub' })).toBeNull();
-
-      // ⚠ Кнопка «Validate» лишається: перевірка нічого не змінює.
-      expect(within(row).getByRole('button', { name: '⟦document.validate⟧' })).toBeTruthy();
     },
     SlowEnvTimeout,
   );

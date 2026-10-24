@@ -11,6 +11,7 @@ import { DetailDrawer } from '@/shared/ui/DetailDrawer';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { KeyValue } from '@/shared/ui/KeyValue';
 import { rowsKey } from './data';
+import { entryPanelId } from './entryPanel';
 import type { RegistryField } from './rowModel';
 
 const DateInput = lazy(async () => ({ default: (await import('@/shared/dates/DateInputWithStyles')).DateInput }));
@@ -18,8 +19,8 @@ const DateInput = lazy(async () => ({ default: (await import('@/shared/dates/Dat
 /** Журнал змін запису (RT-15) — окремим чанком, лише коли відкрили вкладку «Історія». */
 const EntryHistoryLog = lazy(() => import('./EntryHistoryLog'));
 
-/** Значення шторки `?panel=` для запису. */
-export const entryPanelId = (id: number): string => `entry-${String(id)}`;
+// ✎ D-132: `entryPanelId` — у `./entryPanel`: сторінка даних читає `?panel=` без цього модуля (шторка лінива).
+export { entryPanelId };
 
 /**
  * Кінець обраного дня за місцевим часом як момент UTC — `asOfUtc` для «значень станом на».
