@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent, type JSX } from 'react';
-import { Button, Group, Modal, SegmentedControl, Select, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import { Button, Group, SegmentedControl, Select, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import { ResizableModal } from '@/shared/ui/ResizableModal';
 import type { PermitType, PermitTypeRule } from '@/features/permits/api/types';
 import { t } from '@/shared/i18n';
 import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
@@ -82,7 +83,8 @@ export function AddRuleDialog({
   ];
 
   return (
-    <Modal
+    <ResizableModal
+      sizeKey="permit.rule"
       opened={opened}
       onClose={onClose}
       title={t('permits.editor.dialogs.addRule.title')}
@@ -161,6 +163,6 @@ export function AddRuleDialog({
           </Group>
         </Stack>
       </form>
-    </Modal>
+    </ResizableModal>
   );
 }

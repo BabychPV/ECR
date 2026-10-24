@@ -4,7 +4,6 @@ import {
   Button,
   Checkbox,
   Group,
-  Modal,
   NumberInput,
   Select,
   Skeleton,
@@ -14,6 +13,7 @@ import {
   Textarea,
   TextInput,
 } from '@mantine/core';
+import { ResizableModal } from '@/shared/ui/ResizableModal';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   CalculationBindingDto,
@@ -353,7 +353,8 @@ export function MethodologyConstantsPanel({
         )}
       </AsyncBoundary>
 
-      <Modal
+      <ResizableModal
+        sizeKey="methodology.constant"
         opened={editing !== null}
         onClose={() => setEditing(null)}
         title={t('methodologies.constantDialogTitle')}
@@ -477,13 +478,13 @@ export function MethodologyConstantsPanel({
             </Button>
           </Stack>
         )}
-      </Modal>
+      </ResizableModal>
 
-      <Modal opened={usageFor !== null} onClose={() => setUsageFor(null)} title={t('registries.tabUsage')}>
+      <ResizableModal sizeKey="methodology.constantUsage" opened={usageFor !== null} onClose={() => setUsageFor(null)} title={t('registries.tabUsage')}>
         {usageFor !== null && (
           <MethodologyConstantUsage methodologyId={methodologyId} versionId={versionId} code={usageFor} />
         )}
-      </Modal>
+      </ResizableModal>
     </>
   );
 }
@@ -633,7 +634,7 @@ export function MethodologyRulesPanel({
         )}
       </AsyncBoundary>
 
-      <Modal opened={editing !== null} onClose={() => setEditing(null)} title={t('methodologies.rules')}>
+      <ResizableModal sizeKey="methodology.rule" opened={editing !== null} onClose={() => setEditing(null)} title={t('methodologies.rules')}>
         {editing !== null && (() => {
           // ⛔ UI-аудит, lane 5: діалог сам пояснює інваріант («An empty
           // object matches the whole table - which is why such a rule must
@@ -765,7 +766,7 @@ export function MethodologyRulesPanel({
           </Stack>
           );
         })()}
-      </Modal>
+      </ResizableModal>
     </>
   );
 }
@@ -919,7 +920,8 @@ export function MethodologyRequiredInputsPanel({
         )}
       </AsyncBoundary>
 
-      <Modal
+      <ResizableModal
+        sizeKey="methodology.requiredInput"
         opened={editing !== null}
         onClose={() => setEditing(null)}
         title={t('methodologies.requiredInputs')}
@@ -982,7 +984,7 @@ export function MethodologyRequiredInputsPanel({
             </Button>
           </Stack>
         )}
-      </Modal>
+      </ResizableModal>
     </>
   );
 }
@@ -1113,7 +1115,8 @@ export function MethodologyOutputsPanel({
         )}
       </AsyncBoundary>
 
-      <Modal
+      <ResizableModal
+        sizeKey="methodology.output"
         opened={editing !== null}
         onClose={() => setEditing(null)}
         title={t('methodologies.outputs')}
@@ -1176,7 +1179,7 @@ export function MethodologyOutputsPanel({
             </Button>
           </Stack>
         )}
-      </Modal>
+      </ResizableModal>
     </>
   );
 }
@@ -1309,7 +1312,8 @@ export function MethodologyTestsPanel({
         )}
       </AsyncBoundary>
 
-      <Modal
+      <ResizableModal
+        sizeKey="methodology.test"
         opened={editing !== null}
         onClose={() => setEditing(null)}
         title={t('methodologies.tests')}
@@ -1370,7 +1374,7 @@ export function MethodologyTestsPanel({
             </Button>
           </Stack>
         )}
-      </Modal>
+      </ResizableModal>
     </>
   );
 }
@@ -1515,7 +1519,8 @@ export function MethodologyBindingsPanel({
         )}
       </AsyncBoundary>
 
-      <Modal
+      <ResizableModal
+        sizeKey="methodology.binding"
         opened={editing !== null}
         onClose={() => setEditing(null)}
         title={t('methodologies.bindings')}
@@ -1574,7 +1579,7 @@ export function MethodologyBindingsPanel({
             </Button>
           </Stack>
         )}
-      </Modal>
+      </ResizableModal>
     </>
   );
 }

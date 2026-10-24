@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Alert, Button, FileInput, Group, Modal, Stack, Table, Text } from '@mantine/core';
+import { Alert, Button, FileInput, Group, Stack, Table, Text } from '@mantine/core';
+import { ResizableModal } from '@/shared/ui/ResizableModal';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
@@ -161,7 +162,7 @@ export function MethodologyPackageImport(): JSX.Element {
         {t('methodologies.importPackage')}
       </Button>
 
-      <Modal opened={opened} onClose={() => setOpened(false)} title={t('methodologies.importTitle')} size="xl">
+      <ResizableModal sizeKey="methodology.import" opened={opened} onClose={() => setOpened(false)} title={t('methodologies.importTitle')} size="xl">
         <Stack gap="sm">
           <Text size="sm" c="dimmed">
             {t('methodologies.importHint')}
@@ -239,7 +240,7 @@ export function MethodologyPackageImport(): JSX.Element {
             </Stack>
           )}
         </Stack>
-      </Modal>
+      </ResizableModal>
     </>
   );
 }

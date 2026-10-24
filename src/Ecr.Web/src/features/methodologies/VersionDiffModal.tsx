@@ -1,5 +1,6 @@
 import { useState, type JSX } from 'react';
-import { Badge, Group, Modal, Select, Stack, Table, Text } from '@mantine/core';
+import { Badge, Group, Select, Stack, Table, Text } from '@mantine/core';
+import { ResizableModal } from '@/shared/ui/ResizableModal';
 import { useQuery } from '@tanstack/react-query';
 import type { MethodologyDraftVersionDto } from '@/api/types';
 import { methodologyVersionDiff } from '@/features/methodologies/api';
@@ -38,7 +39,8 @@ export function VersionDiffModal({
   onClose,
 }: VersionDiffModalProps): JSX.Element {
   return (
-    <Modal
+    <ResizableModal
+      sizeKey="methodology.versionDiff"
       opened={target !== null}
       onClose={onClose}
       title={t('methodologies.compareTitle', { version: target?.versionNumber ?? '' })}
@@ -48,7 +50,7 @@ export function VersionDiffModal({
       {target !== null && (
         <DiffBody key={target.id} methodologyId={methodologyId} versions={versions} target={target} />
       )}
-    </Modal>
+    </ResizableModal>
   );
 }
 

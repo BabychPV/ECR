@@ -4,7 +4,6 @@ import {
   Button,
   Code,
   Group,
-  Modal,
   ScrollArea,
   Select,
   Stack,
@@ -12,6 +11,7 @@ import {
   Text,
   TextInput,
 } from '@mantine/core';
+import { ResizableModal } from '@/shared/ui/ResizableModal';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -240,7 +240,8 @@ export function MethodologiesPage(): JSX.Element {
         )}
       </AsyncBoundary>
 
-      <Modal
+      <ResizableModal
+        sizeKey="methodology.new"
         opened={creating}
         onClose={() => setCreating(false)}
         title={t('methodologies.newMethodologyTitle')}
@@ -296,9 +297,10 @@ export function MethodologiesPage(): JSX.Element {
             {t('methodologies.create')}
           </Button>
         </Stack>
-      </Modal>
+      </ResizableModal>
 
-      <Modal
+      <ResizableModal
+        sizeKey="methodology.simulate"
         opened={simulating !== null}
         onClose={() => {
           setSimulating(null);
@@ -383,7 +385,7 @@ export function MethodologiesPage(): JSX.Element {
             )}
           </Stack>
         )}
-      </Modal>
+      </ResizableModal>
     </>
   );
 }

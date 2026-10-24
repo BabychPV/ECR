@@ -13,6 +13,7 @@ import {
   TextInput,
   Textarea,
 } from '@mantine/core';
+import { ResizableModal } from '@/shared/ui/ResizableModal';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import type {
@@ -700,7 +701,8 @@ export function MethodologyVersionsPage(): JSX.Element {
         </>
       )}
 
-      <Modal
+      <ResizableModal
+        sizeKey="methodology.newVersion"
         opened={creating}
         onClose={() => setCreating(false)}
         title={t('methodologies.newVersionTitle')}
@@ -798,9 +800,10 @@ export function MethodologyVersionsPage(): JSX.Element {
             {t('methodologies.createVersion')}
           </Button>
         </Stack>
-      </Modal>
+      </ResizableModal>
 
-      <Modal
+      <ResizableModal
+        sizeKey="methodology.formula"
         opened={editing !== null}
         onClose={() => {
           setEditing(null);
@@ -940,7 +943,7 @@ export function MethodologyVersionsPage(): JSX.Element {
             </Button>
           </Stack>
         )}
-      </Modal>
+      </ResizableModal>
 
       {/*
        * ⛔ Той самий рисунок, що й підтвердження правки поза вікном доступу в
@@ -981,7 +984,8 @@ export function MethodologyVersionsPage(): JSX.Element {
        * сервері (`ECR-CALC-0422`, ФВ-14.7), і кнопка тут вимкнена, доки вони
        * порожні — не з ввічливості, а щоб не вести на гарантовану відмову.
        */}
-      <Modal
+      <ResizableModal
+        sizeKey="methodology.publish"
         opened={publishing !== null}
         onClose={() => setPublishing(null)}
         title={t('methodologies.publishTitle')}
@@ -1017,14 +1021,15 @@ export function MethodologyVersionsPage(): JSX.Element {
             {t('methodologies.publish')}
           </Button>
         </Stack>
-      </Modal>
+      </ResizableModal>
 
       {/*
        * ⛔ Diff РЕЗУЛЬТАТІВ, не тексту формул (ФВ-9.6): змінений рядок виразу
        * не каже нічого, змінена на 4 % емісія каже все. Єдине місце, де
        * методологію публікують, — і єдиний показ diff після публікації (L9-43).
        */}
-      <Modal
+      <ResizableModal
+        sizeKey="methodology.publishDiff"
         opened={publishDiff !== null}
         onClose={() => setPublishDiff(null)}
         title={t('methodologies.diffTitle')}
@@ -1077,7 +1082,7 @@ export function MethodologyVersionsPage(): JSX.Element {
             )}
           </Stack>
         )}
-      </Modal>
+      </ResizableModal>
 
       {versionDeletion.dialog}
 
