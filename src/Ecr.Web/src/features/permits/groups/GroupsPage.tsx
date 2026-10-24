@@ -1,8 +1,7 @@
-import { useEffect, useMemo, type JSX } from 'react';
+import { Suspense, lazy, useEffect, useMemo, type JSX } from 'react';
 import { Box, Button, Stack, Text } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { DataTable } from '@/shared/ui/DataTable';
-import { useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { FilterBar } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatStrip } from '@/shared/ui/StatStrip';
@@ -10,11 +9,19 @@ import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { useSession } from '@/shared/session/useSession';
 import { useMayEditPermitTypes } from '../permitRights';
 import { PermitsSubnav } from '../shell/PermitsSubnav';
-import { GroupDrawer } from './GroupDrawer';
 import type { PermitGroupDto } from './groupsApi';
 import { groupColumns } from './GroupsColumns';
 import { NewGroupPanel, filterGroups, groupName, groupsStatParam, groupsStats } from './groupsModel';
 import { usePermitGroups } from './useGroups';
+
+/**
+ * Шторка групи — окремим чанком (`D-132`): відкривається кліком по рядку чи «New group», а тягнула в маршрут
+ * Mantine `Drawer`/`MultiSelect`/`Switch`/`Textarea`, перелік типів і підтвердження. Вантажиться заздалегідь,
+ * щойно приїхав перелік (див. `useEffect` нижче). Стиль — `loadX`/`lazy(async () => ...)`, як
+ * `BusinessKeyChangeAction.tsx`.
+ */
+const loadGroupDrawer = () => import('./GroupDrawer');
+const GroupDrawer = lazy(async () => ({ default: (await loadGroupDrawer()).GroupDrawer }));
 
 /**
  * Групи типів дозволів (`/admin/permits/groups`): іменований набір ОПУБЛІКОВАНИХ типів, що стає списком вибору цілі
@@ -29,7 +36,9 @@ export function GroupsPage(): JSX.Element {
   const setParams = useUrlParamsSetter();
   const [query] = useUrlState('q');
   const [statParam, setStat] = useUrlState('stat');
-  const [panel] = useDetailPanel();
+  // ⚠ `?panel=` — через `useUrlState`, а не `useDetailPanel` з `DetailDrawer`: той тягнув Mantine `Drawer` у
+  // маршрут, хоча шторка лінива. Ключ той самий — `panel`.
+  const [panel] = useUrlState('panel');
   const canEdit = useMayEditPermitTypes();
 
   const stat = groupsStatParam(statParam);
@@ -43,6 +52,12 @@ export function GroupsPage(): JSX.Element {
   const opened: PermitGroupDto | undefined = all.find((group) => group.code === panel);
   const hasGroups = all.length > 0;
   const openNew = (): void => setParams({ panel: NewGroupPanel });
+
+  // Чанк шторки — заздалегідь, щойно є перелік: перший клік відкриває її без очікування мережі.
+  const listed = groups.data !== undefined;
+  useEffect(() => {
+    if (listed) void loadGroupDrawer();
+  }, [listed]);
 
   // Мертвий `?panel=` (`_new` без права, неіснуючий код, групу видалили деінде) не лишається в адресі: шторки немає,
   // а повернення по історії давало б той самий порожній екран. Чекаємо, доки приїдуть і групи, і профіль:
@@ -113,8 +128,10 @@ export function GroupsPage(): JSX.Element {
         />
       </Box>
 
-      {panel === NewGroupPanel && canEdit && <GroupDrawer key={NewGroupPanel} group={null} canEdit />}
-      {opened !== undefined && <GroupDrawer key={opened.code} group={opened} canEdit={canEdit} />}
+      <Suspense fallback={null}>
+        {panel === NewGroupPanel && canEdit && <GroupDrawer key={NewGroupPanel} group={null} canEdit />}
+        {opened !== undefined && <GroupDrawer key={opened.code} group={opened} canEdit={canEdit} />}
+      </Suspense>
     </Stack>
   );
 }

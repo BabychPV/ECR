@@ -3,6 +3,11 @@ import { apiFetch, apiFetchResponse } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { CellChangePage } from '@/api/types';
 import { todayDateOnly } from '@/shared/format';
+import { fileNameOf } from './fileName';
+
+// ✎ D-132: `fileNameOf` живе в `./fileName` — споживачам поза журналами (рядки довідника, переклади) не треба
+// всього модуля журналів у чанку маршруту. Реекспорт — для наявних імпортів.
+export { fileNameOf };
 
 /*
  * ⛔ Адреса записана ПОВНІСТЮ і поруч із викликом `apiFetch`, а не збирається
@@ -305,38 +310,6 @@ export async function fetchStructureExport(filter: StructureChangeFilter): Promi
     blob: await response.blob(),
     fileName: fileNameOf(response.headers.get('Content-Disposition')),
   };
-}
-
-/**
- * Ім'я файлу з `Content-Disposition`; `filename*` (RFC 5987) має перевагу.
- *
- * ⚠ Шлях і керівні символи відкидаються: ім'я прийшло ззовні, а `download`
- * зі слешем браузери трактують по-різному.
- */
-export function fileNameOf(disposition: string | null): string | null {
-  if (disposition === null) return null;
-
-  const extended = /filename\*\s*=\s*[^']*'[^']*'([^;]+)/i.exec(disposition);
-  let name: string | null = null;
-
-  if (extended?.[1] !== undefined) {
-    try {
-      name = decodeURIComponent(extended[1].trim());
-    } catch {
-      name = null;
-    }
-  }
-
-  if (name === null) {
-    const plain = /filename\s*=\s*("([^"]*)"|[^;]+)/i.exec(disposition);
-    name = (plain?.[2] ?? plain?.[1])?.trim() ?? null;
-  }
-
-  if (name === null) return null;
-
-  const safe = name.replace(/[\\/\p{Cc}]/gu, '_').trim();
-
-  return safe.length > 0 ? safe : null;
 }
 
 /** Сторінка журналу подій безпеки (`aud.SecurityEvent`, ФВ-5.24). */

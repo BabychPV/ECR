@@ -20,6 +20,11 @@ import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 import { RegistryExternalKeysPanel } from './RegistryExternalKeysPanel';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
+import { isExternalRegistry } from './externalRegistry';
+
+// ✎ D-132: `isExternalRegistry` — у `./externalRegistry`, щоб сторінка даних довідника не тягнула редактор запису
+// в чанк маршруту заради однієї перевірки. Реекспорт — для наявних імпортів.
+export { isExternalRegistry };
 
 /** A1-02: поле дати — за `import()` (`D-132`), той самий прийом, що `DocumentHeaderPanel`. */
 const DateOnlyInput = lazy(async () => ({
@@ -44,16 +49,6 @@ interface EntryFormState {
 }
 
 const EmptyForm: EntryFormState = { code: '', display: {}, values: {} };
-
-/**
- * D-211: записи довідника з master-джерелом `External` вручну не змінюються —
- * master AF, дані приходять синком. Сервер відмовляє `409 ECR-REG-0409`
- * (`externalSource`); інтерфейс не пропонує дії, яка напевно впаде.
- * `Hybrid` і `Local` — редагуються.
- */
-export function isExternalRegistry(registry: Pick<RegistryDefDto, 'sourceKind'> | undefined): boolean {
-  return registry?.sourceKind === 'External';
-}
 
 /** Стан форми з повного запису (X-03, R-04). */
 function entryFormOf(detail: RegistryEntryDetailDto): EntryFormState {

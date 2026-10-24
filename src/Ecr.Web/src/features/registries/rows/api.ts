@@ -1,6 +1,6 @@
 import { apiFetch, apiFetchResponse } from '@/api/client';
 import type { components } from '@/api/schema';
-import { fileNameOf } from '@/features/audit/api';
+import { fileNameOf } from '@/features/audit/fileName';
 
 /** Рядок довідника зі значеннями полів (`GET …/rows`, RT-13). */
 export type RegistryRow = components['schemas']['RegistryRowDto'];
