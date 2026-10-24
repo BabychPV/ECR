@@ -9305,6 +9305,7 @@ USING (VALUES
     ,(N'notificationTemplates.recipientsSheetReturned', N'en', N'Sent to the document owner and to participants who fill in or submit the sheet, if they can see it. The person who returned it gets nothing.', 1)
     ,(N'notificationTemplates.recipientsTransportOnly', N'en', N'turns the email on; its own addresses and roles are not used', 1)
     ,(N'notificationTemplates.recipientsTeamsIgnored', N'en', N'not used: this message goes only by email', 1)
+    ,(N'jobs.kind.outboxFlush', N'en', N'Send sheet notifications', 1)
     -- P44C:sheet-mail ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -24210,7 +24211,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'notificationTemplates.recipientsTransportOnly', N'ru', N'включает почту; его собственные адреса и роли не используются'),
     (N'notificationTemplates.recipientsTransportOnly', N'kz', N'поштаны қосады; оның өз мекенжайлары мен рөлдері қолданылмайды'),
     (N'notificationTemplates.recipientsTeamsIgnored', N'ru', N'не используется: это письмо идёт только по почте'),
-    (N'notificationTemplates.recipientsTeamsIgnored', N'kz', N'қолданылмайды: бұл хат тек поштамен жіберіледі')
+    (N'notificationTemplates.recipientsTeamsIgnored', N'kz', N'қолданылмайды: бұл хат тек поштамен жіберіледі'),
+    (N'jobs.kind.outboxFlush', N'ru', N'Отправка уведомлений по листам'),
+    (N'jobs.kind.outboxFlush', N'kz', N'Парақтар бойынша хабарламаларды жіберу')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

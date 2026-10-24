@@ -27,6 +27,9 @@ namespace Ecr.Application.Workflow;
 /// ⛔ Подія кладеться в ЧЕРГУ <c>itg.NotificationOutbox</c> (<see cref="INotificationOutbox"/>, той самий шлях, що й
 /// листи передач зрізу), а надсилає її <c>NotificationJob</c> → <c>OutboxDispatcher</c>: стан доставки (Sent/Failed,
 /// спроби) — у рядку черги, не в журналі доставок матриці.
+/// ✎ D-451 (рішення координатора 24.10): година — пізно для «повернуто», тож після постановки ставиться разова
+/// задача <see cref="IOutboxFlushJob"/> ЗЛИТТЯМ на одну ціль — сплеск подань дає один прогін, лист іде за
+/// секунди-хвилину. Збій постановки задачі листа не губить: його забере щогодинний прогін.
 /// </para>
 /// <para>
 /// ⛔ ПІСЛЯ коміту дії і без права її валити (той самий принцип, що <c>PeriodStateJob.NotifyAsync</c>): будь-який збій
@@ -49,6 +52,9 @@ public sealed partial class SheetWorkflowNotifier(
     IUiStringCatalog catalog,
     INotificationOutbox outbox,
     IUnitOfWork uow,
+
+    // ✎ D-451: разова задача «відправити зараз» (злиттям) після постановки; `null` — тестові фабрики без черги задач.
+    IBackgroundJobScheduler? jobs = null,
     ILogger<SheetWorkflowNotifier>? logger = null)
 {
     /// <summary>Код події черги для «подано».</summary>
@@ -307,6 +313,14 @@ public sealed partial class SheetWorkflowNotifier(
         }
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // ⚠ ПІСЛЯ збереження рядків черги: задача, що стартувала б раніше, не побачила б їх.
+        if (jobs is not null)
+        {
+            await jobs
+                .EnqueueCoalescedAsync<IOutboxFlushJob>(OutboxFlushTarget.SheetMail, payload: null, ct)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>Підстановки шаблону мовою адресата.</summary>
