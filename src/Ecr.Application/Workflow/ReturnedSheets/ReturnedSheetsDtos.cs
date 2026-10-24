@@ -4,7 +4,7 @@ using Ecr.Domain.ValueObjects;
 namespace Ecr.Application.Workflow.ReturnedSheets;
 
 /// <summary>
-/// ✎ D-449: аркуш, який погоджувач повернув на доопрацювання і який чекає ПОТОЧНОГО користувача
+/// ✎ D-449: аркуш, повернений на доопрацювання (відхилення погоджувачем або повернення в роботу), що чекає ПОТОЧНОГО користувача
 /// («Повернуто на доопрацювання» у «My tasks»).
 /// </summary>
 /// <param name="DocumentId">Документ.</param>
@@ -17,7 +17,7 @@ namespace Ecr.Application.Workflow.ReturnedSheets;
 /// <param name="PeriodKey">Ключ періоду <c>Рік*100+№</c>.</param>
 /// <param name="ReturnedAt">Коли повернуто, UTC.</param>
 /// <param name="ReturnedByDisplayName">Хто повернув; <c>null</c> — користувача вже немає.</param>
-/// <param name="Reason">Причина повернення (обов'язкова при відхиленні); може бути багаторядковою.</param>
+/// <param name="Reason">Причина повернення (обов'язкова і при відхиленні, і при поверненні в роботу); може бути багаторядковою.</param>
 public sealed record ReturnedSheetItemDto(
     long DocumentId,
     string DocumentKey,

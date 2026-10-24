@@ -11,6 +11,9 @@ export const ReturnedSheetsPageSize = 50;
 /** Опитування, поки шухляда відкрита: повертає інша людина. Закрита - лише на фокус. */
 const OpenedPollMs = 60_000;
 
+/** Свіжість, поки шухляда закрита (лічильник кнопки): не частіше разу на хвилину, крім дій робочого процесу. */
+const ClosedStaleMs = 60_000;
+
 /**
  * ✎ D-449: «Повернуто на доопрацювання» - аркуші, які погоджувач повернув і над якими працюю я
  * (`GET /api/v1/me/returned-sheets`).
@@ -32,7 +35,10 @@ export function useReturnedSheets(opened: boolean): UseInfiniteQueryResult<Infin
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     refetchOnWindowFocus: true,
     refetchInterval: opened ? OpenedPollMs : false,
-    staleTime: opened ? 0 : 30_000,
+    // ✎ D-449: той самий ключ читає лічильник кнопки «My tasks» у шапці КОЖНОГО маршруту. Закрита шухляда: свіже
+    // 60 с, без опитування - перезапит лише на фокус вікна (якщо минуло 60 с) і після дій робочого процесу
+    // (`SheetActions.refresh` скидає ключ). Перехід між маршрутами нового запиту не робить. Відкрита - опитування.
+    staleTime: opened ? 0 : ClosedStaleMs,
   });
 }
 

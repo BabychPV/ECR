@@ -1,5 +1,6 @@
 // src/Ecr.Infrastructure/Persistence/ApprovalQueueStore.cs
 using Ecr.Application.Ports;
+using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -140,9 +141,21 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
 
     /// <inheritdoc />
     /// <remarks>
-    /// ✎ D-449. ⚠ ОДИН запит на порцію (ім'я того, хто повернув, — підзапитом у тому ж зверненні): без N+1. Хто й коли
-    /// повернув — поля стану, які ставить <c>ApprovalState.Reject</c> (<c>ApprovedByUserId</c>/<c>ApprovedAt</c>), причина —
-    /// <c>RejectedReason</c>; повторне подання переводить стан у <c>Submitted</c>, і рядок випадає з вибірки сам.
+    /// ✎ D-449. ⚠ ОДИН запит на порцію (ім'я того, хто повернув, — підзапитом у тому ж зверненні): без N+1.
+    /// <para>
+    /// Два види повернення (рішення координатора, узгоджено з поштовими подіями lane C):
+    /// <list type="bullet">
+    /// <item><c>Rejected</c> — відхилення погоджувачем: хто/коли — <c>ApprovedByUserId</c>/<c>ApprovedAt</c> (їх ставить
+    /// <c>ApprovalState.Reject</c>), причина — <c>RejectedReason</c>;</item>
+    /// <item><c>Draft</c>, чия ОСТАННЯ подія журналу (<c>wf.ApprovalEvent</c> аркуша й періоду) — <c>Reopen</c>: хто/коли/
+    /// причина — <c>ReopenedByUserId</c>/<c>ReopenedAt</c>/<c>ReopenReason</c> стану. Це ті самі значення, що й у цій
+    /// останній події: <c>ReopenDocumentHandler</c> пише їх обидва одним викликом в одній транзакції; поля стану дають
+    /// keyset без підзапиту в порядку. Відкликання автором (<c>Recall</c>) теж веде в <c>Draft</c>, але останньою подією
+    /// стає <c>Recall</c> — і рядок не потрапляє. Попередній фільтр <c>ReopenedAt != null</c> відсікає чернетки, яких
+    /// ніколи не повертали, ще до підзапиту журналу.</item>
+    /// </list>
+    /// Повторне подання переводить стан у <c>Submitted</c> — рядок випадає з вибірки сам.
+    /// </para>
     /// Порядок «момент повернення, ключ стану» детермінований; курсор — keyset.
     /// </remarks>
     public async Task<IReadOnlyList<ReturnedSheetCandidate>> ListReturnedAsync(
@@ -165,19 +178,29 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
             return [];
         }
 
-        var rejected =
+        var returned =
             from a in db.ApprovalStates.AsNoTracking()
             join d in db.Documents.AsNoTracking() on a.DocumentId equals d.Id
             where a.Status == DocumentStatus.Rejected
+                  || (a.Status == DocumentStatus.Draft
+                      && a.ReopenedAt != null
+                      && db.ApprovalEvents
+                          .Where(e => e.DocumentId == a.DocumentId && e.SheetDefId == a.SheetDefId && e.PeriodKey == a.PeriodKey)
+                          .OrderByDescending(e => e.At)
+                          .ThenByDescending(e => e.Id)
+                          .Select(e => (ApprovalAction?)e.Action)
+                          .FirstOrDefault() == ApprovalAction.Reopen)
             select new { a, d };
 
-        // Власник — у видимих за ролями проєктах; учасник — у своїх документах. Без надань — лише власні документи.
-        rejected = participated.Length == 0
-            ? rejected.Where(x => x.d.CreatedByUserId == userId && projects.Contains(x.d.ProjectId))
-            : rejected.Where(x => (x.d.CreatedByUserId == userId && projects.Contains(x.d.ProjectId))
+        // Власник чи останній подавач — у видимих за ролями проєктах; учасник — у своїх документах.
+        returned = participated.Length == 0
+            ? returned.Where(x => (x.d.CreatedByUserId == userId || x.a.SubmittedByUserId == userId)
+                                  && projects.Contains(x.d.ProjectId))
+            : returned.Where(x => ((x.d.CreatedByUserId == userId || x.a.SubmittedByUserId == userId)
+                                   && projects.Contains(x.d.ProjectId))
                                   || participated.Contains(x.d.Id));
 
-        var query = rejected.Select(x => new
+        var query = returned.Select(x => new
         {
             x.a.Id,
             x.a.DocumentId,
@@ -185,11 +208,13 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
             x.d.BusinessKey,
             x.d.NameL10n,
             x.d.CreatedByUserId,
+            x.a.SubmittedByUserId,
             x.a.SheetDefId,
             x.a.PeriodKey,
-            ReturnedAt = x.a.ApprovedAt ?? DateTime.MinValue,
-            x.a.ApprovedByUserId,
-            x.a.RejectedReason,
+            Reopened = x.a.Status == DocumentStatus.Draft,
+            ReturnedAt = (x.a.Status == DocumentStatus.Rejected ? x.a.ApprovedAt : x.a.ReopenedAt) ?? DateTime.MinValue,
+            ReturnedByUserId = x.a.Status == DocumentStatus.Rejected ? x.a.ApprovedByUserId : x.a.ReopenedByUserId,
+            Reason = x.a.Status == DocumentStatus.Rejected ? x.a.RejectedReason : x.a.ReopenReason,
         });
 
         if (requireIncludedSheet)
@@ -217,12 +242,15 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
                 x.BusinessKey,
                 x.NameL10n,
                 x.CreatedByUserId,
+                x.SubmittedByUserId,
                 x.SheetDefId,
                 x.PeriodKey,
+                x.Reopened,
                 x.ReturnedAt,
-                x.RejectedReason,
+                x.ReturnedByUserId,
+                x.Reason,
                 ReturnedByDisplayName = db.Users
-                    .Where(u => u.Id == x.ApprovedByUserId)
+                    .Where(u => u.Id == x.ReturnedByUserId)
                     .Select(u => u.DisplayName)
                     .FirstOrDefault(),
             })
@@ -242,7 +270,12 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
                 x.PeriodKey,
                 DateTime.SpecifyKind(x.ReturnedAt, DateTimeKind.Utc),
                 x.ReturnedByDisplayName,
-                x.RejectedReason ?? string.Empty)),
+                x.Reason ?? string.Empty)
+            {
+                SubmittedByUserId = x.SubmittedByUserId,
+                ReturnedByUserId = x.ReturnedByUserId,
+                Kind = x.Reopened ? ReturnKind.Reopened : ReturnKind.Rejected,
+            }),
         ];
     }
 }

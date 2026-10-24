@@ -43,10 +43,11 @@ public interface IApprovalQueueStore
         IReadOnlyCollection<long> participatedDocumentIds, CancellationToken ct);
 
     /// <summary>
-    /// ✎ D-449 («Повернуто на доопрацювання» у «My tasks»): відхилені погоджувачем (<c>Rejected</c>) аркуші
-    /// документів, де <paramref name="userId"/> — власник (у проєктах <paramref name="ownedProjectIds"/>), або
-    /// документів <paramref name="participatedDocumentIds"/>, від найдавнішого повернення, після <paramref name="after"/>,
-    /// не більше <paramref name="take"/>.
+    /// ✎ D-449 («Повернуто на доопрацювання» у «My tasks»): аркуші, повернені на доопрацювання — відхилені погоджувачем
+    /// (<c>Rejected</c>) або повернені в роботу (<c>Draft</c>, остання подія журналу — <c>Reopen</c>; відкликання автором — ні),
+    /// документів, де <paramref name="userId"/> — власник чи останній подавач аркуша (у проєктах
+    /// <paramref name="ownedProjectIds"/>), або документів <paramref name="participatedDocumentIds"/>; від найдавнішого
+    /// повернення, після <paramref name="after"/>, не більше <paramref name="take"/>.
     /// </summary>
     /// <remarks>
     /// Окремого порту немає навмисно: та сама пара «аркуш × період» з <c>wf.ApprovalState</c>, ті самі проєкти
@@ -139,7 +140,27 @@ public sealed record ReturnedSheetCandidate(
     int PeriodKey,
     DateTime ReturnedAt,
     string? ReturnedByDisplayName,
-    string Reason);
+    string Reason)
+{
+    /// <summary>Останній подавач аркуша за період (<c>ApprovalState.SubmittedByUserId</c>; ставить лише подання).</summary>
+    public int? SubmittedByUserId { get; init; }
+
+    /// <summary>Хто повернув; <c>null</c> — невідомо.</summary>
+    public int? ReturnedByUserId { get; init; }
+
+    /// <summary>Вид повернення.</summary>
+    public ReturnKind Kind { get; init; } = ReturnKind.Rejected;
+}
+
+/// <summary>✎ D-449: вид повернення на доопрацювання.</summary>
+public enum ReturnKind
+{
+    /// <summary>Відхилення погоджувачем (<c>Rejected</c>).</summary>
+    Rejected = 1,
+
+    /// <summary>Повернення в роботу правом <c>Document.Reopen</c> (<c>Draft</c>, остання подія — <c>Reopen</c>).</summary>
+    Reopened = 2,
+}
 
 /// <summary>Позиція в порядку блоку: момент повернення (тики UTC) і ключ стану.</summary>
 /// <param name="ReturnedAtTicks">Тики моменту повернення.</param>

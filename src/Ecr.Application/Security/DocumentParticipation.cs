@@ -124,17 +124,17 @@ public static class DocumentParticipation
     }
 
     /// <summary>
-    /// ✎ D-449: чи ПРАЦЮЄ учасник над аркушем — має діюче надання рівня <see cref="GrantLevel.Write"/> чи
-    /// <see cref="GrantLevel.Submit"/>, що відкриває цей аркуш (на документ, аркуш або його таблицю) у періоді.
-    /// Повернений на доопрацювання аркуш — його задача («Повернуто на доопрацювання»).
+    /// ✎ D-449: чи має учасник право ПИСАТИ в аркуш — діюче надання рівня не нижче <see cref="GrantLevel.Write"/>
+    /// (рівні впорядковані: Read &lt; Write &lt; Submit &lt; Approve), що відкриває цей аркуш (на документ, аркуш або його
+    /// таблицю) у періоді. Повернений на доопрацювання аркуш — його задача («Повернуто на доопрацювання»).
     /// </summary>
     /// <param name="grants">Діючі надання користувача в документі.</param>
     /// <param name="sheetCode">Код аркуша; <c>null</c> — невідомий (не працює).</param>
     /// <param name="period">Період; <c>null</c> — невідомий.</param>
     /// <remarks>
     /// ⚠ Збіг області — ТІ САМІ правила, що <see cref="OpensSheet"/> (аркуш, період); рівень — сирий рівень надання, а
-    /// не <see cref="LevelAt"/> (там <c>Write</c> зводиться до <c>Read</c> рішення). <c>Read</c> — лише перегляд, а
-    /// <c>Approve</c> — погоджувач: повернення від погоджувача не є задачею погоджувача (рішення D-449).
+    /// не <see cref="LevelAt"/> (там <c>Write</c> зводиться до <c>Read</c> рішення, бо запис учасника піднімає
+    /// <see cref="EditAssignmentGuard"/>). <c>Read</c> — лише перегляд, не задача.
     /// </remarks>
     public static bool WorksOnSheet(IReadOnlyList<ParticipationGrant> grants, string? sheetCode, PeriodKey? period)
     {
@@ -142,7 +142,7 @@ public static class DocumentParticipation
 
         foreach (var grant in grants)
         {
-            if (grant.Level is GrantLevel.Write or GrantLevel.Submit
+            if (grant.Level >= GrantLevel.Write
                 && SheetMatches(grant, sheetCode)
                 && PeriodMatches(grant, period))
             {

@@ -11,6 +11,9 @@ export const ApprovalQueuePageSize = 50;
 /** Опитування, поки шухляда відкрита: подання робить інша людина. Закрита - лише на фокус. */
 const OpenedPollMs = 60_000;
 
+/** Свіжість, поки шухляда закрита (лічильник кнопки): не частіше разу на хвилину, крім дій робочого процесу. */
+const ClosedStaleMs = 60_000;
+
 /**
  * Черга «До погодження»: аркуші, які викликач може затвердити зараз (`GET /api/v1/me/approval-queue`).
  *
@@ -31,7 +34,10 @@ export function useApprovalQueue(opened: boolean): UseInfiniteQueryResult<Infini
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     refetchOnWindowFocus: true,
     refetchInterval: opened ? OpenedPollMs : false,
-    staleTime: opened ? 0 : 30_000,
+    // ✎ D-449: той самий ключ читає лічильник кнопки «My tasks» у шапці КОЖНОГО маршруту. Закрита шухляда: свіже
+    // 60 с, без опитування - перезапит лише на фокус вікна (якщо минуло 60 с) і після дій робочого процесу
+    // (`SheetActions.refresh` скидає ключ). Перехід між маршрутами нового запиту не робить. Відкрита - опитування.
+    staleTime: opened ? 0 : ClosedStaleMs,
   });
 }
 

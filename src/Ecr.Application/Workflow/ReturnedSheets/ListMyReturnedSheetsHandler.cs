@@ -5,29 +5,34 @@ using Ecr.Application.Documents.EditAssignments;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Workflow.ReturnedSheets;
 
 /// <summary>
-/// ✎ D-449 (рішення людини 24.10: «My tasks» — те, чого чекають від МЕНЕ зараз): аркуші, які погоджувач повернув на
-/// доопрацювання і над якими працює поточний користувач.
+/// ✎ D-449 (рішення людини 24.10: «My tasks» — те, чого чекають від МЕНЕ зараз): аркуші, повернені на доопрацювання,
+/// над якими працює поточний користувач.
 /// </summary>
 /// <remarks>
 /// <para>
-/// ⛔ «Повернуто» — це стан <c>Rejected</c>, і лише він. Його ставить ЄДИНА дія — відхилення погоджувачем
-/// (<c>ApproveSheetHandler</c> з <c>approved=false</c> → <c>ApprovalState.Reject</c>, право <c>EditRules.CanApprove</c>,
-/// причина обов'язкова). Відкликання автором (<c>Recall</c>, BE-31) і повернення в роботу з правом
-/// <c>Document.Reopen</c> (<c>ReopenDocumentHandler</c>) ведуть у <c>Draft</c> — це не повернення від погоджувача і в
-/// блок не потрапляють. Повторне подання виводить аркуш із <c>Rejected</c>, тож задача зникає сама: це живий запит,
-/// збережених задач немає.
+/// ⛔ «Повернуто» (рішення координатора, узгоджено з поштовими подіями lane C): (а) стан <c>Rejected</c> — його ставить
+/// лише відхилення погоджувачем (<c>ApproveSheetHandler</c> з <c>approved=false</c>, причина обов'язкова); (б) стан
+/// <c>Draft</c>, чия ОСТАННЯ подія журналу аркуша й періоду — <c>Reopen</c> (повернення в роботу правом
+/// <c>Document.Reopen</c>, причина обов'язкова), якщо повернув НЕ сам одержувач задачі. Відкликання автором
+/// (<c>Recall</c>, BE-31) теж веде в <c>Draft</c>, але останньою подією стає <c>Recall</c> — не задача. Повторне подання
+/// виводить аркуш із обох станів, тож задача зникає сама: це живий запит, збережених задач немає.
 /// </para>
 /// <para>
-/// ⛔ Чия задача: (а) власник документа (<c>Document.CreatedByUserId</c>; D-443 — власника можна передати), якщо він
-/// бачить проєкт за ролями; (б) учасник із діючим наданням <c>Write</c>/<c>Submit</c>, що відкриває цей аркуш у цьому
-/// періоді (<see cref="DocumentParticipation.WorksOnSheet"/> — ті самі факти й збіг області, що й рішення доступу,
-/// <see cref="IAccessDecisionService.ActiveParticipationsAsync"/>). Надання <c>Read</c> — лише перегляд, <c>Approve</c> —
-/// погоджувач: не їхня задача. Заборона проєкту (<see cref="AccessProfile.DeniesProject"/>) перемагає обидва шляхи.
+/// ⛔ Чия задача (одна картка на аркуш × період, хоч би якими шляхами людина до неї дійшла):
+/// (1) власник документа (<c>Document.CreatedByUserId</c>; D-443 — власника можна передати), якщо бачить проєкт за ролями;
+/// (2) учасник із діючим наданням рівня ≥ <c>Write</c>, що відкриває цей аркуш у періоді
+/// (<see cref="DocumentParticipation.WorksOnSheet"/>, факти — <see cref="IAccessDecisionService.ActiveParticipationsAsync"/>);
+/// (3) останній подавач аркуша за період (<c>ApprovalState.SubmittedByUserId</c> — його ставить лише подання, тож це
+/// той самий користувач, що в останній події <c>Submit</c> журналу), якщо досі має право писати в аркуш: ефективний
+/// рівень ролей <see cref="EditRules.Effective"/> ≥ <c>Write</c> (той самий розрахунок, що в рішенні про запис; він же
+/// вимагає видимого проєкту) або надання учасника з (2). Нового правила немає.
+/// Заборона проєкту (<see cref="AccessProfile.DeniesProject"/>) перемагає всі шляхи.
 /// </para>
 /// <para>
 /// ⚠ Нерозкриття: аркуш, схований від читача, у відповідь не потрапляє (ні назви, ні причини) — межі ті самі, що на
@@ -124,9 +129,16 @@ public sealed class ListMyReturnedSheetsHandler(
                     continue;
                 }
 
+                // Повернув сам — не задача (повернення в роботу власною рукою людина й так знає).
+                if (row.Kind == ReturnKind.Reopened && row.ReturnedByUserId == userId)
+                {
+                    continue;
+                }
+
                 var owner = row.OwnerUserId == userId && projects.ContainsKey(row.ProjectId);
                 var grants = participations.TryGetValue(row.DocumentId, out var mine) ? mine : null;
-                if (!owner && grants is null)
+                var submitter = row.SubmittedByUserId == userId;
+                if (!owner && grants is null && !submitter)
                 {
                     continue;
                 }
@@ -137,7 +149,7 @@ public sealed class ListMyReturnedSheetsHandler(
                     snapshots[project.TemplateVersionId] = snapshot;
                 }
 
-                var item = Evaluate(row, project, snapshot, profile, restricted, scopes, owner, grants);
+                var item = Evaluate(row, project, snapshot, profile, restricted, scopes, owner, submitter, grants);
                 if (item is null)
                 {
                     continue;
@@ -181,6 +193,7 @@ public sealed class ListMyReturnedSheetsHandler(
         bool restricted,
         Dictionary<int, DocumentReadScope> scopes,
         bool owner,
+        bool submitter,
         IReadOnlyList<ParticipationGrant>? grants)
     {
         var sheet = snapshot.Sheets.FirstOrDefault(s => s.Id == row.SheetDefId);
@@ -192,8 +205,12 @@ public sealed class ListMyReturnedSheetsHandler(
         var key = new PeriodKey(row.PeriodKey);
         PeriodKey? period = key.IsValid ? key : null;
 
-        // Учасник (не власник) — лише якщо його надання Write/Submit відкриває саме цей аркуш у цьому періоді.
-        if (!owner && (grants is null || !DocumentParticipation.WorksOnSheet(grants, sheet.Code, period)))
+        // Учасник — лише з наданням ≥ Write, що відкриває саме цей аркуш у цьому періоді; останній подавач — лише з
+        // правом писати в аркуш (ролі або те саме надання). Власник проходить і так.
+        var participantWrites = grants is not null && DocumentParticipation.WorksOnSheet(grants, sheet.Code, period);
+        if (!owner
+            && !participantWrites
+            && !(submitter && RolesWriteSheet(profile, project, sheet.Id, sheet.Code, period, grants)))
         {
             return null;
         }
@@ -232,6 +249,41 @@ public sealed class ListMyReturnedSheetsHandler(
             row.ReturnedAt,
             row.ReturnedByDisplayName,
             row.Reason);
+    }
+
+    /// <summary>
+    /// Чи дає роль право писати в аркуш у періоді — ефективний рівень <see cref="EditRules.Effective"/> (той самий, що в
+    /// рішенні про запис комірки) ≥ <c>Write</c>; заборони й невидимий проєкт дають <c>None</c>.
+    /// </summary>
+    private static bool RolesWriteSheet(
+        AccessProfile profile,
+        ApprovalQueueProject project,
+        int sheetDefId,
+        string sheetCode,
+        PeriodKey? period,
+        IReadOnlyList<ParticipationGrant>? grants)
+    {
+        var context = new CellAccessContext(
+            project.ProjectId,
+            sheetDefId,
+            TableDefId: 0,
+            ColumnDefId: 0,
+            project.Status,
+            project.IsArchiving,
+            PeriodState.Open,
+            OutOfAccessWindow: false,
+            DocumentStatus.Draft,
+            ColumnIsComputed: false,
+            ColumnIsReadOnly: false,
+            RowIsReadOnly: false)
+        {
+            SheetCode = sheetCode,
+            Period = period,
+            ParticipatesInDocument = grants is not null,
+            ParticipationLevel = grants is null ? GrantLevel.None : DocumentParticipation.LevelAt(grants, sheetCode, null, period),
+        };
+
+        return EditRules.Effective(profile, context) >= GrantLevel.Write;
     }
 
     private static string FormatCursor(ReturnedSheetsCursor cursor)
