@@ -40,6 +40,7 @@ public sealed class SheetWorkflowNotifierTests
     private readonly IUiStringCatalog _catalog = Substitute.For<IUiStringCatalog>();
     private readonly INotificationOutbox _outbox = Substitute.For<INotificationOutbox>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
+    private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
 
     /// <summary>Хто що отримав: адреса → (тема, тіло).</summary>
     private readonly List<(string EventCode, string Subject, string Body, string Recipients)> _queued = [];
@@ -338,10 +339,76 @@ public sealed class SheetWorkflowNotifierTests
         }
     }
 
+    // ─────────────────────── негайна відправка ───────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-451")]
+    public async Task Після_постановки_листа_просить_разову_відправку_злиттям_і_лише_після_збереження()
+    {
+        _store.RoleHoldersAsync(StepRoleId, Arg.Any<CancellationToken>()).Returns<IReadOnlyList<int>>([20]);
+
+        await Notifier().SubmittedAsync(DocumentId, SheetId, Period, Submitter, At, CancellationToken.None);
+
+        // ⛔ Мутація: прибрати постановку `IOutboxFlushJob` — лист чекає щогодинного зведення (до години), падає.
+        // ⛔ Мутація: поставити ДО `SaveChangesAsync` — задача могла б стартувати раніше, ніж рядки черги є в базі;
+        // порядок нижче падає.
+        Received.InOrder(() =>
+        {
+            _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
+            _jobs.EnqueueCoalescedAsync<IOutboxFlushJob>(
+                OutboxFlushTarget.SheetMail, null, Arg.Any<CancellationToken>(), Arg.Any<int?>());
+        });
+
+        // ⚠ Не `EnqueueAsync` (без цілі): кожне подання ставило б окрему задачу.
+        await _jobs.DidNotReceiveWithAnyArgs().EnqueueAsync<IOutboxFlushJob>(default, default, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-451")]
+    public async Task Сплеск_подань_і_повернень_просить_відправку_на_ОДНУ_ціль_злиття()
+    {
+        _store.RoleHoldersAsync(StepRoleId, Arg.Any<CancellationToken>()).Returns<IReadOnlyList<int>>([20]);
+        var targets = new List<string>();
+        _jobs.EnqueueCoalescedAsync<IOutboxFlushJob>(
+                Arg.Do<string>(targets.Add), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns("job-1");
+
+        var notifier = Notifier();
+        await notifier.SubmittedAsync(DocumentId, SheetId, Period, Submitter, At, CancellationToken.None);
+        await notifier.SubmittedAsync(DocumentId, SheetId, Period, 21, At, CancellationToken.None);
+        await notifier.ReturnedAsync(DocumentId, SheetId, Period, 40, At, "x", CancellationToken.None);
+
+        // ⛔ Злиття — на боці черги задач (`EnqueueCoalescedAsync`: задача, що чекає, поглинає постановку); тут
+        // стережеться, що ціль одна для обох подій і всіх документів. Мутація: ціль із документом/подією — падає.
+        Assert.Equal(3, targets.Count);
+        Assert.All(targets, t => Assert.Equal(OutboxFlushTarget.SheetMail, t));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D-451")]
+    public async Task Без_листа_відправку_не_просить_а_збій_постановки_задачі_не_виходить_назовні()
+    {
+        // Адресатів немає (лише подавач) — рядків черги немає, і задачі теж.
+        _store.RoleHoldersAsync(StepRoleId, Arg.Any<CancellationToken>()).Returns<IReadOnlyList<int>>([Submitter]);
+        await Notifier().SubmittedAsync(DocumentId, SheetId, Period, Submitter, At, CancellationToken.None);
+        await _jobs.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<IOutboxFlushJob>(default!, default, default);
+
+        // Черга задач недоступна — лист лишається в черзі пошти (забере щогодинний прогін), дія не падає.
+        _store.RoleHoldersAsync(StepRoleId, Arg.Any<CancellationToken>()).Returns<IReadOnlyList<int>>([20]);
+        _jobs.EnqueueCoalescedAsync<IOutboxFlushJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .ThrowsAsync(new InvalidOperationException("scheduler down"));
+        await Notifier().SubmittedAsync(DocumentId, SheetId, Period, Submitter, At, CancellationToken.None);
+        await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
     // ────────────────────────────── збірка ────────────────────────────
 
     private SheetWorkflowNotifier Notifier()
-        => new(_rules, _store, _access, _documents, _catalog, _outbox, _uow);
+        => new(_rules, _store, _access, _documents, _catalog, _outbox, _uow, _jobs);
 
     private void Enable(params NotificationEventKind[] kinds)
         => _rules.GetPlanAsync(Arg.Any<CancellationToken>())
