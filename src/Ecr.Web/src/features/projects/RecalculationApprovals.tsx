@@ -3,7 +3,7 @@ import { Button, Group, Stack, Table, Title } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
-import { hasProjectGrant } from '@/features/documents/BusinessKeyChangeAction';
+import { hasProjectGrant } from '@/features/documents/projectGrant';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { formatDateTime } from '@/shared/format';
 import { t } from '@/shared/i18n';

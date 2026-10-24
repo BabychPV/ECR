@@ -32,20 +32,19 @@ import { markSlicesStale } from '@/features/grid/sliceCache';
 import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
 import { timeZones } from '@/features/projects/timeZones';
 import { useOpenerFocusReturn } from '@/features/projects/useOpenerFocusReturn';
+import { MountedLazyConfirmModal, MountedLazyReasonModal } from '@/features/projects/lazyPeriodsDialogs';
 import {
   RecalculationApprovalsPanel,
   RequestRecalculationButton,
 } from '@/features/projects/RecalculationApprovals';
-import { hasProjectGrant } from '@/features/documents/BusinessKeyChangeAction';
+import { hasProjectGrant } from '@/features/documents/projectGrant';
 import { pollInterval, outcomeOf } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
-import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { Hint } from '@/shared/ui/Hint';
 import { PageHeader } from '@/shared/ui/PageHeader';
-import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
 import { formatMonthYear } from '@/shared/format';
 import { siteMomentText, zoneClock } from '@/shared/siteMoment';
@@ -1256,7 +1255,7 @@ export function PeriodsPage(): JSX.Element {
       {/* ⛔ `X-25`: підтвердження ПЕРЕД дією, фокус на «Cancel» (`L6`,
           `ConfirmModal`). Не `danger`: жодна з двох дій не знищує даних, але
           обидві — важкі, і клік повз них не має їх запускати. */}
-      <ConfirmModal
+      <MountedLazyConfirmModal
         opened={confirming === 'activate' && selected !== undefined}
         title={t('periods.activateTitle', { code: selected?.code ?? '' })}
         text={t('periods.activateConfirm')}
@@ -1270,7 +1269,7 @@ export function PeriodsPage(): JSX.Element {
         onClose={() => setConfirming(null)}
       />
 
-      <ConfirmModal
+      <MountedLazyConfirmModal
         opened={confirming === 'recalculate' && selected !== undefined}
         title={t('periods.recalcTitle', { code: selected?.code ?? '' })}
         text={t('periods.recalcConfirm')}
@@ -1284,7 +1283,7 @@ export function PeriodsPage(): JSX.Element {
         onClose={() => setConfirming(null)}
       />
 
-      <ReasonModal
+      <MountedLazyReasonModal
         opened={pinning !== null}
         title={t('periods.pin')}
         label={t('workflow.reason')}
