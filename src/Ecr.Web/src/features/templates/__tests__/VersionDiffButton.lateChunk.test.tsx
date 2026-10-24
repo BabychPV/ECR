@@ -29,9 +29,9 @@ const chunk = vi.hoisted(() => {
   return { ready, open: () => release() };
 });
 
-vi.mock('../VersionDiff', async (importOriginal) => {
+vi.mock('@/features/templates/VersionDiff', async (importOriginal) => {
   const { createElement, use } = await import('react');
-  const actual = await importOriginal<typeof import('../VersionDiff')>();
+  const actual = await importOriginal<typeof import('@/features/templates/VersionDiff')>();
   function LateDialog(props: Parameters<typeof actual.VersionDiffDialog>[0]): ReturnType<typeof actual.VersionDiffDialog> {
     use(chunk.ready);
 
@@ -65,7 +65,11 @@ describe('VersionDiffButton: фокус після закриття, коли ч
       </MantineProvider>,
     );
     const trigger = screen.getByRole('button', { name: '⟦version.diff⟧' });
-    trigger.focus();
+    // Фокус кличе передзавантаження чанка (`onFocus`) — воно теж іде через підмінений модуль.
+    await act(async () => {
+      trigger.focus();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
 
     fireEvent.click(trigger);
     await act(async () => {
