@@ -14,7 +14,7 @@ import { expect, test, type APIRequestContext, type Browser, type BrowserContext
  *      повертається.
  *
  * ⚠ Дані — свої: свіжий стенд довідників не має (сід їх не заводить — це дані). `beforeAll` заводить довідник
- * `E2E_EDR_<час>` із текстовим полем `NOTE` і один запис тим самим API, що й інтерфейс; `afterAll` видаляє запис.
+ * `E2E_EDR_<час>` із ключовим полем `KEY`, текстовим `NOTE` і один запис тим самим API, що й інтерфейс; `afterAll` видаляє запис.
  * Видалення довідника API не має (див. `registryDesigner.spec.ts`), тож залишок — порожній `E2E_EDR_*`.
  * Від порядку файлів спека не залежить.
  *
@@ -26,6 +26,7 @@ const Admin = { userName: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
 
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
 
+const KeyCode = 'KEY';
 const FieldCode = 'NOTE';
 const FieldName = 'Note';
 
@@ -131,6 +132,8 @@ test.describe('Шторка запису довідника: адреса, гл�
       expect(created.status(), `створення довідника: ${await created.text()}`).toBe(201);
 
       // Текстове поле — щоб шторка показувала значення поля запису, а не лише код і назву.
+      // ⛔ Опис без жодного ключового поля сервер відхиляє (`ECR-REG-0422 noKeyField`), тож поруч — ключове
+      // поле `KEY`. Правиться саме не-ключове `NOTE`: зміна бізнес-ключа — окрема дія, не тема цієї спеки.
       const definitionResponse = await admin.request.get(`/api/v1/registries/${registry}/definition`);
       expect(definitionResponse.ok(), `опис довідника: ${await definitionResponse.text()}`).toBe(true);
       const definition = (await definitionResponse.json()) as { id: number; definitionVersion: number; codeMode?: string | null };
@@ -141,10 +144,21 @@ test.describe('Шторка запису довідника: адреса, гл�
           fields: [
             {
               id: null,
+              code: KeyCode,
+              nameL10n: { values: { en: 'Key' } },
+              dataType: 'String',
+              ordinal: 1,
+              isRequired: true,
+              isKey: true,
+              lookupRegistryDefId: null,
+              unitId: null,
+            },
+            {
+              id: null,
               code: FieldCode,
               nameL10n: { values: { en: FieldName } },
               dataType: 'String',
-              ordinal: 1,
+              ordinal: 2,
               isRequired: false,
               isKey: false,
               lookupRegistryDefId: null,
@@ -168,7 +182,7 @@ test.describe('Шторка запису довідника: адреса, гл�
           code: auto ? '' : 'EDR1',
           display: { values: { en: display } },
           parentEntryId: null,
-          values: { [FieldCode]: note },
+          values: { [KeyCode]: `K-${stamp}`, [FieldCode]: note },
         },
       });
       expect(entry.status(), `створення запису: ${await entry.text()}`).toBe(201);
