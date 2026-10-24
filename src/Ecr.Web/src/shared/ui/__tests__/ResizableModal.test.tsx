@@ -24,7 +24,13 @@ function GrowProbe(): JSX.Element {
   return <span data-testid="grow">{useInResizableModal() ? 'inside' : 'outside'}</span>;
 }
 
-function Host({ initiallyOpen = true }: { readonly initiallyOpen?: boolean }): JSX.Element {
+function Host({
+  initiallyOpen = true,
+  autofocus = true,
+}: {
+  readonly initiallyOpen?: boolean;
+  readonly autofocus?: boolean;
+}): JSX.Element {
   const [opened, setOpened] = useState(initiallyOpen);
 
   return (
@@ -33,7 +39,7 @@ function Host({ initiallyOpen = true }: { readonly initiallyOpen?: boolean }): J
         Open
       </button>
       <ResizableModal sizeKey={Key} opened={opened} onClose={() => setOpened(false)} title="Formula" size="lg">
-        <TextInput label="Code" data-autofocus />
+        {autofocus ? <TextInput label="Code" data-autofocus /> : <TextInput label="Code" />}
         <GrowProbe />
       </ResizableModal>
     </MantineProvider>
@@ -105,6 +111,41 @@ describe('ResizableModal: на весь екран', () => {
   it('вміст знає, що він у вікні зі змінним розміром (редактор виразу росте)', async () => {
     render(<Host />);
     expect((await screen.findByTestId('grow')).textContent).toBe('inside');
+  });
+});
+
+describe('ResizableModal: початковий фокус — як до P44', () => {
+  /**
+   * ⛔ Кнопка «Full screen» стоїть у DOM перед хрестиком, а пастка фокуса Mantine бере перший
+   * табульований вузол — без `tabIndex=-1` до першої взаємодії фокус переїхав би на неї.
+   * Мутаційний доказ (вручну): прибрати `tabIndex={armed || !trapsFocus ? 0 : -1}` — перший тест
+   * червоний (фокус на «Full screen»).
+   */
+  it('без data-autofocus фокус на хрестику, а не на «Full screen»', async () => {
+    render(<Host autofocus={false} />);
+    const close = await screen.findByRole('button', { name: 'Close' });
+
+    await waitFor(() => expect(document.activeElement).toBe(close));
+    // Друга спроба пастки (вона ставить фокус двічі) теж не переїжджає на кнопку.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.activeElement).toBe(close);
+    expect(toggle().tabIndex).toBe(-1);
+  });
+
+  it('з data-autofocus фокус на позначеному полі', async () => {
+    render(<Host />);
+    const code = await screen.findByLabelText('Code');
+
+    await waitFor(() => expect(document.activeElement).toBe(code));
+  });
+
+  it('після першої клавіші кнопка повертається в порядок Tab', async () => {
+    render(<Host autofocus={false} />);
+    const close = await screen.findByRole('button', { name: 'Close' });
+    await waitFor(() => expect(document.activeElement).toBe(close));
+
+    fireEvent.keyDown(close, { key: 'Shift' });
+    expect(toggle().tabIndex).toBe(0);
   });
 });
 

@@ -146,6 +146,28 @@ export function ResizableModal(props: ResizableModalProps): JSX.Element {
 
   const full = forcedFullScreen === true || size.mode === 'full';
 
+  // ⛔ Початковий фокус — там, де був до P44 (`data-autofocus` або хрестик). Пастка фокуса Mantine
+  // бере ПЕРШИЙ табульований вузол, а кнопка «Full screen» стоїть у DOM перед хрестиком (так само,
+  // як на екрані, — порядок Tab збігається з видимим). Тому до першого фокуса всередині вікна
+  // кнопка поза порядком Tab (`tabIndex=-1`) і повертається в нього на першу клавішу чи натиск
+  // усередині вікна. Без пастки (`trapFocus={false}`) початкового фокуса немає — табульована одразу.
+  //
+  // ⚠ НЕ «на перший фокус»: пастка Mantine ставить початковий фокус ДВІЧІ (`useFocusTrap`: і в
+  // `setRef`, і в ефекті, обидва через `setTimeout`), і другий виклик уже знайшов би кнопку.
+  // ⚠ `tabIndex` міняється ще й прямо в DOM, синхронно: обробник Tab пастки (`scopeTab`, на
+  // `document`) і сам браузер читають порядок у ЦЬОМУ ж натисканні, до перерендеру React.
+  const trapsFocus = root.trapFocus !== false;
+  const [armed, setArmed] = useState(false);
+  const toggleButton = useRef<HTMLButtonElement | null>(null);
+  const arm = (): void => {
+    if (armed) return;
+    if (toggleButton.current !== null) toggleButton.current.tabIndex = 0;
+    setArmed(true);
+  };
+  useEffect(() => {
+    if (!opened) setArmed(false);
+  }, [opened]);
+
   const toggle = useCallback(() => {
     commit(size.mode === 'full' ? NormalSize : { mode: 'full' });
   }, [commit, size.mode]);
@@ -225,6 +247,8 @@ export function ResizableModal(props: ResizableModalProps): JSX.Element {
           data-rm-size={full ? 'full' : size.mode}
           data-rm-width={custom ? size.width : undefined}
           data-rm-height={custom ? size.height : undefined}
+          onKeyDownCapture={arm}
+          onPointerDownCapture={arm}
         >
           <Modal.Header>
             {title !== undefined && title !== null && title !== false && (
@@ -242,6 +266,8 @@ export function ResizableModal(props: ResizableModalProps): JSX.Element {
                 title={toggleHint(full)}
                 onClick={toggle}
                 disabled={forcedFullScreen === true}
+                ref={toggleButton}
+                tabIndex={armed || !trapsFocus ? 0 : -1}
                 data-rm-toggle
               />
               {withCloseButton === true && <Modal.CloseButton {...closeButtonProps} />}
