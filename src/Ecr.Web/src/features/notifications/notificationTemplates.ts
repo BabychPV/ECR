@@ -10,10 +10,32 @@ export interface TemplatedEvent {
   readonly subjectKey: string;
   /** Ключ тіла листа в каталозі. */
   readonly bodyKey: string;
+  /** Підстановки, які сервер заповнює в шаблоні цієї події (упорядковані ordinal). */
+  readonly placeholders: readonly string[];
+  /**
+   * ✎ D-451: лист адресний — адресатів рахує сервер із доступу до аркуша (`SheetWorkflowNotifier`), а канал
+   * правила дає лише транспорт пошти. `undefined` — адресати каналу (ролі, `D-263`).
+   */
+  readonly addressed?: 'sheetSubmitted' | 'sheetReturned';
 }
 
 /**
- * Події з власним шаблоном листа (`AN-9`, `PeriodStateJob.NotifyAsync`).
+ * Підстановки, які сервер заповнює в шаблонах подій періоду (`PeriodStateJob.NotifyAsync`:
+ * `{project}` — код проєкту, `{period}` — ключ і межі періоду). Будь-яка інша лишилася б у листі
+ * фігурними дужками.
+ */
+export const TemplatePlaceholders = ['period', 'project'] as const;
+
+/**
+ * ✎ D-451: підстановки листів аркуша (`SheetWorkflowNotifier.Args`): документ, аркуш, період, хто, коли (UTC),
+ * посилання на аркуш за період; «повернуто» — ще й причина.
+ */
+const SheetPlaceholders = ['at', 'by', 'document', 'link', 'period', 'sheet'] as const;
+const SheetReturnedPlaceholders = ['at', 'by', 'document', 'link', 'period', 'reason', 'sheet'] as const;
+
+/**
+ * Події з власним шаблоном листа (`AN-9`, `PeriodStateJob.NotifyAsync`; ✎ D-451 — листи аркуша,
+ * `SheetWorkflowNotifier`).
  *
  * ⛔ Перелік виписаний тут, а не зібраний із `eventKinds` сервера: решта подій (збої задач, збору,
  * експорту, партицій) іде ЗВЕДЕННЯМ збоїв (`NotificationJob`), і окремого шаблону з плейсхолдерами в
@@ -27,20 +49,30 @@ export const TemplatedEvents = [
     eventKind: 'PeriodOpened',
     subjectKey: 'notifications.periodOpened.subject',
     bodyKey: 'notifications.periodOpened.body',
+    placeholders: TemplatePlaceholders,
   },
   {
     eventKind: 'PeriodGraceStarted',
     subjectKey: 'notifications.periodGraceStarted.subject',
     bodyKey: 'notifications.periodGraceStarted.body',
+    placeholders: TemplatePlaceholders,
+  },
+  // ✎ D-451: ключі — ті самі літерали, що `SheetWorkflowNotifier` (SubmittedSubjectKey…).
+  {
+    eventKind: 'SheetSubmitted',
+    subjectKey: 'notifications.sheetSubmitted.subject',
+    bodyKey: 'notifications.sheetSubmitted.body',
+    placeholders: SheetPlaceholders,
+    addressed: 'sheetSubmitted',
+  },
+  {
+    eventKind: 'SheetReturned',
+    subjectKey: 'notifications.sheetReturned.subject',
+    bodyKey: 'notifications.sheetReturned.body',
+    placeholders: SheetReturnedPlaceholders,
+    addressed: 'sheetReturned',
   },
 ] as const satisfies readonly TemplatedEvent[];
-
-/**
- * Підстановки, які сервер заповнює в шаблонах подій періоду (`PeriodStateJob.NotifyAsync`:
- * `{project}` — код проєкту, `{period}` — ключ і межі періоду). Будь-яка інша лишилася б у листі
- * фігурними дужками.
- */
-export const TemplatePlaceholders = ['period', 'project'] as const;
 
 /**
  * Набір плейсхолдерів тексту — без повторів, упорядкований.
@@ -84,12 +116,18 @@ export type TemplateProblem =
  * @param value Введений текст.
  * @param reference Текст мовою за замовчуванням.
  * @param isDefault Чи редагується мова за замовчуванням.
+ * @param allowed Підстановки події (✎ D-451: у кожної події свій набір; за замовчуванням — події періоду).
  */
-export function templateProblem(value: string, reference: string, isDefault: boolean): TemplateProblem | null {
+export function templateProblem(
+  value: string,
+  reference: string,
+  isDefault: boolean,
+  allowed: readonly string[] = TemplatePlaceholders,
+): TemplateProblem | null {
   if (value.trim().length === 0) return isDefault ? { kind: 'empty' } : null;
 
   const actual = placeholdersOf(value);
-  const unknown = actual.filter((name) => !(TemplatePlaceholders as readonly string[]).includes(name));
+  const unknown = actual.filter((name) => !allowed.includes(name));
   if (unknown.length > 0) return { kind: 'unknownPlaceholder', names: unknown };
 
   if (!isDefault) {

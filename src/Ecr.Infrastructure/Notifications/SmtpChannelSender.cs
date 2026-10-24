@@ -160,7 +160,9 @@ public sealed class SmtpChannelSender(
         return [.. users.Select(u => (u.Email.Trim(), LanguageOf(prefs.GetValueOrDefault(u.Id))))];
     }
 
-    private static string LanguageOf(string? valueJson)
+    /// <summary>Мова з налаштування <c>language</c> (JSON-рядок); немає чи зіпсоване — мова каталогу за замовчуванням.</summary>
+    /// <remarks>✎ D-451: спільне з адресними листами аркуша (<c>SheetWorkflowMailStore</c>) — одне правило мови адресата.</remarks>
+    internal static string LanguageOf(string? valueJson)
     {
         try
         {

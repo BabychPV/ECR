@@ -70,7 +70,11 @@ public sealed class SubmitSheetHandler(
 
     // ФВ-5.19: факт підтвердження попереджень — результатна подія аудиту в тій
     // самій транзакції, що й зріз (`IAuditWriter`, C4).
-    IAuditWriter audit)
+    IAuditWriter audit,
+
+    // ✎ D-451: лист «Аркуш подано» погоджувачам поточного кроку — ПІСЛЯ коміту, без права валити подання.
+    // У проді вприснутий завжди (`DependencyInjection`); `null` — тестові фабрики обробника без пошти.
+    SheetWorkflowNotifier? notifier = null)
 {
     /// <summary>
     /// Ключ тексту відмови подання з причиною <c>InsufficientGrantLevel</c> (D-285):
@@ -208,6 +212,13 @@ public sealed class SubmitSheetHandler(
                     .ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
+
+        // ✎ D-451: подання вже закомічене. Лист — лише за ввімкненим правилом матриці, у чергу; збій листа
+        // подання не відкочує й не перетворює `204` на помилку (`SheetWorkflowNotifier` не кидає).
+        if (notifier is not null)
+        {
+            await notifier.SubmittedAsync(documentId, sheetDefId, key, userId, clock.UtcNow, ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -759,8 +770,11 @@ public sealed class SubmitSheetHandler(
         // постановка події в чергу — прибрано за рішенням замовника: лист про
         // кожне подання це шум, а шум вимикають разом із корисними листами.
         //
-        // ⚠ Події черги — лише ЗБОЇ: збір, архівація, стани періодів,
-        // перевищення бюджету перерахунку. Їх зводить `NotificationJob`.
+        // ✎ D-451 (рішення людини 24.10): лист «Аркуш подано» повернуто — але
+        // ВИМКНЕНИЙ за замовчуванням (вмикає правило матриці SheetSubmitted →
+        // канал пошти) і поза цією транзакцією: його ставить `HandleAsync` після
+        // коміту (`SheetWorkflowNotifier`). Тут, під винятковим блокуванням
+        // аркуша, — як і доти, нічого.
 
         // ⛔ Подання МОРОЗИТЬ зріз звітності, якщо в періоді не лишилося
         // неподаних аркушів (`H-23b`, ФВ-9.17). На цьому тримається `ER-C-11`:

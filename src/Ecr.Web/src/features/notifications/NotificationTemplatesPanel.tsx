@@ -18,7 +18,6 @@ import {
 } from '@/features/notifications/api';
 import {
   TemplatedEvents,
-  TemplatePlaceholders,
   templateProblem,
   type TemplatedEvent,
   type TemplateProblem,
@@ -98,7 +97,7 @@ function TemplatesEditor(): JSX.Element {
     queryFn: () => listUiStringsRaw(lang),
   });
 
-  const template = TemplatedEvents.find((item) => item.eventKind === eventKind) ?? TemplatedEvents[0];
+  const template: TemplatedEvent = TemplatedEvents.find((item) => item.eventKind === eventKind) ?? TemplatedEvents[0];
   const isDefault = lang === DefaultLanguage || languages.data?.find((l) => l.code === lang)?.isDefault === true;
 
   const dirty = draft !== null;
@@ -232,18 +231,18 @@ function TemplatesEditor(): JSX.Element {
     body: valueOf(bodyRow, isDefault),
   };
   const form = draft ?? stored;
-  const subjectProblem = templateProblem(form.subject, subjectRow.reference, isDefault);
-  const bodyProblem = templateProblem(form.body, bodyRow.reference, isDefault);
+  const subjectProblem = templateProblem(form.subject, subjectRow.reference, isDefault, template.placeholders);
+  const bodyProblem = templateProblem(form.body, bodyRow.reference, isDefault, template.placeholders);
   const untranslated = !isDefault && (subjectRow.value === null || bodyRow.value === null);
   // ⛔ L9-28: поля замкнені на час запису (`readOnly={save.isPending}` нижче) — `onSuccess` знімає
   // чернетку цілком (`setDraft(null)`), і правка, зроблена під час `PUT`, мовчки зникала б.
-  const placeholders = TemplatePlaceholders.map((name) => `{${name}}`).join(', ');
+  const placeholders = template.placeholders.map((name) => `{${name}}`).join(', ');
 
   return (
     <Stack gap="sm">
       {selectors}
 
-      <Recipients eventKind={eventKind} />
+      <Recipients eventKind={eventKind} addressed={template.addressed} />
 
       {untranslated && (
         <Text size="sm" c="dimmed" data-notification-templates="untranslated">
@@ -262,7 +261,7 @@ function TemplatesEditor(): JSX.Element {
         }
         value={form.subject}
         readOnly={save.isPending}
-        error={problemText(subjectProblem, template.subjectKey)}
+        error={problemText(subjectProblem, template.subjectKey, template.placeholders)}
         onChange={(event) => setDraft({ ...form, subject: event.currentTarget.value })}
       />
       <Textarea
@@ -272,7 +271,7 @@ function TemplatesEditor(): JSX.Element {
         minRows={3}
         value={form.body}
         readOnly={save.isPending}
-        error={problemText(bodyProblem, template.bodyKey)}
+        error={problemText(bodyProblem, template.bodyKey, template.placeholders)}
         onChange={(event) => setDraft({ ...form, body: event.currentTarget.value })}
       />
       <Text size="xs" c="dimmed">
@@ -311,8 +310,17 @@ function TemplatesEditor(): JSX.Element {
  *
  * ⚠ Відмова тут не валить редактор: текст шаблону правиться й без матриці, а «невідомо кому» —
  * сказано словами з повтором, а не порожнім переліком (порожньо ≠ невідомо).
+ *
+ * ✎ D-451: лист аркуша — адресний. Кому — каже текст події (погоджувачі поточного кроку / власник і
+ * учасники), а канал правила лише вмикає пошту: його адреси й ролі не беруться, канал Teams не шле.
  */
-function Recipients({ eventKind }: { readonly eventKind: TemplatedEvent['eventKind'] }): JSX.Element {
+function Recipients({
+  eventKind,
+  addressed,
+}: {
+  readonly eventKind: TemplatedEvent['eventKind'];
+  readonly addressed?: TemplatedEvent['addressed'];
+}): JSX.Element {
   const session = useSession();
   const rules = useQuery<NotificationRuleMatrix>({
     queryKey: NotificationRulesKey,
@@ -381,6 +389,38 @@ function Recipients({ eventKind }: { readonly eventKind: TemplatedEvent['eventKi
     );
   }
 
+  if (addressed !== undefined) {
+    return (
+      <Stack gap="xs" data-notification-recipients="addressed">
+        {heading}
+        <Text size="sm">
+          {addressed === 'sheetSubmitted'
+            ? t('notificationTemplates.recipientsSheetSubmitted')
+            : t('notificationTemplates.recipientsSheetReturned')}
+        </Text>
+        <List size="sm" spacing="xs">
+          {enabled.map((rule) => {
+            const channel = byId.get(rule.channelId) as NotificationChannel;
+            const notes: string[] = [];
+
+            if (channel.kind !== 'Smtp') notes.push(t('notificationTemplates.recipientsTeamsIgnored'));
+            else notes.push(t('notificationTemplates.recipientsTransportOnly'));
+            if (rule.minSeverity !== 'Info') notes.push(t('notificationTemplates.recipientsFiltered'));
+            if (channel.kind === 'Smtp' && !channel.transportConfigured) {
+              notes.push(t('notificationTemplates.recipientsNoTransport'));
+            }
+
+            return (
+              <List.Item key={rule.channelId} data-channel-id={rule.channelId}>
+                {channel.name} — {notes.join('; ')}
+              </List.Item>
+            );
+          })}
+        </List>
+      </Stack>
+    );
+  }
+
   return (
     <Stack gap="xs" data-notification-recipients="list">
       {heading}
@@ -431,17 +471,19 @@ function valueOf(row: UiStringRawRow, isDefault: boolean): string {
 /** Підпис події — літерали, щоб сторож ключів бачив кожен рядок. */
 function eventLabel(kind: TemplatedEvent['eventKind']): string {
   if (kind === 'PeriodGraceStarted') return t('notifications.event.PeriodGraceStarted');
+  if (kind === 'SheetSubmitted') return t('notifications.event.SheetSubmitted');
+  if (kind === 'SheetReturned') return t('notifications.event.SheetReturned');
 
   return t('notifications.event.PeriodOpened');
 }
 
-function problemText(problem: TemplateProblem | null, key: string): string | undefined {
+function problemText(problem: TemplateProblem | null, key: string, allowed: readonly string[]): string | undefined {
   if (problem === null) return undefined;
   if (problem.kind === 'empty') return t('notificationTemplates.problemEmpty');
   if (problem.kind === 'unknownPlaceholder') {
     return t('notificationTemplates.problemUnknownPlaceholder', {
       names: problem.names.map((name) => `{${name}}`).join(', '),
-      allowed: TemplatePlaceholders.map((name) => `{${name}}`).join(', '),
+      allowed: allowed.map((name) => `{${name}}`).join(', '),
     });
   }
 

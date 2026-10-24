@@ -21,7 +21,11 @@ public sealed class ApproveSheetHandler(
 
     // ✎ D-442: блокування аркуша під затвердження і новий зріз після правки погоджувача. У проді вприснуте
     // завжди (`DependencyInjection`); `null` — лише тестові фабрики обробника без сховищ комірок.
-    ApprovalSnapshotRefresh? snapshotRefresh = null)
+    ApprovalSnapshotRefresh? snapshotRefresh = null,
+
+    // ✎ D-451: лист «Аркуш повернуто» після відхилення — ПІСЛЯ коміту, без права валити дію; `null` — тестові
+    // фабрики обробника без пошти.
+    SheetWorkflowNotifier? notifier = null)
 {
     /// <summary>Затверджує або відхиляє аркуш.</summary>
     /// <param name="documentId">Документ.</param>
@@ -109,6 +113,14 @@ public sealed class ApproveSheetHandler(
                     .ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
+
+        // ✎ D-451: відхилення (`Submitted → Rejected`, `ApprovalAction.Reject`) — повернення погоджувачем; лист
+        // власнику й учасникам Write/Submit, за ввімкненим правилом, ПІСЛЯ коміту. Затвердження листа не дає.
+        if (!approved && notifier is not null)
+        {
+            await notifier.ReturnedAsync(documentId, sheetDefId, key, userId, clock.UtcNow, reason, ct)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>Рішення про затвердження (грант, стан, роль поточного кроку маршруту); відмова — 403.</summary>

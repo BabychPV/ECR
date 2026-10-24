@@ -9554,7 +9554,9 @@
           "CollectionFailed",
           "ExportFailed",
           "PeriodOpened",
-          "PeriodGraceStarted"
+          "PeriodGraceStarted",
+          "SheetSubmitted",
+          "SheetReturned"
         ]
       },
       "NotificationRuleMatrix": {

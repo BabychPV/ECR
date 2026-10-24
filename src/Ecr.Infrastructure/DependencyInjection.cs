@@ -434,6 +434,9 @@ public static class DependencyInjection
         // дає рядок `Failed` у журналі доставок, не тишу.
         services.AddScoped<INotificationDispatchStore, Notifications.NotificationDispatchStore>();
         services.AddScoped<Notifications.NotificationDispatcher>();
+
+        // ✎ D-451: факти й кандидати адресних листів аркуша (подано/повернуто).
+        services.AddScoped<ISheetWorkflowMailStore, Notifications.SheetWorkflowMailStore>();
         services.AddScoped<INotificationChannelSender, Notifications.TeamsWebhookSender>();
 
         // ⚠ SMTP-канал іде поверх транспорту ПРОЦЕСУ, вибраного вище: адресатів
