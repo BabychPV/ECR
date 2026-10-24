@@ -475,7 +475,9 @@ public sealed class DocumentStore(
         var owners = documents
             .GroupBy(d => d.CreatedByUserId)
             .Select(g => new { UserId = g.Key, Count = g.Count() })
-            .Join(db.Users, g => g.UserId, u => u.Id, (g, u) => new OwnerRow(g.UserId, u.DisplayName, g.Count));
+            // ⚠ Анонімний тип, а не позиційний record: EF не перекладає доступ до властивості, заданої лише
+            // конструктором (`OrderByDescending(o => o.Count)` над `new Row(a, b, c)`) — так вибір власників давав 500.
+            .Join(db.Users, g => g.UserId, u => u.Id, (g, u) => new { g.UserId, u.DisplayName, g.Count });
 
         if (nameQuery is { Length: > 0 } term)
         {
@@ -498,9 +500,6 @@ public sealed class DocumentStore(
 
         return [.. rows.Select(o => new DocumentOwnerOption(o.UserId, o.DisplayName, o.Count))];
     }
-
-    /// <summary>✎ D-450: рядок вибору власників (названий тип — як <see cref="DocumentRow"/>).</summary>
-    private sealed record OwnerRow(int UserId, string DisplayName, int Count);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<CompositionViolation>> ValidateCompositionAsync(

@@ -119,8 +119,11 @@ public sealed class ListDocumentsHandler(
                 });
         }
 
-        (filter, var visibleProjects, var scopes, var participant, var bounded) =
-            await ReaderBoundsAsync(profile, projectId, periodKey, filter, ct)
+        // ⛔ ФВ-6.14: лише проєкти, де є і грант, і саме право перегляду — оператор з областю «A» бачить документи
+        // лише A. Перевірка в проєкті — у ТОМУ САМОМУ методі, що й вхідна (сторож `ProjectPermissionCheckTests`).
+        var visibleProjects = ReadableProjects(profile, Permission);
+        (filter, var scopes, var participant, var bounded) =
+            await ReaderBoundsAsync(profile, visibleProjects, projectId, periodKey, filter, ct)
             .ConfigureAwait(false);
 
         var all = await documents
@@ -167,9 +170,14 @@ public sealed class ListDocumentsHandler(
     /// з порахованими межами. ✎ D-450: винесено з переліку, щоб вибір власників (<see cref="HandleOwnersAsync"/>) ішов
     /// РІВНО тим самим шляхом видимості, а не власним, ширшим.
     /// </summary>
-    private async Task<(DocumentListFilter Filter, HashSet<int> VisibleProjects, IReadOnlyDictionary<int, DocumentReadScope>? Scopes,
+    /// <remarks>
+    /// <c>visibleProjects</c> — проєкти з грантом і правом (<see cref="ReadableProjects(AccessProfile, string)"/>) —
+    /// рахує викликач, у тому самому методі, що й вхідну перевірку (ФВ-6.14).
+    /// </remarks>
+    private async Task<(DocumentListFilter Filter, IReadOnlyDictionary<int, DocumentReadScope>? Scopes,
         bool Participant, HashSet<long> Bounded)> ReaderBoundsAsync(
-        AccessProfile profile, int? projectId, int? periodKey, DocumentListFilter filter, CancellationToken ct)
+        AccessProfile profile, HashSet<int> visibleProjects, int? projectId, int? periodKey, DocumentListFilter filter,
+        CancellationToken ct)
     {
         // ⛔ Гранти йдуть у ЗАПИТ, не лише в постфільтр (аудит 2026-09-16, §3.3).
         // Постфільтр сам по собі давав дві діри: `TotalCount` рахувався по ВСІХ
@@ -177,9 +185,8 @@ public sealed class ListDocumentsHandler(
         // документів у чужих, — а сторінка віддавала менше за `page.Limit`
         // видимих елементів, поки `NextCursor` вказував далі в НЕфільтрованій
         // послідовності.
-        // ⛔ ФВ-6.14: лише проєкти, де є і грант, і саме право перегляду —
-        // оператор з областю «A» бачить документи лише A.
-        var visibleProjects = ReadableProjects(profile, Permission);
+        // ⛔ ФВ-6.14: `visibleProjects` — лише проєкти, де є і грант, і саме право
+        // перегляду (рахує викликач).
 
         // ⛔ Фільтр за станом рахується лише по аркушах, які читач бачить: інакше `state=Rejected`
         // знаходить документ, відхилений схованим аркушем, — оракул (смуга зведення цього не показує).
@@ -235,7 +242,7 @@ public sealed class ListDocumentsHandler(
             };
         }
 
-        return (filter, visibleProjects, scopes, participant, bounded);
+        return (filter, scopes, participant, bounded);
     }
 
     /// <summary>Стеля кількості людей у виборі власника (✎ D-450): далі — пошук за іменем.</summary>
@@ -258,7 +265,9 @@ public sealed class ListDocumentsHandler(
         int? projectId, int? periodKey, string? query, CancellationToken ct)
     {
         var profile = await ProfileAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
-        var (filter, visibleProjects, _, _, _) = await ReaderBoundsAsync(profile, projectId, periodKey, default, ct)
+        // ⛔ ФВ-6.14: вхід «хоч у якомусь проєкті» — і тут же перевірка в проєкті: лише проєкти з грантом і правом.
+        var visibleProjects = ReadableProjects(profile, Permission);
+        var (filter, _, _, _) = await ReaderBoundsAsync(profile, visibleProjects, projectId, periodKey, default, ct)
             .ConfigureAwait(false);
 
         var owners = await documents
@@ -284,11 +293,9 @@ public sealed class ListDocumentsHandler(
             throw new BusinessRuleException(
                 ErrorCodes.RequestInvalid,
                 "ownerUserId має бути додатним цілим.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REQ-0422.ownerUserId",
-                    ["ownerUserId"] = ownerUserId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+                // ⚠ Без ехо значення в деталях: каталог його не підставляє, а людина знає, що надіслала (T1-01,
+                // сторож `DenyLeakGuardTests` — Deny-контекст файлу).
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.ownerUserId" });
         }
 
         if (mine)
