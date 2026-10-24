@@ -4131,6 +4131,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/periods/{id}/reopen` | `Period.Reopen` | 3 |
 | `GET` | `/api/v1/documents` | `Document.View` | 1 |
 | `GET` | `/api/v1/documents/summary` | `Document.View` | 6 |
+| `GET` | `/api/v1/documents/owners` | `Document.View` (✎ D-450: власники лише серед видимих викликачу документів; без імені — поза переліком) | 6 |
 | `POST` | `/api/v1/documents` | `Document.Create` | 1 |
 | `GET` | `/api/v1/documents/{id}` | `Document.View` | 1 |
 | `DELETE` | `/api/v1/documents/{id}` | `Document.Delete` | 6 |
@@ -4167,6 +4168,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/me/edit-assignments` | — (лише рядки самого викликача) | 8 |
 | `POST` | `/api/v1/documents/{id}/owner` | — (власник документа ∨ `Manage` проєкту; обробник; D-443: передача власника, подія `DocumentOwnerTransferred`) | 8 |
 | `GET` | `/api/v1/me/approval-queue` | — (лише аркуші, які викликач може затвердити зараз; обробник) | 8 |
+| `GET` | `/api/v1/me/returned-sheets` | — (✎ D-449: лише аркуші, повернені на доопрацювання власнику документа, учаснику з наданням ≥ Write або останньому подавачу з правом писати; обробник) | 8 |
 | `GET` | `/api/v1/me/editor-sets` | — (лише власні набори) | 8 |
 | `POST` | `/api/v1/me/editor-sets` | — (лише власні набори) | 8 |
 | `PUT` | `/api/v1/me/editor-sets/{setId}` | — (лише власні набори; чужий — 404) | 8 |
