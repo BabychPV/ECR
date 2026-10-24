@@ -1,4 +1,4 @@
-import { useEffect, type JSX } from 'react';
+import type { JSX } from 'react';
 import { Anchor, Badge, Button, Group, Stack, Text, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useNavigate } from 'react-router-dom';
@@ -17,12 +17,10 @@ import { ListPage } from '@/shared/ui/ListPage';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
+import { humanizeJobId } from '@/features/workflow/jobLabel';
 
-/**
- * Людський вигляд `jobId` для тосту збору — за `import()` (`D-132`): потрібен лише після кліку «Collect», а перелік
- * типів задач тягнувся в маршрут із кожним відкриттям. Вантажиться заздалегідь, щойно на екрані є кнопки збору.
- */
-const loadJobLabel = () => import('@/features/workflow/jobLabel');
+// ✎ Людський вигляд `jobId` для тосту збору — статично: лінивий варіант (~0.8 КБ виграшу) тримав спінер «Collect»
+// до підвантаження чанка, тобто змінював поведінку. Маршрут і так під ціллю (≈237.4 КБ при межі 250, `D-132`).
 
 /**
  * Конфігуратор джерел і ручний запуск збору.
@@ -91,12 +89,6 @@ export function SourcesPage(): JSX.Element {
   // L9-18: під симуляцією збір (POST) сервер однаково відхилить — кнопок «Collect» тоді немає.
   const mayCollect = can(session.data, 'Integration.Manage') && session.data?.isSimulation !== true;
 
-  // Чанк підпису задачі — заздалегідь, щойно є кнопки збору: тост після кліку не чекає мережі.
-  const collectable = mayCollect && hasEntities;
-  useEffect(() => {
-    if (collectable) void loadJobLabel();
-  }, [collectable]);
-
   const collect = useMutation({
     mutationFn: (id: number) => {
       const to = new Date();
@@ -107,17 +99,11 @@ export function SourcesPage(): JSX.Element {
         toUtc: to.toISOString(),
       } satisfies CollectRequest);
     },
-    onSuccess: async (job) => {
+    onSuccess: (job) => {
       // ⚠ 202 з jobId: збір ходить по мережі до чужої системи, і його
       // тривалість визначає не наш код.
       // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у тості, сам `jobId` — не.
-      // ⚠ Чанк не доїхав (мережа впала саме зараз) — сирий `jobId`, як і для невпізнаного формату в
-      // `humanizeJobId`: збір уже поставлено, і тост «не вдалося» замість «поставлено» збрехав би.
-      const label = await loadJobLabel().then(
-        (module) => module.humanizeJobId(job.jobId),
-        () => job.jobId,
-      );
-      const message = t('sources.queued', { job: label });
+      const message = t('sources.queued', { job: humanizeJobId(job.jobId) });
 
       // P3 живого проходу: тост без шляху до задачі — людина не бачила, чим збір скінчився.
       // ⚠ Тости живуть ПОЗА `RouterProvider` (`App.tsx`), тож `Link` там без контексту —
