@@ -54,6 +54,7 @@ BEGIN
         IsLateEdit      bit            NOT NULL CONSTRAINT DF_CellChange_Late DEFAULT(0),
         CorrelationId   nvarchar(64)   NULL,
         IsOutOfWindow   bit            NOT NULL CONSTRAINT DF_CellChange_OutOfWindow DEFAULT(0),
+        IsOverwrite     bit            NOT NULL CONSTRAINT DF_CellChange_Overwrite DEFAULT(0),
         CONSTRAINT PK_CellChange PRIMARY KEY CLUSTERED (ChangedAt, Id) ON ps_AuditByMonth(ChangedAt)
     ) ON ps_AuditByMonth(ChangedAt);
 END
@@ -66,6 +67,18 @@ GO
 IF COL_LENGTH(N'aud.CellChange', N'IsOutOfWindow') IS NULL
     ALTER TABLE aud.CellChange
         ADD IsOutOfWindow bit NOT NULL CONSTRAINT DF_CellChange_OutOfWindow DEFAULT(0);
+GO
+
+-- D-447: свідомий перезапис рядка, зміненого кимось іншим після експорту книги (AN-114/D-338),
+-- окремим прапорцем, а не лише `Origin = ImportOverwrite`: на поданому аркуші погоджувача
+-- `Origin = ApproverEdit` (D-442/D-445), і одна колонка обидві позначки не вміщувала.
+-- Апгрейд наявних баз — як IsOutOfWindow вище: ADD з DEFAULT(0), наявні рядки лишаються 0
+-- (до D-447 звичайний перезапис читається з `Origin = ImportOverwrite`, перезапис погоджувача
+-- не зберігся ніде). ⛔ Дзеркала — `arc.CellChange` і ціль SWITCH `arc.AuditCellChange`
+-- (12-archive-tables.sql): та сама колонка ТИМ САМИМ порядком, інакше SWITCH падає (Msg 4943/4904).
+IF COL_LENGTH(N'aud.CellChange', N'IsOverwrite') IS NULL
+    ALTER TABLE aud.CellChange
+        ADD IsOverwrite bit NOT NULL CONSTRAINT DF_CellChange_Overwrite DEFAULT(0);
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_Cell'

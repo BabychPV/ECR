@@ -2095,6 +2095,84 @@ public sealed class PatchCellsTests
             Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// ✎ D-447: імпорт погоджувача поточного кроку на поданому аркуші, рядок перезаписано поверх чужої правки
+    /// (AN-114/D-338) — у журналі ОБИДВІ позначки: <c>Origin = ApproverEdit</c> і <c>IsOverwrite = true</c>.
+    /// Рядок без згоди на перезапис — <c>ApproverEdit</c> без позначки перезапису.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: у <c>BuildAuditRecords</c> не передати <c>IsOverwrite</c> (або лишити умову
+    /// <c>!approverEdit</c> у <c>IsOverwriteOf</c>) — перший рядок без позначки, тест червоний; повернути
+    /// <c>ImportOverwrite</c> погоджувачу — червоніє <c>Origin</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-447")]
+    public void D447_погоджувач_що_перезаписав_чужу_правку_має_обидві_позначки()
+    {
+        var records = AuditFor(approverEdit: true);
+
+        var overwritten = records.Single(r => r.RowKey == "R1");
+        Assert.Equal(CellChangeOrigins.ApproverEdit, overwritten.Origin);
+        Assert.True(overwritten.IsOverwrite);
+
+        var plain = records.Single(r => r.RowKey == "R2");
+        Assert.Equal(CellChangeOrigins.ApproverEdit, plain.Origin);
+        Assert.False(plain.IsOverwrite);
+    }
+
+    /// <summary>
+    /// ✎ D-447: звичайний імпорт (не погоджувач) — походження перезапису лишається <c>ImportOverwrite</c>, як
+    /// до D-447 (фільтри й читачі журналу не ламаються), і прапорець <c>IsOverwrite</c> теж стоїть.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Decision", "D-447")]
+    public void D447_звичайний_перезапис_лишає_ImportOverwrite_і_ставить_прапорець()
+    {
+        var records = AuditFor(approverEdit: false);
+
+        var overwritten = records.Single(r => r.RowKey == "R1");
+        Assert.Equal(CellChangeOrigins.ImportOverwrite, overwritten.Origin);
+        Assert.True(overwritten.IsOverwrite);
+
+        var plain = records.Single(r => r.RowKey == "R2");
+        Assert.Equal(CellChangeOrigins.Import, plain.Origin);
+        Assert.False(plain.IsOverwrite);
+    }
+
+    /// <summary>
+    /// Журнал імпорту двох рядків (<c>R1</c> перезаписано за згодою, <c>R2</c> — ні): оновлення в <c>R1</c> і
+    /// очищення в <c>R2</c>, щоб обидві гілки <c>BuildAuditRecords</c> (upsert і delete) були під перевіркою.
+    /// </summary>
+    private static List<CellChangeRecord> AuditFor(bool approverEdit)
+    {
+        var period = PeriodKey.Parse(Period);
+        var r1 = new CellAddress(period, 1001L, VolumeColumnId);
+        var r2 = new CellAddress(period, 1002L, VolumeColumnId);
+
+        var records = PatchCellsHandler.BuildAuditRecords(
+            new PatchCellsRequest(TableInstance, Period, CellChangeOrigins.Import, []),
+            [new CellRecord(r1, 3, new CellValueData { ValueNumeric = 7m })],
+            [r2],
+            userId: 1,
+            now: new DateTime(2026, 10, 24, 10, 0, 0, DateTimeKind.Utc),
+            documentId: 700,
+            rowKeyById: new Dictionary<long, string> { [1001L] = "R1", [1002L] = "R2" },
+            previous: new Dictionary<CellAddress, CellValueData>
+            {
+                [r1] = new() { ValueNumeric = 5m },
+                [r2] = new() { ValueNumeric = 9m },
+            },
+            isLateEdit: false,
+            correlationId: null,
+            overwrittenRowKeys: new HashSet<string>(StringComparer.Ordinal) { "R1" },
+            approverEdit: approverEdit);
+
+        Assert.Equal(2, records.Count);
+        return records;
+    }
+
     /// <summary>Записи, які обробник віддав у журнал аудиту.</summary>
     private IReadOnlyList<CellChangeRecord> Audited()
     {

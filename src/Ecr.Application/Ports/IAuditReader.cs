@@ -42,6 +42,11 @@ namespace Ecr.Application.Ports;
 /// <c>arc.usp_ArchiveAudit</c>), а не з гарячої <c>aud.CellChange</c>. Лише позначка джерела: значення, автор і
 /// межі читання ті самі, що в гарячого рядка.
 /// </param>
+/// <param name="IsOverwrite">
+/// ✎ D-447: правка свідомо перезаписала рядок, змінений кимось іншим після експорту книги
+/// (<c>aud.CellChange.IsOverwrite</c>). Окремо від <paramref name="Origin"/>: у погоджувача
+/// <c>Origin = ApproverEdit</c>, і перезапис видно лише з цього прапорця.
+/// </param>
 public sealed record CellChangeView(
     DateTime ChangedAt,
     int PeriodKey,
@@ -65,7 +70,8 @@ public sealed record CellChangeView(
     string? TableCode = null,
     Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null,
     Ecr.Domain.ValueObjects.LocalizedText? RowLabelL10n = null,
-    bool FromArchive = false);
+    bool FromArchive = false,
+    bool IsOverwrite = false);
 
 /// <summary>Підсумок журналу змін комірок за вікном (UI-38, C2) — лише те, що читач бачить.</summary>
 /// <param name="Total">Усього змін у вікні й за фільтром.</param>

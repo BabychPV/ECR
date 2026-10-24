@@ -1289,6 +1289,11 @@
             "description": "Правка за політикою `Warn` поза вікном доступу (`ФВ-2.16`, `D-239`).",
             "type": "boolean"
           },
+          "isOverwrite": {
+            "default": false,
+            "description": "✎ D-447: правка свідомо перезаписала рядок, змінений кимось іншим після експорту книги\n(`aud.CellChange.IsOverwrite`). Окремо від Origin: у погоджувача\n`Origin = ApproverEdit`, і перезапис видно лише з цього прапорця.",
+            "type": "boolean"
+          },
           "newValue": {
             "description": "Нове значення.",
             "type": [

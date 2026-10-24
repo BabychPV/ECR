@@ -3144,8 +3144,12 @@ public sealed partial class PatchCellsHandler(
     /// </list>
     /// Сховище (<c>AuditWriter</c>) при цьому писало всі три чесно — дефект
     /// був вище, у тому, що йому передавали.
+    /// <para>
+    /// ✎ D-447: <c>internal</c> — щоб позначки журналу (походження + перезапис) перевірялися тестом напряму,
+    /// без сценарію книги з десятком підмін сховища.
+    /// </para>
     /// </remarks>
-    private static List<CellChangeRecord> BuildAuditRecords(
+    internal static List<CellChangeRecord> BuildAuditRecords(
         PatchCellsRequest request, List<CellRecord> upserts,
         List<CellAddress> deletes, int userId, DateTime now, long documentId,
         IReadOnlyDictionary<long, string> rowKeyById,
@@ -3173,10 +3177,17 @@ public sealed partial class PatchCellsHandler(
         // `aud.CellChange.Origin` без міграції (nvarchar(32) його вміщує).
         // ⚠ D-445: на поданому аркуші погоджувача перемагає `ApproverEdit` — одна колонка `Origin` не вміщує
         // обидві позначки, а «правка погоджувача» — вимога D-442 до кожної правки поданого аркуша.
+        // ✎ D-447: тому факт перезапису чужої правки несе ОКРЕМИЙ прапорець `aud.CellChange.IsOverwrite`
+        // (див. `IsOverwriteOf`), а `Origin` лишається як був: `ImportOverwrite` для звичайного перезапису
+        // (фільтри й читачі журналу не ламаються), `ApproverEdit` — для погоджувача.
         string OriginOf(string rowKey) =>
-            !approverEdit && overwrittenRowKeys is not null && overwrittenRowKeys.Contains(rowKey)
+            !approverEdit && IsOverwriteOf(rowKey)
                 ? CellChangeOrigins.ImportOverwrite
                 : batchOrigin;
+
+        // ✎ D-447: «перезаписав чужу правку» — на КОЖНОМУ перезаписаному рядку, і звичайному, і погоджувача.
+        bool IsOverwriteOf(string rowKey) =>
+            overwrittenRowKeys is not null && overwrittenRowKeys.Contains(rowKey);
 
         foreach (var u in upserts)
         {
@@ -3210,7 +3221,8 @@ public sealed partial class PatchCellsHandler(
                 OldValue: Was(previous, u.Address), NewValue: Describe(u.Value),
                 userId, OriginOf(rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty)), isLateEdit,
                 CorrelationId: correlationId,
-                IsOutOfWindow: outOfWindow?.Contains(u.Address) == true));
+                IsOutOfWindow: outOfWindow?.Contains(u.Address) == true,
+                IsOverwrite: IsOverwriteOf(rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty))));
         }
 
         foreach (var d in deletes)
@@ -3229,7 +3241,8 @@ public sealed partial class PatchCellsHandler(
                 OldValue: Was(previous, d), NewValue: null,
                 userId, OriginOf(rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty)), isLateEdit,
                 CorrelationId: correlationId,
-                IsOutOfWindow: outOfWindow?.Contains(d) == true));
+                IsOutOfWindow: outOfWindow?.Contains(d) == true,
+                IsOverwrite: IsOverwriteOf(rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty))));
         }
 
         return records;

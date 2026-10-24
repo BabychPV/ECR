@@ -22539,6 +22539,13 @@ export interface components {
              * @default false
              */
             isOutOfWindow: boolean;
+            /**
+             * @description ✎ D-447: правка свідомо перезаписала рядок, змінений кимось іншим після експорту книги
+             *     (`aud.CellChange.IsOverwrite`). Окремо від Origin: у погоджувача
+             *     `Origin = ApproverEdit`, і перезапис видно лише з цього прапорця.
+             * @default false
+             */
+            isOverwrite: boolean;
             /** @description Нове значення. */
             newValue: null | string;
             /** @description Старе значення. */
