@@ -184,6 +184,37 @@ function Origin({ origin }: { readonly origin: string }): JSX.Element {
   );
 }
 
+const OverwritePath = 'M4 12a8 8 0 0 1 14-5.3M20 4v4h-4M20 12a8 8 0 0 1-14 5.3M4 20v-4h4';
+
+/**
+ * ✎ D-447: «перезаписав чужу правку» — окремий прапорець журналу (`aud.CellChange.IsOverwrite`). Звичайний
+ * перезапис і так видно з походження (`ImportOverwrite`), тож позначка — лише там, де походження інше
+ * (правка погоджувача, `ApproverEdit`): двох однакових позначок в одному рядку не буває.
+ */
+export function showsOverwriteMark(change: Pick<CellChange, 'isOverwrite' | 'origin'>): boolean {
+  return change.isOverwrite && change.origin !== 'ImportOverwrite';
+}
+
+function OriginCell({ change }: { readonly change: CellChange }): JSX.Element {
+  return (
+    <Group gap="xs" wrap="nowrap">
+      <Origin origin={change.origin} />
+      {showsOverwriteMark(change) && (
+        <Badge
+          size="xs"
+          variant="outline"
+          color="statusWarning"
+          leftSection={<Glyph d={OverwritePath} size={10} />}
+          title={t('audit.overwriteHint')}
+          data-audit-overwrite=""
+        >
+          {t('audit.overwriteMark')}
+        </Badge>
+      )}
+    </Group>
+  );
+}
+
 function Late({ change }: { readonly change: CellChange }): ReactNode {
   return (
     <Group gap="xs" wrap="nowrap">
@@ -272,7 +303,7 @@ export const CellChangesTable = memo(function CellChangesTable({
               <WasBecomes change={change} />
             </Table.Td>
             <Table.Td>
-              <Origin origin={change.origin} />
+              <OriginCell change={change} />
             </Table.Td>
             <Table.Td>
               <Late change={change} />

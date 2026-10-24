@@ -91,9 +91,12 @@ public sealed class GetDocumentListSummaryHandler(
             return null;
         }
 
+        // ✎ D-446: застарілі результати — лише документи, видимі учасникові цілком (та сама умова, що виключає частково
+        // схований документ-надання з фільтра `resultsStale` у переліку).
         return new ParticipantSummaryScope(
             [.. scopes.Keys],
             profile.DeniedProjectIds(),
-            [.. scopes.SelectMany(s => s.Value.HiddenSheetCodes().Select(code => (s.Key, code)))]);
+            [.. scopes.SelectMany(s => s.Value.HiddenSheetCodes().Select(code => (s.Key, code)))],
+            [.. scopes.Where(s => !DocumentSheetVisibility.IsProjectNarrowed(s.Value)).Select(s => s.Key).Order()]);
     }
 }

@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { MappingPreview, SourceEntityStatus } from '@/api/types';
 import { WindowDays, fetchMappingPreview, windowFrom } from '@/features/mapping/api';
-import { CreateMappingModal } from '@/features/mapping/CreateMappingModal';
+import { LazyCreateMappingModal } from '@/features/mapping/lazyCreateMappingModal';
 import { MappingGaps } from '@/features/mapping/MappingGaps';
 import { MappingRows } from '@/features/mapping/MappingRows';
 import { can, useSession } from '@/shared/session/useSession';
@@ -88,7 +88,7 @@ export function MappingPreviewPage(): JSX.Element {
       />
 
       {entityId !== null && (
-        <CreateMappingModal
+        <LazyCreateMappingModal
           sourceEntityId={entityId}
           // ⚠ З'єднання береться з уже завантаженого переліку сутностей —
           // окремого запиту сторінка не робить. Доки перелік не прийшов,

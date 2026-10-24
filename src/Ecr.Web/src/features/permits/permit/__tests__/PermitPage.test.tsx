@@ -40,7 +40,7 @@ vi.mock('@/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/client')>()),
   apiFetch: vi.fn(),
 }));
-vi.mock('../../api/permitsApi', () => ({
+vi.mock('@/features/permits/api/permitsApi', () => ({
   getPermit: vi.fn(),
   updatePermit: vi.fn(),
   activatePermit: vi.fn(),
@@ -48,7 +48,7 @@ vi.mock('../../api/permitsApi', () => ({
   renewPermit: vi.fn(),
   deletePermit: vi.fn(),
 }));
-vi.mock('../../api/typesApi', () => ({ getPermitType: vi.fn() }));
+vi.mock('@/features/permits/api/typesApi', () => ({ getPermitType: vi.fn() }));
 vi.mock('@/features/registries/rows/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/features/registries/rows/api')>()),
   getRegistryRows: vi.fn(),

@@ -55,12 +55,20 @@ public sealed record SummaryRestrictions(
 /// <param name="HiddenSheets">
 /// Пари «документ, код аркуша», яких учасник у ЦЬОМУ документі не бачить: межі документа-надання власні (не проєкту).
 /// </param>
+/// <param name="WholeDocumentIds">
+/// ✎ D-446: документи-надання, які учасник бачить ЦІЛКОМ (жодного схованого аркуша, таблиці чи колонки), — лише вони
+/// входять у лічильники застарілих результатів (та сама множина, що в переліку під фільтром <c>resultsStale</c>);
+/// <c>null</c> — жодного.
+/// </param>
 /// <remarks>
-/// ⛔ Документ, видимий лише наданням, не потрапляє ні в «З зауваженнями», ні в застарілі результати: збережений
-/// підсумок і застарілість — по ВСЬОМУ документу (як для проєктів зі звуженням); перелік так само не віддає для нього
-/// позначки пізніх правок і не додає його під фільтрами <c>hasLateEdits</c>/<c>resultsStale</c>.
+/// ⛔ Документ, видимий лише наданням, не потрапляє в «З зауваженнями»: збережений підсумок — по ВСЬОМУ документу (як
+/// для проєктів зі звуженням).
+/// ✎ D-446: застарілість — теж по всьому документу, тож у лічильник застарілих документ-надання входить лише тоді, коли
+/// учасник бачить його цілком (<paramref name="WholeDocumentIds"/>); частково схований — ні тут, ні у фільтрі переліку
+/// <c>resultsStale</c> (рядок — <c>null</c>). Лічильника пізніх правок смуга не має.
 /// </remarks>
 public sealed record ParticipantSummaryScope(
     IReadOnlyCollection<long> DocumentIds,
     IReadOnlyCollection<int> DeniedProjectIds,
-    IReadOnlyCollection<(long DocumentId, string SheetCode)> HiddenSheets);
+    IReadOnlyCollection<(long DocumentId, string SheetCode)> HiddenSheets,
+    IReadOnlyCollection<long>? WholeDocumentIds = null);

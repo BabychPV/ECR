@@ -4,7 +4,7 @@ import type { DocumentSummary } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
 import { t } from '@/shared/i18n';
 import { isActiveJob } from '@/features/jobs/myTasks';
-import { hasProjectGrant } from './BusinessKeyChangeAction';
+import { hasProjectGrant } from './projectGrant';
 import { useMigrationJobCompletion } from './useMigrationJobCompletion';
 import { MigrateDocumentVersionPermission } from './versionMigrationApi';
 

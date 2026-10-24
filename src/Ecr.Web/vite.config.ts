@@ -162,6 +162,11 @@ export default defineConfig({
      *   • те саме з `onlyExplicitManualChunks: true`: ручний чанк Rollup рахує окремим статичним входом, і
      *     спільне ядро Mantine виїжджає з вхідного чанка в третій файл (~35 КБ) — +2 КБ на кожному маршруті.
      * `experimentalMinChunkSize` (1/4/20 КБ) — +4…34 КБ на 39–45 маршрутах. Лікується лише графом імпортів.
+     *
+     * ✎ 2026-10-24 (p43): вилікувано графом імпортів — `UserAccessEditor.tsx` реекспортує `Select`
+     * (`SelectChunkAnchor`, коментар там), набори входів ядра Combobox і `Select` збіглися, окремого
+     * `OptionsDropdown-*.js` більше немає. Замір: −0.5 КБ gzip на 25 маршрутах із `Select` (напр. `JobsPage`
+     * 238.5 → 238.0, `PermitListsPage` 236.4 → 235.8), жоден маршрут не важчий.
      */
   },
   server: {

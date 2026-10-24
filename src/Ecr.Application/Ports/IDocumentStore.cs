@@ -66,6 +66,7 @@ namespace Ecr.Application.Ports;
 /// вхідну комірку (або довідник, який читає методологія). ВИВОДИТЬСЯ запитом, не зберігається. Документ без
 /// результатів — <c>false</c>. ⛔ <c>null</c> — період не задано, або читач має обмеження нижче проєкту
 /// (<c>DocumentSheetVisibility.For</c>): «застаріло за видимими входами» не доводить, що застарів видимий вихід.
+/// ✎ D-446: другий випадок називає <paramref name="ResultsStaleUndetermined"/>.
 /// </param>
 /// <param name="ResultsStaleSince">Відколи застаріло (перша правка входу після прогону, UTC); <c>null</c> — не застаріло чи невідомо.</param>
 /// <param name="TemplateVersion">
@@ -86,6 +87,14 @@ namespace Ecr.Application.Ports;
 /// nullable-enum у схемі додає <c>null</c> у спільний <c>PeriodKind</c> і ламає типи клієнта) — адитивне поле;
 /// метадані проєкту не секрет, звуження читача його не знімає. Документ власної періодичності не має; <c>periodKey</c> не віддається
 /// (це вісь запиту). Заповнюють і картка, і перелік; <c>null</c> лише коли проєкт не знайдено.
+/// </param>
+/// <param name="ResultsStaleUndetermined">
+/// ✎ D-446: ЧОМУ <paramref name="ResultsStale"/> = <c>null</c>, коли застарілість за період порахована, але читачеві не
+/// віддається (<see cref="ResultsStaleUndeterminedReason"/>) — клієнт пояснює це, а не мовчить. <c>null</c> — застарілість
+/// відома, або періоду немає (тоді <c>null</c> і <paramref name="ResultsStale"/>; цей випадок клієнт пояснює сам).
+/// Ставить <c>DocumentSheetVisibility.For</c> — однаково для рядка переліку й картки, за тієї самої умови, що знімає
+/// <paramref name="ResultsStale"/>. Сама причина нічого не розкриває понад це: вона залежить лише від меж читача, а не
+/// від того, чи результати справді застаріли.
 /// </param>
 public sealed record DocumentSummary(
     long Id,
@@ -110,7 +119,22 @@ public sealed record DocumentSummary(
     int? OwnerUserId = null,
     bool? CanManageEditAccess = null,
     [property: System.Text.Json.Serialization.JsonIgnore] bool ProjectIsReadOnly = false,
-    string? PeriodKind = null);
+    string? PeriodKind = null,
+    ResultsStaleUndeterminedReason? ResultsStaleUndetermined = null);
+
+/// <summary>
+/// ✎ D-446: чому застарілість результатів документа читачеві не визначається
+/// (<see cref="DocumentSummary.ResultsStaleUndetermined"/>).
+/// </summary>
+public enum ResultsStaleUndeterminedReason
+{
+    /// <summary>
+    /// Частина документа читачеві закрита (аркуш, таблиця чи колонка): документ-надання учасника (D-443) зі схованими
+    /// частинами або читач зі звуженням ролі в проєкті. Застарілість рахується по ВСІХ входах документа, а
+    /// «застаріло за видимими входами» не доводить, що застарів видимий вихід (<c>DocumentSheetVisibility.For</c>).
+    /// </summary>
+    PartiallyHidden = 0,
+}
 
 /// <summary>Аркуш складу документа в переліку: код, назва, стан за період.</summary>
 /// <param name="Code">Код аркуша (<c>SheetDef.Code</c>); він же ключ у <c>DocumentSummary.SheetStates</c>.</param>
@@ -129,6 +153,8 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// за той самий період; <c>null</c> — без фільтра. Той самий предикат
 /// (<c>aud.CellChange.IsLateEdit = 1</c>, <c>D-70</c>), що обчислює позначку в
 /// рядку (<c>BE-09b</c>) — не друге визначення «пізньої правки».
+/// ✎ D-446: документи-надання учасника фільтр не виключає — рахує їх у власних межах учасника
+/// (<see cref="DocumentParticipationFilter.HiddenSheets"/> та ін.).
 /// </param>
 /// <param name="HiddenSheetDefIds">
 /// Аркуші, яких читач не бачить, ПАРАМИ «проєкт, аркуш»: зведений стан для <paramref name="State"/> рахується
@@ -154,7 +180,8 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// Лише документи зі (<c>true</c>) застарілими або без (<c>false</c>) <see cref="DocumentSummary.ResultsStale"/>
 /// за період; <c>null</c> — без фільтра. Той самий предикат, що дає позначку в рядку. Потребує періоду (без нього
 /// сховище фільтр ігнорує, а обробник відмовляє 422). Документи проєктів з <paramref name="NarrowedProjectIds"/>
-/// виключаються в обох напрямках (не оракул).
+/// виключаються в обох напрямках (не оракул); ✎ D-446 — так само документи-надання з
+/// <see cref="DocumentParticipationFilter.NarrowedDocumentIds"/> (видимі учасникові цілком — у фільтрі як звичайно).
 /// </param>
 /// <param name="StaleByUserId">Лише застарілі через правки цього користувача (<c>ChangedByUserId</c>); діє разом із <paramref name="ResultsStale"/>.</param>
 /// <param name="NarrowedProjectIds">Проєкти, де читач не бачить хоч щось (аркуш, таблицю, колонку): їхні документи поза фільтром <paramref name="ResultsStale"/>.</param>
@@ -179,11 +206,30 @@ public readonly record struct DocumentListFilter(
 /// <param name="HiddenSheets">
 /// D-444 (AN-131): пари «документ, аркуш», яких учасник у ЦЬОМУ документі-наданні не бачить, — для фільтра
 /// <see cref="DocumentListFilter.State"/> (зведений стан лише по видимих аркушах, як у смузі зведення); <c>null</c> —
-/// фільтра стану немає.
+/// межі не пораховані.
+/// ✎ D-446: ті самі пари звужують і предикат пізньої правки (позначка в рядку й фільтр
+/// <see cref="DocumentListFilter.HasLateEdits"/>) — як пари проєкту <see cref="DocumentListFilter.HiddenSheetDefIds"/>.
+/// </param>
+/// <param name="HiddenTables">✎ D-446: пари «документ, таблиця», схованих від учасника в документі-наданні (пізні правки).</param>
+/// <param name="HiddenColumns">✎ D-446: пари «документ, колонка», схованих від учасника в документі-наданні (пізні правки).</param>
+/// <param name="NarrowedDocumentIds">
+/// ✎ D-446: документи-надання, де учасник не бачить хоч щось (аркуш, таблицю чи колонку): застарілість результатів —
+/// по ВСЬОМУ документу, тож для нього вона не визначена, і фільтр <see cref="DocumentListFilter.ResultsStale"/>
+/// виключає такі документи в обох напрямках (як <see cref="DocumentListFilter.NarrowedProjectIds"/>). <c>null</c> —
+/// фільтра застарілості немає.
+/// </param>
+/// <param name="DocumentIds">
+/// ✎ D-446: документи-надання, для яких обробник ПОРАХУВАВ межі учасника: поза проєктами з грантом перелік бере лише їх
+/// (закрито за замовчуванням — надання, що з'явилось посеред запиту, видно з наступним запитом, а не без меж).
+/// <c>null</c> — без обмеження.
 /// </param>
 public sealed record DocumentParticipationFilter(
     int UserId, DateTime AsOfUtc, IReadOnlyCollection<int> DeniedProjectIds,
-    IReadOnlyCollection<(long DocumentId, int SheetDefId)>? HiddenSheets = null);
+    IReadOnlyCollection<(long DocumentId, int SheetDefId)>? HiddenSheets = null,
+    IReadOnlyCollection<(long DocumentId, int TableDefId)>? HiddenTables = null,
+    IReadOnlyCollection<(long DocumentId, int ColumnDefId)>? HiddenColumns = null,
+    IReadOnlyCollection<long>? NarrowedDocumentIds = null,
+    IReadOnlyCollection<long>? DocumentIds = null);
 
 /// <summary>Порушення правила складу документа.</summary>
 /// <param name="SheetGroup">Група аркушів.</param>

@@ -21,7 +21,7 @@ import { DefaultColumnWidth } from '@/features/grid/columnWidths';
  * `putPreference`/`deletePreference`, а не «не впало».
  */
 
-vi.mock('../api', () => ({
+vi.mock('@/features/preferences/api', () => ({
   getPreferences: vi.fn(),
   putPreference: vi.fn(),
   deletePreference: vi.fn(),

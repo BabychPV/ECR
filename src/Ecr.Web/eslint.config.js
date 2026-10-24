@@ -398,6 +398,36 @@ export default [
     rules: { '@typescript-eslint/no-explicit-any': 'off' },
   },
   {
+    /*
+     * ⛔ `vi.mock` лише за псевдонімом `@/…`, не за відносним `'../X'`.
+     *
+     * Під пулом `vmThreads` підміна за відносним шляхом спрацьовувала НЕ
+     * ЗАВЖДИ, і тест отримував справжній модуль — миготіли тести лінивих
+     * чанків (CI 40108193698, 40110453615; виправлено в 6d79d5904, bce3f63af).
+     * За псевдонімом той самий тест стабільний. Обидва шляхи ведуть до одного
+     * файла, тож правило нічого не коштує. Докладніше — docs/build/06-tests.md §2.
+     *
+     * ⚠ Лише `__tests__`: продуктовий блок `no-restricted-syntax` вище не діє
+     * саме там, а будь-де інде цей блок переписав би його селектори (у flat
+     * config пізніший блок замінює опції правила цілком). Придушення не
+     * передбачено: псевдонім досяжний для будь-якого модуля в `src`, а кожне
+     * `eslint-disable-next-line no-restricted-syntax` рахує `lintRules.test.ts`.
+     */
+    files: ['src/**/__tests__/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.object.name='vi'][callee.property.name=/^(mock|doMock|unmock|doUnmock|importActual|importMock)$/][arguments.0.value=/^\\./]",
+          message:
+            'vi.mock за відносним шляхом під vmThreads інколи не застосовується — тест отримує справжній ' +
+            "модуль. Пишіть шлях через псевдонім: vi.mock('@/features/…') (docs/build/06-tests.md §2).",
+        },
+      ],
+    },
+  },
+  {
     files: ['e2e/**/*.ts'],
     languageOptions: {
       parser: tsParser,

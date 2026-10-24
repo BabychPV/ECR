@@ -28,6 +28,7 @@ const Hot = {
   isLateEdit: false,
   isOutOfWindow: false,
   fromArchive: false,
+  isOverwrite: false,
   changedByDisplayName: 'D. Nurlanova',
   documentBusinessKey: 'AKT-001',
   documentNameL10n: null,

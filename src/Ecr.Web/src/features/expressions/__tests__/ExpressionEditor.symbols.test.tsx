@@ -29,8 +29,8 @@ const metadata: ExpressionMetadataDto = {
 
 const expressionMetadataMock = vi.fn(() => Promise.resolve(metadata));
 
-vi.mock('../api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../api')>();
+vi.mock('@/features/expressions/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/expressions/api')>();
   return {
     ...actual,
     validateExpression: vi.fn(() => Promise.resolve({ diagnostics: [], resultType: null, skippedChecks: [] })),
@@ -40,7 +40,7 @@ vi.mock('../api', async (importOriginal) => {
 
 const created: { symbols?: () => EditorSymbols }[] = [];
 
-vi.mock('../monaco', () => {
+vi.mock('@/features/expressions/monaco', () => {
   const model = { getValue: () => '', dispose: () => {} };
 
   return {

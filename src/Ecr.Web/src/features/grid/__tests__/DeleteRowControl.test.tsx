@@ -16,7 +16,7 @@ import { isDeletableRow } from '../useDeleteRow';
 const showApiError = vi.hoisted(() => vi.fn());
 const followRecalculation = vi.hoisted(() => vi.fn());
 vi.mock('@/shared/ui/notify', () => ({ showApiError, showWarning: vi.fn() }));
-vi.mock('../useCellPatch', () => ({ followRecalculation }));
+vi.mock('@/features/grid/useCellPatch', () => ({ followRecalculation }));
 
 const DocumentId = 5;
 const TableInstanceId = 9;

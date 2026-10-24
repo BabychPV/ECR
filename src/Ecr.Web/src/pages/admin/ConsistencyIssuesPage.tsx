@@ -16,7 +16,6 @@ import { useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { ErrorAlert, TechnicalDetails } from '@/shared/ui/ErrorAlert';
 import { FilterBar } from '@/shared/ui/FilterBar';
 import { ListPage } from '@/shared/ui/ListPage';
-import { ReasonModal } from '@/shared/ui/ReasonModal';
 import type { StatItem, StatStripItems } from '@/shared/ui/StatStrip';
 import { StatusBadge, badgeLook } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -27,6 +26,21 @@ import { t } from '@/shared/i18n';
 
 /** Шторка знахідки — лінивим чанком: закрита за замовчуванням (`L2`). */
 const ConsistencyIssueDetail = lazy(() => import('@/features/consistency/ConsistencyIssueDetail'));
+
+/**
+ * Причина «Run now» — лінивим чанком (D-132, бюджет маршруту): `ReasonModal` тягне `Textarea` з
+ * `react-textarea-autosize`, а потрібен лише після кліку.
+ *
+ * ⚠ Обгортка змонтована ЗАВЖДИ, як і статичний діалог до неї: закрита Mantine `Modal` нічого не малює, тож розмітка та
+ * сама, а чанк вантажиться разом зі сторінкою. Фокус після закриття повертає власний `useRestoreFocus` діалогу — він
+ * запам'ятовує відкривача на першому відкритому коміті, тобто й тоді, коли чанк приїхав після кліку (кнопка досі у фокусі).
+ *
+ * ⚠ Не `features/projects/lazyPeriodsDialogs.tsx`: спільний імпорт робив із того модуля окремий файл і додавав
+ * +0.4 КБ маршруту `PeriodsPage` (замір 2026-10-24).
+ */
+const ReasonModalChunk = lazy(async () => ({
+  default: (await import('@/shared/ui/ReasonModal')).ReasonModal,
+}));
 
 /** Загальні лічильники журналу (`GET /consistency/summary`). */
 type ConsistencySummary = components['schemas']['ConsistencySummary'];
@@ -299,19 +313,21 @@ export function ConsistencyIssuesPage(): JSX.Element {
         </Group>
       )}
 
-      <ReasonModal
-        opened={asking}
-        title={t('consistency.runNow')}
-        label={t('workflow.reason')}
-        description={t('consistency.runHint')}
-        confirmLabel={t('consistency.runNow')}
-        isPending={run.isStarting}
-        onConfirm={(reason) => {
-          setAsking(false);
-          run.start(reason);
-        }}
-        onClose={() => setAsking(false)}
-      />
+      <Suspense fallback={null}>
+        <ReasonModalChunk
+          opened={asking}
+          title={t('consistency.runNow')}
+          label={t('workflow.reason')}
+          description={t('consistency.runHint')}
+          confirmLabel={t('consistency.runNow')}
+          isPending={run.isStarting}
+          onConfirm={(reason) => {
+            setAsking(false);
+            run.start(reason);
+          }}
+          onClose={() => setAsking(false)}
+        />
+      </Suspense>
     </ListPage>
   );
 }

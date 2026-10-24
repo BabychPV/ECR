@@ -21,7 +21,7 @@ import { k, kp } from './fixtures';
  * зрізи аркуша»; прибрати `showApiError` валить «відмова»; `keptKeys.length > 0` → `false` у тоні валить
  * «збережені рядки».
  */
-vi.mock('../../api/bindingsRuntimeApi', () => ({ refreshPermitBinding: vi.fn() }));
+vi.mock('@/features/permits/api/bindingsRuntimeApi', () => ({ refreshPermitBinding: vi.fn() }));
 vi.mock('@/features/grid/sliceCache', () => ({ invalidateSlices: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('@/shared/ui/notify', () => ({ showDone: vi.fn(), showApiError: vi.fn() }));
 

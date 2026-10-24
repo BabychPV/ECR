@@ -8,8 +8,8 @@ import { selectionStats } from '../selectionStats';
 import { publishSelection } from '../selectionStore';
 import { testTheme } from '@/test/render';
 
-vi.mock('../selectionStats', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../selectionStats')>();
+vi.mock('@/features/grid/selectionStats', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/grid/selectionStats')>();
 
   return { ...actual, selectionStats: vi.fn(actual.selectionStats) };
 });

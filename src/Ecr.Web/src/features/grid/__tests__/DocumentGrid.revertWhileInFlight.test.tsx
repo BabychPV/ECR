@@ -17,8 +17,8 @@ import { DocumentGrid } from '../DocumentGrid';
  * ⚠ Автозбереження приглушене (як у `DocumentGrid.concurrentSave.test.tsx`):
  * порядок запитів задає тест через Ctrl+S, а не годинник машини.
  */
-vi.mock('../autosave', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../autosave')>();
+vi.mock('@/features/grid/autosave', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/grid/autosave')>();
 
   return { ...actual, scheduleAutosave: (): void => undefined };
 });

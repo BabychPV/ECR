@@ -23,7 +23,7 @@ vi.mock('@/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/client')>()),
   apiFetch: vi.fn(),
 }));
-vi.mock('../../api/typesApi', () => ({ getPermitType: vi.fn(), replacePermitType: vi.fn() }));
+vi.mock('@/features/permits/api/typesApi', () => ({ getPermitType: vi.fn(), replacePermitType: vi.fn() }));
 // Права сесії міняються між прогонами: без `Permit.PublishType` кнопка «Publish» вимкнена, з ним — активна;
 // обидва стани мають пройти перевірку доступності.
 const session = vi.hoisted(() => ({ permissions: ['Permit.EditType'] as string[] }));

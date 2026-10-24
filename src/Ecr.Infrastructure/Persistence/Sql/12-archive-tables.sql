@@ -101,6 +101,7 @@ CREATE TABLE arc.CellChange
     IsLateEdit      bit            NOT NULL,
     CorrelationId   nvarchar(64)   NULL,
     IsOutOfWindow   bit            NOT NULL CONSTRAINT DF_arc_CellChange_OutOfWindow DEFAULT (0),
+    IsOverwrite     bit            NOT NULL CONSTRAINT DF_arc_CellChange_Overwrite DEFAULT (0),
     INDEX CCI_arc_CellChange CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];
 GO
@@ -109,6 +110,12 @@ GO
 IF COL_LENGTH(N'arc.CellChange', N'IsOutOfWindow') IS NULL
     ALTER TABLE arc.CellChange
         ADD IsOutOfWindow bit NOT NULL CONSTRAINT DF_arc_CellChange_OutOfWindow DEFAULT (0);
+GO
+
+-- D-447: дзеркало aud.CellChange.IsOverwrite для наявних баз (сторож ArchiveMirrorTests).
+IF COL_LENGTH(N'arc.CellChange', N'IsOverwrite') IS NULL
+    ALTER TABLE arc.CellChange
+        ADD IsOverwrite bit NOT NULL CONSTRAINT DF_arc_CellChange_Overwrite DEFAULT (0);
 GO
 
 IF OBJECT_ID(N'arc.CalculationResult', N'U') IS NULL
@@ -229,6 +236,7 @@ BEGIN
         IsLateEdit      bit            NOT NULL CONSTRAINT DF_arcAudCellChange_Late DEFAULT(0),
         CorrelationId   nvarchar(64)   NULL,
         IsOutOfWindow   bit            NOT NULL CONSTRAINT DF_arcAudCellChange_OutOfWindow DEFAULT(0),
+        IsOverwrite     bit            NOT NULL CONSTRAINT DF_arcAudCellChange_Overwrite DEFAULT(0),
         CONSTRAINT PK_arcAuditCellChange PRIMARY KEY CLUSTERED (ChangedAt, Id) ON ps_AuditByMonth(ChangedAt)
     ) ON ps_AuditByMonth(ChangedAt);
 END
@@ -239,6 +247,13 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_Cell'
     CREATE INDEX IX_CellChange_Cell
         ON arc.AuditCellChange (DocumentId, TableRowId, ColumnDefId, ChangedAt DESC)
         ON ps_AuditByMonth(ChangedAt);
+GO
+
+-- D-447: дзеркало aud.CellChange.IsOverwrite для наявних баз. ⛔ Додається ПІСЛЯ IsOutOfWindow, як і
+-- в джерелі (11-audit-tables.sql): SWITCH вимагає тих самих колонок тим самим порядком.
+IF COL_LENGTH(N'arc.AuditCellChange', N'IsOverwrite') IS NULL
+    ALTER TABLE arc.AuditCellChange
+        ADD IsOverwrite bit NOT NULL CONSTRAINT DF_arcAudCellChange_Overwrite DEFAULT(0);
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_OutOfWindow'

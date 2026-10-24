@@ -71,6 +71,11 @@ public interface IAuditWriter
 /// доступу до періоду (<c>ФВ-2.16</c>, <c>D-239</c>). Не плутати з
 /// <paramref name="IsLateEdit"/>.
 /// </param>
+/// <param name="IsOverwrite">
+/// ✎ D-447: правка свідомо перезаписала рядок, змінений кимось іншим після експорту книги
+/// (AN-114/D-338, <c>overwrittenRowKeys</c>). Окремо від <paramref name="Origin"/>: на поданому
+/// аркуші погоджувача <c>Origin = ApproverEdit</c>, і без цього прапорця позначка перезапису губилася.
+/// </param>
 public sealed record CellChangeRecord(
     DateTime ChangedAt,
     CellAddress Address,
@@ -82,7 +87,8 @@ public sealed record CellChangeRecord(
     string Origin,
     bool IsLateEdit,
     string? CorrelationId,
-    bool IsOutOfWindow = false);
+    bool IsOutOfWindow = false,
+    bool IsOverwrite = false);
 
 /// <summary>Структурна зміна метаданих.</summary>
 public sealed record StructureChangeRecord(

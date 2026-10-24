@@ -66,8 +66,8 @@ type CellProps = { class?: string; 'data-cell-state'?: string };
  */
 const scheduled = vi.hoisted(() => ({ count: 0 }));
 
-vi.mock('../autosave', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../autosave')>();
+vi.mock('@/features/grid/autosave', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/grid/autosave')>();
 
   return {
     ...actual,

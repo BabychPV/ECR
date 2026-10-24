@@ -124,6 +124,7 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
         new("IsLateEdit", SqlDbType.Bit),
         new("CorrelationId", SqlDbType.NVarChar, CorrelationIdLength),
         new("IsOutOfWindow", SqlDbType.Bit),
+        new("IsOverwrite", SqlDbType.Bit),
     ];
 
     /// <inheritdoc />
@@ -173,9 +174,9 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
         command.CommandText = """
             INSERT INTO aud.CellChange
                 (ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId,
-                 OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow)
+                 OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow, IsOverwrite)
             SELECT ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId,
-                   OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow
+                   OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow, IsOverwrite
             FROM @changes;
             """;
 
@@ -225,6 +226,7 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
             row.SetBoolean(10, c.IsLateEdit);
             SetText(row, 11, c.CorrelationId);
             row.SetBoolean(12, c.IsOutOfWindow);
+            row.SetBoolean(13, c.IsOverwrite);
 
             yield return row;
         }

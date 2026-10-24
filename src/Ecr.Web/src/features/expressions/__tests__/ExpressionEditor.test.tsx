@@ -27,8 +27,8 @@ import { testTheme } from '@/test/render';
 
 const validateExpressionMock = vi.fn();
 
-vi.mock('../api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../api')>();
+vi.mock('@/features/expressions/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/expressions/api')>();
   return {
     ...actual,
     validateExpression: (...args: Parameters<typeof actual.validateExpression>) =>
@@ -38,7 +38,7 @@ vi.mock('../api', async (importOriginal) => {
 });
 
 /** Мінімальна фейкова Monaco — без реального редактора Monaco в jsdom (`D1-12`). */
-vi.mock('../monaco', () => {
+vi.mock('@/features/expressions/monaco', () => {
   const model = { getValue: () => '', dispose: () => {} };
 
   return {

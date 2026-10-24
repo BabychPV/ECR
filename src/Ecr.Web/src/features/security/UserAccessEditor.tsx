@@ -11,6 +11,17 @@ import { t } from '@/shared/i18n';
 import { RoleScopeFields, scopesToSend, scopesValid, useUserRoleScopes, type ScopeDraft } from './UserRoleScopes';
 import { scopeProblem } from './roleScope';
 
+/*
+ * ⛔ Не прибирати як «невживаний експорт» (D-132, замір 2026-10-24). Rollup кладе модуль у спільний чанк за НАБОРОМ
+ * входів, що його тягнуть. Цей лінивий чанк — єдиний вхід, що бере ядро `Combobox` (через `MultiSelect`) без `Select`, і
+ * через нього ядро виїжджало з чанка `Select` в окремий `OptionsDropdown-*.js`: +0.4…0.5 КБ gzip файлової ціни на ~25
+ * маршрутах із `Select`. Експорт лінивого входу Rollup зберігає, тож `Select` тепер у графі цього чанка, набори входів
+ * ядра й `Select` збігаються, і ядро лягає в чанк `Select` (−0.5 КБ на тих маршрутах, жоден не важчий). Ціна —
+ * чанк `Select` (~1.4 КБ) довантажується разом із цим діалогом. `manualChunks` тут гірший — див. `vite.config.ts`.
+ * Перевірка: після `npm run build` у `dist/assets` немає `OptionsDropdown-*.js`.
+ */
+export { Select as SelectChunkAnchor } from '@mantine/core';
+
 // ⚠ Розріз ефективного доступу (ФВ-6.16) — окремий чанк: у діалозі його не видно, доки адміністратор
 // не натисне кнопку, тож сторінка безпеки не платить за нього ні байтом.
 const EffectiveAccessPanel = lazy(async () => ({

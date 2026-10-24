@@ -26,8 +26,8 @@ import { testTheme } from '@/test/render';
  * `onDidChangeModelContent`-слухач, що його реєструє компонент, — тобто ту
  * саму гілку коду, що й реальне натискання клавіші в Monaco.
  */
-vi.mock('../api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../api')>();
+vi.mock('@/features/expressions/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/expressions/api')>();
   return {
     ...actual,
     validateExpression: vi
@@ -37,7 +37,7 @@ vi.mock('../api', async (importOriginal) => {
   };
 });
 
-vi.mock('../monaco', () => {
+vi.mock('@/features/expressions/monaco', () => {
   let internalValue = '';
   let changeHandler: (() => void) | null = null;
   const model = { getValue: () => internalValue, dispose: () => {} };

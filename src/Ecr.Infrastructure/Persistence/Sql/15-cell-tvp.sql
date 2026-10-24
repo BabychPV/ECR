@@ -186,6 +186,8 @@ GO
 -- ФВ-2.16 / D-239: тип без IsOutOfWindow (база до цього кроку) знімається й
 -- створюється заново — змінити TABLE TYPE на місці не можна. Посилаються на нього
 -- лише параметри команд застосунку, не процедури, тож DROP TYPE проходить.
+-- ✎ D-447: та сама перевірка тепер по НАЙНОВІШІЙ колонці `IsOverwrite` — тип із нею має й
+-- IsOutOfWindow, а тип без неї (база до D-447) знімається й створюється в новій формі.
 IF TYPE_ID(N'aud.CellChangeTvp') IS NOT NULL
    AND NOT EXISTS (
         SELECT 1
@@ -193,7 +195,7 @@ IF TYPE_ID(N'aud.CellChangeTvp') IS NOT NULL
         JOIN sys.columns     AS c ON c.object_id = tt.type_table_object_id
         WHERE tt.name = N'CellChangeTvp'
           AND SCHEMA_NAME(tt.schema_id) = N'aud'
-          AND c.name = N'IsOutOfWindow')
+          AND c.name = N'IsOverwrite')
     DROP TYPE aud.CellChangeTvp;
 GO
 
@@ -213,7 +215,8 @@ CREATE TYPE aud.CellChangeTvp AS TABLE
     Origin          nvarchar(32)   NOT NULL,
     IsLateEdit      bit            NOT NULL,
     CorrelationId   nvarchar(64)   NULL,
-    IsOutOfWindow   bit            NOT NULL
+    IsOutOfWindow   bit            NOT NULL,
+    IsOverwrite     bit            NOT NULL
 );');
 GO
 

@@ -9,8 +9,8 @@ import { DocumentGrid } from '../DocumentGrid';
 import { planPaste } from '../clipboard';
 
 // Лічильник вставок: «одна вставка = один розбір буфера» (без подвійної від gate + bodyPaste).
-vi.mock('../clipboard', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../clipboard')>();
+vi.mock('@/features/grid/clipboard', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/features/grid/clipboard')>();
 
   return { ...original, planPaste: vi.fn(original.planPaste) };
 });

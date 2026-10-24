@@ -13,7 +13,7 @@ import { documentState, hasSheetStates, sheetLabels } from '@/features/documents
 import { parseDocumentsView } from '@/features/documents/documentsBoardModel';
 import '@/features/documents/documentsList.css';
 import { LateEditsMark } from '@/features/documents/LateEditsMark';
-import { StaleResultsMark } from '@/features/documents/StaleResultsMark';
+import { StaleResultsMark, StaleResultsUndeterminedMark } from '@/features/documents/StaleResultsMark';
 import { newestOpenPeriodKey } from '@/features/documents/newDocumentPeriod';
 import { formatNumber } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
@@ -533,6 +533,8 @@ export function DocumentsPage(): JSX.Element {
                                 {document.hasLateEdits && <LateEditsMark />}
                                 {/* RC14-D: результати методологій застаріли (лише `true`; `null` — доступ звужено). */}
                                 {document.resultsStale === true && <StaleResultsMark since={document.resultsStaleSince} />}
+                                {/* ✎ D-446: чому застарілість не визначена — частину документа читачеві закрито. */}
+                                {document.resultsStaleUndetermined === 'PartiallyHidden' && <StaleResultsUndeterminedMark />}
                               </Group>
                             </Box>
                           </Table.Td>

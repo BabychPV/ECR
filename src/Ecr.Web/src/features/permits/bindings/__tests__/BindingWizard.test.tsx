@@ -17,8 +17,8 @@ import { airType, airTypeItem, binding, k, kp, sheetTable } from './fixtures';
  * `existing === null` у `locked` замінити на `false` валить «правка»; у `onError` прибрати `api.fail` валить
  * «відмову сервера».
  */
-vi.mock('../../api/typesApi', () => ({ listPermitTypes: vi.fn(), getPermitType: vi.fn() }));
-vi.mock('../../api/bindingsApi', () => ({ savePermitBinding: vi.fn() }));
+vi.mock('@/features/permits/api/typesApi', () => ({ listPermitTypes: vi.fn(), getPermitType: vi.fn() }));
+vi.mock('@/features/permits/api/bindingsApi', () => ({ savePermitBinding: vi.fn() }));
 vi.mock('@/features/templates/headerFieldApi', () => ({ getHeaderFields: vi.fn() }));
 vi.mock('@/shared/ui/notify', () => ({ showDone: vi.fn(), showApiError: vi.fn() }));
 

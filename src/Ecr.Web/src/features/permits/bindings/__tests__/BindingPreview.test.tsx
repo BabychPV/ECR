@@ -15,8 +15,8 @@ import { binding, k, kp, preview } from './fixtures';
  * `ErrorAlert` і на 403) валить «403»; у `PreviewBody` умову `permit.reasonIfNone !== null` замінити на `false`
  * валить «причини»; прибрати клас `is-locked` на комірці валить «штрихування».
  */
-vi.mock('../../api/bindingsApi', () => ({ previewPermitBinding: vi.fn() }));
-vi.mock('../../api/permitsApi', () => ({ listPermits: vi.fn() }));
+vi.mock('@/features/permits/api/bindingsApi', () => ({ previewPermitBinding: vi.fn() }));
+vi.mock('@/features/permits/api/permitsApi', () => ({ listPermits: vi.fn() }));
 
 afterEach(() => {
   cleanup();

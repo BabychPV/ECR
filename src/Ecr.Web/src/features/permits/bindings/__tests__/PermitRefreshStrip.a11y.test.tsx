@@ -13,7 +13,7 @@ import { PermitRefreshStrip } from '../PermitRefreshStrip';
  *
  * ⚠ Контраст axe у jsdom не рахує (`test/a11y.ts`); тут перевіряються імена, ролі, `aria-*` і живі області.
  */
-vi.mock('../../api/bindingsRuntimeApi', () => ({ refreshPermitBinding: vi.fn() }));
+vi.mock('@/features/permits/api/bindingsRuntimeApi', () => ({ refreshPermitBinding: vi.fn() }));
 vi.mock('@/features/grid/sliceCache', () => ({ invalidateSlices: vi.fn().mockResolvedValue(undefined) }));
 
 const table = {

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useRef, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useRef, type JSX } from 'react';
 import {
   Badge,
   Button,
@@ -20,9 +20,6 @@ import {
   useCellChanges,
 } from '@/features/audit/api';
 import { FilterHints, FilterInline, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
-import { SecurityEventsPanel } from '@/features/audit/SecurityEventsPanel';
-import { StructureChangesPanel } from '@/features/audit/StructureChangesPanel';
-import { StructureExportButton } from '@/features/audit/StructureExportButton';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
@@ -37,6 +34,36 @@ export { auditValueText } from '@/features/audit/CellChangesTable';
 const DateOnlyInput = lazy(async () => ({
   default: (await import('@/shared/dates/DateInputWithStyles')).DateOnlyInput,
 }));
+
+/*
+ * Вкладки «Structure» і «Security» — лінивими чанками (D-132, бюджет маршруту `AuditPage`): відкриваються кліком по
+ * перемикачу (чи адресою `?view=`), а журнал комірок, з яким сторінка відкривається, їх не потребує.
+ *
+ * ⚠ «Export» і журнал структурних змін — під ОДНІЄЮ межею `Suspense`: React показує їх разом, коли приїхали обидва
+ * чанки, тож кнопка не з'являється над порожнім місцем і не зсуває журнал, що приїде слідом.
+ *
+ * ⚠ Чанки передзавантажуються, щойно прийшов журнал комірок (`preloadAuditTabs`) — перемикання вкладки не чекає мережі.
+ */
+const loadStructureChangesPanel = () => import('@/features/audit/StructureChangesPanel');
+const loadStructureExportButton = () => import('@/features/audit/StructureExportButton');
+const loadSecurityEventsPanel = () => import('@/features/audit/SecurityEventsPanel');
+
+const StructureChangesPanel = lazy(async () => ({
+  default: (await loadStructureChangesPanel()).StructureChangesPanel,
+}));
+const StructureExportButton = lazy(async () => ({
+  default: (await loadStructureExportButton()).StructureExportButton,
+}));
+const SecurityEventsPanel = lazy(async () => ({
+  default: (await loadSecurityEventsPanel()).SecurityEventsPanel,
+}));
+
+/** Чанки вкладок «Structure»/«Security» — заздалегідь, щоб перемикач не чекав мережі. */
+function preloadAuditTabs(): void {
+  void loadStructureChangesPanel().catch(() => undefined);
+  void loadStructureExportButton().catch(() => undefined);
+  void loadSecurityEventsPanel().catch(() => undefined);
+}
 
 /**
  * Журнал змін комірок (`ФВ-6.13`).
@@ -150,6 +177,12 @@ export function AuditPage(): JSX.Element {
   // завантаження показуються як і досі.
   const shownChanges = useLastData(changes.data, changes.error === null);
 
+  // Журнал комірок приїхав — сторінка вже показана, тож чанки вкладок можна тягнути (див. `preloadAuditTabs`).
+  const changesArrived = changes.data !== undefined;
+  useEffect(() => {
+    if (changesArrived) preloadAuditTabs();
+  }, [changesArrived]);
+
   /**
    * ⚠ Курсор скидається на КОЖНУ зміну фільтра — він позначає позицію в
    * конкретній видачі, і сторінка 5 попереднього фільтра не є сторінкою 5
@@ -227,9 +260,17 @@ export function AuditPage(): JSX.Element {
         }
       />
 
-      {structure && <StructureExportButton from={fromDate} to={toDate} />}
-      {structure && <StructureChangesPanel key={`${fromDate}:${toDate}`} from={fromDate} to={toDate} />}
-      {security && <SecurityEventsPanel key={`${fromDate}:${toDate}`} from={fromDate} to={toDate} />}
+      {structure && (
+        <Suspense fallback={null}>
+          <StructureExportButton from={fromDate} to={toDate} />
+          <StructureChangesPanel key={`${fromDate}:${toDate}`} from={fromDate} to={toDate} />
+        </Suspense>
+      )}
+      {security && (
+        <Suspense fallback={null}>
+          <SecurityEventsPanel key={`${fromDate}:${toDate}`} from={fromDate} to={toDate} />
+        </Suspense>
+      )}
 
       {/* ⚠ Відступ усередині цієї обгортки НАВМИСНО не зсунуто: зсув — це
           форматування 160 рядків, а воно йде окремим PR (CLAUDE.md, правило 4). */}

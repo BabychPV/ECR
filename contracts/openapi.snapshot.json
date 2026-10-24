@@ -498,6 +498,19 @@
         ],
         "type": "object"
       },
+      "ApproverEditAvailabilityDto": {
+        "description": "Чи може поточний користувач змінювати значення поданого аркуша (D-442/D-445).",
+        "properties": {
+          "canApproverEdit": {
+            "description": "`true` — аркуш поданий, і користувач — погоджувач ПОТОЧНОГО кроку маршруту: сітка редаговна, імпорт Excel\n        доступний. `false` — аркуш не поданий або черга не його (автор, погоджувач іншого кроку). Лише підказка\n        інтерфейсу: запис перевіряє те саме правило під блокуванням аркуша.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "canApproverEdit"
+        ],
+        "type": "object"
+      },
       "AssignGroupRoleRequest": {
         "description": "Тіло призначення ролі групі.",
         "properties": {
@@ -1287,6 +1300,11 @@
           "isOutOfWindow": {
             "default": false,
             "description": "Правка за політикою `Warn` поза вікном доступу (`ФВ-2.16`, `D-239`).",
+            "type": "boolean"
+          },
+          "isOverwrite": {
+            "default": false,
+            "description": "✎ D-447: правка свідомо перезаписала рядок, змінений кимось іншим після експорту книги\n(`aud.CellChange.IsOverwrite`). Окремо від Origin: у погоджувача\n`Origin = ApproverEdit`, і перезапис видно лише з цього прапорця.",
             "type": "boolean"
           },
           "newValue": {
@@ -4553,7 +4571,7 @@
             "type": "integer"
           },
           "resultsStale": {
-            "description": "Чи застаріли результати методологій документа за період: після початку актуального прогону хтось правив\nвхідну комірку (або довідник, який читає методологія). ВИВОДИТЬСЯ запитом, не зберігається. Документ без\nрезультатів — `false`. ⛔ `null` — період не задано, або читач має обмеження нижче проєкту\n(`DocumentSheetVisibility.For`): «застаріло за видимими входами» не доводить, що застарів видимий вихід.",
+            "description": "Чи застаріли результати методологій документа за період: після початку актуального прогону хтось правив\nвхідну комірку (або довідник, який читає методологія). ВИВОДИТЬСЯ запитом, не зберігається. Документ без\nрезультатів — `false`. ⛔ `null` — період не задано, або читач має обмеження нижче проєкту\n(`DocumentSheetVisibility.For`): «застаріло за видимими входами» не доводить, що застарів видимий вихід.\n✎ D-446: другий випадок називає ResultsStaleUndetermined.",
             "type": [
               "null",
               "boolean"
@@ -4565,6 +4583,17 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "resultsStaleUndetermined": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResultsStaleUndeterminedReason",
+                "description": "✎ D-446: ЧОМУ ResultsStale = `null`, коли застарілість за період порахована, але читачеві не\nвіддається (ResultsStaleUndeterminedReason) — клієнт пояснює це, а не мовчить. `null` — застарілість\nвідома, або періоду немає (тоді `null` і ResultsStale; цей випадок клієнт пояснює сам).\nСтавить `DocumentSheetVisibility.For` — однаково для рядка переліку й картки, за тієї самої умови, що знімає\nResultsStale. Сама причина нічого не розкриває понад це: вона залежить лише від меж читача, а не\nвід того, чи результати справді застаріли."
+              }
             ]
           },
           "sheetCount": {
@@ -15517,6 +15546,12 @@
           "Table",
           "Column",
           "Registry"
+        ]
+      },
+      "ResultsStaleUndeterminedReason": {
+        "enum": [
+          "PartiallyHidden",
+          null
         ]
       },
       "ReturnEditAssignmentRequest": {
@@ -27946,6 +27981,87 @@
         "summary": "Погодження або відхилення аркуша.",
         "tags": [
           "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/approver-edit": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Аркуш.",
+            "in": "query",
+            "name": "sheetDefId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Період.",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproverEditAvailabilityDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproverEditAvailabilityDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproverEditAvailabilityDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Чи може поточний користувач змінювати значення поданого аркуша (D-442/D-445): лише погоджувач поточного\nкроку маршруту. Рішення сервера для сітки й пункту «Імпорт…»; запис перевіряє те саме правило. Право\n`Document.View`.",
+        "tags": [
+          "DocumentWorkflowHistory"
         ]
       }
     },

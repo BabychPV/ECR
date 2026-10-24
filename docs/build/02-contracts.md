@@ -4172,6 +4172,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/me/editor-sets/{setId}` | — (лише власні набори; чужий — 404) | 8 |
 | `DELETE` | `/api/v1/me/editor-sets/{setId}` | — (лише власні набори; чужий — 404) | 8 |
 | `GET` | `/api/v1/documents/{id}/recall` | — | 3 |
+| `GET` | `/api/v1/documents/{id}/approver-edit` | `Document.View` (✎ D-448: чи може викликач правити поданий аркуш як погоджувач поточного кроку; невидимий документ — 404) | 3 |
 | `GET` | `/api/v1/documents/{id}/tables` | `Document.View` | 6 |
 | `GET` | `/api/v1/documents/{id}/tables/status` | `Document.View` | 6 |
 | `POST` | `/api/v1/documents/{id}/export` | `Document.Export` | 5 |

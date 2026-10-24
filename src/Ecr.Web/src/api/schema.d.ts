@@ -3669,6 +3669,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/approver-edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Чи може поточний користувач змінювати значення поданого аркуша (D-442/D-445): лише погоджувач поточного
+         *     кроку маршруту. Рішення сервера для сітки й пункту «Імпорт…»; запис перевіряє те саме правило. Право
+         *     `Document.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Аркуш. */
+                    sheetDefId?: number;
+                    /** @description Період. */
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApproverEditAvailabilityDto"];
+                        "text/json": components["schemas"]["ApproverEditAvailabilityDto"];
+                        "text/plain": components["schemas"]["ApproverEditAvailabilityDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/business-key": {
         parameters: {
             query?: never;
@@ -22107,6 +22166,13 @@ export interface components {
              */
             sheetDefId: number;
         };
+        /** @description Чи може поточний користувач змінювати значення поданого аркуша (D-442/D-445). */
+        ApproverEditAvailabilityDto: {
+            /** @description `true` — аркуш поданий, і користувач — погоджувач ПОТОЧНОГО кроку маршруту: сітка редаговна, імпорт Excel
+             *             доступний. `false` — аркуш не поданий або черга не його (автор, погоджувач іншого кроку). Лише підказка
+             *             інтерфейсу: запис перевіряє те саме правило під блокуванням аркуша. */
+            canApproverEdit: boolean;
+        };
         /** @description Тіло призначення ролі групі. */
         AssignGroupRoleRequest: {
             /** @description Підтвердження видачі ролі з небезпечними правами. */
@@ -22539,6 +22605,13 @@ export interface components {
              * @default false
              */
             isOutOfWindow: boolean;
+            /**
+             * @description ✎ D-447: правка свідомо перезаписала рядок, змінений кимось іншим після експорту книги
+             *     (`aud.CellChange.IsOverwrite`). Окремо від Origin: у погоджувача
+             *     `Origin = ApproverEdit`, і перезапис видно лише з цього прапорця.
+             * @default false
+             */
+            isOverwrite: boolean;
             /** @description Нове значення. */
             newValue: null | string;
             /** @description Старе значення. */
@@ -24034,13 +24107,15 @@ export interface components {
             /** @description Чи застаріли результати методологій документа за період: після початку актуального прогону хтось правив
              *     вхідну комірку (або довідник, який читає методологія). ВИВОДИТЬСЯ запитом, не зберігається. Документ без
              *     результатів — `false`. ⛔ `null` — період не задано, або читач має обмеження нижче проєкту
-             *     (`DocumentSheetVisibility.For`): «застаріло за видимими входами» не доводить, що застарів видимий вихід. */
+             *     (`DocumentSheetVisibility.For`): «застаріло за видимими входами» не доводить, що застарів видимий вихід.
+             *     ✎ D-446: другий випадок називає ResultsStaleUndetermined. */
             resultsStale?: null | boolean;
             /**
              * Format: date-time
              * @description Відколи застаріло (перша правка входу після прогону, UTC); `null` — не застаріло чи невідомо.
              */
             resultsStaleSince?: null | string;
+            resultsStaleUndetermined?: null | components["schemas"]["ResultsStaleUndeterminedReason"];
             /**
              * Format: int32
              * @description Скільки аркушів у складі.
@@ -29142,6 +29217,8 @@ export interface components {
          * @enum {unknown}
          */
         ResourceKind: "Project" | "Sheet" | "Table" | "Column" | "Registry";
+        /** @enum {unknown} */
+        ResultsStaleUndeterminedReason: "PartiallyHidden" | null;
         /** @description Тіло повернення на доопрацювання. */
         ReturnEditAssignmentRequest: {
             /** @description Версія передачі, яку бачив власник. */

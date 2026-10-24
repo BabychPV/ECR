@@ -500,7 +500,66 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
         return stream.ToArray();
     }
 
+    /// <summary>
+    /// ✎ борг D-445: підказка клієнту <c>GET …/approver-edit</c> — та сама матриця, що й запис: на
+    /// поданому аркуші <c>true</c> лише погоджувачу ПОТОЧНОГО кроку; автор і погоджувач іншого кроку — <c>false</c>.
+    /// Після погодження кроку 1 черга (і підказка) переходить до другого; чернетка — <c>false</c> усім.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: у <c>ApproverEditRule.IsCurrentStepApproverAsync</c> повертати <c>true</c> за грантом
+    /// <c>Approve</c> без ролі кроку — червоніє «погоджувач іншого кроку»; повертати <c>CanApprove</c> без
+    /// стану аркуша — червоніє «чернетка».
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-445")]
+    public async Task D445_підказка_правки_поданого_лише_погоджувачу_поточного_кроку()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var submitter = await NewUserAsync(s, GrantLevel.Submit).ConfigureAwait(true);
+        var first = await NewUserAsync(s, GrantLevel.Approve).ConfigureAwait(true);
+        var second = await NewUserAsync(s, GrantLevel.Approve).ConfigureAwait(true);
+        await RouteAsync(s, first.RoleId, second.RoleId).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var author = await SignInAsync(app, submitter.Name).ConfigureAwait(true);
+        using var firstClient = await SignInAsync(app, first.Name).ConfigureAwait(true);
+        using var secondClient = await SignInAsync(app, second.Name).ConfigureAwait(true);
+
+        var column = await NumberColumnCodeAsync(author, s).ConfigureAwait(true);
+        var rowKey = $"AH{Guid.NewGuid():N}"[..12];
+        await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(author, s, rowKey, column, 10m, null)).ConfigureAwait(true);
+
+        // Чернетка: правку значень вирішує не роль кроку — підказка «ні» навіть погоджувачу.
+        Assert.False(await CanApproverEditAsync(app, firstClient, s).ConfigureAwait(true));
+
+        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+
+        Assert.False(await CanApproverEditAsync(app, author, s).ConfigureAwait(true), "автор");
+        Assert.True(await CanApproverEditAsync(app, firstClient, s).ConfigureAwait(true), "погоджувач поточного кроку");
+        Assert.False(await CanApproverEditAsync(app, secondClient, s).ConfigureAwait(true), "погоджувач іншого кроку");
+
+        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(firstClient, s)).ConfigureAwait(true);
+
+        Assert.False(await CanApproverEditAsync(app, firstClient, s).ConfigureAwait(true), "крок 1 уже погоджено");
+        Assert.True(await CanApproverEditAsync(app, secondClient, s).ConfigureAwait(true), "черга перейшла до другого");
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
+
+    /// <summary>борг D-445: відповідь <c>GET …/approver-edit</c> для аркуша сценарію.</summary>
+    private static async Task<bool> CanApproverEditAsync(EcrApiFactory app, HttpClient client, Scenario s)
+    {
+        var body = await ExpectAsync(
+                app, HttpStatusCode.OK,
+                client.GetAsync(new Uri(
+                    $"/api/v1/documents/{s.Document.DocumentId}/approver-edit?sheetDefId={s.Document.SheetDefId}&periodKey={s.PeriodKey}",
+                    UriKind.Relative)))
+            .ConfigureAwait(false);
+
+        return JsonDocument.Parse(body).RootElement.GetProperty("canApproverEdit").GetBoolean();
+    }
 
     private sealed record Scenario(TestDocumentBuilder Builder, TestDocument Document, int PeriodKey);
 

@@ -15,8 +15,8 @@ import { DocumentGrid } from '../DocumentGrid';
  *
  * ⚠ PATCH не відповідає ніколи — правка лишається в сховищі, предмет перевірки саме вона.
  */
-vi.mock('../autosave', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../autosave')>();
+vi.mock('@/features/grid/autosave', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/grid/autosave')>();
 
   return { ...actual, scheduleAutosave: (): void => undefined };
 });

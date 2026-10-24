@@ -84,7 +84,8 @@ public static class DocumentSheetVisibility
 
     /// <summary>
     /// D-444 (AN-131): межі КОЖНОГО документа, відкритого читачеві наданням учасника (з наданнями саме в ньому), у
-    /// періоді — для зведення переліку й фільтра стану. Межі документа-надання власні: ділити їх між документами
+    /// періоді — для зведення переліку й фільтра стану (✎ D-446: і для позначки/фільтра пізніх правок та фільтра й
+    /// лічильника застарілих результатів). Межі документа-надання власні: ділити їх між документами
     /// проєкту не можна (<see cref="DocumentReadScope.ForParticipant"/>).
     /// </summary>
     /// <param name="access">Служба доступу.</param>
@@ -259,6 +260,7 @@ public static class DocumentSheetVisibility
         var visibleSheets = (document.Sheets ?? []).Where(s => scope.CanReadSheetCode(s.Code)).ToList();
         var visibleCodes = included.Count(scope.CanReadSheetCode);
         var narrowed = IsNarrowed(scope, included);
+        var staleHidden = narrowed || IsProjectNarrowed(scope);
 
         return document with
         {
@@ -278,8 +280,15 @@ public static class DocumentSheetVisibility
 
             // ⛔ Застарілість рахується по ВСІХ входах документа, а видимий вихід може від схованого не залежати:
             // для читача зі звуженням у проєкті - null (і поза фільтром/лічильником), а не здогад «за видимим».
-            ResultsStale = narrowed || IsProjectNarrowed(scope) ? null : document.ResultsStale,
-            ResultsStaleSince = narrowed || IsProjectNarrowed(scope) ? null : document.ResultsStaleSince,
+            ResultsStale = staleHidden ? null : document.ResultsStale,
+            ResultsStaleSince = staleHidden ? null : document.ResultsStaleSince,
+
+            // ✎ D-446: причина того самого null — щоб клієнт пояснив «частину документа вам не відкрито», а не мовчав.
+            // Лише коли застарілість порахована (є період): без періоду null — це «немає періоду», не прихованість.
+            // Обидва шляхи сюди — документ-надання учасника зі схованими частинами і читач зі звуженням у проєкті.
+            ResultsStaleUndetermined = staleHidden && document.ResultsStale is not null
+                ? ResultsStaleUndeterminedReason.PartiallyHidden
+                : document.ResultsStaleUndetermined,
         };
     }
 
