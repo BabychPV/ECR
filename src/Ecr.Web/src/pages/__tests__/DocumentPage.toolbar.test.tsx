@@ -324,8 +324,10 @@ describe('DocumentPage: рядок дій (UI-14)', () => {
       // Перевірка на поданому — у меню, а не поруч із головною дією.
       fireEvent.click(within(row).getByRole('button', More));
       expect(await screen.findByRole('menuitem', { name: '⟦document.validate⟧' })).toBeDefined();
-      // ⛔ Імпорт над поданим аркушем не пропонується (`ФВ-5.20a`).
-      expect(screen.queryByRole('menuitem', { name: '⟦import.pick⟧…' })).toBeNull();
+      // ✎ D-445: погоджувачу поданого аркуша імпорт пропонується — як правка в сітці (D-442); хто саме з
+      // погоджувачів на поточному кроці, каже перегляд імпорту на сервері. Доти тут стерегли «не пропонується»
+      // (`ФВ-5.20a`) — саме це правило D-445 і скасовує для погоджувача.
+      expect(screen.getByRole('menuitem', { name: '⟦import.pick⟧…' })).toBeDefined();
     },
     SlowEnvTimeout,
   );
