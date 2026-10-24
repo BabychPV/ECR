@@ -16,8 +16,8 @@ import type { ColumnDraft } from '../column';
  * колонки зникали від невдалого фокус-перезапиту.
  */
 const api = vi.hoisted(() => ({ getColumn: vi.fn() }));
-vi.mock('../columnApi', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../columnApi')>()),
+vi.mock('@/features/templates/columnApi', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/features/templates/columnApi')>()),
   ...api,
 }));
 

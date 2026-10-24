@@ -17,8 +17,8 @@ import type { PendingEdit } from '../useCellPatch';
  *
  * ⚠ Автозбереження приглушене: предмет — що показано, а не що надіслано.
  */
-vi.mock('../autosave', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../autosave')>();
+vi.mock('@/features/grid/autosave', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/grid/autosave')>();
 
   return { ...actual, scheduleAutosave: (): void => undefined };
 });

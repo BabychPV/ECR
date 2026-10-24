@@ -9,7 +9,7 @@ import { addColumn, removeColumn, updateColumn } from '../draftModel';
 import { AutosaveDelayMs, useTypeEditor } from '../useTypeEditor';
 import { column, permitType } from './fixtures';
 
-vi.mock('../../api/typesApi', () => ({
+vi.mock('@/features/permits/api/typesApi', () => ({
   getPermitType: vi.fn(),
   replacePermitType: vi.fn(),
 }));

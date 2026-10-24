@@ -16,7 +16,7 @@ import { SheetTables } from '../SheetTables';
  * ⚠ `DocumentGrid` підмінений, `IntersectionObserver` прибрано: тоді `SheetTables` монтує лише
  * вибрану таблицю (свідома деградація без спостерігача), і рішення видно без розкладки.
  */
-vi.mock('../DocumentGrid', () => ({
+vi.mock('@/features/grid/DocumentGrid', () => ({
   DocumentGrid: ({ tableInstanceId, hidden }: { tableInstanceId: number; hidden?: boolean }): JSX.Element => (
     <div data-testid={`grid-${String(tableInstanceId)}`} data-hidden={hidden === true ? 'true' : 'false'} />
   ),

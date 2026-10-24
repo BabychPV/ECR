@@ -25,8 +25,8 @@ const api = vi.hoisted(() => ({
   getConditionalFormats: vi.fn(),
   saveConditionalFormats: vi.fn(),
 }));
-vi.mock('../conditionalFormatApi', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../conditionalFormatApi')>()),
+vi.mock('@/features/templates/conditionalFormatApi', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/features/templates/conditionalFormatApi')>()),
   ...api,
 }));
 

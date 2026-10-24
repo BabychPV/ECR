@@ -26,7 +26,7 @@ vi.mock('@/shared/i18n', async (importOriginal) => ({
     params === undefined ? key : `${key} ${JSON.stringify(params)}`,
   language: () => lang.value,
 }));
-vi.mock('../../api/permitsApi', () => ({
+vi.mock('@/features/permits/api/permitsApi', () => ({
   getPermit: vi.fn(),
   updatePermit: vi.fn(),
   activatePermit: vi.fn(),

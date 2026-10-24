@@ -76,8 +76,8 @@ function metadataWithRound(): ExpressionMetadataDto {
 
 const metadataMock = vi.fn();
 
-vi.mock('../api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../api')>();
+vi.mock('@/features/expressions/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/expressions/api')>();
   return {
     ...actual,
     validateExpression: vi
@@ -99,7 +99,7 @@ vi.mock('../api', async (importOriginal) => {
  * `registerCompletion`). Через нього перелік підказок перевіряється тим самим
  * шляхом, що й у браузері, без самого Monaco.
  */
-vi.mock('../monaco', () => {
+vi.mock('@/features/expressions/monaco', () => {
   let internalValue = '';
   let changeHandler: (() => void) | null = null;
   let source: (() => ExpressionMetadataDto | undefined) | null = null;

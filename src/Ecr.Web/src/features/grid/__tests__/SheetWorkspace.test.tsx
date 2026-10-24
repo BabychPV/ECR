@@ -15,7 +15,7 @@ import { SheetWorkspace } from '../SheetWorkspace';
  */
 const lifecycle = { mounts: new Map<number, number>(), unmounts: new Map<number, number>() };
 
-vi.mock('../DocumentGrid', () => ({
+vi.mock('@/features/grid/DocumentGrid', () => ({
   DocumentGrid: ({ tableInstanceId }: { tableInstanceId: number }): JSX.Element => {
     // Підміна «незбережених правок»: лічильник у стані компонента, як `pending` у сітці.
     const [edits, setEdits] = useState(0);

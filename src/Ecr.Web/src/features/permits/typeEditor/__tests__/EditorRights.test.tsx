@@ -30,7 +30,7 @@ vi.mock('@/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/client')>()),
   apiFetch: vi.fn(),
 }));
-vi.mock('../../api/typesApi', () => ({
+vi.mock('@/features/permits/api/typesApi', () => ({
   getPermitType: vi.fn(),
   replacePermitType: vi.fn(),
   publishPermitType: vi.fn(),

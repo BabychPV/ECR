@@ -35,7 +35,7 @@ import {
  * інертна за побудовою: у jsdom немає розкладки, і «що видно» там не визначено
  * зовсім. Подію перетину тут задає сам тест, поіменно.
  */
-vi.mock('../DocumentGrid', () => ({
+vi.mock('@/features/grid/DocumentGrid', () => ({
   DocumentGrid: ({ tableInstanceId }: { tableInstanceId: number }) => (
     <div data-testid={`grid-${String(tableInstanceId)}`} />
   ),

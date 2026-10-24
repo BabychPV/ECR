@@ -15,14 +15,14 @@ import { airType, airTypeItem, binding, preview, sheetTable } from './fixtures';
  * Скануються: вкладка з прив'язкою (зіставлення + перегляд із заштрихованими комірками), порожній стан,
  * кроки майстра «Permit table», «Columns» і «Review».
  */
-vi.mock('../../api/bindingsApi', () => ({
+vi.mock('@/features/permits/api/bindingsApi', () => ({
   listPermitBindings: vi.fn(),
   deletePermitBinding: vi.fn(),
   previewPermitBinding: vi.fn(),
   savePermitBinding: vi.fn(),
 }));
-vi.mock('../../api/typesApi', () => ({ listPermitTypes: vi.fn(), getPermitType: vi.fn() }));
-vi.mock('../../api/permitsApi', () => ({ listPermits: vi.fn() }));
+vi.mock('@/features/permits/api/typesApi', () => ({ listPermitTypes: vi.fn(), getPermitType: vi.fn() }));
+vi.mock('@/features/permits/api/permitsApi', () => ({ listPermits: vi.fn() }));
 vi.mock('@/features/templates/headerFieldApi', () => ({ getHeaderFields: vi.fn() }));
 
 beforeEach(() => {

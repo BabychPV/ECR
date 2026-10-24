@@ -17,14 +17,14 @@ import { airType, binding, k, kp, sheetTable } from './fixtures';
  * у `remove.onError` прибрати `showApiError` валить «відмова видалення»; у `mutationFn` викликати
  * `deletePermitBinding` з іншим кодом валить «видалення».
  */
-vi.mock('../../api/bindingsApi', () => ({ listPermitBindings: vi.fn(), deletePermitBinding: vi.fn() }));
-vi.mock('../../api/typesApi', () => ({ getPermitType: vi.fn() }));
+vi.mock('@/features/permits/api/bindingsApi', () => ({ listPermitBindings: vi.fn(), deletePermitBinding: vi.fn() }));
+vi.mock('@/features/permits/api/typesApi', () => ({ getPermitType: vi.fn() }));
 vi.mock('@/shared/ui/notify', () => ({ showDone: vi.fn(), showApiError: vi.fn() }));
 // Важкі лінивi чанки замінено заглушками: тут перевіряється лише хост.
-vi.mock('../BindingPreview', () => ({
+vi.mock('@/features/permits/bindings/BindingPreview', () => ({
   BindingPreview: ({ binding: shown }: { binding: { code: string } }) => <div data-testid="preview-stub">{shown.code}</div>,
 }));
-vi.mock('../BindingWizard', () => ({
+vi.mock('@/features/permits/bindings/BindingWizard', () => ({
   BindingWizard: ({ existing }: { existing: { code: string } | null }) => (
     <div data-testid="wizard-stub">{existing === null ? 'create' : existing.code}</div>
   ),

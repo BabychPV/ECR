@@ -59,8 +59,8 @@ const hoisted = vi.hoisted(() => {
   return { chunk: () => chunk, openChunk: () => open(), state, reset };
 });
 
-vi.mock('../api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../api')>();
+vi.mock('@/features/expressions/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/expressions/api')>();
 
   return {
     ...actual,
@@ -71,7 +71,7 @@ vi.mock('../api', async (importOriginal) => {
   };
 });
 
-vi.mock('../monaco', async () => {
+vi.mock('@/features/expressions/monaco', async () => {
   // ⛔ Саме тут живе гонка: доки тест не відкриє «канал», динамічний імпорт
   // редактора не завершується.
   await hoisted.chunk();

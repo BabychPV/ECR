@@ -17,8 +17,8 @@ vi.mock('@revolist/react-datagrid', () => ({
   RevoGrid: () => <div data-testid="revogrid-stub" />,
 }));
 
-vi.mock('../useCellPatch', async () => {
-  const actual = await vi.importActual<typeof import('../useCellPatch')>('../useCellPatch');
+vi.mock('@/features/grid/useCellPatch', async () => {
+  const actual = await vi.importActual<typeof import('@/features/grid/useCellPatch')>('@/features/grid/useCellPatch');
   return {
     ...actual,
     useCellPatch: () => ({

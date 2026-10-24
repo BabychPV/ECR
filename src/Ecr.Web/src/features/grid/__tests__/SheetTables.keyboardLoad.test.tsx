@@ -13,7 +13,7 @@ import { SheetTables } from '../SheetTables';
  * ⚠ `DocumentGrid` і `IntersectionObserver` підмінені (див. `SheetTables.lazy.test.tsx`): перевіряється
  * рішення про монтування і фокус, а не сітка.
  */
-vi.mock('../DocumentGrid', () => ({
+vi.mock('@/features/grid/DocumentGrid', () => ({
   DocumentGrid: ({ tableInstanceId }: { tableInstanceId: number }) => (
     <div data-testid={`grid-${String(tableInstanceId)}`} />
   ),

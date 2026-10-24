@@ -461,6 +461,33 @@ describe('борг D15-09 обмежений і може лише скорочу
   });
 });
 
+/*
+ * ⛔ Під `vmThreads` `vi.mock('../X')` інколи не застосовується (6d79d5904, bce3f63af) —
+ * тому в `__tests__` підміна лише за псевдонімом `@/…` (docs/build/06-tests.md §2).
+ */
+describe('vi.mock у тестах — лише за псевдонімом @/', { timeout: 10_000 }, () => {
+  const TestFile = 'src/features/probe/__tests__/probe.test.tsx';
+  const Rule = 'vi.mock за відносним шляхом';
+
+  it('відносний шлях у vi.mock заборонено', async () => {
+    const messages = await lint("vi.mock('../api', async () => ({}));\n", TestFile);
+
+    expect(messages.join('\n')).toContain(Rule);
+  });
+
+  it('vi.importActual за відносним шляхом — те саме порушення', async () => {
+    const messages = await lint("void vi.importActual('./api');\n", TestFile);
+
+    expect(messages.join('\n')).toContain(Rule);
+  });
+
+  it('псевдонім @/ проходить', async () => {
+    const messages = await lint("vi.mock('@/features/probe/api', () => ({}));\n", TestFile);
+
+    expect(messages.join('\n')).not.toContain(Rule);
+  });
+});
+
 describe('правила лінтера мають силу помилки, а не поради', { timeout: 10_000 }, () => {
   it('порушення зупиняє npm run lint', async () => {
     const result = await lintResult(

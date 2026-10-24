@@ -33,8 +33,8 @@ vi.mock('@revolist/react-datagrid', () => ({
 
 let mockStatus: SaveStatus = 'idle';
 
-vi.mock('../useCellPatch', async () => {
-  const actual = await vi.importActual<typeof import('../useCellPatch')>('../useCellPatch');
+vi.mock('@/features/grid/useCellPatch', async () => {
+  const actual = await vi.importActual<typeof import('@/features/grid/useCellPatch')>('@/features/grid/useCellPatch');
   return {
     ...actual,
     useCellPatch: () => ({

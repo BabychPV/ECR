@@ -23,7 +23,7 @@ vi.mock('@/shared/i18n', async (importOriginal) => ({
       params !== undefined && name in params ? String(params[name]) : match,
     ),
 }));
-vi.mock('../../../api/typesApi', () => ({ getPermitTypeUsage: vi.fn() }));
+vi.mock('@/features/permits/api/typesApi', () => ({ getPermitTypeUsage: vi.fn() }));
 
 const usage = vi.mocked(typesApi.getPermitTypeUsage);
 

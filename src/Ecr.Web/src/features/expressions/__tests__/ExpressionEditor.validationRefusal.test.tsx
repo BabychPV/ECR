@@ -87,8 +87,8 @@ function abortRefusal(): EcrApiError {
 
 const validateMock = vi.fn();
 
-vi.mock('../api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../api')>();
+vi.mock('@/features/expressions/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/expressions/api')>();
   return {
     ...actual,
     expressionMetadata: vi.fn().mockResolvedValue({
@@ -104,7 +104,7 @@ vi.mock('../api', async (importOriginal) => {
 });
 
 /** Мінімальна фейкова Monaco — та сама форма, що в сусідніх файлах (`D1-12`). */
-vi.mock('../monaco', () => {
+vi.mock('@/features/expressions/monaco', () => {
   const model = { getValue: () => '', dispose: () => {} };
 
   return {

@@ -20,7 +20,7 @@ import { SheetTables } from '../SheetTables';
  */
 const gridProps = new Map<number, CellNavigationRequest | null | undefined>();
 
-vi.mock('../DocumentGrid', () => ({
+vi.mock('@/features/grid/DocumentGrid', () => ({
   DocumentGrid: (props: { tableInstanceId: number; navigateTo?: CellNavigationRequest | null }) => {
     gridProps.set(props.tableInstanceId, props.navigateTo);
 
