@@ -10,7 +10,8 @@ import { expect, test, type APIRequestContext, type Browser, type BrowserContext
  *  - `e2e-reviewer` (погоджувач) повертає аркуш із причиною (два рядки);
  *  - власник бачить картку в «My tasks» з причиною й тим, хто повернув, і лічильник на кнопці; «Відкрити аркуш» веде
  *    на аркуш і період;
- *  - повторне подання — картка зникає (живий запит, збережених задач немає); погоджувач і подавач задачі не мають.
+ *  - останній подавач (`e2e-admin`, право писати є) теж має задачу, погоджувач — ні;
+ *  - повторне подання — картка зникає в усіх (живий запит, збережених задач немає).
  *
  * ⛔ Без стенда файл ПАДАЄ (`beforeAll`), а не пропускається (honesty-guard). `afterAll` повертає власника й аркуш у
  * `Draft` (`Document.Reopen`), хоч би на якому кроці файл зупинився — наступні специфікації бачать базову лінію.
@@ -172,7 +173,8 @@ test.describe('returnedToMe: «Повернуто на доопрацюванн�
         data: { newOwnerUserId: operatorId },
       });
       expect(transferred.ok(), `передача власника: ${String(transferred.status())} ${await transferred.text()}`).toBe(true);
-      expect(await returnedOf(operator.request, sheetDefId), 'аркуш у Draft уже серед повернених').toEqual([]);
+      // ⚠ Тут порожнечу не перевіряємо: базова лінія стенда — Draft після Reopen (afterAll сусідніх файлів), а це з
+      // D-449 теж «повернуто» для власника, якщо повертав не він. Порожнечу доводить крок 2 — після подання.
 
       // ── 2. Подання від e2e-admin: значення в першій комірці, що приймає запис ─────────────────
       const sliceResponse = await admin.request.get(
@@ -209,7 +211,7 @@ test.describe('returnedToMe: «Повернуто на доопрацюванн�
       });
       expect(rejected.status(), `повернення погоджувачем: ${await rejected.text()}`).toBe(204);
 
-      // ── 4. API: задача власника з причиною й іменем; у погоджувача й подавача її немає ────────
+      // ── 4. API: задача власника з причиною й іменем; останній подавач теж її має, погоджувач — ні ────────
       const items = await returnedOf(operator.request, sheetDefId);
       expect(items, 'повернений аркуш не з’явився у власника').toHaveLength(1);
       const item = items[0] as ReturnedItem;
@@ -218,7 +220,7 @@ test.describe('returnedToMe: «Повернуто на доопрацюванн�
       expect(item.returnedByDisplayName).toBe('E2E reviewer');
       expect(Number.isNaN(Date.parse(item.returnedAt))).toBe(false);
       expect(await returnedOf(reviewer.request, sheetDefId), 'погоджувач бачить чужу задачу').toEqual([]);
-      expect(await returnedOf(admin.request, sheetDefId), 'подавач (не власник) бачить чужу задачу').toEqual([]);
+      expect(await returnedOf(admin.request, sheetDefId), 'останній подавач із правом писати не має задачі').toHaveLength(1);
 
       // ── 5. UI: лічильник на кнопці, картка в «My tasks», «Відкрити аркуш» ────────────────────
       const page = await operator.newPage();
@@ -237,6 +239,7 @@ test.describe('returnedToMe: «Повернуто на доопрацюванн�
       // ── 6. Повторне подання - задача зникає сама ──────────────────────────────────────────
       await submit(admin.request, sheetDefId);
       expect(await returnedOf(operator.request, sheetDefId), 'повторно поданий аркуш лишився серед повернених').toEqual([]);
+      expect(await returnedOf(admin.request, sheetDefId), 'повторно поданий аркуш лишився в подавача').toEqual([]);
 
       await page.goto('/');
       await page.getByRole('button', { name: /My tasks|Мои задачи/ }).click();

@@ -18,7 +18,8 @@ namespace Ecr.Api.Tests;
 
 /// <summary>
 /// ✎ D-449: «Повернуто на доопрацювання» (<c>GET /api/v1/me/returned-sheets</c>) справжнім HTTP на справжній базі —
-/// справжні відхилення погоджувачем, надання учасника (D-443), заборони й видимість аркуша.
+/// справжні відхилення погоджувачем і повернення в роботу, надання учасника (D-443), останній подавач, заборони й
+/// видимість аркуша.
 /// </summary>
 /// <remarks>
 /// ⛔ Мутаційні докази (локально, не в коміті; тести лише в CI за рішенням людини — прогін за CI):
@@ -27,7 +28,12 @@ namespace Ecr.Api.Tests;
 /// документ проєкту) → червоніє <c>Власник_бачить_повернений_аркуш_з_причиною…</c> (колега-автор і погоджувач бачать
 /// чужу задачу);</item>
 /// <item>замість <c>DocumentParticipation.WorksOnSheet</c> пускати будь-яке надання → червоніє
-/// <c>Учасник_Write_бачить…</c> (учасник Read і учасник на іншому аркуші бачать задачу);</item>
+/// <c>Учасник_з_рівнем_від_Write…</c> (учасник Read і учасник на іншому аркуші бачать задачу);</item>
+/// <item>прибрати <c>RolesWriteSheet</c> для останнього подавача (пускати будь-якого подавача) → червоніє
+/// <c>Останній_подавач_без_права_писати…</c>;</item>
+/// <item>прибрати перевірку «повернув сам» → червоніє <c>Повернення_в_роботу…</c>;</item>
+/// <item>у сховищі прибрати умову «остання подія — Reopen» (лише <c>ReopenedAt != null</c>) → червоніє
+/// <c>Відкликання_автором…</c> (повернений колись, а потім відкликаний аркуш лишається в переліку);</item>
 /// <item>прибрати перевірку <c>CanReadSheet</c> → червоніє <c>Схований_від_власника_аркуш…</c>;</item>
 /// <item>прибрати <c>DeniesProject</c> → червоніє <c>Заборона_проєкту…</c>;</item>
 /// <item>у сховищі брати <c>Status != Submitted</c> замість <c>== Rejected</c> → червоніє повторне подання/відкликання
@@ -75,22 +81,26 @@ public sealed class ReturnedSheetsApiTests(SqlServerFixture sql)
         Assert.Equal(JsonValueKind.Object, item.GetProperty("sheetNameL10n").ValueKind);
         Assert.True(item.GetProperty("returnedAt").GetDateTime() > DateTime.UtcNow.AddMinutes(-10));
 
-        // ⛔ Безпека: чужа задача не видна — ні колезі з тим самим правом на проєкт, ні погоджувачу (той, хто повернув),
-        // ні автору подання (він не власник і не учасник).
-        foreach (var client in new[] { colleagueClient, managerClient, submitterClient })
+        // Останній подавач (Submit на проєкт — право писати є) бачить ту саму задачу; одна картка, не дві.
+        var submitted = Assert.Single(await ItemsAsync(app, submitterClient).ConfigureAwait(true));
+        Assert.Equal(s.Sheet1, submitted.GetProperty("sheetDefId").GetInt32());
+
+        // ⛔ Безпека: чужа задача не видна — ні колезі з тим самим правом на проєкт, ні погоджувачу (той, хто повернув).
+        foreach (var client in new[] { colleagueClient, managerClient })
         {
             Assert.Empty(await ItemsAsync(app, client).ConfigureAwait(true));
         }
 
-        // Повторне подання виводить аркуш із Rejected — задача зникає сама (живий запит).
+        // Повторне подання виводить аркуш із Rejected — задача зникає сама (живий запит) в усіх.
         await SubmitAsync(app, s, s.Sheet1).ConfigureAwait(true);
         Assert.Empty(await ItemsAsync(app, ownerClient).ConfigureAwait(true));
+        Assert.Empty(await ItemsAsync(app, submitterClient).ConfigureAwait(true));
     }
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Decision", "D-449")]
-    public async Task Учасник_Write_бачить_повернений_аркуш_а_Read_і_надання_на_інший_аркуш_ні()
+    public async Task Учасник_з_рівнем_від_Write_бачить_повернений_аркуш_а_Read_і_надання_на_інший_аркуш_ні()
     {
         var s = await ArrangeAsync().ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
@@ -111,7 +121,8 @@ public sealed class ReturnedSheetsApiTests(SqlServerFixture sql)
         await SubmitAsync(app, s, s.Sheet1).ConfigureAwait(true);
         await RejectAsync(app, manager, s, s.Sheet1, Reason).ConfigureAwait(true);
 
-        foreach (var person in new[] { writer, submitter })
+        // Рівні впорядковані: Write, Submit і Approve (≥ Write) — задача.
+        foreach (var person in new[] { writer, submitter, approver })
         {
             using var client = await SignedInAsync(app, person.UserName).ConfigureAwait(true);
             var item = Assert.Single(await ItemsAsync(app, client).ConfigureAwait(true));
@@ -119,9 +130,9 @@ public sealed class ReturnedSheetsApiTests(SqlServerFixture sql)
             Assert.Equal(s.Sheet1, item.GetProperty("sheetDefId").GetInt32());
         }
 
-        // Read — лише перегляд; Approve — погоджувач; надання на аркуш 2 повернення аркуша 1 не стосується
+        // Read — лише перегляд; надання на аркуш 2 повернення аркуша 1 не стосується
         // (і аркуш 1 від нього схований — ні назви, ні причини).
-        foreach (var person in new[] { reader, otherSheet, approver })
+        foreach (var person in new[] { reader, otherSheet })
         {
             using var client = await SignedInAsync(app, person.UserName).ConfigureAwait(true);
             Assert.Empty(await ItemsAsync(app, client).ConfigureAwait(true));
@@ -187,18 +198,27 @@ public sealed class ReturnedSheetsApiTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Decision", "D-449")]
-    public async Task Лише_повернення_погоджувачем_відкликання_автором_не_задача()
+    public async Task Відкликання_автором_не_задача_навіть_після_давнього_повернення_в_роботу()
     {
         var s = await ArrangeAsync().ConfigureAwait(true);
         var owner = await NewUserAsync(s.ProjectId, "rtv", GrantLevel.Submit, withView: true).ConfigureAwait(true);
+        var reopener = await NewUserAsync(
+            s.ProjectId, "rtq", GrantLevel.Manage, withView: true, permissions: ["Document.Reopen"]).ConfigureAwait(true);
         await SetOwnerAsync(s, owner).ConfigureAwait(true);
 
         using var app = new EcrApiFactory(sql);
         using var ownerClient = await SignedInAsync(app, owner.UserName).ConfigureAwait(true);
         using var submitterClient = await SignedInAsync(app, s.Submitter.UserName).ConfigureAwait(true);
+        using var reopenerClient = await SignedInAsync(app, reopener.UserName).ConfigureAwait(true);
 
-        // Відкликання автором (BE-31) веде в Draft, а не в Rejected — у блоці нічого немає.
+        // Колись аркуш повертали в роботу (ReopenedAt на стані лишається), потім подали знову…
         await SubmitAsync(app, s, s.Sheet1).ConfigureAwait(true);
+        await ReopenAsync(app, reopenerClient, s, s.Sheet1, "Давнє повернення").ConfigureAwait(true);
+        Assert.Single(await ItemsAsync(app, ownerClient).ConfigureAwait(true));
+        await SubmitAsync(app, s, s.Sheet1).ConfigureAwait(true);
+        Assert.Empty(await ItemsAsync(app, ownerClient).ConfigureAwait(true));
+
+        // …а тепер автор відкликає (BE-31): Draft, але остання подія — Recall, не Reopen. У блоці нічого немає.
         using (var recalled = await submitterClient.PostAsJsonAsync(
                    new Uri($"/api/v1/documents/{Num(s.DocumentId)}/recall", UriKind.Relative),
                    new { sheetDefId = s.Sheet1, periodKey = s.PeriodKey, reason = "Забув рядок" }).ConfigureAwait(true))
@@ -207,6 +227,89 @@ public sealed class ReturnedSheetsApiTests(SqlServerFixture sql)
         }
 
         Assert.Empty(await ItemsAsync(app, ownerClient).ConfigureAwait(true));
+        Assert.Empty(await ItemsAsync(app, submitterClient).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-449")]
+    public async Task Повернення_в_роботу_задача_з_причиною_й_автором_повернення_крім_того_хто_повернув_сам()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+
+        // Власник сам має право повертати в роботу (Manage + Document.Reopen); подає інший — автор подань сценарію.
+        var owner = await NewUserAsync(
+            s.ProjectId, "rtn", GrantLevel.Manage, withView: true, permissions: ["Document.Reopen"]).ConfigureAwait(true);
+        var reopener = await NewUserAsync(
+            s.ProjectId, "rtg", GrantLevel.Manage, withView: true, permissions: ["Document.Reopen"]).ConfigureAwait(true);
+        await SetOwnerAsync(s, owner).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var ownerClient = await SignedInAsync(app, owner.UserName).ConfigureAwait(true);
+        using var reopenerClient = await SignedInAsync(app, reopener.UserName).ConfigureAwait(true);
+        using var submitterClient = await SignedInAsync(app, s.Submitter.UserName).ConfigureAwait(true);
+
+        // Повернув інший: задача власника й останнього подавача, з причиною й іменем із повернення в роботу.
+        await SubmitAsync(app, s, s.Sheet1).ConfigureAwait(true);
+        await ReopenAsync(app, reopenerClient, s, s.Sheet1, Reason).ConfigureAwait(true);
+        foreach (var client in new[] { ownerClient, submitterClient })
+        {
+            var item = Assert.Single(await ItemsAsync(app, client).ConfigureAwait(true));
+            Assert.Equal(s.Sheet1, item.GetProperty("sheetDefId").GetInt32());
+            Assert.Equal(Reason, item.GetProperty("reason").GetString());
+            Assert.Equal(reopener.UserName, item.GetProperty("returnedByDisplayName").GetString());
+        }
+
+        Assert.Empty(await ItemsAsync(app, reopenerClient).ConfigureAwait(true));
+
+        // Повторне подання — зникло в усіх.
+        await SubmitAsync(app, s, s.Sheet1).ConfigureAwait(true);
+        Assert.Empty(await ItemsAsync(app, ownerClient).ConfigureAwait(true));
+        Assert.Empty(await ItemsAsync(app, submitterClient).ConfigureAwait(true));
+
+        // Повернув сам власник: для нього не задача, для останнього подавача — задача.
+        await ReopenAsync(app, ownerClient, s, s.Sheet1, "Сам виправлю").ConfigureAwait(true);
+        Assert.Empty(await ItemsAsync(app, ownerClient).ConfigureAwait(true));
+        var own = Assert.Single(await ItemsAsync(app, submitterClient).ConfigureAwait(true));
+        Assert.Equal(owner.UserName, own.GetProperty("returnedByDisplayName").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-449")]
+    public async Task Останній_подавач_без_права_писати_задачі_не_має()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+
+        // Подавач — роль Submit на проєкт; після повернення роль знижено до Read (право писати втрачено, документ видно).
+        var submitter = await NewUserAsync(s.ProjectId, "rtl", GrantLevel.Submit, withView: true).ConfigureAwait(true);
+        using (var app = new EcrApiFactory(sql))
+        {
+            using var manager = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+            using var submitterClient = await SignedInAsync(app, submitter.UserName).ConfigureAwait(true);
+            using (var submitted = await submitterClient.PostAsJsonAsync(
+                       new Uri($"/api/v1/documents/{Num(s.DocumentId)}/submit", UriKind.Relative),
+                       new { sheetDefId = s.Sheet1, periodKey = s.PeriodKey }).ConfigureAwait(true))
+            {
+                Assert.True(submitted.StatusCode == HttpStatusCode.NoContent, $"{submitted.StatusCode}: {app.ErrorsText}");
+            }
+
+            await RejectAsync(app, manager, s, s.Sheet1, Reason).ConfigureAwait(true);
+
+            // Контроль: з правом писати — задача є.
+            Assert.Single(await ItemsAsync(app, submitterClient).ConfigureAwait(true));
+        }
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE sec.ResourceGrant SET Level = {(byte)GrantLevel.Read} WHERE RoleId = {submitter.RoleId}").ConfigureAwait(true);
+        }
+
+        // Новий застосунок — без кешу профілю: подавач бачить документ (Read), але писати не може — задачі немає.
+        using var fresh = new EcrApiFactory(sql);
+        using var readerClient = await SignedInAsync(fresh, submitter.UserName).ConfigureAwait(true);
+        Assert.Empty(await ItemsAsync(fresh, readerClient).ConfigureAwait(true));
     }
 
     [Fact]
@@ -276,6 +379,15 @@ public sealed class ReturnedSheetsApiTests(SqlServerFixture sql)
         Assert.True(response.StatusCode == HttpStatusCode.NoContent, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
     }
 
+    private static async Task ReopenAsync(EcrApiFactory app, HttpClient reopener, Scenario s, int sheetDefId, string reason)
+    {
+        using var response = await reopener.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{Num(s.DocumentId)}/reopen", UriKind.Relative),
+            new { sheetDefId, periodKey = s.PeriodKey, reason }).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(response.StatusCode == HttpStatusCode.NoContent, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
+    }
+
     private static async Task<List<JsonElement>> ItemsAsync(EcrApiFactory app, HttpClient client)
     {
         var page = await PageAsync(app, client, string.Empty).ConfigureAwait(false);
@@ -313,7 +425,13 @@ public sealed class ReturnedSheetsApiTests(SqlServerFixture sql)
     }
 
     private async Task<Person> NewUserAsync(
-        int projectId, string prefix, GrantLevel? level, bool withView, int? denyTableDefId = null, bool denyProject = false)
+        int projectId,
+        string prefix,
+        GrantLevel? level,
+        bool withView,
+        int? denyTableDefId = null,
+        bool denyProject = false,
+        string[]? permissions = null)
     {
         await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
         var userName = $"{prefix}_{Guid.NewGuid():N}"[..20];
@@ -330,6 +448,11 @@ public sealed class ReturnedSheetsApiTests(SqlServerFixture sql)
         if (withView)
         {
             db.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
+        }
+
+        foreach (var permission in permissions ?? [])
+        {
+            db.RolePermissions.Add(new RolePermission(role.Id, permission));
         }
 
         db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));

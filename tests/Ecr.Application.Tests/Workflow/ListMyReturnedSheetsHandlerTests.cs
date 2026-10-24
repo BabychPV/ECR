@@ -16,7 +16,8 @@ namespace Ecr.Application.Tests.Workflow;
 
 /// <summary>
 /// ✎ D-449: правило «чия це задача» блоку «Повернуто на доопрацювання» в пам'яті обробника — власник, учасник
-/// <c>Write</c>/<c>Submit</c> на аркуш, заборона проєкту, симуляція, бюджет запитів.
+/// з рівнем ≥ <c>Write</c> на аркуш, останній подавач із правом писати, «повернув сам», заборона проєкту, симуляція,
+/// бюджет запитів.
 /// </summary>
 /// <remarks>
 /// Мутаційний доказ (локально, не в коміті; прогін — CI): прибрати <c>row.OwnerUserId == userId</c> → червоніє
@@ -84,9 +85,9 @@ public sealed class ListMyReturnedSheetsHandlerTests
     [InlineData(GrantLevel.Write, null, true)]
     [InlineData(GrantLevel.Submit, "S1", true)]
     [InlineData(GrantLevel.Read, null, false)]
-    [InlineData(GrantLevel.Approve, null, false)]
+    [InlineData(GrantLevel.Approve, null, true)]
     [InlineData(GrantLevel.Submit, "S2", false)]
-    public async Task Учасник_лише_з_Write_або_Submit_на_цей_аркуш(GrantLevel level, string? sheetCode, bool expected)
+    public async Task Учасник_лише_з_рівнем_від_Write_на_цей_аркуш(GrantLevel level, string? sheetCode, bool expected)
     {
         Profile(participant: true, projectLevel: null);
         Participations(new ParticipationGrant(level, sheetCode, null, null));
@@ -95,6 +96,53 @@ public sealed class ListMyReturnedSheetsHandlerTests
         var page = await Handler().HandleAsync(null, null, default);
 
         Assert.Equal(expected ? 1 : 0, page.Items.Count);
+    }
+
+    [Theory]
+    [Trait("Decision", "D-449")]
+    [InlineData(GrantLevel.Write, true)]
+    [InlineData(GrantLevel.Submit, true)]
+    [InlineData(GrantLevel.Read, false)]
+    public async Task Останній_подавач_лише_з_правом_писати_в_аркуш(GrantLevel projectLevel, bool expected)
+    {
+        // Не власник і не учасник — лише останній подавач; право писати — ефективний рівень ролей (EditRules.Effective).
+        Profile(participant: false, projectLevel: projectLevel);
+        Rows(Row(owner: OtherUserId) with { SubmittedByUserId = UserId });
+
+        Assert.Equal(expected ? 1 : 0, (await Handler().HandleAsync(null, null, default)).Items.Count);
+    }
+
+    [Fact]
+    [Trait("Decision", "D-449")]
+    public async Task Подавач_без_ролі_але_з_наданням_Write_має_задачу()
+    {
+        Profile(participant: true, projectLevel: null);
+        Participations(new ParticipationGrant(GrantLevel.Write, null, null, null));
+        Rows(Row(owner: OtherUserId) with { SubmittedByUserId = UserId });
+
+        Assert.Single((await Handler().HandleAsync(null, null, default)).Items);
+    }
+
+    [Theory]
+    [Trait("Decision", "D-449")]
+    [InlineData(OtherUserId, 1)]
+    [InlineData(UserId, 0)]
+    public async Task Повернення_в_роботу_не_задача_того_хто_повернув_сам(int reopenedBy, int expected)
+    {
+        Profile(participant: false, projectLevel: GrantLevel.Manage);
+        Rows(Row(owner: UserId) with { Kind = ReturnKind.Reopened, ReturnedByUserId = reopenedBy });
+
+        Assert.Equal(expected, (await Handler().HandleAsync(null, null, default)).Items.Count);
+    }
+
+    [Fact]
+    [Trait("Decision", "D-449")]
+    public async Task Власник_і_подавач_одночасно_одна_картка()
+    {
+        Profile(participant: false, projectLevel: GrantLevel.Submit);
+        Rows(Row(owner: UserId) with { SubmittedByUserId = UserId });
+
+        Assert.Single((await Handler().HandleAsync(null, null, default)).Items);
     }
 
     [Fact]
@@ -107,7 +155,7 @@ public sealed class ListMyReturnedSheetsHandlerTests
                 .Deny(ResourceKind.Project, ProjectId)
                 .Build());
         Participations(new ParticipationGrant(GrantLevel.Write, null, null, null));
-        Rows(Row(owner: UserId));
+        Rows(Row(owner: UserId) with { SubmittedByUserId = UserId });
 
         Assert.Empty((await Handler().HandleAsync(null, null, default)).Items);
     }
