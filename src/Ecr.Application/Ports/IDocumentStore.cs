@@ -129,6 +129,8 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// за той самий період; <c>null</c> — без фільтра. Той самий предикат
 /// (<c>aud.CellChange.IsLateEdit = 1</c>, <c>D-70</c>), що обчислює позначку в
 /// рядку (<c>BE-09b</c>) — не друге визначення «пізньої правки».
+/// ✎ D-446: документи-надання учасника фільтр не виключає — рахує їх у власних межах учасника
+/// (<see cref="DocumentParticipationFilter.HiddenSheets"/> та ін.).
 /// </param>
 /// <param name="HiddenSheetDefIds">
 /// Аркуші, яких читач не бачить, ПАРАМИ «проєкт, аркуш»: зведений стан для <paramref name="State"/> рахується
@@ -154,7 +156,8 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// Лише документи зі (<c>true</c>) застарілими або без (<c>false</c>) <see cref="DocumentSummary.ResultsStale"/>
 /// за період; <c>null</c> — без фільтра. Той самий предикат, що дає позначку в рядку. Потребує періоду (без нього
 /// сховище фільтр ігнорує, а обробник відмовляє 422). Документи проєктів з <paramref name="NarrowedProjectIds"/>
-/// виключаються в обох напрямках (не оракул).
+/// виключаються в обох напрямках (не оракул); ✎ D-446 — так само документи-надання з
+/// <see cref="DocumentParticipationFilter.NarrowedDocumentIds"/> (видимі учасникові цілком — у фільтрі як звичайно).
 /// </param>
 /// <param name="StaleByUserId">Лише застарілі через правки цього користувача (<c>ChangedByUserId</c>); діє разом із <paramref name="ResultsStale"/>.</param>
 /// <param name="NarrowedProjectIds">Проєкти, де читач не бачить хоч щось (аркуш, таблицю, колонку): їхні документи поза фільтром <paramref name="ResultsStale"/>.</param>
@@ -179,11 +182,24 @@ public readonly record struct DocumentListFilter(
 /// <param name="HiddenSheets">
 /// D-444 (AN-131): пари «документ, аркуш», яких учасник у ЦЬОМУ документі-наданні не бачить, — для фільтра
 /// <see cref="DocumentListFilter.State"/> (зведений стан лише по видимих аркушах, як у смузі зведення); <c>null</c> —
-/// фільтра стану немає.
+/// межі не пораховані.
+/// ✎ D-446: ті самі пари звужують і предикат пізньої правки (позначка в рядку й фільтр
+/// <see cref="DocumentListFilter.HasLateEdits"/>) — як пари проєкту <see cref="DocumentListFilter.HiddenSheetDefIds"/>.
+/// </param>
+/// <param name="HiddenTables">✎ D-446: пари «документ, таблиця», схованих від учасника в документі-наданні (пізні правки).</param>
+/// <param name="HiddenColumns">✎ D-446: пари «документ, колонка», схованих від учасника в документі-наданні (пізні правки).</param>
+/// <param name="NarrowedDocumentIds">
+/// ✎ D-446: документи-надання, де учасник не бачить хоч щось (аркуш, таблицю чи колонку): застарілість результатів —
+/// по ВСЬОМУ документу, тож для нього вона не визначена, і фільтр <see cref="DocumentListFilter.ResultsStale"/>
+/// виключає такі документи в обох напрямках (як <see cref="DocumentListFilter.NarrowedProjectIds"/>). <c>null</c> —
+/// фільтра застарілості немає.
 /// </param>
 public sealed record DocumentParticipationFilter(
     int UserId, DateTime AsOfUtc, IReadOnlyCollection<int> DeniedProjectIds,
-    IReadOnlyCollection<(long DocumentId, int SheetDefId)>? HiddenSheets = null);
+    IReadOnlyCollection<(long DocumentId, int SheetDefId)>? HiddenSheets = null,
+    IReadOnlyCollection<(long DocumentId, int TableDefId)>? HiddenTables = null,
+    IReadOnlyCollection<(long DocumentId, int ColumnDefId)>? HiddenColumns = null,
+    IReadOnlyCollection<long>? NarrowedDocumentIds = null);
 
 /// <summary>Порушення правила складу документа.</summary>
 /// <param name="SheetGroup">Група аркушів.</param>

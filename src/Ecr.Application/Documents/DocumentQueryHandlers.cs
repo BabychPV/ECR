@@ -64,7 +64,8 @@ public sealed class ListDocumentsHandler(
     /// <param name="query">Пошук за кодом і назвою; порожній — без пошуку.</param>
     /// <param name="resultsStale">
     /// Лише документи зі (<c>true</c>) застарілими або без (<c>false</c>) застарілих результатів; <c>null</c> — без
-    /// фільтра. ⛔ Документи проєктів, де читач не бачить хоч щось нижче проєкту, виключаються в обох напрямках.
+    /// фільтра. ⛔ Документи проєктів, де читач не бачить хоч щось нижче проєкту, виключаються в обох напрямках;
+    /// ✎ D-446 — так само документи-надання учасника, у яких він не бачить хоч щось.
     /// </param>
     /// <param name="staleBy"><c>me</c> — лише застарілі через правки поточного користувача; потребує <paramref name="resultsStale"/> = <c>true</c>.</param>
     /// <param name="page">Курсорна пагінація.</param>
@@ -107,7 +108,8 @@ public sealed class ListDocumentsHandler(
 
         // ⛔ Фільтр за станом рахується лише по аркушах, які читач бачить: інакше `state=Rejected`
         // знаходить документ, відхилений схованим аркушем, — оракул (смуга зведення цього не показує).
-        // ⛔ Так само позначка і фільтр `hasLateEdits` не враховують пізні правки схованих колонок (R-7).
+        // ⛔ Так само позначка і фільтр `hasLateEdits` не враховують пізні правки схованих колонок (R-7)
+        // (✎ D-446: у документі-наданні — власних меж учасника, див. нижче).
         // ⛔ N1-01: межі ідуть ПАРАМИ «проєкт, Id» (версія шаблону спільна для кількох проєктів).
         // ⛔ N1-02: межі рахуються лише для `projectId` (якщо задано) і ті самі йдуть в `ApplyAsync` нижче —
         // без другого кола `ReadScopeAsync` по тих самих проєктах.
@@ -120,29 +122,37 @@ public sealed class ListDocumentsHandler(
             .ConfigureAwait(false);
 
         // ✎ D-443: документи, відкриті наданням учасника, — у тому самому запиті, поза проєктами із забороною.
-        // ⛔ Фільтри пізніх правок і застарілих результатів рахують межі ПРОЄКТУ (пари «проєкт, аркуш»), а
-        // документ-надання має власні: з такими фільтрами документи поза проєктами з грантом не додаються
-        // (закрито за замовчуванням — фільтр не стає оракулом схованого аркуша; смуга зведення їх так само не лічить).
         // ✎ D-444 (AN-131): фільтр СТАНУ документи-надання додає — з їхніми власними межами (пари «документ, аркуш»,
         // `DocumentSheetVisibility.ParticipantScopesAsync`), тими самими, що смуга зведення: лічильник стану над
         // таблицею і таблиця під фільтром цього стану не розходяться.
-        var participant = profile.HasDocumentParticipations
-                          && clock is not null
-                          && filter.HasLateEdits is null && filter.ResultsStale is null;
+        // ✎ D-446: так само фільтри й позначки пізніх правок і застарілих результатів (раніше документи-надання з
+        // ними мовчки не додавались, а позначка пізніх правок була завжди `false`):
+        //  • пізні правки — у ВЛАСНИХ межах учасника (пари «документ, аркуш/таблиця/колонка»), тим самим предикатом
+        //    сховища (BE-09b), що й для пар проєкту; картка рахує ті самі межі (R-7, `HasVisibleLateEditsAsync`);
+        //  • застарілість — по ВСЬОМУ документу: видимий учасникові цілком документ — у фільтрі як звичайний, частково
+        //    схований — поза фільтром в обох напрямках (рядок — `null`, `DocumentSheetVisibility.For`).
+        var participant = profile.HasDocumentParticipations && clock is not null;
+        HashSet<long> bounded = [];
         if (participant)
         {
-            IReadOnlyCollection<(long DocumentId, int SheetDefId)>? ownHidden = null;
-            if (filter.State is not null && periodKey is { } statePeriod)
-            {
-                var own = await DocumentSheetVisibility.ParticipantScopesAsync(access, profile, statePeriod, ct)
-                    .ConfigureAwait(false);
-                ownHidden = [.. own.OrderBy(s => s.Key).SelectMany(s => s.Value.HiddenSheetIds().Select(id => (s.Key, id)))];
-            }
+            // ⚠ Без періоду — межі без періоду (недійсний ключ 0), як і картка без періоду: позначка пізніх правок
+            // тоді — за будь-який період.
+            var own = (await DocumentSheetVisibility.ParticipantScopesAsync(access, profile, periodKey ?? 0, ct)
+                    .ConfigureAwait(false))
+                .OrderBy(s => s.Key)
+                .ToList();
+            bounded = [.. own.Select(s => s.Key)];
 
             filter = filter with
             {
                 Participation = new DocumentParticipationFilter(
-                    profile.UserId, clock!.UtcNow, profile.DeniedProjectIds(), ownHidden),
+                    profile.UserId, clock!.UtcNow, profile.DeniedProjectIds(),
+                    HiddenSheets: [.. own.SelectMany(s => s.Value.HiddenSheetIds().Select(id => (s.Key, id)))],
+                    HiddenTables: [.. own.SelectMany(s => s.Value.HiddenTableIds().Select(id => (s.Key, id)))],
+                    HiddenColumns: [.. own.SelectMany(s => s.Value.HiddenColumnIds().Select(id => (s.Key, id)))],
+                    NarrowedDocumentIds: filter.ResultsStale is null
+                        ? null
+                        : [.. own.Where(s => DocumentSheetVisibility.IsProjectNarrowed(s.Value)).Select(s => s.Key)]),
             };
         }
 
@@ -170,11 +180,14 @@ public sealed class ListDocumentsHandler(
         // ні назвою, ні станом, ні лічильниками: фільтр — у `DocumentSheetVisibility`.
         visible = await DocumentSheetVisibility.ApplyAsync(access, profile, visible, periodKey, scopes, ct).ConfigureAwait(false);
 
-        // ⛔ D-443: позначка пізніх правок документа поза проєктами з грантом рахувалась без меж (пар проєкту для
-        // нього немає) — розкрила б активність схованого аркуша. Не віддається (як і лічильники звуженого читача).
+        // ✎ D-446: позначка пізніх правок документа-надання вже порахована сховищем у власних межах учасника. Другий рубіж:
+        // документ-надання, для якого межі НЕ пораховані (надання з'явилось між читанням меж і запитом), — без позначки
+        // (закрито за замовчуванням: без меж вона розкрила б активність схованого аркуша).
         if (participated.Count > 0)
         {
-            visible = [.. visible.Select(d => participated.Contains(d.Id) && !byRoles.Contains(d.Id) ? d with { HasLateEdits = false } : d)];
+            visible = [.. visible.Select(d => participated.Contains(d.Id) && !byRoles.Contains(d.Id) && !bounded.Contains(d.Id)
+                ? d with { HasLateEdits = false }
+                : d)];
         }
 
         // ⛔ `all.TotalCount` НЕ проводиться далі як є — саме це й було дірою:
@@ -395,6 +408,8 @@ public sealed class GetDocumentHandler(
             .ApplyAsync(access, profile, [document], periodKey, known: null, ct).ConfigureAwait(false))[0];
 
         // ⛔ R-7: позначка пізніх правок — лише по тому, що читач бачить.
+        // ✎ D-446: для документа-надання `ReadScopeAsync` дає ВЛАСНІ межі учасника — ті самі, з якими перелік рахує
+        // позначку й фільтр `hasLateEdits` (`ParticipantScopesAsync`), тож картка й рядок переліку не розходяться.
         if (narrowed.HasLateEdits && DocumentSheetVisibility.HasRestrictions(profile))
         {
             var scope = (await DocumentSheetVisibility

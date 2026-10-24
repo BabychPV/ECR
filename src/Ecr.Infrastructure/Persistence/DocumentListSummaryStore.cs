@@ -117,6 +117,7 @@ public sealed class DocumentListSummaryStore(
         // Застарілі результати - ОКРЕМИЙ запит (великий агрегат вище не чіпаємо): той самий предикат, що дає
         // позначку й фільтр у переліку (`StaleResultsQuery`), по тих самих документах, які читач бачить.
         // ⛔ Проєкти зі звуженням не рахуються - як `WithIssues`.
+        // ✎ D-446: документи-надання — лише видимі учасникові цілком (`ParticipantSummaryScope.WholeDocumentIds`).
         var (staleCount, staleMine) = await StaleCountsAsync(
             projectId, periodKey, allowed?.ToArray(), restrictions, currentUserId, ct).ConfigureAwait(false);
 
@@ -145,6 +146,20 @@ public sealed class DocumentListSummaryStore(
         var visible = db.Documents
             .AsNoTracking()
             .Where(d => (scope == null || scope.Contains(d.ProjectId)) && !narrowed.Contains(d.ProjectId));
+
+        // ✎ D-446: документи-надання, видимі учасникові ЦІЛКОМ, — додатково (поза забороненими проєктами, у межах фільтра
+        // проєкту); проєкти зі звуженням виключаються і тут — рівно так, як фільтр `resultsStale` переліку.
+        var whole = restrictions?.Participants?.WholeDocumentIds?.ToArray() ?? [];
+        if (whole.Length > 0)
+        {
+            var denied = restrictions!.Participants!.DeniedProjectIds.ToArray();
+            visible = db.Documents
+                .AsNoTracking()
+                .Where(d => ((scope == null || scope.Contains(d.ProjectId))
+                             || (whole.Contains(d.Id) && !denied.Contains(d.ProjectId)
+                                 && (projectId == null || d.ProjectId == projectId)))
+                            && !narrowed.Contains(d.ProjectId));
+        }
 
         var maps = await new StaleResultsMapCache(db, cache, clock, epoch, log, StaleMapMaxDocuments, scopeFactory)
             .GetAsync(periodKey, currentUserId is { } me ? [null, me] : [null], ct)

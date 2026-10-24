@@ -243,6 +243,7 @@ public sealed class DocumentStore(
         // resultsStale: той самий предикат, що дає позначку в рядку (`StaleResultsQuery`), - підзапитом ДО `Take`.
         // ⛔ Проєкти зі звуженням виключаються в обох напрямках (`false` теж): інакше «не застарілі» = решта,
         // тобто те саме знання навиворіт. Без періоду фільтр не діє (застарілість належить періоду).
+        // ✎ D-446: документ-надання, видимий учасникові ЦІЛКОМ, — у фільтрі як звичайний; частково схований — поза ним.
         // LP-45 / D-432: карта «*» береться ОДИН раз на запит переліку - фільтр і позначка рядків бачать одну й ту саму
         // карту (без другого читання відбитка й без гонки з фоновим оновленням між двома зверненнями).
         var starFetched = false;
@@ -258,7 +259,15 @@ public sealed class DocumentStore(
                 starMap = staleMap;
             }
 
+            // ✎ D-446: так само документи-надання, де учасник не бачить хоч щось: застарілість — по ВСЬОМУ документу,
+            // тож для нього вона не визначена (рядок — `null`), і «не застарілі» без них не стають знанням навиворіт.
+            var narrowedDocuments = filter.Participation?.NarrowedDocumentIds?.ToArray() ?? [];
             documents = documents.Where(d => !narrowed.Contains(d.ProjectId));
+            if (narrowedDocuments.Length > 0)
+            {
+                documents = documents.Where(d => !narrowedDocuments.Contains(d.Id));
+            }
+
             if (staleMap is null)
             {
                 // Карта переповнена: підзапитом по журналу, як у 1885c2c77 (без кешу).
@@ -1036,6 +1045,10 @@ public sealed class DocumentStore(
     private static string PairsJson(IReadOnlyCollection<(int ProjectId, int Id)>? pairs)
         => JsonSerializer.Serialize((pairs ?? []).Select(x => new { p = x.ProjectId, i = x.Id }));
 
+    /// <summary>✎ D-446: пари «документ, Id» як JSON-масив <c>[{"d":1,"i":2}]</c> для <c>OPENJSON</c>; <c>null</c> — порожній.</summary>
+    private static string DocumentPairsJson(IReadOnlyCollection<(long DocumentId, int Id)>? pairs)
+        => JsonSerializer.Serialize((pairs ?? []).Select(x => new { d = x.DocumentId, i = x.Id }));
+
     private static Expression<Func<T, bool>> Not<T>(Expression<Func<T, bool>> predicate)
         => Expression.Lambda<Func<T, bool>>(Expression.Not(predicate.Body), predicate.Parameters);
 
@@ -1089,11 +1102,17 @@ public sealed class DocumentStore(
         // JSON-масивом (`OPENJSON`), бо перелік змінної довжини в сирий SQL параметрами не розгорнути.
         // ⛔ N1-01: це ПАРИ «проєкт, Id» (`h.p = dd.ProjectId`): версія шаблону спільна для кількох проєктів,
         // а схований аркуш/таблиця/колонка — лише в тому проєкті, де стоїть заборона чи звуження.
+        // ✎ D-446: документ-надання учасника має ВЛАСНІ межі — пари «документ, Id» (`h.d = c.DocumentId`), ті самі, що
+        // фільтр стану (D-444) і картка (R-7). Це ТОЙ САМИЙ предикат, доповнений ще трьома парами, а не друге визначення.
+        var participation = hidden.Participation;
         object[] args =
         [
             PairsJson(hidden.HiddenColumnDefIds),
             PairsJson(hidden.HiddenTableDefIds),
             PairsJson(hidden.HiddenSheetDefIds),
+            DocumentPairsJson(participation?.HiddenColumns),
+            DocumentPairsJson(participation?.HiddenTables),
+            DocumentPairsJson(participation?.HiddenSheets),
         ];
 
         // ⚠ P1-05 (AN-109): два тексти запиту замість «catch-all» `(@any = 1 OR c.PeriodKey = @p)`. Один кешований
@@ -1108,7 +1127,7 @@ public sealed class DocumentStore(
         var periodPredicate = string.Empty;
         if (period.Value is { } periodKey)
         {
-            periodPredicate = "AND c.PeriodKey = {3}";
+            periodPredicate = "AND c.PeriodKey = {6}";
             args = [.. args, periodKey];
         }
 
@@ -1129,7 +1148,13 @@ public sealed class DocumentStore(
                            OR EXISTS (SELECT 1 FROM OPENJSON({1}) WITH (p int '$.p', i int '$.i') AS h
                                        WHERE h.p = dd.ProjectId AND h.i = td.Id)
                            OR EXISTS (SELECT 1 FROM OPENJSON({2}) WITH (p int '$.p', i int '$.i') AS h
-                                       WHERE h.p = dd.ProjectId AND h.i = td.SheetDefId)))
+                                       WHERE h.p = dd.ProjectId AND h.i = td.SheetDefId)
+                           OR EXISTS (SELECT 1 FROM OPENJSON({3}) WITH (d bigint '$.d', i int '$.i') AS h
+                                       WHERE h.d = c.DocumentId AND h.i = cd.Id)
+                           OR EXISTS (SELECT 1 FROM OPENJSON({4}) WITH (d bigint '$.d', i int '$.i') AS h
+                                       WHERE h.d = c.DocumentId AND h.i = td.Id)
+                           OR EXISTS (SELECT 1 FROM OPENJSON({5}) WITH (d bigint '$.d', i int '$.i') AS h
+                                       WHERE h.d = c.DocumentId AND h.i = td.SheetDefId)))
             """,
             args);
 
