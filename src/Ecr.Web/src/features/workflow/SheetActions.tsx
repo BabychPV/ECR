@@ -249,9 +249,19 @@ export function SheetActions(props: SheetActionsProps): JSX.Element {
       )}
 
       {submit !== null && (
-        <Button loading={submit.loading} onClick={submit.run}>
-          {submitLabel(submit.periodKey)}
-        </Button>
+        // ✎ D-441: поки ціль — підставна відповідь попереднього аркуша/періоду, кнопка недоступна з поясненням.
+        // ⚠ `Hint` завжди (лише `disabled`): умовна обгортка перемонтовувала б кнопку і губила фокус.
+        <Hint label={t('common.loading')} disabled={!submit.checking}>
+          <Button
+            loading={submit.loading}
+            onClick={submit.run}
+            data-disabled={submit.checking}
+            aria-disabled={submit.checking || undefined}
+            aria-busy={submit.checking || undefined}
+          >
+            {submitLabel(submit.periodKey)}
+          </Button>
+        </Hint>
       )}
 
       {/* ⛔ Затвердження і відхилення — пара, і показуються разом. Кнопка
@@ -360,15 +370,27 @@ export interface RunnableSheetAction {
 export interface SheetActionsModel {
   /** `blockedReason` - чому перерахунок зараз неможливий (поданий сусідній аркуш); `null` - можна. */
   readonly recalculate: (RunnableSheetAction & { readonly running: boolean; readonly blockedReason: string | null }) | null;
-  /** ✎ D-441: `periodKey` — період, який подасть кнопка; `options` — неподані відкриті періоди для вибору. */
+  /**
+   * ✎ D-441: `periodKey` — період, який подасть кнопка; `options` — неподані відкриті періоди для вибору.
+   * ✎ D-441 «миготіння скелета»: `checking` — аркуш чи період щойно змінився, а на руках лише відповідь
+   * ПОПЕРЕДНЬОГО ключа (`isPlaceholderData`). Кнопка лишається на місці (та сама ширина — «More» не рухається), але
+   * `run` і `pick` нічого не роблять: ціль чужого аркуша/періоду не подається.
+   */
   readonly submit:
     | (RunnableSheetAction & {
         readonly periodKey: number;
         readonly nextPeriodKey: number | null;
         readonly options: readonly number[];
         readonly pick: (periodKey: number) => void;
+        readonly checking: boolean;
       })
     | null;
+  /**
+   * ✎ D-441 CLS: форма рядка дій ще невідома — перша відповідь `submission-target` у дорозі, а людина МОЖЕ подавати
+   * (місце «Подати» з'явиться). Без права подання (симуляція, грант нижче `Write`, архівний проєкт) — `false`
+   * одразу: «Подати» не буде за будь-якої відповіді, і скелет лише миготів би.
+   */
+  readonly submitPending: boolean;
   readonly approve: { readonly loading: boolean; readonly ask: () => void } | null;
   readonly reject: { readonly ask: () => void } | null;
   readonly reopen: { readonly ask: () => void } | null;
@@ -813,7 +835,21 @@ export function useSheetActions({
 
   // ⚠ Архівний проєкт блокує подання будь-якого періоду; стан ВІДКРИТОГО періоду (закритий, не відкритий) —
   // ні: подається інший період, і його стан уже врахував сервер.
-  const canSubmit = submitPeriod !== null && lock !== 'projectArchived' && mayWorkflow('submit');
+  const maySubmit = lock !== 'projectArchived' && mayWorkflow('submit');
+  const canSubmit = submitPeriod !== null && maySubmit;
+
+  /*
+   * ✎ D-441 «миготіння скелета»: `keepPreviousData` (`useSubmissionTarget`) тримає відповідь попереднього
+   * аркуша/періоду, доки йде запит нового. ⛔ Подати можна лише ПІДТВЕРДЖЕНУ ціль: поки дані підставні,
+   * `confirmedPeriod === null` і `run` — порожній, хай би кнопка й показувала період зі старої відповіді.
+   */
+  const checking = submissionTarget.isPlaceholderData;
+  const confirmedPeriod = checking ? null : submitPeriod;
+
+  // Перша відповідь у дорозі (без підставних даних) — лише ПЕРША спроба: збій із повторами не тримає скелет
+  // (див. `DocumentActionBar`). Профілю ще немає — право невідоме, тож місце «Подати» тримається.
+  const submitPending =
+    submissionTarget.isLoading && submissionTarget.failureCount === 0 && (me === undefined || maySubmit);
 
   /*
    * ⚠ D-440: правило чотирьох очей скасоване — автор подання з потрібною роллю
@@ -986,14 +1022,21 @@ export function useSheetActions({
           periodKey: submitPeriod,
           nextPeriodKey,
           options: submittable,
-          pick: (key: number) => setPicked({ sheetDefId, periodKey: key }),
+          checking,
+          pick: (key: number) => {
+            if (!checking) setPicked({ sheetDefId, periodKey: key });
+          },
           // N3-01: адреса — знята в мить кліку; період — ЦІЛЬ подання, а не відкритий на екрані (D-441).
-          run: () =>
+          // ⛔ Лише підтверджена ціль (`confirmedPeriod`): поки дані підставні, клік нічого не шле.
+          run: () => {
+            if (confirmedPeriod === null) return;
             settled.run(() =>
-              submit.mutateAsync({ ...here, periodKey: submitPeriod, acknowledgeWarnings: false }),
-            ),
+              submit.mutateAsync({ ...here, periodKey: confirmedPeriod, acknowledgeWarnings: false }),
+            );
+          },
         }
       : null,
+    submitPending,
     approve: canApprove ? { loading: decideLoading || settled.settling, ask: () => ask('approve') } : null,
     reject: canReject ? { ask: () => ask('reject') } : null,
     reopen: canReopen ? { ask: () => ask('reopen') } : null,

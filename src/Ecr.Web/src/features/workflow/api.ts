@@ -1,4 +1,4 @@
-import { useQuery, type UseQueryResult } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 
@@ -81,6 +81,11 @@ export function fetchSubmissionTarget(documentId: number, sheetDefId: number, pe
 /**
  * Цільовий період подання (D-441): найраніший неподаний `Open`/`Grace`, наступний, відкриті періоди для вибору
  * і статуси місячних колонок. Рішення — сервера: стан періоду для подання ЕФЕКТИВНИЙ (за датами).
+ *
+ * ✎ D-441 «миготіння скелета»: при зміні аркуша чи періоду (новий ключ) лишається відповідь ПОПЕРЕДНЬОГО ключа
+ * (`keepPreviousData`), щоб рядок дій не підмінявся скелетом на один запит. ⛔ Ця відповідь — лише для ФОРМИ рядка:
+ * `isPlaceholderData === true` означає «ціль ще чужого аркуша/періоду», і подавати за нею не можна —
+ * `useSheetActions` тоді вимикає «Подати» (`submit.checking`) і бере ціль лише з непідставних даних.
  */
 export function useSubmissionTarget(
   documentId: number,
@@ -90,5 +95,6 @@ export function useSubmissionTarget(
   return useQuery({
     queryKey: submissionTargetKey(documentId, sheetDefId, periodKey),
     queryFn: () => fetchSubmissionTarget(documentId, sheetDefId, periodKey),
+    placeholderData: keepPreviousData,
   });
 }
