@@ -158,6 +158,18 @@ function mockFetch(): void {
         );
       }
 
+      if (url.includes('/api/v1/me/returned-sheets')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              items: [{ documentId: 13, documentKey: 'AIR-2026-08', documentNameL10n: null, projectCode: 'AIR', sheetDefId: 4, sheetCode: 'Mobile', sheetNameL10n: { values: { en: 'Mobile' } }, periodKey: 202608, returnedAt: '2026-10-08T09:30:00Z', returnedByDisplayName: 'Olena', reason: 'Fix totals' }],
+              nextCursor: null,
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
+
       if (url.includes('/api/v1/me/edit-assignments')) {
         return Promise.resolve(
           new Response(
@@ -240,12 +252,17 @@ describe('кнопка «My tasks» у шапці', () => {
     expect(badge.textContent).toBe('1');
   });
 
-  it('передані місяці - ОКРЕМА позначка поруч з активними задачами, а не їх частина (EA-5c)', async () => {
+  it('«чекають на вас» - ОКРЕМА позначка поруч з активними задачами, а не їх частина (EA-5c)', async () => {
     mockFetch();
     mount();
 
-    const edits = await screen.findByLabelText('⟦myTasks.edit.pendingBadge (n=2)⟧');
-    expect(edits.getAttribute('data-my-tasks-edits')).toBe('2');
+    /*
+     * ✎ D-449: одне число «чекають на вас» = передані місяці (2) + «До погодження» (1) + «Повернуто на
+     * доопрацювання» (1). Мутація: прибрати будь-який доданок у `MyTasksLauncher` - число не 4, тест червоний.
+     */
+    const waiting = await screen.findByLabelText('⟦myTasks.waitingBadge (n=4)⟧');
+    expect(waiting.getAttribute('data-my-tasks-waiting')).toBe('4');
+    expect(waiting.textContent).toBe('4');
     // Позначка активних фонових задач лишилась зі своїм смислом (1 активна), число передач її не змінило.
     expect((await screen.findByLabelText('⟦jobs.myTasksActive (n=1)⟧')).textContent).toBe('1');
   });
@@ -298,6 +315,27 @@ describe('фокус після закриття шухляди (RC15-E, WCAG 2.
   });
 });
 
+describe('лічильник «чекають на вас» (D-449)', () => {
+  it('рахується з першої сторінки без відкриття шухляди: по одному запиту, наступні сторінки не довантажуються', async () => {
+    mockFetch();
+    const calls: string[] = [];
+    const inner = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        calls.push(String(input));
+        return inner(input);
+      }),
+    );
+    mount();
+
+    expect(await screen.findByLabelText('⟦myTasks.waitingBadge (n=4)⟧')).toBeTruthy();
+    expect(calls.filter((url) => url.includes('/api/v1/me/approval-queue'))).toHaveLength(1);
+    expect(calls.filter((url) => url.includes('/api/v1/me/returned-sheets'))).toHaveLength(1);
+    expect(calls.some((url) => url.includes('cursor='))).toBe(false);
+  });
+});
+
 describe('перехід із блоку «До погодження»', () => {
   it('клік «Review» закриває шухляду, щоб вона не лишалась поверх документа', async () => {
     mockFetch();
@@ -324,6 +362,7 @@ describe('перехід із сусідніх блоків шухляди', () 
     ['Awaiting validation - Validate', '[data-testid="my-tasks-validation"] a[data-action="validate"]'],
     ['Awaiting validation - Open', '[data-testid="my-tasks-validation"] a[data-action="open"]'],
     ['Потребують перерахунку - Open', '[data-testid="my-tasks-stale"] a'],
+    ['Повернуто на доопрацювання - Відкрити аркуш', '[data-testid="my-tasks-returned"] a[data-action="open-returned"]'],
   ])('клік «%s» закриває шухляду', async (_name, selector) => {
     mockFetch();
     mount();
