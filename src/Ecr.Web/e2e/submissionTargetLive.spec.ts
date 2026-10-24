@@ -136,4 +136,65 @@ test.describe('submissionTarget: «Подати: <період>» на реал�
       await context.close();
     }
   });
+
+  /*
+   * ✎ D-441 CLS: «More» не рухається, коли `submission-target` відповідає ПІСЛЯ першого малюнка рядка дій.
+   *
+   * ⛔ На старому коді «Validate» і «More» малювалися одразу, а «Подати: <період>» з ▾ і «Next to submit: …» —
+   * лише з відповіддю: група дій (притиснута праворуч) розширювалась і переносилась, «More» з'їжджала з ~(1055,138)
+   * на ~(861,162) між натиском і відпуском миші (e2e-stand 39994116932, 40023308269). Відповідь тут навмисно
+   * притримується (2,5 с), щоб «пізня відповідь» була не випадком таймінгу, а умовою прогону: старий код червоніє
+   * детерміновано.
+   */
+  test('«More» зʼявляється одразу на остаточному місці: пізня відповідь submission-target не зсуває рядок дій', async ({
+    browser,
+  }) => {
+    const context = await signedIn(browser);
+    const page = await context.newPage();
+    const targetPath = `/api/v1/documents/${DocumentId}/submission-target`;
+
+    try {
+      await page.route(
+        (url) => url.pathname === targetPath,
+        async (route) => {
+          await new Promise((resolve) => setTimeout(resolve, 2_500));
+          await route.continue();
+        },
+      );
+      const targetResponse = page.waitForResponse(
+        (response) => response.request().method() === 'GET' && new URL(response.url()).pathname === targetPath,
+        { timeout: 90_000 },
+      );
+
+      await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
+
+      // Поки відповіді немає — місце дій тримає скелет (не кнопки).
+      await expect(page.getByTestId('document-actions-pending'), 'немає скелета рядка дій до відповіді').toBeVisible({
+        timeout: 60_000,
+      });
+
+      const more = page.getByTestId('document-more');
+      await expect(more).toBeVisible({ timeout: 60_000 });
+      const first = await more.boundingBox();
+      if (first === null) throw new Error('«More» видима, але без розмірів');
+
+      expect((await targetResponse).status()).toBe(200);
+      // Стенд має неподаний відкритий період (перший тест), тож «Подати» є — рядок дій у повній формі.
+      await expect(page.getByTestId('document-submit')).toBeVisible({ timeout: 30_000 });
+      // Два кадри й пауза: усе, що відповідь могла домалювати (▾, «Next to submit: …»), уже розкладене.
+      await page.evaluate(
+        () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+      );
+      await page.waitForTimeout(500);
+
+      const settled = await more.boundingBox();
+      if (settled === null) throw new Error('«More» зникла після відповіді submission-target');
+      expect(
+        { x: Math.round(settled.x), y: Math.round(settled.y) },
+        `«More» зсунулась: (${first.x.toFixed(0)},${first.y.toFixed(0)}) → (${settled.x.toFixed(0)},${settled.y.toFixed(0)})`,
+      ).toEqual({ x: Math.round(first.x), y: Math.round(first.y) });
+    } finally {
+      await context.close();
+    }
+  });
 });
