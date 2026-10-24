@@ -38,7 +38,8 @@ public sealed partial class E2eStandPermissionsCoverageTests
         ["Document.Delete"] = "e2e не видаляє документи; руйнівне право не потрібне стенду",
         ["Document.ChangeKey"] = "небезпечне (IsDangerous); зміна бізнес-ключа e2e не перевіряє",
         ["Document.Submit"] = "e2e подає аркуш рівнем Write через наявні гранти; окремий e2e на право не існує",
-        ["Calculation.EditFormula"] = "редактор формул не покритий e2e стенда (формули - Ecr.Expressions-тести)",
+        // ✎ P44: `Calculation.EditFormula` перенесено в E2EAdmin — `resizableModal.spec.ts` заводить методологію
+        // й відкриває вікно формули (розмір вікна, Monaco). Виняток прибрано, як і вимагає ratchet.
         ["Calculation.EditConstant"] = "константи розрахунків e2e не змінює",
         ["Calculation.EditRule"] = "правила розрахунків e2e не змінює",
         ["Calculation.ManageRequiredInputs"] = "обов'язкові входи e2e не налаштовує",

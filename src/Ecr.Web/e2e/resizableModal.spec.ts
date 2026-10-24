@@ -12,11 +12,9 @@ import { expect, test, type Browser, type BrowserContext, type Locator, type Pag
  *   3. перетягування ручки в правому нижньому куті → вікно ширшає, розмір запам'ятовано
  *      (`localStorage`) і відновлюється після перезавантаження.
  *
- * ⚠ Дані — свої. `e2e-admin` не має `Calculation.EditFormula` (свідомо, див.
- * `E2eStandPermissionsCoverageTests.NotGrantedToE2e`), а методологію без нього не завести. Тому
- * `beforeAll` від імені `e2e-admin` (у нього `Security.ManageRoles`/`ManageUsers`) заводить
- * одноразову роль і користувача `e2e-rm-<час>` з цим правом, а той — методологію `E2E_RM_<час>`
- * і порожню чернетку. Залишок на одноразовому стенді — роль, користувач і методологія.
+ * ⚠ Дані — свої: `beforeAll` від імені `e2e-admin` (✎ P44: йому видано `Calculation.EditFormula`,
+ * `tools/e2e-stand.ps1`) заводить методологію `E2E_RM_<час>` і порожню чернетку. Видалення
+ * методології API не має — залишок на одноразовому стенді.
  *
  * ⛔ Без стенда файл ПАДАЄ (`beforeAll`), а не пропускається — як `registryEntryDrawer.spec.ts`.
  *
@@ -26,12 +24,7 @@ const Admin = { userName: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
 
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
 
-/** Тестові паролі одноразового користувача — живуть лише в базі стенда. */
-const IssuedPassword = 'E2E-Rsz1-Issued-2026!';
-const WorkPassword = 'E2E-Rsz1-Work-2026!';
-
 interface Seed {
-  readonly userName: string;
   readonly methodologyId: number;
 }
 
@@ -40,73 +33,36 @@ async function login(context: BrowserContext, userName: string, password: string
   expect(response.ok(), `вхід ${userName}: ${String(response.status())} ${await response.text()}`).toBe(true);
 }
 
-/** Одноразовий автор формул і його методологія з порожньою чернеткою. */
+/** Методологія з порожньою чернеткою — тим самим API, що й екран. */
 async function prepare(browser: Browser): Promise<Seed> {
   const stamp = String(Date.now());
-  const roleCode = `E2ERSZ${stamp}`;
-  const userName = `e2e-rm-${stamp}`;
-
   const admin = await browser.newContext();
   try {
     await login(admin, Admin.userName, Admin.password);
 
-    const role = await admin.request.post('/api/v1/roles', {
-      data: {
-        code: roleCode,
-        nameL10n: { en: `E2E formula author ${stamp}` },
-        permissionCodes: ['Calculation.View', 'Calculation.EditFormula'],
-      },
-    });
-    expect(role.ok(), `роль: ${String(role.status())} ${await role.text()}`).toBe(true);
-
-    const user = await admin.request.post('/api/v1/users', {
-      data: {
-        userName,
-        provider: 'Local',
-        sid: null,
-        displayName: `E2E formula author ${stamp}`,
-        initialPassword: IssuedPassword,
-        roleCodes: [roleCode],
-      },
-    });
-    expect(user.ok(), `користувач: ${String(user.status())} ${await user.text()}`).toBe(true);
-  } finally {
-    await admin.close();
-  }
-
-  const author = await browser.newContext();
-  try {
-    // Разовий пароль міняється одразу — інакше прогін перевіряв би екран зміни пароля.
-    await login(author, userName, IssuedPassword);
-    const changed = await author.request.post('/api/v1/auth/change-password', {
-      data: { currentPassword: IssuedPassword, newPassword: WorkPassword },
-    });
-    expect(changed.ok(), `зміна пароля: ${String(changed.status())} ${await changed.text()}`).toBe(true);
-    await login(author, userName, WorkPassword);
-
-    const created = await author.request.post('/api/v1/methodologies', {
+    const created = await admin.request.post('/api/v1/methodologies', {
       data: { code: `E2E_RM_${stamp}`, group: null, kind: 'DataDriven', nameL10n: { en: `E2E resizable ${stamp}` } },
     });
     expect(created.ok(), `методологія: ${String(created.status())} ${await created.text()}`).toBe(true);
     const methodologyId = ((await created.json()) as { id: number }).id;
 
-    const draft = await author.request.post(`/api/v1/methodologies/${String(methodologyId)}/versions`, {
+    const draft = await admin.request.post(`/api/v1/methodologies/${String(methodologyId)}/versions`, {
       data: { versionNumber: '1.0', copyFromVersionId: null, level: 'Configuration' },
     });
     expect(draft.ok(), `чернетка: ${String(draft.status())} ${await draft.text()}`).toBe(true);
 
-    return { userName, methodologyId };
+    return { methodologyId };
   } finally {
-    await author.close();
+    await admin.close();
   }
 }
 
 /** Вхід через сторінку входу — як людина (`registryEntryDrawer.spec.ts`). */
-async function signIn(page: Page, userName: string): Promise<void> {
+async function signIn(page: Page): Promise<void> {
   await page.goto('/login');
   await expect(page.getByRole('heading').first(), 'сторінка входу не відрендерилася').toBeVisible({ timeout: 30_000 });
-  await page.getByLabel(/User name|Ім'я/i).fill(userName);
-  await page.getByRole('textbox', { name: /Password|Пароль/i }).fill(WorkPassword);
+  await page.getByLabel(/User name|Ім'я/i).fill(Admin.userName);
+  await page.getByRole('textbox', { name: /Password|Пароль/i }).fill(Admin.password);
   await page.keyboard.press('Enter');
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
 }
@@ -150,7 +106,7 @@ test.describe('Вікно формули методології: на весь �
     page,
   }) => {
     if (seed === null) throw new Error('дані не підготовлені');
-    await signIn(page, seed.userName);
+    await signIn(page);
     const dialog = await openFormula(page, seed);
     const editor = dialog.locator('.monaco-editor');
 
