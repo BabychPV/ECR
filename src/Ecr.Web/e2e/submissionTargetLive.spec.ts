@@ -166,12 +166,17 @@ test.describe('submissionTarget: «Подати: <період>» на реал�
         { timeout: 90_000 },
       );
 
-      await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
+      // Поки відповіді немає — місце дій тримає скелет (не кнопки). ⚠ Стежимо паралельно і звіряємо В КІНЦІ:
+      // очікування скелета ПЕРЕД заміром відклало б перший замір «More» за мить зсуву, і старий код пройшов би.
+      const skeletonSeen = page
+        .getByTestId('document-actions-pending')
+        .waitFor({ state: 'visible', timeout: 60_000 })
+        .then(
+          () => true,
+          () => false,
+        );
 
-      // Поки відповіді немає — місце дій тримає скелет (не кнопки).
-      await expect(page.getByTestId('document-actions-pending'), 'немає скелета рядка дій до відповіді').toBeVisible({
-        timeout: 60_000,
-      });
+      await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
 
       const more = page.getByTestId('document-more');
       await expect(more).toBeVisible({ timeout: 60_000 });
@@ -193,6 +198,7 @@ test.describe('submissionTarget: «Подати: <період>» на реал�
         { x: Math.round(settled.x), y: Math.round(settled.y) },
         `«More» зсунулась: (${first.x.toFixed(0)},${first.y.toFixed(0)}) → (${settled.x.toFixed(0)},${settled.y.toFixed(0)})`,
       ).toEqual({ x: Math.round(first.x), y: Math.round(first.y) });
+      expect(await skeletonSeen, 'немає скелета рядка дій до відповіді submission-target').toBe(true);
     } finally {
       await context.close();
     }
