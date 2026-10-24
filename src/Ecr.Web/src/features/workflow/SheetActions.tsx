@@ -428,6 +428,10 @@ export function useSheetActions({
     await invalidateSlices(queryClient, { documentId, periodKey: at.periodKey, sheetDefId: at.sheetDefId });
     // ✎ D-441: ціль подання й статуси місячних колонок залежать від станів аркуша в УСІХ періодах.
     await queryClient.invalidateQueries({ queryKey: ['submission-target', documentId] });
+    // ✎ D-449: «До погодження» й «Повернуто на доопрацювання» в «My tasks» (і лічильник кнопки) залежать від стану
+    // аркуша: подання/погодження/повернення/відкликання прибирає чи додає рядок. Без очікування - це не сторінка.
+    void queryClient.invalidateQueries({ queryKey: ['approval-queue'] });
+    void queryClient.invalidateQueries({ queryKey: ['returned-sheets'] });
   };
 
   // ФВ-5.19: попередження, які сервер попросив підтвердити; `null` — діалог закритий.

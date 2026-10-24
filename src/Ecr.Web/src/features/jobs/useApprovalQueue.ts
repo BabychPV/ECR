@@ -40,7 +40,10 @@ export function approvalQueueItems(data: InfiniteData<ApprovalQueue, string | nu
   return data?.pages.flatMap((page) => page.items) ?? [];
 }
 
-/** Посилання на аркуш документа: період і аркуш - в адресі (ФВ-14.29), інакше відкриється інший аркуш. */
-export function approvalQueueHref(item: ApprovalQueueItem): string {
+/**
+ * Посилання на аркуш документа: період і аркуш - в адресі (ФВ-14.29), інакше відкриється інший аркуш.
+ * ✎ D-449: те саме посилання бере блок «Повернуто на доопрацювання» - тому лише три поля, а не рядок черги.
+ */
+export function approvalQueueHref(item: Pick<ApprovalQueueItem, 'documentId' | 'periodKey' | 'sheetCode'>): string {
   return `/documents/${String(item.documentId)}?periodKey=${String(item.periodKey)}&sheet=${encodeURIComponent(item.sheetCode)}`;
 }
