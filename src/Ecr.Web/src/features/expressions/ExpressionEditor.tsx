@@ -13,6 +13,7 @@ import { indexStructure } from './references';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { useInResizableModal } from '@/shared/ui/resizableModalContext';
 import type { MonacoModule } from './monaco';
 
 /**
@@ -151,6 +152,9 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
   valueRef.current = value;
 
   const scheme = useComputedColorScheme('light');
+
+  // P44: у вікні, яке розгортають чи тягнуть за кут, поле росте разом із вікном.
+  const grow = useInResizableModal();
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -442,7 +446,7 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
   }
 
   return (
-    <Stack gap="xs">
+    <Stack gap="xs" data-rm-grow={grow || undefined}>
       {/*
         ⛔ Банер стоїть ПОРУЧ із редактором, а не ЗАМІСТЬ нього. Писати вираз
         без підказок законно — склад мови їх лише пропонує, перевіряє все одно
@@ -464,7 +468,21 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
       */}
       {validateError !== null && <ErrorAlert error={validateError} onRetry={retryValidate} />}
 
-      <div ref={host} style={{ height: height ?? '8rem', width: '100%' }} />
+      {/*
+        ⚠ P44: у вікні, що змінює розмір, висота — НИЖНЯ межа, а решту добирає `flex`. Основа
+        `0` і явний `minHeight` — не дрібниця: з основою `auto` у розмір поля входив би вже
+        розкладений вміст Monaco (його внутрішні блоки мають висоту в пікселях), і поле ніколи
+        не зменшувалося б назад, коли вікно стискають. Перерозкладку робить сам Monaco
+        (`automaticLayout` у `monaco.ts` стежить за розміром цього блоку).
+      */}
+      <div
+        ref={host}
+        style={
+          grow
+            ? { flex: '1 1 0', minHeight: height ?? '8rem', width: '100%', overflow: 'hidden' }
+            : { height: height ?? '8rem', width: '100%' }
+        }
+      />
     </Stack>
   );
 }

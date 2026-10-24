@@ -10,8 +10,20 @@
   overflow-x: auto;
 }
 
+/*
+ * ✎ D-450: колонка «Власник» — ім'я в один рядок, довге обрізається трьома крапками (повне — у `title`), щоб
+ * таблиця не роздувалась; на ≤ 640 px її немає, як і Updated (власник лишається у фільтрі й шторці).
+ */
+.ecr-docs-owner {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 640px) {
-  .ecr-docs-table-scroll [data-column='updated'] {
+  .ecr-docs-table-scroll [data-column='updated'],
+  .ecr-docs-table-scroll [data-column='owner'] {
     display: none;
   }
 }

@@ -14,6 +14,15 @@ export function parseStateFilter(raw: string | null): DocumentStateFilter | null
   return DocumentStateFilters.find((state) => state === raw) ?? null;
 }
 
+/** ✎ D-450: значення фільтра «Власник»: усі, лише мої або конкретна людина (її `userId`). */
+export type OwnerFilterValue = 'all' | 'mine' | number;
+
+/** Значення з адреси → ідентифікатор людини; не додатне ціле — «без фільтра», а не `422`. */
+export function parseOwnerFilter(raw: string | null): number | null {
+  const parsed = raw === null ? Number.NaN : Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 /** Фільтри переліку документів, прочитані з адреси. */
 export interface DocumentListFilters {
   /**
@@ -24,8 +33,16 @@ export interface DocumentListFilters {
    */
   readonly state: DocumentStateFilter | null;
 
-  /** Лише «мої» — створені або подані мною. */
+  /**
+   * Лише «мої» — створені або подані мною.
+   *
+   * ✎ D-450: `false`, коли обрано конкретну людину (`owner`): сервер обидва разом відхиляє `422`, а старе посилання
+   * з `mine=true` і новим `owner=` показує ту людину, яку видно в полі.
+   */
   readonly mine: boolean;
+
+  /** ✎ D-450: лише документи цієї людини (`owner=<id>` в адресі; власник = автор документа); `null` — будь-чиї. */
+  readonly owner: number | null;
 
   /**
    * Лише документи з пізніми правками (`IsLateEdit`, `D-70`).
@@ -59,6 +76,8 @@ export interface DocumentListFilters {
 
   readonly setState: (state: DocumentStateFilter | null) => void;
   readonly setMine: (mine: boolean) => void;
+  /** ✎ D-450: «Власник» одним переходом — усі / лише мої / конкретна людина (решта прибирається з адреси). */
+  readonly setOwner: (owner: OwnerFilterValue) => void;
   readonly setHasLateEdits: (hasLateEdits: boolean) => void;
   readonly setResultsStale: (resultsStale: boolean) => void;
   readonly setQ: (q: string) => void;
@@ -78,6 +97,7 @@ export interface DocumentListFilters {
 export function useDocumentListFilters(periodKey: number | null): DocumentListFilters {
   const [rawState] = useUrlState('state');
   const [rawMine] = useUrlState('mine');
+  const [rawOwner] = useUrlState('owner');
   const [rawHasLateEdits] = useUrlState('hasLateEdits');
   const [rawResultsStale] = useUrlState('resultsStale');
   const [rawQ] = useUrlState('q');
@@ -85,7 +105,8 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
   const setParams = useUrlParamsSetter();
 
   const state = periodKey === null ? null : parseStateFilter(rawState);
-  const mine = rawMine === 'true';
+  const owner = parseOwnerFilter(rawOwner);
+  const mine = owner === null && rawMine === 'true';
   const hasLateEdits = rawHasLateEdits === 'true';
   const resultsStale = periodKey !== null && rawResultsStale === 'true';
   const q = rawQ ?? '';
@@ -101,7 +122,19 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
 
   const setMine = useCallback(
     (next: boolean) => {
-      setParams({ mine: next ? 'true' : null, cursor: null });
+      // ✎ D-450: «мої» знімає обрану людину — два «чиї» разом сервер відхиляє `422`.
+      setParams({ mine: next ? 'true' : null, owner: null, cursor: null });
+    },
+    [setParams],
+  );
+
+  const setOwner = useCallback(
+    (next: OwnerFilterValue) => {
+      setParams({
+        mine: next === 'mine' ? 'true' : null,
+        owner: typeof next === 'number' ? String(next) : null,
+        cursor: null,
+      });
     },
     [setParams],
   );
@@ -135,19 +168,31 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
   );
 
   const reset = useCallback(() => {
-    setParams({ state: null, mine: null, hasLateEdits: null, resultsStale: null, q: null, projectId: null, cursor: null });
+    setParams({
+      state: null,
+      mine: null,
+      owner: null,
+      hasLateEdits: null,
+      resultsStale: null,
+      q: null,
+      projectId: null,
+      cursor: null,
+    });
   }, [setParams]);
 
   return {
     state,
     mine,
+    owner,
     hasLateEdits,
     resultsStale,
     q,
     projectId,
-    active: state !== null || mine || hasLateEdits || resultsStale || q.trim() !== '' || projectId !== null,
+    active:
+      state !== null || mine || owner !== null || hasLateEdits || resultsStale || q.trim() !== '' || projectId !== null,
     setState,
     setMine,
+    setOwner,
     setHasLateEdits,
     setResultsStale,
     setQ,

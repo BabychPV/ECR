@@ -210,6 +210,9 @@ public static class DependencyInjection
         // обох обробників: питання «що тепер зі зрізом» одне, і відповідь на
         // нього має бути одна (`H-23b`).
         services.AddScoped<Reporting.ReportSnapshotSync>();
+
+        // ✎ D-451: листи «Аркуш подано/повернуто» (вимкнені, доки немає правила матриці) — після коміту дії.
+        services.AddScoped<Workflow.SheetWorkflowNotifier>();
         services.AddScoped<Workflow.SubmitSheetHandler>();
 
         // ✎ D-442: блокування аркуша під затвердження й новий зріз після правки погоджувача.
@@ -236,6 +239,8 @@ public static class DependencyInjection
         services.AddScoped<Documents.EditAssignments.ListEditAssignmentCandidatesHandler>();
         services.AddScoped<Documents.EditAssignments.ListMyEditAssignmentsHandler>();
         services.AddScoped<Workflow.ApprovalQueue.ListMyApprovalQueueHandler>();
+        // ✎ D-449: «Повернуто на доопрацювання» у «My tasks».
+        services.AddScoped<Workflow.ReturnedSheets.ListMyReturnedSheetsHandler>();
         services.AddScoped<Documents.EditAssignments.EditorSetsHandler>();
         services.AddScoped<Documents.EditAssignments.BatchEditAssignmentsHandler>();
 

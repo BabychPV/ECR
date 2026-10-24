@@ -7,6 +7,7 @@ import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import type { DocumentStateFilter } from './api';
 import { useDocumentListSummary } from './api';
 import { DocumentStateFilters, parseStateFilter, type DocumentListFilters } from './documentListFilters';
+import { DocumentOwnerFilter } from './DocumentOwnerFilter';
 
 interface DocumentListFilterBarProps {
   /** Обраний період; `null` — фільтр стану недоступний. */
@@ -30,6 +31,9 @@ interface DocumentListFilterBarProps {
    * документом суперечить сам собі. Рядки точні, тому вони — нижня межа числа в чіпі.
    */
   readonly staleOnPage?: number | undefined;
+
+  /** ✎ D-450: ім'я обраної у фільтрі «Власник» людини, якщо воно вже є на сторінці переліку (див. `DocumentOwnerFilter`). */
+  readonly ownerName?: string | undefined;
 }
 
 /**
@@ -57,6 +61,7 @@ export function DocumentListFilterBar({
   projects = [],
   children,
   staleOnPage = 0,
+  ownerName,
 }: DocumentListFilterBarProps): JSX.Element {
   const noPeriod = periodKey === null;
   // Той самий запит, що в смузі лічильників (`DocumentListSummaryStrip`): один ключ — один мережевий виклик.
@@ -136,19 +141,16 @@ export function DocumentListFilterBar({
         />
 
         {/* ⚠ Підпис не обіцяє більше, ніж робить сервер: «лише мої» — це «створені
-            або подані мною» (`documents.filterMine`). Макет: «Everyone's documents» / «Only mine». */}
-        <NativeSelect
-          size="xs"
-          miw={200}
-          label={t('documents.owners')}
-          data={[
-            { value: '', label: t('documents.ownersAll') },
-            { value: 'mine', label: t('documents.filterMine') },
-          ]}
-          value={filters.mine ? 'mine' : ''}
-          onChange={(event) => {
-            filters.setMine(event.currentTarget.value === 'mine');
-          }}
+            або подані мною» (`documents.filterMine`). Макет: «Everyone's documents» / «Only mine».
+            ✎ D-450 (рішення людини 24.10): ~~два варіанти `NativeSelect`~~ — плюс конкретна людина
+            (`owner=<id>`), з пошуком; перелік людей читається лише з відкриттям списку. */}
+        <DocumentOwnerFilter
+          owner={filters.owner}
+          mine={filters.mine}
+          onChange={filters.setOwner}
+          projectId={filters.projectId}
+          periodKey={periodKey}
+          ownerName={ownerName}
         />
 
         {/*

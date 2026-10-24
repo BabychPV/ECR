@@ -33,6 +33,8 @@ const KindKeys: Record<string, string> = {
   IConsistencyCheckJob: 'jobs.kind.consistencyCheck',
   IOrphanScanJob: 'jobs.kind.orphanScan',
   IRegistryImpactRecalculationJob: 'jobs.kind.registryImpactRecalculation',
+  // ✎ D-451: разове «відправити зараз» листів аркуша (подано/повернуто).
+  IOutboxFlushJob: 'jobs.kind.outboxFlush',
   // ⛔ FP-7 (прохід «від першого обличчя» 2026-10-11): повторювані задачі реєструються КОНКРЕТНИМ
   // класом, а не маркером-інтерфейсом (`typeof(TJob).FullName`), тож у переліку `/admin/jobs`
   // стояли `NotificationJob`, `PeriodStateJob`, `RowWindowRefetchJob` поряд з «Recalculation».

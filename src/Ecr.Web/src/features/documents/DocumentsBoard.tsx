@@ -105,6 +105,14 @@ export function DocumentsBoard({ documents, documentHref, projectCode, onQuickLo
                       {code !== undefined && <span className="ecr-board-project"> · {code}</span>}
                     </div>
 
+                    {/* ✎ D-450: власник на картці — окремим рядком, бо «хто змінив» нижче — інша людина.
+                        `null` (людини немає або доступ звужено) — рядка немає, як і решти незнаного на картці. */}
+                    {typeof document.ownerDisplayName === 'string' && (
+                      <div className="ecr-board-owner" data-board-owner="" title={document.ownerDisplayName}>
+                        {t('documents.ownerOf', { name: document.ownerDisplayName })}
+                      </div>
+                    )}
+
                     {hasSheetStates(document) ? (
                       <SegmentBar segments={sheetLabels(document)} />
                     ) : (

@@ -74,6 +74,7 @@ public sealed class DocumentsController(
         [FromQuery] string? q,
         [FromQuery] bool? resultsStale,
         [FromQuery] string? staleBy,
+        [FromQuery] int? ownerUserId,
         CancellationToken ct)
     {
         var page = new CursorRequest(limit == 0 ? 50 : limit, cursor);
@@ -96,9 +97,24 @@ public sealed class DocumentsController(
         // вказано період: без періоду «стан документа» не визначений — аркуші
         // за різні періоди бувають у різних станах одночасно (D-93).
         return Ok(await listDocuments
-            .HandleAsync(projectId, periodKey, state, mine, hasLateEdits, q, resultsStale, staleBy, page, ct)
+            .HandleAsync(projectId, periodKey, state, mine, hasLateEdits, q, resultsStale, staleBy, ownerUserId, page, ct)
             .ConfigureAwait(false));
     }
+
+    /// <summary>
+    /// ✎ D-450: власники документів, які користувач бачить, — для вибору у фільтрі переліку «Власник». Право
+    /// <c>Document.View</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Та сама межа видимості, що й перелік вище (проєкти з роллю + документи-надання D-443 з порахованими межами), а
+    /// документи, де читачеві закрито хоч щось, не рахуються: вибір не називає людей, яких перелік не показав би.
+    /// Не більше 50 рядків (<c>ListDocumentsHandler.MaxOwners</c>); решту знаходить <c>q</c> (підрядок імені).
+    /// </remarks>
+    [HttpGet("owners")]
+    [ProducesResponseType<DocumentOwnersResponse>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Owners(
+        [FromQuery] int? projectId, [FromQuery] int? periodKey, [FromQuery] string? q, CancellationToken ct)
+        => Ok(await listDocuments.HandleOwnersAsync(projectId, periodKey, q, ct).ConfigureAwait(false));
 
     /// <summary>Зведення переліку за період (<c>BE-09</c>). Право <c>Document.View</c>.</summary>
     /// <remarks>

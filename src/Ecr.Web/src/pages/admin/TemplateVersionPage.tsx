@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
 } from '@mantine/core';
+import { ResizableModal } from '@/shared/ui/ResizableModal';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -1500,7 +1501,8 @@ function TemplateVersionEditor(): JSX.Element {
         )}
       </Modal>
 
-      <Modal
+      <ResizableModal
+        sizeKey="template.formula"
         opened={formulaDraft !== null}
         onClose={() => setFormulaDraft(null)}
         title={t('formulas.edit')}
@@ -1524,7 +1526,7 @@ function TemplateVersionEditor(): JSX.Element {
             )}
           </LocalDraft>
         )}
-      </Modal>
+      </ResizableModal>
 
 
       {/*
@@ -1534,7 +1536,8 @@ function TemplateVersionEditor(): JSX.Element {
        * читає рушій валідації, а не GET-відповідь), тому редагування — це
        * ввести код і перезаписати, а не обрати рядок зі списку.
        */}
-      <Modal
+      <ResizableModal
+        sizeKey="template.conditionalFormat"
         opened={conditionalFormatTable !== null}
         onClose={() => setConditionalFormatTable(null)}
         title={t('conditionalFormat.title')}
@@ -1554,9 +1557,10 @@ function TemplateVersionEditor(): JSX.Element {
             />
           </Suspense>
         )}
-      </Modal>
+      </ResizableModal>
 
-      <Modal
+      <ResizableModal
+        sizeKey="template.validationRule"
         opened={validationRuleTable !== null}
         onClose={() => setValidationRuleTable(null)}
         title={t('ctor.addRule')}
@@ -1587,7 +1591,7 @@ function TemplateVersionEditor(): JSX.Element {
 
           </Stack>
         )}
-      </Modal>
+      </ResizableModal>
 
       {/*
        * ⛔ Правила доступу до періоду (`ФВ-2.15`, W5.4). Дві форми в одному

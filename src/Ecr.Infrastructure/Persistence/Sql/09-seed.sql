@@ -9280,6 +9280,53 @@ USING (VALUES
     ,(N'documents.staleUndetermined', N'en', N'Freshness unknown', 1)
     ,(N'documents.staleUndeterminedHint', N'en', N'Some of the data is hidden from you, so result freshness can''t be determined', 1)
     -- D446:stale-undetermined ── кінець секції ──
+    -- P44B:owner-filter ── en: колонка «Власник» і фільтр переліку за конкретною людиною (D-450); ru/kz — порцією P44B:owner-filter нижче ──
+    ,(N'documents.owner', N'en', N'Owner', 1)
+    ,(N'documents.ownerOf', N'en', N'Owner: {name}', 1)
+    ,(N'documents.ownerUnknown', N'en', N'Owner not shown', 1)
+    ,(N'documents.ownerSearch', N'en', N'Find a person…', 1)
+    ,(N'documents.ownerSelected', N'en', N'Selected person', 1)
+    ,(N'documents.ownerCount', N'en', N'{count} doc.', 1)
+    ,(N'documents.ownerNothingFound', N'en', N'No one found among the documents you can see', 1)
+    ,(N'documents.ownerLoading', N'en', N'Loading people…', 1)
+    ,(N'documents.ownerLoadFailed', N'en', N'Could not load the list of people', 1)
+    ,(N'documents.ownerPeople', N'en', N'People', 1)
+    ,(N'err.ECR-REQ-0422.ownerUserId', N'en', N'The owner filter needs a valid person.', 1)
+    ,(N'err.ECR-REQ-0422.ownerWithMine', N'en', N'Choose either «Mine» or a specific person, not both.', 1)
+    -- P44B:owner-filter ── кінець секції ──
+    -- P44C:sheet-mail ── en: листи «Аркуш подано» / «Аркуш повернуто» (D-451, `SheetWorkflowNotifier`, `NotificationEventKind.SheetSubmitted/SheetReturned`); підстановки {document} {sheet} {period} {by} {at} {link} (+ {reason}); ru/kz — порцією P44C:sheet-mail нижче ──
+    ,(N'notifications.event.SheetSubmitted', N'en', N'Sheet submitted for approval', 1)
+    ,(N'notifications.event.SheetReturned', N'en', N'Sheet returned for edits', 1)
+    ,(N'notifications.sheetSubmitted.subject', N'en', N'ECR: {document}, sheet {sheet}, period {period} submitted for approval', 1)
+    ,(N'notifications.sheetSubmitted.body', N'en', N'{by} submitted sheet {sheet} of document {document} for period {period} on {at}. It is waiting for your approval. Open the sheet: {link}', 1)
+    ,(N'notifications.sheetReturned.subject', N'en', N'ECR: {document}, sheet {sheet}, period {period} returned', 1)
+    ,(N'notifications.sheetReturned.body', N'en', N'{by} returned sheet {sheet} of document {document} for period {period} on {at}. Reason: {reason}. Open the sheet: {link}', 1)
+    ,(N'notificationTemplates.recipientsSheetSubmitted', N'en', N'Sent to the people who can approve the sheet at its current route step and can see it. The person who submitted it gets nothing.', 1)
+    ,(N'notificationTemplates.recipientsSheetReturned', N'en', N'Sent to the document owner and to participants who fill in or submit the sheet, if they can see it. The person who returned it gets nothing.', 1)
+    ,(N'notificationTemplates.recipientsTransportOnly', N'en', N'turns the email on; its own addresses and roles are not used', 1)
+    ,(N'notificationTemplates.recipientsTeamsIgnored', N'en', N'not used: this message goes only by email', 1)
+    ,(N'jobs.kind.outboxFlush', N'en', N'Send sheet notifications', 1)
+    -- P44C:sheet-mail ── кінець секції ──
+    -- P44:resizable-modal ── кнопки вікна формул і методологій: на весь екран, ручка розміру; власна порція ──
+    ,(N'common.modal.fullScreen', N'en', N'Full screen', 1)
+    ,(N'common.modal.expand', N'en', N'Expand to full screen', 1)
+    ,(N'common.modal.restore', N'en', N'Restore size', 1)
+    ,(N'common.modal.resize', N'en', N'Resize window', 1)
+    ,(N'common.modal.resizeHint', N'en', N'Drag the corner or use the arrow keys; hold Shift for bigger steps.', 1)
+    -- P44:resizable-modal ── кінець секції ──
+    -- P44A:returned-to-me ── en: «My tasks» — «Повернуто на доопрацювання» і лічильник задач на кнопці (D-449); ru/kz — порцією P44A:returned-to-me нижче ──
+    ,(N'myTasks.returned.title', N'en', N'Returned for rework', 1)
+    ,(N'myTasks.returned.error', N'en', N'Could not load the sheets returned to you for rework.', 1)
+    ,(N'myTasks.returned.more', N'en', N'Show more', 1)
+    ,(N'myTasks.returned.open', N'en', N'Open sheet', 1)
+    ,(N'myTasks.returned.returnedBy', N'en', N'Returned by {name} · {date}', 1)
+    ,(N'myTasks.returned.returnedAt', N'en', N'Returned {date}', 1)
+    ,(N'myTasks.returned.reason', N'en', N'Reason', 1)
+    ,(N'myTasks.returned.reasonMore', N'en', N'Show full reason', 1)
+    ,(N'myTasks.returned.reasonLess', N'en', N'Collapse', 1)
+    ,(N'myTasks.waitingBadge', N'en', N'{n} tasks waiting for you', 1)
+    ,(N'err.ECR-REQ-0422.returnedSheetsCursorInvalid', N'en', N'The page cursor of returned sheets is not valid. Reload the list.', 1)
+    -- P44A:returned-to-me ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -24127,6 +24174,119 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- D446:stale-undetermined ── кінець секції ──
+-- P44B:owner-filter ── ru/kz: колонка «Власник» і фільтр переліку за людиною (D-450); власна порція ──
+-- ⚠ kz — робочий переклад, на звірку термінологу.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'documents.owner', N'ru', N'Владелец'),
+    (N'documents.owner', N'kz', N'Иесі'),
+    (N'documents.ownerOf', N'ru', N'Владелец: {name}'),
+    (N'documents.ownerOf', N'kz', N'Иесі: {name}'),
+    (N'documents.ownerUnknown', N'ru', N'Владелец не показан'),
+    (N'documents.ownerUnknown', N'kz', N'Иесі көрсетілмейді'),
+    (N'documents.ownerSearch', N'ru', N'Найти человека…'),
+    (N'documents.ownerSearch', N'kz', N'Адамды табу…'),
+    (N'documents.ownerSelected', N'ru', N'Выбранный человек'),
+    (N'documents.ownerSelected', N'kz', N'Таңдалған адам'),
+    (N'documents.ownerCount', N'ru', N'{count} док.'),
+    (N'documents.ownerCount', N'kz', N'{count} құж.'),
+    (N'documents.ownerNothingFound', N'ru', N'Среди доступных вам документов никого не найдено'),
+    (N'documents.ownerNothingFound', N'kz', N'Сізге қолжетімді құжаттардан ешкім табылмады'),
+    (N'documents.ownerLoading', N'ru', N'Загружаем людей…'),
+    (N'documents.ownerLoading', N'kz', N'Адамдар жүктелуде…'),
+    (N'documents.ownerLoadFailed', N'ru', N'Не удалось загрузить список людей'),
+    (N'documents.ownerLoadFailed', N'kz', N'Адамдар тізімін жүктеу мүмкін болмады'),
+    (N'documents.ownerPeople', N'ru', N'Люди'),
+    (N'documents.ownerPeople', N'kz', N'Адамдар'),
+    (N'err.ECR-REQ-0422.ownerUserId', N'ru', N'Для фильтра по владельцу нужен существующий человек.'),
+    (N'err.ECR-REQ-0422.ownerUserId', N'kz', N'Иесі бойынша сүзгіге нақты адам қажет.'),
+    (N'err.ECR-REQ-0422.ownerWithMine', N'ru', N'Выберите либо «Мои», либо конкретного человека, но не оба сразу.'),
+    (N'err.ECR-REQ-0422.ownerWithMine', N'kz', N'«Менікі» немесе нақты адамды таңдаңыз, екеуін бірге емес.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- P44B:owner-filter ── кінець секції ──
+-- P44C:sheet-mail ── ru/kz: листи «Аркуш подано» / «Аркуш повернуто» (D-451); власна порція ──
+-- ⚠ kz — робочий переклад, на звірку термінологу.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'notifications.event.SheetSubmitted', N'ru', N'Лист подан на согласование'),
+    (N'notifications.event.SheetSubmitted', N'kz', N'Парақ келісуге жіберілді'),
+    (N'notifications.event.SheetReturned', N'ru', N'Лист возвращён на доработку'),
+    (N'notifications.event.SheetReturned', N'kz', N'Парақ пысықтауға қайтарылды'),
+    (N'notifications.sheetSubmitted.subject', N'ru', N'ECR: {document}, лист {sheet}, период {period} подан на согласование'),
+    (N'notifications.sheetSubmitted.subject', N'kz', N'ECR: {document}, {sheet} парағы, {period} кезеңі келісуге жіберілді'),
+    (N'notifications.sheetSubmitted.body', N'ru', N'{by} подал(а) лист {sheet} документа {document} за период {period} ({at}). Лист ожидает вашего согласования. Открыть лист: {link}'),
+    (N'notifications.sheetSubmitted.body', N'kz', N'{by} {document} құжатының {sheet} парағын {period} кезеңі үшін жіберді ({at}). Парақ сіздің келісуіңізді күтуде. Парақты ашу: {link}'),
+    (N'notifications.sheetReturned.subject', N'ru', N'ECR: {document}, лист {sheet}, период {period} возвращён'),
+    (N'notifications.sheetReturned.subject', N'kz', N'ECR: {document}, {sheet} парағы, {period} кезеңі қайтарылды'),
+    (N'notifications.sheetReturned.body', N'ru', N'{by} вернул(а) лист {sheet} документа {document} за период {period} ({at}). Причина: {reason}. Открыть лист: {link}'),
+    (N'notifications.sheetReturned.body', N'kz', N'{by} {document} құжатының {sheet} парағын {period} кезеңі үшін қайтарды ({at}). Себебі: {reason}. Парақты ашу: {link}'),
+    (N'notificationTemplates.recipientsSheetSubmitted', N'ru', N'Получают те, кто может согласовать лист на текущем шаге маршрута и видит его. Подавший лист письма не получает.'),
+    (N'notificationTemplates.recipientsSheetSubmitted', N'kz', N'Парақты маршруттың ағымдағы қадамында келісе алатын және оны көретіндер алады. Парақты жіберген адам хат алмайды.'),
+    (N'notificationTemplates.recipientsSheetReturned', N'ru', N'Получают владелец документа и участники, которые заполняют или подают лист, если видят его. Вернувший лист письма не получает.'),
+    (N'notificationTemplates.recipientsSheetReturned', N'kz', N'Құжат иесі және парақты толтыратын немесе жіберетін қатысушылар, егер оны көрсе, алады. Парақты қайтарған адам хат алмайды.'),
+    (N'notificationTemplates.recipientsTransportOnly', N'ru', N'включает почту; его собственные адреса и роли не используются'),
+    (N'notificationTemplates.recipientsTransportOnly', N'kz', N'поштаны қосады; оның өз мекенжайлары мен рөлдері қолданылмайды'),
+    (N'notificationTemplates.recipientsTeamsIgnored', N'ru', N'не используется: это письмо идёт только по почте'),
+    (N'notificationTemplates.recipientsTeamsIgnored', N'kz', N'қолданылмайды: бұл хат тек поштамен жіберіледі'),
+    (N'jobs.kind.outboxFlush', N'ru', N'Отправка уведомлений по листам'),
+    (N'jobs.kind.outboxFlush', N'kz', N'Парақтар бойынша хабарламаларды жіберу')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- P44C:sheet-mail ── кінець секції ──
+-- P44:resizable-modal ── ru/kz: кнопки вікна формул і методологій (на весь екран, ручка розміру); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'common.modal.fullScreen', N'ru', N'Во весь экран'),
+    (N'common.modal.fullScreen', N'kz', N'Толық экран'),
+    (N'common.modal.expand', N'ru', N'Развернуть во весь экран'),
+    (N'common.modal.expand', N'kz', N'Толық экранға жаю'),
+    (N'common.modal.restore', N'ru', N'Свернуть до обычного размера'),
+    (N'common.modal.restore', N'kz', N'Қалыпты өлшемге қайтару'),
+    (N'common.modal.resize', N'ru', N'Изменить размер окна'),
+    (N'common.modal.resize', N'kz', N'Терезе өлшемін өзгерту'),
+    (N'common.modal.resizeHint', N'ru', N'Потяните за угол или используйте стрелки; с Shift шаг больше.'),
+    (N'common.modal.resizeHint', N'kz', N'Бұрышынан тартыңыз немесе бағыт пернелерін басыңыз; Shift басылса, қадам үлкенірек.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- P44:resizable-modal ── кінець секції ──
+-- P44A:returned-to-me ── ru/kz: «My tasks» — «Повернуто на доопрацювання» і лічильник задач на кнопці (D-449); власна порція ──
+-- ⚠ kz — робочий переклад, на звірку термінологу.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'myTasks.returned.title', N'ru', N'Возвращено на доработку'),
+    (N'myTasks.returned.title', N'kz', N'Пысықтауға қайтарылды'),
+    (N'myTasks.returned.error', N'ru', N'Не удалось загрузить листы, возвращённые вам на доработку.'),
+    (N'myTasks.returned.error', N'kz', N'Сізге пысықтауға қайтарылған парақтарды жүктеу мүмкін болмады.'),
+    (N'myTasks.returned.more', N'ru', N'Показать ещё'),
+    (N'myTasks.returned.more', N'kz', N'Көбірек көрсету'),
+    (N'myTasks.returned.open', N'ru', N'Открыть лист'),
+    (N'myTasks.returned.open', N'kz', N'Парақты ашу'),
+    (N'myTasks.returned.returnedBy', N'ru', N'Вернул(а) {name} · {date}'),
+    (N'myTasks.returned.returnedBy', N'kz', N'Қайтарған: {name} · {date}'),
+    (N'myTasks.returned.returnedAt', N'ru', N'Возвращено {date}'),
+    (N'myTasks.returned.returnedAt', N'kz', N'Қайтарылған күні: {date}'),
+    (N'myTasks.returned.reason', N'ru', N'Причина'),
+    (N'myTasks.returned.reason', N'kz', N'Себебі'),
+    (N'myTasks.returned.reasonMore', N'ru', N'Показать причину полностью'),
+    (N'myTasks.returned.reasonMore', N'kz', N'Себебін толық көрсету'),
+    (N'myTasks.returned.reasonLess', N'ru', N'Свернуть'),
+    (N'myTasks.returned.reasonLess', N'kz', N'Жию'),
+    (N'myTasks.waitingBadge', N'ru', N'Задач, ожидающих вас: {n}'),
+    (N'myTasks.waitingBadge', N'kz', N'Сізді күтетін тапсырмалар: {n}'),
+    (N'err.ECR-REQ-0422.returnedSheetsCursorInvalid', N'ru', N'Курсор страницы возвращённых листов недействителен. Обновите список.'),
+    (N'err.ECR-REQ-0422.returnedSheetsCursorInvalid', N'kz', N'Қайтарылған парақтар бетінің курсоры жарамсыз. Тізімді жаңартыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- P44A:returned-to-me ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

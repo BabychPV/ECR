@@ -2660,6 +2660,38 @@ public interface INotificationChannelSender
 }
 ```
 
+#### `ISheetWorkflowMailStore`
+
+✎ D-451: дані адресних листів «Аркуш подано» / «Аркуш повернуто» (`SheetWorkflowNotifier`): факти листа (документ, аркуш, період, власник, ім'я того, хто діяв), адресати — тримачі ролі кроку маршруту, погоджувачі без маршруту, учасники документа з потрібним рівнем надання, — їхні скриньки й мова та посилання на аркуш (`PublicBaseUrl`). Видимість аркуша адресатові порт НЕ вирішує — це робить нотифікатор через `IAccessDecisionService` (схований аркуш — без листа). У тому ж файлі — `SheetMailFacts`, `SheetMailbox`.
+
+```csharp
+public interface ISheetWorkflowMailStore
+{
+    public Task<SheetMailFacts?> GetFactsAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, int actorUserId, CancellationToken ct);
+    public Task<IReadOnlyList<int>> RoleHoldersAsync(int roleId, CancellationToken ct);
+    public Task<IReadOnlyList<int>> ApproverRoleHoldersAsync(CancellationToken ct);
+    public Task<IReadOnlyList<int>> ParticipantsAsync(
+        long documentId, string sheetCode, PeriodKey periodKey, IReadOnlyCollection<GrantLevel> levels,
+        CancellationToken ct);
+    public Task<IReadOnlyList<SheetMailbox>> MailboxesAsync(IReadOnlyCollection<int> userIds, CancellationToken ct);
+    public string SheetLink(long documentId, PeriodKey periodKey, string sheetCode);
+}
+```
+
+#### `IOutboxFlushJob`
+
+✎ D-451: маркер разової фонової задачі «відправити зараз» листи аркуша з `itg.NotificationOutbox` (реалізація — `OutboxFlushJob`, `Ecr.Infrastructure`), як `IRecalculationJob`. Нотифікатор ставить її ПІСЛЯ `SaveChangesAsync` через `EnqueueCoalescedAsync` на одну ціль `OutboxFlushTarget.SheetMail` (`outbox-sheet-mail`): сплеск подань — одна задача, що чекає. Шле лише коди `sheet.submitted`/`sheet.returned`, не всю чергу; повторювального тригера немає.
+
+```csharp
+public interface IOutboxFlushJob : IBackgroundJob;
+
+public static class OutboxFlushTarget
+{
+    public const string SheetMail = "outbox-sheet-mail";
+}
+```
+
 #### `IPeriodStore`
 
 Доступ до проєктів і їхніх періодів для календаря і адміністративних операцій над періодами.
@@ -4131,6 +4163,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/periods/{id}/reopen` | `Period.Reopen` | 3 |
 | `GET` | `/api/v1/documents` | `Document.View` | 1 |
 | `GET` | `/api/v1/documents/summary` | `Document.View` | 6 |
+| `GET` | `/api/v1/documents/owners` | `Document.View` (✎ D-450: власники лише серед видимих викликачу документів; без імені — поза переліком) | 6 |
 | `POST` | `/api/v1/documents` | `Document.Create` | 1 |
 | `GET` | `/api/v1/documents/{id}` | `Document.View` | 1 |
 | `DELETE` | `/api/v1/documents/{id}` | `Document.Delete` | 6 |
@@ -4167,6 +4200,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/me/edit-assignments` | — (лише рядки самого викликача) | 8 |
 | `POST` | `/api/v1/documents/{id}/owner` | — (власник документа ∨ `Manage` проєкту; обробник; D-443: передача власника, подія `DocumentOwnerTransferred`) | 8 |
 | `GET` | `/api/v1/me/approval-queue` | — (лише аркуші, які викликач може затвердити зараз; обробник) | 8 |
+| `GET` | `/api/v1/me/returned-sheets` | — (✎ D-449: лише аркуші, повернені на доопрацювання власнику документа, учаснику з наданням ≥ Write або останньому подавачу з правом писати; обробник) | 8 |
 | `GET` | `/api/v1/me/editor-sets` | — (лише власні набори) | 8 |
 | `POST` | `/api/v1/me/editor-sets` | — (лише власні набори) | 8 |
 | `PUT` | `/api/v1/me/editor-sets/{setId}` | — (лише власні набори; чужий — 404) | 8 |

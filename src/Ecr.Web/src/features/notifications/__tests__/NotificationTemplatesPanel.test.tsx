@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { NotificationTemplatesPanel } from '@/features/notifications/NotificationTemplatesPanel';
 import type { NotificationChannel, NotificationRuleMatrix } from '@/features/notifications/api';
-import { placeholdersOf, templateProblem } from '@/features/notifications/notificationTemplates';
+import { placeholdersOf, TemplatedEvents, templateProblem } from '@/features/notifications/notificationTemplates';
 import { renderWithQuery } from '@/test/render';
 
 /**
@@ -52,8 +52,13 @@ function rows(lang: string): { key: string; reference: string; value: string | n
       reference: 'The deadline of {period} for {project} has passed.',
       value: null,
     },
+    { key: 'notifications.sheetSubmitted.subject', reference: SheetSubject, value: lang === 'en' ? SheetSubject : null },
+    { key: 'notifications.sheetSubmitted.body', reference: SheetBody, value: lang === 'en' ? SheetBody : null },
   ];
 }
+
+const SheetSubject = 'ECR: {document}, sheet {sheet}, period {period} submitted for approval';
+const SheetBody = '{by} submitted sheet {sheet} of document {document} for period {period} on {at}. Open: {link}';
 
 const Mail: NotificationChannel = {
   id: 7,
@@ -95,6 +100,7 @@ interface Options {
   readonly strings?: 'ok' | 'refuse' | 'pending' | 'missing';
   readonly rules?: 'ok' | 'refuse';
   readonly channels?: NotificationChannel[];
+  readonly matrix?: NotificationRuleMatrix;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -123,7 +129,7 @@ function mockServer(options: Options = {}): Call[] {
         return options.rules === 'refuse' ? json(Refusal, 500) : json(options.channels ?? [Mail, Teams]);
       }
       if (path === '/api/v1/notifications/rules') {
-        return options.rules === 'refuse' ? json(Refusal, 500) : json(Matrix);
+        return options.rules === 'refuse' ? json(Refusal, 500) : json(options.matrix ?? Matrix);
       }
       if (path === '/api/v1/ui-strings' && method === 'GET') {
         const lang = new URL(url, 'http://x').searchParams.get('lang') ?? 'en';
@@ -321,5 +327,56 @@ describe('notificationTemplates: правила сервера', () => {
   it('переклад мусить нести РІВНО набір еталона', () => {
     expect(templateProblem('{period}', EnSubject, false)).toMatchObject({ kind: 'placeholderMismatch' });
     expect(templateProblem('{project} — {period}', EnSubject, false)).toBeNull();
+  });
+});
+
+/**
+ * ✎ D-451: листи «Аркуш подано/повернуто» — адресні. Кому — каже текст події, канал правила лише вмикає пошту
+ * (його ролі й адреси не беруться), а канал Teams не шле зовсім. Підстановки — свої в кожної події.
+ */
+describe('NotificationTemplatesPanel: листи аркуша (D-451)', () => {
+  const SheetMatrix: NotificationRuleMatrix = {
+    eventKinds: ['PeriodOpened', 'PeriodGraceStarted', 'SheetSubmitted', 'SheetReturned'],
+    rules: [
+      { eventKind: 'SheetSubmitted', channelId: 7, minSeverity: 'Info', isEnabled: true },
+      { eventKind: 'SheetSubmitted', channelId: 8, minSeverity: 'Info', isEnabled: true },
+    ],
+  };
+
+  it('«подано»: адресати — текстом події; пошта — лише транспорт (без ролей каналу), Teams — не використовується', async () => {
+    mockServer({ matrix: SheetMatrix });
+    show();
+
+    await screen.findByLabelText(/notificationTemplates\.subject⟧/, {}, { timeout: 5000 });
+    fireEvent.click(screen.getByLabelText('⟦notificationTemplates.event⟧'));
+    fireEvent.click(screen.getByRole('option', { name: '⟦notifications.event.SheetSubmitted⟧' }));
+
+    expect(await screen.findByText('⟦notificationTemplates.recipientsSheetSubmitted⟧')).toBeDefined();
+    const mail = screen.getByText(/Ops mailbox/);
+    expect(mail.textContent).toContain('⟦notificationTemplates.recipientsTransportOnly⟧');
+    // ⛔ Ролі каналу листа аркуша не отримують — показати їх означало б пообіцяти лист, якого не буде.
+    expect(mail.textContent).not.toContain('ECOLOGIST');
+    expect(screen.getByText(/Teams ops/).textContent).toContain('⟦notificationTemplates.recipientsTeamsIgnored⟧');
+
+    const subject = screen.getByLabelText(/notificationTemplates\.subject⟧/) as HTMLInputElement;
+    expect(subject.value).toBe(SheetSubject);
+  });
+
+  it('підстановки — набір події: {link} у листі аркуша можна, у листі періоду — ні; {reason} — лише «повернуто»', () => {
+    const submitted = TemplatedEvents.find((item) => item.eventKind === 'SheetSubmitted');
+    const returned = TemplatedEvents.find((item) => item.eventKind === 'SheetReturned');
+    expect(submitted?.addressed).toBe('sheetSubmitted');
+    expect(returned?.addressed).toBe('sheetReturned');
+
+    expect(templateProblem('{document} {link}', SheetSubject, true, submitted?.placeholders)).toBeNull();
+    expect(templateProblem('{document} {link}', EnSubject, true)).toEqual({
+      kind: 'unknownPlaceholder',
+      names: ['document', 'link'],
+    });
+    expect(templateProblem('{reason}', SheetSubject, true, submitted?.placeholders)).toEqual({
+      kind: 'unknownPlaceholder',
+      names: ['reason'],
+    });
+    expect(templateProblem('{reason} {link}', SheetSubject, true, returned?.placeholders)).toBeNull();
   });
 });

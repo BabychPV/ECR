@@ -4427,6 +4427,47 @@
         ],
         "type": "object"
       },
+      "DocumentOwnerOption": {
+        "description": "✎ D-450: власник документів для вибору у фільтрі переліку.",
+        "properties": {
+          "displayName": {
+            "description": "Відображуване ім'я (`D-86`), не логін.",
+            "type": "string"
+          },
+          "documentCount": {
+            "description": "Скільки ВИДИМИХ читачеві документів (тих, де ім'я власника йому віддається) належать цій людині.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "userId": {
+            "description": "Користувач (`Document.CreatedByUserId`).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "userId",
+          "displayName",
+          "documentCount"
+        ],
+        "type": "object"
+      },
+      "DocumentOwnersResponse": {
+        "description": "✎ D-450: власники видимих читачеві документів — варіанти фільтра переліку «Власник».",
+        "properties": {
+          "items": {
+            "description": "Люди за спаданням кількості документів, далі за іменем; не більше 50 (`ListDocumentsHandler.MaxOwners`) —\nрешту знаходить пошук `q` за іменем.",
+            "items": {
+              "$ref": "#/components/schemas/DocumentOwnerOption"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "DocumentPeriodRequest": {
         "description": "Дія над документом у межах одного періоду.",
         "properties": {
@@ -4551,7 +4592,7 @@
             ]
           },
           "ownerUserId": {
-            "description": "EA-C: ідентифікатор автора документа (`CreatedByUserId`) — поруч з OwnerDisplayName тим самим розкриттям,\nтож для звуженого читача — `null` (`DocumentSheetVisibility.For`). Заповнює лише шлях картки (`FindAsync`).",
+            "description": "EA-C: ідентифікатор автора документа (`CreatedByUserId`) — поруч з OwnerDisplayName тим самим розкриттям,\nтож для звуженого читача — `null` (`DocumentSheetVisibility.For`). ~~Заповнює лише шлях картки (`FindAsync`).~~\n✎ D-450: заповнюють і картка, і перелік — клієнт за ним підписує обраного власника у фільтрі «Власник».",
             "format": "int32",
             "type": [
               "null",
@@ -9513,7 +9554,9 @@
           "CollectionFailed",
           "ExportFailed",
           "PeriodOpened",
-          "PeriodGraceStarted"
+          "PeriodGraceStarted",
+          "SheetSubmitted",
+          "SheetReturned"
         ]
       },
       "NotificationRuleMatrix": {
@@ -15584,6 +15627,107 @@
           "userIds",
           "reason",
           "baseVersion"
+        ],
+        "type": "object"
+      },
+      "ReturnedSheetItemDto": {
+        "description": "✎ D-449: аркуш, повернений на доопрацювання (відхилення погоджувачем або повернення в роботу), що чекає ПОТОЧНОГО користувача\n(«Повернуто на доопрацювання» у «My tasks»).",
+        "properties": {
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "documentKey": {
+            "description": "Бізнес-ключ документа.",
+            "type": "string"
+          },
+          "documentNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва документа; `null` — не задана (показується ключ)."
+              }
+            ]
+          },
+          "periodKey": {
+            "description": "Ключ періоду `Рік*100+№`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "projectCode": {
+            "description": "Код проєкту документа.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Причина повернення (обов'язкова і при відхиленні, і при поверненні в роботу); може бути багаторядковою.",
+            "type": "string"
+          },
+          "returnedAt": {
+            "description": "Коли повернуто, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "returnedByDisplayName": {
+            "description": "Хто повернув; `null` — користувача вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sheetCode": {
+            "description": "Код аркуша (для посилання на аркуш).",
+            "type": "string"
+          },
+          "sheetDefId": {
+            "description": "Аркуш.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetNameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва аркуша."
+          }
+        },
+        "required": [
+          "documentId",
+          "documentKey",
+          "documentNameL10n",
+          "projectCode",
+          "sheetDefId",
+          "sheetCode",
+          "sheetNameL10n",
+          "periodKey",
+          "returnedAt",
+          "returnedByDisplayName",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ReturnedSheetsDto": {
+        "description": "Сторінка блоку «Повернуто на доопрацювання»: найдавніші повернення першими.",
+        "properties": {
+          "items": {
+            "description": "Повернені аркуші, над якими має працювати поточний користувач.",
+            "items": {
+              "$ref": "#/components/schemas/ReturnedSheetItemDto"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Непрозорий курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
         ],
         "type": "object"
       },
@@ -25825,6 +25969,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "ownerUserId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -25898,6 +26050,62 @@
           }
         },
         "summary": "Створює документ. Право `Document.Create`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/owners": {
+      "get": {
+        "description": "⛔ Та сама межа видимості, що й перелік вище (проєкти з роллю + документи-надання D-443 з порахованими межами), а\nдокументи, де читачеві закрито хоч щось, не рахуються: вибір не називає людей, яких перелік не показав би.\nНе більше 50 рядків (`ListDocumentsHandler.MaxOwners`); решту знаходить `q` (підрядок імені).",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "projectId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOwnersResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOwnersResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOwnersResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "✎ D-450: власники документів, які користувач бачить, — для вибору у фільтрі переліку «Власник». Право\n`Document.View`.",
         "tags": [
           "Documents"
         ]
@@ -31904,6 +32112,75 @@
         "summary": "Створює або замінює налаштування; тіло — саме JSON-значення.",
         "tags": [
           "Preferences"
+        ]
+      }
+    },
+    "/api/v1/me/returned-sheets": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Розмір сторінки 1..200 (за замовчуванням 50).",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Курсор попередньої відповіді.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnedSheetsDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnedSheetsDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnedSheetsDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Аркуші, повернені на доопрацювання — відхилені погоджувачем (`Rejected`) або повернені в роботу\n(`Draft`, остання подія — `Reopen`, не самим викликачем; відкликання автором — ні), над якими працює\nпоточний користувач: власник документа, учасник із наданням ≥ `Write` на аркуш або останній подавач із правом\nписати в аркуш; проєкт не заборонений, аркуш видимий йому. Повторне подання прибирає аркуш із переліку.\nНайдавніші повернення першими; без імен схованого.",
+        "tags": [
+          "MeReturnedSheets"
         ]
       }
     },
@@ -53235,6 +53512,9 @@
     },
     {
       "name": "MeEditorSets"
+    },
+    {
+      "name": "MeReturnedSheets"
     },
     {
       "name": "Methodologies"

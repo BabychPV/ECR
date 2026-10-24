@@ -510,7 +510,9 @@ try {
             'Document.View', 'Document.Create', 'Document.Export', 'Document.Import',
             'Document.Reopen',
             'Project.Manage', 'Period.Configure', 'Period.Reopen',
-            'Calculation.View', 'Calculation.Publish', 'Calculation.Recalculate',
+            # ✎ P44: `Calculation.EditFormula` — `resizableModal.spec` заводить методологію з чернеткою й відкриває
+            # вікно формули. Лише тестова роль стенда; ролі продукту не змінюються.
+            'Calculation.View', 'Calculation.EditFormula', 'Calculation.Publish', 'Calculation.Recalculate',
             'Security.ManageUsers', 'Security.ManageRoles', 'Security.ViewAudit',
             'Security.Simulate',
             'Report.ViewRegulatory', 'Report.BuildSnapshot', 'Report.ViewCampaign',

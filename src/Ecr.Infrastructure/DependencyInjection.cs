@@ -403,6 +403,9 @@ public static class DependencyInjection
         // тому, що найважче помітити, — у тому, кому лист НЕ пішов.
         services.AddScoped<Integration.OutboxDispatcher>();
 
+        // ✎ D-451: разове «відправити зараз» листів аркуша — за маркером, як решта задач черги.
+        services.AddScoped<IOutboxFlushJob, Jobs.OutboxFlushJob>();
+
         // ⛔ Відправник за замовчуванням НЕ доставляє і не вдає, що доставив:
         // транспорт — рішення замовника (`P-13`). Реєстрація потрібна, щоб
         // задача створювалася; вона бачить `IsConfigured = false` і лишає
@@ -434,6 +437,9 @@ public static class DependencyInjection
         // дає рядок `Failed` у журналі доставок, не тишу.
         services.AddScoped<INotificationDispatchStore, Notifications.NotificationDispatchStore>();
         services.AddScoped<Notifications.NotificationDispatcher>();
+
+        // ✎ D-451: факти й кандидати адресних листів аркуша (подано/повернуто).
+        services.AddScoped<ISheetWorkflowMailStore, Notifications.SheetWorkflowMailStore>();
         services.AddScoped<INotificationChannelSender, Notifications.TeamsWebhookSender>();
 
         // ⚠ SMTP-канал іде поверх транспорту ПРОЦЕСУ, вибраного вище: адресатів

@@ -112,13 +112,25 @@ export function DocumentsPage(): JSX.Element {
   const appliedQ = useDebouncedFilter(filters.q.trim());
 
   const query = useQuery({
-    queryKey: ['documents', periodKey, cursor, filters.state, filters.mine, filters.hasLateEdits, filters.resultsStale, appliedQ, filters.projectId],
+    queryKey: [
+      'documents',
+      periodKey,
+      cursor,
+      filters.state,
+      filters.mine,
+      filters.hasLateEdits,
+      filters.resultsStale,
+      appliedQ,
+      filters.projectId,
+      filters.owner,
+    ],
     queryFn: () =>
       listDocuments({
         periodKey,
         cursor,
         state: filters.state,
         mine: filters.mine,
+        ownerUserId: filters.owner,
         hasLateEdits: filters.hasLateEdits,
         resultsStale: filters.resultsStale,
         q: appliedQ,
@@ -332,6 +344,11 @@ export function DocumentsPage(): JSX.Element {
         filters={filters}
         projects={projects.data?.items ?? []}
         staleOnPage={query.data?.items.filter((d) => d.resultsStale === true).length ?? 0}
+        // ✎ D-450: під фільтром за людиною кожен рядок сторінки — її документ, тож ім'я вже є без окремого запиту.
+        ownerName={
+          query.data?.items.find((d) => filters.owner !== null && d.ownerUserId === filters.owner)?.ownerDisplayName ??
+          undefined
+        }
       >
         {/* ✎ `UI-18` (макет `FilterBar`, KIT §3): «Clear filters» з'являється
             сама, щойно є активний фільтр, і скидає все ОДНИМ переходом
@@ -449,6 +466,7 @@ export function DocumentsPage(): JSX.Element {
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th>{t('documents.document')}</Table.Th>
+                      <Table.Th data-column="owner">{t('documents.owner')}</Table.Th>
                       <Table.Th>{t('documents.sheets')}</Table.Th>
                       <Table.Th>{t('documents.issues')}</Table.Th>
                       <Table.Th data-column="updated">{t('documents.updated')}</Table.Th>
@@ -495,6 +513,19 @@ export function DocumentsPage(): JSX.Element {
                                 )}
                               </Group>
                             </Box>
+                          </Table.Td>
+                          <Table.Td data-column="owner">
+                            {/* ✎ D-450: власник (автор документа, передається D-443). `null` — людини вже немає або
+                                доступ звужено (сервер ім'я не віддає) — видиме «—», а не порожнеча. */}
+                            {typeof document.ownerDisplayName === 'string' ? (
+                              <Text size="sm" className="ecr-docs-owner" title={document.ownerDisplayName}>
+                                {document.ownerDisplayName}
+                              </Text>
+                            ) : (
+                              <Text c="dimmed" title={t('documents.ownerUnknown')}>
+                                —
+                              </Text>
+                            )}
                           </Table.Td>
                           <Table.Td data-column="sheets">
                             {/* ⛔ UI-walkthrough F6: станів за період немає — видиме

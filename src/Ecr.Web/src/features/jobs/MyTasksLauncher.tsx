@@ -5,6 +5,8 @@ import { useMyTasks } from './useMyTasks';
 import { activeJobCount } from './myTasks';
 import { useMyEditAssignments } from '@/features/editAssignments/api';
 import { pendingEditAssignmentCount } from '@/features/editAssignments/model';
+import { useApprovalQueue } from './useApprovalQueue';
+import { useReturnedSheets } from './useReturnedSheets';
 
 /**
  * Вхід у шухляду «My tasks» із шапки застосунку (`UI-07`, `UX-09`).
@@ -40,6 +42,11 @@ const ApprovalQueueSection = lazy(async () => ({
   default: (await import('./ApprovalQueueSection')).ApprovalQueueSection,
 }));
 
+// ✎ D-449: «Повернуто на доопрацювання» - окремий чанк, як і сусідні блоки.
+const ReturnedSheetsSection = lazy(async () => ({
+  default: (await import('./ReturnedSheetsSection')).ReturnedSheetsSection,
+}));
+
 const EditAssignmentsSection = lazy(async () => ({
   default: (await import('./EditAssignmentsSection')).EditAssignmentsSection,
 }));
@@ -71,6 +78,19 @@ export function MyTasksLauncher(): JSX.Element {
   const edit = useMyEditAssignments(opened);
   const pendingEdits = pendingEditAssignmentCount(edit.data);
 
+  /*
+   * ✎ D-449 (рішення людини 24.10: «My tasks» - те, чого чекають від МЕНЕ зараз): «До погодження» й «Повернуто на
+   * доопрацювання» входять у ту саму позначку «чекають на вас», що й передані місяці, - одним числом.
+   * ⚠ Дешево: ті самі запити й ключі, що в блоках шухляди (перша сторінка, `limit=50`), без довантаження решти -
+   * понад сторінку показується «50+». Хуки - легкі модулі без UI: чанк шухляди лічильник не тягне (бюджет D-132).
+   * Після дій робочого процесу ключі скидає `SheetActions` (`refresh`).
+   */
+  const approvals = useApprovalQueue(opened);
+  const returned = useReturnedSheets(opened);
+  const waiting = pendingEdits + loadedItemCount(approvals.data) + loadedItemCount(returned.data);
+  const waitingMore = approvals.hasNextPage || returned.hasNextPage;
+  const waitingText = `${String(waiting)}${waitingMore ? '+' : ''}`;
+
   const label = t('jobs.myTasks');
 
   return (
@@ -96,7 +116,7 @@ export function MyTasksLauncher(): JSX.Element {
            * ⛔ Нуль не малюється зовсім. Позначка «0» — це шум, що змушує
            * щоразу її читати, аби пересвідчитись: нічого не відбувається.
            */
-          active > 0 || pendingEdits > 0 ? (
+          active > 0 || waiting > 0 ? (
             <Group gap="xs" wrap="nowrap">
               {active > 0 && (
                 <Badge
@@ -109,16 +129,16 @@ export function MyTasksLauncher(): JSX.Element {
                   {active}
                 </Badge>
               )}
-              {pendingEdits > 0 && (
+              {waiting > 0 && (
                 <Badge
                   size="sm"
-                  circle
+                  circle={!waitingMore}
                   variant="outline"
                   color="brand"
-                  aria-label={t('myTasks.edit.pendingBadge', { n: pendingEdits })}
-                  data-my-tasks-edits={String(pendingEdits)}
+                  aria-label={t('myTasks.waitingBadge', { n: waitingText })}
+                  data-my-tasks-waiting={waitingText}
                 >
-                  {pendingEdits}
+                  {waitingText}
                 </Badge>
               )}
             </Group>
@@ -143,6 +163,10 @@ export function MyTasksLauncher(): JSX.Element {
             onRetry={() => void tasks.refetch()}
             staleSection={
               <>
+                {/* ✎ D-449: повернута робота - найтерміновіше для автора, тому першою. */}
+                <Suspense fallback={null}>
+                  <ReturnedSheetsSection opened={opened} onNavigate={() => setOpened(false)} />
+                </Suspense>
                 <Suspense fallback={null}>
                   <ApprovalQueueSection opened={opened} onNavigate={() => setOpened(false)} />
                 </Suspense>
@@ -159,6 +183,20 @@ export function MyTasksLauncher(): JSX.Element {
       )}
     </>
   );
+}
+
+/**
+ * ✎ D-449: скільки рядків уже завантажено сторінками переліку «чекає на мене».
+ * ⚠ Кнопка - у шапці КОЖНОГО маршруту: зіпсована відповідь (не об'єкт сторінки) не має валити шапку, тож сторінка
+ * без масиву `items` рахується як нуль, а не кидає в рендері.
+ */
+function loadedItemCount(data: { readonly pages: readonly unknown[] } | undefined): number {
+  let count = 0;
+  for (const page of data?.pages ?? []) {
+    const items = (page as { readonly items?: unknown } | null)?.items;
+    if (Array.isArray(items)) count += items.length;
+  }
+  return count;
 }
 
 /** Перелік із галочкою — той самий лінійний стиль, що в `shared/ui/navIcons.tsx`. */

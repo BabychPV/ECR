@@ -2212,6 +2212,7 @@ export interface paths {
                     q?: string;
                     resultsStale?: boolean;
                     staleBy?: string;
+                    ownerUserId?: number;
                 };
                 header?: never;
                 path?: never;
@@ -2262,6 +2263,54 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/owners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * ✎ D-450: власники документів, які користувач бачить, — для вибору у фільтрі переліку «Власник». Право
+         *     `Document.View`.
+         * @description ⛔ Та сама межа видимості, що й перелік вище (проєкти з роллю + документи-надання D-443 з порахованими межами), а
+         *     документи, де читачеві закрито хоч щось, не рахуються: вибір не називає людей, яких перелік не показав би.
+         *     Не більше 50 рядків (`ListDocumentsHandler.MaxOwners`); решту знаходить `q` (підрядок імені).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    projectId?: number;
+                    periodKey?: number;
+                    q?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentOwnersResponse"];
+                        "text/json": components["schemas"]["DocumentOwnersResponse"];
+                        "text/plain": components["schemas"]["DocumentOwnersResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6777,6 +6826,64 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/returned-sheets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Аркуші, повернені на доопрацювання — відхилені погоджувачем (`Rejected`) або повернені в роботу
+         *     (`Draft`, остання подія — `Reopen`, не самим викликачем; відкликання автором — ні), над якими працює
+         *     поточний користувач: власник документа, учасник із наданням ≥ `Write` на аркуш або останній подавач із правом
+         *     писати в аркуш; проєкт не заборонений, аркуш видимий йому. Повторне подання прибирає аркуш із переліку.
+         *     Найдавніші повернення першими; без імен схованого. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Розмір сторінки 1..200 (за замовчуванням 50). */
+                    limit?: number;
+                    /** @description Курсор попередньої відповіді. */
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReturnedSheetsDto"];
+                        "text/json": components["schemas"]["ReturnedSheetsDto"];
+                        "text/plain": components["schemas"]["ReturnedSheetsDto"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -24018,6 +24125,27 @@ export interface components {
              */
             previousOwnerUserId: number;
         };
+        /** @description ✎ D-450: власник документів для вибору у фільтрі переліку. */
+        DocumentOwnerOption: {
+            /** @description Відображуване ім'я (`D-86`), не логін. */
+            displayName: string;
+            /**
+             * Format: int32
+             * @description Скільки ВИДИМИХ читачеві документів (тих, де ім'я власника йому віддається) належать цій людині.
+             */
+            documentCount: number;
+            /**
+             * Format: int32
+             * @description Користувач (`Document.CreatedByUserId`).
+             */
+            userId: number;
+        };
+        /** @description ✎ D-450: власники видимих читачеві документів — варіанти фільтра переліку «Власник». */
+        DocumentOwnersResponse: {
+            /** @description Люди за спаданням кількості документів, далі за іменем; не більше 50 (`ListDocumentsHandler.MaxOwners`) —
+             *     решту знаходить пошук `q` за іменем. */
+            items: components["schemas"]["DocumentOwnerOption"][];
+        };
         /** @description Дія над документом у межах одного періоду. */
         DocumentPeriodRequest: {
             /**
@@ -24091,7 +24219,8 @@ export interface components {
             /**
              * Format: int32
              * @description EA-C: ідентифікатор автора документа (`CreatedByUserId`) — поруч з OwnerDisplayName тим самим розкриттям,
-             *     тож для звуженого читача — `null` (`DocumentSheetVisibility.For`). Заповнює лише шлях картки (`FindAsync`).
+             *     тож для звуженого читача — `null` (`DocumentSheetVisibility.For`). ~~Заповнює лише шлях картки (`FindAsync`).~~
+             *     ✎ D-450: заповнюють і картка, і перелік — клієнт за ним підписує обраного власника у фільтрі «Власник».
              */
             ownerUserId?: null | number;
             /** @description AN-63: періодичність проєкту документа — ім'я `Project.PeriodKind`: Monthly/Quarterly/Yearly/Custom (рядок, а не enum:
@@ -26428,7 +26557,7 @@ export interface components {
          * @description Подія, про яку сповіщають. Числа зберігаються в базі — не перенумеровувати.
          * @enum {unknown}
          */
-        NotificationEventKind: "JobFailed" | "ConsistencyIssuesFound" | "PartitionsRunningOut" | "CollectionFailed" | "ExportFailed" | "PeriodOpened" | "PeriodGraceStarted";
+        NotificationEventKind: "JobFailed" | "ConsistencyIssuesFound" | "PartitionsRunningOut" | "CollectionFailed" | "ExportFailed" | "PeriodOpened" | "PeriodGraceStarted" | "SheetSubmitted" | "SheetReturned";
         /** @description Матриця правил цілком. */
         NotificationRuleMatrix: {
             /** @description УСІ види подій, а не лише ті, на які правило вже є: інакше клієнт не мав би
@@ -29227,6 +29356,50 @@ export interface components {
             reason: string;
             /** @description Кого повернути; порожньо — усіх «Заповнено». */
             userIds: null | number[];
+        };
+        /** @description ✎ D-449: аркуш, повернений на доопрацювання (відхилення погоджувачем або повернення в роботу), що чекає ПОТОЧНОГО користувача
+         *     («Повернуто на доопрацювання» у «My tasks»). */
+        ReturnedSheetItemDto: {
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /** @description Бізнес-ключ документа. */
+            documentKey: string;
+            documentNameL10n: null | components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Ключ періоду `Рік*100+№`.
+             */
+            periodKey: number;
+            /** @description Код проєкту документа. */
+            projectCode: string;
+            /** @description Причина повернення (обов'язкова і при відхиленні, і при поверненні в роботу); може бути багаторядковою. */
+            reason: string;
+            /**
+             * Format: date-time
+             * @description Коли повернуто, UTC.
+             */
+            returnedAt: string;
+            /** @description Хто повернув; `null` — користувача вже немає. */
+            returnedByDisplayName: null | string;
+            /** @description Код аркуша (для посилання на аркуш). */
+            sheetCode: string;
+            /**
+             * Format: int32
+             * @description Аркуш.
+             */
+            sheetDefId: number;
+            /** @description Назва аркуша. */
+            sheetNameL10n: components["schemas"]["LocalizedText"];
+        };
+        /** @description Сторінка блоку «Повернуто на доопрацювання»: найдавніші повернення першими. */
+        ReturnedSheetsDto: {
+            /** @description Повернені аркуші, над якими має працювати поточний користувач. */
+            items: components["schemas"]["ReturnedSheetItemDto"][];
+            /** @description Непрозорий курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
         };
         /** @description Створена роль. */
         RoleIdResponse: {

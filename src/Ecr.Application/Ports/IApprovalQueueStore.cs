@@ -1,6 +1,7 @@
 // src/Ecr.Application/Ports/IApprovalQueueStore.cs
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Ports;
 
@@ -40,6 +41,36 @@ public interface IApprovalQueueStore
     public Task<IReadOnlyList<ApprovalQueueCandidate>> ListSubmittedAsync(
         IReadOnlyCollection<int> projectIds, bool requireIncludedSheet, ApprovalQueueCursor? after, int take,
         IReadOnlyCollection<long> participatedDocumentIds, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ D-449 («Повернуто на доопрацювання» у «My tasks»): аркуші, повернені на доопрацювання — відхилені погоджувачем
+    /// (<c>Rejected</c>) або повернені в роботу (<c>Draft</c>, остання подія журналу — <c>Reopen</c>; відкликання автором — ні),
+    /// документів, де <paramref name="userId"/> — власник чи останній подавач аркуша (у проєктах
+    /// <paramref name="ownedProjectIds"/>), або документів <paramref name="participatedDocumentIds"/>; від найдавнішого
+    /// повернення, після <paramref name="after"/>, не більше <paramref name="take"/>.
+    /// </summary>
+    /// <remarks>
+    /// Окремого порту немає навмисно: та сама пара «аркуш × період» з <c>wf.ApprovalState</c>, ті самі проєкти
+    /// (<see cref="ListProjectsAsync"/> — архівний проєкт повторно не подається) і той самий keyset. Чия це задача й чи
+    /// видно аркуш — вирішує обробник (<c>ListMyReturnedSheetsHandler</c>), сховище лише звужує кандидатів.
+    /// </remarks>
+    /// <param name="userId">Викликач (власник — <c>Document.CreatedByUserId</c>, D-443: власника можна передати).</param>
+    /// <param name="ownedProjectIds">Проєкти, документи яких викликач бачить за ролями.</param>
+    /// <param name="requireIncludedSheet">
+    /// Аркуш має бути у складі документа (<c>IsIncluded</c>) — для читача з обмеженнями нижче проєкту, як у черзі.
+    /// </param>
+    /// <param name="after">Курсор (виключно); <c>null</c> — з початку.</param>
+    /// <param name="take">Розмір порції.</param>
+    /// <param name="participatedDocumentIds">Документи, де викликач має діюче надання учасника.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<ReturnedSheetCandidate>> ListReturnedAsync(
+        int userId,
+        IReadOnlyCollection<int> ownedProjectIds,
+        bool requireIncludedSheet,
+        ReturnedSheetsCursor? after,
+        int take,
+        IReadOnlyCollection<long> participatedDocumentIds,
+        CancellationToken ct);
 }
 
 /// <summary>Проєкт для черги.</summary>
@@ -85,3 +116,53 @@ public sealed record ApprovalQueueCandidate(
 /// <param name="SubmittedAtTicks">Тики моменту подання.</param>
 /// <param name="StateId">Ключ стану.</param>
 public sealed record ApprovalQueueCursor(long SubmittedAtTicks, long StateId);
+
+/// <summary>Відхилена пара «аркуш × період» документа.</summary>
+/// <param name="StateId">Ключ стану (тай-брейк порядку).</param>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="ProjectId">Проєкт.</param>
+/// <param name="DocumentKey">Бізнес-ключ документа.</param>
+/// <param name="DocumentNameL10n">Назва документа; <c>null</c> — не задана.</param>
+/// <param name="OwnerUserId">Власник документа.</param>
+/// <param name="SheetDefId">Аркуш.</param>
+/// <param name="PeriodKey">Період.</param>
+/// <param name="ReturnedAt">Коли повернуто (UTC); порядок і курсор.</param>
+/// <param name="ReturnedByDisplayName">Хто повернув; <c>null</c> — користувача немає.</param>
+/// <param name="Reason">Причина повернення.</param>
+public sealed record ReturnedSheetCandidate(
+    long StateId,
+    long DocumentId,
+    int ProjectId,
+    string DocumentKey,
+    LocalizedText? DocumentNameL10n,
+    int OwnerUserId,
+    int SheetDefId,
+    int PeriodKey,
+    DateTime ReturnedAt,
+    string? ReturnedByDisplayName,
+    string Reason)
+{
+    /// <summary>Останній подавач аркуша за період (<c>ApprovalState.SubmittedByUserId</c>; ставить лише подання).</summary>
+    public int? SubmittedByUserId { get; init; }
+
+    /// <summary>Хто повернув; <c>null</c> — невідомо.</summary>
+    public int? ReturnedByUserId { get; init; }
+
+    /// <summary>Вид повернення.</summary>
+    public ReturnKind Kind { get; init; } = ReturnKind.Rejected;
+}
+
+/// <summary>✎ D-449: вид повернення на доопрацювання.</summary>
+public enum ReturnKind
+{
+    /// <summary>Відхилення погоджувачем (<c>Rejected</c>).</summary>
+    Rejected = 1,
+
+    /// <summary>Повернення в роботу правом <c>Document.Reopen</c> (<c>Draft</c>, остання подія — <c>Reopen</c>).</summary>
+    Reopened = 2,
+}
+
+/// <summary>Позиція в порядку блоку: момент повернення (тики UTC) і ключ стану.</summary>
+/// <param name="ReturnedAtTicks">Тики моменту повернення.</param>
+/// <param name="StateId">Ключ стану.</param>
+public sealed record ReturnedSheetsCursor(long ReturnedAtTicks, long StateId);

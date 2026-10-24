@@ -1,0 +1,90 @@
+/*
+ * Вікно, яке можна розгорнути чи потягнути за кут (`ResizableModal.tsx`, P44).
+ *
+ * ⚠ Вміст вікна — колонка: заголовок не прокручується, тіло займає решту висоти і прокручується
+ * саме (довга таблиця чи diff — усередині вікна, а не сторінкою). У звичайному розмірі вікно,
+ * як і досі, рівно на висоту вмісту, доки той не впреться в межу екрана Mantine.
+ */
+.ecr-rm-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.ecr-rm-header {
+  flex: none;
+}
+
+.ecr-rm-actions {
+  margin-inline-start: auto;
+}
+
+.ecr-rm-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * Обгортка вмісту — звичайний блок, що лише добирає вільну висоту: розкладка форм усередині та
+ * сама, що й без обгортки.
+ */
+.ecr-rm-fill {
+  flex: 1 0 auto;
+}
+
+/*
+ * Ланцюжок до редактора виразу (`data-rm-grow`, `ExpressionEditor`) стає колонкою, що росте:
+ * збільшене вікно віддає висоту саме полю формули, а не порожнечі під кнопкою «Зберегти».
+ *
+ * ⚠ `Group` (рядок) не чіпається: колонкою він переставив би сусідні кнопки одна під одну.
+ */
+.ecr-rm-fill:has([data-rm-grow]),
+.ecr-rm-fill :has([data-rm-grow]):not(.mantine-Group-root) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
+}
+
+.ecr-rm-fill [data-rm-grow] {
+  flex: 1 0 auto;
+}
+
+.ecr-rm-handle {
+  position: absolute;
+  inset-inline-end: 0;
+  bottom: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-end-end-radius: var(--modal-radius, var(--mantine-radius-default));
+  background-color: transparent;
+  background-image: linear-gradient(
+    135deg,
+    transparent 0 55%,
+    var(--mantine-color-dimmed) 55% 62%,
+    transparent 62% 72%,
+    var(--mantine-color-dimmed) 72% 79%,
+    transparent 79%
+  );
+  cursor: nwse-resize;
+  touch-action: none;
+  z-index: 1001;
+}
+
+.ecr-rm-handle:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
+
+/* Телефон: тягнути кут пальцем на вузькому екрані нема куди — лишається «на весь екран». */
+@media (max-width: 47.99em) {
+  .ecr-rm-handle {
+    display: none;
+  }
+}

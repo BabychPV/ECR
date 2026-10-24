@@ -24,7 +24,10 @@ public sealed class ReopenDocumentHandler(
     ICurrentUser currentUser,
     IClock clock,
     IDocumentStore documents,
-    Reporting.ReportSnapshotSync reports)
+    Reporting.ReportSnapshotSync reports,
+
+    // ✎ D-451: лист «Аркуш повернуто» — ПІСЛЯ коміту, без права валити дію; `null` — тестові фабрики без пошти.
+    SheetWorkflowNotifier? notifier = null)
 {
     /// <summary>Право, без якого повернення в роботу неможливе (ФВ-6.12).</summary>
     public const string Permission = "Document.Reopen";
@@ -137,5 +140,14 @@ public sealed class ReopenDocumentHandler(
             await reports.RefreshAsync(documentId, key, innerCt).ConfigureAwait(false);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        // ✎ D-451: «повернути для правок» (`Submitted/Approved → Draft`, `ApprovalAction.Reopen`) — повернення
+        // погоджувачем із правом `Document.Reopen` (кнопку клієнт показує лише тому, хто погоджує). Відкликання
+        // автором — інший обробник (`RecallSheetHandler`, `ApprovalAction.Recall`) і листа не дає.
+        if (notifier is not null)
+        {
+            await notifier.ReturnedAsync(documentId, sheetDefId, key, userId, clock.UtcNow, reason, ct)
+                .ConfigureAwait(false);
+        }
     }
 }
