@@ -33,7 +33,13 @@ test.describe('Перелік документів: власник і фільт
     // Людина з відповіді сервера (перша в списку — найбільше документів).
     const field = page.locator('input[data-owner-filter]');
     await field.click();
-    const person = page.getByRole('option').filter({ hasNotText: /Everyone|Mine|Все|Мои|Барлығы|Менікі/ }).first();
+    // ⚠ Лише пункти списку «Власник» (Mantine `listbox`, підписаний полем): голий `getByRole('option')` першим
+    // знаходив прихований `<option>` рідного списку проєктів («All projects») і чекав його видимості до тайм-ауту.
+    const ownerList = page.getByRole('listbox', { name: /^(Owner|Владелец|Иесі)$/ });
+    const person = ownerList
+      .getByRole('option')
+      .filter({ hasNotText: /Everyone|Mine|всех|Мои|Барлығы|Менікі/ })
+      .first();
     await expect(person, 'у списку немає жодної людини').toBeVisible({ timeout: 30_000 });
     expect(ownerRequests.length).toBeGreaterThan(0);
 

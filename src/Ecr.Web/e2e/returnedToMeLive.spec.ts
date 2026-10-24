@@ -93,8 +93,13 @@ async function reopenToDraft(request: APIRequestContext, sheetDefId: number, why
   const reopen = await request.post(`/api/v1/documents/${DocumentId}/reopen`, {
     data: { sheetDefId, periodKey: Number(PeriodKey), reason: why },
   });
-  // 204 - повернуто; 409 - уже не Submitted/Approved (Draft чи Rejected): теж придатно для подання.
-  expect([204, 409], `reopen: ${String(reopen.status())} ${await reopen.text()}`).toContain(reopen.status());
+  // 204 - повернуто. Аркуш уже не Submitted/Approved (Draft чи Rejected) - теж придатно для подання: сервер
+  // відповідає 403 з причиною `BusinessRule` (`EditRules.CanReopen` іде ДО стану домену; живий прогін CI p44, як
+  // і в `approverEditLive`) або 409 (`reopenWrongState`, якщо стан змінився між рішенням і записом).
+  const text = await reopen.text();
+  const alreadyNotSubmitted =
+    reopen.status() === 409 || (reopen.status() === 403 && text.includes('"reason":"BusinessRule"'));
+  expect(reopen.status() === 204 || alreadyNotSubmitted, `reopen: ${String(reopen.status())} ${text}`).toBe(true);
 }
 
 async function submit(request: APIRequestContext, sheetDefId: number): Promise<void> {
