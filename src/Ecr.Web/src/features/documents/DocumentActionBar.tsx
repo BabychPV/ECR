@@ -110,8 +110,9 @@ export function DocumentActionBar({
   const openImport = useRef<((returnTo?: HTMLElement | null) => void) | null>(null);
   const startExport = useExportStarter();
 
-  // ✎ D-445: поданий аркуш імпортує погоджувач поточного кроку (як править у сітці, D-442). Клієнт знає лише
-  // право погоджувати (`actions.approve`), а не крок маршруту — остаточне «так/ні» дає перегляд імпорту на сервері.
+  // ✎ D-445: поданий аркуш імпортує погоджувач поточного кроку (як править у сітці, D-442). Крок маршруту
+  // знає сервер — `approverImport` приходить із його відповіді (`GET …/approver-edit`, те саме правило, що й запис),
+  // тож погоджувач ІНШОГО кроку пункту не бачить; остаточне «так/ні» однаково дає перегляд імпорту на сервері.
   const showImport = canImport && (!readOnly || (approverImport && actions.approve !== null));
 
   // ⚠ «Validate» ховається в меню лише там, де панель зайнята рішенням

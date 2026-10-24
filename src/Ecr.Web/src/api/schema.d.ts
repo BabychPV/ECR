@@ -3669,6 +3669,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/approver-edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Чи може поточний користувач змінювати значення поданого аркуша (D-442/D-445): лише погоджувач поточного
+         *     кроку маршруту. Рішення сервера для сітки й пункту «Імпорт…»; запис перевіряє те саме правило. Право
+         *     `Document.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Аркуш. */
+                    sheetDefId?: number;
+                    /** @description Період. */
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApproverEditAvailabilityDto"];
+                        "text/json": components["schemas"]["ApproverEditAvailabilityDto"];
+                        "text/plain": components["schemas"]["ApproverEditAvailabilityDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/business-key": {
         parameters: {
             query?: never;
@@ -22106,6 +22165,13 @@ export interface components {
              * @description Аркуш.
              */
             sheetDefId: number;
+        };
+        /** @description Чи може поточний користувач змінювати значення поданого аркуша (D-442/D-445). */
+        ApproverEditAvailabilityDto: {
+            /** @description `true` — аркуш поданий, і користувач — погоджувач ПОТОЧНОГО кроку маршруту: сітка редаговна, імпорт Excel
+             *             доступний. `false` — аркуш не поданий або черга не його (автор, погоджувач іншого кроку). Лише підказка
+             *             інтерфейсу: запис перевіряє те саме правило під блокуванням аркуша. */
+            canApproverEdit: boolean;
         };
         /** @description Тіло призначення ролі групі. */
         AssignGroupRoleRequest: {

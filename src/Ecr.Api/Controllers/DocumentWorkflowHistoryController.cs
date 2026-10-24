@@ -1,3 +1,4 @@
+using Ecr.Application.Documents;
 using Ecr.Application.Workflow;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -15,7 +16,8 @@ namespace Ecr.Api.Controllers;
 public sealed class DocumentWorkflowHistoryController(
     GetWorkflowHistoryHandler history,
     RecallSheetHandler recall,
-    GetSubmissionTargetHandler submissionTarget) : ControllerBase
+    GetSubmissionTargetHandler submissionTarget,
+    GetApproverEditAvailabilityHandler approverEdit) : ControllerBase
 {
     /// <summary>Що подасть «Подати» на аркуші (D-441): найраніший неподаний період у стані <c>Open</c>/<c>Grace</c>, наступний неподаний, відкриті періоди для вибору і статуси місячних колонок. Право <c>Document.View</c>.</summary>
     /// <param name="id">Документ.</param>
@@ -68,6 +70,22 @@ public sealed class DocumentWorkflowHistoryController(
     public async Task<IActionResult> CanRecall(
         long id, [FromQuery] int sheetDefId, [FromQuery] int periodKey, CancellationToken ct)
         => Ok(await recall.CanRecallAsync(id, sheetDefId, periodKey, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Чи може поточний користувач змінювати значення поданого аркуша (D-442/D-445): лише погоджувач поточного
+    /// кроку маршруту. Рішення сервера для сітки й пункту «Імпорт…»; запис перевіряє те саме правило. Право
+    /// <c>Document.View</c>.
+    /// </summary>
+    /// <param name="id">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:long}/approver-edit")]
+    [ProducesResponseType<ApproverEditAvailabilityDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ApproverEdit(
+        long id, [FromQuery] int sheetDefId, [FromQuery] int periodKey, CancellationToken ct)
+        => Ok(await approverEdit.HandleAsync(id, sheetDefId, periodKey, ct).ConfigureAwait(false));
 }
 
 /// <summary>Тіло відкликання аркуша.</summary>

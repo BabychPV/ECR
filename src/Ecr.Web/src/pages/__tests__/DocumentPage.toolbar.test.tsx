@@ -83,6 +83,9 @@ function mockFetch(
 
       if (url.includes('/recall')) return jsonResponse({ canRecall: false });
 
+      // ✎ борг D-445: тестовий користувач (грант Manage) — погоджувач поточного кроку поданого аркуша.
+      if (url.includes('/approver-edit')) return jsonResponse({ canApproverEdit: true });
+
       if (url.includes('/validation')) {
         return options.validation === undefined
           ? jsonResponse({ title: 'Not found', status: 404, errorCode: 'ECR-DOC-0404' }, 404)
@@ -327,7 +330,8 @@ describe('DocumentPage: рядок дій (UI-14)', () => {
       // ✎ D-445: погоджувачу поданого аркуша імпорт пропонується — як правка в сітці (D-442); хто саме з
       // погоджувачів на поточному кроці, каже перегляд імпорту на сервері. Доти тут стерегли «не пропонується»
       // (`ФВ-5.20a`) — саме це правило D-445 і скасовує для погоджувача.
-      expect(screen.getByRole('menuitem', { name: '⟦import.pick⟧…' })).toBeDefined();
+      // ✎ борг D-445: «погоджувач ПОТОЧНОГО кроку» — відповідь сервера (`GET …/approver-edit`), тож пункт — після неї.
+      expect(await screen.findByRole('menuitem', { name: '⟦import.pick⟧…' }, { timeout: SlowEnvTimeout })).toBeDefined();
     },
     SlowEnvTimeout,
   );

@@ -498,6 +498,19 @@
         ],
         "type": "object"
       },
+      "ApproverEditAvailabilityDto": {
+        "description": "Чи може поточний користувач змінювати значення поданого аркуша (D-442/D-445).",
+        "properties": {
+          "canApproverEdit": {
+            "description": "`true` — аркуш поданий, і користувач — погоджувач ПОТОЧНОГО кроку маршруту: сітка редаговна, імпорт Excel\n        доступний. `false` — аркуш не поданий або черга не його (автор, погоджувач іншого кроку). Лише підказка\n        інтерфейсу: запис перевіряє те саме правило під блокуванням аркуша.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "canApproverEdit"
+        ],
+        "type": "object"
+      },
       "AssignGroupRoleRequest": {
         "description": "Тіло призначення ролі групі.",
         "properties": {
@@ -27951,6 +27964,87 @@
         "summary": "Погодження або відхилення аркуша.",
         "tags": [
           "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/approver-edit": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Аркуш.",
+            "in": "query",
+            "name": "sheetDefId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Період.",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproverEditAvailabilityDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproverEditAvailabilityDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproverEditAvailabilityDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Чи може поточний користувач змінювати значення поданого аркуша (D-442/D-445): лише погоджувач поточного\nкроку маршруту. Рішення сервера для сітки й пункту «Імпорт…»; запис перевіряє те саме правило. Право\n`Document.View`.",
+        "tags": [
+          "DocumentWorkflowHistory"
         ]
       }
     },

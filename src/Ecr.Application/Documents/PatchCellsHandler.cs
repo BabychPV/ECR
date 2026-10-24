@@ -2527,14 +2527,13 @@ public sealed partial class PatchCellsHandler(
     }
 
     /// <summary>D-442: користувач і далі погоджувач поточного кроку цього аркуша — під блокуванням.</summary>
-    private async Task<bool> StillCurrentApproverAsync(RequestContext context, CancellationToken ct)
-    {
-        var decision = await access
-            .CanApproveAsync(context.Profile, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
-            .ConfigureAwait(false);
-
-        return decision.IsAllowed;
-    }
+    /// <remarks>
+    /// ✎ Борг D-445: правило — <see cref="ApproverEditRule"/>, спільне з підказкою клієнту
+    /// (<see cref="GetApproverEditAvailabilityHandler"/>): сітка й «Імпорт…» відкриті рівно тоді, коли запис пропустить.
+    /// </remarks>
+    private Task<bool> StillCurrentApproverAsync(RequestContext context, CancellationToken ct)
+        => ApproverEditRule.IsCurrentStepApproverAsync(
+            access, context.Profile, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct);
 
     /// <summary>
     /// EA-B: передача зрізу повторно — під блокуванням аркуша, у транзакції запису.

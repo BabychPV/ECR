@@ -34,6 +34,7 @@ import { DocumentProgress } from '@/features/documents/DocumentProgress';
 import { useDocumentPending } from '@/features/grid/autosave';
 import type { HeldEdit } from '@/features/grid/pendingStore';
 import { editsDeferToServer, isEditable } from '@/features/workflow/SheetActions';
+import { useApproverEditAvailability } from '@/features/workflow/api';
 import { useCalculationsStale } from '@/features/methodologies/staleCalculations';
 import { useUnmatchedRows } from '@/features/documents/useUnmatchedRows';
 import { can, useSession } from '@/shared/session/useSession';
@@ -520,8 +521,15 @@ export function DocumentPage(): JSX.Element {
    * не замикаємо цілком: рішення зрізу дають погоджувачеві редаговні комірки, решті — `DocumentSubmitted`
    * (штриховка, замок, підказка, як і доти). Дії зі зміни даних (`readOnly` вище) лишаються закриті —
    * крім імпорту Excel погоджувачем (✎ D-445, `approverImport` у `DocumentActionBar`).
+   *
+   * ✎ борг D-445: «погоджувач ПОТОЧНОГО кроку» — рішення сервера (`GET …/approver-edit`, те саме правило, що й запис).
+   * Доти погоджувач ІНШОГО кроку бачив «Імпорт…» і редаговну сітку, а сервер відмовляв. Поки відповіді немає —
+   * лише читання: відкрити сітку через невідомість означало б показати дію, якої може не бути.
    */
-  const approverEditable = editsDeferToServer(state) && !locksDataActions(lock) && !narrow;
+  const deferredToServer = editsDeferToServer(state) && active !== undefined;
+  const approverEdit = useApproverEditAvailability(documentId, active?.sheetDefId ?? 0, periodKey, deferredToServer);
+  const approverEditable =
+    deferredToServer && approverEdit.data?.canApproverEdit === true && !locksDataActions(lock) && !narrow;
   const gridReadOnly = readOnly && !approverEditable;
 
   // ⚠ Викликається БЕЗУМОВНО і до будь-якого розгалуження показу: правило

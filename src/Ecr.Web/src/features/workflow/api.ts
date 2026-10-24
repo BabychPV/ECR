@@ -55,6 +55,35 @@ export function useRecallAvailability(
   });
 }
 
+/** Чи може поточний користувач правити значення поданого аркуша (D-442/D-445); тип — зі згенерованої схеми. */
+export type ApproverEditAvailability = components['schemas']['ApproverEditAvailabilityDto'];
+
+/**
+ * ✎ борг D-445: чи правка ПОДАНОГО аркуша цим користувачем пройде на сервері — лише погоджувач
+ * поточного кроку маршруту. Рішення сервера тим самим правилом, що й запис; клієнт його не вгадує (роль кроку,
+ * маршрут, грант знає лише сервер). Відповідь — лише для форми екрана: запис однаково перевіряє правило.
+ *
+ * ⚠ Ключ під префіксом `['document', id, period]` — як `useRecallAvailability`: погодження кроку переводить
+ * чергу далі, і `SheetActions` після кожної дії скидає саме цей префікс.
+ *
+ * @param enabled запит іде лише для поданого аркуша (`editsDeferToServer`).
+ */
+export function useApproverEditAvailability(
+  documentId: number,
+  sheetDefId: number,
+  periodKey: number,
+  enabled: boolean,
+): UseQueryResult<ApproverEditAvailability> {
+  return useQuery({
+    queryKey: ['document', documentId, periodKey, 'approver-edit', sheetDefId],
+    queryFn: () =>
+      apiFetch<ApproverEditAvailability>(
+        `/api/v1/documents/${String(documentId)}/approver-edit?sheetDefId=${String(sheetDefId)}&periodKey=${String(periodKey)}`,
+      ),
+    enabled,
+  });
+}
+
 /** Що подасть «Подати» на аркуші (D-441); тип — зі згенерованої схеми. */
 export type SubmissionTarget = components['schemas']['SubmissionTargetDto'];
 
