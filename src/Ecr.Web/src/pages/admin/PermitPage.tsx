@@ -1,4 +1,4 @@
-import { lazy, Suspense, type JSX } from 'react';
+import { lazy, Suspense, useEffect, type JSX } from 'react';
 import { Badge, Button, Menu, Skeleton, Stack, Tabs } from '@mantine/core';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { NotFoundPage } from '@/app/NotFoundPage';
@@ -8,12 +8,12 @@ import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import type { Permit } from '@/features/permits/api/types';
 import { DialogParam, readLifecycleDialog } from '@/features/permits/permit/lifecycleDialogIds';
-import { localName } from '@/features/permits/permit/model';
+import { localName } from '@/features/permits/permit/names';
 import { OverviewTab } from '@/features/permits/permit/OverviewTab';
 import { useMayEditPermits } from '@/features/permits/permit/permitDataRights';
 import { capabilities, PermitStatus, type PermitCapabilities } from '@/features/permits/permit/permitRules';
-import { PanelParam, TableTab } from '@/features/permits/permit/TableTab';
-import { usePermit, usePermitTypeDefinition, useUnitLabels } from '@/features/permits/permit/usePermitData';
+import { usePermit, usePermitTypeDefinition, useUnitLabels } from '@/features/permits/permit/permitQueries';
+import { PanelParam } from '@/features/permits/permit/tableParams';
 import { PermitEditorHead, PermitStateStepper } from '@/features/permits/shell/PermitEditorHead';
 import { PermitsPaths } from '@/features/permits/shell/permitPaths';
 import { PermitStateBadge } from '@/features/permits/ui/PermitStateBadge';
@@ -22,6 +22,15 @@ import { PermitStateBadge } from '@/features/permits/ui/PermitStateBadge';
 const LifecycleDialogs = lazy(() =>
   import('@/features/permits/permit/LifecycleDialogs').then((module) => ({ default: module.LifecycleDialogs })),
 );
+
+/*
+ * Вкладка таблиці — окремим чанком (бюджет маршруту, D-132): широка таблиця, модель рядка й розбір вставки
+ * (`rc812/rowModel`) потрібні лише на вкладці таблиці, а відкривається дозвіл на Overview. Поки чанк їде, на місці
+ * вкладки той самий скелет, що й поки читається визначення типу; шапка з діями — поза вкладкою і не зсувається.
+ * Чанк підтягується одразу після показу дозволу з таблицями, тож перемикання вкладки його зазвичай не чекає.
+ */
+const loadTableTab = () => import('@/features/permits/permit/TableTab');
+const TableTab = lazy(() => loadTableTab().then((module) => ({ default: module.TableTab })));
 
 const OverviewTabId = 'overview';
 const TabParam = 'tab';
@@ -98,6 +107,11 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
   const open = (id: string): void => update((next) => next.set(DialogParam, id));
   const closeDialog = (): void => update((next) => next.delete(DialogParam));
 
+  const hasTables = permit.tables.length > 0;
+  useEffect(() => {
+    if (hasTables) void loadTableTab();
+  }, [hasTables]);
+
   const typeName = localName(permit.typeNameL10n) || permit.typeCode;
   const subtitle = permit.location === null || permit.location === '' ? typeName : `${typeName} · ${permit.location}`;
 
@@ -143,7 +157,9 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
               ) : typeQuery.data === undefined ? (
                 <Skeleton height={160} role="status" aria-label={t('common.loading')} />
               ) : (
-                <TableTab permit={permit} table={table} type={typeQuery.data} units={units} caps={caps} />
+                <Suspense fallback={<Skeleton height={160} role="status" aria-label={t('common.loading')} />}>
+                  <TableTab permit={permit} table={table} type={typeQuery.data} units={units} caps={caps} />
+                </Suspense>
               )}
             </Tabs.Panel>
           ))}
