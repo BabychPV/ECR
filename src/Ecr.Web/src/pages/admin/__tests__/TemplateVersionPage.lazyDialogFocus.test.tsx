@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { act, render, screen, fireEvent, within, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -19,6 +19,11 @@ import { testTheme } from '@/test/render';
  * `useRestoreFocus(opened, returnFocusTo)` з `ConfirmModal` — червоний другий.
  *
  * ⚠ Каталог не вантажиться: `t()` дає `⟦ключ⟧`.
+ *
+ * ⚠ Ворота — `use(promise)` у підміненому компоненті, а НЕ `await` у фабриці `vi.mock`: код сам передзавантажує чанк
+ * (`preloadDialogs`, ще в першому тесті), і другий `import()` того самого модуля, поки фабрика ще чекає, vitest віддавав справжнім модулем — діалог
+ * з'являвся одразу (CI 40107107198). Для React це той самий стан, що й чанк у дорозі: межа `Suspense` показує
+ * `fallback={null}`, компонент монтується вже відкритим лише після `open()`.
  */
 const chunks = vi.hoisted(() => {
   const gate = (): { ready: Promise<void>; open: () => void } => {
@@ -38,10 +43,17 @@ vi.mock('@/shared/ui/ReasonModal', async (importOriginal) => {
 
   return importOriginal();
 });
+// ⚠ `ConfirmModal` — воротами `use(promise)`, а не `await` у фабриці: див. примітку нижче.
 vi.mock('@/shared/ui/ConfirmModal', async (importOriginal) => {
-  await chunks.confirm.ready;
+  const { createElement, use } = await import('react');
+  const actual = await importOriginal<typeof import('@/shared/ui/ConfirmModal')>();
+  function LateConfirm(props: Parameters<typeof actual.ConfirmModal>[0]): ReturnType<typeof actual.ConfirmModal> {
+    use(chunks.confirm.ready);
 
-  return importOriginal();
+    return createElement(actual.ConfirmModal, props);
+  }
+
+  return { ...actual, ConfirmModal: LateConfirm };
 });
 
 function json(body: unknown): Response {
@@ -136,6 +148,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   vi.unstubAllGlobals();
 });
 

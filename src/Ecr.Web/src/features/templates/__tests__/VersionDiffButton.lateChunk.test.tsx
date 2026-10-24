@@ -11,6 +11,11 @@ import { VersionDiffButton } from '../VersionDiffButton';
  * ⛔ `VersionDiffButton.test.tsx` перевіряє фокус, коли чанк приїздить одразу; тут `vi.mock` із воротами віддає модуль
  * діалогу лише після кліку, тож діалог монтується ВЖЕ відкритим посеред очікування.
  *
+ * ⚠ Ворота — `use(promise)` у підміненому компоненті, а НЕ `await` у фабриці `vi.mock`: код сам передзавантажує чанк
+ * (до кліку), і другий `import()` того самого модуля, поки фабрика ще чекає, vitest віддавав справжнім модулем — діалог
+ * з'являвся одразу (CI 40107107198). Для React це той самий стан, що й чанк у дорозі: межа `Suspense` показує
+ * `fallback={null}`, компонент монтується вже відкритим лише після `open()`.
+ *
  * Мутаційний доказ: прибрати `useRestoreFocus(opened)` з `VersionDiffDialog` — тест червоний.
  *
  * ⚠ Каталог не вантажиться: `t()` дає `⟦ключ⟧`.
@@ -25,9 +30,15 @@ const chunk = vi.hoisted(() => {
 });
 
 vi.mock('../VersionDiff', async (importOriginal) => {
-  await chunk.ready;
+  const { createElement, use } = await import('react');
+  const actual = await importOriginal<typeof import('../VersionDiff')>();
+  function LateDialog(props: Parameters<typeof actual.VersionDiffDialog>[0]): ReturnType<typeof actual.VersionDiffDialog> {
+    use(chunk.ready);
 
-  return importOriginal();
+    return createElement(actual.VersionDiffDialog, props);
+  }
+
+  return { ...actual, VersionDiffDialog: LateDialog };
 });
 
 const Versions = [

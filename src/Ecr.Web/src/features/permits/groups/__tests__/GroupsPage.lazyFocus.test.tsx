@@ -12,7 +12,12 @@ import type { PermitGroupDto } from '../groupsApi';
  *
  * ⛔ Шторка монтується ВЖЕ відкритою (`?panel=_new`), і `returnFocus` Mantine відкривача не бачить. Повертає фокус
  * `DetailDrawer`: відкривача він читає в рендері на першому відкритому кадрі, тобто коли чанк приїхав, — кнопка «New
- * group» на той час досі у фокусі. Чанк тут тримає `vi.mock` із воротами — модуль віддається лише після кліку.
+ * group» на той час досі у фокусі. Чанк тут тримає `vi.mock` із воротами — шторка монтується лише після кліку.
+ *
+ * ⚠ Ворота — `use(promise)` у підміненому компоненті, а НЕ `await` у фабриці `vi.mock`: код сам передзавантажує чанк
+ * (до кліку), і другий `import()` того самого модуля, поки фабрика ще чекає, vitest віддавав справжнім модулем — діалог
+ * з'являвся одразу (CI 40107107198). Для React це той самий стан, що й чанк у дорозі: межа `Suspense` показує
+ * `fallback={null}`, компонент монтується вже відкритим лише після `open()`.
  *
  * Мутаційний доказ: прибрати `if (opened) setOpener(focusedOutside(panelId));` у `DetailDrawer` — тест червоний.
  */
@@ -26,9 +31,15 @@ const chunk = vi.hoisted(() => {
 });
 
 vi.mock('../GroupDrawer', async (importOriginal) => {
-  await chunk.ready;
+  const { createElement, use } = await import('react');
+  const actual = await importOriginal<typeof import('../GroupDrawer')>();
+  function LateDrawer(props: Parameters<typeof actual.GroupDrawer>[0]): ReturnType<typeof actual.GroupDrawer> {
+    use(chunk.ready);
 
-  return importOriginal();
+    return createElement(actual.GroupDrawer, props);
+  }
+
+  return { ...actual, GroupDrawer: LateDrawer };
 });
 
 vi.mock('@/shared/i18n', async (importOriginal) => ({
