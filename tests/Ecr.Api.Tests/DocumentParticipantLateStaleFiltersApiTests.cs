@@ -100,6 +100,12 @@ public sealed class DocumentParticipantLateStaleFiltersApiTests(SqlServerFixture
         var row = Row(await ListAsync(app, client, s, string.Empty).ConfigureAwait(true), s);
         Assert.Equal(JsonValueKind.True, Field(row, "resultsStale").ValueKind);
 
+        // ✎ D-446: застарілість відома — причини «не визначено» немає ні в рядку, ні в картці.
+        Assert.Equal(JsonValueKind.Null, Field(row, "resultsStaleUndetermined").ValueKind);
+        var card = await CardAsync(app, client, s).ConfigureAwait(true);
+        Assert.Equal(JsonValueKind.True, Field(card, "resultsStale").ValueKind);
+        Assert.Equal(JsonValueKind.Null, Field(card, "resultsStaleUndetermined").ValueKind);
+
         Assert.Equal([s.DocumentId], Ids(await ListAsync(app, client, s, "&resultsStale=true").ConfigureAwait(true)));
         Assert.Empty(await ListAsync(app, client, s, "&resultsStale=false").ConfigureAwait(true));
         Assert.Equal([s.DocumentId], Ids(await ListAsync(app, client, s, "&resultsStale=true&staleBy=me").ConfigureAwait(true)));
@@ -134,7 +140,12 @@ public sealed class DocumentParticipantLateStaleFiltersApiTests(SqlServerFixture
         var row = Row(await ListAsync(app, client, s, string.Empty).ConfigureAwait(true), s);
         Assert.Equal(JsonValueKind.Null, Field(row, "resultsStale").ValueKind);
         Assert.Equal(JsonValueKind.Null, Field(row, "resultsStaleSince").ValueKind);
-        Assert.Equal(JsonValueKind.Null, Field(await CardAsync(app, client, s).ConfigureAwait(true), "resultsStale").ValueKind);
+        var card = await CardAsync(app, client, s).ConfigureAwait(true);
+        Assert.Equal(JsonValueKind.Null, Field(card, "resultsStale").ValueKind);
+
+        // ✎ D-446: той самий null пояснено причиною — частину документа учасникові не відкрито (рядок = картка).
+        Assert.Equal("PartiallyHidden", Field(row, "resultsStaleUndetermined").GetString());
+        Assert.Equal("PartiallyHidden", Field(card, "resultsStaleUndetermined").GetString());
 
         Assert.Empty(await ListAsync(app, client, s, "&resultsStale=true").ConfigureAwait(true));
         Assert.Empty(await ListAsync(app, client, s, "&resultsStale=false").ConfigureAwait(true));

@@ -48,9 +48,20 @@ public sealed class DocumentStaleResultsScopeTests(SqlServerFixture sql)
         Assert.Equal(JsonValueKind.Null, Field(item, "resultsStale").ValueKind);
         Assert.Equal(JsonValueKind.Null, Field(item, "resultsStaleSince").ValueKind);
 
+        // ✎ D-446: той самий null пояснено причиною — частину документа читачеві закрито (рядок = картка).
+        Assert.Equal("PartiallyHidden", Field(item, "resultsStaleUndetermined").GetString());
+
         var card = JsonDocument.Parse(await client.GetStringAsync(
             new Uri($"/api/v1/documents/{s.DocumentId}?periodKey={s.PeriodKey}", UriKind.Relative)).ConfigureAwait(true)).RootElement;
         Assert.Equal(JsonValueKind.Null, Field(card, "resultsStale").ValueKind);
+        Assert.Equal("PartiallyHidden", Field(card, "resultsStaleUndetermined").GetString());
+
+        // ✎ D-446: без періоду застарілість не рахується взагалі — null «немає періоду», причина прихованості не віддається.
+        var noPeriod = JsonDocument.Parse(await client.GetStringAsync(
+                new Uri($"/api/v1/documents?limit=200&projectId={s.ProjectId}", UriKind.Relative)).ConfigureAwait(true))
+            .RootElement.GetProperty("items").EnumerateArray().Single(d => Id(d) == s.DocumentId);
+        Assert.Equal(JsonValueKind.Null, Field(noPeriod, "resultsStale").ValueKind);
+        Assert.Equal(JsonValueKind.Null, Field(noPeriod, "resultsStaleUndetermined").ValueKind);
 
         // Обидва напрями фільтра порожні: «не застарілі» = решта розкрило б ту саму відомість навиворіт.
         Assert.Empty(await ListAsync(client, s, "&resultsStale=true").ConfigureAwait(true));
@@ -76,6 +87,7 @@ public sealed class DocumentStaleResultsScopeTests(SqlServerFixture sql)
         var item = (await ListAsync(client, s, string.Empty).ConfigureAwait(true)).Single(d => Id(d) == s.DocumentId);
         Assert.Equal(JsonValueKind.True, Field(item, "resultsStale").ValueKind);
         Assert.NotEqual(JsonValueKind.Null, Field(item, "resultsStaleSince").ValueKind);
+        Assert.Equal(JsonValueKind.Null, Field(item, "resultsStaleUndetermined").ValueKind);
 
         Assert.Contains(await ListAsync(client, s, "&resultsStale=true").ConfigureAwait(true), d => Id(d) == s.DocumentId);
         Assert.DoesNotContain(await ListAsync(client, s, "&resultsStale=false").ConfigureAwait(true), d => Id(d) == s.DocumentId);
