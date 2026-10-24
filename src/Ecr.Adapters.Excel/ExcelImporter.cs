@@ -279,12 +279,12 @@ public sealed class ExcelImporter(
         // книгу. Доти `CanEditSliceAsync` на кожну таблицю коштував ~5–7
         // звернень, тобто ~91 × 6 на типовий шаблон; тепер — стала кількість,
         // незалежна від числа таблиць (`ImportPreviewAccessQueryCountTests`).
-        // ✎ D-442 (борг AN-129): дозвіл погоджувача на поданий аркуш — для сітки, не для книги; застосування
-        // відмовить `DocumentSubmitted`, тож перегляд показує ту саму відмову (`SubmittedSheetImportGuard`).
-        var decisionsBatch = SubmittedSheetImportGuard.Close(
-            await access
-                .CanEditSlicesAsync(profile, tableInstanceIds, ct)
-                .ConfigureAwait(false));
+        // ✎ D-445 (пряме слово людини 24.10): дозвіл погоджувача поточного кроку на поданий аркуш (`ByApprover`)
+        // діє й для книги — як у сітці (D-442). Застосування під блокуванням аркуша перечитує «чия черга»
+        // (`PatchCellsHandler.EnsureWorkbookSheetsEditableAsync`); автор і сторонні отримують тут `DocumentSubmitted`.
+        var decisionsBatch = await access
+            .CanEditSlicesAsync(profile, tableInstanceIds, ct)
+            .ConfigureAwait(false);
 
         // ⛔ PM-10: один дешевий запит; прив'язки читаються лише коли вони є. Без прив'язок (усі таблиці Land та решта)
         // шлях імпорту не змінюється.

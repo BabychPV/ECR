@@ -180,7 +180,10 @@ public sealed partial class PatchCellsHandler
                 continue;
             }
 
-            foreach (var seed in BuildRecalculationSeeds(applied))
+            // ✎ D-445: запис погоджувача поточного кроку в поданий аркуш (позначка під блокуванням) несе аркуш у
+            // насінні — каскад перерахує формули саме цього поданого аркуша, як після правки в сітці (D-442).
+            foreach (var seed in BuildRecalculationSeeds(
+                         applied, item.Context.ApproverEdit ? item.Context.Table.SheetDefId : null))
             {
                 recalculationSeeds.Add(seed);
             }
@@ -543,10 +546,7 @@ public sealed partial class PatchCellsHandler
             }).ConfigureAwait(false);
         }
 
-        foreach (var item in active)
-        {
-            Blamed(item.Id, () => CheckSheetStatus(statuses[item.Context.Table.SheetDefId], item.Planned));
-        }
+        await EnsureWorkbookSheetsEditableAsync(active, statuses, ct).ConfigureAwait(false);
 
         // ⛔ AN-106 (P1-01): ліміт очікування блокувань — до стелі й вставки нових рядків, як у
         // поштучного (`PersistCoreAsync`); `ApplyBatchAsync` нижче його вже не повторює.
@@ -685,10 +685,66 @@ public sealed partial class PatchCellsHandler
             [.. active.SelectMany(x => BuildAuditRecords(
                 x.Request, x.Applied!.Upserts, x.Applied.Deletes, userId, now, documentId,
                 x.Applied.RowKeyById, previous, isLateEdit, AuditCorrelationId(), x.Context.OutOfWindow,
-                x.OverwrittenRowKeys))],
+                x.OverwrittenRowKeys, approverEdit: x.Context.ApproverEdit))],
             ct).ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Стан аркушів під блокуванням: поданий аркуш пише лише погоджувач поточного кроку (D-445), решта —
+    /// <c>CheckSheetStatus</c>, як і доти.
+    /// </summary>
+    /// <remarks>
+    /// ✎ D-445 (пряме слово людини 24.10): імпорт Excel для поданого аркуша відкрито погоджувачу поточного кроку —
+    /// ТИМ САМИМ правилом, що й правка в сітці (<c>EnsureSheetStillEditableAsync</c>, D-442): рішення дозволило
+    /// запис саме роллю погоджувача (<see cref="RequestContext.ByApprover"/>), і під блокуванням аркуша «чия
+    /// черга» перечитано заново (<c>CanApproveAsync</c>) — крок погоджено між переглядом і застосуванням або
+    /// аркуш затверджено → відмова <c>DocumentSubmitted</c>/<c>DocumentApproved</c>. Позначка
+    /// <see cref="RequestContext.ApproverEdit"/> дає журнал <c>ApproverEdit</c> і насіння з аркушем погоджувача.
+    /// <para>
+    /// ⛔ Нові рядки на поданому аркуші — ні: роль кроку знімає лише заборону «подано» для ЗНАЧЕНЬ наявних рядків.
+    /// Імпорт рядків і так не створює (перегляд — <c>ECR-ROW-0404</c>, застосування — нульова версія рядка) і не
+    /// видаляє; батч із новими рядками на поданому аркуші падає в <c>CheckSheetStatus</c> тією самою відмовою.
+    /// </para>
+    /// <para>
+    /// ⚠ «Чия черга» — один раз на аркуш, а не на таблицю: таблиці одного аркуша мають ту саму чергу.
+    /// Позначка скидається на кожній спробі: стратегія повторів виконує тіло транзакції вдруге.
+    /// </para>
+    /// </remarks>
+    private async Task EnsureWorkbookSheetsEditableAsync(
+        List<WorkbookItem> active,
+        Dictionary<int, Domain.Enums.DocumentStatus> statuses,
+        CancellationToken ct)
+    {
+        var stillApprover = new Dictionary<int, bool>();
+
+        foreach (var item in active)
+        {
+            var context = item.Context;
+            var sheetDefId = context.Table.SheetDefId;
+            var status = statuses[sheetDefId];
+
+            context.ApproverEdit = false;
+            if (status == Domain.Enums.DocumentStatus.Submitted
+                && context.ByApprover
+                && context.Creations.Count == 0)
+            {
+                if (!stillApprover.TryGetValue(sheetDefId, out var approver))
+                {
+                    approver = await StillCurrentApproverAsync(context, ct).ConfigureAwait(false);
+                    stillApprover[sheetDefId] = approver;
+                }
+
+                if (approver)
+                {
+                    context.ApproverEdit = true;
+                    continue;
+                }
+            }
+
+            Blamed(item.Id, () => CheckSheetStatus(status, item.Planned));
+        }
     }
 
     /// <summary>

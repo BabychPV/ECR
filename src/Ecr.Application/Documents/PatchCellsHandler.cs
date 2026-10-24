@@ -3159,8 +3159,11 @@ public sealed partial class PatchCellsHandler(
         var records = new List<CellChangeRecord>(upserts.Count + deletes.Count);
 
         // ✎ D-442: правка погоджувача на поданому аркуші — позначка «правка погоджувача» в журналі
-        // (`Origin = ApproverEdit`). Лише замість `UserEdit`: інші походження погоджувачем не бувають.
-        var batchOrigin = approverEdit && string.Equals(request.Origin, UserEditOrigin, StringComparison.Ordinal)
+        // (`Origin = ApproverEdit`). Замість `UserEdit` (сітка) і, ✎ D-445, замість `Import` (книга Excel):
+        // D-442 вимагає позначки на КОЖНІЙ правці погоджувача, хоч би яким шляхом вона прийшла.
+        var batchOrigin = approverEdit
+                          && (string.Equals(request.Origin, UserEditOrigin, StringComparison.Ordinal)
+                              || string.Equals(request.Origin, CellChangeOrigins.Import, StringComparison.Ordinal))
             ? CellChangeOrigins.ApproverEdit
             : request.Origin;
 
@@ -3168,8 +3171,10 @@ public sealed partial class PatchCellsHandler(
         // експорту книги, людина позначила «перезаписати») — власним походженням
         // у журналі, щоб «хто затер чуже число і чи знав про це» читалося з
         // `aud.CellChange.Origin` без міграції (nvarchar(32) його вміщує).
+        // ⚠ D-445: на поданому аркуші погоджувача перемагає `ApproverEdit` — одна колонка `Origin` не вміщує
+        // обидві позначки, а «правка погоджувача» — вимога D-442 до кожної правки поданого аркуша.
         string OriginOf(string rowKey) =>
-            overwrittenRowKeys is not null && overwrittenRowKeys.Contains(rowKey)
+            !approverEdit && overwrittenRowKeys is not null && overwrittenRowKeys.Contains(rowKey)
                 ? CellChangeOrigins.ImportOverwrite
                 : batchOrigin;
 

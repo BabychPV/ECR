@@ -1,11 +1,17 @@
 // tests/Ecr.Api.Tests/ApproverEditHttpFlowTests.cs
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using ClosedXML.Excel;
 using Ecr.Adapters.Excel;
 using Ecr.Application.Documents;
+using Ecr.Application.Ports;
+using Ecr.Application.Security;
 using Ecr.Application.Workflow;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
@@ -15,6 +21,7 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -165,57 +172,296 @@ public sealed class ApproverEditHttpFlowTests(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// ✎ D-442 (борг AN-129): Excel-імпорт поданий аркуш не пише — ні в перегляді, ні в застосуванні. Перегляд
-    /// погоджувача на поданому аркуші показує відмову <c>deny.DocumentSubmitted</c> (а не «буде змінено»), і
-    /// застосування плану, побудованого ще на чернетці, відмовляє тією самою причиною; значення не змінюється.
+    /// ✎ D-445 (пряме слово людини 24.10; замінює закриття імпорту з боргу AN-129): Excel-імпорт поданого аркуша
+    /// відкрито погоджувачу ПОТОЧНОГО кроку — як правку в сітці (D-442). Перегляд показує йому зміну, застосування
+    /// пише значення з позначкою <c>ApproverEdit</c> і ставить перерахунок формул саме цього поданого аркуша
+    /// (<c>RecalculationSeed.ApproverSheetDefId</c>); аркуш лишається <c>Submitted</c>. Автор, сторонній і погоджувач
+    /// іншого кроку — відмова <c>DocumentSubmitted</c> і в перегляді, і в застосуванні плану, побудованого на чернетці.
     /// </summary>
     /// <remarks>
-    /// ⛔ Мутація: прибрати <c>SubmittedSheetImportGuard.Close</c> у <c>ExcelImporter.PreviewAsync</c> — перегляд
-    /// на поданому знову показує зміну як дозволену, тест червоний (застосування ж і далі 403 — та сама розбіжність).
+    /// ⛔ Мутації (локально, не комітяться): повернути <c>SubmittedSheetImportGuard.Close</c> у перегляд — червоніє
+    /// «перегляд погоджувача: 1 зміна»; у <c>EnsureWorkbookSheetsEditableAsync</c> лишити безумовний
+    /// <c>CheckSheetStatus</c> — застосування 403; <c>batchOrigin</c> без <c>Import</c> — журнал <c>Import</c>, червоне;
+    /// не передати <c>ApproverEdit</c> у <c>BuildRecalculationSeeds</c> книги — насіння без аркуша, червоне;
+    /// прибрати гілку <c>Submitted when IsCurrentApprover</c> у <c>EditRules</c> — перегляд погоджувача без змін.
     /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Decision", "D-442")]
+    [Trait("Decision", "D-445")]
     [Trait("Requirement", "ФВ-4.3")]
-    public async Task Імпорт_погоджувача_на_поданому_аркуші_перегляд_і_застосування_відмовляють_однаково()
+    public async Task Імпорт_погоджувача_поточного_кроку_на_поданому_аркуші_пише_з_позначкою_і_перерахунком()
     {
         var s = await ArrangeAsync().ConfigureAwait(true);
-        var submitter = await NewUserAsync(s, GrantLevel.Submit).ConfigureAwait(true);
-        var approver = await NewUserAsync(s, GrantLevel.Approve, "Document.Import").ConfigureAwait(true);
+        var submitter = await NewUserAsync(s, GrantLevel.Submit, "Document.Import").ConfigureAwait(true);
+        var first = await NewUserAsync(s, GrantLevel.Approve, "Document.Import").ConfigureAwait(true);
+        var second = await NewUserAsync(s, GrantLevel.Approve, "Document.Import").ConfigureAwait(true);
+        var outsider = await NewUserAsync(s, GrantLevel.Write, "Document.Import").ConfigureAwait(true);
+        await RouteAsync(s, first.RoleId, second.RoleId).ConfigureAwait(true);
 
-        using var app = new EcrApiFactory(sql);
+        var recalculations = new ConcurrentQueue<string>();
+        using var app = App(recalculations, approveDenied: null);
         using var author = await SignInAsync(app, submitter.Name).ConfigureAwait(true);
-        using var approverClient = await SignInAsync(app, approver.Name).ConfigureAwait(true);
+        using var firstClient = await SignInAsync(app, first.Name).ConfigureAwait(true);
+        using var secondClient = await SignInAsync(app, second.Name).ConfigureAwait(true);
+        using var outsiderClient = await SignInAsync(app, outsider.Name).ConfigureAwait(true);
 
         var column = await NumberColumnCodeAsync(author, s).ConfigureAwait(true);
         var rowKey = $"AI{Guid.NewGuid():N}"[..12];
 
         await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(author, s, rowKey, column, 10m, null)).ConfigureAwait(true);
 
-        // Чернетка: перегляд погоджувача (грант Approve ≥ Write) показує зміну — план застосовний.
-        var draft = await PreviewAsync(app, approverClient, s, Book(s, column, rowKey, 55m)).ConfigureAwait(true);
-        Assert.Equal(1, draft.GetProperty("changes").GetArrayLength());
+        // Чернетка: автор і сторонній (Write) імпорт пишуть — їхні плани застосовні, доки аркуш не подано.
+        var authorDraft = await PreviewAsync(app, author, s, Book(s, column, rowKey, 55m)).ConfigureAwait(true);
+        var outsiderDraft = await PreviewAsync(app, outsiderClient, s, Book(s, column, rowKey, 55m)).ConfigureAwait(true);
+        Assert.Equal(1, authorDraft.GetProperty("changes").GetArrayLength());
+        Assert.Equal(1, outsiderDraft.GetProperty("changes").GetArrayLength());
 
         await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
 
-        // Поданий: та сама книга — жодної зміни, відмова з причиною «подано».
-        var submitted = await PreviewAsync(app, approverClient, s, Book(s, column, rowKey, 55m)).ConfigureAwait(true);
-        Assert.Equal(0, submitted.GetProperty("changes").GetArrayLength());
-        var rejected = Assert.Single(submitted.GetProperty("rejected").EnumerateArray());
-        Assert.Equal(rowKey, rejected.GetProperty("rowKey").GetString());
-        Assert.Equal("ECR-ACCS-0403", rejected.GetProperty("reasonCode").GetString());
-        Assert.Equal($"deny.{nameof(EditDenyReason.DocumentSubmitted)}", rejected.GetProperty("messageKey").GetString());
+        // Поданий: автор, сторонній і погоджувач ДРУГОГО кроку — перегляд без змін, відмова «подано».
+        foreach (var (client, who) in new[] { (author, "автор"), (outsiderClient, "сторонній"), (secondClient, "погоджувач іншого кроку") })
+        {
+            var preview = await PreviewAsync(app, client, s, Book(s, column, rowKey, 77m)).ConfigureAwait(true);
+            AssertRejected(preview, rowKey, EditDenyReason.DocumentSubmitted, who);
+        }
 
-        // Застосування плану чернетки — та сама причина під блокуванням аркуша; значення не змінилося.
-        var denied = await ExpectAsync(
-                app, HttpStatusCode.Forbidden,
-                approverClient.PostAsJsonAsync(
-                    new Uri($"/api/v1/documents/{s.Document.DocumentId}/import/apply", UriKind.Relative),
-                    new { previewToken = draft.GetProperty("previewToken").GetString() }))
-            .ConfigureAwait(true);
+        // Плани чернетки автора і стороннього — відмова під блокуванням аркуша; значення не змінилося.
+        foreach (var (client, plan, who) in new[] { (author, authorDraft, "автор"), (outsiderClient, outsiderDraft, "сторонній") })
+        {
+            var denied = await ExpectAsync(app, HttpStatusCode.Forbidden, ApplyAsync(client, s, plan)).ConfigureAwait(true);
+            Assert.True(denied.Contains(nameof(EditDenyReason.DocumentSubmitted), StringComparison.Ordinal), $"{who}: {denied}");
+        }
+
+        Assert.Equal(10m, await StoredValueAsync(s, rowKey).ConfigureAwait(true));
+
+        // Погоджувач поточного (першого) кроку: перегляд показує зміну, застосування пише — як правка в сітці.
+        var approverPlan = await PreviewAsync(app, firstClient, s, Book(s, column, rowKey, 66m)).ConfigureAwait(true);
+        Assert.Equal(1, approverPlan.GetProperty("changes").GetArrayLength());
+        Assert.Equal(0, approverPlan.GetProperty("rejected").GetArrayLength());
+
+        recalculations.Clear();
+        await ExpectAsync(app, HttpStatusCode.OK, ApplyAsync(firstClient, s, approverPlan)).ConfigureAwait(true);
+
+        Assert.Equal(66m, await StoredValueAsync(s, rowKey).ConfigureAwait(true));
+        Assert.Equal(DocumentStatus.Submitted, await StatusAsync(s).ConfigureAwait(true));
+        Assert.Equal(
+            (CellChangeOrigins.ApproverEdit, await UserIdAsync(s, first.Name).ConfigureAwait(true)),
+            await LastChangeAsync(s).ConfigureAwait(true));
+
+        // Перерахунок формул — з аркушем погоджувача в насінні: лише так каскад пише в поданий аркуш (D-442).
+        var seeds = recalculations
+            .SelectMany(payload => JsonDocument.Parse(payload).RootElement.GetProperty("Cells").EnumerateArray()
+                .Select(cell => cell.TryGetProperty("ApproverSheetDefId", out var sheet) ? sheet.GetInt32() : (int?)null))
+            .ToList();
+        Assert.True(seeds.Count > 0, "імпорт погоджувача не поставив перерахунку формул");
+        Assert.All(seeds, sheet => Assert.Equal(s.Document.SheetDefId, sheet));
+    }
+
+    /// <summary>
+    /// ✎ D-445: імпорт погоджувача на поданому аркуші — лише поки черга його. Крок погоджено між переглядом і
+    /// застосуванням — план колишнього погоджувача відмовляє <c>DocumentSubmitted</c>; аркуш затверджено між
+    /// переглядом і застосуванням — <c>DocumentApproved</c>; перегляд затвердженого — відмова.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-445")]
+    public async Task Імпорт_на_поданому_після_переходу_черги_і_на_затвердженому_відмовляє()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var submitter = await NewUserAsync(s, GrantLevel.Submit).ConfigureAwait(true);
+        var first = await NewUserAsync(s, GrantLevel.Approve, "Document.Import").ConfigureAwait(true);
+        var second = await NewUserAsync(s, GrantLevel.Approve, "Document.Import").ConfigureAwait(true);
+        await RouteAsync(s, first.RoleId, second.RoleId).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var author = await SignInAsync(app, submitter.Name).ConfigureAwait(true);
+        using var firstClient = await SignInAsync(app, first.Name).ConfigureAwait(true);
+        using var secondClient = await SignInAsync(app, second.Name).ConfigureAwait(true);
+
+        var column = await NumberColumnCodeAsync(author, s).ConfigureAwait(true);
+        var rowKey = $"AQ{Guid.NewGuid():N}"[..12];
+
+        await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(author, s, rowKey, column, 10m, null)).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+
+        // Перегляд погоджувача першого кроку — зміна; далі він погоджує крок, і черга переходить до другого.
+        var firstPlan = await PreviewAsync(app, firstClient, s, Book(s, column, rowKey, 55m)).ConfigureAwait(true);
+        Assert.Equal(1, firstPlan.GetProperty("changes").GetArrayLength());
+        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(firstClient, s)).ConfigureAwait(true);
+
+        var stale = await ExpectAsync(app, HttpStatusCode.Forbidden, ApplyAsync(firstClient, s, firstPlan)).ConfigureAwait(true);
+        Assert.Contains(nameof(EditDenyReason.DocumentSubmitted), stale, StringComparison.Ordinal);
+        Assert.Equal(10m, await StoredValueAsync(s, rowKey).ConfigureAwait(true));
+
+        // Другий крок: перегляд — зміна; аркуш затверджено до застосування — план відмовляє «затверджено».
+        var secondPlan = await PreviewAsync(app, secondClient, s, Book(s, column, rowKey, 66m)).ConfigureAwait(true);
+        Assert.Equal(1, secondPlan.GetProperty("changes").GetArrayLength());
+        await ExpectAsync(app, HttpStatusCode.NoContent, ApproveAsync(secondClient, s)).ConfigureAwait(true);
+        Assert.Equal(DocumentStatus.Approved, await StatusAsync(s).ConfigureAwait(true));
+
+        var approved = await ExpectAsync(app, HttpStatusCode.Forbidden, ApplyAsync(secondClient, s, secondPlan)).ConfigureAwait(true);
+        Assert.Contains(nameof(EditDenyReason.DocumentApproved), approved, StringComparison.Ordinal);
+        Assert.Equal(10m, await StoredValueAsync(s, rowKey).ConfigureAwait(true));
+
+        var afterApprove = await PreviewAsync(app, secondClient, s, Book(s, column, rowKey, 77m)).ConfigureAwait(true);
+        AssertRejected(afterApprove, rowKey, EditDenyReason.DocumentApproved, "погоджувач після затвердження");
+    }
+
+    /// <summary>
+    /// ✎ D-445: «чия черга» під блокуванням аркуша — та сама повторна перевірка (<c>CanApproveAsync</c>), що й у
+    /// правки в сітці. Рішення зрізу ще дає погоджувачеві запис, а перевірка під блокуванням каже «вже не його»
+    /// (крок погоджено в ту саму мить) — застосування відмовляє <c>DocumentSubmitted</c>, нічого не записано.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: у <c>EnsureWorkbookSheetsEditableAsync</c> не кликати <c>StillCurrentApproverAsync</c> (довіряти
+    /// <c>ByApprover</c>) — значення записано, тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-445")]
+    public async Task Імпорт_погоджувача_перевіряє_чергу_під_блокуванням_аркуша()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var submitter = await NewUserAsync(s, GrantLevel.Submit).ConfigureAwait(true);
+        var approver = await NewUserAsync(s, GrantLevel.Approve, "Document.Import").ConfigureAwait(true);
+        await RouteAsync(s, approver.RoleId).ConfigureAwait(true);
+
+        var approveDenied = new StrongBox<bool>(false);
+        using var app = App(recalculations: null, approveDenied);
+        using var author = await SignInAsync(app, submitter.Name).ConfigureAwait(true);
+        using var approverClient = await SignInAsync(app, approver.Name).ConfigureAwait(true);
+
+        var column = await NumberColumnCodeAsync(author, s).ConfigureAwait(true);
+        var rowKey = $"AL{Guid.NewGuid():N}"[..12];
+
+        await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(author, s, rowKey, column, 10m, null)).ConfigureAwait(true);
+        await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+
+        var plan = await PreviewAsync(app, approverClient, s, Book(s, column, rowKey, 55m)).ConfigureAwait(true);
+        Assert.Equal(1, plan.GetProperty("changes").GetArrayLength());
+
+        approveDenied.Value = true;
+        var denied = await ExpectAsync(app, HttpStatusCode.Forbidden, ApplyAsync(approverClient, s, plan)).ConfigureAwait(true);
         Assert.Contains(nameof(EditDenyReason.DocumentSubmitted), denied, StringComparison.Ordinal);
         Assert.Equal(10m, await StoredValueAsync(s, rowKey).ConfigureAwait(true));
+        Assert.Equal(DocumentStatus.Submitted, await StatusAsync(s).ConfigureAwait(true));
+    }
+
+    private static void AssertRejected(JsonElement preview, string rowKey, EditDenyReason reason, string who)
+    {
+        Assert.True(preview.GetProperty("changes").GetArrayLength() == 0, $"{who}: {preview}");
+        var rejected = Assert.Single(preview.GetProperty("rejected").EnumerateArray());
+        Assert.Equal(rowKey, rejected.GetProperty("rowKey").GetString());
+        Assert.Equal("ECR-ACCS-0403", rejected.GetProperty("reasonCode").GetString());
+        Assert.True(rejected.GetProperty("messageKey").GetString() == $"deny.{reason}", $"{who}: {rejected}");
+    }
+
+    private static Task<HttpResponseMessage> ApplyAsync(HttpClient client, Scenario s, JsonElement preview)
+        => client.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.Document.DocumentId}/import/apply", UriKind.Relative),
+            new { previewToken = preview.GetProperty("previewToken").GetString() });
+
+    /// <summary>
+    /// Застосунок із записом постановок перерахунку формул (<paramref name="recalculations"/>) і перемикачем
+    /// «<c>CanApproveAsync</c> відмовляє» (<paramref name="approveDenied"/>); <c>null</c> — без підміни.
+    /// </summary>
+    private EcrApiFactory App(ConcurrentQueue<string>? recalculations, StrongBox<bool>? approveDenied)
+        => new(sql)
+        {
+            ExtraServices = services =>
+            {
+                if (recalculations is not null)
+                {
+                    Decorate<IBackgroundJobScheduler>(services, target =>
+                    {
+                        var proxy = DispatchProxy.Create<IBackgroundJobScheduler, RecordingSchedulerProxy>();
+                        var recorder = (RecordingSchedulerProxy)(object)proxy;
+                        recorder.Target = target;
+                        recorder.Recalculations = recalculations;
+                        return proxy;
+                    });
+                }
+
+                if (approveDenied is not null)
+                {
+                    Decorate<IAccessDecisionService>(services, target =>
+                    {
+                        var proxy = DispatchProxy.Create<IAccessDecisionService, ApproveSwitchProxy>();
+                        var gate = (ApproveSwitchProxy)(object)proxy;
+                        gate.Target = target;
+                        gate.Denied = approveDenied;
+                        return proxy;
+                    });
+                }
+            },
+        };
+
+    private static void Decorate<T>(IServiceCollection services, Func<T, T> wrap)
+        where T : class
+    {
+        var original = services.Last(d => d.ServiceType == typeof(T));
+        services.Remove(original);
+        services.Add(ServiceDescriptor.Describe(
+            typeof(T),
+            sp => wrap(original.ImplementationFactory is { } factory
+                ? (T)factory(sp)
+                : (T)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!)),
+            original.Lifetime));
+    }
+
+    private static object? Forward(MethodInfo method, object target, object?[]? args)
+    {
+        try
+        {
+            return method.Invoke(target, args);
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw;
+        }
+    }
+
+    /// <summary>Пересилає все справжньому планувальнику; payload постановок перерахунку формул — у чергу тесту.</summary>
+    public class RecordingSchedulerProxy : DispatchProxy
+    {
+        public IBackgroundJobScheduler Target { get; set; } = null!;
+
+        public ConcurrentQueue<string> Recalculations { get; set; } = null!;
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            ArgumentNullException.ThrowIfNull(targetMethod);
+
+            if (targetMethod is { Name: nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync), IsGenericMethod: true }
+                && targetMethod.GetGenericArguments()[0] == typeof(IFormulaRecalculationJob)
+                && args is [_, { } payload, ..])
+            {
+                Recalculations.Enqueue(JsonSerializer.Serialize(payload));
+            }
+
+            return Forward(targetMethod, Target, args);
+        }
+    }
+
+    /// <summary>Пересилає все справжній службі доступу; <c>CanApproveAsync</c> відмовляє, поки ввімкнено перемикач.</summary>
+    public class ApproveSwitchProxy : DispatchProxy
+    {
+        public IAccessDecisionService Target { get; set; } = null!;
+
+        public StrongBox<bool> Denied { get; set; } = null!;
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            ArgumentNullException.ThrowIfNull(targetMethod);
+
+            return Denied.Value && targetMethod.Name == nameof(IAccessDecisionService.CanApproveAsync)
+                ? Task.FromResult(EditDecision.Deny(EditDenyReason.NoGrant))
+                : Forward(targetMethod, Target, args);
+        }
     }
 
     private static async Task<JsonElement> PreviewAsync(EcrApiFactory app, HttpClient client, Scenario s, byte[] book)
