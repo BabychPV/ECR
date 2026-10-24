@@ -2212,6 +2212,7 @@ export interface paths {
                     q?: string;
                     resultsStale?: boolean;
                     staleBy?: string;
+                    ownerUserId?: number;
                 };
                 header?: never;
                 path?: never;
@@ -2262,6 +2263,54 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/owners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * ✎ D-450: власники документів, які користувач бачить, — для вибору у фільтрі переліку «Власник». Право
+         *     `Document.View`.
+         * @description ⛔ Та сама межа видимості, що й перелік вище (проєкти з роллю + документи-надання D-443 з порахованими межами), а
+         *     документи, де читачеві закрито хоч щось, не рахуються: вибір не називає людей, яких перелік не показав би.
+         *     Не більше 50 рядків (`ListDocumentsHandler.MaxOwners`); решту знаходить `q` (підрядок імені).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    projectId?: number;
+                    periodKey?: number;
+                    q?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentOwnersResponse"];
+                        "text/json": components["schemas"]["DocumentOwnersResponse"];
+                        "text/plain": components["schemas"]["DocumentOwnersResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -24018,6 +24067,27 @@ export interface components {
              */
             previousOwnerUserId: number;
         };
+        /** @description ✎ D-450: власник документів для вибору у фільтрі переліку. */
+        DocumentOwnerOption: {
+            /** @description Відображуване ім'я (`D-86`), не логін. */
+            displayName: string;
+            /**
+             * Format: int32
+             * @description Скільки ВИДИМИХ читачеві документів (тих, де ім'я власника йому віддається) належать цій людині.
+             */
+            documentCount: number;
+            /**
+             * Format: int32
+             * @description Користувач (`Document.CreatedByUserId`).
+             */
+            userId: number;
+        };
+        /** @description ✎ D-450: власники видимих читачеві документів — варіанти фільтра переліку «Власник». */
+        DocumentOwnersResponse: {
+            /** @description Люди за спаданням кількості документів, далі за іменем; не більше 50 (`ListDocumentsHandler.MaxOwners`) —
+             *     решту знаходить пошук `q` за іменем. */
+            items: components["schemas"]["DocumentOwnerOption"][];
+        };
         /** @description Дія над документом у межах одного періоду. */
         DocumentPeriodRequest: {
             /**
@@ -24091,7 +24161,8 @@ export interface components {
             /**
              * Format: int32
              * @description EA-C: ідентифікатор автора документа (`CreatedByUserId`) — поруч з OwnerDisplayName тим самим розкриттям,
-             *     тож для звуженого читача — `null` (`DocumentSheetVisibility.For`). Заповнює лише шлях картки (`FindAsync`).
+             *     тож для звуженого читача — `null` (`DocumentSheetVisibility.For`). ~~Заповнює лише шлях картки (`FindAsync`).~~
+             *     ✎ D-450: заповнюють і картка, і перелік — клієнт за ним підписує обраного власника у фільтрі «Власник».
              */
             ownerUserId?: null | number;
             /** @description AN-63: періодичність проєкту документа — ім'я `Project.PeriodKind`: Monthly/Quarterly/Yearly/Custom (рядок, а не enum:

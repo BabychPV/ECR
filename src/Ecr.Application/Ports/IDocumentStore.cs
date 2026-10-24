@@ -75,7 +75,8 @@ namespace Ecr.Application.Ports;
 /// </param>
 /// <param name="OwnerUserId">
 /// EA-C: ідентифікатор автора документа (<c>CreatedByUserId</c>) — поруч з <paramref name="OwnerDisplayName"/> тим самим розкриттям,
-/// тож для звуженого читача — <c>null</c> (<c>DocumentSheetVisibility.For</c>). Заповнює лише шлях картки (<c>FindAsync</c>).
+/// тож для звуженого читача — <c>null</c> (<c>DocumentSheetVisibility.For</c>). ~~Заповнює лише шлях картки (<c>FindAsync</c>).~~
+/// ✎ D-450: заповнюють і картка, і перелік — клієнт за ним підписує обраного власника у фільтрі «Власник».
 /// </param>
 /// <param name="CanManageEditAccess">
 /// EA-C: чи може поточний користувач керувати передачами місяця — рішення СЕРВЕРА (автор ∨ <c>Manage</c> проєкту,
@@ -188,6 +189,12 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// <param name="Participation">
 /// D-443: документи, відкриті наданням учасника, — ДОДАТКОВО до проєктів із грантом; <c>null</c> — лише проєкти.
 /// </param>
+/// <param name="OwnerUserId">
+/// ✎ D-450: лише документи цього власника (<c>CreatedByUserId</c>); <c>null</c> — будь-якого. ⛔ Документи, де читачеві
+/// закрито хоч щось (ті самі межі, з яких <c>DocumentSheetVisibility.For</c> знімає <see cref="DocumentSummary.OwnerDisplayName"/>),
+/// у фільтр не потрапляють: ім'я власника там не віддається, і фільтр за ним був би оракулом «чий це документ».
+/// З <paramref name="MineUserId"/> не поєднується (обробник відмовляє 422).
+/// </param>
 public readonly record struct DocumentListFilter(
     DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null,
     IReadOnlyCollection<(int ProjectId, int Id)>? HiddenSheetDefIds = null,
@@ -197,7 +204,14 @@ public readonly record struct DocumentListFilter(
     bool? ResultsStale = null,
     int? StaleByUserId = null,
     IReadOnlyCollection<int>? NarrowedProjectIds = null,
-    DocumentParticipationFilter? Participation = null);
+    DocumentParticipationFilter? Participation = null,
+    int? OwnerUserId = null);
+
+/// <summary>✎ D-450: власник документів для вибору у фільтрі переліку.</summary>
+/// <param name="UserId">Користувач (<c>Document.CreatedByUserId</c>).</param>
+/// <param name="DisplayName">Відображуване ім'я (<c>D-86</c>), не логін.</param>
+/// <param name="DocumentCount">Скільки ВИДИМИХ читачеві документів (тих, де ім'я власника йому віддається) належать цій людині.</param>
+public sealed record DocumentOwnerOption(int UserId, string DisplayName, int DocumentCount);
 
 /// <summary>D-443: що з документів учасника потрапляє в перелік поза проєктами з грантом.</summary>
 /// <param name="UserId">Учасник (виконавець передачі).</param>
@@ -307,6 +321,31 @@ public interface IDocumentStore
         DocumentListFilter filter,
         CursorRequest page,
         IReadOnlyCollection<int>? visibleProjectIds,
+        CancellationToken ct);
+
+    /// <summary>
+    /// ✎ D-450: різні власники документів, видимих читачеві, — для вибору у фільтрі переліку «Власник».
+    /// </summary>
+    /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі видимі.</param>
+    /// <param name="filter">
+    /// Межі читача — ТІ САМІ, що у <see cref="ListAsync"/> (пари схованого, надання учасника з порахованими межами);
+    /// фільтри стану, пошуку тощо не діють.
+    /// </param>
+    /// <param name="visibleProjectIds">Проєкти з грантом читання — та сама межа, що в <see cref="ListAsync"/>.</param>
+    /// <param name="nameQuery">Підрядок імені (без регістру); <c>null</c> — усі.</param>
+    /// <param name="limit">Стеля кількості рядків.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Видимість — тим самим базовим запитом, що й перелік, а не окремим «простішим»: вибір, що називав би власників
+    /// невидимих документів, був би оракулом (хто працює в чужому проєкті). Документи, де читачеві закрито хоч щось,
+    /// не рахуються — там ім'я власника не віддається і в рядку переліку.
+    /// </remarks>
+    public Task<IReadOnlyList<DocumentOwnerOption>> ListOwnersAsync(
+        int? projectId,
+        DocumentListFilter filter,
+        IReadOnlyCollection<int> visibleProjectIds,
+        string? nameQuery,
+        int limit,
         CancellationToken ct);
 
     /// <summary>

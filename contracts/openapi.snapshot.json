@@ -4427,6 +4427,47 @@
         ],
         "type": "object"
       },
+      "DocumentOwnerOption": {
+        "description": "✎ D-450: власник документів для вибору у фільтрі переліку.",
+        "properties": {
+          "displayName": {
+            "description": "Відображуване ім'я (`D-86`), не логін.",
+            "type": "string"
+          },
+          "documentCount": {
+            "description": "Скільки ВИДИМИХ читачеві документів (тих, де ім'я власника йому віддається) належать цій людині.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "userId": {
+            "description": "Користувач (`Document.CreatedByUserId`).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "userId",
+          "displayName",
+          "documentCount"
+        ],
+        "type": "object"
+      },
+      "DocumentOwnersResponse": {
+        "description": "✎ D-450: власники видимих читачеві документів — варіанти фільтра переліку «Власник».",
+        "properties": {
+          "items": {
+            "description": "Люди за спаданням кількості документів, далі за іменем; не більше 50 (`ListDocumentsHandler.MaxOwners`) —\nрешту знаходить пошук `q` за іменем.",
+            "items": {
+              "$ref": "#/components/schemas/DocumentOwnerOption"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "DocumentPeriodRequest": {
         "description": "Дія над документом у межах одного періоду.",
         "properties": {
@@ -4551,7 +4592,7 @@
             ]
           },
           "ownerUserId": {
-            "description": "EA-C: ідентифікатор автора документа (`CreatedByUserId`) — поруч з OwnerDisplayName тим самим розкриттям,\nтож для звуженого читача — `null` (`DocumentSheetVisibility.For`). Заповнює лише шлях картки (`FindAsync`).",
+            "description": "EA-C: ідентифікатор автора документа (`CreatedByUserId`) — поруч з OwnerDisplayName тим самим розкриттям,\nтож для звуженого читача — `null` (`DocumentSheetVisibility.For`). ~~Заповнює лише шлях картки (`FindAsync`).~~\n✎ D-450: заповнюють і картка, і перелік — клієнт за ним підписує обраного власника у фільтрі «Власник».",
             "format": "int32",
             "type": [
               "null",
@@ -25825,6 +25866,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "ownerUserId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -25898,6 +25947,62 @@
           }
         },
         "summary": "Створює документ. Право `Document.Create`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/owners": {
+      "get": {
+        "description": "⛔ Та сама межа видимості, що й перелік вище (проєкти з роллю + документи-надання D-443 з порахованими межами), а\nдокументи, де читачеві закрито хоч щось, не рахуються: вибір не називає людей, яких перелік не показав би.\nНе більше 50 рядків (`ListDocumentsHandler.MaxOwners`); решту знаходить `q` (підрядок імені).",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "projectId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOwnersResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOwnersResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOwnersResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "✎ D-450: власники документів, які користувач бачить, — для вибору у фільтрі переліку «Власник». Право\n`Document.View`.",
         "tags": [
           "Documents"
         ]

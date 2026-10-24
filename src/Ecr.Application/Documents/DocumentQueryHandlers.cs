@@ -70,17 +70,40 @@ public sealed class ListDocumentsHandler(
     /// <param name="staleBy"><c>me</c> — лише застарілі через правки поточного користувача; потребує <paramref name="resultsStale"/> = <c>true</c>.</param>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+    public Task<PagedResult<DocumentSummary>> HandleAsync(
         int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
         string? query, bool? resultsStale, string? staleBy, CursorRequest page, CancellationToken ct)
+        => HandleAsync(projectId, periodKey, state, mine, hasLateEdits, query, resultsStale, staleBy, ownerUserId: null, page, ct);
+
+    /// <summary>Те саме, з фільтром за власником документа (✎ D-450, <c>ownerUserId</c>).</summary>
+    /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі.</param>
+    /// <param name="periodKey">Період; для <paramref name="resultsStale"/> обов'язковий.</param>
+    /// <param name="state">Зведений стан; порожньо — будь-який.</param>
+    /// <param name="mine">Лише документи, де користувач — автор або подавав аркуш.</param>
+    /// <param name="hasLateEdits">Фільтр пізніх правок; <c>null</c> — без фільтра.</param>
+    /// <param name="query">Пошук за кодом і назвою; порожній — без пошуку.</param>
+    /// <param name="resultsStale">Фільтр застарілих результатів; <c>null</c> — без фільтра.</param>
+    /// <param name="staleBy"><c>me</c> — лише застарілі через правки поточного користувача.</param>
+    /// <param name="ownerUserId">
+    /// Лише документи цього власника (<c>CreatedByUserId</c>); <c>null</c> — будь-якого. Не більше нуля — 422; разом із
+    /// <paramref name="mine"/> — 422 (два різні «чиї» в одному запиті суперечать одне одному, а мовчазний вибір одного
+    /// з них показав би не той перелік, який людина просила). ⛔ Документи, де ім'я власника читачеві не віддається
+    /// (звужений доступ), у фільтр не потрапляють — інакше він розкривав би власника.
+    /// </param>
+    /// <param name="page">Курсорна пагінація.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+        int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
+        string? query, bool? resultsStale, string? staleBy, int? ownerUserId, CursorRequest page, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
 
         var profile = await ProfileAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         var staleByMe = ParseStaleBy(staleBy, resultsStale, periodKey);
+        ValidateOwner(ownerUserId, mine);
         var filter = new DocumentListFilter(
             ParseState(state, periodKey), mine ? profile.UserId : null, hasLateEdits, Query: NormalizeQuery(query),
-            ResultsStale: resultsStale, StaleByUserId: staleByMe ? profile.UserId : null);
+            ResultsStale: resultsStale, StaleByUserId: staleByMe ? profile.UserId : null, OwnerUserId: ownerUserId);
 
         // ⛔ Родина REQ, а не CELL (`P-25`, рядок 1): хибний `limit` — це
         // помилка параметра запиту, і показувати її в обробнику помилок
@@ -96,6 +119,58 @@ public sealed class ListDocumentsHandler(
                 });
         }
 
+        (filter, var visibleProjects, var scopes, var participant, var bounded) =
+            await ReaderBoundsAsync(profile, projectId, periodKey, filter, ct)
+            .ConfigureAwait(false);
+
+        var all = await documents
+            .ListAsync(projectId, new PeriodKeyFilter(periodKey), filter, page, visibleProjects, ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Постфільтр лишається другим рубежем: перелік документів чужого
+        // проєкту — це вже відомості про те, які об'єкти звітують і як часто, і
+        // помилка в побудові фільтра запиту не має цього відкривати.
+        // ✎ D-443: документ поза проєктами з грантом проходить лише з ДІЮЧИМ наданням (один запит на сторінку).
+        var byRoles = all.Items
+            .Where(d => profile.SeesDocumentsOf(d.ProjectId) && PermissionCheck.IsGrantedIn(profile, Permission, d.ProjectId))
+            .Select(d => d.Id)
+            .ToHashSet();
+        var others = all.Items.Where(d => !byRoles.Contains(d.Id)).Select(d => d.Id).ToList();
+        var participated = participant && others.Count > 0
+            ? await access.ParticipatedDocumentsAsync(profile, others, ct).ConfigureAwait(false)
+            : new HashSet<long>();
+        // ✎ D-446: і лише з ПОРАХОВАНИМИ межами (другий рубіж до `DocumentParticipationFilter.DocumentIds` у запиті):
+        // надання, що з'явилось між читанням меж і запитом, видно з наступним запитом, а не з позначками без меж.
+        var visible = all.Items
+            .Where(d => byRoles.Contains(d.Id)
+                        || (participated.Contains(d.Id) && bounded.Contains(d.Id) && !profile.DeniesProject(d.ProjectId)))
+            .ToList();
+
+        // ⛔ Аркуші, схована від читача (Deny / звуження ролі аркушами), не називаються ні кодом,
+        // ні назвою, ні станом, ні лічильниками: фільтр — у `DocumentSheetVisibility`.
+        visible = await DocumentSheetVisibility.ApplyAsync(access, profile, visible, periodKey, scopes, ct).ConfigureAwait(false);
+
+        // ⛔ `all.TotalCount` НЕ проводиться далі як є — саме це й було дірою:
+        // обробник не може перевірити, що число зі сховища враховує гранти, а
+        // «1 з 5000» розкриває, скільки документів у проєктах, до яких доступу
+        // немає. Точна кількість віддається лише тоді, коли вона справді відома
+        // з цієї сторінки: запит починався з початку послідовності й вона
+        // вичерпана. Інакше — `null`, «підрахунок недоступний» (контракт
+        // `PagedResult.TotalCount`), а не правдоподібне неправильне число.
+        var total = page.Cursor is null && all.NextCursor is null ? visible.Count : (int?)null;
+
+        return new PagedResult<DocumentSummary>(visible, all.NextCursor, total);
+    }
+
+    /// <summary>
+    /// Межі читача для запиту переліку: проєкти з грантом і правом, пари схованого (лише за ролями) і D-443 документи-надання
+    /// з порахованими межами. ✎ D-450: винесено з переліку, щоб вибір власників (<see cref="HandleOwnersAsync"/>) ішов
+    /// РІВНО тим самим шляхом видимості, а не власним, ширшим.
+    /// </summary>
+    private async Task<(DocumentListFilter Filter, HashSet<int> VisibleProjects, IReadOnlyDictionary<int, DocumentReadScope>? Scopes,
+        bool Participant, HashSet<long> Bounded)> ReaderBoundsAsync(
+        AccessProfile profile, int? projectId, int? periodKey, DocumentListFilter filter, CancellationToken ct)
+    {
         // ⛔ Гранти йдуть у ЗАПИТ, не лише в постфільтр (аудит 2026-09-16, §3.3).
         // Постфільтр сам по собі давав дві діри: `TotalCount` рахувався по ВСІХ
         // проєктах системи — користувач з грантом на один проєкт бачив, скільки
@@ -160,43 +235,69 @@ public sealed class ListDocumentsHandler(
             };
         }
 
-        var all = await documents
-            .ListAsync(projectId, new PeriodKeyFilter(periodKey), filter, page, visibleProjects, ct)
+        return (filter, visibleProjects, scopes, participant, bounded);
+    }
+
+    /// <summary>Стеля кількості людей у виборі власника (✎ D-450): далі — пошук за іменем.</summary>
+    public const int MaxOwners = 50;
+
+    /// <summary>
+    /// ✎ D-450: різні власники документів, які читач бачить, — для вибору у фільтрі «Власник». Право <c>Document.View</c>.
+    /// </summary>
+    /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі видимі.</param>
+    /// <param name="periodKey">Період, у межах якого рахуються межі читача (як у переліку); <c>null</c> — без періоду.</param>
+    /// <param name="query">Підрядок імені; порожній — без пошуку; довший за <see cref="MaxQueryLength"/> обрізається.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Видимість — тим самим шляхом, що й перелік (<see cref="ReaderBoundsAsync"/> + базовий запит сховища): проєкти
+    /// з роллю і D-443 документи-надання з порахованими межами. Окремий «простіший» запит назвав би власників документів,
+    /// яких читач не бачить, — оракул «хто працює в чужому проєкті». Документи, де читачеві закрито хоч щось, не
+    /// рахуються: ім'я власника там не віддається і в рядку переліку.
+    /// </remarks>
+    public async Task<Dto.DocumentOwnersResponse> HandleOwnersAsync(
+        int? projectId, int? periodKey, string? query, CancellationToken ct)
+    {
+        var profile = await ProfileAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var (filter, visibleProjects, _, _, _) = await ReaderBoundsAsync(profile, projectId, periodKey, default, ct)
             .ConfigureAwait(false);
 
-        // ⚠ Постфільтр лишається другим рубежем: перелік документів чужого
-        // проєкту — це вже відомості про те, які об'єкти звітують і як часто, і
-        // помилка в побудові фільтра запиту не має цього відкривати.
-        // ✎ D-443: документ поза проєктами з грантом проходить лише з ДІЮЧИМ наданням (один запит на сторінку).
-        var byRoles = all.Items
-            .Where(d => profile.SeesDocumentsOf(d.ProjectId) && PermissionCheck.IsGrantedIn(profile, Permission, d.ProjectId))
-            .Select(d => d.Id)
-            .ToHashSet();
-        var others = all.Items.Where(d => !byRoles.Contains(d.Id)).Select(d => d.Id).ToList();
-        var participated = participant && others.Count > 0
-            ? await access.ParticipatedDocumentsAsync(profile, others, ct).ConfigureAwait(false)
-            : new HashSet<long>();
-        // ✎ D-446: і лише з ПОРАХОВАНИМИ межами (другий рубіж до `DocumentParticipationFilter.DocumentIds` у запиті):
-        // надання, що з'явилось між читанням меж і запитом, видно з наступним запитом, а не з позначками без меж.
-        var visible = all.Items
-            .Where(d => byRoles.Contains(d.Id)
-                        || (participated.Contains(d.Id) && bounded.Contains(d.Id) && !profile.DeniesProject(d.ProjectId)))
-            .ToList();
+        var owners = await documents
+            .ListOwnersAsync(projectId, filter, visibleProjects, NormalizeQuery(query), MaxOwners, ct)
+            .ConfigureAwait(false);
 
-        // ⛔ Аркуші, схована від читача (Deny / звуження ролі аркушами), не називаються ні кодом,
-        // ні назвою, ні станом, ні лічильниками: фільтр — у `DocumentSheetVisibility`.
-        visible = await DocumentSheetVisibility.ApplyAsync(access, profile, visible, periodKey, scopes, ct).ConfigureAwait(false);
+        return new Dto.DocumentOwnersResponse(owners);
+    }
 
-        // ⛔ `all.TotalCount` НЕ проводиться далі як є — саме це й було дірою:
-        // обробник не може перевірити, що число зі сховища враховує гранти, а
-        // «1 з 5000» розкриває, скільки документів у проєктах, до яких доступу
-        // немає. Точна кількість віддається лише тоді, коли вона справді відома
-        // з цієї сторінки: запит починався з початку послідовності й вона
-        // вичерпана. Інакше — `null`, «підрахунок недоступний» (контракт
-        // `PagedResult.TotalCount`), а не правдоподібне неправильне число.
-        var total = page.Cursor is null && all.NextCursor is null ? visible.Count : (int?)null;
+    /// <summary>
+    /// ✎ D-450: <c>ownerUserId</c> — додатне ціле й не разом із <c>mine</c>; інакше 422 тієї самої родини REQ, що й
+    /// решта параметрів переліку.
+    /// </summary>
+    private static void ValidateOwner(int? ownerUserId, bool mine)
+    {
+        if (ownerUserId is null)
+        {
+            return;
+        }
 
-        return new PagedResult<DocumentSummary>(visible, all.NextCursor, total);
+        if (ownerUserId <= 0)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                "ownerUserId має бути додатним цілим.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.ownerUserId",
+                    ["ownerUserId"] = ownerUserId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        if (mine)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                "mine і ownerUserId разом не приймаються: оберіть одне.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.ownerWithMine" });
+        }
     }
 
     /// <summary>Обрізає пробіли й довжину; порожній пошук — <c>null</c> (без фільтра).</summary>

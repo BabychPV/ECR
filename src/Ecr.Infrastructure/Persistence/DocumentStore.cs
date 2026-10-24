@@ -194,42 +194,20 @@ public sealed class DocumentStore(
         // перекладає в `IN (...)`, над інтерфейсом — не гарантовано.
         var allowedProjects = visibleProjectIds?.ToArray();
 
-        IQueryable<Document> documents;
-        if (filter.Participation is { } participation && allowedProjects is not null)
-        {
-            // ✎ D-443: документи, відкриті наданням учасника, — ПІДЗАПИТОМ у тому самому запиті (0 нових звернень),
-            // поза проєктами з забороною ролі. Без учасника — рівно попередній запит (гілка нижче).
-            var participated = EditAssignmentFactsReader.ParticipatedDocuments(db, participation.UserId, participation.AsOfUtc);
-            var denied = participation.DeniedProjectIds.ToArray();
-            documents = db.Documents
-                .AsNoTracking()
-                .Where(d => d.Id > after
-                            && (projectId == null || d.ProjectId == projectId)
-                            && (allowedProjects.Contains(d.ProjectId)
-                                || (!denied.Contains(d.ProjectId) && participated.Contains(d.Id))));
-
-            // ✎ D-446: поза проєктами з грантом — лише документи, для яких межі учасника пораховані (закрито за
-            // замовчуванням: надання, що з'явилось посеред запиту, видно з наступним запитом, а не без меж).
-            if (participation.DocumentIds is { } boundedIds)
-            {
-                var bounded = boundedIds.ToArray();
-                documents = documents.Where(d => allowedProjects.Contains(d.ProjectId) || bounded.Contains(d.Id));
-            }
-        }
-        else
-        {
-            documents = db.Documents
-                .AsNoTracking()
-                .Where(d => d.Id > after
-                            && (projectId == null || d.ProjectId == projectId)
-                            && (allowedProjects == null || allowedProjects.Contains(d.ProjectId)));
-        }
+        var documents = VisibleDocuments(projectId, after, filter, allowedProjects);
 
         // BE-09b: фільтри — у ЗАПИТІ, до `Take`; межа грантів вище лишається.
         if (filter.MineUserId is { } me)
         {
             documents = documents.Where(d => d.CreatedByUserId == me
                                              || db.ApprovalStates.Any(a => a.DocumentId == d.Id && a.SubmittedByUserId == me));
+        }
+
+        // ✎ D-450: власник — теж ЗАПИТОМ до `Take`, і лише серед документів, де ім'я власника читачеві віддається
+        // (`WhereOwnerDisclosed`): інакше фільтр підтверджував би власника документа, у рядку якого стоїть «—».
+        if (filter.OwnerUserId is { } owner)
+        {
+            documents = WhereOwnerDisclosed(documents, filter).Where(d => d.CreatedByUserId == owner);
         }
 
         if (filter.State is { } state && period.Value is { } periodKey)
@@ -334,7 +312,9 @@ public sealed class DocumentStore(
                         .FirstOrDefault()))
                 .Select(u => u.DisplayName).FirstOrDefault(),
                 // AN-63: періодичність проєкту - скалярний підзапит у тому самому запиті сторінки (запитів не додається).
-                db.Projects.Where(p => p.Id == d.ProjectId).Select(p => (PeriodKind?)p.PeriodKind).FirstOrDefault()))
+                db.Projects.Where(p => p.Id == d.ProjectId).Select(p => (PeriodKind?)p.PeriodKind).FirstOrDefault(),
+                // ✎ D-450: ідентифікатор власника поруч з іменем, тим самим розкриттям (звуженому читачеві `For` знімає обидва).
+                d.CreatedByUserId))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -378,12 +358,149 @@ public sealed class DocumentStore(
                 d.ApproverDisplayName,
                 staleByDocument is null ? null : staleByDocument.ContainsKey(d.Id),
                 staleByDocument?.GetValueOrDefault(d.Id),
-                PeriodKind: d.ProjectPeriodKind?.ToString()));
+                PeriodKind: d.ProjectPeriodKind?.ToString(),
+                OwnerUserId: d.OwnerUserId));
         }
 
         return new PagedResult<DocumentSummary>(
             items, hasMore ? Cursor.Encode(items[^1].Id) : null, TotalCount: null);
     }
+
+    /// <summary>
+    /// Базовий запит видимості переліку: курсор, проєкт, проєкти з грантом і (D-443) документи-надання учасника з
+    /// порахованими межами. ✎ D-450: винесено з <see cref="ListAsync"/>, щоб вибір власників
+    /// (<see cref="ListOwnersAsync"/>) бачив РІВНО ті самі документи, а не власну, ширшу межу.
+    /// </summary>
+    private IQueryable<Document> VisibleDocuments(int? projectId, long after, DocumentListFilter filter, int[]? allowedProjects)
+    {
+        IQueryable<Document> documents;
+        if (filter.Participation is { } participation && allowedProjects is not null)
+        {
+            // ✎ D-443: документи, відкриті наданням учасника, — ПІДЗАПИТОМ у тому самому запиті (0 нових звернень),
+            // поза проєктами з забороною ролі. Без учасника — рівно попередній запит (гілка нижче).
+            var participated = EditAssignmentFactsReader.ParticipatedDocuments(db, participation.UserId, participation.AsOfUtc);
+            var denied = participation.DeniedProjectIds.ToArray();
+            documents = db.Documents
+                .AsNoTracking()
+                .Where(d => d.Id > after
+                            && (projectId == null || d.ProjectId == projectId)
+                            && (allowedProjects.Contains(d.ProjectId)
+                                || (!denied.Contains(d.ProjectId) && participated.Contains(d.Id))));
+
+            // ✎ D-446: поза проєктами з грантом — лише документи, для яких межі учасника пораховані (закрито за
+            // замовчуванням: надання, що з'явилось посеред запиту, видно з наступним запитом, а не без меж).
+            if (participation.DocumentIds is { } boundedIds)
+            {
+                var bounded = boundedIds.ToArray();
+                documents = documents.Where(d => allowedProjects.Contains(d.ProjectId) || bounded.Contains(d.Id));
+            }
+        }
+        else
+        {
+            documents = db.Documents
+                .AsNoTracking()
+                .Where(d => d.Id > after
+                            && (projectId == null || d.ProjectId == projectId)
+                            && (allowedProjects == null || allowedProjects.Contains(d.ProjectId)));
+        }
+
+        return documents;
+    }
+
+    /// <summary>
+    /// ✎ D-450: лише документи, де ім'я власника читачеві ВІДДАЄТЬСЯ — дзеркало умови <c>narrowed</c> у
+    /// <c>DocumentSheetVisibility.For</c>, що знімає <see cref="DocumentSummary.OwnerDisplayName"/>: схована таблиця чи
+    /// колонка проєкту (у документі-наданні — самого документа) звужує КОЖЕН документ, схований аркуш — лише той, у
+    /// складі якого він є. Межі — ті самі пари, що вже несе фільтр (роль — «проєкт, Id», надання — «документ, Id»).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього фільтр і вибір власників були б оракулом «чий документ», якого рядок переліку навмисно не каже.
+    /// ⚠ Документ проєкту з роллю, де читач має ще й надання, звужується обома наборами пар — свідомо, як фільтр стану
+    /// D-444: лише недолік (документ випадає з фільтра), не витік.
+    /// </remarks>
+    private IQueryable<Document> WhereOwnerDisclosed(IQueryable<Document> documents, DocumentListFilter filter)
+    {
+        var projectWide = (filter.HiddenTableDefIds ?? []).Select(p => p.ProjectId)
+            .Concat((filter.HiddenColumnDefIds ?? []).Select(p => p.ProjectId))
+            .Distinct()
+            .Order()
+            .ToArray();
+        if (projectWide.Length > 0)
+        {
+            documents = documents.Where(d => !projectWide.Contains(d.ProjectId));
+        }
+
+        if (filter.HiddenSheetDefIds is { Count: > 0 } hiddenSheets)
+        {
+            var hiddenRows = HiddenSheetRows(hiddenSheets);
+            documents = documents.Where(d => !db.DocumentSheets.Any(s => s.DocumentId == d.Id && s.IsIncluded && hiddenRows.Contains(s.Id)));
+        }
+
+        if (filter.Participation is { } participation)
+        {
+            var documentWide = (participation.HiddenTables ?? []).Select(p => p.DocumentId)
+                .Concat((participation.HiddenColumns ?? []).Select(p => p.DocumentId))
+                .Distinct()
+                .Order()
+                .ToArray();
+            if (documentWide.Length > 0)
+            {
+                documents = documents.Where(d => !documentWide.Contains(d.Id));
+            }
+
+            if (participation.HiddenSheets is { Count: > 0 } participantSheets)
+            {
+                var participantRows = HiddenParticipantSheetRows(participantSheets);
+                documents = documents.Where(d => !db.DocumentSheets.Any(s => s.DocumentId == d.Id && s.IsIncluded && participantRows.Contains(s.Id)));
+            }
+        }
+
+        return documents;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<DocumentOwnerOption>> ListOwnersAsync(
+        int? projectId,
+        DocumentListFilter filter,
+        IReadOnlyCollection<int> visibleProjectIds,
+        string? nameQuery,
+        int limit,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(visibleProjectIds);
+
+        var allowedProjects = visibleProjectIds.ToArray();
+        var documents = WhereOwnerDisclosed(VisibleDocuments(projectId, 0, filter, allowedProjects), filter);
+
+        var owners = documents
+            .GroupBy(d => d.CreatedByUserId)
+            .Select(g => new { UserId = g.Key, Count = g.Count() })
+            .Join(db.Users, g => g.UserId, u => u.Id, (g, u) => new OwnerRow(g.UserId, u.DisplayName, g.Count));
+
+        if (nameQuery is { Length: > 0 } term)
+        {
+            // Параметр, не склеєний рядок; регістр — за зіставленням бази (CI), метасимволи екрануються — як у пошуку документів.
+            var pattern = "%" + term
+                .Replace(@"\", @"\\", StringComparison.Ordinal)
+                .Replace("%", @"\%", StringComparison.Ordinal)
+                .Replace("_", @"\_", StringComparison.Ordinal)
+                .Replace("[", @"\[", StringComparison.Ordinal) + "%";
+            owners = owners.Where(o => EF.Functions.Like(o.DisplayName, pattern, @"\"));
+        }
+
+        var rows = await owners
+            .OrderByDescending(o => o.Count)
+            .ThenBy(o => o.DisplayName)
+            .ThenBy(o => o.UserId)
+            .Take(limit)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows.Select(o => new DocumentOwnerOption(o.UserId, o.DisplayName, o.Count))];
+    }
+
+    /// <summary>✎ D-450: рядок вибору власників (названий тип — як <see cref="DocumentRow"/>).</summary>
+    private sealed record OwnerRow(int UserId, string DisplayName, int Count);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<CompositionViolation>> ValidateCompositionAsync(
@@ -1291,7 +1408,7 @@ public sealed class DocumentStore(
     private sealed record DocumentRow(
         long Id, int ProjectId, string BusinessKey, DateTime CreatedAt, int SheetCount,
         Domain.ValueObjects.LocalizedText? NameL10n, DateTime ModifiedAt, string? ModifiedByDisplayName,
-        string? OwnerDisplayName, string? ApproverDisplayName, PeriodKind? ProjectPeriodKind);
+        string? OwnerDisplayName, string? ApproverDisplayName, PeriodKind? ProjectPeriodKind, int OwnerUserId);
 
     /// <summary>Стеля кількості правил складу в одній версії.</summary>
     private const int MaxRules = 500;
