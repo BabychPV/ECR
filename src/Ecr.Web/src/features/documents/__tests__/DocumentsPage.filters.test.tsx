@@ -137,8 +137,11 @@ const Find = 45_000;
 const stateField = (): Promise<HTMLElement> =>
   screen.findByRole('combobox', { name: '⟦documents.state⟧' }, { timeout: Find });
 
-// ✎ D-450: «Власник» — `Select` з пошуком (Mantine), а не `NativeSelect`; поле — за підписом.
-const ownersField = (): Promise<HTMLElement> => screen.findByLabelText('⟦documents.owner⟧', {}, { timeout: Find });
+// ✎ D-450: «Власник» — `Select` з пошуком (Mantine), а не `NativeSelect`; поле — за роллю й підписом.
+// ⚠ Не `findByLabelText`: той самий підпис має й список пунктів (`role="listbox"`, `aria-labelledby`), який Mantine
+// тримає змонтованим, — два збіги, і пошук чекає до тайм-ауту.
+const ownersField = (): Promise<HTMLElement> =>
+  screen.findByRole('textbox', { name: '⟦documents.owner⟧' }, { timeout: Find });
 
 /** Відкриває список «Власник» і обирає пункт за видимим ім'ям. */
 async function pickOwner(name: string | RegExp): Promise<void> {
@@ -524,7 +527,7 @@ describe('DocumentsPage: власник документа (D-450)', () => {
       expect(lastListed().has('mine')).toBe(false);
 
       // Ім'я обраної людини — з рядка сторінки (той самий ownerUserId), без окремого запиту людей.
-      await waitFor(() => expect((screen.getByLabelText('⟦documents.owner⟧') as HTMLInputElement).value).toBe('Olena Koval'), {
+      await waitFor(() => expect((screen.getByRole('textbox', { name: '⟦documents.owner⟧' }) as HTMLInputElement).value).toBe('Olena Koval'), {
         timeout: Find,
       });
     },

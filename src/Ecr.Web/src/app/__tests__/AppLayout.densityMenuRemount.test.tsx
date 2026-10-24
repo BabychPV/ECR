@@ -76,6 +76,11 @@ function renderAppLayout(preferences: Promise<unknown>): void {
       if (url.includes('/ui-strings/')) {
         return jsonResponse({ languageCode: 'en', revision: 1, strings: {} });
       }
+      // ✎ D-449: лічильник «чекають на вас» кнопки «My tasks» читає обидві черги на КОЖНОМУ маршруті — форма сервера
+      // (сторінка з курсором), а не `null` загального запасного варіанта: на `null` падає `getNextPageParam`.
+      if (url.includes('/api/v1/me/approval-queue') || url.includes('/api/v1/me/returned-sheets')) {
+        return jsonResponse({ items: [], nextCursor: null });
+      }
 
       return jsonResponse(null);
     }),
