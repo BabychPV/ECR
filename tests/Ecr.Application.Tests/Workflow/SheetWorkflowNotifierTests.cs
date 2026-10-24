@@ -357,7 +357,8 @@ public sealed class SheetWorkflowNotifierTests
         {
             _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
             _jobs.EnqueueCoalescedAsync<IOutboxFlushJob>(
-                OutboxFlushTarget.SheetMail, null, Arg.Any<CancellationToken>(), Arg.Any<int?>());
+                Arg.Is(OutboxFlushTarget.SheetMail), Arg.Is<object?>(p => p == null),
+                Arg.Any<CancellationToken>(), Arg.Any<int?>());
         });
 
         // ⚠ Не `EnqueueAsync` (без цілі): кожне подання ставило б окрему задачу.
