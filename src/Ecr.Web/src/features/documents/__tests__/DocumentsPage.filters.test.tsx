@@ -20,8 +20,9 @@ import { testTheme } from '@/test/render';
 
 const base = { createdAt: '2026-01-01T00:00:00Z', projectId: 1, sheetCount: 1, sheetStates: {} };
 
-const Late = { ...base, id: 1, businessKey: 'LATE-0001', hasLateEdits: true };
-const OnTime = { ...base, id: 2, businessKey: 'ONTIME-0002', hasLateEdits: false };
+// ✎ D-450: власник у рядку — ім'я та ідентифікатор; `null` — людини немає або доступ звужено («—»).
+const Late = { ...base, id: 1, businessKey: 'LATE-0001', hasLateEdits: true, ownerUserId: 7, ownerDisplayName: 'Olena Koval' };
+const OnTime = { ...base, id: 2, businessKey: 'ONTIME-0002', hasLateEdits: false, ownerUserId: null, ownerDisplayName: null };
 const Stale = {
   ...base,
   id: 3,
@@ -47,8 +48,19 @@ const Forbidden = {
   messageKey: null,
 };
 
-/** Адреси запитів переліку (без `/summary`). */
+/** Адреси запитів переліку (без `/summary` і `/owners`). */
 const listed: string[] = [];
+
+/** ✎ D-450: адреси запитів вибору власника (`GET /documents/owners`). */
+const ownerRequests: string[] = [];
+
+/** ✎ D-450: люди, яких віддає вибір власника. */
+const Owners = {
+  items: [
+    { userId: 7, displayName: 'Olena Koval', documentCount: 12 },
+    { userId: 9, displayName: 'Taras Melnyk', documentCount: 3 },
+  ],
+};
 
 type ListReply = 'rows' | 'empty' | 'forbidden';
 
@@ -57,6 +69,11 @@ function mockFetch(reply: ListReply): void {
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
+      if (url.includes('/api/v1/documents/owners')) {
+        ownerRequests.push(url);
+        return json(Owners);
+      }
 
       if (url.includes('/api/v1/documents/summary')) {
         return json({ draft: 1, submitted: 1, approved: 1, rejected: 0, withIssues: 0, staleResultsCount: 7, staleResultsMineCount: 2 });
@@ -108,6 +125,7 @@ const lastListed = (): URLSearchParams => new URLSearchParams(listed.at(-1)?.spl
 afterEach(() => {
   vi.unstubAllGlobals();
   listed.length = 0;
+  ownerRequests.length = 0;
   search = '';
   withProject = false;
 });
@@ -119,8 +137,14 @@ const Find = 45_000;
 const stateField = (): Promise<HTMLElement> =>
   screen.findByRole('combobox', { name: '⟦documents.state⟧' }, { timeout: Find });
 
-const ownersField = (): Promise<HTMLElement> =>
-  screen.findByRole('combobox', { name: '⟦documents.owners⟧' }, { timeout: Find });
+// ✎ D-450: «Власник» — `Select` з пошуком (Mantine), а не `NativeSelect`; поле — за підписом.
+const ownersField = (): Promise<HTMLElement> => screen.findByLabelText('⟦documents.owner⟧', {}, { timeout: Find });
+
+/** Відкриває список «Власник» і обирає пункт за видимим ім'ям. */
+async function pickOwner(name: string | RegExp): Promise<void> {
+  fireEvent.click(await ownersField());
+  fireEvent.click(await screen.findByRole('option', { name }, { timeout: Find }));
+}
 
 const lateEditsSwitch = (): Promise<HTMLElement> =>
   screen.findByRole('switch', { name: '⟦documents.filterLateEdits⟧' }, { timeout: Find });
@@ -216,13 +240,12 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
       mockFetch('rows');
       show('/');
 
-      const owners = await ownersField();
-      fireEvent.change(owners, { target: { value: 'mine' } });
+      await pickOwner('⟦documents.filterMine⟧');
 
       await waitFor(() => expect(lastListed().get('mine')).toBe('true'), { timeout: Find });
       expect(new URLSearchParams(search).get('mine')).toBe('true');
 
-      fireEvent.change(owners, { target: { value: '' } });
+      await pickOwner('⟦documents.ownersAll⟧');
 
       await waitFor(() => expect(new URLSearchParams(search).has('mine')).toBe(false), { timeout: Find });
       await waitFor(() => expect(lastListed().has('mine')).toBe(false), { timeout: Find });
@@ -426,6 +449,97 @@ describe('DocumentsPage: пошук і фільтр проєкту (UI RC9, ма
       const chip = await screen.findByRole('checkbox', { name: /documents.filterStaleNoCount/ }, { timeout: Find });
       expect((chip as HTMLInputElement).disabled).toBe(true);
       expect(lastListed().has('resultsStale')).toBe(false);
+    },
+    Slow,
+  );
+});
+
+describe('DocumentsPage: власник документа (D-450)', () => {
+  it(
+    'колонка «Власник»: ім\'я з відповіді сервера, а null — видиме «—»',
+    async () => {
+      mockFetch('rows');
+      show('/?periodKey=202601');
+
+      await screen.findByRole('table', {}, { timeout: Find });
+      expect(screen.getByRole('columnheader', { name: '⟦documents.owner⟧' })).not.toBeNull();
+
+      const ownerCell = (key: string): HTMLElement | undefined =>
+        Array.from(document.querySelectorAll<HTMLElement>(`[data-document-row="${key}"] [data-column="owner"]`))[0];
+
+      expect(ownerCell('LATE-0001')?.textContent).toBe('Olena Koval');
+      expect(ownerCell('ONTIME-0002')?.textContent).toBe('—');
+    },
+    Slow,
+  );
+
+  it(
+    'перелік людей не читається з відкриттям сторінки — лише з відкриттям списку',
+    async () => {
+      mockFetch('rows');
+      show('/?periodKey=202601');
+
+      await screen.findByRole('table', {}, { timeout: Find });
+      expect(ownerRequests).toHaveLength(0);
+
+      fireEvent.click(await ownersField());
+
+      await waitFor(() => expect(ownerRequests.length).toBeGreaterThan(0), { timeout: Find });
+      // Той самий період, що в переліку: межі читача рахуються в ньому.
+      expect(new URLSearchParams(ownerRequests[0]?.split('?')[1] ?? '').get('periodKey')).toBe('202601');
+    },
+    Slow,
+  );
+
+  it(
+    'вибір людини: owner=<id> в адресі, ownerUserId у запиті, без mine; «Clear filters» знімає',
+    async () => {
+      mockFetch('rows');
+      show('/?periodKey=202601&mine=true&cursor=abc');
+
+      await pickOwner(/Taras Melnyk/);
+
+      await waitFor(() => expect(lastListed().get('ownerUserId')).toBe('9'), { timeout: Find });
+      expect(lastListed().has('mine')).toBe(false);
+      expect(lastListed().has('cursor')).toBe(false);
+      const params = new URLSearchParams(search);
+      expect(params.get('owner')).toBe('9');
+      expect(params.has('mine')).toBe(false);
+
+      fireEvent.click(await screen.findByRole('button', { name: '⟦documents.clearFilters⟧' }, { timeout: Find }));
+
+      await waitFor(() => expect(new URLSearchParams(search).has('owner')).toBe(false), { timeout: Find });
+      await waitFor(() => expect(lastListed().has('ownerUserId')).toBe(false), { timeout: Find });
+    },
+    Slow,
+  );
+
+  it(
+    'посилання з owner= відкриває вже відфільтрований перелік; старе mine=true поруч — не йде в запит (422)',
+    async () => {
+      mockFetch('rows');
+      show('/?periodKey=202601&owner=7&mine=true');
+
+      await waitFor(() => expect(lastListed().get('ownerUserId')).toBe('7'), { timeout: Find });
+      expect(lastListed().has('mine')).toBe(false);
+
+      // Ім'я обраної людини — з рядка сторінки (той самий ownerUserId), без окремого запиту людей.
+      await waitFor(() => expect((screen.getByLabelText('⟦documents.owner⟧') as HTMLInputElement).value).toBe('Olena Koval'), {
+        timeout: Find,
+      });
+    },
+    Slow,
+  );
+
+  it(
+    'owner= не додатне ціле — без фільтра, а не 422',
+    async () => {
+      mockFetch('rows');
+      show('/?periodKey=202601&owner=abc');
+
+      await screen.findByRole('table', {}, { timeout: Find });
+      expect(lastListed().has('ownerUserId')).toBe(false);
+      expect(screen.queryByRole('button', { name: '⟦documents.clearFilters⟧' })).toBeNull();
     },
     Slow,
   );
