@@ -9,7 +9,7 @@ import type { Permit } from '../api/types';
 import { PermitsPaths } from '../shell/permitPaths';
 import { HeaderForm } from './HeaderForm';
 import { expiringIn, PermitStatus, type PermitCapabilities } from './permitRules';
-import { localName } from './model';
+import { localName } from './names';
 import './permit.css';
 
 function parseDay(value: string | null): number | null {

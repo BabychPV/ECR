@@ -10,7 +10,7 @@ import { showApiError, showDone } from '@/shared/ui/notify';
 import { updatePermit } from '../api/permitsApi';
 import type { Permit, PermitReportingFlags, UpdatePermitRequest } from '../api/types';
 import { DateField } from './DateField';
-import { permitKeys } from './usePermitData';
+import { permitKeys } from './permitQueries';
 import './permit.css';
 
 /** Код відмови «токен застарів / дозвіл закінчився» (`PUT /permits/{id}`): екран перечитує дозвіл. */

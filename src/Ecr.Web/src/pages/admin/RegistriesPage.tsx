@@ -543,12 +543,6 @@ function RegistryOverview(): JSX.Element {
         />
       )}
 
-      <LazyValidityEditor
-        registryCode={code ?? ''}
-        entry={validity}
-        onClose={() => setValidity(null)}
-      />
-
       {/* Підтвердження видалення запису і стан «заблоковано» — `DeleteEntryDialog` (лінивий чанк). */}
       <LazyDeleteEntryDialog
         entry={deleting}
@@ -561,6 +555,16 @@ function RegistryOverview(): JSX.Element {
           setValidity(entry);
           setDeleting(null);
         }}
+      />
+
+      {/* ⚠ ПІСЛЯ `LazyDeleteEntryDialog` навмисно: «Validity» з діалогу видалення закриває його й відкриває цей на тому
+          ж коміті, а ефекти розмітки йдуть у порядку дерева. Так `ConfirmModal` спершу повертає фокус на «Delete»
+          рядка, і лише тоді `useRestoreFocus` обгортки запам'ятовує відкривача — ту саму кнопку, а не «Validity»
+          усередині діалогу, що зникає. */}
+      <LazyValidityEditor
+        registryCode={code ?? ''}
+        entry={validity}
+        onClose={() => setValidity(null)}
       />
 
       {/* ⛔ U-18: діалог винесено в `CreateRegistryModal` — той самий

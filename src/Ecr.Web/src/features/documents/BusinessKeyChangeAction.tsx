@@ -3,10 +3,10 @@ import { Menu, Stack, Text } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
 import type { DocumentSummary } from '@/api/types';
-import { meetsGrant, type GrantLevelName } from '@/features/workflow/SheetActions';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { problemText } from '@/shared/ui/problemText';
+import { hasProjectGrant } from './projectGrant';
 import { showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 import {
@@ -45,24 +45,8 @@ export function hasProjectWriteGrant(me: MeDto | undefined, projectId: number): 
   return hasProjectGrant(me, projectId, 'Write');
 }
 
-/**
- * Чи має користувач на проєкт грант щонайменше `required` — дзеркало
- * `profile.LevelFor(ResourceKind.Project, id) < required` на сервері.
- * Заборона виграє на будь-якому рівні (ФВ-6.6).
- */
-export function hasProjectGrant(
-  me: MeDto | undefined,
-  projectId: number,
-  required: GrantLevelName,
-): boolean {
-  if (me === undefined) return false;
-
-  const key = `Project:${String(projectId)}`;
-  if ((me.denies ?? []).includes(key)) return false;
-
-  const level = (me.grants ?? {})[key] as GrantLevelName | undefined;
-  return level !== undefined && meetsGrant(level, required);
-}
+// `hasProjectGrant` — у `projectGrant.ts` (без рядка дій аркуша; бюджет маршрутів, D-132); реекспорт для наявних імпортів.
+export { hasProjectGrant } from './projectGrant';
 
 /**
  * Чи документ, НАСКІЛЬКИ ЙОГО ЗНАЄ КЛІЄНТ, має поданий або погоджений аркуш.

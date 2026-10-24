@@ -25,6 +25,7 @@ import { isRecalculateKey, isTypingOrDialogTarget } from '@/features/grid/shortc
 import { useNarrowScreen } from '@/shared/narrowScreen';
 import { humanizeJobId } from './jobLabel';
 import { isAllowed, type WorkflowAction } from './transitions';
+import { GrantOrder, meetsGrant, type GrantLevelName } from './grantLevels';
 import { t } from '@/shared/i18n';
 import { formatPeriodKey } from '@/shared/format';
 import { DisabledReason } from '@/features/common/DisabledReason';
@@ -81,19 +82,8 @@ interface SheetActionsProps {
   lock?: DocumentLock | null | undefined;
 }
 
-/**
- * Рівні гранта — **дзеркало** `Ecr.Domain.Enums.GrantLevel`, у тому самому
- * порядку зростання (`None`=0 … `Manage`=5).
- *
- * ⛔ Порядок і є правилом: `EditRules.CanSubmit` вимагає `>= Submit` (3), а
- * `EditRules.CanApprove` — `>= Approve` (4). Переставити тут два імені —
- * означає показати кнопку тому, кому сервер відмовить, і сховати в того, хто
- * має право.
- */
-const GrantOrder = ['None', 'Read', 'Write', 'Submit', 'Approve', 'Manage'] as const;
-
-/** Назва рівня гранта, як її віддає `/api/v1/me` (`GetCurrentUserHandler`). */
-export type GrantLevelName = (typeof GrantOrder)[number];
+// Рівні гранта (`GrantOrder`, `meetsGrant`) — у `grantLevels.ts` (бюджет маршрутів, D-132); реекспорт для наявних імпортів.
+export { meetsGrant, type GrantLevelName } from './grantLevels';
 
 /**
  * Ефективний рівень гранта для дій робочого процесу над аркушем.
@@ -165,11 +155,6 @@ export function effectiveGrant(
   }
 
   return 'None';
-}
-
-/** Чи дотягує наявний рівень до потрібного. */
-export function meetsGrant(actual: GrantLevelName, required: GrantLevelName): boolean {
-  return GrantOrder.indexOf(actual) >= GrantOrder.indexOf(required);
 }
 
 /**

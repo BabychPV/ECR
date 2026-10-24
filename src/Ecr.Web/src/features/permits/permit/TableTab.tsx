@@ -8,6 +8,7 @@ import type { PermitRow } from '../lib/columns';
 import { PermitDefTable } from '../table/PermitDefTable';
 import { localName, totalSums, type LoadedRow } from './model';
 import type { PermitCapabilities } from './permitRules';
+import { NewRowId, PanelParam } from './tableParams';
 import { usePermitRows, useTableFields } from './usePermitData';
 import './permit.css';
 
@@ -16,9 +17,7 @@ import './permit.css';
 const RowDrawer = lazy(() => import('./RowDrawer').then((module) => ({ default: module.RowDrawer })));
 const PasteDialog = lazy(() => import('./PasteDialog').then((module) => ({ default: module.PasteDialog })));
 
-/** Параметр адреси відкритої шторки: `<код таблиці>:<id рядка>` або `<код таблиці>:__new`. */
-export const PanelParam = 'panel';
-export const NewRowId = '__new';
+export { NewRowId, PanelParam } from './tableParams';
 
 export interface TableTabProps {
   readonly permit: Permit;

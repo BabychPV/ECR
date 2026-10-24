@@ -146,7 +146,7 @@ jobs:
     if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
     runs-on: ubuntu-24.04
     # ✎ 2026-10-23 (правило 7 CLAUDE.md 12.10: завислі > 45 хв скасовувати): ліміт від зависань;
-    # api-N ≤ ~18 хв, core-persistence ~13 хв. Без ключа діє типові 360 хв.
+    # api-N ≤ ~13 хв (✎ 2026-10-24, сім частин), core-persistence ~13 хв. Без ключа діє типові 360 хв.
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -176,6 +176,13 @@ jobs:
           # дав api-4 = 26.1 хв; сума тестів 2601 с на 4 частини не вкладалася у ≤ 16 хв.
           - part: api-5
             only: "-Only 'Складання','Тести API (частина 5)'"
+          # ✎ 2026-10-24: СІМ частин (правило 5 CLAUDE.md; «Пришвидшення CI» 24.10): шість прогонів
+          # 24.10 дали api-1 до 19.6 хв, api-5 до 18.1 хв — суми тестів того самого набору гуляють
+          # до 1.7× між раннерами. Прогноз job ≤ ~13 хв на найповільнішому; замір — `api-test-shards.psd1`.
+          - part: api-6
+            only: "-Only 'Складання','Тести API (частина 6)'"
+          - part: api-7
+            only: "-Only 'Складання','Тести API (частина 7)'"
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

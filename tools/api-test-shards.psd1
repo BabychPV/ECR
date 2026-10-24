@@ -1,4 +1,4 @@
-﻿# Розбиття `Ecr.Api.Tests` на шарди у п'яти частинах (з 2026-10-22; раніше сім шардів у чотирьох) для `tools/verify-all.ps1`.
+﻿# Розбиття `Ecr.Api.Tests` на шарди у семи частинах (з 2026-10-24; раніше п'ять частин) для `tools/verify-all.ps1`.
 #
 # ⚠ Дані, а не код: скрипт читає цей файл і будує з нього фільтри
 # `dotnet test --filter`. Префікси — початок імені класу ПІСЛЯ
@@ -11,7 +11,7 @@
 # (K, Q, X, Y, Z), і некласи Security.* на `S` ідуть саме сюди.
 #
 # ⚠ `Part` — до якого кроку `verify-all.ps1` належить шард:
-# 1..4 — «Тести API (частина N)». Остання частина (з шардом-залишком) — точне
+# 1..7 — «Тести API (частина N)». Остання частина (з шардом-залишком) — точне
 # доповнення решти (заперечення їхніх префіксів), як і до шардів.
 #
 # Замір 2026-09-28 (локально, SQL Server Developer, один процес, trx):
@@ -77,17 +77,36 @@
 # того ж run за рядками «Passed … [N s]» (по класах, точність до секунди, тож ≈ 1.2 × сума за логом);
 # по частинах 538 / 526 / 515 / 520 / 539 (розкид ±3 %). Прогноз job ≈ 12–14 хв для всіх п'яти частин.
 # Нового розкиду немає сенсу гасити ітераціями: новий клас лише зсуває баланс, залишок підхоплює все невказане.
+# ✎ 2026-10-24 (п'яте перебалансування, СІМ частин; правило 5 CLAUDE.md, «Пришвидшення CI» 24.10):
+# замір шести успішних повних прогонів 24.10 (40101368351 dev/integration, 40099684508, 40097789488,
+# 40078665029, 40077375686, 40067955901). Факт job, хв (мін…макс): api-1 11.4…19.6, api-2 10.6…16.6,
+# api-3 10.6…13.5, api-4 13.9…14.5, api-5 11.6…18.1; стіна прогону 17.3…22.7 хв. Той самий набір тестів
+# дає суму тривалостей за логом із розкидом до 1.7× між раннерами (api-1: 407…696 с;
+# DocumentVersionMigrationTests 246…359 с, EditAssignmentsApiTests 52…112, Security.DenyRead 42…91), тож
+# api-1/api-5 упиралися в 20 хв на повільних раннерах. Модель за 30 точками: job ≈ 170 с + 1.45 × сума
+# тривалостей за логом. Сума всіх класів: медіана 2588 с, сума максимумів 2967 с; при ≤ ~13 хв job на
+# найповільнішому раннері сума на частину ≤ ~425 с → СІМ частин. Розкладка — жадібне пакування за
+# МАКСИМУМОМ класу з шести прогонів (по префіксах): кожна частина 423…425 с макс. (прогноз job ≤ 13.1 хв),
+# медіана 346…399 с (≈ 10.5…12.5 хв). DocumentVersionMigration — частина 1; залишок (D* крім неї, S*
+# не-Security, Security.F/I і майбутні класи) — частина 7. У кожній частині шард не-Security і шард
+# Security.* окремо (для `-ApiParallel` > 1 локально). `Seconds` — сума МЕДІАН класів шарда з тих шести
+# прогонів (у шарді-залишку — медіани D*, S* не-Security, Security.F/I).
 @{
-    Measured = '2026-10-23'
+    Measured = '2026-10-24'
     Shards   = @(
-        @{ Id = 1; Part = 1; Seconds = 337; Prefixes = @('R', 'A', 'B', 'F', 'G', 'O', 'V', 'W', 'T', 'U') }
-        @{ Id = 2; Part = 1; Seconds = 201; Prefixes = @('Security.D') }
-        @{ Id = 3; Part = 2; Seconds = 278; Prefixes = @('C', 'H', 'I', 'J', 'L') }
-        @{ Id = 4; Part = 2; Seconds = 248; Prefixes = @('E', 'Security.C') }
-        @{ Id = 5; Part = 3; Seconds = 397; Prefixes = @('DocumentVersionMigration') }
-        @{ Id = 6; Part = 3; Seconds = 112; Prefixes = @('Security.A', 'Security.G', 'Security.L', 'Security.M', 'Security.P', 'Security.T', 'Security.U', 'Security.V') }
-        @{ Id = 7; Part = 4; Seconds = 445; Prefixes = @('M', 'N', 'P') }
-        @{ Id = 8; Part = 4; Seconds = 75; Prefixes = @('Security.R') }
-        @{ Id = 9; Part = 5; Seconds = 539; Rest = $true }
+        @{ Id = 1; Part = 1; Seconds = 362; Prefixes = @('DocumentVersionMigration', 'T', 'I') }
+        @{ Id = 2; Part = 1; Seconds = 2; Prefixes = @('Security.M') }
+        @{ Id = 3; Part = 2; Seconds = 327; Prefixes = @('R', 'U', 'H', 'F') }
+        @{ Id = 4; Part = 2; Seconds = 19; Prefixes = @('Security.N') }
+        @{ Id = 5; Part = 3; Seconds = 276; Prefixes = @('E', 'M', 'J', 'W') }
+        @{ Id = 6; Part = 3; Seconds = 85; Prefixes = @('Security.S') }
+        @{ Id = 7; Part = 4; Seconds = 79; Prefixes = @('A', 'O') }
+        @{ Id = 8; Part = 4; Seconds = 292; Prefixes = @('Security.D', 'Security.C', 'Security.E', 'Security.G') }
+        @{ Id = 9; Part = 5; Seconds = 203; Prefixes = @('C', 'L', 'V', 'G') }
+        @{ Id = 10; Part = 5; Seconds = 169; Prefixes = @('Security.H', 'Security.P', 'Security.T') }
+        @{ Id = 11; Part = 6; Seconds = 287; Prefixes = @('N', 'P', 'B') }
+        @{ Id = 12; Part = 6; Seconds = 111; Prefixes = @('Security.R', 'Security.L', 'Security.A', 'Security.V') }
+        @{ Id = 13; Part = 7; Seconds = 16; Prefixes = @('Security.U') }
+        @{ Id = 14; Part = 7; Seconds = 362; Rest = $true }
     )
 }

@@ -75,6 +75,7 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
 import { t } from '@/shared/i18n';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { ColumnsTable } from '@/features/templates/ctor/ColumnsTable';
@@ -216,7 +217,7 @@ const PresentationEditor = lazy(async () => ({
  * гейт — ОДНОСТОРОННІЙ (`useEverOpened`): доки не відкривали, у дереві нічого (закрита `Modal` і так
  * нічого не малює); відкрили раз — компонент лишається, і закриття анімується, як доти. Фокус після
  * закриття повертає `useRestoreFocus` усередині обох модалок — він і зроблений для діалогів, що
- * монтуються вже відкритими.
+ * монтуються вже відкритими; для «Withdraw from use» (пункт меню) — ще й хук сторінки, див. `deprecating`.
  *
  * ⛔ Матриця доступу лишилася статичною навмисно: вона покладається на власний `returnFocus` Mantine,
  * а той запам'ятовує елемент лише на зміні `opened` false → true — діалог, змонтований уже відкритим,
@@ -485,6 +486,13 @@ function TemplateVersionEditor(): JSX.Element {
   const publishMounted = useEverOpened(publishing);
   const deprecateMounted = useEverOpened(deprecating);
   const confirmMounted = useEverOpened(pendingDelete !== null);
+
+  // ⛔ WCAG 2.4.3: відкривача «Withdraw from use» запам'ятовує сторінка — вона змонтована й бачить перехід на коміті
+  // кліку. `useRestoreFocus` усередині `ReasonModal` читає фокус лише тоді, коли приїхав чанк, а пункт «More» →
+  // «Withdraw from use», що за цей час згас разом із меню, там уже не знайти: фокус після закриття падав на `BODY`.
+  // Коли чанк уже є, обидва повертають на ту саму кнопку «More». «Publish» і видалення відкривають кнопки, що лишаються
+  // у фокусі, поки чанк їде, — їм досить хука модалки (`TemplateVersionPage.lazyDialogFocus.test.tsx`).
+  useRestoreFocus(deprecating);
 
   const node: CtorNode =
     structure.data === undefined ? { kind: 'root' } : parseNode(search.get('node'), structure.data);

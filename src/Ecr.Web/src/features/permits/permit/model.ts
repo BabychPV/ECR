@@ -1,5 +1,4 @@
-import type { UnitRef } from '@/api/types';
-import { DefaultLanguage, language } from '@/shared/i18n';
+import { localName } from './names';
 import type { RegistryBatchItem, RegistryRow } from '@/features/registries/rows/api';
 import type { PermitTypeColumn, PermitTypeTable } from '../api/types';
 import { type PermitCellValue, type PermitColumn, type PermitColumnType, type PermitRow } from '../lib/columns';
@@ -34,21 +33,8 @@ export interface LoadedRow {
 /** Значення форми рядка: усе рядками, як у полях вводу; `Lookup` — id запису-цілі, `Bool` — `true`/`false`. */
 export type FormValues = Readonly<Record<string, string>>;
 
-/** Назва мовою користувача: його мова → англійська → перша наявна. */
-export function localName(names: Readonly<Record<string, string>>): string {
-  const exact = names[language()];
-  if (exact !== undefined && exact !== '') return exact;
-  const fallback = names[DefaultLanguage];
-  if (fallback !== undefined && fallback !== '') return fallback;
-  return Object.values(names).find((value) => value !== '') ?? '';
-}
-
-/** Підписи одиниць за id (позначення мовою користувача, інакше код). */
-export function unitLabels(units: readonly UnitRef[]): ReadonlyMap<number, string> {
-  return new Map(
-    units.map((unit) => [unit.id, unit.symbolL10n != null ? localName(unit.symbolL10n) || unit.code : unit.code]),
-  );
-}
+// Назви — у `names.ts` (без розбору вставки; бюджет маршруту, D-132); тут — реекспорт для наявних імпортів.
+export { localName, unitLabels } from './names';
 
 function columnType(source: PermitTypeColumn): PermitColumnType {
   switch (source.dataType) {
