@@ -377,7 +377,7 @@ public sealed class SubmitApproveTests
     private Ecr.Application.Reporting.ReportSnapshotSync Reports()
         => new(_reportSnapshots, _documents);
 
-    private SubmitSheetHandler Submit()
+    private SubmitSheetHandler Submit(SheetWorkflowNotifier? notifier = null)
         => new(_cells, _rows, _workflow, _documents, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _headers,
@@ -386,7 +386,8 @@ public sealed class SubmitApproveTests
                _methodologies,
                _versions,
                _registries,
-               _audit);
+               _audit,
+               notifier);
 
     /// <summary>Довідник для <c>REGFIELD</c> у правилах (D16-04); за замовчуванням порожній.</summary>
     private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
@@ -450,7 +451,22 @@ public sealed class SubmitApproveTests
         //
         // ⚠ Тест лишається саме тому, що раніше тут стояла протилежна
         // перевірка: без нього постановку події легко повернути «як було».
-        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+        //
+        // ✎ D-451 (рішення людини 24.10): лист «Аркуш подано» є, але ВИМКНЕНИЙ —
+        // без правила матриці (стан будь-якої інсталяції після оновлення: сід
+        // правил не створює) черга не отримує нічого. Повідомлювач тут
+        // справжній, з тією самою чергою, — інакше тест мовчки перевіряв би
+        // обробник без пошти.
+        var rules = Substitute.For<INotificationDispatchStore>();
+        rules.GetPlanAsync(Arg.Any<CancellationToken>())
+            .Returns(new NotificationDispatchPlan("empty", [], []));
+        var notifier = new SheetWorkflowNotifier(
+            rules, Substitute.For<ISheetWorkflowMailStore>(), _access, _documents,
+            Substitute.For<IUiStringCatalog>(), _outbox, _uow);
+
+        await Submit(notifier).HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        // ⛔ Мутація: `SheetWorkflowNotifier.IsEnabledAsync` → `true` — рядок черги з'являється, падає.
 
         await _outbox.DidNotReceive().EnqueueAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
