@@ -151,6 +151,18 @@ export default defineConfig({
      * сам). `passes: 2` міряли окремо — +0.1 КБ, тобто нічого, тому дефолт.
      */
     minify: 'terser',
+
+    /*
+     * ⛔ `rollupOptions.output.manualChunks` тут НЕМАЄ свідомо (замір 2026-10-24). Окремий чанк
+     * `OptionsDropdown-*.js` (ядро Combobox, +0.4…0.5 КБ gzip файлової ціни на ~25 маршрутах із `Select`) —
+     * наслідок того, що лінивий `UserAccessEditor` бере `MultiSelect` без `Select`. Склеїти ядро з `Select`
+     * ручним чанком пробували двома способами, обидва гірші:
+     *   • `manualChunks` → 'Select': Rollup дотягує в ручний чанк УСІ статичні залежності (Popover, Input,
+     *     React), вхідний чанк починає імпортувати `Select` — +2…9 КБ на КОЖНОМУ маршруті;
+     *   • те саме з `onlyExplicitManualChunks: true`: ручний чанк Rollup рахує окремим статичним входом, і
+     *     спільне ядро Mantine виїжджає з вхідного чанка в третій файл (~35 КБ) — +2 КБ на кожному маршруті.
+     * `experimentalMinChunkSize` (1/4/20 КБ) — +4…34 КБ на 39–45 маршрутах. Лікується лише графом імпортів.
+     */
   },
   server: {
     port: vitePort,
