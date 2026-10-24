@@ -26,7 +26,7 @@ import type {
 } from '@/api/types';
 import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
-import { ReportDefinitionsModal } from '@/features/reports/ReportDefinitionsModal';
+import { LazyReportDefinitionsModal } from '@/features/reports/LazyReportDefinitionsModal';
 import { snapshotExportUrl } from '@/features/reports/api';
 import { SnapshotFormatBadge } from '@/features/reports/SnapshotFormatBadge';
 import { SnapshotStaleBadge } from '@/features/reports/SnapshotStaleBadge';
@@ -622,7 +622,7 @@ export function SnapshotsPage(): JSX.Element {
         </Group>
       </Modal>
 
-      <ReportDefinitionsModal
+      <LazyReportDefinitionsModal
         opened={managing}
         onClose={() => setManaging(false)}
         definitions={reportDefs.data ?? []}
