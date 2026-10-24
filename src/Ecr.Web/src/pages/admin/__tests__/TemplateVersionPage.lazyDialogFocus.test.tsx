@@ -26,13 +26,13 @@ import { testTheme } from '@/test/render';
  * `fallback={null}`, компонент монтується вже відкритим лише після `open()`.
  */
 const chunks = vi.hoisted(() => {
-  const gate = (): { ready: Promise<void>; open: () => void } => {
+  const gate = (): { ready: Promise<void>; open: () => void; loaded: boolean } => {
     let release: () => void = () => undefined;
     const ready = new Promise<void>((resolve) => {
       release = resolve;
     });
 
-    return { ready, open: () => release() };
+    return { ready, open: () => release(), loaded: false };
   };
 
   return { reason: gate(), confirm: gate() };
@@ -52,6 +52,8 @@ vi.mock('@/shared/ui/ConfirmModal', async (importOriginal) => {
 
     return createElement(actual.ConfirmModal, props);
   }
+
+  chunks.confirm.loaded = true;
 
   return { ...actual, ConfirmModal: LateConfirm };
 });
@@ -176,6 +178,15 @@ describe('TemplateVersionPage: фокус після закриття лінив
 
     const remove = await screen.findByRole('button', { name: '⟦sheets.delete⟧' });
     remove.focus();
+    // ⛔ Гонка, через яку тест «мигав» (CI 40113614883, 40110453615): код сам передзавантажує чанк, і поки async-фабрика
+    // `vi.mock` ще працює, другий `import()` того самого модуля (від `lazy` після кліку; `preloadDialogs`) vitest віддає СПРАВЖНІМ модулем —
+    // шторка з'являлась одразу, без воріт. Тож клікаємо лише тоді, коли передзавантаження вже дало підмінений модуль.
+    await waitFor(() => expect(chunks.confirm.loaded).toBe(true));
+    // Ще одна макрозадача — щоб vitest устиг покласти доготований модуль у реєстр.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
     fireEvent.click(remove);
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));

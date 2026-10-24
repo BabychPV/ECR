@@ -26,7 +26,8 @@ const chunk = vi.hoisted(() => {
     release = resolve;
   });
 
-  return { ready, open: () => release() };
+  // `loaded`: фабрика доробила (див. примітку про гонку нижче у тесті).
+  return { ready, open: () => release(), loaded: false as boolean };
 });
 
 vi.mock('@/features/templates/VersionDiff', async (importOriginal) => {
@@ -37,6 +38,8 @@ vi.mock('@/features/templates/VersionDiff', async (importOriginal) => {
 
     return createElement(actual.VersionDiffDialog, props);
   }
+
+  chunk.loaded = true;
 
   return { ...actual, VersionDiffDialog: LateDialog };
 });
@@ -68,6 +71,15 @@ describe('VersionDiffButton: фокус після закриття, коли ч
     // Фокус кличе передзавантаження чанка (`onFocus`) — воно теж іде через підмінений модуль.
     await act(async () => {
       trigger.focus();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // ⛔ Гонка, через яку тест «мигав» (CI 40113614883, 40110453615): код сам передзавантажує чанк, і поки async-фабрика
+    // `vi.mock` ще працює, другий `import()` того самого модуля (від `lazy` після кліку) vitest віддає СПРАВЖНІМ модулем —
+    // шторка з'являлась одразу, без воріт. Тож клікаємо лише тоді, коли передзавантаження вже дало підмінений модуль.
+    await waitFor(() => expect(chunk.loaded).toBe(true));
+    // Ще одна макрозадача — щоб vitest устиг покласти доготований модуль у реєстр.
+    await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
