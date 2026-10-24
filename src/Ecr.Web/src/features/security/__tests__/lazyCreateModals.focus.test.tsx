@@ -31,12 +31,12 @@ const chunks = vi.hoisted(() => {
   return { role: gate(), user: gate() };
 });
 
-vi.mock('../CreateRoleModal', async (importOriginal) => {
+vi.mock('@/features/security/CreateRoleModal', async (importOriginal) => {
   await chunks.role.ready;
 
   return importOriginal();
 });
-vi.mock('../CreateUserModal', async (importOriginal) => {
+vi.mock('@/features/security/CreateUserModal', async (importOriginal) => {
   await chunks.user.ready;
 
   return importOriginal();

@@ -30,9 +30,9 @@ const chunk = vi.hoisted(() => {
   return { ready, open: () => release() };
 });
 
-vi.mock('../GroupDrawer', async (importOriginal) => {
+vi.mock('@/features/permits/groups/GroupDrawer', async (importOriginal) => {
   const { createElement, use } = await import('react');
-  const actual = await importOriginal<typeof import('../GroupDrawer')>();
+  const actual = await importOriginal<typeof import('@/features/permits/groups/GroupDrawer')>();
   function LateDrawer(props: Parameters<typeof actual.GroupDrawer>[0]): ReturnType<typeof actual.GroupDrawer> {
     use(chunk.ready);
 

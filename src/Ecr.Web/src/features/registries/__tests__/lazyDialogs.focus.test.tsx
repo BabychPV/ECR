@@ -37,17 +37,17 @@ const chunks = vi.hoisted(() => {
   return { create: gate(), entry: gate(), remove: gate() };
 });
 
-vi.mock('../CreateRegistryModal', async (importOriginal) => {
+vi.mock('@/features/registries/CreateRegistryModal', async (importOriginal) => {
   await chunks.create.ready;
 
   return importOriginal();
 });
-vi.mock('../RegistryEntryEditor', async (importOriginal) => {
+vi.mock('@/features/registries/RegistryEntryEditor', async (importOriginal) => {
   await chunks.entry.ready;
 
   return importOriginal();
 });
-vi.mock('../DeleteEntryDialog', async (importOriginal) => {
+vi.mock('@/features/registries/DeleteEntryDialog', async (importOriginal) => {
   await chunks.remove.ready;
 
   return importOriginal();

@@ -27,7 +27,7 @@ const chunk = vi.hoisted(() => {
   return { ready, open: () => release() };
 });
 
-vi.mock('../RegistryEntryEditor', async (importOriginal) => {
+vi.mock('@/features/registries/RegistryEntryEditor', async (importOriginal) => {
   await chunk.ready;
 
   return importOriginal();

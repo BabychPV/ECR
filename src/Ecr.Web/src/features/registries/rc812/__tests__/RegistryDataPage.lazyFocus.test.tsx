@@ -27,9 +27,9 @@ const chunk = vi.hoisted(() => {
   return { ready, open: () => release() };
 });
 
-vi.mock('../EntryDrawer', async (importOriginal) => {
+vi.mock('@/features/registries/rc812/EntryDrawer', async (importOriginal) => {
   const { createElement, use } = await import('react');
-  const actual = await importOriginal<typeof import('../EntryDrawer')>();
+  const actual = await importOriginal<typeof import('@/features/registries/rc812/EntryDrawer')>();
   function LateDrawer(props: Parameters<typeof actual.EntryDrawer>[0]): ReturnType<typeof actual.EntryDrawer> {
     use(chunk.ready);
 

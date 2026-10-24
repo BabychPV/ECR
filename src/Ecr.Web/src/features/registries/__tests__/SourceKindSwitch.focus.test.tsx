@@ -25,7 +25,7 @@ const chunk = vi.hoisted(() => {
   return { ready, open: () => release() };
 });
 
-vi.mock('../SourceKindSwitchDialog', async (importOriginal) => {
+vi.mock('@/features/registries/SourceKindSwitchDialog', async (importOriginal) => {
   await chunk.ready;
 
   return importOriginal();
