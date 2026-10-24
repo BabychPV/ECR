@@ -24,6 +24,7 @@ import {
 } from '@/features/documents/DeleteDocumentAction';
 import { DocumentActionBar } from '@/features/documents/DocumentActionBar';
 import { DocumentSaveState } from '@/features/documents/DocumentSaveState';
+import { StaleResultsUndeterminedMark } from '@/features/documents/StaleResultsMark';
 import { useDocumentLogActions } from '@/features/documents/DocumentLogActions';
 import { useStaleResultsReminderHost } from '@/features/documents/useStaleResultsReminder';
 import { useVersionMigrationAction } from '@/features/documents/VersionMigrationAction';
@@ -703,6 +704,8 @@ export function DocumentPage(): JSX.Element {
                   {t('documents.methodologyResultsStale')}
                 </Badge>
               )}
+              {/* ✎ D-446: застарілість не визначена — частину документа читачеві закрито (те саме, що в рядку переліку). */}
+              {!calculationsStale && document.resultsStaleUndetermined === 'PartiallyHidden' && <StaleResultsUndeterminedMark />}
             </>
           }
         />

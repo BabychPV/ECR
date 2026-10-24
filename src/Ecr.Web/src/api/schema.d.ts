@@ -24107,13 +24107,15 @@ export interface components {
             /** @description Чи застаріли результати методологій документа за період: після початку актуального прогону хтось правив
              *     вхідну комірку (або довідник, який читає методологія). ВИВОДИТЬСЯ запитом, не зберігається. Документ без
              *     результатів — `false`. ⛔ `null` — період не задано, або читач має обмеження нижче проєкту
-             *     (`DocumentSheetVisibility.For`): «застаріло за видимими входами» не доводить, що застарів видимий вихід. */
+             *     (`DocumentSheetVisibility.For`): «застаріло за видимими входами» не доводить, що застарів видимий вихід.
+             *     ✎ D-446: другий випадок називає ResultsStaleUndetermined. */
             resultsStale?: null | boolean;
             /**
              * Format: date-time
              * @description Відколи застаріло (перша правка входу після прогону, UTC); `null` — не застаріло чи невідомо.
              */
             resultsStaleSince?: null | string;
+            resultsStaleUndetermined?: null | components["schemas"]["ResultsStaleUndeterminedReason"];
             /**
              * Format: int32
              * @description Скільки аркушів у складі.
@@ -29215,6 +29217,8 @@ export interface components {
          * @enum {unknown}
          */
         ResourceKind: "Project" | "Sheet" | "Table" | "Column" | "Registry";
+        /** @enum {unknown} */
+        ResultsStaleUndeterminedReason: "PartiallyHidden" | null;
         /** @description Тіло повернення на доопрацювання. */
         ReturnEditAssignmentRequest: {
             /** @description Версія передачі, яку бачив власник. */

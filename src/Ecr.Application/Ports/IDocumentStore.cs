@@ -66,6 +66,7 @@ namespace Ecr.Application.Ports;
 /// вхідну комірку (або довідник, який читає методологія). ВИВОДИТЬСЯ запитом, не зберігається. Документ без
 /// результатів — <c>false</c>. ⛔ <c>null</c> — період не задано, або читач має обмеження нижче проєкту
 /// (<c>DocumentSheetVisibility.For</c>): «застаріло за видимими входами» не доводить, що застарів видимий вихід.
+/// ✎ D-446: другий випадок називає <paramref name="ResultsStaleUndetermined"/>.
 /// </param>
 /// <param name="ResultsStaleSince">Відколи застаріло (перша правка входу після прогону, UTC); <c>null</c> — не застаріло чи невідомо.</param>
 /// <param name="TemplateVersion">
@@ -86,6 +87,14 @@ namespace Ecr.Application.Ports;
 /// nullable-enum у схемі додає <c>null</c> у спільний <c>PeriodKind</c> і ламає типи клієнта) — адитивне поле;
 /// метадані проєкту не секрет, звуження читача його не знімає. Документ власної періодичності не має; <c>periodKey</c> не віддається
 /// (це вісь запиту). Заповнюють і картка, і перелік; <c>null</c> лише коли проєкт не знайдено.
+/// </param>
+/// <param name="ResultsStaleUndetermined">
+/// ✎ D-446: ЧОМУ <paramref name="ResultsStale"/> = <c>null</c>, коли застарілість за період порахована, але читачеві не
+/// віддається (<see cref="ResultsStaleUndeterminedReason"/>) — клієнт пояснює це, а не мовчить. <c>null</c> — застарілість
+/// відома, або періоду немає (тоді <c>null</c> і <paramref name="ResultsStale"/>; цей випадок клієнт пояснює сам).
+/// Ставить <c>DocumentSheetVisibility.For</c> — однаково для рядка переліку й картки, за тієї самої умови, що знімає
+/// <paramref name="ResultsStale"/>. Сама причина нічого не розкриває понад це: вона залежить лише від меж читача, а не
+/// від того, чи результати справді застаріли.
 /// </param>
 public sealed record DocumentSummary(
     long Id,
@@ -110,7 +119,22 @@ public sealed record DocumentSummary(
     int? OwnerUserId = null,
     bool? CanManageEditAccess = null,
     [property: System.Text.Json.Serialization.JsonIgnore] bool ProjectIsReadOnly = false,
-    string? PeriodKind = null);
+    string? PeriodKind = null,
+    ResultsStaleUndeterminedReason? ResultsStaleUndetermined = null);
+
+/// <summary>
+/// ✎ D-446: чому застарілість результатів документа читачеві не визначається
+/// (<see cref="DocumentSummary.ResultsStaleUndetermined"/>).
+/// </summary>
+public enum ResultsStaleUndeterminedReason
+{
+    /// <summary>
+    /// Частина документа читачеві закрита (аркуш, таблиця чи колонка): документ-надання учасника (D-443) зі схованими
+    /// частинами або читач зі звуженням ролі в проєкті. Застарілість рахується по ВСІХ входах документа, а
+    /// «застаріло за видимими входами» не доводить, що застарів видимий вихід (<c>DocumentSheetVisibility.For</c>).
+    /// </summary>
+    PartiallyHidden = 0,
+}
 
 /// <summary>Аркуш складу документа в переліку: код, назва, стан за період.</summary>
 /// <param name="Code">Код аркуша (<c>SheetDef.Code</c>); він же ключ у <c>DocumentSummary.SheetStates</c>.</param>

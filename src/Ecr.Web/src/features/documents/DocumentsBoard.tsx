@@ -11,7 +11,7 @@ import { EyeIcon, IssueCount } from './DocumentListMarks';
 import { documentState, hasSheetStates, sheetLabels } from './documentSheets';
 import { boardColumns, type BoardColumnId } from './documentsBoardModel';
 import { LateEditsMark } from './LateEditsMark';
-import { StaleResultsMark } from './StaleResultsMark';
+import { StaleResultsMark, StaleResultsUndeterminedMark } from './StaleResultsMark';
 import './documentsBoard.css';
 
 interface DocumentsBoardProps {
@@ -126,6 +126,8 @@ export function DocumentsBoard({ documents, documentHref, projectCode, onQuickLo
                         )}
                         {document.hasLateEdits && <LateEditsMark />}
                         {document.resultsStale === true && <StaleResultsMark since={document.resultsStaleSince} />}
+                        {/* ✎ D-446: застарілість не визначена — частину документа читачеві закрито. */}
+                        {document.resultsStaleUndetermined === 'PartiallyHidden' && <StaleResultsUndeterminedMark />}
                         {errors === null || errors === undefined ? (
                           <span className="ecr-board-noissues" title={t('documents.issues')}>
                             —
