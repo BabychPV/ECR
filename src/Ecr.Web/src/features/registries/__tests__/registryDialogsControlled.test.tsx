@@ -50,11 +50,12 @@ describe('SourceKindSwitch: керований режим', () => {
     expect(await screen.findByRole('dialog')).toBeDefined();
   });
 
-  it('з opened — власної кнопки немає; діалог відкритий; «Cancel» повідомляє onClose', () => {
+  it('з opened — власної кнопки немає; діалог відкритий; «Cancel» повідомляє onClose', async () => {
     const onClose = vi.fn();
     render(wrap(<SourceKindSwitch registries={Registries} opened onClose={onClose} />));
 
-    expect(screen.getByRole('dialog')).toBeDefined();
+    // ⚠ `findBy`: діалог — лінивий чанк (`SourceKindSwitchDialog`, D-132).
+    expect(await screen.findByRole('dialog')).toBeDefined();
     // Єдина кнопка з таким іменем — підтвердження всередині діалогу, не кнопка-відкривач.
     expect(screen.getAllByRole('button', { name: /registries\.sourceSwitch/ }).length).toBe(1);
 

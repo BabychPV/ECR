@@ -3,7 +3,7 @@ import { Anchor, Badge, Box, Button, Group, Stack } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import { CreateRegistryModal } from '@/features/registries/CreateRegistryModal';
+import { LazyCreateRegistryModal } from '@/features/registries/lazyDialogs';
 import { SourceKindSwitch } from '@/features/registries/SourceKindSwitch';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
@@ -297,7 +297,7 @@ export function RegistriesList(): JSX.Element {
         </Suspense>
       )}
 
-      <CreateRegistryModal opened={creating} onClose={() => setCreating(false)} onCreated={setCode} />
+      <LazyCreateRegistryModal opened={creating} onClose={() => setCreating(false)} onCreated={setCode} />
     </Stack>
   );
 }

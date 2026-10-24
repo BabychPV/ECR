@@ -52,7 +52,8 @@ const Ledger: Readonly<Record<string, number>> = {
   'features/projects/RecalculationApprovals.tsx': 2,
   'features/registries/CreateRegistryModal.tsx': 1,
   'features/registries/RegistryExternalKeysPanel.tsx': 1,
-  'features/registries/SourceKindSwitch.tsx': 1,
+  // ✎ client debt (D-132): діалог перемикання master винесено в лінивий чанк — те саме місце, інший файл.
+  'features/registries/SourceKindSwitchDialog.tsx': 1,
   'features/registries/impact/RegistryImpactPage.tsx': 1,
   'features/security/CreateRoleModal.tsx': 1,
   'features/security/CreateUserModal.tsx': 1,
