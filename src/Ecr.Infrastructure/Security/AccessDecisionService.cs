@@ -693,6 +693,7 @@ public sealed class AccessDecisionService(
             .AsNoTracking()
             .Where(d => d.ProjectId == projectId && documents.Contains(d.Id))
             .Select(d => d.Id)
+            .OrderBy(id => id)
             .Take(50)
             .ToListAsync(ct)
             .ConfigureAwait(false);
