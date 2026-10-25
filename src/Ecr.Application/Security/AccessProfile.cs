@@ -347,6 +347,19 @@ public sealed record ScopedProjectAccess(
     /// довідників; перегляд довідників, пікер і адміністрування прапорець НЕ відкриває.
     /// </remarks>
     public bool RegistryView { get; init; }
+
+    /// <summary>
+    /// P50 (Аудит-2 W14g): ЗАБОРОНИ на довідники (<c>RegistryDefId</c>), видані ролям без звуження, призначеним на цей
+    /// проєкт. Діють лише в документах цього проєкту й перебивають <see cref="RegistryView"/>, глобальний View і гранти.
+    /// </summary>
+    public IReadOnlySet<int> RegistryDenies { get; init; } = new HashSet<int>();
+
+    /// <summary>
+    /// P50: ресурсні гранти на довідники (<c>RegistryDefId</c> -> рівень) ролей без звуження, призначених на цей проєкт;
+    /// дають право ЧИТАТИ (вибирати запис) довідник у документах цього проєкту. Заборона з
+    /// <see cref="RegistryDenies"/> сильніша.
+    /// </summary>
+    public IReadOnlyDictionary<int, GrantLevel> RegistryGrants { get; init; } = new Dictionary<int, GrantLevel>();
 }
 
 /// <summary>Що дає одне призначення ролі, звужене аркушами чи періодами (D-214), в одному проєкті.</summary>

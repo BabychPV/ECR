@@ -134,4 +134,83 @@ public sealed class LookupTargetMatcherDenyTests
         Assert.True(LookupTargetMatcher.Belongs(groups, Profile(), Target, Other));
         Assert.False(LookupTargetMatcher.Belongs(groups, Profile(Other), Target, Other));
     }
+
+    // ── P50: Deny/Read-грант, видані ролі з областю, діють у проєкті документа ────────────────────────────────────────
+
+    private const int ProjectId = 10;
+
+    private static AccessProfile Scoped(
+        bool globalView, bool scopedView, bool deny, bool readGrant, int scopedProject = ProjectId) => new()
+    {
+        CacheKey = "sc", UserId = 1, SecurityStamp = "s",
+        Permissions = new HashSet<string>(globalView ? ["Registry.View"] : []),
+        Grants = new Dictionary<string, Ecr.Domain.Enums.GrantLevel>(),
+        Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
+        Scoped = new Dictionary<int, ScopedProjectAccess>
+        {
+            [scopedProject] = new(
+                new Dictionary<string, Ecr.Domain.Enums.GrantLevel>(), new HashSet<string>(), new HashSet<int>(), new HashSet<string>())
+            {
+                RegistryView = scopedView,
+                RegistryDenies = deny ? new HashSet<int> { Target } : new HashSet<int>(),
+                RegistryGrants = readGrant
+                    ? new Dictionary<int, Ecr.Domain.Enums.GrantLevel> { [Target] = Ecr.Domain.Enums.GrantLevel.Read }
+                    : new Dictionary<int, Ecr.Domain.Enums.GrantLevel>(),
+            },
+        },
+    };
+
+    [Fact]
+    public void Scoped_View_і_власний_Deny_у_проєкті_не_належить_а_в_іншому_проєкті_належить()
+    {
+        var profile = Scoped(globalView: false, scopedView: true, deny: true, readGrant: false);
+
+        Assert.False(LookupTargetMatcher.Belongs(new FakePermitGroupResolver(), profile, Target, Target, ProjectId));
+        Assert.True(LookupTargetMatcher.ViewProjectNeeded(profile));
+        Assert.False(LookupTargetMatcher.Belongs(new FakePermitGroupResolver(), profile, Target, Target, ProjectId + 1));
+    }
+
+    [Fact]
+    public void Глобальний_View_і_scoped_Deny_потребує_проєкту_і_відмовляє_лише_в_ньому()
+    {
+        var profile = Scoped(globalView: true, scopedView: false, deny: true, readGrant: false);
+
+        Assert.True(LookupTargetMatcher.ViewProjectNeeded(profile));
+        Assert.False(LookupTargetMatcher.Belongs(new FakePermitGroupResolver(), profile, Target, Target, ProjectId));
+        Assert.True(LookupTargetMatcher.Belongs(new FakePermitGroupResolver(), profile, Target, Target, ProjectId + 1));
+        Assert.False(LookupTargetMatcher.MayChoose(profile, Target, ProjectId));
+    }
+
+    [Fact]
+    public void Scoped_Read_грант_без_View_належить_лише_у_проєкті_призначення()
+    {
+        var profile = Scoped(globalView: false, scopedView: false, deny: false, readGrant: true);
+
+        Assert.True(LookupTargetMatcher.Belongs(new FakePermitGroupResolver(), profile, Target, Target, ProjectId));
+        Assert.False(LookupTargetMatcher.Belongs(new FakePermitGroupResolver(), profile, Target, Target, ProjectId + 1));
+    }
+
+    [Fact]
+    public void Група_реєстр_члена_під_scoped_Deny_не_належить()
+    {
+        var groups = new FakePermitGroupResolver();
+        groups.WithGroup(Target, [Other]);
+        var profile = Scoped(globalView: true, scopedView: false, deny: false, readGrant: false);
+        profile = new AccessProfile
+        {
+            CacheKey = "sc2", UserId = 1, SecurityStamp = "s",
+            Permissions = profile.Permissions, Grants = profile.Grants, Denies = profile.Denies, RoleIds = profile.RoleIds,
+            Scoped = new Dictionary<int, ScopedProjectAccess>
+            {
+                [ProjectId] = new(
+                    new Dictionary<string, Ecr.Domain.Enums.GrantLevel>(), new HashSet<string>(), new HashSet<int>(), new HashSet<string>())
+                {
+                    RegistryDenies = new HashSet<int> { Other },
+                },
+            },
+        };
+
+        Assert.False(LookupTargetMatcher.Belongs(groups, profile, Target, Other, ProjectId));
+        Assert.True(LookupTargetMatcher.Belongs(groups, profile, Target, Other, ProjectId + 1));
+    }
 }

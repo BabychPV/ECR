@@ -64,7 +64,7 @@ public static class LookupTargetMatcher
             // P2 (рішення людини 23.10: «Deny блокує і вибір запису»): Deny на ПРЯМУ ціль так само відсікає запис, як і
             // реєстр члена групи (AcceptsFor) - «не належить» = та сама відповідь, що й для неіснуючого запису.
             // Перевірка у пам'яті (profile.Denies): нових запитів у гарячому шляху Land немає.
-            return profile is null || !RegistryAccess.IsDenied(profile, target);
+            return profile is null || !RegistryAccess.IsDeniedIn(profile, target, viewProjectId);
         }
 
         if (groups is null)
@@ -90,12 +90,27 @@ public static class LookupTargetMatcher
     public static bool MayChoose(AccessProfile? profile, int registryDefId, int? viewProjectId)
         => profile is null
            || profile.IsIntegrationWriter
-           || (CanViewRegistry(profile, registryDefId, viewProjectId) && !RegistryAccess.IsDenied(profile, registryDefId));
+           || CanViewRegistry(profile, registryDefId, viewProjectId);
 
     private static bool CanViewRegistry(AccessProfile profile, int registryDefId, int? viewProjectId)
-        => PermissionCheck.IsGranted(profile, ViewPermission)
-           || (viewProjectId is { } project && profile.Scoped.TryGetValue(project, out var scoped) && scoped.RegistryView)
-           || profile.LevelFor(Domain.Enums.ResourceKind.Registry, registryDefId) >= Domain.Enums.GrantLevel.Read;
+    {
+        // P50: Deny (спільний або виданий ролі з областю цього проєкту) перебиває будь-який View/грант.
+        if (RegistryAccess.IsDeniedIn(profile, registryDefId, viewProjectId))
+        {
+            return false;
+        }
+
+        if (PermissionCheck.IsGranted(profile, ViewPermission)
+            || profile.LevelFor(Domain.Enums.ResourceKind.Registry, registryDefId) >= Domain.Enums.GrantLevel.Read)
+        {
+            return true;
+        }
+
+        return viewProjectId is { } project
+               && profile.Scoped.TryGetValue(project, out var scoped)
+               && (scoped.RegistryView
+                   || (scoped.RegistryGrants.TryGetValue(registryDefId, out var level) && level >= Domain.Enums.GrantLevel.Read));
+    }
 
     /// <summary>
     /// Чи потрібно викликачеві визначати проєкт документа для перевірки <c>Registry.View</c>: лише профіль БЕЗ
@@ -103,7 +118,9 @@ public static class LookupTargetMatcher
     /// </summary>
     /// <param name="profile">Профіль; <c>null</c> (системні шляхи) і збір - ні.</param>
     public static bool ViewProjectNeeded(AccessProfile? profile)
-        => profile is { IsIntegrationWriter: false } && !PermissionCheck.IsGranted(profile, ViewPermission) && profile.Scoped.Count > 0;
+        => profile is { IsIntegrationWriter: false, Scoped.Count: > 0 }
+           && (!PermissionCheck.IsGranted(profile, ViewPermission)
+               || profile.Scoped.Values.Any(s => s.RegistryDenies.Count > 0));
 
     /// <summary>
     /// Оновлює знімок груп, лише коли серед пар є незбіг (гілка, недосяжна для Land). Для збігу - без звернення до резолвера.

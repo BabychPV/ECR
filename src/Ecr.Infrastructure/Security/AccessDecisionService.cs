@@ -401,6 +401,7 @@ public sealed class AccessDecisionService(
         var grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal);
         var denies = new HashSet<string>(StringComparer.Ordinal);
         var layers = new Dictionary<int, (Dictionary<string, GrantLevel> Grants, HashSet<string> Denies)>();
+        var registryLayers = new Dictionary<int, (HashSet<int> Denies, Dictionary<int, GrantLevel> Grants)>();
 
         foreach (var row in rows)
         {
@@ -423,6 +424,30 @@ public sealed class AccessDecisionService(
                 if (projects.Contains(row.ResourceId))
                 {
                     Merge(grants, denies, key, row.Level, row.IsDeny);
+                }
+
+                continue;
+            }
+
+            // P50: довідник проєкту не має, але Deny/Read-грант ролі з областю діє в документах ЇЇ проєктів (вибір запису Lookup):
+            // інакше scoped View перебивав би власний Deny ролі (оракул існування запису). Дані вже прочитані - запитів немає.
+            if (row.ResourceKind == ResourceKind.Registry)
+            {
+                foreach (var projectId in projects)
+                {
+                    if (!registryLayers.TryGetValue(projectId, out var registry))
+                    {
+                        registryLayers[projectId] = registry = (new HashSet<int>(), new Dictionary<int, GrantLevel>());
+                    }
+
+                    if (row.IsDeny)
+                    {
+                        registry.Denies.Add(row.ResourceId);
+                    }
+                    else if (!registry.Grants.TryGetValue(row.ResourceId, out var known) || known < row.Level)
+                    {
+                        registry.Grants[row.ResourceId] = row.Level;
+                    }
                 }
 
                 continue;
@@ -473,6 +498,10 @@ public sealed class AccessDecisionService(
                     permissionsHere)) with
             {
                 Narrowed = narrowed.TryGetValue(projectId, out var here) ? here : [],
+                RegistryDenies = registryLayers.TryGetValue(projectId, out var regHere) ? regHere.Denies : new HashSet<int>(),
+                RegistryGrants = registryLayers.TryGetValue(projectId, out var regGrants)
+                    ? regGrants.Grants
+                    : new Dictionary<int, GrantLevel>(),
 
                 // P48: Registry.View ролі, призначеної на цей проєкт, - лише для вибору запису Lookup.
                 RegistryView = scopedHere.Any(registryViewRoles.Contains),
