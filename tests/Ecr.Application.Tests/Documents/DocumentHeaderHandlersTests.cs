@@ -95,7 +95,7 @@ public sealed class DocumentHeaderHandlersTests
 
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }
-                .Permission("Document.View")
+                .Permission("Document.View").Permission("Registry.View")
                 .Grant(ResourceKind.Project, ProjectId, GrantLevel.Write)
                 .Build());
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
@@ -395,7 +395,7 @@ public sealed class DocumentHeaderHandlersTests
         {
             _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
                 .Returns(new AccessBuilder { UserId = 9 }
-                    .Permission("Document.View")
+                    .Permission("Document.View").Permission("Registry.View")
                     .Grant(ResourceKind.Project, ProjectId, GrantLevel.Write)
                     .Deny(ResourceKind.Registry, memberRegistry)
                     .Build());
@@ -591,7 +591,7 @@ public sealed class DocumentHeaderHandlersTests
     private void DenyRegistry(int registryDefId)
         => _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }
-                .Permission("Document.View")
+                .Permission("Document.View").Permission("Registry.View")
                 .Grant(ResourceKind.Project, ProjectId, GrantLevel.Write)
                 .Deny(ResourceKind.Registry, registryDefId)
                 .Build());
@@ -889,7 +889,7 @@ public sealed class DocumentHeaderHandlersTests
         // L1-17: витіснення (Exclusive) — лише для власника Calculation.Recalculate.
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }
-                .Permission("Document.View")
+                .Permission("Document.View").Permission("Registry.View")
                 .Permission("Calculation.Recalculate")
                 .Grant(ResourceKind.Project, ProjectId, GrantLevel.Write)
                 .Build());

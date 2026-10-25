@@ -90,7 +90,8 @@ public sealed class PatchCellsLookupValidityTests
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessProfile
         {
             CacheKey = "p1", UserId = 9, SecurityStamp = "s",
-            Permissions = new HashSet<string>(), Grants = new Dictionary<string, GrantLevel>(),
+            // Рішення 25.10: вибір запису потребує Registry.View - звичайний користувач фікстури його має.
+            Permissions = new HashSet<string> { "Registry.View" }, Grants = new Dictionary<string, GrantLevel>(),
             Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
         });
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
@@ -384,7 +385,7 @@ public sealed class PatchCellsLookupValidityTests
         => _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessProfile
         {
             CacheKey = "p-deny", UserId = 9, SecurityStamp = "s",
-            Permissions = new HashSet<string>(), Grants = new Dictionary<string, GrantLevel>(),
+            Permissions = new HashSet<string> { "Registry.View" }, Grants = new Dictionary<string, GrantLevel>(),
             Denies = new HashSet<string>(registryIds.Select(id => "Registry:" + id)), RoleIds = new HashSet<int>(),
         });
 

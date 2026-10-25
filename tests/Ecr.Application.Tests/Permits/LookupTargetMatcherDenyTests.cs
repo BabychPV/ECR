@@ -16,10 +16,11 @@ public sealed class LookupTargetMatcherDenyTests
     private const int Target = 55;
     private const int Other = 59;
 
+    // Рішення 25.10: звичайний профіль - з Registry.View (вибір запису потребує права читати реєстр); NoView() - без нього.
     private static AccessProfile Profile(params int[] denied) => new()
     {
         CacheKey = "k", UserId = 1, SecurityStamp = "s",
-        Permissions = new HashSet<string>(), Grants = new Dictionary<string, Ecr.Domain.Enums.GrantLevel>(),
+        Permissions = new HashSet<string> { "Registry.View" }, Grants = new Dictionary<string, Ecr.Domain.Enums.GrantLevel>(),
         Denies = new HashSet<string>(denied.Select(id => "Registry:" + id)), RoleIds = new HashSet<int>(),
     };
 
@@ -52,6 +53,13 @@ public sealed class LookupTargetMatcherDenyTests
     // реєстр запису; Deny перемагає; системні шляхи (profile = null) і збір (IsIntegrationWriter) - як було.
     // Мутація: прибрати перевірку View в Belongs - червоніють тести «без View».
 
+    private static AccessProfile NoView() => new()
+    {
+        CacheKey = "n", UserId = 1, SecurityStamp = "s",
+        Permissions = new HashSet<string>(), Grants = new Dictionary<string, Ecr.Domain.Enums.GrantLevel>(),
+        Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
+    };
+
     private static AccessProfile WithView(params string[] denied) => new()
     {
         CacheKey = "v", UserId = 1, SecurityStamp = "s",
@@ -61,7 +69,7 @@ public sealed class LookupTargetMatcherDenyTests
 
     [Fact]
     public void Пряма_ціль_без_Registry_View_не_належить()
-        => Assert.False(LookupTargetMatcher.Belongs(new FakePermitGroupResolver(), Profile(), Target, Target));
+        => Assert.False(LookupTargetMatcher.Belongs(new FakePermitGroupResolver(), NoView(), Target, Target));
 
     [Fact]
     public void Пряма_ціль_з_Registry_View_належить()
@@ -104,7 +112,7 @@ public sealed class LookupTargetMatcherDenyTests
         var groups = new FakePermitGroupResolver();
         groups.WithGroup(Target, [Other]);
 
-        Assert.False(LookupTargetMatcher.Belongs(groups, Profile(), Target, Other));
+        Assert.False(LookupTargetMatcher.Belongs(groups, NoView(), Target, Other));
         Assert.True(LookupTargetMatcher.Belongs(groups, WithView(), Target, Other));
     }
 

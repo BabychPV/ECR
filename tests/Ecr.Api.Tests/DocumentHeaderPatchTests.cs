@@ -378,6 +378,8 @@ public sealed class DocumentHeaderPatchTests(SqlServerFixture sql)
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         db.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
+
+        db.RolePermissions.Add(new RolePermission(role.Id, "Registry.View")); // 25.10: вибір запису Lookup потребує Registry.View
         db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
         db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, document.ProjectId, GrantLevel.Write));
         await db.SaveChangesAsync().ConfigureAwait(false);
