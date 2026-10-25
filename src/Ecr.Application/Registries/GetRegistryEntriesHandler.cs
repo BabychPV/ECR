@@ -75,15 +75,36 @@ public sealed class GetRegistryEntriesHandler(
         // asOf») — вона й була джерелом дефекту: Lookup нетемпорального
         // довідника не працював НІКОЛИ, бо перевірка asOf ішла раніше, ніж
         // хтось встигав дізнатися, що довідник нетемпоральний.
-        await RegistryAccess
-            .RequireAsync(access, currentUser, Permission, GrantLevel.Read, new RegistryLookup(registries, registryCode), ct)
-            .ConfigureAwait(false);
+        // ✎ Рішення людини 26.10 (P3): пікер документа (`documentId`) приймає й Registry.View ролі, призначеної на ПРОЄКТ
+        // документа (`ScopedProjectAccess.RegistryView`) - узгоджено з PATCH шапки/комірки. Без `documentId` - як було.
+        // Запит проєкту і перевірка йдуть лише після відмови глобальної перевірки: звичайні користувачі нічого не платять.
+        Security.AccessProfile? scopedViewer = null;
+        try
+        {
+            await RegistryAccess
+                .RequireAsync(access, currentUser, Permission, GrantLevel.Read, new RegistryLookup(registries, registryCode), ct)
+                .ConfigureAwait(false);
+        }
+        catch (AccessDeniedException) when (documentId is not null)
+        {
+            scopedViewer = await ScopedViewerAsync(documentId.Value, ct).ConfigureAwait(false);
+            if (scopedViewer is null)
+            {
+                throw;
+            }
+        }
 
         var definition = await registries.FindDefinitionAsync(registryCode, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 "ECR-REG-0404",
                 $"Довідника «{registryCode}» не існує.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0404.registry", ["registryCode"] = registryCode });
+
+        // Scoped View не перекриває Deny на довідник: заборонений - 404, як неіснуючий (S18).
+        if (scopedViewer is not null && RegistryAccess.IsDenied(scopedViewer, definition.Id))
+        {
+            throw RegistryAccess.NotFound(registryCode);
+        }
 
         // ⛔ Відсутній або зіпсований `asOf` — ВІДМОВА, а не `0001-01-01`
         // (аудит 2026-09-16, §9), АЛЕ лише для ТЕМПОРАЛЬНОГО довідника
@@ -264,6 +285,28 @@ public sealed class GetRegistryEntriesHandler(
                 type?.Code,
                 type?.NameL10n.Get(currentUser.Language));
         })];
+    }
+
+    /// <summary>
+    /// Профіль, якщо його роль, призначена на проєкт документа, дає <c>Registry.View</c> для вибору запису; інакше <c>null</c>.
+    /// </summary>
+    private async Task<Security.AccessProfile?> ScopedViewerAsync(long documentId, CancellationToken ct)
+    {
+        if (currentUser.UserId is not { } userId)
+        {
+            return null;
+        }
+
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        if (!Permits.Groups.LookupTargetMatcher.ViewProjectNeeded(profile))
+        {
+            return null;
+        }
+
+        return await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false) is { } projectId
+               && profile.Scoped.TryGetValue(projectId, out var scoped) && scoped.RegistryView
+            ? profile
+            : null;
     }
 
     /// <summary>Вікно проєкту документа; невидимий чи відсутній документ - 404 (як <c>GET …/header</c>, B-08).</summary>
