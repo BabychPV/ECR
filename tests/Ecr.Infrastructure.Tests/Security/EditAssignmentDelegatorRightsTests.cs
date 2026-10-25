@@ -480,14 +480,14 @@ public sealed class EditAssignmentDelegatorRightsTests(SqlServerFixture sql)
     {
         var w = await ArrangeAsync(GrantLevel.Submit);
 
-        await ChangeDelegatorAsync(w, u => u.RegisterFailedAttempt(maxFailedAttempts: 1, lockoutMinutes: 60, DateTime.UtcNow));
+        await ChangeDelegatorAsync(w, u => u.RegisterFailedAttempt(maxFailedAttempts: 1, lockoutMinutes: 60, Now));
         Assert.False((await SubmitAsync(w)).IsAllowed);
 
         // Блокування, що вже минуло, надання не вимикає.
         await using (var db = w.Builder.CreateContext())
         {
             await db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE sec.[User] SET LockedUntil = {DateTime.UtcNow.AddDays(-1)} WHERE Id = {w.DelegatorId}",
+                $"UPDATE sec.[User] SET LockedUntil = {Now.AddDays(-1)} WHERE Id = {w.DelegatorId}",
                 CancellationToken.None);
         }
 

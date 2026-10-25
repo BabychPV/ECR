@@ -757,7 +757,7 @@ public sealed class AccessDecisionService(
         }
 
         var facts = await EditAssignmentFactsReader
-            .LoadAsync(db, documentIds, profile.UserId, forUpdate: locked, ct)
+            .LoadAsync(db, documentIds, profile.UserId, forUpdate: locked, ct, clock.UtcNow)
             .ConfigureAwait(false);
 
         var now = clock.UtcNow;
@@ -1921,7 +1921,7 @@ public sealed class AccessDecisionService(
         }
 
         var loaded = await Persistence.EditAssignmentFactsReader
-            .LoadAsync(db, documentIds, profile.UserId, forUpdate: false, ct)
+            .LoadAsync(db, documentIds, profile.UserId, forUpdate: false, ct, clock.UtcNow)
             .ConfigureAwait(false);
 
         // ⛔ P2-2: передача діє лише поки делегатор може її видавати (див. WithDelegatorRightsAsync).
