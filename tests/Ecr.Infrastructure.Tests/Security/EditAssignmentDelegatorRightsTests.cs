@@ -309,4 +309,126 @@ public sealed class EditAssignmentDelegatorRightsTests(SqlServerFixture sql)
 
         Assert.True(decision.IsAllowed);
     }
+
+    // ── P3 (рішення людини 26.10): календар періодів, Write після пониження, глобальний адмін, запити ───────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P3-CALENDAR")]
+    public async Task Календар_проєкту_для_виконавця_зі_знятим_делегатором_закритий_а_відновлений_відкритий()
+    {
+        var w = await ArrangeAsync(GrantLevel.Read);
+
+        Task<bool> InProjectAsync() => WithServiceAsync(
+            w, s => s.ParticipatesInProjectAsync(Participant(w), w.Doc.ProjectId, CancellationToken.None));
+
+        Assert.True(await InProjectAsync());
+
+        await RemoveDelegatorRolesAsync(w);
+        Assert.False(await InProjectAsync());
+
+        await AssignRoleAsync(w, w.ManagerRoleId);
+        Assert.True(await InProjectAsync());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P3-ADMIN")]
+    public async Task Адміністративні_права_без_гранта_Manage_на_проєкт_не_підтримують_надання()
+    {
+        var w = await ArrangeAsync(GrantLevel.Submit);
+        Assert.True((await SubmitAsync(w)).IsAllowed);
+
+        // «Глобальний адмін»: права безпеки/довідників/шаблонів, але без ресурсного гранта Manage на проєкт документа.
+        await RemoveDelegatorRolesAsync(w);
+        await using (var db = w.Builder.CreateContext())
+        {
+            var admin = new Role(EcrCode.Create($"DRA_{Guid.NewGuid():N}"[..20]), Text("Global admin"));
+            db.Roles.Add(admin);
+            await db.SaveChangesAsync(CancellationToken.None);
+            foreach (var permission in new[] { "Document.View", "Security.ManageUsers", "Security.ManageRoles", "Registry.View", "Template.View" })
+            {
+                db.RolePermissions.Add(new RolePermission(admin.Id, permission));
+            }
+
+            await db.SaveChangesAsync(CancellationToken.None);
+            await AssignRoleAsync(w, admin.Id);
+        }
+
+        Assert.False((await SubmitAsync(w)).IsAllowed);
+    }
+
+    /// <summary>
+    /// Запитів до БД на рішення виконавця з наданням не більшає з кількістю його надань і вкладається в стелю
+    /// (профіль делегатора береться раз на рішення, проєкт - раз).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P3-QUERYCOUNT")]
+    public async Task Рішення_виконавця_з_наданням_не_росте_за_запитами_з_кількістю_надань()
+    {
+        var one = await ArrangeAsync(GrantLevel.Submit);
+        var many = await ArrangeAsync(GrantLevel.Submit);
+
+        // Ще дві передачі того самого делегатора тому самому виконавцю: на весь документ (Submit) і на таблицю (Read).
+        await using (var db = many.Builder.CreateContext())
+        {
+            var tableCode = await db.TableDefs.AsNoTracking().Where(t => t.Id == many.Doc.TableDefId)
+                .Select(t => t.Code).SingleAsync(CancellationToken.None);
+            foreach (var (sheet, table, level) in new (string? Sheet, string? Table, GrantLevel Level)[]
+                     {
+                         (null, null, GrantLevel.Submit),
+                         (many.Doc.SheetCode, tableCode, GrantLevel.Read),
+                     })
+            {
+                var extra = new EditAssignment(
+                    many.Doc.DocumentId,
+                    EditAssignmentSlice.Create(sheet, table, monthNumber: null, periodKey: null),
+                    isExclusive: false,
+                    delegatedByUserId: many.DelegatorId,
+                    handoffId: Guid.NewGuid(),
+                    createdByUserId: many.DelegatorId,
+                    utcNow: Now,
+                    level: level);
+                extra.AddRecipient(many.ExecutorId, many.DelegatorId, Now);
+                new EditAssignmentStore(db).Add(extra);
+            }
+
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await SubmitAsync(one);
+        await SubmitAsync(many);
+
+        var oneCount = await CountCommandsAsync(() => SubmitAsync(one));
+        var manyCount = await CountCommandsAsync(() => SubmitAsync(many));
+
+        Assert.True(manyCount == oneCount, $"Рішення з 1 наданням — {oneCount} звернень, з 3 — {manyCount}.");
+        Assert.True(oneCount <= 40, $"Рішення виконавця з наданням: {oneCount} звернень до БД (стеля 40).");
+    }
+
+    private static readonly AsyncLocal<System.Runtime.CompilerServices.StrongBox<bool>?> Measuring = new();
+
+    private static async Task<int> CountCommandsAsync(Func<Task> action)
+    {
+        using var counter = new SqlClientCommandCounter(new CommandTally(), _ => Measuring.Value is { Value: true });
+        counter.Tally.Reset();
+        var flag = new System.Runtime.CompilerServices.StrongBox<bool>(true);
+        Measuring.Value = flag;
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            flag.Value = false;
+            Measuring.Value = null;
+        }
+
+        counter.AssertObserved();
+        return counter.Tally.Snapshot().Total;
+    }
 }
