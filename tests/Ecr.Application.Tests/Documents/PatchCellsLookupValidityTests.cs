@@ -520,7 +520,7 @@ public sealed class PatchCellsLookupValidityTests
                 {
                     [scopedProject] = new(
                         new Dictionary<string, GrantLevel>(), new HashSet<string>(), new HashSet<int>(),
-                        new HashSet<string>(scopedPermissions)),
+                        new HashSet<string>(scopedPermissions)) { RegistryView = scopedPermissions.Contains("Registry.View") },
                 },
         });
     }

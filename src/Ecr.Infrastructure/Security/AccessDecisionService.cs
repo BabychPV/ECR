@@ -384,6 +384,11 @@ public sealed class AccessDecisionService(
             .Where(rp => scopedProjects.ContainsKey(rp.RoleId) && !PermissionScopes.IsGlobal(rp.PermissionCode))
             .ToLookup(rp => rp.RoleId, rp => rp.PermissionCode);
 
+        var registryViewRoles = rolePermissions
+            .Where(rp => scopedProjects.ContainsKey(rp.RoleId) && rp.PermissionCode == "Registry.View")
+            .Select(rp => rp.RoleId)
+            .ToHashSet();
+
         var rows = roleIds.Count == 0
             ? []
             : await db.ResourceGrants
@@ -468,6 +473,9 @@ public sealed class AccessDecisionService(
                     permissionsHere)) with
             {
                 Narrowed = narrowed.TryGetValue(projectId, out var here) ? here : [],
+
+                // P48: Registry.View ролі, призначеної на цей проєкт, - лише для вибору запису Lookup.
+                RegistryView = scopedHere.Any(registryViewRoles.Contains),
             };
         }
 

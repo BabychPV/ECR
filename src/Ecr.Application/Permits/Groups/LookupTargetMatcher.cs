@@ -81,7 +81,7 @@ public static class LookupTargetMatcher
 
     private static bool CanViewRegistry(AccessProfile profile, int registryDefId, int? viewProjectId)
         => PermissionCheck.IsGranted(profile, ViewPermission)
-           || (viewProjectId is { } project && PermissionCheck.IsGrantedIn(profile, ViewPermission, project))
+           || (viewProjectId is { } project && profile.Scoped.TryGetValue(project, out var scoped) && scoped.RegistryView)
            || profile.LevelFor(Domain.Enums.ResourceKind.Registry, registryDefId) >= Domain.Enums.GrantLevel.Read;
 
     /// <summary>

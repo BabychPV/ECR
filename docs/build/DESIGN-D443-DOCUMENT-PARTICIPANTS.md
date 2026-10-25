@@ -145,3 +145,5 @@
 | Пошук | 0 нових, той самий SQL | +2 |
 
 * ✎ 25.10 (рішення людини «Так, вимагати», Аудит-2 P3-2): вибір запису Lookup у шапці (PATCH шапки), комірці (PATCH, книга/Excel) потребує права читати реєстр запису — Registry.View глобально, у проєкті документа (scoped-роль) або грант Read на реєстр; Deny перемагає. Без права відповідь та сама, що для неіснуючого запису (422 ECR-HDR-0422 lookupEntryMissing / ECR-CELL-4223 missingEntry), без оракула існування id. Системні шляхи (profile = null) і збір (IsIntegrationWriter) — як було. Реалізація: LookupTargetMatcher.Belongs(…, viewProjectId); проєкт документа для комірок визначається лише для профілю без глобального права зі scoped-ролями.
+
+* ✎ 25.10 (hotfix p48): scoped-роль (призначена на проєкт документа) з Registry.View теж дозволяє ВИБІР запису Lookup у цьому проєкті - ScopedProjectAccess.RegistryView (Registry.View у PermissionScopes.Global, тож у Scoped[проєкт].Permissions не потрапляє). Прапорець не відкриває пікер, перегляд і адміністрування довідників (це лишилось P3: пікер GET registries/{code}/entries для scoped-оператора - 403, рядок PM-EDITASSIGN-P3).

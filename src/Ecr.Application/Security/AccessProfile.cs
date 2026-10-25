@@ -336,6 +336,17 @@ public sealed record ScopedProjectAccess(
     /// ролі «лише аркуш F1» грантом на весь проєкт.
     /// </remarks>
     public IReadOnlyList<NarrowedAccess> Narrowed { get; init; } = [];
+
+    /// <summary>
+    /// P48: серед ролей без звуження, призначених на цей проєкт, є роль із <c>Registry.View</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>Registry.View</c> — у <see cref="Domain.Entities.Security.PermissionScopes.Global"/>, тож у
+    /// <see cref="Permissions"/> не потрапляє і <c>Has(code, projectId)</c> його не бачить. Окремий прапорець лише для
+    /// ВИБОРУ запису Lookup у документі проєкту (шапка, комірка, книга): оператор, призначений на проєкт, обирає записи
+    /// довідників; перегляд довідників, пікер і адміністрування прапорець НЕ відкриває.
+    /// </remarks>
+    public bool RegistryView { get; init; }
 }
 
 /// <summary>Що дає одне призначення ролі, звужене аркушами чи періодами (D-214), в одному проєкті.</summary>
