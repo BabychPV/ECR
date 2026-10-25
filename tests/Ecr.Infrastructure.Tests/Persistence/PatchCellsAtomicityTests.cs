@@ -183,7 +183,7 @@ public sealed class PatchCellsAtomicityTests(SqlServerFixture sql)
         var profile = new AccessProfile
         {
             CacheKey = "p", UserId = 1, SecurityStamp = "s",
-            Permissions = new HashSet<string>(), Grants = new Dictionary<string, GrantLevel>(),
+            Permissions = new HashSet<string> { "Registry.View" },  Grants = new Dictionary<string, GrantLevel>(),
             Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
         };
         access.BuildProfileAsync(1, Arg.Any<CancellationToken>()).Returns(profile);

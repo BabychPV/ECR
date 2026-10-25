@@ -95,7 +95,7 @@ public sealed class DocumentHeaderHandlersTests
 
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }
-                .Permission("Document.View")
+                .Permission("Document.View").Permission("Registry.View")
                 .Grant(ResourceKind.Project, ProjectId, GrantLevel.Write)
                 .Build());
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
@@ -395,7 +395,7 @@ public sealed class DocumentHeaderHandlersTests
         {
             _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
                 .Returns(new AccessBuilder { UserId = 9 }
-                    .Permission("Document.View")
+                    .Permission("Document.View").Permission("Registry.View")
                     .Grant(ResourceKind.Project, ProjectId, GrantLevel.Write)
                     .Deny(ResourceKind.Registry, memberRegistry)
                     .Build());
@@ -424,10 +424,174 @@ public sealed class DocumentHeaderHandlersTests
             System.Text.Json.JsonSerializer.Serialize(error.Details));
     }
 
+    // ── Решення людини 25.10 («Так, вимагати»): вибір запису Lookup у шапці потребує Registry.View (глобально, у проєкті
+    // документа чи грант Read на реєстр); без нього - lookupEntryMissing, побайтно як для неіснуючого запису.
+    // Мутація: прибрати перевірку View в LookupTargetMatcher.Belongs - червоніють тести «без View».
+
+    private void ViewCase(
+        string[]? globalPermissions = null,
+        string[]? scopedPermissions = null,
+        int scopedProject = ProjectId,
+        Dictionary<string, GrantLevel>? extraGrants = null,
+        string[]? denies = null)
+    {
+        var grants = new Dictionary<string, GrantLevel> { [$"Project:{ProjectId}"] = GrantLevel.Write };
+        foreach (var (key, level) in extraGrants ?? [])
+        {
+            grants[key] = level;
+        }
+
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessProfile
+        {
+            CacheKey = "hdr-view", UserId = 9, SecurityStamp = "s",
+            Permissions = new HashSet<string>(["Document.View", .. globalPermissions ?? []]),
+            Grants = grants,
+            Denies = new HashSet<string>(denies ?? []), RoleIds = new HashSet<int>(),
+            Scoped = scopedPermissions is null
+                ? new Dictionary<int, ScopedProjectAccess>()
+                : new Dictionary<int, ScopedProjectAccess>
+                {
+                    [scopedProject] = new(
+                        new Dictionary<string, GrantLevel>(), new HashSet<string>(), new HashSet<int>(),
+                        new HashSet<string>(scopedPermissions)),
+                },
+        });
+    }
+
+    private async Task<BusinessRuleException> PatchPermitRefusedAsync(IRegistryStore registries)
+    {
+        const long entryId = 777;
+        return await Assert.ThrowsAsync<BusinessRuleException>(() => PatchWith(registries).HandleAsync(
+            DocumentId,
+            Request("v", new PatchHeaderField("Permit", entryId.ToString(System.Globalization.CultureInfo.InvariantCulture), false)),
+            CancellationToken.None));
+    }
+
+    private async Task AssertPermitSameAsAbsentAsync()
+    {
+        var refused = await PatchPermitRefusedAsync(EntryOf(777, PermitRegistryDefId));
+        Assert.Equal("ECR-HDR-0422", refused.ErrorCode);
+        Assert.Equal("err.ECR-HDR-0422.lookupEntryMissing", refused.Details!["messageKey"]);
+        await AssertNothingWrittenAsync();
+
+        var empty = Substitute.For<IRegistryStore>();
+        empty.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns(new List<RegistryEntryStanding>());
+        var absent = await PatchPermitRefusedAsync(empty);
+
+        Assert.Equal(absent.ErrorCode, refused.ErrorCode);
+        Assert.Equal(absent.Message, refused.Message);
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(absent.Details),
+            System.Text.Json.JsonSerializer.Serialize(refused.Details));
+    }
+
+    private async Task AssertPermitSavedAsync()
+    {
+        const long entryId = 777;
+        var version = await VersionOfAsync([]);
+        Values([], new() { [_permit.Id] = new() { ValueRegistryEntryId = entryId } });
+
+        await PatchWith(EntryOf(entryId, PermitRegistryDefId)).HandleAsync(
+            DocumentId,
+            Request(version, new PatchHeaderField("Permit", entryId.ToString(System.Globalization.CultureInfo.InvariantCulture), false)),
+            CancellationToken.None);
+
+        await _headers.Received(1).SaveValuesAsync(
+            DocumentId,
+            Arg.Is<IReadOnlyDictionary<int, DocumentHeaderValueData>>(d => d[_permit.Id].ValueRegistryEntryId == entryId),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [InlineData("none")]
+    [InlineData("scopedOtherProject")]
+    [InlineData("readGrantOnOtherRegistry")]
+    public async Task PATCH_без_Registry_View_існуючий_запис_дає_ту_саму_відповідь_що_й_неіснуючий(string kind)
+    {
+        switch (kind)
+        {
+            case "scopedOtherProject":
+                ViewCase(scopedPermissions: ["Registry.View"], scopedProject: ProjectId + 1);
+                break;
+            case "readGrantOnOtherRegistry":
+                ViewCase(extraGrants: new() { ["Registry:" + (PermitRegistryDefId + 1)] = GrantLevel.Read });
+                break;
+            default:
+                ViewCase();
+                break;
+        }
+
+        await AssertPermitSameAsAbsentAsync();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_View_і_Deny_на_реєстр_поля_дає_ту_саму_відповідь_що_й_неіснуючий()
+    {
+        ViewCase(globalPermissions: ["Registry.View"], denies: ["Registry:" + PermitRegistryDefId]);
+
+        await AssertPermitSameAsAbsentAsync();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_з_глобальним_Registry_View_запис_приймається()
+    {
+        ViewCase(globalPermissions: ["Registry.View"]);
+
+        await AssertPermitSavedAsync();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_scoped_оператор_з_View_на_проєкт_документа_запис_приймається()
+    {
+        ViewCase(scopedPermissions: ["Registry.View"]);
+
+        await AssertPermitSavedAsync();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_грант_Read_на_реєстр_поля_без_View_запис_приймається()
+    {
+        ViewCase(extraGrants: new() { ["Registry:" + PermitRegistryDefId] = GrantLevel.Read });
+
+        await AssertPermitSavedAsync();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_група_реєстр_члена_без_View_дає_lookupEntryMissing_а_з_View_приймається()
+    {
+        const int memberRegistry = PermitRegistryDefId + 1;
+        _groups.WithGroup(PermitRegistryDefId, [memberRegistry]);
+
+        ViewCase();
+        var refused = await PatchPermitRefusedAsync(EntryOf(777, memberRegistry));
+        Assert.Equal("err.ECR-HDR-0422.lookupEntryMissing", refused.Details!["messageKey"]);
+        await AssertNothingWrittenAsync();
+
+        ViewCase(globalPermissions: ["Registry.View"]);
+        var version = await VersionOfAsync([]);
+        Values([], new() { [_permit.Id] = new() { ValueRegistryEntryId = 777 } });
+        await PatchWith(EntryOf(777, memberRegistry)).HandleAsync(
+            DocumentId,
+            Request(version, new PatchHeaderField("Permit", "777", false)),
+            CancellationToken.None);
+
+        await _headers.Received(1).SaveValuesAsync(
+            DocumentId,
+            Arg.Is<IReadOnlyDictionary<int, DocumentHeaderValueData>>(d => d[_permit.Id].ValueRegistryEntryId == 777),
+            Arg.Any<CancellationToken>());
+    }
+
     private void DenyRegistry(int registryDefId)
         => _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }
-                .Permission("Document.View")
+                .Permission("Document.View").Permission("Registry.View")
                 .Grant(ResourceKind.Project, ProjectId, GrantLevel.Write)
                 .Deny(ResourceKind.Registry, registryDefId)
                 .Build());
@@ -725,7 +889,7 @@ public sealed class DocumentHeaderHandlersTests
         // L1-17: витіснення (Exclusive) — лише для власника Calculation.Recalculate.
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }
-                .Permission("Document.View")
+                .Permission("Document.View").Permission("Registry.View")
                 .Permission("Calculation.Recalculate")
                 .Grant(ResourceKind.Project, ProjectId, GrantLevel.Write)
                 .Build());

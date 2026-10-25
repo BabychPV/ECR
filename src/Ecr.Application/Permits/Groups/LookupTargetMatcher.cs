@@ -34,13 +34,27 @@ public static class LookupTargetMatcher
     /// <param name="profile">Профіль користувача для S18; <c>null</c> - без перевірки Deny (системні шляхи).</param>
     /// <param name="targetRegistryId">Ціль колонки/поля; <c>null</c> - колонка без цілі, нічого не належить.</param>
     /// <param name="entryRegistryId"><c>RegistryDefId</c> запису.</param>
+    /// <param name="viewProjectId">
+    /// Проєкт документа для scoped-ролей: <c>Registry.View</c> з області цього проєкту теж відкриває реєстр. Викликач
+    /// визначає його ЛИШЕ коли профіль без глобального права й зі scoped-ролями (<see cref="ViewProjectNeeded"/>).
+    /// </param>
     public static bool Belongs(
         IPermitGroupResolver? groups,
         AccessProfile? profile,
         int? targetRegistryId,
-        int entryRegistryId)
+        int entryRegistryId,
+        int? viewProjectId = null)
     {
         if (targetRegistryId is not { } target)
+        {
+            return false;
+        }
+
+        // Рішення людини 25.10 («Так, вимагати»): вибір запису реєстру потребує права його ЧИТАТИ - ТОЙ САМИЙ критерій,
+        // що й пікер (Registry.View глобально АБО грант Read на реєстр запису), плюс Registry.View у проєкті документа
+        // для scoped-ролей. Без нього - «не належить» = та сама відповідь, що й для неіснуючого запису (без оракула
+        // існування id). Системні шляхи (profile = null) і збір (IsIntegrationWriter) - як було. Усе в пам'яті профілю.
+        if (profile is not null && !profile.IsIntegrationWriter && !CanViewRegistry(profile, entryRegistryId, viewProjectId))
         {
             return false;
         }
@@ -62,6 +76,21 @@ public static class LookupTargetMatcher
             ? groups.Accepts(target, entryRegistryId)
             : groups.AcceptsFor(profile, target, entryRegistryId);
     }
+
+    private const string ViewPermission = "Registry.View";
+
+    private static bool CanViewRegistry(AccessProfile profile, int registryDefId, int? viewProjectId)
+        => PermissionCheck.IsGranted(profile, ViewPermission)
+           || (viewProjectId is { } project && PermissionCheck.IsGrantedIn(profile, ViewPermission, project))
+           || profile.LevelFor(Domain.Enums.ResourceKind.Registry, registryDefId) >= Domain.Enums.GrantLevel.Read;
+
+    /// <summary>
+    /// Чи потрібно викликачеві визначати проєкт документа для перевірки <c>Registry.View</c>: лише профіль БЕЗ
+    /// глобального права, але зі scoped-ролями (решта не платить запитом).
+    /// </summary>
+    /// <param name="profile">Профіль; <c>null</c> (системні шляхи) і збір - ні.</param>
+    public static bool ViewProjectNeeded(AccessProfile? profile)
+        => profile is { IsIntegrationWriter: false } && !PermissionCheck.IsGranted(profile, ViewPermission) && profile.Scoped.Count > 0;
 
     /// <summary>
     /// Оновлює знімок груп, лише коли серед пар є незбіг (гілка, недосяжна для Land). Для збігу - без звернення до резолвера.

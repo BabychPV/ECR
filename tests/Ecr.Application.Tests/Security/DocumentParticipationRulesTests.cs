@@ -254,6 +254,51 @@ public sealed class DocumentParticipationRulesTests
             manager, Project, Snapshot, EditAssignmentSlice.Create("SZ", null, null, null)));
     }
 
+    /// <summary>
+    /// P2-1 (аудит 25.10): заборона КОЛОНКИ делегатора звужує його власний рівень на області — інакше менеджер без права
+    /// бачити колонку відкривав її читання/подання/погодження іншому. Мутація: прибрати цикл по колонках у
+    /// <c>EditAssignmentAccess.OwnLevelOver</c> → червоніють перші дві перевірки.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "P2-1")]
+    public void Стеля_враховує_заборону_колонки_делегатора()
+    {
+        var denied = new AccessBuilder()
+            .Grant(ResourceKind.Project, Project, GrantLevel.Manage)
+            .Deny(ResourceKind.Column, Col1)
+            .Build();
+
+        // Колонка Col1 — у таблиці T201 аркуша SA: і аркуш, і сама таблиця для делегатора неповні.
+        Assert.Equal(GrantLevel.None, EditAssignmentAccess.OwnLevelOver(
+            denied, Project, Snapshot, EditAssignmentSlice.Create("SA", null, null, null)));
+        Assert.Equal(GrantLevel.None, EditAssignmentAccess.OwnLevelOver(
+            denied, Project, Snapshot, EditAssignmentSlice.Create("SA", "T201", null, null)));
+
+        // Контроль: інша таблиця того самого аркуша і чужий аркуш — без заборони, рівень повний.
+        Assert.Equal(GrantLevel.Manage, EditAssignmentAccess.OwnLevelOver(
+            denied, Project, Snapshot, EditAssignmentSlice.Create("SA", "T202", null, null)));
+        Assert.Equal(GrantLevel.Manage, EditAssignmentAccess.OwnLevelOver(
+            denied, Project, Snapshot, EditAssignmentSlice.Create("SB", null, null, null)));
+
+        // Контроль: заборона колонки, якої в області немає, нічого не змінює; без заборони рівень повний.
+        var unrelated = new AccessBuilder()
+            .Grant(ResourceKind.Project, Project, GrantLevel.Manage)
+            .Deny(ResourceKind.Column, 999_999)
+            .Build();
+        Assert.Equal(GrantLevel.Manage, EditAssignmentAccess.OwnLevelOver(
+            unrelated, Project, Snapshot, EditAssignmentSlice.Create("SA", null, null, null)));
+
+        // Усі три рівні, що йдуть шляхом OwnLevelOver, видає лише той, чий власний рівень їх сягає.
+        foreach (var level in new[] { GrantLevel.Read, GrantLevel.Submit, GrantLevel.Approve })
+        {
+            Assert.True(
+                EditAssignmentAccess.OwnLevelOver(denied, Project, Snapshot, EditAssignmentSlice.Create("SA", null, null, null)) < level);
+            Assert.True(
+                EditAssignmentAccess.OwnLevelOver(unrelated, Project, Snapshot, EditAssignmentSlice.Create("SA", null, null, null)) >= level);
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Decision", "D-443")]

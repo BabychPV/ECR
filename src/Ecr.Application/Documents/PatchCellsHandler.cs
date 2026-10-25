@@ -1875,7 +1875,8 @@ public sealed partial class PatchCellsHandler(
 
         // ⛔ S18 (час): «чужий довідник / поза складом групи / Deny» відмовляє ДО читання меж періоду - так само рано, як
         // «запису немає» (CheckLookupsExist), тож відповідь не відрізняється ще й одним запитом у БД (P3-1).
-        CheckLookupsBelong(context, changed, standings, groups);
+        var viewProjectId = await LookupViewProjectAsync(context, ct).ConfigureAwait(false);
+        CheckLookupsBelong(context, changed, standings, groups, viewProjectId);
 
         // ⚠ Межі періоду читаються лише тоді, коли є що перевіряти на дату.
         // Немає періоду (`null`) — перевірки на дату немає; решта причин діють.
@@ -1894,15 +1895,18 @@ public sealed partial class PatchCellsHandler(
         RequestContext context,
         List<(CellAddress Address, long? EntryId)> changed,
         Dictionary<long, RegistryEntryStanding> standings,
-        Permits.Groups.ILookupTargetResolver? groups)
+        Permits.Groups.ILookupTargetResolver? groups,
+        int? viewProjectId)
     {
         // PRMG: ціль-група приймає записи реєстрів складу (збіг реєстру - швидкий шлях без резолвера; Deny - як «немає»).
+        // Рішення людини 25.10: без Registry.View вибір запису - теж «немає» (проєкт документа - лише для scoped-ролей).
         var foreign = changed
             .Where(cell => !Permits.Groups.LookupTargetMatcher.Belongs(
                 groups,
                 context.Profile,
                 context.Snapshot.ColumnsById[cell.Address.ColumnDefId].LookupRegistryDefId,
-                standings[cell.EntryId!.Value].RegistryDefId))
+                standings[cell.EntryId!.Value].RegistryDefId,
+                viewProjectId))
             .Select(cell => DescribeLookup(context, cell))
             .ToList();
 
@@ -1914,6 +1918,12 @@ public sealed partial class PatchCellsHandler(
             throw MissingEntryRefusal(foreign);
         }
     }
+
+    /// <summary>Проєкт документа для перевірки <c>Registry.View</c> у scoped-ролі; для решти - <c>null</c> без запиту.</summary>
+    private async Task<int?> LookupViewProjectAsync(RequestContext context, CancellationToken ct)
+        => Permits.Groups.LookupTargetMatcher.ViewProjectNeeded(context.Profile)
+            ? await access.DocumentProjectIdAsync(context.Instance.DocumentId, ct).ConfigureAwait(false)
+            : null;
 
     /// <summary>Пари (ціль колонки, реєстр запису) змінених посилань - для оновлення знімка груп лише при незбігу.</summary>
     private static IEnumerable<(int? Target, int EntryRegistryId)> LookupPairs(

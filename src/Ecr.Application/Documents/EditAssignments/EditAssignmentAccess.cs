@@ -271,6 +271,15 @@ internal static class EditAssignmentAccess
 
                 matched = true;
                 own = Min(own, EditRules.Effective(roles, context with { TableDefId = table.Id }));
+
+                // ⛔ P2-1 (аудит 25.10): заборона (Deny) КОЛОНКИ делегатора теж звужує його власний рівень —
+                // інакше менеджер без права бачити колонку відкривав її читання/подання/погодження іншому.
+                foreach (var column in table.Columns)
+                {
+                    own = Min(
+                        own,
+                        EditRules.Effective(roles, context with { TableDefId = table.Id, ColumnDefId = column.Id }));
+                }
             }
         }
 

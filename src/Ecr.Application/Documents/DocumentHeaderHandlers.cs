@@ -318,7 +318,8 @@ public sealed class PatchDocumentHeaderHandler(
                 !standings.TryGetValue(e.EntryId, out var standing)
                 || fieldsOfEntries[e.FieldId].LookupRegistryDefId is not null
                    && !Permits.Groups.LookupTargetMatcher.Belongs(
-                       groups, profile, fieldsOfEntries[e.FieldId].LookupRegistryDefId, standing.RegistryDefId));
+                       groups, profile, fieldsOfEntries[e.FieldId].LookupRegistryDefId, standing.RegistryDefId,
+                       document.ProjectId));
             if (missing != default)
             {
                 var missingCode = fieldsOfEntries[missing.FieldId].Code;
@@ -558,7 +559,7 @@ public sealed class PatchDocumentHeaderHandler(
             // чи існує запис у чужому довіднику); гілка `foreignRegistry` лишається другим рубежем.
             var messageKey =
                 field.LookupRegistryDefId is not null
-                && !Permits.Groups.LookupTargetMatcher.Belongs(groups, profile, field.LookupRegistryDefId, standing.RegistryDefId)
+                && !Permits.Groups.LookupTargetMatcher.Belongs(groups, profile, field.LookupRegistryDefId, standing.RegistryDefId, project.Id)
                     ? "err.ECR-HDR-4223.foreignRegistry"
                 : standing.IsDeleted ? "err.ECR-HDR-4223.deletedEntry"
                 : !standing.IsActive ? "err.ECR-HDR-4223.inactiveEntry"

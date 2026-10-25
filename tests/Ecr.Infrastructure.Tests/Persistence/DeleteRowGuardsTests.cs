@@ -511,8 +511,8 @@ Assert.Equal("err.ECR-ACCS-0403.deleteRowValuesDenied", denied.Details!["message
     private async Task<Scene> ArrangeAsync(bool withAssignment, bool exclusive = true)
     {
         // Mixed, а не Dynamic: шаблон із рядками в Dynamic-таблиці TableDef.AddRow відхиляє (знімок не збирається).
-        var doc = await new TestDocumentBuilder(sql.ConnectionString)
-            .BuildAsync(rowMode: TableRowMode.Mixed, ct: CancellationToken.None);
+        var docBuilder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await docBuilder.BuildAsync(rowMode: TableRowMode.Mixed, ct: CancellationToken.None);
 
         int executor;
         int delegator;
@@ -532,6 +532,9 @@ Assert.Equal("err.ECR-ACCS-0403.deleteRowValuesDenied", denied.Details!["message
             delegator = delegatorUser.Id;
             executor = executorUser.Id;
             stranger = strangerUser.Id;
+
+            // P2-2: надання діє, лише поки делегатор може його видавати — права делегатора (Manage) задано явно.
+            await docBuilder.GrantProjectAsync(delegator, doc.ProjectId, GrantLevel.Manage);
 
             if (withAssignment)
             {
