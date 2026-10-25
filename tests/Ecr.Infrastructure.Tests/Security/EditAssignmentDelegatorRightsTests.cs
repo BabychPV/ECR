@@ -431,4 +431,83 @@ public sealed class EditAssignmentDelegatorRightsTests(SqlServerFixture sql)
         counter.AssertObserved();
         return counter.Tally.Snapshot().Total;
     }
+
+    // ── W14F P3-4: заблокований / деактивований делегатор не підтримує надання (критерій входу: LockedUntil, IsActive) ───
+
+    private async Task ChangeDelegatorAsync(World w, Action<User> change)
+    {
+        await using var db = w.Builder.CreateContext();
+        var user = await db.Users.SingleAsync(u => u.Id == w.DelegatorId, CancellationToken.None);
+        change(user);
+        await db.SaveChangesAsync(CancellationToken.None);
+    }
+
+    private async Task SetDelegatorActiveAsync(World w, bool active)
+    {
+        await using var db = w.Builder.CreateContext();
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE sec.[User] SET IsActive = {(active ? 1 : 0)} WHERE Id = {w.DelegatorId}", CancellationToken.None);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "W14F-P3-4")]
+    public async Task Заблокований_делегатор_надання_не_діє_а_розблокований_знову_діє()
+    {
+        var w = await ArrangeAsync(GrantLevel.Submit);
+        Assert.True((await SubmitAsync(w)).IsAllowed);
+        Assert.True(await ParticipatesAsync(w));
+
+        await ChangeDelegatorAsync(w, u => u.LockByAdministrator());
+        Assert.False((await SubmitAsync(w)).IsAllowed);
+        Assert.False(await ParticipatesAsync(w));
+        Assert.False(await CanReadTableAsync(w));
+        Assert.False(await WithServiceAsync(
+            w, s => s.ParticipatesInProjectAsync(Participant(w), w.Doc.ProjectId, CancellationToken.None)));
+
+        await ChangeDelegatorAsync(w, u => u.Unlock());
+        Assert.True((await SubmitAsync(w)).IsAllowed);
+        Assert.True(await ParticipatesAsync(w));
+        Assert.True(await CanReadTableAsync(w));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "W14F-P3-4")]
+    public async Task Тимчасове_блокування_після_невдалих_спроб_теж_вимикає_надання_а_минуле_блокування_ні()
+    {
+        var w = await ArrangeAsync(GrantLevel.Submit);
+
+        await ChangeDelegatorAsync(w, u => u.RegisterFailedAttempt(maxFailedAttempts: 1, lockoutMinutes: 60, DateTime.UtcNow));
+        Assert.False((await SubmitAsync(w)).IsAllowed);
+
+        // Блокування, що вже минуло, надання не вимикає.
+        await using (var db = w.Builder.CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE sec.[User] SET LockedUntil = {DateTime.UtcNow.AddDays(-1)} WHERE Id = {w.DelegatorId}",
+                CancellationToken.None);
+        }
+
+        Assert.True((await SubmitAsync(w)).IsAllowed);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "W14F-P3-4")]
+    public async Task Деактивований_делегатор_надання_не_діє_а_активований_знову_діє()
+    {
+        var w = await ArrangeAsync(GrantLevel.Submit);
+        Assert.True((await SubmitAsync(w)).IsAllowed);
+
+        await SetDelegatorActiveAsync(w, false);
+        Assert.False((await SubmitAsync(w)).IsAllowed);
+        Assert.False(await ParticipatesAsync(w));
+
+        await SetDelegatorActiveAsync(w, true);
+        Assert.True((await SubmitAsync(w)).IsAllowed);
+    }
 }
