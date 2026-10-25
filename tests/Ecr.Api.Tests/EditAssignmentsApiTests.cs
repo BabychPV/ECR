@@ -229,6 +229,42 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
             p.GetProperty("messageKey").GetString());
     }
 
+    /// <summary>
+    /// P3 (PM-EDITASSIGN-P3): на РЕАЛЬНОМУ шляху HTTP менеджер із забороною колонки не видає Read/Submit/Approve на область
+    /// з нею - 403 <c>editAssignmentLevelAboveOwn</c>; без заборони ті самі видачі - 200 (контроль).
+    /// </summary>
+    [Theory]
+    [InlineData("Read")]
+    [InlineData("Submit")]
+    [InlineData("Approve")]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P3-DENY-COLUMN-API")]
+    public async Task Заборона_колонки_делегатора_Read_Submit_Approve_дають_403_а_без_заборони_200(string level)
+    {
+        var denied = await ArrangeAsync(denyColumnForManager: true).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var deniedManager = await SignedInAsync(app, denied.Manager.UserName).ConfigureAwait(true);
+
+        var refused = await deniedManager.PostAsJsonAsync(ListUri(denied), LevelBody(denied, denied.Executor.Id, level)).ConfigureAwait(true);
+        var refusedBody = await refused.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(refused.StatusCode == HttpStatusCode.Forbidden, $"{refused.StatusCode}: {refusedBody}\n{app.ErrorsText}");
+        Assert.Equal("err.ECR-ACCS-0403.editAssignmentLevelAboveOwn", JsonDocument.Parse(refusedBody).RootElement.GetProperty("messageKey").GetString());
+
+        var plain = await ArrangeAsync().ConfigureAwait(true);
+        using var plainManager = await SignedInAsync(app, plain.Manager.UserName).ConfigureAwait(true);
+        await JsonAsync(
+            await plainManager.PostAsJsonAsync(ListUri(plain), LevelBody(plain, plain.Executor.Id, level)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+    }
+
+    private static Dictionary<string, object?> LevelBody(Scenario s, int recipient, string level)
+        => new()
+        {
+            ["slice"] = new { sheetCode = s.SheetCode },
+            ["recipientUserIds"] = new[] { recipient },
+            ["isExclusive"] = false,
+            ["level"] = level,
+        };
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Валідація_до_заповнення_422_повернення_без_причини_422()

@@ -1,8 +1,11 @@
 // tests/Ecr.Api.Tests/ScopedRegistryViewApiTests.cs
 using System.Globalization;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using ClosedXML.Excel;
+using Ecr.Adapters.Excel;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
@@ -38,7 +41,7 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
     [InlineData("global", 200)]
     [InlineData("scopedElsewhere", 422)]
     [InlineData("none", 422)]
-    [InlineData("denied", 422)]
+    [InlineData("deniedUnscopedRole", 422)]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "P48")]
@@ -73,7 +76,7 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
     [InlineData("global", 200)]
     [InlineData("scopedElsewhere", 422)]
     [InlineData("none", 422)]
-    [InlineData("denied", 422)]
+    [InlineData("deniedUnscopedRole", 422)]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "P48")]
@@ -107,13 +110,16 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
     /// Регресія: роль лише з <c>Document.View</c> (як PeriodAdministrator/BootstrapAdministrator у сіді, без грантів
     /// Write на проєкт) комірок не пише - з Registry.View чи без.
     /// </summary>
-    [Fact]
+    [Theory]
+    [InlineData("noGrants")]
+    [InlineData("periodAdministrator")]
+    [InlineData("bootstrapAdministrator")]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "P48")]
-    public async Task Роль_без_грантів_Write_Lookup_у_комірку_не_пише()
+    public async Task Роль_без_грантів_Write_Lookup_у_комірку_не_пише(string kind)
     {
-        var s = await ArrangeAsync("noGrants").ConfigureAwait(true);
+        var s = await ArrangeAsync(kind).ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
@@ -123,6 +129,182 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
         Assert.Null(await StoredCellAsync(s).ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// P3 (рецензія p48): Excel-книга під РЕАЛЬНИМ користувачем. Код запису, до реєстру якого немає View, у перегляді
+    /// відповідає так само, як неіснуючий код (без розкриття існування); scoped-оператор з View на проєкт документа -
+    /// зміна в перегляді й запис при застосуванні.
+    /// </summary>
+    [Theory]
+    [InlineData("scoped", true)]
+    [InlineData("global", true)]
+    [InlineData("scopedElsewhere", false)]
+    [InlineData("none", false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P3-BOOK")]
+    public async Task Книга_Lookup_за_типом_доступу_до_реєстру(string kind, bool allowed)
+    {
+        var b = await ArrangeBookAsync(kind).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, b.UserName).ConfigureAwait(true);
+
+        var existing = await BookPreviewAsync(app, client, b, "E1").ConfigureAwait(true);
+        var missing = await BookPreviewAsync(app, client, b, "ZZZ").ConfigureAwait(true);
+
+        if (allowed)
+        {
+            Assert.Equal(1, existing.GetProperty("changes").GetArrayLength());
+            Assert.Equal(0, existing.GetProperty("rejected").GetArrayLength());
+            var token = existing.GetProperty("previewToken").GetString()!;
+            using var apply = await client.PostAsJsonAsync(
+                new Uri($"/api/v1/documents/{b.Doc.DocumentId}/import/apply", UriKind.Relative),
+                new { previewToken = token }).ConfigureAwait(true);
+            var applyBody = await apply.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(apply.StatusCode == HttpStatusCode.OK, $"{apply.StatusCode}: {applyBody}\n{app.ErrorsText}");
+            Assert.Equal(b.EntryId, await StoredBookCellAsync(b).ConfigureAwait(true));
+        }
+        else
+        {
+            Assert.Equal(0, existing.GetProperty("changes").GetArrayLength());
+            var refusedExisting = existing.GetProperty("rejected").EnumerateArray().Single();
+            var refusedMissing = missing.GetProperty("rejected").EnumerateArray().Single();
+            Assert.Equal(
+                refusedMissing.GetProperty("messageKey").GetString(),
+                refusedExisting.GetProperty("messageKey").GetString());
+            Assert.Null(await StoredBookCellAsync(b).ConfigureAwait(true));
+        }
+    }
+
+    private static async Task<JsonElement> BookPreviewAsync(EcrApiFactory app, HttpClient client, BookScenario b, string code)
+    {
+        using var content = new MultipartFormDataContent();
+        using var file = new ByteArrayContent(Book(b, code));
+        file.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        content.Add(file, "file", "book.xlsx");
+
+        using var response = await client.PostAsync(
+            new Uri($"/api/v1/documents/{b.Doc.DocumentId}/import/preview", UriKind.Relative), content).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"перегляд: {response.StatusCode}\n{body}\n{app.ErrorsText}");
+        return JsonDocument.Parse(body).RootElement.Clone();
+    }
+
+    private static byte[] Book(BookScenario b, string code)
+    {
+        using var workbook = new XLWorkbook();
+        var main = workbook.Worksheets.Add("MAIN");
+        main.Cell(2, 1).Value = code;
+
+        var block = new ExcelTableBlock(
+            b.Doc.TableInstanceId, b.Doc.TableDefId, "MAIN_FILE", "MAIN", HeaderRow: 1,
+            Columns: [new ExcelColumnRef(b.Doc.ColumnDefIds[1], b.ColumnCode, 1, false, null)],
+            Rows: [new ExcelRowRef(b.RowKey, 2)]);
+        var map = new ExcelWorkbookMap(b.Doc.DocumentId, b.PeriodKey, b.Doc.TemplateVersionId, [block]);
+        workbook.Worksheets.Add(ExcelWorkbookMap.SheetName).Cell(1, 1).Value =
+            JsonSerializer.Serialize(map, MapJson);
+
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return stream.ToArray();
+    }
+
+    private async Task<long?> StoredBookCellAsync(BookScenario b)
+    {
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        return await db.CellValues.AsNoTracking()
+            .Where(c => c.PeriodKeyValue == b.PeriodKey && c.TableRowId == b.RowId && c.ColumnDefId == b.Doc.ColumnDefIds[1])
+            .Select(c => c.ValueRegistryEntryId)
+            .SingleOrDefaultAsync().ConfigureAwait(false);
+    }
+
+    private static readonly JsonSerializerOptions MapJson = new(JsonSerializerDefaults.Web);
+
+    private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Atyrau").ToTimeZoneInfo();
+
+    private sealed record BookScenario(
+        TestDocument Doc, string UserName, long EntryId, string ColumnCode, string RowKey, long RowId, int PeriodKey);
+
+    /// <summary>Документ у відкритому ПОТОЧНОМУ періоді активного проєкту (як <c>ImportPreviewTokenApiTests</c>).</summary>
+    private async Task<BookScenario> ArrangeBookAsync(string kind)
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var siteToday = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, SiteZone));
+        var periodKey = (siteToday.Year * 100) + siteToday.Month;
+        var doc = await builder.BuildAsync(periodKey, columnCount: 2, rowCount: 1).ConfigureAwait(false);
+
+        var now = DateTime.UtcNow;
+        await using var db = builder.CreateContext();
+        db.DocumentSheets.Add(new DocumentSheet(doc.DocumentId, doc.SheetDefId));
+
+        var registry = new RegistryDef(EcrCode.Create($"SCB_{Guid.NewGuid():N}"[..20]), Text("Book view"), isTemporal: true);
+        db.RegistryDefs.Add(registry);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        var entry = new RegistryEntry(registry.Id, EcrCode.Create("E1"), Text("Entry 1"));
+        entry.SetValidity(new DateOnly(2025, 1, 1), new DateOnly(2030, 12, 31));
+        db.RegistryEntries.Add(entry);
+
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync().ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE cfg.ColumnDef SET DataType = @type, LookupRegistryDefId = @registry WHERE Id = @id";
+            command.Parameters.AddWithValue("@type", (int)CellDataType.Lookup);
+            command.Parameters.AddWithValue("@registry", registry.Id);
+            command.Parameters.AddWithValue("@id", doc.ColumnDefIds[1]);
+            await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+        }
+
+        var userName = $"scb_{Guid.NewGuid():N}"[..20];
+        var user = new User(userName, userName, AuthProvider.Local);
+        user.SetPassword(new PasswordHasher().Hash(Password));
+        db.Users.Add(user);
+        var role = new Role(EcrCode.Create($"SCB_{Guid.NewGuid():N}"[..24]), Text("Book user"));
+        db.Roles.Add(role);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        db.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
+        db.RolePermissions.Add(new RolePermission(role.Id, "Document.Import"));
+        if (kind is "scoped" or "global")
+        {
+            db.RolePermissions.Add(new RolePermission(role.Id, "Registry.View"));
+        }
+
+        var assignment = new RoleAssignment(role.Id, user.Id, null);
+        if (kind == "scoped")
+        {
+            assignment.SetScope(RoleAssignmentScope.Create([doc.ProjectId]));
+        }
+
+        db.RoleAssignments.Add(assignment);
+        db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, doc.ProjectId, GrantLevel.Write));
+
+        if (kind == "scopedElsewhere")
+        {
+            var other = new Role(EcrCode.Create($"SCO_{Guid.NewGuid():N}"[..24]), Text("View elsewhere"));
+            db.Roles.Add(other);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+            db.RolePermissions.Add(new RolePermission(other.Id, "Registry.View"));
+            var elsewhere = new RoleAssignment(other.Id, user.Id, null);
+            elsewhere.SetScope(RoleAssignmentScope.Create([doc.ProjectId + 1_000_000]));
+            db.RoleAssignments.Add(elsewhere);
+        }
+
+        var project = await db.Projects.FirstAsync(p => p.Id == doc.ProjectId).ConfigureAwait(false);
+        project.Activate(now);
+        var policy = await db.PeriodPolicies.FirstAsync(p => p.Id == project.PeriodPolicyId).ConfigureAwait(false);
+        var period = await db.Periods
+            .FirstAsync(p => p.ProjectId == doc.ProjectId && p.PeriodKeyValue == periodKey).ConfigureAwait(false);
+        period.RecomputeBoundaries(policy, SiteZone);
+        period.AdvanceTo(PeriodState.Open, now);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var column = await db.ColumnDefs.AsNoTracking().Where(c => c.Id == doc.ColumnDefIds[1])
+            .Select(c => c.Code).SingleAsync().ConfigureAwait(false);
+        var rowKey = await db.TableRows.AsNoTracking().Where(r => r.Id == doc.RowIds[0])
+            .Select(r => r.RowKeyValue).SingleAsync().ConfigureAwait(false);
+
+        return new BookScenario(doc, userName, entry.Id, column, rowKey, doc.RowIds[0], periodKey);
+    }
     /// <summary>Без числових ідентифікаторів: id запису й документа в тілі відмови різняться між викликами.</summary>
     private static string Normalize(string body)
     {
@@ -256,9 +438,20 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
         db.Roles.Add(role);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        db.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
+        // PeriodAdministrator / BootstrapAdministrator: набір прав вбудованої ролі з сіду БЕЗ ресурсних грантів Write.
+        var permissions = kind switch
+        {
+            "periodAdministrator" => new[] { "Document.View", "Project.Manage" },
+            "bootstrapAdministrator" => new[] { "Security.ManageUsers", "Security.ManageRoles" },
+            _ => new[] { "Document.View", "Document.Import" },
+        };
+        foreach (var permission in permissions)
+        {
+            db.RolePermissions.Add(new RolePermission(role.Id, permission));
+        }
+
         var assignment = new RoleAssignment(role.Id, user.Id, null);
-        if (kind is "scoped" or "global" or "denied")
+        if (kind is "scoped" or "global" or "deniedUnscopedRole")
         {
             db.RolePermissions.Add(new RolePermission(role.Id, "Registry.View"));
         }
@@ -269,12 +462,12 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
         }
 
         db.RoleAssignments.Add(assignment);
-        if (kind != "noGrants")
+        if (kind is not ("noGrants" or "periodAdministrator" or "bootstrapAdministrator"))
         {
             db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, doc.ProjectId, GrantLevel.Write));
         }
 
-        if (kind == "denied")
+        if (kind == "deniedUnscopedRole")
         {
             db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Registry, registry.Id, GrantLevel.None, isDeny: true));
         }

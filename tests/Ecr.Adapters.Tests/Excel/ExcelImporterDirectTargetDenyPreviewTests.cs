@@ -53,6 +53,11 @@ public sealed class ExcelImporterDirectTargetDenyPreviewTests
     private TemplateVersionSnapshot _snapshot = null!;
     private bool _denyTarget;
 
+    // P3 (рішення людини 25.10 «вимагати Registry.View»): права профілю тесту.
+    private string[] _permissions = ["Registry.View"];
+    private int? _scopedViewProject;
+    private const int DocumentProjectId = 10;
+
     public ExcelImporterDirectTargetDenyPreviewTests()
     {
         BatchStoreStubs.DelegateToSingle(_rows, _cells, _access);
@@ -99,10 +104,21 @@ public sealed class ExcelImporterDirectTargetDenyPreviewTests
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(_ => new AccessProfile
         {
             CacheKey = "p1", UserId = 9, SecurityStamp = "s",
-            Permissions = new HashSet<string>(), Grants = new Dictionary<string, GrantLevel>(),
+            Permissions = new HashSet<string>(_permissions), Grants = new Dictionary<string, GrantLevel>(),
             Denies = _denyTarget ? new HashSet<string> { "Registry:" + Target } : new HashSet<string>(),
             RoleIds = new HashSet<int>(),
+            Scoped = _scopedViewProject is { } scoped
+                ? new Dictionary<int, ScopedProjectAccess>
+                {
+                    [scoped] = new(
+                        new Dictionary<string, GrantLevel>(), new HashSet<string>(), new HashSet<int>(), new HashSet<string>())
+                    {
+                        RegistryView = true,
+                    },
+                }
+                : new Dictionary<int, ScopedProjectAccess>(),
         });
+        _access.DocumentProjectIdAsync(DocumentId, Arg.Any<CancellationToken>()).Returns(DocumentProjectId);
         _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(_ => ReadScopes.Everything(_snapshot));
         _access.CanEditSlicesAsync(Arg.Any<AccessProfile>(), Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
@@ -158,6 +174,79 @@ public sealed class ExcelImporterDirectTargetDenyPreviewTests
         var missingRejection = Assert.Single(missing.Rejected);
         Assert.Equal(ImportMessageKeys.ExpectsIdentifier, missingRejection.MessageKey);
         Assert.Equal(missingRejection.MessageKey, existingRejection.MessageKey);
+    }
+
+    // ── Рішення людини 25.10: вибір запису потребує Registry.View (глобально, scoped на проєкт документа або грант Read).
+    // Мутація: прибрати перевірку View в LookupTargetEntries.ListAsync - червоніють тести «без View» і «інший проєкт».
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "REG-VIEW")]
+    public async Task Без_Registry_View_існуючий_код_відповідає_як_неіснуючий()
+    {
+        _permissions = [];
+
+        var existing = await PreviewAsync("N100");
+        var missing = await PreviewAsync("N999");
+
+        Assert.Empty(existing.Changes);
+        Assert.Empty(missing.Changes);
+        Assert.Equal(missing.Rejected.Single().MessageKey, existing.Rejected.Single().MessageKey);
+        Assert.Equal(ImportMessageKeys.ExpectsIdentifier, existing.Rejected.Single().MessageKey);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "REG-VIEW")]
+    public async Task Scoped_View_на_проєкт_документа_існуючий_код_дає_зміну()
+    {
+        _permissions = [];
+        _scopedViewProject = DocumentProjectId;
+
+        var preview = await PreviewAsync("N100");
+
+        Assert.Equal(2001L, Assert.Single(preview.Changes).NewValue);
+        Assert.Empty(preview.Rejected);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "REG-VIEW")]
+    public async Task Scoped_View_лише_на_інший_проєкт_існуючий_код_відповідає_як_неіснуючий()
+    {
+        _permissions = [];
+        _scopedViewProject = DocumentProjectId + 1;
+
+        var existing = await PreviewAsync("N100");
+        var missing = await PreviewAsync("N999");
+
+        Assert.Empty(existing.Changes);
+        Assert.Equal(missing.Rejected.Single().MessageKey, existing.Rejected.Single().MessageKey);
+    }
+
+    /// <summary>
+    /// P3-7: відмова за Deny/чужий довідник - ДО читання меж періоду і в застосуванні книги (часовий оракул).
+    /// Перегляд будується дозволеним користувачем, Deny з'являється до застосування. Мутація: повернути читання меж
+    /// перед <c>CheckLookupsBelong</c> у <c>EnsureWorkbookReferencesAsync</c> - червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "REG-VIEW-ORDER")]
+    public async Task Застосування_книги_відмова_за_Deny_раніше_за_читання_меж_періоду()
+    {
+        _denyTarget = false;
+        var preview = await PreviewAsync("N100");
+        Assert.Single(preview.Changes);
+
+        _denyTarget = true;
+        _periods.ClearReceivedCalls();
+
+        var error = await Assert.ThrowsAsync<Ecr.Application.Errors.BusinessRuleException>(
+            () => Importer().ApplyAsync(DocumentId, preview.PreviewToken, null, CancellationToken.None));
+
+        Assert.Equal("ECR-CELL-4223", error.ErrorCode);
+        Assert.Equal("err.ECR-CELL-4223.missingEntry", error.Details!["messageKey"]);
+        await _periods.DidNotReceiveWithAnyArgs().FindPeriodBoundsAsync(default, default, default);
     }
 
     private async Task<ImportPreview> PreviewAsync(string typed)

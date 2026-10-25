@@ -42,7 +42,7 @@ public sealed class ScopedRegistryViewProfileTests(SqlServerFixture sql) : IDisp
 
     private async Task<int> UserAsync(
         TestDocument doc, bool view, int[]? scopeProjects, bool projectWrite = true, bool deny = false,
-        int[]? extraViewScopeProjects = null)
+        int[]? extraViewScopeProjects = null, string[]? narrowSheets = null)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         await using var db = builder.CreateContext();
@@ -63,7 +63,7 @@ public sealed class ScopedRegistryViewProfileTests(SqlServerFixture sql) : IDisp
         var assignment = new RoleAssignment(role.Id, user.Id, null);
         if (scopeProjects is not null)
         {
-            assignment.SetScope(RoleAssignmentScope.Create(scopeProjects));
+            assignment.SetScope(RoleAssignmentScope.Create(scopeProjects, narrowSheets));
         }
 
         db.RoleAssignments.Add(assignment);
@@ -163,4 +163,31 @@ public sealed class ScopedRegistryViewProfileTests(SqlServerFixture sql) : IDisp
         Assert.True(await CanChooseAsync(doc, global));
         Assert.False(await CanChooseAsync(doc, denied));
     }
-}
+
+    /// <summary>
+    /// P3-6 (рецензія p48): роль зі ЗВУЖЕННЯМ (аркуші/періоди, D-214) з Registry.View прапорця RegistryView не дає -
+    /// він лише від ролей без звуження, призначених на проєкт.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P3-NARROWED")]
+    public async Task Звужена_роль_з_View_не_дає_RegistryView_і_вибір_запису_закритий()
+    {
+        var doc = await ArrangeAsync();
+        var narrowed = await UserAsync(doc, view: true, scopeProjects: [doc.ProjectId], narrowSheets: ["SHEET_X"]);
+
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        await using var db = builder.CreateContext();
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns(narrowed);
+        currentUser.GroupSids.Returns([]);
+        var service = new AccessDecisionService(
+            db, new MetadataCache(_memory, db), new AccessProfileCache(_memory), new TestClock(DateTime.UtcNow),
+            currentUser, new WorkflowStore(db));
+
+        var profile = await service.BuildProfileAsync(narrowed, CancellationToken.None);
+
+        Assert.False(profile.Scoped.TryGetValue(doc.ProjectId, out var scoped) && scoped.RegistryView);
+        Assert.False(await CanChooseAsync(doc, narrowed));
+    }}
