@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
@@ -642,7 +642,9 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
         => new(db, new BulkCellLoader(sql.ConnectionString, 1000), clock ?? new TestClock(Now));
 
     private static AccessProfile Writer(World world)
-        => new AccessBuilder { UserId = 1 }.Grant(ResourceKind.Project, world.Doc.ProjectId, GrantLevel.Write).Build();
+        => new AccessBuilder { UserId = 1 }
+            .Permission("Registry.View") // 25.10: вибір запису Lookup потребує Registry.View
+            .Grant(ResourceKind.Project, world.Doc.ProjectId, GrantLevel.Write).Build();
 
     // ── Світ ─────────────────────────────────────────────────────────────────
 

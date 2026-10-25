@@ -497,7 +497,13 @@ public static class EditRules
     /// <c>Submitted</c>, і <c>Approved</c> — скасувати затвердження має право
     /// той, хто має право його дати, не менше.
     /// </remarks>
-    public static EditDecision CanReopen(AccessProfile profile, CellAccessContext context)
+    /// <param name="requiredRoleId">
+    /// ⛔ P2-4: роль кроку маршруту (<c>Submitted</c> — поточний крок, <c>Approved</c> — останній); <c>null</c> —
+    /// маршруту немає. Перевірка така сама, як у <see cref="CanApprove"/>: хто не в черзі погодження, не повертає
+    /// аркуш поза нею лише завдяки наданню рівня <c>Approve</c>.
+    /// </param>
+    public static EditDecision CanReopen(
+        AccessProfile profile, CellAccessContext context, int? requiredRoleId = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
@@ -525,6 +531,15 @@ public static class EditRules
         {
             return EditDecision.Deny(
                 EditDenyReason.BusinessRule, $"Аркуш у стані {context.SheetStatus}, а не Submitted/Approved.");
+        }
+
+        // ⛔ P2-4: роль кроку — НА ДОДАЧУ до гранта, як у CanApprove (ролі з областю/звуженням — теж ті самі).
+        if (requiredRoleId is { } roleId
+            && !profile.RoleIdsAt(context.ProjectId, context.SheetCode, context.Period).Contains(roleId))
+        {
+            return EditDecision.Deny(
+                EditDenyReason.NoGrant,
+                $"Крок маршруту погодження вимагає ролі {roleId}; повернути аркуш у роботу може лише учасник маршруту.");
         }
 
         // ⛔ Та сама різниця причин, що в CanApprove: грант ВІДСУТНІЙ і грант

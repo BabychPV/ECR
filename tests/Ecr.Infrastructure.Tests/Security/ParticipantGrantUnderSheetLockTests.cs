@@ -242,6 +242,9 @@ public sealed class ParticipantGrantUnderSheetLockTests(SqlServerFixture sql) : 
         db.Users.AddRange(delegator, participant);
         await db.SaveChangesAsync(CancellationToken.None);
 
+        // P2-2: надання діє, лише поки делегатор може його видавати — права делегатора (Manage) задано явно.
+        await builder.GrantProjectAsync(delegator.Id, doc.ProjectId, GrantLevel.Manage);
+
         var assignment = new EditAssignment(
             doc.DocumentId,
             EditAssignmentSlice.Create(sheetCode: null, tableCode: null, monthNumber: null, periodKey: null),

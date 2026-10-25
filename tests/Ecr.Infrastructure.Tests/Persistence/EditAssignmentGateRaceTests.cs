@@ -500,6 +500,9 @@ public sealed class EditAssignmentGateRaceTests(SqlServerFixture sql) : IDisposa
             executor = executorUser.Id;
             stranger = strangerUser.Id;
 
+            // P2-2: передача діє, лише поки делегатор може її видавати — права делегатора (Manage) задано явно.
+            await builder.GrantProjectAsync(delegator, doc.ProjectId, GrantLevel.Manage);
+
             // Зріз — період документа без місяця: піднімає будь-яку колонку періоду (метадані
             // поштучного хендлера — тестові, без місячних колонок).
             var assignment = new EditAssignment(

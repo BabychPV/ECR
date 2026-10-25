@@ -251,6 +251,8 @@ public sealed class PatchCellsWarnMarkTests(SqlServerFixture sql)
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         db.RolePermissions.Add(new RolePermission(writer.Id, "Document.View"));
+
+        db.RolePermissions.Add(new RolePermission(writer.Id, "Registry.View")); // 25.10: вибір запису Lookup потребує Registry.View
         db.RoleAssignments.Add(new RoleAssignment(writer.Id, user.Id, null));
         db.ResourceGrants.Add(new ResourceGrant(writer.Id, ResourceKind.Project, doc.ProjectId, GrantLevel.Write));
 

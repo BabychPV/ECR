@@ -142,6 +142,9 @@ public sealed class ParticipantProfileCrossNodeTests(SqlServerFixture sql) : IDi
         db.Users.AddRange(delegator, participant);
         await db.SaveChangesAsync(CancellationToken.None);
 
+        // P2-2: надання діє, лише поки делегатор може його видавати — права делегатора (Manage) задано явно.
+        await builder.GrantProjectAsync(delegator.Id, doc.ProjectId, GrantLevel.Manage);
+
         return (builder, doc, delegator.Id, participant.Id);
     }
 

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -437,6 +437,17 @@ public sealed partial class PatchCellsHandler
                 active.SelectMany((x, i) => LookupPairs(x.Context, changed[i], standings)),
                 ct).ConfigureAwait(false);
 
+            // Рішення людини 25.10: проєкт документа для Registry.View scoped-ролі - лише для таких профілів, раз на документ.
+            var viewProjects = new Dictionary<long, int?>();
+            for (var i = 0; i < active.Count; i++)
+            {
+                var documentId = active[i].Context.Instance.DocumentId;
+                if (lookups[i].Count > 0 && !viewProjects.ContainsKey(documentId))
+                {
+                    viewProjects[documentId] = await LookupViewProjectAsync(active[i].Context, ct).ConfigureAwait(false);
+                }
+            }
+
             for (var i = 0; i < active.Count; i++)
             {
                 if (lookups[i].Count == 0)
@@ -450,7 +461,9 @@ public sealed partial class PatchCellsHandler
                     CheckLookupsExist(item.Context, own, standings);
                     if (ownChanged.Count > 0)
                     {
-                        CheckLookupsBelong(item.Context, ownChanged, standings, groups);
+                        CheckLookupsBelong(
+                            item.Context, ownChanged, standings, groups,
+                            viewProjects[item.Context.Instance.DocumentId]);
                         CheckLookupStandings(item.Context, ownChanged, standings, periodBounds);
                     }
                 });
