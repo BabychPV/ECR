@@ -42,6 +42,8 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
     [InlineData("scopedElsewhere", 422)]
     [InlineData("none", 422)]
     [InlineData("deniedUnscopedRole", 422)]
+    [InlineData("scopedSelfDeny", 422)]
+    [InlineData("scopedReadGrant", 200)]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "P48")]
@@ -77,6 +79,8 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
     [InlineData("scopedElsewhere", 422)]
     [InlineData("none", 422)]
     [InlineData("deniedUnscopedRole", 422)]
+    [InlineData("scopedSelfDeny", 422)]
+    [InlineData("scopedReadGrant", 200)]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "P48")]
@@ -139,6 +143,8 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
     [InlineData("global", true)]
     [InlineData("scopedElsewhere", false)]
     [InlineData("none", false)]
+    [InlineData("scopedSelfDeny", false)]
+    [InlineData("scopedReadGrant", true)]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "P3-BOOK")]
@@ -264,19 +270,28 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
 
         db.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
         db.RolePermissions.Add(new RolePermission(role.Id, "Document.Import"));
-        if (kind is "scoped" or "global")
+        if (kind is "scoped" or "global" or "scopedSelfDeny")
         {
             db.RolePermissions.Add(new RolePermission(role.Id, "Registry.View"));
         }
 
         var assignment = new RoleAssignment(role.Id, user.Id, null);
-        if (kind == "scoped")
+        if (kind is "scoped" or "scopedSelfDeny" or "scopedReadGrant")
         {
             assignment.SetScope(RoleAssignmentScope.Create([doc.ProjectId]));
         }
 
         db.RoleAssignments.Add(assignment);
         db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, doc.ProjectId, GrantLevel.Write));
+        if (kind == "scopedReadGrant")
+        {
+            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Registry, registry.Id, GrantLevel.Read));
+        }
+
+        if (kind == "scopedSelfDeny")
+        {
+            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Registry, registry.Id, GrantLevel.None, isDeny: true));
+        }
 
         if (kind == "scopedElsewhere")
         {
@@ -451,23 +466,28 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
         }
 
         var assignment = new RoleAssignment(role.Id, user.Id, null);
-        if (kind is "scoped" or "global" or "deniedUnscopedRole")
+        if (kind is "scoped" or "global" or "deniedUnscopedRole" or "scopedSelfDeny")
         {
             db.RolePermissions.Add(new RolePermission(role.Id, "Registry.View"));
         }
 
-        if (kind == "scoped")
+        if (kind is "scoped" or "scopedSelfDeny" or "scopedReadGrant")
         {
             assignment.SetScope(RoleAssignmentScope.Create([doc.ProjectId]));
         }
 
         db.RoleAssignments.Add(assignment);
+        if (kind == "scopedReadGrant")
+        {
+            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Registry, registry.Id, GrantLevel.Read));
+        }
+
         if (kind is not ("noGrants" or "periodAdministrator" or "bootstrapAdministrator"))
         {
             db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, doc.ProjectId, GrantLevel.Write));
         }
 
-        if (kind == "deniedUnscopedRole")
+        if (kind is "deniedUnscopedRole" or "scopedSelfDeny")
         {
             db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Registry, registry.Id, GrantLevel.None, isDeny: true));
         }
