@@ -1341,7 +1341,11 @@ DELETE t
     (N'err.ECR-CALC-0409.authorCannotPublish', N'kz', N'Сіз {version} нұсқасының авторысыз: екінші тексеруші қажет, сондықтан оны басқа пайдаланушы жариялауы керек. Автор — нұсқаны жасаған пайдаланушы, соңғы өңдеген адам емес.'),
     (N'err.ECR-CALC-0409.ownRecalculationApproval', N'en', N'You cannot approve your own recalculation of a closed period: a second pair of eyes is required.'),
     (N'err.ECR-CALC-0409.ownRecalculationApproval', N'ru', N'Нельзя подтвердить собственный запрос на пересчёт закрытого периода: требуется вторая пара глаз.'),
-    (N'err.ECR-CALC-0409.ownRecalculationApproval', N'kz', N'Жабық кезеңді қайта есептеуге өз сұрауыңызды өзіңіз растай алмайсыз: екінші тексеруші қажет.')
+    (N'err.ECR-CALC-0409.ownRecalculationApproval', N'kz', N'Жабық кезеңді қайта есептеуге өз сұрауыңызды өзіңіз растай алмайсыз: екінші тексеруші қажет.'),
+    -- P45 (борг D-450): фільтр «Власник» підписано `documents.owner`/`documents.ownersAll` — `documents.owners` не вживається.
+    (N'documents.owners', N'en', N'Owners'),
+    (N'documents.owners', N'ru', N'Авторы'),
+    (N'documents.owners', N'kz', N'Авторлар')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -7452,7 +7456,6 @@ USING (VALUES
     (N'documents.search', N'en', N'Search', 1),
     (N'documents.searchPlaceholder', N'en', N'Document name or key', 1),
     (N'documents.projectAll', N'en', N'All projects', 1),
-    (N'documents.owners', N'en', N'Owners', 1),
     (N'documents.ownersAll', N'en', N'Everyone’s documents', 1),
     (N'units.dim.Mass', N'en', N'Mass', 1),
     (N'units.dim.Volume', N'en', N'Volume', 1),
@@ -19764,8 +19767,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'documents.searchPlaceholder', N'kz', N'Құжат атауы немесе кілті'),
     (N'documents.projectAll', N'ru', N'Все проекты'),
     (N'documents.projectAll', N'kz', N'Барлық жобалар'),
-    (N'documents.owners', N'ru', N'Авторы'),
-    (N'documents.owners', N'kz', N'Авторлар'),
     (N'documents.ownersAll', N'ru', N'Документы всех'),
     (N'documents.ownersAll', N'kz', N'Барлығының құжаттары'),
     (N'units.dim.Mass', N'ru', N'Масса'),
