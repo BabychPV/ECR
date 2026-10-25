@@ -1870,16 +1870,49 @@ public sealed partial class PatchCellsHandler(
             return;
         }
 
+        await Permits.Groups.LookupTargetMatcher.EnsureFreshOnMismatchAsync(
+            groups, LookupPairs(context, changed, standings), ct).ConfigureAwait(false);
+
+        // ⛔ S18 (час): «чужий довідник / поза складом групи / Deny» відмовляє ДО читання меж періоду - так само рано, як
+        // «запису немає» (CheckLookupsExist), тож відповідь не відрізняється ще й одним запитом у БД (P3-1).
+        CheckLookupsBelong(context, changed, standings, groups);
+
         // ⚠ Межі періоду читаються лише тоді, коли є що перевіряти на дату.
         // Немає періоду (`null`) — перевірки на дату немає; решта причин діють.
         var bounds = await periods
             .FindPeriodBoundsAsync(context.Instance.DocumentId, context.PeriodKey.Value, ct)
             .ConfigureAwait(false);
 
-        await Permits.Groups.LookupTargetMatcher.EnsureFreshOnMismatchAsync(
-            groups, LookupPairs(context, changed, standings), ct).ConfigureAwait(false);
+        CheckLookupStandings(context, changed, standings, bounds);
+    }
 
-        CheckLookupStandings(context, changed, standings, bounds, groups);
+    /// <summary>
+    /// Змінені посилання на запис, що не належить цілі колонки (чужий довідник, поза складом групи, Deny на реєстр) -
+    /// відмова «запису немає» (AN-93, S18): та сама, що й для неіснуючого запису, без оракула існування.
+    /// </summary>
+    private static void CheckLookupsBelong(
+        RequestContext context,
+        List<(CellAddress Address, long? EntryId)> changed,
+        Dictionary<long, RegistryEntryStanding> standings,
+        Permits.Groups.ILookupTargetResolver? groups)
+    {
+        // PRMG: ціль-група приймає записи реєстрів складу (збіг реєстру - швидкий шлях без резолвера; Deny - як «немає»).
+        var foreign = changed
+            .Where(cell => !Permits.Groups.LookupTargetMatcher.Belongs(
+                groups,
+                context.Profile,
+                context.Snapshot.ColumnsById[cell.Address.ColumnDefId].LookupRegistryDefId,
+                standings[cell.EntryId!.Value].RegistryDefId))
+            .Select(cell => DescribeLookup(context, cell))
+            .ToList();
+
+        if (foreign.Count > 0)
+        {
+            // ⛔ AN-93 (аудит R11): запис ЧУЖОГО довідника - та сама відповідь, що й «немає такого» (як N1-08 для
+            // полів шапки). Різниця `missingEntry` / `foreignRegistry` казала б, чи існує запис у довіднику, який
+            // читач, можливо, не бачить (Deny на довідник): оракул існування за перебором id.
+            throw MissingEntryRefusal(foreign);
+        }
     }
 
     /// <summary>Пари (ціль колонки, реєстр запису) змінених посилань - для оновлення знімка груп лише при незбігу.</summary>
@@ -1960,23 +1993,15 @@ public sealed partial class PatchCellsHandler(
         RequestContext context,
         List<(CellAddress Address, long? EntryId)> changed,
         Dictionary<long, RegistryEntryStanding> standings,
-        PeriodBounds? bounds,
-        Permits.Groups.ILookupTargetResolver? groups)
+        PeriodBounds? bounds)
     {
         // Дата чинності — останній день періоду: D-158 (10-decisions.md), як пікер сітки, OrphanScanner і знімок розрахунку.
         var asOf = bounds?.PeriodEnd;
 
+        // Належність цілі (чужий довідник / група / Deny) уже перевірено в CheckLookupsBelong ДО читання меж періоду.
         LookupRejection? Reject((CellAddress Address, long? EntryId) cell)
         {
             var standing = standings[cell.EntryId!.Value];
-            var column = context.Snapshot.ColumnsById[cell.Address.ColumnDefId];
-
-            // PRMG: ціль-група приймає записи реєстрів складу (збіг реєстру - швидкий шлях без резолвера; Deny - як «немає»).
-            if (!Permits.Groups.LookupTargetMatcher.Belongs(
-                    groups, context.Profile, column.LookupRegistryDefId, standing.RegistryDefId))
-            {
-                return LookupRejection.ForeignRegistry;
-            }
 
             if (standing.IsDeleted)
             {
@@ -2010,10 +2035,6 @@ public sealed partial class PatchCellsHandler(
 
         throw reason switch
         {
-            // ⛔ AN-93 (аудит R11): запис ЧУЖОГО довідника — та сама відповідь, що й «немає такого» (як N1-08 для
-            // полів шапки). Різниця `missingEntry` / `foreignRegistry` казала б, чи існує запис у довіднику, який
-            // читач, можливо, не бачить (Deny на довідник): оракул існування за перебором id.
-            LookupRejection.ForeignRegistry => MissingEntryRefusal(cells),
             LookupRejection.Deleted => new BusinessRuleException(
                 ErrorCodes.CellRegistryEntryMissing,
                 $"Запис довідника видалено: комірок — {cells.Count}.",
@@ -2051,9 +2072,6 @@ public sealed partial class PatchCellsHandler(
     /// </summary>
     private enum LookupRejection
     {
-        /// <summary>Запис іншого довідника, ніж <c>LookupRegistryDefId</c> колонки.</summary>
-        ForeignRegistry,
-
         /// <summary>Запис видалено логічно.</summary>
         Deleted,
 

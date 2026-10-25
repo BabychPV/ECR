@@ -277,6 +277,56 @@ test.describe('Permit groups', () => {
     }
   });
 
+  test('широкий екран: клік по рядку іншого запису з незбереженим питає «Discard» (Keep editing лишає, Discard перемикає, фокус у шторці); Esc поза шторкою не питає - N/5', async ({ page }) => {
+    test.setTimeout(240_000);
+    await page.setViewportSize({ width: 1500, height: 900 });
+    await signIn(page);
+
+    for (let run = 1; run <= 5; run += 1) {
+      const backend = await installBackend(page, [{ ...Water }, Used]);
+      await page.goto('/admin/permits/groups?panel=WATER');
+      const drawer = page.getByRole('dialog').first();
+      await expect(drawer, `прогін ${run}: шторка`).toBeVisible({ timeout: 30_000 });
+      const name = drawer.getByRole('textbox', { name: /^Name · English/ });
+      await name.fill(`Edited ${String(run)}`);
+      const confirm = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+      // Шторка lg (800 px) вкриває праву частину рядка: клікаємо в його ліву, видиму частину.
+      const other = page.getByRole('row', { name: /Air used/ });
+
+      // Esc, натиснутий поза шторкою (фокус на сторінці), не відкриває «Discard» і шторку не закриває.
+      await page.getByRole('heading', { level: 1 }).click();
+      await page.keyboard.press('Escape');
+      await expect(confirm, `прогін ${run}: Esc поза шторкою не питає`).toBeHidden();
+      await expect(drawer).toBeVisible();
+      await expect(name).toHaveValue(`Edited ${String(run)}`);
+
+      // Клік по іншому рядку: питає; Keep editing лишає запис і введене.
+      await other.click({ position: { x: 24, y: 10 } });
+      await expect(confirm, `прогін ${run}: клік по іншому рядку питає`).toBeVisible();
+      expect(page.url()).toContain('panel=WATER');
+      await expect(page.getByRole('button', { name: 'Keep editing' })).toBeFocused();
+      await page.getByRole('button', { name: 'Keep editing' }).click();
+      await expect(confirm).toBeHidden();
+      await expect(name).toHaveValue(`Edited ${String(run)}`);
+      expect(page.url()).toContain('panel=WATER');
+
+      // Discard перемикає на інший запис без запису на сервер, фокус - у новій шторці.
+      await other.click({ position: { x: 24, y: 10 } });
+      await expect(confirm).toBeVisible();
+      await page.getByRole('button', { name: 'Discard', exact: true }).click();
+      await expect(confirm).toBeHidden();
+      await expect(page).toHaveURL(/panel=AIRUSED/);
+      await expect(page.getByRole('dialog').first().getByRole('textbox', { name: /^Name · English/ })).toHaveValue('Air used');
+      await expect(page.getByRole('dialog').first().locator(':focus'), `прогін ${run}: фокус у шторці`).toHaveCount(1);
+      expect(backend.sent, `прогін ${run}: нічого не записано`).toHaveLength(0);
+
+      // Чиста форма: клік по іншому рядку перемикає без питання.
+      await page.getByRole('row', { name: /Water permits/ }).click({ position: { x: 24, y: 10 } });
+      await expect(page).toHaveURL(/panel=WATER/);
+      await expect(confirm).toBeHidden();
+    }
+  });
+
   test('4097 біля поля коду; 4099 перечитує групу і повторна правка йде зі свіжим токеном - N/5', async ({ page }) => {
     test.setTimeout(240_000);
     await signIn(page);

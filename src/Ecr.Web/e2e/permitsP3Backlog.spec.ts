@@ -138,7 +138,8 @@ test.describe('Permits P3 backlog', () => {
     const reason = dialog.getByRole('textbox', { name: /Reason/ });
 
     // KI-04: поріг довжини причини видно людині; N/5 перемикань 9 -> 10 символів (підказка в описі поля, кнопка слідом).
-    const hint = dialog.getByText('Enter at least 10 characters.');
+    // Саме ВІДОБРАЖЕНИЙ опис поля: після переходу 10 -> 9 той самий текст з'являється й у видимо-схованому живому регіоні (a11y).
+    const hint = dialog.getByTestId('end-reason-hint');
     const confirm = dialog.getByRole('button', { name: 'End permit' });
     for (let run = 1; run <= 5; run += 1) {
       await reason.fill('123456789');

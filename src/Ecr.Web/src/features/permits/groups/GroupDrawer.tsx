@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Button, Group, MultiSelect, Skeleton, Stack, Switch, Text, TextInput } from '@mantine/core';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { serverMessage } from '@/features/registries/rc816/serverMessage';
@@ -46,6 +46,18 @@ export interface GroupDrawerProps {
   readonly group: PermitGroupDto | null;
   /** Право керувати групами (`Permit.EditType`, без симуляції); без нього шторка лише для читання. */
   readonly canEdit: boolean;
+  /**
+   * Чи є в шторці незбережене, що не можна кинути мовчки (`guarded`): сторінка питає «Discard», коли людина
+   * клікає по рядку ІНШОГО запису (на широкому екрані без затемнення), бо шторка перемонтується `key={code}`.
+   */
+  readonly onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * Сторінка просить перемкнутися на інший запис, а тут незбережене: показуємо те саме підтвердження «Discard» ТУТ, у
+   * шторці (окремий модальний на сторінці опинявся під шторкою й не діставав кліків - живий e2e); рішення людини
+   * повертається в `onSwitchAnswer`.
+   */
+  readonly switchRequested?: boolean;
+  readonly onSwitchAnswer?: (discard: boolean) => void;
 }
 
 /**
@@ -57,7 +69,7 @@ export interface GroupDrawerProps {
  * ⚠ Збереження існуючої групи - до двох запитів (`PUT permit-groups/{code}` для назви/опису/активності і
  * `PUT …/types` для складу); другий іде з токеном, який повернув перший.
  */
-export function GroupDrawer({ group, canEdit }: GroupDrawerProps): JSX.Element {
+export function GroupDrawer({ group, canEdit, onDirtyChange, switchRequested = false, onSwitchAnswer }: GroupDrawerProps): JSX.Element {
   const isNew = group === null;
   const [, setPanel] = useDetailPanel();
   const panelId = isNew ? NewGroupPanel : group.code;
@@ -116,7 +128,15 @@ export function GroupDrawer({ group, canEdit }: GroupDrawerProps): JSX.Element {
   // Вийти з незбереженим - лише через підтвердження «Discard» (Esc, хрестик, затемнення й Cancel); чиста форма закривається одразу.
   // ⛔ Не `onExitUnsaved => false` без підтвердження: введене пропало б мовчки (клас дефекту «Assign month»).
   const guarded = canEdit && dirty && !busy;
-  useDirtyDrawerExit(panelId, guarded && !confirmingDelete && !discarding, () => setDiscarding(true));
+  useDirtyDrawerExit(panelId, guarded && !confirmingDelete && !discarding && !switchRequested, () => setDiscarding(true));
+
+  const reportDirty = useRef(onDirtyChange);
+  reportDirty.current = onDirtyChange;
+  useEffect(() => {
+    reportDirty.current?.(guarded);
+
+    return () => reportDirty.current?.(false);
+  }, [guarded]);
 
   function requestClose(): void {
     if (guarded) setDiscarding(true);
@@ -353,16 +373,20 @@ export function GroupDrawer({ group, canEdit }: GroupDrawerProps): JSX.Element {
       </form>
 
       <ConfirmModal
-        opened={discarding}
+        opened={discarding || switchRequested}
         title={t('permits.groups.drawer.discardTitle')}
         text={t('permits.groups.drawer.discardText')}
         verb={t('permits.groups.drawer.discardVerb')}
         cancelLabel={t('permits.groups.drawer.keepEditing')}
         onConfirm={() => {
           setDiscarding(false);
-          close();
+          if (switchRequested) onSwitchAnswer?.(true);
+          else close();
         }}
-        onClose={() => setDiscarding(false)}
+        onClose={() => {
+          setDiscarding(false);
+          if (switchRequested) onSwitchAnswer?.(false);
+        }}
       />
 
       {!isNew && (

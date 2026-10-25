@@ -450,7 +450,8 @@ public sealed partial class PatchCellsHandler
                     CheckLookupsExist(item.Context, own, standings);
                     if (ownChanged.Count > 0)
                     {
-                        CheckLookupStandings(item.Context, ownChanged, standings, periodBounds, groups);
+                        CheckLookupsBelong(item.Context, ownChanged, standings, groups);
+                        CheckLookupStandings(item.Context, ownChanged, standings, periodBounds);
                     }
                 });
             }
