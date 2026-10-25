@@ -178,6 +178,14 @@ public sealed class DocumentConfiguration : IEntityTypeConfiguration<Document>
         builder.HasIndex(x => new { x.ProjectId, x.BusinessKey })
                .IsUnique().HasDatabaseName("UQ_Document");
 
+        // ✎ D-450: фільтр переліку «Власник» (`ownerUserId`) і вибір власників (`ListOwnersAsync`) шукають і групують
+        // документи за `CreatedByUserId`; без індексу — скан усієї doc.Document. `ProjectId` в INCLUDE: обидва запити
+        // одразу звіряють проєкт із межею видимості, і без нього кожен знайдений рядок добирався б key lookup-ом.
+        // Будується міграцією `D450DocumentOwnerIndex` сирим SQL (ONLINE лише на редакціях 3/5/8, як R11L4).
+        builder.HasIndex(x => x.CreatedByUserId)
+               .IncludeProperties(x => x.ProjectId)
+               .HasDatabaseName("IX_Document_CreatedByUserId");
+
         builder.HasOne<Project>()
                .WithMany()
                .HasForeignKey(x => x.ProjectId)
