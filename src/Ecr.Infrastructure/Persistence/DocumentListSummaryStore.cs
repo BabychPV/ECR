@@ -64,6 +64,10 @@ public sealed class DocumentListSummaryStore(
             (participants?.HiddenSheets ?? []).Select(h => new { d = h.DocumentId, c = h.SheetCode }));
         var participantProject = projectId ?? 0;
 
+        // ✎ P45 (борг D-446): «З зауваженнями» для документа-надання — за ВЛАСНИМИ межами (рядок переліку показує
+        // `errorCount` лише без схованої таблиці, колонки чи аркуша складу); решта документів — за правилом проєкту.
+        var participantIssueJson = JsonSerializer.Serialize(participants?.IssueDocumentIds ?? []);
+
         var row = await db.Database
             .SqlQuery<SummaryRow>($"""
                 SELECT
@@ -84,10 +88,18 @@ public sealed class DocumentListSummaryStore(
                            (SELECT TOP (1) v.ErrorCount
                             FROM wf.ValidationResult v
                             WHERE v.DocumentId = d.Id AND v.PeriodKey = {periodKey}
-                              AND d.ProjectId NOT IN (SELECT CAST(n.value AS int) FROM OPENJSON({narrowedJson}) n)
-                              AND ({restrict} = 0
-                                   OR d.ProjectId IN (SELECT CAST(j2.value AS int) FROM OPENJSON({projectsJson}) j2))
-                            ORDER BY v.RunAt DESC) AS LastErrorCount
+                              AND ((d.Id NOT IN (SELECT CAST(pd2.value AS bigint) FROM OPENJSON({participantDocsJson}) pd2)
+                                    AND d.ProjectId NOT IN (SELECT CAST(n.value AS int) FROM OPENJSON({narrowedJson}) n)
+                                    AND ({restrict} = 0
+                                         OR d.ProjectId IN (SELECT CAST(j2.value AS int) FROM OPENJSON({projectsJson}) j2)))
+                                   OR (d.Id IN (SELECT CAST(pix.value AS bigint) FROM OPENJSON({participantIssueJson}) pix)
+                                       AND NOT EXISTS (SELECT 1
+                                                       FROM doc.DocumentSheet si
+                                                       JOIN cfg.SheetDef sdi ON sdi.Id = si.SheetDefId
+                                                       JOIN OPENJSON({participantHiddenJson}) WITH (d bigint '$.d', c nvarchar(200) '$.c') hi
+                                                         ON hi.d = d.Id AND hi.c = sdi.Code COLLATE DATABASE_DEFAULT
+                                                       WHERE si.DocumentId = d.Id AND si.IsIncluded = 1)))
+                            ORDER BY v.RunAt DESC, v.Id DESC) AS LastErrorCount
                     FROM doc.Document d
                     LEFT JOIN doc.DocumentSheet s
                       ON s.DocumentId = d.Id AND s.IsIncluded = 1

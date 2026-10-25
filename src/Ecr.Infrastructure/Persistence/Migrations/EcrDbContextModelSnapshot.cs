@@ -2966,6 +2966,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CreatedByUserId")
+                        .HasDatabaseName("IX_Document_CreatedByUserId");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("CreatedByUserId"), new[] { "ProjectId" });
+
                     b.HasIndex("ProjectId", "BusinessKey")
                         .IsUnique()
                         .HasDatabaseName("UQ_Document");
