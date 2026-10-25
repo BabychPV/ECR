@@ -491,6 +491,157 @@ public sealed class PatchCellsLookupValidityTests
         Assert.Equal(0, _groups.EnsureFreshCalls);
     }
 
+    // ── Решення людини 25.10 («Так, вимагати»): вибір запису Lookup у комірці потребує Registry.View (глобально, у
+    // проєкті документа чи грант Read на реєстр); без нього - та сама відповідь, що й для неіснуючого запису.
+    // Мутація: прибрати перевірку View в LookupTargetMatcher.Belongs - червоніють тести «без View».
+
+    private const int DocumentProjectId = 10;
+
+    private void ProfileIs(
+        string[]? globalPermissions = null,
+        string[]? scopedPermissions = null,
+        int scopedProject = DocumentProjectId,
+        Dictionary<string, GrantLevel>? grants = null,
+        string[]? denies = null,
+        bool integration = false)
+    {
+        _access.DocumentProjectIdAsync(DocumentId, Arg.Any<CancellationToken>()).Returns(DocumentProjectId);
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessProfile
+        {
+            CacheKey = "view-case", UserId = 9, SecurityStamp = "s",
+            Permissions = new HashSet<string>(globalPermissions ?? []),
+            Grants = grants ?? new Dictionary<string, GrantLevel>(),
+            Denies = new HashSet<string>(denies ?? []), RoleIds = new HashSet<int>(),
+            IsIntegrationWriter = integration,
+            Scoped = scopedPermissions is null
+                ? new Dictionary<int, ScopedProjectAccess>()
+                : new Dictionary<int, ScopedProjectAccess>
+                {
+                    [scopedProject] = new(
+                        new Dictionary<string, GrantLevel>(), new HashSet<string>(), new HashSet<int>(),
+                        new HashSet<string>(scopedPermissions)),
+                },
+        });
+    }
+
+    /// <summary>Побайтно та сама відмова, що й для запису, якого немає.</summary>
+    private async Task AssertSameAsAbsent()
+    {
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+        Assert.Equal("ECR-CELL-4223", refused.ErrorCode);
+        Assert.Equal("err.ECR-CELL-4223.missingEntry", refused.Details!["messageKey"]);
+
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(new List<RegistryEntryStanding>());
+        var absent = await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+
+        Assert.Equal(absent.ErrorCode, refused.ErrorCode);
+        Assert.Equal(absent.Message, refused.Message);
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(absent.Details),
+            System.Text.Json.JsonSerializer.Serialize(refused.Details));
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "REG-VIEW")]
+    [InlineData("none")]
+    [InlineData("otherPermission")]
+    [InlineData("scopedOtherProject")]
+    [InlineData("readGrantOnOtherRegistry")]
+    public async Task Без_Registry_View_існуючий_запис_відхиляється_побайтно_як_неіснуючий(string kind)
+    {
+        switch (kind)
+        {
+            case "otherPermission":
+                ProfileIs(globalPermissions: ["Document.View"]);
+                break;
+            case "scopedOtherProject":
+                ProfileIs(scopedPermissions: ["Registry.View"], scopedProject: DocumentProjectId + 1);
+                break;
+            case "readGrantOnOtherRegistry":
+                ProfileIs(grants: new Dictionary<string, GrantLevel> { ["Registry:" + OtherRegistryDefId] = GrantLevel.Read });
+                break;
+            default:
+                ProfileIs();
+                break;
+        }
+
+        Entry();
+
+        await AssertSameAsAbsent();
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "REG-VIEW")]
+    public async Task З_глобальним_Registry_View_запис_приймається()
+    {
+        ProfileIs(globalPermissions: ["Registry.View"]);
+        Entry();
+
+        await AssertWritten();
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "REG-VIEW")]
+    public async Task Scoped_оператор_з_View_на_проєкт_документа_запис_приймається()
+    {
+        ProfileIs(scopedPermissions: ["Registry.View"]);
+        Entry();
+
+        await AssertWritten();
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "REG-VIEW")]
+    public async Task Грант_Read_на_реєстр_колонки_без_View_запис_приймається()
+    {
+        ProfileIs(grants: new Dictionary<string, GrantLevel> { ["Registry:" + ColumnRegistryDefId] = GrantLevel.Read });
+        Entry();
+
+        await AssertWritten();
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "REG-VIEW")]
+    public async Task View_і_Deny_на_реєстр_відхиляється_як_немає_запису()
+    {
+        ProfileIs(globalPermissions: ["Registry.View"], denies: ["Registry:" + ColumnRegistryDefId]);
+        Entry();
+
+        await AssertSameAsAbsent();
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "REG-VIEW")]
+    public async Task Збір_IsIntegrationWriter_без_View_запис_приймається()
+    {
+        ProfileIs(integration: true);
+        Entry();
+
+        await AssertWritten();
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "REG-VIEW")]
+    public async Task Група_реєстр_члена_без_View_відхиляється_а_з_View_приймається()
+    {
+        _groups.WithGroup(ColumnRegistryDefId, [OtherRegistryDefId]);
+        Entry(registryDefId: OtherRegistryDefId);
+
+        ProfileIs();
+        await AssertSameAsAbsent();
+
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(new List<RegistryEntryStanding> { new(EntryId, OtherRegistryDefId, true, false, null, null) });
+        ProfileIs(globalPermissions: ["Registry.View"]);
+        await AssertWritten();
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "REG-VIEW")]
+    public async Task Незмінене_значення_без_View_не_перевіряється_повторно()
+    {
+        // Те саме значення, що вже стоїть, - не новий вибір (C7): повтор без View не ламає збереження інших комірок.
+        ProfileIs();
+        Entry();
+        StoredValue(EntryId);
+
+        await AssertWritten();
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "C7")]
     public async Task Неіснуючий_запис_як_і_раніше_missingEntry()
     {

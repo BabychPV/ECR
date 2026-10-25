@@ -48,6 +48,75 @@ public sealed class LookupTargetMatcherDenyTests
     public void Системний_шлях_без_профілю_Deny_не_застосовує()
         => Assert.True(LookupTargetMatcher.Belongs(new FakePermitGroupResolver(), null, Target, Target));
 
+    // ── Решення людини 25.10 («Так, вимагати»): вибір запису потребує Registry.View (глобально) АБО гранта Read на
+    // реєстр запису; Deny перемагає; системні шляхи (profile = null) і збір (IsIntegrationWriter) - як було.
+    // Мутація: прибрати перевірку View в Belongs - червоніють тести «без View».
+
+    private static AccessProfile WithView(params string[] denied) => new()
+    {
+        CacheKey = "v", UserId = 1, SecurityStamp = "s",
+        Permissions = new HashSet<string> { "Registry.View" }, Grants = new Dictionary<string, Ecr.Domain.Enums.GrantLevel>(),
+        Denies = new HashSet<string>(denied), RoleIds = new HashSet<int>(),
+    };
+
+    [Fact]
+    public void Пряма_ціль_без_Registry_View_не_належить()
+        => Assert.False(LookupTargetMatcher.Belongs(new FakePermitGroupResolver(), Profile(), Target, Target));
+
+    [Fact]
+    public void Пряма_ціль_з_Registry_View_належить()
+        => Assert.True(LookupTargetMatcher.Belongs(new FakePermitGroupResolver(), WithView(), Target, Target));
+
+    [Fact]
+    public void Пряма_ціль_View_і_Deny_не_належить()
+        => Assert.False(LookupTargetMatcher.Belongs(new FakePermitGroupResolver(), WithView("Registry:" + Target), Target, Target));
+
+    [Fact]
+    public void Пряма_ціль_грант_Read_на_реєстр_без_View_належить()
+    {
+        var profile = new AccessProfile
+        {
+            CacheKey = "g", UserId = 1, SecurityStamp = "s",
+            Permissions = new HashSet<string>(),
+            Grants = new Dictionary<string, Ecr.Domain.Enums.GrantLevel> { ["Registry:" + Target] = Ecr.Domain.Enums.GrantLevel.Read },
+            Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
+        };
+
+        Assert.True(LookupTargetMatcher.Belongs(new FakePermitGroupResolver(), profile, Target, Target));
+    }
+
+    [Fact]
+    public void Збір_IsIntegrationWriter_без_View_належить()
+    {
+        var profile = new AccessProfile
+        {
+            CacheKey = "i", UserId = 1, SecurityStamp = "s",
+            Permissions = new HashSet<string>(), Grants = new Dictionary<string, Ecr.Domain.Enums.GrantLevel>(),
+            Denies = new HashSet<string>(), RoleIds = new HashSet<int>(), IsIntegrationWriter = true,
+        };
+
+        Assert.True(LookupTargetMatcher.Belongs(new FakePermitGroupResolver(), profile, Target, Target));
+    }
+
+    [Fact]
+    public void Група_реєстр_члена_без_View_не_належить_а_з_View_належить()
+    {
+        var groups = new FakePermitGroupResolver();
+        groups.WithGroup(Target, [Other]);
+
+        Assert.False(LookupTargetMatcher.Belongs(groups, Profile(), Target, Other));
+        Assert.True(LookupTargetMatcher.Belongs(groups, WithView(), Target, Other));
+    }
+
+    [Fact]
+    public void Група_реєстр_члена_View_і_Deny_не_належить()
+    {
+        var groups = new FakePermitGroupResolver();
+        groups.WithGroup(Target, [Other]);
+
+        Assert.False(LookupTargetMatcher.Belongs(groups, WithView("Registry:" + Other), Target, Other));
+    }
+
     [Fact]
     public void Група_реєстр_члена_під_Deny_не_належить()
     {
