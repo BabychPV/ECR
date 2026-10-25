@@ -42,7 +42,8 @@ public static class LookupTargetEntries
     /// <param name="targetRegistryId">Ціль колонки/поля.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <param name="profile">
-    /// Профіль користувача (S18): члени складу під Deny пропускаються - їх номери й назви типів не розкриваються (імпорт Excel).
+    /// Профіль користувача (S18): члени складу під Deny пропускаються - їх номери й назви типів не розкриваються (імпорт Excel);
+    /// пряма ціль під Deny дає порожній перелік (як «записів немає»).
     /// <c>null</c> - без перевірки (експорт, системні шляхи).
     /// </param>
     public static async Task<IReadOnlyList<LookupTargetEntry>> ListAsync(
@@ -58,6 +59,13 @@ public static class LookupTargetEntries
 
         if (groups is null || !groups.IsGroup(targetRegistryId))
         {
+            // Deny на ПРЯМУ ціль (рішення людини 23.10: «Deny блокує і вибір запису», S18): перегляд імпорту не розкриває
+            // існування запису - порожній перелік дає ту саму відповідь, що й для неіснуючого коду (як і apply: Belongs).
+            if (profile is not null && Registries.RegistryAccess.IsDenied(profile, targetRegistryId))
+            {
+                return [];
+            }
+
             var own = await registries.ListEntriesAsync(targetRegistryId, ct).ConfigureAwait(false);
             return [.. own.Select(e => new LookupTargetEntry(e, null))];
         }

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, type JSX } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Box, Button, Stack, Text } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { DataTable } from '@/shared/ui/DataTable';
@@ -58,6 +58,26 @@ export function GroupsPage(): JSX.Element {
   useEffect(() => {
     if (listed) void loadGroupDrawer();
   }, [listed]);
+
+  // Клік по рядку ІНШОГО запису на широкому екрані (затемнення немає) перемонтував би шторку `key={code}` і мовчки
+  // згубив незбережене: при незбереженому спершу те саме підтвердження «Discard», що й при закритті шторки.
+  const dirtyRef = useRef(false);
+  const [switchTo, setSwitchTo] = useState<string | null>(null);
+  const openRow = (code: string): void => {
+    if (code === panel) return;
+    if (dirtyRef.current) setSwitchTo(code);
+    else setParams({ panel: code });
+  };
+  // Адреса змінилась (інший запис, закриття, мертвий `?panel=`) - запит на перемикання застарів.
+  useEffect(() => setSwitchTo(null), [panel]);
+  const answerSwitch = (discard: boolean): void => {
+    const next = switchTo;
+    setSwitchTo(null);
+    if (discard && next !== null) setParams({ panel: next });
+  };
+  const onDirtyChange = useCallback((dirty: boolean): void => {
+    dirtyRef.current = dirty;
+  }, []);
 
   // Мертвий `?panel=` (`_new` без права, неіснуючий код, групу видалили деінде) не лишається в адресі: шторки немає,
   // а повернення по історії давало б той самий порожній екран. Чекаємо, доки приїдуть і групи, і профіль:
@@ -121,7 +141,7 @@ export function GroupsPage(): JSX.Element {
           noMatchTitle={t('permits.groups.noMatches')}
           onClearFilters={() => setParams({ q: null, stat: null })}
           clearFiltersLabel={t('filters.clear')}
-          onRowClick={(group) => setParams({ panel: group.code })}
+          onRowClick={(group) => openRow(group.code)}
           // У клітинках немає посилання на шторку - рядок мусить відкриватися клавіатурою (Tab -> Enter/Space).
           rowFocusable
           rowLabel={(group) => groupName(group)}
@@ -129,8 +149,12 @@ export function GroupsPage(): JSX.Element {
       </Box>
 
       <Suspense fallback={null}>
-        {panel === NewGroupPanel && canEdit && <GroupDrawer key={NewGroupPanel} group={null} canEdit />}
-        {opened !== undefined && <GroupDrawer key={opened.code} group={opened} canEdit={canEdit} />}
+        {panel === NewGroupPanel && canEdit && (
+          <GroupDrawer key={NewGroupPanel} group={null} canEdit onDirtyChange={onDirtyChange} switchRequested={switchTo !== null} onSwitchAnswer={answerSwitch} />
+        )}
+        {opened !== undefined && (
+          <GroupDrawer key={opened.code} group={opened} canEdit={canEdit} onDirtyChange={onDirtyChange} switchRequested={switchTo !== null} onSwitchAnswer={answerSwitch} />
+        )}
       </Suspense>
     </Stack>
   );

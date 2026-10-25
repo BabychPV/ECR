@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
@@ -550,6 +550,54 @@ describe('Groups: вихід зі шторки з незбереженим (Disc
     fireEvent.click(screen.getByRole('button', { name: 'permits.groups.drawer.cancel' }));
     await waitFor(() => expect(where()).not.toContain('panel='));
     expect(discardTitle()).toBeNull();
+  });
+
+  // Клік по рядку ІНШОГО запису (на широкому екрані затемнення немає) перемонтовує шторку `key={code}`.
+  // Мутаційний доказ (вручну, відновлено): `onRowClick={(group) => setParams({ panel: group.code })}` - валить три тести нижче.
+  describe('клік по рядку іншого запису', () => {
+    it('з незбереженим питає «Discard»; «Keep editing» лишає запис і введене', async () => {
+      stub([water, used]);
+      show('/admin/permits/groups?panel=WATER');
+      await editName();
+
+      fireEvent.click(screen.getByText('Air used'));
+
+      expect(await screen.findByText('permits.groups.drawer.discardTitle')).not.toBeNull();
+      expect(where()).toContain('panel=WATER');
+      fireEvent.click(await screen.findByRole('button', { name: 'permits.groups.drawer.keepEditing' }));
+      await waitFor(() => expect(discardTitle()).toBeNull());
+      expect(where()).toContain('panel=WATER');
+      expect((await nameField()).value).toBe('Water 2');
+      expect(backend.sent).toHaveLength(0);
+    });
+
+    it('«Discard» перемикає на інший запис без запису на сервер', async () => {
+      stub([water, used]);
+      show('/admin/permits/groups?panel=WATER');
+      await editName();
+
+      fireEvent.click(screen.getByText('Air used'));
+      fireEvent.click(await screen.findByTestId('confirm-verb'));
+
+      await waitFor(() => expect(where()).toContain('panel=AIRUSED'));
+      await waitFor(() => expect(discardTitle()).toBeNull());
+      expect(backend.sent).toHaveLength(0);
+      expect(((await nameField()).value)).toBe('Air used');
+    });
+
+    it('чиста форма перемикає без питання; клік по тому ж рядку нічого не питає', async () => {
+      stub([water, used]);
+      show('/admin/permits/groups?panel=WATER');
+      await nameField();
+
+      fireEvent.click(within(document.querySelector('[data-list-table]') as HTMLElement).getByText('Water permits'));
+      expect(discardTitle()).toBeNull();
+      expect(where()).toContain('panel=WATER');
+
+      fireEvent.click(screen.getByText('Air used'));
+      await waitFor(() => expect(where()).toContain('panel=AIRUSED'));
+      expect(discardTitle()).toBeNull();
+    });
   });
 
   it('нова група: введений код робить форму «брудною», порожня закривається без питання', async () => {
