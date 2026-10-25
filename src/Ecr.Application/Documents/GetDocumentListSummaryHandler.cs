@@ -93,10 +93,14 @@ public sealed class GetDocumentListSummaryHandler(
 
         // ✎ D-446: застарілі результати — лише документи, видимі учасникові цілком (та сама умова, що виключає частково
         // схований документ-надання з фільтра `resultsStale` у переліку).
+        // ✎ P45: «З зауваженнями» — за правилом лічильника помилок рядка (`DocumentSheetVisibility.For`, `IsNarrowed`):
+        // жодної схованої таблиці чи колонки тут, а схований аркуш СКЛАДУ документа запит відкидає сам (склад знає база).
         return new ParticipantSummaryScope(
             [.. scopes.Keys],
             profile.DeniedProjectIds(),
             [.. scopes.SelectMany(s => s.Value.HiddenSheetCodes().Select(code => (s.Key, code)))],
-            [.. scopes.Where(s => !DocumentSheetVisibility.IsProjectNarrowed(s.Value)).Select(s => s.Key).Order()]);
+            [.. scopes.Where(s => !DocumentSheetVisibility.IsProjectNarrowed(s.Value)).Select(s => s.Key).Order()],
+            [.. scopes.Where(s => s.Value.HiddenTableIds().Count == 0 && s.Value.HiddenColumnIds().Count == 0)
+                .Select(s => s.Key).Order()]);
     }
 }
