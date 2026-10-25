@@ -200,6 +200,75 @@ public sealed partial class DocumentVersionMigrationTests
             + "WHERE cv.PeriodKey = @pk AND r.TableInstanceId = @ti AND cv.TableDefId = @oldTd", s).ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// FH-P2-D: повтор через handler ПЕРЕПЛАНОВУЄ (мапа будується заново з тих самих вхідних) - збережений watermark діє,
+    /// діапазони першого запуску не повторюються, а дані дописуються без дублів і втрат.
+    /// </summary>
+    /// <remarks>Мутація: у <c>MoveDataAsync</c> ігнорувати watermark (стартувати з діапазону 0) - перевірка «перший діапазон >= 3» червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.5")]
+    public async Task Повтор_через_handler_з_переплануванням_тією_ж_мапою_дописує_з_watermark_без_дублів()
+    {
+        var s = await ArrangeAsync(Target.OnlyLabels).ConfigureAwait(true);
+        await BulkInsertAsync(s, 4_000).ConfigureAwait(true);
+        var before = await AggregatesAsync(s).ConfigureAwait(true);
+
+        using (var baseApp = new EcrApiFactory(sql))
+        using (var app = baseApp.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.AddScoped<IDocumentVersionMigrationStore>(sp => new DocumentVersionMigrationStore(sp.GetRequiredService<EcrDbContext>())
+            {
+                RangeRows = 1_000,
+                RangeObserver = stat =>
+                {
+                    if (stat is { Kind: "cells", Index: 2 })
+                    {
+                        throw new Ecr.Application.Errors.BusinessRuleException(Ecr.Domain.Errors.ErrorCodes.JobStateConflict, "імітований обрив між діапазонами");
+                    }
+                },
+            }))))
+        using (var client = await SignedInAsync(app, s.UserName, baseApp).ConfigureAwait(true))
+        {
+            var started = await PostAsyncJob(client, s, "Safe").ConfigureAwait(true);
+            var jobId = JsonDocument.Parse(await started.Content.ReadAsStringAsync().ConfigureAwait(true))
+                .RootElement.GetProperty("jobId").GetString()!;
+            var failed = await WaitJobAsync(client, jobId, baseApp).ConfigureAwait(true);
+            Assert.True(failed.GetProperty("state").GetString() == "Failed", $"{failed.GetRawText()}\n{baseApp.ErrorsText}");
+        }
+
+        Assert.True(await MarkerPresentAsync(s).ConfigureAwait(true), "після обриву маркер мусить лишитися");
+        Assert.True(CountMovedCells(s) > 0, "обрив стався до першого коміту — тест нічого не довів");
+
+        // Повтор: новий запит -> handler будує мапу заново; сховище збирає статистику діапазонів.
+        var resumed = new System.Collections.Concurrent.ConcurrentQueue<MigrationRangeStat>();
+        using (var baseApp = new EcrApiFactory(sql))
+        using (var app = baseApp.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.AddScoped<IDocumentVersionMigrationStore>(sp => new DocumentVersionMigrationStore(sp.GetRequiredService<EcrDbContext>())
+            {
+                RangeRows = 1_000,
+                RangeObserver = resumed.Enqueue,
+            }))))
+        using (var client = await SignedInAsync(app, s.UserName, baseApp).ConfigureAwait(true))
+        {
+            var started = await PostAsyncJob(client, s, "Safe").ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.Accepted, started.StatusCode);
+            var jobId = JsonDocument.Parse(await started.Content.ReadAsStringAsync().ConfigureAwait(true))
+                .RootElement.GetProperty("jobId").GetString()!;
+            var job = await WaitJobAsync(client, jobId, baseApp).ConfigureAwait(true);
+            Assert.True(job.GetProperty("state").GetString() == "Succeeded", $"повтор: {job.GetRawText()}\n{baseApp.ErrorsText}");
+        }
+
+        var firstCellsIndex = resumed.Where(x => x.Kind == "cells").Min(x => x.Index);
+        Assert.True(firstCellsIndex >= 3, $"Повтор почав з діапазону {firstCellsIndex}, а мав з 3: watermark не діє.");
+        Assert.False(await MarkerPresentAsync(s).ConfigureAwait(true), "маркер лишився після повтору");
+        Assert.Equal(s.TargetVersionId, await ProjectVersionAsync(s).ConfigureAwait(true));
+        Assert.Equal(before, await AggregatesAsync(s).ConfigureAwait(true));   // жодної втрати чи дубля
+        Assert.Equal(0, await ScalarAsync(
+            "SELECT COUNT(*) FROM doc.CellValue cv JOIN doc.TableRow r ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId "
+            + "WHERE cv.PeriodKey = @pk AND r.TableInstanceId = @ti AND cv.TableDefId = @oldTd", s).ConfigureAwait(true));
+    }
+
     /// <summary>Спільне блокування структури документа (як у кожного писаря) відмовляє 409 ECR-DOC-4091 при маркері.</summary>
     private async Task AssertWriterRefusedAsync(Scenario s)
     {
