@@ -187,6 +187,27 @@ public sealed class TestDocumentBuilder(string connectionString)
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Дає користувачеві нову роль із грантом <paramref name="level"/> на проєкт (роль + призначення + грант).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ P2-2 (аудит 25.10): надання учасника діє, лише поки ДЕЛЕГАТОР має право його видавати (Manage проєкту або
+    /// автор з Write). Тест, що кладе передачу прямо в базу, мусить дати делегатору права цим методом — інакше
+    /// надання не діє, і тест перевіряв би вже не те.
+    /// </remarks>
+    public async Task GrantProjectAsync(int userId, int projectId, GrantLevel level, CancellationToken ct = default)
+    {
+        await using var db = CreateContext();
+        var role = new Ecr.Domain.Entities.Security.Role(
+            EcrCode.Create($"TKG_{Guid.NewGuid():N}"[..20]), Name("Test project grant"));
+        db.Roles.Add(role);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        db.RoleAssignments.Add(new Ecr.Domain.Entities.Security.RoleAssignment(role.Id, userId, null));
+        db.ResourceGrants.Add(new Ecr.Domain.Entities.Security.ResourceGrant(role.Id, ResourceKind.Project, projectId, level));
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
     /// <summary>Контекст на ту саму базу — для тестів, яким потрібен EF напряму.</summary>
     public EcrDbContext CreateContext()
         => new(new DbContextOptionsBuilder<EcrDbContext>()

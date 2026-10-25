@@ -638,7 +638,14 @@ public sealed class AccessDecisionService(
         }
 
         var documents = EditAssignmentFactsReader.ParticipatedDocuments(db, profile.UserId, clock.UtcNow);
-        return await documents.AnyAsync(id => id == documentId, ct).ConfigureAwait(false);
+        if (!await documents.AnyAsync(id => id == documentId, ct).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        // ⛔ P2-2: надання, чий делегатор втратив право його видавати, видимості не дає (рядок лишається, але не діє).
+        var grants = await ParticipationGrantsAsync(profile, [documentId], ct).ConfigureAwait(false);
+        return grants.TryGetValue(documentId, out var active) && active.Count > 0;
     }
 
     /// <inheritdoc />
@@ -704,7 +711,96 @@ public sealed class AccessDecisionService(
             .ConfigureAwait(false);
 
         var now = clock.UtcNow;
-        return facts.ToDictionary(f => f.Key, f => DocumentParticipation.Active(f.Value.Facts, now));
+        var result = new Dictionary<long, IReadOnlyList<ParticipationGrant>>(facts.Count);
+        foreach (var (documentId, found) in facts)
+        {
+            var checkedFacts = await WithDelegatorRightsAsync(documentId, found.OwnerUserId, found.Facts, now, ct)
+                .ConfigureAwait(false);
+            result[documentId] = DocumentParticipation.Active(checkedFacts, now);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// ⛔ P2-2 (аудит 25.10): надання діє, лише поки делегатор СПРАВДІ може його видавати — активний, має право
+    /// керувати передачами документа (<c>Manage</c> проєкту або автор з <c>Write</c>) і власний рівень на області не
+    /// нижчий за виданий. Знижений чи звільнений менеджер більше не лишає «нащадків» з Submit/Approve.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Без каскадних видалень: рядок передачі лишається й оживає, щойно делегатор відновить права. Для рівня
+    /// <c>Write</c> (передача місяця) власний рівень на області не звіряється — видача Write меряється «видимими
+    /// аркушами» (<c>SheetsBeyondOwnRights</c>), а не мінімумом по області; лишається вимога керувати передачами.
+    /// Запит проєкту/шаблону й профілів делегаторів — лише коли є хоча б одне надання, що ще діє за іншими умовами.
+    /// </remarks>
+    private async Task<IReadOnlyList<EditAssignmentFact>> WithDelegatorRightsAsync(
+        long documentId, int ownerUserId, IReadOnlyList<EditAssignmentFact> facts, DateTime now, CancellationToken ct)
+    {
+        static bool Candidate(EditAssignmentFact f, DateTime utcNow)
+            => f.MyProgress is not null && f.DelegatorActive && f.Level != GrantLevel.None
+               && !(f.ExpiresAt is { } until && until <= utcNow);
+
+        if (!facts.Any(f => Candidate(f, now)))
+        {
+            return facts;
+        }
+
+        var scope = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.ProjectId, p.TemplateVersionId })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        var profiles = new Dictionary<int, AccessProfile?>();
+        TemplateVersionSnapshot? snapshot = null;
+        var result = new List<EditAssignmentFact>(facts.Count);
+
+        foreach (var fact in facts)
+        {
+            if (!Candidate(fact, now))
+            {
+                result.Add(fact);
+                continue;
+            }
+
+            var valid = false;
+            if (scope is not null)
+            {
+                if (!profiles.TryGetValue(fact.DelegatedByUserId, out var delegator))
+                {
+                    try
+                    {
+                        delegator = await BuildProfileAsync(fact.DelegatedByUserId, ct).ConfigureAwait(false);
+                    }
+                    catch (AccessDeniedException)
+                    {
+                        delegator = null;
+                    }
+
+                    profiles[fact.DelegatedByUserId] = delegator;
+                }
+
+                if (delegator is not null
+                    && Application.Documents.EditAssignments.DelegatorAuthority.MayManage(
+                        delegator, scope.ProjectId, ownerUserId))
+                {
+                    valid = true;
+                    if (fact.Level != GrantLevel.Write)
+                    {
+                        snapshot ??= await metadata.GetAsync(scope.TemplateVersionId, ct).ConfigureAwait(false);
+                        var slice = EditAssignmentSlice.Create(
+                            fact.SheetCode, fact.TableCode, fact.MonthNumber, fact.Period?.Value);
+                        valid = Application.Documents.EditAssignments.DelegatorAuthority.OwnLevelReaches(
+                            delegator, scope.ProjectId, snapshot, slice, fact.Level);
+                    }
+                }
+            }
+
+            result.Add(valid ? fact : fact with { DelegatorActive = false });
+        }
+
+        return result;
     }
 
     private static readonly IReadOnlyDictionary<long, IReadOnlyList<ParticipationGrant>> NoGrants =
@@ -1774,9 +1870,21 @@ public sealed class AccessDecisionService(
             return new Dictionary<long, (int, IReadOnlyList<EditAssignmentFact>)>();
         }
 
-        return await Persistence.EditAssignmentFactsReader
+        var loaded = await Persistence.EditAssignmentFactsReader
             .LoadAsync(db, documentIds, profile.UserId, forUpdate: false, ct)
             .ConfigureAwait(false);
+
+        // ⛔ P2-2: передача діє лише поки делегатор може її видавати (див. WithDelegatorRightsAsync).
+        var now = clock.UtcNow;
+        var result = new Dictionary<long, (int, IReadOnlyList<EditAssignmentFact>)>(loaded.Count);
+        foreach (var (documentId, found) in loaded)
+        {
+            result[documentId] = (
+                found.OwnerUserId,
+                await WithDelegatorRightsAsync(documentId, found.OwnerUserId, found.Facts, now, ct).ConfigureAwait(false));
+        }
+
+        return result;
     }
 
     /// <summary>

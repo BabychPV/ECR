@@ -100,6 +100,9 @@ public sealed class EditAssignmentAccessDecisionTests(SqlServerFixture sql) : ID
         db.Users.AddRange(delegator, executor, stranger);
         await db.SaveChangesAsync(CancellationToken.None);
 
+        // P2-2: надання діє, лише поки делегатор може його видавати — права делегатора (Manage) задано явно.
+        await builder.GrantProjectAsync(delegator.Id, doc.ProjectId, GrantLevel.Manage);
+
         var ownerId = await db.Documents
             .Where(d => d.Id == doc.DocumentId)
             .Select(d => d.CreatedByUserId)
