@@ -27,15 +27,18 @@ internal static class EditAssignmentFactsReader
     /// транзакції запису: перехід <c>Fill/Validate/Return</c> чекає її завершення).
     /// </param>
     /// <param name="ct">Токен скасування.</param>
-    /// <param name="utcNow">Поточний час для блокування делегатора; <c>null</c> - системний годинник.</param>
+    /// <param name="utcNow">Поточний час для блокування делегатора; <c>null</c> - блокування не рахується (шлях без годинника).</param>
     public static async Task<IReadOnlyDictionary<long, (int OwnerUserId, IReadOnlyList<EditAssignmentFact> Facts)>>
         LoadAsync(
             EcrDbContext db, IReadOnlyCollection<long> documentIds, int userId, bool forUpdate, CancellationToken ct,
             DateTime? utcNow = null)
     {
         // W14F P3-4: делегатор діє, лише поки обліковий запис активний І не заблокований (LockedUntil - той самий критерій,
-        // що й вхід, User.IsLockedOut). Годинник - зовнішній або системний (шлях під блокуванням аркуша без годинника).
-        var now = utcNow ?? DateTime.UtcNow;
+        // що й вхід, User.IsLockedOut). Годинник - clock служби доступу.
+        // Без годинника (повторна перевірка під блокуванням аркуша - IEditAssignmentStore без IClock) блокування не рахується:
+        // межа "кінець часу" робить умову LockedUntil <= now істинною для будь-якого значення. Перше рішення про дію
+        // (з годинником служби доступу) блокування вже врахувало.
+        var now = utcNow ?? DateTime.MaxValue;
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(documentIds);
 
