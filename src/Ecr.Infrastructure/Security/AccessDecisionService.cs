@@ -689,10 +689,22 @@ public sealed class AccessDecisionService(
         }
 
         var documents = EditAssignmentFactsReader.ParticipatedDocuments(db, profile.UserId, clock.UtcNow);
-        return await db.Documents
+        var candidates = await db.Documents
             .AsNoTracking()
-            .AnyAsync(d => d.ProjectId == projectId && documents.Contains(d.Id), ct)
+            .Where(d => d.ProjectId == projectId && documents.Contains(d.Id))
+            .Select(d => d.Id)
+            .Take(50)
+            .ToListAsync(ct)
             .ConfigureAwait(false);
+        if (candidates.Count == 0)
+        {
+            return false;
+        }
+
+        // ⛔ P3 (календар періодів): надання, чий делегатор утратив право його видавати, проєкту не відкриває - те саме
+        // динамічне правило, що й для документа (ParticipationGrantsAsync -> WithDelegatorRightsAsync).
+        var grants = await ParticipationGrantsAsync(profile, [.. candidates], ct).ConfigureAwait(false);
+        return grants.Values.Any(g => g.Count > 0);
     }
 
     /// <summary>
