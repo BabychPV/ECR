@@ -85,7 +85,7 @@ Known limitations (не цього циклу): (а) заборона, дода�
 | `Template.View` | | перегляд шаблонів і версій | TemplateAdm, DataEntry, Auditor, SysAdm |
 | `Template.Edit` | | редагування шаблонів, екран `/admin/templates` | TemplateAdm, SysAdm |
 | `Template.Publish` | | публікація версії шаблону | TemplateAdm, SysAdm |
-| `Registry.View` | | довідники, `/admin/registries` | TemplateAdm, DataEntry, Approver, Viewer, Auditor, SysAdm |
+| `Registry.View` | | довідники, `/admin/registries`; потрібне для вибору запису довідника (Lookup) у шапці/комірці - PeriodAdm і BootstrapAdm його не мають за задумом (`D-454`), кому треба - видається View/DataEntry | TemplateAdm, DataEntry, Approver, Viewer, Auditor, SysAdm |
 | `Registry.EditData` | | записи довідників | SysAdm |
 | `Registry.EditDefinition` | | структура довідника (конструктор) | SysAdm |
 | `Registry.Publish` | | публікація довідника | SysAdm |
