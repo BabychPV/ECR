@@ -2201,7 +2201,44 @@ public sealed class AccessDecisionService(
         context = await WithSheetCodeAsync(profile, documentId, context, ct).ConfigureAwait(false);
         context = await WithParticipationAsync(profile, documentId, context, ct).ConfigureAwait(false);
 
-        return DenyIfInvisible(profile, context) ?? EditRules.CanReopen(profile, context);
+        if (DenyIfInvisible(profile, context) is { } invisible)
+        {
+            return invisible;
+        }
+
+        // ⛔ P2-4: роль кроку маршруту, як при затвердженні. Submitted — поточний крок; Approved — останній крок
+        // (CurrentStepId після затвердження порожній). Маршруту немає — перевірки немає. Маршрут читається лише коли
+        // стан дозволяє повернення й грант сягає Approve (чиста перевірка без бази) — решта не платить запитом.
+        int? requiredRoleId = null;
+        if (context.SheetStatus is DocumentStatus.Submitted or DocumentStatus.Approved
+            && EditRules.Effective(profile, context with { TableDefId = 0, ColumnDefId = 0 }) >= GrantLevel.Approve)
+        {
+            requiredRoleId = context.SheetStatus == DocumentStatus.Submitted
+                ? (await CurrentApprovalStepAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false))?.RoleId
+                : await LastApprovalStepRoleAsync(documentId, ct).ConfigureAwait(false);
+        }
+
+        return EditRules.CanReopen(profile, context, requiredRoleId);
+    }
+
+    /// <summary>Роль ОСТАННЬОГО кроку маршруту документа; <c>null</c> — маршруту немає.</summary>
+    private async Task<int?> LastApprovalStepRoleAsync(long documentId, CancellationToken ct)
+    {
+        var scope = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (_, p) => new { p.Id, p.TemplateVersionId })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (scope is null)
+        {
+            return null;
+        }
+
+        var route = await workflow.FindRouteAsync(scope.Id, scope.TemplateVersionId, ct).ConfigureAwait(false);
+        return route is null || route.Steps.Count == 0
+            ? null
+            : route.Steps.OrderBy(s => s.Ordinal).Last().RoleId;
     }
 
     /// <inheritdoc />
