@@ -1209,11 +1209,16 @@ public sealed class ExcelImporter(
             : await periods.FindPeriodBoundsAsync(documentId, periodKey, ct).ConfigureAwait(false);
         var asOf = bounds?.PeriodEnd;
 
+        // Рішення 26.10: проєкт документа - лише для профілю без глобального View зі scoped-ролями.
+        var viewProject = Ecr.Application.Permits.Groups.LookupTargetMatcher.ViewProjectNeeded(profile)
+            ? await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false)
+            : null;
+
         foreach (var registryId in registryIds)
         {
             // Permits PRMG: ціль-група = обʼєднання записів реєстрів-членів; для решти - записи самого реєстру.
             var targetEntries = await Ecr.Application.Permits.Groups.LookupTargetEntries
-                .ListAsync(registries, groups, registryId, ct, profile).ConfigureAwait(false);
+                .ListAsync(registries, groups, registryId, ct, profile, viewProject).ConfigureAwait(false);
             Ecr.Application.Permits.Groups.LookupTargetEntries.BuildImportCodes(targetEntries, out var codes, out var ambiguous);
             result[registryId] = codes;
             if (ambiguous.Count > 0)

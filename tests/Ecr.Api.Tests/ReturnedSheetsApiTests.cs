@@ -338,6 +338,47 @@ public sealed class ReturnedSheetsApiTests(SqlServerFixture sql)
 
     private static string Num(long value) => value.ToString(CultureInfo.InvariantCulture);
 
+    /// <summary>
+    /// P3 (PM-EDITASSIGN-P3, закритий період): перевірка ролі кроку в <c>CanReopen</c> не відкриває закритий період -
+    /// повернення затвердженого аркуша в закритому періоді відмовляє <c>ECR-PRD-4223 reopenPeriodFirst</c>
+    /// (<c>ClosedPeriodGuard</c> діє незалежно від права на дію).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P3-CLOSED-PERIOD")]
+    public async Task Повернення_затвердженого_аркуша_у_закритому_періоді_відмовляє_reopenPeriodFirst()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var reopener = await NewUserAsync(
+            s.ProjectId, "rtr", GrantLevel.Manage, withView: true, permissions: ["Document.Reopen"]).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var managerClient = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+        using var reopenerClient = await SignedInAsync(app, reopener.UserName).ConfigureAwait(true);
+
+        await SubmitAsync(app, s, s.Sheet1).ConfigureAwait(true);
+        using (var approve = await managerClient.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{Num(s.DocumentId)}/approve", UriKind.Relative),
+            new { sheetDefId = s.Sheet1, periodKey = s.PeriodKey, approved = true }).ConfigureAwait(true))
+        {
+            Assert.True(approve.StatusCode == HttpStatusCode.NoContent, $"{approve.StatusCode}\n{app.ErrorsText}");
+        }
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE doc.Period SET State = {(int)PeriodState.Closed} WHERE ProjectId = {s.ProjectId} AND PeriodKey = {s.PeriodKey}")
+                .ConfigureAwait(true);
+        }
+
+        using var response = await reopenerClient.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{Num(s.DocumentId)}/reopen", UriKind.Relative),
+            new { sheetDefId = s.Sheet1, periodKey = s.PeriodKey, reason = "Закритий період" }).ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(response.StatusCode == HttpStatusCode.UnprocessableEntity, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
+        Assert.Equal("err.ECR-PRD-4223.reopenPeriodFirst", JsonDocument.Parse(body).RootElement.GetProperty("messageKey").GetString());
+    }
     private static bool IsNullOrMissing(JsonElement element, string name)
         => !element.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null;
 

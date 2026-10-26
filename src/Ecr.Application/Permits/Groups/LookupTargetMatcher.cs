@@ -79,6 +79,19 @@ public static class LookupTargetMatcher
 
     private const string ViewPermission = "Registry.View";
 
+    /// <summary>
+    /// Чи може профіль ОБИРАТИ записи реєстру <paramref name="registryDefId"/> у документі: <c>Registry.View</c> (глобально,
+    /// scoped на проєкт документа) або грант Read на реєстр - і без Deny. <c>null</c> (системні шляхи) і збір - так.
+    /// ЄДИНЕ правило для перегляду імпорту (ті самі відповіді, що й <see cref="Belongs"/>).
+    /// </summary>
+    /// <param name="profile">Профіль; <c>null</c> - системний шлях.</param>
+    /// <param name="registryDefId">Реєстр запису.</param>
+    /// <param name="viewProjectId">Проєкт документа для scoped-ролей (<see cref="ViewProjectNeeded"/>).</param>
+    public static bool MayChoose(AccessProfile? profile, int registryDefId, int? viewProjectId)
+        => profile is null
+           || profile.IsIntegrationWriter
+           || (CanViewRegistry(profile, registryDefId, viewProjectId) && !RegistryAccess.IsDenied(profile, registryDefId));
+
     private static bool CanViewRegistry(AccessProfile profile, int registryDefId, int? viewProjectId)
         => PermissionCheck.IsGranted(profile, ViewPermission)
            || (viewProjectId is { } project && profile.Scoped.TryGetValue(project, out var scoped) && scoped.RegistryView)

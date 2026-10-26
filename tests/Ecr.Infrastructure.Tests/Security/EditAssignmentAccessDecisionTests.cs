@@ -432,6 +432,44 @@ public sealed class EditAssignmentAccessDecisionTests(SqlServerFixture sql) : ID
         Assert.True(system[cell].IsAllowed);
     }
 
+    /// <summary>
+    /// P3 (PM-EDITASSIGN-P3): Write-передача місяця перестає підіймати виконавця, коли делегатор втратив право керувати
+    /// передачами; відновлення прав повертає підйом. Кеш профілів - свіжий на кожне рішення (ролі міняються в базі без штампа).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P3-WRITE-DEMOTION")]
+    public async Task Write_передача_після_зняття_ролей_делегатора_не_піднімає_виконавця_а_відновлення_повертає()
+    {
+        var w = await ArrangeAsync();
+        var profile = Profile(w, w.ExecutorUserId, GrantLevel.Read);
+        var cell = w.Cell(w.OwnMonthColumn);
+
+        async Task<EditDecision> FreshAsync()
+        {
+            using var memory = new MemoryCache(new MemoryCacheOptions());
+            await using var db = w.Builder.CreateContext();
+            var service = new AccessDecisionService(
+                db, new MetadataCache(memory, db), new AccessProfileCache(memory), new TestClock(Now),
+                Substitute.For<ICurrentUser>(), new WorkflowStore(db));
+            return (await service.CanEditCellsAsync(
+                profile, w.Doc.TableInstanceId, w.Doc.PeriodKey, [cell], CancellationToken.None))[cell];
+        }
+
+        Assert.True((await FreshAsync()).IsAllowed);
+
+        await using (var db = w.Builder.CreateContext())
+        {
+            await db.RoleAssignments.Where(a => a.UserId == w.DelegatorUserId).ExecuteDeleteAsync(CancellationToken.None);
+        }
+
+        var demoted = await FreshAsync();
+        Assert.False(demoted.IsAllowed);
+
+        await w.Builder.GrantProjectAsync(w.DelegatorUserId, w.Doc.ProjectId, GrantLevel.Manage);
+        Assert.True((await FreshAsync()).IsAllowed);
+    }
     private static User NewUser()
     {
         var user = new User($"eab_{Guid.NewGuid():N}"[..20], "EA-B test user", AuthProvider.Local);

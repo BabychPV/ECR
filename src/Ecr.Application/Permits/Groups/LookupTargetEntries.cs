@@ -44,11 +44,14 @@ public static class LookupTargetEntries
     /// <param name="profile">
     /// Профіль користувача (S18): члени складу під Deny пропускаються - їх номери й назви типів не розкриваються (імпорт Excel);
     /// пряма ціль під Deny дає порожній перелік (як «записів немає»).
-    /// <c>null</c> - без перевірки (експорт, системні шляхи).
+    /// <c>null</c> - без перевірки (експорт, системні шляхи). Без <c>Registry.View</c> (див. <see cref="LookupTargetMatcher.MayChoose"/>) реєстр теж
+    /// пропускається: код існуючого запису закритого реєстру відповідає як неіснуючий.
     /// </param>
+    /// <param name="viewProjectId">Проєкт документа для scoped-ролей з View (лише коли <see cref="LookupTargetMatcher.ViewProjectNeeded"/>).</param>
     public static async Task<IReadOnlyList<LookupTargetEntry>> ListAsync(
         IRegistryStore registries, IPermitGroupResolver? groups, int targetRegistryId, CancellationToken ct,
-        AccessProfile? profile = null)
+        AccessProfile? profile = null,
+        int? viewProjectId = null)
     {
         ArgumentNullException.ThrowIfNull(registries);
 
@@ -61,7 +64,8 @@ public static class LookupTargetEntries
         {
             // Deny на ПРЯМУ ціль (рішення людини 23.10: «Deny блокує і вибір запису», S18): перегляд імпорту не розкриває
             // існування запису - порожній перелік дає ту саму відповідь, що й для неіснуючого коду (як і apply: Belongs).
-            if (profile is not null && Registries.RegistryAccess.IsDenied(profile, targetRegistryId))
+            // Рішення людини 25.10/26.10: без Registry.View (глобально, scoped на проєкт, грант Read) - теж порожньо.
+            if (!LookupTargetMatcher.MayChoose(profile, targetRegistryId, viewProjectId))
             {
                 return [];
             }
@@ -73,7 +77,7 @@ public static class LookupTargetEntries
         var result = new List<LookupTargetEntry>();
         foreach (var memberId in groups.ExpandRegistryIds(targetRegistryId))
         {
-            if (profile is not null && Registries.RegistryAccess.IsDenied(profile, memberId))
+            if (!LookupTargetMatcher.MayChoose(profile, memberId, viewProjectId))
             {
                 continue;
             }

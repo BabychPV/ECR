@@ -1589,6 +1589,48 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// FH-P2-D (Б1): проєкт під маркером «міграція в процесі» (<c>migratingTo</c>) - задача нічого не пише (ні рядків, ні
+    /// зв'язків), а після зняття маркера наступний прогін підхоплює ті самі події.
+    /// </summary>
+    /// <remarks>Мутація: прибрати <c>return</c> за маркером у <c>SyncMapAsync</c> - перший блок перевірок червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "FH-P2-D")]
+    public async Task Під_маркером_міграції_версії_задача_нічого_не_пише_а_після_зняття_підхоплює_події()
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End, category: "V8", volume: 269.258m));
+
+        string? original;
+        await using (var db = sql.CreateContext())
+        {
+            original = await db.Projects.AsNoTracking()
+                .Where(p => p.Id == stand.ProjectId).Select(p => p.ExternalSettingsJson).SingleAsync();
+        }
+
+        await ExecuteAsync($"UPDATE doc.Project SET ExternalSettingsJson = N'{{\"migratingTo\":1}}' WHERE Id = {stand.ProjectId}");
+        try
+        {
+            await RunAsync(stand, source);
+
+            Assert.Empty(await RowsAsync(stand));
+            Assert.Empty(await LinksAsync(stand));
+        }
+        finally
+        {
+            var restore = original is null ? "NULL" : "N'" + original.Replace("'", "''", StringComparison.Ordinal) + "'";
+            await ExecuteAsync($"UPDATE doc.Project SET ExternalSettingsJson = {restore} WHERE Id = {stand.ProjectId}");
+        }
+
+        await RunAsync(stand, source);
+
+        var row = Assert.Single(await RowsAsync(stand));
+        Assert.Equal("EF-E1", row.RowKey);
+        Assert.Equal(SourceEventLinkStatus.Synced, Assert.Single(await LinksAsync(stand)).Status);
+    }
+
     private sealed record Sibling(int EntityId, int MapId, string Code);
 
     private async Task<Sibling> AddSiblingAsync(Stand stand, string suffix)
