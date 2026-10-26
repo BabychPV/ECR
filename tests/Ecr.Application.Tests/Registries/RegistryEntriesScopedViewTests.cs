@@ -68,7 +68,7 @@ public sealed class RegistryEntriesScopedViewTests
 
     private void Profile(
         bool globalView = false, bool scopedView = false, int scopedProject = ProjectId, bool deny = false,
-        bool readGrant = false, bool scopedDeny = false, bool scopedReadGrant = false)
+        bool readGrant = false, bool scopedDeny = false, bool scopedReadGrant = false, bool scopedPresent = false)
     {
         var grants = new Dictionary<string, GrantLevel> { [$"Project:{ProjectId}"] = GrantLevel.Read };
         if (readGrant)
@@ -83,7 +83,7 @@ public sealed class RegistryEntriesScopedViewTests
             Grants = grants,
             Denies = new HashSet<string>(deny ? [$"Registry:{RegistryId}"] : []),
             RoleIds = new HashSet<int>(),
-            Scoped = scopedView || scopedDeny || scopedReadGrant
+            Scoped = scopedView || scopedDeny || scopedReadGrant || scopedPresent
                 ? new Dictionary<int, ScopedProjectAccess>
                 {
                     [scopedProject] = new(
@@ -131,13 +131,14 @@ public sealed class RegistryEntriesScopedViewTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Finding", "REG-VIEW-PICKER")]
-    public async Task Scoped_View_лише_на_інший_проєкт_пікер_закритий()
+    public async Task Scoped_View_лише_на_інший_проєкт_пікер_закритий_404_як_неіснуючий()
     {
+        // P52: профіль з областю без View у проєкті документа відповідає 404, як неіснуючий реєстр (не 403).
         Profile(scopedView: true, scopedProject: ProjectId + 1);
 
-        var denied = await Assert.ThrowsAsync<AccessDeniedException>(() => Pick(DocumentId));
+        var denied = await Assert.ThrowsAsync<NotFoundException>(() => Pick(DocumentId));
 
-        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("ECR-REG-0404", denied.ErrorCode);
     }
 
     [Fact]
@@ -229,4 +230,53 @@ public sealed class RegistryEntriesScopedViewTests
 
         await Pick(DocumentId);
     }
-}
+
+    // ── P52: вирівнювання шляху відмови пікера (кількість викликів, не таймінг) і однакова відповідь без View ──────────
+
+    private int ProjectLookups() => _access.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IAccessDecisionService.DocumentProjectIdAsync));
+
+    private int DefinitionLookups() => _registries.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IRegistryStore.FindDefinitionAsync));
+
+    /// <summary>
+    /// Deny (scoped) і неіснуючий реєстр - той самий шлях: однакова кількість запитів проєкту документа й довідника,
+    /// інакше різниця часу розкриває існування реєстру. Мутація: повернути запит проєкту ПІСЛЯ FindDefinitionAsync.
+    /// </summary>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "P52-ALIGN")]
+    public async Task Deny_реєстр_і_неіснуючий_реєстр_мають_однакову_кількість_запитів(bool globalViewWithScopedDeny, bool scopedViewWithScopedDeny)
+    {
+        Profile(globalView: globalViewWithScopedDeny, scopedView: scopedViewWithScopedDeny, scopedDeny: true);
+
+        await Assert.ThrowsAsync<NotFoundException>(() => Pick(DocumentId));
+        var deniedProject = ProjectLookups();
+        var deniedDefinition = DefinitionLookups();
+
+        _access.ClearReceivedCalls();
+        _registries.ClearReceivedCalls();
+        await Assert.ThrowsAsync<NotFoundException>(
+            () => Handler().HandleAsync("NO_SUCH_REG", new DateOnly(2026, 9, 30), null, DocumentId, default));
+
+        Assert.Equal(deniedProject, ProjectLookups());
+        Assert.Equal(deniedDefinition, DefinitionLookups());
+    }
+
+    [Theory]
+    [InlineData("scopedElsewhere")]
+    [InlineData("scopedNoView")]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "P52-ORACLE")]
+    public async Task Без_View_зі_scoped_областю_існуючий_і_неіснуючий_реєстр_дають_однакову_404(string kind)
+    {
+        Profile(scopedPresent: true, scopedProject: kind == "scopedElsewhere" ? ProjectId + 1 : ProjectId);
+
+        var existing = await Assert.ThrowsAsync<NotFoundException>(() => Pick(DocumentId));
+        var missing = await Assert.ThrowsAsync<NotFoundException>(
+            () => Handler().HandleAsync("NO_SUCH_REG", new DateOnly(2026, 9, 30), null, DocumentId, default));
+
+        Assert.Equal("ECR-REG-0404", existing.ErrorCode);
+        Assert.Equal(missing.ErrorCode, existing.ErrorCode);
+        Assert.Equal(missing.Details!["messageKey"], existing.Details!["messageKey"]);
+    }}
