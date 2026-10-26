@@ -8,7 +8,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>
-/// Заповненість таблиць документа — двома згрупованими запитами (<c>BE-10</c>).
+/// Заповненість таблиць документа — двома згрупованими запитами (<c>BE-10</c>); при Q-17 з увімкненим прапором — ще
+/// одним (комірки колонок чужих власників).
 /// </summary>
 /// <remarks>
 /// ⛔ <b>Set-based, не по таблиці.</b> Документ має ~91 таблицю; запит на
@@ -32,8 +33,13 @@ namespace Ecr.Infrastructure.Persistence;
 /// обидва агрегати рахуються над декартовим добутком рядків і комірок, і
 /// <c>COUNT(DISTINCT)</c> коштує дорожче за другий похід.
 /// </remarks>
-public sealed class TableFillStore(EcrDbContext db) : ITableFillStore
+public sealed class TableFillStore(
+    EcrDbContext db,
+    IMonthColumnRouter? router = null,
+    IMetadataCache? metadata = null) : ITableFillStore
 {
+    // ⚠ Q-17: `router`/`metadata` необов'язкові з тієї ж причини, що й `archive` у NormalizedCellStore — тести
+    // будують `new TableFillStore(db)`. `null` або вимкнений прапор = рахунок як до Q-17 (жодного додаткового запиту).
     /// <inheritdoc />
     public async Task<IReadOnlyList<TableFillCounts>> GetFillCountsAsync(
         long documentId,
@@ -84,10 +90,25 @@ public sealed class TableFillStore(EcrDbContext db) : ITableFillStore
             .ConfigureAwait(false);
 
         var excluded = computedColumnDefIds.ToHashSet();
+
+        // ── 2a. Q-17: комірки колонок чужих власників ─────────────────────
+        // Введені значення місячного стовпця m / не-місячного стовпця живуть в екземплярі власника, а не перегляду.
+        // Фізичні (застарілі) копії таких колонок у перегляді НЕ рахуються — замість них рахуються непорожні комірки
+        // власників, приєднані до живих рядків перегляду за RowKey, інакше відсоток заповнення падав би.
+        var foreignFilled = await ForeignFilledAsync(
+                documentId, periodKey, excluded, [.. rowCounts.Select(r => r.TableDefId)], ct)
+            .ConfigureAwait(false);
+
         var filledByTable = filledByColumn
-            .Where(x => !excluded.Contains(x.ColumnDefId))
+            .Where(x => !excluded.Contains(x.ColumnDefId)
+                        && !foreignFilled.ForeignColumns.Contains((x.TableDefId, x.ColumnDefId)))
             .GroupBy(x => x.TableDefId)
             .ToDictionary(g => g.Key, g => g.Sum(x => x.FilledCells));
+
+        foreach (var (tableDefId, cells) in foreignFilled.FilledByTable)
+        {
+            filledByTable[tableDefId] = filledByTable.GetValueOrDefault(tableDefId) + cells;
+        }
 
         return
         [
@@ -98,6 +119,129 @@ public sealed class TableFillStore(EcrDbContext db) : ITableFillStore
         ];
     }
 
+    /// <summary>
+    /// Q-17: непорожні введені комірки колонок із чужими власниками, приєднані за <c>RowKey</c> до живих рядків
+    /// екземплярів перегляду, — групи «таблиця × колонка × період власника».
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період перегляду.</param>
+    /// <param name="ownerPeriods">Періоди-власники колонок.</param>
+    /// <param name="tableDefIds">Таблиці з чужими колонками.</param>
+    /// <param name="columnDefIds">Колонки з чужими власниками.</param>
+    /// <remarks>
+    /// ⛔ Ключ партиції — у предикаті кожної з шести джерел (<c>WR-05</c>). Лише введені (<c>IsCalculated = 0</c>)
+    /// комірки; видалені рядки обох боків відсікаються. Групується на сервері — у пам'ять їде десяток-сотня рядків.
+    /// </remarks>
+    public static IQueryable<ForeignFillRow> ForeignFillQuery(
+        EcrDbContext db,
+        long documentId,
+        PeriodKey periodKey,
+        IReadOnlyCollection<int> ownerPeriods,
+        IReadOnlyCollection<int> tableDefIds,
+        IReadOnlyCollection<int> columnDefIds)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(ownerPeriods);
+        ArgumentNullException.ThrowIfNull(tableDefIds);
+        ArgumentNullException.ThrowIfNull(columnDefIds);
+
+        var key = periodKey.Value;
+
+        return from instance in db.TableInstances.AsNoTracking()
+               where instance.DocumentId == documentId
+                     && instance.PeriodKeyValue == key
+                     && tableDefIds.Contains(instance.TableDefId)
+               join row in db.TableRows.AsNoTracking().Where(r => r.PeriodKeyValue == key && !r.IsDeleted)
+                   on instance.Id equals row.TableInstanceId
+               join owner in db.TableInstances.AsNoTracking()
+                       .Where(o => o.DocumentId == documentId
+                                   && ownerPeriods.Contains(o.PeriodKeyValue)
+                                   && tableDefIds.Contains(o.TableDefId))
+                   on instance.TableDefId equals owner.TableDefId
+               join ownerRow in db.TableRows.AsNoTracking()
+                       .Where(r => ownerPeriods.Contains(r.PeriodKeyValue) && !r.IsDeleted)
+                   on new { P = owner.PeriodKeyValue, I = owner.Id, K = row.RowKeyValue }
+                   equals new { P = ownerRow.PeriodKeyValue, I = ownerRow.TableInstanceId, K = ownerRow.RowKeyValue }
+               join cell in db.CellValues.AsNoTracking()
+                       .Where(c => ownerPeriods.Contains(c.PeriodKeyValue) && !c.IsCalculated && columnDefIds.Contains(c.ColumnDefId))
+                   on new { P = ownerRow.PeriodKeyValue, R = ownerRow.Id }
+                   equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
+               group cell by new { instance.TableDefId, cell.ColumnDefId, OwnerPeriod = cell.PeriodKeyValue } into g
+               select new ForeignFillRow
+               {
+                   TableDefId = g.Key.TableDefId,
+                   ColumnDefId = g.Key.ColumnDefId,
+                   OwnerPeriodKey = g.Key.OwnerPeriod,
+                   FilledCells = g.Count(),
+               };
+    }
+
+    /// <summary>Q-17: чисельник по колонках із чужими власниками; без прапора/метаданих — порожньо БЕЗ звернень до бази.</summary>
+    private async Task<ForeignFill> ForeignFilledAsync(
+        long documentId,
+        PeriodKey periodKey,
+        HashSet<int> excluded,
+        IReadOnlyCollection<int> liveTableDefIds,
+        CancellationToken ct)
+    {
+        if (router is not { Enabled: true } || metadata is null || liveTableDefIds.Count == 0)
+        {
+            return ForeignFill.None;
+        }
+
+        var document = await router.GetDocumentAsync(documentId, ct).ConfigureAwait(false);
+        if (document is null)
+        {
+            return ForeignFill.None;
+        }
+
+        var snapshot = await metadata.GetAsync(document.TemplateVersionId, ct).ConfigureAwait(false);
+        var live = liveTableDefIds.ToHashSet();
+
+        // (таблиця, колонка) → період власника — лише введені колонки (обчислювані/readonly вже в `excluded`).
+        var owners = new Dictionary<(int TableDefId, int ColumnDefId), int>();
+        foreach (var sheet in snapshot.Sheets.Where(s => !s.IsDeleted))
+        {
+            foreach (var table in sheet.Tables.Where(t => live.Contains(t.Id) && router.AppliesToTable(t)))
+            {
+                var foreign = await router.ForeignColumnsAsync(document, table, periodKey, ct).ConfigureAwait(false);
+                foreach (var column in foreign.Where(f => !excluded.Contains(f.Column.Id)))
+                {
+                    owners[(table.Id, column.Column.Id)] = column.OwnerPeriod.Value;
+                }
+            }
+        }
+
+        if (owners.Count == 0)
+        {
+            return ForeignFill.None;
+        }
+
+        var rows = await ForeignFillQuery(
+                db,
+                documentId,
+                periodKey,
+                [.. owners.Values.Distinct()],
+                [.. owners.Keys.Select(k => k.TableDefId).Distinct()],
+                [.. owners.Keys.Select(k => k.ColumnDefId).Distinct()])
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var filled = rows
+            .Where(r => owners.TryGetValue((r.TableDefId, r.ColumnDefId), out var owner) && owner == r.OwnerPeriodKey)
+            .GroupBy(r => r.TableDefId)
+            .ToDictionary(g => g.Key, g => g.Sum(r => r.FilledCells));
+
+        return new ForeignFill([.. owners.Keys], filled);
+    }
+
+    private sealed record ForeignFill(
+        HashSet<(int TableDefId, int ColumnDefId)> ForeignColumns, Dictionary<int, int> FilledByTable)
+    {
+        public static ForeignFill None { get; } = new([], []);
+    }
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<PeriodAccessRuleDef>> GetPeriodAccessRulesAsync(
         int templateVersionId, CancellationToken ct)
@@ -106,4 +250,20 @@ public sealed class TableFillStore(EcrDbContext db) : ITableFillStore
             .Where(r => r.TemplateVersionId == templateVersionId)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+}
+
+/// <summary>Група результату <see cref="TableFillStore.ForeignFillQuery"/>: заповнені комірки колонки власника.</summary>
+public sealed class ForeignFillRow
+{
+    /// <summary>Таблиця.</summary>
+    public int TableDefId { get; init; }
+
+    /// <summary>Колонка.</summary>
+    public int ColumnDefId { get; init; }
+
+    /// <summary>Період екземпляра-власника.</summary>
+    public int OwnerPeriodKey { get; init; }
+
+    /// <summary>Скільки непорожніх введених комірок.</summary>
+    public int FilledCells { get; init; }
 }

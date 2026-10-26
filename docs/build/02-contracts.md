@@ -3312,6 +3312,34 @@ public interface ITableFillStore
 }
 ```
 
+#### `IMonthColumnRouter`
+
+Q-17 (варіант А): хто володіє введеними комірками таблиць «місяці в колонках»
+місячного проєкту. Місячний стовпець `m` — екземпляр періоду `PeriodKey(рік, m)`;
+введений не-місячний — «якір року» (найменший період календаря `doc.Period`);
+обчислені — екземпляр перегляду. Діє лише за прапора
+`Collection:MonthColumnRouting` (за замовчуванням вимкнено — порт нічого не
+робить і не ходить до бази). Читання логічного зрізу — декоратор
+`MonthRoutedCellStore` над `NormalizedCellStore`; запис — окремим коммітом Q-17.
+
+```csharp
+public interface IMonthColumnRouter
+{
+    public bool Enabled { get; }
+    public bool AppliesToTable(TableDef table);
+    public Task<MonthRoutingDocument?> GetDocumentAsync(long documentId, CancellationToken ct);
+    public Task<IReadOnlyDictionary<long, MonthRoutingInstance>> ResolveInstancesAsync(
+        IReadOnlyCollection<long> tableInstanceIds, PeriodKey? periodKey, CancellationToken ct);
+    public Task<PeriodKey?> AnchorOfAsync(int projectId, int year, CancellationToken ct);
+    public Task<PeriodKey> OwnerPeriodAsync(
+        MonthRoutingDocument document, TableDef table, ColumnDef column, PeriodKey viewPeriod, CancellationToken ct);
+    public Task<bool> HasForeignOwnerAsync(
+        MonthRoutingDocument document, TableDef table, ColumnDef column, PeriodKey viewPeriod, CancellationToken ct);
+    public Task<IReadOnlyList<ForeignColumn>> ForeignColumnsAsync(
+        MonthRoutingDocument document, TableDef table, PeriodKey viewPeriod, CancellationToken ct);
+}
+```
+
 #### `IDocumentListSummaryStore`
 
 Зведення переліку документів за період (`BE-09`): один агрегований запит, з

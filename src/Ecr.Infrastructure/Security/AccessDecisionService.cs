@@ -2024,10 +2024,8 @@ public sealed class AccessDecisionService(
             return null;
         }
 
-        var first = instancePeriod.Year * 100;
-        var rows = await db.Periods
-            .AsNoTracking()
-            .Where(x => x.ProjectId == project.Id && x.PeriodKeyValue > first && x.PeriodKeyValue <= first + 12)
+        // Q-17: той самий предикат календаря року, що й у маршрутизації місячних стовпців.
+        var rows = await Persistence.PeriodCalendar.YearPeriods(db, project.Id, instancePeriod.Year)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
