@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -428,9 +428,6 @@ public sealed partial class PatchCellsHandler
                 .ToDictionary(s => s.Id);
             var changed = lookups.Select(l => ChangedLookups(l, previous)).ToList();
 
-            // ⚠ Межі — лише якщо є що перевіряти на дату, як і в поштучного.
-            var periodBounds = changed.Any(c => c.Count > 0) ? await bounds().ConfigureAwait(false) : null;
-
             // PRMG: знімок груп оновлюється лише при незбігу реєстру (Land - гілка недосяжна, 0 звернень).
             await Permits.Groups.LookupTargetMatcher.EnsureFreshOnMismatchAsync(
                 groups,
@@ -464,9 +461,23 @@ public sealed partial class PatchCellsHandler
                         CheckLookupsBelong(
                             item.Context, ownChanged, standings, groups,
                             viewProjects[item.Context.Instance.DocumentId]);
-                        CheckLookupStandings(item.Context, ownChanged, standings, periodBounds);
                     }
                 });
+            }
+
+            // ⛔ S18 (час, P3-7): межі періоду читаються ЛИШЕ після того, як усі відмови "запису немає / чужий довідник / Deny /
+            // без Registry.View" пройшли, - як у поштучного (`EnsureRegistryReferencesExistAsync`): відмова за закритий
+            // довідник не відрізняється від "запису немає" ще й одним запитом у БД. Порядок відмов у книзі - за етапами.
+            var periodBounds = changed.Any(c => c.Count > 0) ? await bounds().ConfigureAwait(false) : null;
+            for (var i = 0; i < active.Count; i++)
+            {
+                if (changed[i].Count == 0)
+                {
+                    continue;
+                }
+
+                var (item, ownChanged) = (active[i], changed[i]);
+                Blamed(item.Id, () => CheckLookupStandings(item.Context, ownChanged, standings, periodBounds));
             }
         }
 

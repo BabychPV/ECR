@@ -231,6 +231,7 @@ internal static class EditAssignmentAccess
         var period = slice.PeriodKey is { } key ? new PeriodKey(key) : (PeriodKey?)null;
         var own = GrantLevel.Manage;
         var matched = false;
+        var hasColumnRules = HasColumnRules(roles);
 
         foreach (var sheet in snapshot.Sheets)
         {
@@ -274,6 +275,13 @@ internal static class EditAssignmentAccess
 
                 // ⛔ P2-1 (аудит 25.10): заборона (Deny) КОЛОНКИ делегатора теж звужує його власний рівень —
                 // інакше менеджер без права бачити колонку відкривав її читання/подання/погодження іншому.
+                // ⚡ P3 (перф): без жодного колонкового гранта/заборони в профілі колонка успадковує рівень таблиці -
+                // O(таблиці x колонки) викликів Effective на кожне рішення виконавця не потрібні.
+                if (!hasColumnRules)
+                {
+                    continue;
+                }
+
                 foreach (var column in table.Columns)
                 {
                     own = Min(
@@ -292,6 +300,33 @@ internal static class EditAssignmentAccess
     }
 
     private static GrantLevel Min(GrantLevel a, GrantLevel b) => a < b ? a : b;
+
+    private const string ColumnKeyPrefix = "Column:";
+
+    /// <summary>
+    /// Чи є в профілі (спільні гранти/заборони, шари проєктів, звужені шари) бодай один грант чи заборона НА КОЛОНКУ.
+    /// Без них рівень колонки дорівнює рівню таблиці, і перебір колонок в <see cref="OwnLevelOver"/> зайвий.
+    /// </summary>
+    private static bool HasColumnRules(AccessProfile roles)
+    {
+        static bool Has(IEnumerable<string> keys) => keys.Any(k => k.StartsWith(ColumnKeyPrefix, StringComparison.Ordinal));
+
+        if (Has(roles.Grants.Keys) || Has(roles.Denies))
+        {
+            return true;
+        }
+
+        foreach (var scoped in roles.Scoped.Values)
+        {
+            if (Has(scoped.Grants.Keys) || Has(scoped.Denies)
+                || scoped.Narrowed.Any(n => Has(n.Grants.Keys) || Has(n.Denies)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// 403 <c>editAssignmentLevelAboveOwn</c>: рівень надання вищий за власний рівень передавача на області (D-443).
