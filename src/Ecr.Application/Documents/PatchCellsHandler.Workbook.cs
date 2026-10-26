@@ -298,7 +298,8 @@ public sealed partial class PatchCellsHandler
         var isLateEdit = await DetermineIsLateEditAsync(
                 documentId, [.. active.Select(x => x.Context.Table.SheetDefId).Distinct()], period.Value, ct,
                 [.. active.SelectMany(x => x.Context.ColumnPeriods).Distinct()],
-                active.Exists(x => x.Context.InstancePeriodGoverns))
+                active.Exists(x => x.Context.InstancePeriodGoverns),
+                [.. active.SelectMany(x => x.Context.AnnualPeriods).Distinct()])
             .ConfigureAwait(false);
 
         await uow.ExecuteInTransactionAsync(
@@ -543,8 +544,32 @@ public sealed partial class PatchCellsHandler
         var statuses = new Dictionary<int, Domain.Enums.DocumentStatus>();
         foreach (var sheet in active.GroupBy(x => x.Context.Table.SheetDefId).OrderBy(g => g.Key))
         {
+            // ⛔ Q-17: періоди колонок/річні ЦЬОГО аркуша блокуються РАЗОМ з власним, за зростанням ключа
+            // (інакше книга з перегляду 5 у колонку місяця 3 тримала 5 і чекала 3, а правка з перегляду 3 — навпаки).
+            // Нижчі від власного — ДО нього, вищі — ПІСЛЯ; стани перечитує `EnsureColumnPeriodsEditableAsync`
+            // (повторне спільне блокування того ж ключа тією ж транзакцією видається одразу).
+            var otherPeriods = new SortedSet<int>(sheet.SelectMany(x => x.Context.ColumnPeriods));
+            otherPeriods.UnionWith(sheet.SelectMany(x => x.Context.AnnualPeriods));
+            otherPeriods.Remove(period.Value);
+
             statuses[sheet.Key] = await BlamedAsync(sheet.First().Id, async () =>
             {
+                foreach (var lower in otherPeriods.Where(p => p < period.Value))
+                {
+                    await sheetGate.EnterEditAsync(documentId, sheet.Key, new PeriodKey(lower), ct).ConfigureAwait(false);
+                }
+
+                var ownStatus = await LockOwnWorkbookSheetAsync().ConfigureAwait(false);
+
+                foreach (var higher in otherPeriods.Where(p => p > period.Value))
+                {
+                    await sheetGate.EnterEditAsync(documentId, sheet.Key, new PeriodKey(higher), ct).ConfigureAwait(false);
+                }
+
+                return ownStatus;
+
+                async Task<Domain.Enums.DocumentStatus> LockOwnWorkbookSheetAsync()
+                {
                 if (sheet.Any(x => CreatesRowsUnderCeiling(x.Context)))
                 {
                     // ⛔ L6-08: викликач уже тримає СПІЛЬНЕ блокування цього аркуша
@@ -570,6 +595,7 @@ public sealed partial class PatchCellsHandler
                 }
 
                 return await sheetGate.EnterEditAsync(documentId, sheet.Key, period, ct).ConfigureAwait(false);
+                }
             }).ConfigureAwait(false);
         }
 
@@ -782,13 +808,13 @@ public sealed partial class PatchCellsHandler
 
         // ✎ P2-A: стани аркушів періодів місячних колонок — під їхніми блокуваннями, за зростанням (див.
         // `EnsureColumnPeriodsEditableAsync`).
-        foreach (var item in active.Where(x => x.Context.ColumnPeriods.Count > 0))
+        foreach (var item in active.Where(x => x.Context.ColumnPeriods.Count > 0 || x.Context.AnnualPeriods.Count > 0))
         {
             await BlamedAsync(item.Id, async () =>
             {
                 await EnsureColumnPeriodsEditableAsync(
                         item.Context.Instance.DocumentId, item.Context.Table.SheetDefId, item.Context.ColumnPeriods,
-                        item.Planned, ct)
+                        item.Planned, ct, item.Context.AnnualPeriods)
                     .ConfigureAwait(false);
                 return true;
             }).ConfigureAwait(false);

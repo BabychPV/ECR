@@ -294,6 +294,32 @@ public interface IRowStore
     /// </remarks>
     public Task<IReadOnlyDictionary<long, int>> GetTableDefIdsOfRowsAsync(
         IReadOnlyCollection<long> rowIds, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Q-17: екземпляри ОДНІЄЇ таблиці документа за місяці року (ключі <c>(рік*100, рік*100+12]</c>), за зростанням
+    /// ключа періоду.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Реалізація за замовчуванням порожня: ручні обгортки порту в тестах не мусять знати про Q-17. Справжня —
+    /// <c>RowStore</c>. Потрібно дзеркальному створенню/видаленню рядків («місяці в колонках»,
+    /// <c>Collection:MonthColumnRouting</c>).
+    /// </remarks>
+    public Task<IReadOnlyList<TableInstanceRef>> GetTableInstancesOfTableInYearAsync(
+        long documentId, int tableDefId, int year, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<TableInstanceRef>>([]);
+
+    /// <summary>
+    /// Q-17: ВУЗЬКО створює (або повертає наявний) екземпляр однієї таблиці за період — без створення решти таблиць
+    /// документа за цей період (на відміну від <see cref="EnsureTableInstancesAsync"/>). Новий екземпляр отримує
+    /// Fixed-рядки шаблону і (за прапором) дзеркала рядків якоря. Під спільним <c>doc-structure</c>, у транзакції.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="tableDefId">Таблиця.</param>
+    /// <param name="periodKey">Період; має належати проєкту документа (<c>ECR-PRD-0422</c>).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<TableInstanceRef> EnsureTableInstanceAsync(
+        long documentId, int tableDefId, PeriodKey periodKey, CancellationToken ct)
+        => throw new NotSupportedException("EnsureTableInstanceAsync не реалізовано цим сховищем рядків.");
 }
 
 /// <summary>Ідентичність екземпляра таблиці.</summary>

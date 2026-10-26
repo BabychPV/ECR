@@ -173,7 +173,7 @@ public sealed partial class PatchCellsHandler(
         var now = clock.UtcNow;
         var isLateEdit = await DetermineIsLateEditAsync(
                 context.Instance.DocumentId, [context.Table.SheetDefId], request.PeriodKey, ct,
-                context.ColumnPeriods, context.InstancePeriodGoverns)
+                context.ColumnPeriods, context.InstancePeriodGoverns, context.AnnualPeriods)
             .ConfigureAwait(false);
 
         // ⚠ `BE-05`: ідентифікатор поставленої задачі їде клієнтові у відповіді.
@@ -323,7 +323,14 @@ public sealed partial class PatchCellsHandler(
         /// P2-A: період екземпляра керує записом: є його комірка, або періодів колонок немає зовсім
         /// (звичайна таблиця). <c>false</c> лише коли ВСІ комірки батчу — місячні колонки інших місяців.
         /// </summary>
-        public bool InstancePeriodGoverns => OwnPeriodWritten || ColumnPeriods.Count == 0;
+        public bool InstancePeriodGoverns => OwnPeriodWritten || (ColumnPeriods.Count == 0 && AnnualPeriods.Count == 0);
+
+        /// <summary>
+        /// Q-17: ключі періодів календаря року, агрегат яких керує дозволеними комірками батчу (введені не-місячні
+        /// стовпці таблиці «місяці в колонках», <see cref="EditDecision.AnnualPeriods"/>). Порожньо — прапор
+        /// вимкнено чи таких комірок немає.
+        /// </summary>
+        public SortedSet<int> AnnualPeriods { get; } = [];
     }
 
     /// <summary>Розподіл змін по upsert/delete разом із супутнім станом.</summary>
@@ -1004,7 +1011,11 @@ public sealed partial class PatchCellsHandler(
     /// </summary>
     private static void NoteGoverningPeriod(RequestContext context, EditDecision decision)
     {
-        if (decision.ColumnPeriod is { } columnPeriod && columnPeriod != context.PeriodKey.Value)
+        if (decision.AnnualPeriods is { } annualPeriods)
+        {
+            context.AnnualPeriods.UnionWith(annualPeriods);
+        }
+        else if (decision.ColumnPeriod is { } columnPeriod && columnPeriod != context.PeriodKey.Value)
         {
             context.ColumnPeriods.Add(columnPeriod);
         }
@@ -2263,12 +2274,31 @@ public sealed partial class PatchCellsHandler(
         int periodKeyValue,
         CancellationToken ct,
         IEnumerable<int>? columnPeriods = null,
-        bool instancePeriodGoverns = true)
+        bool instancePeriodGoverns = true,
+        SortedSet<int>? annualPeriods = null)
     {
         if (instancePeriodGoverns
             && await IsLateEditInPeriodAsync(documentId, sheetDefIds, periodKeyValue, ct).ConfigureAwait(false))
         {
             return true;
+        }
+
+        // ✎ Q-17: річна правка пізня, лише коли немає жодного Open, але є Grace (AnnualPeriodRule).
+        if (annualPeriods is { Count: > 0 })
+        {
+            var states = new List<PeriodState>(annualPeriods.Count);
+            foreach (var annualPeriod in annualPeriods)
+            {
+                if (await periods.FindPeriodStateAsync(documentId, annualPeriod, ct).ConfigureAwait(false) is { } found)
+                {
+                    states.Add(found);
+                }
+            }
+
+            if (AnnualPeriodRule.IsLate(states))
+            {
+                return true;
+            }
         }
 
         foreach (var columnPeriod in columnPeriods ?? [])
@@ -2601,17 +2631,27 @@ public sealed partial class PatchCellsHandler(
             context.Instance.TemplateVersionId,
             context.Instance.DocumentId);
 
-        if (CreatesRowsUnderCeiling(context))
+        // ⛔ Q-17: ВСІ задіяні періоди (власний, місячні колонки інших місяців, річний агрегат) беруться
+        // у ЗРОСТАЮЧОМУ порядку ключа. Власний-першим давав дедлок: PATCH з перегляду 3 у колонку місяця 5 тримав 3 і
+        // чекав 5, а PATCH з перегляду 5 у колонку місяця 3 — навпаки. Виняткове блокування рядків (стеля) береться
+        // на місці власного періоду в тому ж порядку.
+        var lockedStatuses = new Dictionary<int, DocumentStatus>();
+        foreach (var lockedPeriod in AllInvolvedPeriods(context))
         {
-            // ⛔ Y7-03: відмова «зайнято» — про рядки, а не про подання (див. `RowWriteLock`).
-            await RowWriteLock
-                .EnterAsync(sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
+            if (lockedPeriod == context.PeriodKey.Value && CreatesRowsUnderCeiling(context))
+            {
+                // ⛔ Y7-03: відмова «зайнято» — про рядки, а не про подання (див. `RowWriteLock`).
+                await RowWriteLock
+                    .EnterAsync(sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
+                    .ConfigureAwait(false);
+            }
+
+            lockedStatuses[lockedPeriod] = await sheetGate
+                .EnterEditAsync(context.Instance.DocumentId, context.Table.SheetDefId, new PeriodKey(lockedPeriod), ct)
                 .ConfigureAwait(false);
         }
 
-        var status = await sheetGate
-            .EnterEditAsync(context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
-            .ConfigureAwait(false);
+        var status = lockedStatuses[context.PeriodKey.Value];
 
         // ✎ D-442: поданий аркуш править лише погоджувач ПОТОЧНОГО кроку. Рішення поза транзакцією
         // бачило крок N; затвердження бере ВИНЯТКОВЕ блокування цього самого ключа
@@ -2637,9 +2677,36 @@ public sealed partial class PatchCellsHandler(
             }
         }
 
-        await EnsureColumnPeriodsEditableAsync(
-                context.Instance.DocumentId, context.Table.SheetDefId, context.ColumnPeriods, changes, ct)
-            .ConfigureAwait(false);
+        CheckLockedColumnPeriods(lockedStatuses, context.ColumnPeriods, context.AnnualPeriods, changes);
+    }
+
+    /// <summary>Q-17: власний період + періоди колонок + річні періоди — без повторів, за зростанням ключа.</summary>
+    private static SortedSet<int> AllInvolvedPeriods(RequestContext context)
+    {
+        var all = new SortedSet<int>(context.ColumnPeriods);
+        all.UnionWith(context.AnnualPeriods);
+        all.Add(context.PeriodKey.Value);
+        return all;
+    }
+
+    /// <summary>
+    /// Q-17: перевірка станів аркуша періодів колонок (кожен окремо) і річного агрегату за вже ВЗЯТИМИ блокуваннями.
+    /// </summary>
+    private void CheckLockedColumnPeriods(
+        Dictionary<int, DocumentStatus> lockedStatuses,
+        IEnumerable<int> columnPeriods,
+        IReadOnlyCollection<int> annualPeriods,
+        CellChangeLists changes)
+    {
+        foreach (var columnPeriod in columnPeriods)
+        {
+            CheckSheetStatus(lockedStatuses[columnPeriod], changes);
+        }
+
+        if (annualPeriods.Count > 0)
+        {
+            CheckSheetStatus(AnnualPeriodRule.AggregateStatus(annualPeriods.Select(p => lockedStatuses[p])), changes);
+        }
     }
 
     /// <summary>
@@ -2651,16 +2718,23 @@ public sealed partial class PatchCellsHandler(
     /// <see cref="EditDecision.ByApprover"/> не ставить, тож поданий місяць тут відмовляє всім.
     /// </remarks>
     private async Task EnsureColumnPeriodsEditableAsync(
-        long documentId, int sheetDefId, IEnumerable<int> columnPeriods, CellChangeLists changes, CancellationToken ct)
+        long documentId, int sheetDefId, IEnumerable<int> columnPeriods, CellChangeLists changes, CancellationToken ct,
+        IReadOnlyCollection<int>? annualPeriods = null)
     {
-        foreach (var columnPeriod in columnPeriods)
-        {
-            var columnStatus = await sheetGate
-                .EnterEditAsync(documentId, sheetDefId, new PeriodKey(columnPeriod), ct)
-                .ConfigureAwait(false);
+        // ⛔ Q-17: усі періоди — за зростанням ключа (див. EnsureSheetStillEditableAsync).
+        var annual = annualPeriods ?? [];
+        var all = new SortedSet<int>(columnPeriods);
+        all.UnionWith(annual);
 
-            CheckSheetStatus(columnStatus, changes);
+        var lockedStatuses = new Dictionary<int, DocumentStatus>();
+        foreach (var period in all)
+        {
+            lockedStatuses[period] = await sheetGate
+                .EnterEditAsync(documentId, sheetDefId, new PeriodKey(period), ct)
+                .ConfigureAwait(false);
         }
+
+        CheckLockedColumnPeriods(lockedStatuses, columnPeriods, annual, changes);
     }
 
     /// <summary>D-442: користувач і далі погоджувач поточного кроку цього аркуша — під блокуванням.</summary>

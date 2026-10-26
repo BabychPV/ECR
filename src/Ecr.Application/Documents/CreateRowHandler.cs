@@ -20,7 +20,11 @@ public sealed class CreateRowHandler(
     // ⛔ EA-B: повторна перевірка передачі зрізу під блокуванням аркуша (заборона «Заповнено»/
     // ексклюзивність між рішенням і комітом). Контейнер передає завжди; `null` — лише тестові
     // фабрики, і тоді документ із передачами відхиляється (fail-closed).
-    IEditAssignmentStore? assignments = null)
+    IEditAssignmentStore? assignments = null,
+
+    // ✎ Q-17: дзеркальні рядки таблиць «місяці в колонках» (`Collection:MonthColumnRouting`). `null` або вимкнений
+    // прапор — поведінка до Q-17 (рядок лише в екземплярі запиту).
+    IMonthColumnRouter? monthRouter = null)
 {
     /// <summary>Створює рядок і повертає його ключ.</summary>
     /// <exception cref="Errors.BusinessRuleException">
@@ -118,12 +122,171 @@ public sealed class CreateRowHandler(
         // а два одночасні POST обидва бачили `existing.Count < max` і обидва
         // брали `ordinal = Count + 1` — стелю перевищено, порядковий номер
         // задвоєно (`CreateRowRaceTests`).
+        // ✎ Q-17: склад рядків таблиці «місяці в колонках» — спільний на рік (якір авторитетний): рядок створюється в
+        // якорі й у всіх наявних екземплярах таблиці за рік. Умова: прапор, MonthsInColumns, місячний проєкт, перегляд
+        // у календарі (рішення несе `AnnualPeriods`) і є якір. Інакше — старий шлях.
+        var mirror = await TryResolveMirrorAsync(instance, table, createDecision, ct).ConfigureAwait(false);
+
         await uow.ExecuteInTransactionAsync(
-            innerCt => CreateUnderLockAsync(
-                instance, table, tableInstanceId, key, profile, createDecision.AssignmentsPresent, sheetCode, innerCt),
+            innerCt => mirror is null
+                ? CreateUnderLockAsync(
+                    instance, table, tableInstanceId, key, profile, createDecision.AssignmentsPresent, sheetCode, innerCt)
+                : CreateMirroredUnderLockAsync(
+                    instance, table, key, profile, createDecision.AssignmentsPresent, sheetCode, mirror, innerCt),
             ct).ConfigureAwait(false);
 
         return key;
+    }
+
+    /// <summary>Параметри дзеркального створення рядка.</summary>
+    /// <param name="Document">Документ місячного проєкту.</param>
+    /// <param name="Anchor">Якір року.</param>
+    /// <param name="AnnualPeriods">Періоди календаря року (за зростанням) — їхній агрегат керує дозволом.</param>
+    private sealed record Mirror(MonthRoutingDocument Document, PeriodKey Anchor, IReadOnlyList<int> AnnualPeriods);
+
+    private async Task<Mirror?> TryResolveMirrorAsync(
+        Ports.TableInstanceRef instance, TableDef table, EditDecision decision, CancellationToken ct)
+    {
+        if (monthRouter is not { Enabled: true }
+            || !monthRouter.AppliesToTable(table)
+            || decision.AnnualPeriods is not { Count: > 0 } annual)
+        {
+            return null;
+        }
+
+        var document = await monthRouter.GetDocumentAsync(instance.DocumentId, ct).ConfigureAwait(false);
+        if (document is null)
+        {
+            return null;
+        }
+
+        var anchor = await monthRouter.AnchorOfAsync(document.ProjectId, PeriodKeyOf(instance).Year, ct).ConfigureAwait(false);
+        return anchor is { } a ? new Mirror(document, a, [.. annual.Order()]) : null;
+    }
+
+    /// <summary>
+    /// Q-17: створення рядка в якорі й усіх наявних екземплярах таблиці за рік — ОДНА транзакція.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ⛔ Замки: ВСІ задіяні періоди (наявні екземпляри таблиці ∪ календар року) беруться ВИНЯТКОВО за зростанням
+    /// ключа — так само, як <c>PatchCellsHandler</c> бере спільні (інакше «3→5» проти «5→3» дає дедлок). Обрано
+    /// впорядковані замки періодів, а не один замок «документ-рік»: ключ замка в <c>sheetGate</c> — (документ, аркуш,
+    /// період), окремого рівня «рік» немає, а новий ключ не зупинив би правки, які тримають замок свого місяця.
+    /// </para>
+    /// <para>
+    /// ⚠ Стан — за ЛІНІЄЮ річного правила (<see cref="AnnualPeriodRule.AggregateStatus"/> над станами аркуша, взятими
+    /// під замками), а не за станом якоря. Стеля <c>MaxDynamicRows</c> і дубль ключа — за якорем. Порядковий номер —
+    /// якоря + 1 для всіх екземплярів. Екземпляр, що вже має цей ключ (розбіжність складу), пропускається.
+    /// </para>
+    /// <para>
+    /// ⚠ Відомий проміжок: екземпляр, що з'явився між читанням переліку і комітом, отримає рядки якоря з його стану
+    /// на момент свого створення (RCSI) — рядок цього запиту він не побачить. Закривається перевіркою складу
+    /// (<c>ConsistencyCheck</c>, окремий крок Q-17).
+    /// </para>
+    /// </remarks>
+    private async Task CreateMirroredUnderLockAsync(
+        Ports.TableInstanceRef instance, TableDef table, RowKey key, AccessProfile profile, bool assignmentsPresent,
+        string? sheetCode, Mirror mirror, CancellationToken ct)
+    {
+        // ⛔ L6-02: структура документа — першою, до блокування аркуша.
+        DocumentStructure.EnsureUnchanged(
+            await sheetGate.EnterStructureAsync(instance.DocumentId, exclusive: false, ct).ConfigureAwait(false),
+            instance.TemplateVersionId,
+            instance.DocumentId);
+
+        var year = PeriodKeyOf(instance).Year;
+        var instances = (await rowStore
+                .GetTableInstancesOfTableInYearAsync(instance.DocumentId, instance.TableDefId, year, ct)
+                .ConfigureAwait(false))
+            .ToList();
+
+        // Якір авторитетний за складом: його екземпляр створюється ліниво, вузько (лише ця таблиця).
+        if (!instances.Exists(i => i.PeriodKey == mirror.Anchor.Value))
+        {
+            instances.Add(await rowStore
+                .EnsureTableInstanceAsync(instance.DocumentId, instance.TableDefId, mirror.Anchor, ct)
+                .ConfigureAwait(false));
+        }
+
+        var anchorInstance = instances.First(i => i.PeriodKey == mirror.Anchor.Value);
+
+        // ⛔ Замки — за зростанням ключа періоду.
+        var periodsToLock = new SortedSet<int>(mirror.AnnualPeriods);
+        periodsToLock.UnionWith(instances.Select(i => i.PeriodKey));
+        periodsToLock.Add(instance.PeriodKey);
+
+        var statuses = new Dictionary<int, DocumentStatus>();
+        foreach (var period in periodsToLock)
+        {
+            var periodKey = new PeriodKey(period);
+            await RowWriteLock.EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, periodKey, ct).ConfigureAwait(false);
+            statuses[period] = await sheetGate
+                .EnterEditAsync(instance.DocumentId, table.SheetDefId, periodKey, ct)
+                .ConfigureAwait(false);
+        }
+
+        var aggregate = AnnualPeriodRule.AggregateStatus(mirror.AnnualPeriods.Select(p => statuses[p]));
+        var stateReason = aggregate switch
+        {
+            DocumentStatus.Submitted => (EditDenyReason?)EditDenyReason.DocumentSubmitted,
+            DocumentStatus.Approved => EditDenyReason.DocumentApproved,
+            _ => null,
+        };
+
+        if (stateReason is { } denied)
+        {
+            throw new Errors.AccessDeniedException(
+                "ECR-ACCS-0403",
+                $"Рядок у цю таблицю додати не можна: {denied}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ACCS-0403.addRowDenied",
+                    ["reason"] = denied.ToString(),
+                });
+        }
+
+        await EnsureAssignmentsHoldAsync(instance, table, profile, assignmentsPresent, sheetCode, ct)
+            .ConfigureAwait(false);
+
+        // Стеля й дубль ключа — за якорем.
+        var anchorRows = await rowStore.GetRowIdsAsync(anchorInstance.TableInstanceId, mirror.Anchor, ct).ConfigureAwait(false);
+        if (table.MaxDynamicRows is { } max && anchorRows.Count >= max)
+        {
+            throw RowLimitReached(table, max);
+        }
+
+        if (anchorRows.ContainsKey(key.Value))
+        {
+            throw RowKeyExists(key);
+        }
+
+        var ordinal = await rowStore.GetMaxOrdinalAsync(anchorInstance.TableInstanceId, mirror.Anchor, ct)
+            .ConfigureAwait(false) + 1;
+
+        var batches = new List<RowCreationBatch>(instances.Count);
+        foreach (var target in instances.OrderBy(i => i.PeriodKey))
+        {
+            var targetPeriod = new PeriodKey(target.PeriodKey);
+            if (target.TableInstanceId != anchorInstance.TableInstanceId)
+            {
+                var present = await rowStore.GetRowIdsAsync(target.TableInstanceId, targetPeriod, ct).ConfigureAwait(false);
+                if (present.ContainsKey(key.Value))
+                {
+                    continue;
+                }
+            }
+
+            batches.Add(new RowCreationBatch(target.TableInstanceId, targetPeriod, [key], ordinal));
+        }
+
+        await rowStore.CreateRowsBatchAsync(batches, ct).ConfigureAwait(false);
+
+        await documents
+            .TouchAsync(instance.DocumentId, profile.UserId, clock.UtcNow, ct)
+            .ConfigureAwait(false);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>Рішення служби доступу на створення рядка з цим ключем.</summary>
@@ -253,28 +416,14 @@ public sealed class CreateRowHandler(
         //    рядків не з'явилася випадково і не зруйнувала бюджет читання зрізу.
         if (table.MaxDynamicRows is { } max && existing.Count >= max)
         {
-            throw new Errors.BusinessRuleException(
-                "ECR-ROW-0409",
-                $"Досягнуто межу динамічних рядків таблиці {table.Code}: {max}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-ROW-0409.rowLimitReached",
-                    ["tableCode"] = table.Code,
-                    ["max"] = max.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            throw RowLimitReached(table, max);
         }
 
         // 5. Дубль ключа — під блокуванням: два одночасні POST з тим самим
         //    ключем серіалізуються тут.
         if (existing.ContainsKey(key.Value))
         {
-            throw new Errors.BusinessRuleException(
-                "ECR-ROW-0409", $"Рядок із ключем {key.Value} у цій таблиці вже існує.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-ROW-0409.rowKeyExists",
-                    ["rowKey"] = key.Value,
-                });
+            throw RowKeyExists(key);
         }
 
         // 6. Порядковий номер — НАЙБІЛЬШИЙ наявний + 1 (D3), а не кількість + 1: після видалення рядка
@@ -303,6 +452,28 @@ public sealed class CreateRowHandler(
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
+
+    /// <summary>Відмова «досягнуто межу динамічних рядків» — спільна для звичайного й дзеркального шляху.</summary>
+    private static Errors.BusinessRuleException RowLimitReached(TableDef table, int max)
+        => new(
+            "ECR-ROW-0409",
+            $"Досягнуто межу динамічних рядків таблиці {table.Code}: {max}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-ROW-0409.rowLimitReached",
+                ["tableCode"] = table.Code,
+                ["max"] = max.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+
+    /// <summary>Відмова «ключ рядка вже існує» — спільна для звичайного й дзеркального шляху.</summary>
+    private static Errors.BusinessRuleException RowKeyExists(RowKey key)
+        => new(
+            "ECR-ROW-0409", $"Рядок із ключем {key.Value} у цій таблиці вже існує.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-ROW-0409.rowKeyExists",
+                ["rowKey"] = key.Value,
+            });
 
     private async Task EnsureAssignmentsHoldAsync(
         Ports.TableInstanceRef instance, TableDef table, AccessProfile profile, bool assignmentsPresent,
