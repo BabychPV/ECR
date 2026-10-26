@@ -13,7 +13,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// прогін лише лічить (dry-run); видалення вмикається словом людини.
 /// </param>
 /// <param name="RetainSnapshots">Скільки НАЙНОВІШИХ зрізів лишається на «документ × аркуш × період»; не менше <see cref="MinRetainSnapshots"/>.</param>
-/// <param name="BatchSize">Скільки зрізів видаляє один оператор <c>DELETE</c> (рядок несе payload ~10 МБ).</param>
+/// <param name="BatchSize">Скільки зрізів видаляє один оператор <c>DELETE</c> (рядок несе payload ~10 МБ, тож 10 зрізів ≈ 100 МБ журналу).</param>
 /// <param name="PauseBetweenBatches">Пауза між пакетами: не тримати таблицю, яку читає подання.</param>
 /// <param name="MaxBatchesPerRun">Стеля пакетів за прогін; решту доїсть наступна ніч.</param>
 /// <remarks>
@@ -58,7 +58,7 @@ public sealed record SnapshotRetentionOptions(
     public const int DefaultRetainSnapshots = 5;
 
     /// <summary>Дефолт розміру пакета: payload великий, тож пакет малий.</summary>
-    public const int DefaultBatchSize = 50;
+    public const int DefaultBatchSize = 10;
 
     /// <summary>Дефолт паузи між пакетами, мілісекунди.</summary>
     public const int DefaultPauseMilliseconds = 500;

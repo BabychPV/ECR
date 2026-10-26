@@ -108,18 +108,27 @@ public sealed partial class SubmissionSnapshotRetentionJob(
 
     private const string DeleteBatchSql = """
         SET DEADLOCK_PRIORITY LOW;
-        DECLARE @out TABLE (Bytes bigint NOT NULL);
+        DECLARE @out TABLE (
+            Id bigint NOT NULL, DocumentId bigint NOT NULL, SheetDefId int NOT NULL, PeriodKey int NOT NULL,
+            Bytes bigint NOT NULL);
 
         """ + CandidatesCte + """
 
         DELETE s
-        OUTPUT CAST(DATALENGTH(deleted.PayloadJson) AS bigint) INTO @out
+        OUTPUT deleted.Id, deleted.DocumentId, deleted.SheetDefId, deleted.PeriodKey,
+               CAST(DATALENGTH(deleted.PayloadJson) AS bigint) INTO @out
           FROM calc.SubmissionSnapshot AS s
          WHERE s.Id IN (SELECT TOP (@batch) c.Id FROM Candidates AS c ORDER BY c.Id);
 
-        SET DEADLOCK_PRIORITY NORMAL;
         SELECT COUNT_BIG(*) AS Deleted, COALESCE(SUM(Bytes), 0) AS Bytes FROM @out;
+        SELECT TOP (@cap) Id, DocumentId, SheetDefId, PeriodKey FROM @out ORDER BY Id;
         """;
+
+    /// <summary>Скільки видалених зрізів (Id і трійка) потрапляє в журнал/<c>DetailsJson</c> для відновлення.</summary>
+    public const int MaxListedSnapshots = 200;
+
+    private const string RecoveryModelSql = "SELECT recovery_model_desc FROM sys.databases WHERE name = DB_NAME();";
+
 
     /// <summary>Скільки разів повторити пакет, якщо він став жертвою взаємного блокування.</summary>
     private const int DeadlockRetries = 3;
@@ -139,9 +148,16 @@ public sealed partial class SubmissionSnapshotRetentionJob(
         try
         {
             var options = SnapshotRetentionOptions.Read(configuration);
-            var outcome = options.Enabled
-                ? await RunAsync(options, progress, ct).ConfigureAwait(false)
-                : SnapshotRetentionOutcome.Disabled(options);
+            SnapshotRetentionOutcome outcome;
+            if (options.Enabled)
+            {
+                outcome = await RunAsync(options, progress, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                LogDisabled(logger, EnabledKeyName);
+                outcome = SnapshotRetentionOutcome.Disabled(options);
+            }
 
             run.Complete("Succeeded", outcome.ToJson(), clock.UtcNow);
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -175,13 +191,40 @@ public sealed partial class SubmissionSnapshotRetentionJob(
         await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
         try
         {
-            return options.DeleteEnabled
+            var recovery = await ReadRecoveryModelAsync(ct).ConfigureAwait(false);
+            LogRecoveryModel(logger, recovery);
+            if (options.DeleteEnabled && string.Equals(recovery, "FULL", StringComparison.OrdinalIgnoreCase))
+            {
+                // ⚠ Пакет 10 зрізів ≈ 100 МБ журналу; без частих log-backup журнал росте до кінця прогону.
+                LogFullRecovery(logger, options.BatchSize, options.MaxBatchesPerRun);
+            }
+
+            var outcome = options.DeleteEnabled
                 ? await DeleteAsync(options, progress, ct).ConfigureAwait(false)
                 : await CountAsync(options, ct).ConfigureAwait(false);
+            return outcome with { RecoveryModel = recovery };
         }
         finally
         {
             await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+        }
+    }
+
+    private const string EnabledKeyName = SnapshotRetentionOptions.EnabledKey;
+
+    private async Task<string?> ReadRecoveryModelAsync(CancellationToken ct)
+    {
+        try
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.CommandText = RecoveryModelSql;
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            return (await command.ExecuteScalarAsync(ct).ConfigureAwait(false)) as string;
+        }
+        catch (DbException)
+        {
+            // Лише інформаційна перевірка: збій читання не має зупиняти прибирання.
+            return null;
         }
     }
 
@@ -192,7 +235,7 @@ public sealed partial class SubmissionSnapshotRetentionJob(
         await reader.ReadAsync(ct).ConfigureAwait(false);
 
         var outcome = new SnapshotRetentionOutcome(
-            DryRun: true,
+            Mode: SnapshotRetentionOutcome.DryRunMode,
             Retain: options.RetainSnapshots,
             Candidates: reader.GetInt64(0),
             Bytes: reader.GetInt64(1),
@@ -210,16 +253,24 @@ public sealed partial class SubmissionSnapshotRetentionJob(
     {
         long deleted = 0, bytes = 0;
         var batches = 0;
+        var listed = new List<DeletedSnapshot>();
 
         while (batches < options.MaxBatchesPerRun)
         {
-            var (batchDeleted, batchBytes) = await DeleteBatchAsync(options, ct).ConfigureAwait(false);
+            var (batchDeleted, batchBytes, ids) = await DeleteBatchAsync(options, MaxListedSnapshots - listed.Count, ct)
+                .ConfigureAwait(false);
 
             deleted += batchDeleted;
             bytes += batchBytes;
             batches++;
+            listed.AddRange(ids);
 
             LogBatch(logger, batches, batchDeleted, batchBytes);
+            if (ids.Count > 0)
+            {
+                // Id і трійки — для відновлення з бекапу (перші MaxListedSnapshots за прогін).
+                LogBatchIds(logger, batches, string.Join(", ", ids.Select(i => $"{i.Id}({i.DocumentId}/{i.SheetDefId}/{i.PeriodKey})")));
+            }
 
             if (progress is not null)
             {
@@ -240,14 +291,17 @@ public sealed partial class SubmissionSnapshotRetentionJob(
         }
 
         var outcome = new SnapshotRetentionOutcome(
-            DryRun: false,
+            Mode: SnapshotRetentionOutcome.DeleteMode,
             Retain: options.RetainSnapshots,
             Candidates: deleted,
             Bytes: bytes,
             PinnedKept: 0,
             Deleted: deleted,
             DeletedBytes: bytes,
-            Batches: batches);
+            Batches: batches)
+        {
+            DeletedSnapshots = listed,
+        };
 
         LogDeleted(logger, deleted, bytes, batches, options.RetainSnapshots);
         return outcome;
@@ -257,22 +311,59 @@ public sealed partial class SubmissionSnapshotRetentionJob(
     /// Один пакет. ⚠ Прибирання — завжди жертва взаємного блокування (<c>DEADLOCK_PRIORITY LOW</c>), а не
     /// подання аркуша; жертву повторюємо кілька разів, далі помилка йде нагору (наступна ніч доїсть).
     /// </summary>
-    private async Task<(long Deleted, long Bytes)> DeleteBatchAsync(SnapshotRetentionOptions options, CancellationToken ct)
+    private async Task<(long Deleted, long Bytes, List<DeletedSnapshot> Ids)> DeleteBatchAsync(
+        SnapshotRetentionOptions options, int idCapacity, CancellationToken ct)
     {
         for (var attempt = 1; ; attempt++)
         {
             try
             {
                 await using var command = CreateCommand(DeleteBatchSql, options, options.BatchSize);
+                AddParameter(command, "@cap", Math.Max(0, idCapacity));
                 await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 await reader.ReadAsync(ct).ConfigureAwait(false);
-                return (reader.GetInt64(0), reader.GetInt64(1));
+                var deleted = reader.GetInt64(0);
+                var bytes = reader.GetInt64(1);
+
+                var ids = new List<DeletedSnapshot>();
+                if (await reader.NextResultAsync(ct).ConfigureAwait(false))
+                {
+                    while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                    {
+                        ids.Add(new DeletedSnapshot(reader.GetInt64(0), reader.GetInt64(1), reader.GetInt32(2), reader.GetInt32(3)));
+                    }
+                }
+
+                return (deleted, bytes, ids);
             }
             catch (Microsoft.Data.SqlClient.SqlException ex)
                 when (ex.Number == DeadlockVictimError && attempt < DeadlockRetries)
             {
                 await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt), ct).ConfigureAwait(false);
             }
+            finally
+            {
+                await ResetDeadlockPriorityAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// ⚠ Приоритет повертається до <c>NORMAL</c> і на винятку: з'єднання відкрите на весь прогін, а пул
+    /// скидає його лише при поверненні — до того наступні запити сесії лишалися б «жертвою».
+    /// </summary>
+    private async Task ResetDeadlockPriorityAsync()
+    {
+        try
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.CommandText = "SET DEADLOCK_PRIORITY NORMAL;";
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (DbException)
+        {
+            // З'єднання зламане — пул однаково скине його; маскувати початкову помилку не можна.
         }
     }
 
@@ -315,14 +406,36 @@ public sealed partial class SubmissionSnapshotRetentionJob(
     private static partial void LogBatch(ILogger logger, int batch, long deleted, long bytes);
 
     [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Прибирання зрізів подання (mode=disabled): вимкнено ключем {Key}, нічого не пораховано й не видалено.")]
+    private static partial void LogDisabled(ILogger logger, string key);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Прибирання зрізів подання: recovery model бази — {Recovery}.")]
+    private static partial void LogRecoveryModel(ILogger logger, string? recovery);
+
+    [LoggerMessage(
         Level = LogLevel.Warning,
-        Message = "Прибирання зрізів подання: видалено {Deleted} зрізів, {Bytes} байт, пакетів — {Batches}; "
+        Message = "Прибирання зрізів подання (mode=delete) при recovery model FULL: пакет — {BatchSize} зрізів "
+            + "(≈ 10 МБ журналу на зріз), до {MaxBatches} пакетів за прогін. Без частих log-backup журнал і диск "
+            + "переповняться; переконайтеся, що резервне копіювання журналу налаштоване.")]
+    private static partial void LogFullRecovery(ILogger logger, int batchSize, int maxBatches);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Прибирання зрізів подання: пакет {Batch} видалив (Id(документ/аркуш/період)): {Ids}.")]
+    private static partial void LogBatchIds(ILogger logger, int batch, string ids);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Прибирання зрізів подання (mode=delete): видалено {Deleted} зрізів, {Bytes} байт, пакетів — {Batches}; "
             + "лишається останніх — {Retain} і всі зрізи погодження.")]
     private static partial void LogDeleted(ILogger logger, long deleted, long bytes, int batches, int retain);
 }
 
 /// <summary>Підсумок проходу прибирання зрізів (лічильники для журналу та <c>MaintenanceRun.DetailsJson</c>).</summary>
-/// <param name="DryRun"><c>true</c> — нічого не видалено, лише пораховано.</param>
+/// <param name="Mode"><c>disabled</c> (Enabled=false), <c>dryRun</c> (DeleteEnabled=false, лише пораховано) або <c>delete</c>.</param>
 /// <param name="Retain">Скільки останніх зрізів лишається на трійку.</param>
 /// <param name="Candidates">Кандидатів на видалення (dry-run) або видалено (видалення).</param>
 /// <param name="Bytes">Байт payload кандидатів/видалених.</param>
@@ -331,17 +444,56 @@ public sealed partial class SubmissionSnapshotRetentionJob(
 /// <param name="DeletedBytes">Видалено байт.</param>
 /// <param name="Batches">Пакетів видалення.</param>
 public sealed record SnapshotRetentionOutcome(
-    bool DryRun, int Retain, long Candidates, long Bytes, long PinnedKept, long Deleted, long DeletedBytes, int Batches)
+    string Mode, int Retain, long Candidates, long Bytes, long PinnedKept, long Deleted, long DeletedBytes, int Batches)
 {
+    /// <summary>Режим: прохід вимкнено.</summary>
+    public const string DisabledMode = "disabled";
+
+    /// <summary>Режим: лише підрахунок.</summary>
+    public const string DryRunMode = "dryRun";
+
+    /// <summary>Режим: видалення.</summary>
+    public const string DeleteMode = "delete";
+
+    /// <summary><c>true</c> — нічого не видалено (disabled або dryRun).</summary>
+    public bool DryRun => Mode != DeleteMode;
+
+    /// <summary>Recovery model бази на момент проходу (<c>null</c> — не вдалося прочитати).</summary>
+    public string? RecoveryModel { get; init; }
+
+    /// <summary>Видалені зрізи (Id і трійка) для відновлення з бекапу; не більше <see cref="SubmissionSnapshotRetentionJob.MaxListedSnapshots"/>.</summary>
+    public IReadOnlyList<DeletedSnapshot> DeletedSnapshots { get; init; } = [];
+
     /// <summary>Підсумок вимкненого проходу (<c>Enabled=false</c>).</summary>
     /// <param name="options">Налаштування.</param>
     public static SnapshotRetentionOutcome Disabled(SnapshotRetentionOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return new SnapshotRetentionOutcome(true, options.RetainSnapshots, 0, 0, 0, 0, 0, 0);
+        return new SnapshotRetentionOutcome(DisabledMode, options.RetainSnapshots, 0, 0, 0, 0, 0, 0);
     }
 
     /// <summary>Підсумок для <c>MaintenanceRun.DetailsJson</c>.</summary>
     public string ToJson()
-        => $$"""{"mode":"{{(DryRun ? "dryRun" : "delete")}}","retain":{{Retain}},"candidates":{{Candidates}},"bytes":{{Bytes}},"pinnedKept":{{PinnedKept}},"deleted":{{Deleted}},"deletedBytes":{{DeletedBytes}},"batches":{{Batches}}}""";
+        => System.Text.Json.JsonSerializer.Serialize(
+            new
+            {
+                mode = Mode,
+                retain = Retain,
+                candidates = Candidates,
+                bytes = Bytes,
+                pinnedKept = PinnedKept,
+                deleted = Deleted,
+                deletedBytes = DeletedBytes,
+                batches = Batches,
+                recoveryModel = RecoveryModel,
+                deletedSnapshots = DeletedSnapshots,
+            },
+            System.Text.Json.JsonSerializerOptions.Web);
 }
+
+/// <summary>Видалений зріз: Id і трійка «документ × аркуш × період» (для відновлення з бекапу).</summary>
+/// <param name="Id">Id зрізу.</param>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="SheetDefId">Аркуш.</param>
+/// <param name="PeriodKey">Період.</param>
+public sealed record DeletedSnapshot(long Id, long DocumentId, int SheetDefId, int PeriodKey);

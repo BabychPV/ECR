@@ -157,7 +157,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Retention:SubmissionSnapshots:Enabled` | `true` | нічне прибирання старих зрізів подання `calc.SubmissionSnapshot` (AN-134). Без `DeleteEnabled` прохід лише ЛІЧИТЬ (dry-run) і пише в журнал/`MaintenanceRun`, скільки зрізів і байт було б видалено |
 | `Retention:SubmissionSnapshots:DeleteEnabled` | `false` | ⛔ реальне видалення. Вмикати лише після слова людини й перегляду підсумку dry-run (`submission-snapshot-retention` у журналі обслуговування, `pinnedKept` — скільки зрізів погодження збережено понад межу) |
 | `Retention:SubmissionSnapshots:RetainSnapshots` | 5 | скільки НАЙНОВІШИХ зрізів лишається на «документ × аркуш × період»; зрізи погодження не видаляються ніколи. Мінімум 2 (менше зупиняє старт) |
-| `Retention:SubmissionSnapshots:BatchSize` | 50 | зрізів в одному `DELETE` (payload ~10 МБ на зріз). Мінімум 1 |
+| `Retention:SubmissionSnapshots:BatchSize` | 10 | зрізів в одному `DELETE` (payload ~10 МБ на зріз, пакет ≈ 100 МБ журналу). Мінімум 1 |
 | `Retention:SubmissionSnapshots:PauseMilliseconds` | 500 | пауза між пакетами, мс. Мінімум 0 |
 | `Retention:SubmissionSnapshots:MaxBatchesPerRun` | 200 | стеля пакетів за нічний прогін; решту доїсть наступний. Мінімум 1 |
 | `Audit:ExportMaxRows` | 100000 | межа експорту аудиту CSV |
@@ -415,6 +415,44 @@ Server Agent немає — завдання обслуговування НЕ �
 
 ⚠ **потрібне рішення замовника:** вікна обслуговування. Код їх не знає. Розклади
 вище зашиті в коді, тож резервне копіювання ставте поза ними.
+
+### 4.1. Прибирання зрізів подання (`SubmissionSnapshotRetentionJob`, AN-134)
+
+Кожне подання аркуша додає в `calc.SubmissionSnapshot` зріз з `PayloadJson` ~10 МБ. Нічна задача (02:15,
+код в журналі обслуговування `submission-snapshot-retention`) прибирає старі.
+
+**Що ніколи не видаляється:** `RetainSnapshots` (5, мінімум 2) найновіших зрізів на «документ × аркуш × період»
+і ВСІ зрізи погодження. Прямого посилання зі стану чи журналу погодження на зріз немає, тому зріз
+погодження — найновіший зріз трійки не пізніше за час `Approve`/`ApproveStep` (`wf.ApprovalEvent`) або
+`ApprovalState.ApprovedAt` (+1 с). Це і зріз подання, і зріз після правки погоджувача.
+
+**Режими** (поле `mode` у `DetailsJson` прогону й `mode=` у рядку журналу):
+
+| `mode` | Коли | Що робить |
+|---|---|---|
+| `disabled` | `Retention:SubmissionSnapshots:Enabled=false` | нічого; пише лише рядок у журнал |
+| `dryRun` | `Enabled=true`, `DeleteEnabled=false` (ТИПОВО) | лічить: `candidates`, `bytes`, `pinnedKept` (зрізи погодження, збережені понад межу); нічого не видаляє |
+| `delete` | `Enabled=true`, `DeleteEnabled=true` | видаляє пакетами `BatchSize` (10) із паузою `PauseMilliseconds`, до `MaxBatchesPerRun` пакетів за прогін; решту доїсть наступна ніч |
+
+**Вмикання видалення (`DeleteEnabled=true`) — не робиться без умов:**
+1. слово людини й запис `D-…` у `docs/tz/10-decisions.md` (зміна `D-67`/ФВ-5.20a: «старий зріз лишається назавжди»);
+2. резервна копія (або точка відновлення) безпосередньо перед першим прогоном;
+3. dry-run на живій базі/копії: порівняти `candidates`/`bytes`/`pinnedKept` з ручним запитом;
+4. recovery model: при `FULL` потрібні часті резервні копії журналу (пакет 10 зрізів ≈ 100 МБ журналу,
+   до 200 пакетів ≈ 20 ГБ за ніч); у журналі при `delete` + `FULL` є попередження;
+5. перший реальний прогін — у робоче вікно, не разом з нічними задачами.
+Ключ задається змінною оточення служби: `ECR_Retention__SubmissionSnapshots__DeleteEnabled=true`.
+
+**Моніторинг:** `MaintenanceRun` з `JobCode = submission-snapshot-retention` (`Status`, `DetailsJson`:
+`mode`, `candidates`, `bytes`, `deleted`, `deletedBytes`, `batches`, `recoveryModel`, `pinnedKept`,
+`deletedSnapshots`); журнал Api: `recovery model`, пакети (Information), підсумок (Warning). Місце у файлах
+даних ОС не повертається (без `SHRINK`), воно лише перевикористовується.
+
+**Відновлення видалених зрізів:** `DetailsJson.deletedSnapshots` і рядки журналу «пакет N видалив …»
+містять `Id` та трійку (документ/аркуш/період) для ПЕРШИХ 200 видалених за прогін. Відновлення — з резервної
+копії, зробленої до прогону: відновити базу під іншим іменем і перенести потрібні рядки
+`calc.SubmissionSnapshot` за `Id` (`SET IDENTITY_INSERT`). Кандидатів понад 200 за прогін списком не
+фіксується — повторюйте за резервною копією за трійкою.
 
 ## 5. Типові збої
 

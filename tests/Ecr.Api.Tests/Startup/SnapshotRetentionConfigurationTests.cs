@@ -28,7 +28,7 @@ public sealed class SnapshotRetentionConfigurationTests
         Assert.True(options.Enabled);
         Assert.False(options.DeleteEnabled);
         Assert.Equal(5, options.RetainSnapshots);
-        Assert.Equal(50, options.BatchSize);
+        Assert.Equal(10, options.BatchSize);
         Assert.Equal(TimeSpan.FromMilliseconds(500), options.PauseBetweenBatches);
         Assert.Equal(200, options.MaxBatchesPerRun);
         Assert.Empty(EcrConfigurationValidation.Validate(shipped));

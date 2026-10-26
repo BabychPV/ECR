@@ -354,6 +354,108 @@ public sealed class SubmissionSnapshotRetentionTests(SqlServerFixture sql)
         Assert.Equal([3, last - 4, last - 3, last - 2, last - 1, last], minutes);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Зрізи_погодження_кожного_циклу_Approve_Reopen_Submit_Approve_захищені()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await chain.BuildAsync();
+
+        var snapshots = new List<SubmissionSnapshot>();
+        await using (var db = chain.CreateContext())
+        {
+            for (var cycle = 0; cycle < 4; cycle++)
+            {
+                var b = cycle * 100;
+                snapshots.Add(Snapshot(doc, b));       // подання
+                snapshots.Add(Snapshot(doc, b + 1));   // зріз після правки погоджувача = зріз погодження
+                db.ApprovalEvents.Add(Event(doc, ApprovalAction.Submit, b));
+                db.ApprovalEvents.Add(Event(doc, ApprovalAction.Approve, b + 1));
+                db.ApprovalEvents.Add(Event(doc, ApprovalAction.Reopen, b + 2));
+            }
+
+            // Чернеткові подання після останнього циклу.
+            for (var m = 400; m < 404; m++)
+            {
+                snapshots.Add(Snapshot(doc, m));
+            }
+
+            db.SubmissionSnapshots.AddRange(snapshots);
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await RunAsync(chain, Delete(retain: 2));
+
+        // Зріз погодження КОЖНОГО циклу (1, 101, 201, 301) + 2 найновіші (402, 403); подання (0, 100, …) не береже ніхто.
+        Assert.Equal([1, 101, 201, 301, 402, 403], await MinutesAsync(chain, doc));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Режими_у_DetailsJson_disabled_dryRun_delete_не_плутаються()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await chain.BuildAsync();
+        await AddAsync(chain, [.. Enumerable.Range(0, 8).Select(m => Snapshot(doc, m))]);
+
+        async Task<string> DetailsAsync(Dictionary<string, string?> values)
+        {
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+            await using (var db = chain.CreateContext())
+            {
+                await Job(db, configuration).ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
+            }
+
+            await using var verify = chain.CreateContext();
+            return (await verify.MaintenanceRuns.AsNoTracking()
+                .Where(r => r.JobCode == SubmissionSnapshotRetentionJob.Code)
+                .OrderByDescending(r => r.Id)
+                .FirstAsync(CancellationToken.None)).DetailsJson!;
+        }
+
+        // Enabled=false (навіть при DeleteEnabled=true): нічого не робить, режим disabled.
+        var disabled = await DetailsAsync(new()
+        {
+            [SnapshotRetentionOptions.EnabledKey] = "false",
+            [SnapshotRetentionOptions.DeleteEnabledKey] = "true",
+        });
+        Assert.Contains("\"mode\":\"disabled\"", disabled, StringComparison.Ordinal);
+        Assert.Equal(8, (await IdsAsync(chain, doc)).Count);
+
+        var dry = await DetailsAsync(new() { [SnapshotRetentionOptions.RetainSnapshotsKey] = "3" });
+        Assert.Contains("\"mode\":\"dryRun\"", dry, StringComparison.Ordinal);
+        Assert.Contains("\"recoveryModel\":\"", dry, StringComparison.Ordinal);
+        Assert.Equal(8, (await IdsAsync(chain, doc)).Count);
+
+        var oldest = (await IdsAsync(chain, doc))[0];
+        var del = await DetailsAsync(new()
+        {
+            [SnapshotRetentionOptions.DeleteEnabledKey] = "true",
+            [SnapshotRetentionOptions.RetainSnapshotsKey] = "3",
+        });
+        Assert.Contains("\"mode\":\"delete\"", del, StringComparison.Ordinal);
+        // Перелік для відновлення: Id і трійка видаленого зрізу.
+        Assert.Contains($"\"id\":{oldest},\"documentId\":{doc.DocumentId},\"sheetDefId\":{doc.SheetDefId},\"periodKey\":{doc.PeriodKey.Value}", del, StringComparison.Ordinal);
+        Assert.Equal([5, 6, 7], await MinutesAsync(chain, doc));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перелік_видалених_обмежений_двома_сотнями()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await chain.BuildAsync();
+        await AddAsync(chain, [.. Enumerable.Range(0, 260).Select(m => Snapshot(doc, m))]);
+
+        var outcome = await RunAsync(chain, Delete(retain: 5, batch: 100));
+
+        Assert.True(outcome.Deleted >= 255);
+        Assert.Equal(SubmissionSnapshotRetentionJob.MaxListedSnapshots, outcome.DeletedSnapshots.Count);
+    }
+
     private static ApprovalEvent Event(TestDocument d, ApprovalAction action, int minute)
         => new(
             d.DocumentId, d.SheetDefId, d.PeriodKey.Value,
