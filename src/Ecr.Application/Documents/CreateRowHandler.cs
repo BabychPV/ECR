@@ -333,6 +333,11 @@ public sealed class CreateRowHandler(
 
         if (!decision.IsAllowed)
         {
+            if (AnchorPeriodOf(decision) is { } anchor)
+            {
+                throw AnchorPeriodDenied("err.ECR-ACCS-0403.addRowAnchorPeriod", "додаються", decision.Reason, anchor);
+            }
+
             throw new Errors.AccessDeniedException(
                 "ECR-ACCS-0403",
                 $"Рядок у цю таблицю додати не можна: {decision.Reason}.",
@@ -346,6 +351,28 @@ public sealed class CreateRowHandler(
         }
 
         return decision;
+    }
+
+    /// <summary>
+    /// Q-17b: якір року, коли відмову дала відсутність гранта в ньому (рядки таблиці «місяці в колонках» додаються й
+    /// видаляються в періоді-якорі; роль без якоря в області отримує NoGrant). Інакше — <c>null</c> (звичайний текст).
+    /// </summary>
+    internal static int? AnchorPeriodOf(EditDecision decision)
+        => decision.Reason == EditDenyReason.NoGrant && decision.AnnualPeriods is { Count: > 0 } annual ? annual[0] : null;
+
+    /// <summary>Той самий 403 <c>ECR-ACCS-0403</c> без нового коду, але з ключем тексту, що називає період-якір.</summary>
+    internal static Errors.AccessDeniedException AnchorPeriodDenied(string key, string verb, EditDenyReason reason, int anchor)
+    {
+        var period = anchor.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return new Errors.AccessDeniedException(
+            "ECR-ACCS-0403",
+            $"Рядки цієї таблиці {verb} в періоді {period}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = key,
+                ["reason"] = reason.ToString(),
+                ["anchorPeriod"] = period,
+            });
     }
 
     /// <summary>
