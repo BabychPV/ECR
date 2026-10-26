@@ -360,6 +360,34 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<(long Id, string ContentHash)?> GetLatestSnapshotKeyAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+    {
+        // Без PayloadJson у проєкції: у вибірку йдуть лише Id і хеш (32 байти).
+        var row = await db.SubmissionSnapshots
+            .AsNoTracking()
+            .Where(s => s.DocumentId == documentId
+                        && s.SheetDefId == sheetDefId
+                        && s.PeriodKey == periodKey.Value)
+            .OrderByDescending(s => s.SubmittedAt)
+            .ThenByDescending(s => s.Id)
+            .Select(s => new { s.Id, s.ContentHash })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return row is null ? null : (row.Id, Convert.ToHexStringLower(row.ContentHash));
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> GetSnapshotPayloadAsync(long snapshotId, CancellationToken ct)
+        => await db.SubmissionSnapshots
+            .AsNoTracking()
+            .Where(s => s.Id == snapshotId)
+            .Select(s => s.PayloadJson)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public Task<bool> HasSubmittedSheetsAsync(int projectId, PeriodKey periodKey, CancellationToken ct)
     {
         // AnyAsync, а не Count: провайдер перекладає його в EXISTS і зупиняється

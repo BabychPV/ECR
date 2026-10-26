@@ -68,7 +68,7 @@ public sealed class RegistryEntriesScopedViewTests
 
     private void Profile(
         bool globalView = false, bool scopedView = false, int scopedProject = ProjectId, bool deny = false,
-        bool readGrant = false)
+        bool readGrant = false, bool scopedDeny = false, bool scopedReadGrant = false)
     {
         var grants = new Dictionary<string, GrantLevel> { [$"Project:{ProjectId}"] = GrantLevel.Read };
         if (readGrant)
@@ -83,13 +83,17 @@ public sealed class RegistryEntriesScopedViewTests
             Grants = grants,
             Denies = new HashSet<string>(deny ? [$"Registry:{RegistryId}"] : []),
             RoleIds = new HashSet<int>(),
-            Scoped = scopedView
+            Scoped = scopedView || scopedDeny || scopedReadGrant
                 ? new Dictionary<int, ScopedProjectAccess>
                 {
                     [scopedProject] = new(
                         new Dictionary<string, GrantLevel>(), new HashSet<string>(), new HashSet<int>(), new HashSet<string>())
                     {
-                        RegistryView = true,
+                        RegistryView = scopedView,
+                        RegistryDenies = scopedDeny ? new HashSet<int> { RegistryId } : new HashSet<int>(),
+                        RegistryGrants = scopedReadGrant
+                            ? new Dictionary<int, GrantLevel> { [RegistryId] = GrantLevel.Read }
+                            : new Dictionary<int, GrantLevel>(),
                     },
                 }
                 : new Dictionary<int, ScopedProjectAccess>(),
@@ -178,6 +182,50 @@ public sealed class RegistryEntriesScopedViewTests
     public async Task Грант_Read_на_довідник_пікер_як_раніше()
     {
         Profile(readGrant: true);
+
+        await Pick(DocumentId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "P50")]
+    public async Task Scoped_View_і_власний_Deny_ролі_пікер_404_як_неіснуючий()
+    {
+        Profile(scopedView: true, scopedDeny: true);
+
+        var denied = await Assert.ThrowsAsync<NotFoundException>(() => Pick(DocumentId));
+
+        Assert.Equal("ECR-REG-0404", denied.ErrorCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "P50")]
+    public async Task Глобальний_View_і_scoped_Deny_у_проєкті_документа_пікер_404()
+    {
+        Profile(globalView: true, scopedDeny: true);
+
+        var denied = await Assert.ThrowsAsync<NotFoundException>(() => Pick(DocumentId));
+
+        Assert.Equal("ECR-REG-0404", denied.ErrorCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "P50")]
+    public async Task Scoped_Deny_іншого_проєкту_глобальному_View_не_заважає()
+    {
+        Profile(globalView: true, scopedDeny: true, scopedProject: ProjectId + 1);
+
+        await Pick(DocumentId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "P50")]
+    public async Task Scoped_Read_грант_на_довідник_без_View_пікер_відкривається()
+    {
+        Profile(scopedReadGrant: true);
 
         await Pick(DocumentId);
     }

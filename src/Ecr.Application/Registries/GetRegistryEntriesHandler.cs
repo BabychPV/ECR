@@ -78,20 +78,24 @@ public sealed class GetRegistryEntriesHandler(
         // ✎ Рішення людини 26.10 (P3): пікер документа (`documentId`) приймає й Registry.View ролі, призначеної на ПРОЄКТ
         // документа (`ScopedProjectAccess.RegistryView`) - узгоджено з PATCH шапки/комірки. Без `documentId` - як було.
         // Запит проєкту і перевірка йдуть лише після відмови глобальної перевірки: звичайні користувачі нічого не платять.
-        Security.AccessProfile? scopedViewer = null;
+        Security.AccessProfile? viewer = null;
+        int? viewerProject = null;
+        var viaScoped = false;
         try
         {
-            await RegistryAccess
+            viewer = await RegistryAccess
                 .RequireAsync(access, currentUser, Permission, GrantLevel.Read, new RegistryLookup(registries, registryCode), ct)
                 .ConfigureAwait(false);
         }
         catch (AccessDeniedException) when (documentId is not null)
         {
-            scopedViewer = await ScopedViewerAsync(documentId.Value, ct).ConfigureAwait(false);
-            if (scopedViewer is null)
+            (viewer, viewerProject) = await ScopedViewerAsync(documentId.Value, ct).ConfigureAwait(false);
+            if (viewer is null)
             {
                 throw;
             }
+
+            viaScoped = true;
         }
 
         var definition = await registries.FindDefinitionAsync(registryCode, ct).ConfigureAwait(false)
@@ -100,10 +104,24 @@ public sealed class GetRegistryEntriesHandler(
                 $"Довідника «{registryCode}» не існує.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0404.registry", ["registryCode"] = registryCode });
 
-        // Scoped View не перекриває Deny на довідник: заборонений - 404, як неіснуючий (S18).
-        if (scopedViewer is not null && RegistryAccess.IsDenied(scopedViewer, definition.Id))
+        // P50 (Аудит-2 W14g): Deny, виданий ролі з областю, діє в документах її проєкту - 404, як неіснуючий (S18).
+        // Scoped-шлях: View/грант проєкту + Deny перевіряє MayChoose; глобальний користувач зі scoped-Deny - лише коли такі є.
+        if (viaScoped)
         {
-            throw RegistryAccess.NotFound(registryCode);
+            if (!Permits.Groups.LookupTargetMatcher.MayChoose(viewer, definition.Id, viewerProject))
+            {
+                throw RegistryAccess.IsDeniedIn(viewer!, definition.Id, viewerProject)
+                    ? RegistryAccess.NotFound(registryCode)
+                    : RegistryAccess.Denied(Permission);
+            }
+        }
+        else if (documentId is not null && Permits.Groups.LookupTargetMatcher.ViewProjectNeeded(viewer))
+        {
+            var project = await access.DocumentProjectIdAsync(documentId.Value, ct).ConfigureAwait(false);
+            if (RegistryAccess.IsDeniedIn(viewer!, definition.Id, project))
+            {
+                throw RegistryAccess.NotFound(registryCode);
+            }
         }
 
         // ⛔ Відсутній або зіпсований `asOf` — ВІДМОВА, а не `0001-01-01`
@@ -288,25 +306,23 @@ public sealed class GetRegistryEntriesHandler(
     }
 
     /// <summary>
-    /// Профіль, якщо його роль, призначена на проєкт документа, дає <c>Registry.View</c> для вибору запису; інакше <c>null</c>.
+    /// Профіль і проєкт документа, коли профіль має ролі з областю (їхній View/гранти/Deny рахує <c>MayChoose</c>); інакше <c>null</c>.
     /// </summary>
-    private async Task<Security.AccessProfile?> ScopedViewerAsync(long documentId, CancellationToken ct)
+    private async Task<(Security.AccessProfile? Profile, int? ProjectId)> ScopedViewerAsync(long documentId, CancellationToken ct)
     {
         if (currentUser.UserId is not { } userId)
         {
-            return null;
+            return (null, null);
         }
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        if (!Permits.Groups.LookupTargetMatcher.ViewProjectNeeded(profile))
+        if (profile.Scoped.Count == 0 || profile.IsIntegrationWriter)
         {
-            return null;
+            return (null, null);
         }
 
-        return await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false) is { } projectId
-               && profile.Scoped.TryGetValue(projectId, out var scoped) && scoped.RegistryView
-            ? profile
-            : null;
+        var projectId = await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false);
+        return projectId is { } id && profile.Scoped.ContainsKey(id) ? (profile, id) : (null, null);
     }
 
     /// <summary>Вікно проєкту документа; невидимий чи відсутній документ - 404 (як <c>GET …/header</c>, B-08).</summary>

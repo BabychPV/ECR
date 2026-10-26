@@ -90,9 +90,21 @@ public sealed class ApprovalSnapshotRefresh(
         var live = await SubmissionPayloadSource
             .ReadAsync(cellStore, headers, documentId, instances, periodKey, headerFieldCodes, ct)
             .ConfigureAwait(false);
-        // ⚠ Від найновішого (`GetSnapshotsAsync` сортує за `SubmittedAt` спадно).
-        var snapshots = await workflow.GetSnapshotsAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false);
-        var latest = snapshots.Count > 0 ? snapshots[0].PayloadJson : null;
+        // ⛔ PERF: лише НАЙНОВІШИЙ зріз, і спершу без payload. Раніше `GetSnapshotsAsync` тягнув payload УСІХ
+        // зрізів аркуша за період (~10 МБ кожен на документі з 91 таблицею; кожне подання додає зріз) —
+        // затвердження 268→493 с і росло з числом подань. Хеш живих даних збігся з хешем найновішого зрізу
+        // (той самий `SubmissionPayloadSource`) — дані байт-у-байт ті самі, зміни немає, payload не читаємо.
+        var latestKey = await workflow.GetLatestSnapshotKeyAsync(documentId, sheetDefId, periodKey, ct)
+            .ConfigureAwait(false);
+        if (latestKey is { } key
+            && string.Equals(key.ContentHash, SubmissionPayloadSource.Hash(live), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var latest = latestKey is { } found
+            ? await workflow.GetSnapshotPayloadAsync(found.Id, ct).ConfigureAwait(false)
+            : null;
 
         if (!SheetChanged(latest, live, sheetColumns))
         {
