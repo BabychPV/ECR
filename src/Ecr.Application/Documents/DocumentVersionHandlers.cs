@@ -95,7 +95,8 @@ public sealed class CompareDocumentVersionsHandler(
     IMetadataCache metadata,
     IDocumentHeaderStore headers,
     Security.IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IMonthColumnRouter? monthRouter = null)
 {
     /// <summary>Право — те саме, що й перегляд документа.</summary>
     public const string Permission = ListDocumentsHandler.Permission;
@@ -156,8 +157,16 @@ public sealed class CompareDocumentVersionsHandler(
             newerHeader = await ReadCurrentHeaderAsync(documentId, ct).ConfigureAwait(false);
         }
 
+        // Q-17: колонки власників поза областю ролі — як приховані (S18); збережений зріз не змінюється.
+        var ownerBlocked = await OwnerScopeMask
+            .BlockedColumnIdsAsync(monthRouter, metadata, readable, documentId, key, ct).ConfigureAwait(false);
+
+        // ⚠ Q-17: з прапором роль, звужена періодами, читає колонки В ПЕРІОДІ порівняння (D-214) — межі «без періоду»
+        // для неї порожні. Прапор вимкнено — як було (поведінка не змінюється).
+        var columnScope = monthRouter is { Enabled: true } ? readable.InPeriod(key) : readable;
+
         return await DiffAsync(
-            documentId, key, from, toId, readable,
+            documentId, key, from, toId, columnScope, ownerBlocked,
             SubmissionPayload.Read(older.PayloadJson), newerCells,
             SubmissionPayload.ReadHeader(older.PayloadJson), newerHeader,
             ct).ConfigureAwait(false);
@@ -190,6 +199,7 @@ public sealed class CompareDocumentVersionsHandler(
 
     private async Task<DocumentCompareDto> DiffAsync(
         long documentId, PeriodKey key, long from, long? to, Security.DocumentReadScope readable,
+        HashSet<int> ownerBlocked,
         IReadOnlyList<SubmissionPayloadCell> oldCells, IReadOnlyList<SubmissionPayloadCell> newCells,
         IReadOnlyDictionary<string, SubmissionPayloadHeaderValue> oldHeader,
         IReadOnlyDictionary<string, SubmissionPayloadHeaderValue> newHeader,
@@ -213,7 +223,7 @@ public sealed class CompareDocumentVersionsHandler(
         var removed = oldRows.Except(newRows).Where(r => rowReadable[r]).Order().ToList();
 
         var changed = oldMap.Keys.Union(newMap.Keys)
-            .Where(k => readable.CanReadColumn(k.ColumnDefId))
+            .Where(k => readable.CanReadColumn(k.ColumnDefId) && !ownerBlocked.Contains(k.ColumnDefId))
             .Where(k => oldRows.Contains(k.RowId) && newRows.Contains(k.RowId))
             .Where(k => !SameValue(oldMap.GetValueOrDefault(k), newMap.GetValueOrDefault(k)))
             .OrderBy(k => k.RowId).ThenBy(k => k.ColumnDefId)

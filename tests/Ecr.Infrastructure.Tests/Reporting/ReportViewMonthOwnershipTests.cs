@@ -163,6 +163,44 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         Assert.Equal(plain, await ViewDefinitionAsync(f.View));
     }
 
+    /// <summary>
+    /// GOLDEN проти main: процедура з origin/main 55f6f8010 (до Q-17.7) лежить у тестових даних без змін (окрім імені) і
+    /// будує вʼюху еталонної таблиці MonthsInColumns; нова процедура з ВИМКНЕНИМ прапором мусить дати той самий текст
+    /// байт-у-байт (інакше вона перебудувала б вʼюху — ALTER — і текст відрізнявся б від еталона), а з увімкненим — ні.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Прапор_вимкнено_DDL_вʼюхи_байт_у_байт_як_у_процедури_main()
+    {
+        var f = await BuildAsync();
+
+        var script = await File.ReadAllTextAsync(Path.Combine(
+            AppContext.BaseDirectory, "Reporting", "Golden", "usp_GenerateTemplateViews.main-55f6f8010.sql"));
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var install = connection.CreateCommand();
+            install.CommandText = script;
+            await install.ExecuteNonQueryAsync();
+
+            await using var run = connection.CreateCommand();
+            run.CommandText = "EXEC rpt.usp_GenerateTemplateViews_GoldenMain @TemplateVersionId = @v";
+            run.Parameters.AddWithValue("@v", f.Doc.TemplateVersionId);
+            await run.ExecuteNonQueryAsync();
+        }
+
+        var golden = await ViewDefinitionAsync(f.View);
+        Assert.DoesNotContain("COALESCE(o", golden, StringComparison.Ordinal);
+
+        await GenerateAsync(f, routing: false);
+        Assert.Equal(golden, await ViewDefinitionAsync(f.View));
+
+        await GenerateAsync(f, routing: true);
+        Assert.NotEqual(golden, await ViewDefinitionAsync(f.View));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

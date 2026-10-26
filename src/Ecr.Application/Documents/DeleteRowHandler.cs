@@ -192,6 +192,11 @@ public sealed class DeleteRowHandler(
 
         if (!decision.IsAllowed)
         {
+            if (CreateRowHandler.AnchorPeriodOf(decision) is { } anchor)
+            {
+                throw CreateRowHandler.AnchorPeriodDenied("err.ECR-ACCS-0403.deleteRowAnchorPeriod", "видаляються", decision.Reason, anchor);
+            }
+
             throw DeleteDenied(decision.Reason);
         }
 
