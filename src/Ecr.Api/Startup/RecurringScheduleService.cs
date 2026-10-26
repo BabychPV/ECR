@@ -378,6 +378,12 @@ public sealed partial class RecurringScheduleService(
             .ScheduleAsync<Infrastructure.Jobs.ReportSnapshotFormatJob>(NightlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
+        // AN-134: прибирання старих зрізів подання. Нічне вікно; за замовчуванням лише рахує (dry-run) —
+        // видалення вмикає окремий ключ `Retention:SubmissionSnapshots:DeleteEnabled`.
+        await scheduler
+            .ScheduleAsync<Infrastructure.Jobs.SubmissionSnapshotRetentionJob>(NightlyCron, null, CancellationToken.None)
+            .ConfigureAwait(false);
+
         await scheduler
             .ScheduleAsync<Infrastructure.Jobs.PeriodStateJob>(HourlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);

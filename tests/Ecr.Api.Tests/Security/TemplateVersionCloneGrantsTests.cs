@@ -24,8 +24,10 @@ namespace Ecr.Api.Tests.Security;
 /// Оракул — <c>EditRules.Effective</c> на профілі зі справжньої служби: те саме рішення, яким
 /// користуються читання сітки, запис, історія й Excel. Мутація: прибрати <c>CloneResourceGrantsAsync</c>
 /// з <c>SaveCloneAsync</c> — червоніють усі чотири сценарії (Column/Table/Sheet і кеш профілю).
-/// ⚠ Свідомі обмеження (відомі, не цього циклу): Deny, додане на v1 ПІСЛЯ клону, на v2 не діє;
-/// клон не переносить правила доступу до періоду.
+/// ⚠ Свідоме обмеження: клон — знімок на момент клонування, тож Deny, додане на v1 ПІСЛЯ клону, на v2 не діє
+/// (AN-51, пін: <c>Deny_доданий_на_v1_після_клону_на_v2_не_діє</c>).
+/// Правила доступу до періоду клон НАВПАКИ переносить (PS-P1B, <c>CloneAccessRulesAsync</c>; пін:
+/// <c>Клон_переносить_правила_доступу_до_періоду_на_Id_клону</c>) — попередня примітка «не переносить» була хибною.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class TemplateVersionCloneGrantsTests(SqlServerFixture sql)
@@ -124,6 +126,105 @@ public sealed class TemplateVersionCloneGrantsTests(SqlServerFixture sql)
         var after = await scope2.ServiceProvider.GetRequiredService<IAccessDecisionService>()
             .BuildProfileAsync(userId, CancellationToken.None).ConfigureAwait(true);
         Assert.Contains($"Column:{v2.Column}", after.Denies);
+    }
+
+    /// <summary>
+    /// AN-51 (дефолт triage 23.10): клон = знімок на момент клонування. Deny, доданий на колонку v1 ПІСЛЯ клону,
+    /// на клоні v2 не діє — адміністратор видає його заново. Пін фіксує поточну поведінку, а не бажану:
+    /// якщо рішення зміниться (синхронізація грантів між версіями), тест треба переписати свідомо.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "A1-04")]
+    public async Task Deny_доданий_на_v1_після_клону_на_v2_не_діє()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(columnCount: 3, rowCount: 2).ConfigureAwait(true);
+        var column = doc.ColumnDefIds[1];
+        var columnCode = await CodeOfAsync(builder, column).ConfigureAwait(true);
+
+        // Роль із грантом лише на проєкт: Deny на колонку ще немає.
+        int userId;
+        int roleId;
+        await using (var db = builder.CreateContext())
+        {
+            var name = $"a104l_{Guid.NewGuid():N}"[..20];
+            var user = new User(name, name, AuthProvider.Local);
+            user.SetPassword(new PasswordHasher().Hash(Password));
+            db.Users.Add(user);
+            var role = new Role(EcrCode.Create($"A104L_{Guid.NewGuid():N}"), Name("Late deny"));
+            db.Roles.Add(role);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
+            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, doc.ProjectId, GrantLevel.Write));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            (userId, roleId) = (user.Id, role.Id);
+        }
+
+        var cloneId = await CloneAndPublishAsync(builder, doc).ConfigureAwait(true);
+        var v2 = await ResolveAsync(builder, cloneId, doc.SheetCode, columnCode).ConfigureAwait(true);
+        Assert.NotEqual(column, v2.Column);
+        var p2 = await CreateProjectAsync(builder, cloneId, roleId).ConfigureAwait(true);
+
+        // Deny на v1 — ПІСЛЯ клону.
+        await using (var db = builder.CreateContext())
+        {
+            db.ResourceGrants.Add(new ResourceGrant(roleId, ResourceKind.Column, column, GrantLevel.None, isDeny: true));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+
+        // Контроль: на v1 Deny справді діє (інакше тест нічого не доводить).
+        Assert.Equal(GrantLevel.None, await EffectiveAsync(
+            app, userId, doc.ProjectId, doc.SheetDefId, doc.TableDefId, column, doc.SheetCode).ConfigureAwait(true));
+
+        // Предмет піну: на клоні та сама колонка (за кодом) лишилась на рівні проєкту.
+        Assert.Equal(GrantLevel.Write, await EffectiveAsync(
+            app, userId, p2, v2.Sheet, v2.Table, v2.Column, doc.SheetCode).ConfigureAwait(true));
+
+        // І в профілі немає забороненої колонки клону.
+        using var scope = app.Services.CreateScope();
+        var profile = await scope.ServiceProvider.GetRequiredService<IAccessDecisionService>()
+            .BuildProfileAsync(userId, CancellationToken.None).ConfigureAwait(true);
+        Assert.Contains($"Column:{column}", profile.Denies);
+        Assert.DoesNotContain($"Column:{v2.Column}", profile.Denies);
+    }
+
+    /// <summary>
+    /// AN-51: правило доступу до періоду версії шаблону клон переносить (PS-P1B) — з перемапінгом аркуша на Id
+    /// клону. Попередня примітка в <c>&lt;remarks&gt;</c> («не переносить») не відповідала коду; пін закріплює факт.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "A1-04")]
+    public async Task Клон_переносить_правила_доступу_до_періоду_на_Id_клону()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(columnCount: 3, rowCount: 2).ConfigureAwait(true);
+        var column = doc.ColumnDefIds[1];
+        var columnCode = await CodeOfAsync(builder, column).ConfigureAwait(true);
+
+        await using (var db = builder.CreateContext())
+        {
+            db.PeriodAccessRules.Add(PeriodAccessRuleDef.AlwaysReadOnly(doc.TemplateVersionId).ForSheet(doc.SheetDefId));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var cloneId = await CloneAndPublishAsync(builder, doc).ConfigureAwait(true);
+        var v2 = await ResolveAsync(builder, cloneId, doc.SheetCode, columnCode).ConfigureAwait(true);
+        Assert.NotEqual(doc.SheetDefId, v2.Sheet);
+
+        await using var read = builder.CreateContext();
+        var cloned = await read.PeriodAccessRules.AsNoTracking()
+            .Where(r => r.TemplateVersionId == cloneId).ToListAsync().ConfigureAwait(true);
+        var rule = Assert.Single(cloned);
+        Assert.Equal(PeriodAccessRuleKind.AlwaysReadOnly, rule.RuleKind);
+        Assert.Equal(v2.Sheet, rule.SheetDefId);
+
+        // Правило v1 лишилось на місці й не переїхало.
+        Assert.Equal(1, await read.PeriodAccessRules.CountAsync(r => r.TemplateVersionId == doc.TemplateVersionId)
+            .ConfigureAwait(true));
     }
 
     private const string Password = "Api-A104-Clone-2026!";
