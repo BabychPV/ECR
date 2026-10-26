@@ -221,7 +221,7 @@ public static class DocumentVisibility
 
     /// <summary>
     /// Таблиця, якої читач не бачить (Deny на таблицю чи її аркуш), для нього НЕ ІСНУЄ: ТА САМА відповідь,
-    /// що й на читання зрізу (<c>404 ECR-DOC-0404 tableInstance</c>), — до будь-якої відмови про режим
+    /// що й на читання зрізу (<c>404 ECR-DOC-0404 document</c>, P2-B: колишній <c>tableInstance</c> відрізнявся від неіснуючого), — до будь-якої відмови про режим
     /// рядків, версії чи ключі. Інакше 409 «Table "X" has RowMode = Fixed…» називав би схований ресурс (D-6).
     /// </summary>
     /// <param name="access">Служба доступу.</param>
@@ -252,14 +252,8 @@ public static class DocumentVisibility
 
         if (!(key.IsValid ? scope.InPeriod(key) : scope).CanReadTable(tableDefId))
         {
-            throw new NotFoundException(
-                "ECR-DOC-0404",
-                $"Екземпляра таблиці {tableInstanceId} не знайдено.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
-                    ["tableInstanceId"] = tableInstanceId.ToString(CultureInfo.InvariantCulture),
-                });
+            // P2-B: ТА САМА відповідь, що й для відсутнього/чужого екземпляра (`DocumentNotFound`), - без оракула схованих таблиць.
+            throw DocumentNotFound(documentId);
         }
     }
 

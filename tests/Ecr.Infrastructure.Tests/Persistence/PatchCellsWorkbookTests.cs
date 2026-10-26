@@ -111,7 +111,7 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
         // D-6: заборона на ЧИТАННЯ таблиці робить її для автора неіснуючою - 404, а не 403 deniedCells
         // (так само відповідає поштучний PATCH і GET зрізу).
         await AssertRejectedAsync<NotFoundException>(
-            world, profile, requests, guilty, "ECR-DOC-0404", "err.ECR-DOC-0404.tableInstance");
+            world, profile, requests, guilty, "ECR-DOC-0404", "err.ECR-DOC-0404.document");
     }
 
     [Fact]
@@ -137,7 +137,7 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
         var error = await Assert.ThrowsAsync<NotFoundException>(() => RunWorkbookAsync(world, profile, requests));
 
         Assert.Equal("ECR-DOC-0404", error.ErrorCode);
-        Assert.Equal("err.ECR-DOC-0404.tableInstance", error.Details!["messageKey"]);
+        Assert.Equal("err.ECR-DOC-0404.document", error.Details!["messageKey"]);
         Assert.DoesNotContain(tableCode!, error.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("RowMode", error.Message, StringComparison.Ordinal);
         Assert.All(
@@ -406,7 +406,7 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
         // D-6 (свідома зміна очікування): «схована таблиця не існує» (404 `err.ECR-DOC-0404.tableInstance`) сам несе
         // `tableInstanceId` - це предмет відмови, і книга додає той самий номер. Суть «книга == поштучний» збережена:
         // тип, код, ключ, речення й решта подробиць збігаються; для всіх інших відмов поштучний номера не має.
-        if (messageKey != "err.ECR-DOC-0404.tableInstance")
+        if (messageKey != "err.ECR-DOC-0404.document")
         {
             Assert.False(alone.Details!.ContainsKey("tableInstanceId"));
         }

@@ -142,14 +142,8 @@ public sealed class GetTableSliceHandler(
 
         if (!readable.CanReadTable(instance.TableDefId))
         {
-            throw new Errors.NotFoundException(
-                "ECR-DOC-0404",
-                $"Екземпляра таблиці {tableInstanceId} не знайдено.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
-                    ["tableInstanceId"] = tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            // P2-B (прохід A): схована таблиця - ТА САМА відповідь, що й неіснуючий/чужий екземпляр (`document`), байт у байт.
+            throw DocumentVisibility.DocumentNotFound(documentId);
         }
 
         // 1. Метадані — зі знімка, без звернення до БД (D-16).

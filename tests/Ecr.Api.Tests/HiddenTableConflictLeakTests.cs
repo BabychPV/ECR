@@ -53,7 +53,7 @@ public sealed class HiddenTableConflictLeakTests(SqlServerFixture sql)
 
                 var problem = JsonDocument.Parse(response.Body).RootElement;
                 Assert.Equal("ECR-DOC-0404", problem.GetProperty("errorCode").GetString());
-                Assert.Equal("err.ECR-DOC-0404.tableInstance", problem.GetProperty("messageKey").GetString());
+                Assert.Equal("err.ECR-DOC-0404.document", problem.GetProperty("messageKey").GetString());
                 Assert.DoesNotContain(s.Hidden.TableCode, response.Body, StringComparison.Ordinal);
                 Assert.DoesNotContain("RowMode", response.Body, StringComparison.Ordinal);
             }
