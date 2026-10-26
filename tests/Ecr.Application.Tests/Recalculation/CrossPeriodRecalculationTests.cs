@@ -30,7 +30,8 @@ public sealed class CrossPeriodRecalculationTests
     private const byte CrossPeriod = 3;
     private const byte Absolute = 5;
 
-    private readonly ICellStore _cells = Substitute.For<ICellStore>();
+    // Q-17.4: сховище вміє і сесію читання власників (як `MonthRoutedCellStore`).
+    private readonly ICellStore _cells = Substitute.For<ICellStore, IOwnerReadSession>();
     private readonly IRowStore _rows = Substitute.For<IRowStore>();
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
     private readonly ITemplateVersionStore _versions = Substitute.For<ITemplateVersionStore>();
@@ -182,7 +183,121 @@ public sealed class CrossPeriodRecalculationTests
         Assert.Equal(90m, Assert.Single(Applied()).Value.ValueNumeric);
     }
 
+    // ── Q-17.4: перерахунок читачів введених стовпців з іншим власником ───
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "Q-17")]
+    public async Task Q17_зміна_введеного_стовпця_власника_перераховує_формулу_з_нульовим_зсувом_в_іншому_періоді()
+    {
+        // Період 5 читає C1 СВОГО зрізу (нульовий зсув), а значення C1 належить екземпляру 11 і змінилось там.
+        Arrange("[C1] * 2", Cell, 0);
+
+        var written = await Service().RecalculateFromOtherPeriodsAsync(
+            DocumentId, Key(5), [new CrossPeriodSource(11, _table.Id, _inputColumn, OwnerInput: true)],
+            CancellationToken.None);
+
+        Assert.Equal(1, written);
+        Assert.Equal(100m, Assert.Single(Applied()).Value.ValueNumeric);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "Q-17")]
+    public async Task Q17_без_позначки_власника_формула_з_нульовим_зсувом_у_іншому_періоді_не_цільова()
+    {
+        // Старе зберігання (прапор вимкнено): зміна в іншому періоді нульовий зсув не зачіпає — поведінка попередня.
+        Arrange("[C1] * 2", Cell, 0);
+
+        var written = await Service().RecalculateFromOtherPeriodsAsync(
+            DocumentId, Key(5), [new CrossPeriodSource(11, _table.Id, _inputColumn)], CancellationToken.None);
+
+        Assert.Equal(0, written);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "Q-17")]
+    public async Task Q17_власник_читається_один_раз_на_задачу_сесія_відкривається_і_закривається()
+    {
+        Arrange("[C1] * 2", Cell, 0);
+        var session = (IOwnerReadSession)_cells;
+        var token = Substitute.For<IDisposable>();
+        session.BeginOwnerReadSession().Returns(token);
+
+        await Service().RecalculateFromOtherPeriodsAsync(
+            DocumentId, Key(5), [new CrossPeriodSource(11, _table.Id, _inputColumn, OwnerInput: true)],
+            CancellationToken.None);
+
+        // Одна сесія на прогін (а прогін читає кілька періодів) і вона закрита навіть без винятку.
+        session.Received(1).BeginOwnerReadSession();
+        token.Received(1).Dispose();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "Q-17")]
+    public async Task Q17_перерахунок_не_перезаписує_введену_комірку_власника_у_колонці_з_чужим_власником()
+    {
+        // Формула цілить у C1 (введена колонка), а її значення — комірка власника (IsCalculated = false) зі зрізу.
+        Arrange("5", Cell, 0, targetInput: true);
+
+        var written = await Service(ForeignInput()).RecalculateAllAsync(DocumentId, Key(5), CancellationToken.None);
+
+        Assert.Equal(0, written);
+        Assert.DoesNotContain(
+            _cells.ReceivedCalls(), c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "Q-17")]
+    public async Task Q17_прапор_вимкнено_перерахунок_пише_у_колонку_як_і_раніше()
+    {
+        Arrange("5", Cell, 0, targetInput: true);
+
+        var disabled = Substitute.For<IMonthColumnRouter>();
+        disabled.Enabled.Returns(false);
+
+        var written = await Service(disabled).RecalculateAllAsync(DocumentId, Key(5), CancellationToken.None);
+
+        Assert.Equal(1, written);
+        Assert.Equal(5m, Assert.Single(Applied()).Value.ValueNumeric);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "Q-17")]
+    public async Task Q17_обчислена_комірка_у_колонці_з_чужим_власником_рахується_екземпляром_перегляду()
+    {
+        // Формула рівня комірки в рядку підсумків: у колонці власник інший, але комірка ОБЧИСЛЕНА (IsCalculated),
+        // власник її не віддає — пропуск лишив би дірку у формулах, що читають увесь рядок.
+        Arrange("5", Cell, 0, targetInput: true, inputIsCalculated: true);
+
+        var written = await Service(ForeignInput()).RecalculateAllAsync(DocumentId, Key(5), CancellationToken.None);
+
+        Assert.Equal(1, written);
+        Assert.Equal(5m, Assert.Single(Applied()).Value.ValueNumeric);
+    }
+
+    private IMonthColumnRouter ForeignInput()
+    {
+        var router = Substitute.For<IMonthColumnRouter>();
+        router.Enabled.Returns(true);
+        router.GetDocumentAsync(DocumentId, Arg.Any<CancellationToken>())
+            .Returns(new MonthRoutingDocument(DocumentId, 1, Version));
+        router.AppliesToTable(Arg.Any<TableDef>()).Returns(true);
+        router.ForeignColumnsAsync(
+                Arg.Any<MonthRoutingDocument>(), Arg.Any<TableDef>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyList<ForeignColumn>)
+                [new ForeignColumn(_table.Columns.Single(c => c.Id == _inputColumn), Key(11))]);
+
+        return router;
+    }
+
     private static long Instance(int sequence) => 1000 + sequence;
+
+    private const byte Cell = 0;
 
     private const long RowId = 2001;
 
@@ -205,7 +320,7 @@ public sealed class CrossPeriodRecalculationTests
         return [.. ((IReadOnlyCollection<CellChangeSet>)call.GetArguments()[0]!).SelectMany(set => set.Upserts)];
     }
 
-    private RecalculationService Service()
+    private RecalculationService Service(IMonthColumnRouter? router = null)
     {
         _units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
 
@@ -224,11 +339,16 @@ public sealed class CrossPeriodRecalculationTests
             _cells, _rows, periods, _metadata, _versions, new RealFormulaEngine(), _units,
             Substitute.For<IRegistryStore>(), headers, Substitute.For<IAuditWriter>(),
             new TestClock(new DateTime(Year, 2, 1, 0, 0, 0, DateTimeKind.Utc)),
-            _uow, Substitute.For<ISheetEditGate>());
+            _uow, Substitute.For<ISheetEditGate>(), monthRouter: router);
     }
 
-    private void Arrange(string expression, byte kind, int offset)
+    /// <summary>Q-17: комірка C1 у зрізі — обчислена (а не введена власником).</summary>
+    private bool _inputIsCalculated;
+
+    private void Arrange(
+        string expression, byte kind, int offset, bool targetInput = false, bool inputIsCalculated = false)
     {
+        _inputIsCalculated = inputIsCalculated;
         var builder = new TemplateBuilder { TemplateVersionId = Version };
         var sheet = builder.Sheet("S");
         _table = builder.Table(sheet, "T1");
@@ -238,7 +358,7 @@ public sealed class CrossPeriodRecalculationTests
 
         var formula = new FormulaDef(_table.Id, FormulaScope.Column, expression, ExpressionDialect.Template);
         typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(formula, FormulaId);
-        formula.AssignColumn(_outColumn);
+        formula.AssignColumn(targetInput ? _inputColumn : _outColumn);
         _table.AddFormula(formula);
 
         _metadata.GetAsync(Version, Arg.Any<CancellationToken>()).Returns(builder.Build());
@@ -286,7 +406,7 @@ public sealed class CrossPeriodRecalculationTests
         =>
         [
             new(new CellAddress(period, RowId, _inputColumn), _table.Id,
-                new CellValueData { ValueNumeric = period.Sequence * 10 }),
+                new CellValueData { ValueNumeric = period.Sequence * 10, IsCalculated = _inputIsCalculated }),
 
             // Застарілий підсумок: `DAT-02` не пише незміненого, тож без розбіжності не було б запису.
             new(new CellAddress(period, RowId, _outColumn), _table.Id,

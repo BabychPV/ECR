@@ -27,7 +27,11 @@ public sealed class CrossPeriodFanOut(
     ITemplateVersionStore versions,
     IPeriodStore periods,
     IBackgroundJobScheduler jobs,
-    EcrDbContext db)
+    EcrDbContext db,
+    // Q-17: необов'язкові — прямі `new CrossPeriodFanOut(...)` у тестах їх не передають (правило власності вимкнено);
+    // DI підставляє обидва, а роутер без прапора повертає «не застосовується».
+    IMonthColumnRouter? router = null,
+    IMetadataCache? metadata = null)
 {
     /// <summary>
     /// Стеля довжини ланцюжка читачів. Місячний рік дає не більше 12 ланок у ациклічному графі;
@@ -48,6 +52,11 @@ public sealed class CrossPeriodFanOut(
     /// </param>
     /// <param name="hops">Номер ланки ланцюжка (0 — перша постановка після правки/повного прогону).</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="inputChanged">
+    /// Q-17: підмножина <paramref name="changed"/> — колонки, змінені ВВЕДЕННЯМ (насіння правки), не похідні. Лише вони
+    /// можуть бути стовпцями з чужим власником (прапор <c>Collection:MonthColumnRouting</c>); <c>null</c> — правило
+    /// власності не застосовується.
+    /// </param>
     /// <returns>Скільки періодів-читачів поставлено.</returns>
     public async Task<int> EnqueueReadersAsync(
         long documentId,
@@ -55,7 +64,8 @@ public sealed class CrossPeriodFanOut(
         IReadOnlyCollection<ValueTuple<int, int>> changed,
         bool onlyEarlierReaders,
         int hops,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyCollection<ValueTuple<int, int>>? inputChanged = null)
     {
         ArgumentNullException.ThrowIfNull(changed);
 
@@ -67,6 +77,7 @@ public sealed class CrossPeriodFanOut(
         var instances = await rowStore.GetTableInstancesAsync(documentId, source, ct).ConfigureAwait(false);
         var readers = new SortedSet<int>();
         var carried = new HashSet<(int TableDefId, int ColumnDefId)>();
+        var carriedInputs = new HashSet<(int TableDefId, int ColumnDefId, int? MonthNumber)>();
         IReadOnlySet<int>? existing = null;
 
         foreach (var versionId in instances.Select(i => i.TemplateVersionId).Distinct())
@@ -74,15 +85,19 @@ public sealed class CrossPeriodFanOut(
             var dependencies = await versions.ListFormulaDependenciesAsync(versionId, ct).ConfigureAwait(false);
 
             var relevant = CrossPeriodReaders.ReadAcrossPeriods(dependencies, changed);
-            if (relevant.Count == 0)
+            var routed = CrossPeriodReaders.ReadsRoutedInput(
+                dependencies,
+                await RoutedInputsAsync(documentId, versionId, inputChanged, ct).ConfigureAwait(false));
+            if (relevant.Count == 0 && routed.Count == 0)
             {
                 continue;
             }
 
             existing ??= await ExistingSequencesAsync(documentId, source.Year, ct).ConfigureAwait(false);
 
-            readers.UnionWith(CrossPeriodReaders.ReaderSequences(dependencies, relevant, source.Sequence, existing));
+            readers.UnionWith(CrossPeriodReaders.ReaderSequences(dependencies, relevant, routed, source.Sequence, existing));
             carried.UnionWith(relevant);
+            carriedInputs.UnionWith(routed);
         }
 
         var enqueued = 0;
@@ -105,6 +120,10 @@ public sealed class CrossPeriodFanOut(
             var cells = carried
                 .OrderBy(c => c.TableDefId).ThenBy(c => c.ColumnDefId)
                 .Select(c => new DirtyCell(0, c.ColumnDefId, c.TableDefId, source.Sequence, hops))
+                .Concat(carriedInputs
+                    .OrderBy(c => c.TableDefId).ThenBy(c => c.ColumnDefId)
+                    .Select(c => new DirtyCell(
+                        0, c.ColumnDefId, c.TableDefId, source.Sequence, hops, OwnerInput: true)))
                 .ToList();
 
             await jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
@@ -116,6 +135,50 @@ public sealed class CrossPeriodFanOut(
         }
 
         return enqueued;
+    }
+
+    /// <summary>
+    /// Q-17: з насіння правки — введені (не похідні) стовпці таблиць «місяці в колонках» місячного проєкту, чиї
+    /// значення живуть в екземплярі-власнику й читаються з усіх екземплярів року. Прапор вимкнено, проєкт не
+    /// <c>Monthly</c> або таблиця поза маршрутизацією — порожньо (поведінка не змінюється).
+    /// </summary>
+    private async Task<List<(int TableDefId, int ColumnDefId, int? MonthNumber)>> RoutedInputsAsync(
+        long documentId,
+        int templateVersionId,
+        IReadOnlyCollection<ValueTuple<int, int>>? inputChanged,
+        CancellationToken ct)
+    {
+        var result = new List<(int TableDefId, int ColumnDefId, int? MonthNumber)>();
+        if (inputChanged is not { Count: > 0 } || router is not { Enabled: true } || metadata is null
+            || await router.GetDocumentAsync(documentId, ct).ConfigureAwait(false) is null)
+        {
+            return result;
+        }
+
+        var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+        var tables = snapshot.Sheets
+            .Where(s => !s.IsDeleted)
+            .SelectMany(s => s.Tables)
+            .GroupBy(t => t.Id)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        foreach (var (tableDefId, columnDefId) in inputChanged)
+        {
+            if (!tables.TryGetValue(tableDefId, out var table) || !router.AppliesToTable(table))
+            {
+                continue;
+            }
+
+            var column = table.Columns.FirstOrDefault(c => c.Id == columnDefId);
+            if (column is null || column.IsDeleted || column.IsComputed)
+            {
+                continue;
+            }
+
+            result.Add((tableDefId, columnDefId, column.IsMonthColumn ? column.MonthNumber : null));
+        }
+
+        return result;
     }
 
     /// <summary>Номери періодів року, у яких документ має екземпляри таблиць.</summary>

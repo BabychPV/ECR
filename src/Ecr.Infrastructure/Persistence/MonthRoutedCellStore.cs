@@ -41,9 +41,24 @@ public sealed class MonthRoutedCellStore(
     ICellStore inner,
     IMonthColumnRouter router,
     IMetadataCache metadata,
-    EcrDbContext db) : ICellStore
+    EcrDbContext db) : ICellStore, IOwnerReadSession
 {
     private static readonly ConditionalWeakTable<TemplateVersionSnapshot, Dictionary<int, TableDef>> TablesBySnapshot = new();
+
+    // Q-17.4: кеш введених комірок власників на одну задачу перерахунку (див. IOwnerReadSession). null — сесії немає.
+    private Dictionary<(long DocumentId, int OwnerPeriod, int TableDefId), OwnerSlot>? _ownerCache;
+    private int _sessionDepth;
+
+    /// <inheritdoc />
+    public IDisposable BeginOwnerReadSession()
+    {
+        _sessionDepth++;
+        _ownerCache ??= [];
+        return new OwnerSession(this);
+    }
+
+    /// <summary>Скільки разів сесія ходила до бази за комірками власників (для тестів/діагностики).</summary>
+    public int OwnerQueryCount { get; private set; }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<CellRecord>> ReadSliceAsync(long tableInstanceId, CancellationToken ct)
@@ -262,16 +277,7 @@ public sealed class MonthRoutedCellStore(
             }
         }
 
-        var ownerPeriods = entries
-            .SelectMany(e => e.ForeignColumns.Values.Select(f => f.OwnerPeriod.Value))
-            .Distinct()
-            .ToList();
-        var tableDefIds = entries.Select(e => e.Instance.TableDefId).Distinct().ToList();
-        var columnDefIds = entries.SelectMany(e => e.ColumnIds).Distinct().ToList();
-
-        var ownerCells = await OwnerCellsQuery(db, documentId, ownerPeriods, tableDefIds, columnDefIds)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        var ownerCells = await LoadOwnerCellsAsync(documentId, entries, ct).ConfigureAwait(false);
         if (ownerCells.Count == 0)
         {
             return;
@@ -309,6 +315,110 @@ public sealed class MonthRoutedCellStore(
                         IsCalculated = false,
                         IsEmpty = cell.IsEmpty,
                     }));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Введені комірки власників для записів плану: без сесії — один запит на документ (як і було); у сесії
+    /// перерахунку — лише те, чого ще немає в кеші (документ × період-власник × таблиця).
+    /// </summary>
+    private async Task<IReadOnlyList<MonthOwnerCellRow>> LoadOwnerCellsAsync(
+        long documentId, List<Entry> entries, CancellationToken ct)
+    {
+        if (_ownerCache is null)
+        {
+            OwnerQueryCount++;
+            return await OwnerCellsQuery(
+                    db,
+                    documentId,
+                    entries.SelectMany(e => e.ForeignColumns.Values.Select(f => f.OwnerPeriod.Value)).Distinct().ToList(),
+                    entries.Select(e => e.Instance.TableDefId).Distinct().ToList(),
+                    entries.SelectMany(e => e.ColumnIds).Distinct().ToList())
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+        }
+
+        // Що потрібно: (період-власник, таблиця) → колонки з цим власником.
+        var needs = new Dictionary<(int OwnerPeriod, int TableDefId), HashSet<int>>();
+        foreach (var entry in entries)
+        {
+            foreach (var foreign in entry.ForeignColumns.Values)
+            {
+                var key = (foreign.OwnerPeriod.Value, entry.Instance.TableDefId);
+                if (!needs.TryGetValue(key, out var columns))
+                {
+                    needs[key] = columns = [];
+                }
+
+                columns.Add(foreign.Column.Id);
+            }
+        }
+
+        var missing = needs
+            .Where(n => !_ownerCache.TryGetValue((documentId, n.Key.OwnerPeriod, n.Key.TableDefId), out var slot)
+                        || !n.Value.IsSubsetOf(slot.Columns))
+            .ToList();
+
+        if (missing.Count > 0)
+        {
+            // Колонки ключа = потрібні ∪ вже завантажені, щоб оновлений слот не втратив старих.
+            var wanted = missing.ToDictionary(
+                m => m.Key,
+                m => _ownerCache.TryGetValue((documentId, m.Key.OwnerPeriod, m.Key.TableDefId), out var old)
+                    ? new HashSet<int>(m.Value.Union(old.Columns))
+                    : m.Value);
+
+            OwnerQueryCount++;
+            var fetched = await OwnerCellsQuery(
+                    db,
+                    documentId,
+                    wanted.Keys.Select(k => k.OwnerPeriod).Distinct().ToList(),
+                    wanted.Keys.Select(k => k.TableDefId).Distinct().ToList(),
+                    wanted.Values.SelectMany(c => c).Distinct().ToList())
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            var byKey = fetched.ToLookup(c => (c.OwnerPeriodKey, c.TableDefId));
+            foreach (var (key, columns) in wanted)
+            {
+                _ownerCache[(documentId, key.OwnerPeriod, key.TableDefId)] = new OwnerSlot(
+                    columns,
+                    [.. byKey[(key.OwnerPeriod, key.TableDefId)].Where(c => columns.Contains(c.ColumnDefId))]);
+            }
+        }
+
+        var result = new List<MonthOwnerCellRow>();
+        foreach (var (key, columns) in needs)
+        {
+            result.AddRange(_ownerCache[(documentId, key.OwnerPeriod, key.TableDefId)].Rows
+                .Where(c => columns.Contains(c.ColumnDefId)));
+        }
+
+        return result;
+    }
+
+    private void EndOwnerReadSession()
+    {
+        if (--_sessionDepth <= 0)
+        {
+            _sessionDepth = 0;
+            _ownerCache = null;
+        }
+    }
+
+    private sealed record OwnerSlot(HashSet<int> Columns, List<MonthOwnerCellRow> Rows);
+
+    private sealed class OwnerSession(MonthRoutedCellStore store) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (!_disposed)
+            {
+                _disposed = true;
+                store.EndOwnerReadSession();
             }
         }
     }
