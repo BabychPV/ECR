@@ -59,6 +59,13 @@ public static class LookupTargetMatcher
             return false;
         }
 
+        // P2-C (прохід A): Deny на саму ціль (у т.ч. реєстр ГРУПИ PRMG_*) перевіряється ПЕРШИМ, до членів: глобальний, scoped і
+        // звужений Deny (IsDeniedIn). Відповідь - «не належить» = та сама, що для неіснуючого запису.
+        if (profile is not null && !profile.IsIntegrationWriter && RegistryAccess.IsDeniedIn(profile, target, viewProjectId))
+        {
+            return false;
+        }
+
         if (entryRegistryId == target)
         {
             // P2 (рішення людини 23.10: «Deny блокує і вибір запису»): Deny на ПРЯМУ ціль так само відсікає запис, як і

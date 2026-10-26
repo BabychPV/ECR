@@ -252,10 +252,10 @@ public sealed partial class DenyReadTests(SqlServerFixture sql)
 
             var problem = JsonDocument.Parse(body).RootElement;
             Assert.Equal("ECR-DOC-0404", problem.GetProperty("errorCode").GetString());
-            Assert.Equal("err.ECR-DOC-0404.tableInstance", problem.GetProperty("messageKey").GetString());
+            // P2-B (прохід A): схована таблиця видимого документа = ТА САМА відповідь `document`, що й неіснуюча.
+            Assert.Equal("err.ECR-DOC-0404.document", problem.GetProperty("messageKey").GetString());
 
-            // ⚠ P3-7: схована таблиця ВИДИМОГО документа — "tableInstance" (D-6, прийняте розкриття всередині
-            // видимого документа); відсутній екземпляр — "document", як у PATCH/POST (тест у DenyReadTests.ForeignInstance).
+            // ⚠ P2-B: схована таблиця ВИДИМОГО документа і відсутній екземпляр — обидва "document" (раніше "tableInstance" — оракул).
             Assert.Equal("err.ECR-DOC-0404.document", JsonDocument.Parse(absent).RootElement.GetProperty("messageKey").GetString());
         }
 
