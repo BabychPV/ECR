@@ -94,7 +94,8 @@ public sealed class MonthMirrorRowsApiTests(SqlServerFixture sql)
         // Значення M11 у екземплярі 202611 для DELME (місяць 11 подано).
         await PutAsync(s, 202611, "DELME", "M11", 5m).ConfigureAwait(true);
 
-        await ExpectAsync(app, HttpStatusCode.Conflict, DeleteRowAsync(client, s, Oct, "DELME")).ConfigureAwait(true);
+        var refused = await ExpectAsync(app, HttpStatusCode.Conflict, DeleteRowAsync(client, s, Oct, "DELME")).ConfigureAwait(true);
+        Assert.Contains("err.ECR-ROW-0409.monthDataLocked", refused, StringComparison.Ordinal);
         Assert.Equal(3, (await LiveRowsAsync(s, "DELME").ConfigureAwait(true)).Count);
 
         // Подання без введеного значення місячного стовпця не заважає: видаляється в усіх екземплярах.

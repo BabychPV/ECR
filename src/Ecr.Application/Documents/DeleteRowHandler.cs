@@ -338,8 +338,7 @@ public sealed class DeleteRowHandler(
         var columns = table.Columns.Where(c => !c.IsDeleted).ToList();
 
         // ⛔ Q-17: рядок не видаляється, якщо в якомусь екземплярі він має непорожню ВВЕДЕНУ комірку місячного
-        // стовпця, чий місяць Submitted/Approved/Closed (409 ECR-ROW-0409; нового коду/ключа немає — взято
-        // найближчий наявний `sourceRowNotDeletable`: «рядок тримає дані, видалити не можна»).
+        // стовпця, чий місяць Submitted/Approved/Closed (409 ECR-ROW-0409, окремий ключ тексту `monthDataLocked`).
         foreach (var other in mirrorInstances)
         {
             var otherPeriod = new PeriodKey(other.PeriodKey);
@@ -370,7 +369,7 @@ public sealed class DeleteRowHandler(
                 .ConfigureAwait(false);
             if (monthValues.Values.Any(v => v is { IsEmpty: false, IsCalculated: false }))
             {
-                throw NotDeletable("err.ECR-ROW-0409.sourceRowNotDeletable");
+                throw NotDeletable("err.ECR-ROW-0409.monthDataLocked");
             }
         }
 
