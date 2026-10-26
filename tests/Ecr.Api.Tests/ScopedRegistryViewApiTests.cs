@@ -44,6 +44,8 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
     [InlineData("deniedUnscopedRole", 422)]
     [InlineData("scopedSelfDeny", 422)]
     [InlineData("scopedReadGrant", 200)]
+    [InlineData("narrowedDenyPlusView", 422)]
+    [InlineData("narrowedViewOnly", 422)]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "P48")]
@@ -81,6 +83,8 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
     [InlineData("deniedUnscopedRole", 422)]
     [InlineData("scopedSelfDeny", 422)]
     [InlineData("scopedReadGrant", 200)]
+    [InlineData("narrowedDenyPlusView", 422)]
+    [InlineData("narrowedViewOnly", 422)]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "P48")]
@@ -145,6 +149,8 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
     [InlineData("none", false)]
     [InlineData("scopedSelfDeny", false)]
     [InlineData("scopedReadGrant", true)]
+    [InlineData("narrowedDenyPlusView", false)]
+    [InlineData("narrowedViewOnly", false)]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "P3-BOOK")]
@@ -270,7 +276,7 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
 
         db.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
         db.RolePermissions.Add(new RolePermission(role.Id, "Document.Import"));
-        if (kind is "scoped" or "global" or "scopedSelfDeny")
+        if (kind is "scoped" or "global" or "scopedSelfDeny" or "narrowedDenyPlusView")
         {
             db.RolePermissions.Add(new RolePermission(role.Id, "Registry.View"));
         }
@@ -291,6 +297,26 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
         if (kind == "scopedSelfDeny")
         {
             db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Registry, registry.Id, GrantLevel.None, isDeny: true));
+        }
+
+        if (kind is "narrowedDenyPlusView" or "narrowedViewOnly")
+        {
+            var narrowed = new Role(EcrCode.Create($"SCN_{Guid.NewGuid():N}"[..24]), Text("Narrowed"));
+            db.Roles.Add(narrowed);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+            if (kind == "narrowedDenyPlusView")
+            {
+                db.ResourceGrants.Add(new ResourceGrant(narrowed.Id, ResourceKind.Registry, registry.Id, GrantLevel.None, isDeny: true));
+            }
+            else
+            {
+                db.RolePermissions.Add(new RolePermission(narrowed.Id, "Registry.View"));
+                db.ResourceGrants.Add(new ResourceGrant(narrowed.Id, ResourceKind.Registry, registry.Id, GrantLevel.Read));
+            }
+
+            var narrowAssignment = new RoleAssignment(narrowed.Id, user.Id, null);
+            narrowAssignment.SetScope(RoleAssignmentScope.Create([doc.ProjectId], ["SHEET_X"]));
+            db.RoleAssignments.Add(narrowAssignment);
         }
 
         if (kind == "scopedElsewhere")
@@ -466,7 +492,7 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
         }
 
         var assignment = new RoleAssignment(role.Id, user.Id, null);
-        if (kind is "scoped" or "global" or "deniedUnscopedRole" or "scopedSelfDeny")
+        if (kind is "scoped" or "global" or "deniedUnscopedRole" or "scopedSelfDeny" or "narrowedDenyPlusView")
         {
             db.RolePermissions.Add(new RolePermission(role.Id, "Registry.View"));
         }
@@ -490,6 +516,28 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
         if (kind is "deniedUnscopedRole" or "scopedSelfDeny")
         {
             db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Registry, registry.Id, GrantLevel.None, isDeny: true));
+        }
+
+        if (kind is "narrowedDenyPlusView" or "narrowedViewOnly")
+        {
+            // Звужена (аркуші) роль у проєкті документа: Deny на реєстр (narrowedDenyPlusView) або лише View + Read-грант
+            // (narrowedViewOnly - fail-closed: доступу не дає).
+            var narrowed = new Role(EcrCode.Create($"SCN_{Guid.NewGuid():N}"[..24]), Text("Narrowed"));
+            db.Roles.Add(narrowed);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+            if (kind == "narrowedDenyPlusView")
+            {
+                db.ResourceGrants.Add(new ResourceGrant(narrowed.Id, ResourceKind.Registry, registry.Id, GrantLevel.None, isDeny: true));
+            }
+            else
+            {
+                db.RolePermissions.Add(new RolePermission(narrowed.Id, "Registry.View"));
+                db.ResourceGrants.Add(new ResourceGrant(narrowed.Id, ResourceKind.Registry, registry.Id, GrantLevel.Read));
+            }
+
+            var narrowAssignment = new RoleAssignment(narrowed.Id, user.Id, null);
+            narrowAssignment.SetScope(RoleAssignmentScope.Create([doc.ProjectId], ["SHEET_X"]));
+            db.RoleAssignments.Add(narrowAssignment);
         }
 
         if (kind == "scopedElsewhere")

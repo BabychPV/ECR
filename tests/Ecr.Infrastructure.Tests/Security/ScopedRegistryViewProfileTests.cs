@@ -258,4 +258,32 @@ public sealed class ScopedRegistryViewProfileTests(SqlServerFixture sql) : IDisp
 
         Assert.False(await CanChooseAsync(doc, denied));
         Assert.True(await CanChooseAsync(doc, plain));
+    }
+    // ── P50b (Аудит P3-1): Deny ролі зі ЗВУЖЕНОЮ областю (D-214) теж діє; View/Read-грант такої ролі - ні (fail-closed) ──
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P50b")]
+    public async Task Deny_звуженої_ролі_перебиває_View_іншої_ролі_лише_в_проєкті_призначення()
+    {
+        var doc = await ArrangeAsync();
+        var user = await UserAsync(
+            doc, view: false, scopeProjects: [doc.ProjectId], deny: true, globalViewRole: true, narrowSheets: ["SHEET_X"]);
+
+        Assert.False(await CanChooseAsync(doc, user));
+        Assert.True(await CanChooseAsync(doc, user, projectOverride: doc.ProjectId + 1_000_000));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P50b")]
+    public async Task View_і_Read_грант_звуженої_ролі_доступу_не_дають()
+    {
+        var doc = await ArrangeAsync();
+        var user = await UserAsync(
+            doc, view: true, scopeProjects: [doc.ProjectId], scopedReadGrant: true, narrowSheets: ["SHEET_X"]);
+
+        Assert.False(await CanChooseAsync(doc, user));
     }}

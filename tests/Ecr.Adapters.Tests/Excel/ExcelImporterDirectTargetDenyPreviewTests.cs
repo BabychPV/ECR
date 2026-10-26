@@ -56,6 +56,7 @@ public sealed class ExcelImporterDirectTargetDenyPreviewTests
     // P3 (рішення людини 25.10 «вимагати Registry.View»): права профілю тесту.
     private string[] _permissions = ["Registry.View"];
     private int? _scopedViewProject;
+    private bool _scopedDeny;
     private const int DocumentProjectId = 10;
 
     public ExcelImporterDirectTargetDenyPreviewTests()
@@ -114,6 +115,7 @@ public sealed class ExcelImporterDirectTargetDenyPreviewTests
                         new Dictionary<string, GrantLevel>(), new HashSet<string>(), new HashSet<int>(), new HashSet<string>())
                     {
                         RegistryView = true,
+                        RegistryDenies = _scopedDeny ? new HashSet<int> { Target } : new HashSet<int>(),
                     },
                 }
                 : new Dictionary<int, ScopedProjectAccess>(),
@@ -207,6 +209,24 @@ public sealed class ExcelImporterDirectTargetDenyPreviewTests
 
         Assert.Equal(2001L, Assert.Single(preview.Changes).NewValue);
         Assert.Empty(preview.Rejected);
+    }
+
+    /// <summary>P50/P3-2 (Аудит): scoped View + власний Deny ролі - перегляд імпорту не розкриває існування коду.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "P50-PREVIEW")]
+    public async Task Scoped_View_і_власний_Deny_існуючий_код_відповідає_як_неіснуючий()
+    {
+        _permissions = [];
+        _scopedViewProject = DocumentProjectId;
+        _scopedDeny = true;
+
+        var existing = await PreviewAsync("N100");
+        var missing = await PreviewAsync("N999");
+
+        Assert.Empty(existing.Changes);
+        Assert.Empty(missing.Changes);
+        Assert.Equal(missing.Rejected.Single().MessageKey, existing.Rejected.Single().MessageKey);
     }
 
     [Fact]
