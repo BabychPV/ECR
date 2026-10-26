@@ -180,6 +180,27 @@ public sealed class ExcelImporterPermitGroupPreviewTests
         Assert.DoesNotContain("WATER_C", rejection.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>P2-C (прохід A, книга): Deny на саму ціль-ГРУПУ - код дозволеного типу відхиляється як невідомий, без розкриття.</summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "P2-C")]
+    [InlineData("N200")]
+    [InlineData("N999")]
+    public async Task Deny_на_ціль_групи_відхиляє_код_члена_як_невідомий(string typed)
+    {
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessProfile
+        {
+            CacheKey = "p-group-deny", UserId = 9, SecurityStamp = "s",
+            Permissions = new HashSet<string> { "Registry.View" }, Grants = new Dictionary<string, GrantLevel>(),
+            Denies = new HashSet<string> { "Registry:" + Group }, RoleIds = new HashSet<int>(),
+        });
+
+        var preview = await PreviewAsync(typed);
+
+        Assert.Empty(preview.Changes);
+        Assert.Equal(ImportMessageKeys.ExpectsIdentifier, Assert.Single(preview.Rejected).MessageKey);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Число_в_комірці_не_падає_а_відхиляється_як_невідомий_код()
