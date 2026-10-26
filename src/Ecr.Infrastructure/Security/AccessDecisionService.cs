@@ -1476,6 +1476,13 @@ public sealed class AccessDecisionService(
                 RowIsReadOnly = RowDefOf(slice, rowKey)?.IsReadOnly ?? false,
             };
 
+            // Q-17 (умови вмикання): рядок належить ЯКОРЮ року - область ролі за періодами (D-214) для створення/видалення
+            // рядка перевіряється за періодом якоря (найменший період календаря), а не за періодом екземпляра запиту.
+            if (slice.RoutesOwnership && slice.Annual is { Periods.Count: > 0 } annualRow0)
+            {
+                rowContext = rowContext with { Period = new PeriodKey(annualRow0.Periods[0]) };
+            }
+
             // ⛔ EA-B (D5): виконавець рядків НЕ створює — підйому на рівні рядка
             // немає; діють лише заборони передачі (рівень рядка, без місяця).
             if (slice.Delegation is { } delegation)

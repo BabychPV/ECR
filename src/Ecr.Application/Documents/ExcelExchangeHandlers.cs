@@ -28,7 +28,11 @@ public sealed class ExportDocumentHandler(
     IAccessDecisionService access,
     ICurrentUser currentUser,
     IAuditWriter audit,
-    Ecr.Domain.Abstractions.IClock clock)
+    Ecr.Domain.Abstractions.IClock clock,
+    // ✎ Q-17: колонки з іншим власником, період якого поза областю ролі замовника, не вивантажуються (як приховані).
+    // Необов'язкові лише заради тестів, що конструюють обробник вручну.
+    IMetadataCache? metadata = null,
+    IMonthColumnRouter? monthRouter = null)
 {
     /// <summary>Право на експорт (`02-contracts.md` §9).</summary>
     public const string Permission = "Document.Export";
@@ -73,12 +77,21 @@ public sealed class ExportDocumentHandler(
         // вивантаження. Задача в черзі не знає користувача, тож межі читання
         // рахуються ТУТ, з профілю, і їдуть у завданні. Перезаписуються завжди —
         // що б не прийшло від викликача.
-        var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false))
-            .InPeriod(new Ecr.Domain.ValueObjects.PeriodKey(options.PeriodKey));
+        var anyPeriodScope = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var exportPeriod = new Ecr.Domain.ValueObjects.PeriodKey(options.PeriodKey);
+        var readable = anyPeriodScope.InPeriod(exportPeriod);
+
+        // ✎ Q-17: значення колонки з чужим власником віддає ВЛАСНИК, тож його період теж має бути в області ролі.
+        var ownerBlocked = await OwnerScopeMask
+            .BlockedColumnIdsAsync(monthRouter, metadata, anyPeriodScope, documentId, exportPeriod, ct)
+            .ConfigureAwait(false);
+
         options = options with
         {
             HiddenTableDefIds = readable.HiddenTableIds(),
-            HiddenColumnDefIds = readable.HiddenColumnIds(),
+            HiddenColumnDefIds = ownerBlocked.Count == 0
+                ? readable.HiddenColumnIds()
+                : [.. readable.HiddenColumnIds().Union(ownerBlocked)],
         };
 
         // ⚠ Ідентифікатор файлу створюється ТУТ і йде в завданні. Ключ
