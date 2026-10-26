@@ -133,6 +133,7 @@ public sealed class ImportDiffBuilder
         var rejected = new List<ImportRejection>();
         var overwritable = new List<ImportChange>();
         var hiddenDenied = new List<DeniedCellRef>();
+        List<PeriodDeniedRef>? periodDenied = null;
 
         foreach (var row in block.Rows)
         {
@@ -312,6 +313,18 @@ public sealed class ImportDiffBuilder
                         row.RowKey, column.Code, "ECR-ACCS-0403",
                         $"Editing the cell is not allowed: {decision.Reason}.",
                         table.Code, table.NameL10n, ImportMessageKeys.Denied(decision.Reason), excelCell));
+
+                    // ✎ P53 (слово людини 12.10 «все або нічого» + P2-A): ЗМІНА значення в місячній колонці ІНШОГО місяця,
+                    // що закритий/поданий/погоджений, відмовляє ВЕСЬ пакет при застосуванні (`ExcelImporter.EnsureAllOrNothing`).
+                    // ⚠ Сюди доходить лише змінена комірка: незмінена відсіяна `Same` вище і шуму не дає.
+                    if (decision.ColumnPeriod is { } columnPeriod
+                        && columnPeriod != periodKey
+                        && decision.Reason is EditDenyReason.PeriodClosed
+                            or EditDenyReason.DocumentSubmitted
+                            or EditDenyReason.DocumentApproved)
+                    {
+                        (periodDenied ??= []).Add(new PeriodDeniedRef(row.RowKey, column.Code, decision.Reason.ToString()));
+                    }
 
                     continue;
                 }
@@ -510,7 +523,7 @@ public sealed class ImportDiffBuilder
             }
         }
 
-        return new TableDiff(block.TableInstanceId, periodKey, changes, rejected, versions, overwritable, hiddenDenied);
+        return new TableDiff(block.TableInstanceId, periodKey, changes, rejected, versions, overwritable, hiddenDenied, periodDenied);
     }
 
     /// <summary>
@@ -926,6 +939,11 @@ public sealed class ImportDiffBuilder
 /// колонках, яких користувач НЕ бачить (S6): вони лишаються в переліку відмов перегляду, але відмова
 /// застосування їх не називає — лише рахує. <c>null</c> — план до цієї правки.
 /// </param>
+/// <param name="PeriodDenied">
+/// ✎ P53. Змінені комірки місячних колонок ІНШОГО місяця (<c>MonthsInColumns</c>), відхилені станом ЦЬОГО місяця
+/// (закритий / поданий / погоджений): вони відмовляють весь пакет при застосуванні. Незмінені сюди не потрапляють.
+/// <c>null</c> — таких немає (або план до цієї правки).
+/// </param>
 public sealed record TableDiff(
     long TableInstanceId,
     int PeriodKey,
@@ -933,7 +951,14 @@ public sealed record TableDiff(
     IReadOnlyList<ImportRejection> Rejected,
     IReadOnlyDictionary<string, string> RowVersions,
     IReadOnlyList<ImportChange>? Overwritable = null,
-    IReadOnlyList<DeniedCellRef>? HiddenDenied = null);
+    IReadOnlyList<DeniedCellRef>? HiddenDenied = null,
+    IReadOnlyList<PeriodDeniedRef>? PeriodDenied = null);
+
+/// <summary>Змінена комірка, відхилена станом періоду її місячної колонки (P53): рядок, колонка, причина (<c>EditDenyReason</c>).</summary>
+/// <param name="RowKey">Рядок.</param>
+/// <param name="ColumnCode">Колонка.</param>
+/// <param name="Reason">Причина відмови (<c>PeriodClosed</c> / <c>DocumentSubmitted</c> / <c>DocumentApproved</c>).</param>
+public sealed record PeriodDeniedRef(string RowKey, string ColumnCode, string Reason);
 
 /// <summary>Адреса комірки в плані імпорту: рядок і колонка таблиці.</summary>
 /// <param name="RowKey">Рядок.</param>
