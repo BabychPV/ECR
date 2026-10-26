@@ -74,6 +74,57 @@ public sealed class HiddenTableConflictLeakTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// P2-B (Тестувальник, прохід A): у видимому документі прихована таблиця, неіснуючий екземпляр і екземпляр ЧУЖОГО документа
+    /// відповідають ОДНАКОВО (404 ECR-DOC-0404 document, байт у байт після нормалізації чисел) - і на читання зрізу, і на PATCH cells.
+    /// Раніше прихована давала `tableInstance` («Table instance N was not found»): перебором id видно існуючі сховані таблиці.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P2-B")]
+    public async Task Схована_таблиця_неіснуючий_і_чужий_екземпляр_дають_однакову_відповідь()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var foreign = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(columnCount: 1, rowCount: 1).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var hidden = await SignedInAsync(app, s.HiddenUser).ConfigureAwait(true);
+
+        async Task<(HttpStatusCode Status, string Body)> GetSliceAsync(long instance)
+        {
+            using var response = await hidden.GetAsync(new Uri(
+                $"/api/v1/documents/{s.Doc.DocumentId}/tables/{instance}", UriKind.Relative)).ConfigureAwait(false);
+            return (response.StatusCode, Normalize(await response.Content.ReadAsStringAsync().ConfigureAwait(false)));
+        }
+
+        var slices = new[]
+        {
+            await GetSliceAsync(s.Hidden.TableInstanceId).ConfigureAwait(true),
+            await GetSliceAsync(987_654_321).ConfigureAwait(true),
+            await GetSliceAsync(foreign.TableInstanceId).ConfigureAwait(true),
+        };
+
+        var patches = new List<(HttpStatusCode Status, string Body)>();
+        foreach (var instance in new[] { s.Hidden.TableInstanceId, 987_654_321, foreign.TableInstanceId })
+        {
+            var patch = await PatchInventedRowAsync(hidden, s, instance, s.Hidden.ColumnCodes[0]).ConfigureAwait(true);
+            patches.Add((patch.Status, Normalize(patch.Body)));
+        }
+
+        Assert.All(slices, r => Assert.Equal(HttpStatusCode.NotFound, r.Status));
+        Assert.All(patches, r => Assert.Equal(HttpStatusCode.NotFound, r.Status));
+        Assert.Single(slices.Select(r => r.Body).Distinct());
+        Assert.Single(patches.Select(r => r.Body).Distinct());
+        Assert.Contains("err.ECR-DOC-0404.document", slices[0].Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("tableInstance", slices[0].Body, StringComparison.Ordinal);
+    }
+
+    private static string Normalize(string body)
+    {
+        var text = System.Text.RegularExpressions.Regex.Replace(body, @"\d+", "N");
+        return System.Text.RegularExpressions.Regex.Replace(text, "\"correlationId\"\\s*:\\s*\"[^\"]*\"", "\"correlationId\":\"x\"");
+    }
     private static async Task<(HttpStatusCode Status, string Body)> PatchInventedRowAsync(
         HttpClient client, Scenario s, long tableInstanceId, string columnCode)
     {

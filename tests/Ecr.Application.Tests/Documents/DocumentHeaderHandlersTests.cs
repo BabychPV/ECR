@@ -588,6 +588,22 @@ public sealed class DocumentHeaderHandlersTests
             Arg.Any<CancellationToken>());
     }
 
+    /// <summary>P2-C (прохід A): Deny на ціль-ГРУПУ поля шапки відсікає запис члена - lookupEntryMissing.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task PATCH_Deny_на_ціль_групи_поля_дає_lookupEntryMissing_для_запису_члена()
+    {
+        const int memberRegistry = PermitRegistryDefId + 1;
+        _groups.WithGroup(PermitRegistryDefId, [memberRegistry]);
+        DenyRegistry(PermitRegistryDefId);
+
+        var error = await PatchPermitRefusedAsync(EntryOf(777, memberRegistry));
+
+        Assert.Equal("ECR-HDR-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-HDR-0422.lookupEntryMissing", error.Details!["messageKey"]);
+        await AssertNothingWrittenAsync();
+    }
+
     private void DenyRegistry(int registryDefId)
         => _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }
