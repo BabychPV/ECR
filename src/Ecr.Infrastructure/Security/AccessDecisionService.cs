@@ -474,6 +474,25 @@ public sealed class AccessDecisionService(
             }
         }
 
+        // P50b (Аудит P3-1): Registry-DENY ролі зі ЗВУЖЕНОЮ областю (D-214) діє в усіх проєктах її призначення - Deny завжди
+        // сильніший, інакше він мовчки ігнорувався б за наявності іншої ролі з View (fail-open). View/Read-ГРАНТ такої ролі
+        // лишається ІГНОРОВАНИМ (fail-closed): звужена роль доступу до довідників не дає.
+        foreach (var (narrowedRoleId, narrowedScope) in narrowedScopes)
+        {
+            foreach (var denied in rows.Where(r => r.RoleId == narrowedRoleId && r.ResourceKind == ResourceKind.Registry && r.IsDeny))
+            {
+                foreach (var projectId in narrowedScope.ProjectIds)
+                {
+                    if (!registryLayers.TryGetValue(projectId, out var registry))
+                    {
+                        registryLayers[projectId] = registry = (new HashSet<int>(), new Dictionary<int, GrantLevel>());
+                    }
+
+                    registry.Denies.Add(denied.ResourceId);
+                }
+            }
+        }
+
         var narrowed = await NarrowedLayersAsync(
                 narrowedScopes,
                 rows.Select(r => (r.RoleId, r.ResourceKind, r.ResourceId, r.Level, r.IsDeny)).ToList(),
