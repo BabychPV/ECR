@@ -1567,6 +1567,20 @@ public sealed class AccessDecisionService(
             annualPeriods = annual.Periods;
         }
 
+        // Q-17 (аудит P2-B): область ролі за періодами - за періодом ВЛАСНИКА колонки (місячний m -> період m; введений
+        // не-місячний -> якір = найменший період календаря). Прапор вимкнено - період екземпляра, як раніше.
+        if (slice.RoutesOwnership)
+        {
+            if (columnPeriod is { } ownerPeriod)
+            {
+                shared = shared with { Period = new PeriodKey(ownerPeriod) };
+            }
+            else if (annualPeriods is { Count: > 0 })
+            {
+                shared = shared with { Period = new PeriodKey(annualPeriods[0]) };
+            }
+        }
+
         var context = shared with
         {
             TableDefId = slice.TableDefId,
@@ -1632,7 +1646,7 @@ public sealed class AccessDecisionService(
             var outcome = PeriodAccessRules.Evaluate(
                 slice.Rules.Rules,
                 facts,
-                profile.RoleIdsAt(slice.Shared.ProjectId, slice.Shared.SheetCode, slice.Shared.Period));
+                profile.RoleIdsAt(shared.ProjectId, shared.SheetCode, shared.Period));
 
             if (outcome.Blocks)
             {
@@ -1740,6 +1754,12 @@ public sealed class AccessDecisionService(
         /// календаря; <c>null</c> — прапор вимкнено, таблиця інша, перегляд поза календарем.
         /// </summary>
         public (CellAccessContext Context, IReadOnlyList<int> Periods)? Annual { get; init; }
+
+        /// <summary>
+        /// Q-17: маршрутизація власників діє (прапор + MonthsInColumns) - область ролі за ПЕРІОДАМИ для комірки колонки з
+        /// іншим власником перевіряється за періодом ВЛАСНИКА, а не періодом екземпляра запиту.
+        /// </summary>
+        public bool RoutesOwnership { get; init; }
     }
 
     private static readonly IReadOnlySet<(string RowKey, int ColumnDefId)> NoComputedCells =
@@ -2058,6 +2078,7 @@ public sealed class AccessDecisionService(
                     ComputedCells = ComputedCellsOf(snapshot, instance.TableDefId),
                     MonthShared = monthShared,
                     Annual = annual,
+                    RoutesOwnership = annualRouting,
                 };
             }
         }
