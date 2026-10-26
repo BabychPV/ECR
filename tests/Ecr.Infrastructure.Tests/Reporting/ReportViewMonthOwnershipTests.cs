@@ -28,18 +28,25 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
 
     /// <summary>Табличні колонки: C1 (рядок), C2 (число, введений не-місячний), M1..M12, D (Formula, похідна).</summary>
     private sealed record Fixture(TestDocument Doc, string View, string C2, string M10, string M11, string Derived,
-        int C2Id, int M10Id, int M11Id, int DerivedId);
+        int C2Id, int M10Id, int M11Id, int DerivedId,
+        string C1 = "", int C1Id = 0, string Flag = "", int FlagId = 0, string Day = "", int DayId = 0);
 
-    private async Task<Fixture> BuildAsync(int periodKey = 202610, TableLayoutKind layout = TableLayoutKind.MonthsInColumns)
+    private async Task<Fixture> BuildAsync(
+        int periodKey = 202610, TableLayoutKind layout = TableLayoutKind.MonthsInColumns, int columnCount = 2)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var doc = await builder.BuildAsync(periodKey, columnCount: 2, rowCount: 2, layoutKind: layout,
+        var doc = await builder.BuildAsync(periodKey, columnCount: columnCount, rowCount: 2, layoutKind: layout,
             monthColumns: layout == TableLayoutKind.MonthsInColumns ? 12 : 0);
 
         await using var db = sql.CreateContext();
         var derived = new ColumnDef(doc.TableDefId, EcrCode.Create("DER" + Guid.NewGuid().ToString("N")[..8]),
-            new LocalizedText(new Dictionary<string, string> { ["en"] = "Derived" }), 99, CellDataType.Formula);
-        db.ColumnDefs.Add(derived);
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Derived" }), 9999, CellDataType.Formula);
+        // Q-17.fix: різнотипні введені не-місячні колонки (Bool, Date) - тип вʼюхи не має змінитися від прапора.
+        var flag = new ColumnDef(doc.TableDefId, EcrCode.Create("FLG" + Guid.NewGuid().ToString("N")[..8]),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Flag" }), 9998, CellDataType.Bool);
+        var day = new ColumnDef(doc.TableDefId, EcrCode.Create("DAY" + Guid.NewGuid().ToString("N")[..8]),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Day" }), 9997, CellDataType.Date);
+        db.ColumnDefs.AddRange(derived, flag, day);
         await db.SaveChangesAsync();
 
         var version = await db.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId);
@@ -55,7 +62,59 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         var c2 = cols.Single(c => c.Ordinal == 2);
         var m10 = layout == TableLayoutKind.MonthsInColumns ? cols.Single(c => c.MonthNumber == 10) : c2;
         var m11 = layout == TableLayoutKind.MonthsInColumns ? cols.Single(c => c.MonthNumber == 11) : c2;
-        return new Fixture(doc, view, c2.Code, m10.Code, m11.Code, derived.Code, c2.Id, m10.Id, m11.Id, derived.Id);
+        var c1 = cols.Single(c => c.Ordinal == 1);
+        return new Fixture(doc, view, c2.Code, m10.Code, m11.Code, derived.Code, c2.Id, m10.Id, m11.Id, derived.Id,
+            c1.Code, c1.Id, flag.Code, flag.Id, day.Code, day.Id);
+    }
+
+    /// <summary>Типізована комірка (рядок/біт/дата) - окремо від <see cref="PutAsync"/> (число).</summary>
+    private async Task PutTypedAsync(Fixture f, int period, long rowId, int columnId, string valueColumn, object value)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, {valueColumn})
+            VALUES ({period}, {rowId}, {columnId}, {f.Doc.TableDefId}, @v);
+            """;
+        command.Parameters.AddWithValue("@v", value);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task<object?> ViewObjectAsync(Fixture f, int period, string rowKey, string column)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            $"SELECT [{column}] FROM rpt.[{f.View}] WHERE _DocumentId = @d AND _PeriodKey = @p AND _RowKey = @k";
+        command.Parameters.AddWithValue("@d", f.Doc.DocumentId);
+        command.Parameters.AddWithValue("@p", period);
+        command.Parameters.AddWithValue("@k", rowKey);
+        var value = await command.ExecuteScalarAsync();
+        return value is DBNull ? null : value;
+    }
+
+    /// <summary>Імена й типи колонок вʼюхи (без nullability): те, що бачить SSRS.</summary>
+    private async Task<List<string>> ViewColumnTypesAsync(string view)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT c.name + ':' + TYPE_NAME(c.user_type_id) + ':' + CAST(c.max_length AS varchar(10)) + ':'
+                 + CAST(c.precision AS varchar(10)) + ':' + CAST(c.scale AS varchar(10))
+              FROM sys.columns AS c WHERE c.object_id = OBJECT_ID(N'rpt.' + QUOTENAME(@v), N'V') ORDER BY c.column_id
+            """;
+        command.Parameters.AddWithValue("@v", view);
+        var list = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            list.Add(reader.GetString(0));
+        }
+
+        return list;
     }
 
     /// <summary>Генерація вʼюх; за замовчуванням з УВІМКНЕНИМ прапором (розширені вʼюхи), <c>routing: false</c> — без роутера.</summary>
@@ -302,6 +361,68 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         // Період у календарі є (є й екземпляр-якір), але рядків у ньому нема — NULL, а не зниклий рядок перегляду.
         await new TestDocumentBuilder(sql.ConnectionString).AddPeriodAsync(f.Doc, new PeriodKey(202601));
         Assert.Null(await ViewValueAsync(f, 202610, RowKeyOf(f.Doc, 0), f.C2));
+    }
+
+    /// <summary>
+    /// B1 (QA2): широка таблиця (≈220 колонок, як T9_04 Land) з увімкненим прапором мусить будуватися - ліміт SQL Server
+    /// 256 таблиць у запиті не може рахуватися «по приєднанню на колонку». Значення збігаються з власниками.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Широка_таблиця_200_плюс_колонок_будується_з_прапором_і_віддає_значення_власників()
+    {
+        var f = await BuildAsync(columnCount: 205);
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var anchor = await builder.AddPeriodInstanceAsync(f.Doc, new PeriodKey(202601));
+        var nov = await builder.AddPeriodInstanceAsync(f.Doc, new PeriodKey(202611));
+
+        await PutAsync(f, 202611, nov.RowIds[0], f.M11Id, 111m);
+        await PutAsync(f, 202601, anchor.RowIds[0], f.C2Id, 22m);
+        await PutAsync(f, 202610, f.Doc.RowIds[0], f.M10Id, 10m);   // власна копія власного місяця
+        await PutAsync(f, 202610, f.Doc.RowIds[1], f.M11Id, 5m);    // копія без власника в рядку 2 - запасне значення
+
+        await GenerateAsync(f);   // раніше: THROW 50422 (399 таблиць у запиті)
+
+        Assert.Equal(111m, await ViewValueAsync(f, 202610, RowKeyOf(f.Doc, 0), f.M11));
+        Assert.Equal(22m, await ViewValueAsync(f, 202610, RowKeyOf(f.Doc, 0), f.C2));
+        Assert.Equal(10m, await ViewValueAsync(f, 202610, RowKeyOf(f.Doc, 0), f.M10));
+        Assert.Equal(5m, await ViewValueAsync(f, 202610, RowKeyOf(f.Doc, 1), f.M11));
+        Assert.Null(await ViewValueAsync(f, 202610, RowKeyOf(f.Doc, 1), f.C2));
+    }
+
+    /// <summary>
+    /// Типи колонок вʼюхи з прапором ідентичні типам без прапора (string/bit/date/decimal), а значення різних типів
+    /// беруться з власника з пріоритетом над копією.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Різнотипні_колонки_зберігають_типи_вʼюхи_і_беруться_з_власника()
+    {
+        var f = await BuildAsync();
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var anchor = await builder.AddPeriodInstanceAsync(f.Doc, new PeriodKey(202601));
+
+        await GenerateAsync(f, routing: false);
+        var plainTypes = await ViewColumnTypesAsync(f.View);
+
+        await PutTypedAsync(f, 202601, anchor.RowIds[0], f.C1Id, "ValueString", "owner-text");
+        await PutTypedAsync(f, 202610, f.Doc.RowIds[0], f.C1Id, "ValueString", "copy-text");
+        await PutTypedAsync(f, 202601, anchor.RowIds[0], f.FlagId, "ValueBool", true);
+        await PutTypedAsync(f, 202610, f.Doc.RowIds[1], f.FlagId, "ValueBool", true);   // копія без власника
+        await PutTypedAsync(f, 202601, anchor.RowIds[0], f.DayId, "ValueDate", new DateTime(2026, 3, 5));
+
+        await GenerateAsync(f, routing: true);
+
+        Assert.Equal(plainTypes, await ViewColumnTypesAsync(f.View));
+        Assert.Equal("owner-text", await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 0), f.C1));
+        Assert.Equal(true, await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 0), f.Flag));
+        Assert.Equal(true, await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 1), f.Flag));
+        Assert.Equal(new DateTime(2026, 3, 5), await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 0), f.Day));
+        Assert.Null(await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 1), f.C1));
     }
 
     [Fact]

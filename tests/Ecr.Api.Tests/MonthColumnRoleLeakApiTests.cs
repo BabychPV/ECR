@@ -13,6 +13,7 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -312,6 +313,79 @@ public sealed class MonthColumnRoleLeakApiTests(SqlServerFixture sql)
         {
             Assert.DoesNotContain(Digits(secrets[alias]), narrow, StringComparison.Ordinal);
         }
+    }
+
+    // ── (4b) B3 (QA2): «подання без правок -> поточний стан» = 0 змін, бо обидві сторони читають ВЛАСНИКІВ ──
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    public async Task Подання_без_правок_порівняння_з_поточним_станом_0_змін_для_повної_і_звуженої_ролі_а_зміна_власника_рівно_1()
+    {
+        var s = await ArrangeAsync(from: Oct, to: Oct).ConfigureAwait(true);
+        // Значення живуть у власників (копій в екземплярі жовтня немає): M11 - листопад, PLAIN - якір січня, M10 - жовтень.
+        await PutAsync(s, 202611, "M11", NovSecret).ConfigureAwait(true);
+        await PutAsync(s, 202601, "PLAIN", AnchorSecret).ConfigureAwait(true);
+        await PutAsync(s, Oct, "M10", OwnVisible).ConfigureAwait(true);
+
+        var (app, scoped) = await BootAsync(s, s.UserName, flag: true).ConfigureAwait(true);
+        using var _a = app;
+        using var _b = scoped;
+        var (app2, admin) = await BootAsync(s, s.AdminName, flag: true).ConfigureAwait(true);
+        using var _c = app2;
+        using var _d = admin;
+
+        // Зріз подання - як у SubmitSheetHandler: маршрутизований ICellStore (значення власників).
+        var versionId = await SnapshotRoutedAsync(app2, s).ConfigureAwait(true);
+
+        var fullBefore = await CompareCountsAsync(admin, s, versionId).ConfigureAwait(true);
+        Assert.Equal(0, fullBefore.Changes);
+        var narrowBefore = await CompareCountsAsync(scoped, s, versionId).ConfigureAwait(true);
+        Assert.Equal(0, narrowBefore.Changes);
+
+        // Зміна значення ВЛАСНИКА (M11 листопада) -> рівно одна зміна для повної ролі; звужена роль її не бачить.
+        await using (var db = s.Builder.CreateContext())
+        {
+            var cell = await db.CellValues.SingleAsync(c =>
+                c.TableRowId == s.November.RowIds[0] && c.ColumnDefId == s.ColumnIds["M11"]).ConfigureAwait(true);
+            cell.Apply(new CellValueData { ValueNumeric = NovSecret + 1m });
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var fullAfter = await CompareCountsAsync(admin, s, versionId).ConfigureAwait(true);
+        Assert.Equal(1, fullAfter.Changes);
+        var narrowAfter = await CompareCountsAsync(scoped, s, versionId).ConfigureAwait(true);
+        Assert.Equal(0, narrowAfter.Changes);
+    }
+
+    private static async Task<long> SnapshotRoutedAsync(EcrApiFactory app, Scenario s)
+    {
+        using var scope = app.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<ICellStore>();
+        var slices = await store.ReadSlicesAsync([s.Doc.TableInstanceId], new PeriodKey(Oct), CancellationToken.None)
+            .ConfigureAwait(false);
+        var payload = SubmissionPayload.Write(slices.Values.SelectMany(x => x));
+        await using var db = s.Builder.CreateContext();
+        var userId = await db.Users.AsNoTracking().Where(u => u.UserName == s.AdminName)
+            .Select(u => u.Id).SingleAsync().ConfigureAwait(false);
+        var snapshot = new SubmissionSnapshot(
+            s.Doc.DocumentId, s.Doc.SheetDefId, Oct, s.Doc.TemplateVersionId,
+            "[]", null, null, payload, new byte[32], DateTime.UtcNow, userId);
+        db.SubmissionSnapshots.Add(snapshot);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        return snapshot.Id;
+    }
+
+    private static async Task<(int Changes, int Added, int Removed)> CompareCountsAsync(
+        HttpClient client, Scenario s, long from)
+    {
+        var body = await CompareAsync(client, s, from).ConfigureAwait(false);
+        var root = JsonDocument.Parse(body).RootElement;
+        return (
+            root.GetProperty("changes").GetArrayLength(),
+            root.GetProperty("addedRows").GetArrayLength(),
+            root.GetProperty("removedRows").GetArrayLength());
     }
 
     // ── (5) відмова на рядок називає період-якір ──
