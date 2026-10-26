@@ -1031,6 +1031,22 @@ public sealed class ExcelImporter(
     /// </remarks>
     private static void EnsureAllOrNothing(ImportPlan plan)
     {
+        // ✎ P53 (слово людини 12.10 + P2-A): ЗМІНА в місячній колонці закритого/поданого/погодженого місяця відмовляє весь
+        // пакет — тією ж відмовою, що й PATCH (`err.ECR-ACCS-0403.deniedCells`, `reason`). Незалежно від передач.
+        var periodDenied = plan.Tables.SelectMany(t => t.PeriodDenied ?? []).ToList();
+        if (periodDenied.Count > 0)
+        {
+            throw new AccessDeniedException(
+                "ECR-ACCS-0403",
+                $"The import was refused as a whole: {periodDenied.Count} changed cell(s) belong to a closed or submitted month. Nothing was written.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["messageKey"] = "err.ECR-ACCS-0403.deniedCells",
+                    ["deniedCount"] = periodDenied.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["reason"] = periodDenied[0].Reason,
+                });
+        }
+
         if (plan.AllOrNothing != true)
         {
             return;
