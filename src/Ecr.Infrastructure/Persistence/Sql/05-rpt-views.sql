@@ -189,6 +189,10 @@ BEGIN
     DECLARE @sheet int, @header nvarchar(400), @view sysname;
     DECLARE @select nvarchar(max), @joins nvarchar(max), @sql nvarchar(max), @existing nvarchar(max), @message nvarchar(2048);
     DECLARE @colId int, @colCode nvarchar(64), @colType tinyint, @alias nvarchar(16), @n int;
+    -- Q-17.7: власність значень MonthsInColumns (місячний стовпець M{m} — в екземплярі періоду m,
+    -- введений не-місячний — в екземплярі-якорі року). @monthMask: біт m — потрібен власник-місяць m.
+    DECLARE @layout tinyint, @isMonth bit, @monthNo tinyint, @isInput bit, @monthMask int, @needAnchor bit,
+            @ownerRows nvarchar(max), @ownerCells nvarchar(max), @valueCol nvarchar(128), @extra int, @mi int;
     DECLARE @marker nvarchar(64) = N'-- Згенеровано rpt.usp_GenerateTemplateViews';
     DECLARE @failure nvarchar(2048);
 
@@ -199,15 +203,17 @@ BEGIN
     WHILE @@FETCH_STATUS = 0
     BEGIN
         -- ⚠ Цикл, а не `STRING_AGG`: підлога сервера — 2016 SP1 (`D-101`).
-        SELECT @select = N'', @joins = N'', @n = 0;
+        SELECT @select = N'', @joins = N'', @n = 0,
+               @ownerRows = N'', @ownerCells = N'', @monthMask = 0, @needAnchor = 0, @extra = 0;
+        SET @layout = (SELECT LayoutKind FROM cfg.TableDef WHERE Id = @id);
         SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0);
         WHILE @colId IS NOT NULL
         BEGIN
-            SELECT @colCode = Code, @colType = DataType FROM cfg.ColumnDef WHERE Id = @colId;
+            SELECT @colCode = Code, @colType = DataType, @isMonth = IsMonthColumn, @monthNo = MonthNumber
+              FROM cfg.ColumnDef WHERE Id = @colId;
             SET @n = @n + 1;
             SET @alias = N'c' + CAST(@n AS nvarchar(10));
-            SET @select = @select + N',
-       ' + @alias + N'.'
+            SET @valueCol = @alias + N'.'
                 + CASE @colType
                       WHEN 0 THEN N'ValueString'
                       WHEN 3 THEN N'ValueBool'
@@ -215,26 +221,100 @@ BEGIN
                       WHEN 5 THEN N'ValueRegistryEntryId'
                       WHEN 7 THEN N'ValueUnitId'
                       ELSE N'ValueNumeric'
-                  END
-                + N' AS ' + QUOTENAME(@colCode);
+                  END;
             SET @joins = @joins + N'
 LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.PeriodKey AND '
                 + @alias + N'.TableRowId = r.Id AND ' + @alias + N'.ColumnDefId = ' + CAST(@colId AS nvarchar(10));
+
+            -- Q-17.7: MonthsInColumns — ВВЕДЕНИЙ стовпець (не Formula/Calculated) читається з комірки власника;
+            -- власна копія в рядку перегляду лишається запасним значенням (до консолідації даних і після неї
+            -- до -PurgeCopies). Похідні (Formula/Calculated) і всі інші розкладки — як було.
+            IF @layout = 0 AND @colType NOT IN (6, 8) AND (@isMonth = 0 OR @monthNo BETWEEN 1 AND 12)
+            BEGIN
+                IF @isMonth = 1
+                BEGIN
+                    SET @monthMask = @monthMask | POWER(2, @monthNo);
+                    SET @mi = @monthNo;
+                    SET @extra = @extra + 1;
+                    SET @ownerCells = @ownerCells + N'
+LEFT JOIN doc.CellValue AS o' + CAST(@n AS nvarchar(10)) + N' ON o' + CAST(@n AS nvarchar(10))
+                        + N'.PeriodKey = ow' + CAST(@mi AS nvarchar(10)) + N'.PeriodKey AND o' + CAST(@n AS nvarchar(10))
+                        + N'.TableRowId = ow' + CAST(@mi AS nvarchar(10)) + N'.Id AND o' + CAST(@n AS nvarchar(10))
+                        + N'.ColumnDefId = ' + CAST(@colId AS nvarchar(10));
+                END
+                ELSE
+                BEGIN
+                    SET @needAnchor = 1;
+                    SET @extra = @extra + 1;
+                    SET @ownerCells = @ownerCells + N'
+LEFT JOIN doc.CellValue AS o' + CAST(@n AS nvarchar(10)) + N' ON o' + CAST(@n AS nvarchar(10))
+                        + N'.PeriodKey = owA.PeriodKey AND o' + CAST(@n AS nvarchar(10))
+                        + N'.TableRowId = owA.Id AND o' + CAST(@n AS nvarchar(10))
+                        + N'.ColumnDefId = ' + CAST(@colId AS nvarchar(10));
+                END
+
+                SET @valueCol = N'COALESCE(o' + CAST(@n AS nvarchar(10)) + N'.' + SUBSTRING(@valueCol, LEN(@alias) + 2, 64)
+                              + N', ' + @valueCol + N')';
+            END
+
+            SET @select = @select + N',
+       ' + @valueCol + N' AS ' + QUOTENAME(@colCode);
             SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0 AND Id > @colId);
+        END
+
+        -- Q-17.7: приєднання власників — по одному екземпляру/рядку на потрібний місяць і на якір.
+        -- Усі з'єднання — по ключах: UQ_TableInstance (PeriodKey, DocumentId, TableDefId) і UQ_TableRow_Key
+        -- (PeriodKey, TableInstanceId, RowKey), обидва вирівняні по ps_ByPeriodKey; без підзапитів на рядок
+        -- (якір — похідна таблиця по doc.Period, обчислюється один раз на запит). Лише Monthly-проєкти:
+        -- у квартальних/річних ключ Year*100+Sequence означає не місяць.
+        IF @monthMask <> 0 OR @needAnchor = 1
+        BEGIN
+            SET @mi = 1;
+            WHILE @mi <= 12
+            BEGIN
+                IF (@monthMask & POWER(2, @mi)) <> 0
+                BEGIN
+                    SET @extra = @extra + 2;
+                    SET @ownerRows = @ownerRows + CONCAT(N'
+LEFT JOIN doc.TableInstance AS oi', @mi, N' ON p.PeriodKind = 0 AND oi', @mi, N'.PeriodKey = (ti.PeriodKey / 100) * 100 + ', @mi,
+                        N' AND oi', @mi, N'.DocumentId = ti.DocumentId AND oi', @mi, N'.TableDefId = ti.TableDefId
+LEFT JOIN doc.TableRow AS ow', @mi, N' ON ow', @mi, N'.PeriodKey = oi', @mi, N'.PeriodKey AND ow', @mi,
+                        N'.TableInstanceId = oi', @mi, N'.Id AND ow', @mi, N'.RowKey = r.RowKey AND ow', @mi, N'.IsDeleted = 0');
+                END
+                SET @mi = @mi + 1;
+            END
+
+            IF @needAnchor = 1
+            BEGIN
+                SET @extra = @extra + 3;
+                SET @ownerRows = @ownerRows + N'
+LEFT JOIN (SELECT ProjectId, PeriodKey / 100 AS Yr, MIN(PeriodKey) AS AnchorKey
+             FROM doc.Period GROUP BY ProjectId, PeriodKey / 100) AS pa
+       ON p.PeriodKind = 0 AND pa.ProjectId = d.ProjectId AND pa.Yr = ti.PeriodKey / 100
+LEFT JOIN doc.TableInstance AS oiA ON oiA.PeriodKey = pa.AnchorKey AND oiA.DocumentId = ti.DocumentId AND oiA.TableDefId = ti.TableDefId
+LEFT JOIN doc.TableRow AS owA ON owA.PeriodKey = oiA.PeriodKey AND owA.TableInstanceId = oiA.Id AND owA.RowKey = r.RowKey AND owA.IsDeleted = 0';
+            END
+
+            -- Порядок: приєднання власників-рядків ідуть ДО комірок власників; власні копії (c<n>) — між ними.
+            SET @joins = @ownerRows + @joins + @ownerCells;
         END
 
         -- ⚠ Колонки — у порядку `Id`, а не `Ordinal`: `Ordinal` — лише
         -- відображення (D-17), і перестановка колонок у новій версії не має
         -- міняти порядок колонок уже опублікованої вʼюхи. Ліміт SQL Server —
         -- 256 таблиць у запиті: 5 службових + по одній на колонку.
-        IF @n > 250
+        -- Q-17.7: у MonthsInColumns кожна введена колонка додає ще одну таблицю (комірка власника), плюс
+        -- екземпляр+рядок на потрібний місяць і якір (@extra) — ліміт той самий, лічильник більший.
+        IF @n + @extra > 250
         BEGIN
             -- ⚠ Не THROW тут: на старті (виклик без параметра) одна задовга
             -- таблиця не має лишати без вʼюх усі інші. Помилка — наприкінці.
             -- ⚠ У повідомленні — заголовок (шаблон, версія, аркуш, таблиця): його
             -- читає /health/ready і журнал публікації, там голий Id нічого не каже.
             SET @failure = COALESCE(@failure, CONCAT(N'rpt.usp_GenerateTemplateViews: ', @header, N' (таблиця ', @id,
-                                  N') має ', @n, N' колонок, вʼюха вміщує щонайбільше 250.'));
+                                  N') має ', @n, N' колонок',
+                                  CASE WHEN @extra > 0 THEN CONCAT(N' (з приєднаннями власників значень — ', @n + @extra, N' таблиць у запиті)') ELSE N'' END,
+                                  N', вʼюха вміщує щонайбільше 250.'));
             GOTO next_table;
         END
 
