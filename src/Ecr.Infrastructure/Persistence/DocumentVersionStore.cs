@@ -6,7 +6,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>Реалізація <see cref="IDocumentVersionStore"/> над <see cref="EcrDbContext"/>.</summary>
-public sealed class DocumentVersionStore(EcrDbContext db) : IDocumentVersionStore
+public sealed class DocumentVersionStore(
+    EcrDbContext db, ICellStore? cellStore = null, IMonthColumnRouter? router = null) : IDocumentVersionStore
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<DocumentVersionRecord>> ListAsync(
@@ -37,6 +38,27 @@ public sealed class DocumentVersionStore(EcrDbContext db) : IDocumentVersionStor
         long documentId, PeriodKey periodKey, CancellationToken ct)
     {
         var p = periodKey.Value;
+
+        // ⛔ Q-17.fix (B3): зріз подання читає МАРШРУТИЗОВАНИЙ ICellStore (значення власників), тож і «поточний стан»
+        // у порівнянні мусить іти тим самим читачем — інакше кожна колонка з чужим власником виходить «зміною».
+        // Прапор вимкнено → нижче лишається прямий запит, як було.
+        if (router is { Enabled: true } && cellStore is not null)
+        {
+            var instanceIds = await db.TableInstances.AsNoTracking()
+                .Where(i => i.DocumentId == documentId && i.PeriodKeyValue == p)
+                .Select(i => i.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            if (instanceIds.Count == 0)
+            {
+                return [];
+            }
+
+            var slices = await cellStore.ReadSlicesAsync(instanceIds, periodKey, ct).ConfigureAwait(false);
+            return SubmissionPayload.Read(SubmissionPayload.Write(
+                slices.Values.SelectMany(s => s).Where(c => c.Address.PeriodKey.Value == p)));
+        }
+
         var cells = await (
             from instance in db.TableInstances.AsNoTracking()
             where instance.DocumentId == documentId && instance.PeriodKeyValue == p
