@@ -106,8 +106,14 @@ GO
 -- Lookup → ValueRegistryEntryId; Unit → ValueUnitId. ⚠ `Calculated` —
 -- лише те, що матеріалізовано в `doc.CellValue`; результати методологій
 -- живуть у `calc.*` і сюди не підтягуються.
+-- ⛔ Q-17.7: @MonthRouting = 1 вмикає у вʼюхах MonthsInColumns читання значень з екземпляра ВЛАСНИКА (місячний M{m} - з
+-- екземпляра періоду m, введений не-місячний - з якоря року; COALESCE із власною копією). Це те саме, що прапор
+-- Collection:MonthColumnRouting (застосунок передає його сам - ReportViewGenerator); за замовчуванням 0, і текст вʼюх
+-- БАЙТ-У-БАЙТ як до Q-17. DBA, що кличе процедуру руками на базі з увімкненим прапором, мусить передати @MonthRouting = 1:
+--     EXEC rpt.usp_GenerateTemplateViews @MonthRouting = 1;
 CREATE OR ALTER PROCEDURE rpt.usp_GenerateTemplateViews
-    @TemplateVersionId int = NULL
+    @TemplateVersionId int = NULL,
+    @MonthRouting bit = 0
 WITH EXECUTE AS OWNER
 AS
 BEGIN
@@ -229,7 +235,7 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
             -- Q-17.7: MonthsInColumns — ВВЕДЕНИЙ стовпець (не Formula/Calculated) читається з комірки власника;
             -- власна копія в рядку перегляду лишається запасним значенням (до консолідації даних і після неї
             -- до -PurgeCopies). Похідні (Formula/Calculated) і всі інші розкладки — як було.
-            IF @layout = 0 AND @colType NOT IN (6, 8) AND (@isMonth = 0 OR @monthNo BETWEEN 1 AND 12)
+            IF @MonthRouting = 1 AND @layout = 0 AND @colType NOT IN (6, 8) AND (@isMonth = 0 OR @monthNo BETWEEN 1 AND 12)
             BEGIN
                 IF @isMonth = 1
                 BEGIN

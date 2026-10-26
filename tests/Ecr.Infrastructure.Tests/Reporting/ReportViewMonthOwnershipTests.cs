@@ -7,6 +7,7 @@ using Ecr.Infrastructure.Reporting;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Reporting;
@@ -57,10 +58,18 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         return new Fixture(doc, view, c2.Code, m10.Code, m11.Code, derived.Code, c2.Id, m10.Id, m11.Id, derived.Id);
     }
 
-    private async Task GenerateAsync(Fixture f)
+    /// <summary>Генерація вʼюх; за замовчуванням з УВІМКНЕНИМ прапором (розширені вʼюхи), <c>routing: false</c> — без роутера.</summary>
+    private async Task GenerateAsync(Fixture f, bool routing = true)
     {
         await using var db = sql.CreateContext();
-        await new ReportViewGenerator(db).GenerateAsync(f.Doc.TemplateVersionId, CancellationToken.None);
+        var router = routing
+            ? new MonthColumnRouter(
+                db,
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["Collection:MonthColumnRouting"] = "true" })
+                    .Build())
+            : null;
+        await new ReportViewGenerator(db, monthRouter: router).GenerateAsync(f.Doc.TemplateVersionId, CancellationToken.None);
     }
 
     private async Task PutAsync(Fixture f, int period, long rowId, int columnId, decimal value)
@@ -119,7 +128,7 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
     public async Task Прапор_вимкнено_вʼюха_MonthsInColumns_без_приєднань_власників()
     {
         var f = await BuildAsync();
-        await GenerateAsync(f);
+        await GenerateAsync(f, routing: false);
 
         var definition = await ViewDefinitionAsync(f.View);
 
@@ -127,6 +136,31 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         Assert.DoesNotContain("doc.TableInstance AS oi", definition, StringComparison.Ordinal);
         Assert.DoesNotContain("doc.TableRow AS ow", definition, StringComparison.Ordinal);
         Assert.DoesNotContain("AnchorKey", definition, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Вмикання прапора і повторна генерація ПЕРЕБУДОВУЮТЬ вʼюху (розширена: власники й якір), вимикання — повертає
+    /// початковий текст байт-у-байт.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Зміна_прапора_і_повторна_генерація_міняють_текст_вʼюхи_і_повертають_його()
+    {
+        var f = await BuildAsync();
+
+        await GenerateAsync(f, routing: false);
+        var plain = await ViewDefinitionAsync(f.View);
+
+        await GenerateAsync(f, routing: true);
+        var routed = await ViewDefinitionAsync(f.View);
+        Assert.Contains("COALESCE(o", routed, StringComparison.Ordinal);
+        Assert.Contains("AnchorKey", routed, StringComparison.Ordinal);
+        Assert.NotEqual(plain, routed);
+
+        await GenerateAsync(f, routing: false);
+        Assert.Equal(plain, await ViewDefinitionAsync(f.View));
     }
 
     [Fact]
@@ -251,8 +285,7 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         Assert.Contains("doc.Period", definition, StringComparison.Ordinal);
 
         // Повторна генерація не змінює вʼюху (Unchanged), тож SSRS не бачить Sch-M без потреби.
-        await using var db = sql.CreateContext();
-        await new ReportViewGenerator(db).GenerateAsync(months.Doc.TemplateVersionId, CancellationToken.None);
+        await GenerateAsync(months);
         Assert.Equal(definition, await ViewDefinitionAsync(months.View));
     }
 }
