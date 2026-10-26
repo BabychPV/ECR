@@ -104,6 +104,31 @@ public sealed class MonthColumnRoleLeakApiTests(SqlServerFixture sql)
         Assert.Equal([Oct], (await LiveRowCountAsync(s, "OLDROW").ConfigureAwait(true)).Select(r => r).ToList());
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    public async Task Прапор_вимкнено_роль_лише_на_жовтень_видаляє_рядок_свого_екземпляра_без_відмови_якоря()
+    {
+        var s = await ArrangeAsync(from: Oct, to: Oct).ConfigureAwait(true);
+        var (app, scoped) = await BootAsync(s, s.UserName, flag: false).ConfigureAwait(true);
+        using var _a = app;
+        using var _b = scoped;
+
+        using var create = await scoped.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.Doc.DocumentId}/rows", UriKind.Relative),
+            new { tableInstanceId = s.Doc.TableInstanceId, rowKey = "OLDDEL" }).ConfigureAwait(true);
+        Assert.True(create.StatusCode == HttpStatusCode.Created, await create.Content.ReadAsStringAsync().ConfigureAwait(true));
+
+        using var delete = await scoped.DeleteAsync(new Uri(
+            $"/api/v1/documents/{s.Doc.DocumentId}/tables/{s.Doc.TableInstanceId}/rows/OLDDEL", UriKind.Relative))
+            .ConfigureAwait(true);
+        var body = await delete.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(delete.StatusCode == HttpStatusCode.OK, body);
+        Assert.DoesNotContain("deleteRowAnchorPeriod", body, StringComparison.Ordinal);
+        Assert.Empty(await LiveRowCountAsync(s, "OLDDEL").ConfigureAwait(true));
+    }
+
     // ── (2) експорт: csv/json не віддають значення власників поза областю ──
 
     [Theory]
@@ -216,18 +241,9 @@ public sealed class MonthColumnRoleLeakApiTests(SqlServerFixture sql)
         using var _c = app2;
         using var _d = admin;
         var full = await CompareAsync(admin, s, versionId).ConfigureAwait(true);
-        string diag;
-        await using (var db = s.Builder.CreateContext())
-        {
-            var snap = await db.SubmissionSnapshots.AsNoTracking().SingleAsync(x => x.Id == versionId).ConfigureAwait(true);
-            var cur = await db.CellValues.AsNoTracking().Where(c => c.TableRowId == rowId)
-                .Select(c => c.ColumnDefId + "=" + c.ValueNumeric).ToListAsync().ConfigureAwait(true);
-            diag = snap.PayloadJson + "\n" + string.Join(",", cur) + $"\nrow={rowId} inst={s.Doc.TableInstanceId}";
-        }
-
         foreach (var alias in aliases)
         {
-            Assert.True(full.Contains(Digits(secrets[alias]), StringComparison.Ordinal), $"{alias}: {full}\n{diag}");
+            Assert.True(full.Contains(Digits(secrets[alias]), StringComparison.Ordinal), $"{alias}: {full}");
         }
 
         var narrow = await CompareAsync(scoped, s, versionId).ConfigureAwait(true);
@@ -237,6 +253,64 @@ public sealed class MonthColumnRoleLeakApiTests(SqlServerFixture sql)
         {
             Assert.DoesNotContain(Digits(secrets[alias]), narrow, StringComparison.Ordinal);
             Assert.DoesNotContain($"\"{s.ColumnCodes[alias]}\"", narrow, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    public async Task Прапор_вимкнено_порівняння_версій_не_маскує_колонок_ні_ролі_ні_адміну()
+    {
+        var s = await ArrangeAsync(from: Oct, to: Oct).ConfigureAwait(true);
+        var rowId = s.Doc.RowIds[0];
+        string[] aliases = ["M1", "M9", "M10", "M11", "M12", "PLAIN"];
+
+        await using (var db = s.Builder.CreateContext())
+        {
+            foreach (var alias in aliases)
+            {
+                db.CellValues.Add(new CellValue(
+                    new CellAddress(new PeriodKey(Oct), rowId, s.ColumnIds[alias]), s.Doc.TableDefId,
+                    new CellValueData { ValueNumeric = 1m }));
+            }
+
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var versionId = await SnapshotOctAsync(s).ConfigureAwait(true);
+        var secrets = aliases.Select((a, i) => (Alias: a, Value: 8810001m + i)).ToDictionary(x => x.Alias, x => x.Value);
+        await using (var db = s.Builder.CreateContext())
+        {
+            foreach (var alias in aliases)
+            {
+                var cell = await db.CellValues.SingleAsync(c =>
+                    c.TableRowId == rowId && c.ColumnDefId == s.ColumnIds[alias]).ConfigureAwait(true);
+                cell.Apply(new CellValueData { ValueNumeric = secrets[alias] });
+            }
+
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var (app, scoped) = await BootAsync(s, s.UserName, flag: false).ConfigureAwait(true);
+        using var _a = app;
+        using var _b = scoped;
+        var (app2, admin) = await BootAsync(s, s.AdminName, flag: false).ConfigureAwait(true);
+        using var _c = app2;
+        using var _d = admin;
+
+        var narrow = await CompareAsync(scoped, s, versionId).ConfigureAwait(true);
+        var full = await CompareAsync(admin, s, versionId).ConfigureAwait(true);
+        foreach (var alias in aliases)
+        {
+            Assert.True(full.Contains(Digits(secrets[alias]), StringComparison.Ordinal), $"admin {alias}: {full}");
+        }
+
+        // До Q-17 (і з вимкненим прапором) межі «без періоду» для ролі, звуженої періодом, порожні: compare лишається
+        // на безпечному боці й не віддає їй нічого. Прапор НЕ повинен цього міняти ні в який бік.
+        foreach (var alias in aliases)
+        {
+            Assert.DoesNotContain(Digits(secrets[alias]), narrow, StringComparison.Ordinal);
         }
     }
 
