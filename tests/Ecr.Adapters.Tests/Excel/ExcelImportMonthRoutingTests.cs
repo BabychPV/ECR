@@ -131,6 +131,33 @@ public sealed class ExcelImportMonthRoutingTests(SqlServerFixture sql) : IDispos
         Assert.Contains(202611, collapsed);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    public async Task Імпортер_разом_з_обробником_бере_замки_періодів_книги_за_зростанням_без_повторних_очікувань()
+    {
+        var world = await ArrangeAsync(closedMonths: []);
+        var plan = await PlanAsync(world, ("M11", 5m), ("PLAIN", 9m));
+        var seen = new List<(char Kind, int Period)>();
+
+        await using var db = CreateContext();
+        await Importer(db, plan, world.Doc.ProjectId, seen).ApplyAsync(world.Doc.DocumentId, Token, CancellationToken.None);
+
+        Assert.NotEmpty(seen);
+
+        // Перші взяття строго зростають, усі 12 місяців; наступні виклики обробника — повторне спільне блокування
+        // вже тримане тією ж транзакцією.
+        var firstAcquisitions = seen.Select(x => x.Period).Distinct().ToList();
+        Assert.True(
+            firstAcquisitions.SequenceEqual(firstAcquisitions.Order()),
+            $"Порядок замків імпортера не зростає: {string.Join(" → ", seen.Select(x => $"{x.Kind}{x.Period}"))}");
+        Assert.Equal(12, firstAcquisitions.Count);
+
+        // Імпортер сам бере весь набір ДО обробника: перші 12 викликів — це 12 різних періодів по порядку.
+        Assert.Equal(firstAcquisitions, seen.Take(12).Select(x => x.Period).ToList());
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     private static int CodeIndex(string alias) => alias == "PLAIN" ? 1 : 1 + int.Parse(alias[1..], System.Globalization.CultureInfo.InvariantCulture);
@@ -310,7 +337,8 @@ public sealed class ExcelImportMonthRoutingTests(SqlServerFixture sql) : IDispos
         var jobs = Substitute.For<IBackgroundJobScheduler>();
 
         return new ExcelImporter(
-            metadata, new RegistryStore(db), access, user, previews, patch, new ImportDiffBuilder(), cells, rows, uow, jobs, gate);
+            metadata, new RegistryStore(db), access, user, previews, patch, new ImportDiffBuilder(), cells, rows, uow, jobs, gate,
+            monthRouter: router);
     }
 
     private EcrDbContext CreateContext()

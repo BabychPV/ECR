@@ -51,7 +51,11 @@ public sealed class ExcelImporter(
     IPermitBindingStore? permitBindings = null,
 
     // Permits PRMG: ціль-група читається як обʼєднання записів реєстрів-членів (`LookupTargetEntries`). `null` - груп немає.
-    Ecr.Application.Permits.Groups.ILookupTargetResolver? groups = null) : IExcelImporter
+    Ecr.Application.Permits.Groups.ILookupTargetResolver? groups = null,
+
+    // ✎ Q-17: за прапора `Collection:MonthColumnRouting` аркуші з таблицями «місяці в колонках» блокуються на ВСІ місяці року
+    // одним впорядкованим набором (див. `ApplyAsync`). `null` — поведінка до Q-17.
+    IMonthColumnRouter? monthRouter = null) : IExcelImporter
 {
     /// <summary>Порожній зріз — таблиця без жодного рядка чи непорожньої комірки.</summary>
     private static readonly IReadOnlyDictionary<string, long> EmptyRowIds =
@@ -488,7 +492,7 @@ public sealed class ExcelImporter(
         var diffs = plan.Tables.Where(t => t.Changes.Count > 0).ToList();
 
         var period = new PeriodKey(plan.PeriodKey);
-        var (sheets, templateVersions) = await SheetsInLockOrderAsync(documentId, period, plan, ct).ConfigureAwait(false);
+        var (sheets, templateVersions, monthSheets) = await SheetsInLockOrderAsync(documentId, period, plan, ct).ConfigureAwait(false);
 
         var enlist = jobs.EnlistsInCallerTransaction;
 
@@ -570,10 +574,26 @@ public sealed class ExcelImporter(
                 var holdsAny = false;
                 foreach (var sheetDefId in sheets)
                 {
-                    statuses[sheetDefId] = holdsAny
-                        ? await sheetGate.EnterEditNoWaitAsync(documentId, sheetDefId, period, innerCt).ConfigureAwait(false)
-                        : await sheetGate.EnterEditAsync(documentId, sheetDefId, period, innerCt).ConfigureAwait(false);
-                    holdsAny = true;
+                    // ⛔ Q-17: аркуш із таблицями «місяці в колонках» (прапор увімкнено) блокується на ВСІ місяці року
+                    // одним набором за зростанням ключа періоду — обробник книги (власники й річні періоди) потім лише
+                    // повторно бере вже тримані замки. Без цього імпорт тримав би «жовтень» і чекав «січень», а
+                    // CreateRow/DeleteRow (виняткові, 1..12) — навпаки: цикл.
+                    var keys = monthSheets.Contains(sheetDefId)
+                        ? Enumerable.Range(1, 12).Select(m => (period.Year * 100) + m).Append(period.Value).Distinct().Order().ToList()
+                        : [period.Value];
+
+                    foreach (var key in keys)
+                    {
+                        var status = holdsAny
+                            ? await sheetGate.EnterEditNoWaitAsync(documentId, sheetDefId, new PeriodKey(key), innerCt).ConfigureAwait(false)
+                            : await sheetGate.EnterEditAsync(documentId, sheetDefId, new PeriodKey(key), innerCt).ConfigureAwait(false);
+                        holdsAny = true;
+
+                        if (key == period.Value)
+                        {
+                            statuses[sheetDefId] = status;
+                        }
+                    }
                 }
 
                 // ⚠ Накопичувачі скидаються НА ПОЧАТКУ замикання, а не поруч із
@@ -783,14 +803,19 @@ public sealed class ExcelImporter(
     /// немає в документі, сюди не потрапляє — його відхилить сам
     /// <c>PatchCellsHandler</c> своєю відмовою.
     /// </remarks>
-    private async Task<(IReadOnlyList<int> Sheets, IReadOnlyList<int> TemplateVersions)> SheetsInLockOrderAsync(
-        long documentId, PeriodKey period, ImportPlan plan, CancellationToken ct)
+    private async Task<(IReadOnlyList<int> Sheets, IReadOnlyList<int> TemplateVersions, IReadOnlySet<int> MonthSheets)>
+        SheetsInLockOrderAsync(long documentId, PeriodKey period, ImportPlan plan, CancellationToken ct)
     {
         var changed = plan.Tables.Where(t => t.Changes.Count > 0).Select(t => t.TableInstanceId).ToHashSet();
         if (changed.Count == 0)
         {
-            return ([], []);
+            return ([], [], new HashSet<int>());
         }
+
+        // Q-17: чи діє маршрутизація власників для документа (прапор + місячний проєкт).
+        var routing = monthRouter is { Enabled: true }
+                      && await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false) is not null;
+        var monthSheets = new HashSet<int>();
 
         var instances = await rowStore.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false);
         var sheets = new SortedSet<int>();
@@ -800,20 +825,24 @@ public sealed class ExcelImporter(
         {
             templateVersions.Add(group.Key);
             var snapshot = await metadata.GetAsync(group.Key, ct).ConfigureAwait(false);
-            var sheetOfTable = snapshot.Sheets
+            var tables = snapshot.Sheets
                 .SelectMany(s => s.Tables)
-                .ToDictionary(t => t.Id, t => t.SheetDefId);
+                .ToDictionary(t => t.Id);
 
             foreach (var instance in group)
             {
-                if (sheetOfTable.TryGetValue(instance.TableDefId, out var sheetDefId))
+                if (tables.TryGetValue(instance.TableDefId, out var table))
                 {
-                    sheets.Add(sheetDefId);
+                    sheets.Add(table.SheetDefId);
+                    if (routing && monthRouter!.AppliesToTable(table))
+                    {
+                        monthSheets.Add(table.SheetDefId);
+                    }
                 }
             }
         }
 
-        return ([.. sheets], templateVersions);
+        return ([.. sheets], templateVersions, monthSheets);
     }
 
     /// <summary>
