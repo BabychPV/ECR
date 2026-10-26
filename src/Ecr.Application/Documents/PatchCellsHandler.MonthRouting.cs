@@ -32,6 +32,15 @@ namespace Ecr.Application.Documents;
 /// </remarks>
 public sealed partial class PatchCellsHandler
 {
+    /// <summary>
+    /// Насіння перерахунку екземпляра ВЛАСНИКА, записаного книгою: задачу періоду власника ставить викликач книги
+    /// (<c>ExcelImporter</c>) поруч із задачею книги.
+    /// </summary>
+    /// <param name="TableInstanceId">Екземпляр власника.</param>
+    /// <param name="PeriodKey">Його період.</param>
+    /// <param name="Seeds">Адреси змінених комірок (рядок і колонка екземпляра власника).</param>
+    public sealed record WorkbookOwnerRecalc(long TableInstanceId, int PeriodKey, IReadOnlyList<RecalculationSeed> Seeds);
+
     /// <summary>Насіння перерахунку одного фізичного екземпляра.</summary>
     /// <param name="TableInstanceId">Фізичний екземпляр (власник або екземпляр запиту).</param>
     /// <param name="PeriodKey">Його період.</param>

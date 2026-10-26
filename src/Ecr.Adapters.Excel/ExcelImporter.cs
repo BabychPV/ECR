@@ -482,6 +482,8 @@ public sealed class ExcelImporter(
         var validation = new List<ValidationMessageDto>();
         var seeds = new List<RecalculationSeed>();
         var rowWindowChanges = new List<RowWindowChange>();
+        // Q-17: насіння екземплярів ВЛАСНИКІВ (колонки з іншим власником, за прапором) - окрема задача на період власника.
+        var ownerRecalcs = new List<PatchCellsHandler.WorkbookOwnerRecalc>();
         long seedTableInstanceId = 0;
         var diffs = plan.Tables.Where(t => t.Changes.Count > 0).ToList();
 
@@ -505,6 +507,16 @@ public sealed class ExcelImporter(
                     .EnqueueCoalescedAsync<IFormulaRecalculationJob>(
                         FormulaRecalculationTarget.Of(documentId, plan.PeriodKey, createdByUserId: null),
                         new { DocumentId = documentId, TableInstanceId = seedTableInstanceId, plan.PeriodKey, Cells = seeds },
+                        token)
+                    .ConfigureAwait(false);
+            }
+
+            foreach (var owner in ownerRecalcs)
+            {
+                await jobs
+                    .EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                        FormulaRecalculationTarget.Of(documentId, owner.PeriodKey, createdByUserId: null),
+                        new { DocumentId = documentId, owner.TableInstanceId, owner.PeriodKey, Cells = owner.Seeds },
                         token)
                     .ConfigureAwait(false);
             }
@@ -574,6 +586,7 @@ public sealed class ExcelImporter(
                 validation.Clear();
                 seeds.Clear();
                 rowWindowChanges.Clear();
+                ownerRecalcs.Clear();
                 seedTableInstanceId = 0;
 
                 // ⚠ Версії рядків беруться з ПЕРЕГЛЯДУ і передаються як
@@ -602,7 +615,7 @@ public sealed class ExcelImporter(
                 try
                 {
                     responses = await patch
-                        .HandleWorkbookAsync(requests, seeds, rowWindowChanges, innerCt, statuses, overwritten)
+                        .HandleWorkbookAsync(requests, seeds, rowWindowChanges, innerCt, statuses, overwritten, ownerRecalcs)
                         .ConfigureAwait(false);
                 }
                 catch (EcrException error) when (Blame(error, diffs) is { } named)

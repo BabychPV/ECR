@@ -69,6 +69,10 @@ public sealed partial class PatchCellsHandler
     /// <see cref="CellChangeOrigins.ImportOverwrite"/> замість <c>Origin</c> батчу.
     /// Лише журнал — правила запису ті самі. <c>null</c> — таких рядків немає.
     /// </param>
+    /// <param name="ownerRecalcs">
+    /// Q-17: куди скласти насіння екземплярів ВЛАСНИКІВ, записаних книгою (колонки з іншим власником, за прапором
+    /// <c>Collection:MonthColumnRouting</c>); задачі на їхні періоди ставить викликач. <c>null</c> — не збирати.
+    /// </param>
     /// <returns>Відповідь на кожен батч — у порядку <paramref name="requests"/>.</returns>
     /// <remarks>
     /// ⚠ Стан, прочитаний під спільним блокуванням, лишається правдою до кінця
@@ -82,7 +86,8 @@ public sealed partial class PatchCellsHandler
         ICollection<RowWindowChange> rowWindowChanges,
         CancellationToken ct,
         IReadOnlyDictionary<int, Domain.Enums.DocumentStatus>? heldSheetStatuses = null,
-        IReadOnlyDictionary<long, IReadOnlySet<string>>? overwrittenRows = null)
+        IReadOnlyDictionary<long, IReadOnlySet<string>>? overwrittenRows = null,
+        ICollection<WorkbookOwnerRecalc>? ownerRecalcs = null)
     {
         ArgumentNullException.ThrowIfNull(requests);
         ArgumentNullException.ThrowIfNull(recalculationSeeds);
@@ -182,10 +187,32 @@ public sealed partial class PatchCellsHandler
 
             // ✎ D-445: запис погоджувача поточного кроку в поданий аркуш (позначка під блокуванням) несе аркуш у
             // насінні — каскад перерахує формули саме цього поданого аркуша, як після правки в сітці (D-442).
-            foreach (var seed in BuildRecalculationSeeds(
-                         applied, item.Context.ApproverEdit ? item.Context.Table.SheetDefId : null))
+            if (applied.Routed is { } groups)
             {
-                recalculationSeeds.Add(seed);
+                // ✎ Q-17: насіння по ФІЗИЧНИХ екземплярах: власні комірки - у задачу періоду книги, комірки власників -
+                // у задачі їхніх екземплярів (`ownerRecalcs`; ставить викликач разом із задачею книги).
+                foreach (var group in groups)
+                {
+                    if (group.TableInstanceId == item.Id)
+                    {
+                        foreach (var seed in group.Seeds)
+                        {
+                            recalculationSeeds.Add(seed);
+                        }
+                    }
+                    else
+                    {
+                        ownerRecalcs?.Add(new WorkbookOwnerRecalc(group.TableInstanceId, group.PeriodKey, group.Seeds));
+                    }
+                }
+            }
+            else
+            {
+                foreach (var seed in BuildRecalculationSeeds(
+                             applied, item.Context.ApproverEdit ? item.Context.Table.SheetDefId : null))
+                {
+                    recalculationSeeds.Add(seed);
+                }
             }
 
             // HSE301 A1: одна зміна на таблицю; хук кличе викликач після коміту (L6-11).
@@ -677,16 +704,46 @@ public sealed partial class PatchCellsHandler
             }
         }
 
+        // ✎ Q-17: комірки колонок з іншим власником (за прапором) йдуть в екземпляри власників. Набори ОДНОГО
+        // екземпляра зливаються (ApplyBatchAsync забороняє дублі), набір екземпляра таблиці несе claim версій її рядків.
+        var routedItems = new Dictionary<long, RoutedWrite>();
+        var batchSets = new List<CellChangeSet>(active.Count);
+        var ownerSetsById = new SortedDictionary<long, CellChangeSet>();
+        foreach (var item in active)
+        {
+            var routed = await BlamedAsync(
+                    item.Id, () => RouteForeignOwnersAsync(item.Context, item.Applied!, isLateEdit, previous, ct))
+                .ConfigureAwait(false);
+            if (routed is null)
+            {
+                batchSets.Add(new CellChangeSet(
+                    item.Id, item.Applied!.Upserts, item.Applied.Deletes, item.Applied.Touched,
+                    userId, isLateEdit, item.Applied.ExpectedRowVersions));
+                continue;
+            }
+
+            routedItems[item.Id] = routed;
+            item.Context.OutOfWindow.UnionWith(routed.OutOfWindowPhysical);
+            batchSets.Add(routed.ViewSet);
+            foreach (var owner in routed.OwnerSets)
+            {
+                ownerSetsById[owner.TableInstanceId] = ownerSetsById.TryGetValue(owner.TableInstanceId, out var already)
+                    ? new CellChangeSet(
+                        owner.TableInstanceId,
+                        [.. already.Upserts, .. owner.Upserts],
+                        [.. already.Deletes, .. owner.Deletes],
+                        [.. already.TouchedRowIds.Union(owner.TouchedRowIds)],
+                        userId, isLateEdit, ExpectedRowVersions: null)
+                    : owner;
+            }
+        }
+
+        batchSets.AddRange(ownerSetsById.Values);
+
         IReadOnlyDictionary<long, IReadOnlyDictionary<long, string>> written;
         try
         {
-            written = await cellStore
-                .ApplyBatchAsync(
-                    [.. active.Select(x => new CellChangeSet(
-                        x.Id, x.Applied!.Upserts, x.Applied.Deletes, x.Applied.Touched,
-                        userId, isLateEdit, x.Applied.ExpectedRowVersions))],
-                    ct)
-                .ConfigureAwait(false);
+            written = await cellStore.ApplyBatchAsync(batchSets, ct).ConfigureAwait(false);
         }
         catch (ConcurrencyConflictException error) when (StaleRowIds(error) is { Count: > 0 } staleRowIds)
         {
@@ -727,18 +784,43 @@ public sealed partial class PatchCellsHandler
             throw named;
         }
 
+        // Попередні значення для аудиту: фізичні адреси власників додаються до прочитаних на вході.
+        var auditPrevious = previous;
+        if (routedItems.Count > 0)
+        {
+            var merged = new Dictionary<CellAddress, CellValueData>(previous);
+            foreach (var routed in routedItems.Values)
+            {
+                foreach (var (address, value) in routed.PreviousPhysical)
+                {
+                    merged[address] = value;
+                }
+            }
+
+            auditPrevious = merged;
+        }
+
         foreach (var item in active)
         {
-            item.Applied = item.Applied! with { NewRowVersions = written.GetValueOrDefault(item.Id) };
+            item.Applied = item.Applied! with
+            {
+                NewRowVersions = written.GetValueOrDefault(item.Id),
+                Routed = routedItems.TryGetValue(item.Id, out var routed) ? routed.Groups : null,
+            };
         }
 
         await documents.TouchAsync(documentId, userId, now, ct).ConfigureAwait(false);
 
+        // ✎ Q-17: аудит маршрутизованих елементів - на ФІЗИЧНИХ адресах (період і рядок власника).
         await audit.WriteCellChangesAsync(
-            [.. active.SelectMany(x => BuildAuditRecords(
-                x.Request, x.Applied!.Upserts, x.Applied.Deletes, userId, now, documentId,
-                x.Applied.RowKeyById, previous, isLateEdit, AuditCorrelationId(), x.Context.OutOfWindow,
-                x.OverwrittenRowKeys, approverEdit: x.Context.ApproverEdit))],
+            [.. active.SelectMany(x =>
+            {
+                var changes = routedItems.TryGetValue(x.Id, out var routed) ? routed.Physical : x.Applied!;
+                return BuildAuditRecords(
+                    x.Request, changes.Upserts, changes.Deletes, userId, now, documentId,
+                    changes.RowKeyById, auditPrevious, isLateEdit, AuditCorrelationId(), x.Context.OutOfWindow,
+                    x.OverwrittenRowKeys, approverEdit: x.Context.ApproverEdit);
+            })],
             ct).ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
