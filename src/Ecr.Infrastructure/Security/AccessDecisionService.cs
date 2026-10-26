@@ -26,8 +26,11 @@ public sealed class AccessDecisionService(
     Caching.AccessProfileCache profileCache,
     IClock clock,
     Application.Common.ICurrentUser currentUser,
-    Application.Ports.IWorkflowStore workflow) : IAccessDecisionService
+    Application.Ports.IWorkflowStore workflow,
+    Application.Ports.IMonthColumnRouter? monthRouter = null) : IAccessDecisionService
 {
+    // ⚠ Q-17: `monthRouter` необов'язковий (тести будують службу напряму); `null` або вимкнений прапор
+    // `Collection:MonthColumnRouting` = річних рішень немає, поведінка до Q-17.
     /// <summary>
     /// Розрахунок стану періоду для рішень (F-08). Без стану, тому один на
     /// тип: параметр конструктора зачепив би кожне місце, що створює службу.
@@ -1463,7 +1466,8 @@ public sealed class AccessDecisionService(
             // писати в цей зріз узагалі. Підставити сюди якусь колонку
             // означало б, що заборона на ОДНУ колонку забороняє створення
             // рядка цілком, а обчислювана перша колонка — завжди.
-            var rowContext = slice.Shared with
+            // Q-17: склад рядків таблиці «місяці в колонках» — спільний на рік, тож і створення рядка рахується за річним агрегатом.
+            var rowContext = (slice.Annual?.Context ?? slice.Shared) with
             {
                 TableDefId = slice.TableDefId,
                 ColumnDefId = 0,
@@ -1499,6 +1503,11 @@ public sealed class AccessDecisionService(
             }
 
             var rowDecision = EditRules.CanEdit(profile, rowContext);
+            if (slice.Annual is { } annualRow)
+            {
+                rowDecision = rowDecision with { AnnualPeriods = annualRow.Periods };
+            }
+
             if (slice.DocumentHasAssignments)
             {
                 rowDecision = rowDecision with { AssignmentsPresent = true };
@@ -1547,6 +1556,29 @@ public sealed class AccessDecisionService(
         {
             shared = monthContext.Context;
             columnPeriod = monthContext.PeriodKey;
+        }
+
+        // Q-17: введений не-місячний стовпець таблиці «місяці в колонках» керується річним агрегатом, а не періодом
+        // екземпляра (подання одного місяця його не блокує). Обчислювані стовпці лишаються за періодом перегляду.
+        IReadOnlyList<int>? annualPeriods = null;
+        if (slice.Annual is { } annual && !column.IsMonthColumn && !column.IsComputed)
+        {
+            shared = annual.Context;
+            annualPeriods = annual.Periods;
+        }
+
+        // Q-17 (аудит P2-B): область ролі за періодами - за періодом ВЛАСНИКА колонки (місячний m -> період m; введений
+        // не-місячний -> якір = найменший період календаря). Прапор вимкнено - період екземпляра, як раніше.
+        if (slice.RoutesOwnership)
+        {
+            if (columnPeriod is { } ownerPeriod)
+            {
+                shared = shared with { Period = new PeriodKey(ownerPeriod) };
+            }
+            else if (annualPeriods is { Count: > 0 })
+            {
+                shared = shared with { Period = new PeriodKey(annualPeriods[0]) };
+            }
         }
 
         var context = shared with
@@ -1614,7 +1646,7 @@ public sealed class AccessDecisionService(
             var outcome = PeriodAccessRules.Evaluate(
                 slice.Rules.Rules,
                 facts,
-                profile.RoleIdsAt(slice.Shared.ProjectId, slice.Shared.SheetCode, slice.Shared.Period));
+                profile.RoleIdsAt(shared.ProjectId, shared.SheetCode, shared.Period));
 
             if (outcome.Blocks)
             {
@@ -1665,6 +1697,11 @@ public sealed class AccessDecisionService(
             decision = decision with { ColumnPeriod = columnPeriod };
         }
 
+        if (annualPeriods is not null)
+        {
+            decision = decision with { AnnualPeriods = annualPeriods };
+        }
+
         return slice.DocumentHasAssignments ? decision with { AssignmentsPresent = true } : decision;
     }
 
@@ -1710,6 +1747,19 @@ public sealed class AccessDecisionService(
         /// Порожньо — таблиця не місячна, місяць той самий, шлях інтеграції/симуляції.
         /// </summary>
         public IReadOnlyDictionary<byte, (CellAccessContext Context, int PeriodKey)> MonthShared { get; init; } = NoMonthShared;
+
+        /// <summary>
+        /// Q-17: «річний контекст» (агрегат стану періоду й аркуша за місяцями календаря, <see cref="AnnualPeriodRule"/>)
+        /// для введених не-місячних стовпців і складу рядків таблиці «місяці в колонках» та ключі періодів
+        /// календаря; <c>null</c> — прапор вимкнено, таблиця інша, перегляд поза календарем.
+        /// </summary>
+        public (CellAccessContext Context, IReadOnlyList<int> Periods)? Annual { get; init; }
+
+        /// <summary>
+        /// Q-17: маршрутизація власників діє (прапор + MonthsInColumns) - область ролі за ПЕРІОДАМИ для комірки колонки з
+        /// іншим власником перевіряється за періодом ВЛАСНИКА, а не періодом екземпляра запиту.
+        /// </summary>
+        public bool RoutesOwnership { get; init; }
     }
 
     private static readonly IReadOnlySet<(string RowKey, int ColumnDefId)> NoComputedCells =
@@ -1945,11 +1995,15 @@ public sealed class AccessDecisionService(
                 }
 
                 var monthShared = NoMonthShared;
-                if (!profile.IsIntegrationWriter
+                (CellAccessContext Context, IReadOnlyList<int> Periods)? annual = null;
+                var isMonthsTable = !profile.IsIntegrationWriter
                     && !profile.IsSimulation
                     && snapshot.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == instance.TableDefId)
-                        is { LayoutKind: TableLayoutKind.MonthsInColumns }
-                    && columns.Any(c => c.IsMonthColumn && c.MonthNumber is { } m && m != periodKey.Sequence))
+                        is { LayoutKind: TableLayoutKind.MonthsInColumns };
+                var hasOtherMonthColumn = isMonthsTable
+                    && columns.Any(c => c.IsMonthColumn && c.MonthNumber is { } m && m != periodKey.Sequence);
+                var annualRouting = isMonthsTable && monthRouter is { Enabled: true };
+                if (hasOtherMonthColumn || annualRouting)
                 {
                     if (!monthStatesBySheet.TryGetValue(sheetDefId, out var monthStates))
                     {
@@ -1966,7 +2020,44 @@ public sealed class AccessDecisionService(
                         monthStatesBySheet[sheetDefId] = monthStates;
                     }
 
-                    if (monthStates.Count > 0)
+                    // Q-17: річний агрегат — за місяцями, що мають рядок періоду в календарі (разом із місяцем екземпляра).
+                    if (annualRouting
+                        && monthEnvironment is { } calendar
+                        && calendar.States.ContainsKey((byte)periodKey.Sequence))
+                    {
+                        var periodStates = new List<PeriodState>(12);
+                        var sheetStatuses = new List<DocumentStatus>(12);
+                        var keys = new List<int>(12);
+                        for (byte month = 1; month <= 12; month++)
+                        {
+                            if (!calendar.States.ContainsKey(month))
+                            {
+                                continue;
+                            }
+
+                            if (month == periodKey.Sequence)
+                            {
+                                periodStates.Add(shared.PeriodState);
+                                sheetStatuses.Add(shared.SheetStatus);
+                                keys.Add(periodKey.Value);
+                            }
+                            else if (monthStates.TryGetValue(month, out var other))
+                            {
+                                periodStates.Add(other.State);
+                                sheetStatuses.Add(other.Status);
+                                keys.Add(other.PeriodKey);
+                            }
+                        }
+
+                        annual = (shared with
+                        {
+                            PeriodState = AnnualPeriodRule.AggregateState(periodStates),
+                            SheetStatus = AnnualPeriodRule.AggregateStatus(sheetStatuses),
+                            IsCurrentApprover = false,
+                        }, keys);
+                    }
+
+                    if (hasOtherMonthColumn && monthStates.Count > 0)
                     {
                         monthShared = monthStates.ToDictionary(
                             s => s.Key,
@@ -1986,6 +2077,8 @@ public sealed class AccessDecisionService(
                     DocumentHasAssignments = documentHasAssignments,
                     ComputedCells = ComputedCellsOf(snapshot, instance.TableDefId),
                     MonthShared = monthShared,
+                    Annual = annual,
+                    RoutesOwnership = annualRouting,
                 };
             }
         }
@@ -2024,10 +2117,8 @@ public sealed class AccessDecisionService(
             return null;
         }
 
-        var first = instancePeriod.Year * 100;
-        var rows = await db.Periods
-            .AsNoTracking()
-            .Where(x => x.ProjectId == project.Id && x.PeriodKeyValue > first && x.PeriodKeyValue <= first + 12)
+        // Q-17: той самий предикат календаря року, що й у маршрутизації місячних стовпців.
+        var rows = await Persistence.PeriodCalendar.YearPeriods(db, project.Id, instancePeriod.Year)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 

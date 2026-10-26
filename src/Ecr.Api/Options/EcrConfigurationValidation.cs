@@ -126,6 +126,9 @@ public static partial class EcrConfigurationValidation
         "Security:Csp:ReportOnly",
         "Security:Csp:Enforce",
         "Health:WarmupOnStart",
+
+        // Q-17: читається `GetValue<bool>` у DependencyInjection (Infrastructure).
+        "Collection:MonthColumnRouting",
         Ecr.Api.Startup.StaleMapWarmService.EnabledKey,
         "Jobs:NightlyRecalculation:Enabled",
         "Logging:File:Json",

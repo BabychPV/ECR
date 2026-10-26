@@ -74,7 +74,11 @@ public sealed partial class PatchCellsHandler(
     // ⛔ PRMG: ціль Lookup може бути ГРУПОЮ типів дозволів (прихований `PRMG_*`): запис належить цілі за членством,
     // а не за збігом реєстру. Порівняння - лише через `LookupTargetMatcher`; збіг реєстру (Land) резолвера не кличе.
     // `null` (прямий конструктор у тестах) - груп немає.
-    Permits.Groups.ILookupTargetResolver? groups = null)
+    Permits.Groups.ILookupTargetResolver? groups = null,
+
+    // ✎ Q-17: запис у стовпці з іншим власником (`Collection:MonthColumnRouting`). `null` або вимкнений прапор —
+    // поведінка до Q-17 (усе пишеться в екземпляр запиту).
+    IMonthColumnRouter? monthRouter = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -173,7 +177,7 @@ public sealed partial class PatchCellsHandler(
         var now = clock.UtcNow;
         var isLateEdit = await DetermineIsLateEditAsync(
                 context.Instance.DocumentId, [context.Table.SheetDefId], request.PeriodKey, ct,
-                context.ColumnPeriods, context.InstancePeriodGoverns)
+                context.ColumnPeriods, context.InstancePeriodGoverns, context.AnnualPeriods)
             .ConfigureAwait(false);
 
         // ⚠ `BE-05`: ідентифікатор поставленої задачі їде клієнтові у відповіді.
@@ -184,13 +188,36 @@ public sealed partial class PatchCellsHandler(
         // ✎ D-442: правка погоджувача (позначка виставлена під блокуванням аркуша, тут уже відома) несе аркуш
         // у насінні — інакше каскад пропустив би поданий аркуш, і формули оновилися б лише на затвердженні.
         async Task EnqueueAsync(CellChangeLists applied, CancellationToken token)
-            => recalculationJobId = await EnqueueRecalculationAsync(
+        {
+            // ✎ Q-17: запис у стовпці з іншим власником — насіння ГРУПУЄТЬСЯ за фізичним періодом (екземпляром):
+            // адреса (рядок власника, колонка) осмислена лише разом з екземпляром власника.
+            if (applied.Routed is { Count: > 0 } groups)
+            {
+                foreach (var group in groups)
+                {
+                    var id = await EnqueueRecalculationAsync(
+                            request, context.Instance.DocumentId, group.Seeds, context.UserId, token,
+                            group.TableInstanceId, group.PeriodKey)
+                        .ConfigureAwait(false);
+
+                    // Ідентифікатор для клієнта — задача періоду екземпляра запиту (інакше перша).
+                    if (group.TableInstanceId == request.TableInstanceId || recalculationJobId is null)
+                    {
+                        recalculationJobId = id;
+                    }
+                }
+
+                return;
+            }
+
+            recalculationJobId = await EnqueueRecalculationAsync(
                     request,
                     context.Instance.DocumentId,
                     BuildRecalculationSeeds(applied, context.ApproverEdit ? context.Table.SheetDefId : null),
                     context.UserId,
                     token)
                 .ConfigureAwait(false);
+        }
 
         // ⛔ MI-02 (в): черга в базі — постановка ВСЕРЕДИНІ транзакції запису,
         // останнім оператором (відкат запису відкочує й задачу, воркер бачить
@@ -323,7 +350,14 @@ public sealed partial class PatchCellsHandler(
         /// P2-A: період екземпляра керує записом: є його комірка, або періодів колонок немає зовсім
         /// (звичайна таблиця). <c>false</c> лише коли ВСІ комірки батчу — місячні колонки інших місяців.
         /// </summary>
-        public bool InstancePeriodGoverns => OwnPeriodWritten || ColumnPeriods.Count == 0;
+        public bool InstancePeriodGoverns => OwnPeriodWritten || (ColumnPeriods.Count == 0 && AnnualPeriods.Count == 0);
+
+        /// <summary>
+        /// Q-17: ключі періодів календаря року, агрегат яких керує дозволеними комірками батчу (введені не-місячні
+        /// стовпці таблиці «місяці в колонках», <see cref="EditDecision.AnnualPeriods"/>). Порожньо — прапор
+        /// вимкнено чи таких комірок немає.
+        /// </summary>
+        public SortedSet<int> AnnualPeriods { get; } = [];
     }
 
     /// <summary>Розподіл змін по upsert/delete разом із супутнім станом.</summary>
@@ -340,13 +374,18 @@ public sealed partial class PatchCellsHandler(
     /// <c>TableRow.Id</c> → нова версія після запису — те, що повернуло сховище
     /// (<see cref="ICellStore.ApplyAsync"/>); <c>null</c> до запису.
     /// </param>
+    /// <param name="Routed">
+    /// Q-17: насіння перерахунку по фізичних екземплярах, коли частину комірок записано власникам; <c>null</c> —
+    /// маршрутизації не було (насіння з <c>Upserts</c>/<c>Deletes</c>).
+    /// </param>
     private sealed record CellChangeLists(
         List<CellRecord> Upserts,
         List<CellAddress> Deletes,
         List<long> Touched,
         Dictionary<long, string> RowKeyById,
         Dictionary<long, string> ExpectedRowVersions,
-        IReadOnlyDictionary<long, string>? NewRowVersions = null);
+        IReadOnlyDictionary<long, string>? NewRowVersions = null,
+        IReadOnlyList<RecalcGroup>? Routed = null);
 
     /// <summary>
     /// Розв'язує особу користувача, структуру таблиці зі знімка метаданих і
@@ -1004,7 +1043,11 @@ public sealed partial class PatchCellsHandler(
     /// </summary>
     private static void NoteGoverningPeriod(RequestContext context, EditDecision decision)
     {
-        if (decision.ColumnPeriod is { } columnPeriod && columnPeriod != context.PeriodKey.Value)
+        if (decision.AnnualPeriods is { } annualPeriods)
+        {
+            context.AnnualPeriods.UnionWith(annualPeriods);
+        }
+        else if (decision.ColumnPeriod is { } columnPeriod && columnPeriod != context.PeriodKey.Value)
         {
             context.ColumnPeriods.Add(columnPeriod);
         }
@@ -2263,12 +2306,31 @@ public sealed partial class PatchCellsHandler(
         int periodKeyValue,
         CancellationToken ct,
         IEnumerable<int>? columnPeriods = null,
-        bool instancePeriodGoverns = true)
+        bool instancePeriodGoverns = true,
+        SortedSet<int>? annualPeriods = null)
     {
         if (instancePeriodGoverns
             && await IsLateEditInPeriodAsync(documentId, sheetDefIds, periodKeyValue, ct).ConfigureAwait(false))
         {
             return true;
+        }
+
+        // ✎ Q-17: річна правка пізня, лише коли немає жодного Open, але є Grace (AnnualPeriodRule).
+        if (annualPeriods is { Count: > 0 })
+        {
+            var states = new List<PeriodState>(annualPeriods.Count);
+            foreach (var annualPeriod in annualPeriods)
+            {
+                if (await periods.FindPeriodStateAsync(documentId, annualPeriod, ct).ConfigureAwait(false) is { } found)
+                {
+                    states.Add(found);
+                }
+            }
+
+            if (AnnualPeriodRule.IsLate(states))
+            {
+                return true;
+            }
         }
 
         foreach (var columnPeriod in columnPeriods ?? [])
@@ -2512,15 +2574,38 @@ public sealed partial class PatchCellsHandler(
             // у цій самій транзакції. Див. <see cref="MaterializeNewRowsAsync"/>.
             var changes = await MaterializeNewRowsAsync(request, context, planned, innerCt).ConfigureAwait(false);
 
-            var newVersions = await cellStore.ApplyAsync(
-                new CellChangeSet(
-                    request.TableInstanceId, changes.Upserts, changes.Deletes, changes.Touched,
-                    context.UserId, isLateEdit, changes.ExpectedRowVersions),
-                innerCt).ConfigureAwait(false);
+            // ✎ Q-17: комірки колонок з іншим власником (місячний m / якір року) йдуть в екземпляр власника, решта
+            // — як і раніше. `null` — прапор вимкнено або чужих комірок у батчі немає: старий шлях БЕЗ змін.
+            var routed = await RouteForeignOwnersAsync(context, changes, isLateEdit, previous, innerCt).ConfigureAwait(false);
+
+            IReadOnlyDictionary<long, string> newVersions;
+            var auditChanges = changes;
+            var auditPrevious = previous;
+            if (routed is null)
+            {
+                newVersions = await cellStore.ApplyAsync(
+                    new CellChangeSet(
+                        request.TableInstanceId, changes.Upserts, changes.Deletes, changes.Touched,
+                        context.UserId, isLateEdit, changes.ExpectedRowVersions),
+                    innerCt).ConfigureAwait(false);
+            }
+            else
+            {
+                // Одноперіодні набори (екземпляр не повторюється): власний — із claim версій рядків запиту, чужі —
+                // «дотик» рядків власників БЕЗ очікуваних версій (їх захищає замок аркуша × період і сам «дотик»).
+                var batch = await cellStore.ApplyBatchAsync([routed.ViewSet, .. routed.OwnerSets], innerCt).ConfigureAwait(false);
+                newVersions = batch.TryGetValue(request.TableInstanceId, out var own)
+                    ? own
+                    : new Dictionary<long, string>();
+                auditChanges = routed.Physical;
+                auditPrevious = routed.PreviousPhysical;
+                context.OutOfWindow.UnionWith(routed.OutOfWindowPhysical);
+            }
 
             // ⚠ `WR-04` п. 4: нові версії «торкнутих» рядків — із самого запису
-            // (див. <see cref="BuildResponseAsync"/>).
-            changes = changes with { NewRowVersions = newVersions };
+            // (див. <see cref="BuildResponseAsync"/>). Версії лише рядків ЕКЗЕМПЛЯРА ЗАПИТУ: рядки власників клієнт
+            // не тримає.
+            changes = changes with { NewRowVersions = newVersions, Routed = routed?.Groups };
             applied = changes;
 
             // ⚠ `WR-04` п. 1: окремого `rowStore.TouchRowsAsync` тут більше
@@ -2540,7 +2625,8 @@ public sealed partial class PatchCellsHandler(
             // гірша за відсутність дати.
             await documents.TouchAsync(context.Instance.DocumentId, context.UserId, now, innerCt).ConfigureAwait(false);
 
-            await WriteAuditAsync(request, context, changes, now, isLateEdit, previous, innerCt).ConfigureAwait(false);
+            // ✎ Q-17: аудит — на ФІЗИЧНИХ адресах (період і рядок власника); без маршрутизації це ті самі `changes`.
+            await WriteAuditAsync(request, context, auditChanges, now, isLateEdit, auditPrevious, innerCt).ConfigureAwait(false);
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
@@ -2601,17 +2687,27 @@ public sealed partial class PatchCellsHandler(
             context.Instance.TemplateVersionId,
             context.Instance.DocumentId);
 
-        if (CreatesRowsUnderCeiling(context))
+        // ⛔ Q-17: ВСІ задіяні періоди (власний, місячні колонки інших місяців, річний агрегат) беруться
+        // у ЗРОСТАЮЧОМУ порядку ключа. Власний-першим давав дедлок: PATCH з перегляду 3 у колонку місяця 5 тримав 3 і
+        // чекав 5, а PATCH з перегляду 5 у колонку місяця 3 — навпаки. Виняткове блокування рядків (стеля) береться
+        // на місці власного періоду в тому ж порядку.
+        var lockedStatuses = new Dictionary<int, DocumentStatus>();
+        foreach (var lockedPeriod in AllInvolvedPeriods(context))
         {
-            // ⛔ Y7-03: відмова «зайнято» — про рядки, а не про подання (див. `RowWriteLock`).
-            await RowWriteLock
-                .EnterAsync(sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
+            if (lockedPeriod == context.PeriodKey.Value && CreatesRowsUnderCeiling(context))
+            {
+                // ⛔ Y7-03: відмова «зайнято» — про рядки, а не про подання (див. `RowWriteLock`).
+                await RowWriteLock
+                    .EnterAsync(sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
+                    .ConfigureAwait(false);
+            }
+
+            lockedStatuses[lockedPeriod] = await sheetGate
+                .EnterEditAsync(context.Instance.DocumentId, context.Table.SheetDefId, new PeriodKey(lockedPeriod), ct)
                 .ConfigureAwait(false);
         }
 
-        var status = await sheetGate
-            .EnterEditAsync(context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
-            .ConfigureAwait(false);
+        var status = lockedStatuses[context.PeriodKey.Value];
 
         // ✎ D-442: поданий аркуш править лише погоджувач ПОТОЧНОГО кроку. Рішення поза транзакцією
         // бачило крок N; затвердження бере ВИНЯТКОВЕ блокування цього самого ключа
@@ -2637,9 +2733,36 @@ public sealed partial class PatchCellsHandler(
             }
         }
 
-        await EnsureColumnPeriodsEditableAsync(
-                context.Instance.DocumentId, context.Table.SheetDefId, context.ColumnPeriods, changes, ct)
-            .ConfigureAwait(false);
+        CheckLockedColumnPeriods(lockedStatuses, context.ColumnPeriods, context.AnnualPeriods, changes);
+    }
+
+    /// <summary>Q-17: власний період + періоди колонок + річні періоди — без повторів, за зростанням ключа.</summary>
+    private static SortedSet<int> AllInvolvedPeriods(RequestContext context)
+    {
+        var all = new SortedSet<int>(context.ColumnPeriods);
+        all.UnionWith(context.AnnualPeriods);
+        all.Add(context.PeriodKey.Value);
+        return all;
+    }
+
+    /// <summary>
+    /// Q-17: перевірка станів аркуша періодів колонок (кожен окремо) і річного агрегату за вже ВЗЯТИМИ блокуваннями.
+    /// </summary>
+    private void CheckLockedColumnPeriods(
+        Dictionary<int, DocumentStatus> lockedStatuses,
+        IEnumerable<int> columnPeriods,
+        IReadOnlyCollection<int> annualPeriods,
+        CellChangeLists changes)
+    {
+        foreach (var columnPeriod in columnPeriods)
+        {
+            CheckSheetStatus(lockedStatuses[columnPeriod], changes);
+        }
+
+        if (annualPeriods.Count > 0)
+        {
+            CheckSheetStatus(AnnualPeriodRule.AggregateStatus(annualPeriods.Select(p => lockedStatuses[p])), changes);
+        }
     }
 
     /// <summary>
@@ -2651,16 +2774,23 @@ public sealed partial class PatchCellsHandler(
     /// <see cref="EditDecision.ByApprover"/> не ставить, тож поданий місяць тут відмовляє всім.
     /// </remarks>
     private async Task EnsureColumnPeriodsEditableAsync(
-        long documentId, int sheetDefId, IEnumerable<int> columnPeriods, CellChangeLists changes, CancellationToken ct)
+        long documentId, int sheetDefId, IEnumerable<int> columnPeriods, CellChangeLists changes, CancellationToken ct,
+        IReadOnlyCollection<int>? annualPeriods = null)
     {
-        foreach (var columnPeriod in columnPeriods)
-        {
-            var columnStatus = await sheetGate
-                .EnterEditAsync(documentId, sheetDefId, new PeriodKey(columnPeriod), ct)
-                .ConfigureAwait(false);
+        // ⛔ Q-17: усі періоди — за зростанням ключа (див. EnsureSheetStillEditableAsync).
+        var annual = annualPeriods ?? [];
+        var all = new SortedSet<int>(columnPeriods);
+        all.UnionWith(annual);
 
-            CheckSheetStatus(columnStatus, changes);
+        var lockedStatuses = new Dictionary<int, DocumentStatus>();
+        foreach (var period in all)
+        {
+            lockedStatuses[period] = await sheetGate
+                .EnterEditAsync(documentId, sheetDefId, new PeriodKey(period), ct)
+                .ConfigureAwait(false);
         }
+
+        CheckLockedColumnPeriods(lockedStatuses, columnPeriods, annual, changes);
     }
 
     /// <summary>D-442: користувач і далі погоджувач поточного кроку цього аркуша — під блокуванням.</summary>
@@ -2947,12 +3077,20 @@ public sealed partial class PatchCellsHandler(
         long documentId,
         IReadOnlyList<RecalculationSeed> seeds,
         int editorUserId,
-        CancellationToken ct)
-        => await jobs.EnqueueCoalescedAsync<Ports.IFormulaRecalculationJob>(
-            Ports.FormulaRecalculationTarget.Of(documentId, request.PeriodKey, editorUserId),
-            new { DocumentId = documentId, request.TableInstanceId, request.PeriodKey, Cells = seeds }, ct,
+        CancellationToken ct,
+        long? tableInstanceId = null,
+        int? periodKey = null)
+    {
+        // ✎ Q-17: задача ФІЗИЧНОГО екземпляра (власника) — коли насіння з його адресами; без параметрів — екземпляр запиту.
+        var instanceId = tableInstanceId ?? request.TableInstanceId;
+        var period = periodKey ?? request.PeriodKey;
+
+        return await jobs.EnqueueCoalescedAsync<Ports.IFormulaRecalculationJob>(
+            Ports.FormulaRecalculationTarget.Of(documentId, period, editorUserId),
+            new { DocumentId = documentId, TableInstanceId = instanceId, PeriodKey = period, Cells = seeds }, ct,
             createdByUserId: editorUserId)
             .ConfigureAwait(false);
+    }
 
     /// <summary>Насіння каскаду: адреси всіх записаних і стертих комірок батчу.</summary>
     /// <remarks>

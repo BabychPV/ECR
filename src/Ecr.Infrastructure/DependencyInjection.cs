@@ -87,7 +87,16 @@ public static class DependencyInjection
         // RowStore (фолбек «гаряча схема порожня → перевір arc.*»); Scoped,
         // бо тримає EcrDbContext, а той теж Scoped.
         services.AddScoped<ArchiveAwareCellReader>();
-        services.AddScoped<ICellStore, NormalizedCellStore>();
+        // Q-17: декоратор маршрутизації місячних стовпців; прапор `Collection:MonthColumnRouting` (за замовчуванням
+        // вимкнено) читає роутер — вимкнено, декоратор лише передає виклики в NormalizedCellStore.
+        services.AddScoped<NormalizedCellStore>();
+        // ⚠ Конфігурація — із замикання, а не з DI: граф задачі в Ecr.Worker.Tests збирається без `IConfiguration`.
+        services.AddScoped<IMonthColumnRouter>(sp => new MonthColumnRouter(sp.GetRequiredService<EcrDbContext>(), configuration));
+        services.AddScoped<ICellStore>(sp => new MonthRoutedCellStore(
+            sp.GetRequiredService<NormalizedCellStore>(),
+            sp.GetRequiredService<IMonthColumnRouter>(),
+            sp.GetRequiredService<IMetadataCache>(),
+            sp.GetRequiredService<EcrDbContext>()));
         services.AddScoped<ICellStyleStore, CellStyleStore>();
         services.AddScoped<IRowStore, RowStore>();
         services.AddScoped<IDocumentHeaderStore, DocumentHeaderStore>();

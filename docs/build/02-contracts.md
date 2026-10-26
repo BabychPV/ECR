@@ -3312,6 +3312,54 @@ public interface ITableFillStore
 }
 ```
 
+#### `IMonthColumnRouter`
+
+Q-17 (варіант А): хто володіє введеними комірками таблиць «місяці в колонках»
+місячного проєкту. Місячний стовпець `m` — екземпляр періоду `PeriodKey(рік, m)`;
+введений не-місячний — «якір року» (найменший період календаря `doc.Period`);
+обчислені — екземпляр перегляду. Діє лише за прапора
+`Collection:MonthColumnRouting` (за замовчуванням вимкнено — порт нічого не
+робить і не ходить до бази). Читання логічного зрізу — декоратор
+`MonthRoutedCellStore` над `NormalizedCellStore`; запис — окремим коммітом Q-17.
+
+```csharp
+public interface IMonthColumnRouter
+{
+    public bool Enabled { get; }
+    public bool AppliesToTable(TableDef table);
+    public Task<MonthRoutingDocument?> GetDocumentAsync(long documentId, CancellationToken ct);
+    public Task<IReadOnlyDictionary<long, MonthRoutingInstance>> ResolveInstancesAsync(
+        IReadOnlyCollection<long> tableInstanceIds, PeriodKey? periodKey, CancellationToken ct);
+    public Task<PeriodKey?> AnchorOfAsync(int projectId, int year, CancellationToken ct);
+    public Task<PeriodKey> OwnerPeriodAsync(
+        MonthRoutingDocument document, TableDef table, ColumnDef column, PeriodKey viewPeriod, CancellationToken ct);
+    public Task<bool> HasForeignOwnerAsync(
+        MonthRoutingDocument document, TableDef table, ColumnDef column, PeriodKey viewPeriod, CancellationToken ct);
+    public Task<IReadOnlyList<ForeignColumn>> ForeignColumnsAsync(
+        MonthRoutingDocument document, TableDef table, PeriodKey viewPeriod, CancellationToken ct);
+}
+```
+
+#### `IOwnerReadSession`
+
+Q-17.4: сесія читання власників на ОДНУ задачу перерахунку. `RecalculationService`
+відкриває її на час прогону (поточний період + зсуви `[Period:-N]`/`[Period:#k]`);
+`MonthRoutedCellStore` у сесії читає введені комірки власників раз на ключ
+(документ × період-власник × таблиця), а не на кожен період читання. Перерахунок
+введених комірок власників НЕ пише, тому інвалідації немає; поза сесією кешу немає.
+Перерахунок читачів: `CrossPeriodReaders.ReaderSequences` — змінений ВВЕДЕНИЙ
+стовпець таблиці «місяці в колонках» робить читачами всі наявні періоди року,
+окрім періоду каскаду, де є залежність-комірка зі зсувом 0/null на цю колонку
+(`DirtyCell.OwnerInput`); в екземплярі перегляду формула НЕ перезаписує введену
+комірку власника (`IsCalculated = false` у логічному зрізі).
+
+```csharp
+public interface IOwnerReadSession
+{
+    public IDisposable BeginOwnerReadSession();
+}
+```
+
 #### `IDocumentListSummaryStore`
 
 Зведення переліку документів за період (`BE-09`): один агрегований запит, з

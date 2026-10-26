@@ -9332,6 +9332,9 @@ USING (VALUES
     ,(N'myTasks.waitingBadge', N'en', N'{n} tasks waiting for you', 1)
     ,(N'err.ECR-REQ-0422.returnedSheetsCursorInvalid', N'en', N'The page cursor of returned sheets is not valid. Reload the list.', 1)
     -- P44A:returned-to-me ── кінець секції ──
+    -- Q17: monthDataLocked ── Q-17/D-457: відмова DeleteRow (409), коли в подані/закриті місяці є введені значення; ru/kz — порцією Q17 нижче ──
+    ,(N'err.ECR-ROW-0409.monthDataLocked', N'en', N'This row cannot be deleted: it holds entered values for a month that is already submitted, approved or closed.', 1)
+    -- Q17: monthDataLocked ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -24294,6 +24297,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- P44A:returned-to-me ── кінець секції ──
+-- Q17: monthDataLocked ── ru/kz: Q-17/D-457, відмова DeleteRow для даних у поданих/закритих місяцях; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-ROW-0409.monthDataLocked', N'ru', N'Строку нельзя удалить: в ней есть введённые значения за месяц, который уже подан, утверждён или закрыт.'),
+    (N'err.ECR-ROW-0409.monthDataLocked', N'kz', N'Бұл жолды жоюға болмайды: онда ай бойынша енгізілген мәндер бар, ал бұл ай бұрыннан тапсырылған, бекітілген немесе жабылған.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- Q17: monthDataLocked ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

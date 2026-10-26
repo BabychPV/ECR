@@ -23,7 +23,10 @@ public sealed partial class ReportViewGenerator(
     EcrDbContext db,
     IReportViewStatus? status = null,
     ILogger<ReportViewGenerator>? logger = null,
-    ICorrelationIdAccessor? correlation = null) : IReportViewGenerator
+    ICorrelationIdAccessor? correlation = null,
+    // ✎ Q-17.7: прапор `Collection:MonthColumnRouting` → процедура будує в'юхи MonthsInColumns із читанням власників;
+    // `null` (тести без роутера) = вимкнено, текст в'юх як до Q-17.
+    IMonthColumnRouter? monthRouter = null) : IReportViewGenerator
 {
     /// <inheritdoc />
     public async Task GenerateAsync(int? templateVersionId, CancellationToken ct)
@@ -31,11 +34,14 @@ public sealed partial class ReportViewGenerator(
         try
         {
             await db.Database.ExecuteSqlRawAsync(
-                "EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId",
-                [new SqlParameter("@TemplateVersionId", System.Data.SqlDbType.Int)
-                {
-                    Value = (object?)templateVersionId ?? DBNull.Value,
-                }],
+                "EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId, @MonthRouting",
+                [
+                    new SqlParameter("@TemplateVersionId", System.Data.SqlDbType.Int)
+                    {
+                        Value = (object?)templateVersionId ?? DBNull.Value,
+                    },
+                    new SqlParameter("@MonthRouting", System.Data.SqlDbType.Bit) { Value = monthRouter is { Enabled: true } },
+                ],
                 ct).ConfigureAwait(false);
         }
         catch (SqlException ex)
