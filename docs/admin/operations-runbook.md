@@ -154,6 +154,12 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Health:RawDataPointWarnRows` | 20000000 | поріг перегляду R2 для картки `db` (п. 3.1); `0` — вимкнено. ⚠ Нечислове значення робить `db` Unhealthy «Database is unavailable» (перевірки на старті немає) |
 | `Calculations:FullYearWarnSeconds` | 600 | бюджет річного перерахунку (ПРД-13); перевищення — `recalcOverBudget` у картці `jobs` |
 | `Calculations:MaxParallelism` | 4 | паралелізм розрахунку |
+| `Retention:SubmissionSnapshots:Enabled` | `true` | нічне прибирання старих зрізів подання `calc.SubmissionSnapshot` (AN-134). Без `DeleteEnabled` прохід лише ЛІЧИТЬ (dry-run) і пише в журнал/`MaintenanceRun`, скільки зрізів і байт було б видалено |
+| `Retention:SubmissionSnapshots:DeleteEnabled` | `false` | ⛔ реальне видалення. Вмикати лише після слова людини й перегляду підсумку dry-run (`submission-snapshot-retention` у журналі обслуговування, `pinnedKept` — скільки зрізів погодження збережено понад межу) |
+| `Retention:SubmissionSnapshots:RetainSnapshots` | 5 | скільки НАЙНОВІШИХ зрізів лишається на «документ × аркуш × період»; зрізи погодження не видаляються ніколи. Мінімум 2 (менше зупиняє старт) |
+| `Retention:SubmissionSnapshots:BatchSize` | 50 | зрізів в одному `DELETE` (payload ~10 МБ на зріз). Мінімум 1 |
+| `Retention:SubmissionSnapshots:PauseMilliseconds` | 500 | пауза між пакетами, мс. Мінімум 0 |
+| `Retention:SubmissionSnapshots:MaxBatchesPerRun` | 200 | стеля пакетів за нічний прогін; решту доїсть наступний. Мінімум 1 |
 | `Audit:ExportMaxRows` | 100000 | межа експорту аудиту CSV |
 | `Campaign:AtRiskDays` | 3 | за скільки днів до терміну проєкт вважається «під загрозою» |
 | `Notifications:WebhookAllowedHostSuffixes` | `.webhook.office.com;.logic.azure.com;.powerplatform.com` | дозволені хости вебхуків (`;` або `,`) |
@@ -374,7 +380,7 @@ Server Agent ідуть за локальним часом сервера SQL. �
 
 | Коли | Задачі |
 |---|---|
-| щоночі 02:15 | `PartitionCheckJob`, `ConsistencyCheckJob`, `OrphanScanJob`, `ReportRetentionJob`, `ReportSnapshotFormatJob` |
+| щоночі 02:15 | `PartitionCheckJob`, `ConsistencyCheckJob`, `OrphanScanJob`, `ReportRetentionJob`, `ReportSnapshotFormatJob`, `SubmissionSnapshotRetentionJob` (AN-134, за замовчуванням лише dry-run) |
 | щогодини, хх:05 | `PeriodStateJob` (також один раз на старті), `NotificationJob`, `RowWindowRefetchJob` (повторне підтягування вікон рядків за пізніми даними PI) |
 | щоночі 03:30 | нічний перерахунок, лише якщо `Jobs:NightlyRecalculation:Enabled=true` |
 | за cron розкладу сутності | збір даних (`ext.CollectionSchedule`, по одному розкладу на сутність джерела; формат і залежності — `admin-guide.md` §5.1–5.2) |
