@@ -47,6 +47,7 @@ public sealed class MonthRoutedCellStore(
 
     // Q-17.4: кеш введених комірок власників на одну задачу перерахунку (див. IOwnerReadSession). null — сесії немає.
     private Dictionary<(long DocumentId, int OwnerPeriod, int TableDefId), OwnerSlot>? _ownerCache;
+    private readonly HashSet<int> _sessionAnchors = [];
     private int _sessionDepth;
 
     /// <inheritdoc />
@@ -115,23 +116,35 @@ public sealed class MonthRoutedCellStore(
     /// <param name="documentId">Документ власників.</param>
     /// <param name="ownerPeriods">Періоди-власники (≤ 13 партицій).</param>
     /// <param name="tableDefIds">Таблиці, що читаються.</param>
-    /// <param name="columnDefIds">Колонки з чужим власником.</param>
+    /// <param name="anchorPeriods">
+    /// Підмножина <paramref name="ownerPeriods"/>, що є ЯКОРЕМ року (власник не-місячних введених колонок).
+    /// </param>
     /// <returns>Незавершений запит без відстеження.</returns>
     /// <remarks>
     /// ⛔ Ключ партиції — у предикаті КОЖНОЇ з трьох таблиць (<c>WR-05</c>, <c>PartitionKeyQueryTests</c>). Лише
     /// введені комірки (<c>IsCalculated = 0</c>): обчислені належать екземпляру перегляду. Видалені рядки відсікаються.
+    /// <para>
+    /// ⚠ Q-17 перф (замір на копії Land, GetTableSlice 5–9× повільніший за прапора): відбір колонок списком
+    /// <c>ColumnDefId IN (≈200 параметрів)</c> коштував двічі — оптимізатор розкладав його у 200 пошуків на КОЖЕН
+    /// рядок власника (~616 тис. логічних читань), а решта CPU йшла на лінійну перевірку 200 значень на кожну комірку
+    /// (+ ~0,5 с компіляції плану на таке число параметрів). Тому власника колонки визначає сам запит через
+    /// <c>cfg.ColumnDef</c> (поєднання за PK): місячна колонка читається лише в періоді свого місяця
+    /// (<c>MonthNumber = PeriodKey % 100</c>), не-місячна — лише в якорі. Це НАДМНОЖИНА того, що потрібно роутеру
+    /// (календар року може зробити власником сам період перегляду); остаточний відбір — точний, у пам'яті,
+    /// за <see cref="ForeignColumn.OwnerPeriod"/> (<c>OverlayDocumentAsync</c>).
+    /// </para>
     /// </remarks>
     public static IQueryable<MonthOwnerCellRow> OwnerCellsQuery(
         EcrDbContext db,
         long documentId,
         IReadOnlyCollection<int> ownerPeriods,
         IReadOnlyCollection<int> tableDefIds,
-        IReadOnlyCollection<int> columnDefIds)
+        IReadOnlyCollection<int> anchorPeriods)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(ownerPeriods);
         ArgumentNullException.ThrowIfNull(tableDefIds);
-        ArgumentNullException.ThrowIfNull(columnDefIds);
+        ArgumentNullException.ThrowIfNull(anchorPeriods);
 
         return from instance in db.TableInstances.AsNoTracking()
                where instance.DocumentId == documentId
@@ -141,9 +154,13 @@ public sealed class MonthRoutedCellStore(
                    on new { P = instance.PeriodKeyValue, I = instance.Id }
                    equals new { P = row.PeriodKeyValue, I = row.TableInstanceId }
                join cell in db.CellValues.AsNoTracking()
-                       .Where(c => ownerPeriods.Contains(c.PeriodKeyValue) && !c.IsCalculated && columnDefIds.Contains(c.ColumnDefId))
+                       .Where(c => ownerPeriods.Contains(c.PeriodKeyValue) && !c.IsCalculated)
                    on new { P = row.PeriodKeyValue, R = row.Id }
                    equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
+               where anchorPeriods.Contains(cell.PeriodKeyValue)
+                     || db.ColumnDefs.Any(column => column.Id == cell.ColumnDefId
+                                                    && column.IsMonthColumn
+                                                    && column.MonthNumber == cell.PeriodKeyValue % 100)
                select new MonthOwnerCellRow
                {
                    OwnerPeriodKey = cell.PeriodKeyValue,
@@ -334,7 +351,8 @@ public sealed class MonthRoutedCellStore(
                     documentId,
                     entries.SelectMany(e => e.ForeignColumns.Values.Select(f => f.OwnerPeriod.Value)).Distinct().ToList(),
                     entries.Select(e => e.Instance.TableDefId).Distinct().ToList(),
-                    entries.SelectMany(e => e.ColumnIds).Distinct().ToList())
+                    entries.SelectMany(e => e.ForeignColumns.Values.Where(f => !f.Column.IsMonthColumn).Select(f => f.OwnerPeriod.Value))
+                        .Distinct().ToList())
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
         }
@@ -345,6 +363,11 @@ public sealed class MonthRoutedCellStore(
         {
             foreach (var foreign in entry.ForeignColumns.Values)
             {
+                if (!foreign.Column.IsMonthColumn)
+                {
+                    _sessionAnchors.Add(foreign.OwnerPeriod.Value);
+                }
+
                 var key = (foreign.OwnerPeriod.Value, entry.Instance.TableDefId);
                 if (!needs.TryGetValue(key, out var columns))
                 {
@@ -375,7 +398,7 @@ public sealed class MonthRoutedCellStore(
                     documentId,
                     wanted.Keys.Select(k => k.OwnerPeriod).Distinct().ToList(),
                     wanted.Keys.Select(k => k.TableDefId).Distinct().ToList(),
-                    wanted.Values.SelectMany(c => c).Distinct().ToList())
+                    [.. _sessionAnchors])
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 
@@ -404,6 +427,7 @@ public sealed class MonthRoutedCellStore(
         {
             _sessionDepth = 0;
             _ownerCache = null;
+            _sessionAnchors.Clear();
         }
     }
 

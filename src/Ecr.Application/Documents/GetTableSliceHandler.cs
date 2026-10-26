@@ -106,11 +106,19 @@ public sealed class GetTableSliceHandler(
             return blocked;
         }
 
+        // ⚠ Q-17 перф: InPeriod будує НОВУ область (індекси по всій версії шаблону) — на кожну чужу колонку
+        // (до сотень) це ~70 мс на зріз. Область на період-власник одна, колонки — з її власним кешем.
+        var scopeByOwner = new Dictionary<Domain.ValueObjects.PeriodKey, DocumentReadScope>();
         foreach (var foreign in await monthRouter
                      .ForeignColumnsAsync(document, table, new Domain.ValueObjects.PeriodKey(viewPeriod), ct)
                      .ConfigureAwait(false))
         {
-            if (!anyPeriod.InPeriod(foreign.OwnerPeriod).CanReadColumn(foreign.Column.Id))
+            if (!scopeByOwner.TryGetValue(foreign.OwnerPeriod, out var ownerScope))
+            {
+                scopeByOwner[foreign.OwnerPeriod] = ownerScope = anyPeriod.InPeriod(foreign.OwnerPeriod);
+            }
+
+            if (!ownerScope.CanReadColumn(foreign.Column.Id))
             {
                 blocked.Add(foreign.Column.Id);
             }
