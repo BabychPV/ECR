@@ -223,7 +223,15 @@ public sealed class MonthMirrorRowsApiTests(SqlServerFixture sql)
             {
                 if (response.StatusCode is not (HttpStatusCode.OK or HttpStatusCode.Created))
                 {
-                    failures.Add($"#{i}: {(int)response.StatusCode} {await response.Content.ReadAsStringAsync().ConfigureAwait(true)}");
+                    var text = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+                    // ECR-CELL-0409 — законна розбіжність версій: PATCH 3→M5 «торкається» рядок власника (екземпляр 5),
+                    // який є рядком запиту сусіднього PATCH 5→M3 (його baseVersion застаріла). Дедлок/зависання/500 —
+                    // це збій.
+                    if (response.StatusCode != HttpStatusCode.Conflict || !text.Contains("ECR-CELL-0409", StringComparison.Ordinal))
+                    {
+                        failures.Add($"#{i}: {(int)response.StatusCode} {text}");
+                    }
                 }
 
                 response.Dispose();

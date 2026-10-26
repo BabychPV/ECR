@@ -74,7 +74,11 @@ public sealed partial class PatchCellsHandler(
     // ⛔ PRMG: ціль Lookup може бути ГРУПОЮ типів дозволів (прихований `PRMG_*`): запис належить цілі за членством,
     // а не за збігом реєстру. Порівняння - лише через `LookupTargetMatcher`; збіг реєстру (Land) резолвера не кличе.
     // `null` (прямий конструктор у тестах) - груп немає.
-    Permits.Groups.ILookupTargetResolver? groups = null)
+    Permits.Groups.ILookupTargetResolver? groups = null,
+
+    // ✎ Q-17: запис у стовпці з іншим власником (`Collection:MonthColumnRouting`). `null` або вимкнений прапор —
+    // поведінка до Q-17 (усе пишеться в екземпляр запиту).
+    IMonthColumnRouter? monthRouter = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -184,13 +188,36 @@ public sealed partial class PatchCellsHandler(
         // ✎ D-442: правка погоджувача (позначка виставлена під блокуванням аркуша, тут уже відома) несе аркуш
         // у насінні — інакше каскад пропустив би поданий аркуш, і формули оновилися б лише на затвердженні.
         async Task EnqueueAsync(CellChangeLists applied, CancellationToken token)
-            => recalculationJobId = await EnqueueRecalculationAsync(
+        {
+            // ✎ Q-17: запис у стовпці з іншим власником — насіння ГРУПУЄТЬСЯ за фізичним періодом (екземпляром):
+            // адреса (рядок власника, колонка) осмислена лише разом з екземпляром власника.
+            if (applied.Routed is { Count: > 0 } groups)
+            {
+                foreach (var group in groups)
+                {
+                    var id = await EnqueueRecalculationAsync(
+                            request, context.Instance.DocumentId, group.Seeds, context.UserId, token,
+                            group.TableInstanceId, group.PeriodKey)
+                        .ConfigureAwait(false);
+
+                    // Ідентифікатор для клієнта — задача періоду екземпляра запиту (інакше перша).
+                    if (group.TableInstanceId == request.TableInstanceId || recalculationJobId is null)
+                    {
+                        recalculationJobId = id;
+                    }
+                }
+
+                return;
+            }
+
+            recalculationJobId = await EnqueueRecalculationAsync(
                     request,
                     context.Instance.DocumentId,
                     BuildRecalculationSeeds(applied, context.ApproverEdit ? context.Table.SheetDefId : null),
                     context.UserId,
                     token)
                 .ConfigureAwait(false);
+        }
 
         // ⛔ MI-02 (в): черга в базі — постановка ВСЕРЕДИНІ транзакції запису,
         // останнім оператором (відкат запису відкочує й задачу, воркер бачить
@@ -347,13 +374,18 @@ public sealed partial class PatchCellsHandler(
     /// <c>TableRow.Id</c> → нова версія після запису — те, що повернуло сховище
     /// (<see cref="ICellStore.ApplyAsync"/>); <c>null</c> до запису.
     /// </param>
+    /// <param name="Routed">
+    /// Q-17: насіння перерахунку по фізичних екземплярах, коли частину комірок записано власникам; <c>null</c> —
+    /// маршрутизації не було (насіння з <c>Upserts</c>/<c>Deletes</c>).
+    /// </param>
     private sealed record CellChangeLists(
         List<CellRecord> Upserts,
         List<CellAddress> Deletes,
         List<long> Touched,
         Dictionary<long, string> RowKeyById,
         Dictionary<long, string> ExpectedRowVersions,
-        IReadOnlyDictionary<long, string>? NewRowVersions = null);
+        IReadOnlyDictionary<long, string>? NewRowVersions = null,
+        IReadOnlyList<RecalcGroup>? Routed = null);
 
     /// <summary>
     /// Розв'язує особу користувача, структуру таблиці зі знімка метаданих і
@@ -2542,15 +2574,38 @@ public sealed partial class PatchCellsHandler(
             // у цій самій транзакції. Див. <see cref="MaterializeNewRowsAsync"/>.
             var changes = await MaterializeNewRowsAsync(request, context, planned, innerCt).ConfigureAwait(false);
 
-            var newVersions = await cellStore.ApplyAsync(
-                new CellChangeSet(
-                    request.TableInstanceId, changes.Upserts, changes.Deletes, changes.Touched,
-                    context.UserId, isLateEdit, changes.ExpectedRowVersions),
-                innerCt).ConfigureAwait(false);
+            // ✎ Q-17: комірки колонок з іншим власником (місячний m / якір року) йдуть в екземпляр власника, решта
+            // — як і раніше. `null` — прапор вимкнено або чужих комірок у батчі немає: старий шлях БЕЗ змін.
+            var routed = await RouteForeignOwnersAsync(context, changes, isLateEdit, previous, innerCt).ConfigureAwait(false);
+
+            IReadOnlyDictionary<long, string> newVersions;
+            var auditChanges = changes;
+            var auditPrevious = previous;
+            if (routed is null)
+            {
+                newVersions = await cellStore.ApplyAsync(
+                    new CellChangeSet(
+                        request.TableInstanceId, changes.Upserts, changes.Deletes, changes.Touched,
+                        context.UserId, isLateEdit, changes.ExpectedRowVersions),
+                    innerCt).ConfigureAwait(false);
+            }
+            else
+            {
+                // Одноперіодні набори (екземпляр не повторюється): власний — із claim версій рядків запиту, чужі —
+                // «дотик» рядків власників БЕЗ очікуваних версій (їх захищає замок аркуша × період і сам «дотик»).
+                var batch = await cellStore.ApplyBatchAsync([routed.ViewSet, .. routed.OwnerSets], innerCt).ConfigureAwait(false);
+                newVersions = batch.TryGetValue(request.TableInstanceId, out var own)
+                    ? own
+                    : new Dictionary<long, string>();
+                auditChanges = routed.Physical;
+                auditPrevious = routed.PreviousPhysical;
+                context.OutOfWindow.UnionWith(routed.OutOfWindowPhysical);
+            }
 
             // ⚠ `WR-04` п. 4: нові версії «торкнутих» рядків — із самого запису
-            // (див. <see cref="BuildResponseAsync"/>).
-            changes = changes with { NewRowVersions = newVersions };
+            // (див. <see cref="BuildResponseAsync"/>). Версії лише рядків ЕКЗЕМПЛЯРА ЗАПИТУ: рядки власників клієнт
+            // не тримає.
+            changes = changes with { NewRowVersions = newVersions, Routed = routed?.Groups };
             applied = changes;
 
             // ⚠ `WR-04` п. 1: окремого `rowStore.TouchRowsAsync` тут більше
@@ -2570,7 +2625,8 @@ public sealed partial class PatchCellsHandler(
             // гірша за відсутність дати.
             await documents.TouchAsync(context.Instance.DocumentId, context.UserId, now, innerCt).ConfigureAwait(false);
 
-            await WriteAuditAsync(request, context, changes, now, isLateEdit, previous, innerCt).ConfigureAwait(false);
+            // ✎ Q-17: аудит — на ФІЗИЧНИХ адресах (період і рядок власника); без маршрутизації це ті самі `changes`.
+            await WriteAuditAsync(request, context, auditChanges, now, isLateEdit, auditPrevious, innerCt).ConfigureAwait(false);
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
@@ -3021,12 +3077,20 @@ public sealed partial class PatchCellsHandler(
         long documentId,
         IReadOnlyList<RecalculationSeed> seeds,
         int editorUserId,
-        CancellationToken ct)
-        => await jobs.EnqueueCoalescedAsync<Ports.IFormulaRecalculationJob>(
-            Ports.FormulaRecalculationTarget.Of(documentId, request.PeriodKey, editorUserId),
-            new { DocumentId = documentId, request.TableInstanceId, request.PeriodKey, Cells = seeds }, ct,
+        CancellationToken ct,
+        long? tableInstanceId = null,
+        int? periodKey = null)
+    {
+        // ✎ Q-17: задача ФІЗИЧНОГО екземпляра (власника) — коли насіння з його адресами; без параметрів — екземпляр запиту.
+        var instanceId = tableInstanceId ?? request.TableInstanceId;
+        var period = periodKey ?? request.PeriodKey;
+
+        return await jobs.EnqueueCoalescedAsync<Ports.IFormulaRecalculationJob>(
+            Ports.FormulaRecalculationTarget.Of(documentId, period, editorUserId),
+            new { DocumentId = documentId, TableInstanceId = instanceId, PeriodKey = period, Cells = seeds }, ct,
             createdByUserId: editorUserId)
             .ConfigureAwait(false);
+    }
 
     /// <summary>Насіння каскаду: адреси всіх записаних і стертих комірок батчу.</summary>
     /// <remarks>

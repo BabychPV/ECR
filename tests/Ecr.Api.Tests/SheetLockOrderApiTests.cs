@@ -89,7 +89,8 @@ public sealed class SheetLockOrderApiTests(SqlServerFixture sql)
         using var _ = app;
         using var __ = client;
 
-        var seen = await ObserveAsync(() => PatchAsync(client, s, ("PLAIN", 4m), ("M3", 3m))).ConfigureAwait(true);
+        var seen = await ObserveAsync(() => PatchAsync(client, s, ("PLAIN", 4m), ("M3", 3m)), () => app.ErrorsText)
+            .ConfigureAwait(true);
 
         AssertAscending(seen);
         var periods = DistinctPeriods(seen);
@@ -145,7 +146,8 @@ public sealed class SheetLockOrderApiTests(SqlServerFixture sql)
 
     private static List<int> DistinctPeriods(List<(char Kind, int Period)> seen) => [.. seen.Select(x => x.Period).Distinct().Order()];
 
-    private static async Task<List<(char Kind, int Period)>> ObserveAsync(Func<Task<HttpResponseMessage>> action)
+    private static async Task<List<(char Kind, int Period)>> ObserveAsync(
+        Func<Task<HttpResponseMessage>> action, Func<string>? serverErrors = null)
     {
         var sink = new List<(char, int)>();
         Sink.Value = sink;
@@ -153,7 +155,7 @@ public sealed class SheetLockOrderApiTests(SqlServerFixture sql)
         {
             using var response = await action().ConfigureAwait(false);
             var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}\n{body}");
+            Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}\n{body}\n{serverErrors?.Invoke()}");
         }
         finally
         {
