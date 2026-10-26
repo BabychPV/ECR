@@ -115,6 +115,47 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// P52: пікер з <c>documentId</c> під РЕАЛЬНИМИ користувачами. Профіль з областю без View (інший проєкт, звужена роль) і
+    /// Deny: існуючий реєстр відповідає ТАК САМО, як неіснуючий (404 ECR-REG-0404); глобальний користувач без View і без
+    /// областей - 403 в обох (як було); scoped View - 200.
+    /// </summary>
+    [Theory]
+    [InlineData("scoped", 200, 404)]
+    [InlineData("scopedSelfDeny", 404, 404)]
+    [InlineData("scopedElsewhere", 404, 404)]
+    [InlineData("narrowedViewOnly", 404, 404)]
+    [InlineData("narrowedDenyPlusView", 404, 404)]
+    [InlineData("none", 403, 403)]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P52")]
+    public async Task Пікер_з_documentId_за_типом_доступу_до_реєстру(string kind, int existing, int missing)
+    {
+        var s = await ArrangeAsync(kind).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var doc = s.Doc.DocumentId.ToString(CultureInfo.InvariantCulture);
+        using var exists = await client.GetAsync(
+            new Uri($"/api/v1/registries/{s.RegistryCode}/entries?documentId={doc}", UriKind.Relative)).ConfigureAwait(true);
+        using var absent = await client.GetAsync(
+            new Uri($"/api/v1/registries/NO_SUCH_REG_P52/entries?documentId={doc}", UriKind.Relative)).ConfigureAwait(true);
+        var existsBody = await exists.Content.ReadAsStringAsync().ConfigureAwait(true);
+        var absentBody = await absent.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True((int)exists.StatusCode == existing, $"існуючий: {exists.StatusCode}: {existsBody}\n{app.ErrorsText}");
+        Assert.True((int)absent.StatusCode == missing, $"неіснуючий: {absent.StatusCode}: {absentBody}\n{app.ErrorsText}");
+
+        if (existing != 200)
+        {
+            Assert.Equal(absent.StatusCode, exists.StatusCode);
+            Assert.Equal(
+                JsonDocument.Parse(absentBody).RootElement.GetProperty("errorCode").GetString(),
+                JsonDocument.Parse(existsBody).RootElement.GetProperty("errorCode").GetString());
+        }
+    }
+
+    /// <summary>
     /// Регресія: роль лише з <c>Document.View</c> (як PeriodAdministrator/BootstrapAdministrator у сіді, без грантів
     /// Write на проєкт) комірок не пише - з Registry.View чи без.
     /// </summary>
@@ -559,10 +600,10 @@ public sealed class ScopedRegistryViewApiTests(SqlServerFixture sql)
         var rowKey = await db.TableRows.AsNoTracking().Where(r => r.Id == doc.RowIds[0])
             .Select(r => r.RowKeyValue).SingleAsync().ConfigureAwait(false);
 
-        return new Scenario(doc, userName, entry.Id, permit.Id, rowKey, doc.RowIds[0], doc.ColumnDefIds[1], column);
+        return new Scenario(doc, userName, entry.Id, permit.Id, rowKey, doc.RowIds[0], doc.ColumnDefIds[1], column, registry.Code);
     }
 
     private sealed record Scenario(
         TestDocument Doc, string UserName, long EntryId, int PermitFieldId, string RowKey, long RowId,
-        int LookupColumnId, string LookupColumnCode);
+        int LookupColumnId, string LookupColumnCode, string RegistryCode);
 }
