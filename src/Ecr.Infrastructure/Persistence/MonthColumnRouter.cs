@@ -43,7 +43,9 @@ public sealed class MonthColumnRouter : IMonthColumnRouter
         ArgumentNullException.ThrowIfNull(configuration);
 
         _db = db;
-        Enabled = configuration.GetValue("Collection:MonthColumnRouting", false);
+        // ⚠ Лише `true`/`True` вмикає; будь-що інше (порожньо, опечатка, підмінена конфігурація тестів) — вимкнено.
+        // Формат ключа перевіряє `EcrConfigurationValidation.Booleans` на старті.
+        Enabled = bool.TryParse(configuration["Collection:MonthColumnRouting"], out var enabled) && enabled;
     }
 
     /// <inheritdoc />

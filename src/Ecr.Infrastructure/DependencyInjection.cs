@@ -90,7 +90,8 @@ public static class DependencyInjection
         // Q-17: декоратор маршрутизації місячних стовпців; прапор `Collection:MonthColumnRouting` (за замовчуванням
         // вимкнено) читає роутер — вимкнено, декоратор лише передає виклики в NormalizedCellStore.
         services.AddScoped<NormalizedCellStore>();
-        services.AddScoped<IMonthColumnRouter, MonthColumnRouter>();
+        // ⚠ Конфігурація — із замикання, а не з DI: граф задачі в Ecr.Worker.Tests збирається без `IConfiguration`.
+        services.AddScoped<IMonthColumnRouter>(sp => new MonthColumnRouter(sp.GetRequiredService<EcrDbContext>(), configuration));
         services.AddScoped<ICellStore>(sp => new MonthRoutedCellStore(
             sp.GetRequiredService<NormalizedCellStore>(),
             sp.GetRequiredService<IMonthColumnRouter>(),
