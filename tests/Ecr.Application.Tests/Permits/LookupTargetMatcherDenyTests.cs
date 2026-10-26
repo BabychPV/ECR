@@ -213,4 +213,27 @@ public sealed class LookupTargetMatcherDenyTests
         Assert.False(LookupTargetMatcher.Belongs(groups, profile, Target, Other, ProjectId));
         Assert.True(LookupTargetMatcher.Belongs(groups, profile, Target, Other, ProjectId + 1));
     }
-}
+
+    // ── P2-C (Тестувальник, прохід A): Deny на саму ціль-ГРУПУ перевіряється першим - запис члена групи не обирається ──
+
+    [Fact]
+    public void Deny_на_ціль_групи_блокує_запис_члена_а_Deny_лише_на_члена_як_раніше()
+    {
+        var groups = new FakePermitGroupResolver();
+        groups.WithGroup(Target, [Other]);
+
+        Assert.True(LookupTargetMatcher.Belongs(groups, WithView(), Target, Other));
+        Assert.False(LookupTargetMatcher.Belongs(groups, WithView("Registry:" + Target), Target, Other));
+        Assert.False(LookupTargetMatcher.Belongs(groups, WithView("Registry:" + Other), Target, Other));
+    }
+
+    [Fact]
+    public void Scoped_Deny_на_ціль_групи_блокує_члена_лише_у_проєкті_призначення()
+    {
+        var groups = new FakePermitGroupResolver();
+        groups.WithGroup(Target, [Other]);
+        var profile = Scoped(globalView: true, scopedView: false, deny: true, readGrant: false);
+
+        Assert.False(LookupTargetMatcher.Belongs(groups, profile, Target, Other, ProjectId));
+        Assert.True(LookupTargetMatcher.Belongs(groups, profile, Target, Other, ProjectId + 1));
+    }}

@@ -132,7 +132,7 @@ public sealed class ExcelImportApplyWorkbookTests(SqlServerFixture sql) : IDispo
             () => Importer(db, profile, plan).ApplyAsync(world.Doc.DocumentId, Token, CancellationToken.None));
 
         Assert.Equal("ECR-DOC-0404", error.ErrorCode);
-        Assert.Equal("err.ECR-DOC-0404.tableInstance", error.Details!["messageKey"]);
+        Assert.Equal("err.ECR-DOC-0404.document", error.Details!["messageKey"]);
         Assert.Equal(guilty.TableInstanceId.ToString(CultureInfo.InvariantCulture), error.Details["tableInstanceId"]);
         Assert.Equal(before, await StateAsync(world));
     }

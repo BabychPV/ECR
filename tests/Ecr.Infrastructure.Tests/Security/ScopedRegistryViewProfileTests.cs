@@ -108,7 +108,7 @@ public sealed class ScopedRegistryViewProfileTests(SqlServerFixture sql) : IDisp
         return user.Id;
     }
 
-    private async Task<bool> CanChooseAsync(TestDocument doc, int userId, int? projectOverride = null)
+    private async Task<bool> CanChooseAsync(TestDocument doc, int userId, int? projectOverride = null, bool groupMember = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         await using var db = builder.CreateContext();
@@ -123,6 +123,14 @@ public sealed class ScopedRegistryViewProfileTests(SqlServerFixture sql) : IDisp
 
         // Як викликачі: проєкт документа передається лише коли він потрібен.
         int? viewProject = LookupTargetMatcher.ViewProjectNeeded(profile) ? projectOverride ?? doc.ProjectId : null;
+        if (groupMember)
+        {
+            // Ціль - ГРУПА (Registry), запис - у реєстрі-члені (Registry + 1).
+            var groups = new FakePermitGroupResolver();
+            groups.WithGroup(Registry, [Registry + 1]);
+            return LookupTargetMatcher.Belongs(groups, profile, Registry, Registry + 1, viewProject);
+        }
+
         return LookupTargetMatcher.Belongs(null, profile, Registry, Registry, viewProject);
     }
 
@@ -286,4 +294,27 @@ public sealed class ScopedRegistryViewProfileTests(SqlServerFixture sql) : IDisp
             doc, view: true, scopeProjects: [doc.ProjectId], scopedReadGrant: true, narrowSheets: ["SHEET_X"]);
 
         Assert.False(await CanChooseAsync(doc, user));
+    }
+    // ── P2-C (прохід A): Deny на саму ціль-групу блокує запис члена у всіх трьох шляхах профілю ────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P2-C")]
+    public async Task Deny_на_ціль_групи_блокує_запис_члена_для_глобальної_scoped_і_звуженої_ролі()
+    {
+        var doc = await ArrangeAsync();
+        var global = await UserAsync(doc, view: true, scopeProjects: null, deny: true);
+        var scoped = await UserAsync(doc, view: false, scopeProjects: [doc.ProjectId], deny: true, globalViewRole: true);
+        var narrowed = await UserAsync(
+            doc, view: false, scopeProjects: [doc.ProjectId], deny: true, globalViewRole: true, narrowSheets: ["SHEET_X"]);
+        var plain = await UserAsync(doc, view: true, scopeProjects: null);
+
+        Assert.False(await CanChooseAsync(doc, global, groupMember: true));
+        Assert.False(await CanChooseAsync(doc, scoped, groupMember: true));
+        Assert.False(await CanChooseAsync(doc, narrowed, groupMember: true));
+        Assert.True(await CanChooseAsync(doc, plain, groupMember: true));
+
+        // Deny проєкту призначення в іншому проєкті не діє.
+        Assert.True(await CanChooseAsync(doc, scoped, projectOverride: doc.ProjectId + 1_000_000, groupMember: true));
     }}

@@ -74,6 +74,13 @@ public static class LookupTargetEntries
             return [.. own.Select(e => new LookupTargetEntry(e, null))];
         }
 
+        // P2-C: Deny на саму ціль-групу - порожній перелік (як неіснуючі коди), до членів.
+        if (profile is not null && !profile.IsIntegrationWriter
+            && Registries.RegistryAccess.IsDeniedIn(profile, targetRegistryId, viewProjectId))
+        {
+            return [];
+        }
+
         var result = new List<LookupTargetEntry>();
         foreach (var memberId in groups.ExpandRegistryIds(targetRegistryId))
         {

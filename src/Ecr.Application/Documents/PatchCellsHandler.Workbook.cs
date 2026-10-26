@@ -296,7 +296,9 @@ public sealed partial class PatchCellsHandler
 
         var now = clock.UtcNow;
         var isLateEdit = await DetermineIsLateEditAsync(
-                documentId, [.. active.Select(x => x.Context.Table.SheetDefId).Distinct()], period.Value, ct)
+                documentId, [.. active.Select(x => x.Context.Table.SheetDefId).Distinct()], period.Value, ct,
+                [.. active.SelectMany(x => x.Context.ColumnPeriods).Distinct()],
+                active.Exists(x => x.Context.InstancePeriodGoverns))
             .ConfigureAwait(false);
 
         await uow.ExecuteInTransactionAsync(
@@ -751,6 +753,13 @@ public sealed partial class PatchCellsHandler
             var status = statuses[sheetDefId];
 
             context.ApproverEdit = false;
+
+            // ✎ P2-A: усі комірки набору — місячні колонки інших місяців: період екземпляра ними не керує.
+            if (!context.InstancePeriodGoverns)
+            {
+                continue;
+            }
+
             if (status == Domain.Enums.DocumentStatus.Submitted
                 && context.ByApprover
                 && context.Creations.Count == 0)
@@ -769,6 +778,20 @@ public sealed partial class PatchCellsHandler
             }
 
             Blamed(item.Id, () => CheckSheetStatus(status, item.Planned));
+        }
+
+        // ✎ P2-A: стани аркушів періодів місячних колонок — під їхніми блокуваннями, за зростанням (див.
+        // `EnsureColumnPeriodsEditableAsync`).
+        foreach (var item in active.Where(x => x.Context.ColumnPeriods.Count > 0))
+        {
+            await BlamedAsync(item.Id, async () =>
+            {
+                await EnsureColumnPeriodsEditableAsync(
+                        item.Context.Instance.DocumentId, item.Context.Table.SheetDefId, item.Context.ColumnPeriods,
+                        item.Planned, ct)
+                    .ConfigureAwait(false);
+                return true;
+            }).ConfigureAwait(false);
         }
     }
 

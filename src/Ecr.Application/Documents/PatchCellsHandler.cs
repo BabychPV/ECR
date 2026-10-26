@@ -172,7 +172,8 @@ public sealed partial class PatchCellsHandler(
 
         var now = clock.UtcNow;
         var isLateEdit = await DetermineIsLateEditAsync(
-                context.Instance.DocumentId, [context.Table.SheetDefId], request.PeriodKey, ct)
+                context.Instance.DocumentId, [context.Table.SheetDefId], request.PeriodKey, ct,
+                context.ColumnPeriods, context.InstancePeriodGoverns)
             .ConfigureAwait(false);
 
         // ⚠ `BE-05`: ідентифікатор поставленої задачі їде клієнтові у відповіді.
@@ -307,6 +308,22 @@ public sealed partial class PatchCellsHandler(
         /// Ставиться ЛИШЕ під блокуванням (скидається на кожній спробі транзакції).
         /// </summary>
         public bool ApproverEdit { get; set; }
+
+        /// <summary>
+        /// P2-A: ключі періодів, ІНШИХ ніж період екземпляра, стан яких керує дозволеними комірками батчу (місячні
+        /// колонки <c>MonthsInColumns</c>, <see cref="EditDecision.ColumnPeriod"/>). Під блокуванням аркуша стан
+        /// аркуша кожного з них перечитується; <c>IsLateEdit</c> рахується і за ними.
+        /// </summary>
+        public SortedSet<int> ColumnPeriods { get; } = [];
+
+        /// <summary>P2-A: у батчі є комірка (чи новий рядок), яку керує період САМОГО екземпляра.</summary>
+        public bool OwnPeriodWritten { get; set; }
+
+        /// <summary>
+        /// P2-A: період екземпляра керує записом: є його комірка, або періодів колонок немає зовсім
+        /// (звичайна таблиця). <c>false</c> лише коли ВСІ комірки батчу — місячні колонки інших місяців.
+        /// </summary>
+        public bool InstancePeriodGoverns => OwnPeriodWritten || ColumnPeriods.Count == 0;
     }
 
     /// <summary>Розподіл змін по upsert/delete разом із супутнім станом.</summary>
@@ -982,6 +999,22 @@ public sealed partial class PatchCellsHandler(
     }
 
     /// <summary>
+    /// P2-A: чий період керує дозволеною коміркою — екземпляра (<c>OwnPeriodWritten</c>) чи місячної колонки іншого
+    /// місяця (<c>ColumnPeriods</c>).
+    /// </summary>
+    private static void NoteGoverningPeriod(RequestContext context, EditDecision decision)
+    {
+        if (decision.ColumnPeriod is { } columnPeriod && columnPeriod != context.PeriodKey.Value)
+        {
+            context.ColumnPeriods.Add(columnPeriod);
+        }
+        else
+        {
+            context.OwnPeriodWritten = true;
+        }
+    }
+
+    /// <summary>
     /// Рішення про права на батч — однакове для поштучного й книжкового шляху;
     /// відсутнє рішення — відмова.
     /// </summary>
@@ -1041,6 +1074,11 @@ public sealed partial class PatchCellsHandler(
                     context.OutOfWindow.Add(address);
                 }
 
+                if (decision.IsAllowed)
+                {
+                    NoteGoverningPeriod(context, decision);
+                }
+
                 if (decision.IsAllowed && decision.ViaAssignment)
                 {
                     context.LiftedColumns.Add(address.ColumnDefId);
@@ -1082,6 +1120,9 @@ public sealed partial class PatchCellsHandler(
                     continue;
                 }
 
+                // P2-A: сам новий рядок належить періоду екземпляра.
+                context.OwnPeriodWritten = true;
+
                 // ⚠ Колонки перевіряються ОКРЕМО від рядка: грант оголошується
                 // в тому числі на колонку (`ResourceKind.Column`), тож «писати
                 // в цю таблицю можна» і «писати в цю колонку можна» — різні
@@ -1106,6 +1147,11 @@ public sealed partial class PatchCellsHandler(
                     else if (decision.RequiresConfirmation)
                     {
                         needsConfirmation++;
+                    }
+
+                    if (decision.IsAllowed)
+                    {
+                        NoteGoverningPeriod(context, decision);
                     }
 
                     if (decision.IsAllowed && decision.ViaAssignment)
@@ -2206,7 +2252,37 @@ public sealed partial class PatchCellsHandler(
     /// умова: аркуш відкрито й відтоді не затверджено знову
     /// (<see cref="IPeriodStore.HasReopenedSheetAsync"/>).
     /// </remarks>
+    /// <remarks>
+    /// ✎ P2-A: крім періоду екземпляра (коли його комірки є в батчі) пізньою вважається й правка комірки місячної
+    /// колонки, період якої в <c>Grace</c> чи перевідкритий (<paramref name="columnPeriods"/>). Ознака одна на батч:
+    /// змішаний батч (власні комірки + колонка періоду в <c>Grace</c>) позначається пізнім цілком.
+    /// </remarks>
     private async Task<bool> DetermineIsLateEditAsync(
+        long documentId,
+        IReadOnlyCollection<int> sheetDefIds,
+        int periodKeyValue,
+        CancellationToken ct,
+        IEnumerable<int>? columnPeriods = null,
+        bool instancePeriodGoverns = true)
+    {
+        if (instancePeriodGoverns
+            && await IsLateEditInPeriodAsync(documentId, sheetDefIds, periodKeyValue, ct).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        foreach (var columnPeriod in columnPeriods ?? [])
+        {
+            if (await IsLateEditInPeriodAsync(documentId, sheetDefIds, columnPeriod, ct).ConfigureAwait(false))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private async Task<bool> IsLateEditInPeriodAsync(
         long documentId, IReadOnlyCollection<int> sheetDefIds, int periodKeyValue, CancellationToken ct)
     {
         var periodState = await periods
@@ -2543,15 +2619,48 @@ public sealed partial class PatchCellsHandler(
         // «чия черга» читається заново (`CanApproveAsync`): крок N+1 чи `Approved` правку відхиляють.
         // ⚠ Позначка скидається на кожній спробі: стратегія повторів виконує тіло транзакції вдруге.
         context.ApproverEdit = false;
-        if (status == DocumentStatus.Submitted
-            && context.ByApprover
-            && await StillCurrentApproverAsync(context, ct).ConfigureAwait(false))
+
+        // ✎ P2-A: стан аркуша ПЕРІОДУ ЕКЗЕМПЛЯРА керує записом, лише коли в батчі є його комірка; комірки місячних
+        // колонок інших місяців підлягають станам своїх періодів (нижче). Блокування періоду екземпляра береться
+        // завжди — порядок блокувань незмінний.
+        if (context.InstancePeriodGoverns)
         {
-            context.ApproverEdit = true;
-            return;
+            if (status == DocumentStatus.Submitted
+                && context.ByApprover
+                && await StillCurrentApproverAsync(context, ct).ConfigureAwait(false))
+            {
+                context.ApproverEdit = true;
+            }
+            else
+            {
+                CheckSheetStatus(status, changes);
+            }
         }
 
-        CheckSheetStatus(status, changes);
+        await EnsureColumnPeriodsEditableAsync(
+                context.Instance.DocumentId, context.Table.SheetDefId, context.ColumnPeriods, changes, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ P2-A: стан аркуша кожного періоду місячних колонок батчу — під ЙОГО спільним блокуванням, за зростанням ключа.
+    /// <c>Submitted</c>/<c>Approved</c> → та сама відмова, що й у <see cref="CheckSheetStatus"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Правка погоджувача (D-442) на інший місяць не поширюється: рішення для колонки іншого періоду
+    /// <see cref="EditDecision.ByApprover"/> не ставить, тож поданий місяць тут відмовляє всім.
+    /// </remarks>
+    private async Task EnsureColumnPeriodsEditableAsync(
+        long documentId, int sheetDefId, IEnumerable<int> columnPeriods, CellChangeLists changes, CancellationToken ct)
+    {
+        foreach (var columnPeriod in columnPeriods)
+        {
+            var columnStatus = await sheetGate
+                .EnterEditAsync(documentId, sheetDefId, new PeriodKey(columnPeriod), ct)
+                .ConfigureAwait(false);
+
+            CheckSheetStatus(columnStatus, changes);
+        }
     }
 
     /// <summary>D-442: користувач і далі погоджувач поточного кроку цього аркуша — під блокуванням.</summary>

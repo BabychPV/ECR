@@ -430,6 +430,27 @@ public sealed class PatchCellsLookupValidityTests
         await _periods.DidNotReceiveWithAnyArgs().FindPeriodBoundsAsync(default, default, default);
     }
 
+    /// <summary>P2-C (прохід A): Deny на саму ціль-ГРУПУ відсікає запис члена - як «запису немає», побайтно.</summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "P2-C")]
+    public async Task Група_Deny_на_ціль_групи_відхиляється_як_немає_запису_побайтно()
+    {
+        DenyRegistry(ColumnRegistryDefId);
+        _groups.WithGroup(ColumnRegistryDefId, [OtherRegistryDefId]);
+        Entry(registryDefId: OtherRegistryDefId);
+
+        await AssertRejected("err.ECR-CELL-4223.missingEntry");
+
+        var denied = await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(new List<RegistryEntryStanding>());
+        var absent = await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+
+        Assert.Equal(absent.Message, denied.Message);
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(absent.Details),
+            System.Text.Json.JsonSerializer.Serialize(denied.Details));
+    }
+
     /// <summary>Deny на видалений/нечинний запис прямої цілі не розкриває причину: теж `missingEntry`.</summary>
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "PRMG-DENY")]
     public async Task Пряма_ціль_під_Deny_видалений_запис_теж_missingEntry()

@@ -1535,7 +1535,21 @@ public sealed class AccessDecisionService(
     {
         var def = RowDefOf(slice, rowKey);
 
-        var context = slice.Shared with
+        // ⛔ P2-A (слово людини 26.10: «заборона лише для поданих/погоджених/закритих»): колонка місяця k таблиці
+        // MonthsInColumns підлягає стану СВОГО періоду k, а не періоду екземпляра. Підміняються лише ознаки періоду
+        // (стан, стан аркуша); ґрант, роль, код аркуша, передачі й правила вікна — ті самі. Scheduled-період колонки
+        // не блокує (внесення наперед), тож `MonthShared` уже несе для нього Open.
+        var shared = slice.Shared;
+        int? columnPeriod = null;
+        if (column.IsMonthColumn
+            && column.MonthNumber is { } columnMonth
+            && slice.MonthShared.TryGetValue(columnMonth, out var monthContext))
+        {
+            shared = monthContext.Context;
+            columnPeriod = monthContext.PeriodKey;
+        }
+
+        var context = shared with
         {
             TableDefId = slice.TableDefId,
             ColumnDefId = column.Id,
@@ -1646,6 +1660,11 @@ public sealed class AccessDecisionService(
             decision = decision with { ByApprover = true };
         }
 
+        if (columnPeriod is not null)
+        {
+            decision = decision with { ColumnPeriod = columnPeriod };
+        }
+
         return slice.DocumentHasAssignments ? decision with { AssignmentsPresent = true } : decision;
     }
 
@@ -1684,10 +1703,20 @@ public sealed class AccessDecisionService(
         /// Порожньо — таких формул у таблиці немає (більшість таблиць).
         /// </summary>
         public IReadOnlySet<(string RowKey, int ColumnDefId)> ComputedCells { get; init; } = NoComputedCells;
+
+        /// <summary>
+        /// P2-A (слово людини 26.10): умови місячних колонок ІНШИХ місяців, ніж період екземпляра, у таблиці
+        /// <c>MonthsInColumns</c> місячного проєкту — номер місяця → (умови з ПЕРІОДОМ колонки, ключ періоду колонки).
+        /// Порожньо — таблиця не місячна, місяць той самий, шлях інтеграції/симуляції.
+        /// </summary>
+        public IReadOnlyDictionary<byte, (CellAccessContext Context, int PeriodKey)> MonthShared { get; init; } = NoMonthShared;
     }
 
     private static readonly IReadOnlySet<(string RowKey, int ColumnDefId)> NoComputedCells =
         new HashSet<(string, int)>();
+
+    private static readonly IReadOnlyDictionary<byte, (CellAccessContext Context, int PeriodKey)> NoMonthShared =
+        new Dictionary<byte, (CellAccessContext, int)>();
 
     /// <summary>
     /// <c>(RowKey, ColumnDefId)</c> комірок таблиці, які рахує комірочна формула шаблону (WW-02): користувач
@@ -1852,6 +1881,12 @@ public sealed class AccessDecisionService(
             // ✎ D-442: погоджувач поточного кроку — ОДИН раз на поданий аркуш групи, не на комірку.
             var approverOf = new Dictionary<int, bool>();
 
+            // ⛔ P2-A: стани періодів місячних колонок — ОДИН раз на групу (проєкт + періоди року) і на аркуш (стани
+            // аркуша), а не на таблицю чи комірку; лише для таблиць `MonthsInColumns` (решта не платить нічого).
+            var monthEnvironmentRead = false;
+            MonthEnvironment? monthEnvironment = null;
+            var monthStatesBySheet = new Dictionary<int, IReadOnlyDictionary<byte, MonthState>>();
+
             foreach (var instance in group)
             {
                 var sheetDefId = sheetOf[instance.Id];
@@ -1909,14 +1944,150 @@ public sealed class AccessDecisionService(
                     }
                 }
 
+                var monthShared = NoMonthShared;
+                if (!profile.IsIntegrationWriter
+                    && !profile.IsSimulation
+                    && snapshot.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == instance.TableDefId)
+                        is { LayoutKind: TableLayoutKind.MonthsInColumns }
+                    && columns.Any(c => c.IsMonthColumn && c.MonthNumber is { } m && m != periodKey.Sequence))
+                {
+                    if (!monthStatesBySheet.TryGetValue(sheetDefId, out var monthStates))
+                    {
+                        if (!monthEnvironmentRead)
+                        {
+                            monthEnvironment = await MonthEnvironmentAsync(documentId, periodKey, ct).ConfigureAwait(false);
+                            monthEnvironmentRead = true;
+                        }
+
+                        monthStates = monthEnvironment is null
+                            ? new Dictionary<byte, MonthState>()
+                            : await MonthStatesAsync(monthEnvironment, documentId, sheetDefId, periodKey, ct)
+                                .ConfigureAwait(false);
+                        monthStatesBySheet[sheetDefId] = monthStates;
+                    }
+
+                    if (monthStates.Count > 0)
+                    {
+                        monthShared = monthStates.ToDictionary(
+                            s => s.Key,
+                            s => (shared with
+                            {
+                                PeriodState = s.Value.State,
+                                SheetStatus = s.Value.Status,
+                                IsCurrentApprover = false,
+                            }, s.Value.PeriodKey));
+                    }
+                }
+
                 result[instance.Id] = new SliceContext(
                     periodKey, instance.TableDefId, sheetDefId, shared, columns, snapshot, ruleContext)
                 {
                     Delegation = delegation,
                     DocumentHasAssignments = documentHasAssignments,
                     ComputedCells = ComputedCellsOf(snapshot, instance.TableDefId),
+                    MonthShared = monthShared,
                 };
             }
+        }
+
+        return result;
+    }
+
+    /// <summary>Стани періодів року документа (ефективні, на <c>clock.UtcNow</c>) за номером місяця.</summary>
+    /// <param name="Year">Рік періоду екземпляра.</param>
+    /// <param name="States">Місяць (<c>Period.Sequence</c>) → ефективний стан; місяця без рядка періоду немає.</param>
+    private sealed record MonthEnvironment(int Year, IReadOnlyDictionary<byte, PeriodState> States);
+
+    /// <summary>Умови місячної колонки: стан її періоду, стан аркуша за цей період і ключ періоду.</summary>
+    private sealed record MonthState(PeriodState State, DocumentStatus Status, int PeriodKey);
+
+    /// <summary>
+    /// P2-A: стани періодів року — ОДНИМ читанням проєкту й ОДНИМ — періодів; <c>null</c> — проєкт не місячний
+    /// (номер періоду не дорівнює місяцю, відповідності «місяць k → період k» немає: <c>SubmissionPeriodSelector</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Стан для РІШЕННЯ — той самий, що в <see cref="BuildContextAsync"/> (F-08, ФВ-1.8): для активного проєкту
+    /// <c>Effective</c> на <c>clock.UtcNow</c> з тим самим вікном року, для чернетки — збережений.
+    /// </remarks>
+    private async Task<MonthEnvironment?> MonthEnvironmentAsync(long documentId, PeriodKey instancePeriod, CancellationToken ct)
+    {
+        var project = await (
+                from d in db.Documents.AsNoTracking()
+                where d.Id == documentId
+                join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                select new { p.Id, p.Status, p.PeriodKind, p.PeriodEnd, p.YearGraceOffsetDays, p.TimeZoneId })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (project is null || project.PeriodKind != PeriodKind.Monthly)
+        {
+            return null;
+        }
+
+        var first = instancePeriod.Year * 100;
+        var rows = await db.Periods
+            .AsNoTracking()
+            .Where(x => x.ProjectId == project.Id && x.PeriodKeyValue > first && x.PeriodKeyValue <= first + 12)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var window = Domain.Services.YearGraceWindow.For(
+            project.PeriodEnd,
+            project.YearGraceOffsetDays,
+            SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo());
+        var now = clock.UtcNow;
+
+        var states = new Dictionary<byte, PeriodState>(rows.Count);
+        foreach (var row in rows)
+        {
+            states[row.Sequence] = project.Status == ProjectStatus.Active ? PeriodStates.Effective(row, now, window) : row.State;
+        }
+
+        return new MonthEnvironment(instancePeriod.Year, states);
+    }
+
+    /// <summary>
+    /// P2-A: для кожного місяця року, КРІМ місяця періоду екземпляра, — стан його періоду й стан аркуша за цей період
+    /// (один запит до <c>wf.ApprovalState</c> на аркуш усього року).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>Scheduled</c> (і періоду без рядка) → <c>Open</c>: внесення наперед (Land T9a) не ламається. Правку
+    /// <c>Submitted</c>/<c>Approved</c>/<c>Closed</c> місяця це не відкриває — вони лишаються самі собою.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<byte, MonthState>> MonthStatesAsync(
+        MonthEnvironment environment, long documentId, int sheetDefId, PeriodKey instancePeriod, CancellationToken ct)
+    {
+        var first = environment.Year * 100;
+        var statuses = await db.ApprovalStates
+            .AsNoTracking()
+            .Where(a => a.DocumentId == documentId
+                        && a.SheetDefId == sheetDefId
+                        && a.PeriodKey > first
+                        && a.PeriodKey <= first + 12)
+            .Select(a => new { a.PeriodKey, a.Status })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var statusByKey = new Dictionary<int, DocumentStatus>();
+        foreach (var status in statuses)
+        {
+            statusByKey.TryAdd(status.PeriodKey, status.Status);
+        }
+
+        var result = new Dictionary<byte, MonthState>(12);
+        for (byte month = 1; month <= 12; month++)
+        {
+            if (month == instancePeriod.Sequence)
+            {
+                continue;
+            }
+
+            var key = first + month;
+            var state = environment.States.TryGetValue(month, out var found) ? found : PeriodState.Scheduled;
+            result[month] = new MonthState(
+                state == PeriodState.Scheduled ? PeriodState.Open : state,
+                statusByKey.TryGetValue(key, out var sheetStatus) ? sheetStatus : DocumentStatus.Draft,
+                key);
         }
 
         return result;

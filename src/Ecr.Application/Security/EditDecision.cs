@@ -52,6 +52,14 @@ public readonly record struct EditDecision(
     /// </summary>
     public bool ByApprover { get; init; }
 
+    /// <summary>
+    /// P2-A (рішення людини 26.10): ключ періоду місячної колонки (<c>MonthsInColumns</c>), стан якого діяв у цьому
+    /// рішенні ЗАМІСТЬ стану періоду екземпляра таблиці; <c>null</c> — рішення про період екземпляра. Запис повторює
+    /// перевірку стану аркуша саме цього періоду під його блокуванням (<c>sheetGate</c>) і ставить <c>IsLateEdit</c>
+    /// за його станом.
+    /// </summary>
+    public int? ColumnPeriod { get; init; }
+
     public static EditDecision Allow() => new(true, EditDenyReason.None);
 
     /// <summary>Дозволено погоджувачеві поточного кроку правити поданий аркуш (D-442).</summary>
