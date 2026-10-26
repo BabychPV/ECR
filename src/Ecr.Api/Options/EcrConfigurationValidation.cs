@@ -99,6 +99,13 @@ public static partial class EcrConfigurationValidation
         // ПРД-13: поріг сигналу «перерахунок довший за бюджет»; нуль зробив би сигналом кожну задачу.
         (Ecr.Infrastructure.Jobs.RecalculationBudgetOptions.WarnSecondsKey, 1),
 
+        // AN-134: прибирання зрізів подання. Менше двох зрізів — не «економія», а втрата попереднього стану
+        // для порівняння; нуль у розмірі пакета/стелі — прохід, що нічого не робить.
+        (Ecr.Infrastructure.Jobs.SnapshotRetentionOptions.RetainSnapshotsKey, Ecr.Infrastructure.Jobs.SnapshotRetentionOptions.MinRetainSnapshots),
+        (Ecr.Infrastructure.Jobs.SnapshotRetentionOptions.BatchSizeKey, 1),
+        (Ecr.Infrastructure.Jobs.SnapshotRetentionOptions.PauseMillisecondsKey, 0),
+        (Ecr.Infrastructure.Jobs.SnapshotRetentionOptions.MaxBatchesPerRunKey, 1),
+
         // R2: поріг рядків ext.RawDataPoint у картці db; 0 вимикає перевірку, від'ємне — помилка.
         (RawDataPointHealthKey, 0),
 
@@ -123,6 +130,8 @@ public static partial class EcrConfigurationValidation
         "Jobs:NightlyRecalculation:Enabled",
         "Logging:File:Json",
         Ecr.Api.Observability.TelemetrySetup.EnabledKey,
+        Ecr.Infrastructure.Jobs.SnapshotRetentionOptions.EnabledKey,
+        Ecr.Infrastructure.Jobs.SnapshotRetentionOptions.DeleteEnabledKey,
     ];
 
     /// <summary>Ключі з переліком допустимих значень (без урахування регістру).</summary>

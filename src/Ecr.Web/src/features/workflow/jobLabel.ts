@@ -51,6 +51,7 @@ const KindKeys: Record<string, string> = {
   ReportRetentionJob: 'jobs.kind.reportRetention',
   ReportSnapshotFormatJob: 'jobs.kind.reportSnapshotFormat',
   RowWindowRefetchJob: 'jobs.kind.rowWindowRefetch',
+  SubmissionSnapshotRetentionJob: 'jobs.kind.submissionSnapshotRetention',
 };
 
 /** Просте ім'я типу з повного (`Ecr.Application.Ports.IRecalculationJob`). */

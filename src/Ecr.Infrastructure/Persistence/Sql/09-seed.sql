@@ -7961,6 +7961,7 @@ USING (VALUES
     ,(N'jobs.kind.registrySync', N'en', N'Registry sync from source', 1)
     ,(N'jobs.kind.reportRetention', N'en', N'Report snapshot retention', 1)
     ,(N'jobs.kind.reportSnapshotFormat', N'en', N'Report snapshot format upgrade', 1)
+    ,(N'jobs.kind.submissionSnapshotRetention', N'en', N'Submission snapshot retention', 1)
     ,(N'jobs.kind.rowWindowRefetch', N'en', N'Row window refetch', 1)
     -- FP:fixes ── кінець секції ──
     -- COLL:rc20rule ── R16-4: правило категорії - єдиний код ECR-CALC-0422 для @Nope, CST.X, !X; ru/kz - порцією COLL:rc20rule нижче ──
@@ -21172,6 +21173,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'jobs.kind.reportRetention', N'kz', N'Есеп кесінділерін сақтау'),
     (N'jobs.kind.reportSnapshotFormat', N'ru', N'Обновление формата срезов отчётов'),
     (N'jobs.kind.reportSnapshotFormat', N'kz', N'Есеп кесінділерінің пішімін жаңарту'),
+    (N'jobs.kind.submissionSnapshotRetention', N'ru', N'Очистка старых срезов подачи'),
+    (N'jobs.kind.submissionSnapshotRetention', N'kz', N'Ескі тапсыру кесінділерін тазарту'),
     (N'jobs.kind.rowWindowRefetch', N'ru', N'Повторная выборка окон строк'),
     (N'jobs.kind.rowWindowRefetch', N'kz', N'Жол терезелерін қайта алу')
        ) AS v ([Key], Lang, Val)

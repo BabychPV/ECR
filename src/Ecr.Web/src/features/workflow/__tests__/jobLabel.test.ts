@@ -47,6 +47,7 @@ describe('jobKindLabel', () => {
     ['Ecr.Infrastructure.Jobs.OrphanScanJob', 'orphanScan'],
     ['ReportRetentionJob', 'reportRetention'],
     ['ReportSnapshotFormatJob', 'reportSnapshotFormat'],
+    ['SubmissionSnapshotRetentionJob', 'submissionSnapshotRetention'],
   ])('FP-7: повторювана задача конкретного класу %s має людську назву, а не сирий тип', (type, key) => {
     expect(jobKindLabel(type)).toBe(`⟦jobs.kind.${key}⟧`);
   });
