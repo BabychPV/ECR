@@ -108,6 +108,27 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
 
     private static string RowKeyOf(TestDocument doc, int index) => $"R{index + 1}_{doc.SheetCode["SHEET".Length..]}";
 
+    /// <summary>
+    /// Прапор <c>Collection:MonthColumnRouting</c> вимкнено (генератор без роутера) → текст вʼюхи MonthsInColumns без жодного
+    /// приєднання власників: ніяких <c>COALESCE(o…)</c>, <c>doc.TableInstance AS oi…</c>, якоря <c>pa</c> — байт-у-байт як до Q-17.7.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Прапор_вимкнено_вʼюха_MonthsInColumns_без_приєднань_власників()
+    {
+        var f = await BuildAsync();
+        await GenerateAsync(f);
+
+        var definition = await ViewDefinitionAsync(f.View);
+
+        Assert.DoesNotContain("COALESCE(o", definition, StringComparison.Ordinal);
+        Assert.DoesNotContain("doc.TableInstance AS oi", definition, StringComparison.Ordinal);
+        Assert.DoesNotContain("doc.TableRow AS ow", definition, StringComparison.Ordinal);
+        Assert.DoesNotContain("AnchorKey", definition, StringComparison.Ordinal);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
