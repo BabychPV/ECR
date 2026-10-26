@@ -3,8 +3,11 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Ecr.Application.Ports;
+using Ecr.Application.Workflow;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
+using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Security;
@@ -162,7 +165,140 @@ public sealed class MonthColumnRoleLeakApiTests(SqlServerFixture sql)
         Assert.DoesNotContain(Digits(HistorySecret), body, StringComparison.Ordinal);
     }
 
+    // ── (4) порівняння версій: збережений зріз (до прапора) містить усі колонки, роль бачить лише свої ──
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    public async Task Порівняння_версій_жовтня_не_віддає_колонки_інших_власників_ролі_лише_на_жовтень()
+    {
+        var s = await ArrangeAsync(from: Oct, to: Oct).ConfigureAwait(true);
+        var rowId = s.Doc.RowIds[0];
+        string[] aliases = ["M1", "M9", "M10", "M11", "M12", "PLAIN"];
+
+        // Зріз подання, зроблений до прапора: усі колонки в екземплярі жовтня (старі значення 1..).
+        await using (var db = s.Builder.CreateContext())
+        {
+            foreach (var alias in aliases)
+            {
+                db.CellValues.Add(new CellValue(
+                    new CellAddress(new PeriodKey(Oct), rowId, s.ColumnIds[alias]), s.Doc.TableDefId,
+                    new CellValueData { ValueNumeric = 1m }));
+            }
+
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var versionId = await SnapshotOctAsync(s).ConfigureAwait(true);
+
+        var secrets = new Dictionary<string, decimal>
+        {
+            ["M1"] = 8800001m, ["M9"] = 8800009m, ["M10"] = OwnVisible, ["M11"] = 8800011m, ["M12"] = 8800012m,
+            ["PLAIN"] = 8800099m,
+        };
+        await using (var db = s.Builder.CreateContext())
+        {
+            foreach (var alias in aliases)
+            {
+                var cell = await db.CellValues.SingleAsync(c =>
+                    c.TableRowId == rowId && c.ColumnDefId == s.ColumnIds[alias]).ConfigureAwait(true);
+                cell.Apply(new CellValueData { ValueNumeric = secrets[alias] });
+            }
+
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var (app, scoped) = await BootAsync(s, s.UserName, flag: true).ConfigureAwait(true);
+        using var _a = app;
+        using var _b = scoped;
+        var (app2, admin) = await BootAsync(s, s.AdminName, flag: true).ConfigureAwait(true);
+        using var _c = app2;
+        using var _d = admin;
+        var full = await CompareAsync(admin, s, versionId).ConfigureAwait(true);
+        string diag;
+        await using (var db = s.Builder.CreateContext())
+        {
+            var snap = await db.SubmissionSnapshots.AsNoTracking().SingleAsync(x => x.Id == versionId).ConfigureAwait(true);
+            var cur = await db.CellValues.AsNoTracking().Where(c => c.TableRowId == rowId)
+                .Select(c => c.ColumnDefId + "=" + c.ValueNumeric).ToListAsync().ConfigureAwait(true);
+            diag = snap.PayloadJson + "\n" + string.Join(",", cur) + $"\nrow={rowId} inst={s.Doc.TableInstanceId}";
+        }
+
+        foreach (var alias in aliases)
+        {
+            Assert.True(full.Contains(Digits(secrets[alias]), StringComparison.Ordinal), $"{alias}: {full}\n{diag}");
+        }
+
+        var narrow = await CompareAsync(scoped, s, versionId).ConfigureAwait(true);
+        Assert.True(
+            narrow.Contains(OwnVisible.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal), narrow);
+        foreach (var alias in aliases.Where(a => a != "M10"))
+        {
+            Assert.DoesNotContain(Digits(secrets[alias]), narrow, StringComparison.Ordinal);
+            Assert.DoesNotContain($"\"{s.ColumnCodes[alias]}\"", narrow, StringComparison.Ordinal);
+        }
+    }
+
+    // ── (5) відмова на рядок називає період-якір ──
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    public async Task Відмова_на_рядок_без_якоря_в_області_називає_період_якір()
+    {
+        var s = await ArrangeAsync(from: Oct, to: Oct).ConfigureAwait(true);
+        var (app, scoped) = await BootAsync(s, s.UserName, flag: true).ConfigureAwait(true);
+        using var _a = app;
+        using var _b = scoped;
+
+        using var create = await scoped.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.Doc.DocumentId}/rows", UriKind.Relative),
+            new { tableInstanceId = s.Doc.TableInstanceId, rowKey = "ANCHORMSG" }).ConfigureAwait(true);
+        var createBody = await create.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, create.StatusCode);
+        Assert.Contains("err.ECR-ACCS-0403.addRowAnchorPeriod", createBody, StringComparison.Ordinal);
+        Assert.Contains("202601", createBody, StringComparison.Ordinal);
+
+        using var delete = await scoped.DeleteAsync(new Uri(
+            $"/api/v1/documents/{s.Doc.DocumentId}/tables/{s.Doc.TableInstanceId}/rows/{s.RowKey}", UriKind.Relative))
+            .ConfigureAwait(true);
+        var deleteBody = await delete.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, delete.StatusCode);
+        Assert.Contains("err.ECR-ACCS-0403.deleteRowAnchorPeriod", deleteBody, StringComparison.Ordinal);
+        Assert.Contains("202601", deleteBody, StringComparison.Ordinal);
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
+
+    private static async Task<string> CompareAsync(HttpClient client, Scenario s, long from)
+    {
+        using var response = await client.GetAsync(new Uri(
+            $"/api/v1/documents/{s.Doc.DocumentId}/compare?from={from}&to=current", UriKind.Relative)).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(response.IsSuccessStatusCode, $"compare: {response.StatusCode}\n{body}");
+        return body;
+    }
+
+    /// <summary>Зріз подання жовтня з поточних комірок екземпляра жовтня.</summary>
+    private static async Task<long> SnapshotOctAsync(Scenario s)
+    {
+        await using var db = s.Builder.CreateContext();
+        var cells = await db.CellValues.AsNoTracking()
+            .Where(c => c.TableRowId == s.Doc.RowIds[0]).ToListAsync().ConfigureAwait(false);
+        var payload = SubmissionPayload.Write(cells.Select(c => new CellRecord(
+            new CellAddress(new PeriodKey(Oct), c.TableRowId, c.ColumnDefId), c.TableDefId,
+            new CellValueData { ValueNumeric = c.ValueNumeric, ValueString = c.ValueString })));
+        var userId = await db.Users.AsNoTracking().Where(u => u.UserName == s.UserName)
+            .Select(u => u.Id).SingleAsync().ConfigureAwait(false);
+        var snapshot = new SubmissionSnapshot(
+            s.Doc.DocumentId, s.Doc.SheetDefId, Oct, s.Doc.TemplateVersionId,
+            "[]", null, null, payload, new byte[32], DateTime.UtcNow, userId);
+        db.SubmissionSnapshots.Add(snapshot);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        return snapshot.Id;
+    }
 
     private sealed record Scenario(
         TestDocumentBuilder Builder, TestDocument Doc, string UserName, string AdminName, string RowKey,
