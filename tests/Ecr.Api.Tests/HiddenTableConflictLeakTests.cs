@@ -116,7 +116,7 @@ public sealed class HiddenTableConflictLeakTests(SqlServerFixture sql)
         Assert.All(patches, r => Assert.Equal(HttpStatusCode.NotFound, r.Status));
         Assert.Single(slices.Select(r => r.Body).Distinct());
         Assert.Single(patches.Select(r => r.Body).Distinct());
-        Assert.Contains("err.ECR-DOC-0404.document", slices[0].Body, StringComparison.Ordinal);
+        Assert.Contains("err.ECR-DOC-N.document", slices[0].Body, StringComparison.Ordinal); // цифри нормалізовано
         Assert.DoesNotContain("tableInstance", slices[0].Body, StringComparison.Ordinal);
     }
 
