@@ -9335,6 +9335,10 @@ USING (VALUES
     -- Q17: monthDataLocked ── Q-17/D-457: відмова DeleteRow (409), коли в подані/закриті місяці є введені значення; ru/kz — порцією Q17 нижче ──
     ,(N'err.ECR-ROW-0409.monthDataLocked', N'en', N'This row cannot be deleted: it holds entered values for a month that is already submitted, approved or closed.', 1)
     -- Q17: monthDataLocked ── кінець секції ──
+    -- Q17b: anchorRows ── Q-17/D-457: рядки таблиці «місяці в колонках» додаються й видаляються в періоді-якорі; ru/kz — порцією Q17b нижче ──
+    ,(N'err.ECR-ACCS-0403.addRowAnchorPeriod', N'en', N'Rows of this table are added in period {anchorPeriod}; your role has no access to it.', 1)
+    ,(N'err.ECR-ACCS-0403.deleteRowAnchorPeriod', N'en', N'Rows of this table are deleted in period {anchorPeriod}; your role has no access to it.', 1)
+    -- Q17b: anchorRows ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -24307,6 +24311,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- Q17: monthDataLocked ── кінець секції ──
+-- Q17b: anchorRows ── ru/kz: Q-17/D-457, рядки додаються й видаляються в періоді-якорі; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-ACCS-0403.addRowAnchorPeriod', N'ru', N'Строки этой таблицы добавляются в периоде {anchorPeriod}; у вашей роли нет доступа к нему.'),
+    (N'err.ECR-ACCS-0403.addRowAnchorPeriod', N'kz', N'Бұл кестенің жолдары {anchorPeriod} кезеңінде қосылады; сіздің рөліңіздің оған қолжетімділігі жоқ.'),
+    (N'err.ECR-ACCS-0403.deleteRowAnchorPeriod', N'ru', N'Строки этой таблицы удаляются в периоде {anchorPeriod}; у вашей роли нет доступа к нему.'),
+    (N'err.ECR-ACCS-0403.deleteRowAnchorPeriod', N'kz', N'Бұл кестенің жолдары {anchorPeriod} кезеңінде жойылады; сіздің рөліңіздің оған қолжетімділігі жоқ.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- Q17b: anchorRows ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
