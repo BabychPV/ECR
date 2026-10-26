@@ -8,7 +8,12 @@ namespace Ecr.Application.Recalculation;
 /// <param name="SourceSequence">Номер періоду-джерела в році (<c>PeriodKey.Sequence</c>).</param>
 /// <param name="TableDefId">Таблиця, у якій змінилася колонка.</param>
 /// <param name="ColumnDefId">Змінена колонка.</param>
-public readonly record struct CrossPeriodSource(int SourceSequence, int TableDefId, int ColumnDefId);
+/// <param name="OwnerInput">
+/// Q-17: змінено ВВЕДЕНИЙ стовпець таблиці «місяці в колонках», чиї значення читають усі екземпляри року через
+/// роутер власності: читачі — формули ІНШИХ періодів із залежністю-коміркою з зсувом 0 на цю колонку.
+/// </param>
+public readonly record struct CrossPeriodSource(
+    int SourceSequence, int TableDefId, int ColumnDefId, bool OwnerInput = false);
 
 /// <summary>
 /// Зворотний індекс МІЖПЕРІОДНИХ залежностей формул: хто читає змінену колонку з іншого періоду
@@ -29,6 +34,7 @@ public static class CrossPeriodReaders
 {
     private const byte CrossPeriodKind = 3;
     private const byte AbsoluteKind = 5;
+    private const byte CellKind = 0;
 
     /// <summary>
     /// Номери періодів року, формули яких читають змінені колонки з періоду <paramref name="sourceSequence"/>.
@@ -43,18 +49,59 @@ public static class CrossPeriodReaders
         IReadOnlyCollection<(int TableDefId, int ColumnDefId)> changed,
         int sourceSequence,
         IReadOnlyCollection<int> existingSequences)
+        => ReaderSequences(dependencies, changed, [], sourceSequence, existingSequences);
+
+    /// <summary>
+    /// Q-17: номери періодів-читачів із урахуванням змінених ВВЕДЕНИХ стовпців таблиць «місяці в колонках»,
+    /// чиє значення живе в одному екземплярі (власник) і читається з усіх інших через роутер власності.
+    /// </summary>
+    /// <param name="dependencies">Граф залежностей версії шаблону.</param>
+    /// <param name="changed">Змінені колонки періоду-джерела (міжперіодні ребра зі зсувом ≠ 0).</param>
+    /// <param name="routedInputs">
+    /// Змінені введені стовпці таблиць із маршрутизацією: таблиця, колонка, номер місяця колонки
+    /// (<c>ColumnDef.MonthNumber</c>; <c>null</c> — не-місячний стовпець, власник якого — якір року).
+    /// </param>
+    /// <param name="sourceSequence">Період, у якому відбувся каскад (там формули вже перераховано локально).</param>
+    /// <param name="existingSequences">Періоди року, які існують у документі.</param>
+    /// <returns>Номери періодів-читачів; без самого джерела.</returns>
+    /// <remarks>
+    /// ⛔ Нове правило: залежність-комірка (<c>DependsOnKind = 0</c>) зі зсувом <c>null</c>/0 на змінену введену колонку
+    /// робить читачем КОЖЕН наявний період року, окрім джерела. Раніше такий читач був би «сам собі»: комірку
+    /// власника читали лише з власного екземпляра, а тепер значення M{m} видно у зрізі кожного екземпляра року.
+    /// Виключається лише період каскаду: коли правку зроблено з перегляду іншого періоду, власник місячного
+    /// стовпця (<c>MonthNumber</c>) теж серед читачів — його власний прогін не залежить від того, хто поставив каскад.
+    /// <c>MonthNumber</c> тут довідковий: правило не звужується ним, бо «зайвий перерахунок дешевший за пропущений».
+    /// </remarks>
+    public static IReadOnlySet<int> ReaderSequences(
+        IReadOnlyList<FormulaDependency> dependencies,
+        IReadOnlyCollection<(int TableDefId, int ColumnDefId)> changed,
+        IReadOnlyCollection<(int TableDefId, int ColumnDefId, int? MonthNumber)> routedInputs,
+        int sourceSequence,
+        IReadOnlyCollection<int> existingSequences)
     {
         ArgumentNullException.ThrowIfNull(dependencies);
         ArgumentNullException.ThrowIfNull(changed);
+        ArgumentNullException.ThrowIfNull(routedInputs);
         ArgumentNullException.ThrowIfNull(existingSequences);
 
         var result = new SortedSet<int>();
+        var existing = existingSequences as ISet<int> ?? new HashSet<int>(existingSequences);
+
+        if (ReadsRoutedInput(dependencies, routedInputs).Count > 0)
+        {
+            foreach (var sequence in existing)
+            {
+                if (sequence != sourceSequence)
+                {
+                    result.Add(sequence);
+                }
+            }
+        }
+
         if (changed.Count == 0)
         {
             return result;
         }
-
-        var existing = existingSequences as ISet<int> ?? new HashSet<int>(existingSequences);
 
         foreach (var dependency in dependencies)
         {
@@ -125,16 +172,35 @@ public static class CrossPeriodReaders
 
         foreach (var dependency in dependencies)
         {
-            if (dependency.FormulaDefId is not { } formulaId
-                || !live.Contains(formulaId)
-                || dependency.PeriodOffset is not { } value
-                || value == 0)
+            if (dependency.FormulaDefId is not { } formulaId || !live.Contains(formulaId))
+            {
+                continue;
+            }
+
+            // Q-17: введений стовпець власника (зсув 0) — читач у кожному іншому періоді року.
+            if (dependency.DependsOnKind == CellKind
+                && dependency.PeriodOffset is null or 0
+                && sources.Any(s => s.OwnerInput
+                                    && s.SourceSequence != readerSequence
+                                    && dependency.TableDefId == s.TableDefId
+                                    && (dependency.ColumnDefId is null || dependency.ColumnDefId == s.ColumnDefId)))
+            {
+                affected.Add(formulaId);
+                continue;
+            }
+
+            if (dependency.PeriodOffset is not { } value || value == 0)
             {
                 continue;
             }
 
             foreach (var source in sources)
             {
+                if (source.OwnerInput)
+                {
+                    continue;
+                }
+
                 var readsSource = dependency.DependsOnKind switch
                 {
                     CrossPeriodKind => readerSequence + value == source.SourceSequence,
@@ -202,6 +268,40 @@ public static class CrossPeriodReaders
                     && (dependency.ColumnDefId is null || dependency.ColumnDefId == column.ColumnDefId))
                 {
                     result.Add(column);
+                    break;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Q-17: підмножина змінених введених стовпців, які хоч одна формула читає КОМІРКОЮ зі зсувом 0
+    /// (<c>DependsOnKind = 0</c>) — те, що варто нести в задачу періоду-читача.
+    /// </summary>
+    /// <param name="dependencies">Граф залежностей версії шаблону.</param>
+    /// <param name="routedInputs">Змінені введені стовпці таблиць «місяці в колонках».</param>
+    /// <returns>Підмножина <paramref name="routedInputs"/>.</returns>
+    public static List<(int TableDefId, int ColumnDefId, int? MonthNumber)> ReadsRoutedInput(
+        IReadOnlyList<FormulaDependency> dependencies,
+        IReadOnlyCollection<(int TableDefId, int ColumnDefId, int? MonthNumber)> routedInputs)
+    {
+        ArgumentNullException.ThrowIfNull(dependencies);
+        ArgumentNullException.ThrowIfNull(routedInputs);
+
+        var result = new List<(int TableDefId, int ColumnDefId, int? MonthNumber)>();
+        foreach (var input in routedInputs)
+        {
+            foreach (var dependency in dependencies)
+            {
+                if (dependency.FormulaDefId is not null
+                    && dependency.DependsOnKind == CellKind
+                    && dependency.PeriodOffset is null or 0
+                    && dependency.TableDefId == input.TableDefId
+                    && (dependency.ColumnDefId is null || dependency.ColumnDefId == input.ColumnDefId))
+                {
+                    result.Add(input);
                     break;
                 }
             }

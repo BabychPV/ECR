@@ -62,6 +62,10 @@ namespace Ecr.Application.Documents;
 /// Permits PRMG: резолвер груп - для колонки-довідника з ціллю-ГРУПОЮ правило умовного форматування читає КОД запису реєстру-члена.
 /// <c>null</c> - груп немає (тести).
 /// </param>
+/// <param name="monthRouter">
+/// Q-17: роутер власності місячних стовпців - значення колонки з іншим власником маскується, якщо період власника поза
+/// областю ролі читача. <c>null</c> або прапор вимкнено - як до Q-17.
+/// </param>
 public sealed class GetTableSliceHandler(
     IRowStore rowStore,
     ICellStore cellStore,
@@ -80,8 +84,41 @@ public sealed class GetTableSliceHandler(
     ICellStyleStore? cellStyles = null,
     IRegistryStore? registries = null,
     Microsoft.Extensions.Logging.ILogger<Calculations.CalculatedCellOverlay>? overlayLog = null,
-    Permits.Groups.IPermitGroupResolver? groups = null)
+    Permits.Groups.IPermitGroupResolver? groups = null,
+    IMonthColumnRouter? monthRouter = null)
 {
+    /// <summary>
+    /// Q-17: колонки таблиці з іншим власником, період якого НЕ в області ролі читача (<c>InPeriod(власник)</c>).
+    /// </summary>
+    /// <remarks>Прапор вимкнено, таблиця поза маршрутизацією або власників нема — порожньо БЕЗ звернень до бази.</remarks>
+    private async Task<HashSet<int>> OwnerBlockedColumnsAsync(
+        long documentId, Domain.Entities.Configuration.TableDef table, int viewPeriod, DocumentReadScope anyPeriod, CancellationToken ct)
+    {
+        var blocked = new HashSet<int>();
+        if (monthRouter is not { Enabled: true } || !monthRouter.AppliesToTable(table))
+        {
+            return blocked;
+        }
+
+        var document = await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false);
+        if (document is null)
+        {
+            return blocked;
+        }
+
+        foreach (var foreign in await monthRouter
+                     .ForeignColumnsAsync(document, table, new Domain.ValueObjects.PeriodKey(viewPeriod), ct)
+                     .ConfigureAwait(false))
+        {
+            if (!anyPeriod.InPeriod(foreign.OwnerPeriod).CanReadColumn(foreign.Column.Id))
+            {
+                blocked.Add(foreign.Column.Id);
+            }
+        }
+
+        return blocked;
+    }
+
     private readonly MethodologyRequiredColumnsCache _required = new(memory);
 
     /// <summary>
@@ -137,8 +174,8 @@ public sealed class GetTableSliceHandler(
         // й неіснуючий екземпляр (`RowStore.ResolveTableInstanceAsync`): 403
         // «заборонено» сам розповідав би, що таблиця є (той самий принцип, що й
         // B-08 для документа).
-        var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false))
-            .InPeriod(new Ecr.Domain.ValueObjects.PeriodKey(instance.PeriodKey));
+        var anyPeriodScope = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var readable = anyPeriodScope.InPeriod(new Ecr.Domain.ValueObjects.PeriodKey(instance.PeriodKey));
 
         if (!readable.CanReadTable(instance.TableDefId))
         {
@@ -287,8 +324,13 @@ public sealed class GetTableSliceHandler(
         // ⛔ S6: значення заборонених колонок відкидаються ТУТ — після накладення
         // чисел методологій, щоб і обчислена колонка під забороною не
         // повернулась у відповідь.
+        // ✎ Q-17: значення колонки з іншим власником (за прапора) читач бачить лише коли область його ролі містить
+        // ПЕРІОД ВЛАСНИКА: комірка «чужого» місяця поза областю маскується, як недоступна.
+        var ownerBlocked = await OwnerBlockedColumnsAsync(documentId, table, instance.PeriodKey, anyPeriodScope, ct)
+            .ConfigureAwait(false);
+
         var cellsByRow = cells
-            .Where(c => readable.CanReadColumn(c.Address.ColumnDefId))
+            .Where(c => readable.CanReadColumn(c.Address.ColumnDefId) && !ownerBlocked.Contains(c.Address.ColumnDefId))
             .GroupBy(c => c.Address.TableRowId)
             .ToDictionary(g => g.Key, g => g.ToList());
 

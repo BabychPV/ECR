@@ -132,6 +132,117 @@ public sealed class CrossPeriodFanOutTests(SqlServerFixture sql)
             Assert.Single(_enqueued).Target);
     }
 
+    // ── Q-17.4: введений стовпець з іншим власником ───────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    public async Task Q17_правка_введеного_стовпця_ставить_читачів_нульового_зсуву_і_несе_позначку_власника()
+    {
+        var (document, builder) = await ArrangeAsync();
+        var (router, metadata, table, column) = ArrangeRouted(document, enabled: true);
+
+        await using var db = builder.CreateContext();
+        var fanOut = new CrossPeriodFanOut(_rows, _versions, _periods, _jobs, db, router, metadata);
+
+        var count = await fanOut.EnqueueReadersAsync(
+            document.DocumentId, new PeriodKey(202601), [(table, column)],
+            onlyEarlierReaders: false, hops: 1, CancellationToken.None, inputChanged: [(table, column)]);
+
+        // Читач — 2 (відкритий); 1 — джерело; 3 закритий не ставиться.
+        Assert.Equal(1, count);
+        var queued = Assert.Single(_enqueued);
+        Assert.Equal(FormulaRecalculationTarget.Of(document.DocumentId, 202602, createdByUserId: null), queued.Target);
+
+        using var json = JsonDocument.Parse(queued.PayloadJson);
+        var cell = Assert.Single(json.RootElement.GetProperty("Cells").EnumerateArray().ToList());
+        Assert.Equal(table, cell.GetProperty("TableDefId").GetInt32());
+        Assert.Equal(column, cell.GetProperty("ColumnDefId").GetInt32());
+        Assert.Equal(1, cell.GetProperty("SourcePeriod").GetInt32());
+        Assert.True(cell.GetProperty("OwnerInput").GetBoolean());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    public async Task Q17_прапор_вимкнено_введений_стовпець_читачів_не_ставить()
+    {
+        var (document, builder) = await ArrangeAsync();
+        var (router, metadata, table, column) = ArrangeRouted(document, enabled: false);
+
+        await using var db = builder.CreateContext();
+        var fanOut = new CrossPeriodFanOut(_rows, _versions, _periods, _jobs, db, router, metadata);
+
+        var count = await fanOut.EnqueueReadersAsync(
+            document.DocumentId, new PeriodKey(202601), [(table, column)],
+            onlyEarlierReaders: false, hops: 1, CancellationToken.None, inputChanged: [(table, column)]);
+
+        Assert.Equal(0, count);
+        Assert.Empty(_enqueued);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    public async Task Q17_похідна_зміна_і_обчислювана_колонка_нового_правила_не_вмикають()
+    {
+        var (document, builder) = await ArrangeAsync();
+        var (router, metadata, table, column) = ArrangeRouted(document, enabled: true);
+
+        await using var db = builder.CreateContext();
+        var fanOut = new CrossPeriodFanOut(_rows, _versions, _periods, _jobs, db, router, metadata);
+
+        // Колонка змінена перерахунком, а не введенням (насіння порожнє) — власнику нічого читати.
+        var derived = await fanOut.EnqueueReadersAsync(
+            document.DocumentId, new PeriodKey(202601), [(table, column)],
+            onlyEarlierReaders: false, hops: 1, CancellationToken.None, inputChanged: null);
+
+        // Те саме з іншої колонки: введена зміна колонки, що не належить жодній залежності — читачів немає.
+        var other = await fanOut.EnqueueReadersAsync(
+            document.DocumentId, new PeriodKey(202601), [(table, column + 1)],
+            onlyEarlierReaders: false, hops: 1, CancellationToken.None, inputChanged: [(table, column + 1)]);
+
+        Assert.Equal(0, derived);
+        Assert.Equal(0, other);
+        Assert.Empty(_enqueued);
+    }
+
+    /// <summary>Роутер/метадані: таблиця «місяці в колонках» з введеною колонкою, яку читає формула коміркою.</summary>
+    private (IMonthColumnRouter Router, IMetadataCache Metadata, int TableDefId, int ColumnDefId) ArrangeRouted(
+        TestDocument document, bool enabled)
+    {
+        var template = new TemplateBuilder { TemplateVersionId = Version };
+        var sheet = template.Sheet("S");
+        var table = template.Table(sheet, "T1");
+        var column = template.Column(table, "C1", isMonthColumn: true);
+        template.Column(table, "C2");
+
+        Arrange(document, Dep(0, 0));
+
+        // Залежність-комірка (зсув null) на введену колонку; сама формула — у цій таблиці.
+        _versions.ListFormulaDependenciesAsync(Version, Arg.Any<CancellationToken>()).Returns(
+        [
+            FormulaDependency.ForFormula(555, 0, table.Id, "R1", column.Id, null, null, 0),
+        ]);
+        _rows.GetTableInstancesAsync(document.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyList<TableInstanceRef>)
+                [new TableInstanceRef(1, document.DocumentId, table.Id, Version, call.ArgAt<PeriodKey>(1).Value)]);
+
+        var router = Substitute.For<IMonthColumnRouter>();
+        router.Enabled.Returns(enabled);
+        router.GetDocumentAsync(document.DocumentId, Arg.Any<CancellationToken>())
+            .Returns(new MonthRoutingDocument(document.DocumentId, document.ProjectId, Version));
+        router.AppliesToTable(Arg.Any<TableDef>()).Returns(enabled);
+
+        var metadata = Substitute.For<IMetadataCache>();
+        metadata.GetAsync(Version, Arg.Any<CancellationToken>()).Returns(template.Build());
+
+        return (router, metadata, table.Id, column.Id);
+    }
+
     private static FormulaDependency Dep(byte kind, int offset)
         => FormulaDependency.ForFormula(555, kind, tableDefId: null, "R1", ColumnDefId, null, (short)offset, 0);
 

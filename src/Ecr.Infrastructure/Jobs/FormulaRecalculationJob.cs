@@ -62,7 +62,7 @@ public sealed class FormulaRecalculationJob(
         {
             if (cell.TableDefId is { } sourceTable && cell.SourcePeriod is { } sourcePeriod)
             {
-                sources.Add(new CrossPeriodSource(sourcePeriod, sourceTable, cell.ColumnDefId));
+                sources.Add(new CrossPeriodSource(sourcePeriod, sourceTable, cell.ColumnDefId, cell.OwnerInput == true));
                 hops = Math.Max(hops, cell.Hops ?? 0);
                 continue;
             }
@@ -106,12 +106,16 @@ public sealed class FormulaRecalculationJob(
 
         int written = 0;
         var changed = new HashSet<(int TableDefId, int ColumnDefId)>();
+
+        // Q-17: колонки ВВЕДЕНИХ комірок (насіння правки) — не похідні: лише вони можуть бути стовпцями з чужим
+        // власником, чиї читачі в інших екземплярах року не бачили б зміни.
+        var inputColumns = new HashSet<(int TableDefId, int ColumnDefId)>();
         try
         {
             if (!dirty.IsEmpty)
             {
                 written = await recalculation
-                    .RecalculateAsync(request.TableInstanceId, dirty, ct, changed, approverSheets)
+                    .RecalculateAsync(request.TableInstanceId, dirty, ct, changed, approverSheets, inputColumns)
                     .ConfigureAwait(false);
             }
 
@@ -150,7 +154,8 @@ public sealed class FormulaRecalculationJob(
         if (fanOut is not null && documentId != 0 && changed.Count > 0)
         {
             await fanOut
-                .EnqueueReadersAsync(documentId, periodKey, changed, onlyEarlierReaders: false, hops + 1, ct)
+                .EnqueueReadersAsync(
+                    documentId, periodKey, changed, onlyEarlierReaders: false, hops + 1, ct, inputColumns)
                 .ConfigureAwait(false);
         }
 
@@ -235,6 +240,10 @@ public sealed record FormulaRecalculationRequest(
 /// ✎ D-442: аркуш, на якому цю комірку змінив погоджувач поточного кроку (<c>RecalculationSeed</c>); лише його,
 /// поданий, прогін має право перерахувати. <c>null</c> — звичайна правка.
 /// </param>
+/// <param name="OwnerInput">
+/// Q-17: у елементі «у іншому періоді змінилась колонка» (<c>TableDefId</c> заповнене) змінено ВВЕДЕНИЙ стовпець
+/// таблиці з маршрутизацією власності: читачі — формули з залежністю-коміркою зі зсувом 0, а не лише міжперіодні.
+/// </param>
 public sealed record DirtyCell(
     long RowId, int ColumnDefId, int? TableDefId = null, int? SourcePeriod = null, int? Hops = null,
-    int? ApproverSheetDefId = null);
+    int? ApproverSheetDefId = null, bool? OwnerInput = null);

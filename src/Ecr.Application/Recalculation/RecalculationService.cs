@@ -46,7 +46,11 @@ public sealed class RecalculationService(
     // LP-40: знімок довідників для форм REG* у формулах шаблону (REGFIND/REGONE/агрегати). Необов'язковий:
     // прямі `new RecalculationService(...)` у тестах його не передають (REG* тоді #REF, як і раніше);
     // DI підставляє `RegistrySnapshotLoader`.
-    IRegistrySnapshotLoader? registrySnapshots = null) : ISubmitRecalculation
+    IRegistrySnapshotLoader? registrySnapshots = null,
+
+    // Q-17: власність введених комірок таблиць «місяці в колонках». Необов'язковий: прямі `new RecalculationService(...)`
+    // у тестах його не передають; DI підставляє роутер, а вимкнений прапор (за замовчуванням) означає «не застосовується».
+    IMonthColumnRouter? monthRouter = null) : ISubmitRecalculation
 {
     /// <summary>
     /// LP-40: джерела знімків довідників цього екземпляра сервісу (скоуп = один прогін задачі чи запит):
@@ -207,10 +211,15 @@ public sealed class RecalculationService(
     /// блокуванням у <c>PatchCellsHandler</c>). Лише ці аркуші прогін пише попри <c>Submitted</c> (див.
     /// <see cref="EnterSheetsAsync"/>); <c>null</c>/порожньо — подані пропускаються всі, як і доти.
     /// </param>
+    /// <param name="inputColumns">
+    /// Q-17: куди скласти колонки НАСІННЯ (введені комірки, не похідні) — з них постановник визначає, чи є серед них
+    /// стовпці з чужим власником, чиї читачі в інших екземплярах року треба перерахувати; <c>null</c> — не збирати.
+    /// </param>
     public async Task<int> RecalculateAsync(
         long tableInstanceId, DirtySet dirty, CancellationToken ct,
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null,
-        IReadOnlySet<int>? approverEditSheets = null)
+        IReadOnlySet<int>? approverEditSheets = null,
+        HashSet<(int TableDefId, int ColumnDefId)>? inputColumns = null)
     {
         ArgumentNullException.ThrowIfNull(dirty);
 
@@ -226,7 +235,8 @@ public sealed class RecalculationService(
         var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
 
         return await RunAsync(
-                instance, dirty, ct, changedColumns: changedColumns, approverEditSheets: approverEditSheets)
+                instance, dirty, ct, changedColumns: changedColumns, approverEditSheets: approverEditSheets,
+                inputColumns: inputColumns)
             .ConfigureAwait(false);
     }
 
@@ -384,14 +394,21 @@ public sealed class RecalculationService(
     /// (<see cref="CrossPeriodReaders.Targets"/>); <c>null</c> — звичайний вхід.
     /// </param>
     /// <param name="approverEditSheets">D-442: подані аркуші правки погоджувача (лише інкрементний вхід).</param>
+    /// <param name="inputColumns">Q-17: куди скласти колонки насіння (введені, не похідні); <c>null</c> — не збирати.</param>
     private async Task<int> RunAsync(
         TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null,
         int? heldSheetDefId = null, IReadOnlyList<TableInstanceRef>? knownInstances = null,
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null,
         IReadOnlyCollection<CrossPeriodSource>? crossPeriodSources = null,
-        IReadOnlySet<int>? approverEditSheets = null)
+        IReadOnlySet<int>? approverEditSheets = null,
+        HashSet<(int TableDefId, int ColumnDefId)>? inputColumns = null)
     {
         var periodKey = new PeriodKey(instance.PeriodKey);
+
+        // Q-17.4: власники введених комірок читаються один раз на ЦЮ задачу (≤ 13 партицій), а не на кожен період
+        // читання (поточний + зсуви). Перерахунок введених комірок власників не пише — інвалідація не потрібна.
+        // Прапор вимкнено — сховище звідси нічого не кешує (роутер не ходить до бази).
+        using var ownerSession = (cellStore as IOwnerReadSession)?.BeginOwnerReadSession();
 
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
         var dependencies = await versions
@@ -428,7 +445,7 @@ public sealed class RecalculationService(
 
         // WW-03: насіння каскаду теж «змінене» для читачів інших періодів — навіть якщо жодна похідна
         // комірка цього періоду не змінилась (читач у сусідньому періоді може читати саме правлену).
-        if (changedColumns is not null && dirty is not null)
+        if ((changedColumns is not null || inputColumns is not null) && dirty is not null)
         {
             var tableOfRow = new Dictionary<long, int>();
             foreach (var (tableDefId, byKey) in rowIdsByTable)
@@ -443,7 +460,8 @@ public sealed class RecalculationService(
             {
                 if (tableOfRow.TryGetValue(seed.TableRowId, out var seedTable))
                 {
-                    changedColumns.Add((seedTable, seed.ColumnDefId));
+                    changedColumns?.Add((seedTable, seed.ColumnDefId));
+                    inputColumns?.Add((seedTable, seed.ColumnDefId));
                 }
             }
         }
@@ -469,6 +487,12 @@ public sealed class RecalculationService(
         var formulas = tables.Values
             .SelectMany(t => t.Formulas.Where(f => !f.IsDeleted).Select(f => (Table: t, Formula: f)))
             .ToDictionary(pair => pair.Formula.Id);
+
+        // ⛔ Q-17.3: колонки з ЧУЖИМ власником для екземплярів цього прогону. Введену комірку такої колонки пише лише
+        // власник (прогін його екземпляра рахує її формули сам); цей прогін її не перезаписує — див. `Evaluate`.
+        // Прапор вимкнено / проєкт не Monthly / таблиця поза маршрутизацією — порожньо, поведінка попередня.
+        var foreignByTable = await ForeignColumnsByTableAsync(instance.DocumentId, instances, tables, periodKey, ct)
+            .ConfigureAwait(false);
 
         List<int> targets;
 
@@ -700,7 +724,8 @@ public sealed class RecalculationService(
 
                 Evaluate(
                     owner.Table, owner.Formula, expression, rows, rowFilter,
-                    periodKey, context, values, stored, sink);
+                    periodKey, context, values, stored, sink,
+                    foreignByTable?.GetValueOrDefault(owner.Table.Id));
             }
         }
 
@@ -1149,8 +1174,9 @@ public sealed class RecalculationService(
         PeriodKey periodKey,
         SliceEvaluationContext context,
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
-        IReadOnlyDictionary<CellKey, CellValueData> stored,
-        Dictionary<CellAddress, CellRecord> upserts)
+        Dictionary<CellKey, CellValueData> stored,
+        Dictionary<CellAddress, CellRecord> upserts,
+        HashSet<int>? foreignColumns = null)
     {
         // ФВ-0.2: діапазони цієї формули — за ключами, зафіксованими при публікації.
         context.UseFormula(formula, parsed.Root);
@@ -1158,6 +1184,19 @@ public sealed class RecalculationService(
         foreach (var (rowKey, columnDefId) in Targets(table, formula, rowIds, rowFilter))
         {
             if (!rowIds.TryGetValue(rowKey, out var rowId))
+            {
+                continue;
+            }
+
+            // ⛔ Q-17.3: у колонці з чужим власником ВВЕДЕНУ комірку власника (зріз перегляду віддає її як
+            // `IsCalculated = false`) перерахунок не перезаписує — інакше два екземпляри писали б одне й те саме
+            // значення двома шляхами. Обчислена комірка тієї ж колонки (формула рівня комірки в рядку підсумків)
+            // лишається справою екземпляра перегляду: власник бачить лише ВВЕДЕНІ комірки, тож пропуск лишив би
+            // дірку у формулах, що читають весь рядок.
+            if (foreignColumns is not null
+                && foreignColumns.Contains(columnDefId)
+                && stored.TryGetValue(new CellKey(0, table.Id, rowKey, columnDefId), out var ownerInput)
+                && !ownerInput.IsCalculated)
             {
                 continue;
             }
@@ -1253,6 +1292,41 @@ public sealed class RecalculationService(
 
             upserts[address] = new CellRecord(address, table.Id, data);
         }
+    }
+
+    /// <summary>
+    /// Q-17.3: колонки таблиць прогону, чиї введені комірки належать екземпляру ІНШОГО періоду. <c>null</c> — немає
+    /// жодної (прапор вимкнено, проєкт не місячний, таблиці поза маршрутизацією, період поза календарем).
+    /// </summary>
+    private async Task<Dictionary<int, HashSet<int>>?> ForeignColumnsByTableAsync(
+        long documentId,
+        IReadOnlyList<TableInstanceRef> instances,
+        Dictionary<int, Domain.Entities.Configuration.TableDef> tables,
+        PeriodKey periodKey,
+        CancellationToken ct)
+    {
+        if (monthRouter is not { Enabled: true }
+            || await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false) is not { } routed)
+        {
+            return null;
+        }
+
+        Dictionary<int, HashSet<int>>? result = null;
+        foreach (var instance in instances)
+        {
+            if (!tables.TryGetValue(instance.TableDefId, out var table) || !monthRouter.AppliesToTable(table))
+            {
+                continue;
+            }
+
+            var foreign = await monthRouter.ForeignColumnsAsync(routed, table, periodKey, ct).ConfigureAwait(false);
+            if (foreign.Count > 0)
+            {
+                (result ??= [])[table.Id] = [.. foreign.Select(f => f.Column.Id)];
+            }
+        }
+
+        return result;
     }
 
     /// <summary>Комірки, які обчислює формула.</summary>

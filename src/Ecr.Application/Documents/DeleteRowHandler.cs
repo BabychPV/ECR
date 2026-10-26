@@ -53,7 +53,12 @@ public sealed class DeleteRowHandler(
     // ⛔ EA-B / P1-4: повторна перевірка передачі зрізу під блокуванням аркуша (як у `CreateRowHandler`).
     // Контейнер передає завжди; `null` — лише тестові фабрики, і тоді документ із передачами
     // відхиляється (fail-closed).
-    IEditAssignmentStore? assignments = null)
+    IEditAssignmentStore? assignments = null,
+
+    // ✎ Q-17: дзеркальне видалення рядків таблиць «місяці в колонках» (`Collection:MonthColumnRouting`) і перевірка
+    // «Closed» місяця. `null` або вимкнений прапор — поведінка до Q-17.
+    IMonthColumnRouter? monthRouter = null,
+    IPeriodStore? periods = null)
 {
     /// <summary>Тип сутності запису аудиту (<c>aud.StructureChange.EntityType</c>).</summary>
     public const string AuditEntityType = "doc.TableRow";
@@ -140,11 +145,20 @@ public sealed class DeleteRowHandler(
         var enlist = jobs.EnlistsInCallerTransaction;
         IReadOnlyList<RecalculationSeed> seeds = [];
 
+        // ✎ Q-17: склад рядків спільний на рік — видаляється в усіх наявних екземплярах таблиці за рік.
+        var annual = rowDecision.AnnualPeriods;
+        var mirror = monthRouter is { Enabled: true }
+                     && monthRouter.AppliesToTable(table)
+                     && annual is { Count: > 0 }
+                     && await monthRouter.GetDocumentAsync(instance.DocumentId, ct).ConfigureAwait(false) is not null
+            ? annual
+            : null;
+
         await uow.ExecuteInTransactionAsync(
             async innerCt =>
             {
                 seeds = await DeleteUnderLockAsync(
-                        instance, table, key, profile, rowDecision.AssignmentsPresent, sheetCode, innerCt)
+                        instance, table, key, profile, rowDecision.AssignmentsPresent, sheetCode, mirror, innerCt)
                     .ConfigureAwait(false);
 
                 // ⛔ MI-02 (в): черга в базі — постановка ВСЕРЕДИНІ транзакції останнім оператором; Quartz — після коміту.
@@ -235,7 +249,7 @@ public sealed class DeleteRowHandler(
     /// <returns>Насіння каскаду перерахунку (порожнє — перераховувати нічого).</returns>
     private async Task<IReadOnlyList<RecalculationSeed>> DeleteUnderLockAsync(
         TableInstanceRef instance, TableDef table, RowKey key, AccessProfile profile, bool assignmentsPresent,
-        string? sheetCode, CancellationToken ct)
+        string? sheetCode, IReadOnlyList<int>? mirrorPeriods, CancellationToken ct)
     {
         // ⛔ P3: очікування блокувань обмежене (409 ECR-DOC-4091 замість висіння до CommandTimeout) — до всіх блокувань.
         await cells.LimitLockWaitAsync(ct).ConfigureAwait(false);
@@ -248,12 +262,40 @@ public sealed class DeleteRowHandler(
 
         var periodKey = new PeriodKey(instance.PeriodKey);
 
-        await RowWriteLock
-            .EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, periodKey, ct)
-            .ConfigureAwait(false);
-        var status = await sheetGate
-            .EnterEditAsync(instance.DocumentId, table.SheetDefId, periodKey, ct)
-            .ConfigureAwait(false);
+        // ✎ Q-17: у дзеркальному режимі — екземпляри таблиці за рік і замки ВСІХ задіяних періодів, виняткові, за
+        // зростанням ключа (див. `CreateRowHandler.CreateMirroredUnderLockAsync`); стан — за річним агрегатом.
+        var mirrorInstances = new List<TableInstanceRef>();
+        var statuses = new Dictionary<int, DocumentStatus>();
+        DocumentStatus status;
+        if (mirrorPeriods is null)
+        {
+            await RowWriteLock
+                .EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, periodKey, ct)
+                .ConfigureAwait(false);
+            status = await sheetGate
+                .EnterEditAsync(instance.DocumentId, table.SheetDefId, periodKey, ct)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            mirrorInstances.AddRange(await rowStore
+                .GetTableInstancesOfTableInYearAsync(instance.DocumentId, instance.TableDefId, periodKey.Year, ct)
+                .ConfigureAwait(false));
+
+            var toLock = new SortedSet<int>(mirrorPeriods);
+            toLock.UnionWith(mirrorInstances.Select(i => i.PeriodKey));
+            toLock.Add(instance.PeriodKey);
+            foreach (var period in toLock)
+            {
+                var lockKey = new PeriodKey(period);
+                await RowWriteLock.EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, lockKey, ct).ConfigureAwait(false);
+                statuses[period] = await sheetGate
+                    .EnterEditAsync(instance.DocumentId, table.SheetDefId, lockKey, ct)
+                    .ConfigureAwait(false);
+            }
+
+            status = AnnualPeriodRule.AggregateStatus(mirrorPeriods.Select(p => statuses[p]));
+        }
 
         var stateReason = status switch
         {
@@ -294,6 +336,43 @@ public sealed class DeleteRowHandler(
         }
 
         var columns = table.Columns.Where(c => !c.IsDeleted).ToList();
+
+        // ⛔ Q-17: рядок не видаляється, якщо в якомусь екземплярі він має непорожню ВВЕДЕНУ комірку місячного
+        // стовпця, чий місяць Submitted/Approved/Closed (409 ECR-ROW-0409, окремий ключ тексту `monthDataLocked`).
+        foreach (var other in mirrorInstances)
+        {
+            var otherPeriod = new PeriodKey(other.PeriodKey);
+            var monthColumns = columns.Where(c => c.IsMonthColumn && c.MonthNumber == otherPeriod.Sequence).ToList();
+            if (monthColumns.Count == 0)
+            {
+                continue;
+            }
+
+            var closed = periods is not null
+                         && await periods.FindPeriodStateAsync(instance.DocumentId, other.PeriodKey, ct).ConfigureAwait(false)
+                             == PeriodState.Closed;
+            if (!closed && statuses[other.PeriodKey] is not (DocumentStatus.Submitted or DocumentStatus.Approved))
+            {
+                continue;
+            }
+
+            var mirrorRowId = other.TableInstanceId == instance.TableInstanceId
+                ? row.Id
+                : (await rowStore.FindLiveRowAsync(other.TableInstanceId, otherPeriod, key.Value, ct).ConfigureAwait(false))?.Id;
+            if (mirrorRowId is not { } rowId)
+            {
+                continue;
+            }
+
+            var monthValues = await cells
+                .ReadCellsAsync([.. monthColumns.Select(c => new CellAddress(otherPeriod, rowId, c.Id))], ct)
+                .ConfigureAwait(false);
+            if (monthValues.Values.Any(v => v is { IsEmpty: false, IsCalculated: false }))
+            {
+                throw NotDeletable("err.ECR-ROW-0409.monthDataLocked");
+            }
+        }
+
         var addresses = columns.ConvertAll(c => new CellAddress(periodKey, row.Id, c.Id));
         var values = addresses.Count == 0
             ? new Dictionary<CellAddress, CellValueData>()
@@ -381,6 +460,18 @@ public sealed class DeleteRowHandler(
         {
             // Гонитва, якої блокування аркуша не пускає; усе одно — чесна відповідь про живий рядок.
             throw RowNotFound();
+        }
+
+        // ✎ Q-17: дзеркала в решті екземплярів — м'яко видаляються тією ж транзакцією.
+        foreach (var other in mirrorInstances.Where(i => i.TableInstanceId != instance.TableInstanceId))
+        {
+            var mirrorRow = await rowStore
+                .FindLiveRowAsync(other.TableInstanceId, new PeriodKey(other.PeriodKey), key.Value, ct)
+                .ConfigureAwait(false);
+            if (mirrorRow is not null)
+            {
+                await rowStore.SoftDeleteRowAsync(mirrorRow.Id, new PeriodKey(other.PeriodKey), ct).ConfigureAwait(false);
+            }
         }
 
         // ⛔ Видалення рядка — зміна документа (`H-23d`), як і додавання.

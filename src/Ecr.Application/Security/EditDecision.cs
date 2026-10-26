@@ -60,6 +60,14 @@ public readonly record struct EditDecision(
     /// </summary>
     public int? ColumnPeriod { get; init; }
 
+    /// <summary>
+    /// Q-17 (<c>Collection:MonthColumnRouting</c>): ключі періодів календаря року, агрегат яких керував цим рішенням
+    /// (введений не-місячний стовпець чи склад рядків таблиці «місяці в колонках», <see cref="AnnualPeriodRule"/>);
+    /// <c>null</c> — рішення не річне. Запис бере блокування ВСІХ цих періодів за зростанням ключа й повторює
+    /// агрегат стану аркуша під ними.
+    /// </summary>
+    public IReadOnlyList<int>? AnnualPeriods { get; init; }
+
     public static EditDecision Allow() => new(true, EditDenyReason.None);
 
     /// <summary>Дозволено погоджувачеві поточного кроку правити поданий аркуш (D-442).</summary>

@@ -23,9 +23,12 @@ public sealed class RowStore(
     ISheetEditGate? structureGate = null,
     Microsoft.Extensions.Logging.ILogger<RowStore>? log = null,
     Application.Permits.Bindings.IPermitBindingService? permits = null,
-    IBackgroundJobScheduler? jobs = null)
+    IBackgroundJobScheduler? jobs = null,
+    IMonthColumnRouter? monthRouter = null)
     : IRowStore
 {
+    // ⚠ Q-17: `monthRouter` необов'язковий (RowStore будують напряму десятки тестів); `null` або вимкнений прапор
+    // `Collection:MonthColumnRouting` = дзеркал рядків якоря немає, поведінка до Q-17.
     // ⚠ PM-10b: `jobs` - необов'язковий з тієї ж причини, що й `permits`; `null` - перерахунок після рядків з дозволу
     // не ставиться (поведінка до PM-10b).
 
@@ -922,6 +925,16 @@ public sealed class RowStore(
         // ⛔ L6-02: читати ПІСЛЯ блокування — те, що знайшов швидкий шлях, могло бути структурою
         // версії, з якої документ уже перенесено.
         var missing = await FindMissingTableDefsAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        return await CreateInstancesCoreAsync(documentId, periodKey, missing, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Створює екземпляри <paramref name="missing"/> (Fixed-рядки, за прапором Q-17 — дзеркала рядків якоря, рядки з
+    /// дозволу); під спільним <c>doc-structure</c> і в транзакції викликача.
+    /// </summary>
+    private async Task<(int Created, Application.Permits.Bindings.PermitMaterialization? Materialized)>
+        CreateInstancesCoreAsync(long documentId, PeriodKey periodKey, List<int> missing, CancellationToken ct)
+    {
         if (missing.Count == 0)
         {
             return (0, null);
@@ -969,6 +982,7 @@ public sealed class RowStore(
         }
 
         await MaterializeFixedRowsAsync(created, periodKey, utcNow, ct).ConfigureAwait(false);
+        await MirrorAnchorRowsAsync(documentId, periodKey, created, utcNow, ct).ConfigureAwait(false);
 
         try
         {
@@ -1012,6 +1026,164 @@ public sealed class RowStore(
 
     /// <summary>Програш гонитви за <c>UQ_TableInstance</c> — штатний вихід, а не помилка.</summary>
     private sealed class InstancesCreatedConcurrently : Exception;
+
+    /// <summary>
+    /// Q-17: новий екземпляр таблиці «місяці в колонках» отримує дзеркала ЖИВИХ рядків якоря року (<c>RowKey</c>,
+    /// <c>Ordinal</c>, <c>RowDefId</c>), яких ще немає серед щойно заведених Fixed-рядків. Лише за прапором
+    /// <c>Collection:MonthColumnRouting</c>; вимкнено — жодного звернення до бази.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Якір авторитетний за складом рядків. Якір сам (чи рік без екземпляра якоря) — нічого копіювати.
+    /// Видалені рядки якоря не копіюються. Дубль ключа з Fixed-рядками пропускається (шаблонний рядок первинний).
+    /// </remarks>
+    private async Task MirrorAnchorRowsAsync(
+        long documentId, PeriodKey periodKey, IReadOnlyDictionary<int, long> created, DateTime utcNow, CancellationToken ct)
+    {
+        if (monthRouter is not { Enabled: true })
+        {
+            return;
+        }
+
+        var document = await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false);
+        if (document is null)
+        {
+            return;
+        }
+
+        var createdIds = created.Keys.ToList();
+        var monthTables = await db.TableDefs
+            .AsNoTracking()
+            .Where(t => createdIds.Contains(t.Id) && t.LayoutKind == Domain.Enums.TableLayoutKind.MonthsInColumns)
+            .Select(t => t.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (monthTables.Count == 0)
+        {
+            return;
+        }
+
+        var anchor = await monthRouter.AnchorOfAsync(document.ProjectId, periodKey.Year, ct).ConfigureAwait(false);
+        if (anchor is not { } anchorKey || anchorKey == periodKey)
+        {
+            return;
+        }
+
+        var anchorInstances = await db.TableInstances
+            .AsNoTracking()
+            .Where(t => t.PeriodKeyValue == anchorKey.Value && t.DocumentId == documentId && monthTables.Contains(t.TableDefId))
+            .Select(t => new { t.Id, t.TableDefId })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (anchorInstances.Count == 0)
+        {
+            return;
+        }
+
+        var anchorIds = anchorInstances.Select(i => i.Id).ToList();
+        var anchorTableOf = anchorInstances.ToDictionary(i => i.Id, i => i.TableDefId);
+        var anchorRows = await db.TableRows
+            .AsNoTracking()
+            .Where(r => r.PeriodKeyValue == anchorKey.Value && anchorIds.Contains(r.TableInstanceId) && !r.IsDeleted)
+            .OrderBy(r => r.Ordinal)
+            .ThenBy(r => r.Id)
+            .Select(r => new { r.TableInstanceId, r.RowKeyValue, r.Ordinal, r.RowDefId })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Ключі, які вже заведено в щойно створених екземплярах (Fixed-рядки з шаблону).
+        var taken = db.ChangeTracker.Entries<TableRow>()
+            .Where(e => e.State == EntityState.Added)
+            .Select(e => (e.Entity.TableInstanceId, e.Entity.RowKeyValue))
+            .ToHashSet();
+
+        var toAdd = anchorRows
+            .Select(r => (Row: r, NewInstanceId: created[anchorTableOf[r.TableInstanceId]]))
+            .Where(x => !taken.Contains((x.NewInstanceId, x.Row.RowKeyValue)))
+            .ToList();
+        if (toAdd.Count == 0)
+        {
+            return;
+        }
+
+        var firstRowId = await bulk.ReserveIdsAsync("doc.TableRowSeq", toAdd.Count, ct).ConfigureAwait(false);
+        for (var i = 0; i < toAdd.Count; i++)
+        {
+            var (row, newInstanceId) = toAdd[i];
+            db.TableRows.Add(new TableRow(
+                periodKey, firstRowId + i, newInstanceId, RowKey.Create(row.RowKeyValue), row.Ordinal, utcNow, row.RowDefId));
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<TableInstanceRef>> GetTableInstancesOfTableInYearAsync(
+        long documentId, int tableDefId, int year, CancellationToken ct)
+    {
+        var first = year * 100;
+
+        // ⚠ Q-17: ключ періоду в діапазоні (рік*100, рік*100+12] — відсікає партиції інших років.
+        var instances = await (
+                from t in db.TableInstances.AsNoTracking()
+                where t.DocumentId == documentId
+                      && t.TableDefId == tableDefId
+                      && t.PeriodKeyValue > first
+                      && t.PeriodKeyValue <= first + PeriodCalendar.MonthsInYear
+                join d in db.Documents.AsNoTracking() on t.DocumentId equals d.Id
+                join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                orderby t.PeriodKeyValue
+                select new { t.Id, t.DocumentId, t.TableDefId, p.TemplateVersionId, t.PeriodKeyValue })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. instances.Select(i => new TableInstanceRef(i.Id, i.DocumentId, i.TableDefId, i.TemplateVersionId, i.PeriodKeyValue))];
+    }
+
+    /// <inheritdoc />
+    public async Task<TableInstanceRef> EnsureTableInstanceAsync(
+        long documentId, int tableDefId, PeriodKey periodKey, CancellationToken ct)
+    {
+        async Task<TableInstanceRef?> FindAsync(CancellationToken token)
+            => (await GetTableInstancesOfTableInYearAsync(documentId, tableDefId, periodKey.Year, token).ConfigureAwait(false))
+                .FirstOrDefault(r => r.PeriodKey == periodKey.Value);
+
+        if (await FindAsync(ct).ConfigureAwait(false) is { } existing)
+        {
+            return existing;
+        }
+
+        try
+        {
+            await new UnitOfWork(db).ExecuteInTransactionAsync(
+                async token =>
+                {
+                    await (structureGate ?? new SheetEditGate(db))
+                        .EnterStructureAsync(documentId, exclusive: false, token)
+                        .ConfigureAwait(false);
+
+                    // Під замком перечитати: переможець гонитви міг уже створити.
+                    if (await FindAsync(token).ConfigureAwait(false) is not null)
+                    {
+                        return;
+                    }
+
+                    await CreateInstancesCoreAsync(documentId, periodKey, [tableDefId], token).ConfigureAwait(false);
+                },
+                ct).ConfigureAwait(false);
+        }
+        catch (InstancesCreatedConcurrently)
+        {
+            // Переможець створив; наша транзакція відкочена.
+        }
+
+        return await FindAsync(ct).ConfigureAwait(false)
+            ?? throw new NotFoundException(
+                "ECR-DOC-0404",
+                $"Екземпляра таблиці {tableDefId} за період {periodKey.Value} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
+                    ["tableInstanceId"] = tableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+    }
 
     /// <summary>
     /// Заводить рядки щойно створених екземплярів за описами
