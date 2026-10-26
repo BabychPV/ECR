@@ -95,6 +95,21 @@ public interface IWorkflowStore
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
+    /// Ключ найновішого зрізу аркуша за період БЕЗ payload: ідентифікатор і <c>ContentHash</c> (hex);
+    /// зрізу немає — <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ PERF (затвердження 91 таблиці, 268→493 с): payload зрізу — ~10 МБ, а <see cref="GetSnapshotsAsync"/>
+    /// тягне їх УСІ (кожне подання додає зріз), тож час затвердження ріс лінійно з числом подань. Потрібен
+    /// лише найновіший, і то лише якщо хеш живих даних від його хеша відрізняється.
+    /// </remarks>
+    public Task<(long Id, string ContentHash)?> GetLatestSnapshotKeyAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>Payload одного зрізу за ідентифікатором; зрізу немає — <c>null</c>.</summary>
+    public Task<string?> GetSnapshotPayloadAsync(long snapshotId, CancellationToken ct);
+
+    /// <summary>
     /// Чи має проєкт хоч один поданий аркуш у цьому періоді.
     /// </summary>
     /// <param name="projectId">Проєкт.</param>

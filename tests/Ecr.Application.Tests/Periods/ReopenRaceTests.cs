@@ -313,6 +313,13 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
             long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
             => inner.GetSnapshotsAsync(documentId, sheetDefId, periodKey, ct);
 
+        public Task<(long Id, string ContentHash)?> GetLatestSnapshotKeyAsync(
+            long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+            => inner.GetLatestSnapshotKeyAsync(documentId, sheetDefId, periodKey, ct);
+
+        public Task<string?> GetSnapshotPayloadAsync(long snapshotId, CancellationToken ct)
+            => inner.GetSnapshotPayloadAsync(snapshotId, ct);
+
         public Task<bool> HasSubmittedSheetsAsync(int projectId, PeriodKey periodKey, CancellationToken ct)
             => inner.HasSubmittedSheetsAsync(projectId, periodKey, ct);
 

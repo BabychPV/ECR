@@ -27,10 +27,18 @@ internal static class EditAssignmentFactsReader
     /// транзакції запису: перехід <c>Fill/Validate/Return</c> чекає її завершення).
     /// </param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="utcNow">Поточний час для блокування делегатора; <c>null</c> - блокування не рахується (шлях без годинника).</param>
     public static async Task<IReadOnlyDictionary<long, (int OwnerUserId, IReadOnlyList<EditAssignmentFact> Facts)>>
         LoadAsync(
-            EcrDbContext db, IReadOnlyCollection<long> documentIds, int userId, bool forUpdate, CancellationToken ct)
+            EcrDbContext db, IReadOnlyCollection<long> documentIds, int userId, bool forUpdate, CancellationToken ct,
+            DateTime? utcNow = null)
     {
+        // W14F P3-4: делегатор діє, лише поки обліковий запис активний І не заблокований (LockedUntil - той самий критерій,
+        // що й вхід, User.IsLockedOut). Годинник - clock служби доступу.
+        // Без годинника (повторна перевірка під блокуванням аркуша - IEditAssignmentStore без IClock) блокування не рахується:
+        // межа "кінець часу" робить умову LockedUntil <= now істинною для будь-якого значення. Перше рішення про дію
+        // (з годинником служби доступу) блокування вже врахувало.
+        var now = utcNow ?? DateTime.MaxValue;
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(documentIds);
 
@@ -42,7 +50,7 @@ internal static class EditAssignmentFactsReader
 
         if (forUpdate)
         {
-            return await LoadLockedAsync(db, documentIds, userId, ct).ConfigureAwait(false);
+            return await LoadLockedAsync(db, documentIds, userId, now, ct).ConfigureAwait(false);
         }
 
         var rows = await (
@@ -61,7 +69,7 @@ internal static class EditAssignmentFactsReader
                     a.ValidationStatus,
                     a.DelegatedByUserId,
                     a.ExpiresAt,
-                    u.IsActive,
+                    u.IsActive && (u.LockedUntil == null || u.LockedUntil <= now),
                     d.CreatedByUserId,
                     db.EditAssignmentRecipients
                         .Where(r => r.AssignmentId == a.Id && r.UserId == userId)
@@ -108,7 +116,8 @@ internal static class EditAssignmentFactsReader
     /// з U) — серіалізується лише перехід станів проти запису.
     /// </remarks>
     private static async Task<IReadOnlyDictionary<long, (int OwnerUserId, IReadOnlyList<EditAssignmentFact> Facts)>>
-        LoadLockedAsync(EcrDbContext db, IReadOnlyCollection<long> documentIds, int userId, CancellationToken ct)
+        LoadLockedAsync(
+            EcrDbContext db, IReadOnlyCollection<long> documentIds, int userId, DateTime now, CancellationToken ct)
     {
         var documentId = documentIds.Single();
 
@@ -164,8 +173,8 @@ internal static class EditAssignmentFactsReader
         var delegatorIds = assignments.Select(a => a.DelegatedByUserId).Distinct().ToList();
         var active = await db.Users.AsNoTracking()
             .Where(u => delegatorIds.Contains(u.Id))
-            .Select(u => new { u.Id, u.IsActive })
-            .ToDictionaryAsync(u => u.Id, u => u.IsActive, ct)
+            .Select(u => new { u.Id, Active = u.IsActive && (u.LockedUntil == null || u.LockedUntil <= now) })
+            .ToDictionaryAsync(u => u.Id, u => u.Active, ct)
             .ConfigureAwait(false);
 
         var rows = assignments.Select(a => new FactRow(
@@ -233,7 +242,7 @@ internal static class EditAssignmentFactsReader
                where r.UserId == userId
                join a in db.EditAssignments.AsNoTracking() on r.AssignmentId equals a.Id
                where (a.ExpiresAt == null || a.ExpiresAt > utcNow)
-                     && db.Users.Any(u => u.Id == a.DelegatedByUserId && u.IsActive)
+                     && db.Users.Any(u => u.Id == a.DelegatedByUserId && u.IsActive && (u.LockedUntil == null || u.LockedUntil <= utcNow))
                select a.DocumentId;
     }
 

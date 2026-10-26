@@ -54,6 +54,19 @@ public static class RegistryAccess
         return profile.Denies.Contains(KeyPrefix + registryDefId.ToString(CultureInfo.InvariantCulture));
     }
 
+    /// <summary>
+    /// Заборона на довідник у документі проєкту <paramref name="projectId"/>: спільна (<see cref="IsDenied"/>) АБО видана ролі
+    /// з областю, призначеній на цей проєкт (<see cref="ScopedProjectAccess.RegistryDenies"/>). P50.
+    /// </summary>
+    /// <param name="profile">Профіль користувача.</param>
+    /// <param name="registryDefId">Довідник.</param>
+    /// <param name="projectId">Проєкт документа; <c>null</c> - лише спільні заборони.</param>
+    public static bool IsDeniedIn(AccessProfile profile, int registryDefId, int? projectId)
+        => IsDenied(profile, registryDefId)
+           || (projectId is { } project
+               && profile.Scoped.TryGetValue(project, out var scoped)
+               && scoped.RegistryDenies.Contains(registryDefId));
+
     /// <summary>Довідники, на які профіль має явну заборону; порожньо — заборон немає.</summary>
     /// <param name="profile">Профіль користувача.</param>
     public static IReadOnlyList<int> DeniedIds(AccessProfile profile)

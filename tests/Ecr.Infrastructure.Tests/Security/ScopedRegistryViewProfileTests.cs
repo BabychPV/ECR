@@ -42,7 +42,8 @@ public sealed class ScopedRegistryViewProfileTests(SqlServerFixture sql) : IDisp
 
     private async Task<int> UserAsync(
         TestDocument doc, bool view, int[]? scopeProjects, bool projectWrite = true, bool deny = false,
-        int[]? extraViewScopeProjects = null, string[]? narrowSheets = null)
+        int[]? extraViewScopeProjects = null, string[]? narrowSheets = null,
+        bool scopedReadGrant = false, bool globalViewRole = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         await using var db = builder.CreateContext();
@@ -77,6 +78,20 @@ public sealed class ScopedRegistryViewProfileTests(SqlServerFixture sql) : IDisp
             db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Registry, Registry, GrantLevel.None, isDeny: true));
         }
 
+        if (scopedReadGrant)
+        {
+            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Registry, Registry, GrantLevel.Read));
+        }
+
+        if (globalViewRole)
+        {
+            var global = new Role(EcrCode.Create($"SRG_{Guid.NewGuid():N}"[..20]), Text("Global view"));
+            db.Roles.Add(global);
+            await db.SaveChangesAsync(CancellationToken.None);
+            db.RolePermissions.Add(new RolePermission(global.Id, "Registry.View"));
+            db.RoleAssignments.Add(new RoleAssignment(global.Id, user.Id, null));
+        }
+
         // Окрема роль БЕЗ області для доступу до документа + роль View, призначена лише на ІНШИЙ проєкт.
         if (extraViewScopeProjects is not null)
         {
@@ -93,7 +108,7 @@ public sealed class ScopedRegistryViewProfileTests(SqlServerFixture sql) : IDisp
         return user.Id;
     }
 
-    private async Task<bool> CanChooseAsync(TestDocument doc, int userId)
+    private async Task<bool> CanChooseAsync(TestDocument doc, int userId, int? projectOverride = null)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         await using var db = builder.CreateContext();
@@ -107,7 +122,7 @@ public sealed class ScopedRegistryViewProfileTests(SqlServerFixture sql) : IDisp
         var profile = await service.BuildProfileAsync(userId, CancellationToken.None);
 
         // Як викликачі: проєкт документа передається лише коли він потрібен.
-        int? viewProject = LookupTargetMatcher.ViewProjectNeeded(profile) ? doc.ProjectId : null;
+        int? viewProject = LookupTargetMatcher.ViewProjectNeeded(profile) ? projectOverride ?? doc.ProjectId : null;
         return LookupTargetMatcher.Belongs(null, profile, Registry, Registry, viewProject);
     }
 
@@ -190,4 +205,85 @@ public sealed class ScopedRegistryViewProfileTests(SqlServerFixture sql) : IDisp
 
         Assert.False(profile.Scoped.TryGetValue(doc.ProjectId, out var scoped) && scoped.RegistryView);
         Assert.False(await CanChooseAsync(doc, narrowed));
+    }
+    // ── P50 (Аудит-2 W14g, P2): Deny/Read-грант, видані САМІЙ ролі з областю, діють у проєкті призначення ────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P50")]
+    public async Task Scoped_View_і_власний_Deny_у_тій_самій_ролі_запис_обрати_не_можна()
+    {
+        var doc = await ArrangeAsync();
+        var user = await UserAsync(doc, view: true, scopeProjects: [doc.ProjectId], deny: true);
+
+        Assert.False(await CanChooseAsync(doc, user));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P50")]
+    public async Task Scoped_Deny_діє_лише_в_проєкті_призначення_а_в_іншому_проєкті_ні()
+    {
+        var doc = await ArrangeAsync();
+        var user = await UserAsync(doc, view: false, scopeProjects: [doc.ProjectId], deny: true, globalViewRole: true);
+
+        Assert.False(await CanChooseAsync(doc, user));
+        Assert.True(await CanChooseAsync(doc, user, projectOverride: doc.ProjectId + 1_000_000));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P50")]
+    public async Task Scoped_грант_Read_на_реєстр_без_View_дозволяє_вибір_лише_у_проєкті_призначення()
+    {
+        var doc = await ArrangeAsync();
+        var user = await UserAsync(doc, view: false, scopeProjects: [doc.ProjectId], scopedReadGrant: true);
+
+        Assert.True(await CanChooseAsync(doc, user));
+        Assert.False(await CanChooseAsync(doc, user, projectOverride: doc.ProjectId + 1_000_000));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P50")]
+    public async Task Глобальний_Deny_як_раніше_перебиває_глобальний_View_і_без_Deny_вибір_дозволений()
+    {
+        var doc = await ArrangeAsync();
+        var denied = await UserAsync(doc, view: true, scopeProjects: null, deny: true);
+        var plain = await UserAsync(doc, view: true, scopeProjects: [doc.ProjectId]);
+
+        Assert.False(await CanChooseAsync(doc, denied));
+        Assert.True(await CanChooseAsync(doc, plain));
+    }
+    // ── P50b (Аудит P3-1): Deny ролі зі ЗВУЖЕНОЮ областю (D-214) теж діє; View/Read-грант такої ролі - ні (fail-closed) ──
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P50b")]
+    public async Task Deny_звуженої_ролі_перебиває_View_іншої_ролі_лише_в_проєкті_призначення()
+    {
+        var doc = await ArrangeAsync();
+        var user = await UserAsync(
+            doc, view: false, scopeProjects: [doc.ProjectId], deny: true, globalViewRole: true, narrowSheets: ["SHEET_X"]);
+
+        Assert.False(await CanChooseAsync(doc, user));
+        Assert.True(await CanChooseAsync(doc, user, projectOverride: doc.ProjectId + 1_000_000));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P50b")]
+    public async Task View_і_Read_грант_звуженої_ролі_доступу_не_дають()
+    {
+        var doc = await ArrangeAsync();
+        var user = await UserAsync(
+            doc, view: true, scopeProjects: [doc.ProjectId], scopedReadGrant: true, narrowSheets: ["SHEET_X"]);
+
+        Assert.False(await CanChooseAsync(doc, user));
     }}

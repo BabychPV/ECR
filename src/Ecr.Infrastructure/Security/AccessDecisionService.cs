@@ -401,6 +401,7 @@ public sealed class AccessDecisionService(
         var grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal);
         var denies = new HashSet<string>(StringComparer.Ordinal);
         var layers = new Dictionary<int, (Dictionary<string, GrantLevel> Grants, HashSet<string> Denies)>();
+        var registryLayers = new Dictionary<int, (HashSet<int> Denies, Dictionary<int, GrantLevel> Grants)>();
 
         foreach (var row in rows)
         {
@@ -428,6 +429,30 @@ public sealed class AccessDecisionService(
                 continue;
             }
 
+            // P50: довідник проєкту не має, але Deny/Read-грант ролі з областю діє в документах ЇЇ проєктів (вибір запису Lookup):
+            // інакше scoped View перебивав би власний Deny ролі (оракул існування запису). Дані вже прочитані - запитів немає.
+            if (row.ResourceKind == ResourceKind.Registry)
+            {
+                foreach (var projectId in projects)
+                {
+                    if (!registryLayers.TryGetValue(projectId, out var registry))
+                    {
+                        registryLayers[projectId] = registry = (new HashSet<int>(), new Dictionary<int, GrantLevel>());
+                    }
+
+                    if (row.IsDeny)
+                    {
+                        registry.Denies.Add(row.ResourceId);
+                    }
+                    else if (!registry.Grants.TryGetValue(row.ResourceId, out var known) || known < row.Level)
+                    {
+                        registry.Grants[row.ResourceId] = row.Level;
+                    }
+                }
+
+                continue;
+            }
+
             // ⚠ Аркуш/таблиця/колонка — окремо на КОЖЕН проєкт області: їхні
             // ідентифікатори спільні для всіх проєктів шаблону. Решта видів
             // (довідник тощо) проєкту не має — роль з областю їх не дає.
@@ -446,6 +471,25 @@ public sealed class AccessDecisionService(
                 }
 
                 Merge(layer.Grants, layer.Denies, key, row.Level, row.IsDeny);
+            }
+        }
+
+        // P50b (Аудит P3-1): Registry-DENY ролі зі ЗВУЖЕНОЮ областю (D-214) діє в усіх проєктах її призначення - Deny завжди
+        // сильніший, інакше він мовчки ігнорувався б за наявності іншої ролі з View (fail-open). View/Read-ГРАНТ такої ролі
+        // лишається ІГНОРОВАНИМ (fail-closed): звужена роль доступу до довідників не дає.
+        foreach (var (narrowedRoleId, narrowedScope) in narrowedScopes)
+        {
+            foreach (var denied in rows.Where(r => r.RoleId == narrowedRoleId && r.ResourceKind == ResourceKind.Registry && r.IsDeny))
+            {
+                foreach (var projectId in narrowedScope.ProjectIds)
+                {
+                    if (!registryLayers.TryGetValue(projectId, out var registry))
+                    {
+                        registryLayers[projectId] = registry = (new HashSet<int>(), new Dictionary<int, GrantLevel>());
+                    }
+
+                    registry.Denies.Add(denied.ResourceId);
+                }
             }
         }
 
@@ -473,6 +517,10 @@ public sealed class AccessDecisionService(
                     permissionsHere)) with
             {
                 Narrowed = narrowed.TryGetValue(projectId, out var here) ? here : [],
+                RegistryDenies = registryLayers.TryGetValue(projectId, out var regHere) ? regHere.Denies : new HashSet<int>(),
+                RegistryGrants = registryLayers.TryGetValue(projectId, out var regGrants)
+                    ? regGrants.Grants
+                    : new Dictionary<int, GrantLevel>(),
 
                 // P48: Registry.View ролі, призначеної на цей проєкт, - лише для вибору запису Lookup.
                 RegistryView = scopedHere.Any(registryViewRoles.Contains),
@@ -728,7 +776,7 @@ public sealed class AccessDecisionService(
         }
 
         var facts = await EditAssignmentFactsReader
-            .LoadAsync(db, documentIds, profile.UserId, forUpdate: locked, ct)
+            .LoadAsync(db, documentIds, profile.UserId, forUpdate: locked, ct, clock.UtcNow)
             .ConfigureAwait(false);
 
         var now = clock.UtcNow;
@@ -1892,7 +1940,7 @@ public sealed class AccessDecisionService(
         }
 
         var loaded = await Persistence.EditAssignmentFactsReader
-            .LoadAsync(db, documentIds, profile.UserId, forUpdate: false, ct)
+            .LoadAsync(db, documentIds, profile.UserId, forUpdate: false, ct, clock.UtcNow)
             .ConfigureAwait(false);
 
         // ⛔ P2-2: передача діє лише поки делегатор може її видавати (див. WithDelegatorRightsAsync).

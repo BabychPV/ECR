@@ -216,6 +216,58 @@ public sealed class DocumentParticipantsApiTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.Forbidden, (await author.GetAsync(AssignmentsUri(s)).ConfigureAwait(true)).StatusCode);
     }
 
+    /// <summary>
+    /// W14F P3-4: заблокований адміністратором або деактивований делегатор не підтримує надання - учасник одразу
+    /// втрачає документ (404 як при знятих ролях); розблокування/активація повертають. Реальний HTTP і профіль.
+    /// </summary>
+    [Theory]
+    [InlineData("lock")]
+    [InlineData("deactivate")]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "W14F-P3-4")]
+    public async Task Заблокований_чи_деактивований_делегатор_вимикає_надання_учасника(string kind)
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var manager = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+
+        await JsonAsync(
+            await manager.PostAsJsonAsync(AssignmentsUri(s), Grant(s.SheetCode1, s.TableCode1, s.Stranger.Id, "Read")).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        using var participant = await SignedInAsync(app, s.Stranger.UserName).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, (await participant.GetAsync(DocumentUri(s)).ConfigureAwait(true)).StatusCode);
+
+        await SetManagerStateAsync(s, kind, on: true).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, (await participant.GetAsync(DocumentUri(s)).ConfigureAwait(true)).StatusCode);
+        Assert.False((await participant.GetAsync(SliceUri(s, s.TableInstance1)).ConfigureAwait(true)).IsSuccessStatusCode);
+
+        await SetManagerStateAsync(s, kind, on: false).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, (await participant.GetAsync(DocumentUri(s)).ConfigureAwait(true)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await participant.GetAsync(SliceUri(s, s.TableInstance1)).ConfigureAwait(true)).StatusCode);
+    }
+
+    private async Task SetManagerStateAsync(Scenario s, string kind, bool on)
+    {
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        if (kind == "lock")
+        {
+            var user = await db.Users.SingleAsync(u => u.Id == s.Manager.Id).ConfigureAwait(false);
+            if (on)
+            {
+                user.LockByAdministrator();
+            }
+            else
+            {
+                user.Unlock();
+            }
+
+            await db.SaveChangesAsync().ConfigureAwait(false);
+            return;
+        }
+
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE sec.[User] SET IsActive = {(on ? 0 : 1)} WHERE Id = {s.Manager.Id}").ConfigureAwait(false);
+    }
     private static string Num(long value) => value.ToString(CultureInfo.InvariantCulture);
 
     private static Uri DocumentUri(Scenario s) => new($"/api/v1/documents/{Num(s.DocumentId)}", UriKind.Relative);
