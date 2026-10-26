@@ -79,7 +79,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.Data
+try { Add-Type -AssemblyName System.Data } catch { }   # pwsh 7: типи SqlClient потрібні лише після запобіжників
 
 function Fail([string]$message) { throw "Q17: $message" }
 

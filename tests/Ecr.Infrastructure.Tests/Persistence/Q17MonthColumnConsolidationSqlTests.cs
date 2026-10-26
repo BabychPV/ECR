@@ -400,6 +400,17 @@ public sealed class Q17MonthColumnConsolidationSqlTests(SqlServerFixture sql)
         var w = await ArrangeAsync(instances: new() { [Jan] = ["A"], [Mar] = ["A"], [May] = ["A"] });
         await CellAsync(w, May, "A", w.M3, 7m);
 
+        if (!OperatingSystem.IsWindows())
+        {
+            // Linux-раннер: SQL Server у контейнері не бачить файл бекапу з боку тесту, а pwsh 7 не має System.Data.SqlClient,
+            // тож «справжній бекап + обгортка» тут неможливі. Запис перевіряємо SQL-режимом через токен обгортки (як A–G),
+            // а запобіжники обгортки — тестом вище (відмови до будь-якого підключення).
+            var linux = Summary(await RunAsync(w, "Apply"));
+            Assert.Equal(1, linux.copiesWritten);
+            Assert.Equal(0, Summary(await RunAsync(w, "Preview")).copyPlanned);
+            Assert.Equal(7m, (await ReadCellAsync(w, Mar, "A", w.M3))!.Numeric);
+            return;
+        }
         var dir = Path.Combine(DataRoot(), "q17-tests", Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(dir);
         var bak = Path.Combine(dir, "backup.bak");
@@ -752,7 +763,7 @@ public sealed class Q17MonthColumnConsolidationSqlTests(SqlServerFixture sql)
 
     private static async Task<(int ExitCode, string Output)> RunPowerShellAsync(string script, params string[] args)
     {
-        var psi = new ProcessStartInfo("powershell.exe")
+        var psi = new ProcessStartInfo(OperatingSystem.IsWindows() ? "powershell.exe" : "pwsh")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
