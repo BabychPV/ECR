@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type APIResponse, type Page } from '@playwright/test';
 
 /**
  * ui-sheet-focus на живому стенді: згортання панелі таблиць (A), таблиця на весь екран (B),
@@ -13,6 +13,8 @@ const DocumentId = process.env['ECR_E2E_DOCUMENT'] ?? '';
 const ShotsDir = process.env['ECR_SHEETFOCUS_SHOTS_DIR'] ?? '';
 const ShotTag = process.env['ECR_SHEETFOCUS_SHOT_TAG'] ?? 'after';
 const Repeats = 5;
+const KeyRepeats = 10;
+const SheetCount = 6;
 
 test.describe('Фокус на таблиці аркуша (ui-sheet-focus)', () => {
   test.skip(
@@ -101,25 +103,30 @@ test.describe('Фокус на таблиці аркуша (ui-sheet-focus)', ()
     }
 
     // Клавіша та посилання.
-    await toggle.focus();
-    await page.evaluate(() => {
-      const log: string[] = [];
-      (window as unknown as { __keys: string[] }).__keys = log;
-      window.addEventListener('keydown', (e) => log.push('keydown:' + e.key + (e.defaultPrevented ? ':prevented' : '')), true);
-      window.addEventListener('click', () => log.push('click'), true);
-      const original = history.replaceState.bind(history);
-      history.replaceState = (...args: Parameters<History['replaceState']>) => {
-        log.push('replace:' + String(args[2]));
-        original(...args);
-      };
-    });
-    await page.keyboard.press('Control+Shift+Enter');
-    try {
-      await expect(page).toHaveURL(/[?&]full=1/);
-    } catch (error) {
-      const seen = await page.evaluate(() => (window as unknown as { __keys: string[] }).__keys);
-      throw new Error(`журнал подій: ${seen.join(' ; ')}`, { cause: error });
+    // Ctrl+Shift+Enter ×10 (вхід і вихід), щоразу ПІСЛЯ правки й збереження: колись флейкало саме після PATCH.
+    const cell = page.locator('revo-grid:visible revogr-data .rgCell').first();
+    for (let i = 0; i < KeyRepeats; i += 1) {
+      await cell.dblclick();
+      await page.keyboard.type(String(100 + i));
+      const patched = page.waitForResponse((r) => r.request().method() === 'PATCH' && r.ok(), { timeout: 30_000 });
+      await page.keyboard.press('Enter');
+      await patched;
+      await page.keyboard.press('Escape');
+      await expect(page.locator('revogr-edit')).toHaveCount(0);
+
+      await page.keyboard.press('Control+Shift+Enter');
+      await expect(page, `Ctrl+Shift+Enter (вхід) ${String(i + 1)}/${String(KeyRepeats)}`).toHaveURL(/[?&]full=1/);
+      await expect(page.getByRole('region')).toBeVisible();
+      // Тулбар сітки (Undo/Redo, статус) видимий у повному екрані.
+      await expect(page.getByRole('button', { name: /^Undo$/ })).toBeVisible();
+      await expect(page.getByRole('button', { name: /^Redo$/ })).toBeVisible();
+
+      await page.keyboard.press('Control+Shift+Enter');
+      await expect(page, `Ctrl+Shift+Enter (вихід) ${String(i + 1)}/${String(KeyRepeats)}`).not.toHaveURL(/[?&]full=1/);
+      await expect(toggle).toBeFocused();
     }
+
+    await toggle.click();
     await page.reload();
     await expect(page.getByRole('region')).toBeVisible({ timeout: 60_000 });
     await toggle.click();
@@ -128,28 +135,47 @@ test.describe('Фокус на таблиці аркуша (ui-sheet-focus)', ()
 
   test('аркуші: «›» до останнього, активна вкладка видима, «…» веде на вибраний (N/5)', async ({ page }) => {
     test.slow();
+    test.setTimeout(300_000);
+    await page.setViewportSize({ width: 900, height: 800 });
     await signIn(page);
-    await open(page);
 
+    // Документ із шістьма аркушами з довгими назвами — вкладки не вміщуються у смугу.
+    const { documentId, periodKey } = await createMultiSheetDocument(page);
+    await page.goto(`/documents/${String(documentId)}?periodKey=${String(periodKey)}`);
     const tabs = page.getByRole('tablist').getByRole('tab');
-    const count = await tabs.count();
-    test.skip(count < 2, 'на стенді один аркуш');
+    await expect(tabs).toHaveCount(SheetCount, { timeout: 60_000 });
+    await shot(page, 'sheets-start');
+
+    const strip = page.getByRole('tablist');
+    const overflows = await strip.evaluate((element) => element.scrollWidth > element.clientWidth);
+    expect(overflows, 'вкладки мали б не вміщуватись у смугу').toBe(true);
+
+    const prev = page.getByTestId('sheet-prev');
+    const next = page.getByTestId('sheet-next');
 
     for (let i = 0; i < Repeats; i += 1) {
-      const next = page.getByTestId('sheet-next');
-      while (await next.isEnabled()) await next.click();
-      await expect(next).toBeDisabled();
-
-      const active = page.getByRole('tab', { selected: true });
-      await expect(active).toBeInViewport();
-      const strip = page.getByRole('tablist');
-      const [a, s] = [await active.boundingBox(), await strip.boundingBox()];
-      expect((a?.x ?? 0) + (a?.width ?? 0), 'вкладка не вилазить правіше смуги').toBeLessThanOrEqual((s?.x ?? 0) + (s?.width ?? 0) + 1);
-      if (i === 0) await shot(page, 'sheets');
-
+      // «‹» на першому аркуші вимкнена; «›» веде до останнього.
       await page.getByTestId('sheet-all').click();
       await page.getByRole('menuitem').first().click();
-      await expect(page.getByTestId('sheet-prev')).toBeDisabled();
+      await expect(prev, `прогін ${String(i + 1)}/${String(Repeats)}`).toBeDisabled();
+      await expect(next).toBeEnabled();
+
+      for (let step = 0; step < SheetCount - 1; step += 1) {
+        await next.click();
+        // Активна вкладка завжди в видимій зоні смуги.
+        await expect(page.getByRole('tab', { selected: true })).toBeInViewport({ ratio: 0.9 });
+      }
+      await expect(next).toBeDisabled();
+      await expect(prev).toBeEnabled();
+      await expect(page.getByRole('tab', { selected: true })).toContainText(`Sheet ${String(SheetCount)}`);
+      if (i === 0) await shot(page, 'sheets-end');
+
+      // «…» → вибір аркуша: другий.
+      await page.getByTestId('sheet-all').click();
+      await page.getByRole('menuitem', { name: /Sheet 2 / }).click();
+      await expect(page.getByRole('tab', { selected: true })).toContainText('Sheet 2 ');
+      await expect(prev).toBeEnabled();
+      await expect(next).toBeEnabled();
     }
   });
 
@@ -175,6 +201,101 @@ test.describe('Фокус на таблиці аркуша (ui-sheet-focus)', ()
     await shot(page, 'calc');
   });
 });
+
+async function ok<T>(response: APIResponse, what: string): Promise<T> {
+  const body = await response.text();
+  expect(response.status(), `${what}: ${String(response.status())} ${body.slice(0, 1500)}`).toBeLessThan(300);
+
+  return (body.length > 0 ? JSON.parse(body) : {}) as T;
+}
+
+/** Шаблон із `SheetCount` аркушами (по таблиці з одним стовпцем), опублікований; проєкт і документ на ньому. */
+async function createMultiSheetDocument(page: Page): Promise<{ documentId: number; periodKey: number }> {
+  const stamp = String(Date.now());
+  const template = await ok<{ templateId: number }>(
+    await page.request.post('/api/v1/templates', { data: { code: `E2ESheets${stamp}`, nameL10n: { en: `E2E sheets ${stamp}` } } }),
+    'заведення шаблону',
+  );
+  const version = await ok<{ versionId: number }>(
+    await page.request.post(`/api/v1/templates/${String(template.templateId)}/versions`, {
+      data: { versionNumber: '1.0.0.0', cloneFromVersionId: null },
+    }),
+    'заведення версії шаблону',
+  );
+  const base = `/api/v1/template-versions/${String(version.versionId)}`;
+
+  for (let n = 1; n <= SheetCount; n += 1) {
+    const code = `S${String(n)}`;
+    await ok(
+      await page.request.put(`${base}/sheets/${code}`, {
+        data: { nameL10n: { en: `Sheet ${String(n)} with a long descriptive name` }, ordinal: n, isMandatory: true, isVisible: true, sheetGroup: null },
+      }),
+      `аркуш ${code}`,
+    );
+    const table = await ok<{ id: number }>(
+      await page.request.put(`${base}/sheets/${code}/tables/T${String(n)}`, {
+        data: { nameL10n: { en: `Table ${String(n)}` }, ordinal: 0, layoutKind: 'Static', rowMode: 'Dynamic', maxDynamicRows: 50 },
+      }),
+      `таблиця аркуша ${code}`,
+    );
+    await ok(
+      await page.request.put(`${base}/tables/${String(table.id)}/columns/C1`, {
+        data: {
+          headerL10n: { en: 'C1' },
+          ordinal: 0,
+          dataType: 'String',
+          isRequired: false,
+          isReadOnly: false,
+          isHidden: false,
+          precision: null,
+          scale: null,
+          defaultValue: null,
+          displayFormat: null,
+          lookupFilter: null,
+          lookupRegistryDefId: null,
+          styleId: null,
+          unitId: null,
+        },
+      }),
+      `стовпець ${code}`,
+    );
+  }
+
+  await ok(await page.request.post(`${base}/publish`, { data: { reason: 'e2e: документ із кількома аркушами' } }), 'публікація версії шаблону');
+  const policies = await ok<{ id: number; code: string }[]>(await page.request.get('/api/v1/projects/period-policies'), 'політики періодів');
+  const policy = policies.find((item) => item.code === 'ECR-Standard') ?? policies[0];
+  expect(policy, 'у стенда немає жодної політики періодів').toBeDefined();
+  const project = await ok<{ projectId: number }>(
+    await page.request.post('/api/v1/projects', {
+      data: {
+        code: `E2ESheetsPrj${stamp}`,
+        nameL10n: { en: `E2E sheets project ${stamp}` },
+        periodKind: 'Monthly',
+        timeZoneId: 'UTC',
+        templateVersionId: version.versionId,
+        periodPolicyId: policy?.id,
+        year: new Date().getUTCFullYear(),
+      },
+    }),
+    'проєкт',
+  );
+  await ok(await page.request.post(`/api/v1/projects/${String(project.projectId)}/activate`), 'активація проєкту');
+  const structure = await ok<{ sheets: { id: number }[] }>(await page.request.get(`${base}/structure`), 'структура версії');
+  const document = await ok<{ documentId: number }>(
+    await page.request.post('/api/v1/documents', {
+      data: { projectId: project.projectId, sheetDefIds: structure.sheets.map((sheet) => sheet.id), templateVersionId: version.versionId },
+    }),
+    'документ',
+  );
+  const calendar = await ok<{ periods: { periodKey: number; state: string }[] }>(
+    await page.request.get(`/api/v1/projects/${String(project.projectId)}/periods`),
+    'календар проєкту',
+  );
+  const period = calendar.periods.find((item) => item.state === 'Open') ?? calendar.periods[0];
+  expect(period, 'у проєкту немає періодів').toBeDefined();
+
+  return { documentId: document.documentId, periodKey: period?.periodKey ?? 0 };
+}
 
 async function open(page: Page): Promise<void> {
   await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
