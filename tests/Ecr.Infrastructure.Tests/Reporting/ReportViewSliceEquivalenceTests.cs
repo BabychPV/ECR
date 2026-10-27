@@ -256,11 +256,26 @@ public sealed class ReportViewSliceEquivalenceTests(SqlServerFixture sql)
             foreach (var col in cols)
             {
                 var cells = slice.Where(c => c.Address.TableRowId == rowId && c.Address.ColumnDefId == col.Id).ToList();
-                // Одна комірка на адресу: обчислена, що несе значення; інакше введена (власника); інакше порожня обчислена.
-                var cell = cells.FirstOrDefault(c => c.Value.IsCalculated && SlotValue(col, c.Value) is not null)
-                           ?? cells.FirstOrDefault(c => !c.Value.IsCalculated) ?? cells.FirstOrDefault();
+                // Зріз віддає РІВНО одну комірку на адресу (обчислена зі значенням, інакше власник, інакше порожня обчислена).
+                if (cells.Count > 1)
+                {
+                    diffs.Add($"{col.Type}{(col.Month ? "/M" + col.MonthNo : "")} own={own} owner={owner}: у зрізі {cells.Count} комірок на адресі");
+                    continue;
+                }
+
+                var cell = cells.SingleOrDefault();
                 var expected = cell is null ? null : SlotValue(col, cell.Value);
                 var actual = viewRows[rowKey][col.Code];
+
+                // Незалежний еталон для порожньої обчисленої + введеного власника (лише колонки з чужим власником):
+                // віддається значення власника, а не порожнеча.
+                var foreignOwner = (!col.Month || col.MonthNo is 3 or 11)   // місяці 3 і 11 мають екземпляр-власник (10 = сам перегляд)
+                                   && col.Type is not (CellDataType.Formula or CellDataType.Calculated);
+                if (own is Own.CalcEmpty or Own.CalcOtherSlot && owner == Owner.Input && foreignOwner
+                    && !Same(expected, Typed(col.Type, 2)))
+                {
+                    diffs.Add($"{col.Type}{(col.Month ? "/M" + col.MonthNo : "")} own={own} owner={owner}: зріз={expected ?? "NULL"}, очікувалось значення власника");
+                }
 
                 var ownCopyFallback = own == Own.Input && Same(actual, Typed(col.Type, 1))
                                       ;

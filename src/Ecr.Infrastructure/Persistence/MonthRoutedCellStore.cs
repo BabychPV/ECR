@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
@@ -310,21 +311,33 @@ public sealed class MonthRoutedCellStore(
 
             var target = result[entry.Instance.TableInstanceId];
 
-            // Q-17: власна обчислена комірка перегляду має пріоритет — на її адресі введена комірка власника не
-            // додається (слайс віддає ОДНУ комірку на адресу, узгоджено з в'ю). Без додаткових запитів до бази.
-            var calculatedAt = target
-                .Where(c => c.Value.IsCalculated)
-                .Select(c => (c.Address.TableRowId, c.Address.ColumnDefId))
-                .ToHashSet();
+            // Q-17 (дзеркало вʼюхи MonthsInColumns): значення = COALESCE(власна обчислена, що НЕСЕ значення у слоті типу
+            // колонки; власник). Обчислена зі значенням приховує власника; порожня обчислена (IsEmpty / NULL у слоті,
+            // у т.ч. помилка в чужому слоті) — ні: її замінює комірка власника. Завжди ОДНА комірка на адресу.
+            var calculatedAt = new Dictionary<(long Row, int Column), CellRecord>();
+            foreach (var c in target.Where(c => c.Value.IsCalculated))
+            {
+                calculatedAt[(c.Address.TableRowId, c.Address.ColumnDefId)] = c;
+            }
 
             foreach (var cell in byTable[entry.Instance.TableDefId])
             {
                 if (!entry.ForeignColumns.TryGetValue(cell.ColumnDefId, out var foreign)
                     || foreign.OwnerPeriod.Value != cell.OwnerPeriodKey
-                    || !rowIds.TryGetValue(cell.RowKey, out var viewRowId)
-                    || calculatedAt.Contains((viewRowId, cell.ColumnDefId)))
+                    || !rowIds.TryGetValue(cell.RowKey, out var viewRowId))
                 {
                     continue;
+                }
+
+                if (calculatedAt.TryGetValue((viewRowId, cell.ColumnDefId), out var own))
+                {
+                    if (CarriesValue(own.Value, foreign.Column.DataType))
+                    {
+                        continue;
+                    }
+
+                    target.Remove(own);
+                    calculatedAt.Remove((viewRowId, cell.ColumnDefId));
                 }
 
                 target.Add(new CellRecord(
@@ -344,6 +357,17 @@ public sealed class MonthRoutedCellStore(
             }
         }
     }
+
+    /// <summary>Чи несе обчислена комірка значення у слоті типу колонки (так само, як COALESCE у вʼюсі).</summary>
+    private static bool CarriesValue(CellValueData v, CellDataType type) => type switch
+    {
+        CellDataType.String => v.ValueString is not null,
+        CellDataType.Bool => v.ValueBool is not null,
+        CellDataType.Date => v.ValueDate is not null,
+        CellDataType.Lookup => v.ValueRegistryEntryId is not null,
+        CellDataType.Unit => v.ValueUnitId is not null,
+        _ => v.ValueNumeric is not null,
+    };
 
     /// <summary>
     /// Введені комірки власників для записів плану: без сесії — один запит на документ (як і було); у сесії
