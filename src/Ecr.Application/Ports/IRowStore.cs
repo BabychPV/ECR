@@ -309,6 +309,24 @@ public interface IRowStore
         => Task.FromResult<IReadOnlyList<TableInstanceRef>>([]);
 
     /// <summary>
+    /// HU-16 (Q-17): добирає в наявний екземпляр таблиці «місяці в колонках» НЕ-якірного періоду дзеркала живих рядків
+    /// якоря року, яких там бракує (екземпляр створено до прапора або до появи якоря).
+    /// </summary>
+    /// <param name="instance">Екземпляр перегляду.</param>
+    /// <param name="anchor">Якір року (авторитетний за складом рядків).</param>
+    /// <param name="presentRowKeys">Ключі живих рядків екземпляра, які викликач уже прочитав (швидкий вихід без запису).</param>
+    /// <param name="sheetDefId">Аркуш таблиці: зі станом Submitted/Approved склад рядків не змінюється (як <c>CreateRowHandler</c>).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки рядків створено; 0 — склад уже повний (або період закрито/заархівовано, аркуш подано/затверджено).</returns>
+    /// <remarks>
+    /// ⚠ Реалізація за замовчуванням нічого не робить: ручні обгортки порту в тестах не мусять знати про Q-17.
+    /// Справжня — <c>RowStore</c>. Лише рядки (без комірок); під спільним <c>doc-structure</c>, у транзакції.
+    /// </remarks>
+    public Task<int> MirrorAnchorRowsIntoInstanceAsync(
+        TableInstanceRef instance, PeriodKey anchor, IReadOnlyCollection<string> presentRowKeys, int sheetDefId, CancellationToken ct)
+        => Task.FromResult(0);
+
+    /// <summary>
     /// Q-17: ВУЗЬКО створює (або повертає наявний) екземпляр однієї таблиці за період — без створення решти таблиць
     /// документа за цей період (на відміну від <see cref="EnsureTableInstancesAsync"/>). Новий екземпляр отримує
     /// Fixed-рядки шаблону і (за прапором) дзеркала рядків якоря. Під спільним <c>doc-structure</c>, у транзакції.
