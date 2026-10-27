@@ -547,6 +547,22 @@ describe('useVersionMigrationAction', () => {
       await waitFor(() => expect(document.activeElement).toBe(no));
     });
 
+    it('CL-13: після «Ні» фокус на «Сухий прогін», після «Так» - на «Перенести», не на body', async () => {
+      show(['Template.Edit'], refused, 'Manage', accepted);
+      await openAndPickTarget();
+      fireEvent.click(screen.getByTestId('migrate-dry-run'));
+      await screen.findByTestId('migrate-overwrite-no');
+
+      fireEvent.click(screen.getByTestId('migrate-overwrite-no'));
+      await waitFor(() => expect(document.querySelector('[data-migrate-overwrite-offer]')).toBeNull());
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('migrate-dry-run')));
+
+      fireEvent.click(screen.getByTestId('migrate-dry-run'));
+      fireEvent.click(await screen.findByTestId('migrate-overwrite-yes'));
+      await waitFor(() => expect(document.querySelector('[data-migrate-overwrite-accepted]')).not.toBeNull());
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('migrate-apply')));
+    });
+
     it('є інші причини або guarded поза формулою - пропозиції немає', async () => {
       show(['Template.Edit'], { ...refused, guardedOverwritable: 100 });
       await openAndPickTarget();
