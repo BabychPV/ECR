@@ -82,7 +82,10 @@ test.describe('Фокус на таблиці аркуша (ui-sheet-focus)', ()
 
       // Esc у редакторі скасовує правку, але НЕ виходить з режиму.
       // (Редактор міг лишитися відкритим після Enter, або його відкриває F2.)
-      if ((await page.locator('revogr-edit').count()) === 0) await page.keyboard.press('F2');
+      if ((await page.locator('revogr-edit').count()) === 0) {
+        await cell.click();
+        await page.keyboard.press('Enter');
+      }
       await expect(page.locator('revogr-edit')).toHaveCount(1);
       await page.keyboard.press('Escape');
       await expect(page.locator('revogr-edit')).toHaveCount(0);
