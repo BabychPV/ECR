@@ -101,8 +101,16 @@ test.describe('Фокус на таблиці аркуша (ui-sheet-focus)', ()
     }
 
     // Клавіша та посилання.
+    await toggle.focus();
+    await page.evaluate(() => {
+      (window as unknown as { __keys: string[] }).__keys = [];
+      document.addEventListener('keydown', (e) => {
+        (window as unknown as { __keys: string[] }).__keys.push(`|c|s|`);
+      });
+    });
     await page.keyboard.press('Control+Shift+Enter');
-    await expect(page).toHaveURL(/[?&]full=1/);
+    const seen = await page.evaluate(() => (window as unknown as { __keys: string[] }).__keys);
+    await expect(page, `клавіші, які бачив документ: ${seen.join(' ; ')}`).toHaveURL(/[?&]full=1/);
     await page.reload();
     await expect(page.getByRole('region')).toBeVisible({ timeout: 60_000 });
     await toggle.click();
