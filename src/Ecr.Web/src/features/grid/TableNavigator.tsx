@@ -22,6 +22,8 @@ export interface TableNavigatorProps {
   /** Людина вибрала таблицю (клік, Enter, пробіл). */
   readonly onSelect: (tableInstanceId: number) => void;
   readonly hidden?: boolean;
+  /** Кнопка «‹ Сховати» у шапці панелі (✎ ui-sheet-focus): без неї перемикач був лише іконкою в рядку таблиці. */
+  readonly onCollapse?: () => void;
 }
 
 /** Назва таблиці мовою інтерфейсу; без перекладу — код. */
@@ -48,6 +50,7 @@ export function TableNavigator({
   selectedTableInstanceId,
   onSelect,
   hidden = false,
+  onCollapse,
 }: TableNavigatorProps): JSX.Element {
   const [query, setQuery] = useState('');
   const [errorsOnly, setErrorsOnly] = useState(false);
@@ -119,6 +122,22 @@ export function TableNavigator({
 
   return (
     <nav id={id} className="ecr-tnav" aria-label={t('grid.tree.label')} hidden={hidden} data-testid="table-navigator">
+      {onCollapse !== undefined && (
+        <div className="ecr-tnav-head">
+          <span className="ecr-tnav-head-title">{t('grid.tree.label')}</span>
+          <button
+            type="button"
+            className="ecr-tnav-hide"
+            data-testid="table-navigator-hide"
+            aria-expanded={!hidden}
+            aria-controls={id}
+            onClick={onCollapse}
+          >
+            <Icon path="M15 6l-6 6 6 6" size={14} />
+            {t('grid.tree.hide')}
+          </button>
+        </div>
+      )}
       <div className="ecr-tnav-progress">
         {/* ⛔ Доки статусу немає, смуги й дробу немає: «0 із 91» про невідоме — неправда (`A7-28`). */}
         {anyStatus && progress.total > 0 && (

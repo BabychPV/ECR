@@ -298,3 +298,140 @@
   flex: 0 1 auto;
   min-width: 12ch;
 }
+
+/* ✎ ui-sheet-focus (A): шапка панелі з «‹ Сховати» і вузька смужка зі згорнутою панеллю (патерн rail-toggle макета). */
+.ecr-tnav {
+  height: fit-content;
+}
+
+.ecr-tnav-tree {
+  flex: 0 1 auto;
+}
+
+.ecr-tnav-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px 4px 12px;
+  border-bottom: 1px solid var(--ecr-border);
+  font-size: 12px;
+  color: var(--ecr-muted);
+}
+
+.ecr-tnav-hide,
+.ecr-tnav-rail-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ecr-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ecr-tnav-hide:hover,
+.ecr-tnav-rail-btn:hover {
+  background: var(--ecr-hover);
+}
+
+.ecr-tnav-hide:focus-visible,
+.ecr-tnav-rail-btn:focus-visible {
+  outline: 2px solid var(--ecr-focus);
+  outline-offset: -2px;
+}
+
+.ecr-tnav-rail {
+  flex: none;
+  width: 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 8px;
+  position: sticky;
+  top: 0;
+  background: var(--ecr-surface);
+  border: 1px solid var(--ecr-border);
+  border-radius: 4px;
+}
+
+.ecr-tnav-rail-btn {
+  width: 28px;
+  padding: 0;
+}
+
+.ecr-tnav-rail-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 10px;
+  border: 1px solid var(--ecr-border);
+  font: 500 12px/1 var(--mantine-font-family-monospace);
+  color: var(--ecr-text);
+}
+
+@media (max-width: 900px) {
+  .ecr-tnav-rail {
+    display: none;
+  }
+}
+
+/* ✎ ui-sheet-focus (B): таблиця «на весь екран» — in-app, не Fullscreen API. */
+.ecr-doc-work--full {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  padding: 8px 12px;
+  background: var(--ecr-ground);
+  overflow: auto;
+}
+
+.ecr-doc-work--full [data-table-slot] {
+  min-height: 0 !important;
+}
+
+.ecr-doc-work--full revo-grid {
+  height: calc(100dvh - 190px) !important;
+  min-height: 240px;
+}
+
+.ecr-full-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--ecr-border-strong);
+  border-radius: 4px;
+  background: var(--ecr-surface);
+  color: var(--ecr-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ecr-full-btn:hover {
+  background: var(--ecr-hover);
+}
+
+.ecr-full-btn:focus-visible {
+  outline: 2px solid var(--ecr-focus);
+  outline-offset: 1px;
+}
+
+.ecr-full-context {
+  font-size: 12px;
+  color: var(--ecr-muted);
+  white-space: nowrap;
+}
