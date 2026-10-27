@@ -214,6 +214,25 @@ public sealed class GetTableSliceHandler(
         //    значенням безпечна: гірше, що буває, — зайвий 409.
         var rowIds = await rowStore.GetRowIdsAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
                                    .ConfigureAwait(false);
+
+        // ✎ HU-16 (Q-17): склад рядків таблиці «місяці в колонках» — за якорем року. Екземпляр не-якірного періоду
+        // (Scheduled/Open…), створений до прапора чи до появи якоря, не має дзеркал — добираємо їх (лише рядки).
+        // Прапор вимкнено / таблиця поза маршрутизацією / період сам якір — жодного звернення до бази.
+        if (monthRouter is { Enabled: true } && monthRouter.AppliesToTable(table))
+        {
+            var routing = await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false);
+            var anchor = routing is null
+                ? null
+                : await monthRouter.AnchorOfAsync(routing.ProjectId, instance.PeriodKey / 100, ct).ConfigureAwait(false);
+            if (anchor is { } anchorKey
+                && anchorKey.Value != instance.PeriodKey
+                && await rowStore.MirrorAnchorRowsIntoInstanceAsync(instance, anchorKey, [.. rowIds.Keys], ct).ConfigureAwait(false) > 0)
+            {
+                rowIds = await rowStore.GetRowIdsAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
+                                       .ConfigureAwait(false);
+            }
+        }
+
         var versions = await rowStore.GetRowVersionsAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
                                      .ConfigureAwait(false);
 

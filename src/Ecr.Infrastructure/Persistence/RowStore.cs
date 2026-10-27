@@ -1138,6 +1138,125 @@ public sealed class RowStore(
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// Швидкий вихід без запису: складу немає чого добирати (усі живі ключі якоря вже є в екземплярі). Запит —
+    /// екземпляр якоря + ключі його живих рядків (seek у партиції якоря), без блокувань.
+    /// </para>
+    /// <para>
+    /// ⚠ Не воскрешає: ключ, що в екземплярі вже є м'яко видалений, пропускається (<c>UQ_TableRow_Key</c> не знає
+    /// <c>IsDeleted</c>). Закритий (<c>Closed</c>) і заархівований період не змінюються. Гонитва двох читачів
+    /// програє на <c>UQ_TableRow_Key</c> — штатний вихід (переможець уже додав).
+    /// </para>
+    /// </remarks>
+    public async Task<int> MirrorAnchorRowsIntoInstanceAsync(
+        TableInstanceRef instance, PeriodKey anchor, IReadOnlyCollection<string> presentRowKeys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        ArgumentNullException.ThrowIfNull(presentRowKeys);
+
+        if (monthRouter is not { Enabled: true } || anchor.Value == instance.PeriodKey)
+        {
+            return 0;
+        }
+
+        var anchorInstanceId = await db.TableInstances
+            .AsNoTracking()
+            .Where(t => t.PeriodKeyValue == anchor.Value && t.DocumentId == instance.DocumentId && t.TableDefId == instance.TableDefId)
+            .Select(t => (long?)t.Id)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (anchorInstanceId is not { } anchorId)
+        {
+            return 0;
+        }
+
+        var present = new HashSet<string>(presentRowKeys, StringComparer.Ordinal);
+        var anchorRows = await db.TableRows
+            .AsNoTracking()
+            .Where(r => r.PeriodKeyValue == anchor.Value && r.TableInstanceId == anchorId && !r.IsDeleted)
+            .OrderBy(r => r.Ordinal)
+            .ThenBy(r => r.Id)
+            .Select(r => new { r.RowKeyValue, r.Ordinal, r.RowDefId })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (anchorRows.TrueForAll(r => present.Contains(r.RowKeyValue)))
+        {
+            return 0;
+        }
+
+        // Закритий період не змінюється; екземпляр має бути в гарячій схемі (не заархівований).
+        var viewState = await (
+                from period in db.Periods.AsNoTracking()
+                where period.PeriodKeyValue == instance.PeriodKey
+                join document in db.Documents.AsNoTracking() on period.ProjectId equals document.ProjectId
+                where document.Id == instance.DocumentId
+                select (Domain.Enums.PeriodState?)period.State)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        var hot = await db.TableInstances.AsNoTracking()
+            .AnyAsync(t => t.PeriodKeyValue == instance.PeriodKey && t.Id == instance.TableInstanceId, ct)
+            .ConfigureAwait(false);
+        if (!hot || viewState is null or Domain.Enums.PeriodState.Closed)
+        {
+            return 0;
+        }
+
+        var created = 0;
+        try
+        {
+            await new UnitOfWork(db).ExecuteInTransactionAsync(
+                async token =>
+                {
+                    created = 0;
+                    await (structureGate ?? new SheetEditGate(db))
+                        .EnterStructureAsync(instance.DocumentId, exclusive: false, token)
+                        .ConfigureAwait(false);
+
+                    // Під замком перечитати ВСІ ключі екземпляра (разом з м'яко видаленими): переможець гонитви
+                    // міг уже додати, а видалений ключ не воскрешається.
+                    var taken = (await db.TableRows
+                            .AsNoTracking()
+                            .Where(r => r.PeriodKeyValue == instance.PeriodKey && r.TableInstanceId == instance.TableInstanceId)
+                            .Select(r => r.RowKeyValue)
+                            .ToListAsync(token)
+                            .ConfigureAwait(false))
+                        .ToHashSet(StringComparer.Ordinal);
+                    var toAdd = anchorRows.Where(r => !taken.Contains(r.RowKeyValue)).ToList();
+                    if (toAdd.Count == 0)
+                    {
+                        return;
+                    }
+
+                    var utcNow = clock.UtcNow;
+                    var firstRowId = await bulk.ReserveIdsAsync("doc.TableRowSeq", toAdd.Count, token).ConfigureAwait(false);
+                    for (var i = 0; i < toAdd.Count; i++)
+                    {
+                        db.TableRows.Add(new TableRow(
+                            new PeriodKey(instance.PeriodKey), firstRowId + i, instance.TableInstanceId,
+                            RowKey.Create(toAdd[i].RowKeyValue), toAdd[i].Ordinal, utcNow, toAdd[i].RowDefId));
+                    }
+
+                    await db.SaveChangesAsync(token).ConfigureAwait(false);
+                    created = toAdd.Count;
+                },
+                ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (SqlConflict.ViolatesIndex(ex, "UQ_TableRow_Key"))
+        {
+            // Переможець гонитви додав те саме; наша транзакція відкочена.
+            foreach (var entry in db.ChangeTracker.Entries<TableRow>().Where(e => e.State == EntityState.Added).ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+
+            return 0;
+        }
+
+        return created;
+    }
+
+    /// <inheritdoc />
     public async Task<TableInstanceRef> EnsureTableInstanceAsync(
         long documentId, int tableDefId, PeriodKey periodKey, CancellationToken ct)
     {
