@@ -44,6 +44,28 @@ async function useScheme(page: Page, scheme: Scheme): Promise<void> {
   }, scheme);
 }
 
+/**
+ * Тема після входу - тим самим шляхом, що й у людини (меню користувача): вподобання з сервера (`usePreferenceSync`)
+ * перекривають сховище, і «dark» без цього йшов у light (прогін 38265555757, `cellColorLive.spec.ts`). Двічі з перезавантаженням.
+ */
+async function applyScheme(page: Page, scheme: Scheme): Promise<void> {
+  for (let pass = 0; pass < 2; pass += 1) {
+    const html = page.locator('html');
+    const userButton = page.getByRole('button', { name: new RegExp(Admin.user, 'i') }).first();
+    await expect(userButton).toBeVisible({ timeout: 30_000 });
+
+    if ((await html.getAttribute('data-mantine-color-scheme')) !== scheme) {
+      await userButton.click();
+      await page.getByText(scheme === 'dark' ? 'Dark' : 'Light', { exact: true }).first().click();
+      await page.keyboard.press('Escape');
+    }
+
+    await expect(html, `тема ${scheme} не застосувалась`).toHaveAttribute('data-mantine-color-scheme', scheme, {
+      timeout: 15_000,
+    });
+    if (pass === 0) await page.reload();
+  }
+}
 interface Overflow {
   readonly scrollWidth: number;
   readonly clientWidth: number;
@@ -174,11 +196,25 @@ test.describe('uiMinorP3: дрібні пункти проходу C', () => {
   );
   test.describe.configure({ timeout: 300_000 });
 
+  // Вподобання теми живе на сервері: наступні файли набору чекають light.
+  test.afterAll(async ({ browser }) => {
+    if (PeriodKey === '' || DocumentId === '') return;
+    const context = await browser.newContext();
+    try {
+      const page = await context.newPage();
+      await signIn(page);
+      await applyScheme(page, 'light');
+    } finally {
+      await context.close();
+    }
+  });
+
   for (const scheme of Schemes) {
     test(`uiMinorP3-assert: 500 px - сторінки документа і журналу без горизонтальної прокрутки (${scheme})`, async ({ page }) => {
       await page.setViewportSize(Wide);
       await useScheme(page, scheme);
       await signIn(page);
+      await applyScheme(page, scheme);
 
       // Рядок журналу, щоб таблиця аудиту була в розмітці (на свіжому стенді журнал порожній).
       // ⚠ Вставка - на широкому вікні: на вузькому (≤ 640 px) сітка лише для читання (UI-42).
@@ -265,6 +301,7 @@ test.describe('uiMinorP3: дрібні пункти проходу C', () => {
     test(`uiMinorP3-shots: знімки ${scheme} (500 і 1440; документ, журнал, період)`, async ({ page }, testInfo) => {
       await useScheme(page, scheme);
       await signIn(page);
+      await applyScheme(page, scheme);
       await pasteOneValue(page);
 
       for (const size of [Narrow, Wide]) {
