@@ -103,14 +103,23 @@ test.describe('Фокус на таблиці аркуша (ui-sheet-focus)', ()
     // Клавіша та посилання.
     await toggle.focus();
     await page.evaluate(() => {
-      (window as unknown as { __keys: string[] }).__keys = [];
-      document.addEventListener('keydown', (e) => {
-        (window as unknown as { __keys: string[] }).__keys.push(`|c|s|`);
-      });
+      const log: string[] = [];
+      (window as unknown as { __keys: string[] }).__keys = log;
+      window.addEventListener('keydown', (e) => log.push('keydown:' + e.key + (e.defaultPrevented ? ':prevented' : '')), true);
+      window.addEventListener('click', () => log.push('click'), true);
+      const original = history.replaceState.bind(history);
+      history.replaceState = (...args: Parameters<History['replaceState']>) => {
+        log.push('replace:' + String(args[2]));
+        original(...args);
+      };
     });
     await page.keyboard.press('Control+Shift+Enter');
-    const seen = await page.evaluate(() => (window as unknown as { __keys: string[] }).__keys);
-    await expect(page, `клавіші, які бачив документ: ${seen.join(' ; ')}`).toHaveURL(/[?&]full=1/);
+    try {
+      await expect(page).toHaveURL(/[?&]full=1/);
+    } catch (error) {
+      const seen = await page.evaluate(() => (window as unknown as { __keys: string[] }).__keys);
+      throw new Error(`журнал подій: ${seen.join(' ; ')}`, { cause: error });
+    }
     await page.reload();
     await expect(page.getByRole('region')).toBeVisible({ timeout: 60_000 });
     await toggle.click();
