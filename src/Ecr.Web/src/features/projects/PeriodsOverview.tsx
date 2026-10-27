@@ -296,8 +296,14 @@ export function AllProjectsPeriods({ projects, selectedId, onPick, siteDate }: A
               component="button"
               type="button"
               size="sm"
-              // CL-18 (B-3, WCAG 2.5.8): код проєкту - кнопка 18x26; хіт-область ≥ 28x28, вигляд тексту той самий.
-              style={{ display: 'inline-flex', alignItems: 'center', minHeight: 28, minWidth: 28 }}
+              // CL-18 (B-3, WCAG 2.5.8): код проєкту - кнопка 18x26; хіт-область - токен висоти контролу KIT
+              // (`--ecr-ctl-height`, 28/36 px за щільністю; ≥ 24 px), вигляд тексту той самий.
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                minHeight: 'var(--ecr-ctl-height, 28px)',
+                minWidth: 'var(--ecr-ctl-height, 28px)',
+              }}
               data-project-pick=""
               onClick={(event) => {
                 // Клац рядка теж обирає — не обирати двічі.
