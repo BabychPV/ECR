@@ -32,10 +32,11 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         string C1 = "", int C1Id = 0, string Flag = "", int FlagId = 0, string Day = "", int DayId = 0);
 
     private async Task<Fixture> BuildAsync(
-        int periodKey = 202610, TableLayoutKind layout = TableLayoutKind.MonthsInColumns, int columnCount = 2)
+        int periodKey = 202610, TableLayoutKind layout = TableLayoutKind.MonthsInColumns, int columnCount = 2,
+        int rowCount = 2)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var doc = await builder.BuildAsync(periodKey, columnCount: columnCount, rowCount: 2, layoutKind: layout,
+        var doc = await builder.BuildAsync(periodKey, columnCount: columnCount, rowCount: rowCount, layoutKind: layout,
             monthColumns: layout == TableLayoutKind.MonthsInColumns ? 12 : 0);
 
         await using var db = sql.CreateContext();
@@ -390,6 +391,226 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         Assert.Equal(10m, await ViewValueAsync(f, 202610, RowKeyOf(f.Doc, 0), f.M10));
         Assert.Equal(5m, await ViewValueAsync(f, 202610, RowKeyOf(f.Doc, 1), f.M11));
         Assert.Null(await ViewValueAsync(f, 202610, RowKeyOf(f.Doc, 1), f.C2));
+    }
+
+    /// <summary>
+    /// P2-1 (QA3, форма запиту): з прапором на КОЖЕН місяць-власник - окремий OUTER APPLY, що читає лише екземпляр цього
+    /// місяця (рівність ключа періоду, не діапазон року) і лише колонки цього місяця; разом sv + якір + 12 місяців, а
+    /// таблиць у запиті менше за ліміт 250. Один apply на всі місяці (~12·C² на рядок) давав 340x від OFF на T9_04 Land.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task З_прапором_кожен_місяць_власник_має_окремий_apply_по_своєму_екземпляру_і_колонках()
+    {
+        var f = await BuildAsync(columnCount: 205);
+        await GenerateAsync(f);
+
+        var definition = await ViewDefinitionAsync(f.View);
+
+        // sv (власна копія) + omA (якір) + om1..om12.
+        Assert.Equal(14, System.Text.RegularExpressions.Regex.Count(definition, "OUTER APPLY \\(SELECT"));
+        for (var m = 1; m <= 12; m++)
+        {
+            Assert.Contains($") AS om{m}", definition, StringComparison.Ordinal);
+            Assert.Contains($"oi.PeriodKey = (ti.PeriodKey / 100) * 100 + {m}", definition, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(12, System.Text.RegularExpressions.Regex.Count(definition, "doc\\.TableInstance AS oi\\b"));
+        // Без діапазону року й без звірки місяця всередині агрегації (старий один apply на всі місяці).
+        Assert.DoesNotContain("<= (ti.PeriodKey / 100) * 100 + 12", definition, StringComparison.Ordinal);
+        Assert.DoesNotContain("PeriodKey % 100", definition, StringComparison.Ordinal);
+
+        // Усі таблиці запиту (ліміт SQL Server 256): кожна doc.* - один рядок apply/приєднання.
+        var tables = System.Text.RegularExpressions.Regex.Count(
+            definition, "(?:FROM|JOIN)\\s+(?:doc|wf)\\.\\w+");
+        Assert.True(tables < 250, $"таблиць у запиті {tables}");
+    }
+
+    /// <summary>Результат вимірювання запиту: логічні читання (STATISTICS IO) і процесорний час (STATISTICS TIME).</summary>
+    private sealed record Measure(long Reads, long CpuMs);
+
+    /// <summary>
+    /// Вимірює запит: один прогрів (план у кеші), далі 3 заміри - читання останнього, CPU - мінімум (стійко до шуму).
+    /// </summary>
+    private async Task<Measure> MeasureAsync(string query)
+    {
+        long reads = 0;
+        long cpu = 0;
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        connection.InfoMessage += (_, e) =>
+        {
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+                         e.Message, "logical reads (\\d+)"))
+            {
+                reads += long.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+                         e.Message, "CPU time = (\\d+) ms"))
+            {
+                cpu += long.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+            }
+        };
+        await connection.OpenAsync();
+        await using (var on = connection.CreateCommand())
+        {
+            on.CommandText = "SET STATISTICS IO ON; SET STATISTICS TIME ON;";
+            await on.ExecuteNonQueryAsync();
+        }
+
+        var best = long.MaxValue;
+        var lastReads = 0L;
+        for (var run = 0; run < 4; run++)
+        {
+            reads = 0;
+            cpu = 0;
+            await using var command = connection.CreateCommand();
+            command.CommandText = query;
+            command.CommandTimeout = 600;
+            await using (var reader = await command.ExecuteReaderAsync())
+            {
+                do
+                {
+                    while (await reader.ReadAsync())
+                    {
+                    }
+                }
+                while (await reader.NextResultAsync());
+            }
+
+            if (run > 0)
+            {
+                best = Math.Min(best, cpu);
+                lastReads = reads;
+            }
+        }
+
+        return new Measure(lastReads, best);
+    }
+
+    /// <summary>
+    /// P2-1 (перф): синтетичний шаблон ≥ 200 колонок × 12 місяців × 40 рядків. Читання вʼюхи з прапором (ON) проти
+    /// вимкненого (OFF) за детермінованими логічними читаннями (CPU лише у звіті): <c>SELECT *</c> не гірше 3x; вибірка 8 колонок - не
+    /// гірше 10x за читаннями (до P2-1: ~25x на цьому наборі й ~340x за часом на T9_04 Land - один apply рахував усі
+    /// місяці для кожної колонки; після: ~7x). Мутація: повернути один спільний apply на всі місяці - межа 8 колонок
+    /// червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Читання_вʼюхи_з_прапором_у_межах_кратності_від_вимкненого_за_cpu_і_логічними_читаннями()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var f = await BuildAsync(columnCount: 205, rowCount: 40);
+        for (var m = 1; m <= 12; m++)
+        {
+            if (202600 + m != 202610)
+            {
+                await builder.AddPeriodInstanceAsync(f.Doc, new PeriodKey(202600 + m));
+            }
+        }
+
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var fill = connection.CreateCommand();
+            fill.CommandTimeout = 600;
+            fill.CommandText = """
+                INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric)
+                SELECT r.PeriodKey, r.Id, c.Id, @td, 1.5
+                  FROM doc.TableRow AS r
+                  JOIN doc.TableInstance AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
+                  JOIN cfg.ColumnDef AS c ON c.TableDefId = @td AND c.DataType = @dec AND c.IsDeleted = 0
+                 WHERE ti.DocumentId = @d AND ti.TableDefId = @td AND r.PeriodKey = @pk;
+                """;
+            fill.Parameters.AddWithValue("@td", f.Doc.TableDefId);
+            fill.Parameters.AddWithValue("@d", f.Doc.DocumentId);
+            fill.Parameters.AddWithValue("@dec", (byte)CellDataType.Decimal);
+            var period = fill.Parameters.Add("@pk", System.Data.SqlDbType.Int);
+
+            // Порціями по місяцю з CHECKPOINT: спільна тестова база має стелю розміру файлів (журнал не росте).
+            await using var checkpoint = connection.CreateCommand();
+            checkpoint.CommandText = "CHECKPOINT";
+            for (var m = 1; m <= 12; m++)
+            {
+                period.Value = 202600 + m;
+                await fill.ExecuteNonQueryAsync();
+                await checkpoint.ExecuteNonQueryAsync();
+            }
+        }
+
+        await using var db = sql.CreateContext();
+        var monthCodes = await db.ColumnDefs.AsNoTracking()
+            .Where(c => c.TableDefId == f.Doc.TableDefId && c.MonthNumber >= 1 && c.MonthNumber <= 7)
+            .OrderBy(c => c.MonthNumber).Select(c => c.Code).ToListAsync();
+        var columns = string.Join(", ", monthCodes.Select(c => $"[{c}]"));
+        var eight = $"SELECT _RowKey, {columns} FROM rpt.[{f.View}] WHERE _DocumentId = {f.Doc.DocumentId} AND _PeriodKey = 202610";
+        var star = $"SELECT * FROM rpt.[{f.View}] WHERE _DocumentId = {f.Doc.DocumentId} AND _PeriodKey = 202610";
+
+        await GenerateAsync(f, routing: false);
+        var offEight = await MeasureAsync(eight);
+        var offStar = await MeasureAsync(star);
+        await GenerateAsync(f, routing: true);
+        var onEight = await MeasureAsync(eight);
+        var onStar = await MeasureAsync(star);
+
+        var report = $"8 колонок: ON {onEight} OFF {offEight}; SELECT *: ON {onStar} OFF {offStar}";
+        Assert.True(onStar.Reads <= 3 * offStar.Reads, report);
+        Assert.True(onEight.Reads <= 10 * offEight.Reads, report);
+    }
+
+    /// <summary>
+    /// D5 (QA3): з прапором генерація має власну стелю команди (холодна перебудова сотень вʼюх > 60 с), яка після виклику
+    /// повертається - контекст scoped і живе далі (публікація версії); без прапора таймаут контексту не чіпається.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Генерація_з_прапором_повертає_таймаут_команди_контексту_а_без_прапора_не_чіпає_його()
+    {
+        var f = await BuildAsync();
+        await using var db = sql.CreateContext();
+        db.Database.SetCommandTimeout(77);
+        var router = new MonthColumnRouter(
+            db,
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Collection:MonthColumnRouting"] = "true" })
+                .Build());
+
+        await new ReportViewGenerator(db, monthRouter: router).GenerateAsync(f.Doc.TemplateVersionId, CancellationToken.None);
+        Assert.Equal(77, db.Database.GetCommandTimeout());
+
+        await new ReportViewGenerator(db).GenerateAsync(f.Doc.TemplateVersionId, CancellationToken.None);
+        Assert.Equal(77, db.Database.GetCommandTimeout());
+        Assert.True(ReportViewGenerator.RoutedGenerationTimeoutSeconds >= 180);
+    }
+
+    /// <summary>
+    /// P2-1: значення колонки місяця m береться ЛИШЕ з екземпляра цього місяця - стороння комірка тієї ж колонки в
+    /// екземплярі іншого місяця (стара копія чи артефакт) у вʼюху не потрапляє. Мутація: діапазон року замість рівності
+    /// ключа в apply місяця - тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Колонка_місяця_не_читається_з_екземпляра_іншого_місяця()
+    {
+        var f = await BuildAsync();
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var nov = await builder.AddPeriodInstanceAsync(f.Doc, new PeriodKey(202611));
+        var dec = await builder.AddPeriodInstanceAsync(f.Doc, new PeriodKey(202612));
+
+        await PutAsync(f, 202611, nov.RowIds[0], f.M11Id, 111m);     // власник M11
+        await PutAsync(f, 202612, dec.RowIds[0], f.M11Id, 9999m);    // чужий місяць: колонка M11 у грудні - не власник
+        await GenerateAsync(f);
+
+        Assert.Equal(111m, await ViewValueAsync(f, 202610, RowKeyOf(f.Doc, 0), f.M11));
+        Assert.Equal(111m, await ViewValueAsync(f, 202612, RowKeyOf(f.Doc, 0), f.M11));
     }
 
     /// <summary>

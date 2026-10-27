@@ -28,9 +28,23 @@ public sealed partial class ReportViewGenerator(
     // `null` (тести без роутера) = вимкнено, текст в'юх як до Q-17.
     IMonthColumnRouter? monthRouter = null) : IReportViewGenerator
 {
+    /// <summary>Стеля однієї команди генерації з прапором <c>Collection:MonthColumnRouting</c>, секунди (QA3 D5).</summary>
+    public const int RoutedGenerationTimeoutSeconds = 300;
+
     /// <inheritdoc />
     public async Task GenerateAsync(int? templateVersionId, CancellationToken ct)
     {
+        // ✎ Q-17 (QA3 D5): холодна генерація З прапором (~600 в'юх з приєднаннями власників) на живій базі може тривати
+        // понад 60 с (41 с у тихій системі, 60 с — стеля команди за конкуренції) → SqlException, `reportviews` = Degraded.
+        // Тому з прапором команда отримує окрему стелю; прапор вимкнено — таймаут контексту НЕ змінюється (поведінка як була).
+        // Контекст scoped і може жити далі (публікація версії), тож попереднє значення повертається.
+        var routed = monthRouter is { Enabled: true };
+        var previousTimeout = db.Database.GetCommandTimeout();
+        if (routed)
+        {
+            db.Database.SetCommandTimeout(RoutedGenerationTimeoutSeconds);
+        }
+
         try
         {
             await db.Database.ExecuteSqlRawAsync(
@@ -40,7 +54,7 @@ public sealed partial class ReportViewGenerator(
                     {
                         Value = (object?)templateVersionId ?? DBNull.Value,
                     },
-                    new SqlParameter("@MonthRouting", System.Data.SqlDbType.Bit) { Value = monthRouter is { Enabled: true } },
+                    new SqlParameter("@MonthRouting", System.Data.SqlDbType.Bit) { Value = routed },
                 ],
                 ct).ConfigureAwait(false);
         }
@@ -63,6 +77,13 @@ public sealed partial class ReportViewGenerator(
 
             status?.Failed(new ReportViewFailure(templateVersionId, ex.Number, SafeMessage(ex, correlationId)));
             throw;
+        }
+        finally
+        {
+            if (routed)
+            {
+                db.Database.SetCommandTimeout(previousTimeout);
+            }
         }
 
         status?.Succeeded(templateVersionId);

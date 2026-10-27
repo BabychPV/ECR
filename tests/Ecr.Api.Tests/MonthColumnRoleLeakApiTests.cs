@@ -438,6 +438,230 @@ public sealed class MonthColumnRoleLeakApiTests(SqlServerFixture sql)
             root.GetProperty("removedRows").GetArrayLength());
     }
 
+    // ── (4d) D6 (QA3): маска області для КОЖНОЇ форми доступу, реальна маршрутизована правка власника ──
+
+    /// <summary>
+    /// Колонка власника поза областю (M11 листопада для перегляду жовтня) відсутня ПОВНІСТЮ - ні значення, ні коду
+    /// колонки - у compare, зрізі й експорті для ролі-рецензента, ролі-погоджувача, звуженої ролі і виконавця
+    /// передачі (EditAssignment періоду). Контроль: власник без звуження (owner) значення бачить.
+    /// Правку M11 робить власник через справжній PATCH з перегляду жовтня (шлях QA3), а не прямим записом у БД.
+    /// </summary>
+    [Theory]
+    [InlineData("owner")]
+    [InlineData("reviewer")]
+    [InlineData("approver")]
+    [InlineData("scoped")]
+    [InlineData("editAssignment")]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    public async Task Колонка_власника_поза_областю_відсутня_у_compare_зрізі_й_експорті_для_кожної_форми_доступу(string form)
+    {
+        var s = await ArrangeAsync(from: Oct, to: Oct).ConfigureAwait(true);
+        var (appAdmin, admin) = await BootAsync(s, s.AdminName, flag: true).ConfigureAwait(true);
+        using var _a = appAdmin;
+        using var _b = admin;
+
+        // Рядок має бути в зрізі ДО правки (інакше compare бачить його «доданим», а не зміненим).
+        await PutAsync(s, Oct, "M10", OwnVisible).ConfigureAwait(true);
+        await PutAsync(s, 202611, "M11", 1m).ConfigureAwait(true);
+
+        // Зріз подання ДО правки; далі власник правит M11 (екземпляр листопада) з перегляду жовтня.
+        var versionId = await SnapshotRoutedAsync(appAdmin, s).ConfigureAwait(true);
+        var patched = await PatchAsync(admin, s, ("M11", NovSecret)).ConfigureAwait(true);
+        Assert.True(patched.Status == HttpStatusCode.OK, $"{(int)patched.Status}\n{patched.Body}");
+
+        var userName = form == "owner" ? s.AdminName : await CreateFormUserAsync(s, form).ConfigureAwait(true);
+        var (app, client) = await BootAsync(s, userName, flag: true).ConfigureAwait(true);
+        using var _c = app;
+        using var _d = client;
+
+        var compare = await CompareAsync(client, s, versionId).ConfigureAwait(true);
+        using var sliceResponse = await client.GetAsync(new Uri(
+            $"/api/v1/documents/{s.Doc.DocumentId}/tables/{s.Doc.TableInstanceId}", UriKind.Relative)).ConfigureAwait(true);
+        var slice = await sliceResponse.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(sliceResponse.IsSuccessStatusCode, $"slice {form}: {sliceResponse.StatusCode}\n{slice}");
+
+        var texts = new List<(string Channel, string Text)> { ("compare", compare), ("slice", slice) };
+        if (form != "editAssignment")
+        {
+            texts.Add(("export", await ExportTextAsync(app, client, s, "json").ConfigureAwait(true)));
+        }
+
+        foreach (var (channel, text) in texts)
+        {
+            if (form == "owner")
+            {
+                Assert.True(text.Contains(Digits(NovSecret), StringComparison.Ordinal), $"контроль {channel}: {text}");
+                continue;
+            }
+
+            Assert.False(text.Contains(Digits(NovSecret), StringComparison.Ordinal), $"{form}/{channel} значення: {text}");
+            if (channel == "slice")
+            {
+                // Зріз віддає перелік колонок таблиці як структуру (заголовки), але КОМІРКИ колонки поза областю - ні:
+                // у cells рядків коду M11 немає.
+                foreach (var row in JsonDocument.Parse(text).RootElement.GetProperty("rows").EnumerateArray())
+                {
+                    Assert.False(row.GetProperty("cells").TryGetProperty(s.ColumnCodes["M11"], out _), $"{form}/slice комірка M11: {text}");
+                }
+
+                continue;
+            }
+
+            Assert.False(text.Contains(s.ColumnCodes["M11"], StringComparison.Ordinal), $"{form}/{channel} код колонки: {text}");
+        }
+    }
+
+    /// <summary>
+    /// D6 (продуктовий шлях): користувач з широкою областю бачить значення власника; адмін звужує область його
+    /// призначення через API (PUT /users/{id}/roles); наступний запит ТОГО Ж клієнта (та сама сесія) значення вже не
+    /// віддає - сесія гасне (штамп безпеки крутиться) або відповідь замаскована. Закріплює: кеш профілю не переживає
+    /// зміну області через продукт (на відміну від прямого SQL).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    public async Task Звуження_області_призначення_через_API_одразу_діє_на_ту_саму_сесію()
+    {
+        var s = await ArrangeAsync(from: Oct, to: Oct).ConfigureAwait(true);
+        var (appAdmin, admin) = await BootAsync(s, s.AdminName, flag: true).ConfigureAwait(true);
+        using var _a = appAdmin;
+        using var _b = admin;
+        await PutAsync(s, Oct, "M10", OwnVisible).ConfigureAwait(true);
+        await PutAsync(s, 202611, "M11", 1m).ConfigureAwait(true);
+        var versionId = await SnapshotRoutedAsync(appAdmin, s).ConfigureAwait(true);
+        var patched = await PatchAsync(admin, s, ("M11", NovSecret)).ConfigureAwait(true);
+        Assert.True(patched.Status == HttpStatusCode.OK, $"{(int)patched.Status}\n{patched.Body}");
+
+        // Користувач із широкою областю (без звуження) і менеджер користувачів.
+        var wideName = $"q17w_{Guid.NewGuid():N}"[..20];
+        var managerName = $"q17m_{Guid.NewGuid():N}"[..20];
+        string roleCode;
+        int wideId;
+        await using (var db = s.Builder.CreateContext())
+        {
+            var wide = new User(wideName, wideName, AuthProvider.Local);
+            wide.SetPassword(new PasswordHasher().Hash(Password));
+            var manager = new User(managerName, managerName, AuthProvider.Local);
+            manager.SetPassword(new PasswordHasher().Hash(Password));
+            db.Users.AddRange(wide, manager);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            wideId = wide.Id;
+
+            var role = new Role(
+                EcrCode.Create($"Q17W{Guid.NewGuid():N}"[..14]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Q-17 wide" }));
+            var managerRole = new Role(
+                EcrCode.Create($"Q17M{Guid.NewGuid():N}"[..14]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Q-17 manager" }));
+            db.Roles.AddRange(role, managerRole);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            roleCode = role.Code;
+
+            db.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
+            db.RolePermissions.Add(new RolePermission(role.Id, "Document.Export"));
+            db.RolePermissions.Add(new RolePermission(managerRole.Id, "Security.ManageUsers"));
+            db.RoleAssignments.Add(new RoleAssignment(role.Id, wide.Id, null));
+            db.RoleAssignments.Add(new RoleAssignment(managerRole.Id, manager.Id, null));
+            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, s.Doc.ProjectId, GrantLevel.Submit));
+            // Обмежити роль проєктом може лише той, хто має на нього Manage.
+            db.ResourceGrants.Add(new ResourceGrant(managerRole.Id, ResourceKind.Project, s.Doc.ProjectId, GrantLevel.Manage));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var (appWide, wideClient) = await BootAsync(s, wideName, flag: true).ConfigureAwait(true);
+        using var _c = appWide;
+        using var _d = wideClient;
+        var before = await CompareAsync(wideClient, s, versionId).ConfigureAwait(true);
+        Assert.Contains(Digits(NovSecret), before, StringComparison.Ordinal);
+
+        var (appManager, manager2) = await BootAsync(s, managerName, flag: true).ConfigureAwait(true);
+        using var _e = appManager;
+        using var _f = manager2;
+        using var put = await manager2.PutAsJsonAsync(
+            new Uri($"/api/v1/users/{wideId}/roles", UriKind.Relative),
+            new
+            {
+                roleCodes = new[] { roleCode },
+                scopes = new Dictionary<string, object>
+                {
+                    [roleCode] = new { projects = new[] { s.Doc.ProjectId }, periods = new { from = Oct, to = Oct } },
+                },
+            }).ConfigureAwait(true);
+        Assert.True(put.IsSuccessStatusCode, $"PUT roles: {put.StatusCode}\n{await put.Content.ReadAsStringAsync().ConfigureAwait(true)}");
+
+        // Та сама сесія: або 401 (штамп змінено), або замаскована відповідь; значення власника поза областю - ніколи.
+        using var after = await wideClient.GetAsync(new Uri(
+            $"/api/v1/documents/{s.Doc.DocumentId}/compare?from={versionId}&to=current", UriKind.Relative)).ConfigureAwait(true);
+        var afterBody = await after.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(
+            after.StatusCode == HttpStatusCode.Unauthorized
+            || (after.StatusCode == HttpStatusCode.OK && afterBody.Contains("\"changes\"", StringComparison.Ordinal)),
+            $"{(int)after.StatusCode}: {afterBody}");
+        Assert.False(afterBody.Contains(Digits(NovSecret), StringComparison.Ordinal), $"{(int)after.StatusCode}: {afterBody}");
+
+        // Новий вхід того ж користувача: 200 з непорожнім тілом compare, значення власника поза областю відсутнє.
+        var (appNew, newClient) = await BootAsync(s, wideName, flag: true).ConfigureAwait(true);
+        using var _g = appNew;
+        using var _h = newClient;
+        using var relogin = await newClient.GetAsync(new Uri(
+            $"/api/v1/documents/{s.Doc.DocumentId}/compare?from={versionId}&to=current", UriKind.Relative)).ConfigureAwait(true);
+        var reloginBody = await relogin.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, relogin.StatusCode);
+        Assert.Contains("\"changes\"", reloginBody, StringComparison.Ordinal);
+        Assert.DoesNotContain(Digits(NovSecret), reloginBody, StringComparison.Ordinal);
+    }
+
+    private async Task<string> CreateFormUserAsync(Scenario s, string form)
+    {
+        var name = $"q17f_{Guid.NewGuid():N}"[..20];
+        await using var db = s.Builder.CreateContext();
+        var user = new User(name, name, AuthProvider.Local);
+        user.SetPassword(new PasswordHasher().Hash(Password));
+        db.Users.Add(user);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        if (form == "editAssignment")
+        {
+            // Делегатор мусить керувати передачами (рівень проєкту Manage) - інакше надання не діє.
+            await db.ResourceGrants.Where(g => g.ResourceKind == ResourceKind.Project && g.ResourceId == s.Doc.ProjectId)
+                .ExecuteUpdateAsync(x => x.SetProperty(g => g.Level, GrantLevel.Manage)).ConfigureAwait(false);
+            var delegator = await db.Users.AsNoTracking().Where(u => u.UserName == s.AdminName).Select(u => u.Id).SingleAsync()
+                .ConfigureAwait(false);
+            var assignment = new EditAssignment(
+                s.Doc.DocumentId, EditAssignmentSlice.Create(null, null, null, Oct), isExclusive: false,
+                delegatedByUserId: delegator, handoffId: Guid.NewGuid(), createdByUserId: delegator, utcNow: DateTime.UtcNow);
+            assignment.AddRecipient(user.Id, delegator, DateTime.UtcNow);
+            db.EditAssignments.Add(assignment);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+            return name;
+        }
+
+        var role = new Role(
+            EcrCode.Create($"Q17F{Guid.NewGuid():N}"[..14]),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Q-17 form " + form }));
+        db.Roles.Add(role);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        db.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
+        db.RolePermissions.Add(new RolePermission(role.Id, "Document.Export"));
+        if (form is "reviewer" or "approver")
+        {
+            db.RolePermissions.Add(new RolePermission(role.Id, "Document.Submit"));
+        }
+
+        var assignmentScope = new RoleAssignment(role.Id, user.Id, null);
+        assignmentScope.SetScope(RoleAssignmentScope.Create(
+            [s.Doc.ProjectId], periodFrom: new PeriodKey(Oct), periodTo: new PeriodKey(Oct)));
+        db.RoleAssignments.Add(assignmentScope);
+        db.ResourceGrants.Add(new ResourceGrant(
+            role.Id, ResourceKind.Project, s.Doc.ProjectId, form == "approver" ? GrantLevel.Approve : GrantLevel.Submit));
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        return name;
+    }
+
     // ── (5) відмова на рядок називає період-якір ──
 
     [Fact]
