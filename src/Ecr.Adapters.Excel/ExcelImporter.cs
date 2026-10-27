@@ -350,7 +350,8 @@ public sealed class ExcelImporter(
                 JsonSerializer.Serialize(
                     new ImportPlan(
                         documentId, map.PeriodKey, diffs, userId, instances[0].TemplateVersionId,
-                        AllOrNothing: IsUnderAssignment(decisionsBatch)),
+                        AllOrNothing: IsUnderAssignment(decisionsBatch),
+                        RejectedOutsideTables: rejected.Count - diffs.Sum(d => d.Rejected.Count)),
                     Options),
                 PreviewLifetime,
                 ct)
@@ -1089,11 +1090,37 @@ public sealed class ExcelImporter(
                 });
         }
 
-        if (plan.AllOrNothing != true)
+        if (plan.AllOrNothing == true)
         {
-            return;
+            EnsureNoDeniedCells(plan);
         }
 
+        // ✎ AN-143 (слово людини p53: «все або нічого», відмова на СЕРВЕРІ): будь-яка відмова перегляду (тип, межі,
+        // обчислювана комірка, відсутня таблиця тощо) відхиляє ВЕСЬ пакет - нічого не записано. Раніше це тримав
+        // лише клієнт (блокував «Застосувати»), а прямий виклик застосовував валідні зміни інших рядків.
+        // ⚠ Конфлікт «рядок змінено після експорту» - не відмова: людина вирішує його окремо (пропустити або
+        // `overwriteRows`, AN-103/AN-114); клієнт теж не рахує його відхиленим (`ImportPanel.isRowConflict`).
+        var rejectedCount = plan.Tables.Sum(t => t.Rejected.Count(
+                                r => !string.Equals(r.MessageKey, ImportMessageKeys.RowChangedSinceExport, StringComparison.Ordinal)))
+                            + (plan.RejectedOutsideTables ?? 0);
+        if (rejectedCount > 0)
+        {
+            throw new BusinessRuleException(
+                "ECR-IMP-0422",
+                $"The import was refused as a whole: {rejectedCount} cell(s) in the file were rejected by the preview. Nothing was written.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["messageKey"] = ImportRejectedMessageKey,
+                    ["rejectedCount"] = rejectedCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+    }
+
+    /// <summary>Ключ каталогу відмови «у перегляді є відхилені комірки: нічого не застосовано» (AN-143).</summary>
+    public const string ImportRejectedMessageKey = "err.ECR-IMP-0422.importHasRejected";
+
+    private static void EnsureNoDeniedCells(ImportPlan plan)
+    {
         var denied = new List<ImportRejection>();
         var hiddenCount = 0;
         foreach (var table in plan.Tables)
@@ -1317,10 +1344,16 @@ public sealed class ExcelImporter(
 /// відхиляє ВЕСЬ перелік змін при застосуванні — нічого не записується. <c>null</c>/<c>false</c> —
 /// колишня поведінка (заборонені комірки лише показані, решта застосовується).
 /// </param>
+/// <param name="RejectedOutsideTables">
+/// ✎ AN-143 (рішення людини p53 «все або нічого»): відмови перегляду, яких немає в <c>Tables[].Rejected</c> —
+/// таблиця з файлу відсутня/аркуш перейменовано, значення поза рядками таблиць. Разом із відмовами таблиць
+/// вони відхиляють застосування цілком. <c>null</c> — план до цієї правки.
+/// </param>
 public sealed record ImportPlan(
     long DocumentId,
     int PeriodKey,
     IReadOnlyList<TableDiff> Tables,
     int? UserId = null,
     int? TemplateVersionId = null,
-    bool? AllOrNothing = null);
+    bool? AllOrNothing = null,
+    int? RejectedOutsideTables = null);
