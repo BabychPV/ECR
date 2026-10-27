@@ -12,8 +12,9 @@
 /*
  * ✎ ui-sheet-focus (P3 Аудиту-2): `anywhere` різав звичайні слова («administ/rator», «La/te»). Тепер
  * `break-word` + `word-break: normal` — слово переноситься цілим, розрив усередині лише там, де воно
- * інакше не вміщується (довгі ідентифікатори). Щоб розпір ≤ 500 px лишився, на вузькому екрані
- * колонки діляться порівну (`table-layout: fixed`), а не за найдовшим словом.
+ * інакше не вміщується. Розрив усередині літер лишено ЛИШЕ колонці «Було → стало» (довге число без
+ * пробілів), щоб вона не розпирала таблицю: так розпір ≤ 500 px лишається, а «administrator» і «Late»
+ * переносяться цілими словами.
  */
 .ecr-audit-table th,
 .ecr-audit-table td {
@@ -21,11 +22,8 @@
   word-break: normal;
 }
 
-@media (max-width: 640px) {
-  .ecr-audit-table {
-    table-layout: fixed;
-    width: 100%;
-  }
+.ecr-audit-table td:has([data-audit-was-becomes]) {
+  overflow-wrap: anywhere;
 }
 
 /*

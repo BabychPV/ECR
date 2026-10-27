@@ -22,11 +22,12 @@ describe('CSS без !important', () => {
 });
 
 describe('журнал аудиту: перенос слів', () => {
-  it('break-word + word-break: normal, без overflow-wrap: anywhere', () => {
+  it('break-word + word-break: normal; `anywhere` лише для колонки «Було → стало»', () => {
     const css = code('features/audit/auditTable.css');
 
     expect(css).toContain('overflow-wrap: break-word');
     expect(css).toContain('word-break: normal');
-    expect(css).not.toContain('anywhere');
+    expect(css.match(/anywhere/g)?.length).toBe(1);
+    expect(css).toMatch(/:has\(\[data-audit-was-becomes\]\)\s*\{[^}]*anywhere/);
   });
 });
