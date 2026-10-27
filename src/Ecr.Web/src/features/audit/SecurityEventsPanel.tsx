@@ -10,6 +10,7 @@ import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { securityEventLabel } from './auditLabels';
+import './auditTable.css';
 
 /**
  * Журнал подій безпеки (ФВ-5.24, ФВ-6.11) — третя вкладка екрана аудиту: зміни прав і ролей та
@@ -78,7 +79,7 @@ export function SecurityEventsPanel({ from, to }: { from: string; to: string }):
       >
         {(page) => (
           <>
-            <Table striped className="ecr-sticky-head">
+            <Table striped className="ecr-sticky-head ecr-audit-table">
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>{t('audit.when')}</Table.Th>

@@ -160,6 +160,27 @@ test.describe('versionMigrationOverwrite: діалог «Перезаписат�
     expect(posted.filter((p) => p.acceptGuardedOverwrite === true)).toEqual([]);
   });
 
+  test('versionMigrationOverwrite: CL-13 - фокус після «Ні» на «Сухий прогін», після «Так» на «Перенести» - N/5', async ({ page }) => {
+    const posted: Posted[] = [];
+    await openDialog(page, posted);
+    const offer = page.locator('[data-migrate-overwrite-offer]');
+    await expect(offer).toBeVisible({ timeout: 30_000 });
+
+    for (let run = 1; run <= 5; run += 1) {
+      await page.getByTestId('migrate-overwrite-no').click();
+      await expect(offer, `прогін ${String(run)}/5: пропозиція не зникла`).toHaveCount(0);
+      await expect(page.getByTestId('migrate-dry-run'), `прогін ${String(run)}/5: після «Ні» фокус не на «Сухий прогін»`).toBeFocused();
+
+      await page.getByTestId('migrate-dry-run').click();
+      await expect(offer, `прогін ${String(run)}/5: пропозиції немає після нового сухого прогону`).toBeVisible();
+    }
+
+    await page.getByTestId('migrate-overwrite-yes').click();
+    await expect(page.locator('[data-migrate-overwrite-accepted]')).toBeVisible();
+    await expect(page.getByTestId('migrate-apply'), 'після «Так» фокус не на «Перенести»').toBeFocused();
+    expect(await page.evaluate(() => document.activeElement === document.body), 'фокус на body').toBe(false);
+  });
+
   test('versionMigrationOverwrite: KI-2 - від 500 000 значень «Перенести» чекає підтвердження бекапу, значення йде в apply', async ({ page }) => {
     const posted: Posted[] = [];
     await openDialog(page, posted, { transferredValues: 600_000 });
