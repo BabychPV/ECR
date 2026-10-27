@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Ecr.Application.Ports;
 using Ecr.Application.Workflow;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Workflow;
@@ -13,6 +14,7 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -222,13 +224,18 @@ public sealed class MonthColumnRoleLeakApiTests(SqlServerFixture sql)
             ["M1"] = 8800001m, ["M9"] = 8800009m, ["M10"] = OwnVisible, ["M11"] = 8800011m, ["M12"] = 8800012m,
             ["PLAIN"] = 8800099m,
         };
+        // Q-17.fix (B3): поточний стан — ЛОГІЧНИЙ (значення живуть у власників: M1 і не-місячна PLAIN - січень-якір,
+        // M11 - листопад, M10 - жовтень); колонки M9/M12 власника не мають (екземплярів нема) - їхній поточний стан порожній.
         await using (var db = s.Builder.CreateContext())
         {
-            foreach (var alias in aliases)
+            var own = await db.CellValues.SingleAsync(c =>
+                c.TableRowId == rowId && c.ColumnDefId == s.ColumnIds["M10"]).ConfigureAwait(true);
+            own.Apply(new CellValueData { ValueNumeric = secrets["M10"] });
+            foreach (var (alias, owner) in new[] { ("M1", s.January), ("PLAIN", s.January), ("M11", s.November) })
             {
-                var cell = await db.CellValues.SingleAsync(c =>
-                    c.TableRowId == rowId && c.ColumnDefId == s.ColumnIds[alias]).ConfigureAwait(true);
-                cell.Apply(new CellValueData { ValueNumeric = secrets[alias] });
+                db.CellValues.Add(new CellValue(
+                    new CellAddress(new PeriodKey(owner == s.January ? 202601 : 202611), owner.RowIds[0], s.ColumnIds[alias]),
+                    s.Doc.TableDefId, new CellValueData { ValueNumeric = secrets[alias] }));
             }
 
             await db.SaveChangesAsync().ConfigureAwait(true);
@@ -241,7 +248,7 @@ public sealed class MonthColumnRoleLeakApiTests(SqlServerFixture sql)
         using var _c = app2;
         using var _d = admin;
         var full = await CompareAsync(admin, s, versionId).ConfigureAwait(true);
-        foreach (var alias in aliases)
+        foreach (var alias in new[] { "M1", "M10", "M11", "PLAIN" })
         {
             Assert.True(full.Contains(Digits(secrets[alias]), StringComparison.Ordinal), $"{alias}: {full}");
         }
@@ -312,6 +319,123 @@ public sealed class MonthColumnRoleLeakApiTests(SqlServerFixture sql)
         {
             Assert.DoesNotContain(Digits(secrets[alias]), narrow, StringComparison.Ordinal);
         }
+    }
+
+    // ── (4b) B3 (QA2): «подання без правок -> поточний стан» = 0 змін, бо обидві сторони читають ВЛАСНИКІВ ──
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    public async Task Подання_без_правок_порівняння_з_поточним_станом_0_змін_для_повної_і_звуженої_ролі_а_зміна_власника_рівно_1()
+    {
+        var s = await ArrangeAsync(from: Oct, to: Oct).ConfigureAwait(true);
+        // Значення живуть у власників (копій в екземплярі жовтня немає): M11 - листопад, PLAIN - якір січня, M10 - жовтень.
+        await PutAsync(s, 202611, "M11", NovSecret).ConfigureAwait(true);
+        await PutAsync(s, 202601, "PLAIN", AnchorSecret).ConfigureAwait(true);
+        await PutAsync(s, Oct, "M10", OwnVisible).ConfigureAwait(true);
+
+        var (app, scoped) = await BootAsync(s, s.UserName, flag: true).ConfigureAwait(true);
+        using var _a = app;
+        using var _b = scoped;
+        var (app2, admin) = await BootAsync(s, s.AdminName, flag: true).ConfigureAwait(true);
+        using var _c = app2;
+        using var _d = admin;
+
+        // Зріз подання - як у SubmitSheetHandler: маршрутизований ICellStore (значення власників).
+        var versionId = await SnapshotRoutedAsync(app2, s).ConfigureAwait(true);
+
+        var fullBefore = await CompareCountsAsync(admin, s, versionId).ConfigureAwait(true);
+        Assert.Equal(0, fullBefore.Changes);
+        var narrowBefore = await CompareCountsAsync(scoped, s, versionId).ConfigureAwait(true);
+        Assert.Equal(0, narrowBefore.Changes);
+
+        // Зміна значення ВЛАСНИКА (M11 листопада) -> рівно одна зміна для повної ролі; звужена роль її не бачить.
+        await using (var db = s.Builder.CreateContext())
+        {
+            var cell = await db.CellValues.SingleAsync(c =>
+                c.TableRowId == s.November.RowIds[0] && c.ColumnDefId == s.ColumnIds["M11"]).ConfigureAwait(true);
+            cell.Apply(new CellValueData { ValueNumeric = NovSecret + 1m });
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var fullAfter = await CompareCountsAsync(admin, s, versionId).ConfigureAwait(true);
+        Assert.Equal(1, fullAfter.Changes);
+        var narrowAfter = await CompareCountsAsync(scoped, s, versionId).ConfigureAwait(true);
+        Assert.Equal(0, narrowAfter.Changes);
+    }
+
+    // ── (4c) валідація: правило з чужою M{m} спрацьовує по значенню ВЛАСНИКА, повідомлення без значень поза областю ──
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    public async Task Правило_з_M11_листопада_спрацьовує_по_власнику_а_відповідь_ролі_лише_на_жовтень_без_значення()
+    {
+        var s = await ArrangeAsync(from: Oct, to: Oct).ConfigureAwait(true);
+        await PutAsync(s, 202611, "M11", NovSecret).ConfigureAwait(true);
+        const string ruleCode = "Q17M11LIM";
+        await using (var db = s.Builder.CreateContext())
+        {
+            db.ValidationRules.Add(new ValidationRule(
+                s.Doc.TableDefId, EcrCode.Create(ruleCode), ValidationSeverity.Error, scope: 1,
+                $"[{s.ColumnCodes["M11"]}] < 1000",
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "November limit exceeded" })));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var (app2, admin) = await BootAsync(s, s.AdminName, flag: true).ConfigureAwait(true);
+        using var _c = app2;
+        using var _d = admin;
+        var fullBody = await ValidateAsync(admin, s).ConfigureAwait(true);
+        Assert.Contains(ruleCode, fullBody, StringComparison.Ordinal);
+
+        var (app, scoped) = await BootAsync(s, s.UserName, flag: true).ConfigureAwait(true);
+        using var _a = app;
+        using var _b = scoped;
+        var narrowBody = await ValidateAsync(scoped, s).ConfigureAwait(true);
+        Assert.DoesNotContain(Digits(NovSecret), narrowBody, StringComparison.Ordinal);
+        Assert.DoesNotContain(Digits(NovSecret), fullBody, StringComparison.Ordinal);
+    }
+
+    private static async Task<string> ValidateAsync(HttpClient client, Scenario s)
+    {
+        using var response = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.Doc.DocumentId}/validate", UriKind.Relative),
+            new { periodKey = Oct }).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(response.IsSuccessStatusCode, $"validate: {response.StatusCode}\n{body}");
+        return body;
+    }
+
+    private static async Task<long> SnapshotRoutedAsync(EcrApiFactory app, Scenario s)
+    {
+        using var scope = app.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<ICellStore>();
+        var slices = await store.ReadSlicesAsync([s.Doc.TableInstanceId], new PeriodKey(Oct), CancellationToken.None)
+            .ConfigureAwait(false);
+        var payload = SubmissionPayload.Write(slices.Values.SelectMany(x => x));
+        await using var db = s.Builder.CreateContext();
+        var userId = await db.Users.AsNoTracking().Where(u => u.UserName == s.AdminName)
+            .Select(u => u.Id).SingleAsync().ConfigureAwait(false);
+        var snapshot = new SubmissionSnapshot(
+            s.Doc.DocumentId, s.Doc.SheetDefId, Oct, s.Doc.TemplateVersionId,
+            "[]", null, null, payload, new byte[32], DateTime.UtcNow, userId);
+        db.SubmissionSnapshots.Add(snapshot);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        return snapshot.Id;
+    }
+
+    private static async Task<(int Changes, int Added, int Removed)> CompareCountsAsync(
+        HttpClient client, Scenario s, long from)
+    {
+        var body = await CompareAsync(client, s, from).ConfigureAwait(false);
+        var root = JsonDocument.Parse(body).RootElement;
+        return (
+            root.GetProperty("changes").GetArrayLength(),
+            root.GetProperty("addedRows").GetArrayLength(),
+            root.GetProperty("removedRows").GetArrayLength());
     }
 
     // ── (5) відмова на рядок називає період-якір ──

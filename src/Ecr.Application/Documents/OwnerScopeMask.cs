@@ -45,6 +45,11 @@ internal static class OwnerScopeMask
         }
 
         var snapshot = await metadata.GetAsync(document.TemplateVersionId, ct).ConfigureAwait(false);
+
+        // ⚠ Q-17.fix (B2, QA2: експорт ON був 5-13x повільніший): InPeriod будує НОВУ область (індекси по всій версії
+        // шаблону), а тут її викликали на КОЖНУ чужу колонку всіх ~90 таблиць (тисячі викликів, ~6 с на POST /export).
+        // Область на період-власник одна (їх ≤ 13), а колонки читає її власний кеш.
+        var scopeByOwner = new Dictionary<PeriodKey, DocumentReadScope>();
         foreach (var table in snapshot.Sheets.Where(s => !s.IsDeleted).SelectMany(s => s.Tables))
         {
             if (!router.AppliesToTable(table))
@@ -54,7 +59,12 @@ internal static class OwnerScopeMask
 
             foreach (var foreign in await router.ForeignColumnsAsync(document, table, viewPeriod, ct).ConfigureAwait(false))
             {
-                if (!anyPeriod.InPeriod(foreign.OwnerPeriod).CanReadColumn(foreign.Column.Id))
+                if (!scopeByOwner.TryGetValue(foreign.OwnerPeriod, out var ownerScope))
+                {
+                    scopeByOwner[foreign.OwnerPeriod] = ownerScope = anyPeriod.InPeriod(foreign.OwnerPeriod);
+                }
+
+                if (!ownerScope.CanReadColumn(foreign.Column.Id))
                 {
                     blocked.Add(foreign.Column.Id);
                 }

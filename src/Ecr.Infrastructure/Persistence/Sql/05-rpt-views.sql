@@ -199,6 +199,10 @@ BEGIN
     -- введений не-місячний — в екземплярі-якорі року). @monthMask: біт m — потрібен власник-місяць m.
     DECLARE @layout tinyint, @isMonth bit, @monthNo tinyint, @isInput bit, @monthMask int, @needAnchor bit,
             @ownerRows nvarchar(max), @ownerCells nvarchar(max), @valueCol nvarchar(128), @extra int, @mi int;
+    -- Q-17.fix (B1): умовні агрегації значень власників - по одному OUTER APPLY на власника (OwnerNo: -1 власна копія,
+    -- 0 якір року, 1..12 місяць), а не по приєднанню doc.CellValue на колонку.
+    DECLARE @routed bit, @raw1 nvarchar(64), @agg nvarchar(max), @aggM nvarchar(max), @ownerNo int, @aggList nvarchar(max), @idList nvarchar(max);
+    DECLARE @pv TABLE (OwnerNo int NOT NULL, ColNo int NOT NULL, ColId int NOT NULL, Agg nvarchar(max) NOT NULL);
     DECLARE @marker nvarchar(64) = N'-- Згенеровано rpt.usp_GenerateTemplateViews';
     DECLARE @failure nvarchar(2048);
 
@@ -211,6 +215,7 @@ BEGIN
         -- ⚠ Цикл, а не `STRING_AGG`: підлога сервера — 2016 SP1 (`D-101`).
         SELECT @select = N'', @joins = N'', @n = 0,
                @ownerRows = N'', @ownerCells = N'', @monthMask = 0, @needAnchor = 0, @extra = 0;
+        DELETE FROM @pv;
         SET @layout = (SELECT LayoutKind FROM cfg.TableDef WHERE Id = @id);
         SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0);
         WHILE @colId IS NOT NULL
@@ -228,39 +233,50 @@ BEGIN
                       WHEN 7 THEN N'ValueUnitId'
                       ELSE N'ValueNumeric'
                   END;
-            SET @joins = @joins + N'
-LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.PeriodKey AND '
-                + @alias + N'.TableRowId = r.Id AND ' + @alias + N'.ColumnDefId = ' + CAST(@colId AS nvarchar(10));
-
             -- Q-17.7: MonthsInColumns — ВВЕДЕНИЙ стовпець (не Formula/Calculated) читається з комірки власника;
             -- власна копія в рядку перегляду лишається запасним значенням (до консолідації даних і після неї
             -- до -PurgeCopies). Похідні (Formula/Calculated) і всі інші розкладки — як було.
-            IF @MonthRouting = 1 AND @layout = 0 AND @colType NOT IN (6, 8) AND (@isMonth = 0 OR @monthNo BETWEEN 1 AND 12)
-            BEGIN
-                IF @isMonth = 1
-                BEGIN
-                    SET @monthMask = @monthMask | POWER(2, @monthNo);
-                    SET @mi = @monthNo;
-                    SET @extra = @extra + 1;
-                    SET @ownerCells = @ownerCells + N'
-LEFT JOIN doc.CellValue AS o' + CAST(@n AS nvarchar(10)) + N' ON o' + CAST(@n AS nvarchar(10))
-                        + N'.PeriodKey = ow' + CAST(@mi AS nvarchar(10)) + N'.PeriodKey AND o' + CAST(@n AS nvarchar(10))
-                        + N'.TableRowId = ow' + CAST(@mi AS nvarchar(10)) + N'.Id AND o' + CAST(@n AS nvarchar(10))
-                        + N'.ColumnDefId = ' + CAST(@colId AS nvarchar(10));
-                END
-                ELSE
-                BEGIN
-                    SET @needAnchor = 1;
-                    SET @extra = @extra + 1;
-                    SET @ownerCells = @ownerCells + N'
-LEFT JOIN doc.CellValue AS o' + CAST(@n AS nvarchar(10)) + N' ON o' + CAST(@n AS nvarchar(10))
-                        + N'.PeriodKey = owA.PeriodKey AND o' + CAST(@n AS nvarchar(10))
-                        + N'.TableRowId = owA.Id AND o' + CAST(@n AS nvarchar(10))
-                        + N'.ColumnDefId = ' + CAST(@colId AS nvarchar(10));
-                END
+            SET @routed = CASE WHEN @MonthRouting = 1 AND @layout = 0 AND @colType NOT IN (6, 8)
+                                    AND (@isMonth = 0 OR @monthNo BETWEEN 1 AND 12) THEN 1 ELSE 0 END;
 
-                SET @valueCol = N'COALESCE(o' + CAST(@n AS nvarchar(10)) + N'.' + SUBSTRING(@valueCol, LEN(@alias) + 2, 64)
-                              + N', ' + @valueCol + N')';
+            IF @routed = 0
+            BEGIN
+                SET @joins = @joins + N'
+LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.PeriodKey AND '
+                    + @alias + N'.TableRowId = r.Id AND ' + @alias + N'.ColumnDefId = ' + CAST(@colId AS nvarchar(10));
+            END
+            ELSE
+            BEGIN
+                -- ⛔ Q-17.fix (B1): жодного приєднання doc.CellValue НА КОЛОНКУ - ліміт SQL Server 256 таблиць у запиті
+                -- (T9_04 Land: 203 колонки давали 399 таблиць). Значення введених колонок читає ОДИН OUTER APPLY на
+                -- кожного власника (власна копія; кожен із ≤ 12 місяців; якір): умовна агрегація MAX(CASE ColumnDefId)
+                -- по ключу комірки (PeriodKey, TableRowId, ColumnDefId) унікальна, тож MAX = саме це значення.
+                -- Тип значення той самий: bit читається як tinyint і повертається CAST(.. AS bit).
+                SET @raw1 = SUBSTRING(@valueCol, LEN(@alias) + 2, 64);   -- ValueNumeric / ValueString / ...
+                SET @agg = CASE WHEN @colType = 3
+                                THEN N'MAX(CAST(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
+                                ELSE N'MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END)'
+                           END + N' AS v' + CAST(@n AS nvarchar(10));
+                -- Власник місячної колонки - екземпляр її місяця; усі місяці читає ОДИН apply (група 100): ключ комірки
+                -- звіряється з місяцем колонки в самій агрегації.
+                -- ⚠ Лише колонки x у агрегаті (зовнішнє посилання в агрегаті - Msg 8124): рік уже обмежено WHERE apply,
+                -- тож місяць екземпляра - залишок ключа періоду YYYYMM.
+                SET @aggM = CASE WHEN @colType = 3
+                                 THEN N'MAX(CAST(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' AND x.PeriodKey % 100 = ' + CAST(@monthNo AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
+                                 ELSE N'MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' AND x.PeriodKey % 100 = ' + CAST(@monthNo AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END)'
+                            END + N' AS v' + CAST(@n AS nvarchar(10));
+                SET @mi = CASE WHEN @isMonth = 1 THEN 100 ELSE 0 END;
+                IF @isMonth = 1
+                    SET @monthMask = 1;
+                ELSE
+                    SET @needAnchor = 1;
+
+                INSERT INTO @pv (OwnerNo, ColNo, ColId, Agg) VALUES (-1, @n, @colId, @agg), (@mi, @n, @colId, CASE WHEN @isMonth = 1 THEN @aggM ELSE @agg END);
+
+                SET @valueCol = N'COALESCE(' + CASE WHEN @isMonth = 1 THEN N'omm' ELSE N'omA' END
+                              + N'.v' + CAST(@n AS nvarchar(10)) + N', sv.v' + CAST(@n AS nvarchar(10)) + N')';
+                IF @colType = 3
+                    SET @valueCol = N'CAST(' + @valueCol + N' AS bit)';
             END
 
             SET @select = @select + N',
@@ -275,24 +291,13 @@ LEFT JOIN doc.CellValue AS o' + CAST(@n AS nvarchar(10)) + N' ON o' + CAST(@n AS
         -- у квартальних/річних ключ Year*100+Sequence означає не місяць.
         IF @monthMask <> 0 OR @needAnchor = 1
         BEGIN
-            SET @mi = 1;
-            WHILE @mi <= 12
-            BEGIN
-                IF (@monthMask & POWER(2, @mi)) <> 0
-                BEGIN
-                    SET @extra = @extra + 2;
-                    SET @ownerRows = @ownerRows + CONCAT(N'
-LEFT JOIN doc.TableInstance AS oi', @mi, N' ON p.PeriodKind = 0 AND oi', @mi, N'.PeriodKey = (ti.PeriodKey / 100) * 100 + ', @mi,
-                        N' AND oi', @mi, N'.DocumentId = ti.DocumentId AND oi', @mi, N'.TableDefId = ti.TableDefId
-LEFT JOIN doc.TableRow AS ow', @mi, N' ON ow', @mi, N'.PeriodKey = oi', @mi, N'.PeriodKey AND ow', @mi,
-                        N'.TableInstanceId = oi', @mi, N'.Id AND ow', @mi, N'.RowKey = r.RowKey AND ow', @mi, N'.IsDeleted = 0');
-                END
-                SET @mi = @mi + 1;
-            END
+            -- Місяці (група 100): екземпляри року -> рядок з тим самим RowKey -> введені комірки; усе в одному OUTER APPLY.
+            IF @monthMask <> 0
+                SET @extra = @extra + 3;   -- doc.TableInstance + doc.TableRow + doc.CellValue всередині apply (нижче)
 
             IF @needAnchor = 1
             BEGIN
-                SET @extra = @extra + 3;
+                SET @extra = @extra + 3 + 1;   -- doc.Period + екземпляр + рядок якоря + його OUTER APPLY (нижче)
                 SET @ownerRows = @ownerRows + N'
 LEFT JOIN (SELECT ProjectId, PeriodKey / 100 AS Yr, MIN(PeriodKey) AS AnchorKey
              FROM doc.Period GROUP BY ProjectId, PeriodKey / 100) AS pa
@@ -301,7 +306,37 @@ LEFT JOIN doc.TableInstance AS oiA ON oiA.PeriodKey = pa.AnchorKey AND oiA.Docum
 LEFT JOIN doc.TableRow AS owA ON owA.PeriodKey = oiA.PeriodKey AND owA.TableInstanceId = oiA.Id AND owA.RowKey = r.RowKey AND owA.IsDeleted = 0';
             END
 
-            -- Порядок: приєднання власників-рядків ідуть ДО комірок власників; власні копії (c<n>) — між ними.
+            -- Власна копія (sv) і кожен власник (om<m>, omA) - по одному OUTER APPLY з умовною агрегацією (B1).
+            -- Власна копія: рядок перегляду; без жодної введеної колонки з маршрутизацією цього блоку немає.
+            SET @extra = @extra + 1 - (SELECT COUNT(*) FROM @pv WHERE OwnerNo = -1);   -- sv замість c<n> на кожну колонку
+            SET @ownerCells = N'';
+            SET @ownerNo = -1;
+            WHILE @ownerNo IS NOT NULL
+            BEGIN
+                -- ⚠ FOR XML PATH, а не «@var = @var + …» з ORDER BY: останнє не гарантує конкатенації всіх рядків.
+                SET @aggList = STUFF((SELECT N', ' + Agg FROM @pv WHERE OwnerNo = @ownerNo ORDER BY ColNo
+                                      FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
+                -- Власник читається лише по СВОЇХ колонках (місяць m - M{m}; якір - не-місячні): відбір за ключем PK
+                -- замість обходу всіх комірок рядка власника. Власна копія (sv) - усі маршрутизовані колонки таблиці.
+                SET @idList = CASE WHEN @ownerNo = -1 THEN N'' ELSE N' AND x.ColumnDefId IN (' + STUFF((
+                                  SELECT N', ' + CAST(ColId AS nvarchar(10)) FROM @pv WHERE OwnerNo = @ownerNo ORDER BY ColNo
+                                  FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'') + N')' END;
+                SET @ownerCells = @ownerCells + N'
+OUTER APPLY (SELECT ' + @aggList + N' FROM '
+                    + CASE WHEN @ownerNo = 100
+                           THEN N'doc.TableInstance AS oi
+          JOIN doc.TableRow AS ow ON ow.PeriodKey = oi.PeriodKey AND ow.TableInstanceId = oi.Id AND ow.RowKey = r.RowKey AND ow.IsDeleted = 0
+          JOIN doc.CellValue AS x ON x.PeriodKey = ow.PeriodKey AND x.TableRowId = ow.Id' + @idList + N'
+          WHERE p.PeriodKind = 0 AND oi.DocumentId = ti.DocumentId AND oi.TableDefId = ti.TableDefId
+            AND oi.PeriodKey > (ti.PeriodKey / 100) * 100 AND oi.PeriodKey <= (ti.PeriodKey / 100) * 100 + 12'
+                           WHEN @ownerNo = -1
+                           THEN N'doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id'
+                           ELSE N'doc.CellValue AS x WHERE x.PeriodKey = owA.PeriodKey AND x.TableRowId = owA.Id' + @idList END
+                    + N') AS ' + CASE WHEN @ownerNo = -1 THEN N'sv' WHEN @ownerNo = 0 THEN N'omA' ELSE N'omm' END;
+                SET @ownerNo = (SELECT MIN(OwnerNo) FROM @pv WHERE OwnerNo > @ownerNo);
+            END
+
+            -- Порядок: приєднання власників-рядків ідуть ДО комірок власників; власні копії нероутованих колонок (c<n>) - між ними.
             SET @joins = @ownerRows + @joins + @ownerCells;
         END
 
@@ -319,7 +354,7 @@ LEFT JOIN doc.TableRow AS owA ON owA.PeriodKey = oiA.PeriodKey AND owA.TableInst
             -- читає /health/ready і журнал публікації, там голий Id нічого не каже.
             SET @failure = COALESCE(@failure, CONCAT(N'rpt.usp_GenerateTemplateViews: ', @header, N' (таблиця ', @id,
                                   N') має ', @n, N' колонок',
-                                  CASE WHEN @extra > 0 THEN CONCAT(N' (з приєднаннями власників значень — ', @n + @extra, N' таблиць у запиті)') ELSE N'' END,
+                                  CASE WHEN @extra <> 0 THEN CONCAT(N' (з приєднаннями власників значень — ', @n + @extra, N' таблиць у запиті)') ELSE N'' END,
                                   N', вʼюха вміщує щонайбільше 250.'));
             GOTO next_table;
         END
