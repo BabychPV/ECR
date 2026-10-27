@@ -81,6 +81,15 @@ public sealed class ExportDocumentHandler(
         var exportPeriod = new Ecr.Domain.ValueObjects.PeriodKey(options.PeriodKey);
         var readable = anyPeriodScope.InPeriod(exportPeriod);
 
+        // ✎ AN-137 (S18, прохід C): період ПОЗА областю читача (жодна таблиця документа не читається в цьому періоді) -
+        // та сама відповідь, що й для невидимого документа/прихованої таблиці у `GetTableSliceHandler`
+        // (`DocumentVisibility.DocumentNotFound`), а не 202 і порожня книга: інакше експорт розкривав би, що період існує.
+        var tableIds = readable.TableIds();
+        if (tableIds.Count > 0 && readable.HiddenTableIds().Count == tableIds.Count)
+        {
+            throw DocumentVisibility.DocumentNotFound(documentId);
+        }
+
         // ✎ Q-17: значення колонки з чужим власником віддає ВЛАСНИК, тож його період теж має бути в області ролі.
         var ownerBlocked = await OwnerScopeMask
             .BlockedColumnIdsAsync(monthRouter, metadata, anyPeriodScope, documentId, exportPeriod, ct)
