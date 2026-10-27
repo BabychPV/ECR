@@ -7759,9 +7759,6 @@ USING (VALUES
     -- COLL:r11l3-overwrite-limit ── R11-L3 / R1-05: застосування імпорту .xlsx з понад 5000 рядків для перезапису - 422, а не 500; ru/kz - порцією COLL:r11l3-overwrite-limit нижче ──
     ,(N'err.ECR-IMP-0422.importTooManyOverwriteRows', N'en', N'More than {maxRows} rows are marked for overwrite. Nothing was applied: overwrite the rows in several batches.', 1)
     -- COLL:r11l3-overwrite-limit ── кінець секції ──
-    -- COLL:an143-import-rejected ── AN-143 (p53 «все або нічого»): застосування імпорту .xlsx відмовляє цілком, якщо перегляд має відхилені комірки; ru/kz - порцією COLL:an143-import-rejected нижче ──
-    ,(N'err.ECR-IMP-0422.importHasRejected', N'en', N'The preview has {rejectedCount} rejected cell(s), so the import was refused as a whole and nothing was applied. Fix or clear the rejected cells in the file, or export the workbook again, and build the preview again.', 1)
-    -- COLL:an143-import-rejected ── кінець секції ──
     -- COLL:r11l3-calc-0434 ── R11-L3: заголовок коду ECR-CALC-0434; ru/kz — порцією COLL:r11l3-calc-0434 нижче ──
     ,(N'err.ECR-CALC-0434', N'en', N'Methodology constant cannot be used in a formula', 1)
     -- COLL:r11l3-calc-0434 ── кінець секції ──
@@ -8149,6 +8146,9 @@ USING (VALUES
     ,(N'documents.migrateGuardedOverwriteCancel', N'en', N'No', 1)
     ,(N'documents.migrateGuardedOverwriteAccepted', N'en', N'Overwrite confirmed: {count} derived values will be replaced by formulas.', 1)
     -- COLL:acc-ow-dialog ── кінець секції ──
+    -- COLL:an143-import-rejected ── AN-143 (p53 «все або нічого»): застосування імпорту .xlsx відмовляє цілком, якщо перегляд має відхилені комірки; ru/kz - порцією COLL:an143-import-rejected нижче ──
+    ,(N'err.ECR-IMP-0422.importHasRejected', N'en', N'The preview has {rejectedCount} rejected cell(s), so the import was refused as a whole and nothing was applied. Fix or clear the rejected cells in the file, or export the workbook again, and build the preview again.', 1)
+    -- COLL:an143-import-rejected ── кінець секції ──
     -- REG-UI:field-form ── UI довідників, коміт 1: форма поля довідника (підписи й підказки до властивостей); ru/kz — порцією REG-UI:field-form у блоці I18N нижче ──
     ,(N'registries.fieldForm.title', N'en', N'New field', 1)
     ,(N'registries.fieldForm.intro', N'en', N'A field is one column of every entry in this registry. The code and the name identify it, the type decides what can be entered. After the description is published, the code and the type cannot be changed.', 1)
@@ -20758,17 +20758,6 @@ OPTION (RECOMPILE);
 GO
 -- COLL:r11l3-overwrite-limit ── кінець секції ──
 
--- COLL:an143-import-rejected ── ru/kz: AN-143 (p53): застосування імпорту .xlsx відмовляє цілком, якщо перегляд має відхилені комірки; власна порція ──
-INSERT INTO #I18N ([Key], Lang, Val)
-SELECT v.[Key], v.Lang, v.Val
-  FROM (VALUES
-    (N'err.ECR-IMP-0422.importHasRejected', N'ru', N'В предпросмотре отклонённых ячеек: {rejectedCount}, поэтому импорт отклонён целиком и ничего не применено. Исправьте или очистите отклонённые ячейки в файле либо выгрузите книгу заново и постройте предпросмотр снова.'),
-    (N'err.ECR-IMP-0422.importHasRejected', N'kz', N'Алдын ала қарауда қабылданбаған ұяшықтар: {rejectedCount}, сондықтан импорт толығымен қабылданбады және ештеңе қолданылмады. Файлдағы қабылданбаған ұяшықтарды түзетіңіз немесе тазалаңыз не кітапты қайта экспорттап, алдын ала қарауды қайта құрыңыз.')
-       ) AS v ([Key], Lang, Val)
-OPTION (RECOMPILE);
-GO
--- COLL:an143-import-rejected ── кінець секції ──
-
 -- COLL:r11l3-calc-0434 ── ru/kz: R11-L3: заголовок коду ECR-CALC-0434; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -21665,6 +21654,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:result-table ── кінець секції ──
+
+-- COLL:an143-import-rejected ── ru/kz: AN-143 (p53): застосування імпорту .xlsx відмовляє цілком, якщо перегляд має відхилені комірки; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-IMP-0422.importHasRejected', N'ru', N'В предпросмотре отклонённых ячеек: {rejectedCount}, поэтому импорт отклонён целиком и ничего не применено. Исправьте или очистите отклонённые ячейки в файле либо выгрузите книгу заново и постройте предпросмотр снова.'),
+    (N'err.ECR-IMP-0422.importHasRejected', N'kz', N'Алдын ала қарауда қабылданбаған ұяшықтар: {rejectedCount}, сондықтан импорт толығымен қабылданбады және ештеңе қолданылмады. Файлдағы қабылданбаған ұяшықтарды түзетіңіз немесе тазалаңыз не кітапты қайта экспорттап, алдын ала қарауды қайта құрыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an143-import-rejected ── кінець секції ──
 
 -- D425:row-activity-filter ── ru/kz: помилка формату фільтра активності рядків (en — у блоці err.ECR-CALC-0422); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

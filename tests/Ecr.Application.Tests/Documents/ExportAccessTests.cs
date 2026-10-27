@@ -94,6 +94,101 @@ public sealed class ExportAccessTests
             Arg.Any<CancellationToken>(), Arg.Any<int?>());
     }
 
+    // ✎ AN-137 (S18, прохід C): експорт періоду ПОЗА областю читача давав 202 і порожню книгу, а зріз таблиці
+    // того ж випадку - 404 `ECR-DOC-0404`. Тепер експорт відмовляє тією самою відповіддю (розкриття існування немає).
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Період_поза_областю_читача_як_неіснуючий_документ_і_задача_не_ставиться()
+    {
+        Allow(NarrowedTo(periodFrom: 202603, periodTo: 202603));
+
+        var denied = await Assert.ThrowsAsync<NotFoundException>(
+            () => Handler().HandleAsync(DocumentId, Options(), CancellationToken.None)); // період 202601
+
+        // Та сама відповідь, що й для невидимого документа та прихованої таблиці у зрізі.
+        var invisible = DocumentVisibility.DocumentNotFound(DocumentId);
+        Assert.Equal(invisible.ErrorCode, denied.ErrorCode);
+        Assert.Equal(invisible.Message, denied.Message);
+        Assert.Equal(invisible.Details!["messageKey"], denied.Details!["messageKey"]);
+
+        await _jobs.DidNotReceiveWithAnyArgs().EnqueueAsync<IExcelExportJob>(null, CancellationToken.None);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Період_в_області_читача_експорт_ставиться_як_раніше()
+    {
+        Allow(NarrowedTo(periodFrom: 202601, periodTo: 202601));
+        _jobs.EnqueueAsync<IExcelExportJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns("job-2");
+
+        var jobId = await Handler().HandleAsync(DocumentId, Options(), CancellationToken.None);
+
+        Assert.Equal("job-2", jobId);
+    }
+
+    private void Allow(AccessProfile reader)
+    {
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(reader);
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(DocumentReadScope.For(reader, AccessBuilder.ProjectId, OneTableSnapshot()));
+    }
+
+    /// <summary>Читач з роллю, звуженою одним діапазоном періодів (D-214): грант на проєкт діє лише там.</summary>
+    private static AccessProfile NarrowedTo(int periodFrom, int periodTo)
+    {
+        var key = $"{ResourceKind.Project}:{AccessBuilder.ProjectId}";
+        var layer = new NarrowedAccess(
+            null, new Ecr.Domain.ValueObjects.PeriodKey(periodFrom), new Ecr.Domain.ValueObjects.PeriodKey(periodTo),
+            new Dictionary<string, GrantLevel> { [key] = GrantLevel.Read }, new HashSet<string>(),
+            new HashSet<int> { 5 }, new HashSet<string>());
+        var baseProfile = new AccessBuilder { UserId = 9 }.Permission("Document.Export").Build();
+
+        return new AccessProfile
+        {
+            CacheKey = baseProfile.CacheKey,
+            UserId = 9,
+            SecurityStamp = baseProfile.SecurityStamp,
+            Permissions = baseProfile.Permissions,
+            Grants = new Dictionary<string, GrantLevel>(),
+            Denies = new HashSet<string>(),
+            RoleIds = new HashSet<int> { 5 },
+            Scoped = new Dictionary<int, ScopedProjectAccess>
+            {
+                [AccessBuilder.ProjectId] = new(
+                    new Dictionary<string, GrantLevel>(), new HashSet<string>(), new HashSet<int>(), new HashSet<string>())
+                {
+                    Narrowed = [layer],
+                },
+            },
+        };
+    }
+
+    private static Domain.Entities.Configuration.TemplateVersionSnapshot OneTableSnapshot()
+    {
+        var text = new Domain.ValueObjects.LocalizedText(new Dictionary<string, string> { ["en"] = "x" });
+        var sheet = new Domain.Entities.Configuration.SheetDef(1, Domain.ValueObjects.EcrCode.Create("SA"), text, 101);
+        SetId(sheet, 101);
+        var table = new Domain.Entities.Configuration.TableDef(
+            101, Domain.ValueObjects.EcrCode.Create("T201"), text, 201,
+            Domain.Enums.TableLayoutKind.PerPeriodInstance, Domain.Enums.TableRowMode.Fixed);
+        SetId(table, 201);
+        var column = new Domain.Entities.Configuration.ColumnDef(
+            201, Domain.ValueObjects.EcrCode.Create("C301"), text, 301, Domain.Enums.CellDataType.Decimal);
+        SetId(column, 301);
+        table.AddColumn(column);
+        sheet.AddTable(table);
+
+        return new Domain.Entities.Configuration.TemplateVersionSnapshot(
+            1, 0, [sheet], new Dictionary<int, Domain.Entities.Configuration.ColumnDef> { [301] = column },
+            new Dictionary<(int, string), Domain.Entities.Configuration.RowDef>());
+    }
+
+    private static void SetId<T>(T e, int id) where T : Ecr.Domain.Abstractions.Entity<int>
+        => typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(e, id);
+
     private static bool ServerScoped(object? payload)
         => payload is ExcelExportTask { Options: { HiddenTableDefIds: { Count: 0 }, HiddenColumnDefIds: { Count: 0 } } };
 
