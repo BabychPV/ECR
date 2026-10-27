@@ -79,8 +79,11 @@ test.describe('Фокус на таблиці аркуша (ui-sheet-focus)', ()
       await expect(page.locator('[data-save-status="saved"]').first()).toBeVisible({ timeout: 30_000 });
 
       // Esc у редакторі скасовує правку, але НЕ виходить з режиму.
-      await cell.dblclick();
+      // (Редактор міг лишитися відкритим після Enter, або його відкриває F2.)
+      if ((await page.locator('revogr-edit').count()) === 0) await page.keyboard.press('F2');
+      await expect(page.locator('revogr-edit')).toHaveCount(1);
       await page.keyboard.press('Escape');
+      await expect(page.locator('revogr-edit')).toHaveCount(0);
       await expect(page).toHaveURL(/[?&]full=1/);
 
       // Esc поза редактором виходить; фокус — на кнопці.
@@ -155,9 +158,10 @@ async function open(page: Page): Promise<void> {
 }
 
 async function shot(page: Page, name: string): Promise<void> {
-  if (ShotsDir === '') return;
   const size = page.viewportSize()?.width ?? 0;
-  await page.screenshot({ path: `${ShotsDir}\\${ShotTag}-${name}-${String(size)}.png` });
+  const file = `${ShotTag}-${name}-${String(size)}.png`;
+  // Без каталогу знімків — у вкладення прогону (test-results, потрапляє в артефакт CI).
+  await page.screenshot({ path: ShotsDir === '' ? test.info().outputPath(file) : `${ShotsDir}\\${file}` });
 }
 
 async function signIn(page: Page): Promise<void> {
