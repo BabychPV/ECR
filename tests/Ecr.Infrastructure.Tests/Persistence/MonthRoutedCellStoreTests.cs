@@ -178,6 +178,44 @@ public sealed class MonthRoutedCellStoreTests(SqlServerFixture sql) : IDisposabl
         Assert.False(entered.Value.IsCalculated);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    public async Task Обчислена_комірка_перегляду_і_введена_власника_на_одній_адресі_дають_одну_обчислену()
+    {
+        var a = await ArrangeAsync(instanceMonths: [1, 11]);
+        var m11 = a.Doc.MonthColumnDefIds[10];
+
+        await PutAsync(a, ViewMonth, 0, m11, 42m, calculated: true); // власна обчислена перегляду
+        await PutAsync(a, 11, 0, m11, 8m); // введена власника на ТІЙ САМІЙ логічній адресі (рядок 0 × M11)
+        await PutAsync(a, 11, 1, m11, 9m); // рядок 1: обчисленої немає — значення власника як раніше
+
+        await using var db = _builder.CreateContext();
+        var store = Decorate(db, new NormalizedCellStore(db), routing: true);
+
+        var byPeriod = await store.ReadSliceAsync(a.Doc.TableInstanceId, a.Doc.PeriodKey, CancellationToken.None);
+        var byId = await store.ReadSliceAsync(a.Doc.TableInstanceId, CancellationToken.None);
+        var batch = await store.ReadSlicesAsync([a.Doc.TableInstanceId], a.Doc.PeriodKey, CancellationToken.None);
+        var batchById = await store.ReadSlicesAsync([a.Doc.TableInstanceId], CancellationToken.None);
+
+        foreach (var slice in new[] { byPeriod, byId, batch[a.Doc.TableInstanceId], batchById[a.Doc.TableInstanceId] })
+        {
+            var atAddress = slice.Where(c => c.Address.TableRowId == a.Doc.RowIds[0] && c.Address.ColumnDefId == m11).ToList();
+            var only = Assert.Single(atAddress);
+            Assert.Equal(42m, only.Value.ValueNumeric);
+            Assert.True(only.Value.IsCalculated);
+
+            Assert.Equal(9m, ValueOf(slice, a.Doc.RowIds[1], m11));
+        }
+
+        // Прапор вимкнено — без змін: фізичний зріз перегляду (лише обчислена комірка).
+        await using var dbOff = _builder.CreateContext();
+        var off = Decorate(dbOff, new NormalizedCellStore(dbOff), routing: false);
+        var offSlice = await off.ReadSliceAsync(a.Doc.TableInstanceId, a.Doc.PeriodKey, CancellationToken.None);
+        Assert.Equal(42m, Assert.Single(offSlice, c => c.Address.TableRowId == a.Doc.RowIds[0] && c.Address.ColumnDefId == m11).Value.ValueNumeric);
+    }
+
     // ── (д) якорного екземпляра немає → порожньо, нічого не створюється ───
 
     [Fact]
