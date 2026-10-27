@@ -75,8 +75,10 @@ test.describe('Фокус на таблиці аркуша (ui-sheet-focus)', ()
       const cell = grid.locator('revogr-data .rgCell').first();
       await cell.dblclick();
       await page.keyboard.type(String(10 + i));
+      // Автозбереження: PATCH пішов і прийнятий (індикатор «saved» мигає коротко — не опора).
+      const saved = page.waitForResponse((r) => r.request().method() === 'PATCH' && r.ok(), { timeout: 30_000 });
       await page.keyboard.press('Enter');
-      await expect(page.locator('[data-save-status="saved"]').first()).toBeVisible({ timeout: 30_000 });
+      await saved;
 
       // Esc у редакторі скасовує правку, але НЕ виходить з режиму.
       // (Редактор міг лишитися відкритим після Enter, або його відкриває F2.)
