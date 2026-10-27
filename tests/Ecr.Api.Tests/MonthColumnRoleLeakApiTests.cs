@@ -596,7 +596,22 @@ public sealed class MonthColumnRoleLeakApiTests(SqlServerFixture sql)
         using var after = await wideClient.GetAsync(new Uri(
             $"/api/v1/documents/{s.Doc.DocumentId}/compare?from={versionId}&to=current", UriKind.Relative)).ConfigureAwait(true);
         var afterBody = await after.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(
+            after.StatusCode == HttpStatusCode.Unauthorized
+            || (after.StatusCode == HttpStatusCode.OK && afterBody.Contains("\"changes\"", StringComparison.Ordinal)),
+            $"{(int)after.StatusCode}: {afterBody}");
         Assert.False(afterBody.Contains(Digits(NovSecret), StringComparison.Ordinal), $"{(int)after.StatusCode}: {afterBody}");
+
+        // Новий вхід того ж користувача: 200 з непорожнім тілом compare, значення власника поза областю відсутнє.
+        var (appNew, newClient) = await BootAsync(s, wideName, flag: true).ConfigureAwait(true);
+        using var _g = appNew;
+        using var _h = newClient;
+        using var relogin = await newClient.GetAsync(new Uri(
+            $"/api/v1/documents/{s.Doc.DocumentId}/compare?from={versionId}&to=current", UriKind.Relative)).ConfigureAwait(true);
+        var reloginBody = await relogin.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, relogin.StatusCode);
+        Assert.Contains("\"changes\"", reloginBody, StringComparison.Ordinal);
+        Assert.DoesNotContain(Digits(NovSecret), reloginBody, StringComparison.Ordinal);
     }
 
     private async Task<string> CreateFormUserAsync(Scenario s, string form)

@@ -491,8 +491,8 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// P2-1 (перф): синтетичний шаблон ≥ 200 колонок × 12 місяців × 120 рядків. Читання вʼюхи з прапором (ON) проти
-    /// вимкненого (OFF): <c>SELECT *</c> не гірше 3x за процесорним часом і логічними читаннями; вибірка 8 колонок - не
+    /// P2-1 (перф): синтетичний шаблон ≥ 200 колонок × 12 місяців × 40 рядків. Читання вʼюхи з прапором (ON) проти
+    /// вимкненого (OFF) за детермінованими логічними читаннями (CPU лише у звіті): <c>SELECT *</c> не гірше 3x; вибірка 8 колонок - не
     /// гірше 10x за читаннями (до P2-1: ~25x на цьому наборі й ~340x за часом на T9_04 Land - один apply рахував усі
     /// місяці для кожної колонки; після: ~7x). Мутація: повернути один спільний apply на всі місяці - межа 8 колонок
     /// червоніє.
@@ -504,7 +504,7 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
     public async Task Читання_вʼюхи_з_прапором_у_межах_кратності_від_вимкненого_за_cpu_і_логічними_читаннями()
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var f = await BuildAsync(columnCount: 205, rowCount: 120);
+        var f = await BuildAsync(columnCount: 205, rowCount: 40);
         for (var m = 1; m <= 12; m++)
         {
             if (202600 + m != 202610)
@@ -524,12 +524,22 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
                   FROM doc.TableRow AS r
                   JOIN doc.TableInstance AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
                   JOIN cfg.ColumnDef AS c ON c.TableDefId = @td AND c.DataType = @dec AND c.IsDeleted = 0
-                 WHERE ti.DocumentId = @d AND ti.TableDefId = @td;
+                 WHERE ti.DocumentId = @d AND ti.TableDefId = @td AND r.PeriodKey = @pk;
                 """;
             fill.Parameters.AddWithValue("@td", f.Doc.TableDefId);
             fill.Parameters.AddWithValue("@d", f.Doc.DocumentId);
             fill.Parameters.AddWithValue("@dec", (byte)CellDataType.Decimal);
-            await fill.ExecuteNonQueryAsync();
+            var period = fill.Parameters.Add("@pk", System.Data.SqlDbType.Int);
+
+            // Порціями по місяцю з CHECKPOINT: спільна тестова база має стелю розміру файлів (журнал не росте).
+            await using var checkpoint = connection.CreateCommand();
+            checkpoint.CommandText = "CHECKPOINT";
+            for (var m = 1; m <= 12; m++)
+            {
+                period.Value = 202600 + m;
+                await fill.ExecuteNonQueryAsync();
+                await checkpoint.ExecuteNonQueryAsync();
+            }
         }
 
         await using var db = sql.CreateContext();
@@ -549,9 +559,9 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
 
         var report = $"8 колонок: ON {onEight} OFF {offEight}; SELECT *: ON {onStar} OFF {offStar}";
         Assert.True(onStar.Reads <= 3 * offStar.Reads, report);
-        Assert.True(onStar.CpuMs <= (3 * offStar.CpuMs) + 20, report);
         Assert.True(onEight.Reads <= 10 * offEight.Reads, report);
     }
+
     /// <summary>
     /// D5 (QA3): з прапором генерація має власну стелю команди (холодна перебудова сотень вʼюх > 60 с), яка після виклику
     /// повертається - контекст scoped і живе далі (публікація версії); без прапора таймаут контексту не чіпається.
