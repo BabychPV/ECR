@@ -118,6 +118,11 @@ export function VersionMigrationDialog({
   const backupRequired = report !== null && report.transferredValues >= BackupConfirmationThreshold;
   const backupMissing = backupRequired && backupConfirmation.trim() === '';
   const backupRef = useRef<HTMLInputElement>(null);
+  // CL-13: «Так»/«Ні» розмонтовують пропозицію разом із сфокусованою кнопкою - фокус падав на `body`.
+  // Куди його віддати, вирішується ПІСЛЯ відповіді: «Ні» → «Сухий прогін», «Так» → «Перенести».
+  const dryRunButtonRef = useRef<HTMLButtonElement>(null);
+  const applyButtonRef = useRef<HTMLButtonElement>(null);
+  const focusAfterOffer = useRef<'dryRun' | 'apply' | null>(null);
 
   // Поле з'являється після сухого прогону - фокус на нього, щоб нове обов'язкове поле не лишилося непоміченим.
   useEffect(() => {
@@ -187,6 +192,16 @@ export function VersionMigrationDialog({
   const settled = useSettledAction(apply.isPending);
   const busy = dryRun.isPending || apply.isPending || settled.settling || jobRunning;
 
+  useEffect(() => {
+    const want = focusAfterOffer.current;
+    if (want === null || busy) return;
+    focusAfterOffer.current = null;
+    // Нове обов'язкове поле копії саме бере фокус (ефект вище) - не відбирати.
+    if (backupMissing) return;
+    if (want === 'apply' && report?.canApply === true) applyButtonRef.current?.focus();
+    else dryRunButtonRef.current?.focus();
+  }, [busy, report, overwriteDeclined, backupMissing]);
+
   return (
     <Modal opened onClose={onClose} title={t('documents.migrateVersionTitle')} size="lg">
       <Stack gap="sm">
@@ -242,8 +257,14 @@ export function VersionMigrationDialog({
           <OverwriteOffer
             report={report}
             busy={busy}
-            onYes={() => dryRun.mutate({ key: selectionKey, accept: true })}
-            onNo={() => setOverwriteDeclined(true)}
+            onYes={() => {
+              focusAfterOffer.current = 'apply';
+              dryRun.mutate({ key: selectionKey, accept: true });
+            }}
+            onNo={() => {
+              focusAfterOffer.current = 'dryRun';
+              setOverwriteDeclined(true);
+            }}
           />
         )}
 
@@ -299,6 +320,7 @@ export function VersionMigrationDialog({
             {t('common.cancel')}
           </Button>
           <Button
+            ref={dryRunButtonRef}
             variant="default"
             disabled={targetId === null || busy}
             loading={dryRun.isPending}
@@ -312,6 +334,7 @@ export function VersionMigrationDialog({
             {t('documents.migrateDryRun')}
           </Button>
           <Button
+            ref={applyButtonRef}
             disabled={report === null || !report.canApply || backupMissing || busy}
             loading={apply.isPending || settled.settling || jobRunning}
             onClick={() => settled.run(() => apply.mutateAsync({ accept: overwriteAccepted, backup: backupRequired ? backupConfirmation : '' }))}
