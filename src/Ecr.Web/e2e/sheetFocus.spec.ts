@@ -1,4 +1,4 @@
-import { expect, test, type APIResponse, type Page } from '@playwright/test';
+import { expect, test, type APIResponse, type Locator, type Page } from '@playwright/test';
 
 /**
  * ui-sheet-focus на живому стенді: згортання панелі таблиць (A), таблиця на весь екран (B),
@@ -78,12 +78,7 @@ test.describe('Фокус на таблиці аркуша (ui-sheet-focus)', ()
 
       // Правка комірки всередині.
       const cell = grid.locator('revogr-data .rgCell').first();
-      await cell.dblclick();
-      await page.keyboard.type(String(10 + i));
-      // Автозбереження: PATCH пішов і прийнятий (індикатор «saved» мигає коротко — не опора).
-      const saved = page.waitForResponse((r) => r.request().method() === 'PATCH' && r.ok(), { timeout: 30_000 });
-      await page.keyboard.press('Enter');
-      await saved;
+      await editCell(page, cell);
 
       // Esc у редакторі скасовує правку, але НЕ виходить з режиму.
       // (Редактор міг лишитися відкритим після Enter, або його відкриває F2.)
@@ -106,12 +101,7 @@ test.describe('Фокус на таблиці аркуша (ui-sheet-focus)', ()
     // Ctrl+Shift+Enter ×10 (вхід і вихід), щоразу ПІСЛЯ правки й збереження: колись флейкало саме після PATCH.
     const cell = page.locator('revo-grid:visible revogr-data .rgCell').first();
     for (let i = 0; i < KeyRepeats; i += 1) {
-      await cell.dblclick();
-      await page.keyboard.type(String(100 + i));
-      const patched = page.waitForResponse((r) => r.request().method() === 'PATCH' && r.ok(), { timeout: 30_000 });
-      await page.keyboard.press('Enter');
-      await patched;
-      await page.keyboard.press('Escape');
+      await editCell(page, cell);
       await expect(page.locator('revogr-edit')).toHaveCount(0);
 
       await page.keyboard.press('Control+Shift+Enter');
@@ -201,6 +191,27 @@ test.describe('Фокус на таблиці аркуша (ui-sheet-focus)', ()
     await shot(page, 'calc');
   });
 });
+
+/** Правка комірки: редактор відкрито ДОСТЕМЕННО (повтор dblclick), нове унікальне значення, PATCH прийнято. */
+let editSeq = Date.now() % 100_000;
+async function editCell(page: Page, cell: Locator): Promise<void> {
+  const editor = page.locator('revogr-edit');
+  if ((await editor.count()) > 0) {
+    await page.keyboard.press('Escape');
+    await expect(editor).toHaveCount(0);
+  }
+  await expect(async () => {
+    if ((await editor.count()) === 0) await cell.dblclick();
+    await expect(editor).toHaveCount(1, { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+
+  editSeq += 1;
+  await page.keyboard.type(String(editSeq));
+  // Автозбереження: PATCH пішов і прийнятий (індикатор «saved» мигає коротко — не опора).
+  const saved = page.waitForResponse((r) => r.request().method() === 'PATCH' && r.ok(), { timeout: 30_000 });
+  await page.keyboard.press('Enter');
+  await saved;
+}
 
 async function ok<T>(response: APIResponse, what: string): Promise<T> {
   const body = await response.text();
