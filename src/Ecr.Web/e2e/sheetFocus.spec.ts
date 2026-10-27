@@ -152,7 +152,8 @@ test.describe('Фокус на таблиці аркуша (ui-sheet-focus)', ()
 
       for (let step = 0; step < SheetCount - 1; step += 1) {
         await next.click();
-        // Активна вкладка завжди в видимій зоні смуги.
+        // Чекаємо, поки аркуш справді змінився (клік рахує сусіда від поточного рендера), і що вкладка видима.
+        await expect(page.getByRole('tab', { selected: true })).toContainText(`Sheet ${String(step + 2)} `);
         await expect(page.getByRole('tab', { selected: true })).toBeInViewport({ ratio: 0.9 });
       }
       await expect(next).toBeDisabled();
