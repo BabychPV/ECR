@@ -193,6 +193,7 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         var definition = await ViewDefinitionAsync(f.View);
 
         Assert.DoesNotContain("COALESCE(o", definition, StringComparison.Ordinal);
+        Assert.DoesNotContain("COALESCE(sc.", definition, StringComparison.Ordinal);
         Assert.DoesNotContain("doc.TableInstance AS oi", definition, StringComparison.Ordinal);
         Assert.DoesNotContain("doc.TableRow AS ow", definition, StringComparison.Ordinal);
         Assert.DoesNotContain("AnchorKey", definition, StringComparison.Ordinal);
@@ -215,7 +216,7 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
 
         await GenerateAsync(f, routing: true);
         var routed = await ViewDefinitionAsync(f.View);
-        Assert.Contains("COALESCE(o", routed, StringComparison.Ordinal);
+        Assert.Contains("COALESCE(sc.", routed, StringComparison.Ordinal);
         Assert.Contains("AnchorKey", routed, StringComparison.Ordinal);
         Assert.NotEqual(plain, routed);
 
@@ -409,8 +410,8 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
 
         var definition = await ViewDefinitionAsync(f.View);
 
-        // sv (власна копія) + omA (якір) + om1..om12.
-        Assert.Equal(14, System.Text.RegularExpressions.Regex.Count(definition, "OUTER APPLY \\(SELECT"));
+        // sc (власна обчислена) + sv (власна копія) + omA (якір) + om1..om12.
+        Assert.Equal(15, System.Text.RegularExpressions.Regex.Count(definition, "OUTER APPLY \\(SELECT"));
         for (var m = 1; m <= 12; m++)
         {
             Assert.Contains($") AS om{m}", definition, StringComparison.Ordinal);
@@ -680,7 +681,7 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
     /// P2-1 (QA Audit-2 проход C): обчислена комірка (IsCalculated = 1) введеної за типом місячної/якірної колонки в
     /// екземплярі перегляду - СВОЯ (так її віддає зріз API); вʼюха з прапором брала значення власника місяця (у звіті
     /// 25 проти 0 на екрані). Введена комірка власника (IsCalculated = 0) і далі має пріоритет над копією.
-    /// Еталон - зріз <see cref="MonthRoutedCellStore"/>. Мутація: прибрати гілку sv.k у <c>05-rpt-views.sql</c> - червоний.
+    /// Еталон - зріз <see cref="MonthRoutedCellStore"/>. Мутація: прибрати sc.cv з COALESCE у <c>05-rpt-views.sql</c> - червоний.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
