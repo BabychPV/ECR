@@ -201,7 +201,7 @@ BEGIN
             @ownerRows nvarchar(max), @ownerCells nvarchar(max), @valueCol nvarchar(128), @extra int, @mi int;
     -- Q-17.fix (B1): умовні агрегації значень власників - по одному OUTER APPLY на власника (OwnerNo: -1 власна копія,
     -- 0 якір року, 1..12 місяць), а не по приєднанню doc.CellValue на колонку.
-    DECLARE @routed bit, @raw1 nvarchar(64), @agg nvarchar(max), @aggM nvarchar(max), @ownerNo int, @aggList nvarchar(max), @idList nvarchar(max);
+    DECLARE @routed bit, @raw1 nvarchar(64), @agg nvarchar(max), @ownerNo int, @aggList nvarchar(max), @idList nvarchar(max);
     DECLARE @pv TABLE (OwnerNo int NOT NULL, ColNo int NOT NULL, ColId int NOT NULL, Agg nvarchar(max) NOT NULL);
     DECLARE @marker nvarchar(64) = N'-- Згенеровано rpt.usp_GenerateTemplateViews';
     DECLARE @failure nvarchar(2048);
@@ -257,23 +257,19 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                                 THEN N'MAX(CAST(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
                                 ELSE N'MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END)'
                            END + N' AS v' + CAST(@n AS nvarchar(10));
-                -- Власник місячної колонки - екземпляр її місяця; усі місяці читає ОДИН apply (група 100): ключ комірки
-                -- звіряється з місяцем колонки в самій агрегації.
-                -- ⚠ Лише колонки x у агрегаті (зовнішнє посилання в агрегаті - Msg 8124): рік уже обмежено WHERE apply,
-                -- тож місяць екземпляра - залишок ключа періоду YYYYMM.
-                SET @aggM = CASE WHEN @colType = 3
-                                 THEN N'MAX(CAST(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' AND x.PeriodKey % 100 = ' + CAST(@monthNo AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
-                                 ELSE N'MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' AND x.PeriodKey % 100 = ' + CAST(@monthNo AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END)'
-                            END + N' AS v' + CAST(@n AS nvarchar(10));
-                SET @mi = CASE WHEN @isMonth = 1 THEN 100 ELSE 0 END;
+                -- Власник місячної колонки - екземпляр її місяця: ОКРЕМИЙ apply на кожен місяць-власник (P2-1, OwnerNo 100 + m),
+                -- що читає лише екземпляр цього місяця й лише колонки цього місяця (seek по ключах). Один спільний apply
+                -- на всі місяці давав ~12·C² операцій на рядок (340x повільніше за OFF на T9_04 Land), а окремі apply
+                -- оптимізатор викидає, коли колонки їхнього місяця не вибрані.
+                SET @mi = CASE WHEN @isMonth = 1 THEN 100 + @monthNo ELSE 0 END;
                 IF @isMonth = 1
                     SET @monthMask = 1;
                 ELSE
                     SET @needAnchor = 1;
 
-                INSERT INTO @pv (OwnerNo, ColNo, ColId, Agg) VALUES (-1, @n, @colId, @agg), (@mi, @n, @colId, CASE WHEN @isMonth = 1 THEN @aggM ELSE @agg END);
+                INSERT INTO @pv (OwnerNo, ColNo, ColId, Agg) VALUES (-1, @n, @colId, @agg), (@mi, @n, @colId, @agg);
 
-                SET @valueCol = N'COALESCE(' + CASE WHEN @isMonth = 1 THEN N'omm' ELSE N'omA' END
+                SET @valueCol = N'COALESCE(' + CASE WHEN @isMonth = 1 THEN N'om' + CAST(@monthNo AS nvarchar(2)) ELSE N'omA' END
                               + N'.v' + CAST(@n AS nvarchar(10)) + N', sv.v' + CAST(@n AS nvarchar(10)) + N')';
                 IF @colType = 3
                     SET @valueCol = N'CAST(' + @valueCol + N' AS bit)';
@@ -291,9 +287,10 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
         -- у квартальних/річних ключ Year*100+Sequence означає не місяць.
         IF @monthMask <> 0 OR @needAnchor = 1
         BEGIN
-            -- Місяці (група 100): екземпляри року -> рядок з тим самим RowKey -> введені комірки; усе в одному OUTER APPLY.
+            -- Місяці (OwnerNo 101..112): екземпляр місяця -> рядок з тим самим RowKey -> введені комірки; один OUTER APPLY
+            -- на місяць, тож 3 таблиці (doc.TableInstance + doc.TableRow + doc.CellValue) на кожен потрібний місяць.
             IF @monthMask <> 0
-                SET @extra = @extra + 3;   -- doc.TableInstance + doc.TableRow + doc.CellValue всередині apply (нижче)
+                SET @extra = @extra + 3 * (SELECT COUNT(DISTINCT OwnerNo) FROM @pv WHERE OwnerNo > 100);
 
             IF @needAnchor = 1
             BEGIN
@@ -323,16 +320,16 @@ LEFT JOIN doc.TableRow AS owA ON owA.PeriodKey = oiA.PeriodKey AND owA.TableInst
                                   FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'') + N')' END;
                 SET @ownerCells = @ownerCells + N'
 OUTER APPLY (SELECT ' + @aggList + N' FROM '
-                    + CASE WHEN @ownerNo = 100
+                    + CASE WHEN @ownerNo > 100
                            THEN N'doc.TableInstance AS oi
           JOIN doc.TableRow AS ow ON ow.PeriodKey = oi.PeriodKey AND ow.TableInstanceId = oi.Id AND ow.RowKey = r.RowKey AND ow.IsDeleted = 0
           JOIN doc.CellValue AS x ON x.PeriodKey = ow.PeriodKey AND x.TableRowId = ow.Id' + @idList + N'
           WHERE p.PeriodKind = 0 AND oi.DocumentId = ti.DocumentId AND oi.TableDefId = ti.TableDefId
-            AND oi.PeriodKey > (ti.PeriodKey / 100) * 100 AND oi.PeriodKey <= (ti.PeriodKey / 100) * 100 + 12'
+            AND oi.PeriodKey = (ti.PeriodKey / 100) * 100 + ' + CAST(@ownerNo - 100 AS nvarchar(3))
                            WHEN @ownerNo = -1
                            THEN N'doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id'
                            ELSE N'doc.CellValue AS x WHERE x.PeriodKey = owA.PeriodKey AND x.TableRowId = owA.Id' + @idList END
-                    + N') AS ' + CASE WHEN @ownerNo = -1 THEN N'sv' WHEN @ownerNo = 0 THEN N'omA' ELSE N'omm' END;
+                    + N') AS ' + CASE WHEN @ownerNo = -1 THEN N'sv' WHEN @ownerNo = 0 THEN N'omA' ELSE N'om' + CAST(@ownerNo - 100 AS nvarchar(3)) END;
                 SET @ownerNo = (SELECT MIN(OwnerNo) FROM @pv WHERE OwnerNo > @ownerNo);
             END
 
