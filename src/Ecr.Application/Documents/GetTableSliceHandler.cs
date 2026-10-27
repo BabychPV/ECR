@@ -224,12 +224,27 @@ public sealed class GetTableSliceHandler(
             var anchor = routing is null
                 ? null
                 : await monthRouter.AnchorOfAsync(routing.ProjectId, instance.PeriodKey / 100, ct).ConfigureAwait(false);
-            if (anchor is { } anchorKey
-                && anchorKey.Value != instance.PeriodKey
-                && await rowStore.MirrorAnchorRowsIntoInstanceAsync(instance, anchorKey, [.. rowIds.Keys], ct).ConfigureAwait(false) > 0)
+            if (anchor is { } anchorKey && anchorKey.Value != instance.PeriodKey)
             {
-                rowIds = await rowStore.GetRowIdsAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
-                                       .ConfigureAwait(false);
+                // P2-1: добір рядків — best-effort. Документ під переносом версії/видаленням або зайнятий замок
+                // (`ECR-DOC-4091`) — слайс віддаємо без добору, а не 409 на читанні.
+                var mirrored = 0;
+                try
+                {
+                    mirrored = await rowStore
+                        .MirrorAnchorRowsIntoInstanceAsync(instance, anchorKey, [.. rowIds.Keys], table.SheetDefId, ct)
+                        .ConfigureAwait(false);
+                }
+                catch (Errors.EcrException ex) when (string.Equals(ex.ErrorCode, "ECR-DOC-4091", StringComparison.Ordinal))
+                {
+                    mirrored = 0;
+                }
+
+                if (mirrored > 0)
+                {
+                    rowIds = await rowStore.GetRowIdsAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
+                                           .ConfigureAwait(false);
+                }
             }
         }
 

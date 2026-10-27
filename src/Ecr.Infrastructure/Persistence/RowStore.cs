@@ -1150,7 +1150,7 @@ public sealed class RowStore(
     /// </para>
     /// </remarks>
     public async Task<int> MirrorAnchorRowsIntoInstanceAsync(
-        TableInstanceRef instance, PeriodKey anchor, IReadOnlyCollection<string> presentRowKeys, CancellationToken ct)
+        TableInstanceRef instance, PeriodKey anchor, IReadOnlyCollection<string> presentRowKeys, int sheetDefId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(instance);
         ArgumentNullException.ThrowIfNull(presentRowKeys);
@@ -1209,9 +1209,19 @@ public sealed class RowStore(
                 async token =>
                 {
                     created = 0;
-                    await (structureGate ?? new SheetEditGate(db))
+                    var gate = structureGate ?? new SheetEditGate(db);
+                    await gate
                         .EnterStructureAsync(instance.DocumentId, exclusive: false, token)
                         .ConfigureAwait(false);
+
+                    // P2-2: склад рядків поданого/затвердженого аркуша не змінюється (як `CreateRowHandler`).
+                    var sheetStatus = await gate
+                        .EnterEditAsync(instance.DocumentId, sheetDefId, new PeriodKey(instance.PeriodKey), token)
+                        .ConfigureAwait(false);
+                    if (sheetStatus is Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved)
+                    {
+                        return;
+                    }
 
                     // Під замком перечитати ВСІ ключі екземпляра (разом з м'яко видаленими): переможець гонитви
                     // міг уже додати, а видалений ключ не воскрешається.
