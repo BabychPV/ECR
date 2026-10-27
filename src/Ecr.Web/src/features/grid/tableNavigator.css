@@ -395,10 +395,12 @@
   overflow: auto;
 }
 
-.ecr-doc-work--full [data-table-slot] {
-  min-height: 0 !important;
-}
-
+/*
+ * ⚠ Єдиний `!important` тут — свідомо: висоту сітки задає ІНЛАЙНОВИЙ `style={{ height: '70vh' }}` у
+ * `DocumentGrid`, і його буква закріплена сторожем `virtualization.guard.test.ts` (висота слота — умова
+ * лінивого монтування). Перекрити інлайн без правки сторожа можна лише так. Мінімальну висоту слота
+ * (`TableSlotMinHeight`) знімає проп `fullScreen` у `SheetTables`, без CSS.
+ */
 .ecr-doc-work--full revo-grid {
   height: calc(100dvh - 100px) !important;
   min-height: 240px;

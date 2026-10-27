@@ -113,6 +113,8 @@ export interface SheetTablesProps {
   readonly titleStart?: ReactNode;
   /** Що стоїть праворуч у рядку заголовка (`single`): підказка клавіш (`UI-41`). */
   readonly titleEnd?: ReactNode;
+  /** ✎ ui-sheet-focus: таблиця «на весь екран» — слот без зарезервованої висоти `TableSlotMinHeight`. */
+  readonly fullScreen?: boolean;
 }
 
 /**
@@ -177,6 +179,7 @@ export function SheetTables({
   onSelectTable,
   titleStart,
   titleEnd,
+  fullScreen = false,
 }: SheetTablesProps): JSX.Element {
   const single = layout === 'single';
 
@@ -392,7 +395,10 @@ export function SheetTables({
             // умова роботи механізму (коментар компонента), і воно має бути
             // видимим і перевірюваним рівно там, де записане.
             // ⛔ `single`: прихована сітка — `display: none`, а не розмонтування (правки, Undo).
-            style={{ minHeight: TableSlotMinHeight, display: single && !isSelected ? 'none' : undefined }}
+            style={{
+              minHeight: fullScreen ? 0 : TableSlotMinHeight,
+              display: single && !isSelected ? 'none' : undefined,
+            }}
           >
             {single ? (
               // Макет: `.tablebar` — перемикач дерева, номер і назва таблиці (`h2`).

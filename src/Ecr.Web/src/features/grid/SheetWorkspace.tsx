@@ -134,10 +134,26 @@ export function SheetWorkspace({
   );
 
   // Клавіші: вхід/вихід Ctrl+Shift+Enter (capture — до сітки), Esc — лише за `shouldExitOnEscape`.
+  //
+  // ⛔ Флейк e2e (Ctrl+Shift+Enter іноді «не вмикав» режим): обробник жив у ефекті із залежністю від
+  // `full` і `setFull`, тож між зміною адреси й перереєстрацією слухача лишалося вікно з ЗАСТАРІЛИМ `full`,
+  // а перемонтування сторінки після автозбереження давало два слухачі одночасно — другий (із протилежним
+  // `full`) скасовував рішення першого в тій самій події. Тепер слухач ОДИН на `view`, стан береться з
+  // актуальної адреси (не із замикання), `setFull` — через ref, а подію, яку вже обробили
+  // (`defaultPrevented`), другий слухач пропускає.
+  const setFullRef = useRef(setFull);
+  setFullRef.current = setFull;
+  const fullRef = useRef(full);
+  fullRef.current = full;
+
   useEffect(() => {
     if (view === 'all') return;
 
+    const fullNow = (): boolean => fullRef.current;
+
     const onKey = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented) return;
+
       if (isFullToggleKey(event)) {
         const target = event.target instanceof Element ? event.target : null;
         const inEditor = target?.closest('input, textarea, select, [contenteditable="true"]') != null;
@@ -145,19 +161,20 @@ export function SheetWorkspace({
         if (inEditor || !inside) return;
         event.preventDefault();
         event.stopPropagation();
-        setFull(!full, full);
+        const wasFull = fullNow();
+        setFullRef.current(!wasFull, wasFull);
         return;
       }
 
-      if (full && shouldExitOnEscape(event)) {
+      if (fullNow() && shouldExitOnEscape(event)) {
         event.preventDefault();
-        setFull(false, true);
+        setFullRef.current(false, true);
       }
     };
 
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [view, full, setFull]);
+  }, [view]);
 
   // Повний екран: усе, що не веде до таблиці, — `inert` (клавіатура й читалка не потрапляють у приховане).
   useEffect(() => {
@@ -296,6 +313,7 @@ export function SheetWorkspace({
           sheetState={sheetState}
           tables={tables}
           layout="single"
+          fullScreen={full}
           selectedTableInstanceId={selectedId}
           onSelectTable={select}
           titleStart={full ? undefined : toggle}
