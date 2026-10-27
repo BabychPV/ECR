@@ -21,3 +21,13 @@
     max-width: 96px;
   }
 }
+
+/*
+ * CL-18 (B-3, WCAG 2.5.8): гамбургер був 22x22 (--burger-size 18 px + відступи Mantine). Хіт-область - 32x32,
+ * лінії лишаються 18 px по центру (padding = (32 - 18) / 2), тож вигляд не змінюється.
+ */
+.ecr-app-header .ecr-burger {
+  width: 32px;
+  height: 32px;
+  padding: 7px;
+}

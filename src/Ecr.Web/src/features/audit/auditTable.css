@@ -1,0 +1,24 @@
+/*
+ * Прохід C (C1), P3-1: на ширині 500 px `/admin/audit` мав горизонтальну прокрутку СТОРІНКИ
+ * (`document.scrollWidth` 928 при 500, en/ru/kz, light/dark). Шість колонок журналу, а в комірках - ряди
+ * `wrap="nowrap"` (було → стало, походження, пізня правка) і моноширинні позначки часу без місця для
+ * переносу: мінімальна ширина таблиці дорівнювала сумі найдовших неподільних шматків.
+ *
+ * ⚠ Не обгортка з `overflow-x: auto`: вона зробила б прокручуваним предком і зламала б закріплену шапку
+ * (`.ecr-sticky-head`, `motion.css`). Лікується перенос, як у `uiStringsTable.css` (CL-19) і
+ * `registryConstructor.css` (CL-26): `anywhere` зменшує мінімальну ширину колонки до однієї літери, а ряди
+ * в комірках дозволяють переносити свої частини.
+ */
+.ecr-audit-table th,
+.ecr-audit-table td {
+  overflow-wrap: anywhere;
+}
+
+/* Ряди `Group wrap="nowrap"` у комірках: на вузькому екрані частини (значення, стрілка, позначка) переносяться. */
+.ecr-audit-table td > .mantine-Group-root {
+  flex-wrap: wrap !important;
+}
+
+.ecr-audit-table td [data-audit-was-becomes] {
+  flex-wrap: wrap !important;
+}

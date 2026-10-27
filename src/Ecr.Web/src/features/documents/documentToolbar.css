@@ -2,3 +2,19 @@
 .ecr-action-group:empty {
   display: none;
 }
+
+/*
+ * Прохід C (C1), P3-1: на ширині 500 px `/documents/2` мав горизонтальну прокрутку сторінки
+ * (`document.scrollWidth` 539 при 500). Дії праворуч - ОДНА група `wrap="nowrap"` (щоб на широкому екрані
+ * переносилась вона ціла, а не кнопка з середини, див. `DocumentToolbar.tsx`), але «Validate · More ·
+ * Submit: <період>» на 500 px ширші за вікно. На вузькому екрані (межа 640 px - як `narrowShell.css`) групі
+ * дозволено переносити кнопки, і вона не ширша за рядок.
+ */
+@media (max-width: 640px) {
+  .ecr-doc-actions,
+  .ecr-doc-actions .ecr-action-group {
+    flex-wrap: wrap !important;
+    max-width: 100%;
+    min-width: 0;
+  }
+}

@@ -469,6 +469,7 @@ export function AppLayout(): JSX.Element {
                   opened={opened}
                   onClick={toggle}
                   size="sm"
+                  className="ecr-burger"
                   aria-label={t('nav.menu')}
                 />
               )}

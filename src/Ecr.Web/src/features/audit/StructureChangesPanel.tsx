@@ -11,6 +11,7 @@ import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { entityTypeLabel, operationLabel } from './auditLabels';
 import { structureChangeReasonText } from './structureChangeReason';
+import './auditTable.css';
 
 /**
  * Журнал структурних змін (`BE-16`) — друга вкладка екрана аудиту.
@@ -94,7 +95,7 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
       >
         {(page) => (
           <>
-            <Table striped className="ecr-sticky-head" aria-label={t('audit.viewStructure')}>
+            <Table striped className="ecr-sticky-head ecr-audit-table" aria-label={t('audit.viewStructure')}>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>{t('audit.when')}</Table.Th>

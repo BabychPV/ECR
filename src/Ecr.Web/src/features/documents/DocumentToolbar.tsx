@@ -56,7 +56,7 @@ export function DocumentToolbar({
       </Group>
 
       {/* ⚠ Контейнер дій — той самий вузол і в скелеті, і в остаточній формі: замінюється лише вміст. */}
-      <Group gap="xs" wrap="nowrap" data-testid="document-actions" ml="auto">
+      <Group gap="xs" wrap="nowrap" data-testid="document-actions" ml="auto" className="ecr-doc-actions">
         {pending ? <ActionsPlaceholder /> : <ActionsContent items={items} primary={primary}>{children}</ActionsContent>}
       </Group>
     </Group>

@@ -8,6 +8,7 @@ import { TwoLine } from '@/shared/ui/TwoLine';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { formatDate, formatDecimal, formatPeriodKey } from '@/shared/format';
+import './auditTable.css';
 
 /**
  * Таблиця журналу змін комірок у формі макета (`UI-38`, `docs/design/hybrid/screens-ops.js`
@@ -246,7 +247,7 @@ export const CellChangesTable = memo(function CellChangesTable({
   readonly items: readonly CellChange[];
 }): JSX.Element {
   return (
-    <Table striped className="ecr-sticky-head" aria-label={t('audit.title')}>
+    <Table striped className="ecr-sticky-head ecr-audit-table" aria-label={t('audit.title')}>
       <Table.Thead>
         <Table.Tr>
           <Table.Th>{t('audit.when')}</Table.Th>
