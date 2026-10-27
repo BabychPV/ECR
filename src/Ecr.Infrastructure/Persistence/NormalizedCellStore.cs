@@ -613,8 +613,11 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
             await connection.OpenAsync(ct).ConfigureAwait(false);
         }
 
-        IReadOnlyList<CellAddress> deletes = sets.Count == 1 ? sets[0].Deletes : [.. sets.SelectMany(s => s.Deletes)];
-        IReadOnlyList<CellRecord> upserts = sets.Count == 1 ? sets[0].Upserts : [.. sets.SelectMany(s => s.Upserts)];
+        // ⛔ AN-139: адреси комірок — у ЗРОСТАЮЧОМУ порядку ключа (період, рядок, колонка), а не в
+        // порядку входу. Два паралельні батчі з перетином по рядках інакше беруть замки у зворотному
+        // порядку й складаються у взаємне блокування (deadlock ~1/640 на MERGE doc.CellValue / PK_TableRow).
+        IReadOnlyList<CellAddress> deletes = LockOrder.Deletes(sets);
+        IReadOnlyList<CellRecord> upserts = LockOrder.Upserts(sets);
 
         var ambient = db.Database.CurrentTransaction;
         if (ambient is not null)
@@ -634,10 +637,13 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
                 limitAlreadySet: ReferenceEquals(_lockWaitLimitedFor, joined),
                 async () =>
                 {
+                    // ⛔ AN-139: ВСІ замки doc.TableRow (захоплення, потім «дотик» рядків власника) — ДО
+                    // замків doc.CellValue. «Дотик» після MERGE брав X на TableRow, коли чужий батч уже
+                    // тримав його (захоплення) і чекав на комірку, яку тримає цей, — цикл.
                     await ClaimRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);
+                    await TouchRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);
                     await DeleteAsync(connection, joined, deletes, ct).ConfigureAwait(false);
                     upsertRows = await UpsertAsync(connection, joined, upserts, ct).ConfigureAwait(false);
-                    await TouchRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);
                 },
                 ct).ConfigureAwait(false);
             LastUpsertRowsAffected = upsertRows;
@@ -650,9 +656,9 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         await using var tx = (SqlTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
         await ClaimRowsAsync(connection, tx, sets, versions, ct).ConfigureAwait(false);
+        await TouchRowsAsync(connection, tx, sets, versions, ct).ConfigureAwait(false);
         await DeleteAsync(connection, tx, deletes, ct).ConfigureAwait(false);
         LastUpsertRowsAffected = await UpsertAsync(connection, tx, upserts, ct).ConfigureAwait(false);
-        await TouchRowsAsync(connection, tx, sets, versions, ct).ConfigureAwait(false);
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
 
@@ -745,7 +751,8 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         }
 
         var stale = new List<long>();
-        foreach (var (periodKey, claims) in groups.Select(g => ((int?)g.Key, g.Value)).Append((null, unfiltered)))
+        // ⛔ AN-139: періоди — за зростанням (спільний порядок Q-17: період ↑, рядок ↑); без періоду — останні.
+        foreach (var (periodKey, claims) in LockOrder.Periods(groups, unfiltered))
         {
             if (claims.Count > 0)
             {
@@ -799,6 +806,7 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         // перетинаються рядками, інакше беруть їх у порядку словника (тобто в
         // порядку ключів рядків клієнта) і складаються у взаємне блокування.
         var claims = group.OrderBy(pair => pair.Key).ToArray();
+        LockOrder.Trace(() => $"claim p={periodKey?.ToString(CultureInfo.InvariantCulture) ?? "-"} ids={string.Join(',', claims.Select(c => c.Key))}");
 
         foreach (var chunk in claims.Chunk(ParameterChunkSize))
         {
@@ -888,6 +896,7 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
 
         // Видалення сутностей не завантажуємо: читати рядок, щоб його стерти,
         // означало б подвоїти кількість звернень на кожну комірку.
+        LockOrder.Trace(() => $"delete {string.Join(';', deletes.Select(d => $"{d.PeriodKey.Value}/{d.TableRowId}/{d.ColumnDefId}"))}");
         foreach (var chunk in deletes.Chunk(ParameterChunkSize))
         {
             var sql = new StringBuilder("DELETE FROM doc.CellValue WHERE ");
@@ -977,6 +986,7 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
             return 0;
         }
 
+        LockOrder.Trace(() => $"upsert {string.Join(';', upserts.Select(u => $"{u.Address.PeriodKey.Value}/{u.Address.TableRowId}/{u.Address.ColumnDefId}"))}");
         await using var command = connection.CreateCommand();
         command.Transaction = tx;
 
@@ -1168,7 +1178,7 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
             }
         }
 
-        foreach (var (periodKey, pending) in groups.Select(g => ((int?)g.Key, g.Value)).Append((null, unfiltered)))
+        foreach (var (periodKey, pending) in LockOrder.Periods(groups, unfiltered))
         {
             if (pending.Count > 0)
             {
@@ -1187,6 +1197,10 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         Dictionary<long, Dictionary<long, string>> newVersions,
         CancellationToken ct)
     {
+        // ⛔ AN-139: рядки — за зростанням Id (як і в захопленні); порядок входу тут був довільним.
+        pending = [.. pending.Distinct().Order()];
+        LockOrder.Trace(() => $"touch p={periodKey?.ToString(CultureInfo.InvariantCulture) ?? "-"} ids={string.Join(',', pending)}");
+
         foreach (var chunk in pending.Chunk(ParameterChunkSize))
         {
             await using var command = connection.CreateCommand();
