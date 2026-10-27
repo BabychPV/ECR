@@ -513,6 +513,92 @@ public sealed class MonthColumnRoleLeakApiTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// D6 (продуктовий шлях): користувач з широкою областю бачить значення власника; адмін звужує область його
+    /// призначення через API (PUT /users/{id}/roles); наступний запит ТОГО Ж клієнта (та сама сесія) значення вже не
+    /// віддає - сесія гасне (штамп безпеки крутиться) або відповідь замаскована. Закріплює: кеш профілю не переживає
+    /// зміну області через продукт (на відміну від прямого SQL).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    public async Task Звуження_області_призначення_через_API_одразу_діє_на_ту_саму_сесію()
+    {
+        var s = await ArrangeAsync(from: Oct, to: Oct).ConfigureAwait(true);
+        var (appAdmin, admin) = await BootAsync(s, s.AdminName, flag: true).ConfigureAwait(true);
+        using var _a = appAdmin;
+        using var _b = admin;
+        await PutAsync(s, Oct, "M10", OwnVisible).ConfigureAwait(true);
+        await PutAsync(s, 202611, "M11", 1m).ConfigureAwait(true);
+        var versionId = await SnapshotRoutedAsync(appAdmin, s).ConfigureAwait(true);
+        var patched = await PatchAsync(admin, s, ("M11", NovSecret)).ConfigureAwait(true);
+        Assert.True(patched.Status == HttpStatusCode.OK, $"{(int)patched.Status}\n{patched.Body}");
+
+        // Користувач із широкою областю (без звуження) і менеджер користувачів.
+        var wideName = $"q17w_{Guid.NewGuid():N}"[..20];
+        var managerName = $"q17m_{Guid.NewGuid():N}"[..20];
+        string roleCode;
+        int wideId;
+        await using (var db = s.Builder.CreateContext())
+        {
+            var wide = new User(wideName, wideName, AuthProvider.Local);
+            wide.SetPassword(new PasswordHasher().Hash(Password));
+            var manager = new User(managerName, managerName, AuthProvider.Local);
+            manager.SetPassword(new PasswordHasher().Hash(Password));
+            db.Users.AddRange(wide, manager);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            wideId = wide.Id;
+
+            var role = new Role(
+                EcrCode.Create($"Q17W{Guid.NewGuid():N}"[..14]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Q-17 wide" }));
+            var managerRole = new Role(
+                EcrCode.Create($"Q17M{Guid.NewGuid():N}"[..14]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Q-17 manager" }));
+            db.Roles.AddRange(role, managerRole);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            roleCode = role.Code;
+
+            db.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
+            db.RolePermissions.Add(new RolePermission(role.Id, "Document.Export"));
+            db.RolePermissions.Add(new RolePermission(managerRole.Id, "Security.ManageUsers"));
+            db.RoleAssignments.Add(new RoleAssignment(role.Id, wide.Id, null));
+            db.RoleAssignments.Add(new RoleAssignment(managerRole.Id, manager.Id, null));
+            db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, s.Doc.ProjectId, GrantLevel.Submit));
+            // Обмежити роль проєктом може лише той, хто має на нього Manage.
+            db.ResourceGrants.Add(new ResourceGrant(managerRole.Id, ResourceKind.Project, s.Doc.ProjectId, GrantLevel.Manage));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var (appWide, wideClient) = await BootAsync(s, wideName, flag: true).ConfigureAwait(true);
+        using var _c = appWide;
+        using var _d = wideClient;
+        var before = await CompareAsync(wideClient, s, versionId).ConfigureAwait(true);
+        Assert.Contains(Digits(NovSecret), before, StringComparison.Ordinal);
+
+        var (appManager, manager2) = await BootAsync(s, managerName, flag: true).ConfigureAwait(true);
+        using var _e = appManager;
+        using var _f = manager2;
+        using var put = await manager2.PutAsJsonAsync(
+            new Uri($"/api/v1/users/{wideId}/roles", UriKind.Relative),
+            new
+            {
+                roleCodes = new[] { roleCode },
+                scopes = new Dictionary<string, object>
+                {
+                    [roleCode] = new { projects = new[] { s.Doc.ProjectId }, periods = new { from = Oct, to = Oct } },
+                },
+            }).ConfigureAwait(true);
+        Assert.True(put.IsSuccessStatusCode, $"PUT roles: {put.StatusCode}\n{await put.Content.ReadAsStringAsync().ConfigureAwait(true)}");
+
+        // Та сама сесія: або 401 (штамп змінено), або замаскована відповідь; значення власника поза областю - ніколи.
+        using var after = await wideClient.GetAsync(new Uri(
+            $"/api/v1/documents/{s.Doc.DocumentId}/compare?from={versionId}&to=current", UriKind.Relative)).ConfigureAwait(true);
+        var afterBody = await after.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.False(afterBody.Contains(Digits(NovSecret), StringComparison.Ordinal), $"{(int)after.StatusCode}: {afterBody}");
+    }
+
     private async Task<string> CreateFormUserAsync(Scenario s, string form)
     {
         var name = $"q17f_{Guid.NewGuid():N}"[..20];
