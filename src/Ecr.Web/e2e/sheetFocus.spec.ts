@@ -204,10 +204,13 @@ async function editCell(page: Page, cell: Locator): Promise<void> {
   await expect(async () => {
     if ((await editor.count()) === 0) await cell.dblclick();
     await expect(editor).toHaveCount(1, { timeout: 2_000 });
+    // Редактор відкрито, але ввід у нього — лише коли поле має фокус (інакше символи губляться, PATCH не йде).
+    await expect(editor.locator('input')).toBeFocused({ timeout: 2_000 });
   }).toPass({ timeout: 20_000 });
 
   editSeq += 1;
-  await page.keyboard.type(String(editSeq));
+  await editor.locator('input').fill(String(editSeq));
+  await expect(editor.locator('input')).toHaveValue(String(editSeq));
   // Автозбереження: PATCH пішов і прийнятий (індикатор «saved» мигає коротко — не опора).
   const saved = page.waitForResponse((r) => r.request().method() === 'PATCH' && r.ok(), { timeout: 30_000 });
   await page.keyboard.press('Enter');
