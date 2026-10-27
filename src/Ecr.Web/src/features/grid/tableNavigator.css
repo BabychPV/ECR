@@ -400,7 +400,7 @@
 }
 
 .ecr-doc-work--full revo-grid {
-  height: calc(100dvh - 190px) !important;
+  height: calc(100dvh - 100px) !important;
   min-height: 240px;
 }
 
