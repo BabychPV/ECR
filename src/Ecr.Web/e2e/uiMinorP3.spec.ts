@@ -176,12 +176,14 @@ test.describe('uiMinorP3: дрібні пункти проходу C', () => {
 
   for (const scheme of Schemes) {
     test(`uiMinorP3-assert: 500 px - сторінки документа і журналу без горизонтальної прокрутки (${scheme})`, async ({ page }) => {
-      await page.setViewportSize(Narrow);
+      await page.setViewportSize(Wide);
       await useScheme(page, scheme);
       await signIn(page);
 
       // Рядок журналу, щоб таблиця аудиту була в розмітці (на свіжому стенді журнал порожній).
+      // ⚠ Вставка - на широкому вікні: на вузькому (≤ 640 px) сітка лише для читання (UI-42).
       await pasteOneValue(page);
+      await page.setViewportSize(Narrow);
 
       for (let run = 1; run <= 5; run += 1) {
         await openDocument(page);
@@ -206,7 +208,7 @@ test.describe('uiMinorP3: дрібні пункти проходу C', () => {
 
     await page.setViewportSize(Narrow);
     await openPeriods(page);
-    const burger = page.locator('.ecr-burger');
+    const burger = page.locator('.mantine-Burger-root');
     await expect(burger, 'на 500 px немає гамбургера').toBeVisible();
     const burgerBox = await burger.boundingBox();
     expect(burgerBox?.width ?? 0, 'ширина гамбургера').toBeGreaterThanOrEqual(24);
