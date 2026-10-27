@@ -851,9 +851,11 @@ public sealed class ImportDiffBuilder
                 current is decimal intNumber
                 && (incoming is decimal di ? intNumber == di : incoming is int ii && intNumber == ii),
             CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated =>
-                current is decimal number
-                && (incoming is decimal d ? number == d || RoundSignificant(number) == RoundSignificant(d)
-                    : incoming is int i && number == i),
+                current is string calculatedText
+                    ? string.Equals(calculatedText, incoming as string, StringComparison.Ordinal) // AN-144
+                    : current is decimal number
+                      && (incoming is decimal d ? number == d || RoundSignificant(number) == RoundSignificant(d)
+                          : incoming is int i && number == i),
             CellDataType.Bool => incoming is bool b && current is bool flag && flag == b,
             CellDataType.Date => incoming is DateTime t && current is DateTime date && date == t,
             // ⛔ Y5-03: осиротіле посилання (запису немає серед кодів довідника колонки)
@@ -892,8 +894,13 @@ public sealed class ImportDiffBuilder
 
         return definition.DataType switch
         {
-            CellDataType.Int or CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated
-                => value.ValueNumeric,
+            CellDataType.Int or CellDataType.Decimal => value.ValueNumeric,
+
+            // ✎ AN-144: текстовий результат обчислюваної колонки (`ValueString`, «No - Нет», Land_NAE) експорт пише
+            // рядком (`ExcelExporter.WriteValue`); без цієї гілки поточне значення було `null`, незмінений експорт
+            // давав `ECR-CELL-4221 importCalculatedStale` на кожній такій комірці.
+            CellDataType.Formula or CellDataType.Calculated
+                => value.ValueNumeric ?? (object?)(string.IsNullOrEmpty(value.ValueString) ? null : value.ValueString),
             CellDataType.Bool => value.ValueBool,
             CellDataType.Date => value.ValueDate,
             CellDataType.Lookup => value.ValueRegistryEntryId,

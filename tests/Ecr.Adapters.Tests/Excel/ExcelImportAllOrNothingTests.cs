@@ -162,7 +162,7 @@ public sealed class ExcelImportAllOrNothingTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "EA-6")]
-    public async Task Звичайний_користувач_без_передачі_лишає_частковий_шлях_заборонені_лише_показані()
+    public async Task Звичайний_користувач_без_передачі_заборонені_показані_а_пакет_відхиляє_загальне_правило_AN143()
     {
         using var workbook = await ExportAsync();
         workbook.Worksheet("Sheet").Cell(3, 1).Value = 10;
@@ -178,11 +178,13 @@ public sealed class ExcelImportAllOrNothingTests
 
         Assert.Single(preview.Rejected);
 
-        // Не EA-виконавець: правило «все або нічого» не вмикається, дозволена зміна лишається застосовною.
+        // Не EA-виконавець: спеціальне правило EA-6 (403 importDeniedCells) не вмикається...
         Assert.NotEqual(true, SavedPlan().AllOrNothing);
-        Assert.Equal(
-            1,
-            await importer.CountPendingChangesAsync(DocumentId, preview.PreviewToken, null, CancellationToken.None));
+
+        // ✎ AN-143: ...але загальне «все або нічого» діє для всіх - відхилена комірка відхиляє пакет (422, не 403).
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => importer.CountPendingChangesAsync(DocumentId, preview.PreviewToken, null, CancellationToken.None));
+        Assert.Equal(ExcelImporter.ImportRejectedMessageKey, error.Details!["messageKey"]);
     }
 
     [Fact]

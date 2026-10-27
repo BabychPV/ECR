@@ -176,7 +176,7 @@ public sealed class ExcelImportPeriodStateAllOrNothingTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Decision", "P53")]
-    public async Task Звичайна_заборона_без_періоду_колонки_лишає_частковий_шлях()
+    public async Task Звичайна_заборона_без_періоду_колонки_теж_відхиляє_пакет_AN143()
     {
         using var workbook = await ExportAsync();
         workbook.Worksheet("Sheet").Cell(3, 1).Value = 10;
@@ -191,9 +191,11 @@ public sealed class ExcelImportPeriodStateAllOrNothingTests
             });
 
         Assert.Single(preview.Rejected);
-        Assert.Equal(
-            1,
-            await importer.CountPendingChangesAsync(DocumentId, preview.PreviewToken, null, CancellationToken.None));
+
+        // ✎ AN-143: раніше тут лишався частковий шлях (1 зміна); тепер будь-яка відмова перегляду відхиляє пакет.
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => importer.CountPendingChangesAsync(DocumentId, preview.PreviewToken, null, CancellationToken.None));
+        Assert.Equal(ExcelImporter.ImportRejectedMessageKey, error.Details!["messageKey"]);
     }
 
     private static EditDecision ClosedMonthDecision(EditDenyReason reason)
