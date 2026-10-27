@@ -309,11 +309,20 @@ public sealed class MonthRoutedCellStore(
             }
 
             var target = result[entry.Instance.TableInstanceId];
+
+            // Q-17: власна обчислена комірка перегляду має пріоритет — на її адресі введена комірка власника не
+            // додається (слайс віддає ОДНУ комірку на адресу, узгоджено з в'ю). Без додаткових запитів до бази.
+            var calculatedAt = target
+                .Where(c => c.Value.IsCalculated)
+                .Select(c => (c.Address.TableRowId, c.Address.ColumnDefId))
+                .ToHashSet();
+
             foreach (var cell in byTable[entry.Instance.TableDefId])
             {
                 if (!entry.ForeignColumns.TryGetValue(cell.ColumnDefId, out var foreign)
                     || foreign.OwnerPeriod.Value != cell.OwnerPeriodKey
-                    || !rowIds.TryGetValue(cell.RowKey, out var viewRowId))
+                    || !rowIds.TryGetValue(cell.RowKey, out var viewRowId)
+                    || calculatedAt.Contains((viewRowId, cell.ColumnDefId)))
                 {
                     continue;
                 }
