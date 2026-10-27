@@ -267,10 +267,17 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                 ELSE
                     SET @needAnchor = 1;
 
-                INSERT INTO @pv (OwnerNo, ColNo, ColId, Agg) VALUES (-1, @n, @colId, @agg), (@mi, @n, @colId, @agg);
+                -- P2-1 (Audit-2 проход C): обчислена комірка (IsCalculated = 1) в екземплярі перегляду - СВОЯ, як у зрізі API
+                -- (MonthRoutedCellStore лишає її, шаруючи власника лише над введеними). Тому власна копія додатково несе
+                -- прапор k<n> (1 - комірка обчислена); значення власника береться, лише коли власна комірка не обчислена.
+                INSERT INTO @pv (OwnerNo, ColNo, ColId, Agg) VALUES
+                    (-1, @n, @colId, @agg + N', MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10))
+                                  + N' THEN CAST(x.IsCalculated AS tinyint) END) AS k' + CAST(@n AS nvarchar(10))),
+                    (@mi, @n, @colId, @agg);
 
-                SET @valueCol = N'COALESCE(' + CASE WHEN @isMonth = 1 THEN N'om' + CAST(@monthNo AS nvarchar(2)) ELSE N'omA' END
-                              + N'.v' + CAST(@n AS nvarchar(10)) + N', sv.v' + CAST(@n AS nvarchar(10)) + N')';
+                SET @valueCol = N'CASE WHEN sv.k' + CAST(@n AS nvarchar(10)) + N' = 1 THEN sv.v' + CAST(@n AS nvarchar(10))
+                              + N' ELSE COALESCE(' + CASE WHEN @isMonth = 1 THEN N'om' + CAST(@monthNo AS nvarchar(2)) ELSE N'omA' END
+                              + N'.v' + CAST(@n AS nvarchar(10)) + N', sv.v' + CAST(@n AS nvarchar(10)) + N') END';
                 IF @colType = 3
                     SET @valueCol = N'CAST(' + @valueCol + N' AS bit)';
             END
