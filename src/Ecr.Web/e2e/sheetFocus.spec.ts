@@ -59,8 +59,11 @@ test.describe('Фокус на таблиці аркуша (ui-sheet-focus)', ()
     await shot(page, 'normal');
 
     for (let i = 0; i < Repeats; i += 1) {
-      await toggle.click();
-      await expect(page, `прогін ${String(i + 1)}/${String(Repeats)}: &full=1 не з'явився після кліку`).toHaveURL(/[?&]full=1/);
+      // Після PATCH документ може перечитатися й перемонтувати сторінку: клік повторюємо, доки адреса не набуде full=1.
+      await expect(async () => {
+        if (!/[?&]full=1/.test(page.url())) await toggle.click();
+        await expect(page, `прогін ${String(i + 1)}/${String(Repeats)}`).toHaveURL(/[?&]full=1/, { timeout: 2_000 });
+      }).toPass({ timeout: 20_000 });
       await expect(page.getByRole('region')).toBeVisible();
       await expect(page.getByTestId('table-navigator')).toBeHidden();
       if (i === 0) await shot(page, 'full');
