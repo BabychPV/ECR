@@ -646,6 +646,109 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         Assert.Null(await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 1), f.C1));
     }
 
+    private async Task PutCalcAsync(Fixture f, int period, long rowId, int columnId, decimal value)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated)
+            VALUES ({period}, {rowId}, {columnId}, {f.Doc.TableDefId}, @v, 1);
+            """;
+        command.Parameters.AddWithValue("@v", value);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>Значення зрізу API (MonthRoutedCellStore, прапор ON) для комірки перегляду; <c>null</c> - комірки нема.</summary>
+    private async Task<decimal?> SliceValueAsync(Fixture f, int period, long rowId, int columnId)
+    {
+        await using var db = sql.CreateContext();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Collection:MonthColumnRouting"] = "true" })
+            .Build();
+        using var memory = new Microsoft.Extensions.Caching.Memory.MemoryCache(
+            new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+        var store = new MonthRoutedCellStore(
+            new NormalizedCellStore(db), new MonthColumnRouter(db, config),
+            new Ecr.Infrastructure.Caching.MetadataCache(memory, db), db);
+        var slice = await store.ReadSliceAsync(f.Doc.TableInstanceId, new PeriodKey(period), CancellationToken.None);
+        return slice.SingleOrDefault(c => c.Address.TableRowId == rowId && c.Address.ColumnDefId == columnId)
+            ?.Value.ValueNumeric;
+    }
+
+    /// <summary>
+    /// P2-1 (QA Audit-2 проход C): обчислена комірка (IsCalculated = 1) введеної за типом місячної/якірної колонки в
+    /// екземплярі перегляду - СВОЯ (так її віддає зріз API); вʼюха з прапором брала значення власника місяця (у звіті
+    /// 25 проти 0 на екрані). Введена комірка власника (IsCalculated = 0) і далі має пріоритет над копією.
+    /// Еталон - зріз <see cref="MonthRoutedCellStore"/>. Мутація: прибрати гілку sv.k у <c>05-rpt-views.sql</c> - червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Обчислена_комірка_перегляду_віддається_вʼюхою_як_у_зрізі_а_не_значення_власника()
+    {
+        var f = await BuildAsync();
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var anchor = await builder.AddPeriodInstanceAsync(f.Doc, new PeriodKey(202601));
+        var nov = await builder.AddPeriodInstanceAsync(f.Doc, new PeriodKey(202611));
+
+        // Рядок 1: власник місяця зберігає 111, обчислена копія в перегляді - 0 (як April: 25 проти 0 у Land).
+        await PutCalcAsync(f, 202611, nov.RowIds[0], f.M11Id, 111m);
+        await PutCalcAsync(f, 202610, f.Doc.RowIds[0], f.M11Id, 0m);
+        // Не-місячна: обчислена і в якорі, і в перегляді.
+        await PutCalcAsync(f, 202601, anchor.RowIds[0], f.C2Id, 22m);
+        await PutCalcAsync(f, 202610, f.Doc.RowIds[0], f.C2Id, 3m);
+        // Рядок 2: власного обчисленого немає, введене значення власника - береться (як і раніше).
+        await PutAsync(f, 202611, nov.RowIds[1], f.M11Id, 77m);
+        await GenerateAsync(f);
+
+        var key0 = RowKeyOf(f.Doc, 0);
+        var key1 = RowKeyOf(f.Doc, 1);
+        Assert.Equal(0m, await ViewValueAsync(f, 202610, key0, f.M11));
+        Assert.Equal(3m, await ViewValueAsync(f, 202610, key0, f.C2));
+        Assert.Equal(77m, await ViewValueAsync(f, 202610, key1, f.M11));
+
+        // Еквівалентність вʼюха == зріз для кожної перевіреної комірки.
+        foreach (var (row, rowKey, colId, col) in new[]
+                 {
+                     (f.Doc.RowIds[0], key0, f.M11Id, f.M11), (f.Doc.RowIds[0], key0, f.C2Id, f.C2),
+                     (f.Doc.RowIds[1], key1, f.M11Id, f.M11),
+                 })
+        {
+            Assert.Equal(await SliceValueAsync(f, 202610, row, colId), await ViewValueAsync(f, 202610, rowKey, col));
+        }
+    }
+
+    /// <summary>
+    /// P3 (до-Q17, лише фіксація): рядкова обчислювана комірка (ValueString, IsCalculated = 1) у колонці типу Formula -
+    /// вʼюха віддає NULL і ПРИ ВИМКНЕНОМУ прапорі (CASE типів у процедурі для 6/8 читає ValueNumeric). Тест фіксує факт,
+    /// щоб (б) не приписували Q-17; виправлення - окремий запис у WORK-QUEUE.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Рядкове_значення_обчислюваної_колонки_NULL_у_вʼюсі_вже_без_прапора_до_Q17()
+    {
+        var f = await BuildAsync();
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"""
+                INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, IsCalculated)
+                VALUES (202610, {f.Doc.RowIds[0]}, {f.DerivedId}, {f.Doc.TableDefId}, N'Sample J-0', 1);
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await GenerateAsync(f, routing: false);
+        Assert.Null(await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 0), f.Derived));
+        await GenerateAsync(f, routing: true);
+        Assert.Null(await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 0), f.Derived));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
