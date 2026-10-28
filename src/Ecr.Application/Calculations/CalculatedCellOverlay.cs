@@ -79,7 +79,32 @@ public sealed partial class CalculatedCellOverlay(
             return output;
         }
 
-        var current = await results.ReadCurrentAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        // Q-17: вибирати з бази лише те, що може дістатися комірок цих таблиць (код виходу, версія методології,
+        // екземпляр). Порт без звуження (тест-подвійник) читається повністю, як і раніше.
+        IReadOnlyList<CalculationResultRow> current;
+        if (results is ICurrentResultFilterReader narrow)
+        {
+            var wanted = withCalculated
+                .SelectMany(t => t.CalculatedColumnIds.Select(c => (t.TableDefId, ColumnDefId: c)))
+                .ToHashSet();
+            var used = bindings.Where(b => wanted.Contains((b.TableDefId, b.ColumnDefId))).ToList();
+
+            current = await narrow
+                .ReadCurrentMatchingAsync(
+                    documentId,
+                    periodKey,
+                    new CurrentResultFilter(
+                        [.. withCalculated.Select(t => t.TableInstanceId).Distinct()],
+                        [.. used.Select(b => b.OutputCode).Distinct(StringComparer.OrdinalIgnoreCase)],
+                        [.. used.SelectMany(b => b.VersionIds).Distinct()]),
+                    ct)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            current = await results.ReadCurrentAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        }
+
         if (current.Count == 0)
         {
             return output;

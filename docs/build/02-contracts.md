@@ -1857,6 +1857,26 @@ public interface ICalculationResultStore
 > `MethodologyVersionId`) і клонуванням версії не копіюється взагалі.
 
 ```csharp
+// src/Ecr.Application/Ports/ICurrentResultFilterReader.cs  (Q-17, наборове читання зрізу API)
+public interface ICurrentResultFilterReader
+{
+    /// <summary>Те саме, що ReadCurrentAsync, звужене до кодів виходів, версій методологій і екземплярів таблиць зрізу.</summary>
+    public Task<IReadOnlyList<CalculationResultRow>> ReadCurrentMatchingAsync(
+        long documentId, int periodKey, CurrentResultFilter filter, CancellationToken ct);
+}
+
+public sealed record CurrentResultFilter(
+    IReadOnlyCollection<long> TableInstanceIds,
+    IReadOnlyCollection<string> OutputCodes,
+    IReadOnlyCollection<int> MethodologyVersionIds);
+```
+
+> Q-17 (2026-10-28): `CalculationResultStore` реалізує обидва порти. `CalculatedCellOverlay` бере звужене
+> читання, якщо порт його вміє; тест-подвійник лише `ICalculationResultStore` читається повністю, як і раніше.
+> Фільтр - надмножина того, що вибирає накладення (воно повторює точну умову), тож значення комірок не змінюються;
+> стеля 50 000 тепер діє на відфільтрований набір (документ з багатьма чужими числами більше не дає 422 на зрізі).
+
+```csharp
 // src/Ecr.Application/Ports/ICalculationBindingStore.cs
 
 using Ecr.Domain.Entities.Configuration;

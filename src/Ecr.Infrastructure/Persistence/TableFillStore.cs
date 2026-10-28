@@ -126,30 +126,38 @@ public sealed class TableFillStore(
     /// <param name="db">Контекст.</param>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період перегляду.</param>
-    /// <param name="ownerPeriod">Період-власник (один).</param>
-    /// <param name="tableDefIds">Таблиці з колонками, чий власник — <paramref name="ownerPeriod"/>.</param>
+    /// <param name="tableDefIds">Таблиці, у яких є колонки з чужими власниками.</param>
     /// <remarks>
     /// ⛔ Ключ партиції — у предикаті кожної з шести джерел (<c>WR-05</c>). Лише введені (<c>IsCalculated = 0</c>)
     /// комірки; видалені рядки обох боків відсікаються. Групується на сервері — у пам'ять їде десяток-сотня рядків.
+    /// <para>
+    /// ⚠ Періоди-власники — діапазон ключа партиції року перегляду (<c>BETWEEN Рік*100+1 AND Рік*100+12</c>, без
+    /// самого періоду перегляду): ОДИН запит замість по запиту на період власника (≤ 11 звернень до
+    /// <c>doc.TableInstance</c>/<c>doc.TableRow</c>/<c>doc.CellValue</c> з перекомпіляцією плану кожне). Ключ
+    /// партиції входить і в умову зʼєднання рядка з коміркою, тож комірки читаються тими самими діапазонами
+    /// (PeriodKey, TableRowId) вузького IX_CellValue_Fill, що й раніше. Відбір «чий власник цей період» робить
+    /// виклик у памʼяті по групах «таблиця × колонка × період».
+    /// </para>
     /// </remarks>
     public static IQueryable<ForeignFillRow> ForeignFillQuery(
         EcrDbContext db,
         long documentId,
         PeriodKey periodKey,
-        int ownerPeriod,
         IReadOnlyCollection<int> tableDefIds)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(tableDefIds);
 
         var key = periodKey.Value;
+        var firstOwner = (periodKey.Year * 100) + 1;
+        var lastOwner = (periodKey.Year * 100) + 12;
 
-        // ⛔ P1-1 (прохід C, 27.10): ОДИН період власника на запит, період — скаляр, а не `IN (12 періодів)`, і БЕЗ
-        // `ColumnDefId IN (…)` над коміркою. Колишня форма (усі власники одним запитом + список усіх чужих колонок)
-        // для кожного рядка власника робила seek по КОЖНІЙ колонці зі списку (синтетика 200 колонок × 12 місяців:
-        // 61 380 seek-ів, 185 тис. логічних читань проти 86 при OFF; на Land doc10 — 50–58 с і Execution Timeout).
-        // Тут кожен рядок власника читається ОДНИМ діапазоном (PeriodKey, TableRowId) вузького IX_CellValue_Fill, а
-        // відбір колонок власника робить виклик у пам'яті по результату «таблиця × колонка» (їх сотня, не мільйони).
+        // ⛔ P1-1 (прохід C, 27.10): БЕЗ `ColumnDefId IN (…)` над коміркою. Колишня форма (усі власники одним запитом +
+        // список усіх чужих колонок) для кожного рядка власника робила seek по КОЖНІЙ колонці зі списку (синтетика
+        // 200 колонок × 12 місяців: 61 380 seek-ів, 185 тис. логічних читань проти 86 при OFF; на Land doc10 —
+        // 50–58 с і Execution Timeout). Тут кожен рядок власника читається ОДНИМ діапазоном (PeriodKey, TableRowId)
+        // вузького IX_CellValue_Fill, а відбір колонок власника робить виклик у пам'яті по результату
+        // «таблиця × колонка × період» (їх сотні, не мільйони).
         return from instance in db.TableInstances.AsNoTracking()
                where instance.DocumentId == documentId
                      && instance.PeriodKeyValue == key
@@ -158,16 +166,25 @@ public sealed class TableFillStore(
                    on instance.Id equals row.TableInstanceId
                join owner in db.TableInstances.AsNoTracking()
                        .Where(o => o.DocumentId == documentId
-                                   && o.PeriodKeyValue == ownerPeriod
+                                   && o.PeriodKeyValue >= firstOwner
+                                   && o.PeriodKeyValue <= lastOwner
+                                   && o.PeriodKeyValue != key
                                    && tableDefIds.Contains(o.TableDefId))
                    on instance.TableDefId equals owner.TableDefId
                join ownerRow in db.TableRows.AsNoTracking()
-                       .Where(r => r.PeriodKeyValue == ownerPeriod && !r.IsDeleted)
-                   on new { I = owner.Id, K = row.RowKeyValue }
-                   equals new { I = ownerRow.TableInstanceId, K = ownerRow.RowKeyValue }
+                       .Where(r => r.PeriodKeyValue >= firstOwner
+                                   && r.PeriodKeyValue <= lastOwner
+                                   && r.PeriodKeyValue != key
+                                   && !r.IsDeleted)
+                   on new { P = owner.PeriodKeyValue, I = owner.Id, K = row.RowKeyValue }
+                   equals new { P = ownerRow.PeriodKeyValue, I = ownerRow.TableInstanceId, K = ownerRow.RowKeyValue }
                join cell in db.CellValues.AsNoTracking()
-                       .Where(c => c.PeriodKeyValue == ownerPeriod && !c.IsCalculated)
-                   on ownerRow.Id equals cell.TableRowId
+                       .Where(c => c.PeriodKeyValue >= firstOwner
+                                   && c.PeriodKeyValue <= lastOwner
+                                   && c.PeriodKeyValue != key
+                                   && !c.IsCalculated)
+                   on new { P = ownerRow.PeriodKeyValue, R = ownerRow.Id }
+                   equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
                group cell by new { instance.TableDefId, cell.ColumnDefId, OwnerPeriod = cell.PeriodKeyValue } into g
                select new ForeignFillRow
                {
@@ -219,21 +236,11 @@ public sealed class TableFillStore(
             return ForeignFill.None;
         }
 
-        // Один запит на період власника (≤ 11): див. примітку в `ForeignFillQuery`. Відбір пар «таблиця × колонка» з
-        // власником саме цього періоду — тут, у пам'яті.
-        var rows = new List<ForeignFillRow>();
-        foreach (var ownerGroup in owners.GroupBy(o => o.Value))
-        {
-            var ownerRows = await ForeignFillQuery(
-                    db,
-                    documentId,
-                    periodKey,
-                    ownerGroup.Key,
-                    [.. ownerGroup.Select(o => o.Key.TableDefId).Distinct()])
-                .ToListAsync(ct)
-                .ConfigureAwait(false);
-            rows.AddRange(ownerRows);
-        }
+        // ОДИН запит на всі періоди-власники року (діапазон ключа партиції): див. примітку в `ForeignFillQuery`.
+        // Відбір пар «таблиця × колонка» з власником саме цього періоду — тут, у пам'яті.
+        var rows = await ForeignFillQuery(db, documentId, periodKey, [.. owners.Keys.Select(o => o.TableDefId).Distinct()])
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
 
         var filled = rows
             .Where(r => owners.TryGetValue((r.TableDefId, r.ColumnDefId), out var owner) && owner == r.OwnerPeriodKey)
