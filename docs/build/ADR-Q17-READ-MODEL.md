@@ -79,6 +79,13 @@
 - 	ables/status: чужі власники рахуються ОДНИМ запитом по діапазону ключа партиції року (BETWEEN Рік*100+1 AND Рік*100+12, без періоду перегляду) замість запиту на період-власник: 15 -> 5 звернень, doc.TableInstance 13 -> 3. Логічні читання майже не змінилися: вартість - пошук комірок власників по КОЖНОМУ рядку власника (рядки x періоди), а не кількість запитів. Знизити її далі можна лише індексом (PeriodKey, ColumnDefId, ...) - це міграція, не робилась (токен міграцій).
 - Правило «звідки значення» лишається записаним двічі (C# і генератор вʼюх): текст вʼюх не змінено, golden OFF зелений, еквівалентність тримає ReportViewSliceEquivalenceTests.
 
+## Уточнення 2026-10-28 (lane/integ-q17-rvseek: читання rv за актуальними прогонами)
+
+- **Чому старий план читав усю таблицю.** Похідна rv не обмежувала `ru.PeriodKey` періодом екземпляра `ti.PeriodKey`, тож відсічка прогону (`Status = Current`) стояла НАД seek-ом: оптимізатор шукав `IX_CalculationResult_DocRun` (ключ `PeriodKey, DocumentId, CalculationRunId`) лише по двох ключах (`PeriodKey, DocumentId`) і читав усі прогони документа за період, включно з неактуальними (Land: 4,47 млн рядків; на синтетиці форми Land - 23 040 читань при 11 520 рядках актуальних прогонів).
+- **Виправлення.** До наборового rv і до підзапиту `rr` гілки з предикатом MatchJson додано `AND ru.PeriodKey = ti.PeriodKey`; у наборовій гілці зʼєднання `calc.CalculationRun ru -> calc.CalculationResult cr` стало `INNER LOOP JOIN`. Результат записується з `periodKey = run.PeriodKey` (`CalculationResultStore`), тож семантика та сама, зокрема для проєктного прогону без `DocumentId` (запасний варіант діє на рівні періоду, `ru2.PeriodKey = ti.PeriodKey` не змінено). Після виправлення: seek по трьох ключах, 11 520 прочитаних рядків = рядкам актуальних прогонів, з предикатом `_PeriodKey` одна партиція.
+- **Чому підказка.** Лише фільтр періоду нестабільний: оптимізатор і далі міг обрати план з відсічкою прогону над seek-ом; `LOOP` змушує йти від актуального прогону до його результатів (`ru` - зовнішній вхід), як і `HASH` для прив'язок. Ціна підказки - порядок зʼєднань у цьому apply зафіксований.
+- Тести: `ReportViewSliceEquivalenceTests` (стара форма == нова EXCEPT в обидва боки = 0 і вʼюха == справжній зріз для обох гілок rv і обох значень прапора), `ReportViewLandShapeTests` (seek по трьох ключах, `ActualRowsRead` <= 1,3 x рядків актуальних прогонів).
+
 ## Addendum 2026-10-28: PAGE compression of calc.CalculationResult indexes
 
 Status: PROPOSAL. Nothing in this section has been run, migrated or applied anywhere. No change to any live database (Land or otherwise) happens without a new explicit human word.
