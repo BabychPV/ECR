@@ -375,6 +375,99 @@ public sealed class ReportViewLandShapeTests(SqlServerFixture sql, ITestOutputHe
                 .Select(p => (int?)p.Attribute("PartitionCount") ?? 0).DefaultIfEmpty(0).Max());
     }
 
+    private sealed record DocRunSeek(int Operators, long RowsRead, long RowsOut, long Executions, List<string> KeyColumns);
+
+    /// <summary>Факти seek-ів IX_CalculationResult_DocRun: ключові колонки префікса пошуку, прочитані рядки, виконання.</summary>
+    private static DocRunSeek DocRunSeekFacts(System.Xml.Linq.XDocument plan)
+    {
+        System.Xml.Linq.XNamespace sp = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";
+        var seeks = plan.Descendants(sp + "RelOp")
+            .Where(o => ((string?)o.Attribute("PhysicalOp") ?? "").Contains("Seek", StringComparison.Ordinal)
+                        && o.Elements(sp + "IndexScan").Elements(sp + "Object").Any(x =>
+                            (string?)x.Attribute("Table") == "[CalculationResult]"
+                            && (string?)x.Attribute("Index") == "[IX_CalculationResult_DocRun]"))
+            .ToList();
+        long Sum(string attribute) => seeks.Sum(o => o.Descendants(sp + "RunTimeCountersPerThread")
+            .Sum(c => (long?)c.Attribute(attribute) ?? 0));
+        var keys = seeks
+            .SelectMany(o => o.Descendants(sp + "SeekPredicateNew").Descendants(sp + "Prefix").Descendants(sp + "RangeColumns")
+                .Descendants(sp + "ColumnReference"))
+            .Select(c => ((string?)c.Attribute("Column") ?? "").Trim('[', ']'))
+            .Distinct().ToList();
+        return new DocRunSeek(seeks.Count, Sum("ActualRowsRead"), Sum("ActualRows"), Sum("ActualExecutions"), keys);
+    }
+
+    /// <summary>
+    /// Q-17.rvseek (Аудит-2, Land 4,47 млн рядків): читання результатів вʼюхою БЕЗ предиката мусить іти за АКТУАЛЬНИМИ прогонами: seek
+    /// IX_CalculationResult_DocRun по ВСІХ трьох ключах (PeriodKey, DocumentId, CalculationRunId) і прочитані рядки ≈ рядкам актуальних
+    /// прогонів, а не всій таблиці (синтетика: історія НЕактуальних прогонів = стільки ж, скільки актуальних; до виправлення seek ішов по
+    /// (PeriodKey, DocumentId), прогін відсікався НАД seek-ом і читалась уся історія документа за період). З предикатом
+    /// _PeriodKey - одна партиція. Детерміновано (план і лічильники, не час): за обох значень прапора.
+    /// Мутація: прибрати <c>INNER LOOP JOIN</c> або <c>AND ru.PeriodKey = ti.PeriodKey</c> у наборовій гілці rv - тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Вʼюха_без_предиката_читає_результати_актуальних_прогонів_seek_по_трьох_ключах_а_не_всю_історію()
+    {
+        var s = await BuildAsync();
+        try
+        {
+            foreach (var routing in new[] { false, true })
+            {
+                await AssertSeekShapeAsync(s, routing);
+            }
+        }
+        finally
+        {
+            await CleanupAsync(s);
+        }
+    }
+
+    private async Task AssertSeekShapeAsync(Shape s, bool routing)
+    {
+        {
+            var star = $"SELECT * FROM rpt.[{s.View}]";
+            var one = $"SELECT * FROM rpt.[{s.View}] WHERE _DocumentId = {s.Doc.DocumentId} AND _PeriodKey = 202603";
+            await GenerateAsync(s, routing);
+
+            long currentRows;
+            long allRows;
+            await using (var connection = new SqlConnection(sql.ConnectionString))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                    SELECT (SELECT COUNT_BIG(*) FROM calc.CalculationResult AS cr JOIN calc.CalculationRun AS ru ON ru.Id = cr.CalculationRunId
+                             WHERE ru.ProjectId = @p AND ru.Status = N'Current'),
+                           (SELECT COUNT_BIG(*) FROM calc.CalculationResult AS cr JOIN calc.CalculationRun AS ru ON ru.Id = cr.CalculationRunId
+                             WHERE ru.ProjectId = @p)
+                    """;
+                command.Parameters.AddWithValue("@p", s.Doc.ProjectId);
+                await using var reader = await command.ExecuteReaderAsync();
+                await reader.ReadAsync();
+                currentRows = reader.GetInt64(0);
+                allRows = reader.GetInt64(1);
+            }
+
+            await PlanAsync(star);   // прогрів кешу плану/сторінок: далі міряємо повторний, "робочий" прогін
+            var starSeek = DocRunSeekFacts(await PlanAsync(star));
+            var oneFacts = Facts(await PlanAsync(one));
+            var report = $"routing={routing} current={currentRows} all={allRows}: star seeks={starSeek.Operators} read={starSeek.RowsRead} "
+                         + $"out={starSeek.RowsOut} exec={starSeek.Executions} keys=[{string.Join(',', starSeek.KeyColumns)}] | one partitions={oneFacts.CalculationResultPartitions}";
+            output.WriteLine(report);
+
+            Assert.True(allRows >= 1.8 * currentRows, "синтетика мусить містити історію НЕактуальних прогонів, співмірну з актуальними: " + report);
+            Assert.True(starSeek.Operators >= 1, "у плані немає seek-а IX_CalculationResult_DocRun: " + report);
+            Assert.Contains("PeriodKey", starSeek.KeyColumns);
+            Assert.Contains("DocumentId", starSeek.KeyColumns);
+            Assert.Contains("CalculationRunId", starSeek.KeyColumns);
+            Assert.True(starSeek.RowsRead <= 1.3 * currentRows, report);
+            Assert.True(oneFacts.CalculationResultPartitions <= 1, report);
+        }
+    }
+
     /// <summary>
     /// SELECT * БЕЗ предиката і з предикатом (документ + період) по в'ю з прапором ON на формі Land. Виміри (24 документи x 12 місяців =
     /// 288 екземплярів, 1 728 рядків): ON без предиката - 34,9 тис. читань (20 на рядок), 11 Nested Loops, seek TableRow по одному на
