@@ -433,13 +433,19 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         for (var m = 1; m <= 12; m++)
         {
             Assert.Contains($") AS om{m}", definition, StringComparison.Ordinal);
-            Assert.Contains($"oi.PeriodKey = (ti.PeriodKey / 100) * 100 + {m}", definition, StringComparison.Ordinal);
+            Assert.Contains($"ow{m}.PeriodKey = (ti.PeriodKey / 100) * 100 + {m}", definition, StringComparison.Ordinal);
+            Assert.Contains($"ow{m}.TableInstanceId = oim.i{m}", definition, StringComparison.Ordinal);
         }
 
-        Assert.Equal(12, System.Text.RegularExpressions.Regex.Count(definition, "doc\\.TableInstance AS oi\\b"));
-        // Без діапазону року й без звірки місяця всередині агрегації (старий один apply на всі місяці).
+        // P2: екземпляри власників-місяців резолвляться ОДНИМ зведенням doc.TableInstance (oim, MAX(CASE ..) по місяцях),
+        // а не окремим seek-ом на місяць у кожному apply (12 seek-ів TableInstance на рядок результату).
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(definition, "\\) AS oim\\b"));
+        Assert.Equal(0, System.Text.RegularExpressions.Regex.Count(definition, "doc\\.TableInstance AS oi\\b"));
+        // Без діапазону року й без звірки місяця всередині агрегації комірок (старий один apply на всі місяці).
         Assert.DoesNotContain("<= (ti.PeriodKey / 100) * 100 + 12", definition, StringComparison.Ordinal);
-        Assert.DoesNotContain("PeriodKey % 100", definition, StringComparison.Ordinal);
+        Assert.DoesNotContain("x.PeriodKey % 100", definition, StringComparison.Ordinal);
+        // Власник читається діапазоном ключа рядка, а не seek-ом на колонку: IN-списку колонок у apply немає.
+        Assert.DoesNotContain("x.ColumnDefId IN (", definition, StringComparison.Ordinal);
 
         // Усі таблиці запиту (ліміт SQL Server 256): кожна doc.* - один рядок apply/приєднання.
         var tables = System.Text.RegularExpressions.Regex.Count(

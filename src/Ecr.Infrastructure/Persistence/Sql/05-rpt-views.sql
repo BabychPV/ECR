@@ -203,7 +203,7 @@ BEGIN
             @ownerRows nvarchar(max), @ownerCells nvarchar(max), @valueCol nvarchar(128), @extra int, @mi int;
     -- Q-17.fix (B1): умовні агрегації значень власників - по одному OUTER APPLY на власника (OwnerNo: -1 власна копія,
     -- 0 якір року, 1..12 місяць), а не по приєднанню doc.CellValue на колонку.
-    DECLARE @routed bit, @raw1 nvarchar(64), @agg nvarchar(max), @aggBody nvarchar(max), @ownerNo int, @aggList nvarchar(max), @idList nvarchar(max);
+    DECLARE @ownerRows2 nvarchar(max), @routed bit, @raw1 nvarchar(64), @agg nvarchar(max), @aggBody nvarchar(max), @ownerNo int, @aggList nvarchar(max), @idList nvarchar(max);
     DECLARE @pv TABLE (OwnerNo int NOT NULL, ColNo int NOT NULL, ColId int NOT NULL, Agg nvarchar(max) NOT NULL);
     DECLARE @marker nvarchar(64) = N'-- Згенеровано rpt.usp_GenerateTemplateViews';
     DECLARE @failure nvarchar(2048);
@@ -333,8 +333,31 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
         BEGIN
             -- Місяці (OwnerNo 101..112): екземпляр місяця -> рядок з тим самим RowKey -> введені комірки; один OUTER APPLY
             -- на місяць, тож 3 таблиці (doc.TableInstance + doc.TableRow + doc.CellValue) на кожен потрібний місяць.
+            -- P2 (T3_00 Land: 96 місячних колонок, 23 400 рядків, ON - 231 seek PK_CellValue + TableInstance/TableRow на
+            -- КОЖЕН рядок результату, ~5,4 млн виконань): екземпляри всіх місяців року резолвляться ОДНИМ зведенням
+            -- doc.TableInstance (oim: MAX(CASE місяць ... Id) по (документ, таблиця, рік)), рядок власника кожного місяця -
+            -- звичайним LEFT JOIN ow<m> (оптимізатор може обрати hash-зʼєднання замість вкладеного циклу на рядок), а apply
+            -- om<m> лишається лише діапазоном комірок цього рядка. Семантика та сама: немає екземпляра/рядка - apply порожній
+            -- (NULL); PeriodKind <> 0 - так само порожній.
             IF @monthMask <> 0
-                SET @extra = @extra + 3 * (SELECT COUNT(DISTINCT OwnerNo) FROM @pv WHERE OwnerNo > 100);
+            BEGIN                SET @extra = @extra + 3 * (SELECT COUNT(DISTINCT OwnerNo) FROM @pv WHERE OwnerNo > 100);
+                SET @mi = (SELECT MIN(OwnerNo) FROM @pv WHERE OwnerNo > 100);
+                SET @aggList = N'';
+                SET @ownerRows2 = N'';
+                WHILE @mi IS NOT NULL
+                BEGIN
+                    SET @aggList = @aggList + N', MAX(CASE WHEN PeriodKey % 100 = ' + CAST(@mi - 100 AS nvarchar(3)) + N' THEN Id END) AS i' + CAST(@mi - 100 AS nvarchar(3));
+                    SET @ownerRows2 = @ownerRows2 + N'
+LEFT JOIN doc.TableRow AS ow' + CAST(@mi - 100 AS nvarchar(3)) + N' ON ow' + CAST(@mi - 100 AS nvarchar(3)) + N'.PeriodKey = (ti.PeriodKey / 100) * 100 + ' + CAST(@mi - 100 AS nvarchar(3))
+                        + N' AND ow' + CAST(@mi - 100 AS nvarchar(3)) + N'.TableInstanceId = oim.i' + CAST(@mi - 100 AS nvarchar(3))
+                        + N' AND ow' + CAST(@mi - 100 AS nvarchar(3)) + N'.RowKey = r.RowKey AND ow' + CAST(@mi - 100 AS nvarchar(3)) + N'.IsDeleted = 0';
+                    SET @mi = (SELECT MIN(OwnerNo) FROM @pv WHERE OwnerNo > @mi);
+                END
+                SET @ownerRows = @ownerRows + N'
+LEFT JOIN (SELECT DocumentId, TableDefId, PeriodKey / 100 AS Yr' + @aggList + N'
+             FROM doc.TableInstance GROUP BY DocumentId, TableDefId, PeriodKey / 100) AS oim
+       ON p.PeriodKind = 0 AND oim.DocumentId = ti.DocumentId AND oim.TableDefId = ti.TableDefId AND oim.Yr = ti.PeriodKey / 100' + @ownerRows2;
+            END
 
             IF @needAnchor = 1
             BEGIN
@@ -357,19 +380,16 @@ LEFT JOIN doc.TableRow AS owA ON owA.PeriodKey = oiA.PeriodKey AND owA.TableInst
                 -- ⚠ FOR XML PATH, а не «@var = @var + …» з ORDER BY: останнє не гарантує конкатенації всіх рядків.
                 SET @aggList = STUFF((SELECT N', ' + Agg FROM @pv WHERE OwnerNo = @ownerNo ORDER BY ColNo
                                       FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
-                -- Власник читається лише по СВОЇХ колонках (місяць m - M{m}; якір - не-місячні): відбір за ключем PK
-                -- замість обходу всіх комірок рядка власника. Власна копія (sv) - усі маршрутизовані колонки таблиці.
-                SET @idList = CASE WHEN @ownerNo < 0 THEN N'' ELSE N' AND x.ColumnDefId IN (' + STUFF((
-                                  SELECT N', ' + CAST(ColId AS nvarchar(10)) FROM @pv WHERE OwnerNo = @ownerNo ORDER BY ColNo
-                                  FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'') + N')' END;
+                -- P2 (T3_00 Land, 96 місячних колонок: 231 seek PK_CellValue на КОЖЕН рядок результату, ~5,4 млн виконань):
+                -- власник читається ОДНИМ діапазоном ключа (PeriodKey, TableRowId) - усі комірки його рядка за один seek, -
+                -- а потрібну колонку вибирає умовна агрегація MAX(CASE ColumnDefId ...) (вона й так фільтрує). Раніше тут стояв
+                -- `x.ColumnDefId IN (<колонки власника>)`: оптимізатор розкривав його в seek НА КОЛОНКУ. Комірок у рядку власника
+                -- небагато (розріджено), тож читання діапазону дешевше за N seek-ів; результат той самий.
+                SET @idList = N'';
                 SET @ownerCells = @ownerCells + N'
 OUTER APPLY (SELECT ' + @aggList + N' FROM '
                     + CASE WHEN @ownerNo > 100
-                           THEN N'doc.TableInstance AS oi
-          JOIN doc.TableRow AS ow ON ow.PeriodKey = oi.PeriodKey AND ow.TableInstanceId = oi.Id AND ow.RowKey = r.RowKey AND ow.IsDeleted = 0
-          JOIN doc.CellValue AS x ON x.PeriodKey = ow.PeriodKey AND x.TableRowId = ow.Id' + @idList + N'
-          WHERE p.PeriodKind = 0 AND oi.DocumentId = ti.DocumentId AND oi.TableDefId = ti.TableDefId
-            AND oi.PeriodKey = (ti.PeriodKey / 100) * 100 + ' + CAST(@ownerNo - 100 AS nvarchar(3))
+                           THEN N'doc.CellValue AS x WHERE x.PeriodKey = ow' + CAST(@ownerNo - 100 AS nvarchar(3)) + N'.PeriodKey AND x.TableRowId = ow' + CAST(@ownerNo - 100 AS nvarchar(3)) + N'.Id'
                            WHEN @ownerNo = -2
                            THEN N'doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id AND x.IsCalculated = 1'
                            WHEN @ownerNo = -1
