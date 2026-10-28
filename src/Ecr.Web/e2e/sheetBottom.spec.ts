@@ -23,19 +23,24 @@ async function open(page: Page): Promise<void> {
   await expect(page.getByTestId('grid-hscroll')).toBeVisible();
 }
 
-/** Заголовок крайньої лівої видимої (не обрізаної ліворуч) комірки сітки — «перший видимий стовпець». */
+/**
+ * Заголовок крайньої лівої видимої (не обрізаної ліворуч) комірки сітки — «перший видимий стовпець».
+ * ⚠ Одним `evaluate`: віртуалізована сітка перемальовує комірки під час прокрутки, і поштучні `locator.innerText()`
+ * зависали б на відчепленому вузлі аж до таймауту дії (хибне «сітка не рушила»).
+ */
 async function firstHeader(page: Page): Promise<string> {
-  const grid = await page.locator('revo-grid:visible').first().boundingBox();
-  const cells = page.locator('revo-grid:visible revogr-header .rgHeaderCell');
-  const count = await cells.count();
-  let best = { x: Number.POSITIVE_INFINITY, text: '' };
-  for (let i = 0; i < count; i += 1) {
-    const box = await cells.nth(i).boundingBox();
-    const text = (await cells.nth(i).innerText()).trim();
-    // Комірка, що ще частково видна (права межа правіше лівого краю сітки), і непорожній заголовок.
-    if (box !== null && grid !== null && box.x + box.width > grid.x + 4 && text !== '' && box.x < best.x) best = { x: box.x, text };
-  }
-  return best.text;
+  return page.evaluate(() => {
+    const grid = document.querySelector('revo-grid');
+    if (grid === null) return '';
+    const left = grid.getBoundingClientRect().x;
+    let best = { x: Number.POSITIVE_INFINITY, text: '' };
+    for (const cell of Array.from(grid.querySelectorAll('revogr-header .rgHeaderCell'))) {
+      const box = cell.getBoundingClientRect();
+      const text = ((cell as HTMLElement).innerText ?? '').trim();
+      if (box.x + box.width > left + 4 && text !== '' && box.x < best.x) best = { x: box.x, text };
+    }
+    return best.text;
+  });
 }
 /** Смугу — на початок і чекаємо, поки сітка покаже перший стовпець: повертає його заголовок (опорна точка). */
 async function resetToStart(page: Page): Promise<string> {
