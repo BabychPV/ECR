@@ -33,7 +33,7 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
 
     private async Task<Fixture> BuildAsync(
         int periodKey = 202610, TableLayoutKind layout = TableLayoutKind.MonthsInColumns, int columnCount = 2,
-        int rowCount = 2)
+        int rowCount = 2, bool collideText = false, int calculatedColumns = 0)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(periodKey, columnCount: columnCount, rowCount: rowCount, layoutKind: layout,
@@ -48,6 +48,19 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         var day = new ColumnDef(doc.TableDefId, EcrCode.Create("DAY" + Guid.NewGuid().ToString("N")[..8]),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Day" }), 9997, CellDataType.Date);
         db.ColumnDefs.AddRange(derived, flag, day);
+        if (collideText)
+        {
+            // AN-147: наявна колонка з кодом <Код формули>_Text - супутник цієї формули має пропуститися.
+            db.ColumnDefs.Add(new ColumnDef(doc.TableDefId, EcrCode.Create(derived.Code + "_Text"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Own" }), 9996, CellDataType.Decimal));
+        }
+        // Q-17.recalc: колонки Calculated (ordinal 7000+) - структура публікованої версії заморожена, тож лише ДО публікації.
+        for (var i = 0; i < calculatedColumns; i++)
+        {
+            db.ColumnDefs.Add(new ColumnDef(doc.TableDefId, EcrCode.Create("CLP" + i + Guid.NewGuid().ToString("N")[..6]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "calc" }), 7000 + i, CellDataType.Calculated));
+        }
+
         await db.SaveChangesAsync();
 
         var version = await db.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId);
@@ -255,8 +268,13 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         var golden = await ViewDefinitionAsync(f.View);
         Assert.DoesNotContain("COALESCE(o", golden, StringComparison.Ordinal);
 
+        // AN-147: еталон main не знає колонок-супутників <Код>_Text (адитивні, у кінці списку) - вони єдина допустима
+        // різниця; після їх вилучення текст байт-у-байт той самий.
         await GenerateAsync(f, routing: false);
-        Assert.Equal(golden, await ViewDefinitionAsync(f.View));
+        var current = await ViewDefinitionAsync(f.View);
+        Assert.Contains("_Text]", current, StringComparison.Ordinal);
+        Assert.Equal(golden, System.Text.RegularExpressions.Regex.Replace(
+            current, @",\r?\n\s+CASE WHEN c\d+\.ValueNumeric IS NULL THEN c\d+\.ValueString END AS \[[^\]]+_Text\]", ""));
 
         await GenerateAsync(f, routing: true);
         Assert.NotEqual(golden, await ViewDefinitionAsync(f.View));
@@ -395,40 +413,53 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// P2-1 (QA3, форма запиту): з прапором на КОЖЕН місяць-власник - окремий OUTER APPLY, що читає лише екземпляр цього
-    /// місяця (рівність ключа періоду, не діапазон року) і лише колонки цього місяця; разом sv + якір + 12 місяців, а
-    /// таблиць у запиті менше за ліміт 250. Один apply на всі місяці (~12·C² на рядок) давав 340x від OFF на T9_04 Land.
+    /// Q-17.perf2 (форма запиту, замінює P2-1 QA3): з прапором значення власників (місяці й якір) читає ОДНА похідна <c>fam</c> -
+    /// один прохід doc.TableInstance -> doc.TableRow -> doc.CellValue таблиці з умовною агрегацією по (документ, рік, RowKey), що
+    /// приєднується хеш-зʼєднанням; на рядок лишаються лише sv (власна копія) і sc (власна обчислена). Ланцюжок ow&lt;m&gt;/om&lt;m&gt;
+    /// на рядок (~100 читань, 26 seek-ів TableRow на рядок на формі Land) прибрано; таблиць у запиті менше за ліміт 250.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-10.2")]
-    public async Task З_прапором_кожен_місяць_власник_має_окремий_apply_по_своєму_екземпляру_і_колонках()
+    public async Task З_прапором_власники_читає_одна_наборова_похідна_а_на_рядок_лише_sv_і_sc()
     {
         var f = await BuildAsync(columnCount: 205);
         await GenerateAsync(f);
 
         var definition = await ViewDefinitionAsync(f.View);
 
-        // sc (власна обчислена) + sv (власна копія) + omA (якір) + om1..om12.
-        Assert.Equal(15, System.Text.RegularExpressions.Regex.Count(definition, "OUTER APPLY \\(SELECT"));
+        // На рядок doc.CellValue читають лише sc (власна обчислена) і sv (власна копія); pc (нероутовані колонки) і скалярний rv -
+        // окремі apply; власників у apply на рядок немає.
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Count(definition, "FROM doc\\.CellValue AS x WHERE x\\.PeriodKey = r\\.PeriodKey AND x\\.TableRowId = r\\.Id( AND x\\.IsCalculated = 1)?\\) AS s[vc]"));
         for (var m = 1; m <= 12; m++)
         {
-            Assert.Contains($") AS om{m}", definition, StringComparison.Ordinal);
-            Assert.Contains($"oi.PeriodKey = (ti.PeriodKey / 100) * 100 + {m}", definition, StringComparison.Ordinal);
+            Assert.DoesNotContain($") AS om{m}", definition, StringComparison.Ordinal);
+            Assert.DoesNotContain($"ow{m}.", definition, StringComparison.Ordinal);
         }
 
-        Assert.Equal(12, System.Text.RegularExpressions.Regex.Count(definition, "doc\\.TableInstance AS oi\\b"));
-        // Без діапазону року й без звірки місяця всередині агрегації (старий один apply на всі місяці).
-        Assert.DoesNotContain("<= (ti.PeriodKey / 100) * 100 + 12", definition, StringComparison.Ordinal);
-        Assert.DoesNotContain("PeriodKey % 100", definition, StringComparison.Ordinal);
+        Assert.DoesNotContain(") AS omA", definition, StringComparison.Ordinal);
+        Assert.DoesNotContain("AS oim", definition, StringComparison.Ordinal);
+        Assert.DoesNotContain("FROM doc.TableInstance GROUP BY", definition, StringComparison.Ordinal);
+        // Одна похідна fam: місячні колонки - за місяцем екземпляра, введені не-місячні - за якорем року; приєднання хешем по
+        // (документ, рік, RowKey), PeriodKind = 0 в умові.
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(definition, "\\) AS fam\\b"));
+        Assert.Contains("LEFT HASH JOIN (SELECT oi.DocumentId, oi.PeriodKey / 100 AS Yr, ow.RowKey", definition, StringComparison.Ordinal);
+        Assert.Contains("p.PeriodKind = 0 AND fam.DocumentId = ti.DocumentId AND fam.Yr = ti.PeriodKey / 100 AND fam.RowKey = r.RowKey", definition, StringComparison.Ordinal);
+        for (var m = 1; m <= 12; m++)
+        {
+            Assert.Contains($"oi.PeriodKey % 100 = {m} THEN", definition, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("oi.PeriodKey = pa.AnchorKey THEN", definition, StringComparison.Ordinal);
+        // Власник читається діапазоном ключа рядка, а не seek-ом на колонку: IN-списку колонок у apply немає.
+        Assert.DoesNotContain("x.ColumnDefId IN (", definition, StringComparison.Ordinal);
 
         // Усі таблиці запиту (ліміт SQL Server 256): кожна doc.* - один рядок apply/приєднання.
         var tables = System.Text.RegularExpressions.Regex.Count(
             definition, "(?:FROM|JOIN)\\s+(?:doc|wf)\\.\\w+");
         Assert.True(tables < 250, $"таблиць у запиті {tables}");
     }
-
     /// <summary>Результат вимірювання запиту: логічні читання (STATISTICS IO) і процесорний час (STATISTICS TIME).</summary>
     private sealed record Measure(long Reads, long CpuMs);
 
@@ -561,6 +592,301 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         var report = $"8 колонок: ON {onEight} OFF {offEight}; SELECT *: ON {onStar} OFF {offStar}";
         Assert.True(onStar.Reads <= 3 * offStar.Reads, report);
         Assert.True(onEight.Reads <= 10 * offEight.Reads, report);
+    }
+
+    /// <summary>
+    /// Q-17.recalc (перф): вʼюха з 40 колонками Calculated, прив'язаними до виходів методології (результати є для всіх
+    /// 40 рядків × 40 виходів). Логічні читання <c>SELECT *</c> і вибірки 8 колонок ON/OFF; apply результатів не має
+    /// давати кратності, що з'їдає бюджет T7/T10/T11. Числа друкуються в повідомленні (до/після - у звіті lane).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Читання_вʼюхи_з_колонками_Calculated_і_результатами_методології_у_межах_бюджету()
+    {
+        const int calcCount = 40;
+        const int rows = 600;
+        var f = await BuildAsync(columnCount: 150, rowCount: rows, calculatedColumns: calcCount);
+        int methodologyId;
+        int versionId;
+        long runId;
+        long historyRunId;
+        int unitId;
+        await using (var db = sql.CreateContext())
+        {
+            var methodology = new Ecr.Domain.Entities.Calculations.Methodology(
+                EcrCode.Create("PRF" + Guid.NewGuid().ToString("N")[..8]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "perf" }));
+            db.Methodologies.Add(methodology);
+            await db.SaveChangesAsync();
+            var version = new Ecr.Domain.Entities.Calculations.MethodologyVersion(
+                methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, Now);
+            db.MethodologyVersions.Add(version);
+            await db.SaveChangesAsync();
+            methodologyId = methodology.Id;
+            versionId = version.Id;
+
+            var calcColumns = await db.ColumnDefs.AsNoTracking()
+                .Where(c => c.TableDefId == f.Doc.TableDefId && c.DataType == CellDataType.Calculated)
+                .OrderBy(c => c.Id).ToListAsync();
+            Assert.Equal(calcCount, calcColumns.Count);
+            for (var i = 0; i < calcCount; i++)
+            {
+                db.CalculationBindings.Add(new CalculationBinding(f.Doc.TableDefId, calcColumns[i].Id, methodologyId, "OUT" + i, "{}"));
+            }
+
+            await db.SaveChangesAsync();
+
+            // Історія перерахунків: Land p66 - 88 % прочитаного були результатами НЕактуальних прогонів (Superseded). Минулий прогін
+            // того самого документа/періоду несе в 3 рази більше результатів, ніж актуальний, і не має впливати на вартість читання.
+            var history = new Ecr.Domain.Entities.Calculations.CalculationRun(
+                f.Doc.ProjectId, 202610, triggeredByUserId: 1, Now, f.Doc.DocumentId);
+            db.CalculationRuns.Add(history);
+            await db.SaveChangesAsync();
+            history.Complete("Completed", Now, profileJson: null, errorMessage: null);
+            await db.SaveChangesAsync();
+            historyRunId = history.Id;
+
+            var run = new Ecr.Domain.Entities.Calculations.CalculationRun(
+                f.Doc.ProjectId, 202610, triggeredByUserId: 1, Now, f.Doc.DocumentId);
+            db.CalculationRuns.Add(run);
+            await db.SaveChangesAsync();
+            run.Complete("Completed", Now, profileJson: null, errorMessage: null);
+            run.MakeCurrent();
+            await db.SaveChangesAsync();
+            runId = run.Id;
+            unitId = await db.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
+        }
+
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var fill = connection.CreateCommand();
+            fill.CommandTimeout = 600;
+            fill.CommandText = """
+                INSERT INTO calc.CalculationResult
+                    (PeriodKey, Id, CalculationRunId, MethodologyVersionId, DocumentId, SourceRowKey, OutputCode, Value, UnitId, Kind)
+                SELECT 202610, NEXT VALUE FOR calc.CalculationResultSeq, @run, @ver, @d, x.RowKey, x.OutputCode, 1.5, @unit, 0
+                  FROM (SELECT r.RowKey, b.OutputCode
+                          FROM doc.TableRow AS r
+                          JOIN doc.TableInstance AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
+                          CROSS JOIN cfg.CalculationBinding AS b
+                         WHERE ti.Id = @ti AND r.PeriodKey = 202610 AND b.TableDefId = @td AND b.MethodologyId = @m) AS x;
+                """;
+            fill.Parameters.AddWithValue("@run", runId);
+            fill.Parameters.AddWithValue("@ver", versionId);
+            fill.Parameters.AddWithValue("@d", f.Doc.DocumentId);
+            fill.Parameters.AddWithValue("@unit", unitId);
+            fill.Parameters.AddWithValue("@ti", f.Doc.TableInstanceId);
+            fill.Parameters.AddWithValue("@td", f.Doc.TableDefId);
+            fill.Parameters.AddWithValue("@m", methodologyId);
+            Assert.Equal(rows * calcCount, await fill.ExecuteNonQueryAsync());
+
+            fill.CommandText = """
+                INSERT INTO calc.CalculationResult
+                    (PeriodKey, Id, CalculationRunId, MethodologyVersionId, DocumentId, SourceRowKey, OutputCode, Value, UnitId, Kind)
+                SELECT 202610, NEXT VALUE FOR calc.CalculationResultSeq, @run, @ver, @d, x.RowKey, x.OutputCode, 9.5 + k.n, @unit, 0
+                  FROM (SELECT r.RowKey, b.OutputCode
+                          FROM doc.TableRow AS r
+                          JOIN doc.TableInstance AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
+                          CROSS JOIN cfg.CalculationBinding AS b
+                         WHERE ti.Id = @ti AND r.PeriodKey = 202610 AND b.TableDefId = @td AND b.MethodologyId = @m) AS x
+                 CROSS JOIN (VALUES (1), (2), (3)) AS k(n);
+                """;
+            fill.Parameters["@run"].Value = historyRunId;
+            Assert.Equal(3 * rows * calcCount, await fill.ExecuteNonQueryAsync());
+        }
+
+        var star = $"SELECT * FROM rpt.[{f.View}] WHERE _DocumentId = {f.Doc.DocumentId} AND _PeriodKey = 202610";
+        await using var db2 = sql.CreateContext();
+        var calcCodes = await db2.ColumnDefs.AsNoTracking()
+            .Where(c => c.TableDefId == f.Doc.TableDefId && c.DataType == CellDataType.Calculated)
+            .OrderBy(c => c.Id).Select(c => c.Code).Take(8).ToListAsync();
+        var eight = $"SELECT _RowKey, {string.Join(", ", calcCodes.Select(c => $"[{c}]"))} FROM rpt.[{f.View}] WHERE _DocumentId = {f.Doc.DocumentId} AND _PeriodKey = 202610";
+
+        await GenerateAsync(f, routing: false);
+        var offStar = await MeasureAsync(star);
+        var offEight = await MeasureAsync(eight);
+        await GenerateAsync(f, routing: true);
+        var onStar = await MeasureAsync(star);
+        var onEight = await MeasureAsync(eight);
+
+        var report = $"SELECT *: ON {onStar} OFF {offStar}; 8 Calculated: ON {onEight} OFF {offEight}";
+        // Q-17.perf. Межі - у ЧИТАННЯХ (детерміновані; час на CI плаває). Набір: 600 рядків x 40 Calculated, 24 000 актуальних результатів
+        // + 72 000 результатів НЕактуального прогону. Виміри (ON): SELECT * - 7,6 тис. читань, коли тест іде окремо, 31 тис. у наборі
+        // класу (спільна база, інша статистика, інший план); 8 колонок Calculated - 0,4-2,3 тис. Те саме на формі p66 (корельований
+        // apply на рядок x прив'язку, SourceRowKey лише residual): SELECT * 56 тис., 8 колонок 2 067 тис. читань (3,4 тис. на рядок).
+        // Межа SELECT * (80 читань на рядок) лишає запас над 52 на рядок у наборі, а 8 колонок (20 тис.) - 50x над виміром і 100x
+        // нижче p66: саме вона червоніє на корельованій формі. Історія прогонів (x3 результатів) на читання не впливає.
+        // Форма плану (фактичний): результати читаються seek-ом IX_CalculationResult_DocRun по (PeriodKey, DocumentId, CalculationRunId) -
+        // предикат документа/періоду зайшов у apply екземпляра, - не більш як кілька разів (по екземпляру), а не на кожен рядок/результат.
+        var plan = System.Xml.Linq.XDocument.Parse(await PlanXmlAsync(star));
+        System.Xml.Linq.XNamespace sp = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";
+        var crOps = plan.Descendants(sp + "RelOp")
+            .Where(o => o.Descendants(sp + "Object").Any(x => (string?)x.Attribute("Table") == "[CalculationResult]"
+                                                          && (string?)x.Attribute("Index") != null)).ToList();
+        var docRunSeeks = crOps.Where(o => (string?)o.Attribute("PhysicalOp") == "Index Seek"
+                                           && o.Descendants(sp + "Object").Any(x => (string?)x.Attribute("Index") == "[IX_CalculationResult_DocRun]")).ToList();
+        Assert.NotEmpty(docRunSeeks);
+        foreach (var op in docRunSeeks)
+        {
+            var executions = op.Descendants(sp + "RunTimeCountersPerThread").Sum(c => (long)c.Attribute("ActualExecutions")!);
+            Assert.True(executions <= 5, $"IX_CalculationResult_DocRun seek виконано {executions} разів (по рядку/результату), {report}");
+        }
+
+        Assert.True(onStar.Reads <= 80L * rows, report);
+        Assert.True(onEight.Reads <= 20_000, report);
+        Assert.True(offEight.Reads <= 20_000, report);
+    }
+
+    /// <summary>
+    /// Q-17.perf (T3_00 Land: PerPeriodInstance, 232 колонки = 232 LEFT JOIN doc.CellValue = 233 seek-ів на рядок, 5,4 млн виконань):
+    /// з прапором ON нероутовані колонки читає ОДИН apply по ключу рядка, тож читання на рядок не ростуть з числом колонок, а
+    /// вміст вʼюхи ідентичний вʼюсі без прапора.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Вʼюха_PerPeriodInstance_з_230_колонками_читає_комірки_одним_apply_і_дає_той_самий_вміст()
+    {
+        const int rows = 600;
+        var f = await BuildAsync(layout: TableLayoutKind.PerPeriodInstance, columnCount: 230, rowCount: rows);
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var fill = connection.CreateCommand();
+            fill.CommandTimeout = 600;
+            // ~20 заповнених комірок на рядок (як у Land): колонки з ordinal 2..21.
+            fill.CommandText = """
+                INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric)
+                SELECT r.PeriodKey, r.Id, c.Id, @td, CAST(r.Ordinal % 97 AS decimal(18, 4)) + c.Ordinal
+                  FROM doc.TableRow AS r
+                  JOIN cfg.ColumnDef AS c ON c.TableDefId = @td AND c.Ordinal BETWEEN 2 AND 21
+                 WHERE r.TableInstanceId = @ti AND r.PeriodKey = 202610 AND c.DataType <> 0;
+                """;
+            fill.Parameters.AddWithValue("@td", f.Doc.TableDefId);
+            fill.Parameters.AddWithValue("@ti", f.Doc.TableInstanceId);
+            await fill.ExecuteNonQueryAsync();
+        }
+
+        var star = $"SELECT * FROM rpt.[{f.View}] WHERE _DocumentId = {f.Doc.DocumentId} AND _PeriodKey = 202610";
+        await GenerateAsync(f, routing: false);
+        var off = await MeasureAsync(star);
+        var offHash = await ContentHashAsync(f);
+        await GenerateAsync(f, routing: true);
+        var on = await MeasureAsync(star);
+        var onHash = await ContentHashAsync(f);
+
+        var definition = await ViewDefinitionAsync(f.View);
+        var report = $"ON {on} OFF {off} hash ON {onHash} OFF {offHash}";
+        Assert.True(offHash == onHash, "ХЕШ " + report);
+        Assert.True(System.Text.RegularExpressions.Regex.Count(definition, "\\) AS pc\\b") == 1, "pc " + report);
+        Assert.DoesNotContain("LEFT JOIN doc.CellValue AS c2 ", definition, StringComparison.Ordinal);
+        // Читання на рядок не залежать від числа колонок: 230 колонок = 1 apply по ключу рядка (7,3 читання на рядок). Форма
+        // «LEFT JOIN doc.CellValue на колонку» (OFF, і ON до Q-17.perf для розкладок не MonthsInColumns) - 257 тис. (430 на рядок).
+        Assert.True(on.Reads <= 15L * rows, report);
+    }
+
+    /// <summary>
+    /// Q-17.perf: форма rv. Прив'язки лише з <c>{}</c> - наборовий rv на екземпляр (CROSS APPLY, актуальні прогони першими, хеш-
+    /// зʼєднання з рядками); з'явилась активна прив'язка з предикатом MatchJson - ізольована гілка (apply на рядок), бо
+    /// предикат залежить від комірок рядка. Значення в обох формах однакові (ReportViewSliceEquivalenceTests).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Форма_rv_наборова_а_з_предикатом_MatchJson_ізольований_apply_на_рядок()
+    {
+        var f = await BuildAsync(columnCount: 4, rowCount: 3, calculatedColumns: 2);
+        int methodologyId;
+        await using (var db = sql.CreateContext())
+        {
+            var methodology = new Ecr.Domain.Entities.Calculations.Methodology(
+                EcrCode.Create("FRM" + Guid.NewGuid().ToString("N")[..8]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "form" }));
+            db.Methodologies.Add(methodology);
+            await db.SaveChangesAsync();
+            methodologyId = methodology.Id;
+            var calc = await db.ColumnDefs.AsNoTracking()
+                .Where(c => c.TableDefId == f.Doc.TableDefId && c.DataType == CellDataType.Calculated)
+                .OrderBy(c => c.Id).ToListAsync();
+            db.CalculationBindings.Add(new CalculationBinding(f.Doc.TableDefId, calc[0].Id, methodologyId, "FA", "{}"));
+            await db.SaveChangesAsync();
+        }
+
+        await GenerateAsync(f);
+        var setBased = await ViewDefinitionAsync(f.View);
+        Assert.Contains("CROSS APPLY (SELECT r0.Id, r0.RowKey, r0.Ordinal, r0.PeriodKey", setBased, StringComparison.Ordinal);
+        Assert.Contains("INNER HASH JOIN (SELECT bb.Id", setBased, StringComparison.Ordinal);
+        Assert.DoesNotContain("cr.SourceRowKey = r.RowKey", setBased, StringComparison.Ordinal);
+
+        await using (var db = sql.CreateContext())
+        {
+            var calc = await db.ColumnDefs.AsNoTracking()
+                .Where(c => c.TableDefId == f.Doc.TableDefId && c.DataType == CellDataType.Calculated)
+                .OrderBy(c => c.Id).ToListAsync();
+            db.CalculationBindings.Add(new CalculationBinding(f.Doc.TableDefId, calc[1].Id, methodologyId, "FB",
+                $"{{\"{f.C2Id}\": \"x\"}}"));
+            await db.SaveChangesAsync();
+        }
+
+        await GenerateAsync(f);
+        var isolated = await ViewDefinitionAsync(f.View);
+        Assert.Contains("cr.SourceRowKey = r.RowKey", isolated, StringComparison.Ordinal);
+        Assert.DoesNotContain("CROSS APPLY (SELECT r0.Id", isolated, StringComparison.Ordinal);
+    }
+
+    /// <summary>Фактичний план запиту (<c>SET STATISTICS XML</c>) - для перевірки ФОРМИ плану, а не лише читань.</summary>
+    private async Task<string> PlanXmlAsync(string query)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandTimeout = 600;
+        command.CommandText = "SET STATISTICS XML ON; " + query;
+        await using var reader = await command.ExecuteReaderAsync();
+        var last = "";
+        do
+        {
+            while (await reader.ReadAsync())
+            {
+                if (reader.FieldCount == 1 && reader.GetName(0).Contains("Showplan", StringComparison.OrdinalIgnoreCase))
+                {
+                    last = reader.GetString(0);
+                }
+            }
+        }
+        while (await reader.NextResultAsync());
+        return last;
+    }
+
+    private async Task<string> ContentHashAsync(Fixture f)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandTimeout = 600;
+        command.CommandText = $"SELECT * FROM rpt.[{f.View}] WHERE _DocumentId = @d AND _PeriodKey = 202610 ORDER BY _RowOrdinal";
+        command.Parameters.AddWithValue("@d", f.Doc.DocumentId);
+        await using var reader = await command.ExecuteReaderAsync();
+        var text = new System.Text.StringBuilder();
+        while (await reader.ReadAsync())
+        {
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                if (!reader.GetName(i).StartsWith('_') || reader.GetName(i) == "_RowOrdinal")
+                {
+                    text.Append(reader.IsDBNull(i) ? "~" : Convert.ToString(reader.GetValue(i), System.Globalization.CultureInfo.InvariantCulture)).Append(';');
+                }
+            }
+
+            text.Append('\n');
+        }
+
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text.ToString())))[..16];
     }
 
     /// <summary>
@@ -722,17 +1048,21 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// P3 (до-Q17, лише фіксація): рядкова обчислювана комірка (ValueString, IsCalculated = 1) у колонці типу Formula -
-    /// вʼюха віддає NULL і ПРИ ВИМКНЕНОМУ прапорі (CASE типів у процедурі для 6/8 читає ValueNumeric). Тест фіксує факт,
-    /// щоб (б) не приписували Q-17; виправлення - окремий запис у WORK-QUEUE.
+    /// AN-147: рядкова обчислювана комірка (ValueString, IsCalculated = 1) у колонці Formula - числова колонка вʼюхи, як і
+    /// раніше, NULL (тип/значення не змінено), а колонка-супутник <c>&lt;Код&gt;_Text</c> віддає рядок; і при вимкненому, і
+    /// при увімкненому прапорі (обчислена власна комірка Formula не підміняється власником). Числовий результат -
+    /// навпаки: число в основній колонці, NULL у супутнику. Супутник - nvarchar і стоїть ОСТАННІМ у вʼюсі.
+    /// Мутація: прибрати <c>@selectText</c> у <c>05-rpt-views.sql</c> - тест червоний.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-10.2")]
-    public async Task Рядкове_значення_обчислюваної_колонки_NULL_у_вʼюсі_вже_без_прапора_до_Q17()
+    public async Task Рядкове_значення_обчислюваної_колонки_віддається_супутником_Text_а_число_не_змінюється()
     {
         var f = await BuildAsync();
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var anchor = await builder.AddPeriodInstanceAsync(f.Doc, new PeriodKey(202601));
         await using (var connection = new SqlConnection(sql.ConnectionString))
         {
             await connection.OpenAsync();
@@ -744,10 +1074,56 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
             await command.ExecuteNonQueryAsync();
         }
 
-        await GenerateAsync(f, routing: false);
-        Assert.Null(await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 0), f.Derived));
-        await GenerateAsync(f, routing: true);
-        Assert.Null(await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 0), f.Derived));
+        await PutCalcAsync(f, 202610, f.Doc.RowIds[1], f.DerivedId, 7m);
+        await PutCalcAsync(f, 202601, anchor.RowIds[0], f.DerivedId, 70m);
+        var text = f.Derived + "_Text";
+
+        foreach (var routing in new[] { false, true })
+        {
+            await GenerateAsync(f, routing);
+            Assert.Null(await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 0), f.Derived));
+            Assert.Equal("Sample J-0", await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 0), text));
+            Assert.Equal(7m, await ViewValueAsync(f, 202610, RowKeyOf(f.Doc, 1), f.Derived));
+            Assert.Null(await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 1), text));
+            Assert.Equal(70m, await ViewValueAsync(f, 202601, RowKeyOf(f.Doc, 0), f.Derived));
+            Assert.Null(await ViewObjectAsync(f, 202601, RowKeyOf(f.Doc, 0), text));
+
+            var types = await ViewColumnTypesAsync(f.View);
+            Assert.Contains(types, t => t.StartsWith(f.Derived + ":decimal:", StringComparison.Ordinal));
+            Assert.StartsWith(text + ":nvarchar:", types[^1], StringComparison.Ordinal);
+            Assert.Single(types, t => t.Contains("_Text:", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>AN-147: супутник лише для Formula/Calculated - введені колонки (рядкова, число) супутника не мають.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Супутник_Text_лише_для_Formula_і_Calculated()
+    {
+        var f = await BuildAsync();
+        await GenerateAsync(f);
+
+        var names = (await ViewColumnTypesAsync(f.View)).Select(t => t.Split(':')[0]).ToList();
+        Assert.Equal(new[] { f.Derived + "_Text" }, names.Where(n => n.EndsWith("_Text", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// AN-147: колізія імені - якщо в таблиці вже є колонка з кодом <c>&lt;Код&gt;_Text</c>, супутник для цієї колонки
+    /// ПРОПУСКАЄТЬСЯ, наявна колонка лишається як є (тип числа), вʼюха будується без помилки дублікатів.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Колізія_з_наявною_колонкою_Text_супутник_пропускається()
+    {
+        var f = await BuildAsync(collideText: true);
+        await GenerateAsync(f);
+        var types = await ViewColumnTypesAsync(f.View);
+        Assert.Single(types, t => t.StartsWith(f.Derived + "_Text:", StringComparison.Ordinal));
+        Assert.Contains(types, t => t.StartsWith(f.Derived + "_Text:decimal:", StringComparison.Ordinal));
     }
 
     [Fact]

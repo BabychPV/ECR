@@ -1,5 +1,7 @@
 ﻿// tests/Ecr.Infrastructure.Tests/Reporting/ReportViewSliceEquivalenceTests.cs
+using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -287,5 +289,275 @@ public sealed class ReportViewSliceEquivalenceTests(SqlServerFixture sql)
         }
 
         Assert.True(diffs.Count == 0, $"{diffs.Count} розбіжностей:\n" + string.Join('\n', diffs.Take(40)));
+    }
+
+    // ───────────────────────── Q-17.recalc: результат методології (колонка Calculated) ─────────────────────────
+
+    private const string RunStatusCompleted = "Completed";
+
+    private async Task<(int MethodologyId, int VersionId)> AddMethodologyAsync(string tag)
+    {
+        await using var db = sql.CreateContext();
+        var methodology = new Methodology(
+            EcrCode.Create($"RCV_{tag}"), new LocalizedText(new Dictionary<string, string> { ["en"] = tag }));
+        db.Methodologies.Add(methodology);
+        await db.SaveChangesAsync();
+
+        var version = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, Now);
+        db.MethodologyVersions.Add(version);
+        await db.SaveChangesAsync();
+        return (methodology.Id, version.Id);
+    }
+
+    private async Task<long> AddRunAsync(TestDocument doc, bool current)
+    {
+        await using var db = sql.CreateContext();
+        var run = new CalculationRun(doc.ProjectId, ViewPeriod, triggeredByUserId: 1, Now, doc.DocumentId);
+        db.CalculationRuns.Add(run);
+        await db.SaveChangesAsync();
+        run.Complete(RunStatusCompleted, Now, profileJson: null, errorMessage: null);
+        if (current)
+        {
+            run.MakeCurrent();
+        }
+        else
+        {
+            run.Supersede();
+        }
+
+        await db.SaveChangesAsync();
+        return run.Id;
+    }
+
+    private async Task AddResultAsync(
+        long runId, int versionId, TestDocument doc, int rowIndex, string output, decimal value, int unitId,
+        long? substance = null, long? instance = null)
+    {
+        await using var db = sql.CreateContext();
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var seq = connection.CreateCommand();
+        seq.CommandText = "SELECT NEXT VALUE FOR calc.CalculationResultSeq";
+        var id = (long)(await seq.ExecuteScalarAsync())!;
+
+        var result = new CalculationResult(runId, versionId, ViewPeriod, doc.DocumentId, RowKeyOf(doc, rowIndex), output, value, unitId);
+        typeof(Ecr.Domain.Abstractions.Entity<long>).GetProperty("Id")!.SetValue(result, id);
+        result.SetSubstance(substance);
+        result.SetTable(instance);
+        db.CalculationResults.Add(result);
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Q-17.recalc: колонка Calculated у вʼюхі == колонці у справжньому зрізі (слайс + <see cref="CalculatedCellOverlay"/>, тобто
+    /// те, що віддає GetTableSliceHandler) - за ОБОХ значень прапора. Покрито: проста прив'язка; кілька прив'язок на колонку
+    /// (виграє найбільший Id, що має значення); предикат MatchJson; різні речовини сумуються, розбіжні значення однієї
+    /// речовини - NULL; результат цього екземпляра точніший за результат без екземпляра, чужий екземпляр ігнорується;
+    /// результат неактуального прогону ігнорується; незвʼязана Calculated-колонка лишає матеріалізоване значення.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Колонка_Calculated_у_вʼюсі_дорівнює_результату_методології_у_зрізі(bool routing)
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(ViewPeriod, columnCount: 2, rowCount: 4,
+            layoutKind: TableLayoutKind.MonthsInColumns, monthColumns: 12);
+
+        var codes = new[] { "STRP", "CLA", "CLB", "CLC", "CLD", "CLE", "CLF", "CLG" };
+        await using (var db = sql.CreateContext())
+        {
+            var ordinal = 9000;
+            foreach (var code in codes)
+            {
+                db.ColumnDefs.Add(new ColumnDef(doc.TableDefId, EcrCode.Create(code + Guid.NewGuid().ToString("N")[..6]),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = code }), ordinal++,
+                    code == "STRP" ? CellDataType.String : CellDataType.Calculated));
+            }
+
+            await db.SaveChangesAsync();
+            var version = await db.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId);
+            version.Publish(publishedByUserId: 1, Now);
+            await db.SaveChangesAsync();
+        }
+
+        await using var read = sql.CreateContext();
+        var table = await read.TableDefs.SingleAsync(t => t.Id == doc.TableDefId);
+        var template = await read.Templates.SingleAsync(t => t.Id == doc.TemplateId);
+        var tv = await read.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId);
+        var view = System.Text.RegularExpressions.Regex.Replace(
+            $"v_{template.Code}_{doc.SheetCode}_{table.Code}_v{tv.Version}", "[^A-Za-z0-9_]", "_");
+        var extra = (await read.ColumnDefs.AsNoTracking().Where(c => c.TableDefId == doc.TableDefId && c.Ordinal >= 9000)
+            .OrderBy(c => c.Id).ToListAsync()).ToDictionary(c => codes[(int)(c.Ordinal - 9000)], c => c);
+        var unitId = await read.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
+
+        // Прив'язки: A - проста; B - дві (друга має більший Id); C - предикат; D - речовини; E - екземпляри; F - лише неактуальний прогін.
+        var mA = await AddMethodologyAsync("A" + Guid.NewGuid().ToString("N")[..6]);
+        var mB1 = await AddMethodologyAsync("B1" + Guid.NewGuid().ToString("N")[..6]);
+        var mB2 = await AddMethodologyAsync("B2" + Guid.NewGuid().ToString("N")[..6]);
+        var mC = await AddMethodologyAsync("C" + Guid.NewGuid().ToString("N")[..6]);
+        var mD = await AddMethodologyAsync("D" + Guid.NewGuid().ToString("N")[..6]);
+        var mE = await AddMethodologyAsync("E" + Guid.NewGuid().ToString("N")[..6]);
+        var mF = await AddMethodologyAsync("F" + Guid.NewGuid().ToString("N")[..6]);
+        await using (var db = sql.CreateContext())
+        {
+            var strId = extra["STRP"].Id;
+            db.CalculationBindings.AddRange(
+                new CalculationBinding(doc.TableDefId, extra["CLA"].Id, mA.MethodologyId, "OA", "{}"),
+                new CalculationBinding(doc.TableDefId, extra["CLB"].Id, mB1.MethodologyId, "OB", "{}"),
+                new CalculationBinding(doc.TableDefId, extra["CLB"].Id, mB2.MethodologyId, "OB", "{ }"),
+                new CalculationBinding(doc.TableDefId, extra["CLC"].Id, mC.MethodologyId, "OC", $"{{\"{strId}\": \"s1\"}}"),
+                new CalculationBinding(doc.TableDefId, extra["CLD"].Id, mD.MethodologyId, "OD", "{}"),
+                new CalculationBinding(doc.TableDefId, extra["CLE"].Id, mE.MethodologyId, "OE", "{}"),
+                new CalculationBinding(doc.TableDefId, extra["CLF"].Id, mF.MethodologyId, "OF", "{}"));
+            await db.SaveChangesAsync();
+        }
+
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            var strCol = new Col(extra["STRP"].Id, "STRP", CellDataType.String, false, null);
+            string[] strings = ["s1", "other", "s1", "s1"];
+            for (var i = 0; i < 4; i++)
+            {
+                await InsertAsync(connection, ViewPeriod, doc.RowIds[i], strCol, doc.TableDefId, "ValueString", strings[i], false, false);
+            }
+
+            // CLG без прив'язки: матеріалізоване значення слайс і вʼюха віддають однаково.
+            await InsertAsync(connection, ViewPeriod, doc.RowIds[0],
+                new Col(extra["CLG"].Id, "CLG", CellDataType.Calculated, false, null), doc.TableDefId, "ValueNumeric", 9.5m, true, false);
+        }
+
+        var current = await AddRunAsync(doc, current: true);
+        var old = await AddRunAsync(doc, current: false);
+        long foreign = 987_654_321;
+        await AddResultAsync(current, mA.VersionId, doc, 0, "OA", 5.5m, unitId);
+        await AddResultAsync(current, mA.VersionId, doc, 2, "OA", 1.25m, unitId);
+        await AddResultAsync(old, mA.VersionId, doc, 3, "OA", 99m, unitId);
+        await AddResultAsync(current, mB1.VersionId, doc, 0, "OB", 3m, unitId);
+        await AddResultAsync(current, mB2.VersionId, doc, 0, "OB", 7m, unitId);
+        await AddResultAsync(current, mB1.VersionId, doc, 2, "OB", 3m, unitId);
+        await AddResultAsync(current, mC.VersionId, doc, 0, "OC", 2m, unitId);
+        await AddResultAsync(current, mC.VersionId, doc, 1, "OC", 2m, unitId);
+        await AddResultAsync(current, mC.VersionId, doc, 2, "OC", 4m, unitId);
+        await AddResultAsync(current, mD.VersionId, doc, 0, "OD", 1.5m, unitId, substance: null);
+        await AddResultAsync(current, mD.VersionId, doc, 0, "OD", 2m, unitId, substance: 1);
+        await AddResultAsync(current, mD.VersionId, doc, 1, "OD", 1.5m, unitId, substance: 1);
+        await AddResultAsync(current, mD.VersionId, doc, 1, "OD", 1.6m, unitId, substance: 1);
+        await AddResultAsync(current, mE.VersionId, doc, 0, "OE", 4m, unitId, instance: doc.TableInstanceId);
+        await AddResultAsync(current, mE.VersionId, doc, 0, "OE", 9m, unitId);
+        await AddResultAsync(current, mE.VersionId, doc, 1, "OE", 5m, unitId, instance: foreign);
+        await AddResultAsync(current, mE.VersionId, doc, 2, "OE", 9m, unitId);
+        await AddResultAsync(old, mF.VersionId, doc, 0, "OF", 8m, unitId);
+
+        await GenerateAsync(doc.TemplateVersionId, routing);
+        var viewRows = await ReadViewAsync(doc, view);
+
+        // Еталон: справжній слайс + накладення результатів (рівно те, що робить GetTableSliceHandler).
+        await using var db2 = sql.CreateContext();
+        var physical = routing
+            ? await SliceAsync(doc)
+            : [.. await new NormalizedCellStore(db2).ReadSliceAsync(doc.TableInstanceId, new PeriodKey(ViewPeriod), CancellationToken.None)];
+        var rowIds = doc.RowIds.Select((id, i) => (key: RowKeyOf(doc, i), id)).ToDictionary(x => x.key, x => x.id);
+        var calcIds = extra.Where(kv => kv.Key != "STRP").Select(kv => kv.Value.Id).ToHashSet();
+        var overlaid = await new CalculatedCellOverlay(new MethodologyStore(db2), new CalculationResultStore(db2, new TestClock(Now)))
+            .ApplyAsync(doc.DocumentId, ViewPeriod,
+                [new OverlayTable(doc.TableInstanceId, doc.TableDefId, rowIds, physical, calcIds)], CancellationToken.None);
+        var slice = overlaid[doc.TableInstanceId];
+
+        var diffs = new List<string>();
+        var nonNull = 0;
+        for (var i = 0; i < 4; i++)
+        {
+            var rowKey = RowKeyOf(doc, i);
+            foreach (var (code, column) in extra.Where(kv => kv.Key != "STRP"))
+            {
+                var cell = slice.SingleOrDefault(c => c.Address.TableRowId == doc.RowIds[i] && c.Address.ColumnDefId == column.Id);
+                var expected = cell?.Value.ValueNumeric;
+                var actual = viewRows[rowKey][column.Code];
+                nonNull += expected is null ? 0 : 1;
+                if (!Same(expected, actual))
+                {
+                    diffs.Add($"{code} {rowKey}: зріз={(expected is { } e ? e.ToString(System.Globalization.CultureInfo.InvariantCulture) : "NULL")} вʼюха={actual ?? "NULL"}");
+                }
+            }
+        }
+
+        Assert.True(nonNull >= 9, $"тест порожній: у зрізі лише {nonNull} значень Calculated");
+        Assert.True(diffs.Count == 0, $"routing={routing}: {diffs.Count} розбіжностей:\n" + string.Join('\n', diffs));
+    }
+
+    /// <summary>
+    /// AN-147 (семантика супутника): <c>&lt;Код&gt;_Text</c> колонки Calculated = ValueString ЛИШЕ коли ПІДСУМКОВЕ число колонки
+    /// (результат методології, інакше матеріалізоване) порожнє. Методологія дала число, а в doc.CellValue лежить рядок -
+    /// супутник NULL (число лишається числом); немає ні результату, ні числа - рядок у супутнику. Прапор вимкнений і увімкнений.
+    /// Мутація: у <c>@selectTextRv</c> замінити COALESCE(rv, ValueNumeric) на ValueNumeric - тест червоний.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Супутник_Text_Calculated_порожній_коли_методологія_дала_число(bool routing)
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(ViewPeriod, columnCount: 2, rowCount: 3,
+            layoutKind: TableLayoutKind.MonthsInColumns, monthColumns: 12);
+
+        string calcCode;
+        await using (var db = sql.CreateContext())
+        {
+            calcCode = "CLT" + Guid.NewGuid().ToString("N")[..6];
+            db.ColumnDefs.Add(new ColumnDef(doc.TableDefId, EcrCode.Create(calcCode),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "CLT" }), 9000, CellDataType.Calculated));
+            await db.SaveChangesAsync();
+            var version = await db.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId);
+            version.Publish(publishedByUserId: 1, Now);
+            await db.SaveChangesAsync();
+        }
+
+        await using var read = sql.CreateContext();
+        var table = await read.TableDefs.SingleAsync(t => t.Id == doc.TableDefId);
+        var template = await read.Templates.SingleAsync(t => t.Id == doc.TemplateId);
+        var tv = await read.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId);
+        var view = System.Text.RegularExpressions.Regex.Replace(
+            $"v_{template.Code}_{doc.SheetCode}_{table.Code}_v{tv.Version}", "[^A-Za-z0-9_]", "_");
+        var column = await read.ColumnDefs.AsNoTracking().SingleAsync(c => c.TableDefId == doc.TableDefId && c.Ordinal == 9000);
+        var unitId = await read.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
+
+        var m = await AddMethodologyAsync("T" + Guid.NewGuid().ToString("N")[..6]);
+        await using (var db = sql.CreateContext())
+        {
+            db.CalculationBindings.Add(new CalculationBinding(doc.TableDefId, column.Id, m.MethodologyId, "OT", "{}"));
+            await db.SaveChangesAsync();
+        }
+
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            var col = new Col(column.Id, calcCode, CellDataType.Calculated, false, null);
+            // Рядки 0 і 1: рядок у ValueString; рядок 0 має результат методології, рядок 1 - ні. Рядок 2: результат без рядка.
+            await InsertAsync(connection, ViewPeriod, doc.RowIds[0], col, doc.TableDefId, "ValueString", "Sample J-0", true, false);
+            await InsertAsync(connection, ViewPeriod, doc.RowIds[1], col, doc.TableDefId, "ValueString", "Sample J-1", true, false);
+        }
+
+        var run = await AddRunAsync(doc, current: true);
+        await AddResultAsync(run, m.VersionId, doc, 0, "OT", 5.5m, unitId);
+        await AddResultAsync(run, m.VersionId, doc, 2, "OT", 2m, unitId);
+
+        await GenerateAsync(doc.TemplateVersionId, routing);
+        var rows = await ReadViewAsync(doc, view);
+        var text = calcCode + "_Text";
+
+        Assert.Equal(5.5m, Convert.ToDecimal(rows[RowKeyOf(doc, 0)][calcCode], System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Null(rows[RowKeyOf(doc, 0)][text]);
+        Assert.Null(rows[RowKeyOf(doc, 1)][calcCode]);
+        Assert.Equal("Sample J-1", rows[RowKeyOf(doc, 1)][text]);
+        Assert.Equal(2m, Convert.ToDecimal(rows[RowKeyOf(doc, 2)][calcCode], System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Null(rows[RowKeyOf(doc, 2)][text]);
     }
 }
