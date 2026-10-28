@@ -402,7 +402,7 @@
  * (`TableSlotMinHeight`) знімає проп `fullScreen` у `SheetTables`, без CSS.
  */
 .ecr-doc-work--full revo-grid {
-  height: calc(100dvh - 100px) !important;
+  height: calc(100dvh - 150px) !important;
   min-height: 240px;
 }
 

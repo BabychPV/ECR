@@ -945,17 +945,26 @@ export function DocumentPage(): JSX.Element {
                   readOnly={gridReadOnly}
                   sheetState={state}
                   tables={active.tables}
+                  // ✎ ui-sheet-bottom: смуга аркушів — у нижньому рядку панелі таблиці, поруч із її прокруткою.
+                  bottomBar={(scroll) => (
+                    <SheetStrip sheets={sheetItemsOf(sheets, document.sheetStates)} activeCode={active.code} onSelect={setSheet}>
+                      {scroll}
+                    </SheetStrip>
+                  )}
                 />
               )}
             </Stack>
           </Tabs.Panel>
         )}
 
-        <SheetStrip
-          sheets={sheets.map((s) => ({ code: s.code, name: s.name, state: document.sheetStates[s.code] ?? 'Draft' }))}
-          activeCode={active?.code}
-          onSelect={setSheet}
-        />
+        {/* Поки чанк сітки вантажиться (або аркуша немає) — смуга окремо, як раніше. */}
+        {(gridModule.component === null || active === undefined) && (
+          <SheetStrip
+            sheets={sheetItemsOf(sheets, document.sheetStates)}
+            activeCode={active?.code}
+            onSelect={setSheet}
+          />
+        )}
       </Tabs>
 
       {/* ⚠ Без аркушів панелі немає, а відмова чанка має лишатися видимою —
@@ -999,6 +1008,13 @@ function isNotValidatedYet(error: unknown): boolean {
 }
 
 /** Аркуш із його таблицями. */
+function sheetItemsOf(
+  sheets: readonly SheetGroup[],
+  states: Readonly<Record<string, string>>,
+): { code: string; name: string; state: string }[] {
+  return sheets.map((s) => ({ code: s.code, name: s.name, state: states[s.code] ?? 'Draft' }));
+}
+
 interface SheetGroup {
   sheetDefId: number;
   code: string;
