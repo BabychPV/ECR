@@ -473,6 +473,10 @@ OUTER APPLY (SELECT ' + @aggList + N' FROM '
         -- рядка й набором не виражається: якщо в таблиці Є активна прив'язка з предикатом (на момент генерації), лишається
         -- посередній apply на рядок нижче (ізольована гілка); прив'язка з предикатом, додана ПІСЛЯ генерації, набором ігнорується
         -- до перегенерації (старт застосунку і публікація шаблону перегенерують вʼюхи). Ціна: +7 таблиць у запиті.
+        -- Q-17.rvshape: runs-driven read. A result lives in the partition of its RUN's period (CalculationResultStore: periodKey = run.PeriodKey),
+        -- so runs are restricted to ti.PeriodKey and the join ru -> cr is forced to LOOP: the optimizer then seeks IX_CalculationResult_DocRun on all
+        -- THREE key columns (PeriodKey, DocumentId, CalculationRunId) and reads only the rows of the Current runs. Without the hint the plan seeks
+        -- (PeriodKey, DocumentId) and filters the run above the seek, i.e. reads every Superseded run of the document-period (Land: 4.47 M rows).
         IF @rvIds <> N'' AND @rvPred = 0 AND @n + @extra + 7 <= 250
         BEGIN
             SET @rowApply = N'
@@ -492,14 +496,14 @@ CROSS APPLY (SELECT r0.Id, r0.RowKey, r0.Ordinal, r0.PeriodKey' + @rvExprs + N'
                                     FROM (SELECT cr.SourceRowKey, b.Id AS BindingId, b.ColumnDefId, cr.SubstanceEntryId, cr.Value, cr.UnitId,
                                                  CASE WHEN cr.TableInstanceId IS NULL THEN 0 ELSE 1 END AS Own
                                           FROM calc.CalculationRun AS ru
-                                          JOIN calc.CalculationResult AS cr ON cr.PeriodKey = ti.PeriodKey AND cr.DocumentId = d.Id AND cr.CalculationRunId = ru.Id
+                                          INNER LOOP JOIN calc.CalculationResult AS cr ON cr.PeriodKey = ti.PeriodKey AND cr.DocumentId = d.Id AND cr.CalculationRunId = ru.Id
                                           INNER HASH JOIN (SELECT bb.Id, bb.ColumnDefId, bb.OutputCode, mv.Id AS MvId
                                                              FROM cfg.CalculationBinding AS bb
                                                              JOIN calc.MethodologyVersion AS mv ON mv.MethodologyId = bb.MethodologyId
                                                             WHERE bb.IsActive = 1 AND bb.TableDefId = ' + CAST(@id AS nvarchar(10)) + N' AND bb.ColumnDefId IN (' + STUFF(@rvIds, 1, 2, N'') + N')
                                                               AND REPLACE(bb.MatchJson, CHAR(32), N'''') = N''{}'') AS b
                                                ON b.MvId = cr.MethodologyVersionId AND b.OutputCode = cr.OutputCode
-                                          WHERE ru.ProjectId = d.ProjectId AND ru.Status = N''Current''
+                                          WHERE ru.ProjectId = d.ProjectId AND ru.Status = N''Current'' AND ru.PeriodKey = ti.PeriodKey
                                             AND (ru.DocumentId = d.Id
                                                  OR (ru.DocumentId IS NULL AND NOT EXISTS (SELECT 1 FROM calc.CalculationRun AS ru2
                                                       WHERE ru2.ProjectId = d.ProjectId AND ru2.Status = N''Current''
@@ -532,7 +536,7 @@ OUTER APPLY (SELECT ' + STUFF(@rvAgg, 1, 2, N'') + N'
                                      JOIN calc.CalculationResult AS cr ON cr.PeriodKey = ti.PeriodKey AND cr.DocumentId = d.Id
                                           AND cr.MethodologyVersionId = mv.Id AND cr.OutputCode = b.OutputCode AND cr.SourceRowKey = r.RowKey
                                      JOIN (SELECT ru.Id FROM calc.CalculationRun AS ru
-                                            WHERE ru.ProjectId = d.ProjectId AND ru.Status = N''Current''
+                                            WHERE ru.ProjectId = d.ProjectId AND ru.Status = N''Current'' AND ru.PeriodKey = ti.PeriodKey
                                               AND (ru.DocumentId = d.Id
                                                    OR (ru.DocumentId IS NULL AND NOT EXISTS (SELECT 1 FROM calc.CalculationRun AS ru2
                                                         WHERE ru2.ProjectId = d.ProjectId AND ru2.Status = N''Current''

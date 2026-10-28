@@ -309,10 +309,10 @@ public sealed class ReportViewSliceEquivalenceTests(SqlServerFixture sql)
         return (methodology.Id, version.Id);
     }
 
-    private async Task<long> AddRunAsync(TestDocument doc, bool current)
+    private async Task<long> AddRunAsync(TestDocument doc, bool current, int period = ViewPeriod, bool projectLevel = false)
     {
         await using var db = sql.CreateContext();
-        var run = new CalculationRun(doc.ProjectId, ViewPeriod, triggeredByUserId: 1, Now, doc.DocumentId);
+        var run = new CalculationRun(doc.ProjectId, period, triggeredByUserId: 1, Now, projectLevel ? null : doc.DocumentId);
         db.CalculationRuns.Add(run);
         await db.SaveChangesAsync();
         run.Complete(RunStatusCompleted, Now, profileJson: null, errorMessage: null);
@@ -331,7 +331,7 @@ public sealed class ReportViewSliceEquivalenceTests(SqlServerFixture sql)
 
     private async Task AddResultAsync(
         long runId, int versionId, TestDocument doc, int rowIndex, string output, decimal value, int unitId,
-        long? substance = null, long? instance = null)
+        long? substance = null, long? instance = null, int period = ViewPeriod)
     {
         await using var db = sql.CreateContext();
         await using var connection = new SqlConnection(sql.ConnectionString);
@@ -340,7 +340,7 @@ public sealed class ReportViewSliceEquivalenceTests(SqlServerFixture sql)
         seq.CommandText = "SELECT NEXT VALUE FOR calc.CalculationResultSeq";
         var id = (long)(await seq.ExecuteScalarAsync())!;
 
-        var result = new CalculationResult(runId, versionId, ViewPeriod, doc.DocumentId, RowKeyOf(doc, rowIndex), output, value, unitId);
+        var result = new CalculationResult(runId, versionId, period, doc.DocumentId, RowKeyOf(doc, rowIndex), output, value, unitId);
         typeof(Ecr.Domain.Abstractions.Entity<long>).GetProperty("Id")!.SetValue(result, id);
         result.SetSubstance(substance);
         result.SetTable(instance);
@@ -488,6 +488,255 @@ public sealed class ReportViewSliceEquivalenceTests(SqlServerFixture sql)
 
         Assert.True(nonNull >= 9, $"тест порожній: у зрізі лише {nonNull} значень Calculated");
         Assert.True(diffs.Count == 0, $"routing={routing}: {diffs.Count} розбіжностей:\n" + string.Join('\n', diffs));
+    }
+
+    private async Task<List<CellRecord>> SliceOfAsync(long instanceId, int period, bool routing)
+    {
+        await using var db = sql.CreateContext();
+        if (!routing)
+        {
+            return [.. await new NormalizedCellStore(db).ReadSliceAsync(instanceId, new PeriodKey(period), CancellationToken.None)];
+        }
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Collection:MonthColumnRouting"] = "true" })
+            .Build();
+        using var memory = new Microsoft.Extensions.Caching.Memory.MemoryCache(
+            new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+        var store = new MonthRoutedCellStore(
+            new NormalizedCellStore(db), new MonthColumnRouter(db, config),
+            new Ecr.Infrastructure.Caching.MetadataCache(memory, db), db);
+        return [.. await store.ReadSliceAsync(instanceId, new PeriodKey(period), CancellationToken.None)];
+    }
+
+    private async Task<string> DefinitionAsync(string view)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT OBJECT_DEFINITION(OBJECT_ID(@n))";
+        command.Parameters.AddWithValue("@n", $"rpt.[{view}]");
+        return (string)(await command.ExecuteScalarAsync())!;
+    }
+
+    private async Task<int> ExecScalarAsync(string text)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandTimeout = 120;
+        command.CommandText = text;
+        return Convert.ToInt32(await command.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Q-17.rvseek: читання rv "за прогонами" (<c>ru.PeriodKey = ti.PeriodKey</c> + <c>INNER LOOP JOIN</c> до результатів) змінює ПЛАН, а не
+    /// семантику. Для обох гілок rv - наборової (прив'язки без предиката) і гілки з предикатом MatchJson (є активна прив'язка з
+    /// предикатом на момент генерації), за обох значень прапора маршрутизації місяців: (1) текст вʼюхи містить саме очікувану гілку
+    /// (наявність фільтра періоду прогону і підказки LOOP порахована); (2) колонки Calculated вʼюхи == справжній зріз + накладення
+    /// (<see cref="CalculatedCellOverlay"/>) для двох екземплярів: період із прогоном документа (неактуальний прогін і проєктний
+    /// прогін того ж періоду ігноруються) і період без прогону документа (діє проєктний прогін, запасний варіант); (3) СТАРИЙ вигляд
+    /// (той самий текст без фільтра періоду й підказки) і НОВИЙ дають однакові набори (EXCEPT в обидва боки = 0).
+    /// Мутація: прибрати <c>AND ru.PeriodKey = ti.PeriodKey</c> з обох гілок - частина (1) червона; змінити період прогону у
+    /// проєктного прогону на ViewPeriod - (2) червона.
+    /// </summary>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Читання_rv_за_прогонами_не_змінює_результат_для_обох_гілок_і_обох_значень_прапора(bool routing, bool predicate)
+    {
+        const int Other = 202611;
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(ViewPeriod, columnCount: 2, rowCount: 4,
+            layoutKind: TableLayoutKind.MonthsInColumns, monthColumns: 12);
+        var codes = new[] { "STRP", "CLA", "CLB", "CLC" };
+        await using (var db = sql.CreateContext())
+        {
+            var ordinal = 9000;
+            foreach (var code in codes)
+            {
+                db.ColumnDefs.Add(new ColumnDef(doc.TableDefId, EcrCode.Create(code + Guid.NewGuid().ToString("N")[..6]),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = code }), ordinal++,
+                    code == "STRP" ? CellDataType.String : CellDataType.Calculated));
+            }
+
+            await db.SaveChangesAsync();
+            var version = await db.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId);
+            version.Publish(publishedByUserId: 1, Now);
+            await db.SaveChangesAsync();
+        }
+
+        var other = await builder.AddPeriodInstanceAsync(doc, new PeriodKey(Other));
+
+        await using var read = sql.CreateContext();
+        var table = await read.TableDefs.SingleAsync(t => t.Id == doc.TableDefId);
+        var template = await read.Templates.SingleAsync(t => t.Id == doc.TemplateId);
+        var tv = await read.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId);
+        var view = System.Text.RegularExpressions.Regex.Replace(
+            $"v_{template.Code}_{doc.SheetCode}_{table.Code}_v{tv.Version}", "[^A-Za-z0-9_]", "_");
+        var extra = (await read.ColumnDefs.AsNoTracking().Where(c => c.TableDefId == doc.TableDefId && c.Ordinal >= 9000)
+            .OrderBy(c => c.Id).ToListAsync()).ToDictionary(c => codes[(int)(c.Ordinal - 9000)], c => c);
+        var unitId = await read.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
+
+        var mA = await AddMethodologyAsync("A" + Guid.NewGuid().ToString("N")[..6]);
+        var mB1 = await AddMethodologyAsync("B1" + Guid.NewGuid().ToString("N")[..6]);
+        var mB2 = await AddMethodologyAsync("B2" + Guid.NewGuid().ToString("N")[..6]);
+        var mC = await AddMethodologyAsync("C" + Guid.NewGuid().ToString("N")[..6]);
+        await using (var db = sql.CreateContext())
+        {
+            var strId = extra["STRP"].Id;
+            db.CalculationBindings.AddRange(
+                new CalculationBinding(doc.TableDefId, extra["CLA"].Id, mA.MethodologyId, "OA", "{}"),
+                new CalculationBinding(doc.TableDefId, extra["CLB"].Id, mB1.MethodologyId, "OB", "{}"),
+                new CalculationBinding(doc.TableDefId, extra["CLB"].Id, mB2.MethodologyId, "OB", "{ }"),
+                new CalculationBinding(doc.TableDefId, extra["CLC"].Id, mC.MethodologyId, "OC",
+                    predicate ? $"{{\"{strId}\": \"s1\"}}" : "{}"));
+            await db.SaveChangesAsync();
+        }
+
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            var strCol = new Col(extra["STRP"].Id, "STRP", CellDataType.String, false, null);
+            string[] strings = ["s1", "other", "s1", "s1"];
+            for (var i = 0; i < 4; i++)
+            {
+                await InsertAsync(connection, ViewPeriod, doc.RowIds[i], strCol, doc.TableDefId, "ValueString", strings[i], false, false);
+                await InsertAsync(connection, Other, other.RowIds[i], strCol, doc.TableDefId, "ValueString", strings[i], false, false);
+            }
+        }
+
+        // 202610: актуальний прогін документа; неактуальний (ігнор); проєктний актуальний того ж періоду (ігнор: є прогін документа).
+        var cur = await AddRunAsync(doc, current: true);
+        var old = await AddRunAsync(doc, current: false);
+        var proj10 = await AddRunAsync(doc, current: true, projectLevel: true);
+        // 202611: прогону документа немає - діє проєктний актуальний; неактуальний прогін документа (ігнор). 202612: проєктний (без екземпляра).
+        var proj11 = await AddRunAsync(doc, current: true, period: Other, projectLevel: true);
+        var old11 = await AddRunAsync(doc, current: false, period: Other);
+        var proj12 = await AddRunAsync(doc, current: true, period: 202612, projectLevel: true);
+
+        await AddResultAsync(cur, mA.VersionId, doc, 0, "OA", 5.5m, unitId);
+        await AddResultAsync(cur, mA.VersionId, doc, 2, "OA", 1.25m, unitId);
+        await AddResultAsync(old, mA.VersionId, doc, 3, "OA", 99m, unitId);
+        await AddResultAsync(proj10, mA.VersionId, doc, 1, "OA", 55m, unitId);
+        await AddResultAsync(cur, mB1.VersionId, doc, 0, "OB", 3m, unitId);
+        await AddResultAsync(cur, mB2.VersionId, doc, 0, "OB", 7m, unitId);
+        await AddResultAsync(cur, mB1.VersionId, doc, 2, "OB", 3m, unitId);
+        await AddResultAsync(cur, mC.VersionId, doc, 0, "OC", 2m, unitId);
+        await AddResultAsync(cur, mC.VersionId, doc, 1, "OC", 2m, unitId);
+        await AddResultAsync(cur, mC.VersionId, doc, 2, "OC", 4m, unitId);
+        await AddResultAsync(proj11, mA.VersionId, doc, 0, "OA", 3m, unitId, period: Other);
+        await AddResultAsync(proj11, mB1.VersionId, doc, 1, "OB", 4m, unitId, period: Other);
+        await AddResultAsync(proj11, mC.VersionId, doc, 0, "OC", 6m, unitId, period: Other);
+        await AddResultAsync(proj11, mC.VersionId, doc, 1, "OC", 8m, unitId, period: Other);
+        await AddResultAsync(old11, mA.VersionId, doc, 2, "OA", 77m, unitId, period: Other);
+        await AddResultAsync(proj12, mA.VersionId, doc, 0, "OA", 1m, unitId, period: 202612);
+
+        var oldView = view + "_rvold";
+        try
+        {
+            await GenerateAsync(doc.TemplateVersionId, routing);
+            var text = await DefinitionAsync(view);
+
+            // (1) гілка справді згенерована: наборова має підказку LOOP і фільтр періоду прогону; предикатна - лише фільтр.
+            Assert.Contains("ru.PeriodKey = ti.PeriodKey", text, StringComparison.Ordinal);
+            Assert.Equal(predicate ? 0 : 1, System.Text.RegularExpressions.Regex.Count(text, "INNER LOOP JOIN calc.CalculationResult"));
+            Assert.Equal(predicate, text.Contains("ISJSON(b.MatchJson)", StringComparison.Ordinal));
+            Assert.Equal(predicate ? 0 : 1, System.Text.RegularExpressions.Regex.Count(text, "LEFT HASH JOIN \\(SELECT q.SourceRowKey"));
+
+            // (3) старий вигляд = той самий текст без фільтра періоду прогону й без підказки.
+            var oldText = text
+                .Replace(" AND ru.PeriodKey = ti.PeriodKey", "", StringComparison.Ordinal)
+                .Replace("INNER LOOP JOIN calc.CalculationResult", "JOIN calc.CalculationResult", StringComparison.Ordinal);
+            Assert.NotEqual(text, oldText);
+            oldText = System.Text.RegularExpressions.Regex.Replace(
+                oldText, @"^\s*(CREATE|ALTER)\s+VIEW\s+\S+", $"CREATE VIEW rpt.[{oldView}]", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            await ExecScalarAsync($"IF OBJECT_ID(N'rpt.[{oldView}]') IS NOT NULL DROP VIEW rpt.[{oldView}]; SELECT 0");
+            await using (var connection = new SqlConnection(sql.ConnectionString))
+            {
+                await connection.OpenAsync();
+                await using var create = connection.CreateCommand();
+                create.CommandText = oldText;
+                await create.ExecuteNonQueryAsync();
+            }
+
+            var rows = await ExecScalarAsync($"SELECT COUNT(*) FROM rpt.[{view}] WHERE _DocumentId = {doc.DocumentId}");
+            Assert.Equal(8, rows);
+            Assert.Equal(rows, await ExecScalarAsync($"SELECT COUNT(*) FROM rpt.[{oldView}] WHERE _DocumentId = {doc.DocumentId}"));
+            Assert.Equal(0, await ExecScalarAsync(
+                $"SELECT COUNT(*) FROM (SELECT * FROM rpt.[{view}] EXCEPT SELECT * FROM rpt.[{oldView}]) AS x"));
+            Assert.Equal(0, await ExecScalarAsync(
+                $"SELECT COUNT(*) FROM (SELECT * FROM rpt.[{oldView}] EXCEPT SELECT * FROM rpt.[{view}]) AS x"));
+
+            // (2) еталон: справжній зріз + накладення результатів для обох екземплярів.
+            var calcIds = extra.Where(kv => kv.Key != "STRP").Select(kv => kv.Value.Id).ToHashSet();
+            var diffs = new List<string>();
+            var nonNull = 0;
+            foreach (var (period, instanceId, rowIds) in new[]
+                     {
+                         (ViewPeriod, doc.TableInstanceId, (IReadOnlyList<long>)doc.RowIds),
+                         (Other, other.TableInstanceId, other.RowIds),
+                     })
+            {
+                var viewRows = await ReadViewPeriodAsync(doc, view, period);
+                var physical = await SliceOfAsync(instanceId, period, routing);
+                await using var db2 = sql.CreateContext();
+                var overlaid = await new CalculatedCellOverlay(new MethodologyStore(db2), new CalculationResultStore(db2, new TestClock(Now)))
+                    .ApplyAsync(doc.DocumentId, period,
+                        [new OverlayTable(instanceId, doc.TableDefId, rowIds.Select((id, i) => (key: RowKeyOf(doc, i), id)).ToDictionary(x => x.key, x => x.id),
+                            physical, calcIds)], CancellationToken.None);
+                var slice = overlaid[instanceId];
+                for (var i = 0; i < 4; i++)
+                {
+                    foreach (var (code, column) in extra.Where(kv => kv.Key != "STRP"))
+                    {
+                        var cell = slice.SingleOrDefault(c => c.Address.TableRowId == rowIds[i] && c.Address.ColumnDefId == column.Id);
+                        var expected = cell?.Value.ValueNumeric;
+                        var actual = viewRows[RowKeyOf(doc, i)][column.Code];
+                        nonNull += expected is null ? 0 : 1;
+                        if (!Same(expected, actual))
+                        {
+                            diffs.Add($"{period} {code} {RowKeyOf(doc, i)}: зріз={expected?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "NULL"} вʼюха={actual ?? "NULL"}");
+                        }
+                    }
+                }
+            }
+
+            Assert.True(nonNull >= 8, $"тест порожній: у зрізі лише {nonNull} значень Calculated");
+            Assert.True(diffs.Count == 0, $"routing={routing} predicate={predicate}: {diffs.Count} розбіжностей:\n" + string.Join('\n', diffs));
+        }
+        finally
+        {
+            await ExecScalarAsync($"IF OBJECT_ID(N'rpt.[{oldView}]') IS NOT NULL DROP VIEW rpt.[{oldView}]; SELECT 0");
+        }
+    }
+
+    private async Task<Dictionary<string, Dictionary<string, object?>>> ReadViewPeriodAsync(TestDocument doc, string view, int period)
+    {
+        var result = new Dictionary<string, Dictionary<string, object?>>();
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT * FROM rpt.[{view}] WHERE _DocumentId = @d AND _PeriodKey = {period}";
+        command.Parameters.AddWithValue("@d", doc.DocumentId);
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var row = new Dictionary<string, object?>();
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+            }
+
+            result[(string)row["_RowKey"]!] = row;
+        }
+
+        return result;
     }
 
     /// <summary>
