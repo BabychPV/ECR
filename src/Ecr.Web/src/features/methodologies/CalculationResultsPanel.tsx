@@ -92,8 +92,7 @@ export function CalculationResultsPanel({
   const [choice, setChoice] = useState<boolean | null>(readCollapsed);
   const collapsed = choice ?? true;
   // Лічильник у заголовку — лише після першого розгортання (рішення координатора): у згорнутому стані заголовок
-  // без числа. ⚠ Ключ запиту спільний з бейджем «результати застаріли» в шапці документа (`useCalculationsStale`):
-  // якщо той уже завантажив дані, вони є в кеші, але панель їх у згорнутому заголовку не показує.
+  // без числа (навіть якщо дані вже є в кеші, наприклад після перерахунку чи імпорту).
   const [opened, setOpened] = useState(!collapsed);
 
   // ⛔ F-02 (четвертий раунд UX): ключ — ПІД префіксом `['document', id,
