@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import { GridHScroll, GridScrollSelector, mapScroll, spacerWidth } from '../GridHScroll';
 
@@ -143,5 +143,26 @@ describe('GridHScroll: синхронізація scrollLeft', () => {
   it('селектор штатного скролу — той, що в RevoGrid', () => {
     expect(GridScrollSelector).toBe('revogr-scroll-virtual.horizontal');
     expect(host.querySelector(GridScrollSelector)).toBe(source);
+  });
+  it('після потягнутої смуги подію scroll на сітці повторено (RevoGrid відкидає ранню, < 10 мс після колеса)', () => {
+    vi.useFakeTimers();
+    const track = show();
+    let seen = 0;
+    source.addEventListener('scroll', () => {
+      seen += 1;
+    });
+
+    act(() => {
+      track.scrollLeft = 100;
+      track.dispatchEvent(new Event('scroll'));
+    });
+    expect(seen).toBe(0);
+
+    act(() => {
+      vi.advanceTimersByTime(50);
+    });
+    expect(seen).toBe(1);
+    expect(source.scrollLeft).toBe(500);
+    vi.useRealTimers();
   });
 });

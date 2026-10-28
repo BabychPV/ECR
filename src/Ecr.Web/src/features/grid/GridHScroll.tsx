@@ -50,6 +50,8 @@ export function GridHScroll({ resolveHost, container, watch }: GridHScrollProps)
     let waiting: MutationObserver | null = null;
 
     const attach = (source: HTMLElement): (() => void) => {
+      let nudge = 0;
+
       const ranges = (): { grid: number; track: number } => ({
         grid: source.scrollWidth - source.clientWidth,
         track: trackEl.scrollWidth - trackEl.clientWidth,
@@ -86,6 +88,14 @@ export function GridHScroll({ resolveHost, container, watch }: GridHScrollProps)
         const target = mapScroll(trackEl.scrollLeft, own, grid);
         if (Math.abs(source.scrollLeft - target) < 0.5) return;
         source.scrollLeft = target;
+        // ⚠ RevoGrid відкидає нативну подію scroll, що прийшла за < 10 мс після його власної прокрутки колесом, і не
+        // повторює її (LocalScrollTimer.isReady) — тоді сітка стояла б, хоч смуга вже зсунулась. Повторюємо подію
+        // трохи згодом: якщо перша спрацювала, друга — дублікат (та сама координата) і ігнорується.
+        if (nudge !== 0) window.clearTimeout(nudge);
+        nudge = window.setTimeout(() => {
+          nudge = 0;
+          source.dispatchEvent(new Event('scroll'));
+        }, 40);
       };
       source.addEventListener('scroll', onSource, { passive: true });
       trackEl.addEventListener('scroll', onTrack, { passive: true });
@@ -98,6 +108,7 @@ export function GridHScroll({ resolveHost, container, watch }: GridHScrollProps)
       return () => {
         source.removeEventListener('scroll', onSource);
         trackEl.removeEventListener('scroll', onTrack);
+        window.clearTimeout(nudge);
         observer?.disconnect();
         setScrollable(false);
         innerEl.style.width = '0px';
