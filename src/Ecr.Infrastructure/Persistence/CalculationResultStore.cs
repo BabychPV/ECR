@@ -13,7 +13,7 @@ namespace Ecr.Infrastructure.Persistence;
 /// A3b) <c>calc.CalculationInput</c>.
 /// У <c>doc.CellValue</c> результати методологій не потрапляють ніколи (D-69).
 /// </remarks>
-public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleCountsEpoch? staleEpoch = null)
+public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleCountsEpoch? staleEpoch = null, int? readCeiling = null)
     : ICalculationResultStore, ICurrentResultFilterReader
 {
     /// <summary>
@@ -639,6 +639,9 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
     /// </remarks>
     public const int MaxResults = 50_000;
 
+    /// <summary>Стеля читання актуальних результатів документа-періоду: <see cref="MaxResults"/>; тест знижує її через <c>readCeiling</c>, щоб не лити 50 тис. рядків у спільну тестову базу.</summary>
+    private int Ceiling => readCeiling ?? MaxResults;
+
     /// <inheritdoc />
     /// <remarks>
     /// ⛔ Прогін добирається за <c>Status = Current</c>, а не за максимальним
@@ -735,7 +738,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
             .ThenBy(r => r.OutputCode)
             .ThenBy(r => r.TableInstanceId)
             .ThenBy(r => r.SubstanceEntryId)
-            .Take(MaxResults + 1)
+            .Take(Ceiling + 1)
             .Select(r => new
             {
                 r.MethodologyVersionId,
@@ -749,17 +752,17 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        if (rows.Count > MaxResults)
+        if (rows.Count > Ceiling)
         {
             throw new BusinessRuleException(
                 "ECR-CALC-0422",
-                $"Результатів документа {documentId} за період {periodKey} більше за {MaxResults}: показати їх частково означало б показати хибні суми.",
+                $"Результатів документа {documentId} за період {periodKey} більше за {Ceiling}: показати їх частково означало б показати хибні суми.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-CALC-0422.resultsTooLarge",
                     ["documentId"] = documentId,
                     ["periodKey"] = periodKey,
-                    ["max"] = MaxResults,
+                    ["max"] = Ceiling,
                 });
         }
 

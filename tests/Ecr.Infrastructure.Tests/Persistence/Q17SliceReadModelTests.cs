@@ -282,9 +282,9 @@ public sealed class Q17SliceReadModelTests(SqlServerFixture sql, ITestOutputHelp
     }
 
     /// <summary>Читач чисел БЕЗ звуження: лише <see cref="ICalculationResultStore"/> (повний набір, як до Q-17).</summary>
-    private static ICalculationResultStore WideOnly(EcrDbContext db)
+    private static ICalculationResultStore WideOnly(EcrDbContext db, int? ceiling = null)
     {
-        var real = new CalculationResultStore(db, new TestClock(Now));
+        var real = new CalculationResultStore(db, new TestClock(Now), readCeiling: ceiling);
         var wide = NSubstitute.Substitute.For<ICalculationResultStore>();
         NSubstitute.SubstituteExtensions.Returns(
             wide.ReadCurrentAsync(NSubstitute.Arg.Any<long>(), NSubstitute.Arg.Any<int>(), NSubstitute.Arg.Any<CancellationToken>()),
@@ -292,7 +292,10 @@ public sealed class Q17SliceReadModelTests(SqlServerFixture sql, ITestOutputHelp
         return wide;
     }
 
-    private static async Task<IReadOnlyList<CellRecord>> ReadSliceAsync(EcrDbContext db, Landish world, bool narrowed)
+    /// <summary>Знижена стеля читання чисел (замість 50 000 реальних рядків у спільній тестовій базі - стеля CI 192 МБ).</summary>
+    private const int SmallCeiling = 1_500;
+
+    private static async Task<IReadOnlyList<CellRecord>> ReadSliceAsync(EcrDbContext db, Landish world, bool narrowed, int? ceiling = null)
     {
         var store = new MonthRoutedCellStore(
             new NormalizedCellStore(db), new MonthColumnRouter(db, RoutingOn()),
@@ -301,7 +304,7 @@ public sealed class Q17SliceReadModelTests(SqlServerFixture sql, ITestOutputHelp
         var rowIds = await db.TableRows.AsNoTracking()
             .Where(r => r.PeriodKeyValue == ViewPeriod && r.TableInstanceId == world.Main.TableInstanceId && !r.IsDeleted)
             .ToDictionaryAsync(r => r.RowKeyValue, r => r.Id);
-        ICalculationResultStore results = narrowed ? new CalculationResultStore(db, new TestClock(Now)) : WideOnly(db);
+        ICalculationResultStore results = narrowed ? new CalculationResultStore(db, new TestClock(Now), readCeiling: ceiling) : WideOnly(db, ceiling);
         var overlaid = await new CalculatedCellOverlay(new MethodologyStore(db), results)
             .ApplyAsync(world.Main.DocumentId, ViewPeriod,
                 [new OverlayTable(world.Main.TableInstanceId, world.Main.TableDefId, rowIds, cells, world.CalculatedColumnIds.ToHashSet())],
@@ -324,8 +327,8 @@ public sealed class Q17SliceReadModelTests(SqlServerFixture sql, ITestOutputHelp
     /// чужий екземпляр, дві речовини, версія поза прив'язкою - усе в одному документі).
     /// </summary>
     [Theory]
-    [InlineData(TableLayoutKind.MonthsInColumns, 190, 8, 100, 30000, 3, 11)]
-    [InlineData(TableLayoutKind.PerPeriodInstance, 222, 8, 100, 30000, 0, 8)]
+    [InlineData(TableLayoutKind.MonthsInColumns, 190, 8, 100, 13000, 3, 11)]
+    [InlineData(TableLayoutKind.PerPeriodInstance, 222, 8, 100, 13000, 0, 8)]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "Q-17")]
@@ -365,14 +368,14 @@ public sealed class Q17SliceReadModelTests(SqlServerFixture sql, ITestOutputHelp
     [Trait("Requirement", "Q-17")]
     public async Task Зріз_не_падає_на_документі_з_понад_50_тисяч_чужих_чисел()
     {
-        var world = await BuildAsync(TableLayoutKind.PerPeriodInstance, columns: 40, filledEvery: 4, rows: 20, noiseResults: 52_000, extraTables: 0);
+        var world = await BuildAsync(TableLayoutKind.PerPeriodInstance, columns: 40, filledEvery: 4, rows: 20, noiseResults: SmallCeiling + 400, extraTables: 0);
 
-        var cells = await ReadSliceAsync(sql.CreateContext(), world, narrowed: true);
+        var cells = await ReadSliceAsync(sql.CreateContext(), world, narrowed: true, ceiling: SmallCeiling);
         Assert.True(cells.Count(c => c.Value.IsCalculated) >= 4 * 20);
 
         // Повний набір (старе читання) і далі відмовляє - стеля 50 000 на документ-період не знята, лише звужена.
         var ex = await Assert.ThrowsAsync<Ecr.Application.Errors.BusinessRuleException>(
-            () => ReadSliceAsync(sql.CreateContext(), world, narrowed: false));
+            () => ReadSliceAsync(sql.CreateContext(), world, narrowed: false, ceiling: SmallCeiling));
         Assert.Equal("ECR-CALC-0422", ex.ErrorCode);
     }
 

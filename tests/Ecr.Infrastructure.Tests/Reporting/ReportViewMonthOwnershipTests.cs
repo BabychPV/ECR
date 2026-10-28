@@ -413,42 +413,45 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// P2-1 (QA3, форма запиту): з прапором на КОЖЕН місяць-власник - окремий OUTER APPLY, що читає лише екземпляр цього
-    /// місяця (рівність ключа періоду, не діапазон року) і лише колонки цього місяця; разом sv + якір + 12 місяців, а
-    /// таблиць у запиті менше за ліміт 250. Один apply на всі місяці (~12·C² на рядок) давав 340x від OFF на T9_04 Land.
+    /// Q-17.perf2 (форма запиту, замінює P2-1 QA3): з прапором значення власників (місяці й якір) читає ОДНА похідна <c>fam</c> -
+    /// один прохід doc.TableInstance -> doc.TableRow -> doc.CellValue таблиці з умовною агрегацією по (документ, рік, RowKey), що
+    /// приєднується хеш-зʼєднанням; на рядок лишаються лише sv (власна копія) і sc (власна обчислена). Ланцюжок ow&lt;m&gt;/om&lt;m&gt;
+    /// на рядок (~100 читань, 26 seek-ів TableRow на рядок на формі Land) прибрано; таблиць у запиті менше за ліміт 250.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-10.2")]
-    public async Task З_прапором_кожен_місяць_власник_має_окремий_apply_по_своєму_екземпляру_і_колонках()
+    public async Task З_прапором_власники_читає_одна_наборова_похідна_а_на_рядок_лише_sv_і_sc()
     {
         var f = await BuildAsync(columnCount: 205);
         await GenerateAsync(f);
 
         var definition = await ViewDefinitionAsync(f.View);
 
-        // sc (власна обчислена) + sv (власна копія) + omA (якір) + om1..om12 читають doc.CellValue; pc (нероутовані колонки,
-        // Q-17.perf) і скалярний rv (методологія) - окремі apply, що не додають звернень до власників.
-        Assert.Equal(15, System.Text.RegularExpressions.Regex.Count(definition, "FROM doc\\.CellValue AS x WHERE x\\.PeriodKey = (?!r\\.PeriodKey AND x\\.TableRowId = r\\.Id\\) AS pc)"));
+        // На рядок doc.CellValue читають лише sc (власна обчислена) і sv (власна копія); pc (нероутовані колонки) і скалярний rv -
+        // окремі apply; власників у apply на рядок немає.
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Count(definition, "FROM doc\\.CellValue AS x WHERE x\\.PeriodKey = r\\.PeriodKey AND x\\.TableRowId = r\\.Id( AND x\\.IsCalculated = 1)?\\) AS s[vc]"));
         for (var m = 1; m <= 12; m++)
         {
-            Assert.Contains($") AS om{m}", definition, StringComparison.Ordinal);
-            Assert.Contains($"ow{m}.PeriodKey = (ti.PeriodKey / 100) * 100 + {m}", definition, StringComparison.Ordinal);
-            Assert.Contains($"ow{m}.TableInstanceId = oim.i{m}", definition, StringComparison.Ordinal);
+            Assert.DoesNotContain($") AS om{m}", definition, StringComparison.Ordinal);
+            Assert.DoesNotContain($"ow{m}.", definition, StringComparison.Ordinal);
         }
 
-        // P2: екземпляри власників-місяців резолвляться ОДНИМ зведенням doc.TableInstance (oim, MAX(CASE ..) по місяцях),
-        // а не окремим seek-ом на місяць у кожному apply (12 seek-ів TableInstance на рядок результату).
-        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(definition, "\\) AS oim\\b"));
-        Assert.Equal(0, System.Text.RegularExpressions.Regex.Count(definition, "doc\\.TableInstance AS oi\\b"));
-        // Без діапазону року й без звірки місяця всередині агрегації комірок (старий один apply на всі місяці).
-        Assert.DoesNotContain("<= (ti.PeriodKey / 100) * 100 + 12", definition, StringComparison.Ordinal);
-        // Q-17.perf: екземпляри місяців - apply на ЕКЗЕМПЛЯР з рівностями по ключу UQ_TableInstance (IN-список періодів року), а не
-        // GROUP BY PeriodKey / 100 по всій doc.TableInstance (оцінка x215, hash + скани без відсічки партицій; діагноз 002c19cbd).
+        Assert.DoesNotContain(") AS omA", definition, StringComparison.Ordinal);
+        Assert.DoesNotContain("AS oim", definition, StringComparison.Ordinal);
         Assert.DoesNotContain("FROM doc.TableInstance GROUP BY", definition, StringComparison.Ordinal);
-        Assert.DoesNotContain("GROUP BY DocumentId, TableDefId", definition, StringComparison.Ordinal);
-        Assert.Contains("x.PeriodKey IN ((ti.PeriodKey / 100) * 100 + 1,", definition, StringComparison.Ordinal);
+        // Одна похідна fam: місячні колонки - за місяцем екземпляра, введені не-місячні - за якорем року; приєднання хешем по
+        // (документ, рік, RowKey), PeriodKind = 0 в умові.
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(definition, "\\) AS fam\\b"));
+        Assert.Contains("LEFT HASH JOIN (SELECT oi.DocumentId, oi.PeriodKey / 100 AS Yr, ow.RowKey", definition, StringComparison.Ordinal);
+        Assert.Contains("p.PeriodKind = 0 AND fam.DocumentId = ti.DocumentId AND fam.Yr = ti.PeriodKey / 100 AND fam.RowKey = r.RowKey", definition, StringComparison.Ordinal);
+        for (var m = 1; m <= 12; m++)
+        {
+            Assert.Contains($"oi.PeriodKey % 100 = {m} THEN", definition, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("oi.PeriodKey = pa.AnchorKey THEN", definition, StringComparison.Ordinal);
         // Власник читається діапазоном ключа рядка, а не seek-ом на колонку: IN-списку колонок у apply немає.
         Assert.DoesNotContain("x.ColumnDefId IN (", definition, StringComparison.Ordinal);
 
@@ -457,7 +460,6 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
             definition, "(?:FROM|JOIN)\\s+(?:doc|wf)\\.\\w+");
         Assert.True(tables < 250, $"таблиць у запиті {tables}");
     }
-
     /// <summary>Результат вимірювання запиту: логічні читання (STATISTICS IO) і процесорний час (STATISTICS TIME).</summary>
     private sealed record Measure(long Reads, long CpuMs);
 

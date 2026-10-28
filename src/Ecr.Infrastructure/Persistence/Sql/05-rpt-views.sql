@@ -217,7 +217,7 @@ BEGIN
     -- @plainAgg / @plainCnt - при прапорі ON усі НЕмаршрутизовані колонки читає ОДИН apply pc замість c<n> на колонку.
     DECLARE @rvPack nvarchar(max), @rvChoose nvarchar(max), @rvExprs nvarchar(max), @rvPred bit, @rvDer nvarchar(max), @rvOwn nvarchar(max), @rvGen nvarchar(max),
             @plainAgg nvarchar(max), @plainCnt int, @numRef nvarchar(64), @strRef nvarchar(64),
-            @rvRef nvarchar(8), @fromSql nvarchar(max), @tiAp nvarchar(max), @rowApply nvarchar(max);
+            @famAgg nvarchar(max), @pkExpr nvarchar(16), @rvRef nvarchar(8), @fromSql nvarchar(max), @tiAp nvarchar(max), @rowApply nvarchar(max);
 
     DECLARE cur_views CURSOR LOCAL FAST_FORWARD FOR
         SELECT TableDefId, SheetDefId, Header, ViewName FROM @tables ORDER BY TableDefId;
@@ -237,7 +237,7 @@ BEGIN
         SET @rvPred = CASE WHEN EXISTS (SELECT 1 FROM cfg.CalculationBinding
                                          WHERE IsActive = 1 AND TableDefId = @id AND REPLACE(MatchJson, CHAR(32), N'') <> N'{}') THEN 1 ELSE 0 END;
         SET @rvRef = CASE WHEN @rvPred = 0 THEN N'r' ELSE N'rv' END;
-        SELECT @fromSql = N'', @tiAp = N'', @rowApply = N'';
+        SELECT @fromSql = N'', @tiAp = N'', @rowApply = N'', @famAgg = N'';
         SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0);
         WHILE @colId IS NOT NULL
         BEGIN
@@ -320,12 +320,14 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                 -- а не другим агрегатом на колонку в sv: p61 (прапор k<n> у sv) подвоював роботу sv (T10_03 / T11_03 у 2-4 рази).
                 INSERT INTO @pv (OwnerNo, ColNo, ColId, Agg) VALUES
                     (-2, @n, @colId, @aggBody + N' AS cv' + CAST(@n AS nvarchar(10))),
-                    (-1, @n, @colId, @agg),
-                    (@mi, @n, @colId, @agg);
+                    (-1, @n, @colId, @agg);
+                SET @famAgg = @famAgg + N', ' + CASE WHEN @colType = 3
+                    THEN N'MAX(CAST(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' AND ' + CASE WHEN @isMonth = 1 THEN N'oi.PeriodKey % 100 = ' + CAST(@monthNo AS nvarchar(3)) ELSE N'oi.PeriodKey = pa.AnchorKey' END + N' THEN x.' + @raw1 + N' END AS tinyint))'
+                    ELSE N'MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' AND ' + CASE WHEN @isMonth = 1 THEN N'oi.PeriodKey % 100 = ' + CAST(@monthNo AS nvarchar(3)) ELSE N'oi.PeriodKey = pa.AnchorKey' END + N' THEN x.' + @raw1 + N' END)' END
+                    + N' AS v' + CAST(@n AS nvarchar(10));
 
                 SET @valueCol = N'COALESCE(sc.cv' + CAST(@n AS nvarchar(10)) + N', '
-                              + CASE WHEN @isMonth = 1 THEN N'om' + CAST(@monthNo AS nvarchar(2)) ELSE N'omA' END
-                              + N'.v' + CAST(@n AS nvarchar(10)) + N', sv.v' + CAST(@n AS nvarchar(10)) + N')';
+                              + N'fam.v' + CAST(@n AS nvarchar(10)) + N', sv.v' + CAST(@n AS nvarchar(10)) + N')';
                 IF @colType = 3
                     SET @valueCol = N'CAST(' + @valueCol + N' AS bit)';
             END
@@ -393,53 +395,26 @@ OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x
 
         IF @monthMask <> 0 OR @needAnchor = 1
         BEGIN
-            -- Місяці (OwnerNo 101..112): екземпляр місяця -> рядок з тим самим RowKey -> введені комірки; один OUTER APPLY
-            -- на місяць, тож 3 таблиці (doc.TableInstance + doc.TableRow + doc.CellValue) на кожен потрібний місяць.
-            -- P2 (T3_00 Land: 96 місячних колонок, 23 400 рядків, ON - 231 seek PK_CellValue + TableInstance/TableRow на
-            -- КОЖЕН рядок результату, ~5,4 млн виконань): екземпляри всіх місяців року резолвляться ОДНИМ зведенням
-            -- doc.TableInstance (oim: MAX(CASE місяць ... Id) по (документ, таблиця, рік)), рядок власника кожного місяця -
-            -- звичайним LEFT JOIN ow<m> (оптимізатор може обрати hash-зʼєднання замість вкладеного циклу на рядок), а apply
-            -- om<m> лишається лише діапазоном комірок цього рядка. Семантика та сама: немає екземпляра/рядка - apply порожній
-            -- (NULL); PeriodKind <> 0 - так само порожній.
-            IF @monthMask <> 0
-            BEGIN                SET @extra = @extra + 3 * (SELECT COUNT(DISTINCT OwnerNo) FROM @pv WHERE OwnerNo > 100);
-                SET @mi = (SELECT MIN(OwnerNo) FROM @pv WHERE OwnerNo > 100);
-                SET @aggList = N'';
-                SET @ownerRows2 = N'';
-                SET @idList = N'';
-                WHILE @mi IS NOT NULL
-                BEGIN
-                    -- Q-17.perf (Аудит-2, діагноз 002c19cbd): oim - apply на ЕКЗЕМПЛЯР (ведучий набір), а не GROUP BY PeriodKey / 100 по ВСІЙ
-                    -- doc.TableInstance: той давав оцінку x215 (437 тис. проти 2 тис.), hash-зʼєднання і повні скани TableRow x13 / CellValue
-                    -- без відсічки партицій. Місяці - явні рівності по ключу UQ_TableInstance (PeriodKey, DocumentId, TableDefId), без діапазону
-                    -- і без PeriodKey / 100 у предикаті seek-у.
-                    SET @aggList = @aggList + N', MAX(CASE WHEN x.PeriodKey % 100 = ' + CAST(@mi - 100 AS nvarchar(3)) + N' THEN x.Id END) AS i' + CAST(@mi - 100 AS nvarchar(3));
-                    SET @idList = @idList + N', (ti.PeriodKey / 100) * 100 + ' + CAST(@mi - 100 AS nvarchar(3));
-                    SET @ownerRows2 = @ownerRows2 + N'
-LEFT JOIN doc.TableRow AS ow' + CAST(@mi - 100 AS nvarchar(3)) + N' ON ow' + CAST(@mi - 100 AS nvarchar(3)) + N'.PeriodKey = (ti.PeriodKey / 100) * 100 + ' + CAST(@mi - 100 AS nvarchar(3))
-                        + N' AND ow' + CAST(@mi - 100 AS nvarchar(3)) + N'.TableInstanceId = oim.i' + CAST(@mi - 100 AS nvarchar(3))
-                        + N' AND ow' + CAST(@mi - 100 AS nvarchar(3)) + N'.RowKey = r.RowKey AND ow' + CAST(@mi - 100 AS nvarchar(3)) + N'.IsDeleted = 0';
-                    SET @mi = (SELECT MIN(OwnerNo) FROM @pv WHERE OwnerNo > @mi);
-                END
-                SET @tiAp = @tiAp + N'
-OUTER APPLY (SELECT ' + STUFF(@aggList, 1, 2, N'') + N'
-             FROM doc.TableInstance AS x
-             WHERE p.PeriodKind = 0 AND x.PeriodKey IN (' + STUFF(@idList, 1, 2, N'') + N')
-               AND x.DocumentId = ti.DocumentId AND x.TableDefId = ti.TableDefId) AS oim';
-                SET @ownerRows = @ownerRows + @ownerRows2;
-            END
-
-            IF @needAnchor = 1
-            BEGIN
-                SET @extra = @extra + 3 + 1;   -- doc.Period + екземпляр + рядок якоря + його OUTER APPLY (нижче)
-                SET @ownerRows = @ownerRows + N'
-LEFT JOIN (SELECT ProjectId, PeriodKey / 100 AS Yr, MIN(PeriodKey) AS AnchorKey
-             FROM doc.Period GROUP BY ProjectId, PeriodKey / 100) AS pa
-       ON p.PeriodKind = 0 AND pa.ProjectId = d.ProjectId AND pa.Yr = ti.PeriodKey / 100
-LEFT JOIN doc.TableInstance AS oiA ON oiA.PeriodKey = pa.AnchorKey AND oiA.DocumentId = ti.DocumentId AND oiA.TableDefId = ti.TableDefId
-LEFT JOIN doc.TableRow AS owA ON owA.PeriodKey = oiA.PeriodKey AND owA.TableInstanceId = oiA.Id AND owA.RowKey = r.RowKey AND owA.IsDeleted = 0';
-            END
-
+            -- Q-17.perf2 (Аудит-2 на 24147ebd4; синтетика за формою Land, 480 екземплярів): власники читалися ланцюжком НА РЯДОК (ow<m> -
+            -- seek TableRow + om<m> - діапазон CellValue, x12 місяців + якір = ~100 читань і ~26 seek-ів TableRow на рядок), причому той самий
+            -- рядок власника перечитувався для кожного з 12 періодів родини. Тепер значення власників (місячні - з екземпляра свого місяця,
+            -- введені не-місячні - з якоря року) збираються ОДИН раз НАБОРОМ по (документ, рік, RowKey): один прохід
+            -- doc.TableInstance -> doc.TableRow -> doc.CellValue таблиці з умовною агрегацією (MAX(CASE ColumnDefId і місяць/якір)) і
+            -- приєднуються до рядків хеш-зʼєднанням (ліворуч лише ti, r, d, p, a - вузький потік). Семантика та сама: немає екземпляра/
+            -- рядка власника/комірки - NULL; PeriodKind <> 0 - так само NULL (умова в ON).
+            SET @extra = @extra + 6;   -- oi, od, pa (doc.Period), ow, x у похідній + її доступ
+            SET @ownerRows = N'
+LEFT HASH JOIN (SELECT oi.DocumentId, oi.PeriodKey / 100 AS Yr, ow.RowKey' + @famAgg + N'
+                  FROM doc.TableInstance AS oi
+                  JOIN doc.Document AS od ON od.Id = oi.DocumentId
+                  LEFT JOIN (SELECT ProjectId, PeriodKey / 100 AS Yr, MIN(PeriodKey) AS AnchorKey
+                               FROM doc.Period GROUP BY ProjectId, PeriodKey / 100) AS pa
+                         ON pa.ProjectId = od.ProjectId AND pa.Yr = oi.PeriodKey / 100
+                  JOIN doc.TableRow AS ow ON ow.PeriodKey = oi.PeriodKey AND ow.TableInstanceId = oi.Id AND ow.IsDeleted = 0
+                  JOIN doc.CellValue AS x ON x.PeriodKey = ow.PeriodKey AND x.TableRowId = ow.Id
+                 WHERE oi.TableDefId = ' + CAST(@id AS nvarchar(10)) + N'
+                 GROUP BY oi.DocumentId, oi.PeriodKey / 100, ow.RowKey) AS fam
+       ON p.PeriodKind = 0 AND fam.DocumentId = ti.DocumentId AND fam.Yr = ti.PeriodKey / 100 AND fam.RowKey = r.RowKey';
             -- Власна копія (sv) і кожен власник (om<m>, omA) - по одному OUTER APPLY з умовною агрегацією (B1).
             -- Власна копія: рядок перегляду; без жодної введеної колонки з маршрутизацією цього блоку немає.
             SET @extra = @extra + 2 - (SELECT COUNT(*) FROM @pv WHERE OwnerNo = -1);   -- sv і sc замість c<n> на кожну колонку
@@ -604,6 +579,11 @@ OUTER APPLY (SELECT ' + STUFF(@rvAgg, 1, 2, N'') + N'
         -- Q-17.perf: ведучий набір - екземпляри (ti, d, p); власники-місяці (oim) і результати методологій (rv) рахуються ОДИН раз
         -- на екземпляр, а рядки таблиці йдуть слідом (JOIN або CROSS APPLY з колонками rv<n>). Без цього (прапор вимкнено,
         -- Calculated немає) текст FROM лишається таким, як був.
+        -- Q-17.perf2 (Аудит-2: seek calc.CalculationResult торкається 3-12 із 25 партицій навіть з предикатом _PeriodKey): коли рядки йдуть
+        -- CROSS APPLY (r - похідна apply на екземпляр), предикат _PeriodKey на r.PeriodKey не потрапляє в екземпляр ti (apply рахується для
+        -- КОЖНОГО екземпляра документа), тож seek по партиціях виконується для всіх періодів. _PeriodKey береться з ti.PeriodKey (те саме
+        -- значення: r.PeriodKey = ti.PeriodKey) - тоді предикат відсікає екземпляри ДО apply, а cr.PeriodKey = ti.PeriodKey - відсічка партицій.
+        SET @pkExpr = CASE WHEN @rowApply = N'' THEN N'r.PeriodKey' ELSE N'ti.PeriodKey' END;
         SET @fromSql = CASE WHEN @rowApply = N'' AND @tiAp = N'' THEN N'FROM doc.TableInstance AS ti
 JOIN doc.TableRow      AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id AND r.IsDeleted = 0
 JOIN doc.Document      AS d ON d.Id = ti.DocumentId
@@ -619,7 +599,7 @@ AS
 ', @marker, N': ', @header, N'. Не редагувати руками.
 SELECT p.Id AS _ProjectId, p.Code AS _ProjectCode,
        d.Id AS _DocumentId, d.BusinessKey AS _DocumentKey,
-       r.PeriodKey AS _PeriodKey,
+       ', @pkExpr, N' AS _PeriodKey,
        CAST(COALESCE(a.Status, 0) AS tinyint) AS _Status,
        r.Id AS _RowId, r.RowKey AS _RowKey, r.Ordinal AS _RowOrdinal', @select, N'
 ', @fromSql, N'
