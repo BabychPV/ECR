@@ -25,11 +25,13 @@ test.describe('застарілі результати методологій', 
 
     let stale = true;
     let recalcPosts = 0;
-    await page.route(`**/api/v1/documents/${DocumentId}/calculation-results**`, (route) =>
-      route.fulfill({
-        json: [{ rowKey: 'R1', outputCode: 'OUT', value: 1, unitId: 1, isStale: stale, changedRegistries: [] }],
-      }),
-    );
+    // ✎ ui-sheet-bottom: застарілість — з КАРТКИ документа (поле resultsStale), а не з запиту чисел (його при відкритті
+    // документа немає). Картку підміняємо лише в цьому полі.
+    await page.route(new RegExp(`/api/v1/documents/${DocumentId}\\?`), async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({ response, json: { ...body, resultsStale: stale } });
+    });
     await page.route(`**/api/v1/documents/${DocumentId}/recalculate`, (route) => {
       recalcPosts += 1;
       stale = false;
@@ -40,8 +42,8 @@ test.describe('застарілі результати методологій', 
     await signIn(page);
     await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
 
-    // Початковий стан: бейдж видно.
-    const badge = page.getByTestId('document-methodology-stale');
+    // Початковий стан: банер «результати застаріли» видно (окремого бейджа більше немає).
+    const badge = page.getByTestId('document-stale-results');
     await expect(badge).toBeVisible({ timeout: 60_000 });
 
     // Дія: пункт з новою назвою в «More».

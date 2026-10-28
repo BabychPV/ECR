@@ -7488,6 +7488,9 @@ USING (VALUES
     (N'documents.sheets.all', N'en', N'All sheets', 1),
     (N'documents.calculationResultsNone', N'en', N'none', 1),
     -- COLL:ui-sheet-focus ── кінець секції ──
+    -- COLL:ui-sheet-bottom ── нижній рядок під таблицею: підпис горизонтальної прокрутки; ru/kz — порцією COLL:ui-sheet-bottom у блоці I18N нижче ──
+    (N'grid.hscroll.label', N'en', N'Horizontal scroll of the table', 1),
+    -- COLL:ui-sheet-bottom ── кінець секції ──
     -- A11Y-P3C:dim-names ── CL-20 (B-6): назви розмірностей 20-23 (kz/ru лишались англійськими кодами); ru/kz - порцією A11Y-P3C:dim-names нижче ──
     (N'units.dim.VolumeFlow', N'en', N'Volumetric flow', 1),
     (N'units.dim.Power', N'en', N'Power', 1),
@@ -19860,6 +19863,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-sheet-focus ── кінець секції ──
+-- COLL:ui-sheet-bottom ── ru/kz: нижній рядок під таблицею; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.hscroll.label', N'ru', N'Горизонтальная прокрутка таблицы'),
+    (N'grid.hscroll.label', N'kz', N'Кестенің көлденең айналдыруы')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-sheet-bottom ── кінець секції ──
 -- A11Y-P3C:dim-names ── ru/kz: CL-20 (B-6), назви розмірностей 20-23; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val

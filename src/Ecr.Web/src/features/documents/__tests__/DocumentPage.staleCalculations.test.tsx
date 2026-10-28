@@ -47,7 +47,7 @@ function mockFetch(
   recalcRefusal = false,
   runStatus: unknown = { runId: null, finishedAt: null, unmatchedRows: null },
 ): { posts: () => number } {
-  let calcReads = 0;
+  let summaryReads = 0;
   let posts = 0;
 
   vi.stubGlobal(
@@ -72,10 +72,9 @@ function mockFetch(
       // ✎ D14: стан прогону - рядки без правила (calculation-run); адреса не містить calculation-results.
       if (url.includes('/calculation-run')) return jsonResponse(runStatus);
 
+      // Числи методологій: власний запит ПАНЕЛІ (вона тут замінена заглушкою) — відкриття документа його не робить.
       if (url.includes('/calculation-results')) {
-        const stale = staleSequence[Math.min(calcReads, staleSequence.length - 1)] ?? false;
-        calcReads += 1;
-        return jsonResponse([result(stale)]);
+        return jsonResponse([result(false)]);
       }
 
       if (url.includes('/recalculate') && init?.method === 'POST') {
@@ -123,6 +122,9 @@ function mockFetch(
       }
 
       if (url.includes('/api/v1/documents/1')) {
+        // ✎ ui-sheet-bottom: застарілість — з КАРТКИ документа (поле resultsStale), відповіді по черзі; остання повторюється.
+        const stale = staleSequence[Math.min(summaryReads, staleSequence.length - 1)] ?? false;
+        summaryReads += 1;
         return jsonResponse({
           businessKey: 'DOC-0001',
           createdAt: '2026-01-01T00:00:00Z',
@@ -131,6 +133,7 @@ function mockFetch(
           projectId: 1,
           sheetCount: 1,
           sheetStates: { GEN: 'Draft' },
+          resultsStale: stale,
         });
       }
 
@@ -166,7 +169,7 @@ function show(
 }
 
 const Slow = 60_000;
-const BadgeId = 'document-methodology-stale';
+const BannerId = 'document-stale-results';
 const MoreButton = { name: '⟦document.moreActions⟧' };
 const ValidateButton = { name: '⟦document.validate⟧' };
 
@@ -176,12 +179,11 @@ describe('DocumentPage: застарілі числа методологій', (
   });
 
   it(
-    'isStale=true — бейдж у шапці, а пункт перерахунку в «More» називається «Recalculate calculations»',
+    'resultsStale=true у картці — банер, а пункт перерахунку в «More» називається «Recalculate calculations»',
     async () => {
       show(['Document.View', 'Calculation.View'], [true]);
 
-      const badge = await screen.findByTestId(BadgeId, undefined, { timeout: Slow });
-      expect(badge.textContent).toBe('⟦documents.methodologyResultsStale⟧');
+      await screen.findByTestId(BannerId, undefined, { timeout: Slow });
 
       // ✎ D-441 CLS: дії — після відповіді `submission-target` (до того скелет).
       fireEvent.click(await screen.findByRole('button', MoreButton, { timeout: Slow }));
@@ -191,18 +193,20 @@ describe('DocumentPage: застарілі числа методологій', (
   );
 
   it(
-    'числа свіжі — бейджа немає, пункт зі звичайною назвою',
+    'картка без застарілості — банера немає, пункт зі звичайною назвою; запиту calculation-results при відкритті немає',
     async () => {
       show(['Document.View', 'Calculation.View'], [false]);
 
       await screen.findByRole('button', ValidateButton, { timeout: Slow });
-      // ⛔ Спершу дочекатися, що числа прочитано (меню з тією ж назвою), інакше «бейджа немає» було б правдою від нічого.
+      // ⛔ Спершу дочекатися, що картку прочитано, інакше «банера немає» було б правдою від нічого.
       await waitFor(() => {
-        expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/calculation-results'))).toBe(true);
+        expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/api/v1/documents/1?'))).toBe(true);
       });
+      // ✎ ui-sheet-bottom: відкриття документа — 0 запитів calculation-results (на Land до 174 тис. рядків).
+      expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/calculation-results'))).toBe(false);
       fireEvent.click(screen.getByRole('button', MoreButton));
       expect(await screen.findByRole('menuitem', { name: /⟦workflow\.recalculate⟧/ })).toBeDefined();
-      expect(screen.queryByTestId(BadgeId)).toBeNull();
+      expect(screen.queryByTestId(BannerId)).toBeNull();
       expect(screen.queryByRole('menuitem', { name: /recalculateCalculations/ })).toBeNull();
     },
     Slow,
@@ -250,42 +254,43 @@ describe('DocumentPage: застарілі числа методологій', (
   );
 
   it(
-    'без права Calculation.View — числа не читаються, бейджа немає',
+    'без права Calculation.View — числа не читаються, банера немає',
     async () => {
-      show(['Document.View'], [true]);
+      // Картка без застарілості (банер від resultsStale=true тут не причетний): перевіряється саме відсутність запиту чисел.
+      show(['Document.View'], [false]);
 
       await screen.findByRole('button', ValidateButton, { timeout: Slow });
-      expect(screen.queryByTestId(BadgeId)).toBeNull();
+      expect(screen.queryByTestId(BannerId)).toBeNull();
       expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/calculation-results'))).toBe(false);
     },
     Slow,
   );
 
   it(
-    'перерахунок завершено — числа перечитано, бейдж зникає',
+    'перерахунок завершено — картку перечитано, банер зникає',
     async () => {
       const probe = show(['Document.View', 'Calculation.View'], [true, false]);
 
-      await screen.findByTestId(BadgeId, undefined, { timeout: Slow });
+      await screen.findByTestId(BannerId, undefined, { timeout: Slow });
       // ✎ D-441 CLS: дії — після відповіді `submission-target` (до того скелет).
       fireEvent.click(await screen.findByRole('button', MoreButton, { timeout: Slow }));
       fireEvent.click(await screen.findByRole('menuitem', { name: /⟦workflow\.recalculateCalculations⟧/ }));
 
       await waitFor(() => {
         expect(probe.posts()).toBe(1);
-        expect(screen.queryByTestId(BadgeId)).toBeNull();
+        expect(screen.queryByTestId(BannerId)).toBeNull();
       }, { timeout: Slow });
     },
     Slow,
   );
 
   it(
-    '422 ECR-CALC-4221 (є подані аркуші) — помилка з поясненням, а не «перераховано»; бейдж лишається',
+    '422 ECR-CALC-4221 (є подані аркуші) — помилка з поясненням, а не «перераховано»; банер лишається',
     async () => {
       vi.mocked(notifications.show).mockClear();
       const probe = show(['Document.View', 'Calculation.View'], [true], true);
 
-      await screen.findByTestId(BadgeId, undefined, { timeout: Slow });
+      await screen.findByTestId(BannerId, undefined, { timeout: Slow });
       // ✎ D-441 CLS: дії — після відповіді `submission-target` (до того скелет).
       fireEvent.click(await screen.findByRole('button', MoreButton, { timeout: Slow }));
       fireEvent.click(await screen.findByRole('menuitem', { name: /⟦workflow\.recalculateCalculations⟧/ }));
@@ -300,7 +305,7 @@ describe('DocumentPage: застарілі числа методологій', (
       // ⛔ Мутаційний доказ: покажи «Recalculated»/«queued» на відмову — тут червоне.
       expect(shown.some((o) => o.color === 'statusSuccess')).toBe(false);
       expect(JSON.stringify(shown.find((o) => o.color === 'statusError'))).toContain('has submitted sheets: reopen the period first');
-      expect(screen.getByTestId(BadgeId)).toBeDefined();
+      expect(screen.getByTestId(BannerId)).toBeDefined();
     },
     Slow,
   );

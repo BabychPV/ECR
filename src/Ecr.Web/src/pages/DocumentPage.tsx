@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { isHeaderFinding } from '@/features/documents/inspector/headerFinding';
-import { Alert, Badge, Skeleton, Stack, Tabs, Text } from '@mantine/core';
+import { Alert, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -36,7 +36,6 @@ import { useDocumentPending } from '@/features/grid/autosave';
 import type { HeldEdit } from '@/features/grid/pendingStore';
 import { editsDeferToServer, isEditable } from '@/features/workflow/SheetActions';
 import { useApproverEditAvailability } from '@/features/workflow/api';
-import { useCalculationsStale } from '@/features/methodologies/staleCalculations';
 import { useUnmatchedRows } from '@/features/documents/useUnmatchedRows';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
@@ -581,10 +580,12 @@ export function DocumentPage(): JSX.Element {
   // «History» і «Compare versions» — пункти «More» + лінивий діалог (макет: блоків між шапкою й сіткою немає).
   const documentLog = useDocumentLogActions({ documentId, periodKey });
 
-  // ✎ Лінія B: бейдж у шапці й назва пункту «More», коли числа методологій застаріли. Запит спільний із
-  // панеллю чисел (один ключ), тож завершений перерахунок оновлює обох.
   const staleReminderHost = useStaleResultsReminderHost(documentId);
-  const calculationsStale = useCalculationsStale(documentId, periodKey, can(session.data, 'Calculation.View'));
+  // ✎ ui-sheet-bottom (рішення людини 28.10): назва пункту «More» («Recalculate calculations») бере застарілість з
+  // картки документа (поле resultsStale: сервер виводить її тим самим правилом, що й свіжість чисел, включно з
+  // довідниками й звуженими читачами), БЕЗ запиту calculation-results при відкритті документа (на Land до 174 тис.
+  // рядків). Окремий бейдж прибрано: банер під рядком дій каже те саме. Числа панель вантажить лише після розгортання.
+  const calculationsStale = summary.data?.resultsStale === true;
   // ✎ D14: рядки без правила розрахунку - інформація під рядком дій, не помилка.
   const unmatchedRows = useUnmatchedRows(documentId, periodKey, can(session.data, 'Calculation.View'));
 
@@ -697,14 +698,8 @@ export function DocumentPage(): JSX.Element {
                 onShowIssues={() => undefined}
               />
               <DocumentSaveState readOnly={gridReadOnly} />
-              {/* RC15-C: банер «результати застаріли» під рядком уже каже те саме - бейдж за нього не дублюється. */}
-              {calculationsStale && document.resultsStale !== true && (
-                <Badge color="statusWarning" variant="light" role="status" data-testid="document-methodology-stale">
-                  {t('documents.methodologyResultsStale')}
-                </Badge>
-              )}
               {/* ✎ D-446: застарілість не визначена — частину документа читачеві закрито (те саме, що в рядку переліку). */}
-              {!calculationsStale && document.resultsStaleUndetermined === 'PartiallyHidden' && <StaleResultsUndeterminedMark />}
+              {document.resultsStaleUndetermined === 'PartiallyHidden' && <StaleResultsUndeterminedMark />}
             </>
           }
         />
@@ -945,17 +940,26 @@ export function DocumentPage(): JSX.Element {
                   readOnly={gridReadOnly}
                   sheetState={state}
                   tables={active.tables}
+                  // ✎ ui-sheet-bottom: смуга аркушів — у нижньому рядку панелі таблиці, поруч із її прокруткою.
+                  bottomBar={(scroll) => (
+                    <SheetStrip sheets={sheetItemsOf(sheets, document.sheetStates)} activeCode={active.code} onSelect={setSheet}>
+                      {scroll}
+                    </SheetStrip>
+                  )}
                 />
               )}
             </Stack>
           </Tabs.Panel>
         )}
 
-        <SheetStrip
-          sheets={sheets.map((s) => ({ code: s.code, name: s.name, state: document.sheetStates[s.code] ?? 'Draft' }))}
-          activeCode={active?.code}
-          onSelect={setSheet}
-        />
+        {/* Поки чанк сітки вантажиться (або аркуша немає) — смуга окремо, як раніше. */}
+        {(gridModule.component === null || active === undefined) && (
+          <SheetStrip
+            sheets={sheetItemsOf(sheets, document.sheetStates)}
+            activeCode={active?.code}
+            onSelect={setSheet}
+          />
+        )}
       </Tabs>
 
       {/* ⚠ Без аркушів панелі немає, а відмова чанка має лишатися видимою —
@@ -999,6 +1003,13 @@ function isNotValidatedYet(error: unknown): boolean {
 }
 
 /** Аркуш із його таблицями. */
+function sheetItemsOf(
+  sheets: readonly SheetGroup[],
+  states: Readonly<Record<string, string>>,
+): { code: string; name: string; state: string }[] {
+  return sheets.map((s) => ({ code: s.code, name: s.name, state: states[s.code] ?? 'Draft' }));
+}
+
 interface SheetGroup {
   sheetDefId: number;
   code: string;

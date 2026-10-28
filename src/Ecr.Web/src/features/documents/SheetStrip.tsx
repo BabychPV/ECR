@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 import { Menu, Tabs } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
@@ -14,6 +14,8 @@ export interface SheetStripProps {
   readonly sheets: readonly SheetStripItem[];
   readonly activeCode: string | undefined;
   readonly onSelect: (code: string) => void;
+  /** ✎ ui-sheet-bottom: праворуч у тому ж рядку — горизонтальна прокрутка таблиці (макет A). */
+  readonly children?: ReactNode;
 }
 
 /** Сусідній аркуш у заданому напрямку; `null` — на краю (кнопка вимкнена). */
@@ -40,7 +42,7 @@ const Chevron = ({ path }: { readonly path: string }): JSX.Element => (
  *
  * ⚠ У режимі «на весь екран» смуга `inert` разом з усією сторінкою: перехід між аркушами — після виходу.
  */
-export function SheetStrip({ sheets, activeCode, onSelect }: SheetStripProps): JSX.Element {
+export function SheetStrip({ sheets, activeCode, onSelect, children }: SheetStripProps): JSX.Element {
   const list = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ left: false, right: false });
 
@@ -88,6 +90,7 @@ export function SheetStrip({ sheets, activeCode, onSelect }: SheetStripProps): J
 
   return (
     <div className="doc-sheet-bar" data-edge-left={edges.left ? '' : undefined} data-edge-right={edges.right ? '' : undefined}>
+      <div className="doc-sheet-nav-group">
       <button
         type="button"
         className="doc-sheet-nav"
@@ -114,14 +117,6 @@ export function SheetStrip({ sheets, activeCode, onSelect }: SheetStripProps): J
       >
         <Chevron path="M9 6l6 6-6 6" />
       </button>
-
-      <Tabs.List ref={list} className="doc-sheet-strip" aria-label={t('documents.sheets')} data-doc-sheet-strip="">
-        {sheets.map((s) => (
-          <Tabs.Tab key={s.code} value={s.code} className="doc-sheet-tab">
-            {s.name} <StatusBadge kind="sheet" state={s.state} />
-          </Tabs.Tab>
-        ))}
-      </Tabs.List>
 
       <Menu position="top-end" withinPortal returnFocus>
         <Menu.Target>
@@ -151,6 +146,17 @@ export function SheetStrip({ sheets, activeCode, onSelect }: SheetStripProps): J
           ))}
         </Menu.Dropdown>
       </Menu>
+      </div>
+
+      <Tabs.List ref={list} className="doc-sheet-strip" aria-label={t('documents.sheets')} data-doc-sheet-strip="">
+        {sheets.map((s) => (
+          <Tabs.Tab key={s.code} value={s.code} className="doc-sheet-tab">
+            {s.name} <StatusBadge kind="sheet" state={s.state} />
+          </Tabs.Tab>
+        ))}
+      </Tabs.List>
+
+      {children !== undefined && children !== null && <div className="doc-sheet-scroll">{children}</div>}
     </div>
   );
 }

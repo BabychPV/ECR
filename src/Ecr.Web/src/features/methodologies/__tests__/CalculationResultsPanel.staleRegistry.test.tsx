@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -72,6 +72,11 @@ function show(): void {
     </MantineProvider>,
   );
 }
+
+// ✎ ui-sheet-bottom: блок за замовчуванням згорнуто — ці тести перевіряють ВМІСТ, тож розгортають його вибором людини.
+beforeEach(() => {
+  window.localStorage.setItem('ecr.calcResults.collapsed', '0');
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
