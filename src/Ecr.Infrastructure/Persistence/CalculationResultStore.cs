@@ -13,8 +13,8 @@ namespace Ecr.Infrastructure.Persistence;
 /// A3b) <c>calc.CalculationInput</c>.
 /// У <c>doc.CellValue</c> результати методологій не потрапляють ніколи (D-69).
 /// </remarks>
-public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleCountsEpoch? staleEpoch = null)
-    : ICalculationResultStore
+public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleCountsEpoch? staleEpoch = null, int? readCeiling = null)
+    : ICalculationResultStore, ICurrentResultFilterReader
 {
     /// <summary>
     /// Резервує діапазон ідентифікаторів із <c>calc.CalculationResultSeq</c>
@@ -639,6 +639,9 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
     /// </remarks>
     public const int MaxResults = 50_000;
 
+    /// <summary>Стеля читання актуальних результатів документа-періоду: <see cref="MaxResults"/>; тест знижує її через <c>readCeiling</c>, щоб не лити 50 тис. рядків у спільну тестову базу.</summary>
+    private int Ceiling => readCeiling ?? MaxResults;
+
     /// <inheritdoc />
     /// <remarks>
     /// ⛔ Прогін добирається за <c>Status = Current</c>, а не за максимальним
@@ -676,8 +679,27 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
     /// найдешевший спосіб знати, що рядків БІЛЬШЕ за стелю, а не рівно стільки.
     /// </remarks>
     /// <exception cref="BusinessRuleException">Результатів документа за період більше за <see cref="MaxResults"/>.</exception>
-    public async Task<IReadOnlyList<CalculationResultRow>> ReadCurrentAsync(
+    public Task<IReadOnlyList<CalculationResultRow>> ReadCurrentAsync(
         long documentId, int periodKey, CancellationToken ct)
+        => ReadCurrentCoreAsync(documentId, periodKey, filter: null, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Q-17: той самий запит, що й <see cref="ReadCurrentAsync"/>, із трьома додатковими предикатами (екземпляр, код
+    /// виходу, версія методології) на покриваючому індексі <c>IX_CalculationResult_DocRun</c> — вони лише відсікають
+    /// рядки, ключ пошуку (<c>PeriodKey</c>, <c>DocumentId</c>, <c>CalculationRunId</c>) той самий. Код виходу
+    /// порівнює CI-колація бази (<c>Latin1_General_100_CI_AS_SC</c>), як <c>ToUpperInvariant</c> у накладенні;
+    /// накладення все одно повторює точну умову у памʼяті.
+    /// </remarks>
+    public Task<IReadOnlyList<CalculationResultRow>> ReadCurrentMatchingAsync(
+        long documentId, int periodKey, CurrentResultFilter filter, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        return ReadCurrentCoreAsync(documentId, periodKey, filter, ct);
+    }
+
+    private async Task<IReadOnlyList<CalculationResultRow>> ReadCurrentCoreAsync(
+        long documentId, int periodKey, CurrentResultFilter? filter, CancellationToken ct)
     {
         // ⛔ R5-Q1-02: спершу ідентифікатори актуальних прогонів (одиниці), далі seek
         // `IX_CalculationResult_DocRun (PeriodKey, DocumentId, CalculationRunId)` по кожному.
@@ -690,16 +712,33 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
             return [];
         }
 
-        var rows = await db.CalculationResults
+        var query = db.CalculationResults
             .AsNoTracking()
             .Where(r => r.PeriodKey == periodKey
                         && r.DocumentId == documentId
-                        && runIds.Contains(r.CalculationRunId))
+                        && runIds.Contains(r.CalculationRunId));
+
+        if (filter is not null)
+        {
+            if (filter.OutputCodes.Count == 0 || filter.MethodologyVersionIds.Count == 0)
+            {
+                return [];
+            }
+
+            var instanceIds = filter.TableInstanceIds.ToList();
+            var outputs = filter.OutputCodes.ToList();
+            var versions = filter.MethodologyVersionIds.ToList();
+            query = query.Where(r => versions.Contains(r.MethodologyVersionId)
+                                     && outputs.Contains(r.OutputCode)
+                                     && (r.TableInstanceId == null || instanceIds.Contains(r.TableInstanceId.Value)));
+        }
+
+        var rows = await query
             .OrderBy(r => r.SourceRowKey)
             .ThenBy(r => r.OutputCode)
             .ThenBy(r => r.TableInstanceId)
             .ThenBy(r => r.SubstanceEntryId)
-            .Take(MaxResults + 1)
+            .Take(Ceiling + 1)
             .Select(r => new
             {
                 r.MethodologyVersionId,
@@ -713,17 +752,17 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        if (rows.Count > MaxResults)
+        if (rows.Count > Ceiling)
         {
             throw new BusinessRuleException(
                 "ECR-CALC-0422",
-                $"Результатів документа {documentId} за період {periodKey} більше за {MaxResults}: показати їх частково означало б показати хибні суми.",
+                $"Результатів документа {documentId} за період {periodKey} більше за {Ceiling}: показати їх частково означало б показати хибні суми.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-CALC-0422.resultsTooLarge",
                     ["documentId"] = documentId,
                     ["periodKey"] = periodKey,
-                    ["max"] = MaxResults,
+                    ["max"] = Ceiling,
                 });
         }
 
@@ -771,23 +810,14 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
     private async Task<List<long>> CurrentRunIdsAsync(
         long documentId, int periodKey, long? excludeRunId, CancellationToken ct)
     {
-        var projectId = await db.Documents
-            .AsNoTracking()
-            .Where(d => d.Id == documentId)
-            .Select(d => (int?)d.ProjectId)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
-        if (projectId is not { } project)
-        {
-            return [];
-        }
-
-        var current = await db.CalculationRuns
-            .AsNoTracking()
-            .Where(r => r.ProjectId == project
-                        && r.Status == CalculationRun.CurrentStatus
-                        && (r.DocumentId == documentId || r.DocumentId == null))
-            .Select(r => new { r.Id, r.DocumentId, r.PeriodKey })
+        // Q-17: проєкт документа і актуальні прогони - ОДИН запит (док. не існує - прогонів нема, порожньо).
+        var current = await (
+                from d in db.Documents.AsNoTracking()
+                where d.Id == documentId
+                join r in db.CalculationRuns.AsNoTracking() on d.ProjectId equals r.ProjectId
+                where r.Status == CalculationRun.CurrentStatus
+                      && (r.DocumentId == documentId || r.DocumentId == null)
+                select new { r.Id, r.DocumentId, r.PeriodKey })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
