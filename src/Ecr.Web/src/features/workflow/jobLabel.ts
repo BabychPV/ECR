@@ -52,6 +52,8 @@ const KindKeys: Record<string, string> = {
   ReportSnapshotFormatJob: 'jobs.kind.reportSnapshotFormat',
   RowWindowRefetchJob: 'jobs.kind.rowWindowRefetch',
   SubmissionSnapshotRetentionJob: 'jobs.kind.submissionSnapshotRetention',
+  // Q-17: нічне прибирання витіснених результатів розрахунку.
+  SupersededResultsSweepJob: 'jobs.kind.supersededResultsSweep',
 };
 
 /** Просте ім'я типу з повного (`Ecr.Application.Ports.IRecalculationJob`). */

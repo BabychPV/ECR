@@ -48,6 +48,7 @@ describe('jobKindLabel', () => {
     ['ReportRetentionJob', 'reportRetention'],
     ['ReportSnapshotFormatJob', 'reportSnapshotFormat'],
     ['SubmissionSnapshotRetentionJob', 'submissionSnapshotRetention'],
+    ['SupersededResultsSweepJob', 'supersededResultsSweep'],
   ])('FP-7: повторювана задача конкретного класу %s має людську назву, а не сирий тип', (type, key) => {
     expect(jobKindLabel(type)).toBe(`⟦jobs.kind.${key}⟧`);
   });
