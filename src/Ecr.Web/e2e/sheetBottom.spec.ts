@@ -88,6 +88,13 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
       expect(native).toBe('hidden');
 
       // Прокрутка ВИДНА: таблиця ширша за вікно, доріжка намальована, повзунок має ненульову ширину в межах рядка.
+      // Сітка домальовує ширину вмісту після першого малювання (особливо після reload): чекаємо, а не міряємо миттю.
+      await expect
+        .poll(() => page.getByTestId('grid-hscroll').evaluate((el) => el.scrollWidth - el.clientWidth), {
+          timeout: 15_000,
+          message: `прогін ${String(i + 1)}: прокручувати нічого, хоч стовпців ${String(WideColumns)}`,
+        })
+        .toBeGreaterThan(0);
       const metrics = await page.getByTestId('grid-hscroll').evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
       expect(metrics.scroll, `прогін ${String(i + 1)}: прокручувати нічого, хоч стовпців ${String(WideColumns)}`).toBeGreaterThan(metrics.client);
       const rail = await page.getByTestId('grid-hscroll-rail').boundingBox();
@@ -171,9 +178,24 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
           const t = document.querySelector('[data-testid="grid-hscroll"]') as HTMLElement;
           const g = document.querySelector('revo-grid revogr-scroll-virtual.horizontal') as HTMLElement;
           const grid = document.querySelector('revo-grid') as HTMLElement;
-          const headers = [...document.querySelectorAll('revo-grid revogr-header .rgHeaderCell')].slice(0, 40).map((h) => { const b = h.getBoundingClientRect(); return `@${Math.round(b.x)}`; });
-          const viewports = [...document.querySelectorAll('revo-grid revogr-viewport-scroll')].map((v) => `:${(v.querySelector('.horizontal-wrapper, .inner-content-table') as HTMLElement | null)?.scrollLeft ?? v.scrollLeft}`);
-          return JSON.stringify({ trackLeft: t.scrollLeft, trackRange: t.scrollWidth - t.clientWidth, gridLeft: g.scrollLeft, gridRange: g.scrollWidth - g.clientWidth, gridX: Math.round(grid.getBoundingClientRect().x), headers, viewports });
+          const headers = [...document.querySelectorAll('revo-grid revogr-header .rgHeaderCell')].slice(0, 40).map((h) => {
+            const b = h.getBoundingClientRect();
+            return `${((h as HTMLElement).innerText ?? '').trim()}@${String(Math.round(b.x))}`;
+          });
+          const viewports = [...document.querySelectorAll('revo-grid revogr-viewport-scroll')].map(
+            (v) => `${v.className}:${String((v.querySelector('.horizontal-wrapper, .inner-content-table') as HTMLElement | null)?.scrollLeft ?? v.scrollLeft)}`,
+          );
+          const scrollers = [document.scrollingElement, document.querySelector('main')].map((m) => m?.scrollLeft ?? -1);
+          return JSON.stringify({
+            scrollers,
+            gridRect: grid.getBoundingClientRect().toJSON(),
+            trackLeft: t.scrollLeft,
+            trackRange: t.scrollWidth - t.clientWidth,
+            gridLeft: g.scrollLeft,
+            gridRange: g.scrollWidth - g.clientWidth,
+            headers,
+            viewports,
+          });
         });
         throw new Error(`прогін ${String(i + 1)}: сітка не рушила за смугою: ${state}`, { cause: error });
       }
