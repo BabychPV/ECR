@@ -29,6 +29,7 @@ function rows(): ShortcutRow[] {
     { keys: 'Ctrl+S', what: t('grid.keys.save'), edit: true },
     { keys: 'F9', what: t('grid.keys.recalc'), edit: true },
     { keys: 'Ctrl+K', what: t('grid.keys.palette') },
+    { keys: 'Ctrl+Shift+Enter', what: t('grid.keys.fullscreen') },
   ];
 }
 

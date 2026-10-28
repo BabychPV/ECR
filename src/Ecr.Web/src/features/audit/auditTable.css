@@ -9,16 +9,31 @@
  * `registryConstructor.css` (CL-26): `anywhere` зменшує мінімальну ширину колонки до однієї літери, а ряди
  * в комірках дозволяють переносити свої частини.
  */
+/*
+ * ✎ ui-sheet-focus (P3 Аудиту-2): `anywhere` різав звичайні слова («administ/rator», «La/te»). Тепер
+ * `break-word` + `word-break: normal` — слово переноситься цілим, розрив усередині лише там, де воно
+ * інакше не вміщується. Розрив усередині літер лишено ЛИШЕ колонці «Було → стало» (довге число без
+ * пробілів), щоб вона не розпирала таблицю: так розпір ≤ 500 px лишається, а «administrator» і «Late»
+ * переносяться цілими словами.
+ */
 .ecr-audit-table th,
 .ecr-audit-table td {
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.ecr-audit-table td:has([data-audit-was-becomes]) {
   overflow-wrap: anywhere;
 }
 
-/* Ряди `Group wrap="nowrap"` у комірках: на вузькому екрані частини (значення, стрілка, позначка) переносяться. */
+/*
+ * Ряди `Group wrap="nowrap"` у комірках: на вузькому екрані частини (значення, стрілка, позначка)
+ * переносяться. Без `!important`: селектор специфічніший за клас Mantine, що читає `--group-wrap`.
+ */
 .ecr-audit-table td > .mantine-Group-root {
-  flex-wrap: wrap !important;
+  flex-wrap: wrap;
 }
 
 .ecr-audit-table td [data-audit-was-becomes] {
-  flex-wrap: wrap !important;
+  flex-wrap: wrap;
 }
