@@ -128,8 +128,17 @@ export function GridHScroll({ resolveHost, container, watch }: GridHScrollProps)
       observer?.observe(railEl);
       if (source.firstElementChild !== null) observer?.observe(source.firstElementChild);
       layout();
+      // RevoGrid дораховує ширину вмісту ПІСЛЯ першого малювання (колонки приходять зі зрізом): поки прокручувати
+      // нічого, перераховуємо раз на 250 мс, до 40 разів (ResizeObserver на внутрішньому блоці це не завжди ловить).
+      let retries = 0;
+      const poll = window.setInterval(() => {
+        retries += 1;
+        if (source.scrollWidth - source.clientWidth > 1 || retries >= 40) window.clearInterval(poll);
+        layout();
+      }, 250);
 
       return () => {
+        window.clearInterval(poll);
         source.removeEventListener('scroll', onSource);
         trackEl.removeEventListener('scroll', onTrack);
         trackEl.removeEventListener('scroll', paint);

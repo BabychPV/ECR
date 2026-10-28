@@ -170,7 +170,10 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
         const state = await page.evaluate(() => {
           const t = document.querySelector('[data-testid="grid-hscroll"]') as HTMLElement;
           const g = document.querySelector('revo-grid revogr-scroll-virtual.horizontal') as HTMLElement;
-          return JSON.stringify({ trackLeft: t.scrollLeft, trackRange: t.scrollWidth - t.clientWidth, gridLeft: g.scrollLeft, gridRange: g.scrollWidth - g.clientWidth });
+          const grid = document.querySelector('revo-grid') as HTMLElement;
+          const headers = [...document.querySelectorAll('revo-grid revogr-header .rgHeaderCell')].slice(0, 40).map((h) => { const b = h.getBoundingClientRect(); return `@${Math.round(b.x)}`; });
+          const viewports = [...document.querySelectorAll('revo-grid revogr-viewport-scroll')].map((v) => `:${(v.querySelector('.horizontal-wrapper, .inner-content-table') as HTMLElement | null)?.scrollLeft ?? v.scrollLeft}`);
+          return JSON.stringify({ trackLeft: t.scrollLeft, trackRange: t.scrollWidth - t.clientWidth, gridLeft: g.scrollLeft, gridRange: g.scrollWidth - g.clientWidth, gridX: Math.round(grid.getBoundingClientRect().x), headers, viewports });
         });
         throw new Error(`прогін ${String(i + 1)}: сітка не рушила за смугою: ${state}`, { cause: error });
       }
