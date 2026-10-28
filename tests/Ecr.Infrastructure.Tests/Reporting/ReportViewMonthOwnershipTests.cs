@@ -33,7 +33,7 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
 
     private async Task<Fixture> BuildAsync(
         int periodKey = 202610, TableLayoutKind layout = TableLayoutKind.MonthsInColumns, int columnCount = 2,
-        int rowCount = 2, bool collideText = false)
+        int rowCount = 2, bool collideText = false, int calculatedColumns = 0)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(periodKey, columnCount: columnCount, rowCount: rowCount, layoutKind: layout,
@@ -53,6 +53,12 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
             // AN-147: наявна колонка з кодом <Код формули>_Text - супутник цієї формули має пропуститися.
             db.ColumnDefs.Add(new ColumnDef(doc.TableDefId, EcrCode.Create(derived.Code + "_Text"),
                 new LocalizedText(new Dictionary<string, string> { ["en"] = "Own" }), 9996, CellDataType.Decimal));
+        }
+        // Q-17.recalc: колонки Calculated (ordinal 7000+) - структура публікованої версії заморожена, тож лише ДО публікації.
+        for (var i = 0; i < calculatedColumns; i++)
+        {
+            db.ColumnDefs.Add(new ColumnDef(doc.TableDefId, EcrCode.Create("CLP" + i + Guid.NewGuid().ToString("N")[..6]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "calc" }), 7000 + i, CellDataType.Calculated));
         }
 
         await db.SaveChangesAsync();
@@ -573,6 +579,105 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         var report = $"8 колонок: ON {onEight} OFF {offEight}; SELECT *: ON {onStar} OFF {offStar}";
         Assert.True(onStar.Reads <= 3 * offStar.Reads, report);
         Assert.True(onEight.Reads <= 10 * offEight.Reads, report);
+    }
+
+    /// <summary>
+    /// Q-17.recalc (перф): вʼюха з 40 колонками Calculated, прив'язаними до виходів методології (результати є для всіх
+    /// 40 рядків × 40 виходів). Логічні читання <c>SELECT *</c> і вибірки 8 колонок ON/OFF; apply результатів не має
+    /// давати кратності, що з'їдає бюджет T7/T10/T11. Числа друкуються в повідомленні (до/після - у звіті lane).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Читання_вʼюхи_з_колонками_Calculated_і_результатами_методології_у_межах_бюджету()
+    {
+        const int calcCount = 40;
+        var f = await BuildAsync(columnCount: 150, rowCount: 40, calculatedColumns: calcCount);
+        int methodologyId;
+        int versionId;
+        long runId;
+        int unitId;
+        await using (var db = sql.CreateContext())
+        {
+            var methodology = new Ecr.Domain.Entities.Calculations.Methodology(
+                EcrCode.Create("PRF" + Guid.NewGuid().ToString("N")[..8]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "perf" }));
+            db.Methodologies.Add(methodology);
+            await db.SaveChangesAsync();
+            var version = new Ecr.Domain.Entities.Calculations.MethodologyVersion(
+                methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, Now);
+            db.MethodologyVersions.Add(version);
+            await db.SaveChangesAsync();
+            methodologyId = methodology.Id;
+            versionId = version.Id;
+
+            var calcColumns = await db.ColumnDefs.AsNoTracking()
+                .Where(c => c.TableDefId == f.Doc.TableDefId && c.DataType == CellDataType.Calculated)
+                .OrderBy(c => c.Id).ToListAsync();
+            Assert.Equal(calcCount, calcColumns.Count);
+            for (var i = 0; i < calcCount; i++)
+            {
+                db.CalculationBindings.Add(new CalculationBinding(f.Doc.TableDefId, calcColumns[i].Id, methodologyId, "OUT" + i, "{}"));
+            }
+
+            await db.SaveChangesAsync();
+
+            var run = new Ecr.Domain.Entities.Calculations.CalculationRun(
+                f.Doc.ProjectId, 202610, triggeredByUserId: 1, Now, f.Doc.DocumentId);
+            db.CalculationRuns.Add(run);
+            await db.SaveChangesAsync();
+            run.Complete("Completed", Now, profileJson: null, errorMessage: null);
+            run.MakeCurrent();
+            await db.SaveChangesAsync();
+            runId = run.Id;
+            unitId = await db.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
+        }
+
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var fill = connection.CreateCommand();
+            fill.CommandTimeout = 600;
+            fill.CommandText = """
+                INSERT INTO calc.CalculationResult
+                    (PeriodKey, Id, CalculationRunId, MethodologyVersionId, DocumentId, SourceRowKey, OutputCode, Value, UnitId, Kind)
+                SELECT 202610, NEXT VALUE FOR calc.CalculationResultSeq, @run, @ver, @d, x.RowKey, x.OutputCode, 1.5, @unit, 0
+                  FROM (SELECT r.RowKey, b.OutputCode
+                          FROM doc.TableRow AS r
+                          JOIN doc.TableInstance AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
+                          CROSS JOIN cfg.CalculationBinding AS b
+                         WHERE ti.Id = @ti AND r.PeriodKey = 202610 AND b.TableDefId = @td AND b.MethodologyId = @m) AS x;
+                """;
+            fill.Parameters.AddWithValue("@run", runId);
+            fill.Parameters.AddWithValue("@ver", versionId);
+            fill.Parameters.AddWithValue("@d", f.Doc.DocumentId);
+            fill.Parameters.AddWithValue("@unit", unitId);
+            fill.Parameters.AddWithValue("@ti", f.Doc.TableInstanceId);
+            fill.Parameters.AddWithValue("@td", f.Doc.TableDefId);
+            fill.Parameters.AddWithValue("@m", methodologyId);
+            Assert.Equal(40 * calcCount, await fill.ExecuteNonQueryAsync());
+        }
+
+        var star = $"SELECT * FROM rpt.[{f.View}] WHERE _DocumentId = {f.Doc.DocumentId} AND _PeriodKey = 202610";
+        await using var db2 = sql.CreateContext();
+        var calcCodes = await db2.ColumnDefs.AsNoTracking()
+            .Where(c => c.TableDefId == f.Doc.TableDefId && c.DataType == CellDataType.Calculated)
+            .OrderBy(c => c.Id).Select(c => c.Code).Take(8).ToListAsync();
+        var eight = $"SELECT _RowKey, {string.Join(", ", calcCodes.Select(c => $"[{c}]"))} FROM rpt.[{f.View}] WHERE _DocumentId = {f.Doc.DocumentId} AND _PeriodKey = 202610";
+
+        await GenerateAsync(f, routing: false);
+        var offStar = await MeasureAsync(star);
+        var offEight = await MeasureAsync(eight);
+        await GenerateAsync(f, routing: true);
+        var onStar = await MeasureAsync(star);
+        var onEight = await MeasureAsync(eight);
+
+        var report = $"SELECT *: ON {onStar} OFF {offStar}; 8 Calculated: ON {onEight} OFF {offEight}";
+        // Заміри на цьому наборі: ~4,8 тис. читань (до apply результатів у вʼюсі було ~0,4 тис., але Calculated віддавала
+        // NULL); перший варіант apply (три вікна, run-фільтр на кожен зонд) давав 25,8 тис. Межа - з запасом ~2,5x.
+        Assert.True(onStar.Reads <= 3 * offStar.Reads, report);
+        Assert.True(offStar.Reads <= 12_000 && onStar.Reads <= 12_000, report);
     }
 
     /// <summary>

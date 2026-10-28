@@ -104,8 +104,8 @@ GO
 -- Тип колонки — за `ColumnDef.DataType`: String → ValueString; Int, Decimal,
 -- Formula, Calculated → ValueNumeric; Bool → ValueBool; Date → ValueDate;
 -- Lookup → ValueRegistryEntryId; Unit → ValueUnitId. ⚠ `Calculated` —
--- лише те, що матеріалізовано в `doc.CellValue`; результати методологій
--- живуть у `calc.*` і сюди не підтягуються.
+-- число методології з `calc.CalculationResult` (як у зрізі API; Q-17.recalc, див. нижче),
+-- а коли результату немає, - те, що матеріалізовано в `doc.CellValue`.
 -- AN-147: для Formula/Calculated додатково віддається колонка-супутник `<Код>_Text` (nvarchar): ValueString там, де
 -- результат обчислення рядковий (числове значення порожнє), інакше NULL. Числова колонка `<Код>` не змінюється.
 -- ⛔ Q-17.7: @MonthRouting = 1 вмикає у вʼюхах MonthsInColumns читання значень з екземпляра ВЛАСНИКА (місячний M{m} - з
@@ -207,6 +207,9 @@ BEGIN
     DECLARE @pv TABLE (OwnerNo int NOT NULL, ColNo int NOT NULL, ColId int NOT NULL, Agg nvarchar(max) NOT NULL);
     DECLARE @marker nvarchar(64) = N'-- Згенеровано rpt.usp_GenerateTemplateViews';
     DECLARE @failure nvarchar(2048);
+    -- Q-17.recalc: результати методологій для колонок Calculated (див. нижче). @selectRv - той самий список колонок, але
+    -- Calculated читається з результатів; @rvIds / @rvAgg - колонки й їхні агрегати; @rvApply - сам OUTER APPLY.
+    DECLARE @selectRv nvarchar(max), @valueColRv nvarchar(256), @rvIds nvarchar(max), @rvAgg nvarchar(max), @rvApply nvarchar(max);
 
     DECLARE cur_views CURSOR LOCAL FAST_FORWARD FOR
         SELECT TableDefId, SheetDefId, Header, ViewName FROM @tables ORDER BY TableDefId;
@@ -216,7 +219,8 @@ BEGIN
     BEGIN
         -- ⚠ Цикл, а не `STRING_AGG`: підлога сервера — 2016 SP1 (`D-101`).
         SELECT @select = N'', @selectText = N'', @joins = N'', @n = 0,
-               @ownerRows = N'', @ownerCells = N'', @monthMask = 0, @needAnchor = 0, @extra = 0;
+               @ownerRows = N'', @ownerCells = N'', @monthMask = 0, @needAnchor = 0, @extra = 0,
+               @selectRv = N'', @rvIds = N'', @rvAgg = N'', @rvApply = N'';
         DELETE FROM @pv;
         SET @layout = (SELECT LayoutKind FROM cfg.TableDef WHERE Id = @id);
         SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0);
@@ -288,6 +292,18 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                     SET @valueCol = N'CAST(' + @valueCol + N' AS bit)';
             END
 
+            -- Q-17.recalc: колонка Calculated (8) у зрізі API - число методології (CalculatedCellOverlay, calc.CalculationResult),
+            -- а не doc.CellValue. Вʼюха бере його з OUTER APPLY rv (нижче), а матеріалізоване значення лишає запасним.
+            SET @valueColRv = @valueCol;
+            IF @colType = 8
+            BEGIN
+                SET @valueColRv = N'COALESCE(rv.rv' + CAST(@n AS nvarchar(10)) + N', ' + @valueCol + N')';
+                SET @rvIds = @rvIds + N', ' + CAST(@colId AS nvarchar(10));
+                -- Переможець - прив'язка з найбільшим Id: рядок "Id (10 цифр) + значення або N" береться через MAX і розпаковується.
+                SET @rvAgg = @rvAgg + N', CAST(NULLIF(SUBSTRING(MAX(CASE WHEN q.ColumnDefId = ' + CAST(@colId AS nvarchar(10))
+                           + N' THEN q.Pack END), 11, 60), ''N'') AS decimal(34, 16)) AS rv' + CAST(@n AS nvarchar(10));
+            END
+
             SET @select = @select + N',
        ' + @valueCol + N' AS ' + QUOTENAME(@colCode);
             -- AN-147: колонка-супутник `<Код>_Text` лише для Formula/Calculated - РЯДКОВИЙ результат обчислення (ValueString);
@@ -301,9 +317,12 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                 SET @selectText = @selectText + N',
        CASE WHEN ' + @alias + N'.ValueNumeric IS NULL THEN ' + @alias + N'.ValueString END AS '
                                 + QUOTENAME(@colCode + N'_Text');
-            SET @colId =(SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0 AND Id > @colId);
+            SET @selectRv = @selectRv + N',
+       ' + @valueColRv + N' AS ' + QUOTENAME(@colCode);
+            SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0 AND Id > @colId);
         END
         SET @select = @select + @selectText;
+        SET @selectRv = @selectRv + @selectText;   -- AN-147: супутники й у варіанті з rv (Calculated числом методології)
 
         -- Q-17.7: приєднання власників — по одному екземпляру/рядку на потрібний місяць і на якір.
         -- Усі з'єднання — по ключах: UQ_TableInstance (PeriodKey, DocumentId, TableDefId) і UQ_TableRow_Key
@@ -362,6 +381,64 @@ OUTER APPLY (SELECT ' + @aggList + N' FROM '
 
             -- Порядок: приєднання власників-рядків ідуть ДО комірок власників; власні копії нероутованих колонок (c<n>) - між ними.
             SET @joins = @ownerRows + @joins + @ownerCells;
+        END
+
+        -- ⛔ Q-17.recalc (Аудит-2, Land-заміри): зріз API віддає колонку Calculated числом методології
+        -- (`CalculatedCellOverlay`: calc.CalculationResult за активною прив'язкою cfg.CalculationBinding), а doc.CellValue її
+        -- не містить, тож вʼюха показувала NULL. Той самий відбір, що в зрізі, - ОДИН OUTER APPLY rv на рядок для всіх таких колонок:
+        --   * результати АКТУАЛЬНИХ прогонів документа (ReadCurrentAsync: власний документний прогін має перевагу над
+        --     проєктним, якщо він є для цього періоду) за документом, періодом екземпляра й RowKey рядка;
+        --   * вихід = OutputCode прив'язки, версія - будь-яка версія методології прив'язки;
+        --   * результат екземпляра цього рядка точніший за результат без екземпляра (D-401); решта екземплярів ігноруються;
+        --   * предикат MatchJson (`{}` - уся таблиця; інакше всі пари "ColumnDefId": "текст" мусять збігтися з комірками
+        --     рядка - MethodologyRuleMatcher);
+        --   * кілька прив'язок на колонку - виграє найбільший Id; різні речовини сумуються, а розбіжні значення однієї
+        --     речовини дають NULL (TryCombine).
+        -- Прив'язки читаються під час запиту (не під час генерації), тож нова прив'язка діє без перегенерації вʼюх.
+        -- Лише колонки Calculated; решта (введені, Formula) - як було. Матеріалізоване значення doc.CellValue лишається запасним.
+        -- Ціна: +8 таблиць у запиті (лічильник нижче); не вміщається в ліміт - apply не додається, вʼюха як до Q-17.recalc.
+        IF @rvIds <> N'' AND @n + @extra + 8 <= 250
+        BEGIN
+            SET @rvApply = N'
+OUTER APPLY (SELECT ' + STUFF(@rvAgg, 1, 2, N'') + N'
+             FROM (SELECT t.ColumnDefId, RIGHT(N''0000000000'' + CAST(t.BindingId AS nvarchar(10)), 10) + COALESCE(CONVERT(nvarchar(60), t.Total), N''N'') AS Pack
+                   FROM (SELECT g.BindingId, g.ColumnDefId,
+                                CASE WHEN MAX(g.Own) = 1
+                                     THEN CASE WHEN MAX(CASE WHEN g.Own = 1 THEN g.Amb END) = 1 THEN NULL ELSE SUM(CASE WHEN g.Own = 1 THEN g.SubTotal END) END
+                                     ELSE CASE WHEN MAX(CASE WHEN g.Own = 0 THEN g.Amb END) = 1 THEN NULL ELSE SUM(CASE WHEN g.Own = 0 THEN g.SubTotal END) END
+                                END AS Total
+                         FROM (SELECT u.BindingId, u.ColumnDefId, u.Own, MIN(u.Value) AS SubTotal,
+                                      CASE WHEN MIN(u.Value) <> MAX(u.Value) OR MIN(u.UnitId) <> MAX(u.UnitId) THEN 1 ELSE 0 END AS Amb
+                               FROM (SELECT b.Id AS BindingId, b.ColumnDefId, cr.SubstanceEntryId, cr.Value, cr.UnitId,
+                                            CASE WHEN cr.TableInstanceId IS NULL THEN 0 ELSE 1 END AS Own
+                                     FROM cfg.CalculationBinding AS b
+                                     JOIN calc.MethodologyVersion AS mv ON mv.MethodologyId = b.MethodologyId
+                                     JOIN calc.CalculationResult AS cr ON cr.PeriodKey = ti.PeriodKey AND cr.DocumentId = d.Id
+                                          AND cr.MethodologyVersionId = mv.Id AND cr.OutputCode = b.OutputCode AND cr.SourceRowKey = r.RowKey
+                                     JOIN (SELECT ru.Id FROM calc.CalculationRun AS ru
+                                            WHERE ru.ProjectId = d.ProjectId AND ru.Status = N''Current''
+                                              AND (ru.DocumentId = d.Id
+                                                   OR (ru.DocumentId IS NULL AND NOT EXISTS (SELECT 1 FROM calc.CalculationRun AS ru2
+                                                        WHERE ru2.ProjectId = d.ProjectId AND ru2.Status = N''Current''
+                                                          AND ru2.DocumentId = d.Id AND ru2.PeriodKey = ti.PeriodKey)))) AS rr
+                                          ON rr.Id = cr.CalculationRunId
+                                     WHERE b.IsActive = 1 AND b.TableDefId = ' + CAST(@id AS nvarchar(10)) + N' AND b.ColumnDefId IN (' + STUFF(@rvIds, 1, 2, N'') + N')
+                                       AND (cr.TableInstanceId = ti.Id OR cr.TableInstanceId IS NULL)';
+            SET @rvApply = @rvApply + N'
+                                       AND (REPLACE(b.MatchJson, CHAR(32), N'''') = N''{}''
+                                            OR (ISJSON(b.MatchJson) = 1 AND LEFT(LTRIM(b.MatchJson), 1) = N''{''
+                                                AND NOT EXISTS (SELECT 1 FROM OPENJSON(CASE WHEN ISJSON(b.MatchJson) = 1 THEN b.MatchJson ELSE N''{}'' END) AS j
+                                                     WHERE NOT EXISTS (SELECT 1 FROM doc.CellValue AS m
+                                                          WHERE m.PeriodKey = r.PeriodKey AND m.TableRowId = r.Id
+                                                            AND CAST(m.ColumnDefId AS nvarchar(20)) = j.[key] COLLATE Latin1_General_BIN2
+                                                            AND COALESCE(m.ValueString, CONVERT(nvarchar(64), m.ValueNumeric), CONVERT(nvarchar(20), m.ValueRegistryEntryId),
+                                                                         CASE m.ValueBool WHEN 1 THEN N''True'' WHEN 0 THEN N''False'' END) COLLATE Latin1_General_BIN2
+                                                              = CASE WHEN j.[type] = 3 THEN CASE j.[value] WHEN N''true'' THEN N''True'' ELSE N''False'' END ELSE j.[value] END COLLATE Latin1_General_BIN2))))) AS u
+                               GROUP BY u.BindingId, u.ColumnDefId, u.Own, u.SubstanceEntryId) AS g
+                         GROUP BY g.BindingId, g.ColumnDefId) AS t) AS q) AS rv';
+            SET @joins = @joins + @rvApply;
+            SET @select = @selectRv;
+            SET @extra = @extra + 8;
         END
 
         -- ⚠ Колонки — у порядку `Id`, а не `Ordinal`: `Ordinal` — лише
