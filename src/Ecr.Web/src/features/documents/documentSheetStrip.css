@@ -1,11 +1,11 @@
 /*
- * b4b: смуга аркушів документа ПІД сіткою (макет `screen-document.js`:
- * `.statusbar` 32 px + `.sheet-tabs`; KIT §1.5). Липне до низу вікна, щоб
- * перемикач аркушів був видимий і під високою сіткою. Кольори — токени теми
- * Mantine, тож Light/Dark беруться самі.
+ * b4b: смуга аркушів документа (макет `screen-document.js`: `.statusbar` + `.sheet-tabs`; KIT §1.5). Кольори —
+ * токени теми Mantine, тож Light/Dark беруться самі.
  *
- * ✎ ui-sheet-focus (C): липне тепер `.doc-sheet-bar` (кнопки «‹ ›», вкладки, «…»); вкладки гортаються
- * вбік, на обрізаному краї — тінь.
+ * ✎ ui-sheet-bottom (макет A «вкладки і скрол в одному рядку під таблицею»): рядок ~36 px у рамці панелі
+ * таблиці, ПІД сіткою: ліворуч група «‹ › …», далі вкладки (~62 %, мають право стискатися, гортаються колесом,
+ * на обрізаному краї — маска-затухання), праворуч горизонтальна прокрутка таблиці (~38 %, ≥ 160 px).
+ * Липне до низу (вікна чи повного екрана), щоб бути видимим і під високою сіткою.
  */
 .doc-sheet-bar {
   position: sticky;
@@ -13,38 +13,19 @@
   z-index: 3;
   display: flex;
   align-items: stretch;
-  min-height: 32px;
+  min-height: 36px;
   border-top: 1px solid var(--mantine-color-default-border);
   background-color: var(--mantine-color-body);
   background-image: linear-gradient(var(--mantine-color-default-hover), var(--mantine-color-default-hover));
 }
 
-.doc-sheet-bar::before,
-.doc-sheet-bar::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 20px;
-  pointer-events: none;
-  opacity: 0;
-  z-index: 1;
-}
-
-/* Лівий край вкладок починається після двох кнопок (2 × 28 px), правий — перед «…» (28 px). */
-.doc-sheet-bar::before {
-  left: 56px;
-  background: linear-gradient(to right, var(--mantine-color-body), transparent);
-}
-
-.doc-sheet-bar::after {
-  right: 28px;
-  background: linear-gradient(to left, var(--mantine-color-body), transparent);
-}
-
-.doc-sheet-bar[data-edge-left]::before,
-.doc-sheet-bar[data-edge-right]::after {
-  opacity: 1;
+.doc-sheet-nav-group {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-right: 1px solid var(--mantine-color-default-border);
 }
 
 .doc-sheet-nav {
@@ -52,10 +33,11 @@
   display: inline-grid;
   place-items: center;
   width: 28px;
-  min-height: 32px;
+  height: 28px;
   padding: 0;
-  border: 0;
-  background: transparent;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 4px;
+  background: var(--mantine-color-body);
   color: var(--mantine-color-text);
   cursor: pointer;
 }
@@ -76,12 +58,28 @@
 }
 
 .doc-sheet-strip {
-  flex: 1;
+  flex: 0 1 62%;
   min-width: 0;
-  min-height: 32px;
+  min-height: 34px;
   flex-wrap: nowrap;
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+/* Затухання на обрізаному краї (замість накладних псевдоелементів): маска лише з тих боків, де є що гортати. */
+.doc-sheet-bar[data-edge-right] .doc-sheet-strip {
+  -webkit-mask-image: linear-gradient(90deg, #000 92%, transparent);
+  mask-image: linear-gradient(90deg, #000 92%, transparent);
+}
+
+.doc-sheet-bar[data-edge-left] .doc-sheet-strip {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%);
+  mask-image: linear-gradient(90deg, transparent, #000 8%);
+}
+
+.doc-sheet-bar[data-edge-left][data-edge-right] .doc-sheet-strip {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
 }
 
 .doc-sheet-strip .doc-sheet-tab {
@@ -95,5 +93,14 @@
   background: var(--mantine-color-body);
   color: var(--mantine-color-text);
   font-weight: 500;
-  box-shadow: inset 0 -2px 0 var(--mantine-primary-color-filled);
+  box-shadow: inset 0 2px 0 var(--mantine-primary-color-filled);
+}
+
+.doc-sheet-scroll {
+  flex: 1 1 38%;
+  min-width: 160px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border-left: 1px solid var(--mantine-color-default-border);
 }

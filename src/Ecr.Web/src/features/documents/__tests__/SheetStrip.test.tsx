@@ -61,4 +61,25 @@ describe('SheetStrip', () => {
 
     expect(onSelect).toHaveBeenCalledWith('S3');
   });
+  it('макет A: група «‹ › …» ліворуч, далі вкладки, праворуч слот прокрутки таблиці', () => {
+    render(
+      <MantineProvider theme={testTheme}>
+        <Tabs value="S1">
+          <SheetStrip sheets={Sheets} activeCode="S1" onSelect={vi.fn()}>
+            <div data-testid="scroll-slot" />
+          </SheetStrip>
+        </Tabs>
+      </MantineProvider>,
+    );
+
+    const group = document.querySelector('.doc-sheet-nav-group') as HTMLElement;
+    const tablist = screen.getByRole('tablist');
+    const slot = screen.getByTestId('scroll-slot');
+    expect(group.contains(screen.getByTestId('sheet-prev'))).toBe(true);
+    expect(group.contains(screen.getByTestId('sheet-next'))).toBe(true);
+    expect(group.contains(screen.getByTestId('sheet-all'))).toBe(true);
+    expect(group.compareDocumentPosition(tablist) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tablist.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(slot.closest('.doc-sheet-scroll')).not.toBeNull();
+  });
 });

@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { useMediaQuery } from '@mantine/hooks';
 import { useTableStatus } from '@/features/documents/api';
 import { focusSoon } from '@/shared/a11y/focus';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { useUrlState } from '@/shared/ui/useUrlState';
+import { GridHScroll } from './GridHScroll';
 import { GridKeyHint } from './GridKeyHint';
 import { SheetTables, type SheetTablesProps } from './SheetTables';
 import { Icon, TableNavigator, tableName } from './TableNavigator';
@@ -27,7 +28,16 @@ const CollapseIcon = 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5';
 type SheetWorkspaceProps = Pick<
   SheetTablesProps,
   'documentId' | 'periodKey' | 'periodEnd' | 'readOnly' | 'sheetState' | 'tables'
->;
+> &
+  BottomBarProps;
+
+/** Дані для нижнього рядка (✎ ui-sheet-bottom): смуга аркушів + горизонтальна прокрутка таблиці в одному рядку. */
+export type BottomBarRenderer = (scroll: ReactNode) => ReactNode;
+
+interface BottomBarProps {
+  /** Малює нижній рядок під таблицею; scroll — горизонтальна прокрутка таблиці для його правої частини. */
+  readonly bottomBar?: BottomBarRenderer | undefined;
+}
 
 /**
  * Esc виходить з повного екрана ЛИШЕ коли нічого іншого його не очікує: редактор комірки (Esc скасовує
@@ -74,6 +84,7 @@ export function SheetWorkspace({
   readOnly,
   sheetState,
   tables,
+  bottomBar,
 }: SheetWorkspaceProps): JSX.Element {
   const [view] = useUrlState('view');
   const [tableKey, setTableKey] = useUrlState('table');
@@ -93,6 +104,9 @@ export function SheetWorkspace({
   const items = useMemo(() => buildTableTree(tables, status.data), [tables, status.data]);
 
   const work = useRef<HTMLDivElement>(null);
+  // Рамка панелі таблиці (сітки + нижній рядок) і слот, на якому останнім був фокус (режим «усі таблиці»).
+  const panel = useRef<HTMLDivElement>(null);
+  const [focusedSlot, setFocusedSlot] = useState<string | null>(null);
   const split = useRef<HTMLDivElement>(null);
   const fullBtn = useRef<HTMLButtonElement>(null);
   // Таблиця, на заголовок якої перенести фокус після вибору в дереві (клік, Enter).
@@ -199,18 +213,33 @@ export function SheetWorkspace({
     };
   }, [full]);
 
+  const panelClass = bottomBar === undefined ? 'ecr-sheet-panel' : 'ecr-sheet-panel ecr-sheet-panel--bar';
+
   if (view === 'all') {
+    // Кілька таблиць: нижній рядок один, під останньою; прокрутка належить таблиці, де останнім був фокус.
+    const hostOf = (): HTMLElement | null =>
+      panel.current?.querySelector<HTMLElement>(focusedSlot === null ? '[data-table-mounted="true"]' : `[data-table-slot="${focusedSlot}"]`) ?? null;
     return (
       <>
         <GridKeyHint readOnly={readOnly} />
-        <SheetTables
-          documentId={documentId}
-          periodKey={periodKey}
-          periodEnd={periodEnd}
-          readOnly={readOnly}
-          sheetState={sheetState}
-          tables={tables}
-        />
+        <div
+          ref={panel}
+          className={panelClass}
+          onFocusCapture={(event) => {
+            const slot = (event.target as HTMLElement).closest('[data-table-slot]')?.getAttribute('data-table-slot');
+            if (slot !== null && slot !== undefined) setFocusedSlot(slot);
+          }}
+        >
+          <SheetTables
+            documentId={documentId}
+            periodKey={periodKey}
+            periodEnd={periodEnd}
+            readOnly={readOnly}
+            sheetState={sheetState}
+            tables={tables}
+          />
+          {bottomBar?.(<GridHScroll resolveHost={hostOf} container={() => panel.current} watch={focusedSlot} />)}
+        </div>
       </>
     );
   }
@@ -305,32 +334,41 @@ export function SheetWorkspace({
         aria-label={full && selected !== undefined ? tableName(selected) : undefined}
         data-sheet-full={full ? '' : undefined}
       >
-        <SheetTables
-          documentId={documentId}
-          periodKey={periodKey}
-          periodEnd={periodEnd}
-          readOnly={readOnly}
-          sheetState={sheetState}
-          tables={tables}
-          layout="single"
-          fullScreen={full}
-          selectedTableInstanceId={selectedId}
-          onSelectTable={select}
-          titleStart={full ? undefined : toggle}
-          // `UI-41`: видима підказка клавіш праворуч у рядку таблиці (у макеті — `aria-label` сітки
-          // і рядок стану внизу; під сіткою висотою 70vh її не було б видно без прокрутки).
-          titleEnd={
-            <>
-              {full && (
-                <span className="ecr-full-context" data-testid="sheet-full-context">
-                  {sheetName} · {periodText}
-                </span>
-              )}
-              <GridKeyHint readOnly={readOnly} />
-              {fullButton}
-            </>
-          }
-        />
+        <div ref={panel} className={panelClass}>
+          <SheetTables
+            documentId={documentId}
+            periodKey={periodKey}
+            periodEnd={periodEnd}
+            readOnly={readOnly}
+            sheetState={sheetState}
+            tables={tables}
+            layout="single"
+            fullScreen={full}
+            selectedTableInstanceId={selectedId}
+            onSelectTable={select}
+            titleStart={full ? undefined : toggle}
+            // `UI-41`: видима підказка клавіш праворуч у рядку таблиці (у макеті — `aria-label` сітки
+            // і рядок стану внизу; під сіткою висотою 70vh її не було б видно без прокрутки).
+            titleEnd={
+              <>
+                {full && (
+                  <span className="ecr-full-context" data-testid="sheet-full-context">
+                    {sheetName} · {periodText}
+                  </span>
+                )}
+                <GridKeyHint readOnly={readOnly} />
+                {fullButton}
+              </>
+            }
+          />
+          {bottomBar?.(
+            <GridHScroll
+              resolveHost={() => panel.current?.querySelector<HTMLElement>('[data-table-slot][data-table-selected="true"]') ?? null}
+              container={() => panel.current}
+              watch={selectedId}
+            />,
+          )}
+        </div>
       </div>
     </div>
   );

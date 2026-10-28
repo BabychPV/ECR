@@ -387,6 +387,7 @@
 
 /* ✎ ui-sheet-focus (B): таблиця «на весь екран» — in-app, не Fullscreen API. */
 .ecr-doc-work--full {
+  scroll-padding-bottom: 48px;
   position: fixed;
   inset: 0;
   z-index: 150;
@@ -402,7 +403,7 @@
  * (`TableSlotMinHeight`) знімає проп `fullScreen` у `SheetTables`, без CSS.
  */
 .ecr-doc-work--full revo-grid {
-  height: calc(100dvh - 100px) !important;
+  height: calc(100dvh - 150px) !important;
   min-height: 240px;
 }
 
