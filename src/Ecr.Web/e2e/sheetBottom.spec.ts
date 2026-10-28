@@ -87,9 +87,66 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
       const native = await page.locator('revo-grid:visible revogr-scroll-virtual.horizontal').first().evaluate((el) => getComputedStyle(el).visibility);
       expect(native).toBe('hidden');
 
+      // Прокрутка ВИДНА: таблиця ширша за вікно, доріжка намальована, повзунок має ненульову ширину в межах рядка.
+      const metrics = await page.getByTestId('grid-hscroll').evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+      expect(metrics.scroll, `прогін ${String(i + 1)}: прокручувати нічого, хоч стовпців ${String(WideColumns)}`).toBeGreaterThan(metrics.client);
+      const rail = await page.getByTestId('grid-hscroll-rail').boundingBox();
+      const thumb = await page.getByTestId('grid-hscroll-thumb').boundingBox();
+      expect(rail, 'доріжка намальована').toBeTruthy();
+      expect(thumb, 'повзунок намальований').toBeTruthy();
+      if (!rail || !thumb) return;
+      expect(rail.height).toBeGreaterThanOrEqual(9);
+      expect(thumb.width, 'повзунок має ненульову ширину').toBeGreaterThan(8);
+      expect(thumb.width).toBeLessThan(rail.width);
+      expect(thumb.x).toBeGreaterThanOrEqual(rail.x - 1);
+      expect(thumb.x + thumb.width).toBeLessThanOrEqual(rail.x + rail.width + 1);
+      expect(rail.y).toBeGreaterThanOrEqual(barBox.y);
+      expect(rail.y + rail.height).toBeLessThanOrEqual(barBox.y + barBox.height + 1);
+      // Колір повзунка відрізняється від доріжки (видно на знімку).
+      const colours = await page.evaluate(() => {
+        const r = document.querySelector('[data-testid="grid-hscroll-rail"]') as HTMLElement;
+        const t = document.querySelector('[data-testid="grid-hscroll-thumb"]') as HTMLElement;
+        return { rail: getComputedStyle(r).backgroundColor, thumb: getComputedStyle(t).backgroundColor };
+      });
+      expect(colours.thumb).not.toBe(colours.rail);
+
       if (i === 0) {
         await page.screenshot({ path: test.info().outputPath('after-bar-1280.png') });
+        await page.screenshot({ path: test.info().outputPath('after-bar-1280-zoom.png'), clip: { x: barBox.x, y: barBox.y - 4, width: barBox.width, height: barBox.height + 8 } });
       }
+    }
+  });
+
+  test('низьке вікно: липкий рядок не накриває сітку, коли сторінку докручено; повзунок тягнеться мишею (N/5)', async ({ page }) => {
+    test.setTimeout(300_000);
+    await page.setViewportSize({ width: 1280, height: 600 });
+    await open(page);
+
+    for (let i = 0; i < Repeats; i += 1) {
+      // Докручуємо сторінку до кінця колесом над шапкою документа (не над сіткою).
+      const title = page.locator('h1, h2').first();
+      await title.hover();
+      for (let k = 0; k < 6; k += 1) await page.mouse.wheel(0, 800);
+      const bar = page.locator('.ecr-sheet-panel .doc-sheet-bar');
+      await expect(bar).toBeVisible();
+      await expect.poll(async () => {
+        const [grid, b] = await Promise.all([page.locator('revo-grid:visible').first().boundingBox(), bar.boundingBox()]);
+        return grid !== null && b !== null ? b.y - (grid.y + grid.height) : -9999;
+      }, { timeout: 10_000, message: `прогін ${String(i + 1)}: рядок накриває нижній край сітки` }).toBeGreaterThanOrEqual(-1);
+
+      // Повзунок тягнеться мишею: сітка зсувається, назад — теж.
+      const start = await resetToStart(page);
+      const thumb = await page.getByTestId('grid-hscroll-thumb').boundingBox();
+      if (thumb === null) throw new Error('повзунка немає');
+      await page.mouse.move(thumb.x + thumb.width / 2, thumb.y + thumb.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(thumb.x + thumb.width / 2 + 600, thumb.y + thumb.height / 2, { steps: 8 });
+      await page.mouse.up();
+      await expect.poll(() => firstHeader(page), { timeout: 15_000, message: 'повзунок не зрушив сітку' }).not.toBe(start);
+      await page.getByTestId('grid-hscroll').evaluate((el) => {
+        el.scrollLeft = 0;
+      });
+      await expect.poll(() => firstHeader(page), { timeout: 15_000 }).toBe(start);
     }
   });
 

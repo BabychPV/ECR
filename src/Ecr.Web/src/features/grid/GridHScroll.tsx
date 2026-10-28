@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { t } from '@/shared/i18n';
 import './gridHScroll.css';
 
 /** Власний горизонтальний скрол RevoGrid, який віддає позицію (`scrollLeft`) — штатний «віртуальний» скрол сітки. */
+/** Найменша ширина повзунка, px (щоб за дуже широкої таблиці його було чим узяти). */
+export const ThumbMinWidth = 24;
+
 export const GridScrollSelector = 'revogr-scroll-virtual.horizontal';
 
 /** Ширина внутрішнього блока нативної смуги так, щоб її повзунок мав ту саму частку, що й у сітки. */
@@ -39,12 +42,17 @@ export interface GridHScrollProps {
 export function GridHScroll({ resolveHost, container, watch }: GridHScrollProps): JSX.Element {
   const track = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
+  const rail = useRef<HTMLDivElement>(null);
+  const thumb = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ startX: number; startLeft: number } | null>(null);
   const [scrollable, setScrollable] = useState(false);
 
   useEffect(() => {
     const trackEl = track.current;
     const innerEl = inner.current;
-    if (trackEl === null || innerEl === null) return;
+    const railEl = rail.current;
+    const thumbEl = thumb.current;
+    if (trackEl === null || innerEl === null || railEl === null || thumbEl === null) return;
 
     let detach: (() => void) | null = null;
     let waiting: MutationObserver | null = null;
@@ -71,11 +79,28 @@ export function GridHScroll({ resolveHost, container, watch }: GridHScrollProps)
         trackEl.scrollLeft = target;
       };
 
+      // Власний повзунок (✎ ui-sheet-bottom): нативний скролбар на overlay-системах (macOS, headless) не малюється,
+      // тож доріжка й повзунок — звичайні елементи, положення яких рахується з метрик нативного контейнера.
+      const paint = (): void => {
+        const range = trackEl.scrollWidth - trackEl.clientWidth;
+        const railWidth = railEl.clientWidth;
+        if (range <= 1 || railWidth <= 0 || trackEl.scrollWidth <= 0) {
+          thumbEl.style.display = 'none';
+          return;
+        }
+        const width = Math.max(ThumbMinWidth, (railWidth * trackEl.clientWidth) / trackEl.scrollWidth);
+        const left = (trackEl.scrollLeft / range) * (railWidth - width);
+        thumbEl.style.display = 'block';
+        thumbEl.style.width = `${String(width)}px`;
+        thumbEl.style.transform = `translateX(${String(Math.max(0, left))}px)`;
+      };
+
       const layout = (): void => {
         const can = source.scrollWidth - source.clientWidth > 1 && source.clientWidth > 0;
         setScrollable(can);
         innerEl.style.width = `${String(can ? spacerWidth(trackEl.clientWidth, source.clientWidth, source.scrollWidth) : 0)}px`;
         fromSource();
+        paint();
       };
 
       const onSource = (): void => {
@@ -96,19 +121,23 @@ export function GridHScroll({ resolveHost, container, watch }: GridHScrollProps)
       };
       source.addEventListener('scroll', onSource, { passive: true });
       trackEl.addEventListener('scroll', onTrack, { passive: true });
+      trackEl.addEventListener('scroll', paint, { passive: true });
       const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(layout);
       observer?.observe(source);
       observer?.observe(trackEl);
+      observer?.observe(railEl);
       if (source.firstElementChild !== null) observer?.observe(source.firstElementChild);
       layout();
 
       return () => {
         source.removeEventListener('scroll', onSource);
         trackEl.removeEventListener('scroll', onTrack);
+        trackEl.removeEventListener('scroll', paint);
         for (const timer of nudges) window.clearTimeout(timer);
         observer?.disconnect();
         setScrollable(false);
         innerEl.style.width = '0px';
+        thumbEl.style.display = 'none';
       };
     };
 
@@ -140,17 +169,79 @@ export function GridHScroll({ resolveHost, container, watch }: GridHScrollProps)
     // `resolveHost` і `container` — замикання батька, що читають refs; перепідключення робить `watch`.
   }, [watch]);
 
+  /** Перетягування повзунка: зсув курсора переводиться в зсув нативного контейнера за ставленням діапазонів. */
+  const onThumbDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const trackEl = track.current;
+    if (trackEl === null) return;
+    event.stopPropagation();
+    drag.current = { startX: event.clientX, startLeft: trackEl.scrollLeft };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const onThumbMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const trackEl = track.current;
+    const railEl = rail.current;
+    const thumbEl = thumb.current;
+    if (drag.current === null || trackEl === null || railEl === null || thumbEl === null) return;
+    const free = railEl.clientWidth - thumbEl.offsetWidth;
+    if (free <= 0) return;
+    const range = trackEl.scrollWidth - trackEl.clientWidth;
+    trackEl.scrollLeft = drag.current.startLeft + ((event.clientX - drag.current.startX) * range) / free;
+  };
+
+  const onThumbUp = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    drag.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  /** Клік по вільній частині доріжки — на сторінку (ширину видимої частини) в той бік. */
+  const onRailDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const trackEl = track.current;
+    const thumbEl = thumb.current;
+    if (trackEl === null || thumbEl === null || event.target !== event.currentTarget) return;
+    const thumbBox = thumbEl.getBoundingClientRect();
+    trackEl.scrollLeft += (event.clientX < thumbBox.left ? -1 : 1) * trackEl.clientWidth;
+  };
+
+  /** Колесо над доріжкою гортає так само, як над сіткою. */
+  const onRailWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
+    const trackEl = track.current;
+    if (trackEl === null) return;
+    trackEl.scrollLeft += event.deltaX !== 0 ? event.deltaX : event.deltaY;
+  };
+
   return (
-    <div
-      ref={track}
-      className="ecr-hscroll"
-      role="group"
-      aria-label={t('grid.hscroll.label')}
-      tabIndex={scrollable ? 0 : -1}
-      data-testid="grid-hscroll"
-      data-scrollable={scrollable ? 'true' : 'false'}
-    >
-      <div ref={inner} className="ecr-hscroll-inner" />
+    <div className="ecr-hscroll-wrap">
+      <div
+        ref={track}
+        className="ecr-hscroll"
+        role="group"
+        aria-label={t('grid.hscroll.label')}
+        tabIndex={scrollable ? 0 : -1}
+        data-testid="grid-hscroll"
+        data-scrollable={scrollable ? 'true' : 'false'}
+      >
+        <div ref={inner} className="ecr-hscroll-inner" />
+      </div>
+      <div
+        ref={rail}
+        className="ecr-hscroll-rail"
+        aria-hidden="true"
+        data-testid="grid-hscroll-rail"
+        data-scrollable={scrollable ? 'true' : 'false'}
+        onPointerDown={onRailDown}
+        onWheel={onRailWheel}
+      >
+        <div
+          ref={thumb}
+          className="ecr-hscroll-thumb"
+          data-testid="grid-hscroll-thumb"
+          onPointerDown={onThumbDown}
+          onPointerMove={onThumbMove}
+          onPointerUp={onThumbUp}
+          onPointerCancel={onThumbUp}
+        />
+      </div>
     </div>
   );
 }

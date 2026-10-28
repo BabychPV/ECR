@@ -28,7 +28,7 @@ function install(): () => void {
   Object.defineProperty(Element.prototype, 'clientWidth', {
     configurable: true,
     get(this: Element) {
-      if (this.classList.contains('ecr-hscroll')) return 200;
+      if (this.classList.contains('ecr-hscroll') || this.classList.contains('ecr-hscroll-rail')) return 200;
       return sizes.get(this)?.client ?? 0;
     },
   });
@@ -140,6 +140,34 @@ describe('GridHScroll: синхронізація scrollLeft', () => {
     expect(track.getAttribute('data-scrollable')).toBe('true');
   });
 
+  it('доріжка малюється завжди; повзунок — пропорційний, стоїть де сітка, ховається коли нічого прокручувати', () => {
+    const track = show();
+    const rail = screen.getByTestId('grid-hscroll-rail');
+    const thumb = screen.getByTestId('grid-hscroll-thumb');
+
+    // 800 px вмісту смуги при 200 px видимих → повзунок 25 % доріжки (50 px), на початку зліва.
+    expect(rail).toBeTruthy();
+    expect(Number.parseFloat(thumb.style.width)).toBeCloseTo(66.67, 1);
+    expect(thumb.style.display).toBe('block');
+    expect(thumb.style.transform).toBe('translateX(0px)');
+
+    // Сітка прокручена до кінця (діапазон 2000) → повзунок у крайньому правому положенні.
+    act(() => {
+      source.scrollLeft = 2000;
+      source.dispatchEvent(new Event('scroll'));
+      track.dispatchEvent(new Event('scroll'));
+    });
+    const width = Number.parseFloat(thumb.style.width);
+    expect(Number.parseFloat(thumb.style.transform.replace(/[^\d.]/g, ''))).toBeCloseTo(200 - width, 1);
+  });
+
+  it('прокручувати нічого — доріжка є, повзунка немає', () => {
+    sizes.set(source, { client: 1000, scroll: 1000 });
+    show();
+
+    expect(screen.getByTestId('grid-hscroll-rail').getAttribute('data-scrollable')).toBe('false');
+    expect(screen.getByTestId('grid-hscroll-thumb').style.display).toBe('none');
+  });
   it('селектор штатного скролу — той, що в RevoGrid', () => {
     expect(GridScrollSelector).toBe('revogr-scroll-virtual.horizontal');
     expect(host.querySelector(GridScrollSelector)).toBe(source);

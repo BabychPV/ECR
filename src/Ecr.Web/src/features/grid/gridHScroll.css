@@ -3,18 +3,29 @@
  * рядку»). Нативна смуга; штатний скрол RevoGrid лишається в DOM (він рахує прокрутку), але виведений із
  * потоку й невидимий — смуга сітки більше не з'їдає висоту під таблицею.
  */
-.ecr-hscroll {
+/*
+ * Горизонтальна прокрутка: обгортка 10 px = нативний контейнер (колесо, клавіатура, `scrollLeft`) + ПОВЕРХ
+ * нього власні доріжка й повзунок. Нативний скролбар приховано: на overlay-системах (macOS, headless
+ * Chromium) його не видно взагалі, тож «порожня зона» замість прокрутки. Доріжка малюється ЗАВЖДИ (фон
+ * `--ecr-sunken`, радіус 5); коли прокручувати нічого — доріжка лишається, повзунок ховається.
+ */
+.ecr-hscroll-wrap {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
-  height: 18px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--ecr-border-strong) var(--ecr-sunken);
+  height: 10px;
 }
 
-.ecr-hscroll[data-scrollable='false'] {
-  opacity: 0.45;
+.ecr-hscroll {
+  position: absolute;
+  inset: 0;
+  overflow-x: scroll;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.ecr-hscroll::-webkit-scrollbar {
+  display: none;
 }
 
 .ecr-hscroll-inner {
@@ -23,9 +34,44 @@
 
 .ecr-hscroll:focus-visible {
   outline: 2px solid var(--ecr-focus);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 
+.ecr-hscroll-rail {
+  position: absolute;
+  inset: 0;
+  border-radius: 5px;
+  background: var(--ecr-sunken);
+  border: 1px solid var(--ecr-border);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.ecr-hscroll-rail[data-scrollable='false'] {
+  opacity: 0.6;
+}
+
+.ecr-hscroll-thumb {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  min-width: 24px;
+  border-radius: 4px;
+  background: var(--ecr-border-strong);
+  cursor: grab;
+  touch-action: none;
+}
+
+.ecr-hscroll-thumb:hover,
+.ecr-hscroll-thumb:active {
+  background: var(--ecr-muted);
+}
+
+.ecr-hscroll-thumb:active {
+  cursor: grabbing;
+}
 /* Рамка панелі таблиці: назва, тулбар, сітка і нижній рядок «вкладки + прокрутка» (макет A). */
 .ecr-sheet-panel {
   display: flex;
@@ -61,4 +107,15 @@
   left: 0;
   visibility: hidden;
   pointer-events: none;
+}
+/*
+ * Липкий нижній рядок (36 px) не повинен накривати те, до чого прокручує браузер (фокус на комірці, перехід
+ * від зауваження): запас знизу для прокрутки сторінки й повноекранної панелі.
+ */
+html:has(.ecr-sheet-panel--bar) {
+  scroll-padding-bottom: 48px;
+}
+
+.ecr-sheet-panel--bar > [data-table-slot] {
+  scroll-margin-bottom: 48px;
 }
