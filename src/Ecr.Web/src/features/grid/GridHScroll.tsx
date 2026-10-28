@@ -6,11 +6,6 @@ import './gridHScroll.css';
 /** Найменша ширина повзунка, px (щоб за дуже широкої таблиці його було чим узяти). */
 export const ThumbMinWidth = 24;
 
-/** Найменший проміжок між записами смуги в сітку, мс (див. write у GridHScroll). */
-export const WriteGap = 60;
-/** Скільки мс після запису повернення сітки на попередню позицію вважається запізнілим застосуванням RevoGrid. */
-export const StaleWindow = 400;
-
 export const GridScrollSelector = 'revogr-scroll-virtual.horizontal';
 
 /** Ширина внутрішнього блока нативної смуги так, щоб її повзунок мав ту саму частку, що й у сітки. */
@@ -108,55 +103,21 @@ export function GridHScroll({ resolveHost, container, watch }: GridHScrollProps)
         paint();
       };
 
-      // ⚠ Запис у сітку: не частіше ніж раз на WriteGap мс і з «страховкою». RevoGrid обробляє зсув асинхронно (rAF)
-      // і відкидає нативну подію scroll, що прийшла за < 10 мс після попередньої; а його запізніле «застосування»
-      // попередньої позиції може ПЕРЕПИСАТИ щойно виставлену нами (сітка й смуга відкочувались назад).
-      // Тому: (1) записи рознесено в часі, (2) подія scroll на сітці повторюється (40/160 мс), (3) якщо протягом
-      // StaleWindow мс після запису сітка повернулась на ПОПЕРЕДНЮ позицію — це запізніле застосування RevoGrid, а
-      // не людина: виставляємо бажану позицію знову, а смугу назад не тягнемо.
-      let lastWrite = 0;
-      let writeTimer = 0;
-      let before = 0;
-      let desired: number | null = null;
-
-      const write = (target: number): void => {
-        before = source.scrollLeft;
-        desired = target;
-        lastWrite = performance.now();
-        source.scrollLeft = target;
-        for (const timer of nudges) window.clearTimeout(timer);
-        nudges = [40, 160].map((delay) => window.setTimeout(() => source.dispatchEvent(new Event('scroll')), delay));
-      };
-
       const onSource = (): void => {
-        const stale =
-          desired !== null &&
-          performance.now() - lastWrite < StaleWindow &&
-          Math.abs(source.scrollLeft - before) < 2 &&
-          Math.abs(source.scrollLeft - desired) > 2;
-        if (stale && desired !== null) {
-          source.scrollLeft = desired;
-          return;
-        }
         fromSource();
       };
 
       const onTrack = (): void => {
         if (Math.abs(trackEl.scrollLeft - expectedTrack()) < 1) return;
-        const apply = (): void => {
-          writeTimer = 0;
-          const { grid, track: own } = ranges();
-          const target = mapScroll(trackEl.scrollLeft, own, grid);
-          if (Math.abs(source.scrollLeft - target) < 0.5) return;
-          write(target);
-        };
-        const wait = lastWrite + WriteGap - performance.now();
-        if (wait <= 0) {
-          apply();
-          return;
-        }
-        // Хвостовий запис: беремо ОСТАННЄ положення смуги, а не те, що було на мить події.
-        if (writeTimer === 0) writeTimer = window.setTimeout(apply, wait);
+        const { grid, track: own } = ranges();
+        const target = mapScroll(trackEl.scrollLeft, own, grid);
+        if (Math.abs(source.scrollLeft - target) < 0.5) return;
+        source.scrollLeft = target;
+        // ⚠ RevoGrid відкидає нативну подію scroll, що прийшла за < 10 мс після його власної прокрутки колесом, і не
+        // повторює її (LocalScrollTimer.isReady) — тоді сітка стояла б, хоч смуга вже зсунулась. Повторюємо подію
+        // трохи згодом: якщо перша спрацювала, друга — дублікат (та сама координата) і ігнорується.
+        for (const timer of nudges) window.clearTimeout(timer);
+        nudges = [40, 160].map((delay) => window.setTimeout(() => source.dispatchEvent(new Event('scroll')), delay));
       };
       source.addEventListener('scroll', onSource, { passive: true });
       trackEl.addEventListener('scroll', onTrack, { passive: true });
@@ -182,7 +143,6 @@ export function GridHScroll({ resolveHost, container, watch }: GridHScrollProps)
         trackEl.removeEventListener('scroll', onTrack);
         trackEl.removeEventListener('scroll', paint);
         for (const timer of nudges) window.clearTimeout(timer);
-        window.clearTimeout(writeTimer);
         observer?.disconnect();
         setScrollable(false);
         innerEl.style.width = '0px';

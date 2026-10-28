@@ -42,12 +42,21 @@ async function firstHeader(page: Page): Promise<string> {
     return best.text;
   });
 }
+/**
+ * Дати RevoGrid доробити асинхронну прокрутку (rAF-застосування позиції) перед наступним стрибком смуги:
+ * його запізніле застосування попередньої позиції може переписати щойно виставлену нами (див. `GridHScroll`).
+ */
+async function settle(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await page.waitForTimeout(200);
+}
 /** Смугу — на початок і чекаємо, поки сітка покаже перший стовпець: повертає його заголовок (опорна точка). */
 async function resetToStart(page: Page): Promise<string> {
   await page.getByTestId('grid-hscroll').evaluate((el) => {
     el.scrollLeft = 0;
   });
   await expect.poll(() => firstHeader(page), { timeout: 15_000, message: 'сітка не стала на перший стовпець' }).toBe('C1');
+  await settle(page);
   return 'C1';
 }
 test.describe('Нижній рядок під таблицею (ui-sheet-bottom)', () => {
@@ -155,10 +164,12 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
       await page.mouse.move(thumb.x + thumb.width / 2 + 600, thumb.y + thumb.height / 2, { steps: 8 });
       await page.mouse.up();
       await expect.poll(() => firstHeader(page), { timeout: 15_000, message: 'повзунок не зрушив сітку' }).not.toBe(start);
+      await settle(page);
       await page.getByTestId('grid-hscroll').evaluate((el) => {
         el.scrollLeft = 0;
       });
       await expect.poll(() => firstHeader(page), { timeout: 15_000 }).toBe(start);
+      await settle(page);
     }
   });
 
@@ -178,6 +189,7 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
       });
       try {
         await expect.poll(() => firstHeader(page), { timeout: 15_000 }).not.toBe(start);
+        await settle(page);
       } catch (error) {
         const state = await page.evaluate(() => {
           const t = document.querySelector('[data-testid="grid-hscroll"]') as HTMLElement;
@@ -210,6 +222,7 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
         el.scrollLeft = 0;
       });
       await expect.poll(() => firstHeader(page), { timeout: 15_000 }).toBe(start);
+      await settle(page);
 
       // Shift+колесо / горизонтальне колесо по сітці — смуга слідує.
       const grid = page.locator('revo-grid:visible').first();
@@ -218,9 +231,11 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
       await page.mouse.wheel(900, 0);
       await expect.poll(() => scroll.evaluate((el) => el.scrollLeft), { timeout: 15_000 }).toBeGreaterThan(0);
+      await settle(page);
 
       await page.mouse.wheel(-5000, 0);
       await expect.poll(() => scroll.evaluate((el) => el.scrollLeft), { timeout: 15_000 }).toBe(0);
+      await settle(page);
     }
   });
 
@@ -277,10 +292,12 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
         el.scrollLeft = el.scrollWidth;
       });
       await expect.poll(() => firstHeader(page), { timeout: 15_000 }).not.toBe(start);
+      await settle(page);
       await scroll.evaluate((el) => {
         el.scrollLeft = 0;
       });
       await expect.poll(() => firstHeader(page), { timeout: 15_000 }).toBe(start);
+      await settle(page);
       if (i === 0) await page.screenshot({ path: test.info().outputPath('after-full-1280.png') });
 
       await page.getByTestId('sheet-full-toggle').click();

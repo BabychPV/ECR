@@ -168,25 +168,6 @@ describe('GridHScroll: синхронізація scrollLeft', () => {
     expect(screen.getByTestId('grid-hscroll-rail').getAttribute('data-scrollable')).toBe('false');
     expect(screen.getByTestId('grid-hscroll-thumb').style.display).toBe('none');
   });
-  it('запізніле застосування RevoGrid (повернення на попередню позицію) не відкочує смугу, а позицію виставлено знову', () => {
-    vi.useFakeTimers();
-    const track = show();
-
-    act(() => {
-      track.scrollLeft = 100;
-      track.dispatchEvent(new Event('scroll'));
-      vi.advanceTimersByTime(70);
-    });
-    expect(source.scrollLeft).toBe(500);
-
-    act(() => {
-      source.scrollLeft = 0;
-      source.dispatchEvent(new Event('scroll'));
-    });
-    expect(source.scrollLeft).toBe(500);
-    expect(track.scrollLeft).toBe(100);
-    vi.useRealTimers();
-  });
   it('селектор штатного скролу — той, що в RevoGrid', () => {
     expect(GridScrollSelector).toBe('revogr-scroll-virtual.horizontal');
     expect(host.querySelector(GridScrollSelector)).toBe(source);
@@ -203,16 +184,8 @@ describe('GridHScroll: синхронізація scrollLeft', () => {
       track.scrollLeft = 100;
       track.dispatchEvent(new Event('scroll'));
     });
-    // Під фейковим годинником `performance.now()` стоїть на нулі: перший запис відкладено на WriteGap (60 мс).
-    expect(source.scrollLeft).toBe(0);
-
-    act(() => {
-      vi.advanceTimersByTime(70);
-    });
-    expect(source.scrollLeft).toBe(500);
     expect(seen).toBe(0);
 
-    // Подія scroll на сітці повторюється через 40 і 160 мс після запису (RevoGrid міг відкинути ранню).
     act(() => {
       vi.advanceTimersByTime(50);
     });
@@ -220,6 +193,8 @@ describe('GridHScroll: синхронізація scrollLeft', () => {
     act(() => {
       vi.advanceTimersByTime(150);
     });
-    expect(seen).toBe(2);    vi.useRealTimers();
+    expect(seen).toBe(2);
+    expect(source.scrollLeft).toBe(500);
+    vi.useRealTimers();
   });
 });
