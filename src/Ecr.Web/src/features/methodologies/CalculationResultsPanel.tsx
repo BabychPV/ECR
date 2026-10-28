@@ -91,6 +91,10 @@ export function CalculationResultsPanel({
   // явний вибір людини пам'ятається.
   const [choice, setChoice] = useState<boolean | null>(readCollapsed);
   const collapsed = choice ?? true;
+  // Лічильник у заголовку — лише після першого розгортання (рішення координатора): у згорнутому стані заголовок
+  // без числа. ⚠ Ключ запиту спільний з бейджем «результати застаріли» в шапці документа (`useCalculationsStale`):
+  // якщо той уже завантажив дані, вони є в кеші, але панель їх у згорнутому заголовку не показує.
+  const [opened, setOpened] = useState(!collapsed);
 
   // ⛔ F-02 (четвертий раунд UX): ключ — ПІД префіксом `['document', id,
   // period]`. Саме його інвалідує завершений перерахунок (`SheetActions`) і
@@ -144,13 +148,14 @@ export function CalculationResultsPanel({
         onClick={() => {
           writeCollapsed(!collapsed);
           setChoice(!collapsed);
+          if (collapsed) setOpened(true);
         }}
       >
         <Chevron path={collapsed ? 'M9 6l6 6-6 6' : 'M6 9l6 6 6-6'} />
         <Text component="span" fw={600}>
           {t('documents.calculationResults')}
         </Text>
-        {count !== undefined && (
+        {opened && count !== undefined && (
           <Text component="span" size="sm" c="dimmed" data-testid="calc-results-count">
             {`· ${count === 0 ? t('documents.calculationResultsNone') : String(count)}`}
           </Text>

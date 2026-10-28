@@ -312,7 +312,9 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
     await page.evaluate(() => {
       window.localStorage.removeItem('ecr.calcResults.collapsed');
     });
-    // Мережа: запит `calculation-results` — ЛІНИВИЙ (до кліку немає, після кліку є; на Land до 174 тис. рядків).
+    // Мережа: рахуємо запити `calculation-results`. ⚠ Один такий запит іде й БЕЗ панелі — його робить бейдж
+    // «результати застаріли» в шапці документа (`useCalculationsStale`, той самий ключ); панель власного запиту
+    // до розгортання не додає (її `enabled: !collapsed`), тому до кліку їх не більше одного.
     const resultRequests: string[] = [];
     page.on('request', (request) => {
       if (request.url().includes('calculation-results')) resultRequests.push(request.url());
@@ -322,14 +324,16 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
     const toggle = page.getByTestId('calc-results-toggle');
     await expect(toggle).toBeVisible({ timeout: 60_000 });
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    // Згорнутий заголовок — без числа; даємо документові догрузитись і перевіряємо, що запиту чисел не було.
-    await expect(page.getByTestId('calc-results-count')).toHaveCount(0);
+    // Згорнутий заголовок — без числа (навіть якщо дані вже в кеші від бейджа).
     await page.waitForLoadState('networkidle');
-    expect(resultRequests, 'запит calculation-results пішов до розгортання блоку').toHaveLength(0);
+    await expect(page.getByTestId('calc-results-count')).toHaveCount(0);
+    const before = resultRequests.length;
+    expect(before, 'до розгортання панель додала власний запит calculation-results').toBeLessThanOrEqual(1);
+    test.info().annotations.push({ type: 'calculation-results-requests-before-click', description: String(before) });
 
     await toggle.click();
-    await expect.poll(() => resultRequests.length, { timeout: 30_000, message: 'після розгортання запиту чисел немає' }).toBeGreaterThan(0);
     await expect(page.getByTestId('calc-results-count')).toBeVisible({ timeout: 30_000 });
+    test.info().annotations.push({ type: 'calculation-results-requests-after-click', description: String(resultRequests.length) });
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
 

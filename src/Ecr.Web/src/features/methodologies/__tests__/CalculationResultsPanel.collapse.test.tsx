@@ -1,8 +1,9 @@
-﻿import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CalculationResultsPanel, ResultsCollapsedKey } from '@/features/methodologies/CalculationResultsPanel';
+import { calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
 import { testTheme } from '@/test/render';
 
 /**
@@ -120,6 +121,22 @@ describe('CalculationResultsPanel: згортання і ліниве заван
     expect(resultCalls).toBe(1);
   });
 
+  it('дані вже в кеші (бейдж у шапці тримає той самий ключ) — згорнутий заголовок усе одно без числа', async () => {
+    mockServer([]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(calculationResultsKey(1, 202610), [row('A'), row('B')]);
+    render(
+      <MantineProvider theme={testTheme}>
+        <QueryClientProvider client={client}>
+          <CalculationResultsPanel documentId={1} periodKey={202610} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+
+    await screen.findByTestId('calc-results-toggle');
+    expect(screen.queryByTestId('calc-results-count')).toBeNull();
+    expect(resultCalls).toBe(0);
+  });
   it('збережений вибір «згорнуто» пам’ятається і запиту немає', async () => {
     window.localStorage.setItem(ResultsCollapsedKey, '1');
     mockServer([row('A')]);
