@@ -206,7 +206,7 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         var definition = await ViewDefinitionAsync(f.View);
 
         Assert.DoesNotContain("COALESCE(o", definition, StringComparison.Ordinal);
-        Assert.DoesNotContain("COALESCE(sc.", definition, StringComparison.Ordinal);
+        Assert.DoesNotContain("COALESCE(cvs.cv", definition, StringComparison.Ordinal);
         Assert.DoesNotContain("doc.TableInstance AS oi", definition, StringComparison.Ordinal);
         Assert.DoesNotContain("doc.TableRow AS ow", definition, StringComparison.Ordinal);
         Assert.DoesNotContain("AnchorKey", definition, StringComparison.Ordinal);
@@ -229,7 +229,7 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
 
         await GenerateAsync(f, routing: true);
         var routed = await ViewDefinitionAsync(f.View);
-        Assert.Contains("COALESCE(sc.", routed, StringComparison.Ordinal);
+        Assert.Contains("COALESCE(cvs.cv", routed, StringComparison.Ordinal);
         Assert.Contains("AnchorKey", routed, StringComparison.Ordinal);
         Assert.NotEqual(plain, routed);
 
@@ -415,23 +415,28 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
     /// <summary>
     /// Q-17.perf2 (форма запиту, замінює P2-1 QA3): з прапором значення власників (місяці й якір) читає ОДНА похідна <c>fam</c> -
     /// один прохід doc.TableInstance -> doc.TableRow -> doc.CellValue таблиці з умовною агрегацією по (документ, рік, RowKey), що
-    /// приєднується хеш-зʼєднанням; на рядок лишаються лише sv (власна копія) і sc (власна обчислена). Ланцюжок ow&lt;m&gt;/om&lt;m&gt;
+    /// приєднується хеш-зʼєднанням; власну копію (sv), власну обчислену (sc) і нероутовані колонки (pc) читає одна наборова похідна cvs (Q-17.cellrange). Ланцюжок ow&lt;m&gt;/om&lt;m&gt;
     /// на рядок (~100 читань, 26 seek-ів TableRow на рядок на формі Land) прибрано; таблиць у запиті менше за ліміт 250.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-10.2")]
-    public async Task З_прапором_власники_читає_одна_наборова_похідна_а_на_рядок_лише_sv_і_sc()
+    public async Task З_прапором_власники_читає_одна_наборова_похідна_а_комірки_рядка_одна_наборова_cvs_діапазонами()
     {
         var f = await BuildAsync(columnCount: 205);
         await GenerateAsync(f);
 
         var definition = await ViewDefinitionAsync(f.View);
 
-        // На рядок doc.CellValue читають лише sc (власна обчислена) і sv (власна копія); pc (нероутовані колонки) і скалярний rv -
-        // окремі apply; власників у apply на рядок немає.
-        Assert.Equal(2, System.Text.RegularExpressions.Regex.Count(definition, "FROM doc\\.CellValue AS x WHERE x\\.PeriodKey = r\\.PeriodKey AND x\\.TableRowId = r\\.Id( AND x\\.IsCalculated = 1)?\\) AS s[vc]"));
+        // Q-17.cellrange: на рядок doc.CellValue не читає жоден apply - sc / sv / pc замінила одна наборова похідна cvs (хеш-зʼєднання), що
+        // читає комірки діапазонами островів Id рядків; умовні агрегати sc мають IsCalculated = 1 в самій похідній; власників у apply на рядок немає.
+        Assert.Equal(0, System.Text.RegularExpressions.Regex.Count(definition, "FROM doc\\.CellValue AS x WHERE x\\.PeriodKey = r\\.PeriodKey AND x\\.TableRowId = r\\.Id"));
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(definition, "\\) AS cvs\\b"));
+        Assert.Contains("LEFT HASH JOIN (SELECT isl.DocumentId, x.PeriodKey, x.TableRowId", definition, StringComparison.Ordinal);
+        Assert.Contains("INNER LOOP JOIN doc.CellValue AS x ON x.PeriodKey = isl.PeriodKey AND x.TableRowId BETWEEN isl.Lo AND isl.Hi", definition, StringComparison.Ordinal);
+        Assert.Contains("ON cvs.DocumentId = ti.DocumentId AND cvs.PeriodKey = ", definition, StringComparison.Ordinal);
+        Assert.Contains("CASE WHEN x.IsCalculated = 1 AND x.ColumnDefId = ", definition, StringComparison.Ordinal);
         for (var m = 1; m <= 12; m++)
         {
             Assert.DoesNotContain($") AS om{m}", definition, StringComparison.Ordinal);
@@ -782,7 +787,7 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         var definition = await ViewDefinitionAsync(f.View);
         var report = $"ON {on} OFF {off} hash ON {onHash} OFF {offHash}";
         Assert.True(offHash == onHash, "ХЕШ " + report);
-        Assert.True(System.Text.RegularExpressions.Regex.Count(definition, "\\) AS pc\\b") == 1, "pc " + report);
+        Assert.True(System.Text.RegularExpressions.Regex.Count(definition, "\\) AS cvs\\b") == 1, "cvs " + report);
         Assert.DoesNotContain("LEFT JOIN doc.CellValue AS c2 ", definition, StringComparison.Ordinal);
         // Читання на рядок не залежать від числа колонок: 230 колонок = 1 apply по ключу рядка (7,3 читання на рядок). Форма
         // «LEFT JOIN doc.CellValue на колонку» (OFF, і ON до Q-17.perf для розкладок не MonthsInColumns) - 257 тис. (430 на рядок).
@@ -1007,7 +1012,7 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
     /// P2-1 (QA Audit-2 проход C): обчислена комірка (IsCalculated = 1) введеної за типом місячної/якірної колонки в
     /// екземплярі перегляду - СВОЯ (так її віддає зріз API); вʼюха з прапором брала значення власника місяця (у звіті
     /// 25 проти 0 на екрані). Введена комірка власника (IsCalculated = 0) і далі має пріоритет над копією.
-    /// Еталон - зріз <see cref="MonthRoutedCellStore"/>. Мутація: прибрати sc.cv з COALESCE у <c>05-rpt-views.sql</c> - червоний.
+    /// Еталон - зріз <see cref="MonthRoutedCellStore"/>. Мутація: прибрати cvs.cv з COALESCE у <c>05-rpt-views.sql</c> - червоний.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]

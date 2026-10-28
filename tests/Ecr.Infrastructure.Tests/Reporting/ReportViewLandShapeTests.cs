@@ -32,7 +32,7 @@ public sealed class ReportViewLandShapeTests(SqlServerFixture sql, ITestOutputHe
     private static readonly DateTime Now = new(2026, 2, 1, 10, 0, 0, DateTimeKind.Utc);
     private const int Docs = 8;
     private const int RowsPerInstance = 6;
-    private const int CalcColumns = 20;
+    private const int CalcColumns = 22;
 
     private sealed record Shape(TestDocument Doc, string View, int Instances, int Rows);
 
@@ -49,7 +49,7 @@ public sealed class ReportViewLandShapeTests(SqlServerFixture sql, ITestOutputHe
         await using (var db = sql.CreateContext())
         {
             var ordinal = 9000;
-            for (var g = 2; g <= 8; g++)
+            for (var g = 2; g <= 9; g++)
             {
                 for (var m = 1; m <= 12; m++)
                 {
@@ -151,6 +151,30 @@ public sealed class ReportViewLandShapeTests(SqlServerFixture sql, ITestOutputHe
               JOIN doc.TableRow AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id
               JOIN cfg.ColumnDef AS c ON c.TableDefId = @t AND c.IsMonthColumn = 0 AND c.DataType = 2 AND c.Ordinal BETWEEN 2 AND 4
              WHERE ti.TableDefId = @t AND r.PeriodKey = 202601;
+
+            -- Q-17.cellrange: усі три читачі комірок рядка вʼюхи мусять мати що читати: власні ОБЧИСЛЕНІ комірки введених колонок (sc, IsCalculated = 1,
+            -- ховають власника) на парних рядках, власні копії (sv) на кожному третьому, матеріалізовані значення колонок Calculated (pc) на парних.
+            ;WITH mc AS (
+                SELECT c.Id, c.MonthNumber, ROW_NUMBER() OVER (PARTITION BY c.MonthNumber ORDER BY c.Id) AS rn
+                  FROM cfg.ColumnDef AS c WHERE c.TableDefId = @t AND c.IsMonthColumn = 1)
+            INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated)
+            SELECT r.PeriodKey, r.Id, mc.Id, @t, 500 + r.Ordinal + mc.MonthNumber / 100.0, 1
+              FROM doc.TableInstance AS ti
+              JOIN doc.TableRow AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id
+              JOIN mc ON mc.rn = 3
+             WHERE ti.TableDefId = @t AND r.Ordinal % 2 = 0 AND mc.MonthNumber <= 3
+            UNION ALL
+            SELECT r.PeriodKey, r.Id, mc.Id, @t, 900 + r.Ordinal + mc.MonthNumber / 100.0, 0
+              FROM doc.TableInstance AS ti
+              JOIN doc.TableRow AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id
+              JOIN mc ON mc.rn = 4
+             WHERE ti.TableDefId = @t AND r.Ordinal % 3 = 0 AND mc.MonthNumber <= 3
+            UNION ALL
+            SELECT r.PeriodKey, r.Id, c.Id, @t, 11 + r.Ordinal + c.Ordinal / 10000.0, 1
+              FROM doc.TableInstance AS ti
+              JOIN doc.TableRow AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id
+              JOIN cfg.ColumnDef AS c ON c.TableDefId = @t AND c.DataType = 8 AND c.Ordinal BETWEEN 7000 AND 7003
+             WHERE ti.TableDefId = @t AND r.Ordinal % 2 = 0;
             """;
         command.Parameters.AddWithValue("@t", doc.TableDefId);
         await command.ExecuteNonQueryAsync();
@@ -300,14 +324,22 @@ public sealed class ReportViewLandShapeTests(SqlServerFixture sql, ITestOutputHe
         await new ReportViewGenerator(db, monthRouter: router).GenerateAsync(s.Doc.TemplateVersionId, CancellationToken.None);
     }
 
-    private sealed record Run(long Reads, long CpuMs, long CompileCpuMs, int Rows);
+    private sealed record Run(long Reads, long CpuMs, long CompileCpuMs, int Rows, long CellScans = 0, long CellReads = 0);
+
+    private static readonly Regex CellIo = new(@"Table 'CellValue'\. Scan count (\d+), logical reads (\d+)", RegexOptions.Compiled);
 
     private async Task<Run> MeasureAsync(string query)
     {
-        long reads = 0, cpu = 0, compile = 0;
+        long reads = 0, cpu = 0, compile = 0, cellScans = 0, cellReads = 0;
         await using var connection = new SqlConnection(sql.ConnectionString);
         connection.InfoMessage += (_, e) =>
         {
+            foreach (Match m in CellIo.Matches(e.Message))
+            {
+                cellScans += long.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+                cellReads += long.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
+            }
+
             foreach (Match m in Reads.Matches(e.Message)) { reads += long.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture); }
             foreach (Match m in Cpu.Matches(e.Message)) { cpu += long.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture); }
             foreach (Match m in Compile.Matches(e.Message)) { compile += long.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture); }
@@ -323,7 +355,7 @@ public sealed class ReportViewLandShapeTests(SqlServerFixture sql, ITestOutputHe
             SELECT COUNT(*) FROM #x;
             """;
         var count = (int)(await command.ExecuteScalarAsync())!;
-        return new Run(reads, cpu, compile, count);
+        return new Run(reads, cpu, compile, count, cellScans, cellReads);
     }
 
     private async Task<System.Xml.Linq.XDocument> PlanAsync(string query)
@@ -351,7 +383,8 @@ public sealed class ReportViewLandShapeTests(SqlServerFixture sql, ITestOutputHe
 
     private sealed record PlanFacts(
         int NestedLoops, int HashMatches, long DocRunSeekExecutions, long InstanceSeekExecutions, long TableRowSeekExecutions,
-        int CalculationResultPartitions);
+        int CalculationResultPartitions, long CellValueExecutions = 0, int CellValueOperators = 0,
+        long CellRangeSeekExecutions = 0, long CellPointSeekExecutions = 0, long CellScanExecutions = 0);
 
     private static PlanFacts Facts(System.Xml.Linq.XDocument plan)
     {
@@ -372,8 +405,25 @@ public sealed class ReportViewLandShapeTests(SqlServerFixture sql, ITestOutputHe
             ops.Where(o => ((string?)o.Attribute("PhysicalOp") ?? "").Contains("Seek", StringComparison.Ordinal)
                            && o.Elements(sp + "IndexScan").Elements(sp + "Object").Any(x => (string?)x.Attribute("Table") == "[CalculationResult]"))
                 .SelectMany(o => o.Descendants(sp + "PartitionsAccessed"))
-                .Select(p => (int?)p.Attribute("PartitionCount") ?? 0).DefaultIfEmpty(0).Max());
+                .Select(p => (int?)p.Attribute("PartitionCount") ?? 0).DefaultIfEmpty(0).Max(),
+            CellValueOps(ops, sp).Sum(Exec),
+            CellValueOps(ops, sp).Count(),
+            CellValueOps(ops, sp).Where(o => IsSeek(o) && IsRange(o, sp)).Sum(Exec),
+            CellValueOps(ops, sp).Where(o => IsSeek(o) && !IsRange(o, sp)).Sum(Exec),
+            CellValueOps(ops, sp).Where(o => !IsSeek(o)).Sum(Exec));
     }
+
+    private static bool IsSeek(System.Xml.Linq.XElement o) => (((string?)o.Attribute("PhysicalOp")) ?? "").Contains("Seek", StringComparison.Ordinal);
+
+    /// <summary>Seek з діапазоном по ключу (BETWEEN): у плані є StartRange / EndRange; точковий (EQ) seek їх не має.</summary>
+    private static bool IsRange(System.Xml.Linq.XElement o, System.Xml.Linq.XNamespace sp) =>
+        o.Descendants(sp + "StartRange").Any() || o.Descendants(sp + "EndRange").Any();
+
+    /// <summary>Усі доступи (seek / scan) до doc.CellValue у плані.</summary>
+    private static IEnumerable<System.Xml.Linq.XElement> CellValueOps(List<System.Xml.Linq.XElement> ops, System.Xml.Linq.XNamespace sp) => ops
+        .Where(o => (((string?)o.Attribute("PhysicalOp")) ?? "").Contains("Seek", StringComparison.Ordinal)
+                    || (((string?)o.Attribute("PhysicalOp")) ?? "").Contains("Scan", StringComparison.Ordinal))
+        .Where(o => o.Elements(sp + "IndexScan").Elements(sp + "Object").Any(x => (string?)x.Attribute("Table") == "[CellValue]"));
 
     private sealed record DocRunSeek(int Operators, long RowsRead, long RowsOut, long Executions, List<string> KeyColumns);
 
@@ -520,9 +570,123 @@ public sealed class ReportViewLandShapeTests(SqlServerFixture sql, ITestOutputHe
             // Відсічка партицій (calc.CalculationResult - по місяцю): seek результатів з предикатом _PeriodKey торкається ОДНІЄЇ партиції
             // (Land: 3-12 із 25), бо cr.PeriodKey = ti.PeriodKey, а _PeriodKey береться з ti.
             Assert.True(onOneFacts.CalculationResultPartitions <= 1, report);
+
+            // Q-17.cellrange: комірки рядка (pc / sv / sc) читає ОДНА наборова похідна cvs ДІАПАЗОНАМИ (seek BETWEEN по острову Id рядків екземпляра),
+            // а не точковим seek-ом на рядок на кожен з трьох apply (до виправлення: ~3 seek-и PK_CellValue на рядок, 1 729 виконань на 576 рядків).
+            // Решту точкових seek-ів дає fam (власники, ≤ 1 на рядок - вибір плану), тож межа на ВСІ доступи 1,5 на рядок відрізняє від 3 на рядок.
+            Assert.True(onFacts.CellRangeSeekExecutions >= 1 && onFacts.CellRangeSeekExecutions <= s.Instances, report);
+            Assert.True(onFacts.CellValueExecutions <= 3L * s.Rows / 2, report);
+            Assert.True(on.CellReads <= 3L * s.Rows, report);
+            // Вузький шлях (документ + період): один екземпляр = не більше одного діапазону, читання комірок не гірші за поточні (було 180), план - до 100 доступів.
+            Assert.True(onOneFacts.CellRangeSeekExecutions == 1, report);
+            Assert.True(onOne.CellReads <= 200, report);
+            Assert.True(onOneFacts.CellValueExecutions <= 100, report);
         }
         finally
         {
+            await CleanupAsync(s);
+        }
+    }
+
+    private async Task ExecAsync(string text)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandTimeout = 600;
+        command.CommandText = text;
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task<int> CountAsync(string text)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandTimeout = 600;
+        command.CommandText = text;
+        return Convert.ToInt32(await command.ExecuteScalarAsync(), CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Q-17.cellrange: СТАРА форма читання комірок - три apply на рядок (pc / sv / sc) - відновлена з тексту нової вʼюхи: та сама умовна агрегація
+    /// <c>MAX(CASE ColumnDefId …)</c>, але OUTER APPLY по ключу рядка замість наборової похідної cvs з островами. Вʼюха-еталон <c>_rvold</c>.
+    /// </summary>
+    private static string OldShape(string definition, string oldName)
+    {
+        var rebuilt = Regex.Replace(
+            definition,
+            @"LEFT HASH JOIN \(SELECT isl\.DocumentId, x\.PeriodKey, x\.TableRowId(?<aggs>,.*?)\s+FROM \(SELECT q\.DocumentId.*?\) AS cvs\s+ON cvs\.DocumentId = [^\r\n]*",
+            m => "OUTER APPLY (SELECT " + m.Groups["aggs"].Value[2..] + " FROM doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS cvs",
+            RegexOptions.Singleline);
+        Assert.NotEqual(definition, rebuilt);
+        return Regex.Replace(rebuilt, @"^\s*(CREATE|ALTER)\s+VIEW\s+\S+", $"CREATE VIEW rpt.[{oldName}]", RegexOptions.IgnoreCase);
+    }
+
+    /// <summary>
+    /// Q-17.cellrange: НОВА вʼюха (наборова похідна cvs, діапазони) == СТАРА (apply на рядок) - EXCEPT в обидва боки = 0 на формі Land для
+    /// SELECT * (усе), зрізу «документ + період», зрізу періоду й якоря року; рядків порівну і непорожньо. На даних є власні обчислені комірки
+    /// (sc), власні копії (sv) і матеріалізовані Calculated (pc). Сама НОВА вʼюха звіряється зі справжнім зрізом у
+    /// <c>ReportViewMonthOwnershipTests</c> / <c>ReportViewSliceEquivalenceTests</c> (вʼюха == ReadSlice).
+    /// Мутація: у <c>cvs</c> прибрати <c>AND x.IsCalculated = 1</c> з агрегатів cv&lt;n&gt; або змінити <c>BETWEEN isl.Lo AND isl.Hi</c> на <c>= isl.Lo</c> - червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Наборова_похідна_комірок_дає_ті_самі_рядки_що_apply_на_рядок_на_формі_Land()
+    {
+        var s = await BuildAsync();
+        var oldView = s.View + "_rvold";
+        try
+        {
+            await GenerateAsync(s, routing: true);
+            string definition;
+            await using (var connection = new SqlConnection(sql.ConnectionString))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT OBJECT_DEFINITION(OBJECT_ID(@n))";
+                command.Parameters.AddWithValue("@n", $"rpt.[{s.View}]");
+                definition = (string)(await command.ExecuteScalarAsync())!;
+            }
+
+            Assert.Equal(1, Regex.Count(definition, @"\) AS cvs\b"));
+            Assert.DoesNotContain("AS ccs", definition, StringComparison.Ordinal);
+            await ExecAsync($"IF OBJECT_ID(N'rpt.[{oldView}]') IS NOT NULL DROP VIEW rpt.[{oldView}]");
+            await ExecAsync(OldShape(definition, oldView));
+
+            var slices = new[]
+            {
+                "",
+                $" WHERE _DocumentId = {s.Doc.DocumentId} AND _PeriodKey = 202603",
+                " WHERE _PeriodKey = 202607",
+                $" WHERE _DocumentId = {s.Doc.DocumentId} AND _PeriodKey = 202601",
+            };
+            foreach (var where in slices)
+            {
+                var rows = await CountAsync($"SELECT COUNT(*) FROM rpt.[{s.View}]{where}");
+                Assert.True(rows > 0, where);
+                Assert.Equal(rows, await CountAsync($"SELECT COUNT(*) FROM rpt.[{oldView}]{where}"));
+                Assert.Equal(0, await CountAsync(
+                    $"SELECT COUNT(*) FROM (SELECT * FROM rpt.[{s.View}]{where} EXCEPT SELECT * FROM rpt.[{oldView}]{where}) AS x"));
+                Assert.Equal(0, await CountAsync(
+                    $"SELECT COUNT(*) FROM (SELECT * FROM rpt.[{oldView}]{where} EXCEPT SELECT * FROM rpt.[{s.View}]{where}) AS x"));
+            }
+
+            // Форма планів: еталон читає по рядку, нова вʼюха - діапазонами.
+            var star = $"SELECT * FROM rpt.[{s.View}]";
+            await PlanAsync(star);
+            var oldFacts = Facts(await PlanAsync($"SELECT * FROM rpt.[{oldView}]"));
+            var newFacts = Facts(await PlanAsync(star));
+            output.WriteLine($"OLD {oldFacts} | NEW {newFacts}");
+            // Еталон справді «по рядку» (інакше порівняння з ним нічого не доводить).
+            Assert.True(oldFacts.CellRangeSeekExecutions == 0 && oldFacts.CellPointSeekExecutions >= s.Rows, oldFacts.ToString());
+            Assert.True(newFacts.CellRangeSeekExecutions >= 1 && newFacts.CellRangeSeekExecutions <= s.Instances, newFacts.ToString());
+        }
+        finally
+        {
+            await ExecAsync($"IF OBJECT_ID(N'rpt.[{oldView}]') IS NOT NULL DROP VIEW rpt.[{oldView}]");
             await CleanupAsync(s);
         }
     }

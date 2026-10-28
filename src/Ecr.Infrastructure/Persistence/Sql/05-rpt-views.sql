@@ -217,6 +217,7 @@ BEGIN
     -- @plainAgg / @plainCnt - при прапорі ON усі НЕмаршрутизовані колонки читає ОДИН apply pc замість c<n> на колонку.
     DECLARE @rvPack nvarchar(max), @rvChoose nvarchar(max), @rvExprs nvarchar(max), @rvPred bit, @rvDer nvarchar(max), @rvOwn nvarchar(max), @rvGen nvarchar(max),
             @plainAgg nvarchar(max), @plainCnt int, @numRef nvarchar(64), @strRef nvarchar(64),
+            @cvCols int, @cvAgg nvarchar(max), @cellJoin nvarchar(max),
             @famAgg nvarchar(max), @pkExpr nvarchar(16), @rvRef nvarchar(8), @fromSql nvarchar(max), @tiAp nvarchar(max), @rowApply nvarchar(max);
 
     DECLARE cur_views CURSOR LOCAL FAST_FORWARD FOR
@@ -274,14 +275,14 @@ BEGIN
                            THEN N'MAX(CAST(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
                            ELSE N'MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END)' END
                     + N' AS v' + CAST(@n AS nvarchar(10));
-                SET @numRef = N'pc.v' + CAST(@n AS nvarchar(10));
-                SET @strRef = N'pc.s' + CAST(@n AS nvarchar(10));
+                SET @numRef = N'cvs.v' + CAST(@n AS nvarchar(10));
+                SET @strRef = N'cvs.s' + CAST(@n AS nvarchar(10));
                 IF @colType IN (6, 8)
                     SET @plainAgg = @plainAgg + N', MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' THEN x.ValueString END) AS s'
                                   + CAST(@n AS nvarchar(10));
                 SET @plainCnt = @plainCnt + 1;
-                SET @valueCol = CASE WHEN @colType = 3 THEN N'CAST(pc.v' + CAST(@n AS nvarchar(10)) + N' AS bit)'
-                                     ELSE N'pc.v' + CAST(@n AS nvarchar(10)) END;
+                SET @valueCol = CASE WHEN @colType = 3 THEN N'CAST(cvs.v' + CAST(@n AS nvarchar(10)) + N' AS bit)'
+                                     ELSE N'cvs.v' + CAST(@n AS nvarchar(10)) END;
             END
             ELSE IF @routed = 0
             BEGIN
@@ -319,15 +320,15 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                 -- Власна обчислена читається ОКРЕМИМ apply sc (OwnerNo -2) лише по обчислених комірках рядка (їх мало, а то й нема),
                 -- а не другим агрегатом на колонку в sv: p61 (прапор k<n> у sv) подвоював роботу sv (T10_03 / T11_03 у 2-4 рази).
                 INSERT INTO @pv (OwnerNo, ColNo, ColId, Agg) VALUES
-                    (-2, @n, @colId, @aggBody + N' AS cv' + CAST(@n AS nvarchar(10))),
+                    (-2, @n, @colId, REPLACE(@aggBody, N'CASE WHEN x.ColumnDefId', N'CASE WHEN x.IsCalculated = 1 AND x.ColumnDefId') + N' AS cv' + CAST(@n AS nvarchar(10))),
                     (-1, @n, @colId, @agg);
                 SET @famAgg = @famAgg + N', ' + CASE WHEN @colType = 3
                     THEN N'MAX(CAST(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' AND ' + CASE WHEN @isMonth = 1 THEN N'oi.PeriodKey % 100 = ' + CAST(@monthNo AS nvarchar(3)) ELSE N'oi.PeriodKey = pa.AnchorKey' END + N' THEN x.' + @raw1 + N' END AS tinyint))'
                     ELSE N'MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' AND ' + CASE WHEN @isMonth = 1 THEN N'oi.PeriodKey % 100 = ' + CAST(@monthNo AS nvarchar(3)) ELSE N'oi.PeriodKey = pa.AnchorKey' END + N' THEN x.' + @raw1 + N' END)' END
                     + N' AS v' + CAST(@n AS nvarchar(10));
 
-                SET @valueCol = N'COALESCE(sc.cv' + CAST(@n AS nvarchar(10)) + N', '
-                              + N'fam.v' + CAST(@n AS nvarchar(10)) + N', sv.v' + CAST(@n AS nvarchar(10)) + N')';
+                SET @valueCol = N'COALESCE(cvs.cv' + CAST(@n AS nvarchar(10)) + N', '
+                              + N'fam.v' + CAST(@n AS nvarchar(10)) + N', cvs.v' + CAST(@n AS nvarchar(10)) + N')';
                 IF @colType = 3
                     SET @valueCol = N'CAST(' + @valueCol + N' AS bit)';
             END
@@ -386,12 +387,11 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
         -- (PeriodKey, TableInstanceId, RowKey), обидва вирівняні по ps_ByPeriodKey; без підзапитів на рядок
         -- (якір — похідна таблиця по doc.Period, обчислюється один раз на запит). Лише Monthly-проєкти:
         -- у квартальних/річних ключ Year*100+Sequence означає не місяць.
-        IF @plainCnt > 0
-        BEGIN
-            SET @joins = @joins + N'
-OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc';
-            SET @extra = @extra + 1 - @plainCnt;   -- pc замість c<n> на кожну нероутовану колонку
-        END
+        -- Q-17.cellrange: нероутовані (pc) і введені власні копії (sv) читає ОДНА похідна cvs, а власні обчислені комірки (sc) - умовні агрегати тієї ж похідної
+        -- (текст - нижче, після вибору виразу _PeriodKey). Облік таблиць: 3 на похідну замість по одній на колонку.
+        SET @cvCols = @plainCnt + (SELECT COUNT(*) FROM @pv WHERE OwnerNo = -1);
+        IF @cvCols > 0
+            SET @extra = @extra + 4 - @cvCols;   -- похідна cvs: isl (oi, ow), x - 3 таблиці + запас на ROW_NUMBER-похідну
 
         IF @monthMask <> 0 OR @needAnchor = 1
         BEGIN
@@ -415,37 +415,8 @@ LEFT HASH JOIN (SELECT oi.DocumentId, oi.PeriodKey / 100 AS Yr, ow.RowKey' + @fa
                  WHERE oi.TableDefId = ' + CAST(@id AS nvarchar(10)) + N'
                  GROUP BY oi.DocumentId, oi.PeriodKey / 100, ow.RowKey) AS fam
        ON p.PeriodKind = 0 AND fam.DocumentId = ti.DocumentId AND fam.Yr = ti.PeriodKey / 100 AND fam.RowKey = r.RowKey';
-            -- Власна копія (sv) і кожен власник (om<m>, omA) - по одному OUTER APPLY з умовною агрегацією (B1).
-            -- Власна копія: рядок перегляду; без жодної введеної колонки з маршрутизацією цього блоку немає.
-            SET @extra = @extra + 2 - (SELECT COUNT(*) FROM @pv WHERE OwnerNo = -1);   -- sv і sc замість c<n> на кожну колонку
-            SET @ownerCells = N'';
-            SET @ownerNo = -2;
-            WHILE @ownerNo IS NOT NULL
-            BEGIN
-                -- ⚠ FOR XML PATH, а не «@var = @var + …» з ORDER BY: останнє не гарантує конкатенації всіх рядків.
-                SET @aggList = STUFF((SELECT N', ' + Agg FROM @pv WHERE OwnerNo = @ownerNo ORDER BY ColNo
-                                      FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
-                -- P2 (T3_00 Land, 96 місячних колонок: 231 seek PK_CellValue на КОЖЕН рядок результату, ~5,4 млн виконань):
-                -- власник читається ОДНИМ діапазоном ключа (PeriodKey, TableRowId) - усі комірки його рядка за один seek, -
-                -- а потрібну колонку вибирає умовна агрегація MAX(CASE ColumnDefId ...) (вона й так фільтрує). Раніше тут стояв
-                -- `x.ColumnDefId IN (<колонки власника>)`: оптимізатор розкривав його в seek НА КОЛОНКУ. Комірок у рядку власника
-                -- небагато (розріджено), тож читання діапазону дешевше за N seek-ів; результат той самий.
-                SET @idList = N'';
-                SET @ownerCells = @ownerCells + N'
-OUTER APPLY (SELECT ' + @aggList + N' FROM '
-                    + CASE WHEN @ownerNo > 100
-                           THEN N'doc.CellValue AS x WHERE x.PeriodKey = ow' + CAST(@ownerNo - 100 AS nvarchar(3)) + N'.PeriodKey AND x.TableRowId = ow' + CAST(@ownerNo - 100 AS nvarchar(3)) + N'.Id'
-                           WHEN @ownerNo = -2
-                           THEN N'doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id AND x.IsCalculated = 1'
-                           WHEN @ownerNo = -1
-                           THEN N'doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id'
-                           ELSE N'doc.CellValue AS x WHERE x.PeriodKey = owA.PeriodKey AND x.TableRowId = owA.Id' + @idList END
-                    + N') AS ' + CASE WHEN @ownerNo = -1 THEN N'sv' WHEN @ownerNo = -2 THEN N'sc' WHEN @ownerNo = 0 THEN N'omA' ELSE N'om' + CAST(@ownerNo - 100 AS nvarchar(3)) END;
-                SET @ownerNo = (SELECT MIN(OwnerNo) FROM @pv WHERE OwnerNo > @ownerNo);
-            END
-
-            -- Порядок: приєднання власників-рядків ідуть ДО комірок власників; власні копії нероутованих колонок (c<n>) - між ними.
-            SET @joins = @ownerRows + @joins + @ownerCells;
+            -- Власна копія (sv) і власні обчислені (sc) - тепер похідна cvs (Q-17.cellrange, нижче); тут лише приєднання власників.
+            SET @joins = @ownerRows + @joins;
         END
 
         -- ⛔ Q-17.recalc (Аудит-2, Land-заміри): зріз API віддає колонку Calculated числом методології
@@ -556,8 +527,7 @@ OUTER APPLY (SELECT ' + STUFF(@rvAgg, 1, 2, N'') + N'
                                                               = CASE WHEN j.[type] = 3 THEN CASE j.[value] WHEN N''true'' THEN N''True'' ELSE N''False'' END ELSE j.[value] END COLLATE Latin1_General_BIN2))))) AS u
                                GROUP BY u.BindingId, u.ColumnDefId, u.Own, u.SubstanceEntryId) AS g
                          GROUP BY g.BindingId, g.ColumnDefId) AS t) AS q) AS rv';
-            SET @joins = @joins + @rvApply;
-            SET @select = @selectRv;
+            SET @select = @selectRv;   -- сам @rvApply дописується до @joins нижче, ПІСЛЯ похідної cvs (порядок приєднань зафіксовано підказками)
             SET @extra = @extra + 8;
         END
 
@@ -588,6 +558,37 @@ OUTER APPLY (SELECT ' + STUFF(@rvAgg, 1, 2, N'') + N'
         -- КОЖНОГО екземпляра документа), тож seek по партиціях виконується для всіх періодів. _PeriodKey береться з ti.PeriodKey (те саме
         -- значення: r.PeriodKey = ti.PeriodKey) - тоді предикат відсікає екземпляри ДО apply, а cr.PeriodKey = ti.PeriodKey - відсічка партицій.
         SET @pkExpr = CASE WHEN @rowApply = N'' THEN N'r.PeriodKey' ELSE N'ti.PeriodKey' END;
+        -- Q-17.cellrange (Аудит-2 p66, Land: T3_00 холодний 42 с, doc.CellValue 23 400 seek-ів PK_CellValue - по одному на рядок на apply pc/sc/sv):
+-- комірки рядка читає НАБОРОВО (як fam): похідна cvs - умовна агрегація по (PeriodKey, TableRowId), що приєднується до рядків хеш-зʼєднанням
+-- (ліворуч вузький потік). Комірки читаються ДІАПАЗОНАМИ, а не по рядку: рядки екземпляра ідуть підряд за Id (їх резервує пачка), тож
+-- «острови» послідовних Id рядків одного екземпляра (isl: Id - ROW_NUMBER) дають по одному seek-у (PeriodKey, TableRowId BETWEEN Lo AND Hi)
+-- на острів (Land: ~680 діапазонів замість 23 400 точкових seek-ів); рознесені Id просто дають більше островів, не гірше за рядок.
+-- ⛔ Не повний скан doc.CellValue: комірки ЧУЖИХ таблиць у діапазоні немає (острів - лише Id рядків цієї таблиці), а скан читав би всі таблиці.
+-- cvs читає: нероутовані колонки (pc), власні копії введених (sv) - усі комірки рядка, і власні ОБЧИСЛЕНІ комірки (sc, cv<n>: IsCalculated = 1,
+-- їх мало, p61/P2-1) - умовні агрегати в ОДНОМУ проході (дві похідні давали рядок хеш-зʼєднання понад 8060 Б на T9_04: 193 введені колонки).
+-- Ключі: DocumentId (= ti.DocumentId) і PeriodKey (= вираз _PeriodKey) стоять у PARTITION BY / GROUP BY і в ON, тож предикати _DocumentId /
+-- _PeriodKey вʼюхи потрапляють до островів (вузький шлях = один екземпляр = один діапазон). Кратність та сама: ключ комірки унікальний,
+-- агрегат без групи давав рівно один рядок на рядок вʼюхи (NULL, коли комірок немає), LEFT JOIN дає те саме.
+-- ⚠ INNER LOOP JOIN острів -> комірки: інакше оптимізатор на малих/неточних оцінках бере хеш-скан усього doc.CellValue.
+        -- ⚠ FOR XML PATH, а не «@var = @var + …» з ORDER BY: останнє не гарантує конкатенації всіх рядків.
+        SET @cvAgg = @plainAgg + COALESCE((SELECT N', ' + Agg FROM @pv ORDER BY OwnerNo DESC, ColNo
+                                           FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N'');
+        SET @cellJoin = N'';
+        IF @cvCols > 0
+            SET @cellJoin = N'
+LEFT HASH JOIN (SELECT isl.DocumentId, x.PeriodKey, x.TableRowId' + @cvAgg + N'
+                  FROM (SELECT q.DocumentId, q.PeriodKey, MIN(q.Id) AS Lo, MAX(q.Id) AS Hi
+                          FROM (SELECT oi.DocumentId, ow.PeriodKey, ow.Id,
+                                       ow.Id - ROW_NUMBER() OVER (PARTITION BY oi.DocumentId, ow.PeriodKey ORDER BY ow.Id) AS Grp
+                                  FROM doc.TableInstance AS oi
+                                  JOIN doc.TableRow AS ow ON ow.PeriodKey = oi.PeriodKey AND ow.TableInstanceId = oi.Id
+                                 WHERE oi.TableDefId = ' + CAST(@id AS nvarchar(10)) + N') AS q
+                         GROUP BY q.DocumentId, q.PeriodKey, q.Grp) AS isl
+                  INNER LOOP JOIN doc.CellValue AS x ON x.PeriodKey = isl.PeriodKey AND x.TableRowId BETWEEN isl.Lo AND isl.Hi
+                 GROUP BY isl.DocumentId, x.PeriodKey, x.TableRowId) AS cvs
+       ON cvs.DocumentId = ti.DocumentId AND cvs.PeriodKey = ' + @pkExpr + N' AND cvs.TableRowId = r.Id';
+        SET @joins = @joins + @cellJoin + @rvApply;
+
         SET @fromSql = CASE WHEN @rowApply = N'' AND @tiAp = N'' THEN N'FROM doc.TableInstance AS ti
 JOIN doc.TableRow      AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id AND r.IsDeleted = 0
 JOIN doc.Document      AS d ON d.Id = ti.DocumentId
