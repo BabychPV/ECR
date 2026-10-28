@@ -211,6 +211,13 @@ BEGIN
     -- Q-17.recalc: результати методологій для колонок Calculated (див. нижче). @selectRv - той самий список колонок, але
     -- Calculated читається з результатів; @rvIds / @rvAgg - колонки й їхні агрегати; @rvApply - сам OUTER APPLY.
     DECLARE @selectRv nvarchar(max), @valueColRv nvarchar(256), @rvIds nvarchar(max), @rvAgg nvarchar(max), @rvApply nvarchar(max), @selectTextRv nvarchar(max);
+    -- Q-17.perf (бюджети Land, рішення людини 28.10): rv - НАБОРОВО (дві похідні таблиці по (документ, період, RowKey) замість
+    -- OUTER APPLY на рядок з ~45 seek-ів); @rvPack - агрегати пакетів у похідних, @rvExprs - вибір «власний > загальний» у
+    -- скалярному apply rv; @rvPred - є прив'язка з предикатом MatchJson (тоді лишається посередній apply на рядок).
+    -- @plainAgg / @plainCnt - при прапорі ON усі НЕмаршрутизовані колонки читає ОДИН apply pc замість c<n> на колонку.
+    DECLARE @rvPack nvarchar(max), @rvChoose nvarchar(max), @rvExprs nvarchar(max), @rvPred bit, @rvDer nvarchar(max), @rvOwn nvarchar(max), @rvGen nvarchar(max),
+            @plainAgg nvarchar(max), @plainCnt int, @numRef nvarchar(64), @strRef nvarchar(64),
+            @rvRef nvarchar(8), @fromSql nvarchar(max), @tiAp nvarchar(max), @rowApply nvarchar(max);
 
     DECLARE cur_views CURSOR LOCAL FAST_FORWARD FOR
         SELECT TableDefId, SheetDefId, Header, ViewName FROM @tables ORDER BY TableDefId;
@@ -221,9 +228,16 @@ BEGIN
         -- ⚠ Цикл, а не `STRING_AGG`: підлога сервера — 2016 SP1 (`D-101`).
         SELECT @select = N'', @selectText = N'', @joins = N'', @n = 0,
                @ownerRows = N'', @ownerCells = N'', @monthMask = 0, @needAnchor = 0, @extra = 0,
-               @selectRv = N'', @rvIds = N'', @rvAgg = N'', @rvApply = N'', @selectTextRv = N'';
+               @selectRv = N'', @rvIds = N'', @rvAgg = N'', @rvApply = N'', @selectTextRv = N'',
+               @rvPack = N'', @rvChoose = N'', @rvExprs = N'', @plainAgg = N'', @plainCnt = 0;
         DELETE FROM @pv;
         SET @layout = (SELECT LayoutKind FROM cfg.TableDef WHERE Id = @id);
+        -- Q-17.perf: чи є в таблиці активна прив'язка з предикатом MatchJson (тоді rv - посередній apply на рядок, нижче).
+        -- rv наборового варіанта стає колонками apply-джерела рядків r (alias r), посередній - окремим apply rv.
+        SET @rvPred = CASE WHEN EXISTS (SELECT 1 FROM cfg.CalculationBinding
+                                         WHERE IsActive = 1 AND TableDefId = @id AND REPLACE(MatchJson, CHAR(32), N'') <> N'{}') THEN 1 ELSE 0 END;
+        SET @rvRef = CASE WHEN @rvPred = 0 THEN N'r' ELSE N'rv' END;
+        SELECT @fromSql = N'', @tiAp = N'', @rowApply = N'';
         SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0);
         WHILE @colId IS NOT NULL
         BEGIN
@@ -246,7 +260,30 @@ BEGIN
             SET @routed = CASE WHEN @MonthRouting = 1 AND @layout = 0 AND @colType NOT IN (6, 8)
                                     AND (@isMonth = 0 OR @monthNo BETWEEN 1 AND 12) THEN 1 ELSE 0 END;
 
-            IF @routed = 0
+            SET @numRef = @alias + N'.ValueNumeric';
+            SET @strRef = @alias + N'.ValueString';
+            IF @routed = 0 AND @MonthRouting = 1
+            BEGIN
+                -- Q-17.perf (T3_00 Land: 232 колонки = 232 LEFT JOIN doc.CellValue = 233 seek-ів на рядок, 5,4 млн виконань): при прапорі ON
+                -- усі НЕмаршрутизовані колонки (PerPeriodInstance/Static, а в MonthsInColumns - Formula/Calculated) читає ОДИН
+                -- apply pc по ключу рядка (PeriodKey, TableRowId) з умовною агрегацією; ключ комірки унікальний, тож MAX = саме значення.
+                -- Прапор вимкнено - текст вʼюхи як раніше (c<n>).
+                SET @raw1 = SUBSTRING(@valueCol, LEN(@alias) + 2, 64);
+                SET @plainAgg = @plainAgg + N', '
+                    + CASE WHEN @colType = 3
+                           THEN N'MAX(CAST(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
+                           ELSE N'MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END)' END
+                    + N' AS v' + CAST(@n AS nvarchar(10));
+                SET @numRef = N'pc.v' + CAST(@n AS nvarchar(10));
+                SET @strRef = N'pc.s' + CAST(@n AS nvarchar(10));
+                IF @colType IN (6, 8)
+                    SET @plainAgg = @plainAgg + N', MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' THEN x.ValueString END) AS s'
+                                  + CAST(@n AS nvarchar(10));
+                SET @plainCnt = @plainCnt + 1;
+                SET @valueCol = CASE WHEN @colType = 3 THEN N'CAST(pc.v' + CAST(@n AS nvarchar(10)) + N' AS bit)'
+                                     ELSE N'pc.v' + CAST(@n AS nvarchar(10)) END;
+            END
+            ELSE IF @routed = 0
             BEGIN
                 SET @joins = @joins + N'
 LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.PeriodKey AND '
@@ -298,11 +335,18 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
             SET @valueColRv = @valueCol;
             IF @colType = 8
             BEGIN
-                SET @valueColRv = N'COALESCE(rv.rv' + CAST(@n AS nvarchar(10)) + N', ' + @valueCol + N')';
+                SET @valueColRv = N'COALESCE(' + @rvRef + N'.rv' + CAST(@n AS nvarchar(10)) + N', ' + @valueCol + N')';
                 SET @rvIds = @rvIds + N', ' + CAST(@colId AS nvarchar(10));
                 -- Переможець - прив'язка з найбільшим Id: рядок "Id (10 цифр) + значення або N" береться через MAX і розпаковується.
                 SET @rvAgg = @rvAgg + N', CAST(NULLIF(SUBSTRING(MAX(CASE WHEN q.ColumnDefId = ' + CAST(@colId AS nvarchar(10))
                            + N' THEN q.Pack END), 11, 60), ''N'') AS decimal(34, 16)) AS rv' + CAST(@n AS nvarchar(10));
+                -- Q-17.perf: наборовий варіант - пакет колонки з похідних ro (результат екземпляра цього рядка) і rg (загальний);
+                -- «власний > загальний» ПО ПРИВ'ЯЗЦІ: переможець - найбільший Id прив'язки серед обох, при рівному - власний.
+                SET @rvPack = @rvPack + N', MAX(CASE WHEN q.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' THEN q.Pack END) AS p' + CAST(@n AS nvarchar(10));
+                -- Пакет - двійковий (4 Б Id прив'язки + 1 Б «є число» + 20 Б decimal(34,16)): рядки хеш-таблиці не мають перевищити 8060 Б
+                -- (nvarchar-пакет x 40 колонок Calculated давав "worktable ... exceeds 8060").
+                SET @rvExprs = @rvExprs + N', CASE WHEN SUBSTRING(rvx.p' + CAST(@n AS nvarchar(10)) + N', 5, 1) = 0x01 THEN CAST(SUBSTRING(rvx.p'
+                             + CAST(@n AS nvarchar(10)) + N', 6, 20) AS decimal(34, 16)) END AS rv' + CAST(@n AS nvarchar(10));
             END
 
             SET @select = @select + N',
@@ -316,7 +360,7 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                AND NOT EXISTS (SELECT 1 FROM cfg.ColumnDef
                                 WHERE TableDefId = @id AND IsDeleted = 0 AND Code = @colCode + N'_Text')
                 SET @selectText = @selectText + N',
-       CASE WHEN ' + @alias + N'.ValueNumeric IS NULL THEN ' + @alias + N'.ValueString END AS '
+       CASE WHEN ' + @numRef + N' IS NULL THEN ' + @strRef + N' END AS '
                                 + QUOTENAME(@colCode + N'_Text');
             -- Варіант з rv: для Calculated супутник заповнюється ЛИШЕ коли ПІДСУМКОВЕ число (результат методології, інакше
             -- матеріалізоване - те, що віддає числова колонка) порожнє; методологія дала число - супутник NULL.
@@ -324,9 +368,9 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                AND NOT EXISTS (SELECT 1 FROM cfg.ColumnDef
                                 WHERE TableDefId = @id AND IsDeleted = 0 AND Code = @colCode + N'_Text')
                 SET @selectTextRv = @selectTextRv + N',
-       CASE WHEN ' + CASE WHEN @colType = 8 THEN N'COALESCE(rv.rv' + CAST(@n AS nvarchar(10)) + N', ' + @alias + N'.ValueNumeric)'
-                          ELSE @alias + N'.ValueNumeric' END
-                                + N' IS NULL THEN ' + @alias + N'.ValueString END AS '
+       CASE WHEN ' + CASE WHEN @colType = 8 THEN N'COALESCE(' + @rvRef + N'.rv' + CAST(@n AS nvarchar(10)) + N', ' + @numRef + N')'
+                          ELSE @numRef END
+                                + N' IS NULL THEN ' + @strRef + N' END AS '
                                 + QUOTENAME(@colCode + N'_Text');
             SET @selectRv = @selectRv + N',
        ' + @valueColRv + N' AS ' + QUOTENAME(@colCode);
@@ -340,6 +384,13 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
         -- (PeriodKey, TableInstanceId, RowKey), обидва вирівняні по ps_ByPeriodKey; без підзапитів на рядок
         -- (якір — похідна таблиця по doc.Period, обчислюється один раз на запит). Лише Monthly-проєкти:
         -- у квартальних/річних ключ Year*100+Sequence означає не місяць.
+        IF @plainCnt > 0
+        BEGIN
+            SET @joins = @joins + N'
+OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc';
+            SET @extra = @extra + 1 - @plainCnt;   -- pc замість c<n> на кожну нероутовану колонку
+        END
+
         IF @monthMask <> 0 OR @needAnchor = 1
         BEGIN
             -- Місяці (OwnerNo 101..112): екземпляр місяця -> рядок з тим самим RowKey -> введені комірки; один OUTER APPLY
@@ -355,19 +406,27 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                 SET @mi = (SELECT MIN(OwnerNo) FROM @pv WHERE OwnerNo > 100);
                 SET @aggList = N'';
                 SET @ownerRows2 = N'';
+                SET @idList = N'';
                 WHILE @mi IS NOT NULL
                 BEGIN
-                    SET @aggList = @aggList + N', MAX(CASE WHEN PeriodKey % 100 = ' + CAST(@mi - 100 AS nvarchar(3)) + N' THEN Id END) AS i' + CAST(@mi - 100 AS nvarchar(3));
+                    -- Q-17.perf (Аудит-2, діагноз 002c19cbd): oim - apply на ЕКЗЕМПЛЯР (ведучий набір), а не GROUP BY PeriodKey / 100 по ВСІЙ
+                    -- doc.TableInstance: той давав оцінку x215 (437 тис. проти 2 тис.), hash-зʼєднання і повні скани TableRow x13 / CellValue
+                    -- без відсічки партицій. Місяці - явні рівності по ключу UQ_TableInstance (PeriodKey, DocumentId, TableDefId), без діапазону
+                    -- і без PeriodKey / 100 у предикаті seek-у.
+                    SET @aggList = @aggList + N', MAX(CASE WHEN x.PeriodKey % 100 = ' + CAST(@mi - 100 AS nvarchar(3)) + N' THEN x.Id END) AS i' + CAST(@mi - 100 AS nvarchar(3));
+                    SET @idList = @idList + N', (ti.PeriodKey / 100) * 100 + ' + CAST(@mi - 100 AS nvarchar(3));
                     SET @ownerRows2 = @ownerRows2 + N'
 LEFT JOIN doc.TableRow AS ow' + CAST(@mi - 100 AS nvarchar(3)) + N' ON ow' + CAST(@mi - 100 AS nvarchar(3)) + N'.PeriodKey = (ti.PeriodKey / 100) * 100 + ' + CAST(@mi - 100 AS nvarchar(3))
                         + N' AND ow' + CAST(@mi - 100 AS nvarchar(3)) + N'.TableInstanceId = oim.i' + CAST(@mi - 100 AS nvarchar(3))
                         + N' AND ow' + CAST(@mi - 100 AS nvarchar(3)) + N'.RowKey = r.RowKey AND ow' + CAST(@mi - 100 AS nvarchar(3)) + N'.IsDeleted = 0';
                     SET @mi = (SELECT MIN(OwnerNo) FROM @pv WHERE OwnerNo > @mi);
                 END
-                SET @ownerRows = @ownerRows + N'
-LEFT JOIN (SELECT DocumentId, TableDefId, PeriodKey / 100 AS Yr' + @aggList + N'
-             FROM doc.TableInstance GROUP BY DocumentId, TableDefId, PeriodKey / 100) AS oim
-       ON p.PeriodKind = 0 AND oim.DocumentId = ti.DocumentId AND oim.TableDefId = ti.TableDefId AND oim.Yr = ti.PeriodKey / 100' + @ownerRows2;
+                SET @tiAp = @tiAp + N'
+OUTER APPLY (SELECT ' + STUFF(@aggList, 1, 2, N'') + N'
+             FROM doc.TableInstance AS x
+             WHERE p.PeriodKind = 0 AND x.PeriodKey IN (' + STUFF(@idList, 1, 2, N'') + N')
+               AND x.DocumentId = ti.DocumentId AND x.TableDefId = ti.TableDefId) AS oim';
+                SET @ownerRows = @ownerRows + @ownerRows2;
             END
 
             IF @needAnchor = 1
@@ -428,7 +487,58 @@ OUTER APPLY (SELECT ' + @aggList + N' FROM '
         -- Прив'язки читаються під час запиту (не під час генерації), тож нова прив'язка діє без перегенерації вʼюх.
         -- Лише колонки Calculated; решта (введені, Formula) - як було. Матеріалізоване значення doc.CellValue лишається запасним.
         -- Ціна: +8 таблиць у запиті (лічильник нижче); не вміщається в ліміт - apply не додається, вʼюха як до Q-17.recalc.
-        IF @rvIds <> N'' AND @n + @extra + 8 <= 250
+        -- Q-17.perf (Аудит-2 p66, Land: T3_00 rv ~107 з 130 с; діагноз 002c19cbd): OUTER APPLY на РЯДОК x прив'язку читав
+        -- IX_CalculationResult_Lookup (SourceRowKey лише residual) -> key lookup PK -> CalculationRun для КОЖНОГО результату, 88 % з них -
+        -- Superseded-прогони (ціна росте з кожним перерахунком). Тепер результати збираються ОДИН раз на ЕКЗЕМПЛЯР (ведучий набір
+        -- ti -> CROSS APPLY): спершу АКТУАЛЬНІ прогони (ru, UX_CalculationRun_Current), далі seek IX_CalculationResult_DocRun
+        -- (PeriodKey, DocumentId, CalculationRunId) - як у CalculationResultStore.ReadCurrentAsync, - прив'язки таблиці, і групування
+        -- за SourceRowKey; рядки таблиці приєднуються до цього набору хеш-зʼєднанням (лівий потік вузький: лише рядки екземпляра).
+        -- Семантика та сама (власний екземпляр > загальний ПО ПРИВ'ЯЗЦІ, TryCombine, найбільший Id прив'язки, документний
+        -- прогін > проєктний). Значення колонок Calculated - колонки rv<n> джерела рядків r. Предикат MatchJson залежить від комірок
+        -- рядка й набором не виражається: якщо в таблиці Є активна прив'язка з предикатом (на момент генерації), лишається
+        -- посередній apply на рядок нижче (ізольована гілка); прив'язка з предикатом, додана ПІСЛЯ генерації, набором ігнорується
+        -- до перегенерації (старт застосунку і публікація шаблону перегенерують вʼюхи). Ціна: +7 таблиць у запиті.
+        IF @rvIds <> N'' AND @rvPred = 0 AND @n + @extra + 7 <= 250
+        BEGIN
+            SET @rowApply = N'
+CROSS APPLY (SELECT r0.Id, r0.RowKey, r0.Ordinal, r0.PeriodKey' + @rvExprs + N'
+             FROM doc.TableRow AS r0
+             LEFT HASH JOIN (SELECT q.SourceRowKey' + @rvPack + N'
+                  FROM (SELECT t.SourceRowKey, t.ColumnDefId,
+                               CAST(t.BindingId AS binary(4)) + CAST(CASE WHEN t.Total IS NULL THEN 0 ELSE 1 END AS binary(1))
+                               + CAST(COALESCE(t.Total, 0) AS binary(20)) AS Pack
+                        FROM (SELECT g.SourceRowKey, g.BindingId, g.ColumnDefId,
+                                     CASE WHEN MAX(g.Own) = 1
+                                          THEN CASE WHEN MAX(CASE WHEN g.Own = 1 THEN g.Amb END) = 1 THEN NULL ELSE SUM(CASE WHEN g.Own = 1 THEN g.SubTotal END) END
+                                          ELSE CASE WHEN MAX(CASE WHEN g.Own = 0 THEN g.Amb END) = 1 THEN NULL ELSE SUM(CASE WHEN g.Own = 0 THEN g.SubTotal END) END
+                                     END AS Total
+                              FROM (SELECT u.SourceRowKey, u.BindingId, u.ColumnDefId, u.Own, MIN(u.Value) AS SubTotal,
+                                           CASE WHEN MIN(u.Value) <> MAX(u.Value) OR MIN(u.UnitId) <> MAX(u.UnitId) THEN 1 ELSE 0 END AS Amb
+                                    FROM (SELECT cr.SourceRowKey, b.Id AS BindingId, b.ColumnDefId, cr.SubstanceEntryId, cr.Value, cr.UnitId,
+                                                 CASE WHEN cr.TableInstanceId IS NULL THEN 0 ELSE 1 END AS Own
+                                          FROM calc.CalculationRun AS ru
+                                          JOIN calc.CalculationResult AS cr ON cr.PeriodKey = ti.PeriodKey AND cr.DocumentId = d.Id AND cr.CalculationRunId = ru.Id
+                                          INNER HASH JOIN (SELECT bb.Id, bb.ColumnDefId, bb.OutputCode, mv.Id AS MvId
+                                                             FROM cfg.CalculationBinding AS bb
+                                                             JOIN calc.MethodologyVersion AS mv ON mv.MethodologyId = bb.MethodologyId
+                                                            WHERE bb.IsActive = 1 AND bb.TableDefId = ' + CAST(@id AS nvarchar(10)) + N' AND bb.ColumnDefId IN (' + STUFF(@rvIds, 1, 2, N'') + N')
+                                                              AND REPLACE(bb.MatchJson, CHAR(32), N'''') = N''{}'') AS b
+                                               ON b.MvId = cr.MethodologyVersionId AND b.OutputCode = cr.OutputCode
+                                          WHERE ru.ProjectId = d.ProjectId AND ru.Status = N''Current''
+                                            AND (ru.DocumentId = d.Id
+                                                 OR (ru.DocumentId IS NULL AND NOT EXISTS (SELECT 1 FROM calc.CalculationRun AS ru2
+                                                      WHERE ru2.ProjectId = d.ProjectId AND ru2.Status = N''Current''
+                                                        AND ru2.DocumentId = d.Id AND ru2.PeriodKey = ti.PeriodKey)))
+                                            AND (cr.TableInstanceId = ti.Id
+ OR cr.TableInstanceId IS NULL)) AS u
+                                    GROUP BY u.SourceRowKey, u.BindingId, u.ColumnDefId, u.Own, u.SubstanceEntryId) AS g
+                              GROUP BY g.SourceRowKey, g.BindingId, g.ColumnDefId) AS t) AS q
+                  GROUP BY q.SourceRowKey) AS rvx ON rvx.SourceRowKey = r0.RowKey
+             WHERE r0.PeriodKey = ti.PeriodKey AND r0.TableInstanceId = ti.Id AND r0.IsDeleted = 0) AS r';
+            SET @select = @selectRv;
+            SET @extra = @extra + 7;
+        END
+        ELSE IF @rvIds <> N'' AND @rvPred = 1 AND @n + @extra + 8 <= 250
         BEGIN
             SET @rvApply = N'
 OUTER APPLY (SELECT ' + STUFF(@rvAgg, 1, 2, N'') + N'
@@ -491,6 +601,18 @@ OUTER APPLY (SELECT ' + STUFF(@rvAgg, 1, 2, N'') + N'
             GOTO next_table;
         END
 
+        -- Q-17.perf: ведучий набір - екземпляри (ti, d, p); власники-місяці (oim) і результати методологій (rv) рахуються ОДИН раз
+        -- на екземпляр, а рядки таблиці йдуть слідом (JOIN або CROSS APPLY з колонками rv<n>). Без цього (прапор вимкнено,
+        -- Calculated немає) текст FROM лишається таким, як був.
+        SET @fromSql = CASE WHEN @rowApply = N'' AND @tiAp = N'' THEN N'FROM doc.TableInstance AS ti
+JOIN doc.TableRow      AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id AND r.IsDeleted = 0
+JOIN doc.Document      AS d ON d.Id = ti.DocumentId
+JOIN doc.Project       AS p ON p.Id = d.ProjectId'
+            ELSE N'FROM doc.TableInstance AS ti
+JOIN doc.Document      AS d ON d.Id = ti.DocumentId
+JOIN doc.Project       AS p ON p.Id = d.ProjectId' + @tiAp + CASE WHEN @rowApply <> N'' THEN @rowApply ELSE N'
+JOIN doc.TableRow      AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id AND r.IsDeleted = 0' END END;
+
         SET @sql = CONCAT(
 N'CREATE OR ALTER VIEW rpt.', QUOTENAME(@view), N'
 AS
@@ -500,10 +622,7 @@ SELECT p.Id AS _ProjectId, p.Code AS _ProjectCode,
        r.PeriodKey AS _PeriodKey,
        CAST(COALESCE(a.Status, 0) AS tinyint) AS _Status,
        r.Id AS _RowId, r.RowKey AS _RowKey, r.Ordinal AS _RowOrdinal', @select, N'
-FROM doc.TableInstance AS ti
-JOIN doc.TableRow      AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id AND r.IsDeleted = 0
-JOIN doc.Document      AS d ON d.Id = ti.DocumentId
-JOIN doc.Project       AS p ON p.Id = d.ProjectId
+', @fromSql, N'
 LEFT JOIN wf.ApprovalState AS a ON a.DocumentId = d.Id AND a.SheetDefId = ', CAST(@sheet AS nvarchar(10)),
 N' AND a.PeriodKey = ti.PeriodKey', @joins, N'
 WHERE ti.TableDefId = ', CAST(@id AS nvarchar(10)), N';');
