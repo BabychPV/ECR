@@ -162,6 +162,10 @@ describe('GridHScroll: синхронізація scrollLeft', () => {
       vi.advanceTimersByTime(50);
     });
     expect(seen).toBe(1);
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+    expect(seen).toBe(2);
     expect(source.scrollLeft).toBe(500);
     vi.useRealTimers();
   });

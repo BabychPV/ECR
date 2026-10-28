@@ -107,7 +107,16 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
       await scroll.evaluate((el) => {
         el.scrollLeft = el.scrollWidth;
       });
-      await expect.poll(() => firstHeader(page), { timeout: 15_000, message: `прогін ${String(i + 1)}: сітка не рушила за смугою` }).not.toBe(start);
+      try {
+        await expect.poll(() => firstHeader(page), { timeout: 15_000 }).not.toBe(start);
+      } catch (error) {
+        const state = await page.evaluate(() => {
+          const t = document.querySelector('[data-testid="grid-hscroll"]') as HTMLElement;
+          const g = document.querySelector('revo-grid revogr-scroll-virtual.horizontal') as HTMLElement;
+          return JSON.stringify({ trackLeft: t.scrollLeft, trackRange: t.scrollWidth - t.clientWidth, gridLeft: g.scrollLeft, gridRange: g.scrollWidth - g.clientWidth });
+        });
+        throw new Error(`прогін ${String(i + 1)}: сітка не рушила за смугою: ${state}`, { cause: error });
+      }
 
       // Смугу — на початок: сітка вертається.
       await scroll.evaluate((el) => {
