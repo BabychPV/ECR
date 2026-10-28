@@ -1,5 +1,5 @@
 ﻿import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CalculationResultsPanel, ResultsCollapsedKey } from '@/features/methodologies/CalculationResultsPanel';
@@ -74,25 +74,37 @@ describe('CalculationResultsPanel: згортання', () => {
     expect(screen.queryByText('⟦documents.noCalculationResults⟧')).toBeNull();
   });
 
-  it('є результати — розгорнуто, у заголовку лічильник', async () => {
+  it('є результати — ЗАВЖДИ згорнуто за замовчуванням, лічильник у заголовку, вміст не рендериться', async () => {
     mockServer([row('A'), row('B')]);
     show();
 
-    await screen.findByText('A');
-    expect(screen.getByTestId('calc-results-toggle').getAttribute('aria-expanded')).toBe('true');
-    expect(screen.getByTestId('calc-results-count').textContent).toContain('2');
+    const toggle = await screen.findByTestId('calc-results-toggle');
+    await waitFor(() => {
+      expect(screen.getByTestId('calc-results-count').textContent).toContain('2');
+    });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText('A')).toBeNull();
   });
 
-  it('вибір людини пам’ятається і сильніший за авто', async () => {
+  it('розгорнути вручну — вміст з’являється, вибір пам’ятається', async () => {
     mockServer([row('A')]);
     show();
 
     const toggle = await screen.findByTestId('calc-results-toggle');
-    await screen.findByText('A');
     fireEvent.click(toggle);
 
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(await screen.findByText('A')).toBeTruthy();
+    expect(window.localStorage.getItem(ResultsCollapsedKey)).toBe('0');
+  });
+
+  it('збережений вибір «згорнуто» пам’ятається', async () => {
+    window.localStorage.setItem(ResultsCollapsedKey, '1');
+    mockServer([row('A')]);
+    show();
+
+    const toggle = await screen.findByTestId('calc-results-toggle');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(window.localStorage.getItem(ResultsCollapsedKey)).toBe('1');
   });
 
   it('збережений вибір «розгорнуто» тримає блок відкритим і при порожньому результаті', async () => {

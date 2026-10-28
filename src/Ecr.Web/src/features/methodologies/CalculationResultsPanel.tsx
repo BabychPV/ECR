@@ -115,10 +115,11 @@ export function CalculationResultsPanel({
     retry: false,
   });
 
-  // ✎ ui-sheet-focus (D): явний вибір людини сильніший за авто (є числа — розгорнуто, немає — згорнуто).
+  // ✎ ui-sheet-bottom (рішення людини 28.10): блок ЗАВЖДИ згорнуто за замовчуванням, навіть коли числа є
+  // (авто-розгортання з ui-sheet-focus прибрано); лічильник у заголовку лишається, явний вибір пам'ятається.
   const [choice, setChoice] = useState<boolean | null>(readCollapsed);
   const count = results.data?.length;
-  const collapsed = choice ?? (count === undefined ? true : count === 0);
+  const collapsed = choice ?? true;
 
   const units = useQuery({
     queryKey: ['units'],
