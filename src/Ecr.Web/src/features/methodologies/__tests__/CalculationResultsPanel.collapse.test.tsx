@@ -6,8 +6,8 @@ import { CalculationResultsPanel, ResultsCollapsedKey } from '@/features/methodo
 import { testTheme } from '@/test/render';
 
 /**
- * Блок «Calculation results» згортається (ui-sheet-focus, D): порожньо — згорнуто, є числа — розгорнуто,
- * явний вибір людини (localStorage) сильніший за авто.
+ * Блок «Calculation results» (ui-sheet-bottom): ЗАВЖДИ згорнуто за замовчуванням, запит чисел — ЛІНИВИЙ (лише
+ * після розгортання; на Land до 174 тис. результатів на документ), явний вибір людини пам'ятається.
  *
  * ⚠ У тестах каталог рядків порожній: текст UiString видно як ключ `⟦…⟧`.
  */
@@ -31,13 +31,20 @@ function row(code: string): Record<string, unknown> {
   };
 }
 
+/** Скільки запитів чисел пішло (лічильник викликів fetch до `…/calculation-results`). */
+let resultCalls = 0;
+
 function mockServer(results: unknown[]): void {
+  resultCalls = 0;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input).split('?')[0] ?? '';
       if (path.endsWith('/api/v1/units')) return json([{ id: 8, code: 't', nameL10n: { values: {} } }]);
-      if (path.endsWith('/calculation-results')) return json(results);
+      if (path.endsWith('/calculation-results')) {
+        resultCalls += 1;
+        return json(results);
+      }
       return json(null);
     }),
   );
@@ -63,31 +70,23 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-describe('CalculationResultsPanel: згортання', () => {
-  it('немає результатів — згорнуто, у заголовку «немає», вміст не рендериться', async () => {
-    mockServer([]);
-    show();
-
-    const toggle = await screen.findByTestId('calc-results-toggle');
-    await screen.findByText(/calculationResultsNone/);
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(screen.queryByText('⟦documents.noCalculationResults⟧')).toBeNull();
-  });
-
-  it('є результати — ЗАВЖДИ згорнуто за замовчуванням, лічильник у заголовку, вміст не рендериться', async () => {
+describe('CalculationResultsPanel: згортання і ліниве завантаження', () => {
+  it('згорнуто за замовчуванням: запиту чисел НЕМАЄ, у заголовку немає лічильника', async () => {
     mockServer([row('A'), row('B')]);
     show();
 
     const toggle = await screen.findByTestId('calc-results-toggle');
-    await waitFor(() => {
-      expect(screen.getByTestId('calc-results-count').textContent).toContain('2');
-    });
+    // Дати черзі запитів час, якби запит усе ж стартував.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(resultCalls).toBe(0);
+    expect(screen.queryByTestId('calc-results-count')).toBeNull();
     expect(screen.queryByText('A')).toBeNull();
   });
 
-  it('розгорнути вручну — вміст з’являється, вибір пам’ятається', async () => {
-    mockServer([row('A')]);
+  it('розгортання — рівно один запит; лічильник береться з відповіді; вибір пам’ятається', async () => {
+    mockServer([row('A'), row('B')]);
     show();
 
     const toggle = await screen.findByTestId('calc-results-toggle');
@@ -95,24 +94,49 @@ describe('CalculationResultsPanel: згортання', () => {
 
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(await screen.findByText('A')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByTestId('calc-results-count').textContent).toContain('2');
+    });
+    expect(resultCalls).toBe(1);
     expect(window.localStorage.getItem(ResultsCollapsedKey)).toBe('0');
   });
 
-  it('збережений вибір «згорнуто» пам’ятається', async () => {
+  it('поки числа вантажаться — тіло позначено aria-busy', async () => {
+    window.localStorage.setItem(ResultsCollapsedKey, '0');
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)));
+    show();
+
+    const toggle = await screen.findByTestId('calc-results-toggle');
+    const body = document.getElementById(toggle.getAttribute('aria-controls') ?? '') as HTMLElement;
+    expect(body.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('порожній результат: після розгортання лічильник «немає»', async () => {
+    mockServer([]);
+    show();
+
+    fireEvent.click(await screen.findByTestId('calc-results-toggle'));
+    expect(await screen.findByText(/calculationResultsNone/)).toBeTruthy();
+    expect(resultCalls).toBe(1);
+  });
+
+  it('збережений вибір «згорнуто» пам’ятається і запиту немає', async () => {
     window.localStorage.setItem(ResultsCollapsedKey, '1');
     mockServer([row('A')]);
     show();
 
     const toggle = await screen.findByTestId('calc-results-toggle');
+    await new Promise((resolve) => setTimeout(resolve, 100));
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(resultCalls).toBe(0);
   });
 
-  it('збережений вибір «розгорнуто» тримає блок відкритим і при порожньому результаті', async () => {
+  it('збережений вибір «розгорнуто» одразу вантажить числа (один запит)', async () => {
     window.localStorage.setItem(ResultsCollapsedKey, '0');
-    mockServer([]);
+    mockServer([row('A')]);
     show();
 
-    expect(await screen.findByText('⟦documents.noCalculationResults⟧')).toBeTruthy();
-    expect(screen.getByTestId('calc-results-toggle').getAttribute('aria-expanded')).toBe('true');
+    expect(await screen.findByText('A')).toBeTruthy();
+    expect(resultCalls).toBe(1);
   });
 });

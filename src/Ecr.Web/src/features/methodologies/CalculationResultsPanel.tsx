@@ -87,14 +87,25 @@ export function CalculationResultsPanel({
   readonly documentId: number;
   readonly periodKey: number;
 }): JSX.Element {
+  // ✎ ui-sheet-bottom (рішення людини 28.10): блок ЗАВЖДИ згорнуто за замовчуванням, навіть коли числа є;
+  // явний вибір людини пам'ятається.
+  const [choice, setChoice] = useState<boolean | null>(readCollapsed);
+  const collapsed = choice ?? true;
+
   // ⛔ F-02 (четвертий раунд UX): ключ — ПІД префіксом `['document', id,
   // period]`. Саме його інвалідує завершений перерахунок (`SheetActions`) і
   // кожна зміна робочого процесу; доти панель жила під окремим ключем, і після
   // перерахунку показувала старі числа до перезавантаження сторінки.
+  //
+  // ✎ ui-sheet-bottom: запит ЛІНИВИЙ — лише після розгортання. На Land до 174 тис. результатів на (документ,
+  // період), і вантажити їх при відкритті документа заради лічильника не можна; prefetch немає. Лічильник у
+  // заголовку з'являється з першої відповіді (після першого розгортання).
   const results = useQuery({
     queryKey: calculationResultsKey(documentId, periodKey),
     queryFn: () => calculationResults(documentId, periodKey),
+    enabled: !collapsed,
   });
+  const count = results.data?.length;
 
   // Правда про застарілість — на сервері: щойно свіжі числа дійшли, тост-підказка імпорту
   // («Перерахуйте») втрачає сенс і знімається, а не висить до перезавантаження.
@@ -114,12 +125,6 @@ export function CalculationResultsPanel({
     enabled: changedCodes.length > 0,
     retry: false,
   });
-
-  // ✎ ui-sheet-bottom (рішення людини 28.10): блок ЗАВЖДИ згорнуто за замовчуванням, навіть коли числа є
-  // (авто-розгортання з ui-sheet-focus прибрано); лічильник у заголовку лишається, явний вибір пам'ятається.
-  const [choice, setChoice] = useState<boolean | null>(readCollapsed);
-  const count = results.data?.length;
-  const collapsed = choice ?? true;
 
   const units = useQuery({
     queryKey: ['units'],
@@ -145,12 +150,14 @@ export function CalculationResultsPanel({
         <Text component="span" fw={600}>
           {t('documents.calculationResults')}
         </Text>
-        <Text component="span" size="sm" c="dimmed" data-testid="calc-results-count">
-          {`· ${count === undefined ? '…' : count === 0 ? t('documents.calculationResultsNone') : String(count)}`}
-        </Text>
+        {count !== undefined && (
+          <Text component="span" size="sm" c="dimmed" data-testid="calc-results-count">
+            {`· ${count === 0 ? t('documents.calculationResultsNone') : String(count)}`}
+          </Text>
+        )}
       </button>
 
-      <div id={ResultsBodyId} hidden={collapsed}>
+      <div id={ResultsBodyId} hidden={collapsed} aria-busy={!collapsed && results.isPending ? true : undefined}>
       {!collapsed && (
       <AsyncBoundary<CalculationResultDto[]>
         isPending={results.isPending}

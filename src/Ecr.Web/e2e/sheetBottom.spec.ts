@@ -312,12 +312,26 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
     await page.evaluate(() => {
       window.localStorage.removeItem('ecr.calcResults.collapsed');
     });
+    // Мережа: запит `calculation-results` — ЛІНИВИЙ (до кліку немає, після кліку є; на Land до 174 тис. рядків).
+    const resultRequests: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('calculation-results')) resultRequests.push(request.url());
+    });
     await page.reload();
 
     const toggle = page.getByTestId('calc-results-toggle');
     await expect(toggle).toBeVisible({ timeout: 60_000 });
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await expect(page.getByTestId('calc-results-count')).toBeVisible();
+    // Згорнутий заголовок — без числа; даємо документові догрузитись і перевіряємо, що запиту чисел не було.
+    await expect(page.getByTestId('calc-results-count')).toHaveCount(0);
+    await page.waitForLoadState('networkidle');
+    expect(resultRequests, 'запит calculation-results пішов до розгортання блоку').toHaveLength(0);
+
+    await toggle.click();
+    await expect.poll(() => resultRequests.length, { timeout: 30_000, message: 'після розгортання запиту чисел немає' }).toBeGreaterThan(0);
+    await expect(page.getByTestId('calc-results-count')).toBeVisible({ timeout: 30_000 });
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
 
     for (let i = 0; i < Repeats; i += 1) {
       await toggle.click();
