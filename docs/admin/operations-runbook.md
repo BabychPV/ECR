@@ -160,6 +160,12 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Retention:SubmissionSnapshots:BatchSize` | 10 | зрізів в одному `DELETE` (payload ~10 МБ на зріз, пакет ≈ 100 МБ журналу). Мінімум 1 |
 | `Retention:SubmissionSnapshots:PauseMilliseconds` | 500 | пауза між пакетами, мс. Мінімум 0 |
 | `Retention:SubmissionSnapshots:MaxBatchesPerRun` | 200 | стеля пакетів за нічний прогін; решту доїсть наступний. Мінімум 1 |
+| `Calculations:SupersededPurge:Enabled` | `false` | Q-17 (рішення людини 28.10: лишається лише останній розрахунок «документ × період»): швидкий шлях після перемикання прогону + нічна задача `superseded-results-sweep` + правило `NON_CURRENT_RUN_ROWS` перевірки узгодженості. Див. п. 4.2 |
+| `Calculations:SupersededPurge:DeleteEnabled` | `false` | ⛔ реальне видалення нічною задачею/разовим прибиранням; без нього задача лише ЛІЧИТЬ (dry-run). Швидкий шлях цього ключа не читає |
+| `Calculations:SupersededPurge:BatchSize` / `PauseMilliseconds` / `MaxBatchesPerRun` | 500 / 50 / 2000 | рядків в одному `DELETE` (≈ 5 замків на рядок, нижче порога ескалації 5000) / пауза між пакетами, мс / стеля пакетів за прохід. Мінімуми 1 / 0 / 1 |
+| `Calculations:SupersededPurge:IncludeTrace` | `true` | прибирати також `calc.CalculationStep` і `calc.CalculationInput` |
+| `Calculations:SupersededPurge:LogPauseThresholdPercent` / `LogPauseSeconds` / `MaxLogPauses` / `CheckpointEveryBatches` | 60 / 30 / 20 / 50 | FULL recovery: пауза, поки журнал заповнений вище порога (після `MaxLogPauses` пауз прохід зупиняється, наступний продовжує); SIMPLE: `CHECKPOINT` кожні N пакетів |
+| `Calculations:SupersededPurge:RebuildAfter` | `false` | після повного прибирання перебудувати індекси зачеплених партицій і `UPDATE STATISTICS` |
 | `Audit:ExportMaxRows` | 100000 | межа експорту аудиту CSV |
 | `Campaign:AtRiskDays` | 3 | за скільки днів до терміну проєкт вважається «під загрозою» |
 | `Collection:MonthColumnRouting` | `false` | Q-17: єдине джерело правди для таблиць «місяці в колонках» місячного проєкту: значення стовпця місяця m живуть в екземплярі періоду m, введені не-місячні стовпці — в екземплярі «якоря року». Вимкнено — читання/запис як до Q-17 (повна сумісність). Вмикати ЛИШЕ після перенесення даних (`tools/q17`) і слова людини; читається на початку кожного запиту. Рішення — `D-457`. Порядок: (1) бекап і пауза фонових джобів; (2) Apply перенесення (`admin-guide.md` §12) — на живому стенді лише словом людини; (3) перерахунок змінених документів; (4) ввімкнути прапор і перезапустити API; (5) за потреби `-PurgeCopies` окремою фазою. Після влиття коду `Q-17` очікуваний `UiString` стенда +9 (`err.ECR-ROW-0409.monthDataLocked`, `err.ECR-ACCS-0403.addRowAnchorPeriod`, `err.ECR-ACCS-0403.deleteRowAnchorPeriod`, по en/ru/kz) |
@@ -381,7 +387,7 @@ Server Agent ідуть за локальним часом сервера SQL. �
 
 | Коли | Задачі |
 |---|---|
-| щоночі 02:15 | `PartitionCheckJob`, `ConsistencyCheckJob`, `OrphanScanJob`, `ReportRetentionJob`, `ReportSnapshotFormatJob`, `SubmissionSnapshotRetentionJob` (AN-134, за замовчуванням лише dry-run) |
+| щоночі 02:15 | `PartitionCheckJob`, `ConsistencyCheckJob`, `OrphanScanJob`, `ReportRetentionJob`, `ReportSnapshotFormatJob`, `SubmissionSnapshotRetentionJob` (AN-134, за замовчуванням лише dry-run), `SupersededResultsSweepJob` (Q-17, вимкнено за замовчуванням) |
 | щогодини, хх:05 | `PeriodStateJob` (також один раз на старті), `NotificationJob`, `RowWindowRefetchJob` (повторне підтягування вікон рядків за пізніми даними PI) |
 | щоночі 03:30 | нічний перерахунок, лише якщо `Jobs:NightlyRecalculation:Enabled=true` |
 | за cron розкладу сутності | збір даних (`ext.CollectionSchedule`, по одному розкладу на сутність джерела; формат і залежності — `admin-guide.md` §5.1–5.2) |
@@ -455,6 +461,27 @@ Server Agent немає — завдання обслуговування НЕ �
 `calc.SubmissionSnapshot` за `Id` (`SET IDENTITY_INSERT`). Кандидатів понад 200 за прогін списком не
 фіксується — повторюйте за резервною копією за трійкою.
 
+### 4.2. Прибирання результатів неактуальних прогонів (`SupersededResultsSweepJob`, Q-17)
+
+Рішення людини 28.10: у базі лишаються результати, кроки й входи лише ПОТОЧНОГО (`Current`) прогону на «документ × період»
+(`Running` не чіпається). Рядки `calc.CalculationRun` не видаляються ніколи. Зміна **незворотна**: старі числа
+показати знову не можна (лишаються зрізи подання з комірками, `aud.CellChange`, метадані прогонів і поточний результат).
+
+**Порядок вмикання** (кожен крок — окреме слово людини):
+1. залишок політики: запис `D-…` у `docs/tz/10-decisions.md` (D-25/D-71/ФВ-9.11/ФВ-9.13 кажуть «результати не видаляються»);
+2. зберегти `tools/land/postcheck` ДО прибирання (його лічильники рахують усі прогони);
+3. повний бекап; узгодити з DBA частоту резервних копій журналу (FULL) та вікно;
+4. `ECR_Calculations__SupersededPurge__Enabled=true` (без `DeleteEnabled`): нічна задача лише лічить —
+   `MaintenanceRun` `superseded-results-sweep`, `DetailsJson`: `statusHistogram`, `candidates` за таблицями.
+   Невідомий статус прогону (поза `Current, Running, Superseded, Failed`) зупиняє прохід (`mode=aborted`) — рішення за людиною;
+5. `ECR_Calculations__SupersededPurge__DeleteEnabled=true` у робоче вікно; прохід відновлюється (прогрес — самі дані),
+   `complete=false` означає «стеля пакетів або журнал»; повторюйте до `complete=true`, далі — `deleted` порожній;
+6. за потреби `RebuildAfter=true` (або перебудова індексів вручну), далі `UPDATE STATISTICS`; файли не стискати;
+7. після цього швидкий шлях (`Enabled=true`) прибирає замінені прогони одразу після кожного перерахунку;
+   `ConsistencyCheckJob` правило `NON_CURRENT_RUN_ROWS` (знахідка на «таблиця × період») очікувано нульове.
+
+⚠ Гард `strictBackdated` (публікація Strict заднім числом) після прибирання бачить лише наявні рядки результатів і архів:
+версія, чиї єдині рядки були у замінених прогонах, більше не блокує — рішення людини (див. `ADR-Q17-READ-MODEL.md`).
 ## 5. Типові збої
 
 | Симптом | Причина | Дія |

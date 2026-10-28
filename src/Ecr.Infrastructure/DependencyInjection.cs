@@ -405,6 +405,7 @@ public static class DependencyInjection
         services.AddScoped<Jobs.ReportRetentionJob>();
         services.AddScoped<Jobs.ReportSnapshotFormatJob>();
         services.AddScoped<Jobs.SubmissionSnapshotRetentionJob>();
+        services.AddScoped<Jobs.SupersededResultsSweepJob>();
         services.AddScoped<Jobs.NotificationJob>();
 
         // ⚠ Розсилка черги — окремий компонент, бо відправників двоє: зведення

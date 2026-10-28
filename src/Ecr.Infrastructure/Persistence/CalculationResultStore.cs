@@ -4,6 +4,9 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Ecr.Infrastructure.Persistence;
 
@@ -13,9 +16,19 @@ namespace Ecr.Infrastructure.Persistence;
 /// A3b) <c>calc.CalculationInput</c>.
 /// У <c>doc.CellValue</c> результати методологій не потрапляють ніколи (D-69).
 /// </remarks>
-public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleCountsEpoch? staleEpoch = null, int? readCeiling = null)
+public sealed partial class CalculationResultStore(
+    EcrDbContext db,
+    IClock clock,
+    StaleCountsEpoch? staleEpoch = null,
+    int? readCeiling = null,
+    IConfiguration? configuration = null,
+    SupersededPurgeOptions? purgeOptions = null,
+    ILogger<CalculationResultStore>? logger = null)
     : ICalculationResultStore, ICurrentResultFilterReader
 {
+    /// <summary>Прибирання рядків неактуальних прогонів: явні налаштування (тести) або з конфігурації (вимкнено за замовчуванням).</summary>
+    private readonly SupersededPurgeOptions purge = purgeOptions ?? SupersededPurgeOptions.Read(configuration);
+
     /// <summary>
     /// Резервує діапазон ідентифікаторів із <c>calc.CalculationResultSeq</c>
     /// одним викликом <c>sp_sequence_get_range</c>.
@@ -408,7 +421,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
     private const int MaxInvalidatedSnapshots = 1_000;
 
     /// <inheritdoc />
-    public async Task SwitchCurrentRunAsync(
+    public async Task<IReadOnlyList<SupersededRun>> SwitchCurrentRunAsync(
         long calculationRunId, string modulesProfileJson, CancellationToken ct)
     {
         var run = await db.CalculationRuns
@@ -490,8 +503,17 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
                     {
                         ["runId"] = newerRunId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     })));
-            return;
+
+            // Q-17: відмовлений прогін сам став неактуальним - його рядки теж підлягають прибиранню.
+            return [new SupersededRun(run.Id, run.PeriodKey ?? 0, run.DocumentId)];
         }
+
+        // Q-17: які прогони цей виклик знімає з актуальності - для прибирання їхніх рядків ПІСЛЯ коміту.
+        var superseded = await previousQuery
+            .Where(r => r.Id < calculationRunId)
+            .Select(r => new SupersededRun(r.Id, r.PeriodKey ?? 0, r.DocumentId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
 
         // ⛔ Порядок ЯВНИЙ: спершу зняти актуальність зі старіших — окремим
         // UPDATE, що виконується одразу (у транзакції викликача,
@@ -509,7 +531,39 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
 
         run.Complete(CalculationRun.CurrentStatus, clock.UtcNow, modulesProfileJson, errorMessage: null);
         run.MakeCurrent();
+        return superseded;
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Поза транзакцією викликача й ПІСЛЯ її коміту (див. порт). Помилка не кидається: перемикання вже правильне,
+    /// решту доїсть <c>SupersededResultsSweepJob</c>. Скасування проходить нагору.
+    /// </remarks>
+    public async Task<int> PurgeSupersededRunsAsync(IReadOnlyList<SupersededRun> runs, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(runs);
+        if (!purge.Enabled || runs.Count == 0)
+        {
+            return 0;
+        }
+
+        try
+        {
+            var purger = new SupersededResultsPurger(db, purge, logger ?? NullLogger<CalculationResultStore>.Instance);
+            return await purger.PurgeRunsAsync(runs, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogPurgeFailed(logger ?? NullLogger<CalculationResultStore>.Instance, ex, runs.Count);
+            return 0;
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Прибирання результатів неактуальних прогонів ({Runs} прогонів) не вдалося; прогін актуальний, "
+            + "решту доїсть нічна задача SupersededResultsSweepJob.")]
+    private static partial void LogPurgeFailed(ILogger logger, Exception exception, int runs);
 
     /// <inheritdoc />
     public async Task<int> CarryOverResultsAsync(
@@ -547,7 +601,8 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
         // над проєктним); сам новий прогін ще не актуальний, тож у вибірку не потрапляє.
         // ⛔ R5-Q1-02: ідентифікатори актуальних прогонів — окремо, далі seek по кожному
         // (`IX_CalculationResult_DocRun`), а не lookup на кожен результат усіх минулих прогонів.
-        var currentRunIds = await CurrentRunIdsAsync(documentId, periodKey, calculationRunId, ct).ConfigureAwait(false);
+        var currentRunIds = await LockCurrentSourceRunsAsync(documentId, periodKey, calculationRunId, ct)
+            .ConfigureAwait(false);
         if (currentRunIds.Count == 0)
         {
             return 0;
@@ -623,6 +678,53 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
         }
 
         return source.Count;
+    }
+
+    /// <summary>Скільки разів повторити вибір і блокування прогонів-джерел, якщо актуальність змінилась між ними.</summary>
+    private const int SourceLockAttempts = 5;
+
+    /// <summary>
+    /// Q-17: актуальні прогони-джерела переносу ЗАБЛОКОВАНІ (<c>UPDLOCK</c>) до коміту транзакції викликача.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього перемикання паралельного прогону могло зняти актуальність із джерела й (після коміту) прибрати його
+    /// рядки між підрахунком і завантаженням: у новий прогін перенеслася б неповна множина - тиха втрата чисел.
+    /// Блокування рядка <c>calc.CalculationRun</c> тримає чужий <c>UPDATE Status</c> (перемикання) до нашого коміту; а
+    /// прибирання йде лише після коміту того перемикання. Після блокування вибір повторюється: якщо актуальність
+    /// встигла змінитися ДО блокування (і прибирання вже могло відпрацювати), беремо нову множину й блокуємо її.
+    /// Поза транзакцією (прямий виклик у тесті) замок знімається одразу - гарантії немає, лише перевірка.
+    /// </remarks>
+    private async Task<List<long>> LockCurrentSourceRunsAsync(
+        long documentId, int periodKey, long excludeRunId, CancellationToken ct)
+    {
+        for (var attempt = 1; attempt <= SourceLockAttempts; attempt++)
+        {
+            var runIds = await CurrentRunIdsAsync(documentId, periodKey, excludeRunId, ct).ConfigureAwait(false);
+            if (runIds.Count == 0)
+            {
+                return runIds;
+            }
+
+            // По одному й за зростанням Id: єдиний порядок захоплення замків для всіх переносів (менше взаємних блокувань).
+            foreach (var runId in runIds.Order())
+            {
+                await db.Database
+                    .ExecuteSqlAsync(
+                        $"SELECT Id FROM calc.CalculationRun WITH (UPDLOCK, ROWLOCK) WHERE Id = {runId}",
+                        ct)
+                    .ConfigureAwait(false);
+            }
+
+            var after = await CurrentRunIdsAsync(documentId, periodKey, excludeRunId, ct).ConfigureAwait(false);
+            if (runIds.Order().SequenceEqual(after.Order()))
+            {
+                return runIds;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Актуальні прогони документа {documentId} за період {periodKey} змінюються швидше, ніж їх вдається "
+            + "заблокувати для переносу; прогін завершиться з помилкою, попередній лишиться актуальним.");
     }
 
     /// <summary>Стеля результатів, що переносяться (<c>CarryOver</c>), на один документ і період; понад неї — відмова.</summary>
@@ -706,51 +808,34 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
         // Доти `EXISTS` по прогону робив key lookup на КОЖЕН результат документа-періоду за ВСІ
         // минулі (Superseded) прогони: `IX_CalculationResult_Lookup` не містить `CalculationRunId`,
         // а ретенції результатів немає (ЗБР-1) — вартість GET зрізу росла з кожним перерахунком.
-        var runIds = await CurrentRunIdsAsync(documentId, periodKey, excludeRunId: null, ct).ConfigureAwait(false);
-        if (runIds.Count == 0)
+        if (filter is not null && (filter.OutputCodes.Count == 0 || filter.MethodologyVersionIds.Count == 0))
         {
             return [];
         }
 
-        var query = db.CalculationResults
-            .AsNoTracking()
-            .Where(r => r.PeriodKey == periodKey
-                        && r.DocumentId == documentId
-                        && runIds.Contains(r.CalculationRunId));
-
-        if (filter is not null)
+        // ⛔ Q-17 (прибирання результатів неактуальних прогонів): прогони й рядки читаються ДВОМА запитами, і між
+        // ними перемикання + прибирання могли б залишити читачу порожню або неповну множину (раніше рядки старого
+        // прогону просто лишалися). Тому ідентифікатори актуальних прогонів перечитуються ПІСЛЯ рядків: збіглися -
+        // рядки узгоджені з тією самою множиною; ні - ще до `ReadAttempts` спроб з новою множиною. Остання спроба
+        // повертає прочитане як є (3 перемикання підряд за мілісекунди - не штатний режим).
+        List<long> runIds = [];
+        List<ResultProjection> rows = [];
+        for (var attempt = 1; attempt <= ReadAttempts; attempt++)
         {
-            if (filter.OutputCodes.Count == 0 || filter.MethodologyVersionIds.Count == 0)
+            runIds = await CurrentRunIdsAsync(documentId, periodKey, excludeRunId: null, ct).ConfigureAwait(false);
+            if (runIds.Count == 0)
             {
                 return [];
             }
 
-            var instanceIds = filter.TableInstanceIds.ToList();
-            var outputs = filter.OutputCodes.ToList();
-            var versions = filter.MethodologyVersionIds.ToList();
-            query = query.Where(r => versions.Contains(r.MethodologyVersionId)
-                                     && outputs.Contains(r.OutputCode)
-                                     && (r.TableInstanceId == null || instanceIds.Contains(r.TableInstanceId.Value)));
-        }
+            rows = await ReadRowsAsync(documentId, periodKey, runIds, filter, ct).ConfigureAwait(false);
 
-        var rows = await query
-            .OrderBy(r => r.SourceRowKey)
-            .ThenBy(r => r.OutputCode)
-            .ThenBy(r => r.TableInstanceId)
-            .ThenBy(r => r.SubstanceEntryId)
-            .Take(Ceiling + 1)
-            .Select(r => new
+            var after = await CurrentRunIdsAsync(documentId, periodKey, excludeRunId: null, ct).ConfigureAwait(false);
+            if (runIds.Order().SequenceEqual(after.Order()))
             {
-                r.MethodologyVersionId,
-                r.SourceRowKey,
-                r.OutputCode,
-                r.Value,
-                r.UnitId,
-                r.SubstanceEntryId,
-                r.TableInstanceId,
-            })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+                break;
+            }
+        }
 
         if (rows.Count > Ceiling)
         {
@@ -768,6 +853,55 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
 
         return rows.ConvertAll(r => new CalculationResultRow(
             r.MethodologyVersionId, r.SourceRowKey, r.OutputCode, r.Value, r.UnitId, r.SubstanceEntryId, r.TableInstanceId));
+    }
+
+    /// <summary>Скільки разів повторити читання актуальних результатів, якщо множина актуальних прогонів змінилась під час читання.</summary>
+    private const int ReadAttempts = 3;
+
+    private sealed record ResultProjection(
+        int MethodologyVersionId,
+        string? SourceRowKey,
+        string OutputCode,
+        decimal Value,
+        int UnitId,
+        long? SubstanceEntryId,
+        long? TableInstanceId);
+
+    private async Task<List<ResultProjection>> ReadRowsAsync(
+        long documentId, int periodKey, List<long> runIds, CurrentResultFilter? filter, CancellationToken ct)
+    {
+        var query = db.CalculationResults
+            .AsNoTracking()
+            .Where(r => r.PeriodKey == periodKey
+                        && r.DocumentId == documentId
+                        && runIds.Contains(r.CalculationRunId));
+
+        if (filter is not null)
+        {
+            var instanceIds = filter.TableInstanceIds.ToList();
+            var outputs = filter.OutputCodes.ToList();
+            var versions = filter.MethodologyVersionIds.ToList();
+            query = query.Where(r => versions.Contains(r.MethodologyVersionId)
+                                     && outputs.Contains(r.OutputCode)
+                                     && (r.TableInstanceId == null || instanceIds.Contains(r.TableInstanceId.Value)));
+        }
+
+        return await query
+            .OrderBy(r => r.SourceRowKey)
+            .ThenBy(r => r.OutputCode)
+            .ThenBy(r => r.TableInstanceId)
+            .ThenBy(r => r.SubstanceEntryId)
+            .Take(Ceiling + 1)
+            .Select(r => new ResultProjection(
+                r.MethodologyVersionId,
+                r.SourceRowKey,
+                r.OutputCode,
+                r.Value,
+                r.UnitId,
+                r.SubstanceEntryId,
+                r.TableInstanceId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
