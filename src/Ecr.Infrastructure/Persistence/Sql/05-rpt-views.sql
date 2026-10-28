@@ -106,6 +106,8 @@ GO
 -- Lookup → ValueRegistryEntryId; Unit → ValueUnitId. ⚠ `Calculated` —
 -- лише те, що матеріалізовано в `doc.CellValue`; результати методологій
 -- живуть у `calc.*` і сюди не підтягуються.
+-- AN-147: для Formula/Calculated додатково віддається колонка-супутник `<Код>_Text` (nvarchar): ValueString там, де
+-- результат обчислення рядковий (числове значення порожнє), інакше NULL. Числова колонка `<Код>` не змінюється.
 -- ⛔ Q-17.7: @MonthRouting = 1 вмикає у вʼюхах MonthsInColumns читання значень з екземпляра ВЛАСНИКА (місячний M{m} - з
 -- екземпляра періоду m, введений не-місячний - з якоря року; COALESCE із власною копією). Це те саме, що прапор
 -- Collection:MonthColumnRouting (застосунок передає його сам - ReportViewGenerator); за замовчуванням 0, і текст вʼюх
@@ -193,7 +195,7 @@ BEGIN
     DELETE FROM @tables WHERE @TemplateVersionId IS NOT NULL AND TemplateVersionId <> @TemplateVersionId;
 
     DECLARE @sheet int, @header nvarchar(400), @view sysname;
-    DECLARE @select nvarchar(max), @joins nvarchar(max), @sql nvarchar(max), @existing nvarchar(max), @message nvarchar(2048);
+    DECLARE @select nvarchar(max), @selectText nvarchar(max), @joins nvarchar(max), @sql nvarchar(max), @existing nvarchar(max), @message nvarchar(2048);
     DECLARE @colId int, @colCode nvarchar(64), @colType tinyint, @alias nvarchar(16), @n int;
     -- Q-17.7: власність значень MonthsInColumns (місячний стовпець M{m} — в екземплярі періоду m,
     -- введений не-місячний — в екземплярі-якорі року). @monthMask: біт m — потрібен власник-місяць m.
@@ -213,7 +215,7 @@ BEGIN
     WHILE @@FETCH_STATUS = 0
     BEGIN
         -- ⚠ Цикл, а не `STRING_AGG`: підлога сервера — 2016 SP1 (`D-101`).
-        SELECT @select = N'', @joins = N'', @n = 0,
+        SELECT @select = N'', @selectText = N'', @joins = N'', @n = 0,
                @ownerRows = N'', @ownerCells = N'', @monthMask = 0, @needAnchor = 0, @extra = 0;
         DELETE FROM @pv;
         SET @layout = (SELECT LayoutKind FROM cfg.TableDef WHERE Id = @id);
@@ -288,8 +290,20 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
 
             SET @select = @select + N',
        ' + @valueCol + N' AS ' + QUOTENAME(@colCode);
-            SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0 AND Id > @colId);
+            -- AN-147: колонка-супутник `<Код>_Text` лише для Formula/Calculated - РЯДКОВИЙ результат обчислення (ValueString);
+            -- числова колонка вище не змінюється. Формула/Calculated ніколи не маршрутизується (@routed = 0), тож і в режимі
+            -- @MonthRouting = 1 супутник читає ту саму власну комірку c<n> (власна обчислена > власник дотримано). Супутники
+            -- ідуть У КІНЦІ списку колонок (позиції наявних колонок не зсуваються). Колізія імені: якщо в таблиці вже є
+            -- колонка з кодом `<Код>_Text`, супутник для цієї колонки ПРОПУСКАЄТЬСЯ (наявна колонка не підміняється).
+            IF @colType IN (6, 8)
+               AND NOT EXISTS (SELECT 1 FROM cfg.ColumnDef
+                                WHERE TableDefId = @id AND IsDeleted = 0 AND Code = @colCode + N'_Text')
+                SET @selectText = @selectText + N',
+       CASE WHEN ' + @alias + N'.ValueNumeric IS NULL THEN ' + @alias + N'.ValueString END AS '
+                                + QUOTENAME(@colCode + N'_Text');
+            SET @colId =(SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0 AND Id > @colId);
         END
+        SET @select = @select + @selectText;
 
         -- Q-17.7: приєднання власників — по одному екземпляру/рядку на потрібний місяць і на якір.
         -- Усі з'єднання — по ключах: UQ_TableInstance (PeriodKey, DocumentId, TableDefId) і UQ_TableRow_Key

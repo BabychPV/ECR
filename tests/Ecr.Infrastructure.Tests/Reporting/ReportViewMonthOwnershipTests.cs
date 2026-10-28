@@ -33,7 +33,7 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
 
     private async Task<Fixture> BuildAsync(
         int periodKey = 202610, TableLayoutKind layout = TableLayoutKind.MonthsInColumns, int columnCount = 2,
-        int rowCount = 2)
+        int rowCount = 2, bool collideText = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(periodKey, columnCount: columnCount, rowCount: rowCount, layoutKind: layout,
@@ -48,6 +48,13 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         var day = new ColumnDef(doc.TableDefId, EcrCode.Create("DAY" + Guid.NewGuid().ToString("N")[..8]),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Day" }), 9997, CellDataType.Date);
         db.ColumnDefs.AddRange(derived, flag, day);
+        if (collideText)
+        {
+            // AN-147: наявна колонка з кодом <Код формули>_Text - супутник цієї формули має пропуститися.
+            db.ColumnDefs.Add(new ColumnDef(doc.TableDefId, EcrCode.Create(derived.Code + "_Text"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Own" }), 9996, CellDataType.Decimal));
+        }
+
         await db.SaveChangesAsync();
 
         var version = await db.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId);
@@ -255,8 +262,13 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         var golden = await ViewDefinitionAsync(f.View);
         Assert.DoesNotContain("COALESCE(o", golden, StringComparison.Ordinal);
 
+        // AN-147: еталон main не знає колонок-супутників <Код>_Text (адитивні, у кінці списку) - вони єдина допустима
+        // різниця; після їх вилучення текст байт-у-байт той самий.
         await GenerateAsync(f, routing: false);
-        Assert.Equal(golden, await ViewDefinitionAsync(f.View));
+        var current = await ViewDefinitionAsync(f.View);
+        Assert.Contains("_Text]", current, StringComparison.Ordinal);
+        Assert.Equal(golden, System.Text.RegularExpressions.Regex.Replace(
+            current, @",\r?\n\s+CASE WHEN c\d+\.ValueNumeric IS NULL THEN c\d+\.ValueString END AS \[[^\]]+_Text\]", ""));
 
         await GenerateAsync(f, routing: true);
         Assert.NotEqual(golden, await ViewDefinitionAsync(f.View));
@@ -722,17 +734,21 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// P3 (до-Q17, лише фіксація): рядкова обчислювана комірка (ValueString, IsCalculated = 1) у колонці типу Formula -
-    /// вʼюха віддає NULL і ПРИ ВИМКНЕНОМУ прапорі (CASE типів у процедурі для 6/8 читає ValueNumeric). Тест фіксує факт,
-    /// щоб (б) не приписували Q-17; виправлення - окремий запис у WORK-QUEUE.
+    /// AN-147: рядкова обчислювана комірка (ValueString, IsCalculated = 1) у колонці Formula - числова колонка вʼюхи, як і
+    /// раніше, NULL (тип/значення не змінено), а колонка-супутник <c>&lt;Код&gt;_Text</c> віддає рядок; і при вимкненому, і
+    /// при увімкненому прапорі (обчислена власна комірка Formula не підміняється власником). Числовий результат -
+    /// навпаки: число в основній колонці, NULL у супутнику. Супутник - nvarchar і стоїть ОСТАННІМ у вʼюсі.
+    /// Мутація: прибрати <c>@selectText</c> у <c>05-rpt-views.sql</c> - тест червоний.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-10.2")]
-    public async Task Рядкове_значення_обчислюваної_колонки_NULL_у_вʼюсі_вже_без_прапора_до_Q17()
+    public async Task Рядкове_значення_обчислюваної_колонки_віддається_супутником_Text_а_число_не_змінюється()
     {
         var f = await BuildAsync();
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var anchor = await builder.AddPeriodInstanceAsync(f.Doc, new PeriodKey(202601));
         await using (var connection = new SqlConnection(sql.ConnectionString))
         {
             await connection.OpenAsync();
@@ -744,10 +760,56 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
             await command.ExecuteNonQueryAsync();
         }
 
-        await GenerateAsync(f, routing: false);
-        Assert.Null(await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 0), f.Derived));
-        await GenerateAsync(f, routing: true);
-        Assert.Null(await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 0), f.Derived));
+        await PutCalcAsync(f, 202610, f.Doc.RowIds[1], f.DerivedId, 7m);
+        await PutCalcAsync(f, 202601, anchor.RowIds[0], f.DerivedId, 70m);
+        var text = f.Derived + "_Text";
+
+        foreach (var routing in new[] { false, true })
+        {
+            await GenerateAsync(f, routing);
+            Assert.Null(await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 0), f.Derived));
+            Assert.Equal("Sample J-0", await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 0), text));
+            Assert.Equal(7m, await ViewValueAsync(f, 202610, RowKeyOf(f.Doc, 1), f.Derived));
+            Assert.Null(await ViewObjectAsync(f, 202610, RowKeyOf(f.Doc, 1), text));
+            Assert.Equal(70m, await ViewValueAsync(f, 202601, RowKeyOf(f.Doc, 0), f.Derived));
+            Assert.Null(await ViewObjectAsync(f, 202601, RowKeyOf(f.Doc, 0), text));
+
+            var types = await ViewColumnTypesAsync(f.View);
+            Assert.Contains(types, t => t.StartsWith(f.Derived + ":decimal:", StringComparison.Ordinal));
+            Assert.StartsWith(text + ":nvarchar:", types[^1], StringComparison.Ordinal);
+            Assert.Single(types, t => t.Contains("_Text:", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>AN-147: супутник лише для Formula/Calculated - введені колонки (рядкова, число) супутника не мають.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Супутник_Text_лише_для_Formula_і_Calculated()
+    {
+        var f = await BuildAsync();
+        await GenerateAsync(f);
+
+        var names = (await ViewColumnTypesAsync(f.View)).Select(t => t.Split(':')[0]).ToList();
+        Assert.Equal(new[] { f.Derived + "_Text" }, names.Where(n => n.EndsWith("_Text", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// AN-147: колізія імені - якщо в таблиці вже є колонка з кодом <c>&lt;Код&gt;_Text</c>, супутник для цієї колонки
+    /// ПРОПУСКАЄТЬСЯ, наявна колонка лишається як є (тип числа), вʼюха будується без помилки дублікатів.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Колізія_з_наявною_колонкою_Text_супутник_пропускається()
+    {
+        var f = await BuildAsync(collideText: true);
+        await GenerateAsync(f);
+        var types = await ViewColumnTypesAsync(f.View);
+        Assert.Single(types, t => t.StartsWith(f.Derived + "_Text:", StringComparison.Ordinal));
+        Assert.Contains(types, t => t.StartsWith(f.Derived + "_Text:decimal:", StringComparison.Ordinal));
     }
 
     [Fact]
