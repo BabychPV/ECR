@@ -46,6 +46,8 @@ public sealed class AccessDecisionService(
         // при побудові профілю: надання, видане на ІНШОМУ вузлі, скидало кеш лише там (`InvalidateUser` — пам'ять
         // процесу), і тут новий учасник не бачив документа до сплину профілю (до 60 хв). Тепер перший же запит після
         // коміту надання (чи зняття останнього) адресує інший запис кешу — на кожному вузлі, без спільного лічильника.
+        // ⛔ AN-138: рядки призначень (для відбитка вмісту) читаються В ТОМУ САМОМУ зверненні — жодного додаткового запиту.
+        var groupSids = GroupSidsFor(userId);
         var account = await db.Users
             .AsNoTracking()
             .Where(u => u.Id == userId)
@@ -54,6 +56,12 @@ public sealed class AccessDecisionService(
                 u.SecurityStamp,
                 u.IsActive,
                 Participates = db.EditAssignmentRecipients.Any(r => r.UserId == u.Id),
+                Rows = db.RoleAssignments
+                    .Where(a => a.UserId == userId || (a.PrincipalSid != null && groupSids.Contains(a.PrincipalSid)))
+                    .OrderByDescending(a => a.Id)
+                    .Take(MaxRoleAssignments)
+                    .Select(x => new AssignmentRow(x.Id, x.RoleId, x.UserId, x.PrincipalSid, x.ScopeJson, x.ValidFrom, x.ValidTo))
+                    .ToList(),
             })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
@@ -74,7 +82,6 @@ public sealed class AccessDecisionService(
         // ключ `IMemoryCache` (`GetOrCreateAsync`) і в `LoadAsync` — щоб ключ,
         // за яким запис кладеться, і ключ, під яким `AccessProfile` сам себе
         // описує (`CacheKey`), не могли розійтися (`Q-187`).
-        var groupSids = GroupSidsFor(userId);
         var groupsFingerprint = await GroupsFingerprintAsync(groupSids, ct).ConfigureAwait(false);
 
         // ⚠ Ознака учасника — у ТОЙ САМИЙ третій компонент ключа, що й відбиток груп: і ключ `IMemoryCache`, і
@@ -83,7 +90,7 @@ public sealed class AccessDecisionService(
 
         // ⛔ AN-138: відбиток вмісту рядків призначень (ScopeJson, межі дії) — у той самий третій компонент ключа.
         // Лічильники/Id вище не бачать прямої SQL-правки наявного рядка; без цього застарілі межі жили до TTL.
-        var assignmentsFingerprint = await AssignmentRowsFingerprintAsync(userId, groupSids, ct).ConfigureAwait(false);
+        var assignmentsFingerprint = AssignmentRowsFingerprint(account.Rows);
         var cacheVariant = ParticipationKeyed(groupsFingerprint + assignmentsFingerprint, participates);
 
         var profile = await profileCache
@@ -206,6 +213,10 @@ public sealed class AccessDecisionService(
             : $"{Fingerprint(groupSids)}.{revision.Assignments}.{revision.LastAssignment}.{revision.Grants}.{revision.LastGrant}";
     }
 
+    /// <summary>Рядок призначення для відбитка вмісту (AN-138).</summary>
+    private sealed record AssignmentRow(
+        int Id, int RoleId, int? UserId, string? PrincipalSid, string? ScopeJson, DateOnly? ValidFrom, DateOnly? ValidTo);
+
     /// <summary>Відбиток ВМІСТУ рядків призначень, з яких будується профіль (AN-138).</summary>
     /// <remarks>
     /// ⛔ Чому не <c>CHECKSUM_AGG</c>: той слабкий (XOR 32-бітних хешів, колізії тривіальні, а колізія тут =
@@ -215,18 +226,8 @@ public sealed class AccessDecisionService(
     /// ValidFrom/ValidTo; вставка/видалення рядка змінює набір. Один індексований запит (без груп — по UserId).
     /// Не покриває ПЕРЕХІД часу (ValidTo минає опівночі UTC) — це досі TTL профілю, як і було.
     /// </remarks>
-    private async Task<string> AssignmentRowsFingerprintAsync(
-        int userId, IReadOnlyList<string> groupSids, CancellationToken ct)
+    private static string AssignmentRowsFingerprint(IReadOnlyList<AssignmentRow> rows)
     {
-        var rows = await db.RoleAssignments
-            .AsNoTracking()
-            .Where(a => a.UserId == userId || (a.PrincipalSid != null && groupSids.Contains(a.PrincipalSid)))
-            .OrderByDescending(a => a.Id)
-            .Take(MaxRoleAssignments)
-            .Select(x => new { x.Id, x.RoleId, x.UserId, x.PrincipalSid, x.ScopeJson, x.ValidFrom, x.ValidTo })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
         var text = new System.Text.StringBuilder();
         foreach (var r in rows)
         {
