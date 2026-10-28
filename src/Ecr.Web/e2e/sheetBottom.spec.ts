@@ -154,8 +154,11 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
     await open(page);
 
     for (let i = 0; i < Repeats; i += 1) {
-      await page.getByTestId('sheet-full-toggle').click();
-      await expect(page).toHaveURL(/[?&]full=1/);
+      // Після перечитування документа сторінка може перемонтуватися: клік повторюємо, доки адреса не набуде full=1.
+      await expect(async () => {
+        if (!/[?&]full=1/.test(page.url())) await page.getByTestId('sheet-full-toggle').click();
+        await expect(page).toHaveURL(/[?&]full=1/, { timeout: 2_000 });
+      }).toPass({ timeout: 20_000 });
       const bar = page.locator('.ecr-sheet-panel .doc-sheet-bar');
       await expect(bar).toBeVisible();
 
