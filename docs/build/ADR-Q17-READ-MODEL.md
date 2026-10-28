@@ -78,3 +78,53 @@
 - Зроблено без міграції й без нового індексу: CalculationResultStore.ReadCurrentMatchingAsync (порт ICurrentResultFilterReader) - той самий запит по IX_CalculationResult_DocRun, плюс предикати код виходу / версія методології / екземпляр (або NULL); накладення бере його, якщо порт уміє. Проєкт документа й актуальні прогони - один запит. Рядків з бази 44 737 -> 4 735.
 - 	ables/status: чужі власники рахуються ОДНИМ запитом по діапазону ключа партиції року (BETWEEN Рік*100+1 AND Рік*100+12, без періоду перегляду) замість запиту на період-власник: 15 -> 5 звернень, doc.TableInstance 13 -> 3. Логічні читання майже не змінилися: вартість - пошук комірок власників по КОЖНОМУ рядку власника (рядки x періоди), а не кількість запитів. Знизити її далі можна лише індексом (PeriodKey, ColumnDefId, ...) - це міграція, не робилась (токен міграцій).
 - Правило «звідки значення» лишається записаним двічі (C# і генератор вʼюх): текст вʼюх не змінено, golden OFF зелений, еквівалентність тримає ReportViewSliceEquivalenceTests.
+
+## Addendum 2026-10-28: PAGE compression of calc.CalculationResult indexes
+
+Status: PROPOSAL. Nothing in this section has been run, migrated or applied anywhere. No change to any live database (Land or otherwise) happens without a new explicit human word.
+
+### A. Measured basis (read-only estimate on the Land copy EcrPassC_Q17)
+
+Sources: `.sync-local/reports/Q17-T3_00-compression-estimate.sql`, its `-RESULT.txt`, `NOTE-Q17-T3_00-CELLVALUE-NEXT.md`.
+
+- Current state (query 0 of the script): all five `calc.CalculationResult` indexes are `NONE`, 25 partitions, 4,466,232 rows, 2.24 GB used in total (DocRun 0.60, Lookup 0.60, PK 0.63, Version 0.23, UnitId 0.18 GB).
+- `sp_estimate_data_compression_savings ... 'PAGE'`, partition 7 (period 202606) only: 265,080 KB -> 55,088 KB, about -79% for the table. Per index: PK -86%, DocRun -81%, Lookup -85%, Version -64%, UnitId -44%. The extrapolation of -79% to all 25 partitions is an assumption (one partition sampled; 202604 was not estimated for this table). The mapping of estimate `index_id` 2..5 to index names was inferred from index size and the two measured names in the caller's note, not read from the output; it is not stated in the RESULT file.
+- Not a lever: `doc.TableRow` is about 0.15 GB in total (PAGE about -59%). `doc.CellValue` PK is already `PAGE` (query 0). ROW compression of the CellValue PK was estimated larger than current (76,272 -> 129,672 KB); irrelevant, do not use ROW there.
+
+### B. Rationale
+
+The remaining cold cost of the T3_00 star is physical IO (cold 42.3 s vs warm 5.1 s; CPU is about 12 s of 61 s in the pre-fix run, see the NOTE). The working hypothesis is PAGEIOLATCH wait, and it is still unconfirmed (the NOTE section 4 asks for the wait stats). `calc.CalculationResult` is read through `IX_CalculationResult_DocRun` and `IX_CalculationResult_Lookup`, which are uncompressed. About one fifth of the pages means about one fifth of the cold page reads and read-ahead for those indexes, and a smaller buffer-pool footprint. Expected gain is proportional to CalculationResult's share of cold IO; that share in variant B is measured only as 562 physical and 11,171 read-ahead pages (NOTE section 1), so the cold-time gain is unknown until measured. This is secondary to the CellValue set-read option A in the NOTE and does not replace it.
+
+### C. Plan (not executed)
+
+1. New databases: in `src/Ecr.Infrastructure/Persistence/Sql/07-partition-tables.sql` the `@map` row for `calc.CalculationResult` has `CompressPk = 0`, and the move cursor compresses only clustered indexes (`CASE WHEN m.CompressPk = 1 AND i.type = 1 THEN PAGE ELSE NONE`). Two non-clustered indexes are created later in the same file without `DATA_COMPRESSION` (`IX_CalculationResult_Version`, `IX_CalculationResult_DocRun`), and the D-401 `DROP_EXISTING` step also omits it, so it would reset an already compressed index to NONE. The change: PAGE for all CalculationResult indexes in all three places (a per-table all-index flag, or `DATA_COMPRESSION = PAGE` added to the three explicit statements). The cursor skips indexes already on the scheme, so this alone does nothing for existing databases.
+2. Existing databases (Land and any upgraded copy): one migration/upgrade step, idempotent, per partition n = 1..25:
+   `ALTER INDEX <ix> ON calc.CalculationResult REBUILD PARTITION = n WITH (DATA_COMPRESSION = PAGE)`
+   for each of the five indexes, skipping partitions whose `sys.partitions.data_compression_desc` is already `PAGE` and empty partitions. Add `ONLINE = ON` only if the edition supports it (see risks). The step belongs in the upgrade path next to the other `-Upgrade` maintenance-window steps in `07-partition-tables.sql`, or as an EF migration; that choice and the migration itself belong to the migration-token holder. Not created in this change.
+3. The upgrade check (main -> SHA, twice, second run 0 changes) must be extended to assert `data_compression_desc = 'PAGE'` on all five indexes after the first run.
+
+### D. Risks
+
+- Edition / ONLINE: the repo comments say Standard edition has no ONLINE builds (`07-partition-tables.sql`, lines about "Standard без ONLINE"). The Land edition is UNKNOWN (not confirmed in the files read). Without ONLINE, each partition rebuild blocks writes to that partition. Verify the edition and version with `SELECT SERVERPROPERTY('Edition'), SERVERPROPERTY('ProductVersion')` before planning.
+- Free space: a rebuild needs room for the new copy per partition plus sort space (tempdb if `SORT_IN_TEMPDB`). Largest partition size on Land is not recorded; rough size of the 202606 partition is 265 MB uncompressed (estimate output). Disk rules in CLAUDE.md apply (H: or F:).
+- Write cost: PAGE compression adds CPU on insert/update/recalc into CalculationResult, which is a write-heavy table during recalculation. Magnitude UNKNOWN; must be measured with the patch/recalc benchmark (I could not locate a `patchbench` script in the repo files searched, so the exact tool is to be named by its owner).
+- Log growth: rebuild is fully logged under FULL recovery; size UNKNOWN, measure on the scratch copy.
+- Interaction with the planned CellValue set-read change (option A): independent; do not combine in one measurement, or the effects cannot be separated.
+- Later rebuilds that omit `DATA_COMPRESSION` silently revert an index to NONE; see plan item 1.
+
+### E. Verification gates (all on the scratch copy first, never on live)
+
+1. Before: cold T3_00 star (OFFLINE/ONLINE the copy as in the NOTE), 3 runs, with STATISTICS IO per table and PAGEIOLATCH_SH wait time; record index sizes (`sys.dm_db_partition_stats`).
+2. Rebuild one partition (202606), timed; record log used, tempdb and free-space delta; then all partitions.
+3. After: same cold/warm T3_00 runs; result sets must be unchanged (EXCEPT both ways vs the Before output, as in Audit-2). Index sizes must be within the estimate (-79% +/- 10 points, otherwise stop and report).
+4. Write benchmark before/after (recalculation of a loaded period and the patch benchmark): accept only if the regression is within an agreed bound (the bound is a decision for the coordinator; not set here).
+5. Upgrade check (main -> SHA twice + smoke + idempotent) green with the new step.
+6. Go on only if the cold gain is material against the 15 s budget; otherwise leave as is (the saving is about 1.8 GB on Land, which alone does not justify the write-CPU risk).
+
+### F. Rollback
+
+Per partition: `ALTER INDEX <ix> ON calc.CalculationResult REBUILD PARTITION = n WITH (DATA_COMPRESSION = NONE)`, same space and log needs as the forward step. Revert the `07-partition-tables.sql` change in git for new databases. No data is changed by compression, only the physical page format.
+
+### G. Execution authority
+
+Nothing runs on live (Land or any production database) from this addendum. Each application step (scratch-copy rebuild, any live rebuild, migration creation) needs a new explicit human word; this document records the plan and the evidence only.
