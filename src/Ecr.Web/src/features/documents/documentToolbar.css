@@ -11,9 +11,10 @@
  * дозволено переносити кнопки, і вона не ширша за рядок.
  */
 @media (max-width: 640px) {
-  .ecr-doc-actions,
-  .ecr-doc-actions .ecr-action-group {
-    flex-wrap: wrap !important;
+  /* Без `!important`: `div.` + клас специфічніші за клас Mantine з `--group-wrap`. */
+  div.ecr-doc-actions,
+  div.ecr-doc-actions .ecr-action-group {
+    flex-wrap: wrap;
     max-width: 100%;
     min-width: 0;
   }

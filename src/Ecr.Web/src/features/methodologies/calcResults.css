@@ -1,0 +1,24 @@
+/* ✎ ui-sheet-focus (D): заголовок блоку «Calculation results» — кнопка-розкривачка (ціль ≥ 24 px). */
+.ecr-results-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--mantine-color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ecr-results-toggle:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.ecr-results-toggle:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 1px;
+}

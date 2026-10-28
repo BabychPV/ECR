@@ -1,4 +1,4 @@
-import { useEffect, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { notifications } from '@mantine/notifications';
 import { Alert, Code, Skeleton, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
@@ -10,8 +10,39 @@ import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import './calcResults.css';
 import { calculationResults } from './api';
 import { RecalculateHintId, calculationResultsKey } from './calculationResultsKey';
+
+/** Пам'ять вибору «блок згорнуто/розгорнуто» (глобально, як `ecr.tableNavigator.hidden`): `1` згорнуто, `0` розгорнуто. */
+export const ResultsCollapsedKey = 'ecr.calcResults.collapsed';
+export const ResultsBodyId = 'ecr-calc-results-body';
+
+function readCollapsed(): boolean | null {
+  try {
+    const value = window.localStorage.getItem(ResultsCollapsedKey);
+    return value === '1' ? true : value === '0' ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCollapsed(collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(ResultsCollapsedKey, collapsed ? '1' : '0');
+  } catch {
+    // Сховище недоступне — вибір просто не запам'ятається.
+  }
+}
+
+/** Шеврон контуром (без бібліотеки іконок у чанку). */
+function Chevron({ path }: { readonly path: string }): JSX.Element {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d={path} />
+    </svg>
+  );
+}
 
 /**
  * Коди довідників, змінених після прогону (RT-25), без повторів і впорядковані.
@@ -84,16 +115,42 @@ export function CalculationResultsPanel({
     retry: false,
   });
 
+  // ✎ ui-sheet-focus (D): явний вибір людини сильніший за авто (є числа — розгорнуто, немає — згорнуто).
+  const [choice, setChoice] = useState<boolean | null>(readCollapsed);
+  const count = results.data?.length;
+  const collapsed = choice ?? (count === undefined ? true : count === 0);
+
   const units = useQuery({
     queryKey: ['units'],
+    enabled: !collapsed,
     queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
     staleTime: 60 * 60 * 1000,
   });
 
   return (
     <Stack gap="xs">
-      <Text fw={600}>{t('documents.calculationResults')}</Text>
+      <button
+        type="button"
+        className="ecr-results-toggle"
+        aria-expanded={!collapsed}
+        aria-controls={ResultsBodyId}
+        data-testid="calc-results-toggle"
+        onClick={() => {
+          writeCollapsed(!collapsed);
+          setChoice(!collapsed);
+        }}
+      >
+        <Chevron path={collapsed ? 'M9 6l6 6-6 6' : 'M6 9l6 6 6-6'} />
+        <Text component="span" fw={600}>
+          {t('documents.calculationResults')}
+        </Text>
+        <Text component="span" size="sm" c="dimmed" data-testid="calc-results-count">
+          {`· ${count === undefined ? '…' : count === 0 ? t('documents.calculationResultsNone') : String(count)}`}
+        </Text>
+      </button>
 
+      <div id={ResultsBodyId} hidden={collapsed}>
+      {!collapsed && (
       <AsyncBoundary<CalculationResultDto[]>
         isPending={results.isPending}
         error={results.error}
@@ -194,6 +251,8 @@ export function CalculationResultsPanel({
           </Stack>
         )}
       </AsyncBoundary>
+      )}
+      </div>
     </Stack>
   );
 }

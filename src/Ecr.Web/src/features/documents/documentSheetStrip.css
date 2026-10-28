@@ -3,20 +3,85 @@
  * `.statusbar` 32 px + `.sheet-tabs`; KIT §1.5). Липне до низу вікна, щоб
  * перемикач аркушів був видимий і під високою сіткою. Кольори — токени теми
  * Mantine, тож Light/Dark беруться самі.
+ *
+ * ✎ ui-sheet-focus (C): липне тепер `.doc-sheet-bar` (кнопки «‹ ›», вкладки, «…»); вкладки гортаються
+ * вбік, на обрізаному краї — тінь.
  */
-.doc-sheet-strip {
+.doc-sheet-bar {
   position: sticky;
   bottom: 0;
   z-index: 3;
+  display: flex;
+  align-items: stretch;
+  min-height: 32px;
+  border-top: 1px solid var(--mantine-color-default-border);
+  background-color: var(--mantine-color-body);
+  background-image: linear-gradient(var(--mantine-color-default-hover), var(--mantine-color-default-hover));
+}
+
+.doc-sheet-bar::before,
+.doc-sheet-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 20px;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 1;
+}
+
+/* Лівий край вкладок починається після двох кнопок (2 × 28 px), правий — перед «…» (28 px). */
+.doc-sheet-bar::before {
+  left: 56px;
+  background: linear-gradient(to right, var(--mantine-color-body), transparent);
+}
+
+.doc-sheet-bar::after {
+  right: 28px;
+  background: linear-gradient(to left, var(--mantine-color-body), transparent);
+}
+
+.doc-sheet-bar[data-edge-left]::before,
+.doc-sheet-bar[data-edge-right]::after {
+  opacity: 1;
+}
+
+.doc-sheet-nav {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--mantine-color-text);
+  cursor: pointer;
+}
+
+.doc-sheet-nav:hover:not(:disabled) {
+  background: var(--mantine-color-default-hover);
+}
+
+.doc-sheet-nav:disabled {
+  cursor: default;
+  color: var(--mantine-color-dimmed);
+  opacity: 0.55;
+}
+
+.doc-sheet-nav:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
+
+.doc-sheet-strip {
+  flex: 1;
+  min-width: 0;
   min-height: 32px;
   flex-wrap: nowrap;
   overflow-x: auto;
   scrollbar-width: none;
-  border-top: 1px solid var(--mantine-color-default-border);
-  /* «sunken» макета: напівпрозорий `default-hover` поверх НЕПРОЗОРОГО тла сторінки —
-     інакше крізь липку смугу просвічувала б сітка. */
-  background-color: var(--mantine-color-body);
-  background-image: linear-gradient(var(--mantine-color-default-hover), var(--mantine-color-default-hover));
 }
 
 .doc-sheet-strip .doc-sheet-tab {

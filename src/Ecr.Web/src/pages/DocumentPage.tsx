@@ -46,8 +46,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useProjectCurrentPeriodDefault } from '@/features/documents/useProjectCurrentPeriodDefault';
-import { StatusBadge } from '@/shared/ui/StatusBadge';
-import '@/features/documents/documentSheetStrip.css';
+import { SheetStrip } from '@/features/documents/SheetStrip';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/settleEdits';
@@ -952,14 +951,11 @@ export function DocumentPage(): JSX.Element {
           </Tabs.Panel>
         )}
 
-        <Tabs.List className="doc-sheet-strip" aria-label={t('documents.sheets')} data-doc-sheet-strip="">
-          {sheets.map((s) => (
-            <Tabs.Tab key={s.code} value={s.code} className="doc-sheet-tab">
-              {s.name}{' '}
-              <StatusBadge kind="sheet" state={document.sheetStates[s.code] ?? 'Draft'} />
-            </Tabs.Tab>
-          ))}
-        </Tabs.List>
+        <SheetStrip
+          sheets={sheets.map((s) => ({ code: s.code, name: s.name, state: document.sheetStates[s.code] ?? 'Draft' }))}
+          activeCode={active?.code}
+          onSelect={setSheet}
+        />
       </Tabs>
 
       {/* ⚠ Без аркушів панелі немає, а відмова чанка має лишатися видимою —

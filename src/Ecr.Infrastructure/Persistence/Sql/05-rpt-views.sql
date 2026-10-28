@@ -201,7 +201,7 @@ BEGIN
             @ownerRows nvarchar(max), @ownerCells nvarchar(max), @valueCol nvarchar(128), @extra int, @mi int;
     -- Q-17.fix (B1): умовні агрегації значень власників - по одному OUTER APPLY на власника (OwnerNo: -1 власна копія,
     -- 0 якір року, 1..12 місяць), а не по приєднанню doc.CellValue на колонку.
-    DECLARE @routed bit, @raw1 nvarchar(64), @agg nvarchar(max), @ownerNo int, @aggList nvarchar(max), @idList nvarchar(max);
+    DECLARE @routed bit, @raw1 nvarchar(64), @agg nvarchar(max), @aggBody nvarchar(max), @ownerNo int, @aggList nvarchar(max), @idList nvarchar(max);
     DECLARE @pv TABLE (OwnerNo int NOT NULL, ColNo int NOT NULL, ColId int NOT NULL, Agg nvarchar(max) NOT NULL);
     DECLARE @marker nvarchar(64) = N'-- Згенеровано rpt.usp_GenerateTemplateViews';
     DECLARE @failure nvarchar(2048);
@@ -253,10 +253,11 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                 -- по ключу комірки (PeriodKey, TableRowId, ColumnDefId) унікальна, тож MAX = саме це значення.
                 -- Тип значення той самий: bit читається як tinyint і повертається CAST(.. AS bit).
                 SET @raw1 = SUBSTRING(@valueCol, LEN(@alias) + 2, 64);   -- ValueNumeric / ValueString / ...
-                SET @agg = CASE WHEN @colType = 3
+                SET @aggBody = CASE WHEN @colType = 3
                                 THEN N'MAX(CAST(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
                                 ELSE N'MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END)'
-                           END + N' AS v' + CAST(@n AS nvarchar(10));
+                           END;
+                SET @agg = @aggBody + N' AS v' + CAST(@n AS nvarchar(10));
                 -- Власник місячної колонки - екземпляр її місяця: ОКРЕМИЙ apply на кожен місяць-власник (P2-1, OwnerNo 100 + m),
                 -- що читає лише екземпляр цього місяця й лише колонки цього місяця (seek по ключах). Один спільний apply
                 -- на всі місяці давав ~12·C² операцій на рядок (340x повільніше за OFF на T9_04 Land), а окремі apply
@@ -267,17 +268,20 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                 ELSE
                     SET @needAnchor = 1;
 
-                -- P2-1 (Audit-2 проход C): обчислена комірка (IsCalculated = 1) в екземплярі перегляду - СВОЯ, як у зрізі API
-                -- (MonthRoutedCellStore лишає її, шаруючи власника лише над введеними). Тому власна копія додатково несе
-                -- прапор k<n> (1 - комірка обчислена); значення власника береться, лише коли власна комірка не обчислена.
+                -- P2-1 (Audit-2 проход C, p61 -> viewfix): обчислена комірка (IsCalculated = 1) екземпляра перегляду, що НЕСЕ
+                -- значення, - СВОЯ і приховує значення власника (так її віддає зріз API: MonthRoutedCellStore лишає обчислені,
+                -- шаруючи власника лише над введеними). Порожня обчислена (IsEmpty, результат NULL) значення власника НЕ
+                -- приховує. Правило - на рівні КОМІРКИ: значення = COALESCE(власна обчислена, власник, власна копія).
+                -- Власна обчислена читається ОКРЕМИМ apply sc (OwnerNo -2) лише по обчислених комірках рядка (їх мало, а то й нема),
+                -- а не другим агрегатом на колонку в sv: p61 (прапор k<n> у sv) подвоював роботу sv (T10_03 / T11_03 у 2-4 рази).
                 INSERT INTO @pv (OwnerNo, ColNo, ColId, Agg) VALUES
-                    (-1, @n, @colId, @agg + N', MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10))
-                                  + N' THEN CAST(x.IsCalculated AS tinyint) END) AS k' + CAST(@n AS nvarchar(10))),
+                    (-2, @n, @colId, @aggBody + N' AS cv' + CAST(@n AS nvarchar(10))),
+                    (-1, @n, @colId, @agg),
                     (@mi, @n, @colId, @agg);
 
-                SET @valueCol = N'CASE WHEN sv.k' + CAST(@n AS nvarchar(10)) + N' = 1 THEN sv.v' + CAST(@n AS nvarchar(10))
-                              + N' ELSE COALESCE(' + CASE WHEN @isMonth = 1 THEN N'om' + CAST(@monthNo AS nvarchar(2)) ELSE N'omA' END
-                              + N'.v' + CAST(@n AS nvarchar(10)) + N', sv.v' + CAST(@n AS nvarchar(10)) + N') END';
+                SET @valueCol = N'COALESCE(sc.cv' + CAST(@n AS nvarchar(10)) + N', '
+                              + CASE WHEN @isMonth = 1 THEN N'om' + CAST(@monthNo AS nvarchar(2)) ELSE N'omA' END
+                              + N'.v' + CAST(@n AS nvarchar(10)) + N', sv.v' + CAST(@n AS nvarchar(10)) + N')';
                 IF @colType = 3
                     SET @valueCol = N'CAST(' + @valueCol + N' AS bit)';
             END
@@ -312,9 +316,9 @@ LEFT JOIN doc.TableRow AS owA ON owA.PeriodKey = oiA.PeriodKey AND owA.TableInst
 
             -- Власна копія (sv) і кожен власник (om<m>, omA) - по одному OUTER APPLY з умовною агрегацією (B1).
             -- Власна копія: рядок перегляду; без жодної введеної колонки з маршрутизацією цього блоку немає.
-            SET @extra = @extra + 1 - (SELECT COUNT(*) FROM @pv WHERE OwnerNo = -1);   -- sv замість c<n> на кожну колонку
+            SET @extra = @extra + 2 - (SELECT COUNT(*) FROM @pv WHERE OwnerNo = -1);   -- sv і sc замість c<n> на кожну колонку
             SET @ownerCells = N'';
-            SET @ownerNo = -1;
+            SET @ownerNo = -2;
             WHILE @ownerNo IS NOT NULL
             BEGIN
                 -- ⚠ FOR XML PATH, а не «@var = @var + …» з ORDER BY: останнє не гарантує конкатенації всіх рядків.
@@ -322,7 +326,7 @@ LEFT JOIN doc.TableRow AS owA ON owA.PeriodKey = oiA.PeriodKey AND owA.TableInst
                                       FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
                 -- Власник читається лише по СВОЇХ колонках (місяць m - M{m}; якір - не-місячні): відбір за ключем PK
                 -- замість обходу всіх комірок рядка власника. Власна копія (sv) - усі маршрутизовані колонки таблиці.
-                SET @idList = CASE WHEN @ownerNo = -1 THEN N'' ELSE N' AND x.ColumnDefId IN (' + STUFF((
+                SET @idList = CASE WHEN @ownerNo < 0 THEN N'' ELSE N' AND x.ColumnDefId IN (' + STUFF((
                                   SELECT N', ' + CAST(ColId AS nvarchar(10)) FROM @pv WHERE OwnerNo = @ownerNo ORDER BY ColNo
                                   FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'') + N')' END;
                 SET @ownerCells = @ownerCells + N'
@@ -333,10 +337,12 @@ OUTER APPLY (SELECT ' + @aggList + N' FROM '
           JOIN doc.CellValue AS x ON x.PeriodKey = ow.PeriodKey AND x.TableRowId = ow.Id' + @idList + N'
           WHERE p.PeriodKind = 0 AND oi.DocumentId = ti.DocumentId AND oi.TableDefId = ti.TableDefId
             AND oi.PeriodKey = (ti.PeriodKey / 100) * 100 + ' + CAST(@ownerNo - 100 AS nvarchar(3))
+                           WHEN @ownerNo = -2
+                           THEN N'doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id AND x.IsCalculated = 1'
                            WHEN @ownerNo = -1
                            THEN N'doc.CellValue AS x WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id'
                            ELSE N'doc.CellValue AS x WHERE x.PeriodKey = owA.PeriodKey AND x.TableRowId = owA.Id' + @idList END
-                    + N') AS ' + CASE WHEN @ownerNo = -1 THEN N'sv' WHEN @ownerNo = 0 THEN N'omA' ELSE N'om' + CAST(@ownerNo - 100 AS nvarchar(3)) END;
+                    + N') AS ' + CASE WHEN @ownerNo = -1 THEN N'sv' WHEN @ownerNo = -2 THEN N'sc' WHEN @ownerNo = 0 THEN N'omA' ELSE N'om' + CAST(@ownerNo - 100 AS nvarchar(3)) END;
                 SET @ownerNo = (SELECT MIN(OwnerNo) FROM @pv WHERE OwnerNo > @ownerNo);
             END
 
