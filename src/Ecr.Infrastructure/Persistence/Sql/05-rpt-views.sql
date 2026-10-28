@@ -107,7 +107,8 @@ GO
 -- число методології з `calc.CalculationResult` (як у зрізі API; Q-17.recalc, див. нижче),
 -- а коли результату немає, - те, що матеріалізовано в `doc.CellValue`.
 -- AN-147: для Formula/Calculated додатково віддається колонка-супутник `<Код>_Text` (nvarchar): ValueString там, де
--- результат обчислення рядковий (числове значення порожнє), інакше NULL. Числова колонка `<Код>` не змінюється.
+-- результат обчислення рядковий, тобто ПІДСУМКОВЕ числове значення колонки порожнє (для Calculated - з урахуванням
+-- результату методології), інакше NULL. Числова колонка `<Код>` не змінюється.
 -- ⛔ Q-17.7: @MonthRouting = 1 вмикає у вʼюхах MonthsInColumns читання значень з екземпляра ВЛАСНИКА (місячний M{m} - з
 -- екземпляра періоду m, введений не-місячний - з якоря року; COALESCE із власною копією). Це те саме, що прапор
 -- Collection:MonthColumnRouting (застосунок передає його сам - ReportViewGenerator); за замовчуванням 0, і текст вʼюх
@@ -209,7 +210,7 @@ BEGIN
     DECLARE @failure nvarchar(2048);
     -- Q-17.recalc: результати методологій для колонок Calculated (див. нижче). @selectRv - той самий список колонок, але
     -- Calculated читається з результатів; @rvIds / @rvAgg - колонки й їхні агрегати; @rvApply - сам OUTER APPLY.
-    DECLARE @selectRv nvarchar(max), @valueColRv nvarchar(256), @rvIds nvarchar(max), @rvAgg nvarchar(max), @rvApply nvarchar(max);
+    DECLARE @selectRv nvarchar(max), @valueColRv nvarchar(256), @rvIds nvarchar(max), @rvAgg nvarchar(max), @rvApply nvarchar(max), @selectTextRv nvarchar(max);
 
     DECLARE cur_views CURSOR LOCAL FAST_FORWARD FOR
         SELECT TableDefId, SheetDefId, Header, ViewName FROM @tables ORDER BY TableDefId;
@@ -220,7 +221,7 @@ BEGIN
         -- ⚠ Цикл, а не `STRING_AGG`: підлога сервера — 2016 SP1 (`D-101`).
         SELECT @select = N'', @selectText = N'', @joins = N'', @n = 0,
                @ownerRows = N'', @ownerCells = N'', @monthMask = 0, @needAnchor = 0, @extra = 0,
-               @selectRv = N'', @rvIds = N'', @rvAgg = N'', @rvApply = N'';
+               @selectRv = N'', @rvIds = N'', @rvAgg = N'', @rvApply = N'', @selectTextRv = N'';
         DELETE FROM @pv;
         SET @layout = (SELECT LayoutKind FROM cfg.TableDef WHERE Id = @id);
         SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0);
@@ -317,12 +318,22 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                 SET @selectText = @selectText + N',
        CASE WHEN ' + @alias + N'.ValueNumeric IS NULL THEN ' + @alias + N'.ValueString END AS '
                                 + QUOTENAME(@colCode + N'_Text');
+            -- Варіант з rv: для Calculated супутник заповнюється ЛИШЕ коли ПІДСУМКОВЕ число (результат методології, інакше
+            -- матеріалізоване - те, що віддає числова колонка) порожнє; методологія дала число - супутник NULL.
+            IF @colType IN (6, 8)
+               AND NOT EXISTS (SELECT 1 FROM cfg.ColumnDef
+                                WHERE TableDefId = @id AND IsDeleted = 0 AND Code = @colCode + N'_Text')
+                SET @selectTextRv = @selectTextRv + N',
+       CASE WHEN ' + CASE WHEN @colType = 8 THEN N'COALESCE(rv.rv' + CAST(@n AS nvarchar(10)) + N', ' + @alias + N'.ValueNumeric)'
+                          ELSE @alias + N'.ValueNumeric' END
+                                + N' IS NULL THEN ' + @alias + N'.ValueString END AS '
+                                + QUOTENAME(@colCode + N'_Text');
             SET @selectRv = @selectRv + N',
        ' + @valueColRv + N' AS ' + QUOTENAME(@colCode);
             SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0 AND Id > @colId);
         END
         SET @select = @select + @selectText;
-        SET @selectRv = @selectRv + @selectText;   -- AN-147: супутники й у варіанті з rv (Calculated числом методології)
+        SET @selectRv = @selectRv + @selectTextRv;   -- AN-147: супутники й у варіанті з rv (Calculated числом методології)
 
         -- Q-17.7: приєднання власників — по одному екземпляру/рядку на потрібний місяць і на якір.
         -- Усі з'єднання — по ключах: UQ_TableInstance (PeriodKey, DocumentId, TableDefId) і UQ_TableRow_Key

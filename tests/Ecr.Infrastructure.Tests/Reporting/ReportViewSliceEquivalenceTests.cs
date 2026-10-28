@@ -489,4 +489,75 @@ public sealed class ReportViewSliceEquivalenceTests(SqlServerFixture sql)
         Assert.True(nonNull >= 9, $"тест порожній: у зрізі лише {nonNull} значень Calculated");
         Assert.True(diffs.Count == 0, $"routing={routing}: {diffs.Count} розбіжностей:\n" + string.Join('\n', diffs));
     }
+
+    /// <summary>
+    /// AN-147 (семантика супутника): <c>&lt;Код&gt;_Text</c> колонки Calculated = ValueString ЛИШЕ коли ПІДСУМКОВЕ число колонки
+    /// (результат методології, інакше матеріалізоване) порожнє. Методологія дала число, а в doc.CellValue лежить рядок -
+    /// супутник NULL (число лишається числом); немає ні результату, ні числа - рядок у супутнику. Прапор вимкнений і увімкнений.
+    /// Мутація: у <c>@selectTextRv</c> замінити COALESCE(rv, ValueNumeric) на ValueNumeric - тест червоний.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Супутник_Text_Calculated_порожній_коли_методологія_дала_число(bool routing)
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(ViewPeriod, columnCount: 2, rowCount: 3,
+            layoutKind: TableLayoutKind.MonthsInColumns, monthColumns: 12);
+
+        string calcCode;
+        await using (var db = sql.CreateContext())
+        {
+            calcCode = "CLT" + Guid.NewGuid().ToString("N")[..6];
+            db.ColumnDefs.Add(new ColumnDef(doc.TableDefId, EcrCode.Create(calcCode),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "CLT" }), 9000, CellDataType.Calculated));
+            await db.SaveChangesAsync();
+            var version = await db.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId);
+            version.Publish(publishedByUserId: 1, Now);
+            await db.SaveChangesAsync();
+        }
+
+        await using var read = sql.CreateContext();
+        var table = await read.TableDefs.SingleAsync(t => t.Id == doc.TableDefId);
+        var template = await read.Templates.SingleAsync(t => t.Id == doc.TemplateId);
+        var tv = await read.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId);
+        var view = System.Text.RegularExpressions.Regex.Replace(
+            $"v_{template.Code}_{doc.SheetCode}_{table.Code}_v{tv.Version}", "[^A-Za-z0-9_]", "_");
+        var column = await read.ColumnDefs.AsNoTracking().SingleAsync(c => c.TableDefId == doc.TableDefId && c.Ordinal == 9000);
+        var unitId = await read.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
+
+        var m = await AddMethodologyAsync("T" + Guid.NewGuid().ToString("N")[..6]);
+        await using (var db = sql.CreateContext())
+        {
+            db.CalculationBindings.Add(new CalculationBinding(doc.TableDefId, column.Id, m.MethodologyId, "OT", "{}"));
+            await db.SaveChangesAsync();
+        }
+
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            var col = new Col(column.Id, calcCode, CellDataType.Calculated, false, null);
+            // Рядки 0 і 1: рядок у ValueString; рядок 0 має результат методології, рядок 1 - ні. Рядок 2: результат без рядка.
+            await InsertAsync(connection, ViewPeriod, doc.RowIds[0], col, doc.TableDefId, "ValueString", "Sample J-0", true, false);
+            await InsertAsync(connection, ViewPeriod, doc.RowIds[1], col, doc.TableDefId, "ValueString", "Sample J-1", true, false);
+        }
+
+        var run = await AddRunAsync(doc, current: true);
+        await AddResultAsync(run, m.VersionId, doc, 0, "OT", 5.5m, unitId);
+        await AddResultAsync(run, m.VersionId, doc, 2, "OT", 2m, unitId);
+
+        await GenerateAsync(doc.TemplateVersionId, routing);
+        var rows = await ReadViewAsync(doc, view);
+        var text = calcCode + "_Text";
+
+        Assert.Equal(5.5m, Convert.ToDecimal(rows[RowKeyOf(doc, 0)][calcCode], System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Null(rows[RowKeyOf(doc, 0)][text]);
+        Assert.Null(rows[RowKeyOf(doc, 1)][calcCode]);
+        Assert.Equal("Sample J-1", rows[RowKeyOf(doc, 1)][text]);
+        Assert.Equal(2m, Convert.ToDecimal(rows[RowKeyOf(doc, 2)][calcCode], System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Null(rows[RowKeyOf(doc, 2)][text]);
+    }
 }
