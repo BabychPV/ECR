@@ -80,7 +80,11 @@ public sealed class AccessDecisionService(
         // ⚠ Ознака учасника — у ТОЙ САМИЙ третій компонент ключа, що й відбиток груп: і ключ `IMemoryCache`, і
         // `AccessProfile.CacheKey` будуються з одного рядка (`Q-187`), а профіль — саме з цього значення ознаки.
         var participates = account.Participates;
-        var cacheVariant = ParticipationKeyed(groupsFingerprint, participates);
+
+        // ⛔ AN-138: відбиток вмісту рядків призначень (ScopeJson, межі дії) — у той самий третій компонент ключа.
+        // Лічильники/Id вище не бачать прямої SQL-правки наявного рядка; без цього застарілі межі жили до TTL.
+        var assignmentsFingerprint = await AssignmentRowsFingerprintAsync(userId, groupSids, ct).ConfigureAwait(false);
+        var cacheVariant = ParticipationKeyed(groupsFingerprint + assignmentsFingerprint, participates);
 
         var profile = await profileCache
             .GetOrCreateAsync(
@@ -200,6 +204,43 @@ public sealed class AccessDecisionService(
         return revision is null
             ? $"{Fingerprint(groupSids)}.0.0.0.0"
             : $"{Fingerprint(groupSids)}.{revision.Assignments}.{revision.LastAssignment}.{revision.Grants}.{revision.LastGrant}";
+    }
+
+    /// <summary>Відбиток ВМІСТУ рядків призначень, з яких будується профіль (AN-138).</summary>
+    /// <remarks>
+    /// ⛔ Чому не <c>CHECKSUM_AGG</c>: той слабкий (XOR 32-бітних хешів, колізії тривіальні, а колізія тут =
+    /// застарілі права — небезпека, не незручність). Вибірка обмежена <see cref="MaxRoleAssignments"/> (≤200
+    /// вузьких рядків, ті самі, що читає <see cref="LoadAsync"/>), тому SHA-256 рахується в застосунку: сталий між
+    /// вузлами, без схеми/міграції/SQL-функцій, 128 біт у ключі. Хешуються Id, роль, субʼєкт, ScopeJson,
+    /// ValidFrom/ValidTo; вставка/видалення рядка змінює набір. Один індексований запит (без груп — по UserId).
+    /// Не покриває ПЕРЕХІД часу (ValidTo минає опівночі UTC) — це досі TTL профілю, як і було.
+    /// </remarks>
+    private async Task<string> AssignmentRowsFingerprintAsync(
+        int userId, IReadOnlyList<string> groupSids, CancellationToken ct)
+    {
+        var rows = await db.RoleAssignments
+            .AsNoTracking()
+            .Where(a => a.UserId == userId || (a.PrincipalSid != null && groupSids.Contains(a.PrincipalSid)))
+            .OrderByDescending(a => a.Id)
+            .Take(MaxRoleAssignments)
+            .Select(x => new { x.Id, x.RoleId, x.UserId, x.PrincipalSid, x.ScopeJson, x.ValidFrom, x.ValidTo })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var text = new System.Text.StringBuilder();
+        foreach (var r in rows)
+        {
+            text.Append(System.Globalization.CultureInfo.InvariantCulture,
+                    $"{r.Id}\u001f{r.RoleId}\u001f{r.UserId}\u001f")
+                .Append(r.PrincipalSid is null ? "N" : "V" + r.PrincipalSid).Append('\u001f')
+                .Append(r.ScopeJson is null ? "N" : "V" + r.ScopeJson).Append('\u001f')
+                .Append(r.ValidFrom?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "N").Append('\u001f')
+                .Append(r.ValidTo?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "N")
+                .Append('\u001e');
+        }
+
+        return "|a" + System.Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text.ToString())))[..32];
     }
 
     /// <summary>
