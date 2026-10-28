@@ -37,6 +37,14 @@ async function firstHeader(page: Page): Promise<string> {
   }
   return best.text;
 }
+/** Смугу — на початок і чекаємо, поки сітка покаже перший стовпець: повертає його заголовок (опорна точка). */
+async function resetToStart(page: Page): Promise<string> {
+  await page.getByTestId('grid-hscroll').evaluate((el) => {
+    el.scrollLeft = 0;
+  });
+  await expect.poll(() => firstHeader(page), { timeout: 15_000, message: 'сітка не стала на перший стовпець' }).toBe('C1');
+  return 'C1';
+}
 test.describe('Нижній рядок під таблицею (ui-sheet-bottom)', () => {
   test.skip(PeriodKey === '', 'ECR_E2E_OPTIONAL: стенда немає, перевіряти нічого. Стенд: tools/e2e-stand.ps1.');
 
@@ -92,7 +100,7 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
 
     const scroll = page.getByTestId('grid-hscroll');
     await expect(scroll).toHaveAttribute('data-scrollable', 'true', { timeout: 30_000 });
-    const start = await firstHeader(page);
+    const start = await resetToStart(page);
 
     for (let i = 0; i < Repeats; i += 1) {
       // Смугу — у кінець: перший видимий стовпець змінюється.
@@ -168,7 +176,7 @@ test.describe('Нижній рядок під таблицею (ui-sheet-bottom)
       expect((box?.y ?? 0) + (box?.height ?? 0), `прогін ${String(i + 1)}/${String(Repeats)}: рядок не внизу вікна`).toBeGreaterThanOrEqual(viewport - 24);
 
       const scroll = page.getByTestId('grid-hscroll');
-      const start = await firstHeader(page);
+      const start = await resetToStart(page);
       await scroll.evaluate((el) => {
         el.scrollLeft = el.scrollWidth;
       });
