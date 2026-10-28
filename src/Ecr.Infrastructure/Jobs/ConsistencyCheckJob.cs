@@ -32,9 +32,13 @@ namespace Ecr.Infrastructure.Jobs;
 /// черзі задача має два різні <c>JobCode</c>.
 /// </remarks>
 public sealed class ConsistencyCheckJob(
-    EcrDbContext db, IOrphanScanner scanner, IClock clock, IConsistencyMetrics metrics)
+    EcrDbContext db, IOrphanScanner scanner, IClock clock, IConsistencyMetrics metrics,
+    Microsoft.Extensions.Configuration.IConfiguration? configuration = null)
     : IBackgroundJob, IConsistencyCheckJob
 {
+    /// <summary>Код правила: рядки результатів/кроків/входів прогонів, що не <c>Current</c>/<c>Running</c> (Q-17).</summary>
+    public const string NonCurrentRunRowsRule = "NON_CURRENT_RUN_ROWS";
+
     /// <summary>Код задачі в журналі обслуговування.</summary>
     public static string Code => "consistency-check";
 
@@ -152,6 +156,7 @@ public sealed class ConsistencyCheckJob(
         await progress.ReportKeyAsync(70, "jobs.consistencyUnboundCalculated", ct).ConfigureAwait(false);
         issues.AddRange(await UnboundCalculatedColumnsAsync(ct).ConfigureAwait(false));
         issues.AddRange(await UnsourcedFormulaColumnsAsync(ct).ConfigureAwait(false));
+        issues.AddRange(await NonCurrentRunRowsAsync(periodKeys, ct).ConfigureAwait(false));
 
         // ⚠ Перерахунок ознаки IsOrphaned — В ОБИДВА боки (ФВ-8.13a). Задача
         // симетрична: те, що ставить ознаку, її ж і знімає. Асиметрія тут не
@@ -560,6 +565,78 @@ public sealed class ConsistencyCheckJob(
                 f.ColumnCode,
                 f.TemplateVersionId,
                 f.ColumnDefId)));
+    }
+
+    /// <summary>
+    /// Q-17: рядки <c>calc.CalculationResult/Step/Input</c> прогонів, що не <c>Current</c>/<c>Running</c>
+    /// (інваріант «лише актуальний розрахунок», рішення людини 28.10).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Перевіряється лише коли прибирання увімкнено (<c>Calculations:SupersededPurge:Enabled</c>): доти кожна база,
+    /// де історія ще не прибрана (Land - мільйони рядків), щоночі давала б знахідки за кожен період. Очікування після
+    /// проходу <c>SupersededResultsSweepJob</c> - нуль; ненульове означає, що швидкий шлях/прохід недопрацював. Одна
+    /// знахідка на «таблиця × період» (`EntityId` = період), кількість - у тексті. Партиція 0 (прогін без періоду)
+    /// перевіряється теж: доти рядки нульового періоду лишалися «історією» (HSE301).
+    /// </remarks>
+    private async Task<List<ConsistencyIssue>> NonCurrentRunRowsAsync(
+        IReadOnlyList<int> periodKeys, CancellationToken ct)
+    {
+        var issues = new List<ConsistencyIssue>();
+        if (!Persistence.SupersededPurgeOptions.Read(configuration).Enabled)
+        {
+            return issues;
+        }
+
+        foreach (var periodKey in periodKeys.Append(0).Distinct())
+        {
+            var budget = MaxIssues - issues.Count;
+            if (budget <= 0)
+            {
+                break;
+            }
+
+            var results = await (
+                    from row in db.CalculationResults.AsNoTracking()
+                    join run in db.CalculationRuns.AsNoTracking() on row.CalculationRunId equals run.Id
+                    where row.PeriodKey == periodKey && run.Status != "Current" && run.Status != "Running"
+                    select row.Id)
+                .LongCountAsync(ct).ConfigureAwait(false);
+            var steps = await (
+                    from row in db.CalculationSteps.AsNoTracking()
+                    join run in db.CalculationRuns.AsNoTracking() on row.CalculationRunId equals run.Id
+                    where row.PeriodKey == periodKey && run.Status != "Current" && run.Status != "Running"
+                    select row.Id)
+                .LongCountAsync(ct).ConfigureAwait(false);
+            var inputs = await (
+                    from row in db.CalculationInputs.AsNoTracking()
+                    join run in db.CalculationRuns.AsNoTracking() on row.CalculationRunId equals run.Id
+                    where row.PeriodKey == periodKey && run.Status != "Current" && run.Status != "Running"
+                    select row.Id)
+                .LongCountAsync(ct).ConfigureAwait(false);
+
+            if (results + steps + inputs == 0)
+            {
+                continue;
+            }
+
+            issues.Add(new ConsistencyIssue(
+                NonCurrentRunRowsRule,
+                Severity: 2,
+                "calc.CalculationRun",
+                periodKey,
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "У періоді {0} лишилися рядки прогонів, які не Current/Running: результатів {1}, кроків {2}, входів {3}. "
+                    + "Рішення людини 28.10: зберігається лише останній розрахунок; доїсть задача superseded-results-sweep "
+                    + "(Calculations:SupersededPurge:DeleteEnabled=true).",
+                    periodKey,
+                    results,
+                    steps,
+                    inputs),
+                periodKey));
+        }
+
+        return issues;
     }
 
     /// <summary>

@@ -384,6 +384,13 @@ public sealed partial class RecurringScheduleService(
             .ScheduleAsync<Infrastructure.Jobs.SubmissionSnapshotRetentionJob>(NightlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
+        // Q-17 (рішення людини 28.10): прибирання результатів/кроків/входів неактуальних прогонів - страховка швидкого
+        // шляху й двигун разового прибирання. Вимкнено (`Calculations:SupersededPurge:Enabled=false`) і, навіть увімкнене,
+        // лише лічить, доки `DeleteEnabled` не поставлено словом людини.
+        await scheduler
+            .ScheduleAsync<Infrastructure.Jobs.SupersededResultsSweepJob>(NightlyCron, null, CancellationToken.None)
+            .ConfigureAwait(false);
+
         await scheduler
             .ScheduleAsync<Infrastructure.Jobs.PeriodStateJob>(HourlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);

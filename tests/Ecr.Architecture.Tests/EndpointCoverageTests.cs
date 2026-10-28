@@ -435,7 +435,7 @@ public sealed partial class EndpointCoverageTests
                 "jobs.kind.archive", "jobs.kind.notification", "jobs.kind.partitionCheck",
                 "jobs.kind.periodState", "jobs.kind.registrySync", "jobs.kind.reportRetention",
                 "jobs.kind.reportSnapshotFormat", "jobs.kind.rowWindowRefetch",
-                "jobs.kind.submissionSnapshotRetention",
+                "jobs.kind.submissionSnapshotRetention", "jobs.kind.supersededResultsSweep",
             ],
             "Назва типу фонової задачі (KindKeys)."),
 

@@ -9356,6 +9356,9 @@ USING (VALUES
     ,(N'err.ECR-ACCS-0403.addRowAnchorPeriod', N'en', N'Rows of this table are added in period {anchorPeriod}; your role has no access to it.', 1)
     ,(N'err.ECR-ACCS-0403.deleteRowAnchorPeriod', N'en', N'Rows of this table are deleted in period {anchorPeriod}; your role has no access to it.', 1)
     -- Q17b: anchorRows ── кінець секції ──
+    -- Q17c: sweepJobKind ── Q-17: підпис типу фонової задачі SupersededResultsSweepJob у /admin/jobs; ru/kz — порцією Q17c нижче ──
+    ,(N'jobs.kind.supersededResultsSweep', N'en', N'Superseded calculation results cleanup', 1)
+    -- Q17c: sweepJobKind ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -24387,6 +24390,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- Q17b: anchorRows ── кінець секції ──
+-- Q17c: sweepJobKind ── ru/kz: Q-17, підпис задачі прибирання витіснених результатів розрахунку; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'jobs.kind.supersededResultsSweep', N'ru', N'Очистка вытесненных результатов расчёта'),
+    (N'jobs.kind.supersededResultsSweep', N'kz', N'Ығыстырылған есептеу нәтижелерін тазарту')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- Q17c: sweepJobKind ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
