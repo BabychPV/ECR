@@ -32,8 +32,9 @@ export interface GridHScrollProps {
  * потоку й ховає. Прокрутка колесом/тачпадом/Shift+колесо по сітці лишається за RevoGrid; смуга лише
  * відбиває її положення і керує ним.
  *
- * ⚠ Позиції переводяться ПРОПОРЦІЙНО діапазонам (смуга вужча за сітку), тож кожне програмне виставлення
- * позначається і його ехо-подія ігнорується — інакше округлення давало б «тремтіння» сітки.
+ * ⚠ Позиції переводяться ПРОПОРЦІЙНО діапазонам (смуга вужча за сітку): ехо-події (смуга вже там, де їй
+ * належить за положенням сітки, з точністю до 1 px смуги) нічого не роблять — інакше округлення давало б
+ * «тремтіння» сітки.
  */
 export function GridHScroll({ resolveHost, container, watch }: GridHScrollProps): JSX.Element {
   const track = useRef<HTMLDivElement>(null);
@@ -49,19 +50,22 @@ export function GridHScroll({ resolveHost, container, watch }: GridHScrollProps)
     let waiting: MutationObserver | null = null;
 
     const attach = (source: HTMLElement): (() => void) => {
-      let ignoreTrack: number | null = null;
-      let ignoreSource: number | null = null;
-
       const ranges = (): { grid: number; track: number } => ({
         grid: source.scrollWidth - source.clientWidth,
         track: trackEl.scrollWidth - trackEl.clientWidth,
       });
 
-      const fromSource = (): void => {
+      // ⚠ Без прапорців «ігнорувати ехо»: вони «застрягали» (подія не прийшла — прапорець лишався й ковтав
+      // справжню). Замість них — мертва зона: смуга вже стоїть там, де їй «належить» стояти за положенням сітки
+      // (з точністю до одного пікселя смуги), — отже подія є ехом і нічого не робить.
+      const expectedTrack = (): number => {
         const { grid, track: own } = ranges();
-        const target = mapScroll(source.scrollLeft, grid, own);
-        if (Math.abs(trackEl.scrollLeft - target) < 0.5) return;
-        ignoreTrack = target;
+        return mapScroll(source.scrollLeft, grid, own);
+      };
+
+      const fromSource = (): void => {
+        const target = expectedTrack();
+        if (Math.abs(trackEl.scrollLeft - target) < 1) return;
         trackEl.scrollLeft = target;
       };
 
@@ -73,25 +77,16 @@ export function GridHScroll({ resolveHost, container, watch }: GridHScrollProps)
       };
 
       const onSource = (): void => {
-        if (ignoreSource !== null && Math.abs(source.scrollLeft - ignoreSource) < 1.5) {
-          ignoreSource = null;
-          return;
-        }
         fromSource();
       };
 
       const onTrack = (): void => {
-        if (ignoreTrack !== null && Math.abs(trackEl.scrollLeft - ignoreTrack) < 1.5) {
-          ignoreTrack = null;
-          return;
-        }
+        if (Math.abs(trackEl.scrollLeft - expectedTrack()) < 1) return;
         const { grid, track: own } = ranges();
         const target = mapScroll(trackEl.scrollLeft, own, grid);
         if (Math.abs(source.scrollLeft - target) < 0.5) return;
-        ignoreSource = target;
         source.scrollLeft = target;
       };
-
       source.addEventListener('scroll', onSource, { passive: true });
       trackEl.addEventListener('scroll', onTrack, { passive: true });
       const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(layout);

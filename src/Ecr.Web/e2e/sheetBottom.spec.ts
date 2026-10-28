@@ -23,25 +23,27 @@ async function open(page: Page): Promise<void> {
   await expect(page.getByTestId('grid-hscroll')).toBeVisible();
 }
 
-/** Текст першої видимої заголовкової комірки сітки (перший видимий стовпець). */
+/** Заголовок крайньої лівої видимої (не обрізаної ліворуч) комірки сітки — «перший видимий стовпець». */
 async function firstHeader(page: Page): Promise<string> {
+  const grid = await page.locator('revo-grid:visible').first().boundingBox();
   const cells = page.locator('revo-grid:visible revogr-header .rgHeaderCell');
   const count = await cells.count();
   let best = { x: Number.POSITIVE_INFINITY, text: '' };
   for (let i = 0; i < count; i += 1) {
     const box = await cells.nth(i).boundingBox();
     const text = (await cells.nth(i).innerText()).trim();
-    if (box !== null && box.x >= 0 && text !== '' && box.x < best.x) best = { x: box.x, text };
+    // Комірка, що ще частково видна (права межа правіше лівого краю сітки), і непорожній заголовок.
+    if (box !== null && grid !== null && box.x + box.width > grid.x + 4 && text !== '' && box.x < best.x) best = { x: box.x, text };
   }
   return best.text;
 }
-
 test.describe('Нижній рядок під таблицею (ui-sheet-bottom)', () => {
   test.skip(PeriodKey === '', 'ECR_E2E_OPTIONAL: стенда немає, перевіряти нічого. Стенд: tools/e2e-stand.ps1.');
 
   test('макет: рядок під сіткою в рамці панелі — «‹ › …», вкладки, прокрутка (N/5)', async ({ page }) => {
     test.setTimeout(300_000);
-    await page.setViewportSize({ width: 1280, height: 800 });
+    // Високе вікно: сторінка вміщується, тож липка позиція рядка не накладається на сітку.
+    await page.setViewportSize({ width: 1280, height: 1500 });
     await open(page);
 
     for (let i = 0; i < Repeats; i += 1) {
