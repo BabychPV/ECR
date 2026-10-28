@@ -232,12 +232,17 @@ public sealed class RunCalculationHandler(
             // (`SwitchCurrentRunAsync` — порядок явний, не на порядку UPDATE EF).
             // Без спільної транзакції між двома кроками був би коміт, після якого
             // актуальних прогонів нуль (ФВ-9.11).
+            IReadOnlyList<SupersededRun> unleased = [];
             await uow.ExecuteInTransactionAsync(
-                    token => SwitchAsync(calculationRunId, profile, carryOver, beforeSwitch, token), ct)
+                    async token => unleased = await SwitchAsync(calculationRunId, profile, carryOver, beforeSwitch, token)
+                        .ConfigureAwait(false),
+                    ct)
                 .ConfigureAwait(false);
+            await PurgeSupersededAsync(unleased, ct).ConfigureAwait(false);
             return;
         }
 
+        IReadOnlyList<SupersededRun> superseded = [];
         await uow.ExecuteInTransactionAsync(
                 async token =>
                 {
@@ -246,13 +251,41 @@ public sealed class RunCalculationHandler(
                         throw new JobLeaseLostException(claim.JobId);
                     }
 
-                    await SwitchAsync(calculationRunId, profile, carryOver, beforeSwitch, token).ConfigureAwait(false);
+                    superseded = await SwitchAsync(calculationRunId, profile, carryOver, beforeSwitch, token)
+                        .ConfigureAwait(false);
                 },
                 ct)
             .ConfigureAwait(false);
+        await PurgeSupersededAsync(superseded, ct).ConfigureAwait(false);
     }
 
-    private async Task SwitchAsync(
+    /// <summary>
+    /// Q-17 (рішення людини 28.10): після коміту перемикання прибирає рядки прогонів, що перестали бути актуальними.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ПІСЛЯ коміту й поза транзакцією: до коміту ті прогони ще актуальні для читачів, а видалення десятків тисяч
+    /// рядків усередині перемикання тримало б замок рядка задачі й відкотило б саме перемикання при збої. Збій
+    /// прибирання прогін НЕ валить: перемикання вже правильне (рядки неактуальних прогонів не читає ніхто), решту
+    /// доїсть нічна задача <c>SupersededResultsSweepJob</c>. Скасування проходить нагору.
+    /// </remarks>
+    private async Task PurgeSupersededAsync(IReadOnlyList<SupersededRun> superseded, CancellationToken ct)
+    {
+        if (superseded is not { Count: > 0 })
+        {
+            return;
+        }
+
+        try
+        {
+            await results.PurgeSupersededRunsAsync(superseded, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Сховище само пише збій у журнал і не кидає; сюди дійде лише непередбачене. Прогін уже актуальний.
+        }
+    }
+
+    private async Task<IReadOnlyList<SupersededRun>> SwitchAsync(
         long calculationRunId, ModuleProfile profile, IReadOnlyCollection<ResultCarryOver>? carryOver,
         Func<CancellationToken, Task>? beforeSwitch, CancellationToken ct)
     {
@@ -275,7 +308,7 @@ public sealed class RunCalculationHandler(
             }
         }
 
-        await results
+        var superseded = await results
             .SwitchCurrentRunAsync(calculationRunId, profile.ToJson(), ct)
             .ConfigureAwait(false);
 
@@ -295,6 +328,7 @@ public sealed class RunCalculationHandler(
         }
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        return superseded;
     }
 
     /// <summary>Тип сутності в журналі для застарілості зрізу (ФВ-10.5).</summary>

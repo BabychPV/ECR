@@ -106,6 +106,16 @@ public static partial class EcrConfigurationValidation
         (Ecr.Infrastructure.Jobs.SnapshotRetentionOptions.PauseMillisecondsKey, 0),
         (Ecr.Infrastructure.Jobs.SnapshotRetentionOptions.MaxBatchesPerRunKey, 1),
 
+        // Q-17: прибирання результатів неактуальних прогонів. Нуль у розмірі пакета/стелі - прохід, що нічого не робить;
+        // поріг журналу поза 1-100 % - або завжди пауза, або ніколи.
+        (Ecr.Infrastructure.Persistence.SupersededPurgeOptions.BatchSizeKey, 1),
+        (Ecr.Infrastructure.Persistence.SupersededPurgeOptions.PauseMillisecondsKey, 0),
+        (Ecr.Infrastructure.Persistence.SupersededPurgeOptions.MaxBatchesPerRunKey, 1),
+        (Ecr.Infrastructure.Persistence.SupersededPurgeOptions.LogPauseThresholdPercentKey, 1),
+        (Ecr.Infrastructure.Persistence.SupersededPurgeOptions.LogPauseSecondsKey, 0),
+        (Ecr.Infrastructure.Persistence.SupersededPurgeOptions.MaxLogPausesKey, 0),
+        (Ecr.Infrastructure.Persistence.SupersededPurgeOptions.CheckpointEveryBatchesKey, 1),
+
         // R2: поріг рядків ext.RawDataPoint у картці db; 0 вимикає перевірку, від'ємне — помилка.
         (RawDataPointHealthKey, 0),
 
@@ -135,6 +145,10 @@ public static partial class EcrConfigurationValidation
         Ecr.Api.Observability.TelemetrySetup.EnabledKey,
         Ecr.Infrastructure.Jobs.SnapshotRetentionOptions.EnabledKey,
         Ecr.Infrastructure.Jobs.SnapshotRetentionOptions.DeleteEnabledKey,
+        Ecr.Infrastructure.Persistence.SupersededPurgeOptions.EnabledKey,
+        Ecr.Infrastructure.Persistence.SupersededPurgeOptions.DeleteEnabledKey,
+        Ecr.Infrastructure.Persistence.SupersededPurgeOptions.IncludeTraceKey,
+        Ecr.Infrastructure.Persistence.SupersededPurgeOptions.RebuildAfterKey,
     ];
 
     /// <summary>Ключі з переліком допустимих значень (без урахування регістру).</summary>

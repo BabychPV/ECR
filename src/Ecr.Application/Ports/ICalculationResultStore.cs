@@ -79,8 +79,27 @@ public interface ICalculationResultStore
     /// <c>jobs.calculationRunSupersededByNewer</c>, без винятку.
     /// </para>
     /// </remarks>
-    public Task SwitchCurrentRunAsync(
+    /// <returns>
+    /// Прогони, що цим викликом стали НЕактуальними (Q-17, рішення людини 28.10: у базі лишаються результати лише
+    /// актуального прогону). Для прогону, відмовленого як старішого за актуальний, — він сам. Порожньо — нікого.
+    /// Викликач після коміту передає їх у <see cref="PurgeSupersededRunsAsync"/>.
+    /// </returns>
+    public Task<IReadOnlyList<SupersededRun>> SwitchCurrentRunAsync(
         long calculationRunId, string modulesProfileJson, CancellationToken ct);
+
+    /// <summary>
+    /// Прибирає результати, кроки й входи прогонів, що перестали бути актуальними (Q-17, ADR «Deleting results of
+    /// superseded runs»). Рядки <c>calc.CalculationRun</c> лишаються.
+    /// </summary>
+    /// <param name="runs">Прогони з <see cref="SwitchCurrentRunAsync"/>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки рядків видалено (0, якщо прибирання вимкнено).</returns>
+    /// <remarks>
+    /// ⛔ Викликати ЛИШЕ ПІСЛЯ коміту перемикання: до коміту прогони ще актуальні для читачів. Помилка прибирання
+    /// прогін не валить (реалізація пише в журнал і повертає 0): решту доїдає нічна задача
+    /// <c>SupersededResultsSweepJob</c>. Інваріант: результати існують лише для прогонів <c>Current</c>/<c>Running</c>.
+    /// </remarks>
+    public Task<int> PurgeSupersededRunsAsync(IReadOnlyList<SupersededRun> runs, CancellationToken ct);
 
     /// <summary>
     /// Переносить у прогін <paramref name="calculationRunId"/> результати методологій, яких цей прогін
@@ -146,6 +165,12 @@ public interface ICalculationResultStore
     /// </remarks>
     public Task<CurrentRunProfile?> ReadCurrentRunProfileAsync(long documentId, int periodKey, CancellationToken ct);
 }
+
+/// <summary>Прогін, що перестав бути актуальним (Q-17): що саме прибирати з <c>calc.*</c>.</summary>
+/// <param name="RunId">Прогін.</param>
+/// <param name="PeriodKey">Партиція його рядків (<c>0</c> — прогін без періоду).</param>
+/// <param name="DocumentId">Документ прогону документа; <c>null</c> — прогін усього проєкту.</param>
+public sealed record SupersededRun(long RunId, int PeriodKey, long? DocumentId);
 
 /// <summary>Актуальний прогін документа й збережений профіль (D14).</summary>
 /// <param name="RunId">Прогін.</param>
