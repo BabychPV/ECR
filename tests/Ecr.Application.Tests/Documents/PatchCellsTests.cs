@@ -1,4 +1,4 @@
-using Ecr.Application.Common;
+﻿using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
@@ -1597,7 +1597,7 @@ public sealed class PatchCellsTests
         // `ProjectId`/`DocumentId`, а надсилався `TableInstanceId`. Розбір
         // давав нулі, і задача не робила нічого — а цей тест був зелений, бо
         // питав лише «чи поставили в чергу» (`A7-63`).
-        // ⚠ O1: злиттям за документо-періодом і автором — `doc{id}-p{period}-formula-u{user}`.
+        // ⚠ O1: злиттям за документом і автором — `doc{id}-formula-u{user}` (L2; період несе кожна комірка).
         await _jobs.Received(1).EnqueueCoalescedAsync<IFormulaRecalculationJob>(
             Arg.Is<string>(t => t.EndsWith("-formula-u9", StringComparison.Ordinal)),
             Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());

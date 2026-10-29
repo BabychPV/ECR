@@ -21,6 +21,12 @@ namespace Ecr.Infrastructure.Jobs;
 /// </remarks>
 public static class RecalculationDocumentLock
 {
+    /// <summary>
+    /// Спостерігач взяття лока для тестів (L2: «N періодів — одне взяття»); задається в async-контексті тесту, тож
+    /// паралельні тести його не бачать. У виробничому коді не задається ніколи.
+    /// </summary>
+    internal static readonly AsyncLocal<Action<long>?> AcquireObserver = new();
+
     /// <summary>Ресурс <c>sp_getapplock</c> для перерахунку документа.</summary>
     /// <param name="documentId">Документ.</param>
     /// <returns>Ім'я ресурсу.</returns>
@@ -124,6 +130,8 @@ public static class RecalculationDocumentLock
 
         var connectionString = db.Database.GetConnectionString()
             ?? throw new InvalidOperationException("Немає рядка з'єднання для лока документа.");
+
+        AcquireObserver.Value?.Invoke(documentId);
 
         return await SqlDistributedLock
                    .AcquireAsync(connectionString, Resource(documentId), timeout, ct)

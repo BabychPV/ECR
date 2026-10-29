@@ -6,7 +6,7 @@ import type { TemplateHeaderGroupDto } from '@/api/types';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
-import { LocalizedInput } from '@/shared/ui/LocalizedInput';
+import { GroupLabelInput } from './GroupLabelInput';
 import { showDone } from '@/shared/ui/notify';
 import {
   MaxGroupDepth,
@@ -86,8 +86,7 @@ export function ColumnGroupsDialog({
               data-group-code={group.code}
               data-group-depth={depth}
             >
-              <LocalizedInput
-                label={t('colgroups.label')}
+              <GroupLabelInput
                 value={group.label}
                 onChange={(next) => setDrafts((current) => relabel(current, group.code, next))}
               />

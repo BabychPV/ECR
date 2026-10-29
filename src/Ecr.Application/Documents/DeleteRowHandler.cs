@@ -540,7 +540,7 @@ public sealed class DeleteRowHandler(
                 DocumentId = instance.DocumentId,
                 TableInstanceId = instance.TableInstanceId,
                 PeriodKey = instance.PeriodKey,
-                Cells = seeds,
+                Cells = RecalculationSeed.Stamp(seeds, instance.PeriodKey, instance.TableInstanceId),
             },
             ct,
             createdByUserId: editorUserId);

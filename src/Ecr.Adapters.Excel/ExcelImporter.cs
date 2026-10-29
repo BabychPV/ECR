@@ -511,7 +511,13 @@ public sealed class ExcelImporter(
                 await jobs
                     .EnqueueCoalescedAsync<IFormulaRecalculationJob>(
                         FormulaRecalculationTarget.Of(documentId, plan.PeriodKey, createdByUserId: null),
-                        new { DocumentId = documentId, TableInstanceId = seedTableInstanceId, plan.PeriodKey, Cells = seeds },
+                        new
+                        {
+                            DocumentId = documentId,
+                            TableInstanceId = seedTableInstanceId,
+                            plan.PeriodKey,
+                            Cells = RecalculationSeed.Stamp(seeds, plan.PeriodKey, seedTableInstanceId),
+                        },
                         token)
                     .ConfigureAwait(false);
             }
@@ -521,7 +527,13 @@ public sealed class ExcelImporter(
                 await jobs
                     .EnqueueCoalescedAsync<IFormulaRecalculationJob>(
                         FormulaRecalculationTarget.Of(documentId, owner.PeriodKey, createdByUserId: null),
-                        new { DocumentId = documentId, owner.TableInstanceId, owner.PeriodKey, Cells = owner.Seeds },
+                        new
+                        {
+                            DocumentId = documentId,
+                            owner.TableInstanceId,
+                            owner.PeriodKey,
+                            Cells = RecalculationSeed.Stamp(owner.Seeds, owner.PeriodKey, owner.TableInstanceId),
+                        },
                         token)
                     .ConfigureAwait(false);
             }

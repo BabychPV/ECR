@@ -9385,6 +9385,9 @@ USING (VALUES
     ,(N'colgroups.fieldHint', N'en', N'Columns that share a group are shown under one header. Only neighbouring columns can share a group.', 1)
     ,(N'colgroups.none', N'en', N'No group', 1)
     -- COLL:ui-colgroups ── кінець секції ──
+    -- COLL:ui-colgroups-polish ── діалог груп колонок: поле поточної мови, решта мов згорнуто; ru/kz — порцією COLL:ui-colgroups-polish нижче ──
+    ,(N'colgroups.otherLanguages', N'en', N'Other languages', 1)
+    -- COLL:ui-colgroups-polish ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -24480,6 +24483,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-colgroups ── кінець секції ──
+-- COLL:ui-colgroups-polish ── ru/kz: діалог груп колонок, «Other languages»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'colgroups.otherLanguages', N'ru', N'Другие языки'),
+    (N'colgroups.otherLanguages', N'kz', N'Басқа тілдер')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-colgroups-polish ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

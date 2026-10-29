@@ -1,4 +1,4 @@
-// src/Ecr.Application/Ports/IBackgroundJobScheduler.cs
+﻿// src/Ecr.Application/Ports/IBackgroundJobScheduler.cs
 namespace Ecr.Application.Ports;
 
 /// <summary>
@@ -344,6 +344,11 @@ public interface IJobProgress
 /// клієнт не перечитує зрізи); <c>null</c> — інша задача, ще не завершена або число невідоме
 /// (AN-108 / P2-02, <c>FormulaRecalcOutcome</c>). Заповнює <c>GetJobStatusHandler</c>.
 /// </param>
+/// <param name="WrittenPeriods">
+/// L3: періоди (<c>yyyyMM</c>, за зростанням), де <c>Succeeded</c> перерахунок формул документа справді записав
+/// комірки (задача формул одна на документ, L2). <c>null</c> — невідомо (старий конверт, інша задача, нічого не
+/// записано): клієнт перечитує період правки, як раніше. Заповнює <c>GetJobStatusHandler</c>.
+/// </param>
 public sealed record JobStatus(
     string JobId,
     string State,
@@ -360,7 +365,8 @@ public sealed record JobStatus(
     int? CreatedByUserId = null,
     FanOutStatus? FanOut = null,
     string? EffectiveState = null,
-    int? WrittenCount = null);
+    int? WrittenCount = null,
+    IReadOnlyList<int>? WrittenPeriods = null);
 
 /// <summary>Ідентифікатор поточної задачі; його несе канал прогресу воркера.</summary>
 /// <remarks>Потрібен задачі, що розкладає роботу на дочірні, щоб позначити їх своїм <c>JobId</c>.</remarks>
@@ -466,13 +472,26 @@ public static class FormulaRecalculationTarget
     /// збереженні. Двоє редакторів одного документо-періоду — дві задачі, і лок
     /// документа серіалізує їх так само, як і раніше.
     /// </para>
+    /// <para>
+    /// ✎ L2 (recalc-latency): ціль тепер «документ × автор» (<c>doc{id}-formula[-u{user}]</c>) — ОДНА задача
+    /// формул на документ, що обходить усі зачеплені періоди під одним локом. <paramref name="periodKey"/>
+    /// лишено в сигнатурі, щоб не чіпати всіх постановників, але в ключ він більше не входить: період несе
+    /// кожна комірка масиву <c>cells</c> (<c>RecalculationSeed.PeriodKey</c>), а тіло задачі — лише запасний
+    /// період для комірок без позначки.
+    /// </para>
     /// </remarks>
     public static string Of(long documentId, int periodKey, int? createdByUserId)
+        => OfDocument(documentId, createdByUserId);
+
+    /// <summary>Ціль «документ × автор»: <c>doc{id}-formula[-u{user}]</c>.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="createdByUserId">Автор постановки; <c>null</c> — системна.</param>
+    public static string OfDocument(long documentId, int? createdByUserId)
         => createdByUserId is { } user
             ? string.Create(
-                System.Globalization.CultureInfo.InvariantCulture, $"doc{documentId}-p{periodKey}-formula-u{user}")
+                System.Globalization.CultureInfo.InvariantCulture, $"doc{documentId}-formula-u{user}")
             : string.Create(
-                System.Globalization.CultureInfo.InvariantCulture, $"doc{documentId}-p{periodKey}-formula");
+                System.Globalization.CultureInfo.InvariantCulture, $"doc{documentId}-formula");
 }
 
 /// <summary>Маркер задачі експорту документа у <c>.xlsx</c>.</summary>

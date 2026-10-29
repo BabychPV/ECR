@@ -209,5 +209,35 @@ public sealed class GetJobStatusHandlerTests
         Assert.Equal("Перерахунок методологій.", status!.Message);
     }
 
+    /// <summary>L3: задача формул документа віддає записані періоди; без параметра - null (клієнт: період правки).</summary>
+    [Theory]
+    [InlineData("202603,202605", new[] { 202603, 202605 })]
+    [InlineData(null, null)]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Задача_формул_віддає_записані_періоди_а_без_параметра_null(string? periods, int[]? expected)
+    {
+        const string FormulaJobId = "job-formula";
+        var p = new Dictionary<string, string> { [FormulaRecalcOutcome.WrittenParam] = "3" };
+        if (periods is not null)
+        {
+            p[FormulaRecalcOutcome.PeriodsParam] = periods;
+        }
+
+        _jobs.GetStatusAsync(FormulaJobId, Arg.Any<CancellationToken>())
+            .Returns(new JobStatus(
+                FormulaJobId, "Succeeded", 100,
+                JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(FormulaRecalcOutcome.DoneKey, p)), null));
+        _user.UserId.Returns(Author);
+        _user.Language.Returns("en");
+        _access.BuildProfileAsync(Author, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = Author }.Build());
+        _jobs.GetCreatedByUserIdAsync(FormulaJobId, Arg.Any<CancellationToken>()).Returns(Author);
+
+        var status = await Handler().HandleAsync(FormulaJobId, CancellationToken.None);
+
+        Assert.Equal(3, status!.WrittenCount);
+        Assert.Equal(expected, status.WrittenPeriods?.ToArray());
+    }
+
     private GetJobStatusHandler Handler() => new(_jobs, _access, _user, _catalog);
 }

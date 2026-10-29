@@ -9,7 +9,7 @@ import { MoreConflictsExtension } from '@/api/types';
 // `RecalculationPollMs`.
 import { outcomeOf, pollInterval, type JobOutcome } from '@/features/workflow/jobFollow';
 import { formatTime } from '@/shared/format';
-import { invalidateSlices } from './sliceCache';
+import { invalidateSlicesForPeriods } from './sliceCache';
 import { applyPatchLocally, patchCells, refreshStaleness } from './cellPatchRequest';
 
 // Запит патча й застосування до кешу — у `cellPatchRequest.ts` (`D-132`); реекспорт для сітки й тестів.
@@ -80,7 +80,12 @@ function takeRecalculation(jobId: string, documentId: number, periodKey: number)
  * автозбереження - найдорожчий наслідок PATCH. `null`/`undefined` (невідомо, старий сервер) - як раніше.
  * Невраховані старіші задачі того самого документа (слідкувач перейшов з них на цю) теж змушують перечитати.
  *
+ * ⛔ L3: задача формул одна на ДОКУМЕНТ і пише в кілька періодів. `writtenPeriods` (непорожній) - зрізи САМЕ цих
+ * періодів застарівають (а не лише періоду правки); період правки, куди нічого не записано, не перечитується.
+ * Відсутній/порожній (старий сервер, старий конверт) - невідомо: перечитується період правки, як раніше.
+ *
  * @param writtenCount `JobStatus.writtenCount` завершеної задачі.
+ * @param writtenPeriods `JobStatus.writtenPeriods` завершеної задачі (`yyyyMM`).
  */
 export function settleRecalculation(
   queryClient: QueryClient,
@@ -88,6 +93,7 @@ export function settleRecalculation(
   documentId: number,
   periodKey: number,
   writtenCount?: number | null,
+  writtenPeriods?: readonly number[] | null,
 ): boolean {
   const previous = settledJobs.get(jobId);
   if (previous === 'refetched') return false;
@@ -103,7 +109,12 @@ export function settleRecalculation(
     if (oldest.done === true) break;
     settledJobs.delete(oldest.value);
   }
-  if (!nothingWritten) void invalidateSlices(queryClient, { documentId, periodKey });
+  if (!nothingWritten) {
+    const known = writtenPeriods !== undefined && writtenPeriods !== null && writtenPeriods.length > 0;
+    // Невраховані старіші задачі (olderPending) знають про період правки лише те, що він міг змінитися.
+    const periods = known ? (olderPending ? [...writtenPeriods, periodKey] : writtenPeriods) : [periodKey];
+    void invalidateSlicesForPeriods(queryClient, documentId, periods);
+  }
   return true;
 }
 
@@ -199,7 +210,7 @@ export function followRecalculation(
         if (follower.jobId !== current) continue;
         if (pollInterval(job.state) === false) {
           settled = true;
-          settleRecalculation(queryClient, current, documentId, periodKey, job.writtenCount);
+          settleRecalculation(queryClient, current, documentId, periodKey, job.writtenCount, job.writtenPeriods);
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, RecalculationPollMs));
@@ -406,6 +417,9 @@ interface RecalculationStatus {
    * `null` — ще йде або невідомо.
    */
   writtenCount: number | null;
+
+  /** Періоди (`yyyyMM`), де перерахунок записав комірки (`JobStatus.writtenPeriods`, L3); `null` - невідомо. */
+  writtenPeriods: number[] | null;
 }
 
 /**
@@ -501,6 +515,7 @@ export function useRecalculationStatus(jobId: string | null): RecalculationStatu
     outcome,
     finishedAt: shown === null ? null : formatTime(shown),
     writtenCount: job.data?.writtenCount ?? null,
+    writtenPeriods: job.data?.writtenPeriods ?? null,
   };
 }
 
