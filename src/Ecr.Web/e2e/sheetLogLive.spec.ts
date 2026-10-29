@@ -97,7 +97,16 @@ test.describe('sheetLogLive: History = журнал аркуша на реаль
 
     const admin = await signedIn(browser, Admin);
     try {
+      // ⛔ Після відхилення аркуш лишається Rejected, а Reopen з Rejected не діє: без цього кроку стенд зберігає
+      // чужий стан періоду, і `submissionTargetLive` не знаходить двох періодів з однаковим станом. Rejected ->
+      // повторне подання -> Reopen -> Draft (як у `returnedToMeLive`).
+      await admin.request.post(`/api/v1/documents/${DocumentId}/submit`, {
+        data: { sheetDefId, periodKey: Number(PeriodKey), acknowledgeWarnings: true },
+      });
       await reopenToDraft(admin.request, sheetDefId, 'e2e: sheetLogLive, повернення базової лінії');
+      const state = await admin.request.get(`/api/v1/documents/${DocumentId}?periodKey=${PeriodKey}`);
+      const sheetStates = ((await state.json()) as { sheetStates?: Record<string, string> }).sheetStates ?? {};
+      expect(Object.values(sheetStates), 'аркуші стенда після sheetLogLive мають бути не Rejected').not.toContain('Rejected');
     } finally {
       await admin.close();
     }
