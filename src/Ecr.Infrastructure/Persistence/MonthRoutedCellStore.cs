@@ -147,37 +147,71 @@ public sealed class MonthRoutedCellStore(
         ArgumentNullException.ThrowIfNull(tableDefIds);
         ArgumentNullException.ThrowIfNull(anchorPeriods);
 
-        return from instance in db.TableInstances.AsNoTracking()
-               where instance.DocumentId == documentId
-                     && ownerPeriods.Contains(instance.PeriodKeyValue)
-                     && tableDefIds.Contains(instance.TableDefId)
-               join row in db.TableRows.AsNoTracking().Where(r => ownerPeriods.Contains(r.PeriodKeyValue) && !r.IsDeleted)
-                   on new { P = instance.PeriodKeyValue, I = instance.Id }
-                   equals new { P = row.PeriodKeyValue, I = row.TableInstanceId }
-               join cell in db.CellValues.AsNoTracking()
-                       .Where(c => ownerPeriods.Contains(c.PeriodKeyValue) && !c.IsCalculated)
-                   on new { P = row.PeriodKeyValue, R = row.Id }
-                   equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
-               where anchorPeriods.Contains(cell.PeriodKeyValue)
-                     || db.ColumnDefs.Any(column => column.Id == cell.ColumnDefId
-                                                    && column.IsMonthColumn
-                                                    && column.MonthNumber == cell.PeriodKeyValue % 100)
-               select new MonthOwnerCellRow
-               {
-                   OwnerPeriodKey = cell.PeriodKeyValue,
-                   RowKey = row.RowKeyValue,
-                   ColumnDefId = cell.ColumnDefId,
-                   TableDefId = cell.TableDefId,
-                   ValueString = cell.ValueString,
-                   ValueNumeric = cell.ValueNumeric,
-                   ValueDate = cell.ValueDate,
-                   ValueBool = cell.ValueBool,
-                   ValueRegistryEntryId = cell.ValueRegistryEntryId,
-                   ValueUnitId = cell.ValueUnitId,
-                   IsEmpty = cell.IsEmpty,
-               };
-    }
+        // ⛔ L6 перф (замір на копії Land, правка комірки січня у звіті S07: 12 читачів «місяці в колонках»).
+        // Колишній відбір `anchor OR EXISTS(ColumnDef …)` на кожній комірці ВСІХ таблиць × 12 періодів SQL Server
+        // виконував через Table Spool (~111 тис. логічних читань робочої таблиці, 125 тис. разом, 150–3400 мс на запит,
+        // паралельний план DOP 12 — під навантаженням машини хвіст найповільнішого потоку). Тепер дві гілки UNION ALL:
+        // якір — усі введені комірки періоду-якоря; решта — ЗВИЧАЙНЕ з'єднання за PK `cfg.ColumnDef` (місячна колонка
+        // лише в періоді свого місяця). Гілки не перетинаються (друга виключає якорі), тож рядки ті самі, що й з OR
+        // (`OwnerCellsQuery…EquivalenceTests`), а читань ~12 тис. і план послідовний.
+        var instancesRows =
+            from instance in db.TableInstances.AsNoTracking()
+            where instance.DocumentId == documentId
+                  && ownerPeriods.Contains(instance.PeriodKeyValue)
+                  && tableDefIds.Contains(instance.TableDefId)
+            join row in db.TableRows.AsNoTracking().Where(r => ownerPeriods.Contains(r.PeriodKeyValue) && !r.IsDeleted)
+                on new { P = instance.PeriodKeyValue, I = instance.Id }
+                equals new { P = row.PeriodKeyValue, I = row.TableInstanceId }
+            select new { row.PeriodKeyValue, row.Id, row.RowKeyValue };
 
+        var inputCells = db.CellValues.AsNoTracking()
+            .Where(c => ownerPeriods.Contains(c.PeriodKeyValue) && !c.IsCalculated);
+
+        var anchorBranch =
+            from row in instancesRows
+            join cell in inputCells.Where(c => anchorPeriods.Contains(c.PeriodKeyValue))
+                on new { P = row.PeriodKeyValue, R = row.Id }
+                equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
+            select new MonthOwnerCellRow
+            {
+                OwnerPeriodKey = cell.PeriodKeyValue,
+                RowKey = row.RowKeyValue,
+                ColumnDefId = cell.ColumnDefId,
+                TableDefId = cell.TableDefId,
+                ValueString = cell.ValueString,
+                ValueNumeric = cell.ValueNumeric,
+                ValueDate = cell.ValueDate,
+                ValueBool = cell.ValueBool,
+                ValueRegistryEntryId = cell.ValueRegistryEntryId,
+                ValueUnitId = cell.ValueUnitId,
+                IsEmpty = cell.IsEmpty,
+            };
+
+        var monthBranch =
+            from row in instancesRows
+            join cell in inputCells.Where(c => !anchorPeriods.Contains(c.PeriodKeyValue))
+                on new { P = row.PeriodKeyValue, R = row.Id }
+                equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
+            join column in db.ColumnDefs.AsNoTracking()
+                on cell.ColumnDefId equals column.Id
+            where column.IsMonthColumn && column.MonthNumber == cell.PeriodKeyValue % 100
+            select new MonthOwnerCellRow
+            {
+                OwnerPeriodKey = cell.PeriodKeyValue,
+                RowKey = row.RowKeyValue,
+                ColumnDefId = cell.ColumnDefId,
+                TableDefId = cell.TableDefId,
+                ValueString = cell.ValueString,
+                ValueNumeric = cell.ValueNumeric,
+                ValueDate = cell.ValueDate,
+                ValueBool = cell.ValueBool,
+                ValueRegistryEntryId = cell.ValueRegistryEntryId,
+                ValueUnitId = cell.ValueUnitId,
+                IsEmpty = cell.IsEmpty,
+            };
+
+        return anchorBranch.Concat(monthBranch);
+    }
     private async Task<IReadOnlyList<CellRecord>> RouteOneAsync(
         long tableInstanceId, IReadOnlyList<CellRecord> physical, PeriodKey? period, CancellationToken ct)
     {
