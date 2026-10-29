@@ -249,8 +249,7 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
 
       <div className="ecr-chat-filter" role="group" aria-label={t('tableChat.periodFilter')}>
         <Button
-          size="compact-xs"
-          radius="xl"
+          size="xs"
           variant={filter === 'all' ? 'light' : 'default'}
           aria-pressed={filter === 'all'}
           onClick={() => setFilter('all')}
@@ -259,8 +258,7 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
           {t('tableChat.allPeriods')}
         </Button>
         <Button
-          size="compact-xs"
-          radius="xl"
+          size="xs"
           variant={filter === 'period' ? 'light' : 'default'}
           aria-pressed={filter === 'period'}
           onClick={() => setFilter('period')}
@@ -308,7 +306,7 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
 
         {state.status === 'ready' && state.hasMoreBefore && (
           <div className="ecr-chat-older">
-            <Button size="compact-xs" variant="default" loading={state.loadingOlder} onClick={loadOlder} data-chat-older="">
+            <Button size="xs" variant="default" loading={state.loadingOlder} onClick={loadOlder} data-chat-older="">
               {t('tableChat.loadOlder')}
             </Button>
           </div>

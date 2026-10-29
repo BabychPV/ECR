@@ -144,7 +144,7 @@ export function ChatMessageItem({ message, nowMs, unread, onSave, onRemove }: Ch
             />
             <Group gap="xs" mt="xs">
               <Button
-                size="compact-xs"
+                size="xs"
                 loading={loading}
                 disabled={draft.trim().length === 0 || draft.length > MaxBodyLength}
                 onClick={() => void save()}
@@ -152,7 +152,7 @@ export function ChatMessageItem({ message, nowMs, unread, onSave, onRemove }: Ch
               >
                 {t('common.save')}
               </Button>
-              <Button size="compact-xs" variant="default" onClick={() => setMode('view')}>
+              <Button size="xs" variant="default" onClick={() => setMode('view')}>
                 {t('common.cancel')}
               </Button>
             </Group>
@@ -163,7 +163,7 @@ export function ChatMessageItem({ message, nowMs, unread, onSave, onRemove }: Ch
           <Group gap="xs" className="ecr-chat-actions">
             {editable && (
               <Button
-                size="compact-xs"
+                size="xs"
                 variant="subtle"
                 color="gray"
                 c="dimmed"
@@ -178,7 +178,7 @@ export function ChatMessageItem({ message, nowMs, unread, onSave, onRemove }: Ch
             )}
             {deletable && (
               <Button
-                size="compact-xs"
+                size="xs"
                 variant="subtle"
                 color="statusError"
                 onClick={() => setMode('confirm')}
@@ -193,10 +193,10 @@ export function ChatMessageItem({ message, nowMs, unread, onSave, onRemove }: Ch
         {mode === 'confirm' && (
           <Group gap="xs" className="ecr-chat-actions" role="group" aria-label={t('tableChat.deleteConfirm')}>
             <Text size="xs">{t('tableChat.deleteConfirm')}</Text>
-            <Button size="compact-xs" color="statusError" loading={loading} onClick={() => void remove()} data-chat-delete-yes="">
+            <Button size="xs" color="statusError" loading={loading} onClick={() => void remove()} data-chat-delete-yes="">
               {t('tableChat.delete')}
             </Button>
-            <Button size="compact-xs" variant="default" onClick={() => setMode('view')}>
+            <Button size="xs" variant="default" onClick={() => setMode('view')}>
               {t('common.cancel')}
             </Button>
           </Group>
