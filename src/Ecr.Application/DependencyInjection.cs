@@ -269,6 +269,11 @@ public static class DependencyInjection
         services.AddScoped<Registries.UpsertRegistryEntryHandler>();
         services.AddScoped<Registries.GetRegistryEntryHandler>();
         services.AddScoped<Registries.SetEntryValidityHandler>();
+        services.AddScoped<Registries.Hierarchy.GetRegistryHierarchyHandler>();
+        services.AddScoped<Registries.Hierarchy.SaveRegistryHierarchyHandler>();
+        services.AddScoped<Registries.Hierarchy.GetRegistryTreeHandler>();
+        services.AddScoped<Registries.Hierarchy.MoveRegistryEntryHandler>();
+        services.AddScoped<Registries.Hierarchy.RetireRegistryEntryHandler>();
         services.AddScoped<Registries.SwitchRegistrySourceHandler>();
         services.AddScoped<Registries.DeleteRegistryEntryHandler>();
         services.AddScoped<Preferences.ListUserPreferencesHandler>();
