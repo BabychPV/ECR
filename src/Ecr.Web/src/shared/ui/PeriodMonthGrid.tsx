@@ -28,6 +28,7 @@ export default function PeriodMonthGrid({
   periodKind,
   value,
   states,
+  allowed,
   anchor,
   onPick,
   onClose,
@@ -38,6 +39,8 @@ export default function PeriodMonthGrid({
   periodKind: string | undefined;
   value: number | null;
   states: ReadonlyMap<number, PeriodStateSummary> | undefined;
+  /** Допустимі періоди проєкту; решта місяців вимкнена. undefined - усі. */
+  allowed?: ReadonlySet<number> | undefined;
   /** Обгортка контрола: клік поза нею закриває сітку. */
   anchor: RefObject<HTMLElement | null>;
   onPick: (periodKey: number) => void;
@@ -60,19 +63,19 @@ export default function PeriodMonthGrid({
 
   useEffect(() => {
     if (!focusOnOpen) return;
-    const buttons = Array.from(grid.current?.querySelectorAll<HTMLButtonElement>('button') ?? []);
+    const buttons = Array.from(grid.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
     (buttons.find((button) => button.getAttribute('aria-current') === 'true') ?? buttons[0])?.focus();
     // ⚠ Лише при відкритті: зміна значення стрілкою не має висмикувати фокус.
   }, []);
 
   const focusAt = (index: number): void => {
-    const buttons = grid.current?.querySelectorAll<HTMLButtonElement>('button');
+    const buttons = grid.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');
     if (buttons === undefined || buttons.length === 0) return;
     buttons[(index + buttons.length) % buttons.length]?.focus();
   };
 
   const handleKey = (event: KeyboardEvent<HTMLDivElement>): void => {
-    const buttons = Array.from(grid.current?.querySelectorAll<HTMLButtonElement>('button') ?? []);
+    const buttons = Array.from(grid.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
     const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
     const move: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: Columns, ArrowUp: -Columns };
 
@@ -114,6 +117,7 @@ export default function PeriodMonthGrid({
               key={key}
               type="button"
               aria-current={key === value ? 'true' : 'false'}
+              disabled={allowed !== undefined && !allowed.has(key)}
               aria-label={summary === undefined ? full : `${full}, ${periodStateText(summary)}`}
               title={summary === undefined ? undefined : periodStateText(summary)}
               onClick={() => onPick(key)}

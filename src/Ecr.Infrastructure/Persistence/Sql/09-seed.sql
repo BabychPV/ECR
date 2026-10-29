@@ -2429,6 +2429,7 @@ USING (VALUES
     -- КАЛЕНДАРНИЙ місяць, а не periodKey ± 1 (R-A6): після 202512 йде 202601.
     (N'period.previous',                 N'en', N'Previous period', 1),
     (N'period.next',                     N'en', N'Next period', 1),
+    (N'document.periodGoTo',             N'en', N'Go to {period}', 1),
     (N'documents.sheets',                N'en', N'Sheets', 1),
     (N'documents.state',                 N'en', N'State', 1),
     (N'documents.empty',                 N'en', N'No documents for this period', 1),
@@ -10474,6 +10475,15 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.addRule', N'ru', N'Добавить правило'),
     (N'methodologies.ruleSaved', N'ru', N'Правило сохранено.'),
     (N'methodologies.matchJson', N'ru', N'Предикат')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.periodGoTo', N'ru', N'Перейти к {period}'),
+    (N'document.periodGoTo', N'kz', N'{period} кезеңіне өту')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

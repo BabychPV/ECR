@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useId, useRef, useState, type JSX, type KeyboardEvent } from 'react';
+import { lazy, Suspense, useCallback, useId, useMemo, useRef, useState, type JSX, type KeyboardEvent } from 'react';
 import { Text, TextInput, type MantineSize } from '@mantine/core';
 import { formatPeriodKey } from '@/shared/format';
 import { t } from '@/shared/i18n';
@@ -193,6 +193,24 @@ interface PeriodPickerProps {
    * стану, як у формах.
    */
   readonly projectIds?: readonly number[] | undefined;
+  /**
+   * Допустимі `periodKey` проєкту (календар проєкту, `PeriodCalendarDto.periods`). З ним стрілки
+   * ходять по цьому переліку й вимикаються на першому/останньому періоді, сітка вимикає решту
+   * місяців, а набраний ключ поза переліком не йде в `onChange` (сервер відповів би `ECR-PRD-0422`).
+   * Без пропа - календарна поведінка, як була.
+   */
+  readonly periods?: readonly number[] | undefined;
+}
+
+/** Сусід у відсортованому переліку допустимих періодів: найближчий менший/більший за `from`. */
+export function neighbourIn(periods: readonly number[], from: number, delta: -1 | 1): number | null {
+  let best: number | null = null;
+  for (const key of periods) {
+    if (delta === 1 && key > from && (best === null || key < best)) best = key;
+    if (delta === -1 && key < from && (best === null || key > best)) best = key;
+  }
+
+  return best;
 }
 
 /**
@@ -216,6 +234,7 @@ export function PeriodPicker({
   id,
   periodKind,
   projectIds,
+  periods,
 }: PeriodPickerProps): JSX.Element {
   /*
    * ⛔ Незавершений набір живе ЛИШЕ тут, у полі, і не йде в `onChange`: див.
@@ -233,7 +252,9 @@ export function PeriodPicker({
   const field = useFieldDraft<string>(external);
   const draft = field.value;
   const local = /^\d{6}$/.test(draft) ? Number(draft) : null;
-  const complete = local !== null && isCompletePeriodKey(local);
+  const allowed = useMemo(() => (periods === undefined ? undefined : new Set(periods)), [periods]);
+  const isAllowed = (key: number): boolean => allowed === undefined || allowed.has(key);
+  const complete = local !== null && isCompletePeriodKey(local) && isAllowed(local);
   // ⚠ Людина друкує ключ: поле показує набране, а не назву (див. опис компонента).
   const [typing, setTyping] = useState(false);
   const [open, setOpen] = useState<false | 'field' | 'grid'>(false);
@@ -250,7 +271,11 @@ export function PeriodPicker({
   // ⚠ Місячна (і невідома) періодичність — той самий календарний крок, що й
   // був; решта — номер у межах року (`X-34`).
   const step = (from: number, delta: -1 | 1): number | null =>
-    perYear === LastMonth ? shiftPeriod(from, delta) : shiftSequence(from, delta, perYear);
+    periods !== undefined
+      ? neighbourIn(periods, from, delta)
+      : perYear === LastMonth
+        ? shiftPeriod(from, delta)
+        : shiftSequence(from, delta, perYear);
   const prevValue = current === null ? null : step(current, -1);
   const nextValue = current === null ? null : step(current, 1);
   // ⚠ Поки набір неповний, назва попереднього періоду брехала б — тоді поле показує набране.
@@ -274,7 +299,7 @@ export function PeriodPicker({
 
     if (next === '') {
       onChange(null);
-    } else if (/^\d{6}$/.test(next) && isCompletePeriodKey(Number(next))) {
+    } else if (/^\d{6}$/.test(next) && isCompletePeriodKey(Number(next)) && isAllowed(Number(next))) {
       onChange(Number(next));
     }
   };
@@ -396,6 +421,7 @@ export function PeriodPicker({
             perYear={perYear}
             periodKind={periodKind}
             value={current}
+            allowed={allowed}
             states={states}
             anchor={anchor}
             focusOnOpen={open === 'grid'}
