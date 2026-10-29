@@ -126,13 +126,24 @@ describe('the header button', () => {
     expect(screen.queryByRole('button')).toBeNull();
     unmount();
 
+    // A page test that stubs every unknown route with `null` must not crash the page (the button renders nothing).
+    summary = () => new Response('null', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    const nullBody = render(
+      <Shell>
+        <TableChatButton documentId={7} />
+      </Shell>,
+    );
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('button')).toBeNull();
+    nullBody.unmount();
+
     summary = () => summaryOf([], false);
     render(
       <Shell>
         <TableChatButton documentId={7} />
       </Shell>,
     );
-    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(3));
     expect(screen.queryByRole('button')).toBeNull();
   });
 

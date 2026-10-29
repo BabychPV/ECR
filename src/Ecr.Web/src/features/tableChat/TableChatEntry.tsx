@@ -41,7 +41,7 @@ export function TableChatButton({ documentId }: { readonly documentId: number })
 
   // ⚠ A body that is not a summary (a stand without the route answers with something else) is "no chat".
   const data = summary.data;
-  const items = data !== undefined && Array.isArray(data.items) ? data.items : undefined;
+  const items = data != null && Array.isArray(data.items) ? data.items : undefined;
 
   // The badges in the table titles read what the button published.
   useEffect(() => {
@@ -50,7 +50,7 @@ export function TableChatButton({ documentId }: { readonly documentId: number })
     return () => publishSummary(documentId, null);
   }, [documentId, items]);
 
-  if (data === undefined || items === undefined) return null;
+  if (data == null || items === undefined) return null;
   if (!data.canWrite && items.length === 0) return null;
 
   const unread = items.reduce((sum, item) => sum + item.unread, 0);
