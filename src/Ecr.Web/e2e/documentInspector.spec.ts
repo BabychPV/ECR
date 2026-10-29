@@ -60,6 +60,12 @@ test.describe('інспектор документа', () => {
     await expect(page).toHaveURL(/[?&]panel=history/);
     await expect(aside.locator('[data-inspector-address]')).toBeVisible();
 
+    // Вибір комірки не підміняє вміст: History лишається журналом аркуша, «This cell» доступний і веде до історії комірки.
+    await expect(aside.getByRole('radio', { name: 'Sheet log' })).toBeChecked();
+    await expect(aside.getByRole('radio', { name: 'This cell' })).toBeEnabled();
+    await aside.locator('label', { hasText: 'This cell' }).click();
+    await expect(aside.locator('[data-inspector-scope]')).toContainText(/^Cell: /);
+
     await aside.getByRole('tab').nth(2).click();
     await expect(aside.locator('[data-inspector-info]')).toBeVisible();
   });
