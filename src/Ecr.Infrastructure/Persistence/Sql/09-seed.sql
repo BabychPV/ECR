@@ -9406,6 +9406,43 @@ USING (VALUES
     ,(N'err.ECR-ACCS-0403.discussionPeriodForbidden', N'en', N'Your access does not cover this period, so you cannot write in this chat for it.', 1)
     ,(N'err.ECR-PRD-0409.projectArchivedNoChat', N'en', N'The project of document {documentId} is archived: its table chats are read-only.', 1)
     -- TC:server ── кінець секції ──
+    -- COLL:ui-tablechat ── en: чат таблиці документа, клієнт (кнопка «Discussion», бейдж у назві таблиці, права панель, «My tasks»); ru/kz — порцією COLL:ui-tablechat нижче ──
+    ,(N'tableChat.button', N'en', N'Discussion', 1)
+    ,(N'tableChat.buttonUnread', N'en', N'Discussion, {n} unread', 1)
+    ,(N'tableChat.buttonTitle', N'en', N'Discussion of the table you are working in', 1)
+    ,(N'tableChat.buttonMentioned', N'en', N'Discussion — you were mentioned', 1)
+    ,(N'tableChat.panelTitle', N'en', N'Discussion', 1)
+    ,(N'tableChat.close', N'en', N'Close discussion', 1)
+    ,(N'tableChat.periodFilter', N'en', N'Period filter', 1)
+    ,(N'tableChat.allPeriods', N'en', N'All periods', 1)
+    ,(N'tableChat.thisPeriod', N'en', N'{period} only', 1)
+    ,(N'tableChat.messages', N'en', N'Messages', 1)
+    ,(N'tableChat.loading', N'en', N'Loading messages…', 1)
+    ,(N'tableChat.empty', N'en', N'No messages yet', 1)
+    ,(N'tableChat.emptyHint', N'en', N'Start the discussion of this table. Everyone who can see the table can read it.', 1)
+    ,(N'tableChat.emptyPeriod', N'en', N'No messages in this period', 1)
+    ,(N'tableChat.emptyPeriodHint', N'en', N'Switch to all periods to see earlier messages.', 1)
+    ,(N'tableChat.loadOlder', N'en', N'Load older messages', 1)
+    ,(N'tableChat.edited', N'en', N'edited', 1)
+    ,(N'tableChat.new', N'en', N'new', 1)
+    ,(N'tableChat.deleted', N'en', N'Message deleted', 1)
+    ,(N'tableChat.edit', N'en', N'Edit', 1)
+    ,(N'tableChat.editLabel', N'en', N'Edit message', 1)
+    ,(N'tableChat.delete', N'en', N'Delete', 1)
+    ,(N'tableChat.deleteConfirm', N'en', N'Delete this message?', 1)
+    ,(N'tableChat.composerLabel', N'en', N'Message · {period}', 1)
+    ,(N'tableChat.composerHint', N'en', N'Ctrl+Enter to send · plain text · up to {max} characters', 1)
+    ,(N'tableChat.send', N'en', N'Send', 1)
+    ,(N'tableChat.tooLong', N'en', N'The message is longer than {max} characters.', 1)
+    ,(N'tableChat.mentionList', N'en', N'Mention suggestions', 1)
+    ,(N'tableChat.readOnly', N'en', N'You can read this discussion but cannot write in it.', 1)
+    ,(N'tableChat.badgeLabel', N'en', N'Open discussion: {total} messages, {unread} new', 1)
+    ,(N'tableChat.badgeNew', N'en', N'{total} · {unread} new', 1)
+    ,(N'tableChat.tasksTitle', N'en', N'You were mentioned', 1)
+    ,(N'tableChat.taskLine', N'en', N'{author} · {table} · {period}', 1)
+    ,(N'tableChat.taskOpen', N'en', N'Open discussion', 1)
+    ,(N'tableChat.tasksError', N'en', N'Could not load mentions.', 1)
+    -- COLL:ui-tablechat ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -24547,6 +24584,85 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- TC:server ── кінець секції ──
+-- COLL:ui-tablechat ── ru/kz: чат таблиці документа, клієнт; власна порція ──
+-- ⚠ kz — робочий переклад, на звірку термінологу.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'tableChat.button', N'ru', N'Обсуждение'),
+    (N'tableChat.button', N'kz', N'Талқылау'),
+    (N'tableChat.buttonUnread', N'ru', N'Обсуждение, непрочитанных: {n}'),
+    (N'tableChat.buttonUnread', N'kz', N'Талқылау, оқылмаған: {n}'),
+    (N'tableChat.buttonTitle', N'ru', N'Обсуждение таблицы, в которой вы работаете'),
+    (N'tableChat.buttonTitle', N'kz', N'Сіз жұмыс істеп жатқан кестенің талқылауы'),
+    (N'tableChat.buttonMentioned', N'ru', N'Обсуждение — вас упомянули'),
+    (N'tableChat.buttonMentioned', N'kz', N'Талқылау — сізді атап өтті'),
+    (N'tableChat.panelTitle', N'ru', N'Обсуждение'),
+    (N'tableChat.panelTitle', N'kz', N'Талқылау'),
+    (N'tableChat.close', N'ru', N'Закрыть обсуждение'),
+    (N'tableChat.close', N'kz', N'Талқылауды жабу'),
+    (N'tableChat.periodFilter', N'ru', N'Фильтр по периоду'),
+    (N'tableChat.periodFilter', N'kz', N'Кезең сүзгісі'),
+    (N'tableChat.allPeriods', N'ru', N'Все периоды'),
+    (N'tableChat.allPeriods', N'kz', N'Барлық кезеңдер'),
+    (N'tableChat.thisPeriod', N'ru', N'Только {period}'),
+    (N'tableChat.thisPeriod', N'kz', N'Тек {period}'),
+    (N'tableChat.messages', N'ru', N'Сообщения'),
+    (N'tableChat.messages', N'kz', N'Хабарламалар'),
+    (N'tableChat.loading', N'ru', N'Загрузка сообщений…'),
+    (N'tableChat.loading', N'kz', N'Хабарламалар жүктелуде…'),
+    (N'tableChat.empty', N'ru', N'Сообщений пока нет'),
+    (N'tableChat.empty', N'kz', N'Әзірге хабарлама жоқ'),
+    (N'tableChat.emptyHint', N'ru', N'Начните обсуждение этой таблицы. Его прочтёт каждый, кто видит таблицу.'),
+    (N'tableChat.emptyHint', N'kz', N'Осы кестенің талқылауын бастаңыз. Оны кестені көретін әрбір адам оқи алады.'),
+    (N'tableChat.emptyPeriod', N'ru', N'В этом периоде сообщений нет'),
+    (N'tableChat.emptyPeriod', N'kz', N'Бұл кезеңде хабарлама жоқ'),
+    (N'tableChat.emptyPeriodHint', N'ru', N'Переключитесь на все периоды, чтобы увидеть прежние сообщения.'),
+    (N'tableChat.emptyPeriodHint', N'kz', N'Бұрынғы хабарламаларды көру үшін барлық кезеңдерге ауысыңыз.'),
+    (N'tableChat.loadOlder', N'ru', N'Показать более ранние сообщения'),
+    (N'tableChat.loadOlder', N'kz', N'Бұрынғы хабарламаларды көрсету'),
+    (N'tableChat.edited', N'ru', N'изменено'),
+    (N'tableChat.edited', N'kz', N'өзгертілген'),
+    (N'tableChat.new', N'ru', N'новое'),
+    (N'tableChat.new', N'kz', N'жаңа'),
+    (N'tableChat.deleted', N'ru', N'Сообщение удалено'),
+    (N'tableChat.deleted', N'kz', N'Хабарлама жойылды'),
+    (N'tableChat.edit', N'ru', N'Изменить'),
+    (N'tableChat.edit', N'kz', N'Өзгерту'),
+    (N'tableChat.editLabel', N'ru', N'Изменить сообщение'),
+    (N'tableChat.editLabel', N'kz', N'Хабарламаны өзгерту'),
+    (N'tableChat.delete', N'ru', N'Удалить'),
+    (N'tableChat.delete', N'kz', N'Жою'),
+    (N'tableChat.deleteConfirm', N'ru', N'Удалить это сообщение?'),
+    (N'tableChat.deleteConfirm', N'kz', N'Бұл хабарламаны жою керек пе?'),
+    (N'tableChat.composerLabel', N'ru', N'Сообщение · {period}'),
+    (N'tableChat.composerLabel', N'kz', N'Хабарлама · {period}'),
+    (N'tableChat.composerHint', N'ru', N'Ctrl+Enter — отправить · простой текст · до {max} символов'),
+    (N'tableChat.composerHint', N'kz', N'Ctrl+Enter — жіберу · қарапайым мәтін · {max} таңбаға дейін'),
+    (N'tableChat.send', N'ru', N'Отправить'),
+    (N'tableChat.send', N'kz', N'Жіберу'),
+    (N'tableChat.tooLong', N'ru', N'Сообщение длиннее {max} символов.'),
+    (N'tableChat.tooLong', N'kz', N'Хабарлама {max} таңбадан ұзын.'),
+    (N'tableChat.mentionList', N'ru', N'Варианты упоминания'),
+    (N'tableChat.mentionList', N'kz', N'Атап өту нұсқалары'),
+    (N'tableChat.readOnly', N'ru', N'Вы можете читать это обсуждение, но не можете писать в него.'),
+    (N'tableChat.readOnly', N'kz', N'Бұл талқылауды оқи аласыз, бірақ оған жаза алмайсыз.'),
+    (N'tableChat.badgeLabel', N'ru', N'Открыть обсуждение: сообщений {total}, новых {unread}'),
+    (N'tableChat.badgeLabel', N'kz', N'Талқылауды ашу: хабарлама {total}, жаңа {unread}'),
+    (N'tableChat.badgeNew', N'ru', N'{total} · {unread} новых'),
+    (N'tableChat.badgeNew', N'kz', N'{total} · {unread} жаңа'),
+    (N'tableChat.tasksTitle', N'ru', N'Вас упомянули'),
+    (N'tableChat.tasksTitle', N'kz', N'Сізді атап өтті'),
+    (N'tableChat.taskLine', N'ru', N'{author} · {table} · {period}'),
+    (N'tableChat.taskLine', N'kz', N'{author} · {table} · {period}'),
+    (N'tableChat.taskOpen', N'ru', N'Открыть обсуждение'),
+    (N'tableChat.taskOpen', N'kz', N'Талқылауды ашу'),
+    (N'tableChat.tasksError', N'ru', N'Не удалось загрузить упоминания.'),
+    (N'tableChat.tasksError', N'kz', N'Атап өтулерді жүктеу мүмкін болмады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-tablechat ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

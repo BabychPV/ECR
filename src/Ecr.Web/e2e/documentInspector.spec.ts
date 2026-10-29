@@ -54,7 +54,8 @@ test.describe('інспектор документа', () => {
     await grid.locator('revogr-data [data-rgcol]').first().click();
     await expect(page.locator('[data-formula-bar="cell"]').first()).toBeVisible();
 
-    await page.locator('[data-inspector-triggers]').getByRole('button').nth(1).click();
+    // ✎ TC: between Issues and History now sits the "Discussion" button (when the chat exists), so not by index.
+    await page.locator('[data-inspector-triggers]').getByRole('button', { name: /History/i }).click();
     const aside = page.getByRole('complementary');
     await expect(aside).toBeVisible();
     await expect(page).toHaveURL(/[?&]panel=history/);

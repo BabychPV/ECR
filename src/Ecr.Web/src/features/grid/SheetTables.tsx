@@ -3,6 +3,7 @@ import { Box, Button, Group, Skeleton, Stack, Text } from '@mantine/core';
 import type { DocumentTableDto } from '@/api/types';
 import { focusSoon } from '@/shared/a11y/focus';
 import { localized } from '@/shared/i18n/localized';
+import { TableChatBadge } from '@/features/tableChat/TableChatBadge';
 import { t } from '@/shared/i18n';
 import { DocumentGrid } from './DocumentGrid';
 import { tableNumber } from './tableTreeModel';
@@ -410,13 +411,18 @@ export function SheetTables({
                   </Text>
                   {localized(table.tableNameL10n)}
                 </Text>
+                {/* ✎ TC: чат таблиці - лічильник «повідомлень · нових» у назві (читає те, що опублікувала кнопка шапки). */}
+                <TableChatBadge documentId={documentId} tableCode={table.tableCode} />
                 {titleEnd}
               </Group>
             ) : (
               /* `tabIndex={-1}`: сюди повертається фокус, коли заглушка, що його мала, замінюється сіткою. */
-              <Text fw={600} data-table-title tabIndex={-1}>
-                {localized(table.tableNameL10n)}
-              </Text>
+              <Group gap="xs" wrap="nowrap">
+                <Text fw={600} data-table-title tabIndex={-1}>
+                  {localized(table.tableNameL10n)}
+                </Text>
+                <TableChatBadge documentId={documentId} tableCode={table.tableCode} />
+              </Group>
             )}
 
             {isMounted ? (
