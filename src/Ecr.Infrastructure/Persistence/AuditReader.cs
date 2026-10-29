@@ -152,7 +152,8 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                     LocalizedOrNull(reader, 21),
                     LocalizedOrNull(reader, 22),
                     reader.GetBoolean(23),
-                    reader.GetBoolean(24))));
+                    reader.GetBoolean(24),
+                    reader.GetInt64(0))));
         }
 
         return rows;
@@ -481,6 +482,13 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                 "%" + EscapeLike(query) + "%",
                 SqlDbType.NVarChar,
                 (2 * QueryMaxLength) + 2);
+        }
+
+        if (filter.HumanOnly)
+        {
+            // ⚠ Константа зі спільного переліку «рішення людини» (не вхід користувача): журнал аркуша не показує
+            // перерахунок, інтеграцію й міграцію як «дії людей».
+            where.Append("\n                   AND Origin IN (" + Ecr.Application.Documents.CellChangeOrigins.HumanOriginsSql + ")");
         }
 
         if (filter.LateOnly)

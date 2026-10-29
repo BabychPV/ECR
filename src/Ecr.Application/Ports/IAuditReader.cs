@@ -47,6 +47,7 @@ namespace Ecr.Application.Ports;
 /// (<c>aud.CellChange.IsOverwrite</c>). Окремо від <paramref name="Origin"/>: у погоджувача
 /// <c>Origin = ApproverEdit</c>, і перезапис видно лише з цього прапорця.
 /// </param>
+/// <param name="Id">Ідентифікатор рядка журналу (другий складник курсора); у відповідь API не потрапляє.</param>
 public sealed record CellChangeView(
     DateTime ChangedAt,
     int PeriodKey,
@@ -71,7 +72,8 @@ public sealed record CellChangeView(
     Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null,
     Ecr.Domain.ValueObjects.LocalizedText? RowLabelL10n = null,
     bool FromArchive = false,
-    bool IsOverwrite = false);
+    bool IsOverwrite = false,
+    [property: System.Text.Json.Serialization.JsonIgnore] long Id = 0);
 
 /// <summary>Підсумок журналу змін комірок за вікном (UI-38, C2) — лише те, що читач бачить.</summary>
 /// <param name="Total">Усього змін у вікні й за фільтром.</param>
@@ -146,6 +148,12 @@ public sealed record StructureChangeView(
 /// Застосовується в SQL ДО <c>TOP</c>/курсора, тож сторінка, <c>nextCursor</c> і підрахунок рахуються по видимих;
 /// порожній перелік — жодного рядка. Колонка, якої немає в переліку, невидима (закрито за замовчуванням).
 /// </param>
+/// <param name="Descending">
+/// Журнал аркуша (<c>SheetActivityQuery</c>): найновіші першими й поза адресою однієї комірки. Не міняє доступ:
+/// поріг права все одно вирішує <see cref="IsSingleCell"/>; цим прапорцем користується лише обробник, що вже
+/// перевірив документ і межі читання.
+/// </param>
+/// <param name="HumanOnly">Лише походження «людина» (<c>CellChangeOrigins.HumanOriginsSql</c>): без перерахунку, інтеграції, міграції.</param>
 /// <param name="PeriodKey">
 /// AN-98 (N3-07): звітний період змін; <c>null</c> — усі. Це вісь, відмінна від вікна <c>ChangedAt</c> (місяць зміни ≠
 /// звітний період), тож без неї історія комірки збирала зміни ВСІХ періодів документа, а клієнт відсіював чужі вже
@@ -162,7 +170,9 @@ public sealed record CellChangeFilter(
     bool LateOnly = false,
     string? Query = null,
     IReadOnlyList<int>? VisibleColumnIds = null,
-    int? PeriodKey = null)
+    int? PeriodKey = null,
+    bool Descending = false,
+    bool HumanOnly = false)
 {
     /// <summary>Фільтр адресує РІВНО ОДНУ комірку — документ, рядок і колонку.</summary>
     /// <remarks>
@@ -191,7 +201,7 @@ public sealed record CellChangeFilter(
     /// зростанням (гортання аудитора від початку вікна). Обидва порядки — за кластерним ключем таблиці
     /// <c>(ChangedAt, Id)</c> (P1-07): прямий або зворотний обхід індексу без сортування вікна.
     /// </remarks>
-    public bool NewestFirst => IsSingleCell;
+    public bool NewestFirst => IsSingleCell || Descending;
 }
 
 /// <summary>Фільтр загального журналу структурних змін (<c>BE-16</c>).</summary>

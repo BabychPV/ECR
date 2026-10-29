@@ -224,6 +224,8 @@ public static class DependencyInjection
         services.AddScoped<Documents.ChangeDocumentKeyHandler>();
         services.AddScoped<Documents.VersionMigration.MigrateDocumentVersionHandler>();
         services.AddScoped<Workflow.GetWorkflowHistoryHandler>();
+        services.AddScoped<Audit.SheetActivityQuery>();
+        services.AddScoped<Audit.GetSheetActivityHandler>();
         services.AddScoped<Documents.ListDocumentVersionsHandler>();
         services.AddScoped<Documents.CompareDocumentVersionsHandler>();
         services.AddScoped<Workflow.RecallSheetHandler>();
