@@ -54,6 +54,10 @@ public sealed record SaveRegistryHierarchyRequest(
 /// <param name="IsActive">Entry is switched on.</param>
 /// <param name="ChildCount">Live direct children (all, regardless of the filter).</param>
 /// <param name="IsMatch">The node itself matches the <c>q</c> filter (ancestors of matches are included, unmarked).</param>
+/// <param name="NaeCode">
+/// Value of the string field <c>NaeCode</c> when the registry has one and the node has a value (NAE plan N2: sources render
+/// as <c>NaeCode · name</c>); <c>null</c> otherwise.
+/// </param>
 public sealed record RegistryTreeNodeDto(
     long Id,
     long? ParentEntryId,
@@ -65,7 +69,8 @@ public sealed record RegistryTreeNodeDto(
     DateOnly? ValidTo,
     bool IsActive,
     int ChildCount,
-    bool IsMatch);
+    bool IsMatch,
+    string? NaeCode = null);
 
 /// <summary>The tree of a hierarchical registry.</summary>
 /// <param name="RegistryCode">Registry code.</param>

@@ -306,6 +306,20 @@ public sealed class GetRegistryTreeHandler(
             }
         }
 
+        var naeCodes = new Dictionary<long, string>();
+        if (definition.Fields.FirstOrDefault(f => string.Equals(f.Code, "NaeCode", StringComparison.OrdinalIgnoreCase)
+                                                  && f.DataType == CellDataType.String) is { } naeField)
+        {
+            var ids = visible.Where(e => included.Contains(e.Id)).Select(e => e.Id).ToList();
+            foreach (var v in await registries.ListValuesForEntriesAsync(ids, ct).ConfigureAwait(false))
+            {
+                if (v.RegistryFieldDefId == naeField.Id && !string.IsNullOrWhiteSpace(v.ValueString))
+                {
+                    naeCodes[v.RegistryEntryId] = v.ValueString;
+                }
+            }
+        }
+
         var nodes = visible
             .Where(e => included.Contains(e.Id))
             .Select(e => new RegistryTreeNodeDto(
@@ -319,7 +333,8 @@ public sealed class GetRegistryTreeHandler(
                 e.ValidTo,
                 e.IsActive,
                 childCount.GetValueOrDefault(e.Id),
-                matches.Contains(e.Id)))
+                matches.Contains(e.Id),
+                naeCodes.GetValueOrDefault(e.Id)))
             .ToList();
 
         return new RegistryTreeDto(
