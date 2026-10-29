@@ -285,11 +285,37 @@ public sealed class RegistryDefConfiguration : IEntityTypeConfiguration<Registry
         // вставок повз EF.
         builder.Property(x => x.CodeMode).HasConversion<byte>()
                .HasDefaultValueSql("0", "DF_RegDef_CodeMode").ValueGeneratedNever();
+        builder.Property(x => x.IsHierarchical).HasDefaultValue(false, "DF_RegDef_Hier");
         builder.Property(x => x.DataChangedAt).HasColumnType("datetime2(3)");
         builder.Property(x => x.DefinitionUpdatedAt).HasColumnType("datetime2(3)");
 
         builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_RegistryDef");
         builder.Navigation(x => x.Fields).UsePropertyAccessMode(PropertyAccessMode.Field);
+    }
+}
+
+/// <summary>Configuration of <see cref="RegistryLevelDef"/> — levels of a hierarchical registry (NAE plan N1).</summary>
+public sealed class RegistryLevelDefConfiguration : IEntityTypeConfiguration<RegistryLevelDef>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<RegistryLevelDef> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("RegistryLevelDef", "cfg", t => t.HasCheckConstraint(
+            "CK_RegLevel_Ordinal", "Ordinal >= 1"));
+        builder.HasKey(x => x.Id).HasName("PK_RegistryLevelDef");
+        builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
+        builder.LocalizedText(x => x.NameL10n);
+        builder.Property(x => x.IsOptional).HasDefaultValue(false, "DF_RegLevel_Opt");
+
+        builder.HasIndex(x => new { x.RegistryDefId, x.Ordinal })
+               .IsUnique().HasDatabaseName("UQ_RegistryLevelDef_Ordinal");
+        builder.HasIndex(x => new { x.RegistryDefId, x.Code })
+               .IsUnique().HasDatabaseName("UQ_RegistryLevelDef_Code");
+
+        builder.HasOne<RegistryDef>().WithMany().HasForeignKey(x => x.RegistryDefId)
+               .HasConstraintName("FK_RegLevel_Registry");
     }
 }
 
