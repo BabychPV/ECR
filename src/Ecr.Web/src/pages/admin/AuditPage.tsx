@@ -12,10 +12,13 @@ import {
 import type { CellChangePage } from '@/api/types';
 import { useAuthorOptions } from '@/features/audit/authorOptions';
 import { CellChangesTable, originLabel } from '@/features/audit/CellChangesTable';
+import { AuditExportButton } from '@/features/audit/AuditExportButton';
+import { useAuditSort } from '@/features/audit/auditSort';
 import {
   archiveWindow,
   cellChangeOrigins,
   cellChangesQuery,
+  fetchCellsExport,
   isSingleCell,
   useCellChanges,
 } from '@/features/audit/api';
@@ -57,12 +60,17 @@ const StructureExportButton = lazy(async () => ({
 const SecurityEventsPanel = lazy(async () => ({
   default: (await loadSecurityEventsPanel()).SecurityEventsPanel,
 }));
+const loadWorkflowEventsPanel = () => import('@/features/audit/WorkflowEventsPanel');
+const WorkflowEventsPanel = lazy(async () => ({
+  default: (await loadWorkflowEventsPanel()).WorkflowEventsPanel,
+}));
 
 /** Чанки вкладок «Structure»/«Security» — заздалегідь, щоб перемикач не чекав мережі. */
 function preloadAuditTabs(): void {
   void loadStructureChangesPanel().catch(() => undefined);
   void loadStructureExportButton().catch(() => undefined);
   void loadSecurityEventsPanel().catch(() => undefined);
+  void loadWorkflowEventsPanel().catch(() => undefined);
 }
 
 /**
@@ -102,6 +110,8 @@ export function AuditPage(): JSX.Element {
   const [origin, setOrigin] = useUrlState('origin');
   const [lateOnly, setLateOnly] = useUrlState('lateOnly');
   const [view, setView] = useUrlState('view');
+  // ⛔ Порядок — серверний і в адресі (`?sort=`), спільний для вкладок; типово найновіші першими.
+  const [sort, setSort] = useAuditSort();
   const setParams = useUrlParamsSetter();
 
   const fromDate = from ?? isoDaysAgo(7);
@@ -153,6 +163,7 @@ export function AuditPage(): JSX.Element {
     author: appliedAuthor,
     origin,
     lateOnly: lateOnly === 'true',
+    sort,
     limit: 100,
   };
 
@@ -168,7 +179,9 @@ export function AuditPage(): JSX.Element {
   const structure = view === 'structure';
   // ФВ-5.24: третя вкладка — журнал подій безпеки (`?view=security`), з тих самих міркувань.
   const security = view === 'security';
-  const other = structure || security;
+  // Журнал подій погодження (`?view=workflow`): `wf.ApprovalEvent` — подання, затвердження, відхилення, повернення.
+  const workflow = view === 'workflow';
+  const other = structure || security || workflow;
   const changes = useCellChanges(filter, !other);
 
   // ⛔ `R-18`: попередня сторінка лишається на екрані, доки їде нова. Раніше кожен
@@ -202,12 +215,15 @@ export function AuditPage(): JSX.Element {
             <FilterInline>
               <SegmentedControl
                 aria-label={t('audit.title')}
-                value={structure ? 'structure' : security ? 'security' : 'cells'}
-                onChange={(value) => setView(value === 'structure' || value === 'security' ? value : null)}
+                value={structure ? 'structure' : security ? 'security' : workflow ? 'workflow' : 'cells'}
+                onChange={(value) =>
+                  setView(value === 'structure' || value === 'security' || value === 'workflow' ? value : null)
+                }
                 data={[
                   { value: 'cells', label: t('audit.viewCells') },
                   { value: 'structure', label: t('audit.viewStructure') },
                   { value: 'security', label: t('audit.viewSecurity') },
+                  { value: 'workflow', label: t('audit.viewWorkflow') },
                 ]}
               />
             </FilterInline>
@@ -269,6 +285,11 @@ export function AuditPage(): JSX.Element {
       {security && (
         <Suspense fallback={null}>
           <SecurityEventsPanel key={`${fromDate}:${toDate}`} from={fromDate} to={toDate} />
+        </Suspense>
+      )}
+      {workflow && (
+        <Suspense fallback={null}>
+          <WorkflowEventsPanel key={`${fromDate}:${toDate}`} from={fromDate} to={toDate} />
         </Suspense>
       )}
 
@@ -403,6 +424,18 @@ export function AuditPage(): JSX.Element {
         active={cellWithoutDocument ? t('audit.cellHint') : null}
       />
 
+      {/* Експорт — серверний потік із тими самими фільтрами й порядком; адреса комірки (історія однієї
+          комірки за Document.View) експорту не має. */}
+      {!single && (
+        <AuditExportButton
+          tab="cells"
+          from={fromDate}
+          to={toDate}
+          fallbackName="audit-cells.csv"
+          load={() => fetchCellsExport(applied)}
+        />
+      )}
+
       <AsyncBoundary<CellChangePage>
         isPending={changes.isPending && shownChanges === undefined}
         error={changes.error}
@@ -416,7 +449,7 @@ export function AuditPage(): JSX.Element {
         {(page) => (
           <>
             {/* ⛔ `memo`-таблиця (`R-18`), форма макета `UI-38` — див. `CellChangesTable`. */}
-            <CellChangesTable items={page.items} />
+            <CellChangesTable items={page.items} sort={sort} onSort={setSort} />
 
             {/* ⚠ Курсорна пагінація: журнал за рік — мільйони рядків, і
                 `OFFSET` на сторінці 200 сканував би все, що до неї. */}

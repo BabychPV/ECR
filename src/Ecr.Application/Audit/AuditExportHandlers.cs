@@ -4,6 +4,8 @@ using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Ecr.Application.Security;
+using Ecr.Application.Templates;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Errors;
 
@@ -219,8 +221,11 @@ public sealed class ExportCellChangesHandler(
 
 /// <summary>Експорт журналу подій безпеки у CSV.</summary>
 public sealed class ExportSecurityEventsHandler(
-    GetSecurityEventsHandler pages, IAuditWriter writer, IClock clock, ICurrentUser currentUser)
+    GetSecurityEventsHandler pages, IAuditWriter writer, IAccessDecisionService access, IClock clock, ICurrentUser currentUser)
 {
+    /// <summary>Право перегляду журналу аудиту — те саме, що в переліку вкладки.</summary>
+    private const string Permission = "Security.ViewAudit";
+
     /// <summary>Тип події журналу безпеки.</summary>
     public const string ExportedEventType = "AuditSecurityExported";
 
@@ -232,11 +237,16 @@ public sealed class ExportSecurityEventsHandler(
     /// <param name="filter">Ті самі вікно, фільтри й порядок, що в переліку.</param>
     /// <param name="maxRows">Жорстка стеля рядків.</param>
     /// <param name="ct">Токен скасування.</param>
-    public Task<AuditExport<SecurityEventView>> PrepareAsync(SecurityEventFilter filter, int maxRows, CancellationToken ct)
+    public async Task<AuditExport<SecurityEventView>> PrepareAsync(SecurityEventFilter filter, int maxRows, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(filter);
 
-        return AuditExportRunner.PrepareAsync(
+        // Право — явно й першим (перелік перевіряє його ще раз на кожній сторінці), як в експорті структури.
+        await ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
+        return await AuditExportRunner.PrepareAsync(
             cursor => pages.HandleAsync(filter, new CursorRequest(CursorRequest.MaxLimit, cursor), ct),
             _ => pages.CountAsync(filter, ct),
             maxRows,
@@ -252,7 +262,7 @@ public sealed class ExportSecurityEventsHandler(
                 rows = total,
             },
             AuditExportRunner.FileNameOf("security", filter.From, filter.To),
-            writer, clock, currentUser, ct);
+            writer, clock, currentUser, ct).ConfigureAwait(false);
     }
 
     /// <summary>Рядок CSV для однієї події.</summary>
@@ -275,8 +285,11 @@ public sealed class ExportSecurityEventsHandler(
 
 /// <summary>Експорт журналу подій погодження у CSV.</summary>
 public sealed class ExportWorkflowEventsHandler(
-    GetWorkflowEventsHandler pages, IAuditWriter writer, IClock clock, ICurrentUser currentUser)
+    GetWorkflowEventsHandler pages, IAuditWriter writer, IAccessDecisionService access, IClock clock, ICurrentUser currentUser)
 {
+    /// <summary>Право перегляду журналу аудиту — те саме, що в переліку вкладки.</summary>
+    private const string Permission = "Security.ViewAudit";
+
     /// <summary>Тип події журналу безпеки.</summary>
     public const string ExportedEventType = "AuditWorkflowExported";
 
@@ -291,11 +304,15 @@ public sealed class ExportWorkflowEventsHandler(
     /// <param name="filter">Ті самі вікно, фільтри й порядок, що в переліку.</param>
     /// <param name="maxRows">Жорстка стеля рядків.</param>
     /// <param name="ct">Токен скасування.</param>
-    public Task<AuditExport<WorkflowEventView>> PrepareAsync(WorkflowEventFilter filter, int maxRows, CancellationToken ct)
+    public async Task<AuditExport<WorkflowEventView>> PrepareAsync(WorkflowEventFilter filter, int maxRows, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(filter);
 
-        return AuditExportRunner.PrepareAsync(
+        await ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
+        return await AuditExportRunner.PrepareAsync(
             cursor => pages.HandleAsync(filter, new CursorRequest(CursorRequest.MaxLimit, cursor), ct),
             _ => pages.CountAsync(filter, ct),
             maxRows,
@@ -312,7 +329,7 @@ public sealed class ExportWorkflowEventsHandler(
                 rows = total,
             },
             AuditExportRunner.FileNameOf("workflow", filter.From, filter.To),
-            writer, clock, currentUser, ct);
+            writer, clock, currentUser, ct).ConfigureAwait(false);
     }
 
     /// <summary>Рядок CSV для однієї події.</summary>

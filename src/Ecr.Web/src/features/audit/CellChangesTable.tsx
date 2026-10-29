@@ -2,6 +2,8 @@ import { memo, type JSX, type ReactNode } from 'react';
 import { Badge, Box, Group, Table, Text, VisuallyHidden } from '@mantine/core';
 import type { CellChangePage } from '@/api/types';
 import { cellAuthorHint, cellAuthorName } from '@/features/audit/authorOptions';
+import { DefaultAuditSort, type AuditSort } from '@/features/audit/api';
+import { SortableTh } from '@/features/audit/SortableTh';
 import { decimalDelta } from '@/features/audit/changeDelta';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { TwoLine } from '@/shared/ui/TwoLine';
@@ -243,15 +245,29 @@ function Late({ change }: { readonly change: CellChange }): ReactNode {
  */
 export const CellChangesTable = memo(function CellChangesTable({
   items,
+  sort = DefaultAuditSort,
+  onSort,
 }: {
   readonly items: readonly CellChange[];
+  /** Порядок видачі (серверний); заголовки «Changed at» і «By user» його перемикають через `onSort`. */
+  readonly sort?: AuditSort;
+  readonly onSort?: (next: AuditSort) => void;
 }): JSX.Element {
   return (
     <Table striped className="ecr-sticky-head ecr-audit-table" aria-label={t('audit.title')}>
       <Table.Thead>
         <Table.Tr>
-          <Table.Th>{t('audit.when')}</Table.Th>
-          <Table.Th>{t('audit.who')}</Table.Th>
+          {onSort === undefined ? (
+            <>
+              <Table.Th>{t('audit.when')}</Table.Th>
+              <Table.Th>{t('audit.who')}</Table.Th>
+            </>
+          ) : (
+            <>
+              <SortableTh label={t('audit.when')} column="time" sort={sort} onSort={onSort} />
+              <SortableTh label={t('audit.who')} column="user" sort={sort} onSort={onSort} />
+            </>
+          )}
           <Table.Th>{t('audit.documentCell')}</Table.Th>
           <Table.Th>{t('audit.wasBecomes')}</Table.Th>
           <Table.Th>{t('audit.origin')}</Table.Th>
