@@ -48,6 +48,12 @@ export function applySliceCachePolicy(client: QueryClient): void {
   client.setQueryDefaults(queryKeys.slices.all(), {
     staleTime: SliceStaleTime,
     refetchOnWindowFocus: false,
+    // ⛔ Perf: `replaceEqualDeep` (structural sharing, query-core 5.62.9) робить `keys.includes(key)` на кожен ключ
+    // плоскої мапи, тобто O(n²): `cellPermissions` ~77 тис. ключів на аркуші Land — 7–25 с заморозки головного
+    // потоку на КОЖЕН перезапит зрізу (і ~150 мс на кожен `setQueryData` у `onMutate`). Зріз і так замінюється
+    // цілком, а посилальну стабільність частин (`cellPermissions` тощо) тримає `sliceApply`/`applyStylePatches`
+    // через spread, тож порівнювати вміст нема навіщо. Діє і на `setQueryData` (опції запиту).
+    structuralSharing: false,
   });
 }
 
