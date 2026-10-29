@@ -94,7 +94,7 @@ public sealed class SheetActivityTests
 
         await audit.Received(1).ReadCellChangesAsync(
             Arg.Is<CellChangeFilter>(f => f.DocumentId == DocumentId && f.PeriodKey == PeriodValue && f.HumanOnly
-                && f.Descending && f.ChangedByUserId == 9 && f.VisibleColumnIds!.SequenceEqual(TwoColumns)),
+                && f.Sort == AuditSort.ChangedAtDesc && f.ChangedByUserId == 9 && f.VisibleColumnIds!.SequenceEqual(TwoColumns)),
             Arg.Is<CursorRequest>(p => p.Limit == 50 && p.Cursor == null),
             Arg.Any<CancellationToken>());
     }
@@ -300,8 +300,9 @@ public sealed class SheetActivityTests
             return null;
         }
 
-        var parts = Encoding.UTF8.GetString(Convert.FromBase64String(cursor)).Split(':');
-        return (new DateTime(long.Parse(parts[0], CultureInfo.InvariantCulture), DateTimeKind.Utc), long.Parse(parts[1], CultureInfo.InvariantCulture));
+        // Спільний кодек курсора журналів аудиту (`AuditCursorCodec`, порядок «найновіші першими»).
+        var decoded = AuditCursorCodec.TryDecode(cursor) ?? throw new InvalidOperationException("курсор не розпізнано");
+        return (decoded.At, decoded.Id);
     }
 
     private static IWorkflowStore FakeWorkflow(IReadOnlyList<(long Id, DateTime At)> events)
