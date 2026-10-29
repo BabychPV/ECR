@@ -141,6 +141,7 @@ public static class DependencyInjection
         services.AddScoped<IValidationResultStore, ValidationResultStore>();
         services.AddScoped<IProjectStore, ProjectStore>();
         services.AddScoped<IRegistryStore, RegistryStore>();
+        services.AddScoped<IRegistryHierarchyStore, RegistryHierarchyStore>();
         services.AddScoped<IRegistryUseStore, RegistryUseStore>(); // RT-23b
         services.AddScoped<IRegistryImpactStore, RegistryImpactStore>(); // RT-25
         services.AddScoped<IRegistryDraftStore, RegistryDraftStore>();
