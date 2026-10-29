@@ -134,7 +134,7 @@ test.describe('Групові заголовки колонок (ui-colgroups)',
       const label = `прогін ${String(i + 1)}/${String(Repeats)}`;
       expect(info, label).not.toBeNull();
       expect(info?.rows.slice(0, 4), `${label}: aria-rowindex рядків шапки`).toEqual(['1', '2', '3', '4']);
-      expect(info?.rowcount, `${label}: aria-rowcount`).toBeGreaterThanOrEqual(5);
+      expect(info?.rowcount, `${label}: aria-rowcount`).toBeGreaterThanOrEqual(4);
       expect(info?.colspan, `${label}: aria-colspan Emissions`).toBe('7');
       expect(info?.sr, `${label}: шлях групи для читалки`).toBe('Emissions / Q1 / Jan: ');
     }

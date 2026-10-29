@@ -17,17 +17,26 @@
 :root revo-grid[theme] revogr-header .rgHeaderCell.ecr-hg-grp {
   justify-content: center;
   align-items: center;
+  /* Пакет ставить клітинці групи висоту всього блоку груп (N×45) — підпис опинявся під сусіднім рівнем. */
+  height: var(--ecr-hg-row);
   border-right: 1px solid var(--ecr-border-strong);
   border-bottom: 1px solid var(--ecr-border-strong);
 }
 
+:root revo-grid[theme] revogr-header .rgHeaderCell.ecr-hg-grp .header-content {
+  line-height: 1.2;
+  text-align: center;
+}
+
+/* Підпис по центру клітинки; `translateX` від `attachStickyGroupLabels` зсуває його над видимою частиною. */
 :root revo-grid[theme] revogr-header .rgHeaderCell .ecr-hg-label {
-  display: inline-block;
+  display: block;
+  width: fit-content;
   max-width: 100%;
+  margin: 0 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-align: center;
   will-change: transform;
 }
 

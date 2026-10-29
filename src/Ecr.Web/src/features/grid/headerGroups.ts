@@ -188,15 +188,20 @@ export function attachStickyGroupLabels(grid: HTMLElement): () => void {
       if (cell === null) continue;
 
       const box = cell.getBoundingClientRect();
-      const width = label.offsetWidth;
-      const room = Math.max(0, (box.width - width) / 2);
+      const mine = label.getBoundingClientRect();
+      // Природне (без зсуву) положення мітки: поточне мінус уже застосований зсув.
+      const applied = Number(label.dataset['hgShift'] ?? '0');
+      const naturalLeft = mine.left - applied;
+      const naturalRight = mine.right - applied;
       const visibleLeft = Math.max(box.left, viewport.left);
       const visibleRight = Math.min(box.right, viewport.right);
-      const wanted = (visibleLeft + visibleRight) / 2 - (box.left + box.right) / 2;
-      const shift = Math.max(-room, Math.min(room, wanted));
-      const value = shift === 0 ? '' : `translateX(${Math.round(shift)}px)`;
+      const wanted = (visibleLeft + visibleRight) / 2 - (naturalLeft + naturalRight) / 2;
+      // Мітка не виходить за клітинку групи.
+      const shift = Math.round(Math.max(box.left - naturalLeft, Math.min(box.right - naturalRight, wanted)));
+      const value = shift === 0 ? '' : `translateX(${shift}px)`;
 
       if (label.style.transform !== value) label.style.transform = value;
+      label.dataset['hgShift'] = String(shift);
     }
   };
 
