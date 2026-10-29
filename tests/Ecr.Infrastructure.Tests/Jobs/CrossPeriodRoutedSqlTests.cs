@@ -262,6 +262,122 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
             $"Сесія задачі: {withSession} читань власників, без сесії: {plainStore.OwnerQueryCount}. Кеш не спрацював.");
     }
 
+    // ── L6: правка в 12-періодному році (звіт S07: січень тече у дванадцять періодів) ─────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    public async Task L6_дванадцять_періодів_задача_дає_ті_самі_числа_що_й_повний_перерахунок_по_періодах()
+    {
+        var job = await ArrangeAsync(offsets: true, fullYear: true);
+        var reference = await ArrangeAsync(offsets: true, fullYear: true);
+        await SetOwnerValueAsync(job, 7m);
+        await SetOwnerValueAsync(reference, 7m);
+
+        var progress = await RunJobAsync(job, [], OwnerRequest(job), routing: true);
+        Assert.Equal(Enumerable.Range(1, 12).Select(Period).ToList(), progress.Periods);
+
+        // Еталон: ті самі дані, але кожен період — окремий повний прогін зі своєю (не спільною) сесією читання власників.
+        await using (var db = reference.Builder.CreateContext())
+        {
+            var router = new MonthColumnRouter(db, Config(true));
+            var plain = new MonthRoutedCellStore(new NormalizedCellStore(db), router, reference.Metadata, db);
+            var service = Formulas(db, reference, plain, router);
+            for (var month = 1; month <= 12; month++)
+            {
+                await service.RecalculateAllAsync(
+                    reference.Doc.DocumentId, new PeriodKey(Period(month)), CancellationToken.None);
+            }
+        }
+
+        for (var month = 1; month <= 12; month++)
+        {
+            var expected = await OutputAsync(reference, Period(month));
+            Assert.NotEqual(StaleOutput, expected);
+            Assert.Equal(expected, await OutputAsync(job, Period(month)));
+        }
+
+        // Не порожній збіг: у середині року формула бачить власника тричі (M11 + сусіди) — 7 + 7 + 7.
+        Assert.Equal(21m, await OutputAsync(job, Period(5)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    public async Task L6_дванадцять_періодів_власники_читаються_кілька_разів_на_ЗАДАЧУ_а_не_по_запиту_на_читача()
+    {
+        var world = await ArrangeAsync(offsets: true, fullYear: true);
+        await SetOwnerValueAsync(world, 7m);
+
+        var (progress, store) = await RunJobWithStoreAsync(world, [], OwnerRequest(world), routing: true);
+        Assert.Equal(12, progress.Periods.Count);
+
+        // Стеля: перше читання (насіння) + доповнення для періоду-власника; не 12+ (по одному на кожного читача).
+        // Кожне таке читання — скан введених комірок усіх таблиць за 12 періодів (звіт S07: ~124 тис. читань).
+        Assert.InRange(store.OwnerQueryCount, 1, 3);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    public async Task L6_запит_власників_повертає_ті_самі_рядки_що_й_колишній_відбір_з_OR_EXISTS()
+    {
+        var world = await ArrangeAsync(fullYear: true);
+
+        // Місячні колонки: власник кожної — свій місяць; у решті екземплярів лежать «чужі копії» (мають бути відкинуті).
+        // Не-місячна введена колонка IN: у якорі (період 1) — потрібна, в інших періодах — ні.
+        for (var owner = 1; owner <= 12; owner++)
+        {
+            for (var column = 1; column <= 12; column++)
+            {
+                await SetCellAsync(
+                    world, Period(owner), world.Doc.MonthColumnDefIds[column - 1], (owner * 100m) + column);
+            }
+
+            await SetCellAsync(world, Period(owner), world.Doc.ColumnDefIds[1], 9000m + owner);
+        }
+
+        var periods = Enumerable.Range(1, 12).Select(Period).ToList();
+        IReadOnlyCollection<int> tables = [world.Doc.TableDefId];
+        IReadOnlyCollection<int> anchors = [Period(1)];
+
+        await using var db = world.Builder.CreateContext();
+        var current = await MonthRoutedCellStore.OwnerCellsQuery(db, world.Doc.DocumentId, periods, tables, anchors)
+            .ToListAsync();
+
+        // Колишній відбір (до L6), дослівно: anchor OR EXISTS(ColumnDef).
+        var old = await (from instance in db.TableInstances.AsNoTracking()
+                         where instance.DocumentId == world.Doc.DocumentId
+                               && periods.Contains(instance.PeriodKeyValue)
+                               && tables.Contains(instance.TableDefId)
+                         join row in db.TableRows.AsNoTracking().Where(r => periods.Contains(r.PeriodKeyValue) && !r.IsDeleted)
+                             on new { P = instance.PeriodKeyValue, I = instance.Id }
+                             equals new { P = row.PeriodKeyValue, I = row.TableInstanceId }
+                         join cell in db.CellValues.AsNoTracking()
+                                 .Where(c => periods.Contains(c.PeriodKeyValue) && !c.IsCalculated)
+                             on new { P = row.PeriodKeyValue, R = row.Id }
+                             equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
+                         where anchors.Contains(cell.PeriodKeyValue)
+                               || db.ColumnDefs.Any(column => column.Id == cell.ColumnDefId
+                                                              && column.IsMonthColumn
+                                                              && column.MonthNumber == cell.PeriodKeyValue % 100)
+                         select new { cell.PeriodKeyValue, row.RowKeyValue, cell.ColumnDefId, cell.ValueNumeric })
+            .ToListAsync();
+
+        static string Key(int period, string row, int column, decimal? value)
+            => string.Create(CultureInfo.InvariantCulture, $"{period}|{row}|{column}|{value}");
+
+        var expected = old.Select(r => Key(r.PeriodKeyValue, r.RowKeyValue, r.ColumnDefId, r.ValueNumeric)).Order().ToList();
+        var actual = current.Select(r => Key(r.OwnerPeriodKey, r.RowKey, r.ColumnDefId, r.ValueNumeric)).Order().ToList();
+
+        // Не порожній збіг: якір дає 12 місячних + IN, решта 11 періодів — по одній місячній (власної колонки).
+        Assert.Equal(12 + 1 + 11, expected.Count);
+        Assert.Equal(expected, actual);
+        Assert.Equal(actual.Count, actual.Distinct().Count());
+    }
     // ── допоміжне ────────────────────────────────────────────────────────
 
     private static int Period(int month) => (Year * 100) + month;
@@ -277,22 +393,28 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
             world.Others[OwnerMonth].TableInstanceId, Period(OwnerMonth),
             [new DirtyCell(world.Others[OwnerMonth].RowIds[0], world.Doc.MonthColumnDefIds[OwnerMonth - 1])]);
 
-    private async Task<World> ArrangeAsync(bool absolute = false, bool offsets = false)
+    private async Task<World> ArrangeAsync(bool absolute = false, bool offsets = false, bool fullYear = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(
             periodKey: Period(ViewMonth), columnCount: 3, rowCount: 1,
             layoutKind: TableLayoutKind.MonthsInColumns, monthColumns: 12);
 
+        // L6: fullYear — усі 12 місяців року (звіт S07: правка січня тече у дванадцять періодів).
+        var otherMonths = fullYear
+            ? Enumerable.Range(1, 12).Where(m => m != ViewMonth).ToArray()
+            : new[] { 1, 9, OwnerMonth };
+        var allMonths = fullYear ? Enumerable.Range(1, 12).ToArray() : new[] { 1, 9, ViewMonth, OwnerMonth };
+
         var others = new Dictionary<int, TestPeriodInstance>();
-        foreach (var month in new[] { 1, 9, OwnerMonth })
+        foreach (var month in otherMonths)
         {
             others[month] = await builder.AddPeriodInstanceAsync(doc, new PeriodKey(Period(month)));
         }
 
         await using (var setup = builder.CreateContext())
         {
-            foreach (var month in new[] { 1, 9, ViewMonth, OwnerMonth })
+            foreach (var month in allMonths)
             {
                 var period = await setup.Periods.SingleAsync(
                     p => p.ProjectId == doc.ProjectId && p.PeriodKeyValue == Period(month));
@@ -305,7 +427,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         var world = new World(builder, doc, others, Metadata(doc, absolute, offsets), absolute, offsets);
 
         // Застарілий вихід у кожному екземплярі; M11 власника порожнє (до першої правки).
-        foreach (var month in new[] { 1, 9, ViewMonth, OwnerMonth })
+        foreach (var month in allMonths)
         {
             await SetCellAsync(world, Period(month), doc.ColumnDefIds[2], StaleOutput, calculated: true);
         }
@@ -347,6 +469,10 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
 
     private async Task<CapturingJobProgress> RunJobAsync(
         World world, List<(string Target, string Payload)> enqueued, FormulaRecalculationRequest request, bool routing)
+        => (await RunJobWithStoreAsync(world, enqueued, request, routing)).Progress;
+
+    private async Task<(CapturingJobProgress Progress, MonthRoutedCellStore Store)> RunJobWithStoreAsync(
+        World world, List<(string Target, string Payload)> enqueued, FormulaRecalculationRequest request, bool routing)
     {
         await using var db = world.Builder.CreateContext();
 
@@ -370,7 +496,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         var progress = new CapturingJobProgress();
         await job.ExecuteAsync(request, progress, CancellationToken.None);
 
-        return progress;
+        return (progress, store);
     }
 
     private static RecalculationService Formulas(

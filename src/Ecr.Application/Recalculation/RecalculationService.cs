@@ -183,7 +183,7 @@ public sealed class RecalculationService(
     }
 
     /// <summary>L2: нове сховище спільних читань для одного проходу перерахунку документа.</summary>
-    public RecalculationSharedLoad NewSharedLoad() => new(rowStore, versions);
+    public RecalculationSharedLoad NewSharedLoad() => new(rowStore, versions, cellStore as IOwnerReadSession);
 
     /// <summary>
     /// Перераховує залежне піддерево і записує результати.

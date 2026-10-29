@@ -115,7 +115,7 @@ public sealed class FormulaRecalculationJob(
         JobDeferredException? deferral = null;
 
         // L2: спільні читання проходу — екземпляри/залежності не перечитуються на кожен період і ланку.
-        var shared = recalculation.NewSharedLoad();
+        using var shared = recalculation.NewSharedLoad();
 
         // ⛔ Прохід за зростанням періоду: беремо НАЙМЕНШИЙ зачеплений. Читач РАНІШЕ за джерело (абсолютне
         // `[Period:#k]`, k пізніше) дописується в перелік і береться наступним — як і раніше, коли це була окрема

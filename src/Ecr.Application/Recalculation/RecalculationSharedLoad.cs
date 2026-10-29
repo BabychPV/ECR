@@ -13,8 +13,14 @@ namespace Ecr.Application.Recalculation;
 /// створюються й не видаляються під час перерахунку (рядки й екземпляри пише PATCH/імпорт до постановки задачі),
 /// а залежності версії незмінні. Не потокобезпечний навмисно: прохід послідовний.
 /// </remarks>
-public sealed class RecalculationSharedLoad(IRowStore rowStore, ITemplateVersionStore versions)
+public sealed class RecalculationSharedLoad(
+    IRowStore rowStore, ITemplateVersionStore versions, IOwnerReadSession? ownerReads = null) : IDisposable
 {
+    // L6: сесія читання комірок власників (Q-17.4) живе весь прохід, а не один період: 12 читачів «місяці в колонках»
+    // читали ТІ САМІ введені комірки власників 12 разів (кожне читання — скан ~124 тис. сторінок doc.CellValue).
+    // Введені комірки під час проходу не пишуться (перерахунок пише лише похідні), тож кеш залишається чинним.
+    private readonly IDisposable? _ownerSession = ownerReads?.BeginOwnerReadSession();
+
     private readonly Dictionary<(long DocumentId, int Period), IReadOnlyList<TableInstanceRef>> _instances = [];
     private readonly Dictionary<int, IReadOnlyList<FormulaDependency>> _dependencies = [];
 
@@ -38,6 +44,9 @@ public sealed class RecalculationSharedLoad(IRowStore rowStore, ITemplateVersion
 
         return loaded;
     }
+
+    /// <inheritdoc />
+    public void Dispose() => _ownerSession?.Dispose();
 
     /// <summary>Розкриті залежності формул версії шаблону.</summary>
     public async Task<IReadOnlyList<FormulaDependency>> DependenciesAsync(int templateVersionId, CancellationToken ct)
