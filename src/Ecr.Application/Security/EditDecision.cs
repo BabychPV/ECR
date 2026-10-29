@@ -68,6 +68,16 @@ public readonly record struct EditDecision(
     /// </summary>
     public IReadOnlyList<int>? AnnualPeriods { get; init; }
 
+    /// <summary>
+    /// AN-142 (рішення людини, амендує D-457): комірка — звичайний ТЕКСТ якоря року (<c>String</c>, не бізнес-ключ, не
+    /// обчислювана). Така комірка пишеться і в <c>Submitted</c>-аркуші (опис, примітка): вона не змінює поданих чисел, тож
+    /// перерахунок не ставиться. <c>Approved</c> лишається замкненим. Запис повторює цю поблажку під блокуванням.
+    /// </summary>
+    public bool AnnualTextOnly { get; init; }
+
+    /// <summary>AN-142: поблажка справді спрацювала (аркуш був Submitted) - лише тоді правка не ставить перерахунок.</summary>
+    public bool AnnualTextRelaxed { get; init; }
+
     public static EditDecision Allow() => new(true, EditDenyReason.None);
 
     /// <summary>Дозволено погоджувачеві поточного кроку правити поданий аркуш (D-442).</summary>
