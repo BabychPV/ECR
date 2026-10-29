@@ -231,6 +231,22 @@ describe('CL-02 · політика кешу зрізів', () => {
     expect(forSlice.refetchOnWindowFocus).toBe(false);
   });
 
+  it('perf: structuralSharing вимкнено для зрізів (O(n²) на мапах у десятки тисяч ключів), решта запитів — ні', () => {
+    const client = new QueryClient();
+    applySliceCachePolicy(client);
+
+    expect(client.getQueryDefaults(queryKeys.slices.one(700, PeriodKey)).structuralSharing).toBe(false);
+    expect(client.getQueryDefaults(['documents']).structuralSharing).toBeUndefined();
+
+    // setQueryData не перебудовує дані: посилання на нові дані зберігається, replaceEqualDeep не викликається.
+    const key = queryKeys.slices.one(700, PeriodKey);
+    const first = { cellPermissions: { a: 1 } };
+    const equalCopy = { cellPermissions: { a: 1 } };
+    client.setQueryData(key, first);
+    client.setQueryData(key, equalCopy);
+    expect(client.getQueryData(key)).toBe(equalCopy);
+  });
+
   it('свіжість зрізу — не менше п’яти хвилин, і лише для зрізів', () => {
     const client = new QueryClient();
     applySliceCachePolicy(client);

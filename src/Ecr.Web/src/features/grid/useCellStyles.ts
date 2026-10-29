@@ -7,7 +7,15 @@ import { t } from '@/shared/i18n';
 import { notificationCloseButtonProps } from '@/shared/ui/notify';
 import { logSuppressedDetail, problemText } from '@/shared/ui/problemText';
 import { denyText } from './permissions';
-import { applyStylePatches, chunkPatches, isValidPatch, type CellStylePatch, type StyleArea } from './userCellStyle';
+import {
+  applyStylePatches,
+  chunkPatches,
+  deniedCellKeys,
+  isValidPatch,
+  revertCellStyles,
+  type CellStylePatch,
+  type StyleArea,
+} from './userCellStyle';
 
 function mergeResponses(a: PatchCellStylesResponse, b: PatchCellStylesResponse): PatchCellStylesResponse {
   const reasons: Record<string, number> = { ...(a.deniedByReason ?? {}) };
@@ -21,6 +29,26 @@ function mergeResponses(a: PatchCellStylesResponse, b: PatchCellStylesResponse):
     skippedCells: a.skippedCells + b.skippedCells,
     deniedByReason: reasons,
   };
+}
+
+/**
+ * Комірки, які оптимістика намалювала, а сервер відмовив; `null` — відповідь НЕ підтверджує кеш (тоді перечитуємо).
+ *
+ * - `items`: сервер відмовляє повністю (403 → `error`), тож успіх = усе застосовано → `[]`.
+ * - `scope` (область): лише коли оптимістика була (`cells` непорожні) і розгорнуте сервером дорівнює тому, що намалював
+ *   клієнт. Область без оптимістики (> `OptimisticMaxCells`) і будь-яка розбіжність — `null`: перечитуємо, як і раніше.
+ * - Часткова відмова (`deniedCells > 0`): відмовлені комірки відновлюються з кешу прав (`cellPermissions[комірка]` ==
+ *   причина відмови), але лише коли кількість комірок з кожною причиною ТОЧНО дорівнює лічильнику сервера.
+ */
+function confirmedDenied(
+  slice: TableSliceDto,
+  response: PatchCellStylesResponse | null,
+  variables: { cells: readonly CellStylePatch[]; areas?: readonly StyleArea[] | null },
+): string[] | null {
+  if ((variables.areas ?? null) === null) return [];
+  if (response === null || variables.cells.length === 0) return null;
+
+  return deniedCellKeys(slice, variables.cells, response);
 }
 
 /**
@@ -133,6 +161,29 @@ export function useCellStyles(documentId: number, tableInstanceId: number, perio
         ...{ 'data-testid': 'cell-color-toast' },
       });
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: sliceKey }),
+    onSettled: (response, error, variables, context) => {
+      // ⛔ Perf: раніше ТУТ завжди йшов `invalidateQueries` зрізу = `GET /tables/{id}` (5,8 МБ на Land) після КОЖНОГО
+      // кольору. Тепер успішний запис, який відповідь сервера підтвердила, лишає кеш як є (оптимістика == результат);
+      // відмовлені сервером комірки (часткова відмова області) відкочуються точково, без перечитування.
+      const current = error === null ? queryClient.getQueryData<TableSliceDto>(sliceKey) : undefined;
+      const denied = current === undefined ? null : confirmedDenied(current, response ?? null, variables);
+
+      if (error === null && denied !== null) {
+        if (denied.length > 0) {
+          queryClient.setQueryData<TableSliceDto>(sliceKey, (slice) =>
+            slice === undefined ? slice : revertCellStyles(slice, denied, context?.previous),
+          );
+        }
+
+        // Але `GET`, що почався ПІСЛЯ `onMutate` (а отже міг прочитати стару БД), перезаписав би підтверджене —
+        // тоді перезапит, як у `applyPatchLocally` (G1-01).
+        if (queryClient.getQueryState(sliceKey)?.fetchStatus !== 'fetching') return undefined;
+
+        return queryClient.invalidateQueries({ queryKey: sliceKey, refetchType: 'all' });
+      }
+
+      // Відмова/409, часткова відмова, розбіжність лічильників, область без оптимістики — актуальний стан сервера.
+      return queryClient.invalidateQueries({ queryKey: sliceKey });
+    },
   });
 }

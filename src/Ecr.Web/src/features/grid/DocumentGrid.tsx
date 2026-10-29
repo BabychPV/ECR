@@ -393,6 +393,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     // визначає період однозначно — і сервер бере його звідти.
     queryKey: ['table-slice', tableInstanceId, periodKey],
 
+    // Perf: див. `applySliceCachePolicy` — `replaceEqualDeep` на мапах у десятки тисяч ключів = O(n²). Задано і тут,
+    // щоб не залежати від дефолтів клієнта (тестові клієнти без політики).
+    structuralSharing: false,
+
     // ⛔ `?periodKey=` тут був, і сервер його НЕ ЧИТАВ: у дії немає такого
     // параметра взагалі. Шкоди він не завдавав лише випадково — бо
     // збігався з періодом екземпляра. Але виглядав як обіцянка: читач

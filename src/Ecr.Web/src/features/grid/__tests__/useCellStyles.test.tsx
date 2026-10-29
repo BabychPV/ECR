@@ -125,6 +125,122 @@ describe('useCellStyles', () => {
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: sliceKey }));
   });
 
+  describe('perf: без повного перечитування зрізу після підтвердженого запису', () => {
+    const rowSlice = {
+      ...slice,
+      cellStyles: {},
+      cellPermissions: { 'R1:A': 'None', 'R1:B': 'None' },
+    } as unknown as TableSliceDto;
+    const cells = [
+      { rowKey: 'R1', columnCode: 'A', backgroundHex: '#ffff00' },
+      { rowKey: 'R1', columnCode: 'B', backgroundHex: '#ffff00' },
+    ];
+
+    function setupWith(data: TableSliceDto) {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      client.setQueryData(sliceKey, data);
+      const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+
+      return { client, ...renderHook(() => useCellStyles(1, 5, 202609), { wrapper }) };
+    }
+
+    it('items: успіх лишає оптимістичний кеш і НЕ інвалідує зріз', async () => {
+      apiFetch.mockResolvedValue({ appliedCells: 2, resetCells: 0, deniedCells: 0, skippedCells: 0 });
+      const { result, client } = setupWith(rowSlice);
+      const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+      await act(() => result.current.mutateAsync({ cells }));
+
+      expect(Object.keys(client.getQueryData<TableSliceDto>(sliceKey)?.cellStyles ?? {})).toEqual(['R1:A', 'R1:B']);
+      expect(invalidate).not.toHaveBeenCalled();
+    });
+
+    it('область з оптимістикою: лічильники збігаються → без інвалідації; cellPermissions не перестворюється', async () => {
+      apiFetch.mockResolvedValue({ appliedCells: 1, resetCells: 0, deniedCells: 0, skippedCells: 1 });
+      const { result, client } = setupWith(rowSlice);
+      const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+      await act(() => result.current.mutateAsync({ cells, areas: [{ rowKeys: ['R1'], allColumns: true }], style: { backgroundHex: '#ffff00' } }));
+
+      const data = client.getQueryData<TableSliceDto>(sliceKey);
+      expect(invalidate).not.toHaveBeenCalled();
+      expect(data?.cellPermissions).toBe(rowSlice.cellPermissions);
+      expect(Object.keys(data?.cellStyles ?? {})).toHaveLength(2);
+    });
+
+    it('часткова відмова з відомими комірками (cellPermissions == причина): відкат лише їх, без інвалідації, тост лишається', async () => {
+      const locked = {
+        ...rowSlice,
+        cellStyles: { 'R1:B': { backgroundHex: '#00b0f0', foregroundHex: null, isBold: false } },
+        cellPermissions: { 'R1:A': 'None', 'R1:B': 'LockedByOwner' },
+      } as unknown as TableSliceDto;
+      apiFetch.mockResolvedValue({ appliedCells: 1, resetCells: 0, deniedCells: 1, deniedByReason: { LockedByOwner: 1 }, skippedCells: 0 });
+      const { result, client } = setupWith(locked);
+      const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+      await act(() => result.current.mutateAsync({ cells, areas: [{ rowKeys: ['R1'], allColumns: true }], style: { backgroundHex: '#ffff00' } }));
+
+      const styles = client.getQueryData<TableSliceDto>(sliceKey)?.cellStyles;
+      expect(styles?.['R1:A']?.backgroundHex).toBe('#ffff00');
+      expect(styles?.['R1:B']?.backgroundHex).toBe('#00b0f0'); // відмовлена комірка повернута до попереднього
+      expect(invalidate).not.toHaveBeenCalled();
+      expect(show.mock.calls[0]?.[0]).toMatchObject({ color: 'statusWarning', 'data-testid': 'cell-color-toast' });
+    });
+
+    it('відмовлені комірки поза оптимістикою (клієнт їх не малював) → кеш підтверджено без перечитування', async () => {
+      const locked = { ...rowSlice, cellPermissions: { 'R1:A': 'None', 'R1:B': 'LockedByOwner' } } as unknown as TableSliceDto;
+      apiFetch.mockResolvedValue({ appliedCells: 1, resetCells: 0, deniedCells: 1, deniedByReason: { LockedByOwner: 1 }, skippedCells: 0 });
+      const { result, client } = setupWith(locked);
+      const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+      await act(() => result.current.mutateAsync({ cells: [cells[0] as (typeof cells)[number]], areas: [{ rowKeys: ['R1'], allColumns: true }] }));
+
+      expect(Object.keys(client.getQueryData<TableSliceDto>(sliceKey)?.cellStyles ?? {})).toEqual(['R1:A']);
+      expect(invalidate).not.toHaveBeenCalled();
+    });
+
+    it('часткова відмова, комірки якої не встановлюються однозначно → перечитування', async () => {
+      apiFetch.mockResolvedValue({ appliedCells: 1, resetCells: 0, deniedCells: 1, deniedByReason: { LockedByOwner: 1 }, skippedCells: 0 });
+      const { result, client } = setupWith(rowSlice); // у cellPermissions немає LockedByOwner
+      const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+      await act(() => result.current.mutateAsync({ cells, areas: [{ rowKeys: ['R1'], allColumns: true }] }));
+
+      await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: sliceKey }));
+    });
+
+    it('область: розбіжність лічильників (сервер розгорнув більше) → перечитування', async () => {
+      apiFetch.mockResolvedValue({ appliedCells: 5, resetCells: 0, deniedCells: 0, skippedCells: 0 });
+      const { result, client } = setupWith(rowSlice);
+      const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+      await act(() => result.current.mutateAsync({ cells, areas: [{ rowKeys: ['R1'], allColumns: true }] }));
+
+      await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: sliceKey }));
+    });
+
+    it('область без оптимістики (cells порожні) → перечитування', async () => {
+      apiFetch.mockResolvedValue({ appliedCells: 9, resetCells: 0, deniedCells: 0, skippedCells: 0 });
+      const { result, client } = setupWith(rowSlice);
+      const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+      await act(() => result.current.mutateAsync({ cells: [], areas: [{ allRows: true, allColumns: true }] }));
+
+      await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: sliceKey }));
+    });
+
+    it('підтверджений запис, поки зріз саме читається, → перезапит у дорозі (G1-01)', async () => {
+      apiFetch.mockResolvedValue({ appliedCells: 2, resetCells: 0, deniedCells: 0, skippedCells: 0 });
+      const { result, client } = setupWith(rowSlice);
+      vi.spyOn(client, 'getQueryState').mockReturnValue({ fetchStatus: 'fetching' } as never);
+      const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+      await act(() => result.current.mutateAsync({ cells }));
+
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: sliceKey, refetchType: 'all' });
+    });
+  });
+
   it('понад 50 000 комірок: кілька запитів по rowKeys, відмови підсумовуються', async () => {
     apiFetch.mockResolvedValue({ appliedCells: 10, resetCells: 0, deniedCells: 1, deniedByReason: { NoWriteRight: 1 }, skippedCells: 0 });
     const { result } = setup();
