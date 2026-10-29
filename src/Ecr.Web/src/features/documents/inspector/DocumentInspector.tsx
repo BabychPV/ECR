@@ -1,10 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent, type RefObject } from 'react';
-import { ActionIcon, Badge, Box, Button, Group, Tabs, Text } from '@mantine/core';
+import { ActionIcon, Badge, Box, Button, Group, SegmentedControl, Tabs, Text } from '@mantine/core';
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
 import { isHumanOrigin, useCellChanges } from '@/features/audit/api';
 import { useTableStatus } from '@/features/documents/api';
-import { useWorkflowHistory } from '@/features/workflow/api';
 import { formatDateOnly } from '@/shared/format/dateOnly';
+import { formatPeriodKey } from '@/shared/format/periodKey';
 import { formatCount } from '@/shared/format/plural';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -22,7 +22,10 @@ import {
   tableTitleOf,
   type InspectorIssueGroup,
 } from './inspectorModel';
+import { SheetLog, type InspectorSheet, type SheetLogTarget } from './SheetLog';
 import './inspector.css';
+
+export type { InspectorSheet, SheetLogTarget } from './SheetLog';
 
 /**
  * Інспектор документа справа: вкладки Issues / History / Info (`UI-25`).
@@ -68,6 +71,10 @@ export interface DocumentInspectorProps {
    * відкривається сам (макет: `runValidate` → `openInspector('issues')`).
    */
   readonly validatedSeq?: number | undefined;
+  /** Активний аркуш сторінки: його журнал показує History без вибраної комірки; `null` - аркуша немає. */
+  readonly sheet?: InspectorSheet | null | undefined;
+  /** Перехід у комірку з рядка журналу аркуша (той самий шлях, що й для зауважень). */
+  readonly onOpenCell?: ((target: SheetLogTarget) => void) | undefined;
 }
 
 export function DocumentInspector({
@@ -77,8 +84,11 @@ export function DocumentInspector({
   messages,
   onSelectFinding,
   validatedSeq,
+  sheet = null,
+  onOpenCell,
 }: DocumentInspectorProps): JSX.Element {
   const [panel, setPanel] = useUrlState(PanelParam);
+  const [historyMode, setHistoryMode] = useState<HistoryMode>('sheet');
   const tab = asTab(panel);
   const opened = tab !== null;
 
@@ -173,6 +183,12 @@ export function DocumentInspector({
   // ⛔ Комірка іншого документа, періоду чи таблиці, якої тут немає, — не ця комірка.
   const shownCell = cellTable === undefined ? null : cell;
 
+  // Комірки немає - режим «This cell» неможливий: перемикач повертається на журнал аркуша і лишається узгодженим,
+  // а наступний вибір комірки його сам НЕ вмикає (вміст не підміняється без дії людини).
+  useEffect(() => {
+    if (shownCell === null && historyMode === 'cell') setHistoryMode('sheet');
+  }, [shownCell, historyMode]);
+
   return (
     <>
       <InspectorTriggers
@@ -227,7 +243,15 @@ export function DocumentInspector({
               <IssuesTab groups={groups} onSelect={onSelectIssue} />
             </Tabs.Panel>
             <Tabs.Panel value="history" className="ecr-insp-body">
-              <HistoryTab documentId={documentId} periodKey={periodKey} cell={shownCell} />
+              <HistoryTab
+                documentId={documentId}
+                periodKey={periodKey}
+                cell={shownCell}
+                sheet={sheet}
+                mode={historyMode}
+                onModeChange={setHistoryMode}
+                onOpenCell={onOpenCell}
+              />
             </Tabs.Panel>
             <Tabs.Panel value="info" className="ecr-insp-body">
               <InfoTab documentId={documentId} periodKey={periodKey} cell={shownCell} table={cellTable} />
@@ -427,7 +451,76 @@ function historyWindow(): { from: string; to: string } {
   return { from: formatDateOnly(from), to: formatDateOnly(today) };
 }
 
+export type HistoryMode = 'sheet' | 'cell';
+
+/**
+ * Вкладка History: ДВА явні режими - журнал аркуша («Sheet log») і історія вибраної комірки («This cell»).
+ *
+ * ⛔ Вибір комірки НЕ підміняє вміст мовчки: режим змінює лише людина перемикачем. «This cell» вимкнений, поки комірки
+ * немає; зняття вибору в режимі комірки повертає на журнал аркуша (стан перемикача лишається узгодженим).
+ * Заголовок щоразу називає, ЧИЮ історію видно (аркуш і період або комірка і колонка).
+ */
 function HistoryTab({
+  documentId,
+  periodKey,
+  cell,
+  sheet,
+  mode,
+  onModeChange,
+  onOpenCell,
+}: {
+  documentId: number;
+  periodKey: number;
+  cell: InspectedCell | null;
+  sheet: InspectorSheet | null;
+  mode: HistoryMode;
+  onModeChange: (mode: HistoryMode) => void;
+  onOpenCell: ((target: SheetLogTarget) => void) | undefined;
+}): JSX.Element {
+  const effective: HistoryMode = mode === 'cell' && cell !== null ? 'cell' : 'sheet';
+  const period = formatPeriodKey(periodKey) || String(periodKey);
+  const scope =
+    effective === 'cell' && cell !== null
+      ? t('inspector.history.scopeCell', {
+          cell: addressChip(cell.rowKey, cell.columnCode),
+          column: cell.columnHeader.length > 0 ? cell.columnHeader : cell.columnCode,
+        })
+      : t('inspector.history.scopeSheet', { sheet: sheet?.name ?? '—', period });
+
+  return (
+    <div data-inspector-history-mode={effective}>
+      <Box px="sm" pt="xs" pb="xs" className="ecr-insp-scope">
+        <SegmentedControl
+          size="xs"
+          fullWidth
+          aria-label={t('inspector.history.modeLabel')}
+          value={effective}
+          onChange={(value) => onModeChange(value === 'cell' ? 'cell' : 'sheet')}
+          data={[
+            { value: 'sheet', label: t('inspector.history.modeSheet') },
+            { value: 'cell', label: t('inspector.history.modeCell'), disabled: cell === null },
+          ]}
+        />
+        <Text size="xs" c="dimmed" mt="xs" role="status" data-inspector-scope="">
+          {scope}
+        </Text>
+        {effective === 'sheet' && cell === null && (
+          <Text size="xs" c="dimmed" data-inspector-select-hint="">
+            {t('inspector.sheetHistoryHint')}
+          </Text>
+        )}
+      </Box>
+
+      {effective === 'cell' ? (
+        <CellHistory documentId={documentId} periodKey={periodKey} cell={cell} />
+      ) : (
+        <SheetLog documentId={documentId} periodKey={periodKey} sheet={sheet} onOpenCell={onOpenCell} />
+      )}
+    </div>
+  );
+}
+
+function CellHistory({
   documentId,
   periodKey,
   cell,
@@ -452,7 +545,7 @@ function HistoryTab({
   );
 
   if (cell === null) {
-    return <SheetHistory documentId={documentId} periodKey={periodKey} />;
+    return <Empty title={t('inspector.noCellTitle')} hint={t('inspector.noCellHint')} />;
   }
 
   if (history.error !== null) {
@@ -511,96 +604,6 @@ function HistoryTab({
           </Group>
         </div>
       ))}
-    </div>
-  );
-}
-
-/** Літеральні ключі (а не складені рядки): сторож каталогу бачить кожен ключ. Невідома дія — сирий код, не вигадка. */
-function eventActionLabel(action: string): string {
-  switch (action) {
-    case 'Submit':
-      return t('workflow.eventAction.Submit');
-    case 'Approve':
-      return t('workflow.eventAction.Approve');
-    case 'ApproveStep':
-      return t('workflow.eventAction.ApproveStep');
-    case 'Reject':
-      return t('workflow.eventAction.Reject');
-    case 'Reopen':
-      return t('workflow.eventAction.Reopen');
-    case 'Recall':
-      return t('workflow.eventAction.Recall');
-    default:
-      return action;
-  }
-}
-
-/** Довгий коментар у вузькій колонці інспектора обрізається (повний текст — у `title`). */
-export const SheetHistoryReasonMax = 300;
-
-/**
- * Журнал погодження аркуша (Submit / Approve / Reject / Return / Reopen з причиною, хто, коли), найновіші перші.
- * Показується у History, коли комірку не вибрано. Джерело — той самий `GET …/workflow/history`, що й банер аркуша:
- * доступ сервер вирішує тим самим правом, що й читання документа. Причина — звичайний текст (React екранує).
- */
-function SheetHistory({ documentId, periodKey }: { documentId: number; periodKey: number }): JSX.Element {
-  const history = useWorkflowHistory(documentId, periodKey, true);
-
-  if (history.error !== null) {
-    return (
-      <Box p="sm">
-        <ErrorAlert error={history.error} onRetry={() => void history.refetch()} />
-      </Box>
-    );
-  }
-
-  if (history.data === undefined) {
-    return (
-      <Text size="sm" c="dimmed" p="sm" role="status">
-        {t('inspector.loading')}
-      </Text>
-    );
-  }
-
-  const events = Array.isArray(history.data) ? history.data : [];
-
-  if (events.length === 0) {
-    return <Empty title={t('inspector.sheetHistoryTitle')} hint={t('inspector.sheetHistoryEmpty')} />;
-  }
-
-  return (
-    <div data-inspector-sheet-history="">
-      <Text size="xs" c="dimmed" p="sm" pb={0}>
-        {t('inspector.sheetHistoryHint')}
-      </Text>
-      <div role="list" aria-label={t('inspector.sheetHistoryTitle')}>
-        {events.map((event, index) => {
-          const reason = event.reason ?? '';
-          const clipped = reason.length > SheetHistoryReasonMax ? `${reason.slice(0, SheetHistoryReasonMax)}…` : reason;
-
-          return (
-            // Події без власного id: перелік лише читається й замінюється цілком — позиція чесний ключ.
-            <div key={index} role="listitem" className="ecr-insp-hist" data-inspector-sheet-event={event.action}>
-              <Group justify="space-between" gap="xs" wrap="nowrap">
-                <Text size="sm" fw={500}>
-                  {eventActionLabel(event.action)}
-                </Text>
-                <Text size="xs" c="dimmed">
-                  <Timestamp value={event.at} />
-                </Text>
-              </Group>
-              <Text size="xs" c="dimmed">
-                {event.sheetCode} · {event.byDisplayName}
-              </Text>
-              {clipped.length > 0 && (
-                <Text size="sm" title={reason} style={{ whiteSpace: 'pre-line', overflowWrap: 'anywhere' }} data-inspector-sheet-reason="">
-                  {clipped}
-                </Text>
-              )}
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }

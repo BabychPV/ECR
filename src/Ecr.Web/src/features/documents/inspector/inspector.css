@@ -169,6 +169,32 @@
   gap: 4px;
 }
 
+/* History: шапка з перемикачем режимів і назвою області (аркуш/комірка). */
+.ecr-insp-scope {
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+/* Рядок журналу, що веде в комірку: та сама розмітка, що й `.ecr-insp-hist`, але кнопка (клавіатура, фокус). */
+button.ecr-insp-hist-open {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+button.ecr-insp-hist-open:hover {
+  background: var(--ecr-hover);
+}
+
+button.ecr-insp-hist-open:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
+
 .ecr-insp-diff {
   font-family: var(--mantine-font-family-monospace);
   font-size: var(--mantine-font-size-sm);

@@ -9390,9 +9390,16 @@ USING (VALUES
     ,(N'colgroups.otherLanguages', N'en', N'Other languages', 1)
     -- COLL:ui-colgroups-polish ── кінець секції ──
     -- WFREASONS:sheet-history ── en: Inspector → History без вибраної комірки показує журнал погодження аркуша; ru/kz — порцією WFREASONS:sheet-history нижче ──
-    ,(N'inspector.sheetHistoryTitle', N'en', N'Approval history', 1)
-    ,(N'inspector.sheetHistoryHint', N'en', N'Select a cell to see its change history.', 1)
-    ,(N'inspector.sheetHistoryEmpty', N'en', N'Nothing has been submitted or decided on this sheet yet.', 1)
+    ,(N'inspector.sheetHistoryTitle', N'en', N'Sheet log', 1)
+    ,(N'inspector.sheetHistoryHint', N'en', N'Select a cell to enable “This cell”.', 1)
+    ,(N'inspector.sheetHistoryEmpty', N'en', N'No edits or approval actions on this sheet yet.', 1)
+    ,(N'inspector.history.modeLabel', N'en', N'What the history shows', 1)
+    ,(N'inspector.history.modeSheet', N'en', N'Sheet log', 1)
+    ,(N'inspector.history.modeCell', N'en', N'This cell', 1)
+    ,(N'inspector.history.scopeSheet', N'en', N'Sheet: {sheet} · {period}', 1)
+    ,(N'inspector.history.scopeCell', N'en', N'Cell: {cell} · {column}', 1)
+    ,(N'inspector.history.includeSystem', N'en', N'Include system changes', 1)
+    ,(N'inspector.history.loadMore', N'en', N'Load more', 1)
     ,(N'workflow.eventAction.Submit', N'en', N'Submitted', 1)
     ,(N'workflow.eventAction.Approve', N'en', N'Approved', 1)
     ,(N'workflow.eventAction.ApproveStep', N'en', N'Approved a step', 1)
@@ -24518,12 +24525,26 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'inspector.sheetHistoryTitle', N'ru', N'История согласования'),
-    (N'inspector.sheetHistoryTitle', N'kz', N'Келісу тарихы'),
-    (N'inspector.sheetHistoryHint', N'ru', N'Выберите ячейку, чтобы увидеть историю её изменений.'),
-    (N'inspector.sheetHistoryHint', N'kz', N'Өзгерістер тарихын көру үшін ұяшықты таңдаңыз.'),
-    (N'inspector.sheetHistoryEmpty', N'ru', N'По этому листу ещё ничего не подавали и не решали.'),
-    (N'inspector.sheetHistoryEmpty', N'kz', N'Бұл парақ бойынша әлі ештеңе тапсырылмаған не шешілмеген.'),
+    (N'inspector.sheetHistoryTitle', N'ru', N'Журнал листа'),
+    (N'inspector.sheetHistoryTitle', N'kz', N'Парақ журналы'),
+    (N'inspector.sheetHistoryHint', N'ru', N'Выберите ячейку, чтобы включить «Эта ячейка».'),
+    (N'inspector.sheetHistoryHint', N'kz', N'«Осы ұяшық» режимін қосу үшін ұяшықты таңдаңыз.'),
+    (N'inspector.sheetHistoryEmpty', N'ru', N'На этом листе ещё нет правок и действий согласования.'),
+    (N'inspector.sheetHistoryEmpty', N'kz', N'Бұл параққа әлі түзетулер мен келісу әрекеттері жасалмаған.'),
+    (N'inspector.history.modeLabel', N'ru', N'Что показывает история'),
+    (N'inspector.history.modeLabel', N'kz', N'Тарих нені көрсетеді'),
+    (N'inspector.history.modeSheet', N'ru', N'Журнал листа'),
+    (N'inspector.history.modeSheet', N'kz', N'Парақ журналы'),
+    (N'inspector.history.modeCell', N'ru', N'Эта ячейка'),
+    (N'inspector.history.modeCell', N'kz', N'Осы ұяшық'),
+    (N'inspector.history.scopeSheet', N'ru', N'Лист: {sheet} · {period}'),
+    (N'inspector.history.scopeSheet', N'kz', N'Парақ: {sheet} · {period}'),
+    (N'inspector.history.scopeCell', N'ru', N'Ячейка: {cell} · {column}'),
+    (N'inspector.history.scopeCell', N'kz', N'Ұяшық: {cell} · {column}'),
+    (N'inspector.history.includeSystem', N'ru', N'Показывать системные изменения'),
+    (N'inspector.history.includeSystem', N'kz', N'Жүйелік өзгерістерді көрсету'),
+    (N'inspector.history.loadMore', N'ru', N'Показать ещё'),
+    (N'inspector.history.loadMore', N'kz', N'Тағы көрсету'),
     (N'workflow.eventAction.Submit', N'ru', N'Подан'),
     (N'workflow.eventAction.Submit', N'kz', N'Тапсырылды'),
     (N'workflow.eventAction.Approve', N'ru', N'Утверждён'),

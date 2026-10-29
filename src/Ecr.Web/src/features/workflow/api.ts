@@ -1,4 +1,11 @@
-import { keepPreviousData, useQuery, type UseQueryResult } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+  type UseInfiniteQueryResult,
+  type InfiniteData,
+  type UseQueryResult,
+} from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 
@@ -25,6 +32,46 @@ export function useWorkflowHistory(
       apiFetch<WorkflowEvent[]>(
         `/api/v1/documents/${String(documentId)}/workflow/history?periodKey=${String(periodKey)}`,
       ),
+    enabled,
+  });
+}
+
+/** Рядок журналу дій на аркуші (правка комірки людиною або дія процесу); тип - зі згенерованої схеми. */
+export type SheetActivityItem = components['schemas']['SheetActivityItem'];
+
+/** Сторінка журналу дій аркуша. */
+export type SheetActivityPage = components['schemas']['SheetActivityPage'];
+
+/** Розмір сторінки журналу аркуша в панелі History. */
+export const SheetActivityPageSize = 50;
+
+/**
+ * Журнал дій на аркуші за період (панель History, режим «Sheet log»): правки значень людьми й дії процесу з
+ * коментарем, найновіші перші, keyset по 50.
+ *
+ * ⚠ Ключ під префіксом `['document', id, period]`: будь-яка дія робочого процесу (`SheetActions`) скидає його,
+ * тож щойно зроблене відхилення з'являється в журналі без зв'язку між компонентами.
+ *
+ * @param includeSystem додати системні зміни значень (перерахунок, інтеграція); типово лише дії людей.
+ * @param enabled запит іде лише коли панель показує цей режим.
+ */
+export function useSheetActivity(
+  documentId: number,
+  sheetDefId: number,
+  periodKey: number,
+  includeSystem: boolean,
+  enabled: boolean,
+): UseInfiniteQueryResult<InfiniteData<SheetActivityPage, string | null>> {
+  return useInfiniteQuery({
+    queryKey: ['document', documentId, periodKey, 'sheet-activity', sheetDefId, includeSystem],
+    queryFn: ({ pageParam }: { pageParam: string | null }) =>
+      apiFetch<SheetActivityPage>(
+        `/api/v1/documents/${String(documentId)}/sheets/${String(sheetDefId)}/activity`
+          + `?periodKey=${String(periodKey)}&includeSystem=${String(includeSystem)}&limit=${String(SheetActivityPageSize)}`
+          + (pageParam === null ? '' : `&cursor=${encodeURIComponent(pageParam)}`),
+      ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor ?? null,
     enabled,
   });
 }
