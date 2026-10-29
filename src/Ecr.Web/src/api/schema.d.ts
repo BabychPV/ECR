@@ -3541,7 +3541,8 @@ export interface paths {
          * Пише повідомлення в чат таблиці. Право `Document.Discuss`.
          * @description `403 ECR-AUTH-0403` — немає `Document.Discuss`; `403 ECR-ACCS-0403` (`discussionPeriodForbidden`) —\n    /// роль, звужена періодами, не бачить цей період; `404 ECR-DOC-0404` — документ чи таблиця невидимі;
          *     `422 ECR-REQ-0422` (`discussionBodyInvalid`) — порожній чи задовгий текст, недійсний період,
-         *     забагато згадок; `429` — ліміт запитів. Згадки користувачів без доступу мовчки відкидаються — у відповіді
+         *     забагато згадок; `409 ECR-PRD-0409` (`projectArchivedNoChat`) — проєкт заархівований, чат лише для читання;
+         *     `429` — ліміт запитів. Повтор з тим самим `clientMessageId` — `200` з існуючим повідомленням. Згадки користувачів без доступу мовчки відкидаються — у відповіді
          *     лише прийняті.
          */
         post: {
@@ -3573,6 +3574,17 @@ export interface paths {
                         "text/plain": components["schemas"]["TableDiscussionMessageDto"];
                     };
                 };
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TableDiscussionMessageDto"];
+                        "text/json": components["schemas"]["TableDiscussionMessageDto"];
+                        "text/plain": components["schemas"]["TableDiscussionMessageDto"];
+                    };
+                };
                 /** @description Forbidden */
                 403: {
                     headers: {
@@ -3586,6 +3598,17 @@ export interface paths {
                 };
                 /** @description Not Found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -28519,6 +28542,12 @@ export interface components {
         PostTableDiscussionMessageRequest: {
             /** @description Простий текст, 1..4000 символів після нормалізації (керівні символи прибираються). */
             body: string;
+            /**
+             * Format: uuid
+             * @description Необов'язковий GUID клієнта для безпечного повтору: повторний POST з тим самим значенням (той самий автор, документ і
+             *     таблиця) повертає ІСНУЮЧЕ повідомлення з `200`, а не створює друге; нове повідомлення — `201`.
+             */
+            clientMessageId?: null | string;
             /** @description Згадані користувачі (до 10). Ті, хто не бачить таблицю, мовчки відкидаються. */
             mentionUserIds?: null | number[];
             /**
