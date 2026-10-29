@@ -46,6 +46,13 @@ public sealed class RegistryDef : Entity<int>
     public bool IsActive { get; private set; }
     public IReadOnlyList<RegistryFieldDef> Fields => _fields;
 
+    /// <summary>Entries form a tree with declared <see cref="RegistryLevelDef"/> levels (NAE plan N1).</summary>
+    public bool IsHierarchical { get; private set; }
+
+    /// <summary>Switches hierarchy on or off (the handler checks that no entry holds a level before switching off).</summary>
+    /// <param name="isHierarchical">New value.</param>
+    public void UseHierarchy(bool isHierarchical) => IsHierarchical = isHierarchical;
+
     /// <summary>Звідки береться код нового запису (<c>D-157</c>).</summary>
     public RegistryCodeMode CodeMode { get; private set; }
 

@@ -923,6 +923,37 @@ CREATE TABLE cfg.RegistryImportProfile
 );
 GO
 
+-- Ієрархічні довідники (NAE plan N1, міграція NAE1_HierarchicalRegistry). RegistryDef.IsHierarchical
+-- вмикає дерево; рівні — cfg.RegistryLevelDef (1..6, порядок = глибина, пропустити можна лише
+-- необов'язкові); запис несе dic.RegistryEntry.LevelId. Правила розміщення (порядок рівнів, цикли,
+-- піддерево) перевіряє застосунок на свіжих даних під блокуванням рядка RegistryDef; база тримає
+-- унікальність (RegistryDefId, Ordinal|Code) і FK. Ordinal >= 1 (а не 1..6): тимчасові «паркувальні»
+-- ординали >6 дозволяють поміняти рівні місцями без порушення унікального індексу.
+-- Індекси: IX_RegistryEntry_Parent (RegistryDefId, ParentEntryId) відфільтрований, покриваючий —
+-- діти вузла, піддерево, перевірка FK_RegEntry_Parent (раніше без індексу); IX_RegistryEntry_Level —
+-- «чи використовується рівень». Унікальність Code лишається в межах довідника (UQ_RegistryEntry).
+CREATE TABLE cfg.RegistryLevelDef
+(
+    Id            int           IDENTITY(1,1) NOT NULL,
+    RegistryDefId int           NOT NULL,
+    Ordinal       int           NOT NULL,
+    Code          nvarchar(64)  NOT NULL,
+    NameL10n      nvarchar(max) NOT NULL,
+    IsOptional    bit           NOT NULL CONSTRAINT DF_RegLevel_Opt DEFAULT (0),
+    CONSTRAINT PK_RegistryLevelDef PRIMARY KEY (Id),
+    CONSTRAINT CK_RegLevel_Ordinal CHECK (Ordinal >= 1),
+    CONSTRAINT UQ_RegistryLevelDef_Ordinal UNIQUE (RegistryDefId, Ordinal),
+    CONSTRAINT UQ_RegistryLevelDef_Code UNIQUE (RegistryDefId, Code),
+    CONSTRAINT FK_RegLevel_Registry FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id)
+);
+ALTER TABLE cfg.RegistryDef ADD IsHierarchical bit NOT NULL CONSTRAINT DF_RegDef_Hier DEFAULT (0);
+ALTER TABLE dic.RegistryEntry ADD LevelId int NULL
+    CONSTRAINT FK_RegEntry_Level FOREIGN KEY REFERENCES cfg.RegistryLevelDef (Id);
+CREATE INDEX IX_RegistryEntry_Parent ON dic.RegistryEntry (RegistryDefId, ParentEntryId)
+    INCLUDE (Ordinal, Code, IsActive, IsDeleted, LevelId) WHERE ParentEntryId IS NOT NULL;
+CREATE INDEX IX_RegistryEntry_Level ON dic.RegistryEntry (LevelId) WHERE LevelId IS NOT NULL;
+GO
+
 -- Дозволи (Permits, PM-02, міграція PRM01_Permits; FEATURE-REGISTRY-TABLES §3, §4.8).
 -- Тип дозволу = реєстр шапки + упорядкований склад таблиць-реєстрів. Сам механізм
 -- реєстрів (cfg.RegistryDef / RegistryFieldDef) НЕ змінюється: усе, чого полю
