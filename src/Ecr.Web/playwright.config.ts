@@ -124,8 +124,7 @@ export default defineConfig({
    * змінює кольорів і меж, а саме їх ми й міряємо.
    */
   webServer: {
-    // Opt-in: E2E_WEB_PROD=1 — production-збірка (
-pm run build ДО прогону) через vite preview; для замірів швидкодії.
+    // Opt-in: E2E_WEB_PROD=1 - production build (run 'npm run build' BEFORE the run) via vite preview; for performance measurements.
     command: process.env['E2E_WEB_PROD'] === '1' ? `npx vite preview --port ${webPort} --strictPort` : `npm run dev -- --port ${webPort} --strictPort`,
     url: webUrl,
     reuseExistingServer: !standWebPort,
