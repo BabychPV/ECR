@@ -4,6 +4,7 @@ using Ecr.Application.Ports;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace Ecr.Infrastructure.Reporting;
@@ -47,16 +48,40 @@ public sealed partial class ReportViewGenerator(
 
         try
         {
-            await db.Database.ExecuteSqlRawAsync(
-                "EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId, @MonthRouting",
-                [
-                    new SqlParameter("@TemplateVersionId", System.Data.SqlDbType.Int)
-                    {
-                        Value = (object?)templateVersionId ?? DBNull.Value,
-                    },
-                    new SqlParameter("@MonthRouting", System.Data.SqlDbType.Bit) { Value = routed },
-                ],
-                ct).ConfigureAwait(false);
+            // ✎ RPT-STABLE: спершу _vN (без змін), потім стабільні вʼюхи без версії. Збій першого не відміняє другого
+            // (одна задовга таблиця не лишає без вʼюх решту), але перша помилка кидається викликачу.
+            SqlException? first = null;
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync(
+                    "EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId, @MonthRouting",
+                    [
+                        new SqlParameter("@TemplateVersionId", System.Data.SqlDbType.Int)
+                        {
+                            Value = (object?)templateVersionId ?? DBNull.Value,
+                        },
+                        new SqlParameter("@MonthRouting", System.Data.SqlDbType.Bit) { Value = routed },
+                    ],
+                    ct).ConfigureAwait(false);
+            }
+            catch (SqlException ex)
+            {
+                first = ex;
+            }
+
+            try
+            {
+                await GenerateStableAsync(templateVersionId, routed, ct).ConfigureAwait(false);
+            }
+            catch (SqlException ex)
+            {
+                first ??= ex;
+            }
+
+            if (first is not null)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(first).Throw();
+            }
         }
         catch (SqlException ex)
         {
@@ -88,6 +113,53 @@ public sealed partial class ReportViewGenerator(
 
         status?.Succeeded(templateVersionId);
     }
+
+    /// <summary>
+    /// ✎ RPT-STABLE: <c>rpt.usp_GenerateStableViews</c> — вʼюхи без версії (шаблон, аркуш, таблиця) по всіх опублікованих версіях.
+    /// Попередження процедури (конфлікт типу колонки між версіями → nvarchar) пишуться в журнал.
+    /// </summary>
+    private async Task GenerateStableAsync(int? templateVersionId, bool routed, CancellationToken ct)
+    {
+        var connection = db.Database.GetDbConnection();
+        var wasClosed = connection.State != System.Data.ConnectionState.Open;
+        if (wasClosed)
+        {
+            await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "EXEC rpt.usp_GenerateStableViews @TemplateVersionId, @MonthRouting";
+            command.CommandTimeout = db.Database.GetCommandTimeout() ?? 30;
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            command.Parameters.Add(new SqlParameter("@TemplateVersionId", System.Data.SqlDbType.Int)
+            {
+                Value = (object?)templateVersionId ?? DBNull.Value,
+            });
+            command.Parameters.Add(new SqlParameter("@MonthRouting", System.Data.SqlDbType.Bit) { Value = routed });
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                if (!reader.IsDBNull(2) && logger is not null)
+                {
+                    LogStableWarning(logger, reader.GetString(0), reader.GetString(2));
+                }
+            }
+        }
+        finally
+        {
+            if (wasClosed)
+            {
+                await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "ReportViewGenerator: стабільна вʼюха rpt.{ViewName}: {Warning}.")]
+    private static partial void LogStableWarning(ILogger logger, string viewName, string warning);
 
     [LoggerMessage(
         Level = LogLevel.Warning,
