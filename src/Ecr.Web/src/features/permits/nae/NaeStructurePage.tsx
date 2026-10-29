@@ -1,8 +1,10 @@
 import { Suspense, lazy, useState, type JSX } from 'react';
-import { Stack, Text } from '@mantine/core';
+import { Button, Group, Stack, Text } from '@mantine/core';
+import { EcrApiError } from '@/api/client';
 import { useRegistryDefinition } from '@/features/registries/rc812/data';
 import { RegistryTreeEditor } from '@/features/registries/tree/RegistryTreeEditor';
 import { t } from '@/shared/i18n';
+import { can, useSession } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import type { TreeLevel, TreeNode, TreeNodeId } from '@/shared/ui/TreeEditor';
@@ -19,6 +21,9 @@ import './naeStructure.css';
  */
 const NodeAttributesForm = lazy(async () => ({
   default: (await import('./NodeAttributesForm')).NodeAttributesForm,
+}));
+const AfImportPanel = lazy(async () => ({
+  default: (await import('./AfImportPanel')).AfImportPanel,
 }));
 const CreateNodeModal = lazy(async () => ({
   default: (await import('./CreateNodeModal')).CreateNodeModal,
@@ -45,6 +50,12 @@ export function NaeStructurePage(): JSX.Element {
   const definition = useRegistryDefinition(NaeRegistryCode);
   const [nodeParam, setNodeParam] = useUrlState('node');
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const session = useSession();
+  // ⛔ Завантаження з AF створює довідник і вузли: сервер вимагає `Registry.EditDefinition` ТА `Registry.EditData`.
+  const canImport = canEdit && can(session.data, 'Registry.EditDefinition');
+  // Довідника ще немає (його створює перше завантаження з AF): визначення відповідає 404.
+  const notProvisioned = definition.error instanceof EcrApiError && definition.error.problem.status === 404;
 
   const selected: TreeNodeId | null = nodeParam === null || nodeParam === '' ? null : Number(nodeParam);
   const registry = definition.data;
@@ -64,11 +75,29 @@ export function NaeStructurePage(): JSX.Element {
         </Text>
       )}
 
-      {definition.error !== null && definition.error !== undefined && (
-        <ErrorAlert error={definition.error} onRetry={() => void definition.refetch()} />
+      {canImport && (
+        <Group gap="xs" data-nae-import-bar="">
+          <Button variant="default" size="xs" onClick={() => setImportOpen((open) => !open)} aria-expanded={importOpen}>
+            {t('permits.nae.import.open')}
+          </Button>
+        </Group>
+      )}
+      {canImport && importOpen && (
+        <Suspense fallback={null}>
+          <AfImportPanel registryCode={NaeRegistryCode} onClose={() => setImportOpen(false)} />
+        </Suspense>
       )}
 
-      <RegistryTreeEditor
+      {notProvisioned ? (
+        <Text size="sm" role="status" data-nae-not-provisioned="">
+          {canImport ? t('permits.nae.import.hintNotProvisioned') : t('permits.nae.import.hintAskAdmin')}
+        </Text>
+      ) : (
+        definition.error !== null &&
+        definition.error !== undefined && <ErrorAlert error={definition.error} onRetry={() => void definition.refetch()} />
+      )}
+
+      {!notProvisioned && <RegistryTreeEditor
         registryCode={NaeRegistryCode}
         label={t('permits.nae.treeLabel')}
         canEdit={canEdit}
@@ -97,7 +126,7 @@ export function NaeStructurePage(): JSX.Element {
             <WhereUsed key={`used-${String(node.id)}`} registryCode={NaeRegistryCode} entryId={Number(node.id)} />
           </div>
         )}
-      />
+      />}
 
       {draft !== null && registry !== undefined && (
         <Suspense fallback={null}>
