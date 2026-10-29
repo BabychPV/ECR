@@ -64,6 +64,18 @@
     Значення `--reporter` для Playwright (напр. `list,html`); порожнє —
     репортер із `playwright.config.ts`, як і раніше.
 
+.PARAMETER Shard
+    `k/M` - прогнати лише k-й із M шардів набору Playwright. Розподіл файлів/сценаріїв за шардами - явний
+    план `src/Ecr.Web/e2e/shard-plan.json` (шарди 2..M перелічують свої файли, шард 1 = усе решта, тож новий
+    spec-файл потрапляє в шард 1 сам). Не `--shard=k/M` Playwright: той ділить за кількістю тестів, а не за
+    часом, і `keyCommitGateLive.spec.ts` (20 хв із 55) зробив би розподіл перекошеним. Разом із `-Grep` план
+    не діє: `--shard=k/M` Playwright + `--pass-with-no-tests` (шард без збігів не падає). `M` = 1 -
+    без шардування. Кожен шард ганяють на ОКРЕМОМУ стенді (CI: окремий раннер); на одній машині різні шарди
+    потребують різних `-Database`, `-Port` і `-DataPath`.
+
+.PARAMETER ShardPlan
+    Шлях до плану шардів; типово `src/Ecr.Web/e2e/shard-plan.json`.
+
 .EXAMPLE
     powershell -File tools/e2e-stand.ps1
     pwsh -File tools/e2e-stand.ps1 -Server 'localhost,1433' -Login sa -SmallFiles -RequireFreeGb 0
@@ -89,7 +101,14 @@ param(
     [string] $SqlPassword = $env:ECR_SQL_PASSWORD,
     [switch] $SmallFiles,
     [int] $StartupTimeoutSec = 60,
-    [string] $Reporter = ''
+    [string] $Reporter = '',
+
+    # `k/M`: ганяти лише k-й із M шардів набору (CI: кожен шард — свій раннер, своя база, свій стенд).
+    [string] $Shard = '',
+    [string] $ShardPlan = '',
+
+    # Лише показати склад шарда (`playwright test --list`) і вийти: без бази й стенда, за секунди.
+    [switch] $ListOnly
 )
 
 # ⚠ Масив аргументів, а не сплат: `setup-dev-db.ps1` викликається окремим
@@ -215,6 +234,74 @@ function GrantsVersion {
     if (-not $etag) { Fail "GET /api/v1/roles/$RoleId/grants не віддав ETag" }
 
     return $etag
+}
+
+# Шардування набору (див. `.PARAMETER Shard`). Рахується ДО підйому стенда: помилка плану має падати за секунди,
+# а не після розгортання бази.
+$shardArgs = @()
+if ($Shard) {
+    if ($Shard -notmatch '^(\d+)/(\d+)$') { Fail "-Shard має вигляд k/M, отримано '$Shard'" }
+    $shardIndex = [int] $Matches[1]
+    $shardCount = [int] $Matches[2]
+    if ($shardCount -lt 1 -or $shardIndex -lt 1 -or $shardIndex -gt $shardCount) { Fail "-Shard ${Shard}: k має бути в 1..M" }
+
+    if ($shardCount -gt 1) {
+        if ($Grep) {
+            # Цільовий прогін: план (він під ПОВНИЙ набір) не застосовний - ділимо те, що знайшов grep.
+            $shardArgs = @("--shard=$shardIndex/$shardCount", '--pass-with-no-tests')
+        }
+        else {
+            if (-not $ShardPlan) { $ShardPlan = Join-Path $client 'e2e/shard-plan.json' }
+            $plan = Get-Content -Raw -Encoding UTF8 $ShardPlan | ConvertFrom-Json
+            $claimed = @($plan.claims.PSObject.Properties.Name | Sort-Object { [int] $_ })
+            $expected = @(2..$shardCount | ForEach-Object { [string] $_ })
+            if (($claimed -join ',') -ne ($expected -join ',')) {
+                Fail "план шардів $ShardPlan заявляє шарди [$($claimed -join ',')], а потрібні [$($expected -join ',')] (M=$shardCount; шард 1 = решта)"
+            }
+
+            # `grep` Playwright дивиться на повний заголовок (проєкт, файл, describe, тест), тож файл ловиться
+            # за ім'ям; `файл::регекс` - сценарії всередині файла (один великий файл ділиться на шарди).
+            function ConvertTo-ClaimRegex([string] $Entry) {
+                $file, $title = $Entry -split '::', 2
+                $rx = '(?:^|[ /])' + [regex]::Escape($file)
+                if ($title) { $rx += '.*' + $title }
+                return $rx
+            }
+            $byShard = @{}
+            foreach ($k in $expected) {
+                $byShard[$k] = '(?:' + ((@($plan.claims.$k) | ForEach-Object { ConvertTo-ClaimRegex $_ }) -join '|') + ')'
+            }
+            if ($shardIndex -eq 1) {
+                # Шард 1 = доповнення до заявок решти: новий spec-файл не губиться, а їде сюди.
+                # ⚠ Скобки обов'язкові: в `@(a, b + c)` кома старша за `+`, і без них масив розвалюється на частини.
+                $shardArgs = @('--grep-invert', ('(?:' + (($expected | ForEach-Object { $byShard[$_] }) -join '|') + ')'))
+            }
+            else {
+                $shardArgs = @('--grep', $byShard[[string] $shardIndex])
+            }
+        }
+    }
+}
+
+if ($ListOnly) {
+    $listArgs = @('playwright', 'test', '--list') + @($shardArgs) + $(if ($Grep) { @('--grep', $Grep) } else { @() })
+    Push-Location $client
+    $previousEapList = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $listOut = @(& $npxExe @listArgs)
+        $listCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousEapList
+        Pop-Location
+    }
+    $total = $listOut | Select-Object -Last 1
+    Write-Host "шард ${Shard}: $total"
+    if ($env:GITHUB_STEP_SUMMARY) { Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- шард ${Shard}: $total" }
+    if ($listCode -ne 0) { Fail "playwright --list завершився з кодом $listCode (шард ${Shard})" }
+    if (-not $Grep -and "$total" -notmatch 'Total: [1-9]') { Fail "шард $Shard порожній без grep: перевір ${ShardPlan}" }
+    return
 }
 
 if ($WebPort -eq 0) { $WebPort = $Port + 1000 }
@@ -657,7 +744,13 @@ try {
         try {
             $pwArgs = @('playwright', 'test')
             if ($Grep) { $pwArgs += @('--grep', $Grep) }
+            $pwArgs += $shardArgs
             if ($Reporter) { $pwArgs += "--reporter=$Reporter" }
+            if ($Shard) {
+                # Склад шарда видно в журналі (і для звірки: сума по шардах = увесь набір).
+                $listArgs = @('playwright', 'test', '--list') + @($shardArgs) + $(if ($Grep) { @('--grep', $Grep) } else { @() })
+                Write-Host "  шард ${Shard}: $(@(& $npxExe @listArgs) | Select-Object -Last 1)"
+            }
             & $npxExe @pwArgs
         }
         finally {
