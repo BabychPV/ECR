@@ -263,6 +263,10 @@ public sealed class GetJobStatusHandler(
                              ?? JobCompletionWarning.EffectiveStateOf(status.State, status.Message),
             // ⚠ AN-108 / P2-02: з СИРОГО конверта — `Message` вище вже перекладений, `written` із нього не дістати.
             WrittenCount = FormulaRecalcOutcome.WrittenCountOf(status.State, status.Message),
+            // L3: періоди, де задача формул документа справді записала; порожньо = невідомо -> null.
+            WrittenPeriods = FormulaRecalcOutcome.WrittenPeriodsOf(status.State, status.Message) is { Count: > 0 } wp
+                ? wp
+                : null,
         };
     }
 }
