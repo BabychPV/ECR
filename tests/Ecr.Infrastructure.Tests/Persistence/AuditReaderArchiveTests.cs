@@ -305,8 +305,10 @@ public sealed class AuditReaderArchiveTests(SqlServerFixture sql, ITestOutputHel
         Assert.Equal(legacy.Rows, probed.Rows);
 
         // Пакет з пробником читає aud.CellChange рівно як той самий запит без архіву...
-        Assert.Equal(hotOnly.AudScans, probed.AudScans);
-        Assert.Equal(hotOnly.AudReads, probed.AudReads);
+        // ⚠ «Не дорожче», а не «рівно»: пакет з пробником компілюється як одне ціле, і на CI його гаряча гілка інколи
+        // читає на сторінку МЕНШЕ (2 проти 3) - дорожчою вона бути не повинна.
+        Assert.True(probed.AudScans <= hotOnly.AudScans, $"пробник збільшив заходи: {probed} проти {hotOnly}");
+        Assert.True(probed.AudReads <= hotOnly.AudReads, $"пробник збільшив читання: {probed} проти {hotOnly}");
 
         // ...а той — не дорожче за запит ДО цієї зміни (параметри `datetime`, як давав AddWithValue).
         Assert.True(hotOnly.AudScans <= legacy.AudScans, $"гарячий запит дорожчий за колишній: {hotOnly} проти {legacy}");
