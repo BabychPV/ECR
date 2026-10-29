@@ -115,6 +115,13 @@ public sealed class CrossPeriodFanOut(
                 continue;
             }
 
+            // L1: не ставимо задачу, яка б повернулася з `written = 0` (порожні цілі в періоді-читачі).
+            if (!await ReaderHasWorkAsync(documentId, readerKey, source.Sequence, carried, carriedInputs, ct)
+                    .ConfigureAwait(false))
+            {
+                continue;
+            }
+
             // Елемент масиву `cells` — «джерело зміни», а не адреса комірки: `RowId = 0` його відрізняє,
             // а злиття задач (`JobPayloadMerge`) об'єднує масив і прибирає повтори.
             var cells = carried
@@ -135,6 +142,59 @@ public sealed class CrossPeriodFanOut(
         }
 
         return enqueued;
+    }
+
+    /// <summary>
+    /// L1: чи має період-читач хоч одну ціль для переданих змін — той самий відбір, що зробить задача
+    /// (<see cref="CrossPeriodReaders.Targets"/> за залежностями ВЕРСІЇ ПЕРІОДУ-ЧИТАЧА), без плану й без запису.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Помилитися можна лише в бік «так»: немає метаданих (<c>metadata is null</c>) — так; версія з активним
+    /// Rollup/Check — так (<c>RecalculationService</c> йде далі й за порожніх цілей); у періоді немає екземплярів — ні
+    /// (задача повернула б 0). Таблиця формули без екземпляра в періоді-читачі цілі не дає: сервіс її пропускає.
+    /// </remarks>
+    private async Task<bool> ReaderHasWorkAsync(
+        long documentId,
+        PeriodKey reader,
+        int sourceSequence,
+        IReadOnlyCollection<(int TableDefId, int ColumnDefId)> carried,
+        IReadOnlyCollection<(int TableDefId, int ColumnDefId, int? MonthNumber)> carriedInputs,
+        CancellationToken ct)
+    {
+        if (metadata is null)
+        {
+            return true;
+        }
+
+        var sources = carried
+            .Select(c => new CrossPeriodSource(sourceSequence, c.TableDefId, c.ColumnDefId))
+            .Concat(carriedInputs.Select(c => new CrossPeriodSource(sourceSequence, c.TableDefId, c.ColumnDefId, OwnerInput: true)))
+            .ToList();
+
+        var instances = await rowStore.GetTableInstancesAsync(documentId, reader, ct).ConfigureAwait(false);
+        foreach (var group in instances.GroupBy(i => i.TemplateVersionId))
+        {
+            var snapshot = await metadata.GetAsync(group.Key, ct).ConfigureAwait(false);
+            if (snapshot.HasActiveRollupOrCheck)
+            {
+                return true;
+            }
+
+            var dependencies = await versions.ListFormulaDependenciesAsync(group.Key, ct).ConfigureAwait(false);
+            var liveFormulaTables = snapshot.Sheets
+                .SelectMany(s => s.Tables)
+                .SelectMany(t => t.Formulas.Where(f => !f.IsDeleted).Select(f => (Formula: f.Id, Table: t.Id)))
+                .GroupBy(p => p.Formula)
+                .ToDictionary(g => g.Key, g => g.First().Table);
+            var presentTables = group.Select(i => i.TableDefId).ToHashSet();
+
+            if (CrossPeriodReaders.HasTargets(dependencies, sources, reader.Sequence, liveFormulaTables, presentTables))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

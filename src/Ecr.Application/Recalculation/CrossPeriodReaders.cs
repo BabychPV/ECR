@@ -168,6 +168,74 @@ public static class CrossPeriodReaders
         ArgumentNullException.ThrowIfNull(liveFormulas);
 
         var live = liveFormulas as ISet<int> ?? new HashSet<int>(liveFormulas);
+        var affected = DirectlyAffected(dependencies, sources, readerSequence, live);
+
+        // Транзитивне розкриття — те саме, що в `RecalculationService.Plan`: формула, яка читає
+        // результат брудної формули, теж брудна.
+        var growing = true;
+        while (growing)
+        {
+            growing = false;
+            foreach (var formulaId in affected.ToList())
+            {
+                foreach (var dependent in plan.DependentsOfFormula(formulaId))
+                {
+                    if (affected.Add(dependent))
+                    {
+                        growing = true;
+                    }
+                }
+            }
+        }
+
+        var ordered = affected.Where(id => !plan.IsSnapshot(id)).ToList();
+        ordered.Sort((a, b) => plan.EvaluationOrder(a).CompareTo(plan.EvaluationOrder(b)));
+
+        return ordered;
+    }
+
+    /// <summary>
+    /// L1 (затримка перерахунку): чи матиме період-читач <paramref name="readerSequence"/> хоч одну ціль —
+    /// тобто чи варто ставити задачу. Це ТОЙ САМИЙ відбір, що й <see cref="Targets"/> (спільний
+    /// <see cref="DirectlyAffected"/>), без плану: транзитивні залежні лише ДОДАЮТЬ цілі до прямих, тож порожні
+    /// прямі цілі ⇒ порожній <see cref="Targets"/> ⇒ задача повернулася б з <c>written = 0</c>.
+    /// </summary>
+    /// <param name="dependencies">Граф залежностей версії шаблону ПЕРІОДУ-ЧИТАЧА.</param>
+    /// <param name="sources">Що змінилося в інших періодах.</param>
+    /// <param name="readerSequence">Період-читач.</param>
+    /// <param name="liveFormulaTables">Живі (не видалені) формули версії → таблиця формули.</param>
+    /// <param name="presentTables">Таблиці, що мають екземпляр у періоді-читачі.</param>
+    /// <returns><c>true</c>, якщо хоч одна пряма ціль живе в таблиці, яка є в періоді-читачі.</returns>
+    /// <remarks>
+    /// ⛔ Таблиця формули без екземпляра в періоді: <c>RecalculationService</c> такої цілі не пише
+    /// («рахувати нема куди»), тому вона не робить період читачем. Безпечно лише ДО того, як
+    /// відкинути період; версії з Rollup/Check (<c>HasActiveRollupOrCheck</c>) викликач не відсікає взагалі.
+    /// </remarks>
+    public static bool HasTargets(
+        IReadOnlyList<FormulaDependency> dependencies,
+        IReadOnlyCollection<CrossPeriodSource> sources,
+        int readerSequence,
+        IReadOnlyDictionary<int, int> liveFormulaTables,
+        IReadOnlySet<int> presentTables)
+    {
+        ArgumentNullException.ThrowIfNull(dependencies);
+        ArgumentNullException.ThrowIfNull(sources);
+        ArgumentNullException.ThrowIfNull(liveFormulaTables);
+        ArgumentNullException.ThrowIfNull(presentTables);
+
+        var live = new HashSet<int>(liveFormulaTables.Keys);
+
+        return DirectlyAffected(dependencies, sources, readerSequence, live)
+            .Any(id => presentTables.Contains(liveFormulaTables[id]));
+    }
+
+    /// <summary>Формули, що напряму читають зміни інших періодів (до транзитивного розкриття).</summary>
+    private static HashSet<int> DirectlyAffected(
+        IReadOnlyList<FormulaDependency> dependencies,
+        IReadOnlyCollection<CrossPeriodSource> sources,
+        int readerSequence,
+        ISet<int> live)
+    {
         var affected = new HashSet<int>();
 
         foreach (var dependency in dependencies)
@@ -218,28 +286,7 @@ public static class CrossPeriodReaders
             }
         }
 
-        // Транзитивне розкриття — те саме, що в `RecalculationService.Plan`: формула, яка читає
-        // результат брудної формули, теж брудна.
-        var growing = true;
-        while (growing)
-        {
-            growing = false;
-            foreach (var formulaId in affected.ToList())
-            {
-                foreach (var dependent in plan.DependentsOfFormula(formulaId))
-                {
-                    if (affected.Add(dependent))
-                    {
-                        growing = true;
-                    }
-                }
-            }
-        }
-
-        var ordered = affected.Where(id => !plan.IsSnapshot(id)).ToList();
-        ordered.Sort((a, b) => plan.EvaluationOrder(a).CompareTo(plan.EvaluationOrder(b)));
-
-        return ordered;
+        return affected;
     }
 
     /// <summary>
