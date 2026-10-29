@@ -9776,6 +9776,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nae-tree/af-import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Loads the NAE tree from the PI AF equipment tree (elements with `Region` / `On_Offshore` attributes). Needs
+         *     `Registry.EditDefinition` and `Registry.EditData`.
+         * @description Idempotent and create-only: after the first load ECR owns the tree, so existing nodes are never changed or moved.
+         *     `dryRun` builds the report without writing anything (not even the registry). The first applied call also creates
+         *     the registry `NAE_TREE` (levels, fields, composite key) when it does not exist.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ImportNaeFromAfRequest"];
+                    "application/json": components["schemas"]["ImportNaeFromAfRequest"];
+                    "text/json": components["schemas"]["ImportNaeFromAfRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NaeAfImportReport"];
+                        "text/json": components["schemas"]["NaeAfImportReport"];
+                        "text/plain": components["schemas"]["NaeAfImportReport"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications/channels": {
         parameters: {
             query?: never;
@@ -14291,6 +14353,65 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registries/{code}/entries/{id}/references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Where a registry entry is used (permits, type, validity, substance count). Permission `Registry.View` or grant
+         *     `Read`.
+         * @description Empty until the permit tables point at registry entries (plan N3). An entry of another registry is the same 404 as a
+         *     missing one.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Registry code. */
+                    code: string;
+                    /** @description Entry. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryEntryReferencesDto"];
+                        "text/json": components["schemas"]["RegistryEntryReferencesDto"];
+                        "text/plain": components["schemas"]["RegistryEntryReferencesDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -26212,6 +26333,20 @@ export interface components {
             tableCode?: null | string;
             tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
+        /** @description One-time load of the NAE tree from the PI AF element tree (NAE plan N2). */
+        ImportNaeFromAfRequest: {
+            /**
+             * Format: int32
+             * @description PI AF data source to read.
+             */
+            dataSourceId: number;
+            /** @description `true` — build the report only: nothing is created or changed (not even the registry). */
+            dryRun: boolean;
+            /** @description Target registry; `null` — string NaeTreeSchema.RegistryCode (`NAE_TREE`). */
+            registryCode: null | string;
+            /** @description AF element that holds the equipment tree; `null` — string NaeTreeSchema.DefaultAfRoot (`ECR_01_Air Equipment`). */
+            rootPath: null | string;
+        };
         /** @description Рядок книги, для якого людина свідомо перезаписує чужу правку, зроблену
          *     після експорту (AN-114, D-338). */
         ImportOverwriteRow: {
@@ -27508,6 +27643,61 @@ export interface components {
             assignedToMe: components["schemas"]["MyEditAssignmentDto"][];
             /** @description Усі виконавці заповнили — чекає валідації мною. */
             awaitingMyValidation: components["schemas"]["MyEditAssignmentDto"][];
+        };
+        /** @description Result of `POST /api/v1/nae-tree/af-import`. */
+        NaeAfImportReport: {
+            /** @description Something was written (never for a dry run or when there was nothing new). */
+            applied: boolean;
+            /** @description The request was a dry run. */
+            dryRun: boolean;
+            /**
+             * Format: int32
+             * @description AF elements read under the root.
+             */
+            elementsRead: number;
+            /** @description Findings, at most 200 (the rest is counted in Skipped). */
+            issues: components["schemas"]["NaeAfIssueDto"][];
+            /** @description Per level: created and existing nodes (levels with no nodes are present with zeros). */
+            levels: components["schemas"]["NaeAfLevelCountDto"][];
+            /** @description Target registry. */
+            registryCode: string;
+            /** @description The registry (fields, key, levels) was created by this call. */
+            registryProvisioned: boolean;
+            /**
+             * Format: int32
+             * @description Elements not loaded (see Issues).
+             */
+            skipped: number;
+            /** @description The AF listing is complete (`false` — it may have been truncated). */
+            sourceComplete: boolean;
+        };
+        /** @description One finding of the import: an element that was skipped or a rule that fired. */
+        NaeAfIssueDto: {
+            /** @description `noCode` (empty NAE code), `noRegion` (no Region attribute), `duplicateBusinessKey` (same NAE code, region and
+             *             area twice in AF), `pathFlattened` (more than two grouping levels under the area), `existingElsewhere`
+             *             (the business key already belongs to another node), `sourceIncomplete` (AF listing may be truncated). */
+            code: string;
+            /** @description Short explanation for the report (English; the UI shows its own text per `Code`). */
+            detail: string;
+            /** @description AF path of the element (or empty for a whole-source finding). */
+            path: string;
+            /** @description `warning` (loaded with a caveat) or `skipped` (not loaded). */
+            severity: string;
+        };
+        /** @description Count of nodes of one level in an import report. */
+        NaeAfLevelCountDto: {
+            /**
+             * Format: int32
+             * @description Nodes that are created (dry run: would be created).
+             */
+            create: number;
+            /**
+             * Format: int32
+             * @description Nodes that already exist and are left untouched (ECR owns the tree after the first load).
+             */
+            existing: number;
+            /** @description Level code (`REGION`, `AREA`, `SITE`, `EQUIP`, `SRC`). */
+            levelCode: string;
         };
         /**
          * @description Транспорт каналу сповіщень. Числа зберігаються в базі — не перенумеровувати.
@@ -29634,6 +29824,52 @@ export interface components {
              *     записи збережено. `Error` — відмова всього файлу `422 ECR-REG-4221`. Прев'ю
              *     (`dryRun`) правил не виконує: воно нічого не записує. */
             warnings?: components["schemas"]["RegistryRuleViolationDto"][];
+        };
+        /** @description One place where a registry entry is used (the "where used" panel of the NAE tree). */
+        RegistryEntryReferenceDto: {
+            /** @description `permit` (the only kind today; others may follow). */
+            kind: string;
+            /**
+             * Format: int64
+             * @description Permit header entry id.
+             */
+            permitId: number;
+            /** @description Permit number as shown to the user. */
+            permitNumber: string;
+            /** @description Permit type code. */
+            permitTypeCode: string;
+            /**
+             * Format: int32
+             * @description Substances limited for the entry in this permit.
+             */
+            substanceCount: number;
+            /**
+             * Format: date
+             * @description First valid day of the permit.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description First NOT valid day of the permit (exclusive).
+             */
+            validTo: null | string;
+        };
+        /** @description Where a registry entry is used. */
+        RegistryEntryReferencesDto: {
+            /**
+             * Format: int64
+             * @description Entry.
+             */
+            entryId: number;
+            /** @description Uses, permit number then id; empty while no permit table points at the entry. */
+            items: components["schemas"]["RegistryEntryReferenceDto"][];
+            /** @description Registry code. */
+            registryCode: string;
+            /**
+             * Format: int32
+             * @description Number of uses.
+             */
+            total: number;
         };
         /** @description Створення або оновлення запису довідника. */
         RegistryEntryUpsertDto: {

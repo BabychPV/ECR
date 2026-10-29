@@ -1394,6 +1394,11 @@ public sealed partial class EndpointCoverageTests
         "POST /api/v1/registries/{p}/entries/{p}/move",
         "POST /api/v1/registries/{p}/entries/{p}/retire",
 
+        // NAE plan N2: the AF load is an admin action surfaced by the NAE tree page; "where used" is the node panel there.
+        // For the UI session: TEMPORARY, remove each line in the commit that adds the client call.
+        "POST /api/v1/nae-tree/af-import",
+        "GET /api/v1/registries/{p}/entries/{p}/references",
+
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було
         // НЕПРАВДОЮ: жодне місце клієнта нічого не конвертувало.
