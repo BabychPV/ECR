@@ -492,11 +492,10 @@ public sealed class RecalculationService(
         // ⚠ Q-331: перенесено ВИЩЕ вибору цілей (`targets` нижче) — фільтр
         // повного прогону за аркушем потребує знати, якій таблиці належить
         // кожна формула, ДО того, як список цілей уже сформований.
-        var tables = snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
-
-        var formulas = tables.Values
-            .SelectMany(t => t.Formulas.Where(f => !f.IsDeleted).Select(f => (Table: t, Formula: f)))
-            .ToDictionary(pair => pair.Formula.Id);
+        // L2b: словники таблиць і живих формул — з індексу знімка (будується раз на знімок, не на кожен прогін).
+        var snapshotIndex = RecalculationPlanBuilder.SnapshotIndex.For(snapshot);
+        var tables = snapshotIndex.Tables;
+        var formulas = snapshotIndex.Formulas;
 
         // ⛔ Q-17.3: колонки з ЧУЖИМ власником для екземплярів цього прогону. Введену комірку такої колонки пише лише
         // власник (прогін його екземпляра рахує її формули сам); цей прогін її не перезаписує — див. `Evaluate`.
