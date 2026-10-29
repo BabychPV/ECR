@@ -122,7 +122,15 @@ public sealed class GetTemplateStructureHandler(
             table.RowMode,
             table.MaxDynamicRows,
             [.. table.Columns.OrderBy(c => c.Ordinal).Select(c => Column(c, symbols, columnFormulas))],
-            [.. RowsOf(table, rowFormulas)]);
+            [.. RowsOf(table, rowFormulas)])
+        {
+            HeaderGroups =
+            [
+                .. table.HeaderGroups
+                    .OrderBy(g => g.Ordinal).ThenBy(g => g.Id)
+                    .Select(g => new TemplateHeaderGroupDto(g.Id, g.Code, g.ParentGroupId, g.Ordinal, g.HeaderL10n)),
+            ],
+        };
     }
 
     /// <summary>Рядки таблиці з розгорнутою ієрархією за ключами.</summary>
@@ -155,7 +163,8 @@ public sealed class GetTemplateStructureHandler(
             column.UnitId is { } unitId && symbols.TryGetValue(unitId, out var symbol) ? symbol : null,
             formula?.Expression,
             formula?.Dialect,
-            column.WidthPx);
+            column.WidthPx,
+            column.HeaderGroupId);
     }
 
     private static TemplateRowDto Row(

@@ -171,6 +171,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
                .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.Rows)
                .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.Formulas)
                .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.ValidationRules)
+            .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.HeaderGroups)
                .Include(v => v.HeaderFields)
 
                // ⛔ AsSplitQuery, а не один нероздільний запит (аудит
@@ -207,6 +208,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
             .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.Rows)
             .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.Formulas)
             .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.ValidationRules)
+            .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.HeaderGroups)
             .Include(v => v.HeaderFields)
 
             // ⛔ Той самий декартів добуток, що й у `GetWithStructureAsync`
@@ -1377,6 +1379,8 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
             affected += rows;
         }
 
+        await EnsureHeaderGroupsValidAsync(templateVersionId, changes, ct).ConfigureAwait(false);
+
         return affected;
     }
 
@@ -1449,6 +1453,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
             [("ColumnDef", "IsHidden")] = Bit(columnScope, "IsHidden"),
             [("ColumnDef", "StyleId")] = Int(columnScope, "StyleId"),
             [("ColumnDef", "WidthPx")] = Int(columnScope, "WidthPx"),
+            [("ColumnDef", "HeaderGroupId")] = Int(columnScope, "HeaderGroupId"),
             [("RowDef", "LabelL10n")] = Text(rowScope, "LabelL10n"),
             [("RowDef", "Ordinal")] = Int(rowScope, "Ordinal"),
             [("RowDef", "StyleId")] = Int(rowScope, "StyleId"),

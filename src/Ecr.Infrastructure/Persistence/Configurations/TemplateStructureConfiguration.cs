@@ -98,6 +98,13 @@ public sealed class TableDefConfiguration : IEntityTypeConfiguration<TableDef>
                .HasConstraintName("FK_ColumnDef_Table");
         builder.Navigation(x => x.Columns).UsePropertyAccessMode(PropertyAccessMode.Field);
 
+        builder.HasMany(x => x.HeaderGroups)
+               .WithOne()
+               .HasForeignKey(g => g.TableDefId)
+               .HasConstraintName("FK_ColumnHeaderGroupDef_Table")
+               .OnDelete(DeleteBehavior.Restrict);
+        builder.Navigation(x => x.HeaderGroups).UsePropertyAccessMode(PropertyAccessMode.Field);
+
         builder.HasMany(x => x.Rows)
                .WithOne()
                .HasForeignKey(r => r.TableDefId)
@@ -179,6 +186,39 @@ public sealed class ColumnDefConfiguration : IEntityTypeConfiguration<ColumnDef>
                .WithMany()
                .HasForeignKey(x => x.UnitId)
                .HasConstraintName("FK_ColumnDef_Unit");
+
+        // Група заголовків колонки (презентація). NO ACTION: заміна дерева спершу зісковзує колонки з груп.
+        builder.HasOne<ColumnHeaderGroupDef>()
+               .WithMany()
+               .HasForeignKey(x => x.HeaderGroupId)
+               .HasConstraintName("FK_ColumnDef_HeaderGroup")
+               .OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(x => x.HeaderGroupId).HasDatabaseName("IX_ColumnDef_HeaderGroupId");
+    }
+}
+
+/// <summary>Конфігурація <see cref="ColumnHeaderGroupDef"/>.</summary>
+public sealed class ColumnHeaderGroupDefConfiguration : IEntityTypeConfiguration<ColumnHeaderGroupDef>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<ColumnHeaderGroupDef> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("ColumnHeaderGroupDef", "cfg");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
+        builder.LocalizedText(x => x.HeaderL10n);
+
+        builder.HasIndex(x => new { x.TableDefId, x.Code })
+               .IsUnique().HasDatabaseName("UQ_ColumnHeaderGroupDef");
+
+        builder.HasOne<ColumnHeaderGroupDef>()
+               .WithMany()
+               .HasForeignKey(x => x.ParentGroupId)
+               .HasConstraintName("FK_ColumnHeaderGroupDef_Parent")
+               .OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(x => x.ParentGroupId).HasDatabaseName("IX_ColumnHeaderGroupDef_ParentGroupId");
     }
 }
 

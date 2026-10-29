@@ -59,6 +59,7 @@ public static class DependencyInjection
         services.AddScoped<Security.GetEffectiveAccessHandler>();
         services.AddScoped<DiffTemplateVersionsHandler>();
         services.AddScoped<PatchPresentationHandler>();
+        services.AddScoped<ReplaceHeaderGroupsHandler>();
 
         // Зв'язки між таблицями версії (ФВ-2.12, ФВ-2.13)
         services.AddScoped<ListTableRelationsHandler>();

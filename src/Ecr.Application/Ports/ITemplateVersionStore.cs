@@ -332,7 +332,25 @@ public interface ITemplateVersionStore
     /// <returns>Скільки рядків справді змінилося.</returns>
     public Task<int> ApplyPresentationAsync(
         int templateVersionId, IReadOnlyList<PresentationChange> changes, CancellationToken ct);
+
+    /// <summary>
+    /// Замінює ВСЕ дерево груп заголовків таблиці (презентаційна операція; опублікована версія теж). Групи
+    /// зіставляються за кодом (Id стабільний), відсутні у вході — прибираються, колонки прибраних груп втрачають групу.
+    /// Викликається в транзакції обробника.
+    /// </summary>
+    /// <exception cref="Errors.NotFoundException">Таблиці немає в цій версії — <c>ECR-TMPL-0404</c>.</exception>
+    /// <exception cref="Errors.BusinessRuleException">Дерево порушує правила — <c>ECR-TMPL-4229</c>.</exception>
+    public Task<IReadOnlyList<HeaderGroupRow>> ReplaceHeaderGroupsAsync(
+        int templateVersionId, int tableDefId, IReadOnlyList<HeaderGroupInput> groups, CancellationToken ct);
 }
+
+/// <summary>Група у вході заміни дерева: батько — кодом, порядок — серед сусідів.</summary>
+public sealed record HeaderGroupInput(
+    string Code, string? ParentCode, int Ordinal, Ecr.Domain.ValueObjects.LocalizedText HeaderL10n);
+
+/// <summary>Збережена група заголовків.</summary>
+public sealed record HeaderGroupRow(
+    int Id, int? ParentGroupId, string Code, int Ordinal, Ecr.Domain.ValueObjects.LocalizedText HeaderL10n);
 
 /// <summary>Одна презентаційна зміна.</summary>
 /// <param name="EntityType">Тип сутності: <c>ColumnDef</c>, <c>RowDef</c>, <c>SheetDef</c>, <c>TableDef</c>.</param>

@@ -42,6 +42,15 @@ public sealed class ColumnDef : Entity<int>
     /// користувача (D-201) перекриває цю.
     /// </summary>
     public int? WidthPx { get; private set; }
+
+    /// <summary>
+    /// Найглибша група заголовків, до якої належить колонка (<c>null</c> — без групи). Презентаційне поле;
+    /// група — тієї ж таблиці (перевіряє сховище).
+    /// </summary>
+    public int? HeaderGroupId { get; private set; }
+
+    /// <summary>Призначає колонку групі заголовків (<c>null</c> — прибрати).</summary>
+    public void SetHeaderGroup(int? headerGroupId) => HeaderGroupId = headerGroupId;
     public bool IsMonthColumn { get; private set; }
     public byte? MonthNumber { get; private set; }
     public string? DefaultValue { get; private set; }

@@ -336,7 +336,7 @@ public sealed class PatchPresentationHandler(
 
         return field switch
         {
-            "StyleId" or "HeaderStyleId" => value is null || int.TryParse(
+            "StyleId" or "HeaderStyleId" or "HeaderGroupId" => value is null || int.TryParse(
                 value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out _),
             "DisplayFormat" => value is null || value.Length <= MaxDisplayFormatLength,
             _ => true,

@@ -431,6 +431,14 @@ public sealed class MetadataCache(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // Групи заголовків колонок (презентація): один легкий запит на версію.
+        var headerGroups = await db.ColumnHeaderGroupDefs
+            .AsNoTracking()
+            .Where(g => tableIds.Contains(g.TableDefId))
+            .OrderBy(g => g.Ordinal).ThenBy(g => g.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
         // Сьомий запит — ПОЛЯ ШАПКИ ДОКУМЕНТА. Рівень версії, не таблиці,
         // тому фільтр — за TemplateVersionId, а не за tableIds (на відміну
         // від решти шести запитів вище).
@@ -450,9 +458,15 @@ public sealed class MetadataCache(
         var rowsByTable = rows.ToLookup(r => r.TableDefId);
         var rulesByTable = validationRules.ToLookup(r => r.TableDefId);
         var formulasByTable = formulas.ToLookup(f => f.TableDefId);
+        var groupsByTable = headerGroups.ToLookup(g => g.TableDefId);
 
         foreach (var table in tables)
         {
+            foreach (var group in groupsByTable[table.Id])
+            {
+                table.AddHeaderGroup(group);
+            }
+
             foreach (var column in columnsByTable[table.Id])
             {
                 table.AddColumn(column);

@@ -344,7 +344,28 @@ public sealed class GetTableSliceHandler(
                 c.LookupRegistryDefId, c.UnitId, SymbolOf(symbolById, c.UnitId),
                 c.Precision, c.Scale, requiredByMethodology.Contains(c.Id), StyleOf(styleById, c.StyleId), c.WidthPx,
                 ColumnExpressionVisibility.Visible(
-                    columnFormulas.GetValueOrDefault(c.Id), table, c.Id, snapshot, readable, formulaEngine)))
+                    columnFormulas.GetValueOrDefault(c.Id), table, c.Id, snapshot, readable, formulaEngine),
+                c.HeaderGroupId))
+            .ToList();
+
+        // Групи заголовків: лише ті, у піддереві яких є видима колонка; колонка без групи/з невідомою — без групи.
+        var groupById = table.HeaderGroups.ToDictionary(g => g.Id);
+        var visibleGroups = new HashSet<int>();
+        foreach (var column in columns)
+        {
+            var cursor = column.HeaderGroupId;
+            while (cursor is { } gid && groupById.TryGetValue(gid, out var g) && visibleGroups.Add(gid))
+            {
+                cursor = g.ParentGroupId;
+            }
+        }
+
+        var headerGroups = table.HeaderGroups
+            .Where(g => visibleGroups.Contains(g.Id))
+            .OrderBy(g => g.Ordinal).ThenBy(g => g.Id)
+            .Select(g => new ColumnHeaderGroupDto(
+                g.Id, g.Code, g.ParentGroupId is { } p && visibleGroups.Contains(p) ? p : null,
+                g.Ordinal, g.HeaderL10n.Get(language) ?? g.Code))
             .ToList();
 
         var columnCodeById = table.Columns.ToDictionary(c => c.Id, c => c.Code);
@@ -464,7 +485,10 @@ public sealed class GetTableSliceHandler(
 
         return new TableSliceDto(
             tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations, formats, outOfWindow,
-            userStyles, StyleOf(styleById, table.HeaderStyleId), styleAccess);
+            userStyles, StyleOf(styleById, table.HeaderStyleId), styleAccess)
+        {
+            HeaderGroups = headerGroups,
+        };
     }
 
     /// <summary>
