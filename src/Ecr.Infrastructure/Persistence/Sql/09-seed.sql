@@ -2250,6 +2250,20 @@ USING (VALUES
     -- Project.cs/FormulaDefHandlers.cs), нижче — нові.
     (N'err.ECR-AUTH-0401.securityStampStale', N'en', N'Your session is no longer valid: your permissions changed. Sign in again.', 1),
     (N'err.ECR-REG-0422.selfParent',          N'en', N'Entry {entryId} cannot be its own parent.', 1),
+    (N'err.ECR-REG-0422.levelRequired',       N'en', N'An entry of a hierarchical registry needs a level.', 1),
+    (N'err.ECR-REG-0422.levelUnknown',        N'en', N'Level «{levelCode}» is not declared for this registry.', 1),
+    (N'err.ECR-REG-0422.levelOrder',          N'en', N'A node must sit on a deeper level than its parent.', 1),
+    (N'err.ECR-REG-0422.levelSkipsRequired',  N'en', N'The levels between the parent and this node are required and cannot be skipped.', 1),
+    (N'err.ECR-REG-0422.hierarchyCycle',      N'en', N'Entry {entryId} cannot be placed under its own descendant.', 1),
+    (N'err.ECR-REG-0422.hierarchyLevelsInvalid', N'en', N'The level list is invalid: 1 to {max} levels with unique codes and an English name are required.', 1),
+    (N'err.ECR-REG-0422.hierarchyLevelChange', N'en', N'The new level order would leave {count} entries in an invalid place.', 1),
+    (N'err.ECR-REG-0422.hierarchyNotEnabled', N'en', N'Registry «{registryCode}» is not hierarchical.', 1),
+    (N'err.ECR-REG-0422.moveBeforeNotSibling', N'en', N'Entry {entryId} is not a child of the target parent.', 1),
+    (N'err.ECR-REG-0409.levelInUse',          N'en', N'Level «{levelCode}» holds {count} entries and cannot be removed.', 1),
+    (N'err.ECR-REG-0409.nodeHasLiveChildren', N'en', N'The node has {count} live children: retire them too (cascade).', 1),
+    (N'registryAudit.hierarchySaved',         N'en', N'Levels: {count}.', 1),
+    (N'registryAudit.entryMoved',             N'en', N'Siblings renumbered: {count}.', 1),
+    (N'registryAudit.entryRetired',           N'en', N'Entries retired: {count}.', 1),
     (N'err.ECR-INT-0422.materializationRequiresAggregation', N'en', N'Mapping of field "{sourceField}" names row "{targetRowKey}", but does not say how to fold period points: the system does not know whether the value is instantaneous or cumulative.', 1),
     (N'err.ECR-RPT-0409.versionNotDraft',           N'en', N'Report version {version} is {status}: there is nothing to publish.', 1),
     (N'err.ECR-RPT-0409.snapshotSubmittedContent',  N'en', N'Snapshot {snapshotId} was submitted: its content is not rebuilt, a new snapshot is needed.', 1),
@@ -16538,6 +16552,43 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- HSE301:a5b-jobs ── кінець секції ──
+
+-- NAE1:hierarchy ── ru/kz ієрархічні довідники (рівні, дерево, переміщення, закриття вузла); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.levelRequired', N'ru', N'Запись иерархического справочника должна иметь уровень.'),
+    (N'err.ECR-REG-0422.levelUnknown', N'ru', N'Уровень «{levelCode}» не объявлен в этом справочнике.'),
+    (N'err.ECR-REG-0422.levelOrder', N'ru', N'Узел должен находиться на уровне глубже родительского.'),
+    (N'err.ECR-REG-0422.levelSkipsRequired', N'ru', N'Уровни между родителем и этим узлом обязательны и не могут быть пропущены.'),
+    (N'err.ECR-REG-0422.hierarchyCycle', N'ru', N'Запись {entryId} нельзя поместить под её собственного потомка.'),
+    (N'err.ECR-REG-0422.hierarchyLevelsInvalid', N'ru', N'Список уровней некорректен: нужно от 1 до {max} уровней с уникальными кодами и английским названием.'),
+    (N'err.ECR-REG-0422.hierarchyLevelChange', N'ru', N'Новый порядок уровней оставил бы {count} записей в недопустимом месте.'),
+    (N'err.ECR-REG-0422.hierarchyNotEnabled', N'ru', N'Справочник «{registryCode}» не является иерархическим.'),
+    (N'err.ECR-REG-0422.moveBeforeNotSibling', N'ru', N'Запись {entryId} не является дочерней для выбранного родителя.'),
+    (N'err.ECR-REG-0409.levelInUse', N'ru', N'Уровень «{levelCode}» содержит записей: {count}, удалить его нельзя.'),
+    (N'err.ECR-REG-0409.nodeHasLiveChildren', N'ru', N'У узла есть действующих потомков: {count}. Закройте и их (каскадно).'),
+    (N'registryAudit.hierarchySaved', N'ru', N'Уровней: {count}.'),
+    (N'registryAudit.entryMoved', N'ru', N'Перенумеровано соседних записей: {count}.'),
+    (N'registryAudit.entryRetired', N'ru', N'Закрыто записей: {count}.'),
+    (N'err.ECR-REG-0422.levelRequired', N'kz', N'Иерархиялық анықтамалықтың жазбасында деңгей болуы керек.'),
+    (N'err.ECR-REG-0422.levelUnknown', N'kz', N'«{levelCode}» деңгейі бұл анықтамалықта жарияланбаған.'),
+    (N'err.ECR-REG-0422.levelOrder', N'kz', N'Түйін өзінің аталық түйінінен терең деңгейде тұруы керек.'),
+    (N'err.ECR-REG-0422.levelSkipsRequired', N'kz', N'Аталық түйін мен осы түйін арасындағы деңгейлер міндетті, оларды өткізіп жіберуге болмайды.'),
+    (N'err.ECR-REG-0422.hierarchyCycle', N'kz', N'{entryId} жазбасын өзінің ұрпағының астына орналастыруға болмайды.'),
+    (N'err.ECR-REG-0422.hierarchyLevelsInvalid', N'kz', N'Деңгейлер тізімі жарамсыз: бірегей кодтары мен ағылшынша атауы бар 1-ден {max}-ге дейін деңгей қажет.'),
+    (N'err.ECR-REG-0422.hierarchyLevelChange', N'kz', N'Деңгейлердің жаңа реті {count} жазбаны жарамсыз орында қалдырар еді.'),
+    (N'err.ECR-REG-0422.hierarchyNotEnabled', N'kz', N'«{registryCode}» анықтамалығы иерархиялық емес.'),
+    (N'err.ECR-REG-0422.moveBeforeNotSibling', N'kz', N'{entryId} жазбасы таңдалған аталық түйіннің еншілесі емес.'),
+    (N'err.ECR-REG-0409.levelInUse', N'kz', N'«{levelCode}» деңгейінде {count} жазба бар, оны жоюға болмайды.'),
+    (N'err.ECR-REG-0409.nodeHasLiveChildren', N'kz', N'Түйіннің {count} әрекет ететін еншілесі бар: оларды да жабыңыз (каскадпен).'),
+    (N'registryAudit.hierarchySaved', N'kz', N'Деңгейлер: {count}.'),
+    (N'registryAudit.entryMoved', N'kz', N'Қайта нөмірленген көрші жазбалар: {count}.'),
+    (N'registryAudit.entryRetired', N'kz', N'Жабылған жазбалар: {count}.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- NAE1:hierarchy ── кінець секції ──
 
 -- I18N:ru-kz-backfill 2026-09-30 ── ru/kz для ключів, що мали лише en (req-g2, rpt-views-health, реєстри, безпека, збір подій та ін.); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

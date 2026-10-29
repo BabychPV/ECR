@@ -27,7 +27,8 @@ public sealed class UpsertRegistryEntryHandler(
     ICurrentUser currentUser,
     RegistryEntryWriter writer,
     IUnitOfWork? uow = null,
-    Rules.IRegistryRuleEngine? rules = null)
+    Rules.IRegistryRuleEngine? rules = null,
+    IRegistryHierarchyStore? hierarchy = null)
 {
     // ⚠ `uow` і `rules` необов'язкові лише для тестів, що будують обробник руками (довідники без
     // правил) — той самий прийом, що `keys` у RegistryEntryWriter. Контейнер підставляє обидва
@@ -163,7 +164,14 @@ public sealed class UpsertRegistryEntryHandler(
         // в запиті немає, лишається як була; мова з порожнім текстом —
         // свідомо прибирається (так клієнт каже «цей переклад видалено»).
         entry.Rename(dto.Id is null ? WithoutEmpty(dto.Display) : Merge(entry.DisplayL10n, dto.Display));
-        entry.SetParent(dto.ParentEntryId);
+        if (definition.IsHierarchical)
+        {
+            await ApplyHierarchyAsync(definition, entry, dto, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            entry.SetParent(dto.ParentEntryId);
+        }
 
         var changes = await writer.ApplyValuesAsync(definition, entry, values, prefetch: null, ct).ConfigureAwait(false);
 
@@ -194,6 +202,28 @@ public sealed class UpsertRegistryEntryHandler(
             ct).ConfigureAwait(false);
 
         return new RegistryEntryUpsertResult(entry.Id, check.Warnings);
+    }
+
+    /// <summary>
+    /// Places an entry of a hierarchical registry (NAE plan N1): level, parent, order of levels, cycles, subtree — validated
+    /// against fresh data before the entry is saved (<c>422 ECR-REG-0422</c>).
+    /// </summary>
+    private async Task ApplyHierarchyAsync(
+        RegistryDef definition, RegistryEntry entry, RegistryEntryUpsertDto dto, CancellationToken ct)
+    {
+        var store = hierarchy
+            ?? throw new InvalidOperationException("IRegistryHierarchyStore is required for hierarchical registries.");
+        var levels = await store.ListLevelsAsync(definition.Id, ct).ConfigureAwait(false);
+
+        var level = dto.LevelCode is not null
+            ? Hierarchy.RegistryHierarchyPlacement.LevelByCode(levels, dto.LevelCode)
+            : levels.FirstOrDefault(l => l.Id == entry.LevelId) ?? throw Hierarchy.RegistryHierarchyPlacement.LevelRequired();
+
+        await Hierarchy.RegistryHierarchyPlacement.EnsureAsync(
+            store, definition.Id, levels, entry.IsPersisted ? entry.Id : null, dto.ParentEntryId, level, ct).ConfigureAwait(false);
+
+        entry.SetParent(dto.ParentEntryId);
+        entry.SetLevel(level.Id);
     }
 
     /// <summary>Наявна назва, поверх якої лягли мови з запиту (X-03).</summary>
