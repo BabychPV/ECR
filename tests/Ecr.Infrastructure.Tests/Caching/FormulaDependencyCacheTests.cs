@@ -184,6 +184,56 @@ public sealed class FormulaDependencyCacheTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// Співіснування colgroups (групи заголовків у знімку) і L2b (граф залежностей у кеші метаданих): знімок з групами
+    /// вантажиться, граф віддається з кешу без запиту, а одна інвалідація скидає ОБИДВА.
+    /// </summary>
+    [Fact]
+    public async Task Знімок_з_групами_заголовків_і_граф_з_кешу_скидаються_однією_інвалідацією()
+    {
+        var world = await ArrangeAsync(published: true);
+        var memory = new MemoryCache(new MemoryCacheOptions());
+
+        await using (var db = CreateContext(new DbCommandCounter()))
+        {
+            db.ColumnHeaderGroupDefs.Add(new ColumnHeaderGroupDef(
+                world.TableDefId, Ecr.Domain.ValueObjects.EcrCode.Create("Q1"),
+                new Ecr.Domain.ValueObjects.LocalizedText(new Dictionary<string, string> { ["en"] = "Q1" }), 1));
+            await db.SaveChangesAsync();
+        }
+
+        async Task<(int Groups, int Dependencies, int DependencyQueries)> ReadAsync()
+        {
+            var counter = new DbCommandCounter();
+            await using var db = CreateContext(counter);
+            var snapshot = await new MetadataCache(memory, db).GetAsync(world.VersionId, CancellationToken.None);
+            var table = snapshot.Sheets.SelectMany(s => s.Tables).Single(t => t.Id == world.TableDefId);
+            counter.Tally.Reset();
+            var graph = await Store(db, memory).ListFormulaDependenciesAsync(world.VersionId, CancellationToken.None);
+            return (table.HeaderGroups.Count, graph.Count, counter.Tally.Snapshot().Total);
+        }
+
+        var first = await ReadAsync();
+        Assert.Equal(1, first.Groups);
+        Assert.Equal(3, first.Dependencies);
+
+        var cached = await ReadAsync();
+        Assert.Equal(1, cached.Groups);
+        Assert.Equal(0, cached.DependencyQueries);
+
+        await using (var db = CreateContext(new DbCommandCounter()))
+        {
+            await new TemplateVersionStore(db).ReplaceFormulaDependenciesAsync(
+                world.VersionId, [Dependency(world.FormulaId, world.TableDefId, world.ColumnIds[0], 0)], CancellationToken.None);
+            await db.SaveChangesAsync();
+            await new MetadataCache(memory, db).InvalidateAsync(world.VersionId, CancellationToken.None);
+        }
+
+        var afterInvalidate = await ReadAsync();
+        Assert.Equal(1, afterInvalidate.Groups);
+        Assert.Equal(1, afterInvalidate.Dependencies);
+    }
+
     // ── світ ─────────────────────────────────────────────────────────────────
 
     private static IEnumerable<string> Describe(IReadOnlyList<FormulaDependency> list)
