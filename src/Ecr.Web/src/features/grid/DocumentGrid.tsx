@@ -14,7 +14,7 @@ import type {
   UnitRef,
 } from '@/api/types';
 import { useColumnWidths } from '@/features/preferences/columnWidthsSync';
-import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
+import { cellAppearanceClassOf, cellAppearanceOf, withExplicitTextColour } from './cellAppearance';
 import { cellFormatOf, withCellFormat } from './conditionalAppearance';
 import { CellColorMenu, type ColourTarget } from './CellColorMenu';
 import { useCellStyles } from './useCellStyles';
@@ -3161,7 +3161,8 @@ export function gridColumns(
         const baseStyle = withRowStyle(column.style, rowIndexOf(slice).get(rowKey)?.style);
         const afterUser = userFormat === null ? baseStyle : withUserStyle(baseStyle, userFormat);
         const style = conditional === null ? afterUser : withCellFormat(afterUser, conditional);
-        const appearance = cellAppearanceOf(style);
+        // ⛔ P1 (Land): власний колір тексту людини — без перевірки контрасту (withExplicitTextColour).
+        const appearance = withExplicitTextColour(cellAppearanceOf(style), userFormat?.foregroundHex, conditional?.foregroundHex);
 
         // ⛔ `X-10`: колір і заливка автора — змінними й класами, які читає
         // `cellEditors.css`, а не inline-кольором (коментар `cellAppearanceOf`).
