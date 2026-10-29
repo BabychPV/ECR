@@ -119,6 +119,18 @@ const registries = {
 
   /** `GET /api/v1/registries/{code}/history`. */
   history: (code: string) => ['registries', 'history', code] as const,
+
+  /** `GET /api/v1/registries/{code}/hierarchy` - рівні ієрархічного довідника (NAE plan N1). */
+  hierarchy: (code: string) => ['registries', 'hierarchy', code] as const,
+
+  /**
+   * `GET /api/v1/registries/{code}/tree` - плаский список вузлів. Без параметрів - префікс для інвалідації всіх
+   * варіантів дерева довідника (з виведеними / з пошуком); із параметрами - ключ одного запиту.
+   */
+  tree: (code: string, includeRetired?: boolean, q?: string) =>
+    includeRetired === undefined
+      ? (['registries', 'tree', code] as const)
+      : (['registries', 'tree', code, { includeRetired, q: q ?? '' }] as const),
 };
 
 /** Домен `methodologies`: перелік, версії, вміст версії (формули, константи…). */
