@@ -19,6 +19,8 @@ import {
   buildNodeBody,
   formOfDetail,
   hasProblems,
+  inheritedValues,
+  NaeAreaField,
   serverFieldProblem,
   validateNode,
   type NodeDetail,
@@ -34,6 +36,8 @@ type RegistryField = components['schemas']['RegistryFieldDto'];
 export interface NodeAttributesFormProps {
   readonly registryCode: string;
   readonly registryId: number;
+  /** Код запису видає система (`CodeMode = Auto`): поля коду для нового вузла немає, у правці він лише показаний. */
+  readonly codeAutomatic: boolean;
   readonly fields: readonly RegistryField[];
   readonly target: NodeFormTarget;
   /** Шлях до батька (для підпису «куди додається»); порожній - корінь. */
@@ -70,10 +74,25 @@ export function NodeAttributesForm(props: NodeAttributesFormProps): JSX.Element 
     // те, чого вже немає.
     gcTime: 0,
   });
-  const pending = usePendingLoading(detail.isPending && target.mode === 'edit');
+  const parentId = target.mode === 'create' && target.parent !== null ? Number(target.parent.id) : null;
+  // Регіон і район нового вузла підказуються від батька: його значення лежать лише в повному записі.
+  const parent = useQuery({
+    queryKey: detailKey(registryCode, parentId ?? 0),
+    queryFn: () =>
+      apiFetch<NodeDetail>(`/api/v1/registries/${encodeURIComponent(registryCode)}/entries/${String(parentId ?? 0)}`),
+    enabled: parentId !== null,
+    gcTime: 0,
+  });
+  const pending = usePendingLoading((detail.isPending && target.mode === 'edit') || (parent.isPending && parentId !== null));
 
   if (target.mode === 'create') {
-    return <Form {...props} initial={EmptyNodeForm} parentEntryId={target.parent === null ? null : Number(target.parent.id)} />;
+    // Підказка не обов'язкова: збій читання батька не блокує створення, поля просто порожні.
+    if (parentId !== null && parent.isPending) {
+      return pending ? <Skeleton height={160} radius="sm" data-nae-form="pending" /> : <div aria-busy="true" data-nae-form="pending" />;
+    }
+    const inherited = parent.data === undefined ? {} : inheritedValues(formOfDetail(parent.data).values, target.level.code);
+
+    return <Form {...props} initial={{ ...EmptyNodeForm, values: inherited }} parentEntryId={parentId} />;
   }
 
   if (detail.error !== null && detail.error !== undefined) {
@@ -90,6 +109,7 @@ export function NodeAttributesForm(props: NodeAttributesFormProps): JSX.Element 
 function Form({
   registryCode,
   registryId,
+  codeAutomatic,
   fields,
   target,
   parentPath = [],
@@ -107,7 +127,7 @@ function Form({
   const [serverProblem, setServerProblem] = useState<ServerFieldProblem | null>(null);
 
   const current: NodeFormState = { code, display, values };
-  const problems: NodeFormProblems = validateNode(fields, current);
+  const problems: NodeFormProblems = validateNode(fields, current, codeAutomatic);
   const dirty = JSON.stringify(current) !== JSON.stringify(initial);
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
@@ -123,7 +143,7 @@ function Form({
       apiFetch<EntryIdResponse>(`/api/v1/registries/${encodeURIComponent(registryCode)}/entries`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildNodeBody({ registryId, fields, target, parentEntryId, initial, current })),
+        body: JSON.stringify(buildNodeBody({ registryId, fields, target, parentEntryId, initial, current, codeAutomatic })),
       }),
     onSuccess: async (result) => {
       await invalidateRegistryTree(queryClient, registryCode);
@@ -184,18 +204,26 @@ function Form({
 
         <Fieldset variant="unstyled" disabled={readOnly}>
           <Stack gap="sm">
-            <TextInput
-              label={t('registries.code')}
-              description={t('registries.entryCodeHint')}
-              value={code}
-              error={codeError}
-              onChange={(event) => {
-                const next = event.currentTarget.value;
-                setCode(next);
-                setServerProblem(null);
-              }}
-              data-autofocus={target.mode === 'create' ? true : undefined}
-            />
+            {serverProblem === 'keyTaken' && (
+              <Text size="sm" c="statusError" role="alert" data-nae-key-error="">
+                {t('permits.nae.form.keyTaken')}
+              </Text>
+            )}
+            {!(codeAutomatic && target.mode === 'create') && (
+              <TextInput
+                label={t('registries.code')}
+                description={codeAutomatic ? undefined : t('registries.entryCodeHint')}
+                value={code}
+                error={codeError}
+                readOnly={codeAutomatic}
+                onChange={(event) => {
+                  const next = event.currentTarget.value;
+                  setCode(next);
+                  setServerProblem(null);
+                }}
+                data-autofocus={target.mode === 'create' ? true : undefined}
+              />
+            )}
 
             <LocalizedInput label={t('registries.name')} value={display} onChange={setDisplay} required />
             {tried && problems.display !== undefined && (
@@ -208,7 +236,11 @@ function Form({
               <TextInput
                 key={field.id}
                 label={localized(field.nameL10n) || field.code}
-                description={`${field.code} · ${dataTypeLabel(field.dataType)}`}
+                description={
+                  field.code === NaeAreaField
+                    ? t('permits.nae.form.areaHint')
+                    : `${field.code} · ${dataTypeLabel(field.dataType)}`
+                }
                 required={field.isRequired}
                 value={values[field.code] ?? ''}
                 error={tried && problems.values[field.code] !== undefined ? t('permits.nae.form.fieldRequired') : undefined}
