@@ -8,6 +8,8 @@ import { NodeAttributesForm } from './NodeAttributesForm';
 export interface CreateNodeModalProps {
   readonly registryCode: string;
   readonly registryId: number;
+  /** Код запису видає система (`CodeMode = Auto`). */
+  readonly codeAutomatic: boolean;
   readonly fields: readonly components['schemas']['RegistryFieldDto'][];
   /** Куди додається вузол; `null` - діалог закритий. */
   readonly draft: { readonly parent: TreeNode | null; readonly level: TreeLevel } | null;
@@ -19,13 +21,22 @@ export interface CreateNodeModalProps {
  * Діалог нового вузла. ⚠ Сторінка тягне його через `React.lazy()`: Mantine `Modal` і поля форми вантажаться окремим
  * чанком, коли людина вперше натисне «Add child» (бюджет `D-132`).
  */
-export function CreateNodeModal({ registryCode, registryId, fields, draft, onClose, onCreated }: CreateNodeModalProps): JSX.Element {
+export function CreateNodeModal({
+  registryCode,
+  registryId,
+  codeAutomatic,
+  fields,
+  draft,
+  onClose,
+  onCreated,
+}: CreateNodeModalProps): JSX.Element {
   return (
     <Modal opened={draft !== null} onClose={onClose} title={t('permits.nae.form.newNode')} size="lg">
       {draft !== null && (
         <NodeAttributesForm
           registryCode={registryCode}
           registryId={registryId}
+          codeAutomatic={codeAutomatic}
           fields={fields}
           target={{ mode: 'create', parent: draft.parent, level: draft.level }}
           parentPath={draft.parent === null ? [] : [draft.parent]}
