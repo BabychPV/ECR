@@ -25325,11 +25325,9 @@ export interface components {
              *     (AN-108 / P2-02, `FormulaRecalcOutcome`). Заповнює `GetJobStatusHandler`.
              */
             writtenCount?: null | number;
-            /**
-             * @description L3: періоди (`yyyyMM`, за зростанням), де `Succeeded` перерахунок формул документа справді записав
+            /** @description L3: періоди (`yyyyMM`, за зростанням), де `Succeeded` перерахунок формул документа справді записав
              *     комірки (задача формул одна на документ, L2). `null` — невідомо (старий конверт, інша задача, нічого не
-             *     записано): клієнт перечитує період правки, як раніше. Заповнює `GetJobStatusHandler`.
-             */
+             *     записано): клієнт перечитує період правки, як раніше. Заповнює `GetJobStatusHandler`. */
             writtenPeriods?: null | number[];
         };
         /** @description Задача в переліку черги — легша за JobStatus. */
