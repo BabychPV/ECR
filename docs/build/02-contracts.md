@@ -4467,6 +4467,11 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/entries/batch?dryRun=` | `Registry.EditData` | 8 |
 | `GET` | `/api/v1/registries/{code}/entries/{id}/history?cursor=&limit=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/registries/{code}/export?format=&asOf=` | `Registry.View` | 8 |
+| `GET` | `/api/v1/registries/{code}/hierarchy` | `Registry.View` або грант `Read` на довідник | 8 |
+| `PUT` | `/api/v1/registries/{code}/hierarchy` | `Registry.EditDefinition` або грант `Write` на довідник | 8 |
+| `GET` | `/api/v1/registries/{code}/tree?asOf=&includeRetired=&q=` | `Registry.View` або грант `Read` на довідник | 8 |
+| `POST` | `/api/v1/registries/{code}/entries/{id}/move` | `Registry.EditData` або грант `Write` на довідник | 8 |
+| `POST` | `/api/v1/registries/{code}/entries/{id}/retire` | `Registry.EditData` або грант `Write` на довідник | 8 |
 | `GET` | `/api/v1/permit-types?category=&status=&q=&limit=&cursor=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types/{code}` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types/{code}/usage` | `Registry.View` | 8 |

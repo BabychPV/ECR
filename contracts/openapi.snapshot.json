@@ -9307,6 +9307,74 @@
         ],
         "type": "object"
       },
+      "MoveRegistryEntryRequest": {
+        "description": "Move an entry (re-parent and/or re-level and/or re-order).",
+        "properties": {
+          "beforeEntryId": {
+            "description": "Place before this sibling; `null` — last among siblings.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "levelCode": {
+            "description": "New level; `null` — keep the current one.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "parentEntryId": {
+            "description": "New parent; `null` — make it a root.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "parentEntryId",
+          "levelCode",
+          "beforeEntryId"
+        ],
+        "type": "object"
+      },
+      "MoveRegistryEntryResponse": {
+        "description": "Result of a move.",
+        "properties": {
+          "id": {
+            "description": "Entry id.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "levelCode": {
+            "description": "Level after the move.",
+            "type": "string"
+          },
+          "ordinal": {
+            "description": "Ordinal among siblings after the move.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "parentEntryId": {
+            "description": "Parent after the move.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "parentEntryId",
+          "levelCode",
+          "ordinal"
+        ],
+        "type": "object"
+      },
       "MyEditAssignmentDto": {
         "description": "Моя задача як виконавця або очікування валідації як власника.",
         "properties": {
@@ -13582,6 +13650,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "levelCode": {
+            "description": "Level code in a hierarchical registry; `null` in a flat one.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "parentEntryId": {
             "description": "Батьківський запис; `null` — корінь.",
             "format": "int64",
@@ -13943,6 +14018,13 @@
               "integer"
             ]
           },
+          "levelCode": {
+            "description": "Level code in a hierarchical registry (required for a new entry there, ignored in a flat registry);\n`null` on update keeps the current level.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "parentEntryId": {
             "description": "Батьківський запис в ієрархії; `null` — корінь.",
             "format": "int64",
@@ -14181,6 +14263,38 @@
           "isKey",
           "lookupRegistryDefId",
           "unitId"
+        ],
+        "type": "object"
+      },
+      "RegistryHierarchyDto": {
+        "description": "Hierarchy settings of a registry.",
+        "properties": {
+          "isHierarchical": {
+            "description": "Entries form a tree with declared levels.",
+            "type": "boolean"
+          },
+          "levels": {
+            "description": "Levels ordered by ordinal (empty for a flat registry).",
+            "items": {
+              "$ref": "#/components/schemas/RegistryLevelDto"
+            },
+            "type": "array"
+          },
+          "maxDepth": {
+            "description": "Hard limit on the number of levels (and so on the tree depth).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "registryCode": {
+            "description": "Registry code.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "registryCode",
+          "isHierarchical",
+          "levels",
+          "maxDepth"
         ],
         "type": "object"
       },
@@ -14486,6 +14600,70 @@
           "isPrimary",
           "ignoreCase",
           "isActive"
+        ],
+        "type": "object"
+      },
+      "RegistryLevelDto": {
+        "description": "One declared level of a hierarchical registry (NAE plan N1).",
+        "properties": {
+          "code": {
+            "description": "Level code, unique within the registry.",
+            "type": "string"
+          },
+          "entryCount": {
+            "description": "Live entries placed on this level.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "description": "Level id (stable while the level code is kept).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isOptional": {
+            "description": "A node may skip this level (child on a deeper level than `parent + 1`).",
+            "type": "boolean"
+          },
+          "name": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Level name, all languages."
+          },
+          "ordinal": {
+            "description": "1-based depth: roots sit on the lowest ordinal present on their path.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "ordinal",
+          "code",
+          "name",
+          "isOptional",
+          "entryCount"
+        ],
+        "type": "object"
+      },
+      "RegistryLevelInput": {
+        "description": "Level in a save request; its position in the list is its ordinal.",
+        "properties": {
+          "code": {
+            "description": "Level code (EcrCode); an existing code keeps the level id.",
+            "type": "string"
+          },
+          "isOptional": {
+            "description": "A node may skip this level.",
+            "type": "boolean"
+          },
+          "name": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Name; `en` is required."
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "isOptional"
         ],
         "type": "object"
       },
@@ -14924,6 +15102,127 @@
           "descriptionL10n",
           "kind",
           "isActive"
+        ],
+        "type": "object"
+      },
+      "RegistryTreeDto": {
+        "description": "The tree of a hierarchical registry.",
+        "properties": {
+          "dataRevision": {
+            "description": "Registry data revision (cache key).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isHierarchical": {
+            "description": "Registry is hierarchical.",
+            "type": "boolean"
+          },
+          "levels": {
+            "description": "Levels by ordinal.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryLevelDto"
+            },
+            "type": "array"
+          },
+          "nodes": {
+            "description": "Nodes ordered by (parent, ordinal, code).",
+            "items": {
+              "$ref": "#/components/schemas/RegistryTreeNodeDto"
+            },
+            "type": "array"
+          },
+          "registryCode": {
+            "description": "Registry code.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "registryCode",
+          "isHierarchical",
+          "levels",
+          "nodes",
+          "dataRevision"
+        ],
+        "type": "object"
+      },
+      "RegistryTreeNodeDto": {
+        "description": "One node of the tree (flat list; the client assembles the tree by `ParentEntryId`).",
+        "properties": {
+          "childCount": {
+            "description": "Live direct children (all, regardless of the filter).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "code": {
+            "description": "Entry code.",
+            "type": "string"
+          },
+          "display": {
+            "description": "Name in the reader's language.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Entry id.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "isActive": {
+            "description": "Entry is switched on.",
+            "type": "boolean"
+          },
+          "isMatch": {
+            "description": "The node itself matches the `q` filter (ancestors of matches are included, unmarked).",
+            "type": "boolean"
+          },
+          "levelCode": {
+            "description": "Level code; `null` for an entry that has no level yet.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "ordinal": {
+            "description": "Position among siblings.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "parentEntryId": {
+            "description": "Parent; `null` for a root.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "validFrom": {
+            "description": "First valid day.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validTo": {
+            "description": "First NOT valid day (exclusive).",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "parentEntryId",
+          "levelCode",
+          "code",
+          "display",
+          "ordinal",
+          "validFrom",
+          "validTo",
+          "isActive",
+          "childCount",
+          "isMatch"
         ],
         "type": "object"
       },
@@ -15726,6 +16025,51 @@
           "PartiallyHidden",
           null
         ]
+      },
+      "RetireRegistryEntryRequest": {
+        "description": "Retire a node (soft: closes the validity window, never deletes).",
+        "properties": {
+          "cascade": {
+            "description": "Retire the whole live subtree; without it a node with live children is refused.",
+            "type": "boolean"
+          },
+          "on": {
+            "description": "First day the node is NOT valid (exclusive); `null` — today.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "on",
+          "cascade"
+        ],
+        "type": "object"
+      },
+      "RetireRegistryEntryResponse": {
+        "description": "Result of a retire.",
+        "properties": {
+          "affectedRows": {
+            "description": "Document rows flagged as orphaned by the closed windows.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "retiredIds": {
+            "description": "Entries whose window was closed (node first, then descendants).",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "retiredIds",
+          "affectedRows"
+        ],
+        "type": "object"
       },
       "ReturnEditAssignmentRequest": {
         "description": "Тіло повернення на доопрацювання.",
@@ -17551,6 +17895,27 @@
           "fields",
           "rules",
           "reason"
+        ],
+        "type": "object"
+      },
+      "SaveRegistryHierarchyRequest": {
+        "description": "Save hierarchy settings: all-or-nothing replacement of the level list.",
+        "properties": {
+          "isHierarchical": {
+            "description": "`false` is accepted only when no entry has a level.",
+            "type": "boolean"
+          },
+          "levels": {
+            "description": "1..`MaxDepth` levels when hierarchical; empty otherwise.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryLevelInput"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "isHierarchical",
+          "levels"
         ],
         "type": "object"
       },
@@ -42072,6 +42437,254 @@
         ]
       }
     },
+    "/api/v1/registries/{code}/entries/{id}/move": {
+      "post": {
+        "description": "`422 ECR-REG-0422`: level order violated (a node sits only on a deeper level than its parent, skipped levels\nmust be optional), cycle, depth. One audit record (`Move`) per move.",
+        "parameters": [
+          {
+            "description": "Registry code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Entry.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveRegistryEntryRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveRegistryEntryRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveRegistryEntryRequest"
+              }
+            }
+          },
+          "description": "Cancellation token.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveRegistryEntryResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveRegistryEntryResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveRegistryEntryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Moves an entry within the tree. Permission `Registry.EditData` or grant `Write`.",
+        "tags": [
+          "RegistryHierarchy"
+        ]
+      }
+    },
+    "/api/v1/registries/{code}/entries/{id}/retire": {
+      "post": {
+        "description": "Never deletes: the validity window is closed (documents keep reading the node through `asOf`).\nA node with live children is `409 ECR-REG-0409 nodeHasLiveChildren` unless `cascade`.",
+        "parameters": [
+          {
+            "description": "Registry code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Entry.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetireRegistryEntryRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetireRegistryEntryRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetireRegistryEntryRequest"
+              }
+            }
+          },
+          "description": "Cancellation token.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetireRegistryEntryResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetireRegistryEntryResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetireRegistryEntryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Retires a node softly. Permission `Registry.EditData` or grant `Write`.",
+        "tags": [
+          "RegistryHierarchy"
+        ]
+      }
+    },
     "/api/v1/registries/{code}/entries/{id}/validity": {
       "post": {
         "description": "Запис не видаляється, а закривається датою: у комірці зберігається\n`Id`, і видалення зробило б історичні документи нечитабельними.",
@@ -42627,6 +43240,188 @@
         ]
       }
     },
+    "/api/v1/registries/{code}/hierarchy": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Registry code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryHierarchyDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryHierarchyDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryHierarchyDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Hierarchy settings and levels. Permission `Registry.View` or grant `Read`.",
+        "tags": [
+          "RegistryHierarchy"
+        ]
+      },
+      "put": {
+        "description": "A level in use cannot be removed (`409 ECR-REG-0409 levelInUse`); a change that would leave an entry in an\ninvalid place is `422 ECR-REG-0422`. At most `MaxDepth` levels.",
+        "parameters": [
+          {
+            "description": "Registry code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRegistryHierarchyRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRegistryHierarchyRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRegistryHierarchyRequest"
+              }
+            }
+          },
+          "description": "Cancellation token.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryHierarchyDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryHierarchyDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryHierarchyDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Saves hierarchy settings (all-or-nothing replacement of the level list). Permission `Registry.EditDefinition`\nor grant `Write`.",
+        "tags": [
+          "RegistryHierarchy"
+        ]
+      }
+    },
     "/api/v1/registries/{code}/history": {
       "get": {
         "description": "⚠ Історія ОПИСУ, а не записів: зміни записів живуть у журналі комірок і\nв самих вікнах чинності. Питання, на яке відповідає цей маршрут, —\n«чому тут з'явилося це поле».",
@@ -43150,6 +43945,92 @@
         "summary": "Рядки довідника зі значеннями полів, сторінками за курсором. Право `Registry.View` або\nгрант `Read` на довідник.",
         "tags": [
           "RegistryRows"
+        ]
+      }
+    },
+    "/api/v1/registries/{code}/tree": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Registry code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only nodes valid on this day; default — today.",
+            "in": "query",
+            "name": "asOf",
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Also nodes outside the window and switched-off nodes.",
+            "in": "query",
+            "name": "includeRetired",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Case-insensitive substring of code or name; matches are returned with their ancestors.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryTreeDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryTreeDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryTreeDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "The tree as a flat node list. Permission `Registry.View` or grant `Read`.",
+        "tags": [
+          "RegistryHierarchy"
         ]
       }
     },
@@ -53886,6 +54767,9 @@
     },
     {
       "name": "RegistryExternalKeys"
+    },
+    {
+      "name": "RegistryHierarchy"
     },
     {
       "name": "RegistryImpact"
