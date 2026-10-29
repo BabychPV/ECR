@@ -38,7 +38,7 @@ test.describe('Майстер створення документа', () => {
     await dialog.getByRole('textbox').first().click();
     // ⚠ Не `getByRole('option').first()`: на сторінці є нативний `<select>` фільтра
     // стану, і перший `option` — його «All states», а не проєкт.
-    await page.getByRole('listbox', { name: /Project|Проект/i }).getByRole('option').first().click();
+    await page.getByRole('listbox', { name: /Project|Проект/i }).getByRole('option').filter({ hasNotText: /E2E[ -]?(groups|bottom)|E2E(Groups|Bottom)Prj/i }).first().click();
     await expect(next, 'склад нового документа не приїхав').toBeEnabled({ timeout: 15_000 });
 
     await next.click(); // → Period

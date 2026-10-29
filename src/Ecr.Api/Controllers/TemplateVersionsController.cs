@@ -19,6 +19,7 @@ public sealed class TemplateVersionsController(
     PublishTemplateVersionHandler publish,
     DiffTemplateVersionsHandler diff,
     PatchPresentationHandler patchPresentation,
+    ReplaceHeaderGroupsHandler replaceHeaderGroups,
     GetTemplateStructureHandler structure,
     GetAccessMatrixHandler accessMatrix,
     ListTableRelationsHandler listRelations,
@@ -153,6 +154,31 @@ public sealed class TemplateVersionsController(
         // Нова ревізія — це новий ключ кешу v{id}:r{rev}. Клієнт має її
         // отримати, інакше він і далі питатиме структуру за старим ключем.
         return Ok(new PresentationRevisionResponse(revision));
+    }
+
+    /// <summary>
+    /// Замінює ВСЕ дерево груп заголовків колонок таблиці (до 3 рівнів). Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <remarks>
+    /// Презентаційна операція: працює й на опублікованій версії, піднімає <c>PresentationRevision</c>.
+    /// Групи зіставляються за кодом; прибрані групи звільняють колонки. Колонки групи мають бути суміжними за
+    /// <c>Ordinal</c> (<c>ECR-TMPL-4229</c>). Призначення колонки групі — звичайне поле <c>ColumnDef.HeaderGroupId</c>
+    /// у <c>PATCH …/presentation</c>.
+    /// </remarks>
+    [HttpPut("tables/{tableId:int}/header-groups")]
+    [ProducesResponseType<ReplaceHeaderGroupsResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ReplaceHeaderGroupsResponse>> ReplaceHeaderGroups(
+        int id, int tableId, [FromBody] ReplaceHeaderGroupsRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var result = await replaceHeaderGroups
+            .HandleAsync(id, tableId, request.Groups, UserId, ct)
+            .ConfigureAwait(false);
+
+        return Ok(new ReplaceHeaderGroupsResponse(result.PresentationRevision, result.Groups));
     }
 
     /// <summary>Структура версії для клієнта. Право <c>Template.View</c>.</summary>
@@ -1037,6 +1063,15 @@ public sealed record SaveTableRelationRequest(
 /// <summary>Нова ревізія презентаційного шару.</summary>
 /// <param name="PresentationRevision">Ревізія; входить у ключ кешу метаданих (D-16).</param>
 public sealed record PresentationRevisionResponse(int PresentationRevision);
+
+/// <summary>Запит заміни дерева груп заголовків колонок таблиці.</summary>
+/// <param name="Groups">Усе дерево (плоский список); порожній список прибирає всі групи.</param>
+public sealed record ReplaceHeaderGroupsRequest(IReadOnlyList<HeaderGroupInputDto> Groups);
+
+/// <summary>Дерево груп після заміни й нова ревізія презентаційного шару.</summary>
+/// <param name="PresentationRevision">Нова ревізія (ключ кешу метаданих).</param>
+/// <param name="Groups">Групи таблиці: <c>id</c>, <c>code</c>, <c>parentId</c>, <c>ordinal</c>, <c>labelL10n</c>.</param>
+public sealed record ReplaceHeaderGroupsResponse(int PresentationRevision, IReadOnlyList<TemplateHeaderGroupDto> Groups);
 
 /// <summary>Налаштування аркуша чернетки (<c>ФВ-2.1</c>).</summary>
 /// <param name="NameL10n">Назва аркуша мовами каталогу.</param>

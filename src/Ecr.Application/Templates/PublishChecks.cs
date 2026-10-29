@@ -519,6 +519,7 @@ public static class PublishChecks
         {
             CheckComputedColumns(table, boundColumnIds, diagnostics);
             CheckFixedTableRows(table, diagnostics);
+            CheckHeaderGroups(table, diagnostics);
         }
 
         return diagnostics;
@@ -1216,6 +1217,30 @@ public static class PublishChecks
     /// рядки м'яко видалені, для оператора виглядає так само порожньою, як і
     /// таблиця, де рядків не заводили ніколи.
     /// </remarks>
+    private static void CheckHeaderGroups(TableDef table, List<ExpressionDiagnostic> diagnostics)
+    {
+        if (table.HeaderGroups.Count == 0)
+        {
+            return;
+        }
+
+        var byId = table.HeaderGroups.ToDictionary(g => g.Id, g => g.Code);
+        var nodes = table.HeaderGroups
+            .Select(g => new Domain.Services.HeaderGroupNode(
+                g.Code, g.ParentGroupId is { } p && byId.TryGetValue(p, out var pc) ? pc : null))
+            .ToList();
+        var placements = table.Columns.Where(c => !c.IsDeleted)
+            .Select(c => new Domain.Services.HeaderColumnPlacement(
+                c.Code, c.Ordinal, c.HeaderGroupId is { } id ? (byId.TryGetValue(id, out var gc) ? gc : $"#{id}") : null))
+            .ToList();
+
+        foreach (var violation in Domain.Services.ColumnHeaderGroupRules.Validate(table.Code, nodes, placements))
+        {
+            diagnostics.Add(new ExpressionDiagnostic(
+                ErrorCodes.HeaderGroupInvalid, violation.Message, 0, 1, violation.MessageKey, violation.Args.ToDictionary(a => a.Key, a => a.Value)));
+        }
+    }
+
     private static void CheckFixedTableRows(TableDef table, List<ExpressionDiagnostic> diagnostics)
     {
         if (table.RowMode != TableRowMode.Fixed)

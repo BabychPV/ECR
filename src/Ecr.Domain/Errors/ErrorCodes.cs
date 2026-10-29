@@ -184,6 +184,12 @@ public static class ErrorCodes
     public const string FixedTableWithoutRows = "ECR-TMPL-4228";
 
     /// <summary>
+    /// Дерево груп заголовків колонок некоректне: глибина понад 3, цикл, батько з іншої таблиці, дубль коду або
+    /// колонки групи не суміжні за <c>Ordinal</c> (презентаційний шар, 422).
+    /// </summary>
+    public const string HeaderGroupInvalid = "ECR-TMPL-4229";
+
+    /// <summary>
     /// <c>Breaking</c>-зміна у версії з документами (ФВ-7.4).
     /// </summary>
     /// <remarks>

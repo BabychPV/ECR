@@ -205,6 +205,10 @@ const TableWorkspace = lazy(async () => ({
   default: (await import('@/features/templates/ctor/TableWorkspace')).TableWorkspace,
 }));
 
+const ColumnGroupsDialog = lazy(async () => ({
+  default: (await import('@/features/templates/ColumnGroupsDialog')).ColumnGroupsDialog,
+}));
+
 const PresentationEditor = lazy(async () => ({
   default: (await import('@/features/templates/PresentationEditor')).PresentationEditor,
 }));
@@ -458,6 +462,7 @@ function TemplateVersionEditor(): JSX.Element {
 
   // ФВ-2.7: таблиця, для якої відкрито умовне форматування.
   const [conditionalFormatTable, setConditionalFormatTable] = useState<TemplateTable | null>(null);
+  const [groupsTable, setGroupsTable] = useState<TemplateTable | null>(null);
 
   // ⛔ Правила доступу до періоду (`ФВ-2.15`) не мають коду — форма
   // створення і форма правки наявного за `id` навмисно окремі, за тією самою
@@ -1204,6 +1209,8 @@ function TemplateVersionEditor(): JSX.Element {
                       }
                       onProperties={() => setTableDraft({ sheetCode: sheet.code, draft: tableDraftOf(table) })}
                       onConditionalFormat={() => setConditionalFormatTable(table)}
+                      onManageGroups={() => setGroupsTable(table)}
+                      canEditPresentation={can(session.data, 'Template.Edit')}
                       onDelete={() =>
                         setPendingDelete({
                           kind: 'table',
@@ -1296,6 +1303,7 @@ function TemplateVersionEditor(): JSX.Element {
           <PresentationEditor
             templateVersionId={id}
             column={editing}
+            headerGroups={editing === null ? undefined : structure.data?.sheets.flatMap((sheet) => sheet.tables).find((table) => table.columns.some((column) => column.id === editing.id))?.headerGroups}
             onClose={() => setEditing(null)}
           />
         </Suspense>
@@ -1558,6 +1566,18 @@ function TemplateVersionEditor(): JSX.Element {
           </Suspense>
         )}
       </ResizableModal>
+
+      {groupsTable !== null && (
+        <Suspense fallback={null}>
+          <ColumnGroupsDialog
+            key={groupsTable.id}
+            templateVersionId={id}
+            tableId={groupsTable.id}
+            groups={groupsTable.headerGroups}
+            onClose={() => setGroupsTable(null)}
+          />
+        </Suspense>
+      )}
 
       <ResizableModal
         sizeKey="template.validationRule"

@@ -2335,6 +2335,13 @@
           "header": {
             "type": "string"
           },
+          "headerGroupId": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "id": {
             "format": "int32",
             "type": "integer"
@@ -2418,6 +2425,45 @@
           "lookupRegistryDefId",
           "unitId",
           "unitSymbol"
+        ],
+        "type": "object"
+      },
+      "ColumnHeaderGroupDto": {
+        "description": "Група заголовків у зрізі: підпис уже обрано за мовою запиту (fallback — як у заголовка колонки).",
+        "properties": {
+          "code": {
+            "description": "Код групи.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор групи.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "label": {
+            "description": "Підпис.",
+            "type": "string"
+          },
+          "ordinal": {
+            "description": "Порядок серед сусідів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "parentId": {
+            "description": "Батько; `null` — корінь.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "parentId",
+          "ordinal",
+          "label"
         ],
         "type": "object"
       },
@@ -6520,6 +6566,41 @@
           "dataType",
           "isRequired",
           "lookupRegistryDefId"
+        ],
+        "type": "object"
+      },
+      "HeaderGroupInputDto": {
+        "description": "Група у запиті заміни дерева.",
+        "properties": {
+          "code": {
+            "description": "Код групи, унікальний у таблиці; стабільний при клонуванні версії.",
+            "type": "string"
+          },
+          "labelL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Підпис мовами каталогу (uk/en/ru/kz); потрібна хоч одна мова.",
+            "type": "object"
+          },
+          "ordinal": {
+            "description": "Порядок серед сусідів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "parentCode": {
+            "description": "Код батьківської групи тієї ж таблиці; `null` — корінь.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "parentCode",
+          "ordinal",
+          "labelL10n"
         ],
         "type": "object"
       },
@@ -14971,6 +15052,44 @@
         ],
         "type": "object"
       },
+      "ReplaceHeaderGroupsRequest": {
+        "description": "Запит заміни дерева груп заголовків колонок таблиці.",
+        "properties": {
+          "groups": {
+            "description": "Усе дерево (плоский список); порожній список прибирає всі групи.",
+            "items": {
+              "$ref": "#/components/schemas/HeaderGroupInputDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "groups"
+        ],
+        "type": "object"
+      },
+      "ReplaceHeaderGroupsResponse": {
+        "description": "Дерево груп після заміни й нова ревізія презентаційного шару.",
+        "properties": {
+          "groups": {
+            "description": "Групи таблиці: `id`, `code`, `parentId`, `ordinal`, `labelL10n`.",
+            "items": {
+              "$ref": "#/components/schemas/TemplateHeaderGroupDto"
+            },
+            "type": "array"
+          },
+          "presentationRevision": {
+            "description": "Нова ревізія (ключ кешу метаданих).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "presentationRevision",
+          "groups"
+        ],
+        "type": "object"
+      },
       "ReplaceNotificationChannelSecretRequest": {
         "description": "Тіло заміни секрету.",
         "properties": {
@@ -20152,6 +20271,13 @@
             },
             "type": "array"
           },
+          "headerGroups": {
+            "description": "Групи заголовків колонок таблиці; порожній список — груп немає.",
+            "items": {
+              "$ref": "#/components/schemas/TemplateHeaderGroupDto"
+            },
+            "type": "array"
+          },
           "id": {
             "description": "Ідентифікатор.",
             "format": "int32",
@@ -20366,6 +20492,13 @@
             },
             "type": "array"
           },
+          "headerGroups": {
+            "description": "Групи заголовків видимих колонок (плоский список). Лише групи, у піддереві яких є хоч одна видима\nколонка зрізу (прихована/заборонена колонка випадає зі спану, група без видимих — не віддається).\nПорожній — груп немає.",
+            "items": {
+              "$ref": "#/components/schemas/ColumnHeaderGroupDto"
+            },
+            "type": "array"
+          },
           "headerStyle": {
             "oneOf": [
               {
@@ -20376,6 +20509,11 @@
                 "description": "Стиль шапки таблиці, заданий автором шаблону (`TableDef.HeaderStyleId` → `StyleDef`); `null` —\nстиль не задано (або посилання висить). Це дані самої таблиці: таблиця під забороною/схована\nне віддає зрізу взагалі (404), тож стиль шапки окремо розкрити не може."
               }
             ]
+          },
+          "maxHeaderGroupDepth": {
+            "description": "Максимальна глибина дерева груп (3).",
+            "format": "int32",
+            "type": "integer"
           },
           "outOfWindowCells": {
             "description": "Комірки, чия остання зміна — правка за політикою `Warn` поза вікном\nдоступу (`ФВ-2.16`, `D-239`); формат — той самий\n`\"{rowKey}:{columnCode}\"`, що й `PatchCellsResponse.OutOfWindow`.\nПорожній — таких немає. Читається з `aud.CellChange.IsOutOfWindow`\nодним запитом на зріз, тож значок на сітці переживає перезавантаження.",
@@ -20600,6 +20738,14 @@
               "string"
             ]
           },
+          "headerGroupId": {
+            "description": "Найглибша група заголовків колонки (`TableDto.HeaderGroups`); `null` — без групи; презентаційне поле.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "headerL10n": {
             "$ref": "#/components/schemas/LocalizedText",
             "description": "Заголовок усіма мовами каталогу."
@@ -20724,6 +20870,45 @@
         ],
         "type": "object"
       },
+      "TemplateHeaderGroupDto": {
+        "description": "Група заголовків колонок таблиці (плоский список; дерево — через `ParentId`).",
+        "properties": {
+          "code": {
+            "description": "Код — унікальний у таблиці, стабільний при клонуванні версії.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор групи.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "labelL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Підпис усіма мовами каталогу."
+          },
+          "ordinal": {
+            "description": "Порядок серед сусідів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "parentId": {
+            "description": "Батьківська група тієї ж таблиці; `null` — корінь.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "parentId",
+          "ordinal",
+          "labelL10n"
+        ],
+        "type": "object"
+      },
       "TemplateIdResponse": {
         "description": "Створений шаблон.",
         "properties": {
@@ -20822,6 +21007,11 @@
           "isEditable": {
             "description": "Чи дозволяє стан версії структурну правку (`ФВ-7.1`). Рахує СЕРВЕР —\nтой самий прапорець, що й bool TableRelationsDto.IsEditable:\nклієнт, який виводив би його зі статусу самостійно, тримав би другу копію\nправила «опублікована незмінна».",
             "type": "boolean"
+          },
+          "maxHeaderGroupDepth": {
+            "description": "Максимальна глибина дерева груп заголовків колонок (3 рівні).",
+            "format": "int32",
+            "type": "integer"
           },
           "presentationRevision": {
             "description": "Ревізія презентаційного шару; частина ключа кешу.",
@@ -50322,6 +50512,119 @@
           }
         },
         "summary": "Записує колонку таблиці чернетки. Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/tables/{tableId}/header-groups": {
+      "put": {
+        "description": "Презентаційна операція: працює й на опублікованій версії, піднімає `PresentationRevision`.\nГрупи зіставляються за кодом; прибрані групи звільняють колонки. Колонки групи мають бути суміжними за\n`Ordinal` (`ECR-TMPL-4229`). Призначення колонки групі — звичайне поле `ColumnDef.HeaderGroupId`\nу `PATCH …/presentation`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tableId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceHeaderGroupsRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceHeaderGroupsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceHeaderGroupsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplaceHeaderGroupsResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplaceHeaderGroupsResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplaceHeaderGroupsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Замінює ВСЕ дерево груп заголовків колонок таблиці (до 3 рівнів). Право `Template.Edit`.",
         "tags": [
           "TemplateVersions"
         ]

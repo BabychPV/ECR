@@ -59,6 +59,12 @@ public static class TemplateVersionCloner
     /// <param name="SourceStyleId">Id стилю в джерелі.</param>
     public sealed record StyleLink(object Owner, int SourceStyleId);
 
+    /// <summary>Батько групи заголовків за кодом (у межах тієї ж таблиці).</summary>
+    public sealed record GroupParentLink(ColumnHeaderGroupDef Group, TableDef Table, string ParentCode);
+
+    /// <summary>Група колонки за кодом групи (у межах тієї ж таблиці).</summary>
+    public sealed record ColumnGroupLink(ColumnDef Column, TableDef Table, string GroupCode);
+
     /// <summary>Усе, що треба перев'язати після першого збереження клону.</summary>
     /// <param name="Formulas">Формули, вилучені з графа до першого збереження.</param>
     /// <param name="Rules">Правила рівня колонки.</param>
@@ -66,13 +72,17 @@ public static class TemplateVersionCloner
     /// <param name="Parents">Батьківські рядки (D2).</param>
     /// <param name="Styles">Посилання на стилі (D3).</param>
     /// <param name="Graph">Клон, у графі якого шукаються цілі.</param>
+    /// <param name="GroupParents">Батьки груп заголовків колонок.</param>
+    /// <param name="ColumnGroups">Групи колонок.</param>
     public sealed record CloneLinks(
         IReadOnlyList<FormulaLink> Formulas,
         IReadOnlyList<RuleLink> Rules,
         IReadOnlyList<CascadeLink>? Cascades = null,
         IReadOnlyList<ParentLink>? Parents = null,
         IReadOnlyList<StyleLink>? Styles = null,
-        TemplateVersion? Graph = null);
+        TemplateVersion? Graph = null,
+        IReadOnlyList<GroupParentLink>? GroupParents = null,
+        IReadOnlyList<ColumnGroupLink>? ColumnGroups = null);
 
     /// <summary>Готує клон і перелік посилань, які треба перев'язати після збереження.</summary>
     /// <param name="source">Версія-джерело з повністю завантаженим графом.</param>
@@ -169,6 +179,8 @@ public static class TemplateVersionCloner
         var cascadeLinks = new List<CascadeLink>();
         var parentLinks = new List<ParentLink>();
         var styleLinks = new List<StyleLink>();
+        var groupParentLinks = new List<GroupParentLink>();
+        var columnGroupLinks = new List<ColumnGroupLink>();
 
         Reset(source, nameof(TemplateVersion.Id));
         Set(source, nameof(TemplateVersion.Version), newVersion);
@@ -195,8 +207,32 @@ public static class TemplateVersionCloner
                     Set(table, nameof(TableDef.HeaderStyleId), null);
                 }
 
+                // Групи заголовків: коди стабільні, Id — нові; батьки й колонки перев'язуються після збереження.
+                var groupCodeById = table.HeaderGroups.ToDictionary(g => g.Id, g => g.Code);
+                foreach (var group in table.HeaderGroups)
+                {
+                    if (group.ParentGroupId is { } parentGroup && groupCodeById.TryGetValue(parentGroup, out var parentCode))
+                    {
+                        groupParentLinks.Add(new GroupParentLink(group, table, parentCode));
+                    }
+
+                    Set(group, nameof(ColumnHeaderGroupDef.ParentGroupId), null);
+                    Reset(group, nameof(ColumnHeaderGroupDef.Id));
+                    Reset(group, nameof(ColumnHeaderGroupDef.TableDefId));
+                }
+
                 foreach (var column in table.Columns)
                 {
+                    if (column.HeaderGroupId is { } headerGroup)
+                    {
+                        if (groupCodeById.TryGetValue(headerGroup, out var groupCode))
+                        {
+                            columnGroupLinks.Add(new ColumnGroupLink(column, table, groupCode));
+                        }
+
+                        Set(column, nameof(ColumnDef.HeaderGroupId), null);
+                    }
+
                     if (column.CascadeFromColumnId is { } cascade)
                     {
                         cascadeLinks.Add(new CascadeLink(
@@ -262,7 +298,8 @@ public static class TemplateVersionCloner
             Reset(field, nameof(HeaderFieldDef.TemplateVersionId));
         }
 
-        return (source, new CloneLinks(formulaLinks, ruleLinks, cascadeLinks, parentLinks, styleLinks, source));
+        return (source, new CloneLinks(
+            formulaLinks, ruleLinks, cascadeLinks, parentLinks, styleLinks, source, groupParentLinks, columnGroupLinks));
     }
 
     /// <summary>
@@ -352,6 +389,22 @@ public static class TemplateVersionCloner
             if (link.Target is { } target && rows.TryGetValue(target, out var id))
             {
                 Set(link.Row, nameof(RowDef.ParentRowDefId), id);
+            }
+        }
+
+        foreach (var link in links.GroupParents ?? [])
+        {
+            if (link.Table.HeaderGroups.FirstOrDefault(g => g.Code == link.ParentCode) is { } parent)
+            {
+                link.Group.SetParent(parent.Id);
+            }
+        }
+
+        foreach (var link in links.ColumnGroups ?? [])
+        {
+            if (link.Table.HeaderGroups.FirstOrDefault(g => g.Code == link.GroupCode) is { } group)
+            {
+                link.Column.SetHeaderGroup(group.Id);
             }
         }
     }

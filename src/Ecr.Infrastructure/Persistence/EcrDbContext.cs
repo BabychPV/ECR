@@ -32,6 +32,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<SheetDef> SheetDefs => Set<SheetDef>();
     public DbSet<TableDef> TableDefs => Set<TableDef>();
     public DbSet<ColumnDef> ColumnDefs => Set<ColumnDef>();
+    public DbSet<ColumnHeaderGroupDef> ColumnHeaderGroupDefs => Set<ColumnHeaderGroupDef>();
     public DbSet<HeaderFieldDef> HeaderFieldDefs => Set<HeaderFieldDef>();
     public DbSet<RowDef> RowDefs => Set<RowDef>();
     public DbSet<StyleDef> StyleDefs => Set<StyleDef>();

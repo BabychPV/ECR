@@ -47,6 +47,8 @@ function mount(canEditStructure: boolean, onTab = vi.fn(), tab: 'columns' | 'per
       onAddColumn={vi.fn()}
       onFormula={vi.fn()}
       onAddRule={vi.fn()}
+      onManageGroups={vi.fn()}
+      canEditPresentation={false}
       onDeleteRule={vi.fn()}
     />,
   );
