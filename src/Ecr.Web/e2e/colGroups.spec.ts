@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { axeViolations } from './axeRule';
 import { createGroupedDocument, type GroupedDocument } from './colGroups';
 import { signIn } from './multiSheet';
 
@@ -77,14 +78,18 @@ test.describe('Групові заголовки колонок (ui-colgroups)',
       expect(Math.abs(emissions.w - sum), `${label}: ширина Emissions ${String(emissions.w)} ≠ сума C2..C8 ${String(sum)}`).toBeLessThanOrEqual(3);
       expect(emissions.x).toBeLessThanOrEqual(c2.x + 1);
 
-      // Колонка без групи — на всю шапку (4 рядки), вирівняна верхом із першим груповим рядком.
-      expect(c1.h, `${label}: висота C1`).toBeGreaterThanOrEqual(4 * 45 - 4);
+      // Групові рядки компактні (32 px), рядок колонок — 45 px.
+      const group = 32;
+      const leaf = 45;
+      expect(Math.abs(emissions.h - group), `${label}: висота групового рядка ${String(emissions.h)}`).toBeLessThanOrEqual(2);
+      // Колонка без групи — на всю шапку (3 групові рядки + рядок колонок), верх — із першим груповим рядком.
+      expect(Math.abs(c1.h - (3 * group + leaf)), `${label}: висота C1 ${String(c1.h)}`).toBeLessThanOrEqual(3);
       expect(Math.abs(c1.y - emissions.y), `${label}: верх C1 і Emissions`).toBeLessThanOrEqual(3);
-      expect(c12.h).toBeGreaterThanOrEqual(4 * 45 - 4);
+      expect(Math.abs(c12.h - (3 * group + leaf))).toBeLessThanOrEqual(3);
       // Fuel (корінь із прямими колонками) — один груповий рядок, не вся шапка.
-      expect(fuel.h).toBeLessThan(2 * 45);
-      // C8 напряму в Emissions (глибина 1): піднята на 2 рядки.
-      expect(c8.h, `${label}: висота C8`).toBeGreaterThanOrEqual(3 * 45 - 4);
+      expect(Math.abs(fuel.h - group)).toBeLessThanOrEqual(2);
+      // C8 напряму в Emissions (глибина 1): піднята на 2 групові рядки.
+      expect(Math.abs(c8.h - (2 * group + leaf)), `${label}: висота C8 ${String(c8.h)}`).toBeLessThanOrEqual(3);
 
       // Групові клітинки: межі видимі (токени), у групах немає ручки зміни ширини.
       const borders = await page.evaluate(() => {
@@ -137,6 +142,10 @@ test.describe('Групові заголовки колонок (ui-colgroups)',
       expect(info?.rowcount, `${label}: aria-rowcount`).toBeGreaterThanOrEqual(4);
       expect(info?.colspan, `${label}: aria-colspan Emissions`).toBe('7');
       expect(info?.sr, `${label}: шлях групи для читалки`).toBe('Emissions / Q1 / Jan: ');
+      // Справжній axe на згрупованій шапці: ARIA-правила, які зачіпає `GridAriaPlugin` (рядки шапки, діти grid, значення атрибутів).
+      for (const rule of ['aria-required-parent', 'aria-required-children', 'aria-valid-attr-value', 'aria-allowed-attr']) {
+        expect(await axeViolations(page, rule), `${label}: axe ${rule}`).toEqual([]);
+      }
     }
   });
 
@@ -181,6 +190,44 @@ test.describe('Групові заголовки колонок (ui-colgroups)',
     }
   });
 
+  test('вузьке вікно 500 px: мітка групи або цілком у вікні, або прихована — без обрізка (N/5)', async ({ page }) => {
+    test.setTimeout(300_000);
+    await page.setViewportSize({ width: 500, height: 900 });
+    await open(page);
+
+    for (let i = 0; i < Repeats; i += 1) {
+      if (i > 0) await page.reload();
+      await expect(page.getByTestId('grid-hscroll')).toBeVisible({ timeout: 60_000 });
+
+      for (const left of [0, 120, 240, 360, 480]) {
+        await page.getByTestId('grid-hscroll').evaluate((el, value) => {
+          el.scrollLeft = value;
+        }, left);
+        await page.waitForTimeout(600);
+
+        const bad = await page.evaluate(() => {
+          const grid = document.querySelector('revo-grid');
+          const scroller = grid?.querySelector('revogr-viewport-scroll.rgCol');
+          if (!grid || !scroller) return ['немає сітки'];
+          const view = scroller.getBoundingClientRect();
+          const problems: string[] = [];
+          for (const node of Array.from(grid.querySelectorAll<HTMLElement>('.ecr-hg-label'))) {
+            const box = node.getBoundingClientRect();
+            const cell = node.closest('.rgHeaderCell')?.getBoundingClientRect();
+            if (!cell || cell.right < view.left || cell.left > view.right) continue;
+            if (getComputedStyle(node).visibility === 'hidden') continue;
+            const clipped = node.scrollWidth > node.clientWidth + 1 && getComputedStyle(node).textOverflow !== 'ellipsis';
+            if (box.left < view.left - 1 || box.right > view.right + 1 || clipped) {
+              problems.push(`${node.textContent ?? ''}: label [${String(Math.round(box.left))},${String(Math.round(box.right))}] view [${String(Math.round(view.left))},${String(Math.round(view.right))}]`);
+            }
+          }
+          return problems;
+        });
+        expect(bad, `прогін ${String(i + 1)}/${String(Repeats)}, scrollLeft=${String(left)}`).toEqual([]);
+      }
+    }
+  });
+
   test('конструктор: діалог «Групи колонок», вибір групи колонки, перегляд із груповою шапкою (N/5)', async ({ page }) => {
     test.setTimeout(420_000);
     await page.setViewportSize({ width: 1500, height: 1000 });
@@ -197,10 +244,17 @@ test.describe('Групові заголовки колонок (ui-colgroups)',
       await expect(dialog.locator('[data-group-code]'), `${label}: 6 груп`).toHaveCount(6);
       await expect(dialog.locator('[data-group-depth="3"]'), `${label}: рівень 3 — Jan і Feb`).toHaveCount(2);
 
+      // На виду — лише поле поточної мови; решта мов згорнуто під «Other languages».
+      await expect(dialog.locator('input[data-group-label="current"]'), `${label}: поле поточної мови в кожної групи`).toHaveCount(6);
+      await expect(dialog.locator('input[data-group-label="current"]').first()).toBeVisible();
+      await expect(dialog.locator('input[data-group-label]:not([data-group-label="current"])').first(), `${label}: інші мови згорнуто`).toBeHidden();
+      await dialog.getByTestId('group-other-languages').first().click();
+      await expect(dialog.locator('input[data-group-label]:not([data-group-label="current"])').first(), `${label}: інші мови розгорнулись`).toBeVisible();
+
       // Додаємо кореневу групу з назвою й зберігаємо.
       await dialog.getByRole('button', { name: 'Add group', exact: true }).click();
       await expect(dialog.locator('[data-group-code]')).toHaveCount(7);
-      await dialog.locator('[data-group-code]').last().getByRole('textbox').first().fill(`Extra ${String(i)}`);
+      await dialog.locator('[data-group-code]').last().locator('input[data-group-label="current"]').fill(`Extra ${String(i)}`);
       await dialog.getByRole('button', { name: 'Save groups' }).click();
       await expect(page.getByTestId('column-groups-dialog')).toBeHidden({ timeout: 45_000 });
 
