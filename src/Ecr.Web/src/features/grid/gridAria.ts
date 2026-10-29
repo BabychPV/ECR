@@ -30,6 +30,7 @@ export class GridAriaPlugin extends BasePlugin {
   private readonly counts = { rgRow: 0, rowPinStart: 0, rowPinEnd: 0 };
   private readonly observer: MutationObserver;
   private frame = 0;
+  private headerRows = 1;
 
   constructor(revogrid: HTMLRevoGridElement, providers: PluginProviders) {
     super(revogrid, providers);
@@ -38,10 +39,16 @@ export class GridAriaPlugin extends BasePlugin {
     this.addEventListener('beforesourceset', ({ detail }) => {
       const type = detail.type as keyof GridAriaPlugin['counts'];
       if (type in this.counts) this.counts[type] = detail.source.length;
-      revogrid.setAttribute('aria-rowcount', String(1 + this.counts.rowPinStart + this.counts.rgRow + this.counts.rowPinEnd));
+      revogrid.setAttribute('aria-rowcount', String(this.headerRows + this.counts.rowPinStart + this.counts.rgRow + this.counts.rowPinEnd));
     });
 
     this.addEventListener('beforecolumnsset', ({ detail }) => {
+      // Рядки шапки: рівні групових заголовків + рядок колонок.
+      const levels = [...detail.columnGrouping.colPinStart, ...detail.columnGrouping.rgCol, ...detail.columnGrouping.colPinEnd].map(
+        (group) => group.level + 1,
+      );
+      this.headerRows = 1 + Math.max(0, ...levels);
+      revogrid.setAttribute('aria-rowcount', String(this.headerRows + this.counts.rowPinStart + this.counts.rgRow + this.counts.rowPinEnd));
       const columns: ColumnRegular[] = [...detail.columns.colPinStart, ...detail.columns.rgCol, ...detail.columns.colPinEnd];
       columns.forEach((column, index) => {
         const header = column.columnProperties;
@@ -81,15 +88,21 @@ export class GridAriaPlugin extends BasePlugin {
   }
 
   private rowIndexOf(type: string, index: number): number {
-    if (type === 'rowPinStart') return 2 + index;
-    if (type === 'rowPinEnd') return 2 + this.counts.rowPinStart + this.counts.rgRow + index;
-    return 2 + this.counts.rowPinStart + index;
+    const first = this.headerRows + 1;
+    if (type === 'rowPinStart') return first + index;
+    if (type === 'rowPinEnd') return first + this.counts.rowPinStart + this.counts.rgRow + index;
+    return first + this.counts.rowPinStart + index;
   }
 
   private patchStatic(): void {
-    for (const row of this.revogrid.querySelectorAll('.header-rgRow')) {
-      if (row.getAttribute('role') !== 'row') row.setAttribute('role', 'row');
-      if (row.getAttribute('aria-rowindex') !== '1') row.setAttribute('aria-rowindex', '1');
+    // Рядки шапки нумеруються зверху вниз у межах кожної секції (групові рівні, потім рядок колонок).
+    for (const header of this.revogrid.querySelectorAll('revogr-header')) {
+      let position = 0;
+      for (const row of header.querySelectorAll('.header-rgRow')) {
+        position += 1;
+        if (row.getAttribute('role') !== 'row') row.setAttribute('role', 'row');
+        if (row.getAttribute('aria-rowindex') !== String(position)) row.setAttribute('aria-rowindex', String(position));
+      }
     }
     // CL-17 (B-2): прокручувана область даних (`rgCol`; закріплені `colPinStart`/`colPinEnd` самі не прокручуються)
     // мусить приймати фокус, інакше клавіатурний користувач не прокрутить її стрілками (WCAG 2.1.1, axe
