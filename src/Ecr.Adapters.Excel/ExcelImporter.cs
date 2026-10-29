@@ -1194,7 +1194,7 @@ public sealed class ExcelImporter(
     /// відмова вже має код і ключ, а ClosedXML не бачить непридатного пакета
     /// взагалі.
     /// </remarks>
-    private static XLWorkbook Open(Stream file)
+    internal static XLWorkbook Open(Stream file)
     {
         XlsxSafetyGate.EnsureSafe(file);
 
