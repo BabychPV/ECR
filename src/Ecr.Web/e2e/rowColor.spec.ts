@@ -120,17 +120,25 @@ test.describe('rowColor: колір тексту', () => {
       try {
         doc ??= await createRowColorDocument(page, Rows);
         await openDocument(page);
-        const row = 30;
+        const fills = [Orange, '#ed7d31', '#a5a5a5', '#5b9bd5', '#70ad47', '#4472c4', '#ffff00', '#92d050', '#00b050', '#00b0f0', '#0070c0', '#ff0000', '#7030a0', '#44546a', '#e7e6e6'];
+        const results: { fill: string; ratio: number; fg: string; bg: string }[] = [];
 
-        await cell(page, row, 2).click();
-        await page.getByTestId('cell-color-scope').selectOption('row');
-        await choose(page, 'fill', Orange);
-        await expect(cell(page, row, 2)).toHaveAttribute('data-user-fill', 'true', { timeout: 15_000 });
-        await expect(cell(page, row, 2), 'явного кольору тексту немає').not.toHaveAttribute('data-user-text', 'true');
-        const result = await contrastOf(page, row, 2);
-        await testInfo.attach(`contrast-${scheme}.json`, { body: JSON.stringify(result), contentType: 'application/json' });
-        console.log(`AUTOCONTRAST ${scheme} ${JSON.stringify(result)}`);
-        expect(result.ratio, `${scheme}: контраст тексту на заливці без явного кольору ${JSON.stringify(result)}`).toBeGreaterThanOrEqual(4.5);
+        await page.getByTestId('cell-color-scope').selectOption('selection');
+
+        for (const [index, fill] of fills.entries()) {
+          const row = 20 + index;
+
+          await cell(page, row, 2).click();
+          await choose(page, 'fill', fill);
+          await expect(cell(page, row, 2), `${fill}: заливка`).toHaveAttribute('data-user-fill', 'true', { timeout: 15_000 });
+          await expect(cell(page, row, 2), `${fill}: явного кольору тексту немає`).not.toHaveAttribute('data-user-text', 'true');
+          results.push({ fill, ...(await contrastOf(page, row, 2)) });
+        }
+
+        await testInfo.attach(`contrast-${scheme}.json`, { body: JSON.stringify(results), contentType: 'application/json' });
+        console.log(`AUTOCONTRAST ${scheme} ${JSON.stringify(results.map((r) => `${r.fill}=${r.ratio.toFixed(2)}`))}`);
+        const worst = results.reduce((a, b) => (a.ratio <= b.ratio ? a : b));
+        expect(worst.ratio, `${scheme}: найгірший автоконтраст на заливці без явного кольору ${JSON.stringify(worst)}`).toBeGreaterThanOrEqual(4.5);
       } finally {
         await page.context().close();
       }
