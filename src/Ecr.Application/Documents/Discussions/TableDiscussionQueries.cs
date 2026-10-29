@@ -23,7 +23,7 @@ public sealed class TableDiscussionQueries
 
     /// <summary>Кандидати у згадки: лише користувачі, які бачать таблицю.</summary>
     public Task<IReadOnlyList<TableDiscussionMentionCandidateDto>> MentionCandidatesAsync(
-        long documentId, string tableCode, string? q, CancellationToken ct)
+        long documentId, string tableCode, string? q, int? periodKey, CancellationToken ct)
         => throw new NotImplementedException("table chat: contract commit");
 
     /// <summary>Непрочитані згадки поточного користувача в таблицях, які він досі бачить.</summary>

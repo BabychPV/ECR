@@ -68,19 +68,19 @@ public sealed class TableDiscussionsController(
         return page is null ? StatusCode(StatusCodes.Status304NotModified) : Ok(page);
     }
 
-    /// <summary>Кандидати у згадки: лише користувачі, які самі бачать цю таблицю (≥ 2 символи, до 20).</summary>
+    /// <summary>Кандидати у згадки: лише користувачі, які самі бачать цю таблицю (і період <c>periodKey</c>, якщо задано) (≥ 2 символи, до 20).</summary>
     /// <remarks>Імена користувачів без доступу не повертаються ніколи. <c>404</c> — таблиця невидима.</remarks>
     [HttpGet("tables/{tableCode}/mention-candidates")]
     [ProducesResponseType<IReadOnlyList<TableDiscussionMentionCandidateDto>>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> MentionCandidates(
-        long documentId, string tableCode, [FromQuery] string? q, CancellationToken ct)
-        => Ok(await queries.MentionCandidatesAsync(documentId, tableCode, q, ct).ConfigureAwait(false));
+        long documentId, string tableCode, [FromQuery] string? q, [FromQuery] int? periodKey, CancellationToken ct)
+        => Ok(await queries.MentionCandidatesAsync(documentId, tableCode, q, periodKey, ct).ConfigureAwait(false));
 
     /// <summary>Пише повідомлення в чат таблиці. Право <c>Document.Discuss</c>.</summary>
     /// <remarks>
-    /// <c>403 ECR-AUTH-0403</c> — немає <c>Document.Discuss</c>; <c>404 ECR-DOC-0404</c> — документ чи таблиця невидимі;
+    /// <c>403 ECR-AUTH-0403</c> — немає <c>Document.Discuss</c>; <c>403 ECR-ACCS-0403</c> (<c>discussionPeriodForbidden</c>) —\n    /// роль, звужена періодами, не бачить цей період; <c>404 ECR-DOC-0404</c> — документ чи таблиця невидимі;
     /// <c>422 ECR-REQ-0422</c> (<c>discussionBodyInvalid</c>) — порожній чи задовгий текст, недійсний період,
     /// забагато згадок; <c>429</c> — ліміт запитів. Згадки користувачів без доступу мовчки відкидаються — у відповіді
     /// лише прийняті.
