@@ -82,7 +82,8 @@ public static class RegistryHierarchyRules
         ArgumentNullException.ThrowIfNull(nodes);
         ArgumentNullException.ThrowIfNull(all);
 
-        var byId = levels.ToDictionary(l => l.Id);
+        // Levels not saved yet (Id 0, several at once when a hierarchy is first declared) cannot hold nodes: skip them here.
+        var byId = levels.Where(l => l.Id != 0).ToDictionary(l => l.Id);
         var violations = new List<(long, string)>();
 
         foreach (var node in nodes)

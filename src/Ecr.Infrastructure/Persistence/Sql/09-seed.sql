@@ -2265,6 +2265,9 @@ USING (VALUES
     (N'registryAudit.hierarchySaved',         N'en', N'Levels: {count}.', 1),
     (N'registryAudit.entryMoved',             N'en', N'Siblings renumbered: {count}.', 1),
     (N'registryAudit.entryRetired',           N'en', N'Entries retired: {count}.', 1),
+    (N'err.ECR-REG-0422.naeTreeIncompatible', N'en', N'Registry «{registryCode}» exists but is not an NAE tree (missing: {missing}).', 1),
+    (N'err.ECR-REG-0422.naeImportRejected',   N'en', N'NAE load rejected at {code}: {reason}.', 1),
+    (N'registryAudit.naeAfImport',            N'en', N'NAE nodes created: {count}.', 1),
     (N'err.ECR-INT-0422.materializationRequiresAggregation', N'en', N'Mapping of field "{sourceField}" names row "{targetRowKey}", but does not say how to fold period points: the system does not know whether the value is instantaneous or cumulative.', 1),
     (N'err.ECR-RPT-0409.versionNotDraft',           N'en', N'Report version {version} is {status}: there is nothing to publish.', 1),
     (N'err.ECR-RPT-0409.snapshotSubmittedContent',  N'en', N'Snapshot {snapshotId} was submitted: its content is not rebuilt, a new snapshot is needed.', 1),
@@ -16631,6 +16634,21 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- NAE1:hierarchy ── кінець секції ──
+
+-- NAE2:af-import ── ru/kz разове завантаження дерева НАЕ з AF; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.naeTreeIncompatible', N'ru', N'Справочник «{registryCode}» уже существует, но не является деревом НАЕ (нет: {missing}).'),
+    (N'err.ECR-REG-0422.naeImportRejected', N'ru', N'Загрузка НАЕ отклонена на записи {code}: {reason}.'),
+    (N'registryAudit.naeAfImport', N'ru', N'Создано узлов НАЕ: {count}.'),
+    (N'err.ECR-REG-0422.naeTreeIncompatible', N'kz', N'«{registryCode}» анықтамалығы бар, бірақ НАЕ ағашы емес (жоқ: {missing}).'),
+    (N'err.ECR-REG-0422.naeImportRejected', N'kz', N'НАЕ жүктеу {code} жазбасында қабылданбады: {reason}.'),
+    (N'registryAudit.naeAfImport', N'kz', N'Жасалған НАЕ түйіндері: {count}.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- NAE2:af-import ── кінець секції ──
 
 -- I18N:ru-kz-backfill 2026-09-30 ── ru/kz для ключів, що мали лише en (req-g2, rpt-views-health, реєстри, безпека, збір подій та ін.); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
