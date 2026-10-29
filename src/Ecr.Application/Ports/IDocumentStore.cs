@@ -71,7 +71,16 @@ namespace Ecr.Application.Ports;
 /// <param name="ResultsStaleSince">Відколи застаріло (перша правка входу після прогону, UTC); <c>null</c> — не застаріло чи невідомо.</param>
 /// <param name="TemplateVersion">
 /// RC15: версія шаблону проєкту документа (<c>TemplateVersion.Version</c>, рядок). Адитивне поле; метадані шаблону не секрет,
-/// тож звуження читача його не знімає. Заповнює лише шлях картки (<c>FindAsync</c>); перелік віддає <c>null</c>.
+/// тож звуження читача його не знімає. ~~Заповнює лише шлях картки (<c>FindAsync</c>); перелік віддає <c>null</c>.~~
+/// ✎ RPT-STABLE: заповнюють і картка, і перелік (колонка «Версія» переліку документів) — це ТИПОВА версія документа;
+/// періоди, що відрізняються, називає <paramref name="TemplateVersionByPeriod"/>.
+/// </param>
+/// <param name="TemplateVersionByPeriod">
+/// ✎ RPT-STABLE (Part A, контракт під Part B «міграція з обраного місяця»): РІДКА карта «ключ періоду → версія шаблону»
+/// лише для періодів, версія яких ВІДРІЗНЯЄТЬСЯ від <paramref name="TemplateVersion"/> (ключ — рядок <c>YYYYMM</c>, значення —
+/// <c>TemplateVersion.Version</c>). <c>null</c> = усі періоди документа на <paramref name="TemplateVersion"/> (так є зараз:
+/// версія живе лише в проєкті); непорожня карта = документ «змішаний». Версія періоду = карта[період] ?? <paramref name="TemplateVersion"/>.
+/// Адитивне; метадані шаблону не секрет — звуження читача не знімає.
 /// </param>
 /// <param name="OwnerUserId">
 /// EA-C: ідентифікатор автора документа (<c>CreatedByUserId</c>) — поруч з <paramref name="OwnerDisplayName"/> тим самим розкриттям,
@@ -121,7 +130,8 @@ public sealed record DocumentSummary(
     bool? CanManageEditAccess = null,
     [property: System.Text.Json.Serialization.JsonIgnore] bool ProjectIsReadOnly = false,
     string? PeriodKind = null,
-    ResultsStaleUndeterminedReason? ResultsStaleUndetermined = null);
+    ResultsStaleUndeterminedReason? ResultsStaleUndetermined = null,
+    IReadOnlyDictionary<string, string>? TemplateVersionByPeriod = null);
 
 /// <summary>
 /// ✎ D-446: чому застарілість результатів документа читачеві не визначається
