@@ -273,7 +273,8 @@ if ($Shard) {
             }
             if ($shardIndex -eq 1) {
                 # Шард 1 = доповнення до заявок решти: новий spec-файл не губиться, а їде сюди.
-                $shardArgs = @('--grep-invert', '(?:' + (($expected | ForEach-Object { $byShard[$_] }) -join '|') + ')')
+                # ⚠ Скобки обов'язкові: в `@(a, b + c)` кома старша за `+`, і без них масив розвалюється на частини.
+                $shardArgs = @('--grep-invert', ('(?:' + (($expected | ForEach-Object { $byShard[$_] }) -join '|') + ')'))
             }
             else {
                 $shardArgs = @('--grep', $byShard[[string] $shardIndex])
