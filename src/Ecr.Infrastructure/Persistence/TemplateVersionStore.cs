@@ -18,8 +18,11 @@ namespace Ecr.Infrastructure.Persistence;
 /// ⚠ Файла немає в дереві `05-skeleton.md` §1: порт уведений `Q-032`,
 /// реалізація — `Q-050`.
 /// </remarks>
-public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStore
+public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache? metadata = null) : ITemplateVersionStore
 {
+    /// <summary>Вид похідних даних кешу метаданих: граф залежностей формул версії.</summary>
+    private const string DependenciesKind = "formulaDependencies";
+
     /// <inheritdoc />
     /// <remarks>
     /// ⚠ ОДИН statement із <c>OUTPUT</c> (<c>R-B7</c>). Послідовність
@@ -1207,7 +1210,26 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// L2b: граф версії читають КОЖНА задача перерахунку й кожен прохід fan-out, а він незмінний між публікаціями:
+    /// на великому шаблоні (десятки тисяч залежностей) читання й матеріалізація коштували ~100–200 мс на задачу з
+    /// ОДНІЄЮ зміненою коміркою. Тому список живе в кеші метаданих (<see cref="IMetadataCache.GetDerivedAsync{T}"/>) —
+    /// з ключем ревізії версії і з тим самим скиданням (<c>Publish</c>, структурні правки), що й знімок. Єдиний, хто пише
+    /// граф, — <see cref="ReplaceFormulaDependenciesAsync"/> у транзакції публікації; обробник скидає кеш ПІСЛЯ коміту.
+    /// Без кешу метаданих (тести, що збирають сховище вручну) — читання напряму, як і раніше.
+    /// </remarks>
     public async Task<IReadOnlyList<FormulaDependency>> ListFormulaDependenciesAsync(
+        int templateVersionId, CancellationToken ct)
+        => metadata is null
+            ? await ReadFormulaDependenciesAsync(templateVersionId, ct).ConfigureAwait(false)
+            : await metadata
+                .GetDerivedAsync(
+                    templateVersionId, DependenciesKind,
+                    token => ReadFormulaDependenciesAsync(templateVersionId, token),
+                    ct)
+                .ConfigureAwait(false);
+
+    private async Task<IReadOnlyList<FormulaDependency>> ReadFormulaDependenciesAsync(
         int templateVersionId, CancellationToken ct)
         => await (
                 from dependency in db.FormulaDependencies.AsNoTracking()
@@ -1218,7 +1240,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
                 where sheet.TemplateVersionId == templateVersionId
                 orderby dependency.FormulaDefId, dependency.SortOrder
                 select dependency)
-            .ToListAsync(ct)
+            .ToArrayAsync(ct)
             .ConfigureAwait(false);
 
     /// <inheritdoc />
