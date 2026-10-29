@@ -30,3 +30,22 @@
 .nae-used-table td {
   padding: 6px 4px;
 }
+
+.nae-import-report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-xs);
+}
+
+.nae-import-issues {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.nae-import-path {
+  font-family: var(--mantine-font-family-monospace);
+  overflow-wrap: anywhere;
+}

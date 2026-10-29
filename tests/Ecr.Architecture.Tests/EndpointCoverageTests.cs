@@ -1391,10 +1391,8 @@ public sealed partial class EndpointCoverageTests
         // ⚠ TEMPORARY: remove in the same commit that adds `saveRegistryHierarchy` to a screen.
         "PUT /api/v1/registries/{p}/hierarchy",
 
-        // NAE plan N2: the AF load is an admin action for the NAE tree page (follow-up: dry-run + apply panel).
-        // "where used" (GET .../entries/{p}/references) is consumed by `features/permits/nae/referencesApi.ts`.
-        // TEMPORARY: remove the line below in the commit that adds the af-import client call.
-        "POST /api/v1/nae-tree/af-import",
+        // NAE plan N2: af-import is consumed by `features/permits/nae/afImportApi.ts` (AfImportPanel),
+        // "where used" (GET .../entries/{p}/references) by `features/permits/nae/referencesApi.ts`.
 
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було
