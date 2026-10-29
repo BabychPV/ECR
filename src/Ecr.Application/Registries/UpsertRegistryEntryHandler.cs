@@ -164,9 +164,10 @@ public sealed class UpsertRegistryEntryHandler(
         // в запиті немає, лишається як була; мова з порожнім текстом —
         // свідомо прибирається (так клієнт каже «цей переклад видалено»).
         entry.Rename(dto.Id is null ? WithoutEmpty(dto.Display) : Merge(entry.DisplayL10n, dto.Display));
+        (IReadOnlyList<RegistryLevelDef> Levels, RegistryLevelDef Level)? placement = null;
         if (definition.IsHierarchical)
         {
-            await ApplyHierarchyAsync(definition, entry, dto, ct).ConfigureAwait(false);
+            placement = await ApplyHierarchyAsync(definition, entry, dto, ct).ConfigureAwait(false);
         }
         else
         {
@@ -195,6 +196,16 @@ public sealed class UpsertRegistryEntryHandler(
         await uow.ExecuteInTransactionAsync(
             async token =>
             {
+                // N2: the placement was validated before the transaction; take the tree lock (the row move/retire write) and
+                // validate once more on fresh data, so a concurrent move cannot slip a cycle or a wrong level past the check.
+                if (placement is { } p && hierarchy is not null)
+                {
+                    await hierarchy.LockTreeAsync(definition.Id, token).ConfigureAwait(false);
+                    await Hierarchy.RegistryHierarchyPlacement.EnsureAsync(
+                        hierarchy, definition.Id, p.Levels, entry.IsPersisted ? entry.Id : null, dto.ParentEntryId, p.Level, token)
+                        .ConfigureAwait(false);
+                }
+
                 await writer.SaveEntryAsync(definition, entry, changes, userId, token).ConfigureAwait(false);
                 check = await rules.EvaluateAsync(definition, [entry.Id], [], businessDate: null, token).ConfigureAwait(false);
                 check.ThrowIfErrors();
@@ -208,7 +219,7 @@ public sealed class UpsertRegistryEntryHandler(
     /// Places an entry of a hierarchical registry (NAE plan N1): level, parent, order of levels, cycles, subtree — validated
     /// against fresh data before the entry is saved (<c>422 ECR-REG-0422</c>).
     /// </summary>
-    private async Task ApplyHierarchyAsync(
+    private async Task<(IReadOnlyList<RegistryLevelDef> Levels, RegistryLevelDef Level)> ApplyHierarchyAsync(
         RegistryDef definition, RegistryEntry entry, RegistryEntryUpsertDto dto, CancellationToken ct)
     {
         var store = hierarchy
@@ -224,6 +235,7 @@ public sealed class UpsertRegistryEntryHandler(
 
         entry.SetParent(dto.ParentEntryId);
         entry.SetLevel(level.Id);
+        return (levels, level);
     }
 
     /// <summary>Наявна назва, поверх якої лягли мови з запиту (X-03).</summary>

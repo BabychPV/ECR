@@ -20,6 +20,14 @@ public interface IRegistryHierarchyStore
     /// <param name="level">Level.</param>
     public void RemoveLevel(RegistryLevelDef level);
 
+    /// <summary>
+    /// Takes the tree lock of the registry until the transaction ends (<c>UPDLOCK</c> on the definition row — the same row
+    /// move/retire write), so a placement validated afterwards cannot be invalidated by a concurrent tree change.
+    /// </summary>
+    /// <param name="registryDefId">Registry.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public Task LockTreeAsync(int registryDefId, CancellationToken ct);
+
     /// <summary>Entries per level id, soft-deleted ones included (they keep the level FK, so they pin the level).</summary>
     /// <param name="registryDefId">Registry.</param>
     /// <param name="ct">Cancellation token.</param>

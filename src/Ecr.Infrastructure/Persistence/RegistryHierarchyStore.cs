@@ -20,6 +20,12 @@ public sealed class RegistryHierarchyStore(EcrDbContext db) : IRegistryHierarchy
                    .ToListAsync(ct).ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task LockTreeAsync(int registryDefId, CancellationToken ct)
+        => _ = await db.Database
+            .ExecuteSqlInterpolatedAsync($"SELECT 1 FROM cfg.RegistryDef WITH (UPDLOCK, ROWLOCK) WHERE Id = {registryDefId}", ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public void AddLevel(RegistryLevelDef level) => db.RegistryLevelDefs.Add(level);
 
     /// <inheritdoc />
