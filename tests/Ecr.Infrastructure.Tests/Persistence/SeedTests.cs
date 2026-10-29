@@ -17,7 +17,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     /// сюди, тест впаде — і це правильно. Право, якого немає в цьому списку,
     /// ніхто не перевіряв.
     /// </remarks>
-    private const int ExpectedPermissions = 45; // D-285: + Document.Submit; PM-04: + Permit.EditType/PublishType (безпечні; джерело — MERGE sec.Permission у 09-seed.sql)
+    private const int ExpectedPermissions = 47; // TC: + Document.Discuss/DiscussModerate (безпечні, чат таблиці); D-285: + Document.Submit; PM-04: + Permit.EditType/PublishType (безпечні; джерело — MERGE sec.Permission у 09-seed.sql)
 
     private const int ExpectedDangerous = 11;
 
@@ -157,6 +157,51 @@ public sealed class SeedTests(SqlServerFixture sql)
         Assert.Equal(0, await ScalarAsync(
             "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Template.Migrate'"));
         Assert.Equal(ExpectedPermissions, await ScalarAsync("SELECT COUNT(*) FROM sec.Permission"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Document_Discuss_видано_кожній_ролі_з_View_одноразово_і_повторний_сід_не_повертає_знятого()
+    {
+        // TC:discuss — кожна роль, що має Document.View, має й Document.Discuss.
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*) FROM sec.RolePermission AS v
+            WHERE v.PermissionCode = N'Document.View'
+              AND NOT EXISTS (SELECT 1 FROM sec.RolePermission AS d WHERE d.RoleId = v.RoleId AND d.PermissionCode = N'Document.Discuss')
+            """));
+
+        // Адміністратор зняв право з ролі «Переглядач»: повторний сід його НЕ повертає (позначка — подія безпеки).
+        try
+        {
+            await ExecuteAsync("""
+                DELETE rp FROM sec.RolePermission AS rp JOIN sec.Role AS r ON r.Id = rp.RoleId
+                WHERE r.Code = N'Viewer' AND rp.PermissionCode = N'Document.Discuss'
+                """);
+
+            await using (var db = CreateContext())
+            {
+                await new SeedRunner(db).RunAsync(CancellationToken.None);
+            }
+
+            Assert.Equal(0, await ScalarAsync("""
+                SELECT COUNT(*) FROM sec.RolePermission AS rp JOIN sec.Role AS r ON r.Id = rp.RoleId
+                WHERE r.Code = N'Viewer' AND rp.PermissionCode = N'Document.Discuss'
+                """));
+            Assert.True(await ScalarAsync("""
+                SELECT COUNT(*) FROM aud.SecurityEvent
+                WHERE EventType = N'RolePermissionsGranted' AND DetailsJson LIKE N'%"source":"seed TC:discuss"%'
+                """) > 0);
+        }
+        finally
+        {
+            await ExecuteAsync("""
+                INSERT sec.RolePermission (RoleId, PermissionCode)
+                SELECT r.Id, N'Document.Discuss' FROM sec.Role AS r
+                WHERE r.Code = N'Viewer'
+                  AND NOT EXISTS (SELECT 1 FROM sec.RolePermission AS d WHERE d.RoleId = r.Id AND d.PermissionCode = N'Document.Discuss')
+                """);
+        }
     }
 
     [Fact]
