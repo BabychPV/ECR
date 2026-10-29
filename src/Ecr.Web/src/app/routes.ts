@@ -433,6 +433,17 @@ export const routes = {
       crumb: { ancestorIds: ['admin-permits', 'admin-permit-bindings'] },
     },
   },
+  // Структура НАВ (N2): дерево регіон › район › майданчик › обладнання › НАВ; читання - `Registry.View`, правки - `Registry.EditData` (екран).
+  adminPermitNae: {
+    id: 'admin-permit-nae',
+    path: '/admin/permits/nae',
+    handle: {
+      labelKey: 'permits.nae.title',
+      permission: 'Registry.View',
+      descriptionKey: 'permits.nae.description',
+      crumb: { ancestorIds: ['admin-permits'] },
+    },
+  },
   adminPermit: {
     id: 'admin-permit',
     path: '/admin/permits/:id',

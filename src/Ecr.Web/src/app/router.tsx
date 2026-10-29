@@ -120,6 +120,9 @@ const PermitBindingsPage = lazy(async () => ({
 const PermitBindingPage = lazy(async () => ({
   default: (await import('@/pages/admin/PermitBindingPage')).PermitBindingPage,
 }));
+const PermitNaePage = lazy(async () => ({
+  default: (await import('@/pages/admin/PermitNaePage')).PermitNaePage,
+}));
 const PermitPage = lazy(async () => ({
   default: (await import('@/pages/admin/PermitPage')).PermitPage,
 }));
@@ -442,6 +445,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminPermitBinding, 'admin'),
             element: guarded(routes.adminPermitBinding.handle, <PermitBindingPage />),
             handle: routes.adminPermitBinding.handle,
+          },
+          {
+            path: relativePath(routes.adminPermitNae, 'admin'),
+            element: guarded(routes.adminPermitNae.handle, <PermitNaePage />),
+            handle: routes.adminPermitNae.handle,
           },
           {
             path: relativePath(routes.adminPermit, 'admin'),
