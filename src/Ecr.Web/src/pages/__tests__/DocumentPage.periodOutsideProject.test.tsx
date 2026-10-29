@@ -135,9 +135,10 @@ describe('DocumentPage: період поза проєктом', () => {
 
       const go = await screen.findByTestId('period-recovery-go', undefined, { timeout: 20_000 });
       expect(go.textContent).toContain('⟦document.periodGoTo');
-      expect(screen.getByRole('button', { name: '⟦period.next⟧' })).toBeTruthy();
+      // Вибір періоду - лінивий чанк: чекаємо, а не читаємо одразу (у CI під навантаженням він приходить пізніше).
+      expect(await screen.findByRole('button', { name: '⟦period.next⟧' }, { timeout: 20_000 })).toBeTruthy();
       // Сервер лишається як є - його текст видно.
-      expect(screen.getAllByRole('alert').length).toBeGreaterThan(0);
+      expect((await screen.findAllByRole('alert', undefined, { timeout: 20_000 })).length).toBeGreaterThan(0);
     },
     SlowEnvTimeout,
   );
