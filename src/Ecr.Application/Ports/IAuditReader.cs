@@ -342,6 +342,16 @@ public interface IAuditReader
     /// <param name="ct">Токен скасування.</param>
     public Task<int> CountStructureJournalAsync(StructureChangeFilter filter, CancellationToken ct);
 
+    /// <summary>Кількість подій безпеки за тим самим фільтром — для стелі експорту.</summary>
+    /// <param name="filter">Вікно й звуження журналу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<int> CountSecurityEventsAsync(SecurityEventFilter filter, CancellationToken ct);
+
+    /// <summary>Кількість подій погодження за тим самим фільтром — для стелі експорту.</summary>
+    /// <param name="filter">Вікно й звуження журналу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<int> CountWorkflowEventsAsync(WorkflowEventFilter filter, CancellationToken ct);
+
     /// <summary>Журнал подій погодження (<c>wf.ApprovalEvent</c>) у вікні часу, курсорна пагінація, порядок з фільтра.</summary>
     /// <param name="filter">Вікно й звуження журналу.</param>
     /// <param name="page">Курсорна пагінація.</param>

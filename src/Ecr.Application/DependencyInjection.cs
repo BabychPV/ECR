@@ -194,6 +194,10 @@ public static class DependencyInjection
         services.AddScoped<Audit.GetStructureChangesHandler>();
         services.AddScoped<Audit.GetSecurityEventsHandler>();
         services.AddScoped<Audit.ExportStructureChangesHandler>();
+        services.AddScoped<Audit.GetWorkflowEventsHandler>();
+        services.AddScoped<Audit.ExportCellChangesHandler>();
+        services.AddScoped<Audit.ExportSecurityEventsHandler>();
+        services.AddScoped<Audit.ExportWorkflowEventsHandler>();
         services.AddScoped<Consistency.GetConsistencyIssuesHandler>();
         services.AddScoped<Consistency.GetConsistencySummaryHandler>();
         services.AddScoped<Consistency.RunConsistencyCheckHandler>();

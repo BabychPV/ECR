@@ -64,7 +64,7 @@ public sealed class AuditReaderArchiveTests(SqlServerFixture sql, ITestOutputHel
 
         // Вікно в архівному місяці: лише архів, кожен рядок із позначкою й людськими іменами (ті самі LEFT JOIN).
         var archived = await reader.ReadCellChangesAsync(
-            new CellChangeFilter(ArchiveFrom, ArchiveTo, DocumentId: doc.DocumentId), new CursorRequest(50), CancellationToken.None);
+            new CellChangeFilter(ArchiveFrom, ArchiveTo, DocumentId: doc.DocumentId, Sort: AuditSort.ChangedAtAsc), new CursorRequest(50), CancellationToken.None);
         Assert.Equal(["arc-1", "arc-2"], archived.Items.Select(c => c.NewValue));
         Assert.All(archived.Items, c =>
         {
@@ -82,7 +82,7 @@ public sealed class AuditReaderArchiveTests(SqlServerFixture sql, ITestOutputHel
 
         // Вікно через межу: одна видача за ChangedAt, архів першим.
         var both = await reader.ReadCellChangesAsync(
-            new CellChangeFilter(ArchiveFrom, HotTo, DocumentId: doc.DocumentId), new CursorRequest(50), CancellationToken.None);
+            new CellChangeFilter(ArchiveFrom, HotTo, DocumentId: doc.DocumentId, Sort: AuditSort.ChangedAtAsc), new CursorRequest(50), CancellationToken.None);
         Assert.Equal(["arc-1", "arc-2", "hot-1"], both.Items.Select(c => c.NewValue));
         Assert.Equal([true, true, false], both.Items.Select(c => c.FromArchive));
     }
@@ -111,7 +111,7 @@ public sealed class AuditReaderArchiveTests(SqlServerFixture sql, ITestOutputHel
 
         // Загальний журнал документа — від найстаріших: межа гаряче/архів лягає всередину другої сторінки.
         var forward = await WalkAsync(
-            reader, new CellChangeFilter(ArchiveFrom, HotTo, DocumentId: doc.DocumentId), limit: 2);
+            reader, new CellChangeFilter(ArchiveFrom, HotTo, DocumentId: doc.DocumentId, Sort: AuditSort.ChangedAtAsc), limit: 2);
         Assert.Equal(["a1", "a2", "a3", "h1", "h2", "h3"], forward.Select(c => c.NewValue));
         Assert.Equal([true, true, true, false, false, false], forward.Select(c => c.FromArchive));
 
@@ -121,6 +121,45 @@ public sealed class AuditReaderArchiveTests(SqlServerFixture sql, ITestOutputHel
         var backward = await WalkAsync(reader, single, limit: 2);
         Assert.Equal(["h3", "h2", "h1", "a3", "a2", "a1"], backward.Select(c => c.NewValue));
         Assert.Equal([false, false, false, true, true, true], backward.Select(c => c.FromArchive));
+    }
+
+    [Theory]
+    [InlineData(AuditSort.ChangedAtDesc, 1)]
+    [InlineData(AuditSort.ChangedAtDesc, 2)]
+    [InlineData(AuditSort.ChangedAtAsc, 2)]
+    [InlineData(AuditSort.UserAsc, 2)]
+    [InlineData(AuditSort.UserDesc, 2)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "НФ-8.9.6")]
+    public async Task Архівне_вікно_має_той_самий_порядок_що_й_гаряче_в_кожному_sort_через_межу_архіву(AuditSort sort, int limit)
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(ct: CancellationToken.None);
+        await using var db = builder.CreateContext();
+
+        foreach (var (at, value) in new[] { (A1, "a1"), (A2, "a2"), (A3, "a3") })
+        {
+            await WriteArchiveAsync(doc, "R1", doc.ColumnDefIds[1], at, value);
+        }
+
+        foreach (var (at, value) in new[] { (H1, "h1"), (H2, "h2"), (H3, "h3") })
+        {
+            await WriteHotAsync(db, doc, "R1", doc.ColumnDefIds[1], at, value);
+        }
+
+        var walked = await WalkAsync(
+            new AuditReader(db),
+            new CellChangeFilter(ArchiveFrom, HotTo, DocumentId: doc.DocumentId, Sort: sort),
+            limit);
+
+        // Один автор в усіх рядках: «за користувачем» зводиться до часу в тому ж напрямку (А→Я = зростання,
+        // Я→А = спадання); межа гаряче/архів лежить усередині сторінки й не порушує порядку.
+        string[] ascending = ["a1", "a2", "a3", "h1", "h2", "h3"];
+        var expected = sort is AuditSort.ChangedAtAsc or AuditSort.UserAsc ? ascending : [.. ascending.Reverse()];
+
+        Assert.Equal(expected, walked.Select(c => c.NewValue));
+        Assert.Equal(expected.Select(v => v.StartsWith('a')), walked.Select(c => c.FromArchive));
     }
 
     [Fact]
@@ -188,7 +227,7 @@ public sealed class AuditReaderArchiveTests(SqlServerFixture sql, ITestOutputHel
         await WriteHotAsync(db, doc, "R1", visible, H2, "open-2");
 
         var reader = new AuditReader(db);
-        var narrowed = new CellChangeFilter(ArchiveFrom, HotTo, DocumentId: doc.DocumentId, VisibleColumnIds: [visible]);
+        var narrowed = new CellChangeFilter(ArchiveFrom, HotTo, DocumentId: doc.DocumentId, VisibleColumnIds: [visible], Sort: AuditSort.ChangedAtAsc);
 
         var pages = new List<PagedResult<CellChangeView>>();
         string? cursor = null;
