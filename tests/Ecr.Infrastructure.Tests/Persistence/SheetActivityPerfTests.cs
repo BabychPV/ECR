@@ -76,7 +76,7 @@ public sealed class SheetActivityPerfTests(ITestOutputHelper output)
             var window = now - SheetActivityQuery.CellWindow;
             var firstFilter = new CellChangeFilter(
                 window, now.AddDays(1), doc.DocumentId,
-                VisibleColumnIds: [doc.ColumnDefIds[1], doc.ColumnDefIds[2]], PeriodKey: Period, Descending: true, HumanOnly: true);
+                VisibleColumnIds: [doc.ColumnDefIds[1], doc.ColumnDefIds[2]], PeriodKey: Period, HumanOnly: true, Sort: AuditSort.ChangedAtDesc);
             var ioFirst = await Io(database.ConnectionString, firstFilter, after: null);
             var ioDeep = await Io(database.ConnectionString, firstFilter, after: (now.AddSeconds(-(Own * 20L)), long.MaxValue));
 
@@ -129,7 +129,7 @@ public sealed class SheetActivityPerfTests(ITestOutputHelper output)
         }
 
         await using var command = connection.CreateCommand();
-        var where = AuditReader.BuildCellChangeWhere(filter, command, after).ToString();
+        var where = AuditReader.BuildCellChangeWhere(filter, command, after is { } p ? new AuditPosition(p.At, p.Id, 0, string.Empty) : null).ToString();
         command.CommandText = AuditReader.CellChangesPageSql(where, "ChangedAt DESC, Id DESC", "a.ChangedAt DESC, a.Id DESC");
         command.Parameters.AddWithValue("@take", 51);
         await command.ExecuteNonQueryAsync(CancellationToken.None);

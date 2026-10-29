@@ -1,5 +1,6 @@
 import { useState, type JSX } from 'react';
 import { Badge, Box, Button, Checkbox, Group, Text } from '@mantine/core';
+import { auditValueText } from '@/features/audit/auditValue';
 import { useSheetActivity, type SheetActivityItem } from '@/features/workflow/api';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
@@ -161,11 +162,19 @@ function CellEditRow({
         {where}
       </Text>
       <div className="ecr-insp-diff">
-        {item.oldValue === null ? <Text span c="dimmed">—</Text> : <s>{item.oldValue}</s>}
+        {item.oldValue === null ? (
+          <Text span c="dimmed">—</Text>
+        ) : (
+          <s title={item.oldValue} data-inspector-old="">{auditValueText(item.oldValue, item.columnDataType)}</s>
+        )}
         <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
           <path d="M5 12h14M13 6l6 6-6 6" />
         </svg>
-        <span>{item.newValue ?? '—'}</span>
+        {/* ⛔ Значення — за правилом показу колонки (`auditValueText`, як вкладка Audit і сітка), а не у форматі сховища
+            (`437.6311000000000000`); точне значення лишається в `title`. Нечислові колонки — без змін. */}
+        <span title={item.newValue ?? undefined} data-inspector-new="">
+          {item.newValue === null ? '—' : auditValueText(item.newValue, item.columnDataType)}
+        </span>
       </div>
       <Group gap="xs">
         <Badge size="xs" variant="default" radius="sm" tt="none">

@@ -32,8 +32,11 @@ public sealed class SheetActivityReaderTests(SqlServerFixture sql)
     {
         var at = new DateTime(2021, 3, 10, 9, 0, 1, 234, DateTimeKind.Utc);
 
-        Assert.Equal(Cursor.Encode(at, 77), ActivityCursor.EncodeCellPosition(at, 77));
-        Assert.Equal((at, 77L), Cursor.DecodeAt(ActivityCursor.EncodeCellPosition(at, 77)));
+        // Формат — спільний кодек (`AuditCursorCodec`): читач приймає курсор журналу аркуша для порядку «найновіші першими».
+        var position = AuditCursor.Decode(ActivityCursor.EncodeCellPosition(at, 77), AuditSort.ChangedAtDesc);
+        Assert.NotNull(position);
+        Assert.Equal(at, position.Value.At);
+        Assert.Equal(77L, position.Value.Id);
     }
 
     [Fact]

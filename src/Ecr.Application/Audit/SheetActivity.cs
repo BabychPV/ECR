@@ -160,8 +160,8 @@ public sealed class SheetActivityQuery(IAuditReader audit, IWorkflowStore workfl
             ChangedByUserId: scope.ByUserId,
             VisibleColumnIds: scope.VisibleColumnIds,
             PeriodKey: scope.PeriodKey,
-            Descending: true,
-            HumanOnly: !scope.IncludeSystem);
+            HumanOnly: !scope.IncludeSystem,
+            Sort: AuditSort.ChangedAtDesc);
 
         // Курсор читача журналу правок — пара (At, Id) «строго після» в порядку DESC. Після рядка процесу (тег 1)
         // правки того ж At вже видано (тег 0 раніше за тег 1), тож Id = 0 дає «At строго менший».
@@ -246,10 +246,10 @@ public static class ActivityCursor
     }
 
     /// <summary>
-    /// Курсор читача <c>aud.CellChange</c> (формат <c>Infrastructure.Persistence.Cursor.Encode(at, id)</c>:
-    /// <c>ticks:id</c> у base64; збіг формату стереже тест).
+    /// Курсор читача <c>aud.CellChange</c> порядку «найновіші першими» (<see cref="AuditCursorCodec"/>): позиція
+    /// <c>(At, Id)</c> без автора. Збіг формату з читачем стереже тест.
     /// </summary>
     public static string EncodeCellPosition(DateTime at, long id)
-        => Convert.ToBase64String(Encoding.UTF8.GetBytes(
-            at.Ticks.ToString(CultureInfo.InvariantCulture) + ":" + id.ToString(CultureInfo.InvariantCulture)));
+        => AuditCursorCodec.Encode(AuditSort.ChangedAtDesc, at, id, 0, null);
 }
+
