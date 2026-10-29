@@ -180,4 +180,42 @@ test.describe('Групові заголовки колонок (ui-colgroups)',
       expect(geometry.right).toBeLessThanOrEqual(geometry.cellRight + 1);
     }
   });
+
+  test('конструктор: діалог «Групи колонок», вибір групи колонки, перегляд із груповою шапкою (N/5)', async ({ page }) => {
+    test.setTimeout(420_000);
+    await page.setViewportSize({ width: 1500, height: 1000 });
+    await signIn(page);
+    doc ??= await createGroupedDocument(page);
+    const base = `/admin/templates/${String(doc.templateId)}/versions/${String(doc.versionId)}?node=t:${String(doc.tableId)}`;
+
+    for (let i = 0; i < Repeats; i += 1) {
+      const label = `прогін ${String(i + 1)}/${String(Repeats)}`;
+      await page.goto(`${base}&tab=columns`);
+      await page.getByTestId('manage-column-groups').click();
+      const dialog = page.getByTestId('column-groups-dialog');
+      await expect(dialog, `${label}: діалог груп`).toBeVisible({ timeout: 45_000 });
+      await expect(dialog.locator('[data-group-code]'), `${label}: 6 груп`).toHaveCount(6);
+      await expect(dialog.locator('[data-group-depth="3"]'), `${label}: рівень 3 — Jan і Feb`).toHaveCount(2);
+
+      // Додаємо кореневу групу з назвою й зберігаємо.
+      await dialog.getByRole('button', { name: 'Add group', exact: true }).click();
+      await expect(dialog.locator('[data-group-code]')).toHaveCount(7);
+      await dialog.locator('[data-group-code]').last().getByRole('textbox').first().fill(`Extra ${String(i)}`);
+      await dialog.getByRole('button', { name: 'Save groups' }).click();
+      await expect(page.getByTestId('column-groups-dialog')).toBeHidden({ timeout: 45_000 });
+
+      // Повторне відкриття бачить 7 груп; прибираємо додану й зберігаємо.
+      await page.getByTestId('manage-column-groups').click();
+      await expect(dialog.locator('[data-group-code]'), `${label}: 7 груп після збереження`).toHaveCount(7, { timeout: 30_000 });
+      await dialog.locator('[data-group-code]').last().getByRole('button', { name: 'Remove group' }).click();
+      await expect(dialog.locator('[data-group-code]')).toHaveCount(6);
+      await dialog.getByRole('button', { name: 'Save groups' }).click();
+      await expect(page.getByTestId('column-groups-dialog')).toBeHidden({ timeout: 45_000 });
+
+      // Перегляд таблиці: три групові рядки, Emissions охоплює 7 колонок.
+      await page.goto(`${base}&tab=preview`);
+      await expect(page.locator('[data-preview-group-row]'), `${label}: групові рядки перегляду`).toHaveCount(3, { timeout: 45_000 });
+      await expect(page.locator('th[data-preview-group="Emissions"]')).toHaveAttribute('colspan', '7');
+    }
+  });
 });

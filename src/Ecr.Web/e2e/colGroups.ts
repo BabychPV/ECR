@@ -44,6 +44,7 @@ function column(ordinal: number, header: string): Record<string, unknown> {
 export interface GroupedDocument {
   readonly documentId: number;
   readonly periodKey: number;
+  readonly templateId: number;
   readonly versionId: number;
   readonly tableId: number;
 }
@@ -158,5 +159,5 @@ export async function createGroupedDocument(page: Page): Promise<GroupedDocument
   const period = calendar.periods.find((item) => item.state === 'Open') ?? calendar.periods[0];
   expect(period, 'у проєкті немає періодів').toBeDefined();
 
-  return { documentId: document.documentId, periodKey: period?.periodKey ?? 0, versionId: version.versionId, tableId: table.id };
+  return { documentId: document.documentId, periodKey: period?.periodKey ?? 0, templateId: template.templateId, versionId: version.versionId, tableId: table.id };
 }
