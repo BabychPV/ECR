@@ -78,10 +78,10 @@ test.describe('Період документа: межі проєкту (PERIODN
     expect(flat, 'з верху сторінки перемикання не має зсувати вниз').toBeLessThanOrEqual(5);
 
     // Те саме з прокруткою: позиція зберігається (допуск - перемальований вміст).
-    await page.getByRole('button', { name: 'Previous period' }).scrollIntoViewIfNeeded();
     await page.evaluate((y) => window.scrollTo(0, y), Math.min(startY, 120));
     const y0 = await page.evaluate(() => window.scrollY);
-    await page.getByRole('button', { name: 'Previous period' }).click();
+    // DOM-клік: locator.click() сам докручує кнопку в поле зору і міняв би scrollY ДО перемикання.
+    await page.getByRole('button', { name: 'Previous period' }).evaluate((button) => (button as HTMLButtonElement).click());
     await page.waitForURL((url) => url.searchParams.get('periodKey') === String(before), { timeout: 30_000 });
     await expect(page.locator('[data-doc-sheet-strip]').first()).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(1_500);
