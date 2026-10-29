@@ -1,11 +1,23 @@
 import { useMemo, useState } from 'react';
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
 import { todayDateOnly } from '@/shared/format/dateOnly';
 import type { TreeLevel, TreeMoveRequest, TreeNode } from '@/shared/ui/TreeEditor';
 import { showApiError } from '@/shared/ui/notify';
 import { toTreeLevels, toTreeNodes } from './treeAdapter';
 import { getRegistryHierarchy, getRegistryTree, moveRegistryEntry, retireRegistryEntry } from './treeApi';
+
+/**
+ * Перечитує дерево, рівні й перелік записів довідника після зміни (перенос, виведення, збереження атрибутів вузла).
+ * Спільна з формою атрибутів сторінки: зміна поза деревом теж мусить його оновити.
+ */
+export async function invalidateRegistryTree(queryClient: QueryClient, registryCode: string): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.registries.tree(registryCode) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.registries.hierarchy(registryCode) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.registries.entries(registryCode) }),
+  ]);
+}
 
 /**
  * Дані й дії редактора дерева ієрархічного довідника (NAE plan N1 -> `shared/ui/TreeEditor`).
@@ -54,13 +66,7 @@ export function useRegistryTree(registryCode: string): {
   const nodes = useMemo(() => toTreeNodes(tree.data?.nodes ?? [], todayDateOnly()), [tree.data]);
   const levels = useMemo(() => toTreeLevels(hierarchy.data?.levels ?? tree.data?.levels ?? []), [hierarchy.data, tree.data]);
 
-  const refresh = async (): Promise<void> => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.registries.tree(registryCode) }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.registries.hierarchy(registryCode) }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.registries.entries(registryCode) }),
-    ]);
-  };
+  const refresh = (): Promise<void> => invalidateRegistryTree(queryClient, registryCode);
 
   const moveMutation = useMutation({
     mutationFn: (request: TreeMoveRequest) =>
