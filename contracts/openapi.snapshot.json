@@ -28328,6 +28328,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -28401,7 +28409,7 @@
             "description": "Not Found"
           }
         },
-        "summary": "Кандидати у згадки: лише користувачі, які самі бачать цю таблицю (≥ 2 символи, до 20).",
+        "summary": "Кандидати у згадки: лише користувачі, які самі бачать цю таблицю (і період `periodKey`, якщо задано) (≥ 2 символи, до 20).",
         "tags": [
           "TableDiscussions"
         ]
@@ -28539,7 +28547,7 @@
         ]
       },
       "post": {
-        "description": "`403 ECR-AUTH-0403` — немає `Document.Discuss`; `404 ECR-DOC-0404` — документ чи таблиця невидимі;\n`422 ECR-REQ-0422` (`discussionBodyInvalid`) — порожній чи задовгий текст, недійсний період,\nзабагато згадок; `429` — ліміт запитів. Згадки користувачів без доступу мовчки відкидаються — у відповіді\nлише прийняті.",
+        "description": "`403 ECR-AUTH-0403` — немає `Document.Discuss`; `403 ECR-ACCS-0403` (`discussionPeriodForbidden`) —\\n    /// роль, звужена періодами, не бачить цей період; `404 ECR-DOC-0404` — документ чи таблиця невидимі;\n`422 ECR-REQ-0422` (`discussionBodyInvalid`) — порожній чи задовгий текст, недійсний період,\nзабагато згадок; `429` — ліміт запитів. Згадки користувачів без доступу мовчки відкидаються — у відповіді\nлише прийняті.",
         "parameters": [
           {
             "in": "path",
@@ -55010,6 +55018,9 @@
       "name": "MeReturnedSheets"
     },
     {
+      "name": "MeTableDiscussionMentions"
+    },
+    {
       "name": "Methodologies"
     },
     {
@@ -55098,9 +55109,6 @@
     },
     {
       "name": "TableDiscussions"
-    },
-    {
-      "name": "MeTableDiscussionMentions"
     },
     {
       "name": "Templates"
