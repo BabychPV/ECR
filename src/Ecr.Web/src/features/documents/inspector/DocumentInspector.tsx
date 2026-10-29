@@ -1,4 +1,15 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent, type RefObject } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { ActionIcon, Badge, Box, Button, Group, Tabs, Text } from '@mantine/core';
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
 import { isHumanOrigin, useCellChanges } from '@/features/audit/api';
@@ -67,6 +78,11 @@ export interface DocumentInspectorProps {
    * відкривається сам (макет: `runValidate` → `openInspector('issues')`).
    */
   readonly validatedSeq?: number | undefined;
+  /**
+   * ✎ TC: extra buttons of the same row, between "Issues" and "History" (the "Discussion" button of the table chat,
+   * mockup order Issues · Discussion · History). The inspector does not know what they are.
+   */
+  readonly extraTriggers?: ReactNode;
 }
 
 export function DocumentInspector({
@@ -76,6 +92,7 @@ export function DocumentInspector({
   messages,
   onSelectFinding,
   validatedSeq,
+  extraTriggers,
 }: DocumentInspectorProps): JSX.Element {
   const [panel, setPanel] = useUrlState(PanelParam);
   const tab = asTab(panel);
@@ -180,6 +197,7 @@ export function DocumentInspector({
         issuesButton={issuesButton}
         onIssues={() => toggle('issues')}
         onHistory={() => toggle('history')}
+        extra={extraTriggers}
       />
 
       {opened && (
@@ -245,12 +263,14 @@ function InspectorTriggers({
   issuesButton,
   onIssues,
   onHistory,
+  extra,
 }: {
   counts: ReturnType<typeof countIssues> | null;
   tab: InspectorTab | null;
   issuesButton: RefObject<HTMLButtonElement | null>;
   onIssues: () => void;
   onHistory: () => void;
+  extra?: ReactNode;
 }): JSX.Element {
   const tone = counts === null || counts.all === 0 ? 'gray' : counts.errors > 0 ? 'statusError' : 'statusWarning';
   const label =
@@ -292,6 +312,7 @@ function InspectorTriggers({
       >
         {label}
       </Button>
+      {extra}
       <ActionIcon
         size="sm"
         variant={tab === 'history' ? 'light' : 'subtle'}

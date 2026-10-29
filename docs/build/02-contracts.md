@@ -4269,6 +4269,14 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/edit-assignments/copy` | — (автор документа ∨ `Manage` проєкту; обробник) | 8 |
 | `GET` | `/api/v1/me/edit-assignments` | — (лише рядки самого викликача) | 8 |
 | `POST` | `/api/v1/documents/{id}/owner` | — (власник документа ∨ `Manage` проєкту; обробник; D-443: передача власника, подія `DocumentOwnerTransferred`) | 8 |
+| `GET` | `/api/v1/documents/{id}/discussions/summary` | `Document.View` (чат таблиці, TC: лічильники всіх таблиць документа одним запитом; лише таблиці, які викликач бачить, і лише з повідомленнями; невидимий документ — 404) | 8 |
+| `GET` | `/api/v1/documents/{id}/tables/{tableCode}/messages` | `Document.View` (TC: те саме рішення про доступ, що й зріз таблиці — схована таблиця = 404 `ECR-DOC-0404`; `before`/`after`/`limit`/`periodKey`; `ETag` → 304) | 8 |
+| `GET` | `/api/v1/documents/{id}/tables/{tableCode}/mention-candidates` | `Document.Discuss` (TC: лише користувачі, які бачать таблицю (і період `periodKey`); імена решти не повертаються) | 8 |
+| `POST` | `/api/v1/documents/{id}/tables/{tableCode}/messages` | `Document.Discuss` (TC: будь-який стан документа; простий текст ≤ 4000; згадки без доступу відкидаються; роль, звужена періодами, пише лише у видимі періоди, інакше 403 `discussionPeriodForbidden`; бачить лише повідомлення видимих періодів) | 8 |
+| `PATCH` | `/api/v1/documents/{id}/tables/{tableCode}/messages/{messageId}` | `Document.Discuss` (TC: лише автор, впродовж 15 хв) | 8 |
+| `DELETE` | `/api/v1/documents/{id}/tables/{tableCode}/messages/{messageId}` | `Document.Discuss` ∨ `Document.DiscussModerate` (TC: м'яке видалення; автор або модератор) | 8 |
+| `PUT` | `/api/v1/documents/{id}/tables/{tableCode}/read` | `Document.View` (TC: «прочитано до», монотонно; знімає згадки) | 8 |
+| `GET` | `/api/v1/me/table-discussion-mentions` | — (TC: лише непрочитані згадки самого викликача в таблицях, які він досі бачить) | 8 |
 | `GET` | `/api/v1/me/approval-queue` | — (лише аркуші, які викликач може затвердити зараз; обробник) | 8 |
 | `GET` | `/api/v1/me/returned-sheets` | — (✎ D-449: лише аркуші, повернені на доопрацювання власнику документа, учаснику з наданням ≥ Write або останньому подавачу з правом писати; обробник) | 8 |
 | `GET` | `/api/v1/me/editor-sets` | — (лише власні набори) | 8 |
@@ -5452,6 +5460,9 @@ public sealed record RowDto(
 
 ### Передача місяця виконавцям (EA)
 
+#### `ITableDiscussionStore`
+
+Сховище чатів таблиць документа (TC; `doc.TableDiscussionMessage`, `doc.TableDiscussion`, `doc.TableDiscussionRead`, `doc.TableDiscussionMention`, міграція `TC01_TableDiscussion`). Порт не знає про права: рішення про доступ (документ видимий, таблиця читається межею читання, період у межах звуженої ролі) приймає обробник ДО звернення. Чат ключується `(DocumentId, TableDefCode)` — код таблиці стабільний між версіями шаблону. `SummaryAsync` — підсумок усіх таблиць документа ОДНІЄЮ командою (таблиці з повним доступом — зі зведень `doc.TableDiscussion` + корельовані лічильники «непрочитано» по індексу чату; таблиці, видимі лише в частині періодів, — з повідомлень дозволених періодів, `UNION ALL` у тій самій команді). `LockStateAsync` — зведення під `UPDLOCK, HOLDLOCK`: ревізія (ETag опитування) і лічильник оновлюються в ТІЙ САМІЙ транзакції, що й повідомлення. Видалення м'яке (`DeletedAt`), текст лишається в рядку й у журналі безпеки. Порт НЕ торкається комірок, розрахунків і станів аркушів. Видалення документа прибирає чат явно (`DocumentDeletionStore`).
 #### `IEditAssignmentStore`, `IEditorSetStore`, `IEditAssignmentManagementStore`
 
 Сховища передач зрізу документа виконавцям (`doc.EditAssignment*`, міграція `EA1EditAssignment`) і наборів виконавців власника (`doc.EditorSet*`). Вибірка конкретної передачі — завжди за парою `(DocumentId, Id)`, набору — `(OwnerUserId, Id)`: чужа чи відсутня дає `null` (одна відповідь «не знайдено»). `FindForUpdateAsync` — рядок передачі під `UPDLOCK` для переходів станів (Fill/Validate/Return). `ReadFactsForGateAsync` — факти передач документа для користувача, що пише, під `REPEATABLEREAD, ROWLOCK` на передачах І на його рядку виконавця: повторна перевірка в транзакції запису під блокуванням аркуша (`PatchCellsHandler`, `CreateRowHandler`); спільні блокування тримаються до коміту, тож перехід станів чекає запис, а зафіксований перехід видно (блокуюче читання не користується RCSI-знімком). Рішення «підйом Read → Write / `LockedByOwner` / `AssignmentFilled` / `AssignmentValidated` / `AssignmentExpired`» — чиста функція `EditAssignmentGuard` у `EditRules.CanEdit`; `AccessDecisionService` читає передачі лише для документа, у якого вони є (ознака — `EXISTS` у запиті умов доступу).

@@ -110,6 +110,18 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     /// <summary>Члени наборів виконавців (EA-1).</summary>
     public DbSet<EditorSetMember> EditorSetMembers => Set<EditorSetMember>();
 
+    /// <summary>Повідомлення чатів таблиць документів (TC).</summary>
+    public DbSet<TableDiscussionMessage> TableDiscussionMessages => Set<TableDiscussionMessage>();
+
+    /// <summary>Зведення чатів таблиць: ревізія, лічильник, останнє повідомлення (TC).</summary>
+    public DbSet<TableDiscussionState> TableDiscussions => Set<TableDiscussionState>();
+
+    /// <summary>Позначки «прочитано до» чатів таблиць (TC).</summary>
+    public DbSet<TableDiscussionRead> TableDiscussionReads => Set<TableDiscussionRead>();
+
+    /// <summary>Згадки в чатах таблиць (TC).</summary>
+    public DbSet<TableDiscussionMention> TableDiscussionMentions => Set<TableDiscussionMention>();
+
     // sec
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();

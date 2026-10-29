@@ -272,6 +272,12 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
             .Take(1)
             .ToListAsync(ct).ConfigureAwait(false);
 
+        // TC: чат таблиць іде разом з документом (текст видалених повідомлень лишається в журналі аудиту).
+        await db.TableDiscussionMentions.Where(m => m.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await db.TableDiscussionReads.Where(r => r.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await db.TableDiscussionMessages.Where(m => m.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await db.TableDiscussions.Where(s => s.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
         // EA-1: передачі зрізу (виконавці — листя, передача — корінь); FK без каскаду, як усі решта.
         await db.EditAssignmentRecipients
             .Where(r => db.EditAssignments.Any(a => a.Id == r.AssignmentId && a.DocumentId == documentId))

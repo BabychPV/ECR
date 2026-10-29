@@ -3568,6 +3568,141 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.TableDiscussionMention", b =>
+                {
+                    b.Property<long>("MessageId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("TableDefCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("MessageId", "UserId");
+
+                    b.HasIndex("UserId", "DocumentId", "TableDefCode")
+                        .HasDatabaseName("IX_TableDiscussionMention_User");
+
+                    b.ToTable("TableDiscussionMention", "doc");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.TableDiscussionMessage", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("AuthorUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<Guid?>("ClientMessageId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("EditedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("PeriodKey")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TableDefCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentId", "TableDefCode", "Id")
+                        .IsDescending(false, false, true)
+                        .HasDatabaseName("IX_TableDiscussionMessage_Chat");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("DocumentId", "TableDefCode", "Id"), new[] { "PeriodKey", "AuthorUserId", "CreatedAt", "DeletedAt" });
+
+                    b.HasIndex("DocumentId", "TableDefCode", "AuthorUserId", "ClientMessageId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_TableDiscussionMessage_ClientId")
+                        .HasFilter("[ClientMessageId] IS NOT NULL");
+
+                    b.ToTable("TableDiscussionMessage", "doc", t =>
+                        {
+                            t.HasCheckConstraint("CK_TableDiscussionMessage_Body", "LEN(Body) BETWEEN 1 AND 4000");
+
+                            t.HasCheckConstraint("CK_TableDiscussionMessage_Deleted", "(DeletedAt IS NULL AND DeletedByUserId IS NULL) OR (DeletedAt IS NOT NULL AND DeletedByUserId IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_TableDiscussionMessage_Period", "PeriodKey / 100 BETWEEN 1900 AND 9999 AND PeriodKey % 100 BETWEEN 1 AND 99");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.TableDiscussionRead", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("TableDefCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("LastReadMessageId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("UserId", "DocumentId", "TableDefCode");
+
+                    b.ToTable("TableDiscussionRead", "doc");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.TableDiscussionState", b =>
+                {
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("TableDefCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("LastMessageAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("LastMessageId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("MessageCount")
+                        .HasColumnType("int");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("DocumentId", "TableDefCode");
+
+                    b.ToTable("TableDiscussion", "doc");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.TableInstance", b =>
                 {
                     b.Property<int>("PeriodKeyValue")
@@ -7229,6 +7364,73 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_Project_TV");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.TableDiscussionMention", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Documents.TableDiscussionMessage", null)
+                        .WithMany()
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_TableDiscussionMention_Message");
+
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_TableDiscussionMention_User");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.TableDiscussionMessage", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_TableDiscussionMessage_Author");
+
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("DeletedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_TableDiscussionMessage_DeletedBy");
+
+                    b.HasOne("Ecr.Domain.Entities.Documents.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_TableDiscussionMessage_Document");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.TableDiscussionRead", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Documents.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_TableDiscussionRead_Document");
+
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_TableDiscussionRead_User");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.TableDiscussionState", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Documents.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_TableDiscussion_Document");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.TableInstance", b =>
