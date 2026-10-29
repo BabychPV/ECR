@@ -149,7 +149,7 @@ export function headerStyleProps(style: CellStyleDto | null | undefined): { clas
   return { class: light ? 'ecr-header-styled ecr-header-fill-light' : 'ecr-header-styled', style: vars };
 }
 
-export function userStyleOf(slice: Pick<TableSliceDto, 'cellStyles'>, key: string): UserCellFormat | null {
+export function userStyleOf(slice: { readonly cellStyles?: TableSliceDto['cellStyles'] | undefined }, key: string): UserCellFormat | null {
   const found = slice.cellStyles?.[key];
 
   if (found === undefined) return null;

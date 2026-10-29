@@ -1,4 +1,4 @@
-import { useRef, useState, type JSX } from "react";
+import { memo, useCallback, useMemo, useRef, useState, type JSX } from "react";
 import { Button, Popover } from "@mantine/core";
 import { t } from "@/shared/i18n";
 import "./cellColorMenu.css";
@@ -121,10 +121,63 @@ function ColourButton({
     target === "fill" ? "grid.cellColor.noFill" : "grid.cellColor.autoText",
   );
 
-  const choose = (hex: string | null): void => {
-    setOpened(false);
-    onApply(target, hex);
-  };
+  // ✎ P1 (швидкодія кольору): `choose` СТАБІЛЬНИЙ (`onApply` міняється з кожною зміною зрізу — через посилання), а палітра
+  // нижче мемоізована. Раніше кожен рендер (їх на одне застосування 4–10) перемальовував ~90 зразків із новими
+  // `ref`/`onClick` — 85–125 мс із ~135–220 мс рендера сітки на одну заливку рядка.
+  const onApplyRef = useRef(onApply);
+  onApplyRef.current = onApply;
+  const choose = useCallback(
+    (hex: string | null): void => {
+      setOpened(false);
+      onApplyRef.current(target, hex);
+    },
+    [target],
+  );
+  const palette = useMemo(
+    () => (
+      <>
+        <div
+          className="ecr-cell-color-grid"
+          role="group"
+          aria-label={t("grid.cellColor.theme")}
+        >
+          {ThemeColours.map((hex) => (
+            <Swatch key={hex} hex={hex} name={colourName(hex)} onChoose={choose} />
+          ))}
+        </div>
+        {ThemeShades.map((row, index) => (
+          <div
+            key={index}
+            className="ecr-cell-color-grid ecr-cell-color-shades"
+          >
+            {row.map((hex, column) => (
+              <Swatch
+                key={hex}
+                hex={hex}
+                name={shadeName(ThemeColours[column], index)}
+                onChoose={choose}
+              />
+            ))}
+          </div>
+        ))}
+
+        <div className="ecr-cell-color-caption">
+          {t("grid.cellColor.standard")}
+        </div>
+        <div
+          className="ecr-cell-color-grid"
+          role="group"
+          aria-label={t("grid.cellColor.standard")}
+        >
+          {StandardColours.map((hex) => (
+            <Swatch key={hex} hex={hex} name={colourName(hex)} onChoose={choose} />
+          ))}
+        </div>
+      </>
+    ),
+    // Підписи (`t`) — за мовою інтерфейсу: вона міняє `label`, тож і ключ перерахунку.
+    [choose, label],
+  );
 
   return (
     <>
@@ -170,43 +223,7 @@ function ColourButton({
             {resetLabel}
           </button>
 
-          <div
-            className="ecr-cell-color-grid"
-            role="group"
-            aria-label={t("grid.cellColor.theme")}
-          >
-            {ThemeColours.map((hex) => (
-              <Swatch key={hex} hex={hex} name={colourName(hex)} onChoose={choose} />
-            ))}
-          </div>
-          {ThemeShades.map((row, index) => (
-            <div
-              key={index}
-              className="ecr-cell-color-grid ecr-cell-color-shades"
-            >
-              {row.map((hex, column) => (
-                <Swatch
-                  key={hex}
-                  hex={hex}
-                  name={shadeName(ThemeColours[column], index)}
-                  onChoose={choose}
-                />
-              ))}
-            </div>
-          ))}
-
-          <div className="ecr-cell-color-caption">
-            {t("grid.cellColor.standard")}
-          </div>
-          <div
-            className="ecr-cell-color-grid"
-            role="group"
-            aria-label={t("grid.cellColor.standard")}
-          >
-            {StandardColours.map((hex) => (
-              <Swatch key={hex} hex={hex} name={colourName(hex)} onChoose={choose} />
-            ))}
-          </div>
+          {palette}
 
           <button
             type="button"
@@ -282,7 +299,7 @@ function shadeName(base: string | undefined, row: number): string | null {
   return shade === undefined ? name : t("grid.cellColor.shadeName", { name, shade });
 }
 
-function Swatch({
+const Swatch = memo(function Swatch({
   hex,
   name,
   onChoose,
@@ -292,12 +309,15 @@ function Swatch({
   name: string | null;
   onChoose: (hex: string) => void;
 }): JSX.Element {
+  // Стабільний `ref` (залежить лише від кольору): inline-функція викликалась би на кожному рендері кожного зразка.
+  const paint = useCallback((node: HTMLButtonElement | null) => node?.style.setProperty("background-color", hex), [hex]);
+
   return (
     <button
       type="button"
       className="ecr-cell-color-swatch"
       // ⚠ Колір зразка — дані вибору, не тема: ставиться напряму, а не `style`-пропом (ФВ-14.11).
-      ref={(node) => node?.style.setProperty("background-color", hex)}
+      ref={paint}
       aria-label={hex}
       // CL-23: ім'я (accessible name) = hex, як і було; назва кольору - опис, тож
       // `getByRole('button', { name: '#c00000' })` у e2e не ламається.
@@ -307,4 +327,4 @@ function Swatch({
       onClick={() => onChoose(hex)}
     />
   );
-}
+});

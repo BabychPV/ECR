@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Alert, Badge, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
@@ -14,7 +14,7 @@ import type {
   UnitRef,
 } from '@/api/types';
 import { useColumnWidths } from '@/features/preferences/columnWidthsSync';
-import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
+import { cellAppearanceClassOf, cellAppearanceOf, withExplicitTextColour } from './cellAppearance';
 import { cellFormatOf, withCellFormat } from './conditionalAppearance';
 import { CellColorMenu, type ColourTarget } from './CellColorMenu';
 import { useCellStyles } from './useCellStyles';
@@ -78,6 +78,7 @@ import {
 import { beginInFlight, deferUntilInFlightSettles, inFlightEdit, splitByInFlight } from './inFlightEdits';
 import { GridAriaPlugin } from './gridAria';
 import { attachStickyGroupLabels, withHeaderGroups } from './headerGroups';
+import { useStyleFreeSlice } from './useStyleFreeSlice';
 import { mergePatchNotices, PatchNoticesAlert, type PatchNotice } from './patchNotices';
 // ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
 // з `permissions.ts`, і хоч обидва дають `rowKey:columnCode`, ключем мапи
@@ -1259,12 +1260,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // ✎ D-441: колонка місяця k таблиці `MonthsInColumns` позначається станом аркуша за період k.
   const monthStatus = useMonthColumnStatuses(documentId, sheetDefId, periodKey, tableDefId);
 
+  // ✎ P1: зріз із ТІЄЮ САМОЮ ідентичністю, поки змінюються лише користувацькі кольори; колонки й модель рядків
+  // (source замінює модель RevoGrid цілком) від кольору не перебудовуються.
+  const baseData = useStyleFreeSlice(data);
+  const userStylesRef = useRef<TableSliceDto['cellStyles']>(data?.cellStyles);
+  userStylesRef.current = data?.cellStyles;
+
   const columns = useMemo(
     () =>
-      data === undefined
+      baseData === undefined
         ? []
         : gridColumns(
-            data,
+            baseData,
             readOnly,
             flags,
             widths,
@@ -1278,9 +1285,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             outOfWindow,
             unlistedLabelsByRegistryId,
             monthStatus,
+            userStylesRef,
           ),
     [
-      data,
+      baseData,
       readOnly,
       flags,
       widths,
@@ -1345,9 +1353,19 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   }, [overrides, rejections, pending]);
 
   const rows = useMemo(
-    () => (data === undefined ? [] : gridRows(data, shownOverrides)),
-    [data, shownOverrides],
+    () => (baseData === undefined ? [] : gridRows(baseData, shownOverrides)),
+    [baseData, shownOverrides],
   );
+
+  // ✎ P1: колір змінився — сітка лише перемальовує комірки (refresh): ні колонки, ні модель рядків, ні виділення не
+  // скидаються. Перший рендер пропускаємо. useLayoutEffect: пасивний ефект React запускає ПІСЛЯ малювання.
+  const lastStyles = useRef(data?.cellStyles);
+  useLayoutEffect(() => {
+    if (lastStyles.current === data?.cellStyles) return;
+    lastStyles.current = data?.cellStyles;
+    const grid = gridContainer.current?.querySelector('revo-grid') as HTMLRevoGridElement | null | undefined;
+    void grid?.refresh?.('rgRow');
+  }, [data?.cellStyles]);
 
   /**
    * Закріплений рядок підсумків — `UI-08`.
@@ -2873,6 +2891,11 @@ export function gridColumns(
 
   // ✎ D-441: код місячної колонки → стан аркуша за її період (`Submitted`/`Approved`); решта без позначки.
   monthStatus: ReadonlyMap<string, MarkedMonthStatus> = new Map(),
+
+  // ✎ P1 (швидкодія кольору): користувацькі кольори (slice.cellStyles) читаються через ПОСИЛАННЯ на актуальне значення,
+  // а не зі зрізу, захопленого при побудові колонок, — тоді зміна кольору не перебудовує ні колонки, ні модель рядків
+  // (useStyleFreeSlice), а сітка лише перемальовується (refresh). За замовчуванням — стилі самого зрізу.
+  userStyles: { readonly current: TableSliceDto['cellStyles'] } = { current: slice.cellStyles },
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -3157,11 +3180,12 @@ export function gridColumns(
         // тексту»), — шар ПІД умовним форматуванням (рішення Аудиту 12.10, як
         // в Excel: правило перекриває ручну заливку). Порядок: колонка < рядок
         // < користувацький < умовний формат < стан.
-        const userFormat = userStyleOf(slice, key);
+        const userFormat = userStyleOf({ cellStyles: userStyles.current }, key);
         const baseStyle = withRowStyle(column.style, rowIndexOf(slice).get(rowKey)?.style);
         const afterUser = userFormat === null ? baseStyle : withUserStyle(baseStyle, userFormat);
         const style = conditional === null ? afterUser : withCellFormat(afterUser, conditional);
-        const appearance = cellAppearanceOf(style);
+        // ⛔ P1 (Land): власний колір тексту людини — без перевірки контрасту (withExplicitTextColour).
+        const appearance = withExplicitTextColour(cellAppearanceOf(style), userFormat?.foregroundHex, conditional?.foregroundHex);
 
         // ⛔ `X-10`: колір і заливка автора — змінними й класами, які читає
         // `cellEditors.css`, а не inline-кольором (коментар `cellAppearanceOf`).
