@@ -359,6 +359,64 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
         Assert.True(newStats.Reads <= oldStats.Reads * 1.2, $"stable reads {newStats.Reads} > 1.2 x _v1 reads {oldStats.Reads}");
     }
 
+    /// <summary>
+    /// Синтетика з маршрутизацією місяців (прапор ON, форма Land у мініатюрі): MonthsInColumns, 12 місячних + 28 звичайних колонок,
+    /// 3000 рядків у 202610 і 202611 (власник). Стабільна проти <c>_v1</c> тим самим запитом. Числа - у виводі.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "RPT-STABLE")]
+    public async Task Стабільна_вʼюха_з_маршрутизацією_місяців_на_синтетиці_не_читає_більше_ніж_vN_плюс_20_відсотків()
+    {
+        const int rows = 3000;
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(202610, columnCount: 28, rowCount: rows, layoutKind: TableLayoutKind.MonthsInColumns, monthColumns: 12);
+        await using (var db = sql.CreateContext())
+        {
+            (await db.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId)).Publish(1, Now);
+            await db.SaveChangesAsync();
+        }
+
+        await builder.AddPeriodInstanceAsync(doc, new PeriodKey(202611));
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandTimeout = 300;
+            command.CommandText = """
+                INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric)
+                SELECT r.PeriodKey, r.Id, c.Id, @t, CAST(r.Ordinal AS decimal(18,4)) + c.Ordinal
+                  FROM doc.TableRow AS r CROSS JOIN cfg.ColumnDef AS c
+                 WHERE r.PeriodKey IN (202610, 202611) AND c.TableDefId = @t AND c.DataType <> 0
+                   AND EXISTS (SELECT 1 FROM doc.TableInstance AS i WHERE i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId AND i.DocumentId = @d);
+                """;
+            command.Parameters.AddWithValue("@t", doc.TableDefId);
+            command.Parameters.AddWithValue("@d", doc.DocumentId);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await GenerateViaProcedureAsync(doc.TemplateVersionId, routing: true);
+        await ExecStableAsync(doc.TemplateVersionId, routing: true);
+        string[] numeric;
+        string tpl, table;
+        await using (var db = sql.CreateContext())
+        {
+            numeric = await db.ColumnDefs.Where(c => c.TableDefId == doc.TableDefId && c.DataType != CellDataType.String).Select(c => c.Code).ToArrayAsync();
+            tpl = await db.TemplateVersions.Where(v => v.Id == doc.TemplateVersionId).Join(db.Templates, v => v.TemplateId, t => t.Id, (v, t) => t.Code).SingleAsync();
+            table = await db.TableDefs.Where(t => t.Id == doc.TableDefId).Select(t => t.Code).SingleAsync();
+        }
+
+        var sum = string.Join(" + ", numeric.Select(c => $"ISNULL([{c}], 0)"));
+        var old = VersionedName(tpl, doc.SheetCode, table, $"1.0.0.{doc.SheetCode["SHEET".Length..]}");
+        var stable = StableName(tpl, doc.SheetCode, table);
+        var oldStats = await MeasureAsync($"SELECT SUM({sum}) FROM rpt.[{old}] WHERE _ProjectId = {doc.ProjectId}");
+        var newStats = await MeasureAsync($"SELECT SUM({sum}) FROM rpt.[{stable}] WHERE _ProjectId = {doc.ProjectId}");
+        Assert.Equal(oldStats.Value, newStats.Value);
+        Console.WriteLine($"PERF-ROUTED rows={rows}x2 cols={numeric.Length}: _v1 reads={oldStats.Reads} ms={oldStats.Ms}; stable reads={newStats.Reads} ms={newStats.Ms}");
+        Assert.True(newStats.Reads <= oldStats.Reads * 1.2, $"stable reads {newStats.Reads} > 1.2 x _v1 reads {oldStats.Reads}");
+    }
+
     // ── помічники ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private async Task<(int TemplateId, string Code)> NewTemplateAsync()
