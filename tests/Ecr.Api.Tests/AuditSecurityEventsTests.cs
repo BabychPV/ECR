@@ -74,14 +74,15 @@ public sealed class AuditSecurityEventsTests(SqlServerFixture sql)
         await WriteAsync(type, 1, "second");
 
         var first = await PageAsync(client, $"eventType={type}", limit: 1);
-        Assert.Equal("first", Assert.Single(Items(first)).GetProperty("detailsJson").GetString());
+        // Типовий порядок - найновіші першими: "second" записано пізніше.
+        Assert.Equal("second", Assert.Single(Items(first)).GetProperty("detailsJson").GetString());
 
         var cursor = first.GetProperty("nextCursor").GetString();
         Assert.NotNull(cursor);
 
         // ⛔ Мутація: прибрати `AND Id > @after` — друга сторінка знову віддасть «first».
         var second = await PageAsync(client, $"eventType={type}&cursor={Uri.EscapeDataString(cursor)}", limit: 1);
-        Assert.Equal("second", Assert.Single(Items(second)).GetProperty("detailsJson").GetString());
+        Assert.Equal("first", Assert.Single(Items(second)).GetProperty("detailsJson").GetString());
         Assert.Equal(JsonValueKind.Null, second.GetProperty("nextCursor").ValueKind);
     }
 
