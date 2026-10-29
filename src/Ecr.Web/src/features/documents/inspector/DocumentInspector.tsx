@@ -3,6 +3,7 @@ import { ActionIcon, Badge, Box, Button, Group, Tabs, Text } from '@mantine/core
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
 import { isHumanOrigin, useCellChanges } from '@/features/audit/api';
 import { useTableStatus } from '@/features/documents/api';
+import { useWorkflowHistory } from '@/features/workflow/api';
 import { formatDateOnly } from '@/shared/format/dateOnly';
 import { formatCount } from '@/shared/format/plural';
 import { t } from '@/shared/i18n';
@@ -451,7 +452,7 @@ function HistoryTab({
   );
 
   if (cell === null) {
-    return <Empty title={t('inspector.noCellTitle')} hint={t('inspector.noCellHint')} />;
+    return <SheetHistory documentId={documentId} periodKey={periodKey} />;
   }
 
   if (history.error !== null) {
@@ -510,6 +511,96 @@ function HistoryTab({
           </Group>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Літеральні ключі (а не складені рядки): сторож каталогу бачить кожен ключ. Невідома дія — сирий код, не вигадка. */
+function eventActionLabel(action: string): string {
+  switch (action) {
+    case 'Submit':
+      return t('workflow.eventAction.Submit');
+    case 'Approve':
+      return t('workflow.eventAction.Approve');
+    case 'ApproveStep':
+      return t('workflow.eventAction.ApproveStep');
+    case 'Reject':
+      return t('workflow.eventAction.Reject');
+    case 'Reopen':
+      return t('workflow.eventAction.Reopen');
+    case 'Recall':
+      return t('workflow.eventAction.Recall');
+    default:
+      return action;
+  }
+}
+
+/** Довгий коментар у вузькій колонці інспектора обрізається (повний текст — у `title`). */
+export const SheetHistoryReasonMax = 300;
+
+/**
+ * Журнал погодження аркуша (Submit / Approve / Reject / Return / Reopen з причиною, хто, коли), найновіші перші.
+ * Показується у History, коли комірку не вибрано. Джерело — той самий `GET …/workflow/history`, що й банер аркуша:
+ * доступ сервер вирішує тим самим правом, що й читання документа. Причина — звичайний текст (React екранує).
+ */
+function SheetHistory({ documentId, periodKey }: { documentId: number; periodKey: number }): JSX.Element {
+  const history = useWorkflowHistory(documentId, periodKey, true);
+
+  if (history.error !== null) {
+    return (
+      <Box p="sm">
+        <ErrorAlert error={history.error} onRetry={() => void history.refetch()} />
+      </Box>
+    );
+  }
+
+  if (history.data === undefined) {
+    return (
+      <Text size="sm" c="dimmed" p="sm" role="status">
+        {t('inspector.loading')}
+      </Text>
+    );
+  }
+
+  const events = Array.isArray(history.data) ? history.data : [];
+
+  if (events.length === 0) {
+    return <Empty title={t('inspector.sheetHistoryTitle')} hint={t('inspector.sheetHistoryEmpty')} />;
+  }
+
+  return (
+    <div data-inspector-sheet-history="">
+      <Text size="xs" c="dimmed" p="sm" pb={0}>
+        {t('inspector.sheetHistoryHint')}
+      </Text>
+      <div role="list" aria-label={t('inspector.sheetHistoryTitle')}>
+        {events.map((event, index) => {
+          const reason = event.reason ?? '';
+          const clipped = reason.length > SheetHistoryReasonMax ? `${reason.slice(0, SheetHistoryReasonMax)}…` : reason;
+
+          return (
+            // Події без власного id: перелік лише читається й замінюється цілком — позиція чесний ключ.
+            <div key={index} role="listitem" className="ecr-insp-hist" data-inspector-sheet-event={event.action}>
+              <Group justify="space-between" gap="xs" wrap="nowrap">
+                <Text size="sm" fw={500}>
+                  {eventActionLabel(event.action)}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  <Timestamp value={event.at} />
+                </Text>
+              </Group>
+              <Text size="xs" c="dimmed">
+                {event.sheetCode} · {event.byDisplayName}
+              </Text>
+              {clipped.length > 0 && (
+                <Text size="sm" title={reason} style={{ whiteSpace: 'pre-line', overflowWrap: 'anywhere' }} data-inspector-sheet-reason="">
+                  {clipped}
+                </Text>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -9389,6 +9389,17 @@ USING (VALUES
     -- COLL:ui-colgroups-polish ── діалог груп колонок: поле поточної мови, решта мов згорнуто; ru/kz — порцією COLL:ui-colgroups-polish нижче ──
     ,(N'colgroups.otherLanguages', N'en', N'Other languages', 1)
     -- COLL:ui-colgroups-polish ── кінець секції ──
+    -- WFREASONS:sheet-history ── en: Inspector → History без вибраної комірки показує журнал погодження аркуша; ru/kz — порцією WFREASONS:sheet-history нижче ──
+    ,(N'inspector.sheetHistoryTitle', N'en', N'Approval history', 1)
+    ,(N'inspector.sheetHistoryHint', N'en', N'Select a cell to see its change history.', 1)
+    ,(N'inspector.sheetHistoryEmpty', N'en', N'Nothing has been submitted or decided on this sheet yet.', 1)
+    ,(N'workflow.eventAction.Submit', N'en', N'Submitted', 1)
+    ,(N'workflow.eventAction.Approve', N'en', N'Approved', 1)
+    ,(N'workflow.eventAction.ApproveStep', N'en', N'Approved a step', 1)
+    ,(N'workflow.eventAction.Reject', N'en', N'Rejected', 1)
+    ,(N'workflow.eventAction.Reopen', N'en', N'Returned for edits', 1)
+    ,(N'workflow.eventAction.Recall', N'en', N'Recalled', 1)
+    -- WFREASONS:sheet-history ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -24503,6 +24514,32 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-colgroups-polish ── кінець секції ──
+-- WFREASONS:sheet-history ── ru/kz: журнал погодження аркуша в Inspector → History; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'inspector.sheetHistoryTitle', N'ru', N'История согласования'),
+    (N'inspector.sheetHistoryTitle', N'kz', N'Келісу тарихы'),
+    (N'inspector.sheetHistoryHint', N'ru', N'Выберите ячейку, чтобы увидеть историю её изменений.'),
+    (N'inspector.sheetHistoryHint', N'kz', N'Өзгерістер тарихын көру үшін ұяшықты таңдаңыз.'),
+    (N'inspector.sheetHistoryEmpty', N'ru', N'По этому листу ещё ничего не подавали и не решали.'),
+    (N'inspector.sheetHistoryEmpty', N'kz', N'Бұл парақ бойынша әлі ештеңе тапсырылмаған не шешілмеген.'),
+    (N'workflow.eventAction.Submit', N'ru', N'Подан'),
+    (N'workflow.eventAction.Submit', N'kz', N'Тапсырылды'),
+    (N'workflow.eventAction.Approve', N'ru', N'Утверждён'),
+    (N'workflow.eventAction.Approve', N'kz', N'Бекітілді'),
+    (N'workflow.eventAction.ApproveStep', N'ru', N'Шаг согласован'),
+    (N'workflow.eventAction.ApproveStep', N'kz', N'Қадам келісілді'),
+    (N'workflow.eventAction.Reject', N'ru', N'Отклонён'),
+    (N'workflow.eventAction.Reject', N'kz', N'Қабылданбады'),
+    (N'workflow.eventAction.Reopen', N'ru', N'Возвращён в работу'),
+    (N'workflow.eventAction.Reopen', N'kz', N'Жұмысқа қайтарылды'),
+    (N'workflow.eventAction.Recall', N'ru', N'Отозван'),
+    (N'workflow.eventAction.Recall', N'kz', N'Кері шақырылды')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- WFREASONS:sheet-history ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

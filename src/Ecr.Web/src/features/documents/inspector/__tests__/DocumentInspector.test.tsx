@@ -59,6 +59,19 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     ]);
   }
 
+  if (url.includes('/workflow/history')) {
+    return jsonResponse([
+      {
+        sheetCode: 'A', fromState: 'Submitted', toState: 'Rejected', action: 'Reject', byDisplayName: 'land-owner',
+        at: '2026-10-29T10:00:00Z', reason: 'Correct <b>the</b> figures', stepOrdinal: null, approvedBySubmitter: false,
+      },
+      {
+        sheetCode: 'A', fromState: 'Draft', toState: 'Submitted', action: 'Submit', byDisplayName: 'author',
+        at: '2026-10-29T09:00:00Z', reason: null, stepOrdinal: null, approvedBySubmitter: false,
+      },
+    ]);
+  }
+
   if (url.includes('/api/v1/audit/cells')) {
     return jsonResponse({
       items: [
@@ -265,12 +278,20 @@ describe('інспектор документа (UI-25)', () => {
     expect(screen.queryByText('⟦inspector.noIssuesTitle⟧')).toBeNull();
   });
 
-  it('History: без вибраної комірки — пояснення, з коміркою — її зміни за цей період (D15-16)', async () => {
+  it('History: без вибраної комірки — журнал погодження аркуша з причиною, з коміркою — її зміни за цей період (D15-16)', async () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<Harness entry="/documents/1?panel=history" />);
 
-    expect(await screen.findByText('⟦inspector.noCellTitle⟧')).toBeTruthy();
-    expect(fetchMock).not.toHaveBeenCalled();
+    // Без комірки: події Submit/Reject (найновіші перші), причина — текстом, а не розміткою.
+    const items = await screen.findAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    expect(items[0]?.textContent).toContain('⟦workflow.eventAction.Reject⟧');
+    expect(items[0]?.textContent).toContain('Correct <b>the</b> figures');
+    expect(items[0]?.querySelector('b')).toBeNull();
+    expect(items[0]?.textContent).toContain('land-owner');
+    expect(items[1]?.textContent).toContain('⟦workflow.eventAction.Submit⟧');
+    expect(screen.queryByText('⟦inspector.noCellTitle⟧')).toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/audit/cells'))).toBe(false);
 
     act(() => publishInspectedCell(Cell));
 
