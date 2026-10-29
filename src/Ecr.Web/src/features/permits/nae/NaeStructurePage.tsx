@@ -47,7 +47,11 @@ interface Draft {
  */
 export function NaeStructurePage(): JSX.Element {
   const canEdit = useMayWritePermits();
-  const definition = useRegistryDefinition(NaeRegistryCode);
+  // ⚠ `?registry=<код>` підміняє довідник структури (лише формат коду): так e2e працює на власному довіднику, а не на
+  // спільному `NAE_TREE`, який у стенді створює лише завантаження з AF. Без параметра - `NAE_TREE`.
+  const [registryParam] = useUrlState('registry');
+  const registryCode = registryParam !== null && /^[A-Za-z0-9_]{1,64}$/.test(registryParam) ? registryParam : NaeRegistryCode;
+  const definition = useRegistryDefinition(registryCode);
   const [nodeParam, setNodeParam] = useUrlState('node');
   const [draft, setDraft] = useState<Draft | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -84,7 +88,7 @@ export function NaeStructurePage(): JSX.Element {
       )}
       {canImport && importOpen && (
         <Suspense fallback={null}>
-          <AfImportPanel registryCode={NaeRegistryCode} onClose={() => setImportOpen(false)} />
+          <AfImportPanel registryCode={registryCode} onClose={() => setImportOpen(false)} />
         </Suspense>
       )}
 
@@ -98,7 +102,7 @@ export function NaeStructurePage(): JSX.Element {
       )}
 
       {!notProvisioned && <RegistryTreeEditor
-        registryCode={NaeRegistryCode}
+        registryCode={registryCode}
         label={t('permits.nae.treeLabel')}
         canEdit={canEdit}
         hideEntryCode={codeAutomatic}
@@ -113,7 +117,7 @@ export function NaeStructurePage(): JSX.Element {
               <Suspense fallback={null}>
                 <NodeAttributesForm
                   key={String(node.id)}
-                  registryCode={NaeRegistryCode}
+                  registryCode={registryCode}
                   registryId={registry.id}
                   codeAutomatic={codeAutomatic}
                   fields={registry.fields}
@@ -123,7 +127,7 @@ export function NaeStructurePage(): JSX.Element {
                 />
               </Suspense>
             )}
-            <WhereUsed key={`used-${String(node.id)}`} registryCode={NaeRegistryCode} entryId={Number(node.id)} />
+            <WhereUsed key={`used-${String(node.id)}`} registryCode={registryCode} entryId={Number(node.id)} />
           </div>
         )}
       />}
@@ -131,7 +135,7 @@ export function NaeStructurePage(): JSX.Element {
       {draft !== null && registry !== undefined && (
         <Suspense fallback={null}>
           <CreateNodeModal
-            registryCode={NaeRegistryCode}
+            registryCode={registryCode}
             registryId={registry.id}
             codeAutomatic={codeAutomatic}
             fields={registry.fields}
