@@ -46,6 +46,8 @@ public sealed class AccessDecisionService(
         // при побудові профілю: надання, видане на ІНШОМУ вузлі, скидало кеш лише там (`InvalidateUser` — пам'ять
         // процесу), і тут новий учасник не бачив документа до сплину профілю (до 60 хв). Тепер перший же запит після
         // коміту надання (чи зняття останнього) адресує інший запис кешу — на кожному вузлі, без спільного лічильника.
+        // ⛔ AN-138: рядки призначень (для відбитка вмісту) читаються В ТОМУ САМОМУ зверненні — жодного додаткового запиту.
+        var groupSids = GroupSidsFor(userId);
         var account = await db.Users
             .AsNoTracking()
             .Where(u => u.Id == userId)
@@ -54,6 +56,12 @@ public sealed class AccessDecisionService(
                 u.SecurityStamp,
                 u.IsActive,
                 Participates = db.EditAssignmentRecipients.Any(r => r.UserId == u.Id),
+                Rows = db.RoleAssignments
+                    .Where(a => a.UserId == userId || (a.PrincipalSid != null && groupSids.Contains(a.PrincipalSid)))
+                    .OrderByDescending(a => a.Id)
+                    .Take(MaxRoleAssignments)
+                    .Select(x => new AssignmentRow(x.Id, x.RoleId, x.UserId, x.PrincipalSid, x.ScopeJson, x.ValidFrom, x.ValidTo))
+                    .ToList(),
             })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
@@ -74,13 +82,16 @@ public sealed class AccessDecisionService(
         // ключ `IMemoryCache` (`GetOrCreateAsync`) і в `LoadAsync` — щоб ключ,
         // за яким запис кладеться, і ключ, під яким `AccessProfile` сам себе
         // описує (`CacheKey`), не могли розійтися (`Q-187`).
-        var groupSids = GroupSidsFor(userId);
         var groupsFingerprint = await GroupsFingerprintAsync(groupSids, ct).ConfigureAwait(false);
 
         // ⚠ Ознака учасника — у ТОЙ САМИЙ третій компонент ключа, що й відбиток груп: і ключ `IMemoryCache`, і
         // `AccessProfile.CacheKey` будуються з одного рядка (`Q-187`), а профіль — саме з цього значення ознаки.
         var participates = account.Participates;
-        var cacheVariant = ParticipationKeyed(groupsFingerprint, participates);
+
+        // ⛔ AN-138: відбиток вмісту рядків призначень (ScopeJson, межі дії) — у той самий третій компонент ключа.
+        // Лічильники/Id вище не бачать прямої SQL-правки наявного рядка; без цього застарілі межі жили до TTL.
+        var assignmentsFingerprint = AssignmentRowsFingerprint(account.Rows);
+        var cacheVariant = ParticipationKeyed(groupsFingerprint + assignmentsFingerprint, participates);
 
         var profile = await profileCache
             .GetOrCreateAsync(
@@ -200,6 +211,37 @@ public sealed class AccessDecisionService(
         return revision is null
             ? $"{Fingerprint(groupSids)}.0.0.0.0"
             : $"{Fingerprint(groupSids)}.{revision.Assignments}.{revision.LastAssignment}.{revision.Grants}.{revision.LastGrant}";
+    }
+
+    /// <summary>Рядок призначення для відбитка вмісту (AN-138).</summary>
+    private sealed record AssignmentRow(
+        int Id, int RoleId, int? UserId, string? PrincipalSid, string? ScopeJson, DateOnly? ValidFrom, DateOnly? ValidTo);
+
+    /// <summary>Відбиток ВМІСТУ рядків призначень, з яких будується профіль (AN-138).</summary>
+    /// <remarks>
+    /// ⛔ Чому не <c>CHECKSUM_AGG</c>: той слабкий (XOR 32-бітних хешів, колізії тривіальні, а колізія тут =
+    /// застарілі права — небезпека, не незручність). Вибірка обмежена <see cref="MaxRoleAssignments"/> (≤200
+    /// вузьких рядків, ті самі, що читає <see cref="LoadAsync"/>), тому SHA-256 рахується в застосунку: сталий між
+    /// вузлами, без схеми/міграції/SQL-функцій, 128 біт у ключі. Хешуються Id, роль, субʼєкт, ScopeJson,
+    /// ValidFrom/ValidTo; вставка/видалення рядка змінює набір. Один індексований запит (без груп — по UserId).
+    /// Не покриває ПЕРЕХІД часу (ValidTo минає опівночі UTC) — це досі TTL профілю, як і було.
+    /// </remarks>
+    private static string AssignmentRowsFingerprint(IReadOnlyList<AssignmentRow> rows)
+    {
+        var text = new System.Text.StringBuilder();
+        foreach (var r in rows)
+        {
+            text.Append(System.Globalization.CultureInfo.InvariantCulture,
+                    $"{r.Id}\u001f{r.RoleId}\u001f{r.UserId}\u001f")
+                .Append(r.PrincipalSid is null ? "N" : "V" + r.PrincipalSid).Append('\u001f')
+                .Append(r.ScopeJson is null ? "N" : "V" + r.ScopeJson).Append('\u001f')
+                .Append(r.ValidFrom?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "N").Append('\u001f')
+                .Append(r.ValidTo?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "N")
+                .Append('\u001e');
+        }
+
+        return "|a" + System.Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text.ToString())))[..32];
     }
 
     /// <summary>
