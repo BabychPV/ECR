@@ -14,6 +14,19 @@
 # ⚠ Linux, а не Windows — той самий вибір і ті самі параметри, що в `smoke.yml`:
 # SQL Server у контейнері, `-Login` (SQL-автентифікація), `-SmallFiles`
 # (64 МБ замість 14 ГБ), `pwsh`.
+#
+# ✎ 2026-10-29 (lane/integ-e2e-shard): набір ішов ~55 хв одним стендом (з них 20 хв —
+# `keyCommitGateLive.spec.ts`). Тепер він ділиться на ШАРДИ, кожен на СВОЄМУ раннері зі своїм
+# SQL Server, своєю базою і своїм стендом (`tools/e2e-stand.ps1 -Shard k/M`):
+#   plan  — читає `src/Ecr.Web/e2e/shard-plan.json` і видає матрицю (з `grep` — один шард: план
+#           під ПОВНИЙ набір, а цільовий прогін і так короткий);
+#   shard — `e2e-stand (shard k/M)`, паралельно, `fail-fast: false`;
+#   e2e   — АГРЕГАТ з незмінним ім'ям `e2e-stand (linux)` (за ним стежать спостерігач
+#           `cancel-when-closed`, сторожі й ruleset): зелений лише коли зелені `plan` і ВСІ шарди.
+# Чому свій раннер, а не свої бази на одному: спецфайли міняють спільний документ стенда
+# (кожен повертає його у базову лінію в `afterAll`), а на одному раннері три стенди ще й
+# ділили б 2 ядра/7 ГБ — лише повільніші прогони. Об'єднання звітів не потрібне: артефакти
+# `e2e-stand-report-shard-k` / `e2e-stand-logs-shard-k` окремі.
 
 name: e2e-stand
 
@@ -43,15 +56,48 @@ env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
 
 jobs:
-  e2e:
-    name: e2e-stand (linux)
+  plan:
+    name: e2e-stand (plan)
     # PR у `main` з `dev/integration` (і будь-який інший не-rc) — пропуск.
     if: >-
       github.event_name != 'pull_request' ||
       startsWith(github.head_ref, 'rc/') ||
       startsWith(github.base_ref, 'rc/')
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.ref || '' }}
+          sparse-checkout: src/Ecr.Web/e2e/shard-plan.json
+          sparse-checkout-cone-mode: false
+
+      # Число шардів = 1 (шард 1 — решта) + кількість заявлених у плані. З `grep` — один шард.
+      - name: Матриця шардів
+        id: m
+        env:
+          GREP: ${{ inputs.grep }}
+        run: |
+          set -euo pipefail
+          if [ -n "$GREP" ]; then
+            count=1
+          else
+            count=$(( $(jq '.claims | length' src/Ecr.Web/e2e/shard-plan.json) + 1 ))
+          fi
+          matrix="$(jq -cn --argjson c "$count" '{include: [range(1; $c + 1) | {shard: ., count: $c}]}')"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "### e2e-stand: шардів $count" >> "$GITHUB_STEP_SUMMARY"
+
+  shard:
+    name: e2e-stand (shard ${{ matrix.shard }}/${{ matrix.count }})
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -62,7 +108,7 @@ jobs:
           GREP: ${{ inputs.grep }}
         run: |
           {
-            echo "### e2e-stand"
+            echo "### e2e-stand (shard ${{ matrix.shard }}/${{ matrix.count }})"
             echo "- коміт: \`$(git rev-parse HEAD)\`"
             echo "- подія: ${{ github.event_name }}"
             echo "- фільтр: \`${GREP:-увесь набір}\`"
@@ -141,8 +187,17 @@ jobs:
         working-directory: src/Ecr.Web
         run: npx playwright install --with-deps chromium
 
-      # ⚠ Порт 5080 (Vite — 6080): `setup-dev-db.ps1` піднімає застосунок для
-      # сіду на 5099, стенд не має говорити з ним.
+      # Склад шарда за секунди, ДО розгортання бази: помилка плану (порожній шард, зникла заявка)
+      # падає тут, а не через 6 хвилин підйому стенда.
+      - name: Склад шарда
+        env:
+          E2E_GREP: ${{ inputs.grep }}
+        run: pwsh -File tools/e2e-stand.ps1 -ListOnly -Shard '${{ matrix.shard }}/${{ matrix.count }}' -Grep "$E2E_GREP"
+
+      # ⚠ Порт 5080+k (Vite — 6080+k): свій у кожного шарда (раннери окремі, але так стенди
+      # лишаються розрізненими й на одній машині); `setup-dev-db.ps1` піднімає застосунок для
+      # сіду на 5099, стенд не має говорити з ним. База — `EcrE2ECi<k>`, файли — `-SmallFiles`
+      # (64 МБ) у типовому каталозі інстансу контейнера: окремий `-DataPath` на раннері не потрібен.
       # ⛔ Пароль іде оточенням (`ECR_SQL_PASSWORD`), не аргументом; `grep` —
       # теж оточенням, щоб введений текст не потрапляв у командний рядок.
       - name: Стенд і прогони Playwright (e2e-stand.ps1)
@@ -150,18 +205,19 @@ jobs:
           ECR_SQL_PASSWORD: ${{ env.ECR_SQL_PASSWORD }}
           E2E_GREP: ${{ inputs.grep }}
           PLAYWRIGHT_HTML_OPEN: never
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ github.workspace }}/artifacts/e2e.results.json
         run: |
           mkdir -p artifacts
           pwsh -File tools/e2e-stand.ps1 \
-            -Server 'localhost,1433' -Login sa -Database EcrE2ECi -Port 5080 \
+            -Server 'localhost,1433' -Login sa -Database "EcrE2ECi${{ matrix.shard }}" -Port "$((5079 + ${{ matrix.shard }}))" \
             -SmallFiles -RequireFreeGb 0 -StartupTimeoutSec 180 \
-            -Reporter 'list,html' -Grep "$E2E_GREP"
+            -Reporter 'list,html,json' -Shard '${{ matrix.shard }}/${{ matrix.count }}' -Grep "$E2E_GREP"
 
       - name: Звіт, трасування, знімки
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: e2e-stand-report
+          name: e2e-stand-report-shard-${{ matrix.shard }}
           path: |
             src/Ecr.Web/playwright-report/
             src/Ecr.Web/test-results/
@@ -172,12 +228,41 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: e2e-stand-logs
+          name: e2e-stand-logs-shard-${{ matrix.shard }}
           path: |
             artifacts/e2e.*
             artifacts/setup-dev-db.api.log*
           retention-days: 14
           if-no-files-found: ignore
+
+  # АГРЕГАТ. Ім'я `e2e-stand (linux)` НЕ змінювати: за ним стежить `cancel-when-closed`, на нього
+  # посилаються сторожі (`CiE2eStandCancelTests`), CLAUDE.md і ruleset. Зелений лише коли `plan` і
+  # ВСІ шарди `success`: шард, що впав, скасований чи пропущений, червонить агрегат.
+  e2e:
+    name: e2e-stand (linux)
+    needs: [ plan, shard ]
+    if: >-
+      always() && (
+      github.event_name != 'pull_request' ||
+      startsWith(github.head_ref, 'rc/') ||
+      startsWith(github.base_ref, 'rc/'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Вердикт за шардами
+        env:
+          PLAN: ${{ needs.plan.result }}
+          SHARDS: ${{ needs.shard.result }}
+        run: |
+          {
+            echo "### e2e-stand (linux): вердикт"
+            echo "- plan: $PLAN"
+            echo "- шарди: $SHARDS"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PLAN" != "success" ] || [ "$SHARDS" != "success" ]; then
+            echo "::error::e2e-stand: plan=$PLAN, шарди=$SHARDS - потрібні success/success."
+            exit 1
+          fi
 
   # ✎ 2026-10-13 (ретро #8): прогін без споживача. GitHub НЕ скасовує вже запущений
   # run, коли PR змержено/закрито, а e2e іде 23-38 хв. Тому паралельний легкий

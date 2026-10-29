@@ -1,0 +1,72 @@
+{
+  "claims": {
+    "2": [
+      "keyCommitGateLive.spec.ts::\\sB,\\s",
+      "keyCommitGateLive.spec.ts::T5-03.*Ctrl\\+V",
+      "rowColor.spec.ts",
+      "cellStyleCanStyleLive.spec.ts",
+      "permitGroupsReal.spec.ts",
+      "keyboardPath.spec.ts",
+      "permitLookupHeader.spec.ts",
+      "sheetBottomShots.spec.ts",
+      "registryDesigner.spec.ts",
+      "permitBindings.spec.ts",
+      "approvalQueueLive.spec.ts",
+      "documentsQuickLook.spec.ts",
+      "navbarCollapse.spec.ts",
+      "createDocumentWizard.spec.ts",
+      "periodsOverview.spec.ts"
+    ],
+    "3": [
+      "keyCommitGateLive.spec.ts::\\sC,\\s",
+      "uiMinorP3.spec.ts",
+      "keyCommitGateLive.spec.ts::RevoGrid",
+      "sheetBottom.spec.ts",
+      "colGroupsShots.spec.ts",
+      "anchorTextSubmittedLive.spec.ts",
+      "gridF2Live.spec.ts",
+      "gridRecalcRefetchLive.spec.ts",
+      "staleResultsFlow.spec.ts",
+      "permitGroupsUnlisted.spec.ts",
+      "documentInspector.spec.ts",
+      "lazyTables.spec.ts",
+      "cellStates.spec.ts",
+      "modalReopen.spec.ts"
+    ],
+    "4": [
+      "keyCommitGateLive.spec.ts::\\sA,\\s",
+      "cellColorLive.spec.ts",
+      "cellColorGridLive.spec.ts",
+      "cellColorScopeLive.spec.ts",
+      "gridPasteAfterEditor.spec.ts",
+      "permitTypeDialogs.spec.ts",
+      "expressionEditor.spec.ts",
+      "submissionTargetLive.spec.ts",
+      "documentParticipantsLive.spec.ts",
+      "periodNavBounds.spec.ts",
+      "auditTrail.spec.ts",
+      "cellColor.spec.ts",
+      "permitBindingsPages.spec.ts",
+      "permitTypes.spec.ts",
+      "virtualGrid.spec.ts"
+    ],
+    "5": [
+      "screenshots.spec.ts",
+      "keyCommitGateLive.spec.ts::\\sD,\\s",
+      "colGroups.spec.ts",
+      "sheetFocus.spec.ts",
+      "permitPage.spec.ts",
+      "permitsList.spec.ts",
+      "versionMigrationOverwrite.spec.ts",
+      "permitsP3Backlog.spec.ts",
+      "tableTree.spec.ts",
+      "registryEntryDrawer.spec.ts",
+      "permitTypeEditor.spec.ts",
+      "returnedToMeLive.spec.ts",
+      "documentsBoardCard.spec.ts",
+      "registriesList.spec.ts",
+      "healthPage.spec.ts"
+    ]
+  }
+}
+
