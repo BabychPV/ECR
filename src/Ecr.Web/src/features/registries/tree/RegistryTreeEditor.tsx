@@ -1,4 +1,4 @@
-import { useState, type JSX, type ReactNode } from 'react';
+import { useMemo, useState, type JSX, type ReactNode } from 'react';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -15,6 +15,8 @@ export interface RegistryTreeEditorProps {
   readonly onAddChild?: ((parent: TreeNode | null, level: TreeLevel) => void) | undefined;
   /** Додаткові блоки під відомостями вузла (атрибути, «де використано»). */
   readonly renderPanelExtra?: ((node: TreeNode) => ReactNode) | undefined;
+  /** Код запису технічний (довідник із `CodeMode = Auto`): у рядках і панелі його не показують. */
+  readonly hideEntryCode?: boolean | undefined;
   readonly selectedId?: TreeNodeId | null | undefined;
   readonly onSelect?: ((id: TreeNodeId | null) => void) | undefined;
 }
@@ -31,10 +33,15 @@ export function RegistryTreeEditor({
   canEdit,
   onAddChild,
   renderPanelExtra,
+  hideEntryCode = false,
   selectedId,
   onSelect,
 }: RegistryTreeEditorProps): JSX.Element {
   const tree = useRegistryTree(registryCode);
+  const nodes = useMemo(
+    () => (hideEntryCode ? tree.nodes.map(({ code: _technical, ...rest }) => rest) : tree.nodes),
+    [hideEntryCode, tree.nodes],
+  );
   const [own, setOwn] = useState<TreeNodeId | null>(null);
   const selected = selectedId !== undefined ? selectedId : own;
   const slow = usePendingLoading(tree.isFetching && !tree.isPending);
@@ -52,7 +59,7 @@ export function RegistryTreeEditor({
   return (
     <TreeEditor
       label={label}
-      nodes={tree.nodes}
+      nodes={nodes}
       levels={tree.levels}
       selectedId={selected}
       onSelect={(id) => {

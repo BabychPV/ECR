@@ -48,6 +48,8 @@ export function NaeStructurePage(): JSX.Element {
 
   const selected: TreeNodeId | null = nodeParam === null || nodeParam === '' ? null : Number(nodeParam);
   const registry = definition.data;
+  // ⚠ Код запису NAE_TREE технічний: бізнес-код - поле NaeCode. Поки визначення не приїхало, код вважаємо технічним.
+  const codeAutomatic = registry === undefined || registry.codeMode === 'Auto';
 
   return (
     <Stack gap="md" data-nae-page="">
@@ -70,6 +72,7 @@ export function NaeStructurePage(): JSX.Element {
         registryCode={NaeRegistryCode}
         label={t('permits.nae.treeLabel')}
         canEdit={canEdit}
+        hideEntryCode={codeAutomatic}
         selectedId={selected}
         onSelect={(id) => setNodeParam(id === null ? null : String(id))}
         onAddChild={
@@ -83,6 +86,7 @@ export function NaeStructurePage(): JSX.Element {
                   key={String(node.id)}
                   registryCode={NaeRegistryCode}
                   registryId={registry.id}
+                  codeAutomatic={codeAutomatic}
                   fields={registry.fields}
                   target={{ mode: 'edit', node }}
                   readOnly={!canEdit || node.retired === true}
@@ -90,7 +94,7 @@ export function NaeStructurePage(): JSX.Element {
                 />
               </Suspense>
             )}
-            <WhereUsed />
+            <WhereUsed key={`used-${String(node.id)}`} registryCode={NaeRegistryCode} entryId={Number(node.id)} />
           </div>
         )}
       />
@@ -100,6 +104,7 @@ export function NaeStructurePage(): JSX.Element {
           <CreateNodeModal
             registryCode={NaeRegistryCode}
             registryId={registry.id}
+            codeAutomatic={codeAutomatic}
             fields={registry.fields}
             draft={draft}
             onClose={() => setDraft(null)}
