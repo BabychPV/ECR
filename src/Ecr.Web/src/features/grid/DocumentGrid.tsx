@@ -504,7 +504,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     // а `staleTime` зрізів — 5 хв: перемикання вкладки показувало старе з кешу. Тому не лише власний зріз:
     // усі зрізи документа за період — змонтовані перезапитуються, решта позначається застарілою.
     // ⚠ AN-108 / P2-02: перерахунок, що нічого не записав (`writtenCount = 0`), зрізів не чіпає.
-    settleRecalculation(queryClient, recalculationJobId, documentId, periodKey, recalc.writtenCount);
+    settleRecalculation(
+      queryClient,
+      recalculationJobId,
+      documentId,
+      periodKey,
+      recalc.writtenCount,
+      recalc.writtenPeriods,
+    );
   }, [recalc.outcome, recalculationJobId]);
 
   // Додавання рядка динамічної таблиці (`ФВ-3.2`) — `useAddRow.ts` (A7-39, Y7-03).
