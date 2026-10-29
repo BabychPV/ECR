@@ -30,7 +30,7 @@ test.describe('Periods: огляд проєктів і плитки року (UI
     const year = page.getByTestId('periods-year');
     if (!(await year.isVisible())) {
       // Not `.first()`: other specs (colGroups, sheetBottom, ...) create `E2E <name> project` fixtures on the shared stand.
-      await overview.getByRole('table').getByRole('row').filter({ hasNotText: /E2E (groups|bottom)/i }).getByRole('button').first().click();
+      await overview.getByRole('table').getByRole('row').filter({ hasNotText: /E2E[ -]?(groups|bottom)|E2E(Groups|Bottom)Prj/i }).getByRole('button').first().click();
     }
     await expect(year, 'вибір проєкту не показав плиток року').toBeVisible({ timeout: 30_000 });
 
