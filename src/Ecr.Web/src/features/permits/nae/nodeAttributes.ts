@@ -47,19 +47,45 @@ export interface NodeFormProblems {
 export function validateNode(
   fields: readonly Pick<RegistryField, 'code' | 'isRequired'>[],
   form: NodeFormState,
+  codeAutomatic = false,
 ): NodeFormProblems {
   const values: Record<string, 'required'> = {};
   for (const field of fields) {
+    // ⚠ Порожній «район» - це «-» (вузол без району), тож обов'язковим він лишається, а порожнім не вважається.
+    if (field.code === NaeAreaField) continue;
     if (field.isRequired && (form.values[field.code] ?? '').trim().length === 0) values[field.code] = 'required';
   }
 
   const named = Object.values(form.display).some((text) => text.trim().length > 0);
 
   return {
-    ...(form.code.trim().length === 0 ? { code: 'required' as const } : {}),
+    ...(!codeAutomatic && form.code.trim().length === 0 ? { code: 'required' as const } : {}),
     ...(named ? {} : { display: 'required' as const }),
     values,
   };
+}
+
+/** Поля ділового ключа NAE (`NaeTreeSchema`): код NAE, регіон, район (`-`, якщо району немає). */
+export const NaeCodeField = 'NaeCode';
+export const NaeRegionField = 'RegionCode';
+export const NaeAreaField = 'AreaCode';
+export const NaeNoArea = '-';
+
+/**
+ * Значення нового вузла, які успадковуються від батька: регіон завжди, район - крім вузла-району.
+ * ⚠ Лише підказка в порожніх полях; людина може змінити, а сервер перевірить ключ.
+ */
+export function inheritedValues(
+  parentValues: Readonly<Record<string, string>>,
+  levelCode: string,
+): Readonly<Record<string, string>> {
+  const result: Record<string, string> = {};
+  const region = (parentValues[NaeRegionField] ?? '').trim();
+  const area = (parentValues[NaeAreaField] ?? '').trim();
+  if (levelCode !== 'REGION' && region !== '') result[NaeRegionField] = region;
+  if (levelCode !== 'REGION' && levelCode !== 'AREA' && area !== '' && area !== NaeNoArea) result[NaeAreaField] = area;
+
+  return result;
 }
 
 export function hasProblems(problems: NodeFormProblems): boolean {
@@ -83,6 +109,8 @@ export function buildNodeBody(input: {
   readonly parentEntryId: number | null;
   readonly initial: NodeFormState;
   readonly current: NodeFormState;
+  /** Код видає система: для нового вузла іде порожнім (сервер відмовить, якщо його назвати). */
+  readonly codeAutomatic?: boolean;
 }): NodeUpsertBody {
   const { target, initial, current } = input;
   const display: Record<string, string> = { ...current.display };
@@ -92,15 +120,17 @@ export function buildNodeBody(input: {
 
   const values: Record<string, string | null> = {};
   for (const field of input.fields) {
-    const before = initial.values[field.code] ?? '';
-    const after = current.values[field.code] ?? '';
+    // Новий вузол везе всі непорожні значення (в тому числі успадковані від батька), правка - лише змінені.
+    const before = target.mode === 'create' ? '' : (initial.values[field.code] ?? '');
+    let after = current.values[field.code] ?? '';
+    if (field.code === NaeAreaField && after.trim().length === 0) after = NaeNoArea;
     if (after !== before) values[field.code] = after.trim().length === 0 ? null : after;
   }
 
   return {
     id: target.mode === 'edit' ? Number(target.node.id) : null,
     registryDefId: input.registryId,
-    code: current.code.trim(),
+    code: input.codeAutomatic === true && target.mode === 'create' ? '' : current.code.trim(),
     display: { values: display },
     parentEntryId: input.parentEntryId,
     levelCode: target.mode === 'create' ? target.level.code : null,
@@ -109,10 +139,12 @@ export function buildNodeBody(input: {
 }
 
 /** Відмови сервера, які належать конкретному полю форми. */
-export type ServerFieldProblem = 'codeTaken' | 'codeAutomatic';
+export type ServerFieldProblem = 'codeTaken' | 'codeAutomatic' | 'keyTaken';
 
 const CodeTakenKey = 'err.ECR-REG-0409.entryCodeTaken';
 const CodeAutomaticKey = 'err.ECR-REG-0422.entryCodeAutomatic';
+/** Ділового ключа (код NAE + регіон + район) вже хтось займає. */
+const KeyTakenKeys: readonly string[] = ['err.ECR-REG-4092.keyTaken', 'err.ECR-REG-4092.keyWindowOverlap'];
 
 /** Ключ каталогу відмови сервера (`extensions2.messageKey`), якщо він є. */
 export function serverMessageKey(error: unknown): string | null {
@@ -130,6 +162,7 @@ export function serverFieldProblem(error: unknown): ServerFieldProblem | null {
   const key = serverMessageKey(error);
   if (key === CodeTakenKey) return 'codeTaken';
   if (key === CodeAutomaticKey) return 'codeAutomatic';
+  if (key !== null && KeyTakenKeys.includes(key)) return 'keyTaken';
 
   return null;
 }

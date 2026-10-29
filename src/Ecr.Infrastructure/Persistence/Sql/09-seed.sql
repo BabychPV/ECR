@@ -9468,7 +9468,9 @@ USING (VALUES
     ,(N'permits.nae.used.type', N'en', N'Type', 1)
     ,(N'permits.nae.used.valid', N'en', N'Valid', 1)
     ,(N'permits.nae.used.substances', N'en', N'Substances', 1)
-    ,(N'permits.nae.used.unavailable', N'en', N'Usage by permits is not available yet. This does not mean the node is unused.', 1)
+    ,(N'permits.nae.used.empty', N'en', N'No permit refers to this node yet.', 1)
+    ,(N'permits.nae.form.keyTaken', N'en', N'A node with this NAE code, region and area already exists.', 1)
+    ,(N'permits.nae.form.areaHint', N'en', N'Leave empty when there is no area: it is saved as “-”.', 1)
     -- COLL:ui-nae-structure ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -24757,8 +24759,12 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.nae.used.valid', N'kz', N'Қолданылады'),
     (N'permits.nae.used.substances', N'ru', N'Вещества'),
     (N'permits.nae.used.substances', N'kz', N'Заттар'),
-    (N'permits.nae.used.unavailable', N'ru', N'Использование в разрешениях пока недоступно. Это не значит, что узел нигде не используется.'),
-    (N'permits.nae.used.unavailable', N'kz', N'Рұқсаттарда қолданылуы әзірге қолжетімсіз. Бұл түйін еш жерде қолданылмайды дегенді білдірмейді.')
+    (N'permits.nae.used.empty', N'ru', N'Ни одно разрешение пока не ссылается на этот узел.'),
+    (N'permits.nae.used.empty', N'kz', N'Бұл түйінге әзірге бірде-бір рұқсат сілтемейді.'),
+    (N'permits.nae.form.keyTaken', N'ru', N'Узел с таким кодом NAE, регионом и районом уже существует.'),
+    (N'permits.nae.form.keyTaken', N'kz', N'Мұндай NAE коды, өңірі және ауданы бар түйін әлдеқашан бар.'),
+    (N'permits.nae.form.areaHint', N'ru', N'Оставьте пустым, если района нет: сохранится как «-».'),
+    (N'permits.nae.form.areaHint', N'kz', N'Аудан жоқ болса, бос қалдырыңыз: «-» болып сақталады.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
