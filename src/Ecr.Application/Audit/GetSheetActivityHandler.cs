@@ -40,11 +40,13 @@ public sealed class GetSheetActivityHandler(
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="periodKey">Звітний період.</param>
     /// <param name="byUserId">Лише дії цього користувача; <c>null</c> - усі.</param>
+    /// <param name="includeSystem">Додати системні зміни значень (перерахунок, інтеграція, міграція).</param>
     /// <param name="limit">Розмір сторінки; <c>0</c> - 50; більше за 100 - 422.</param>
     /// <param name="cursor">Курсор наступної сторінки.</param>
     /// <param name="ct">Токен скасування.</param>
     public async Task<SheetActivityPage> HandleAsync(
-        long documentId, int sheetDefId, int periodKey, int? byUserId, int limit, string? cursor, CancellationToken ct)
+        long documentId, int sheetDefId, int periodKey, int? byUserId, bool includeSystem, int limit, string? cursor,
+        CancellationToken ct)
     {
         var key = PeriodKey.Parse(periodKey);
         var size = limit == 0 ? DefaultLimit : limit;
@@ -78,7 +80,7 @@ public sealed class GetSheetActivityHandler(
         }
 
         return await query
-            .ReadAsync(new SheetActivityScope(documentId, periodKey, sheetCode, columns, byUserId), size, cursor, ct)
+            .ReadAsync(new SheetActivityScope(documentId, periodKey, sheetCode, columns, byUserId, includeSystem), size, cursor, ct)
             .ConfigureAwait(false);
     }
 

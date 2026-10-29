@@ -54,6 +54,7 @@ public sealed class DocumentWorkflowHistoryController(
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="author">Лише дії цього користувача (<c>UserId</c>); без нього - усі.</param>
+    /// <param name="includeSystem">Додати системні зміни значень (перерахунок, інтеграція, міграція); типово - лише дії людей.</param>
     /// <param name="limit">Розмір сторінки; <c>0</c> - 50.</param>
     /// <param name="cursor">Курсор наступної сторінки.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -62,9 +63,9 @@ public sealed class DocumentWorkflowHistoryController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> SheetActivity(
-        long id, int sheetDefId, [FromQuery] int periodKey, [FromQuery] int? author,
+        long id, int sheetDefId, [FromQuery] int periodKey, [FromQuery] int? author, [FromQuery] bool includeSystem,
         [FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
-        => Ok(await sheetActivity.HandleAsync(id, sheetDefId, periodKey, author, limit, cursor, ct).ConfigureAwait(false));
+        => Ok(await sheetActivity.HandleAsync(id, sheetDefId, periodKey, author, includeSystem, limit, cursor, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Відкликання поданого аркуша автором: <c>Submitted → Draft</c> з причиною.

@@ -69,8 +69,15 @@ public static class SheetActivityKinds
 /// <param name="SheetCode">Код аркуша (журнал переходів знає код).</param>
 /// <param name="VisibleColumnIds">Колонки аркуша, які читач бачить (<c>DocumentReadScope.VisibleColumnIdsOfSheet</c>).</param>
 /// <param name="ByUserId">Лише дії цього користувача; <c>null</c> — усіх.</param>
+/// <param name="IncludeSystem">
+/// <c>true</c> - додатково системні зміни значень (перерахунок, інтеграція, значення з дозволу, міграція).
+/// Класифікація - за <c>aud.CellChange.Origin</c>, спільним переліком <c>CellChangeOrigins.IsHuman</c>:
+/// людина - <c>UserEdit</c>, <c>Import</c>, <c>ImportOverwrite</c>, <c>ApproverEdit</c> (імпорт - дія людини);
+/// решта - система. Дії процесу (подання, погодження...) показуються завжди.
+/// </param>
 public sealed record SheetActivityScope(
-    long DocumentId, int PeriodKey, string SheetCode, IReadOnlyList<int> VisibleColumnIds, int? ByUserId = null);
+    long DocumentId, int PeriodKey, string SheetCode, IReadOnlyList<int> VisibleColumnIds, int? ByUserId = null,
+    bool IncludeSystem = false);
 
 /// <summary>
 /// Спільний шар читання журналу дій на аркуші: злиття двох джерел в один потік, найновіші перші.
@@ -154,7 +161,7 @@ public sealed class SheetActivityQuery(IAuditReader audit, IWorkflowStore workfl
             VisibleColumnIds: scope.VisibleColumnIds,
             PeriodKey: scope.PeriodKey,
             Descending: true,
-            HumanOnly: true);
+            HumanOnly: !scope.IncludeSystem);
 
         // Курсор читача журналу правок — пара (At, Id) «строго після» в порядку DESC. Після рядка процесу (тег 1)
         // правки того ж At вже видано (тег 0 раніше за тег 1), тож Id = 0 дає «At строго менший».
@@ -166,7 +173,10 @@ public sealed class SheetActivityQuery(IAuditReader audit, IWorkflowStore workfl
 
         var rows = result.Items
             .Select(c => new Row(c.ChangedAt, CellTag, c.Id, new SheetActivityItem(
-                SheetActivityKinds.CellEdit, c.ChangedAt, c.ChangedByDisplayName ?? "#" + c.ChangedByUserId.ToString(CultureInfo.InvariantCulture),
+                SheetActivityKinds.CellEdit, c.ChangedAt,
+                !Documents.CellChangeOrigins.IsHuman(c.Origin)
+                    ? SystemActor
+                    : c.ChangedByDisplayName ?? "#" + c.ChangedByUserId.ToString(CultureInfo.InvariantCulture),
                 c.Origin, c.PeriodKey, c.RowKey, c.RowLabelL10n, c.ColumnDefId, c.ColumnCode, c.ColumnHeaderL10n,
                 c.ColumnDataType, c.TableCode, c.TableNameL10n, c.OldValue, c.NewValue,
                 Action: null, FromState: null, ToState: null, Reason: null)))
