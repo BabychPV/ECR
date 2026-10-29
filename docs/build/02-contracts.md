@@ -2848,6 +2848,31 @@ public interface IRegistryHierarchyStore
     public Task<IReadOnlyDictionary<int, int>> CountEntriesByLevelAsync(int registryDefId, CancellationToken ct);
     public Task<IReadOnlyList<RegistryEntry>> ListLiveEntriesAsync(int registryDefId, CancellationToken ct);
     public Task<IReadOnlyList<RegistryEntry>> ListChildrenTrackedAsync(int registryDefId, long? parentEntryId, CancellationToken ct);
+    public Task LockTreeAsync(int registryDefId, CancellationToken ct); // N2: UPDLOCK на рядок опису до кінця транзакції
+}
+```
+
+#### `INaeAfReader`
+
+Читання дерева обладнання AF для разового завантаження дерева НАЕ (NAE plan N2). Лише читання (D-44);
+у тестах — підміна. Реалізація — `PiAfNaeReader` (`DiscoverElementsAsync` + `ReadCurrentAsync`).
+
+```csharp
+public interface INaeAfReader
+{
+    public Task<NaeAfSnapshot> ReadAsync(int dataSourceId, string rootPath, CancellationToken ct);
+}
+```
+
+#### `IRegistryEntryReferenceReader`
+
+«Де використано» запису довідника (дозволи, тип, чинність, кількість речовин). До N3 повертає порожній
+список — таблиць дозволів, що посилаються на вузол НАЕ, ще немає.
+
+```csharp
+public interface IRegistryEntryReferenceReader
+{
+    public Task<IReadOnlyList<RegistryEntryReferenceDto>> ListAsync(int registryDefId, long entryId, CancellationToken ct);
 }
 ```
 
