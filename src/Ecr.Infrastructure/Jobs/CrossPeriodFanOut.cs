@@ -1,4 +1,4 @@
-using Ecr.Application.Ports;
+﻿using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
@@ -11,6 +11,12 @@ namespace Ecr.Infrastructure.Jobs;
 /// колонки (<c>[Period:-N]</c>, <c>[Period:#k]</c>) — WW-03, закриття G2.
 /// </summary>
 /// <remarks>
+/// <para>
+/// ✎ L2 (recalc-latency): <see cref="FindReadersAsync"/> віддає читачів БЕЗ постановки — задача документа
+/// (<c>FormulaRecalculationJob</c>) дописує їх у власний перелік періодів і обробляє в тому самому проході під
+/// одним локом. <see cref="EnqueueReadersAsync"/> лишився для повного перерахунку року (<c>RecalculationJob</c>):
+/// ціль тепер одна на документ, а період-читач стоїть у кожному елементі <c>cells</c> (<c>DirtyCell.PeriodKey</c>).
+/// </para>
 /// ⛔ Постановка — лише <see cref="IBackgroundJobScheduler.EnqueueCoalescedAsync{TJob}"/> на ціль
 /// «документ × період-читач» (<see cref="FormulaRecalculationTarget.Of"/>): серія правок і
 /// ланцюжок читачів зливаються в одну задачу періоду, а не множаться; <c>EnqueueExclusive</c>
@@ -67,14 +73,65 @@ public sealed class CrossPeriodFanOut(
         CancellationToken ct,
         IReadOnlyCollection<ValueTuple<int, int>>? inputChanged = null)
     {
-        ArgumentNullException.ThrowIfNull(changed);
+        var found = await FindReadersAsync(
+                documentId, source, changed, onlyEarlierReaders, hops, ct, inputChanged, shared: null)
+            .ConfigureAwait(false);
 
-        if (changed.Count == 0 || hops > MaxHops)
+        var enqueued = 0;
+        foreach (var (readerKey, sources) in found)
         {
-            return 0;
+            // Елемент масиву `cells` — «джерело зміни», а не адреса комірки: `RowId = 0` його відрізняє,
+            // а злиття задач (`JobPayloadMerge`) об'єднує масив і прибирає повтори. L2: задача одна на документ,
+            // тож період-читач стоїть у кожному елементі (`PeriodKey`), а не лише в тілі.
+            var cells = sources
+                .Select(s => new DirtyCell(
+                    0, s.ColumnDefId, s.TableDefId, s.SourceSequence, hops,
+                    OwnerInput: s.OwnerInput ? true : null, PeriodKey: readerKey.Value))
+                .ToList();
+
+            await jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                    FormulaRecalculationTarget.Of(documentId, readerKey.Value, createdByUserId: null),
+                    new { DocumentId = documentId, TableInstanceId = 0L, PeriodKey = readerKey.Value, Cells = cells },
+                    ct)
+                .ConfigureAwait(false);
+            enqueued++;
         }
 
-        var instances = await rowStore.GetTableInstancesAsync(documentId, source, ct).ConfigureAwait(false);
+        return enqueued;
+    }
+
+    /// <summary>
+    /// L2: ті самі читачі, що їх ставить <see cref="EnqueueReadersAsync"/>, але БЕЗ постановки — задача документа
+    /// дописує їх у власний перелік періодів і обробляє в тому самому проході.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="source">Період, у якому змінилися колонки.</param>
+    /// <param name="changed">Змінені колонки періоду-джерела (див. <see cref="EnqueueReadersAsync"/>).</param>
+    /// <param name="onlyEarlierReaders">Лише читачі раніше за джерело.</param>
+    /// <param name="hops">Номер ланки ланцюжка; понад <see cref="MaxHops"/> читачів немає.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <param name="inputChanged">Підмножина <paramref name="changed"/> — введені (не похідні) колонки (Q-17).</param>
+    /// <param name="shared">Спільні читання проходу (екземпляри/залежності); <c>null</c> — читати напряму.</param>
+    /// <returns>Періоди-читачі за зростанням і «джерела зміни», які кожен з них має врахувати.</returns>
+    public async Task<IReadOnlyList<(PeriodKey Reader, IReadOnlyList<CrossPeriodSource> Sources)>> FindReadersAsync(
+        long documentId,
+        PeriodKey source,
+        IReadOnlyCollection<ValueTuple<int, int>> changed,
+        bool onlyEarlierReaders,
+        int hops,
+        CancellationToken ct,
+        IReadOnlyCollection<ValueTuple<int, int>>? inputChanged = null,
+        RecalculationSharedLoad? shared = null)
+    {
+        ArgumentNullException.ThrowIfNull(changed);
+
+        var result = new List<(PeriodKey Reader, IReadOnlyList<CrossPeriodSource> Sources)>();
+        if (changed.Count == 0 || hops > MaxHops)
+        {
+            return result;
+        }
+
+        var instances = await InstancesAsync(shared, documentId, source, ct).ConfigureAwait(false);
         var readers = new SortedSet<int>();
         var carried = new HashSet<(int TableDefId, int ColumnDefId)>();
         var carriedInputs = new HashSet<(int TableDefId, int ColumnDefId, int? MonthNumber)>();
@@ -82,7 +139,7 @@ public sealed class CrossPeriodFanOut(
 
         foreach (var versionId in instances.Select(i => i.TemplateVersionId).Distinct())
         {
-            var dependencies = await versions.ListFormulaDependenciesAsync(versionId, ct).ConfigureAwait(false);
+            var dependencies = await DependenciesAsync(shared, versionId, ct).ConfigureAwait(false);
 
             var relevant = CrossPeriodReaders.ReadAcrossPeriods(dependencies, changed);
             var routed = CrossPeriodReaders.ReadsRoutedInput(
@@ -100,7 +157,15 @@ public sealed class CrossPeriodFanOut(
             carriedInputs.UnionWith(routed);
         }
 
-        var enqueued = 0;
+        // Одні й ті самі «джерела» для кожного читача: відбір читача залежить лише від змінених колонок.
+        var sources = carried
+            .OrderBy(c => c.TableDefId).ThenBy(c => c.ColumnDefId)
+            .Select(c => new CrossPeriodSource(source.Sequence, c.TableDefId, c.ColumnDefId))
+            .Concat(carriedInputs
+                .OrderBy(c => c.TableDefId).ThenBy(c => c.ColumnDefId)
+                .Select(c => new CrossPeriodSource(source.Sequence, c.TableDefId, c.ColumnDefId, OwnerInput: true)))
+            .ToList();
+
         foreach (var reader in readers)
         {
             if (onlyEarlierReaders && reader >= source.Sequence)
@@ -116,33 +181,25 @@ public sealed class CrossPeriodFanOut(
             }
 
             // L1: не ставимо задачу, яка б повернулася з `written = 0` (порожні цілі в періоді-читачі).
-            if (!await ReaderHasWorkAsync(documentId, readerKey, source.Sequence, carried, carriedInputs, ct)
+            if (!await ReaderHasWorkAsync(documentId, readerKey, source.Sequence, carried, carriedInputs, shared, ct)
                     .ConfigureAwait(false))
             {
                 continue;
             }
 
-            // Елемент масиву `cells` — «джерело зміни», а не адреса комірки: `RowId = 0` його відрізняє,
-            // а злиття задач (`JobPayloadMerge`) об'єднує масив і прибирає повтори.
-            var cells = carried
-                .OrderBy(c => c.TableDefId).ThenBy(c => c.ColumnDefId)
-                .Select(c => new DirtyCell(0, c.ColumnDefId, c.TableDefId, source.Sequence, hops))
-                .Concat(carriedInputs
-                    .OrderBy(c => c.TableDefId).ThenBy(c => c.ColumnDefId)
-                    .Select(c => new DirtyCell(
-                        0, c.ColumnDefId, c.TableDefId, source.Sequence, hops, OwnerInput: true)))
-                .ToList();
-
-            await jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
-                    FormulaRecalculationTarget.Of(documentId, readerKey.Value, createdByUserId: null),
-                    new { DocumentId = documentId, TableInstanceId = 0L, PeriodKey = readerKey.Value, Cells = cells },
-                    ct)
-                .ConfigureAwait(false);
-            enqueued++;
+            result.Add((readerKey, sources));
         }
 
-        return enqueued;
+        return result;
     }
+
+    private Task<IReadOnlyList<TableInstanceRef>> InstancesAsync(
+        RecalculationSharedLoad? shared, long documentId, PeriodKey period, CancellationToken ct)
+        => shared is null ? rowStore.GetTableInstancesAsync(documentId, period, ct) : shared.InstancesAsync(documentId, period, ct);
+
+    private Task<IReadOnlyList<Ecr.Domain.Entities.Configuration.FormulaDependency>> DependenciesAsync(
+        RecalculationSharedLoad? shared, int versionId, CancellationToken ct)
+        => shared is null ? versions.ListFormulaDependenciesAsync(versionId, ct) : shared.DependenciesAsync(versionId, ct);
 
     /// <summary>
     /// L1: чи має період-читач хоч одну ціль для переданих змін — той самий відбір, що зробить задача
@@ -159,6 +216,7 @@ public sealed class CrossPeriodFanOut(
         int sourceSequence,
         IReadOnlyCollection<(int TableDefId, int ColumnDefId)> carried,
         IReadOnlyCollection<(int TableDefId, int ColumnDefId, int? MonthNumber)> carriedInputs,
+        RecalculationSharedLoad? shared,
         CancellationToken ct)
     {
         if (metadata is null)
@@ -171,7 +229,7 @@ public sealed class CrossPeriodFanOut(
             .Concat(carriedInputs.Select(c => new CrossPeriodSource(sourceSequence, c.TableDefId, c.ColumnDefId, OwnerInput: true)))
             .ToList();
 
-        var instances = await rowStore.GetTableInstancesAsync(documentId, reader, ct).ConfigureAwait(false);
+        var instances = await InstancesAsync(shared, documentId, reader, ct).ConfigureAwait(false);
         foreach (var group in instances.GroupBy(i => i.TemplateVersionId))
         {
             var snapshot = await metadata.GetAsync(group.Key, ct).ConfigureAwait(false);
@@ -180,7 +238,7 @@ public sealed class CrossPeriodFanOut(
                 return true;
             }
 
-            var dependencies = await versions.ListFormulaDependenciesAsync(group.Key, ct).ConfigureAwait(false);
+            var dependencies = await DependenciesAsync(shared, group.Key, ct).ConfigureAwait(false);
             var liveFormulaTables = snapshot.Sheets
                 .SelectMany(s => s.Tables)
                 .SelectMany(t => t.Formulas.Where(f => !f.IsDeleted).Select(f => (Formula: f.Id, Table: t.Id)))
