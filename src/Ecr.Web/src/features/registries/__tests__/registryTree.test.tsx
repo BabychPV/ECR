@@ -92,6 +92,20 @@ describe('treeAdapter', () => {
     expect(mapped).toMatchObject({ id: 9, parentId: 3, label: 'X', code: 'x', levelCode: 'nae', ordinal: 4, childCount: 2, isMatch: true });
   });
 
+  it('вузол з naeCode підписаний «naeCode · назва», порожній naeCode - лише назва', () => {
+    const mapped = toTreeNodes(
+      [
+        node({ id: 1, code: 'a', display: 'Pipe', naeCode: '1085' }),
+        node({ id: 2, code: 'b', display: 'Barge', naeCode: null }),
+        node({ id: 3, code: 'c', display: 'Plain', naeCode: '' }),
+        node({ id: 4, code: 'd', display: 'Old' }),
+      ],
+      '2026-10-29',
+    );
+
+    expect(mapped.map((item) => item.label)).toEqual(['1085 · Pipe', 'Barge', 'Plain', 'Old']);
+  });
+
   it('рівні сортуються за ordinal, назва - мовою читача, запасний варіант - код', () => {
     const levels = toTreeLevels([...hierarchy.levels, { id: 9, ordinal: 4, code: 'raw', name: { values: {} }, isOptional: true, entryCount: 0 }]);
 

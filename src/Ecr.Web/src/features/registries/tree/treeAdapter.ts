@@ -13,7 +13,8 @@ export function toTreeNodes(nodes: readonly RegistryTreeNode[], today: string): 
   return nodes.map((node) => ({
     id: node.id,
     parentId: node.parentEntryId,
-    label: node.display,
+    // NAE plan N2: джерело показується як «NaeCode · назва»; решта рівнів і довідників - лише назва.
+    label: node.naeCode !== undefined && node.naeCode !== null && node.naeCode !== '' ? `${node.naeCode} · ${node.display}` : node.display,
     code: node.code,
     levelCode: node.levelCode,
     ordinal: node.ordinal,

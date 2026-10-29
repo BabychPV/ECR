@@ -22,6 +22,7 @@ import {
   inheritedValues,
   NaeAreaField,
   serverFieldProblem,
+  serverKeyHolder,
   validateNode,
   type NodeDetail,
   type NodeFormProblems,
@@ -125,6 +126,7 @@ function Form({
   const [values, setValues] = useState<Record<string, string>>({ ...initial.values });
   const [tried, setTried] = useState(false);
   const [serverProblem, setServerProblem] = useState<ServerFieldProblem | null>(null);
+  const [holder, setHolder] = useState<string | null>(null);
 
   const current: NodeFormState = { code, display, values };
   const problems: NodeFormProblems = validateNode(fields, current, codeAutomatic);
@@ -153,6 +155,7 @@ function Form({
     onError: (error: unknown) => {
       // Відмова про код - біля поля коду; решта - сповіщенням (текст бере каталог за `messageKey`).
       setServerProblem(serverFieldProblem(error));
+      setHolder(serverKeyHolder(error));
       showApiError(error);
     },
   });
@@ -206,7 +209,7 @@ function Form({
           <Stack gap="sm">
             {serverProblem === 'keyTaken' && (
               <Text size="sm" c="statusError" role="alert" data-nae-key-error="">
-                {t('permits.nae.form.keyTaken')}
+                {holder === null ? t('permits.nae.form.keyTaken') : t('permits.nae.form.keyTakenBy', { holder })}
               </Text>
             )}
             {!(codeAutomatic && target.mode === 'create') && (
