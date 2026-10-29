@@ -248,6 +248,10 @@ public static class DependencyInjection
         // D-443: передача власника документа (учасники документа).
         services.AddScoped<Documents.EditAssignments.TransferDocumentOwnerHandler>();
 
+        // Чат таблиці документа (TC): читання й запис; лише контракт у першому коміті лінії.
+        services.AddScoped<Documents.Discussions.TableDiscussionQueries>();
+        services.AddScoped<Documents.Discussions.TableDiscussionCommands>();
+
         // Локалізація (модуль 3.7)
         services.AddScoped<Localization.GetUiStringsHandler>();
 

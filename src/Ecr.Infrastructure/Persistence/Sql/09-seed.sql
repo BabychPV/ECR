@@ -1,4 +1,4 @@
-﻿-- ⚠ SET-опції задаються ЯВНО і першими.
+-- ⚠ SET-опції задаються ЯВНО і першими.
 -- `sqlcmd` за замовчуванням має `QUOTED_IDENTIFIER OFF`, а `SqlClient` — `ON`.
 -- Через це скрипт, який проходить у тестах (їх виконує SqlClient), падає в
 -- розгортанні (його виконує DBA через sqlcmd, `09-commands.md` §3) на будь-якій
@@ -120,6 +120,12 @@ USING (VALUES
   -- `SystemAdministrator` (`%`) отримує його цим же MERGE; роздача
   -- `DataEntry` — секція `SEC:SUBMIT` нижче, після `SEC:RPT`.
   (N'Document.Submit',          N'Document',    0),
+  -- TC (чат таблиці документа, рішення людини 29.10): `Document.Discuss` — писати в чат таблиці, яку бачиш;
+  -- `Document.DiscussModerate` — видаляти чужі повідомлення. Не небезпечні (0): коментар — не дані. Обидва проєктні
+  -- (не глобальні). `SystemAdministrator` бере їх шаблоном `%`; решта ролей з `Document.View` — одноразова роздача
+  -- в секції `TC:discuss` наприкінці файлу (повторний сід її не повертає: адміністратор може зняти право з ролі).
+  (N'Document.Discuss',         N'Document',    0),
+  (N'Document.DiscussModerate', N'Document',    0),
   -- PERMITS: permissions ── права типів дозволів (PM-04, рішення «Аудиту» ч.1, варіант б) ──
   -- Окремі глобальні права замість Registry.EditDefinition / Registry.Publish: ними керують реєстри Land, а тип
   -- дозволу — власна сутність. Не небезпечні (0), як і Registry.EditDefinition: `SystemAdministrator` (`%`) бере їх
@@ -9388,6 +9394,15 @@ USING (VALUES
     -- COLL:ui-colgroups-polish ── діалог груп колонок: поле поточної мови, решта мов згорнуто; ru/kz — порцією COLL:ui-colgroups-polish нижче ──
     ,(N'colgroups.otherLanguages', N'en', N'Other languages', 1)
     -- COLL:ui-colgroups-polish ── кінець секції ──
+    -- TC:server ── en: чат таблиці документа, права й відмови сервера (клієнтські підписи панелі — секція UI-lane) ──
+    ,(N'permission.Document.Discuss', N'en', N'Write in the chat of a table the user can see', 1)
+    ,(N'permission.Document.DiscussModerate', N'en', N'Delete other people''s messages in table chats', 1)
+    ,(N'err.ECR-REQ-0422.discussionBodyInvalid', N'en', N'The message must contain text, no longer than {max} characters, and reference at most {maxMentions} people. Check the period too.', 1)
+    ,(N'err.ECR-REQ-0422.discussionEditWindowClosed', N'en', N'A message can be edited only within {minutes} minutes after it was written.', 1)
+    ,(N'err.ECR-REQ-0422.discussionMessageDeleted', N'en', N'This message was deleted and can no longer be edited.', 1)
+    ,(N'err.ECR-ACCS-0403.discussionEditForbidden', N'en', N'Only the author can edit a message.', 1)
+    ,(N'err.ECR-ACCS-0403.discussionDeleteForbidden', N'en', N'Only the author or a moderator can delete a message.', 1)
+    -- TC:server ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -24493,6 +24508,29 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-colgroups-polish ── кінець секції ──
+-- TC:server ── ru/kz: чат таблиці документа, права й відмови сервера; власна порція ──
+-- ⚠ kz — робочий переклад, на звірку термінологу.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permission.Document.Discuss', N'ru', N'Писать в чат таблицы, которую пользователь видит'),
+    (N'permission.Document.Discuss', N'kz', N'Пайдаланушы көретін кестенің чатына жазу'),
+    (N'permission.Document.DiscussModerate', N'ru', N'Удалять чужие сообщения в чатах таблиц'),
+    (N'permission.Document.DiscussModerate', N'kz', N'Кесте чаттарындағы басқалардың хабарламаларын жою'),
+    (N'err.ECR-REQ-0422.discussionBodyInvalid', N'ru', N'Сообщение должно содержать текст не длиннее {max} символов и упоминать не более {maxMentions} человек. Проверьте также период.'),
+    (N'err.ECR-REQ-0422.discussionBodyInvalid', N'kz', N'Хабарламада {max} таңбадан аспайтын мәтін болуы және {maxMentions} адамнан көп аталмауы керек. Кезеңді де тексеріңіз.'),
+    (N'err.ECR-REQ-0422.discussionEditWindowClosed', N'ru', N'Сообщение можно править только в течение {minutes} минут после написания.'),
+    (N'err.ECR-REQ-0422.discussionEditWindowClosed', N'kz', N'Хабарламаны жазғаннан кейін тек {minutes} минут ішінде түзетуге болады.'),
+    (N'err.ECR-REQ-0422.discussionMessageDeleted', N'ru', N'Сообщение удалено, править его больше нельзя.'),
+    (N'err.ECR-REQ-0422.discussionMessageDeleted', N'kz', N'Хабарлама жойылған, оны енді түзетуге болмайды.'),
+    (N'err.ECR-ACCS-0403.discussionEditForbidden', N'ru', N'Править сообщение может только его автор.'),
+    (N'err.ECR-ACCS-0403.discussionEditForbidden', N'kz', N'Хабарламаны тек оның авторы түзете алады.'),
+    (N'err.ECR-ACCS-0403.discussionDeleteForbidden', N'ru', N'Удалить сообщение может только автор или модератор.'),
+    (N'err.ECR-ACCS-0403.discussionDeleteForbidden', N'kz', N'Хабарламаны тек автор немесе модератор жоя алады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- TC:server ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
@@ -24711,3 +24749,38 @@ GROUP BY r.Id;
 DROP TABLE #FpSysAdminRightsBefore;
 GO
 -- FP:sysadmin-rights ── кінець секції ────────────────────────────────────────
+
+-- TC:discuss ── право `Document.Discuss` усім ролям, що мають `Document.View` (чат таблиці, рішення людини 29.10) ──
+-- ⛔ ОДНОРАЗОВО, а не MERGE на кожен старт: адміністратор вправі зняти право з ролі, і повторний сід не повинен
+-- його повертати. Позначка виконання — подія безпеки `RolePermissionsGranted` з `"source":"seed TC:discuss"`; є подія —
+-- секція нічого не робить. Роль, створена ПІСЛЯ першого сіду, права не отримує (адміністратор видає свідомо).
+-- `SystemAdministrator` отримав обидва права шаблоном `%` ще в блоці роздач вище (право не небезпечне).
+IF NOT EXISTS (SELECT 1 FROM aud.SecurityEvent
+               WHERE EventType = N'RolePermissionsGranted' AND DetailsJson LIKE N'%"source":"seed TC:discuss"%')
+   AND EXISTS (SELECT 1 FROM sec.Permission WHERE Code = N'Document.Discuss')
+BEGIN
+    DECLARE @tcGranted TABLE (RoleId int NOT NULL);
+
+    INSERT INTO sec.RolePermission (RoleId, PermissionCode)
+    OUTPUT inserted.RoleId INTO @tcGranted (RoleId)
+    SELECT v.RoleId, N'Document.Discuss'
+    FROM sec.RolePermission AS v
+    WHERE v.PermissionCode = N'Document.View'
+      AND NOT EXISTS (SELECT 1 FROM sec.RolePermission AS d
+                      WHERE d.RoleId = v.RoleId AND d.PermissionCode = N'Document.Discuss');
+
+    INSERT INTO aud.SecurityEvent (ChangedAt, EventType, TargetUserId, TargetRoleId, DetailsJson, ChangedByUserId, CorrelationId)
+    SELECT SYSUTCDATETIME(), N'RolePermissionsGranted', NULL, g.RoleId,
+           CONCAT(N'{"permission":"Document.Discuss","source":"seed TC:discuss","roleId":', g.RoleId, N'}'),
+           0, NULL
+    FROM @tcGranted AS g;
+
+    -- Хоч одна подія-позначка потрібна навіть коли нових пар не було (усі ролі вже мали право): без неї секція
+    -- повторювалась би на кожному старті.
+    IF NOT EXISTS (SELECT 1 FROM @tcGranted)
+        INSERT INTO aud.SecurityEvent (ChangedAt, EventType, TargetUserId, TargetRoleId, DetailsJson, ChangedByUserId, CorrelationId)
+        VALUES (SYSUTCDATETIME(), N'RolePermissionsGranted', NULL, NULL,
+                N'{"permission":"Document.Discuss","source":"seed TC:discuss","count":0}', 0, NULL);
+END
+GO
+-- TC:discuss ── кінець секції ──
