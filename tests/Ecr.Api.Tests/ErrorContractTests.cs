@@ -387,6 +387,56 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Журнал_аркуша_справжнім_HTTP_віддає_подію_читачу_документа_і_ховає_від_решти()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        var (strangerName, documentA, sheetA) = await ArrangeAsync().ConfigureAwait(true);
+        var author = await SubmitAsNewSubmitterAsync(app, client, documentA, sheetA).ConfigureAwait(true);
+
+        // Читач документа A: подія подання з іменем, без прихованих полів правки.
+        var own = new Uri($"/api/v1/documents/{documentA}/sheets/{sheetA}/activity?periodKey=202601", UriKind.Relative);
+        var ok = await client.GetAsync(own).ConfigureAwait(true);
+        Assert.True(ok.IsSuccessStatusCode, $"{ok.StatusCode}: {app.ErrorsText}");
+        var page = JsonDocument.Parse(await ok.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        var item = Assert.Single(page.GetProperty("items").EnumerateArray());
+        Assert.Equal("Workflow", item.GetProperty("kind").GetString());
+        Assert.Equal("Submit", item.GetProperty("action").GetString());
+        Assert.Equal(author, item.GetProperty("byDisplayName").GetString());
+
+        // Document.View, але лише в проєкті ІНШОГО документа: журнал документа A - як неіснуючий документ.
+        var (_, documentB, sheetB) = await ArrangeAsync().ConfigureAwait(true);
+        await SubmitAsNewSubmitterAsync(app, client, documentB, sheetB).ConfigureAwait(true);
+        var foreign = await client.GetAsync(own).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+
+        // Власний документ B цього користувача читається; аркуш, якого немає, - 404; сторінка поза межами - 422.
+        var mine = await client.GetAsync(new Uri(
+            $"/api/v1/documents/{documentB}/sheets/{sheetB}/activity?periodKey=202601", UriKind.Relative)).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, mine.StatusCode);
+        var noSheet = await client.GetAsync(new Uri(
+            $"/api/v1/documents/{documentB}/sheets/99999999/activity?periodKey=202601", UriKind.Relative)).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, noSheet.StatusCode);
+        var tooBig = await client.GetAsync(new Uri(
+            $"/api/v1/documents/{documentB}/sheets/{sheetB}/activity?periodKey=202601&limit=101", UriKind.Relative)).ConfigureAwait(true);
+        Assert.Equal((HttpStatusCode)422, tooBig.StatusCode);
+
+        // Користувач без права Document.View: 403 з назвою права - ТА САМА відповідь, що в `workflow/history`.
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = strangerName, password = LoginPassword }).ConfigureAwait(true);
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+        var none = await client.GetAsync(own).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, none.StatusCode);
+        var denied = await client.GetAsync(new Uri(
+            $"/api/v1/documents/{documentA}/workflow/history?periodKey=202601", UriKind.Relative)).ConfigureAwait(true);
+        Assert.Equal(denied.StatusCode, none.StatusCode);
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "BE-11")]
