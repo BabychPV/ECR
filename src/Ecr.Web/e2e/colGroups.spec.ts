@@ -124,7 +124,7 @@ test.describe('Групові заголовки колонок (ui-colgroups)',
       const info = await page.evaluate(() => {
         const grid = document.querySelector('revo-grid');
         if (grid === null) return null;
-        // Блок груп — один ow (1), розпірки .header-rgRow.group приховано, рядок колонок — після рівнів груп (4).
+        // Group block is ONE row (1); the empty .header-rgRow.group spacers are hidden; the column row follows the group levels (4).
         const rows = Array.from(grid.querySelectorAll('revogr-header .group-rgRow, revogr-header .actual-rgRow')).map((row) => row.getAttribute('aria-rowindex'));
         const emissions = Array.from(grid.querySelectorAll('revogr-header .rgHeaderCell.ecr-hg-grp')).find(
           (cell) => (cell.textContent ?? '').trim() === 'Emissions',
