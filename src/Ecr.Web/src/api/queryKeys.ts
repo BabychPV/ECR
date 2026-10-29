@@ -295,6 +295,26 @@ const projects = {
 };
 
 /**
+ * Domain `tableChat` (TC, table discussion). The message window itself is NOT a query (it is a polled window with
+ * older pages; see `features/tableChat/useChatWindow.ts`); queries are the per-document summary, the mention
+ * candidates and the "mentions" block of My tasks.
+ */
+const tableChat = {
+  /** Prefix of the whole domain. */
+  all: () => ['tableChat'] as const,
+
+  /** `GET /documents/{id}/discussions/summary` — counters of every table the user sees. */
+  summary: (documentId: number) => ['tableChat', 'summary', documentId] as const,
+
+  /** `GET /me/table-discussion-mentions` — unread mentions for My tasks. */
+  mentions: () => ['tableChat', 'mentions'] as const,
+
+  /** `GET /documents/{id}/tables/{code}/mention-candidates?q=` — people who can see the table. */
+  candidates: (documentId: number, tableCode: string, periodKey: number, query: string) =>
+    ['tableChat', 'candidates', documentId, tableCode, periodKey, query] as const,
+};
+
+/**
  * Єдина точка правди для ключів TanStack Query.
  *
  * Охоплює домени, потрібні для першого зрізу навігаційної архітектури —
@@ -312,4 +332,5 @@ export const queryKeys = {
   editAssignments,
   document: documentKeys,
   projects,
+  tableChat,
 };

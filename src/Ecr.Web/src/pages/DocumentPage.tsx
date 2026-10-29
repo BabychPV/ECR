@@ -101,6 +101,11 @@ const DocumentInspector = lazy(async () => ({
   default: (await loadDocumentInspector()).DocumentInspector,
 }));
 
+/** ✎ TC: чат таблиці — кнопка «Discussion» і права панель; обидва в лінивому чанку (`D-132`), панель — у другому всередині. */
+const loadTableChat = () => import('@/features/tableChat/TableChatEntry');
+const TableChatButton = lazy(async () => ({ default: (await loadTableChat()).TableChatButton }));
+const TableChatHost = lazy(async () => ({ default: (await loadTableChat()).TableChatHost }));
+
 /**
  * Поле періоду в шапці — за `import()` (`D-132`): воно тягне `NumberInput`
  * (~8 КБ gzip), а маршрут стояв на 246 із 250.
@@ -835,6 +840,11 @@ export function DocumentPage(): JSX.Element {
           tables={tables.data ?? []}
           messages={shownValidation?.messages ?? null}
           validatedSeq={validatedSeq}
+          extraTriggers={
+            <Suspense fallback={null}>
+              <TableChatButton documentId={documentId} />
+            </Suspense>
+          }
           onSelectFinding={(finding) => {
             // Знахідка шапки (`tableDefId` 0) веде до панелі шапки, а не в клітинку.
             if (isHeaderFinding(finding)) {
@@ -854,6 +864,15 @@ export function DocumentPage(): JSX.Element {
               module.requestCellNavigation(finding),
             );
           }}
+        />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <TableChatHost
+          documentId={documentId}
+          periodKey={periodKey}
+          tables={tables.data ?? []}
+          activeTables={active?.tables ?? []}
         />
       </Suspense>
 
