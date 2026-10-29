@@ -165,6 +165,11 @@ export function headerRowCountOf(groupLevels: number): number {
   return 1 + Math.max(0, Math.min(MaxHeaderGroupDepth, groupLevels));
 }
 
+/** Відступ мітки від країв видимої частини клітинки, px. */
+const LabelGap = 6;
+/** Мінімальна ширина видимої частини, з якої підпис ще показується, px. */
+const MinVisibleLabelWidth = 28;
+
 /**
  * «Липка» мітка групи: центрує підпис над ВИДИМОЮ частиною клітинки групи, а не над усією (група
  * ширша за вікно прокрутки не втрачає підпис, коли її перша колонка пішла за край). CSS `sticky`
@@ -188,20 +193,26 @@ export function attachStickyGroupLabels(grid: HTMLElement): () => void {
       if (cell === null) continue;
 
       const box = cell.getBoundingClientRect();
-      const mine = label.getBoundingClientRect();
-      // Природне (без зсуву) положення мітки: поточне мінус уже застосований зсув.
-      const applied = Number(label.dataset['hgShift'] ?? '0');
-      const naturalLeft = mine.left - applied;
-      const naturalRight = mine.right - applied;
       const visibleLeft = Math.max(box.left, viewport.left);
       const visibleRight = Math.min(box.right, viewport.right);
-      const wanted = (visibleLeft + visibleRight) / 2 - (naturalLeft + naturalRight) / 2;
+      // Мітка природно стоїть по центру клітинки (`margin: 0 auto`), тож відлік — від центру клітинки.
+      // `scrollWidth` — повна ширина тексту незалежно від поточного `max-width`.
+      const full = label.scrollWidth;
+      const available = Math.max(0, Math.min(visibleRight - visibleLeft, box.width) - 2 * LabelGap);
+      // Видима частина вужча за мінімум — підпис ховається (не показуємо обрізок «eb»); інакше ужимається з «…».
+      const hidden = available < MinVisibleLabelWidth;
+      const width = Math.min(full, available);
+      const maxWidth = hidden || width >= full ? '' : `${Math.floor(width)}px`;
+      const wanted = (visibleLeft + visibleRight) / 2 - (box.left + box.right) / 2;
       // Мітка не виходить за клітинку групи.
-      const shift = Math.round(Math.max(box.left - naturalLeft, Math.min(box.right - naturalRight, wanted)));
+      const room = Math.max(0, (box.width - Math.min(full, width)) / 2);
+      const shift = Math.round(Math.max(-room, Math.min(room, wanted)));
       const value = shift === 0 ? '' : `translateX(${shift}px)`;
 
       if (label.style.transform !== value) label.style.transform = value;
-      label.dataset['hgShift'] = String(shift);
+      if (label.style.maxWidth !== maxWidth) label.style.maxWidth = maxWidth;
+      const visibility = hidden ? 'hidden' : '';
+      if (label.style.visibility !== visibility) label.style.visibility = visibility;
     }
   };
 
@@ -218,12 +229,19 @@ export function attachStickyGroupLabels(grid: HTMLElement): () => void {
     scroller?.addEventListener('scroll', schedule, { passive: true });
   };
 
-  const observer = new MutationObserver(() => {
+  // RevoGrid зсуває шапку ПІСЛЯ події scroll (трансформація стилем), тож слухаємо ще й `style`;
+  // власні правки міток (`transform`, `max-width`, `visibility`) ігноруємо, щоб не зациклитись.
+  const observer = new MutationObserver((records) => {
+    const foreign = records.some(
+      (record) => record.type === 'childList' || !(record.target instanceof HTMLElement && record.target.classList.contains(HeaderGroupLabelClass)),
+    );
+
+    if (!foreign) return;
     bind();
     schedule();
   });
 
-  observer.observe(grid, { childList: true, subtree: true });
+  observer.observe(grid, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
   window.addEventListener('resize', schedule);
   bind();
   schedule();
