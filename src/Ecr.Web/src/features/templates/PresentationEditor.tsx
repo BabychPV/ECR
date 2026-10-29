@@ -1,9 +1,11 @@
 import { useState, type JSX } from 'react';
-import { Button, Group, Modal, NumberInput, Switch, TextInput } from '@mantine/core';
+import { Button, Group, Modal, NumberInput, Select, Switch, TextInput } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import type { PresentationRevisionResponse, TemplateColumnDto } from '@/api/types';
+import type { PresentationRevisionResponse, TemplateColumnDto, TemplateHeaderGroupDto } from '@/api/types';
+import { localized } from '@/shared/i18n/localized';
+import { draftsOf, flatten } from './headerGroupTree';
 import { LocalizedInput, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
@@ -35,10 +37,13 @@ interface PresentationChange {
 export function PresentationEditor({
   templateVersionId,
   column,
+  headerGroups,
   onClose,
 }: {
   templateVersionId: number;
   column: TemplateColumnDto | null;
+  /** Групи таблиці колонки (для вибору групи заголовка). */
+  headerGroups?: readonly TemplateHeaderGroupDto[] | undefined;
   onClose: () => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
@@ -49,6 +54,8 @@ export function PresentationEditor({
   const [hidden, setHidden] = useState(false);
   // D-234: типова ширина, px; '' — типова за типом даних.
   const [width, setWidth] = useState<number | ''>('');
+  // Групи заголовків: id групи колонки; `''` — без групи.
+  const [groupId, setGroupId] = useState('');
   const [loadedFor, setLoadedFor] = useState<number | null>(null);
 
   // ⚠ Стан наповнюється при зміні колонки, а не в `useEffect`: ефект тут дав
@@ -60,6 +67,7 @@ export function PresentationEditor({
     setOrdinal(column.ordinal);
     setHidden(column.isHidden);
     setWidth(column.widthPx ?? '');
+    setGroupId(column.headerGroupId == null ? '' : String(column.headerGroupId));
   }
 
   /**
@@ -122,10 +130,18 @@ export function PresentationEditor({
       result.push({ ...entity, field: 'WidthPx', value: width === '' ? null : String(width) });
     }
 
+    if (groupId !== (column.headerGroupId == null ? '' : String(column.headerGroupId))) {
+      result.push({ ...entity, field: 'HeaderGroupId', value: groupId === '' ? null : groupId });
+    }
+
     return result;
   };
 
   const pending = changes();
+  const groupOptions = flatten(draftsOf(headerGroups)).map(({ group, depth }) => ({
+    value: String(headerGroups?.find((item) => item.code === group.code)?.id ?? ''),
+    label: `${'— '.repeat(depth - 1)}${localized({ values: group.label }) || group.code}`,
+  }));
 
   return (
     <Modal
@@ -167,6 +183,20 @@ export function PresentationEditor({
         value={width}
         onChange={(value) => setWidth(typeof value === 'number' ? value : '')}
       />
+
+      {groupOptions.length > 0 && (
+        <Select
+          mt="sm"
+          label={t('colgroups.field')}
+          description={t('colgroups.fieldHint')}
+          placeholder={t('colgroups.none')}
+          clearable
+          allowDeselect
+          data={groupOptions}
+          value={groupId === '' ? null : groupId}
+          onChange={(value) => setGroupId(value ?? '')}
+        />
+      )}
 
       <Switch
         mt="sm"

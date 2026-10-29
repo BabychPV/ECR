@@ -1385,10 +1385,6 @@ public sealed partial class EndpointCoverageTests
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/methodologies`.
         "PUT /api/v1/methodologies/{p}/row-activity-filter",
 
-        // COLGROUPS (групи заголовків колонок): сервер і контракт першими; споживач — редактор шаблону в
-        // `features/templates` (UI-сесія, друга фаза). ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик.
-        "PUT /api/v1/template-versions/{p}/tables/{p}/header-groups",
-
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було
         // НЕПРАВДОЮ: жодне місце клієнта нічого не конвертувало.

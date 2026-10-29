@@ -782,3 +782,5 @@ export type EffectiveAccessView = Schemas['EffectiveAccessView'];
 
 /** Один внесок у підсумковий рівень доступу: роль, призначення, область, заборона. */
 export type EffectiveAccessContribution = Schemas['EffectiveAccessContribution'];
+
+export type TemplateHeaderGroupDto = Schemas['TemplateHeaderGroupDto'];
