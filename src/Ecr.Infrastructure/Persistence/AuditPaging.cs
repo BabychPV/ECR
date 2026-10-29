@@ -148,6 +148,68 @@ internal static class AuditPaging
             : $"{alias}.{at}{dir}, {alias}.{id}{dir}";
     }
 
+    /// <summary>
+    /// Підказка запиту сторінки: для порядків «за користувачем» — `OPTION (RECOMPILE)`.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ З параметричним `TOP (@take)` рушій не вбачає Top-N сортування й сортує вікно повністю: виміряно ~14,7 с CPU
+    /// на 3 млн рядків проти ~1,4 с з літералом `TOP (101)`. `RECOMPILE` вбудовує значення `@take` у план. Для порядків
+    /// «за часом» (seek по кластерному ключу) підказка не потрібна, і вони лишаються з кешованим планом.
+    /// </remarks>
+    internal static string Hint(string outerOrder)
+        => outerOrder.Contains("DisplayName", StringComparison.Ordinal) ? "\n OPTION (RECOMPILE)" : string.Empty;
+
+    /// <summary>
+    /// Текст `SELECT TOP (@take)` сторінки над таблицею журналу.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ «За часом» — звичайний `TOP` по кластерному ключу (як і було). «За користувачем» сортує ВІКНО, і сортувати
+    /// широкі рядки (значення до 1000 знаків, JSON) дорого — виміряно ~20 с CPU на 3 млн рядків проти ~1,4 с для
+    /// вузького ключа. Тому внутрішній `TOP` сортує лише ключ `(момент, Id)`, а колонки добираються приєднанням
+    /// по первинному ключу — тільки для `@take` рядків.
+    /// </remarks>
+    internal static string TopPage(
+        string columns, string table, string where, string order,
+        string at = "ChangedAt", string id = "Id", string userColumn = "ChangedByUserId")
+    {
+        var name = NameExpr(userColumn);
+        if (!order.Contains(name, StringComparison.Ordinal))
+        {
+            return $"SELECT TOP (@take) {columns}\n  FROM {table}\n WHERE {where}\n ORDER BY {order}";
+        }
+
+        // ⚠ Ім'я автора рахується ОДИН раз на рядок (CROSS APPLY), а не в кожному місці курсорного предиката: тричі
+        // обчислений скалярний підзапит на 3 млн рядків давав ~22 с CPU на глибокій сторінці.
+        return $"SELECT TOP (@take) {columns}\n"
+               + $"  FROM {table} AS t\n"
+               + $" INNER JOIN (SELECT TOP (@take) i.{at} AS KAt, i.{id} AS KId FROM {table} AS i\n"
+               + $"             CROSS APPLY (SELECT ISNULL(MAX(usr.DisplayName), N'') AS SortName FROM sec.[User] AS usr WHERE usr.Id = i.{userColumn}) AS nm\n"
+               + $"             WHERE {where.Replace(name, "nm.SortName", StringComparison.Ordinal)}\n"
+               + $"             ORDER BY {order.Replace(name, "nm.SortName", StringComparison.Ordinal)}) AS k ON t.{at} = k.KAt AND t.{id} = k.KId\n"
+               + $" ORDER BY {order}";
+    }
+    /// <summary>
+    /// Вікно запиту, стиснуте позицією курсора (лише порядки «за часом»).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Дві нижні (чи верхні) межі в одному WHERE — `ChangedAt &gt;= @from AND ChangedAt &gt;= @afterAt` — рушій не
+    /// зводить в одну: seek іде за першою, друга стає залишковим предикатом, і глибока сторінка читала весь журнал від
+    /// початку вікна до курсора (виміряно: 17 тис. читань сторінок проти 37 на 3 млн рядків). Тому вікно СТИСКАЄТЬСЯ в
+    /// параметрах: у зростанні нижня межа — не раніше за курсор, у спаданні верхня — не пізніше за момент курсора
+    /// (+1 мс, бо верхня межа виключна, а курсорний предикат `&lt;=`). Рядки поза стисненим вікном курсор і так відсікав би.
+    /// </remarks>
+    internal static (DateTime From, DateTime To) Window(AuditSort sort, DateTime from, DateTime to, AuditPosition? after)
+    {
+        if (after is not { } position || ByUser(sort))
+        {
+            return (from, to);
+        }
+
+        return Descending(sort)
+            ? (from, position.At.AddMilliseconds(1) < to ? position.At.AddMilliseconds(1) : to)
+            : (position.At > from ? position.At : from, to);
+    }
+
     /// <summary>Складає WHERE з вікна й курсорного предиката.</summary>
     internal static void AppendKeyset(
         StringBuilder where, AuditSort sort, AuditPosition? after, SqlCommand command,
