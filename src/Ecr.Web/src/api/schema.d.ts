@@ -5266,6 +5266,8 @@ export interface paths {
                     periodKey?: number;
                     /** @description Лише дії цього користувача (`UserId`); без нього - усі. */
                     author?: number;
+                    /** @description Додати системні зміни значень (перерахунок, інтеграція, міграція); типово - лише дії людей. */
+                    includeSystem?: boolean;
                     /** @description Розмір сторінки; `0` - 50. */
                     limit?: number;
                     /** @description Курсор наступної сторінки. */
