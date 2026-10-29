@@ -4360,6 +4360,10 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/audit/structure` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/audit/structure/export.csv` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/audit/security` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/cells/export.csv` | `Security.ViewAudit` (історія однієї комірки — `Document.View`) | 7 |
+| `GET` | `/api/v1/audit/security/export.csv` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/workflow` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/workflow/export.csv` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/consistency/issues` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/consistency/summary` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/consistency/run` | `System.RunJob` | 5 |
