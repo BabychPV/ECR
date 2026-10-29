@@ -1,6 +1,8 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { isPeriodOutsideProject, nearestPeriod } from '@/features/documents/periodBounds';
+import { formatPeriodKey } from '@/shared/format';
 import { isHeaderFinding } from '@/features/documents/inspector/headerFinding';
-import { Alert, Skeleton, Stack, Tabs, Text } from '@mantine/core';
+import { Alert, Button, Group, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -478,7 +480,23 @@ export function DocumentPage(): JSX.Element {
    * Доки відповіді немає — причини немає: закрити дії через невідомість
    * означало б сховати їх на кожному відкритті на час запиту.
    */
-  const projectId = summary.data?.projectId ?? null;
+  // ⛔ PERIODNAV: період поза проєктом (`ECR-PRD-0422`) лишає екран без `summary`, а отже без проєкту й
+  // календаря - тупик. Проєкт беремо з картки БЕЗ періоду (`periodKey` необов'язковий), а на час перемикання
+  // періоду тримаємо останній відомий (інакше календар зникає на кожному кроці).
+  // ⚠ Сервер відхиляє період там, де вперше перевіряє його (`…/tables`, інколи й картка); `summary` при цьому може
+  // бути вже прочитаним - тоді проєкт відомий і без запиту нижче.
+  const periodRejected =
+    (summary.data === undefined && isPeriodOutsideProject(summary.error)) ||
+    (tables.data === undefined && isPeriodOutsideProject(tables.error));
+  const baseSummary = useQuery({
+    queryKey: ['document', documentId, 'base'],
+    queryFn: () => apiFetch<DocumentSummary>(`/api/v1/documents/${documentId}`),
+    enabled: periodRejected && summary.data === undefined,
+  });
+  const knownProject = useRef<{ documentId: number; projectId: number } | null>(null);
+  const loadedProjectId = summary.data?.projectId ?? baseSummary.data?.projectId;
+  if (loadedProjectId !== undefined) knownProject.current = { documentId, projectId: loadedProjectId };
+  const projectId = knownProject.current?.documentId === documentId ? knownProject.current.projectId : null;
 
   const projects = useQuery({
     queryKey: queryKeys.projects.all(),
@@ -495,6 +513,60 @@ export function DocumentPage(): JSX.Element {
   });
 
   useProjectCurrentPeriodDefault(urlPeriod, calendar.data?.periods, setPeriodKey);
+
+  // PERIODNAV: допустимі періоди проєкту (за зростанням) - стрілки й сітка не виходять за них.
+  const projectPeriods = useMemo(
+    () => calendar.data?.periods?.map((period) => period.periodKey).sort((a, b) => a - b),
+    [calendar.data],
+  );
+  const lastValidPeriod = projectPeriods?.[projectPeriods.length - 1] ?? null;
+  const nearestValid =
+    periodRejected && projectPeriods !== undefined && !projectPeriods.includes(periodKey)
+      ? nearestPeriod(projectPeriods, periodKey)
+      : null;
+
+  // Адреса з періодом поза проєктом (сервер його відхилив) сама веде на найближчий допустимий; кнопка в стані
+  // помилки нижче - запасний шлях, якщо календар не завантажився.
+  useEffect(() => {
+    if (nearestValid !== null) setPeriodKey(nearestValid);
+  }, [nearestValid, setPeriodKey]);
+
+  // PERIODNAV: перемикання періоду міняє ключі запитів, і сторінка на мить стає скелетом (нижчим за документ) -
+  // браузер притискає прокрутку, а ефекти монтування (фокус заголовка, вкладка аркуша) її зсувають. Пам'ятаємо
+  // позицію на момент зміни періоду й повертаємо, щойно документ знову намальовано.
+  const scrollAtSwitch = useRef<{ periodKey: number; y: number } | null>(null);
+  const seenPeriod = useRef(periodKey);
+  if (seenPeriod.current !== periodKey) {
+    seenPeriod.current = periodKey;
+    scrollAtSwitch.current = { periodKey, y: window.scrollY };
+  }
+  const periodSettled = summary.data !== undefined && tables.data !== undefined;
+  useLayoutEffect(() => {
+    const saved = scrollAtSwitch.current;
+    if (saved === null || saved.periodKey !== periodKey || !periodSettled) return;
+    scrollAtSwitch.current = null;
+    window.scrollTo({ top: saved.y });
+
+    // Висота документа добирається ще кілька кадрів (слоти таблиць, смуга аркушів): повторюємо, доки людина
+    // сама не прокрутила (колесо, дотик, клавіша, клік) - її рух важливіший за збережену позицію.
+    let frames = 0;
+    let frame = 0;
+    const userScroll = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+    const stop = (): void => {
+      window.cancelAnimationFrame(frame);
+      for (const type of userScroll) window.removeEventListener(type, stop);
+    };
+    for (const type of userScroll) window.addEventListener(type, stop, { passive: true, once: true });
+    const retry = (): void => {
+      if (Math.abs(window.scrollY - saved.y) > 1) window.scrollTo({ top: saved.y });
+      frames += 1;
+      if (frames < 40) frame = window.requestAnimationFrame(retry);
+      else stop();
+    };
+    frame = window.requestAnimationFrame(retry);
+
+    return stop;
+  }, [periodKey, periodSettled]);
 
   // ⛔ D1-02: дата чинності довідників у сітці — календарний кінець періоду ІЗ СЕРВЕРА.
   // `periodKey` для квартальних/річних проєктів — не `YYYYMM`, тож виводити дату з нього не можна.
@@ -594,7 +666,25 @@ export function DocumentPage(): JSX.Element {
     void tables.refetch();
   };
 
-  return (
+  // PERIODNAV: період поза проєктом - не глухий кут: повідомлення сервера лишається, а поруч - перехід до
+  // найближчого допустимого періоду й вибір періоду (лише з переліку проєкту).
+  const recoveryTarget = nearestValid ?? lastValidPeriod;
+  const recovery =
+    periodRejected && projectPeriods !== undefined && recoveryTarget !== null ? (
+      <Stack data-testid="period-recovery">
+        <ErrorAlert error={summary.error ?? tables.error} onRetry={refetchBoth} />
+        <Group align="flex-end">
+          <Button onClick={() => setPeriodKey(recoveryTarget)} data-testid="period-recovery-go">
+            {t('document.periodGoTo', { period: formatPeriodKey(recoveryTarget) })}
+          </Button>
+          <Suspense fallback={<Skeleton h={52} w={190} />}>
+            <PeriodPicker size="xs" miw={110} value={periodKey} periods={projectPeriods} onChange={(value) => setPeriodKey(value ?? periodKey)} />
+          </Suspense>
+        </Group>
+      </Stack>
+    ) : null;
+
+  return recovery ?? (
     /*
      * ⛔ Обгортка навколо ВСЬОГО екрана: заголовок — це бізнес-ключ документа,
      * тобто теж дані. Помилки обох запитів зведені разом, бо екран без
@@ -648,6 +738,7 @@ export function DocumentPage(): JSX.Element {
               size="xs"
               miw={110}
               value={periodKey}
+              periods={projectPeriods}
               onChange={(value) => setPeriodKey(value ?? periodKey)}
             />
           </Suspense>
