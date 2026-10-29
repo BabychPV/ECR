@@ -196,6 +196,79 @@ describe('AN-108 / P2-02: перерахунок, що нічого не зап�
     await vi.waitFor(() => expect(stale(some, other)).toBe(true));
   });
 
+  // L3: задача формул одна на документ і пише в кілька періодів.
+  // ⛔ Мутаційний доказ: поверни `[periodKey]` замість `writtenPeriods` - тести 1 і 2 червоніють.
+  describe('L3: writtenPeriods', () => {
+    const p1 = queryKeys.slices.one(910, 202609);
+    const p2 = queryKeys.slices.one(911, 202610);
+    const p3 = queryKeys.slices.one(912, 202611);
+
+    /** Які зрізи охоплює ПЕРШИЙ (перезапитувальний) виклик інвалідації - синхронно, без гонки з другим проходом. */
+    function firstPassScope(client: QueryClient, run: () => void): Set<readonly unknown[]> {
+      const spy = vi.spyOn(client, 'invalidateQueries');
+      run();
+      const first = spy.mock.calls[0]?.[0] as { predicate?: (q: unknown) => boolean } | undefined;
+      const hit = new Set<readonly unknown[]>();
+      for (const key of [p1, p2, p3]) {
+        const query = client.getQueryCache().find({ queryKey: key });
+        if (first?.predicate?.(query) === true) hit.add(key);
+      }
+      return hit;
+    }
+
+    function clientWithPeriods(): QueryClient {
+      const client = new QueryClient();
+      for (const key of [p1, p2, p3]) client.setQueryData(key, { rows: [] });
+      return client;
+    }
+
+    it('записано в двох періодах - обидва перечитуються, третій і період правки без записів - ні', () => {
+      const client = clientWithPeriods();
+      const hit = firstPassScope(client, () => {
+        settleRecalculation(client, 'multi#1', 7, 202611, 5, [202609, 202610]);
+      });
+      expect(hit.has(p1)).toBe(true);
+      expect(hit.has(p2)).toBe(true);
+      expect(hit.has(p3)).toBe(false);
+    });
+
+    it('період правки теж у списку - перечитується разом з іншими', () => {
+      const client = clientWithPeriods();
+      const hit = firstPassScope(client, () => {
+        settleRecalculation(client, 'multi#2', 7, 202611, 3, [202610, 202611]);
+      });
+      expect([...hit]).toEqual([p2, p3]);
+    });
+
+    it('невідомо (undefined, null, порожньо) - перечитується лише період правки, як раніше', () => {
+      for (const [i, periods] of [undefined, null, []].entries()) {
+        const client = clientWithPeriods();
+        const hit = firstPassScope(client, () => {
+          settleRecalculation(client, `unknown-periods#${String(i)}`, 7, 202610, 2, periods);
+        });
+        expect([...hit]).toEqual([p2]);
+      }
+    });
+
+    it('writtenCount = 0 - нічого не перечитується, навіть якщо періоди передано', () => {
+      const client = clientWithPeriods();
+      const spy = vi.spyOn(client, 'invalidateQueries');
+      settleRecalculation(client, 'zero-periods#1', 7, 202610, 0, [202609]);
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('є старіша невраховане задача того ж періоду правки - період правки перечитується попри список', () => {
+      vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)));
+      const client = clientWithPeriods();
+      followRecalculation(client, 'older#1', 7, 202611);
+      followRecalculation(client, 'older#2', 7, 202611);
+      const hit = firstPassScope(client, () => {
+        settleRecalculation(client, 'older#2', 7, 202611, 4, [202609]);
+      });
+      expect([...hit]).toEqual([p1, p3]);
+    });
+  });
+
   it('слідкувач: задача завершилась з writtenCount = 0 — нуль запитів зрізів, зріз не застарів', async () => {
     vi.useFakeTimers();
     const slices = stubSucceeded(0);

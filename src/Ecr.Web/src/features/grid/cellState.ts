@@ -140,6 +140,27 @@ export function rowsLockedBySheet(sheetState: string | undefined): boolean {
   return sheetState === 'Submitted' || sheetState === 'Approved';
 }
 
+/**
+ * AN-142 (Q-17): сітку ПОДАНОГО аркуша не замикають цілком, коли сервер сам віддав у зрізі бодай одну
+ * редаговну комірку - текст якоря року (`Collection:MonthColumnRouting`) править і поданий аркуш, а решту
+ * (числа, ключ, Lookup) сервер відмовляє `DocumentSubmitted` по комірці.
+ *
+ * ⚠ Клієнт нічого не вгадує: рішення - лише `slice.cellPermissions` (`decide`). Поданий аркуш без жодної
+ * редаговної комірки (звичайний випадок) лишається повністю «лише читання», як доти. `Approved` і чернетка
+ * сюди не входять: перший замкнений, другий і так не `readOnly`.
+ */
+export function gridReadOnlyFor(pageReadOnly: boolean, sheetState: string | undefined, slice: TableSliceDto | undefined): boolean {
+  if (!pageReadOnly || sheetState !== 'Submitted' || slice === undefined) return pageReadOnly;
+
+  for (const column of slice.columns) {
+    for (const row of slice.rows) {
+      if (decide(slice, row.rowKey, column).editable) return false;
+    }
+  }
+
+  return true;
+}
+
 /** `readOnly` → `read-only`; решта імен уже в потрібному вигляді. */
 function kebab(state: CellStateName): string {
   return state.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);

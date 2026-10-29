@@ -49,7 +49,22 @@ const CalcLagMs = 1_500;
 let calcJobSeq = 0;
 let calcJobDoneAt = 0;
 
-const calcEnabled = (): boolean => new URLSearchParams(window.location.search).get('calc') === '1';
+// L3: `?calc=periods` - задача формул документа повідомляє записані періоди (період правки серед них);
+// `?calc=other` - записано лише в ІНШИЙ період (202610): зріз періоду правки перечитувати не треба.
+const calcMode = (): string | null => new URLSearchParams(window.location.search).get('calc');
+const calcEnabled = (): boolean => ['1', 'periods', 'other'].includes(calcMode() ?? '');
+const OtherPeriodKey = 202_610;
+
+function finishedJobStatus(): Record<string, unknown> {
+  switch (calcMode()) {
+    case 'periods':
+      return { state: 'Succeeded', writtenCount: 3, writtenPeriods: [StandPeriodKey, OtherPeriodKey] };
+    case 'other':
+      return { state: 'Succeeded', writtenCount: 1, writtenPeriods: [OtherPeriodKey] };
+    default:
+      return { state: 'Succeeded' };
+  }
+}
 
 function finishCalcJob(): void {
   for (const [rowKey, cells] of stored) {
@@ -191,7 +206,7 @@ function installStandServer(): void {
     }
     // ⚠ Без літерала адреси: сторож `EndpointCoverageTests` звіряє кожен шлях клієнта з сервером.
     if (/\/StandRecalcJob(%23|#)\d+$/.test(path)) {
-      return json({ state: Date.now() >= calcJobDoneAt ? 'Succeeded' : 'Running' });
+      return json(Date.now() >= calcJobDoneAt ? finishedJobStatus() : { state: 'Running' });
     }
     if (path === `/api/v1/documents/${StandDocumentId}/tables/${StandTableInstanceId}`) return json(slice());
     // ⛔ `/me/preferences` теж свій: у e2e-стенді зі справжнім API сторінка поза сесією отримувала 401 →

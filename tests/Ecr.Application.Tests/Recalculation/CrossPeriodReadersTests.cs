@@ -125,6 +125,143 @@ public sealed class CrossPeriodReadersTests
         Assert.Empty(targets);
     }
 
+    // ── L1: вузький набір читачів — HasTargets ────────────────────────────
+
+    private const int Other = 200;
+    private static readonly IReadOnlySet<int> Present = new HashSet<int> { WaterReport };
+    private static readonly IReadOnlyDictionary<int, int> Live = new Dictionary<int, int> { [10] = WaterReport, [20] = WaterReport };
+
+    private static bool Has(
+        FormulaDependency[] deps, CrossPeriodSource source, int reader,
+        IReadOnlyDictionary<int, int>? live = null, IReadOnlySet<int>? present = null)
+        => CrossPeriodReaders.HasTargets(deps, [source], reader, live ?? Live, present ?? Present);
+
+    [Theory]
+    [InlineData(4, true)]    // [Period:-1]: джерело 3 ⇒ читач рівно 4
+    [InlineData(5, false)]
+    [InlineData(2, false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "L1")]
+    public void L1_відносне_ребро_точне(int reader, bool expected)
+        => Assert.Equal(expected, Has([Edge(10, CrossPeriod, -1)], new(3, WaterReport, March), reader));
+
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(12, true)]
+    [InlineData(3, false)]   // власний період посилання — веде план
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "L1")]
+    public void L1_абсолютне_ребро_усі_крім_власного_періоду(int reader, bool expected)
+        => Assert.Equal(expected, Has([Edge(10, Absolute, 3)], new(3, WaterReport, March), reader));
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "L1")]
+    public void L1_абсолютне_ребро_таблиця_формули_без_екземпляра_або_мертва_формула_читача_не_дає()
+    {
+        var source = new CrossPeriodSource(3, WaterReport, March);
+
+        Assert.False(Has([Edge(10, Absolute, 3)], source, 5, present: new HashSet<int> { Other }));
+        Assert.False(Has([Edge(10, Absolute, 3)], source, 5, live: new Dictionary<int, int>()));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "L1")]
+    public void L1_ніхто_не_залежить_від_зміненої_колонки_читача_немає()
+    {
+        Assert.False(Has([Edge(10, Absolute, 3)], new(3, WaterReport, March + 1), 5));
+        Assert.False(Has([Edge(10, Absolute, 3)], new(3, Other, March), 5));
+        Assert.False(Has([], new(3, WaterReport, March), 5));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "L1")]
+    public void L1_залежність_від_усієї_таблиці_без_колонки_читач_лишається()
+    {
+        var wholeTable = FormulaDependency.ForFormula(10, Absolute, WaterReport, "R1", null, null, 3, 0);
+
+        Assert.True(Has([wholeTable], new(3, WaterReport, March), 5));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "L1")]
+    [Trait("Requirement", "Q-17")]
+    public void L1_маршрутизований_введений_стовпець_читач_лише_для_формули_що_читає_цю_колонку()
+    {
+        var owner = new CrossPeriodSource(11, WaterReport, March, OwnerInput: true);
+
+        Assert.True(Has([CellEdge(10)], owner, 5));
+        Assert.False(Has([CellEdge(10)], owner, 11));                                  // період каскаду
+        Assert.False(Has([CellEdge(10, column: March + 1)], owner, 5));                 // інший місяць
+        Assert.False(Has([CellEdge(10)], owner, 5, present: new HashSet<int> { Other })); // немає таблиці
+        Assert.False(Has([CellEdge(10)], new(11, WaterReport, March), 5));              // не OwnerInput
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "L1")]
+    public void L1_транзитивний_залежний_не_робить_читачем_без_прямої_цілі_але_лишається_у_Targets()
+    {
+        var plan = new RecalculationPlan();
+        plan.Declare(10, 1);
+        plan.Declare(20, 2);
+        plan.DependsOnFormula(20, 10);
+        var source = new CrossPeriodSource(3, WaterReport, March);
+
+        // 10 читає #3; 20 читає лише результат 10 ⇒ читач є, цілі [10, 20].
+        Assert.True(Has([Edge(10, Absolute, 3)], source, 5));
+        Assert.Equal([10, 20], CrossPeriodReaders.Targets([Edge(10, Absolute, 3)], [source], 5, plan, [10, 20]));
+
+        // Лише 20 «читає» колонку напряму, а 10 — ні: напряму ціль одна, 20.
+        Assert.True(Has([Edge(20, Absolute, 3)], source, 5));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "L1")]
+    public void L1_диференційно_HasTargets_хибно_лише_коли_Targets_порожні()
+    {
+        // Корпус: кожен період-читач 1..12 × набір ребер; HasTargets не має відсікати того, чий Targets не порожній.
+        FormulaDependency[][] corpora =
+        [
+            [Edge(10, Absolute, 3)],
+            [Edge(10, CrossPeriod, -1)],
+            [Edge(10, CrossPeriod, 2), Edge(20, Absolute, 7)],
+            [CellEdge(10)],
+            [Edge(10, Absolute, 3), CellEdge(20)],
+            [],
+        ];
+        CrossPeriodSource[][] sourceSets =
+        [
+            [new(3, WaterReport, March)],
+            [new(3, WaterReport, March), new(7, WaterReport, March)],
+            [new(11, WaterReport, March, OwnerInput: true)],
+            [new(3, WaterReport, March), new(11, WaterReport, March, OwnerInput: true)],
+        ];
+
+        var plan = new RecalculationPlan();
+        plan.Declare(10, 1);
+        plan.Declare(20, 2);
+        plan.DependsOnFormula(20, 10);
+
+        foreach (var deps in corpora)
+        {
+            foreach (var sources in sourceSets)
+            {
+                for (var reader = 1; reader <= 12; reader++)
+                {
+                    var targets = CrossPeriodReaders.Targets(deps, sources, reader, plan, Live.Keys);
+                    var has = CrossPeriodReaders.HasTargets(deps, sources, reader, Live, Present);
+
+                    Assert.Equal(targets.Count > 0, has);
+                }
+            }
+        }
+    }
+
     // ── Q-17.4: введений стовпець власника читають усі екземпляри року ────
 
     private const byte Cell = 0;

@@ -101,12 +101,34 @@ function tablesInScope(client: QueryClient, scope: SliceScope): ReadonlySet<numb
  * виклик, і «перезапитати ці, але не ті» іншим способом не виражається.
  */
 export async function invalidateSlices(client: QueryClient, scope: SliceScope): Promise<void> {
-  const ids = tablesInScope(client, scope);
+  await invalidateScopes(client, [scope]);
+}
+
+/**
+ * L3: перерахунок документа пише в КІЛЬКА періодів (задача формул одна на документ) - усі вони в наміру одним
+ * проходом. ⚠ Не цикл по `invalidateSlices`: другий виклик позначав би зрізи першого періоду «застарілими без
+ * перезапиту» (вони поза ЙОГО наміром) і перетирав би щойно початий перезапит.
+ */
+export async function invalidateSlicesForPeriods(
+  client: QueryClient,
+  documentId: number,
+  periodKeys: readonly number[],
+): Promise<void> {
+  await invalidateScopes(
+    client,
+    [...new Set(periodKeys)].map((periodKey) => ({ documentId, periodKey })),
+  );
+}
+
+async function invalidateScopes(client: QueryClient, scopes: readonly SliceScope[]): Promise<void> {
+  const idsByPeriod = new Map<number, ReadonlySet<number> | null>();
+  for (const scope of scopes) idsByPeriod.set(scope.periodKey, tablesInScope(client, scope));
 
   const inScope = (query: Query): boolean => {
     const address = sliceAddressOf(query.queryKey);
     if (address === null) return false;
-    if (address.periodKey !== scope.periodKey) return false;
+    const ids = idsByPeriod.get(address.periodKey);
+    if (ids === undefined) return false;
 
     return ids === null || ids.has(address.tableInstanceId);
   };

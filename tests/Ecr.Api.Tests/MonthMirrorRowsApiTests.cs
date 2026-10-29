@@ -242,6 +242,187 @@ public sealed class MonthMirrorRowsApiTests(SqlServerFixture sql)
         Assert.True(failures.Count == 0, $"{20 - failures.Count}/20 пройшло. Збої:\n{string.Join("\n", failures)}\n{app.ErrorsText}");
     }
 
+    // ── AN-142 (амендує D-457): у поданому аркуші текст якоря править, числа/ключ/Lookup - ні ──
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-457")]
+    public async Task Подано_всі_місяці_текст_якоря_править_аудиться_без_перерахунку_і_числа_не_змінюються()
+    {
+        var s = await ArrangeAsync(instanceMonths: [1, 10], submitted: [.. Enumerable.Range(1, 12)]).ConfigureAwait(true);
+        await PutAsync(s, 202601, s.RowKey, "PLAIN", 77m).ConfigureAwait(true);
+        var (app, client) = await BootAsync(s, flag: true).ConfigureAwait(true);
+        using var _ = app;
+        using var __ = client;
+
+        var body = await ExpectAsync(app, HttpStatusCode.OK, PatchTextAsync(client, s, Oct, ("STR", "примітка"))).ConfigureAwait(true);
+
+        var root = JsonDocument.Parse(body).RootElement;
+        Assert.True(
+            !root.TryGetProperty("recalculationJobId", out var job) || job.ValueKind == JsonValueKind.Null,
+            $"перерахунок не мав стати в чергу: {body}");
+        Assert.Equal(["примітка"], await StoredStringsAsync(s, "STR").ConfigureAwait(true));
+        Assert.Equal(1, await AuditCountAsync(s, "STR").ConfigureAwait(true));
+        Assert.Equal(77m, await StoredNumberAsync(s, "PLAIN").ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-457")]
+    public async Task Чернетка_текст_якоря_ставить_перерахунок_як_і_до_зміни(bool flag)
+    {
+        var s = await ArrangeAsync(instanceMonths: [1, 10]).ConfigureAwait(true);
+        var (app, client) = await BootAsync(s, flag).ConfigureAwait(true);
+        using var _ = app;
+        using var __ = client;
+
+        var body = await ExpectAsync(app, HttpStatusCode.OK, PatchTextAsync(client, s, Oct, ("STR", "чернетка"))).ConfigureAwait(true);
+
+        var root = JsonDocument.Parse(body).RootElement;
+        Assert.True(
+            root.TryGetProperty("recalculationJobId", out var job) && job.ValueKind == JsonValueKind.String,
+            $"у чернетці перерахунок мав стати в чергу: {body}");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-457")]
+    public async Task Подано_всі_місяці_число_якоря_відхиляється_а_змішаний_батч_цілком()
+    {
+        var s = await ArrangeAsync(instanceMonths: [1, 10], submitted: [.. Enumerable.Range(1, 12)]).ConfigureAwait(true);
+        var (app, client) = await BootAsync(s, flag: true).ConfigureAwait(true);
+        using var _ = app;
+        using var __ = client;
+
+        var numeric = await ExpectAsync(app, HttpStatusCode.Forbidden, PatchAsync(client, s, Oct, s.RowKey, ("PLAIN", 4m))).ConfigureAwait(true);
+        Assert.Equal("DocumentSubmitted", ReasonOf(numeric));
+
+        var mixed = await ExpectAsync(
+            app, HttpStatusCode.Forbidden, PatchTextAsync(client, s, Oct, ("STR", "x"), ("PLAIN", "5"))).ConfigureAwait(true);
+        Assert.Equal("DocumentSubmitted", ReasonOf(mixed));
+        Assert.Empty(await StoredStringsAsync(s, "STR").ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData("key")]
+    [InlineData("lookup")]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-457")]
+    public async Task Подано_всі_місяці_ключ_і_Lookup_якоря_лишаються_замкненими(string kind)
+    {
+        var s = await ArrangeAsync(instanceMonths: [1, 10], submitted: [.. Enumerable.Range(1, 12)]).ConfigureAwait(true);
+        await using (var db = s.Builder.CreateContext())
+        {
+            var id = s.ColumnIds["STR"];
+            var query = db.ColumnDefs.Where(c => c.Id == id);
+            if (kind == "key")
+            {
+                await query.ExecuteUpdateAsync(u => u.SetProperty(c => c.IsBusinessKey, true)).ConfigureAwait(true);
+            }
+            else
+            {
+                var registry = new Ecr.Domain.Entities.Configuration.RegistryDef(
+                    EcrCode.Create($"R{Guid.NewGuid():N}"[..12]),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "AN-142 lookup" }),
+                    isTemporal: false);
+                db.Set<Ecr.Domain.Entities.Configuration.RegistryDef>().Add(registry);
+                await db.SaveChangesAsync().ConfigureAwait(true);
+                await query.ExecuteUpdateAsync(u => u
+                    .SetProperty(c => c.DataType, CellDataType.Lookup)
+                    .SetProperty(c => c.LookupRegistryDefId, registry.Id)).ConfigureAwait(true);
+            }
+        }
+
+        var (app, client) = await BootAsync(s, flag: true).ConfigureAwait(true);
+        using var _ = app;
+        using var __ = client;
+
+        var body = await ExpectAsync(app, HttpStatusCode.Forbidden, PatchTextAsync(client, s, Oct, ("STR", "x"))).ConfigureAwait(true);
+        Assert.Equal("DocumentSubmitted", ReasonOf(body));
+        Assert.Empty(await StoredStringsAsync(s, "STR").ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-457")]
+    public async Task Прапор_вимкнено_текст_у_поданому_аркуші_як_раніше_відхиляється()
+    {
+        var s = await ArrangeAsync(instanceMonths: [1, 10], submitted: [.. Enumerable.Range(1, 12)]).ConfigureAwait(true);
+        var (app, client) = await BootAsync(s, flag: false).ConfigureAwait(true);
+        using var _ = app;
+        using var __ = client;
+
+        var body = await ExpectAsync(app, HttpStatusCode.Forbidden, PatchTextAsync(client, s, Oct, ("STR", "x"))).ConfigureAwait(true);
+        Assert.Equal("DocumentSubmitted", ReasonOf(body));
+    }
+
+    private static async Task<HttpResponseMessage> PatchTextAsync(
+        HttpClient client, Scenario s, int period, params (string Alias, string Value)[] cells)
+    {
+        var instanceId = period == s.ViewPeriod ? s.Doc.TableInstanceId : s.Others[period].TableInstanceId;
+        using var read = await client.GetAsync(new Uri(
+            $"/api/v1/documents/{s.Doc.DocumentId}/tables/{instanceId}", UriKind.Relative)).ConfigureAwait(false);
+        var text = await read.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(read.IsSuccessStatusCode, $"GET зрізу: {read.StatusCode}\n{text}");
+        var version = JsonDocument.Parse(text).RootElement.GetProperty("rows").EnumerateArray()
+            .First(r => r.GetProperty("rowKey").GetString() == s.RowKey)
+            .GetProperty("rowVersion").GetString()!;
+
+        return await client.PatchAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.Doc.DocumentId}/cells", UriKind.Relative),
+            new
+            {
+                tableInstanceId = instanceId,
+                periodKey = period,
+                origin = "UserEdit",
+                rows = new[]
+                {
+                    new
+                    {
+                        rowKey = s.RowKey,
+                        baseVersion = version,
+                        cells = cells.Select(c => new { columnCode = s.ColumnCodes[c.Alias], value = (object)c.Value }).ToArray(),
+                    },
+                },
+            }).ConfigureAwait(false);
+    }
+
+    private static async Task<List<string>> StoredStringsAsync(Scenario s, string alias)
+    {
+        await using var db = s.Builder.CreateContext();
+        var columnId = s.ColumnIds[alias];
+        return await db.CellValues.AsNoTracking()
+            .Where(c => c.ColumnDefId == columnId && c.TableDefId == s.Doc.TableDefId && c.ValueString != null)
+            .Select(c => c.ValueString!).ToListAsync().ConfigureAwait(false);
+    }
+
+    private static async Task<decimal?> StoredNumberAsync(Scenario s, string alias)
+    {
+        await using var db = s.Builder.CreateContext();
+        var columnId = s.ColumnIds[alias];
+        return await db.CellValues.AsNoTracking()
+            .Where(c => c.ColumnDefId == columnId && c.TableDefId == s.Doc.TableDefId)
+            .Select(c => c.ValueNumeric).SingleAsync().ConfigureAwait(false);
+    }
+
+    private async Task<int> AuditCountAsync(Scenario s, string alias)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM aud.CellChange WHERE DocumentId = @doc AND ColumnDefId = @col";
+        command.Parameters.AddWithValue("@doc", s.Doc.DocumentId);
+        command.Parameters.AddWithValue("@col", s.ColumnIds[alias]);
+        return (int)(await command.ExecuteScalarAsync().ConfigureAwait(false))!;
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     private sealed record Scenario(

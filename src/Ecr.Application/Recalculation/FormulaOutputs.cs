@@ -31,6 +31,32 @@ public static class FormulaOutputs
         ArgumentNullException.ThrowIfNull(formula);
         ArgumentNullException.ThrowIfNull(table);
 
+        // ⚠ Ключ рядка формули потрібен лише не-колонковим областям; колонкова його не читає.
+        return Produces(
+            formula,
+            formula.Scope == FormulaScope.Column ? null : RowKeyOf(table, formula),
+            rowKey,
+            columnDefId);
+    }
+
+    /// <summary>
+    /// Те саме правило, але з УЖЕ відомим ключем рядка формули (<see cref="RowKeyOf"/>).
+    /// </summary>
+    /// <param name="formula">Формула-кандидат.</param>
+    /// <param name="formulaRowKey">
+    /// Ключ рядка самої формули (<see cref="RowKeyOf"/>); для колонкової області не читається.
+    /// </param>
+    /// <param name="rowKey">Рядок цілі; <c>null</c> — ціль не про рядок.</param>
+    /// <param name="columnDefId">Колонка цілі.</param>
+    /// <remarks>
+    /// ⛔ Єдине визначення правила: версія з таблицею лише обчислює <paramref name="formulaRowKey"/> і йде сюди.
+    /// Існує, бо <see cref="RowKeyOf"/> — лінійний пошук по рядках таблиці, і індекс формул версії
+    /// (<c>RecalculationPlanBuilder</c>) рахує його ОДИН раз на формулу, а не на кожну пару «залежність × формула».
+    /// </remarks>
+    public static bool Produces(FormulaDef formula, string? formulaRowKey, string? rowKey, int? columnDefId)
+    {
+        ArgumentNullException.ThrowIfNull(formula);
+
         // ⚠ Row-скоуп із ЯВНОЮ колонкою обчислює ОДНУ комірку, а не «весь
         // рядок» (аудит 2026-09-16, §1.3). До фіксу тут стояло виключення
         // `&& formula.Scope != FormulaScope.Row`, тобто `ColumnDefId` для
@@ -46,8 +72,8 @@ public static class FormulaOutputs
         return formula.Scope switch
         {
             FormulaScope.Column => formula.ColumnDefId == columnDefId,
-            FormulaScope.Row => RowKeyOf(table, formula) == rowKey,
-            _ => formula.ColumnDefId == columnDefId && RowKeyOf(table, formula) == rowKey,
+            FormulaScope.Row => formulaRowKey == rowKey,
+            _ => formula.ColumnDefId == columnDefId && formulaRowKey == rowKey,
         };
     }
 

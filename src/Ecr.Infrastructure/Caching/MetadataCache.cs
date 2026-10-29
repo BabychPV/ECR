@@ -130,6 +130,57 @@ public sealed class MetadataCache(
             .ConfigureAwait(false);
     }
 
+    /// <summary>Спільний «один політ на ключ» для похідних даних (різні типи → <c>object</c>; ключ містить вид).</summary>
+    private static readonly SingleFlight<object> DerivedFlight = new();
+
+    /// <inheritdoc />
+    public async Task<T> GetDerivedAsync<T>(
+        int templateVersionId, string kind, Func<CancellationToken, Task<T>> load, CancellationToken ct)
+        where T : class
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(kind);
+        ArgumentNullException.ThrowIfNull(load);
+
+        var state = await RevisionAsync(templateVersionId, ct).ConfigureAwait(false);
+        var key = $"d:{kind}:{CacheKey(templateVersionId, state.Revision)}";
+
+        if (memory.TryGetValue(key, out T? cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        var built = await DerivedFlight
+            .RunAsync(
+                key,
+                async token =>
+                {
+                    if (memory.TryGetValue(key, out T? ready) && ready is not null)
+                    {
+                        return ready;
+                    }
+
+                    // ⛔ Y6-01, та сама гонка, що й у `BuildAsync`: токен — ДО читання. Інвалідація, що прийшла, поки
+                    // ми читали, скасовує токен, і `Set` нижче нічого не кладе (значення все одно повертається цьому
+                    // викликачу — воно чесне на мить читання, як і знімок).
+                    var invalidation = InvalidationToken(templateVersionId);
+                    var value = await load(token).ConfigureAwait(false);
+
+                    var options = new MemoryCacheEntryOptions
+                    {
+                        Priority = CacheItemPriority.High,
+                        AbsoluteExpirationRelativeToNow = state.Frozen ? Lifetime : DraftLifetime,
+                    };
+                    options.AddExpirationToken(new CancellationChangeToken(invalidation));
+                    memory.Set(key, value, options);
+
+                    return value;
+                },
+                ct)
+            .ConfigureAwait(false);
+
+        return (T)built;
+    }
+
     /// <summary>Будує знімок і кладе його в кеш — усередині одного польоту.</summary>
     private async Task<TemplateVersionSnapshot> BuildAsync(
         int templateVersionId, VersionState state, string key, CancellationToken ct)

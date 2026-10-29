@@ -1,4 +1,4 @@
-using Ecr.Application.Calculations;
+﻿using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
@@ -195,8 +195,15 @@ public sealed partial class PatchCellsHandler(
             {
                 foreach (var group in groups)
                 {
+                    // AN-142: правка лише тексту якоря перерахунку не ставить.
+                    var groupSeeds = WithoutAnnualText(context, group.Seeds);
+                    if (groupSeeds.Count == 0)
+                    {
+                        continue;
+                    }
+
                     var id = await EnqueueRecalculationAsync(
-                            request, context.Instance.DocumentId, group.Seeds, context.UserId, token,
+                            request, context.Instance.DocumentId, groupSeeds, context.UserId, token,
                             group.TableInstanceId, group.PeriodKey)
                         .ConfigureAwait(false);
 
@@ -210,10 +217,17 @@ public sealed partial class PatchCellsHandler(
                 return;
             }
 
+            var seeds = WithoutAnnualText(
+                context, BuildRecalculationSeeds(applied, context.ApproverEdit ? context.Table.SheetDefId : null));
+            if (seeds.Count == 0)
+            {
+                return; // AN-142: лише текст якоря - задачі немає, recalculationJobId лишається null
+            }
+
             recalculationJobId = await EnqueueRecalculationAsync(
                     request,
                     context.Instance.DocumentId,
-                    BuildRecalculationSeeds(applied, context.ApproverEdit ? context.Table.SheetDefId : null),
+                    seeds,
                     context.UserId,
                     token)
                 .ConfigureAwait(false);
@@ -242,6 +256,12 @@ public sealed partial class PatchCellsHandler(
         return await BuildResponseAsync(request, context, changes, messages, recalculationJobId, ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>AN-142: насіння без текстових комірок якоря (вони не входять у числа, тож каскаду не потребують).</summary>
+    private static List<RecalculationSeed> WithoutAnnualText(RequestContext context, IReadOnlyList<RecalculationSeed> seeds)
+        => context.AnnualTextColumns.Count == 0
+            ? [.. seeds]
+            : [.. seeds.Where(s => !context.AnnualTextColumns.Contains(s.ColumnDefId))];
 
     /// <summary>Записані чи стерті колонки екземпляра — для хука вікон рядків (HSE301 A1).</summary>
     private static RowWindowChange ChangedColumns(TableInstanceRef instance, CellChangeLists applied)
@@ -358,6 +378,15 @@ public sealed partial class PatchCellsHandler(
         /// вимкнено чи таких комірок немає.
         /// </summary>
         public SortedSet<int> AnnualPeriods { get; } = [];
+
+        /// <summary>AN-142: у батчі є річна комірка НЕ-текстового якоря (чи новий рядок) — агрегат аркушів замикає її повністю.</summary>
+        public bool AnnualNumericWritten { get; set; }
+
+        /// <summary>AN-142: усі річні комірки батчу — текст якоря; поданий (не затверджений) аркуш їх не замикає.</summary>
+        public bool AnnualTextOnly => AnnualPeriods.Count > 0 && !AnnualNumericWritten;
+
+        /// <summary>AN-142: колонки текстових комірок якоря - їхні правки не ставлять перерахунок.</summary>
+        public HashSet<int> AnnualTextColumns { get; } = [];
     }
 
     /// <summary>Розподіл змін по upsert/delete разом із супутнім станом.</summary>
@@ -1058,6 +1087,31 @@ public sealed partial class PatchCellsHandler(
     }
 
     /// <summary>
+    /// AN-142: річна комірка - текст якоря (<see cref="EditDecision.AnnualTextOnly"/>) чи ні. Нова комірка нового рядка
+    /// текстом не вважається: створення рядка поданий аркуш не пропускає ніколи.
+    /// </summary>
+    private static void NoteAnnualText(RequestContext context, EditDecision decision, int columnDefId, bool creation)
+    {
+        if (decision.AnnualPeriods is null)
+        {
+            return;
+        }
+
+        if (decision.AnnualTextOnly && !creation)
+        {
+            // Перерахунок пропускається лише коли поблажка справді спрацювала (аркуш Submitted).
+            if (decision.AnnualTextRelaxed)
+            {
+                context.AnnualTextColumns.Add(columnDefId);
+            }
+        }
+        else
+        {
+            context.AnnualNumericWritten = true;
+        }
+    }
+
+    /// <summary>
     /// Рішення про права на батч — однакове для поштучного й книжкового шляху;
     /// відсутнє рішення — відмова.
     /// </summary>
@@ -1120,6 +1174,7 @@ public sealed partial class PatchCellsHandler(
                 if (decision.IsAllowed)
                 {
                     NoteGoverningPeriod(context, decision);
+                    NoteAnnualText(context, decision, address.ColumnDefId, creation: false);
                 }
 
                 if (decision.IsAllowed && decision.ViaAssignment)
@@ -1195,6 +1250,7 @@ public sealed partial class PatchCellsHandler(
                     if (decision.IsAllowed)
                     {
                         NoteGoverningPeriod(context, decision);
+                        NoteAnnualText(context, decision, columnDefId, creation: true);
                     }
 
                     if (decision.IsAllowed && decision.ViaAssignment)
@@ -2733,7 +2789,7 @@ public sealed partial class PatchCellsHandler(
             }
         }
 
-        CheckLockedColumnPeriods(lockedStatuses, context.ColumnPeriods, context.AnnualPeriods, changes);
+        CheckLockedColumnPeriods(lockedStatuses, context.ColumnPeriods, context.AnnualPeriods, changes, context.AnnualTextOnly);
     }
 
     /// <summary>Q-17: власний період + періоди колонок + річні періоди — без повторів, за зростанням ключа.</summary>
@@ -2752,7 +2808,8 @@ public sealed partial class PatchCellsHandler(
         Dictionary<int, DocumentStatus> lockedStatuses,
         IEnumerable<int> columnPeriods,
         IReadOnlyCollection<int> annualPeriods,
-        CellChangeLists changes)
+        CellChangeLists changes,
+        bool annualTextOnly = false)
     {
         foreach (var columnPeriod in columnPeriods)
         {
@@ -2761,7 +2818,15 @@ public sealed partial class PatchCellsHandler(
 
         if (annualPeriods.Count > 0)
         {
-            CheckSheetStatus(AnnualPeriodRule.AggregateStatus(annualPeriods.Select(p => lockedStatuses[p])), changes);
+            var aggregate = AnnualPeriodRule.AggregateStatus(annualPeriods.Select(p => lockedStatuses[p]));
+
+            // AN-142: текст якоря править і Submitted-аркуш; Approved (і Draft-чернетка без поблажок) - як було.
+            if (annualTextOnly && aggregate == DocumentStatus.Submitted)
+            {
+                return;
+            }
+
+            CheckSheetStatus(aggregate, changes);
         }
     }
 
@@ -2775,7 +2840,8 @@ public sealed partial class PatchCellsHandler(
     /// </remarks>
     private async Task EnsureColumnPeriodsEditableAsync(
         long documentId, int sheetDefId, IEnumerable<int> columnPeriods, CellChangeLists changes, CancellationToken ct,
-        IReadOnlyCollection<int>? annualPeriods = null)
+        IReadOnlyCollection<int>? annualPeriods = null,
+        bool annualTextOnly = false)
     {
         // ⛔ Q-17: усі періоди — за зростанням ключа (див. EnsureSheetStillEditableAsync).
         var annual = annualPeriods ?? [];
@@ -2790,7 +2856,7 @@ public sealed partial class PatchCellsHandler(
                 .ConfigureAwait(false);
         }
 
-        CheckLockedColumnPeriods(lockedStatuses, columnPeriods, annual, changes);
+        CheckLockedColumnPeriods(lockedStatuses, columnPeriods, annual, changes, annualTextOnly);
     }
 
     /// <summary>D-442: користувач і далі погоджувач поточного кроку цього аркуша — під блокуванням.</summary>
@@ -3087,7 +3153,14 @@ public sealed partial class PatchCellsHandler(
 
         return await jobs.EnqueueCoalescedAsync<Ports.IFormulaRecalculationJob>(
             Ports.FormulaRecalculationTarget.Of(documentId, period, editorUserId),
-            new { DocumentId = documentId, TableInstanceId = instanceId, PeriodKey = period, Cells = seeds }, ct,
+            new
+            {
+                DocumentId = documentId,
+                TableInstanceId = instanceId,
+                PeriodKey = period,
+                Cells = RecalculationSeed.Stamp(seeds, period, instanceId),
+            },
+            ct,
             createdByUserId: editorUserId)
             .ConfigureAwait(false);
     }
@@ -3582,9 +3655,34 @@ public sealed partial class PatchCellsHandler(
 /// каскад має право перерахувати; без позначки (<c>null</c>) — поле в JSON не пишеться, форма та сама.
 /// </remarks>
 /// <param name="ApproverSheetDefId">Аркуш правки погоджувача; <c>null</c> — звичайна правка.</param>
+/// <param name="PeriodKey">L2: період комірки (задача формул одна на документ); <c>null</c> — період тіла задачі.</param>
+/// <param name="TableInstanceId">L2: екземпляр таблиці комірки; <c>null</c> — екземпляр тіла задачі.</param>
 public sealed record RecalculationSeed(
     long RowId,
     int ColumnDefId,
     [property: System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    int? ApproverSheetDefId = null);
+    int? ApproverSheetDefId = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    int? PeriodKey = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    long? TableInstanceId = null)
+{
+    /// <summary>
+    /// L2: задача формул одна на ДОКУМЕНТ (<see cref="Ports.FormulaRecalculationTarget.Of"/>), а злиття дописує масив
+    /// <c>cells</c> із різних періодів в одну задачу, тож період і екземпляр несе кожна комірка, а не лише тіло задачі.
+    /// </summary>
+    public static List<RecalculationSeed> Stamp(
+        IEnumerable<RecalculationSeed> seeds, int periodKey, long tableInstanceId)
+    {
+        ArgumentNullException.ThrowIfNull(seeds);
+
+        return [.. seeds.Select(s => s with
+        {
+            PeriodKey = s.PeriodKey ?? periodKey,
+            TableInstanceId = s.TableInstanceId ?? (tableInstanceId == 0 ? null : tableInstanceId),
+        })];
+    }
+}

@@ -1,9 +1,10 @@
 /*
  * Групові заголовки колонок (до 3 рівнів). Логіка — `headerGroups.ts`.
  *
- * Рядок шапки — 45 px (див. `cell-states.css`, UI-24). Колонка без групи (або з меншою глибиною)
- * не має rowspan у RevoGrid, тому її клітинка підіймається на N рядків і перекриває порожні
- * групові клітинки над собою: `top: -N*45px; height: (N+1)*45px`.
+ * Рядок колонок — 45 px (див. `cell-states.css`, UI-24: назва й одиниця). Групові рядки — КОМПАКТНІ,
+ * 32 px (висота рядка даних; у них лише однорядковий підпис). Колонка без групи (або з меншою
+ * глибиною) не має rowspan у RevoGrid, тому її клітинка підіймається на N групових рядків і
+ * перекриває порожні групові клітинки над собою: `top: -N*32px; height: N*32px + 45px`.
  *
  * Жодних літералів кольору: ті самі токени, що й шапка (`--ecr-sunken`, `--ecr-border-strong`).
  * Специфічність `:root revo-grid[theme] …` — як у `cell-states.css`, щоб правила пакета не
@@ -11,14 +12,20 @@
  */
 :root revo-grid[theme] {
   --ecr-hg-row: 45px;
+  --ecr-hg-group-row: 32px;
+}
+
+/* Групові рядки компактні: пакет ставить їм висоту рядка колонок (45 px). */
+:root revo-grid[theme] revogr-header .header-rgRow.group {
+  height: var(--ecr-hg-group-row);
 }
 
 /* Клітинка групи: підпис по центру, межі з усіх боків рядка. */
 :root revo-grid[theme] revogr-header .rgHeaderCell.ecr-hg-grp {
   justify-content: center;
   align-items: center;
-  /* Пакет ставить клітинці групи висоту всього блоку груп (N×45) — підпис опинявся під сусіднім рівнем. */
-  height: var(--ecr-hg-row);
+  /* Пакет ставить клітинці групи висоту всього блоку груп (N×рядок) — підпис опинявся під сусіднім рівнем. */
+  height: var(--ecr-hg-group-row);
   border-right: 1px solid var(--ecr-border-strong);
   border-bottom: 1px solid var(--ecr-border-strong);
 }
@@ -58,18 +65,18 @@
 }
 
 :root revo-grid[theme] revogr-header .rgHeaderCell.ecr-hg-up-1 {
-  top: calc(-1 * var(--ecr-hg-row));
-  height: calc(2 * var(--ecr-hg-row));
+  top: calc(-1 * var(--ecr-hg-group-row));
+  height: calc(1 * var(--ecr-hg-group-row) + var(--ecr-hg-row));
 }
 
 :root revo-grid[theme] revogr-header .rgHeaderCell.ecr-hg-up-2 {
-  top: calc(-2 * var(--ecr-hg-row));
-  height: calc(3 * var(--ecr-hg-row));
+  top: calc(-2 * var(--ecr-hg-group-row));
+  height: calc(2 * var(--ecr-hg-group-row) + var(--ecr-hg-row));
 }
 
 :root revo-grid[theme] revogr-header .rgHeaderCell.ecr-hg-up-3 {
-  top: calc(-3 * var(--ecr-hg-row));
-  height: calc(4 * var(--ecr-hg-row));
+  top: calc(-3 * var(--ecr-hg-group-row));
+  height: calc(3 * var(--ecr-hg-group-row) + var(--ecr-hg-row));
 }
 
 /* Вертикальна межа між колонками рядка колонок — лише в сітці з групами (`ecr-hg-col` ставить мапер). */

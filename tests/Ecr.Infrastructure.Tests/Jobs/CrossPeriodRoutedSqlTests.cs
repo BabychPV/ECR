@@ -1,4 +1,4 @@
-// tests/Ecr.Infrastructure.Tests/Jobs/CrossPeriodRoutedSqlTests.cs
+﻿// tests/Ecr.Infrastructure.Tests/Jobs/CrossPeriodRoutedSqlTests.cs
 using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Ports;
@@ -41,7 +41,6 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 10, 26, 12, 0, 0, DateTimeKind.Utc);
-    private static readonly JsonSerializerOptions WebOptions = new(JsonSerializerDefaults.Web);
     private const int Year = 2026;
     private const int ViewMonth = 10;
     private const int OwnerMonth = 11;
@@ -60,20 +59,16 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         await SetOwnerValueAsync(world, 7m);
 
         var enqueued = new List<(string Target, string Payload)>();
-        await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
+        var progress = await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
 
         // Власний період власника — через звичайний план (читає свою фізичну комірку).
         Assert.Equal(14m, await OutputAsync(world, Period(OwnerMonth)));
 
-        // Читачі — усі наявні періоди року, окрім джерела: по одній coalesced-задачі на період.
+        // L2: читачі — усі наявні періоди року, окрім джерела, — дораховуються тим самим проходом, без нових задач.
+        Assert.Empty(enqueued);
         Assert.Equal(
-            Targets(world, 1, 9, 10),
-            enqueued.Select(e => e.Target).Order(StringComparer.Ordinal).ToList());
-
-        foreach (var queued in enqueued)
-        {
-            await RunJobAsync(world, [], Deserialize(queued.Payload), routing: true);
-        }
+            [Period(1), Period(9), Period(ViewMonth), Period(OwnerMonth)],
+            progress.Periods);
 
         // Читачі бачать M11 власника через роутер: 7 × 2 у КОЖНОМУ екземплярі.
         Assert.Equal(14m, await OutputAsync(world, Period(1)));
@@ -92,7 +87,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
 
         // Каскад іде з перегляду 202610 (запис маршрутизовано в 202611, насіння — рядок перегляду).
         var enqueued = new List<(string Target, string Payload)>();
-        await RunJobAsync(
+        var progress = await RunJobAsync(
             world, enqueued,
             new FormulaRecalculationRequest(
                 world.Doc.TableInstanceId, Period(ViewMonth),
@@ -102,15 +97,11 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         // Сам перегляд перераховано локально (читає логічний зріз із значенням власника).
         Assert.Equal(14m, await OutputAsync(world, Period(ViewMonth)));
 
-        // Читачі — усі, окрім періоду каскаду; власник серед них.
+        // Читачі — усі, окрім періоду каскаду; власник серед них — у тому самому проході.
+        Assert.Empty(enqueued);
         Assert.Equal(
-            Targets(world, 1, 9, 11),
-            enqueued.Select(e => e.Target).Order(StringComparer.Ordinal).ToList());
-
-        foreach (var queued in enqueued)
-        {
-            await RunJobAsync(world, [], Deserialize(queued.Payload), routing: true);
-        }
+            [Period(1), Period(9), Period(ViewMonth), Period(OwnerMonth)],
+            progress.Periods);
 
         Assert.Equal(14m, await OutputAsync(world, Period(OwnerMonth)));
         Assert.Equal(14m, await OutputAsync(world, Period(1)));
@@ -128,11 +119,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
 
         var enqueued = new List<(string Target, string Payload)>();
         await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
-
-        foreach (var queued in enqueued)
-        {
-            await RunJobAsync(world, [], Deserialize(queued.Payload), routing: true);
-        }
+        Assert.Empty(enqueued);
 
         // [Period:#11].[M11] * 2 — те саме число у кожному читачі, що б не лежало в його власній копії.
         Assert.Equal(14m, await OutputAsync(world, Period(ViewMonth)));
@@ -153,17 +140,10 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         await ClosePeriodAsync(world, 9);
 
         var enqueued = new List<(string Target, string Payload)>();
-        await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
+        var progress = await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
 
-        Assert.Equal(
-            Targets(world, 1, 10),
-            enqueued.Select(e => e.Target).Order(StringComparer.Ordinal).ToList());
-
-        foreach (var queued in enqueued)
-        {
-            await RunJobAsync(world, [], Deserialize(queued.Payload), routing: true);
-        }
-
+        Assert.Empty(enqueued);
+        Assert.Equal([Period(1), Period(ViewMonth), Period(OwnerMonth)], progress.Periods);
         Assert.Equal(14m, await OutputAsync(world, Period(ViewMonth)));
         Assert.Equal(StaleOutput, await OutputAsync(world, Period(9)));
     }
@@ -176,18 +156,17 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
     {
         var world = await ArrangeAsync();
         await SetOwnerValueAsync(world, 7m);
-
-        var enqueued = new List<(string Target, string Payload)>();
-        await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
-
         await ClosePeriodAsync(world, 9);
-        foreach (var queued in enqueued)
-        {
-            await RunJobAsync(world, [], Deserialize(queued.Payload), routing: true);
-        }
+
+        // Задача періоду-читача зі старим форматом (як у черзі до L2: період — у тілі, елемент — «джерело зміни»).
+        var legacy = new FormulaRecalculationRequest(
+            0, Period(9),
+            [new DirtyCell(0, world.Doc.MonthColumnDefIds[OwnerMonth - 1], world.Doc.TableDefId, OwnerMonth, 1, OwnerInput: true)],
+            world.Doc.DocumentId);
+        var progress = await RunJobAsync(world, [], legacy, routing: true);
 
         Assert.Equal(StaleOutput, await OutputAsync(world, Period(9)));
-        Assert.Equal(14m, await OutputAsync(world, Period(1)));
+        Assert.Equal(0, progress.Written);
     }
 
     // ── перерахунок не пише введені комірки власників ─────────────────────
@@ -203,10 +182,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
 
         var enqueued = new List<(string Target, string Payload)>();
         await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
-        foreach (var queued in enqueued)
-        {
-            await RunJobAsync(world, [], Deserialize(queued.Payload), routing: true);
-        }
+        Assert.Empty(enqueued);
 
         // M11 фізично є лише в екземплярі власника: перерахунок читачів писав тільки обчислену OUT.
         Assert.Equal(
@@ -290,17 +266,10 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
 
     private static int Period(int month) => (Year * 100) + month;
 
-    private static List<string> Targets(World world, params int[] months)
-        => [.. months.Select(m => FormulaRecalculationTarget.Of(world.Doc.DocumentId, Period(m), createdByUserId: null))
-            .Order(StringComparer.Ordinal)];
-
     private static IConfiguration Config(bool routing)
         => new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { ["Collection:MonthColumnRouting"] = routing ? "true" : "false" })
             .Build();
-
-    private static FormulaRecalculationRequest Deserialize(string payload)
-        => JsonSerializer.Deserialize<FormulaRecalculationRequest>(payload, WebOptions)!;
 
     /// <summary>Запит задачі на екземпляр власника: насіння — введена комірка M11.</summary>
     private static FormulaRecalculationRequest OwnerRequest(World world)
@@ -376,7 +345,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
             .ToListAsync();
     }
 
-    private async Task RunJobAsync(
+    private async Task<CapturingJobProgress> RunJobAsync(
         World world, List<(string Target, string Payload)> enqueued, FormulaRecalculationRequest request, bool routing)
     {
         await using var db = world.Builder.CreateContext();
@@ -398,7 +367,10 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
             new RowStore(db, bulk, new TestClock(Now)), Versions(world), periods, jobs, db, router, world.Metadata);
 
         var job = new FormulaRecalculationJob(Formulas(db, world, store, router), db, fanOut, periods);
-        await job.ExecuteAsync(request, NoOpProgress.Instance, CancellationToken.None);
+        var progress = new CapturingJobProgress();
+        await job.ExecuteAsync(request, progress, CancellationToken.None);
+
+        return progress;
     }
 
     private static RecalculationService Formulas(
@@ -588,10 +560,4 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         bool Absolute,
         bool Offsets);
 
-    private sealed class NoOpProgress : IJobProgress
-    {
-        public static readonly NoOpProgress Instance = new();
-
-        public Task ReportAsync(int percent, string? message, CancellationToken ct) => Task.CompletedTask;
-    }
 }

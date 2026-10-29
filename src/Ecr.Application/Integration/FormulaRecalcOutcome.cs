@@ -27,6 +27,32 @@ public static class FormulaRecalcOutcome
     public const string WrittenParam = "written";
 
     /// <summary>
+    /// L2: параметр <see cref="DoneKey"/> — періоди (<c>yyyyMM</c> через кому, за зростанням), де прохід справді
+    /// записав комірки. Задача формул одна на документ і може писати в кілька періодів; клієнт (L3) оновлює саме їх.
+    /// Необов'язковий: старий конверт його не має.
+    /// </summary>
+    public const string PeriodsParam = "periods";
+
+    /// <summary>Записані періоди з сирого конверта; порожньо — немає параметра чи задача не завершена.</summary>
+    public static IReadOnlyList<int> WrittenPeriodsOf(string state, string? rawMessage)
+    {
+        if (!string.Equals(state, "Succeeded", StringComparison.Ordinal)
+            || !JobProgressMessageCodec.TryDecode(rawMessage, out var envelope)
+            || !string.Equals(envelope.Key, DoneKey, StringComparison.Ordinal)
+            || envelope.Params is not { } p
+            || !p.TryGetValue(PeriodsParam, out var csv)
+            || string.IsNullOrWhiteSpace(csv))
+        {
+            return [];
+        }
+
+        return [.. csv
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(s => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : 0)
+            .Where(n => n > 0)];
+    }
+
+    /// <summary>
     /// Записані комірки для <c>Succeeded</c> перерахунку формул: <see cref="NoneKey"/> — <c>0</c>,
     /// <see cref="DoneKey"/> — його <c>written</c>; інакше (інша задача, не завершена, старий
     /// конверт без числа) — <c>null</c>.

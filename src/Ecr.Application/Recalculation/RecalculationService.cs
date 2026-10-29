@@ -182,6 +182,9 @@ public sealed class RecalculationService(
         return now;
     }
 
+    /// <summary>L2: нове сховище спільних читань для одного проходу перерахунку документа.</summary>
+    public RecalculationSharedLoad NewSharedLoad() => new(rowStore, versions);
+
     /// <summary>
     /// Перераховує залежне піддерево і записує результати.
     /// </summary>
@@ -215,11 +218,13 @@ public sealed class RecalculationService(
     /// Q-17: куди скласти колонки НАСІННЯ (введені комірки, не похідні) — з них постановник визначає, чи є серед них
     /// стовпці з чужим власником, чиї читачі в інших екземплярах року треба перерахувати; <c>null</c> — не збирати.
     /// </param>
+    /// <param name="shared">L2: спільні читання проходу (екземпляри, залежності); <c>null</c> — читати напряму.</param>
     public async Task<int> RecalculateAsync(
         long tableInstanceId, DirtySet dirty, CancellationToken ct,
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null,
         IReadOnlySet<int>? approverEditSheets = null,
-        HashSet<(int TableDefId, int ColumnDefId)>? inputColumns = null)
+        HashSet<(int TableDefId, int ColumnDefId)>? inputColumns = null,
+        RecalculationSharedLoad? shared = null)
     {
         ArgumentNullException.ThrowIfNull(dirty);
 
@@ -236,7 +241,7 @@ public sealed class RecalculationService(
 
         return await RunAsync(
                 instance, dirty, ct, changedColumns: changedColumns, approverEditSheets: approverEditSheets,
-                inputColumns: inputColumns)
+                inputColumns: inputColumns, shared: shared)
             .ConfigureAwait(false);
     }
 
@@ -249,6 +254,7 @@ public sealed class RecalculationService(
     /// <param name="sources">Що змінилося: період-джерело (номер у році), таблиця, колонка.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <param name="changedColumns">Куди скласти колонки, змінені цим прогоном (для наступного fan-out).</param>
+    /// <param name="shared">L2: спільні читання проходу; <c>null</c> — читати напряму.</param>
     /// <returns>Скільки комірок перераховано.</returns>
     /// <remarks>
     /// ⛔ Це G2 із дизайну WW-03: залежність із ненульовим зсувом не входить у зворотний індекс
@@ -260,7 +266,8 @@ public sealed class RecalculationService(
     /// </remarks>
     public async Task<int> RecalculateFromOtherPeriodsAsync(
         long documentId, PeriodKey periodKey, IReadOnlyCollection<CrossPeriodSource> sources, CancellationToken ct,
-        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null)
+        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null,
+        RecalculationSharedLoad? shared = null)
     {
         ArgumentNullException.ThrowIfNull(sources);
 
@@ -269,16 +276,16 @@ public sealed class RecalculationService(
             return 0;
         }
 
-        var instances = await rowStore
-            .GetTableInstancesAsync(documentId, periodKey, ct)
-            .ConfigureAwait(false);
+        var instances = shared is null
+            ? await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false)
+            : await shared.InstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
 
         var written = 0;
         foreach (var group in instances.GroupBy(i => i.TemplateVersionId).OrderBy(g => g.Key))
         {
             written += await RunAsync(
                     group.First(), dirty: null, ct, sheetDefId: null, heldSheetDefId: null, instances,
-                    changedColumns, sources)
+                    changedColumns, sources, shared: shared)
                 .ConfigureAwait(false);
         }
 
@@ -395,13 +402,15 @@ public sealed class RecalculationService(
     /// </param>
     /// <param name="approverEditSheets">D-442: подані аркуші правки погоджувача (лише інкрементний вхід).</param>
     /// <param name="inputColumns">Q-17: куди скласти колонки насіння (введені, не похідні); <c>null</c> — не збирати.</param>
+    /// <param name="shared">L2: спільні читання проходу (екземпляри, залежності); <c>null</c> — читати напряму.</param>
     private async Task<int> RunAsync(
         TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null,
         int? heldSheetDefId = null, IReadOnlyList<TableInstanceRef>? knownInstances = null,
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null,
         IReadOnlyCollection<CrossPeriodSource>? crossPeriodSources = null,
         IReadOnlySet<int>? approverEditSheets = null,
-        HashSet<(int TableDefId, int ColumnDefId)>? inputColumns = null)
+        HashSet<(int TableDefId, int ColumnDefId)>? inputColumns = null,
+        RecalculationSharedLoad? shared = null)
     {
         var periodKey = new PeriodKey(instance.PeriodKey);
 
@@ -411,17 +420,18 @@ public sealed class RecalculationService(
         using var ownerSession = (cellStore as IOwnerReadSession)?.BeginOwnerReadSession();
 
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
-        var dependencies = await versions
-            .ListFormulaDependenciesAsync(instance.TemplateVersionId, ct)
-            .ConfigureAwait(false);
+        var dependencies = shared is null
+            ? await versions.ListFormulaDependenciesAsync(instance.TemplateVersionId, ct).ConfigureAwait(false)
+            : await shared.DependenciesAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
 
         // ⛔ Читаються ВСІ таблиці документа за період, а не лише та, де
         // сталася правка. Формула сусідньої таблиці, яка читає цю, живе в
         // СВОЄМУ екземплярі: з одним переліком рядків вона не отримала б ані
         // ребра графа, ані місця для запису — і мовчки не перераховувалася б.
-        var instances = knownInstances ?? await rowStore
-            .GetTableInstancesAsync(instance.DocumentId, periodKey, ct)
-            .ConfigureAwait(false);
+        var instances = knownInstances
+            ?? (shared is null
+                ? await rowStore.GetTableInstancesAsync(instance.DocumentId, periodKey, ct).ConfigureAwait(false)
+                : await shared.InstancesAsync(instance.DocumentId, periodKey, ct).ConfigureAwait(false));
 
         // ⛔ Q-166 (аудит фази 2, продуктивність): ОДИН пакетний запит на
         // рядки ВСІХ таблиць документа замість запиту на кожну — цей прогін
@@ -482,11 +492,10 @@ public sealed class RecalculationService(
         // ⚠ Q-331: перенесено ВИЩЕ вибору цілей (`targets` нижче) — фільтр
         // повного прогону за аркушем потребує знати, якій таблиці належить
         // кожна формула, ДО того, як список цілей уже сформований.
-        var tables = snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
-
-        var formulas = tables.Values
-            .SelectMany(t => t.Formulas.Where(f => !f.IsDeleted).Select(f => (Table: t, Formula: f)))
-            .ToDictionary(pair => pair.Formula.Id);
+        // L2b: словники таблиць і живих формул — з індексу знімка (будується раз на знімок, не на кожен прогін).
+        var snapshotIndex = RecalculationPlanBuilder.SnapshotIndex.For(snapshot);
+        var tables = snapshotIndex.Tables;
+        var formulas = snapshotIndex.Formulas;
 
         // ⛔ Q-17.3: колонки з ЧУЖИМ власником для екземплярів цього прогону. Введену комірку такої колонки пише лише
         // власник (прогін його екземпляра рахує її формули сам); цей прогін її не перезаписує — див. `Evaluate`.

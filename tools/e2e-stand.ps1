@@ -448,6 +448,11 @@ $env:ECR_Auth__RequireHttps = 'false'
 # згода на незахищене кільце (тоді старт пише Critical, а db — Degraded).
 $env:ECR_Auth__DataProtection__AllowUnprotectedKeys = 'true'
 
+# AN-142 (Q-17): маршрутизація місячних колонок діє ЛИШЕ для таблиць `MonthsInColumns`; сід-шаблон стенда
+# (DataGen: `PerPeriodInstance`) нею не зачеплений. Потрібна `anchorTextSubmittedLive.spec.ts`: вона збирає таку
+# таблицю через API і перевіряє правку тексту якоря в поданому році.
+$env:ECR_Collection__MonthColumnRouting = 'true'
+
 Step 'старт застосунку'
 $startArgs = @{
     PassThru               = $true

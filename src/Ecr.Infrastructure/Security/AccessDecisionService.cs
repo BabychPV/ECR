@@ -1610,10 +1610,23 @@ public sealed class AccessDecisionService(
         // Q-17: введений не-місячний стовпець таблиці «місяці в колонках» керується річним агрегатом, а не періодом
         // екземпляра (подання одного місяця його не блокує). Обчислювані стовпці лишаються за періодом перегляду.
         IReadOnlyList<int>? annualPeriods = null;
+        var annualText = false;
+        var annualRelaxed = false;
         if (slice.Annual is { } annual && !column.IsMonthColumn && !column.IsComputed)
         {
             shared = annual.Context;
             annualPeriods = annual.Periods;
+
+            // AN-142: текст якоря (не ключ, не обчислюваний) править і поданий аркуш; Approved лишається замкненим.
+            if (column.DataType == CellDataType.String && !column.IsBusinessKey)
+            {
+                annualText = true;
+                if (shared.SheetStatus == DocumentStatus.Submitted)
+                {
+                    shared = shared with { SheetStatus = DocumentStatus.Draft };
+                    annualRelaxed = true;
+                }
+            }
         }
 
         // Q-17 (аудит P2-B): область ролі за періодами - за періодом ВЛАСНИКА колонки (місячний m -> період m; введений
@@ -1748,7 +1761,7 @@ public sealed class AccessDecisionService(
 
         if (annualPeriods is not null)
         {
-            decision = decision with { AnnualPeriods = annualPeriods };
+            decision = decision with { AnnualPeriods = annualPeriods, AnnualTextOnly = annualText, AnnualTextRelaxed = annualRelaxed };
         }
 
         return slice.DocumentHasAssignments ? decision with { AssignmentsPresent = true } : decision;
