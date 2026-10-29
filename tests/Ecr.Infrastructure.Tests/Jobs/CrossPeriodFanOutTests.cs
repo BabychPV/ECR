@@ -210,6 +210,225 @@ public sealed class CrossPeriodFanOutTests(SqlServerFixture sql)
         Assert.Empty(_enqueued);
     }
 
+    // ── L1: вузький набір читачів (метадані відомі) ───────────────────────
+
+    private const int OtherVersion = 2;
+
+    /// <summary>Шаблон з однією формулою «[C1] * 2» у таблиці T1; залежності й екземпляри — на розсуд тесту.</summary>
+    private (TemplateBuilder Template, TableDef Table, ColumnDef Column, FormulaDef Formula) ArrangeNarrow(
+        TestDocument document,
+        byte kind,
+        short? offset,
+        Func<int, int> tableOfPeriod,
+        bool formulaLive = true,
+        bool relationsActive = false,
+        bool inputs = false)
+    {
+        var template = new TemplateBuilder { TemplateVersionId = Version };
+        var sheet = template.Sheet("S");
+        var table = template.Table(sheet, "T1");
+        var column = template.Column(table, "C1", isMonthColumn: inputs);
+        var formula = template.Formula(table, "[C1] * 2");
+
+        Arrange(document, Dep(0, 0));
+
+        _versions.ListFormulaDependenciesAsync(Version, Arg.Any<CancellationToken>()).Returns(
+        [
+            FormulaDependency.ForFormula(
+                formulaLive ? formula.Id : formula.Id + 1000, kind, table.Id, "R1", column.Id, null, offset, 0),
+        ]);
+        _rows.GetTableInstancesAsync(document.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyList<TableInstanceRef>)
+            [
+                new TableInstanceRef(
+                    1, document.DocumentId, tableOfPeriod(call.ArgAt<PeriodKey>(1).Value), Version,
+                    call.ArgAt<PeriodKey>(1).Value),
+            ]);
+
+        var metadata = Substitute.For<IMetadataCache>();
+        metadata.GetAsync(Version, Arg.Any<CancellationToken>())
+            .Returns(template.Build() with { HasActiveRollupOrCheck = relationsActive });
+        _metadata = metadata;
+
+        return (template, table, column, formula);
+    }
+
+    private IMetadataCache? _metadata;
+
+    private CrossPeriodFanOut Narrow(EcrDbContext db) => new(_rows, _versions, _periods, _jobs, db, null, _metadata);
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "L1")]
+    public async Task L1_абсолютне_ребро_читач_із_таблицею_формули_ставиться()
+    {
+        var (document, builder) = await ArrangeAsync();
+        var (_, table, column, _) = ArrangeNarrow(document, kind: 5, offset: 1, tableOfPeriod: _ => 0);
+        ArrangeAllPeriodsHave(document, table.Id);
+
+        await using var db = builder.CreateContext();
+        var count = await Narrow(db).EnqueueReadersAsync(
+            document.DocumentId, new PeriodKey(202601), [(table.Id, column.Id)],
+            onlyEarlierReaders: false, hops: 1, CancellationToken.None);
+
+        Assert.Equal(1, count);
+        Assert.Equal(
+            FormulaRecalculationTarget.Of(document.DocumentId, 202602, createdByUserId: null),
+            Assert.Single(_enqueued).Target);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "L1")]
+    public async Task L1_відносне_ребро_читач_ставиться()
+    {
+        var (document, builder) = await ArrangeAsync();
+        var (_, table, column, _) = ArrangeNarrow(document, kind: 3, offset: -1, tableOfPeriod: _ => 0);
+        ArrangeAllPeriodsHave(document, table.Id);
+
+        await using var db = builder.CreateContext();
+        var count = await Narrow(db).EnqueueReadersAsync(
+            document.DocumentId, new PeriodKey(202601), [(table.Id, column.Id)],
+            onlyEarlierReaders: false, hops: 1, CancellationToken.None);
+
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "L1")]
+    public async Task L1_абсолютне_ребро_період_без_таблиці_формули_не_ставиться()
+    {
+        var (document, builder) = await ArrangeAsync();
+        var (_, table, column, _) = ArrangeNarrow(document, kind: 5, offset: 1, tableOfPeriod: _ => 0);
+
+        // Період 2 має екземпляр ІНШОЇ таблиці: формула там не має куди писати.
+        _rows.GetTableInstancesAsync(document.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyList<TableInstanceRef>)
+            [
+                new TableInstanceRef(
+                    1, document.DocumentId, document.TableDefId, Version, call.ArgAt<PeriodKey>(1).Value),
+            ]);
+
+        await using var db = builder.CreateContext();
+        var count = await Narrow(db).EnqueueReadersAsync(
+            document.DocumentId, new PeriodKey(202601), [(table.Id, column.Id)],
+            onlyEarlierReaders: false, hops: 1, CancellationToken.None);
+
+        Assert.Equal(0, count);
+        Assert.Empty(_enqueued);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "L1")]
+    public async Task L1_формула_ребра_видалена_або_відсутня_у_знімку_читача_не_ставить()
+    {
+        var (document, builder) = await ArrangeAsync();
+        var (_, table, column, _) = ArrangeNarrow(document, kind: 5, offset: 1, tableOfPeriod: _ => 0, formulaLive: false);
+        ArrangeAllPeriodsHave(document, table.Id);
+
+        await using var db = builder.CreateContext();
+        var count = await Narrow(db).EnqueueReadersAsync(
+            document.DocumentId, new PeriodKey(202601), [(table.Id, column.Id)],
+            onlyEarlierReaders: false, hops: 1, CancellationToken.None);
+
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "L1")]
+    public async Task L1_читач_на_версії_без_цього_ребра_не_ставиться()
+    {
+        // Період-читач на ІНШІЙ версії шаблону, де формули немає: задача порахувала б порожні цілі.
+        var (document, builder) = await ArrangeAsync();
+        var (_, table, column, _) = ArrangeNarrow(document, kind: 5, offset: 1, tableOfPeriod: _ => 0);
+
+        _rows.GetTableInstancesAsync(document.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyList<TableInstanceRef>)
+            [
+                new TableInstanceRef(
+                    1, document.DocumentId, table.Id,
+                    call.ArgAt<PeriodKey>(1).Value == 202601 ? Version : OtherVersion,
+                    call.ArgAt<PeriodKey>(1).Value),
+            ]);
+        _versions.ListFormulaDependenciesAsync(OtherVersion, Arg.Any<CancellationToken>()).Returns([]);
+        _metadata!.GetAsync(OtherVersion, Arg.Any<CancellationToken>())
+            .Returns(new TemplateBuilder { TemplateVersionId = OtherVersion }.Build());
+
+        await using var db = builder.CreateContext();
+        var count = await Narrow(db).EnqueueReadersAsync(
+            document.DocumentId, new PeriodKey(202601), [(table.Id, column.Id)],
+            onlyEarlierReaders: false, hops: 1, CancellationToken.None);
+
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "L1")]
+    public async Task L1_версія_з_Rollup_або_Check_читача_не_відсікає()
+    {
+        // Сервіс іде далі й за порожніх цілей (relationsActive): відсікати такий період не можна.
+        var (document, builder) = await ArrangeAsync();
+        var (_, table, column, _) = ArrangeNarrow(
+            document, kind: 5, offset: 1, tableOfPeriod: _ => 0, relationsActive: true);
+
+        _rows.GetTableInstancesAsync(document.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyList<TableInstanceRef>)
+            [
+                new TableInstanceRef(
+                    1, document.DocumentId, document.TableDefId, Version, call.ArgAt<PeriodKey>(1).Value),
+            ]);
+
+        await using var db = builder.CreateContext();
+        var count = await Narrow(db).EnqueueReadersAsync(
+            document.DocumentId, new PeriodKey(202601), [(table.Id, column.Id)],
+            onlyEarlierReaders: false, hops: 1, CancellationToken.None);
+
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    public async Task L1_Q17_читач_без_таблиці_формули_не_ставиться()
+    {
+        var (document, builder) = await ArrangeAsync();
+        var (router, metadata, table, column) = ArrangeRouted(document, enabled: true);
+
+        _rows.GetTableInstancesAsync(document.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyList<TableInstanceRef>)
+            [
+                new TableInstanceRef(
+                    1, document.DocumentId,
+                    call.ArgAt<PeriodKey>(1).Value == 202601 ? table : document.TableDefId,
+                    Version, call.ArgAt<PeriodKey>(1).Value),
+            ]);
+
+        await using var db = builder.CreateContext();
+        var fanOut = new CrossPeriodFanOut(_rows, _versions, _periods, _jobs, db, router, metadata);
+
+        var count = await fanOut.EnqueueReadersAsync(
+            document.DocumentId, new PeriodKey(202601), [(table, column)],
+            onlyEarlierReaders: false, hops: 1, CancellationToken.None, inputChanged: [(table, column)]);
+
+        Assert.Equal(0, count);
+    }
+
+    private void ArrangeAllPeriodsHave(TestDocument document, int tableDefId)
+        => _rows.GetTableInstancesAsync(document.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyList<TableInstanceRef>)
+                [new TableInstanceRef(1, document.DocumentId, tableDefId, Version, call.ArgAt<PeriodKey>(1).Value)]);
+
     /// <summary>Роутер/метадані: таблиця «місяці в колонках» з введеною колонкою, яку читає формула коміркою.</summary>
     private (IMonthColumnRouter Router, IMetadataCache Metadata, int TableDefId, int ColumnDefId) ArrangeRouted(
         TestDocument document, bool enabled)
@@ -219,13 +438,14 @@ public sealed class CrossPeriodFanOutTests(SqlServerFixture sql)
         var table = template.Table(sheet, "T1");
         var column = template.Column(table, "C1", isMonthColumn: true);
         template.Column(table, "C2");
+        var formula = template.Formula(table, "[C1] * 2");
 
         Arrange(document, Dep(0, 0));
 
-        // Залежність-комірка (зсув null) на введену колонку; сама формула — у цій таблиці.
+        // Залежність-комірка (зсув null) на введену колонку; сама формула — у цій таблиці (L1: формула має бути живою).
         _versions.ListFormulaDependenciesAsync(Version, Arg.Any<CancellationToken>()).Returns(
         [
-            FormulaDependency.ForFormula(555, 0, table.Id, "R1", column.Id, null, null, 0),
+            FormulaDependency.ForFormula(formula.Id, 0, table.Id, "R1", column.Id, null, null, 0),
         ]);
         _rows.GetTableInstancesAsync(document.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(call => (IReadOnlyList<TableInstanceRef>)
