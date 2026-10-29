@@ -9504,6 +9504,29 @@ USING (VALUES
     ,(N'treeEditor.panel.until', N'en', N'until {to}', 1)
     ,(N'treeEditor.panel.retiredNote', N'en', N'This node is retired: it is hidden from new choices.', 1)
     -- COLL:ui-treeeditor ── кінець секції ──
+    -- COLL:ui-nae-structure ── сторінка «Структура NAE» (/admin/permits/nae, NAE plan N2): дерево, форма атрибутів, «Де використовується»; ru/kz — порцією COLL:ui-nae-structure нижче ──
+    ,(N'permits.nae.title', N'en', N'NAE structure', 1)
+    ,(N'permits.nae.description', N'en', N'The tree of regions, districts, sites, equipment and NAE items that permits refer to.', 1)
+    ,(N'permits.nae.sourceNote', N'en', N'This structure is a registry: permits and imports refer to its nodes by code. Retire a node instead of deleting it.', 1)
+    ,(N'permits.nae.readOnly', N'en', N'You can browse the structure, but changing it needs the right to edit registry data.', 1)
+    ,(N'permits.nae.treeLabel', N'en', N'NAE structure tree', 1)
+    ,(N'permits.nae.form.newNode', N'en', N'New node', 1)
+    ,(N'permits.nae.form.createTitle', N'en', N'New {level}', 1)
+    ,(N'permits.nae.form.editTitle', N'en', N'Node attributes', 1)
+    ,(N'permits.nae.form.parent', N'en', N'Parent: {path}', 1)
+    ,(N'permits.nae.form.parentRoot', N'en', N'top level', 1)
+    ,(N'permits.nae.form.codeRequired', N'en', N'Enter a code.', 1)
+    ,(N'permits.nae.form.codeTaken', N'en', N'This code is already used in the structure.', 1)
+    ,(N'permits.nae.form.codeAutomatic', N'en', N'The code of this registry is assigned automatically.', 1)
+    ,(N'permits.nae.form.nameRequired', N'en', N'Enter a name.', 1)
+    ,(N'permits.nae.form.fieldRequired', N'en', N'Fill in this field.', 1)
+    ,(N'permits.nae.used.title', N'en', N'Where it is used', 1)
+    ,(N'permits.nae.used.permit', N'en', N'Permit', 1)
+    ,(N'permits.nae.used.type', N'en', N'Type', 1)
+    ,(N'permits.nae.used.valid', N'en', N'Valid', 1)
+    ,(N'permits.nae.used.substances', N'en', N'Substances', 1)
+    ,(N'permits.nae.used.unavailable', N'en', N'Usage by permits is not available yet. This does not mean the node is unused.', 1)
+    -- COLL:ui-nae-structure ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -24868,6 +24891,56 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-treeeditor ── кінець секції ──
+-- COLL:ui-nae-structure ── ru/kz: сторінка «Структура NAE»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.nae.title', N'ru', N'Структура NAE'),
+    (N'permits.nae.title', N'kz', N'NAE құрылымы'),
+    (N'permits.nae.description', N'ru', N'Дерево регионов, районов, площадок, оборудования и позиций NAE, на которые ссылаются разрешения.'),
+    (N'permits.nae.description', N'kz', N'Рұқсаттар сілтейтін өңірлер, аудандар, алаңдар, жабдық және NAE позицияларының ағашы.'),
+    (N'permits.nae.sourceNote', N'ru', N'Эта структура — справочник: разрешения и импорт ссылаются на её узлы по коду. Узел выводят из использования, а не удаляют.'),
+    (N'permits.nae.sourceNote', N'kz', N'Бұл құрылым — анықтамалық: рұқсаттар мен импорт оның түйіндеріне код арқылы сілтейді. Түйінді жоймайды, қолданыстан шығарады.'),
+    (N'permits.nae.readOnly', N'ru', N'Структуру можно просматривать, но для изменений нужно право редактировать данные справочников.'),
+    (N'permits.nae.readOnly', N'kz', N'Құрылымды қарауға болады, бірақ өзгерту үшін анықтамалық деректерін өңдеу құқығы қажет.'),
+    (N'permits.nae.treeLabel', N'ru', N'Дерево структуры NAE'),
+    (N'permits.nae.treeLabel', N'kz', N'NAE құрылымының ағашы'),
+    (N'permits.nae.form.newNode', N'ru', N'Новый узел'),
+    (N'permits.nae.form.newNode', N'kz', N'Жаңа түйін'),
+    (N'permits.nae.form.createTitle', N'ru', N'Новый узел: {level}'),
+    (N'permits.nae.form.createTitle', N'kz', N'Жаңа түйін: {level}'),
+    (N'permits.nae.form.editTitle', N'ru', N'Атрибуты узла'),
+    (N'permits.nae.form.editTitle', N'kz', N'Түйін атрибуттары'),
+    (N'permits.nae.form.parent', N'ru', N'Родитель: {path}'),
+    (N'permits.nae.form.parent', N'kz', N'Аталық: {path}'),
+    (N'permits.nae.form.parentRoot', N'ru', N'верхний уровень'),
+    (N'permits.nae.form.parentRoot', N'kz', N'жоғарғы деңгей'),
+    (N'permits.nae.form.codeRequired', N'ru', N'Введите код.'),
+    (N'permits.nae.form.codeRequired', N'kz', N'Кодты енгізіңіз.'),
+    (N'permits.nae.form.codeTaken', N'ru', N'Такой код в структуре уже есть.'),
+    (N'permits.nae.form.codeTaken', N'kz', N'Мұндай код құрылымда бар.'),
+    (N'permits.nae.form.codeAutomatic', N'ru', N'Код этого справочника назначается автоматически.'),
+    (N'permits.nae.form.codeAutomatic', N'kz', N'Бұл анықтамалықтың коды автоматты түрде беріледі.'),
+    (N'permits.nae.form.nameRequired', N'ru', N'Введите название.'),
+    (N'permits.nae.form.nameRequired', N'kz', N'Атауын енгізіңіз.'),
+    (N'permits.nae.form.fieldRequired', N'ru', N'Заполните это поле.'),
+    (N'permits.nae.form.fieldRequired', N'kz', N'Осы өрісті толтырыңыз.'),
+    (N'permits.nae.used.title', N'ru', N'Где используется'),
+    (N'permits.nae.used.title', N'kz', N'Қайда қолданылады'),
+    (N'permits.nae.used.permit', N'ru', N'Разрешение'),
+    (N'permits.nae.used.permit', N'kz', N'Рұқсат'),
+    (N'permits.nae.used.type', N'ru', N'Тип'),
+    (N'permits.nae.used.type', N'kz', N'Түрі'),
+    (N'permits.nae.used.valid', N'ru', N'Действует'),
+    (N'permits.nae.used.valid', N'kz', N'Қолданылады'),
+    (N'permits.nae.used.substances', N'ru', N'Вещества'),
+    (N'permits.nae.used.substances', N'kz', N'Заттар'),
+    (N'permits.nae.used.unavailable', N'ru', N'Использование в разрешениях пока недоступно. Это не значит, что узел нигде не используется.'),
+    (N'permits.nae.used.unavailable', N'kz', N'Рұқсаттарда қолданылуы әзірге қолжетімсіз. Бұл түйін еш жерде қолданылмайды дегенді білдірмейді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-nae-structure ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

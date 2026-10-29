@@ -28,6 +28,7 @@ export const Routes = [
   { path: '/admin/permits/lists', name: 'permit-lists' },
   { path: '/admin/permits/groups', name: 'permit-groups' },
   { path: '/admin/permits/bindings', name: 'permit-bindings' },
+  { path: '/admin/permits/nae', name: 'permit-nae' },
   { path: '/admin/methodologies', name: 'methodologies' },
   { path: '/admin/expressions', name: 'expressions' },
   { path: '/admin/units', name: 'units' },

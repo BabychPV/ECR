@@ -11,6 +11,7 @@ export const PermitsPaths = {
   lists: '/admin/permits/lists',
   groups: '/admin/permits/groups',
   bindings: '/admin/permits/bindings',
+  nae: '/admin/permits/nae',
 } as const;
 
 /** Адреса редактора типу за кодом (код — літери, цифри й `_`, але кодується про всяк випадок). */
