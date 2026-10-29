@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
 import { testTheme } from '@/test/render';
-import { DocumentInspector } from '../DocumentInspector';
+import { DocumentInspector, type SheetLogTarget } from '../DocumentInspector';
 import { clearInspectedCell, inspectedCell, publishInspectedCell, type InspectedCell } from '../inspectedCell';
 
 /**
@@ -59,17 +59,34 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     ]);
   }
 
-  if (url.includes('/workflow/history')) {
-    return jsonResponse([
-      {
-        sheetCode: 'A', fromState: 'Submitted', toState: 'Rejected', action: 'Reject', byDisplayName: 'land-owner',
-        at: '2026-10-29T10:00:00Z', reason: 'Correct <b>the</b> figures', stepOrdinal: null, approvedBySubmitter: false,
-      },
-      {
-        sheetCode: 'A', fromState: 'Draft', toState: 'Submitted', action: 'Submit', byDisplayName: 'author',
-        at: '2026-10-29T09:00:00Z', reason: null, stepOrdinal: null, approvedBySubmitter: false,
-      },
-    ]);
+  if (url.includes('/sheets/101/activity')) {
+    const base = {
+      periodKey: 202609, rowKey: null, rowLabelL10n: null, columnDefId: null, columnCode: null, columnHeaderL10n: null,
+      columnDataType: null, tableCode: null, tableNameL10n: null, oldValue: null, newValue: null, origin: null,
+      action: null, fromState: null, toState: null, reason: null,
+    };
+    if (url.includes('cursor=NEXT')) {
+      return jsonResponse({
+        items: [{ ...base, kind: 'Workflow', at: '2026-10-29T08:00:00Z', byDisplayName: 'author', action: 'Submit', fromState: 'Draft', toState: 'Submitted' }],
+        nextCursor: null,
+      });
+    }
+
+    return jsonResponse({
+      items: [
+        {
+          ...base, kind: 'Workflow', at: '2026-10-29T10:00:00Z', byDisplayName: 'land-owner', action: 'Reject',
+          fromState: 'Submitted', toState: 'Rejected', reason: 'Correct <b>the</b> figures',
+        },
+        {
+          ...base, kind: 'CellEdit', at: '2026-10-29T09:00:00Z', byDisplayName: url.includes('includeSystem=true') ? 'system' : 'M. Petrenko',
+          origin: url.includes('includeSystem=true') ? 'Recalculation' : 'UserEdit', rowKey: 'R4', columnCode: 'C3', tableCode: 'T1',
+          rowLabelL10n: { values: { en: 'Diesel' } }, columnHeaderL10n: { values: { en: 'Volume' } }, tableNameL10n: { values: { en: 'Fuel' } },
+          oldValue: '10', newValue: '12.5', columnDefId: 33,
+        },
+      ],
+      nextCursor: 'NEXT',
+    });
   }
 
   if (url.includes('/api/v1/audit/cells')) {
@@ -123,12 +140,14 @@ function Harness({
   onSelect = () => {},
   seq,
   documentId = 1,
+  onOpenCell,
 }: {
   documentId?: number;
   entry?: string;
   messages?: ValidationFindingDto[] | null;
   onSelect?: (finding: ValidationFindingDto) => void;
   seq?: number;
+  onOpenCell?: (target: SheetLogTarget) => void;
 }): JSX.Element {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
@@ -145,6 +164,8 @@ function Harness({
             messages={messages}
             onSelectFinding={onSelect}
             validatedSeq={seq}
+            sheet={{ sheetDefId: 101, code: 'A', name: 'Sheet A' }}
+            onOpenCell={onOpenCell}
           />
         </MemoryRouter>
       </QueryClientProvider>
@@ -278,26 +299,59 @@ describe('інспектор документа (UI-25)', () => {
     expect(screen.queryByText('⟦inspector.noIssuesTitle⟧')).toBeNull();
   });
 
-  it('History: без вибраної комірки — журнал погодження аркуша з причиною, з коміркою — її зміни за цей період (D15-16)', async () => {
+  it('History без комірки: журнал аркуша (правки й дії процесу), заголовок називає аркуш і період, «This cell» вимкнений', async () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<Harness entry="/documents/1?panel=history" />);
 
-    // Без комірки: події Submit/Reject (найновіші перші), причина — текстом, а не розміткою.
+    // Лінія: найновіші перші; причина - текстом, а не розміткою; правка - було → стало.
     const items = await screen.findAllByRole('listitem');
     expect(items).toHaveLength(2);
     expect(items[0]?.textContent).toContain('⟦workflow.eventAction.Reject⟧');
     expect(items[0]?.textContent).toContain('Correct <b>the</b> figures');
     expect(items[0]?.querySelector('b')).toBeNull();
     expect(items[0]?.textContent).toContain('land-owner');
-    expect(items[1]?.textContent).toContain('⟦workflow.eventAction.Submit⟧');
+    expect(items[1]?.textContent).toContain('M. Petrenko');
+    expect(items[1]?.textContent).toContain('Fuel · Diesel · Volume');
+    expect(items[1]?.textContent).toContain('10');
+    expect(items[1]?.textContent).toContain('12.5');
+
+    // Режим і область названі явно.
+    const sheetRadio = screen.getByRole('radio', { name: '⟦inspector.history.modeSheet⟧' }) as HTMLInputElement;
+    const cellRadio = screen.getByRole('radio', { name: '⟦inspector.history.modeCell⟧' }) as HTMLInputElement;
+    expect(sheetRadio.checked).toBe(true);
+    expect(cellRadio.disabled).toBe(true);
+    expect(screen.getByRole('radiogroup', { name: '⟦inspector.history.modeLabel⟧' })).toBeTruthy();
+    expect(document.querySelector('[data-inspector-scope]')?.textContent).toContain('inspector.history.scopeSheet');
+    expect(document.querySelector('[data-inspector-scope]')?.textContent).toContain('sheet=Sheet A');
     expect(screen.queryByText('⟦inspector.noCellTitle⟧')).toBeNull();
+
+    const url = new URL(String(fetchMock.mock.calls.find(([input]) => String(input).includes('/activity'))?.[0]), 'http://localhost');
+    expect(url.searchParams.get('periodKey')).toBe('202609');
+    expect(url.searchParams.get('includeSystem')).toBe('false');
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/audit/cells'))).toBe(false);
+  });
+
+  it('вибір комірки НЕ підміняє журнал: «This cell» вмикається, перемикання показує історію комірки, зняття вибору повертає журнал', async () => {
+    vi.stubGlobal('fetch', fetchMock);
+    render(<Harness entry="/documents/1?panel=history" />);
+    await screen.findAllByRole('listitem');
 
     act(() => publishInspectedCell(Cell));
 
+    // Вміст лишився журналом аркуша; перемикач лише став доступним.
+    const cellRadio = screen.getByRole('radio', { name: '⟦inspector.history.modeCell⟧' }) as HTMLInputElement;
+    await waitFor(() => expect(cellRadio.disabled).toBe(false));
+    expect((screen.getByRole('radio', { name: '⟦inspector.history.modeSheet⟧' }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/audit/cells'))).toBe(false);
+
+    fireEvent.click(cellRadio);
+
     expect(await screen.findByText('M. Petrenko')).toBeTruthy();
     expect(screen.queryByText('Other period')).toBeNull();
-    // Чип адреси в шапці.
+    expect(document.querySelector('[data-inspector-scope]')?.textContent).toContain('inspector.history.scopeCell');
+    expect(document.querySelector('[data-inspector-scope]')?.textContent).toContain('cell=R4 · C3');
+    expect(document.querySelector('[data-inspector-scope]')?.textContent).toContain('column=Volume');
     expect(screen.getByRole('complementary').textContent).toContain('R4 · C3');
 
     const url = String(fetchMock.mock.calls.find(([input]) => String(input).includes('/audit/cells'))?.[0]);
@@ -306,6 +360,38 @@ describe('інспектор документа (UI-25)', () => {
     expect(url).toContain('columnDefId=33');
     // AN-98: період іде в запит (відсів на сервері до сторінки), а не лишається на клієнті.
     expect(new URL(url, 'http://localhost').searchParams.get('periodKey')).toBe('202609');
+
+    // Зняли вибір у режимі комірки: журнал аркуша, перемикач узгоджений і «This cell» знову вимкнений.
+    act(() => clearInspectedCell());
+    await waitFor(() => expect((screen.getByRole('radio', { name: '⟦inspector.history.modeSheet⟧' }) as HTMLInputElement).checked).toBe(true));
+    expect((screen.getByRole('radio', { name: '⟦inspector.history.modeCell⟧' }) as HTMLInputElement).disabled).toBe(true);
+
+    // ...і наступний вибір комірки режим сам НЕ вмикає.
+    act(() => publishInspectedCell(Cell));
+    expect((screen.getByRole('radio', { name: '⟦inspector.history.modeSheet⟧' }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('журнал аркуша: системні зміни за прапорцем, «ще» дочитує за курсором, клік по правці веде в комірку', async () => {
+    vi.stubGlobal('fetch', fetchMock);
+    const open = vi.fn();
+    render(<Harness entry="/documents/1?panel=history" onOpenCell={open} />);
+    await screen.findAllByRole('listitem');
+
+    fireEvent.click(screen.getByRole('button', { name: /Fuel · Diesel · Volume/ }));
+    expect(open).toHaveBeenCalledWith({ sheetCode: 'A', tableCode: 'T1', rowKey: 'R4', columnCode: 'C3' });
+
+    fireEvent.click(document.querySelector('[data-inspector-load-more]') as HTMLElement);
+    await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(3));
+    expect(document.querySelector('[data-inspector-load-more]')).toBeNull();
+    expect(
+      fetchMock.mock.calls.some(([input]) => String(input).includes('cursor=NEXT')),
+    ).toBe(true);
+
+    fireEvent.click(document.querySelector('[data-inspector-include-system] input') ?? screen.getByRole('checkbox'));
+    await waitFor(() => expect(
+      fetchMock.mock.calls.some(([input]) => String(input).includes('includeSystem=true')),
+    ).toBe(true));
+    expect(await screen.findByText('⟦audit.systemAuthor⟧')).toBeTruthy();
   });
 
   it('N3-02: зміна документа скидає комірку під курсором', () => {
