@@ -30,7 +30,8 @@ public sealed class GetRegistryEntryHandler(
     IRegistryStore registries,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
-    Permits.Groups.IPermitGroupResolver? groups = null)
+    Permits.Groups.IPermitGroupResolver? groups = null,
+    IRegistryHierarchyStore? hierarchy = null)
 {
     // ⚠ `groups` (PRMG) потрібен лише для запису, адресованого під кодом ГРУПИ типів дозволів (опція «unlisted» клієнта);
     // необов'язковий для тестів, що будують обробник руками, - контейнер підставляє його завжди.
@@ -105,6 +106,13 @@ public sealed class GetRegistryEntryHandler(
             }
         }
 
+        string? levelCode = null;
+        if (entry.LevelId is { } levelId && hierarchy is not null)
+        {
+            levelCode = (await hierarchy.ListLevelsAsync(entryDefinition.Id, ct).ConfigureAwait(false))
+                .FirstOrDefault(l => l.Id == levelId)?.Code;
+        }
+
         return new RegistryEntryDetailDto(
             entry.Id,
             entry.Code,
@@ -112,7 +120,8 @@ public sealed class GetRegistryEntryHandler(
             entry.ParentEntryId,
             entry.ValidFrom,
             entry.ValidTo,
-            values);
+            values,
+            levelCode);
     }
 
     /// <summary>Значення поля текстом у форматі, який приймає запис.</summary>
