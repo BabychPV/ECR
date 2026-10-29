@@ -35,7 +35,7 @@ import {
 } from './edits';
 import { captureRange, isRangeEdit, type RangeEditDetail } from './rangeEdit';
 import { ConflictPanel, hasCurrentVersion, type OpenConflict } from './ConflictPanel';
-import { cellStateClass, cellStateOf, rowsLockedBySheet, sheetLockClass, type LocalCellFlags } from './cellState';
+import { cellStateClass, cellStateOf, gridReadOnlyFor, rowsLockedBySheet, sheetLockClass, type LocalCellFlags } from './cellState';
 import { isMissingColumns, isSliceEmpty } from './emptiness';
 import { columnWidth, widthsFromEvent } from './columnWidths';
 import { createLookupCellEditor, lookupCellDisplay, lookupIdOfText } from './LookupCellEditor';
@@ -378,14 +378,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     periodKey,
     sheetDefId,
     periodEnd = null,
-    readOnly,
+    readOnly: pageReadOnly,
     sheetState,
     allowsDynamicRows,
     maxDynamicRows,
     navigateTo = null,
     hidden = false,
   } = props;
-  const rowsReadOnly = readOnly || rowsLockedBySheet(sheetState);
+  const rowsReadOnly = pageReadOnly || rowsLockedBySheet(sheetState);
 
   const slice = useQuery({
     // ⚠ Період лишається в КЛЮЧІ КЕШУ, але не в адресі. Екземпляр таблиці
@@ -401,6 +401,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     queryFn: () =>
       apiFetch<TableSliceDto>(`/api/v1/documents/${documentId}/tables/${tableInstanceId}`),
   });
+
+  // AN-142: поданий аркуш із редаговною (за рішенням сервера) коміркою - текстом якоря - не замикається цілком.
+  const readOnly = useMemo(
+    () => gridReadOnlyFor(pageReadOnly, sheetState, slice.data),
+    [pageReadOnly, sheetState, slice.data],
+  );
 
   const { patch, isPending, status: saveStatus, recalculationJobId } = useCellPatch(documentId);
 
