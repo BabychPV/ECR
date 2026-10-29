@@ -344,6 +344,11 @@ public interface IJobProgress
 /// клієнт не перечитує зрізи); <c>null</c> — інша задача, ще не завершена або число невідоме
 /// (AN-108 / P2-02, <c>FormulaRecalcOutcome</c>). Заповнює <c>GetJobStatusHandler</c>.
 /// </param>
+/// <param name="WrittenPeriods">
+/// L3: періоди (<c>yyyyMM</c>, за зростанням), де <c>Succeeded</c> перерахунок формул документа справді записав
+/// комірки (задача формул одна на документ, L2). <c>null</c> — невідомо (старий конверт, інша задача, нічого не
+/// записано): клієнт перечитує період правки, як раніше. Заповнює <c>GetJobStatusHandler</c>.
+/// </param>
 public sealed record JobStatus(
     string JobId,
     string State,
@@ -360,7 +365,8 @@ public sealed record JobStatus(
     int? CreatedByUserId = null,
     FanOutStatus? FanOut = null,
     string? EffectiveState = null,
-    int? WrittenCount = null);
+    int? WrittenCount = null,
+    IReadOnlyList<int>? WrittenPeriods = null);
 
 /// <summary>Ідентифікатор поточної задачі; його несе канал прогресу воркера.</summary>
 /// <remarks>Потрібен задачі, що розкладає роботу на дочірні, щоб позначити їх своїм <c>JobId</c>.</remarks>
