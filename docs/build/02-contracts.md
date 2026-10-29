@@ -2834,6 +2834,23 @@ public interface IRegistryDraftStore
 }
 ```
 
+#### `IRegistryHierarchyStore`
+
+Рівні ієрархічних довідників `cfg.RegistryLevelDef` і читання дерева (NAE plan N1). Правила розміщення
+(порядок рівнів, пропуск лише необов'язкових, цикли) живуть в `RegistryHierarchyRules`, не в сховищі.
+
+```csharp
+public interface IRegistryHierarchyStore
+{
+    public Task<IReadOnlyList<RegistryLevelDef>> ListLevelsAsync(int registryDefId, CancellationToken ct);
+    public void AddLevel(RegistryLevelDef level);
+    public void RemoveLevel(RegistryLevelDef level);
+    public Task<IReadOnlyDictionary<int, int>> CountEntriesByLevelAsync(int registryDefId, CancellationToken ct);
+    public Task<IReadOnlyList<RegistryEntry>> ListLiveEntriesAsync(int registryDefId, CancellationToken ct);
+    public Task<IReadOnlyList<RegistryEntry>> ListChildrenTrackedAsync(int registryDefId, long? parentEntryId, CancellationToken ct);
+}
+```
+
 #### `IRegistryKeyStore`
 
 Складені ключі довідника при записі (RT-10a, FEATURE-REGISTRY-TABLES §4.3, D-151…D-153).

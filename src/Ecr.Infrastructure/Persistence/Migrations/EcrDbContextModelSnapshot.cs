@@ -1741,6 +1741,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(true, "DF_RegDef_Act");
 
+                    b.Property<bool>("IsHierarchical")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_RegDef_Hier");
+
                     b.Property<bool>("IsTemporal")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
@@ -1983,6 +1988,51 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("UQ_RegistryKeyField_Field");
 
                     b.ToTable("RegistryKeyField", "cfg");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryLevelDef", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<bool>("IsOptional")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_RegLevel_Opt");
+
+                    b.Property<string>("NameL10n")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RegistryDefId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id")
+                        .HasName("PK_RegistryLevelDef");
+
+                    b.HasIndex("RegistryDefId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_RegistryLevelDef_Code");
+
+                    b.HasIndex("RegistryDefId", "Ordinal")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_RegistryLevelDef_Ordinal");
+
+                    b.ToTable("RegistryLevelDef", "cfg", t =>
+                        {
+                            t.HasCheckConstraint("CK_RegLevel_Ordinal", "Ordinal >= 1");
+                        });
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryRuleDef", b =>
@@ -2608,6 +2658,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(false);
 
+                    b.Property<int?>("LevelId")
+                        .HasColumnType("int");
+
                     b.Property<int>("Ordinal")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
@@ -2640,9 +2693,19 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("PK_RegistryEntry");
 
+                    b.HasIndex("LevelId")
+                        .HasDatabaseName("IX_RegistryEntry_Level")
+                        .HasFilter("[LevelId] IS NOT NULL");
+
                     b.HasIndex("RegistryDefId", "Code")
                         .IsUnique()
                         .HasDatabaseName("UQ_RegistryEntry");
+
+                    b.HasIndex("RegistryDefId", "ParentEntryId")
+                        .HasDatabaseName("IX_RegistryEntry_Parent")
+                        .HasFilter("[ParentEntryId] IS NOT NULL");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("RegistryDefId", "ParentEntryId"), new[] { "Ordinal", "Code", "IsActive", "IsDeleted", "LevelId" });
 
                     b.HasIndex("RegistryDefId", "IsActive", "IsDeleted")
                         .HasDatabaseName("IX_RegistryEntry_Lookup");
@@ -6933,6 +6996,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_RegKeyField_Key");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryLevelDef", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryDef", null)
+                        .WithMany()
+                        .HasForeignKey("RegistryDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RegLevel_Registry");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryRuleDef", b =>
                 {
                     b.HasOne("Ecr.Domain.Entities.Configuration.RegistryDef", null)
@@ -7053,6 +7126,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Ecr.Domain.Entities.Dictionaries.RegistryEntry", b =>
                 {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryLevelDef", null)
+                        .WithMany()
+                        .HasForeignKey("LevelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_RegEntry_Level");
+
                     b.HasOne("Ecr.Domain.Entities.Dictionaries.RegistryEntry", null)
                         .WithMany()
                         .HasForeignKey("ParentEntryId")
