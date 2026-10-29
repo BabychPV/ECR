@@ -32,4 +32,23 @@ public sealed class MonthOwnerCellsQueryShapeTests
         var parameterCount = sql.Split('\n').Count(l => l.StartsWith("DECLARE @", StringComparison.Ordinal));
         Assert.True(parameterCount <= (2 * periods.Count) + 4,$"параметрів {parameterCount}: {sql}");
     }
+
+    /// <summary>
+    /// L6 перф: відбір «якір АБО EXISTS(ColumnDef)» на кожній комірці SQL Server виконував через Table Spool
+    /// (~111 тис. логічних читань робочої таблиці на запит, 150–3400 мс; звіт S07 × 12 читачів). Форма має лишатись
+    /// двома гілками UNION ALL зі звичайним з'єднанням за PK <c>cfg.ColumnDef</c>, без корельованого EXISTS.
+    /// </summary>
+    [Fact]
+    [Trait("Decision", "Q-17")]
+    public void Запит_власників_без_корельованого_EXISTS_і_двома_гілками_UNION_ALL()
+    {
+        using var db = Context();
+
+        var sql = MonthRoutedCellStore.OwnerCellsQuery(
+            db, 1L, Enumerable.Range(202601, 12).ToList(), [724], [202601]).ToQueryString();
+
+        Assert.DoesNotContain("EXISTS", sql, StringComparison.Ordinal);
+        Assert.Contains("UNION ALL", sql, StringComparison.Ordinal);
+        Assert.Contains("[cfg].[ColumnDef]", sql, StringComparison.Ordinal);
+    }
 }
