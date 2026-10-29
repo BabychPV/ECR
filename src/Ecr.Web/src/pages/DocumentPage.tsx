@@ -483,12 +483,15 @@ export function DocumentPage(): JSX.Element {
   // ⛔ PERIODNAV: період поза проєктом (`ECR-PRD-0422`) лишає екран без `summary`, а отже без проєкту й
   // календаря - тупик. Проєкт беремо з картки БЕЗ періоду (`periodKey` необов'язковий), а на час перемикання
   // періоду тримаємо останній відомий (інакше календар зникає на кожному кроці).
+  // ⚠ Сервер відхиляє період там, де вперше перевіряє його (`…/tables`, інколи й картка); `summary` при цьому може
+  // бути вже прочитаним - тоді проєкт відомий і без запиту нижче.
   const periodRejected =
-    summary.data === undefined && (isPeriodOutsideProject(summary.error) || isPeriodOutsideProject(tables.error));
+    (summary.data === undefined && isPeriodOutsideProject(summary.error)) ||
+    (tables.data === undefined && isPeriodOutsideProject(tables.error));
   const baseSummary = useQuery({
     queryKey: ['document', documentId, 'base'],
     queryFn: () => apiFetch<DocumentSummary>(`/api/v1/documents/${documentId}`),
-    enabled: periodRejected,
+    enabled: periodRejected && summary.data === undefined,
   });
   const knownProject = useRef<{ documentId: number; projectId: number } | null>(null);
   const loadedProjectId = summary.data?.projectId ?? baseSummary.data?.projectId;
@@ -543,6 +546,26 @@ export function DocumentPage(): JSX.Element {
     if (saved === null || saved.periodKey !== periodKey || !periodSettled) return;
     scrollAtSwitch.current = null;
     window.scrollTo({ top: saved.y });
+
+    // Висота документа добирається ще кілька кадрів (слоти таблиць, смуга аркушів): повторюємо, доки людина
+    // сама не прокрутила (колесо, дотик, клавіша, клік) - її рух важливіший за збережену позицію.
+    let frames = 0;
+    let frame = 0;
+    const userScroll = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+    const stop = (): void => {
+      window.cancelAnimationFrame(frame);
+      for (const type of userScroll) window.removeEventListener(type, stop);
+    };
+    for (const type of userScroll) window.addEventListener(type, stop, { passive: true, once: true });
+    const retry = (): void => {
+      if (Math.abs(window.scrollY - saved.y) > 1) window.scrollTo({ top: saved.y });
+      frames += 1;
+      if (frames < 40) frame = window.requestAnimationFrame(retry);
+      else stop();
+    };
+    frame = window.requestAnimationFrame(retry);
+
+    return stop;
   }, [periodKey, periodSettled]);
 
   // ⛔ D1-02: дата чинності довідників у сітці — календарний кінець періоду ІЗ СЕРВЕРА.

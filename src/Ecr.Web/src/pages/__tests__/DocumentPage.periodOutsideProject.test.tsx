@@ -35,7 +35,7 @@ const rejected = (): Response =>
 
 const requested: string[] = [];
 
-function mockFetch(alwaysReject: boolean): void {
+function mockFetch(alwaysReject: boolean, cardToo = true): void {
   requested.length = 0;
   vi.stubGlobal(
     'fetch',
@@ -61,7 +61,8 @@ function mockFetch(alwaysReject: boolean): void {
       }
 
       const periodKey = /periodKey=(\d+)/.exec(url)?.[1];
-      const isDocument = /\/api\/v1\/documents\/1(\?|$|\/tables)/.test(url);
+      // Сервер перевіряє період там, де створює екземпляри таблиць (…/tables); картка може пройти.
+      const isDocument = cardToo ? /\/api\/v1\/documents\/1(\?|$|\/tables)/.test(url) : /\/api\/v1\/documents\/1\/tables\?/.test(url);
       if (isDocument && periodKey !== undefined && (alwaysReject || !Valid.includes(Number(periodKey)))) return rejected();
 
       if (url.includes('/validation')) return jsonResponse({ documentId: 1, periodKey: 202612, messages: [], validated: false });
@@ -83,8 +84,8 @@ function LocationProbe(): JSX.Element {
   return <div data-testid="search">{useLocation().search}</div>;
 }
 
-function show(periodKey: number, alwaysReject: boolean): void {
-  mockFetch(alwaysReject);
+function show(periodKey: number, alwaysReject: boolean, cardToo = true): void {
+  mockFetch(alwaysReject, cardToo);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
@@ -118,6 +119,15 @@ describe('DocumentPage: період поза проєктом', () => {
     SlowEnvTimeout,
   );
 
+  it(
+    'відхиляє лише /tables (картка пройшла) - теж веде на останній допустимий період',
+    async () => {
+      show(202701, false, false);
+
+      await waitFor(() => expect(screen.getByTestId('search').textContent).toBe('?periodKey=202612'), { timeout: 20_000 });
+    },
+    SlowEnvTimeout,
+  );
   it(
     'коли перехід не допомагає - є дія «Go to <період>», вибір періоду й повідомлення сервера',
     async () => {
