@@ -1,4 +1,4 @@
-// tests/Ecr.Infrastructure.Tests/Jobs/CrossPeriodRecalculationSqlTests.cs
+﻿// tests/Ecr.Infrastructure.Tests/Jobs/CrossPeriodRecalculationSqlTests.cs
 using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Ports;
@@ -63,7 +63,7 @@ public sealed class CrossPeriodRecalculationSqlTests(SqlServerFixture sql)
             $"AND ColumnDefId = {world.Doc.ColumnDefIds[1]}");
 
         var enqueued = new List<(string Target, string Payload)>();
-        await RunJobAsync(
+        var progress = await RunJobAsync(
             world, enqueued,
             new FormulaRecalculationRequest(
                 world.Doc.TableInstanceId, 202603, [new DirtyCell(world.Doc.RowIds[0], world.Doc.ColumnDefIds[1])]));
@@ -71,24 +71,14 @@ public sealed class CrossPeriodRecalculationSqlTests(SqlServerFixture sql)
         // Власний період (3): абсолютне посилання на себе йде через звичайний план.
         Assert.Equal(33m, await OutputAsync(world, 202603));
 
-        // Рівно по одній coalesced-задачі на період-читач — не по задачі на комірку.
-        Assert.Equal(
-            [
-                FormulaRecalculationTarget.Of(world.Doc.DocumentId, May, createdByUserId: null),
-                FormulaRecalculationTarget.Of(world.Doc.DocumentId, July, createdByUserId: null),
-            ],
-            enqueued.Select(e => e.Target).Order(StringComparer.Ordinal).ToList());
-
-        // 3. Виконавець бере задачі періодів-читачів — ті самі, що поставив fan-out.
-        foreach (var queued in enqueued)
-        {
-            var request = JsonSerializer.Deserialize<FormulaRecalculationRequest>(
-                queued.Payload, WebOptions)!;
-            await RunJobAsync(world, [], request);
-        }
-
+        // L2: читачі НЕ ставляться окремими задачами — той самий прохід дораховує 5 і 7 під тим самим локом.
+        Assert.Empty(enqueued);
         Assert.Equal(33m, await OutputAsync(world, May));
         Assert.Equal(33m, await OutputAsync(world, July));
+
+        // Підсумок: по одній комірці в кожному з трьох періодів, періоди названі (для клієнта, L3).
+        Assert.Equal(3, progress.Written);
+        Assert.Equal([202603, May, July], progress.Periods);
     }
 
     [Fact]
@@ -116,9 +106,9 @@ public sealed class CrossPeriodRecalculationSqlTests(SqlServerFixture sql)
             new FormulaRecalculationRequest(
                 world.Doc.TableInstanceId, 202603, [new DirtyCell(world.Doc.RowIds[0], world.Doc.ColumnDefIds[1])]));
 
-        // «Закриті періоди автоматично не перераховуються ніколи»: у чергу лише 5.
-        var only = Assert.Single(enqueued);
-        Assert.Equal(FormulaRecalculationTarget.Of(world.Doc.DocumentId, May, createdByUserId: null), only.Target);
+        // «Закриті періоди автоматично не перераховуються ніколи»: 5 дораховано, закритий 7 — ні.
+        Assert.Empty(enqueued);
+        Assert.Equal(33m, await OutputAsync(world, May));
         Assert.Equal(StaleOutput, await OutputAsync(world, July));
     }
 
@@ -147,12 +137,7 @@ public sealed class CrossPeriodRecalculationSqlTests(SqlServerFixture sql)
             new FormulaRecalculationRequest(
                 world.Doc.TableInstanceId, 202603, [new DirtyCell(world.Doc.RowIds[0], world.Doc.ColumnDefIds[1])]));
 
-        foreach (var queued in enqueued)
-        {
-            var request = JsonSerializer.Deserialize<FormulaRecalculationRequest>(
-                queued.Payload, WebOptions)!;
-            await RunJobAsync(world, [], request);
-        }
+        Assert.Empty(enqueued);
 
         // ФВ-9.17: подана цифра змінюється лише Reopen. Липень (не поданий) оновився, травень — ні.
         Assert.Equal(StaleOutput, await OutputAsync(world, May));
@@ -238,7 +223,8 @@ public sealed class CrossPeriodRecalculationSqlTests(SqlServerFixture sql)
         await setup.SaveChangesAsync();
     }
 
-    private async Task RunJobAsync(World world, List<(string Target, string Payload)> enqueued, FormulaRecalculationRequest request)
+    private async Task<CapturingJobProgress> RunJobAsync(
+        World world, List<(string Target, string Payload)> enqueued, FormulaRecalculationRequest request)
     {
         await using var db = world.Builder.CreateContext();
 
@@ -258,7 +244,10 @@ public sealed class CrossPeriodRecalculationSqlTests(SqlServerFixture sql)
             new RowStore(db, bulk, new TestClock(Now)), versions, periods, jobs, db);
 
         var job = new FormulaRecalculationJob(Formulas(db, world), db, fanOut, periods);
-        await job.ExecuteAsync(request, NoOpProgress.Instance, CancellationToken.None);
+        var progress = new CapturingJobProgress();
+        await job.ExecuteAsync(request, progress, CancellationToken.None);
+
+        return progress;
     }
 
     private async Task<World> ArrangeAsync()
@@ -438,10 +427,4 @@ public sealed class CrossPeriodRecalculationSqlTests(SqlServerFixture sql)
 
     private sealed record World(TestDocumentBuilder Builder, TestDocument Doc);
 
-    private sealed class NoOpProgress : IJobProgress
-    {
-        public static readonly NoOpProgress Instance = new();
-
-        public Task ReportAsync(int percent, string? message, CancellationToken ct) => Task.CompletedTask;
-    }
 }

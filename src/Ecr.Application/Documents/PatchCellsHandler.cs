@@ -1,4 +1,4 @@
-using Ecr.Application.Calculations;
+﻿using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
@@ -3087,7 +3087,14 @@ public sealed partial class PatchCellsHandler(
 
         return await jobs.EnqueueCoalescedAsync<Ports.IFormulaRecalculationJob>(
             Ports.FormulaRecalculationTarget.Of(documentId, period, editorUserId),
-            new { DocumentId = documentId, TableInstanceId = instanceId, PeriodKey = period, Cells = seeds }, ct,
+            new
+            {
+                DocumentId = documentId,
+                TableInstanceId = instanceId,
+                PeriodKey = period,
+                Cells = RecalculationSeed.Stamp(seeds, period, instanceId),
+            },
+            ct,
             createdByUserId: editorUserId)
             .ConfigureAwait(false);
     }
@@ -3582,9 +3589,34 @@ public sealed partial class PatchCellsHandler(
 /// каскад має право перерахувати; без позначки (<c>null</c>) — поле в JSON не пишеться, форма та сама.
 /// </remarks>
 /// <param name="ApproverSheetDefId">Аркуш правки погоджувача; <c>null</c> — звичайна правка.</param>
+/// <param name="PeriodKey">L2: період комірки (задача формул одна на документ); <c>null</c> — період тіла задачі.</param>
+/// <param name="TableInstanceId">L2: екземпляр таблиці комірки; <c>null</c> — екземпляр тіла задачі.</param>
 public sealed record RecalculationSeed(
     long RowId,
     int ColumnDefId,
     [property: System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    int? ApproverSheetDefId = null);
+    int? ApproverSheetDefId = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    int? PeriodKey = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    long? TableInstanceId = null)
+{
+    /// <summary>
+    /// L2: задача формул одна на ДОКУМЕНТ (<see cref="Ports.FormulaRecalculationTarget.Of"/>), а злиття дописує масив
+    /// <c>cells</c> із різних періодів в одну задачу, тож період і екземпляр несе кожна комірка, а не лише тіло задачі.
+    /// </summary>
+    public static List<RecalculationSeed> Stamp(
+        IEnumerable<RecalculationSeed> seeds, int periodKey, long tableInstanceId)
+    {
+        ArgumentNullException.ThrowIfNull(seeds);
+
+        return [.. seeds.Select(s => s with
+        {
+            PeriodKey = s.PeriodKey ?? periodKey,
+            TableInstanceId = s.TableInstanceId ?? (tableInstanceId == 0 ? null : tableInstanceId),
+        })];
+    }
+}

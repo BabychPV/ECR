@@ -48,7 +48,9 @@ internal static partial class PermitMaterializationRecalculation
                         DocumentId = documentId,
                         TableInstanceId = materialized.EntryTableInstanceId,
                         PeriodKey = periodKey.Value,
-                        Cells = cells.Select(c => new RecalculationSeed(c.RowId, c.ColumnId)).ToList(),
+                        Cells = RecalculationSeed.Stamp(
+                            cells.Select(c => new RecalculationSeed(c.RowId, c.ColumnId)),
+                            periodKey.Value, materialized.EntryTableInstanceId),
                     },
                     ct)
                 .ConfigureAwait(false);

@@ -272,7 +272,9 @@ public sealed class RefreshPermitBindingHandler(
                 DocumentId = instance.DocumentId,
                 TableInstanceId = instance.TableInstanceId,
                 PeriodKey = instance.PeriodKey,
-                Cells = result.ChangedCells.Select(c => new RecalculationSeed(c.RowId, c.ColumnId)).ToList(),
+                Cells = RecalculationSeed.Stamp(
+                    result.ChangedCells.Select(c => new RecalculationSeed(c.RowId, c.ColumnId)),
+                    instance.PeriodKey, instance.TableInstanceId),
             },
             ct,
             createdByUserId: editorUserId);
