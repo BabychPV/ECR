@@ -1,4 +1,4 @@
-﻿using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Infrastructure.Caching;
 using Ecr.Infrastructure.Observability;
 using Ecr.Infrastructure.Persistence;
@@ -72,7 +72,8 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
         // ПОЛЯ ШАПКИ (`HeaderFieldDef`), фільтровані за TemplateVersionId, а
         // не за tableIds, як решта семи. `GetHeaderFieldDefsHandler` бере
         // поля шапки рівно з `snapshot.HeaderFields`.
-        Assert.Equal(8, first.Count);
+        // ⚠ Дев'ять: групи заголовків колонок (ColumnHeaderGroupDef) - ще один запит за tableIds.
+        Assert.Equal(9, first.Count);
 
         // ⛔ НУЛЬ, а не один (`RD-05`). Абзац вище — про те, як було до
         // директиви №14: «один запит лишається, і прибрати його не можна».
@@ -292,7 +293,7 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
             // було б 350.
             // ⚠ Твердження ПЕРШЕ саме тому, що воно головне: воно друкує
             // виміряне число, а не «не той екземпляр» п'ятдесят разів.
-            Assert.Equal(7, seen.Total);
+            Assert.Equal(8, seen.Total); // +1: групи заголовків колонок
 
             // Один знімок на всіх — не просто «однакові числа», а той самий
             // об'єкт: побудова була одна.
