@@ -29830,6 +29830,9 @@ export interface components {
             isMatch: boolean;
             /** @description Level code; `null` for an entry that has no level yet. */
             levelCode: null | string;
+            /** @description Value of the string field `NaeCode` when the registry has one and the node has a value (NAE plan N2: sources render
+             *     as `NaeCode · name`); `null` otherwise. */
+            naeCode?: null | string;
             /**
              * Format: int32
              * @description Position among siblings.
