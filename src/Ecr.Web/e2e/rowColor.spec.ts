@@ -75,6 +75,7 @@ test.describe('rowColor: колір тексту й заливка рядка', 
           await expect(cell(page, filledRow, 2), `${label}: заливка рядка`).toHaveAttribute('data-user-fill', 'true', { timeout: 15_000 });
           await choose(page, 'text', colour);
           await expect(cell(page, filledRow, 2), `${label}: дані користувацького тексту`).toHaveAttribute('data-user-text', 'true', { timeout: 15_000 });
+          if (i === 0) await page.screenshot({ path: test.info().outputPath(`rowcolor-${scheme}.png`) });
           await expect(cell(page, filledRow, 2), `${label}: computed color на ЗАЛИТОМУ рядку`).toHaveCSS('color', rgb);
           await expect(cell(page, filledRow, 6), `${label}: computed color, інша колонка рядка`).toHaveCSS('color', rgb);
 
