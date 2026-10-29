@@ -44,7 +44,8 @@ export class GridAriaPlugin extends BasePlugin {
 
     this.addEventListener('beforecolumnsset', ({ detail }) => {
       // Рядки шапки: рівні групових заголовків + рядок колонок.
-      const levels = [...detail.columnGrouping.colPinStart, ...detail.columnGrouping.rgCol, ...detail.columnGrouping.colPinEnd].map(
+      const grouping = detail.columnGrouping as Partial<typeof detail.columnGrouping> | undefined;
+      const levels = [...(grouping?.colPinStart ?? []), ...(grouping?.rgCol ?? []), ...(grouping?.colPinEnd ?? [])].map(
         (group) => group.level + 1,
       );
       this.headerRows = 1 + Math.max(0, ...levels);

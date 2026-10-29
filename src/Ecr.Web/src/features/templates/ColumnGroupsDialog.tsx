@@ -3,6 +3,7 @@ import { ActionIcon, Button, Group, Modal, Paper, Stack, Text } from '@mantine/c
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
 import type { TemplateHeaderGroupDto } from '@/api/types';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput } from '@/shared/ui/LocalizedInput';
@@ -45,6 +46,8 @@ export function ColumnGroupsDialog({
   const [drafts, setDrafts] = useState<GroupDraft[]>(() => draftsOf(groups));
 
   const save = useMutation({
+    // Відмову (зокрема ECR-TMPL-4229) показує сам діалог — без другого тосту глобальної сітки.
+    meta: { handled: true },
     mutationFn: () => replaceHeaderGroups(templateVersionId, tableId, toRequest(drafts)),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(templateVersionId) });
@@ -53,6 +56,7 @@ export function ColumnGroupsDialog({
     },
   });
 
+  const saveLoading = usePendingLoading(save.isPending);
   const rows = flatten(drafts);
   const valid = isValid(drafts);
 
@@ -144,7 +148,7 @@ export function ColumnGroupsDialog({
           <Button variant="default" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button disabled={!valid} loading={save.isPending} onClick={() => save.mutate()}>
+          <Button disabled={!valid} loading={saveLoading} onClick={() => save.mutate()}>
             {t('colgroups.save')}
           </Button>
         </Group>
