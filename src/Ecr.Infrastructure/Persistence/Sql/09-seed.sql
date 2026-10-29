@@ -9460,6 +9460,50 @@ USING (VALUES
     ,(N'tableChat.taskOpen', N'en', N'Open discussion', 1)
     ,(N'tableChat.tasksError', N'en', N'Could not load mentions.', 1)
     -- COLL:ui-tablechat ── кінець секції ──
+    -- COLL:ui-treeeditor ── загальний редактор дерева (shared/ui/TreeEditor, NAE plan N1/N2): пошук, клавіатура, перенос, виведення; ru/kz — порцією COLL:ui-treeeditor нижче ──
+    ,(N'treeEditor.searchLabel', N'en', N'Search the tree', 1)
+    ,(N'treeEditor.searchPlaceholder', N'en', N'Search by code or name', 1)
+    ,(N'treeEditor.clearSearch', N'en', N'Clear search', 1)
+    ,(N'treeEditor.showRetired', N'en', N'Retired', 1)
+    ,(N'treeEditor.addRoot', N'en', N'Add top-level node', 1)
+    ,(N'treeEditor.keyboardHint', N'en', N'Arrow keys move through the tree, Right and Left expand and collapse, Enter selects, Delete retires, Alt+M moves, Alt+Up and Alt+Down reorder, Insert adds a child.', 1)
+    ,(N'treeEditor.matches', N'en', N'{count} matches', 1)
+    ,(N'treeEditor.loading', N'en', N'Loading the tree…', 1)
+    ,(N'treeEditor.updating', N'en', N'Updating…', 1)
+    ,(N'treeEditor.nothingFound', N'en', N'Nothing found.', 1)
+    ,(N'treeEditor.empty', N'en', N'The tree is empty.', 1)
+    ,(N'treeEditor.retiredTag', N'en', N'Retired', 1)
+    ,(N'treeEditor.childCount', N'en', N'{count} direct children', 1)
+    ,(N'treeEditor.reordered', N'en', N'{name} moved to position {position} of {total}', 1)
+    ,(N'treeEditor.moved', N'en', N'Moved “{name}”.', 1)
+    ,(N'treeEditor.retiredDone', N'en', N'Retired “{name}”.', 1)
+    ,(N'treeEditor.addChild', N'en', N'Add child', 1)
+    ,(N'treeEditor.retire.action', N'en', N'Retire', 1)
+    ,(N'treeEditor.retire.title', N'en', N'Retire “{name}”?', 1)
+    ,(N'treeEditor.retire.text', N'en', N'The node stays in history and in documents that already use it, and disappears from new choices.', 1)
+    ,(N'treeEditor.retire.cascade', N'en', N'It has {count} direct children; they and everything below are retired too.', 1)
+    ,(N'treeEditor.retire.verb', N'en', N'Retire', 1)
+    ,(N'treeEditor.move.action', N'en', N'Move to…', 1)
+    ,(N'treeEditor.move.title', N'en', N'Move “{name}”', 1)
+    ,(N'treeEditor.move.hint', N'en', N'Pick the new parent. Only places allowed by the level order are listed.', 1)
+    ,(N'treeEditor.move.search', N'en', N'Find the new parent', 1)
+    ,(N'treeEditor.move.groupLabel', N'en', N'New parent', 1)
+    ,(N'treeEditor.move.none', N'en', N'There is no allowed place for this node.', 1)
+    ,(N'treeEditor.move.root', N'en', N'Top level (no parent)', 1)
+    ,(N'treeEditor.move.current', N'en', N'(current)', 1)
+    ,(N'treeEditor.move.limited', N'en', N'Showing the first {count} places. Narrow the search to see others.', 1)
+    ,(N'treeEditor.move.confirm', N'en', N'Move', 1)
+    ,(N'treeEditor.panel.empty', N'en', N'Select a node to see its details.', 1)
+    ,(N'treeEditor.panel.code', N'en', N'Code', 1)
+    ,(N'treeEditor.panel.level', N'en', N'Level', 1)
+    ,(N'treeEditor.panel.path', N'en', N'Path', 1)
+    ,(N'treeEditor.panel.validity', N'en', N'Valid', 1)
+    ,(N'treeEditor.panel.children', N'en', N'Direct children', 1)
+    ,(N'treeEditor.panel.fromTo', N'en', N'from {from} until {to}', 1)
+    ,(N'treeEditor.panel.from', N'en', N'from {from}', 1)
+    ,(N'treeEditor.panel.until', N'en', N'until {to}', 1)
+    ,(N'treeEditor.panel.retiredNote', N'en', N'This node is retired: it is hidden from new choices.', 1)
+    -- COLL:ui-treeeditor ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -24732,6 +24776,98 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-tablechat ── кінець секції ──
+-- COLL:ui-treeeditor ── ru/kz: загальний редактор дерева (shared/ui/TreeEditor); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'treeEditor.searchLabel', N'ru', N'Поиск по дереву'),
+    (N'treeEditor.searchLabel', N'kz', N'Ағаштан іздеу'),
+    (N'treeEditor.searchPlaceholder', N'ru', N'Поиск по коду или названию'),
+    (N'treeEditor.searchPlaceholder', N'kz', N'Код немесе атау бойынша іздеу'),
+    (N'treeEditor.clearSearch', N'ru', N'Сбросить поиск'),
+    (N'treeEditor.clearSearch', N'kz', N'Іздеуді тазарту'),
+    (N'treeEditor.showRetired', N'ru', N'Выведенные'),
+    (N'treeEditor.showRetired', N'kz', N'Қолданыстан шыққандар'),
+    (N'treeEditor.addRoot', N'ru', N'Добавить узел верхнего уровня'),
+    (N'treeEditor.addRoot', N'kz', N'Жоғары деңгейдегі түйін қосу'),
+    (N'treeEditor.keyboardHint', N'ru', N'Стрелки перемещают по дереву, Вправо и Влево разворачивают и сворачивают, Enter выбирает, Delete выводит из использования, Alt+M переносит, Alt+Вверх и Alt+Вниз меняют порядок, Insert добавляет дочерний узел.'),
+    (N'treeEditor.keyboardHint', N'kz', N'Көрсеткілер ағаш бойымен жылжиды, Оң және Сол көрсеткі ашады және жабады, Enter таңдайды, Delete қолданыстан шығарады, Alt+M жылжытады, Alt+Жоғары және Alt+Төмен ретін өзгертеді, Insert ішкі түйін қосады.'),
+    (N'treeEditor.matches', N'ru', N'Совпадений: {count}'),
+    (N'treeEditor.matches', N'kz', N'Сәйкестіктер: {count}'),
+    (N'treeEditor.loading', N'ru', N'Загрузка дерева…'),
+    (N'treeEditor.loading', N'kz', N'Ағаш жүктелуде…'),
+    (N'treeEditor.updating', N'ru', N'Обновление…'),
+    (N'treeEditor.updating', N'kz', N'Жаңартылуда…'),
+    (N'treeEditor.nothingFound', N'ru', N'Ничего не найдено.'),
+    (N'treeEditor.nothingFound', N'kz', N'Ештеңе табылмады.'),
+    (N'treeEditor.empty', N'ru', N'Дерево пусто.'),
+    (N'treeEditor.empty', N'kz', N'Ағаш бос.'),
+    (N'treeEditor.retiredTag', N'ru', N'Выведен'),
+    (N'treeEditor.retiredTag', N'kz', N'Шығарылған'),
+    (N'treeEditor.childCount', N'ru', N'Прямых дочерних: {count}'),
+    (N'treeEditor.childCount', N'kz', N'Тікелей ішкі түйіндер: {count}'),
+    (N'treeEditor.reordered', N'ru', N'«{name}»: позиция {position} из {total}'),
+    (N'treeEditor.reordered', N'kz', N'«{name}»: {position}-орын, барлығы {total}'),
+    (N'treeEditor.moved', N'ru', N'«{name}» перенесён.'),
+    (N'treeEditor.moved', N'kz', N'«{name}» жылжытылды.'),
+    (N'treeEditor.retiredDone', N'ru', N'«{name}» выведен из использования.'),
+    (N'treeEditor.retiredDone', N'kz', N'«{name}» қолданыстан шығарылды.'),
+    (N'treeEditor.addChild', N'ru', N'Добавить дочерний'),
+    (N'treeEditor.addChild', N'kz', N'Ішкі түйін қосу'),
+    (N'treeEditor.retire.action', N'ru', N'Вывести'),
+    (N'treeEditor.retire.action', N'kz', N'Шығару'),
+    (N'treeEditor.retire.title', N'ru', N'Вывести «{name}» из использования?'),
+    (N'treeEditor.retire.title', N'kz', N'«{name}» қолданыстан шығарылсын ба?'),
+    (N'treeEditor.retire.text', N'ru', N'Узел останется в истории и в документах, где уже используется, но исчезнет из новых выборов.'),
+    (N'treeEditor.retire.text', N'kz', N'Түйін тарихта және оны қолданып жүрген құжаттарда қалады, бірақ жаңа таңдаулардан жоғалады.'),
+    (N'treeEditor.retire.cascade', N'ru', N'Прямых дочерних узлов: {count}; они и всё ниже тоже будут выведены.'),
+    (N'treeEditor.retire.cascade', N'kz', N'Тікелей ішкі түйіндер: {count}; олар және олардың астындағының бәрі де шығарылады.'),
+    (N'treeEditor.retire.verb', N'ru', N'Вывести'),
+    (N'treeEditor.retire.verb', N'kz', N'Шығару'),
+    (N'treeEditor.move.action', N'ru', N'Перенести в…'),
+    (N'treeEditor.move.action', N'kz', N'Жылжыту…'),
+    (N'treeEditor.move.title', N'ru', N'Перенести «{name}»'),
+    (N'treeEditor.move.title', N'kz', N'«{name}» түйінін жылжыту'),
+    (N'treeEditor.move.hint', N'ru', N'Выберите нового родителя. Показаны только места, допустимые порядком уровней.'),
+    (N'treeEditor.move.hint', N'kz', N'Жаңа аталықты таңдаңыз. Деңгей реті рұқсат ететін орындар ғана көрсетіледі.'),
+    (N'treeEditor.move.search', N'ru', N'Найти нового родителя'),
+    (N'treeEditor.move.search', N'kz', N'Жаңа аталықты табу'),
+    (N'treeEditor.move.groupLabel', N'ru', N'Новый родитель'),
+    (N'treeEditor.move.groupLabel', N'kz', N'Жаңа аталық'),
+    (N'treeEditor.move.none', N'ru', N'Для этого узла нет допустимых мест.'),
+    (N'treeEditor.move.none', N'kz', N'Бұл түйін үшін рұқсат етілген орын жоқ.'),
+    (N'treeEditor.move.root', N'ru', N'Верхний уровень (без родителя)'),
+    (N'treeEditor.move.root', N'kz', N'Жоғарғы деңгей (аталықсыз)'),
+    (N'treeEditor.move.current', N'ru', N'(текущий)'),
+    (N'treeEditor.move.current', N'kz', N'(ағымдағы)'),
+    (N'treeEditor.move.limited', N'ru', N'Показаны первые {count} мест. Уточните поиск, чтобы увидеть остальные.'),
+    (N'treeEditor.move.limited', N'kz', N'Алғашқы {count} орын көрсетілген. Қалғандарын көру үшін іздеуді нақтылаңыз.'),
+    (N'treeEditor.move.confirm', N'ru', N'Перенести'),
+    (N'treeEditor.move.confirm', N'kz', N'Жылжыту'),
+    (N'treeEditor.panel.empty', N'ru', N'Выберите узел, чтобы увидеть сведения.'),
+    (N'treeEditor.panel.empty', N'kz', N'Мәліметтерді көру үшін түйінді таңдаңыз.'),
+    (N'treeEditor.panel.code', N'ru', N'Код'),
+    (N'treeEditor.panel.code', N'kz', N'Коды'),
+    (N'treeEditor.panel.level', N'ru', N'Уровень'),
+    (N'treeEditor.panel.level', N'kz', N'Деңгей'),
+    (N'treeEditor.panel.path', N'ru', N'Путь'),
+    (N'treeEditor.panel.path', N'kz', N'Жол'),
+    (N'treeEditor.panel.validity', N'ru', N'Действует'),
+    (N'treeEditor.panel.validity', N'kz', N'Қолданылады'),
+    (N'treeEditor.panel.children', N'ru', N'Прямых дочерних'),
+    (N'treeEditor.panel.children', N'kz', N'Тікелей ішкі түйіндер'),
+    (N'treeEditor.panel.fromTo', N'ru', N'с {from} до {to}'),
+    (N'treeEditor.panel.fromTo', N'kz', N'{from} бастап {to} дейін'),
+    (N'treeEditor.panel.from', N'ru', N'с {from}'),
+    (N'treeEditor.panel.from', N'kz', N'{from} бастап'),
+    (N'treeEditor.panel.until', N'ru', N'до {to}'),
+    (N'treeEditor.panel.until', N'kz', N'{to} дейін'),
+    (N'treeEditor.panel.retiredNote', N'ru', N'Узел выведен из использования: в новых выборах его нет.'),
+    (N'treeEditor.panel.retiredNote', N'kz', N'Түйін қолданыстан шыққан: жаңа таңдауларда көрсетілмейді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-treeeditor ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
