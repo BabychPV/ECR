@@ -242,6 +242,7 @@ public sealed record SubmissionSnapshotRecord(
 /// Погодження (<c>Approve</c>/<c>ApproveStep</c>), яке виконав той самий користувач, що й останнє
 /// подання (<c>Submit</c>) цього аркуша за період перед ним (<c>D-440</c>); для інших дій — <c>false</c>.
 /// </param>
+/// <param name="Id">Ідентифікатор події (порядок вставки; другий складник курсора журналу аркуша).</param>
 public sealed record ApprovalEventRecord(
     string SheetCode,
     Ecr.Domain.Enums.DocumentStatus FromStatus,
@@ -252,7 +253,8 @@ public sealed record ApprovalEventRecord(
     DateTime At,
     string? Reason,
     int? StepOrdinal,
-    bool ApprovedBySubmitter = false);
+    bool ApprovedBySubmitter = false,
+    long Id = 0);
 
 /// <summary>Календар подання аркуша (D-441): проєкт документа і стани періодів × аркуша.</summary>
 /// <param name="ProjectStatus">Стан проєкту.</param>

@@ -204,7 +204,8 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
                                 && s.PeriodKey == e.PeriodKey && s.Action == ApprovalAction.Submit && s.Id < e.Id)
                     .OrderByDescending(s => s.Id)
                     .Select(s => s.ByUserId)
-                    .FirstOrDefault() == e.ByUserId);
+                    .FirstOrDefault() == e.ByUserId,
+                e.Id);
 
         return await query.Take(limit).ToListAsync(ct).ConfigureAwait(false);
     }

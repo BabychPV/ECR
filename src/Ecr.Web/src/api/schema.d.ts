@@ -4746,6 +4746,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/sheets/{sheetDefId}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Журнал дій на аркуші за період (панель History): правки значень людьми (сітка, імпорт, правка погоджувача)
+         *     і дії процесу з коментарем; найновіші перші, keyset (50 за замовчуванням, до 100). Право `Document.View`;
+         *     аркуш, закритий читачеві, - `404`, як неіснуючий документ; закриті таблиці в журнал не потрапляють. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Період. */
+                    periodKey?: number;
+                    /** @description Лише дії цього користувача (`UserId`); без нього - усі. */
+                    author?: number;
+                    /** @description Розмір сторінки; `0` - 50. */
+                    limit?: number;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                    /** @description Аркуш. */
+                    sheetDefId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SheetActivityPage"];
+                        "text/json": components["schemas"]["SheetActivityPage"];
+                        "text/plain": components["schemas"]["SheetActivityPage"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/submission-target": {
         parameters: {
             query?: never;
@@ -30557,6 +30633,60 @@ export interface components {
              * @description Кінець дії; `null` — без обмеження.
              */
             to: null | string;
+        };
+        /** @description Рядок журналу дій на аркуші: правка комірки (людини) або дія робочого процесу. */
+        SheetActivityItem: {
+            /** @description Лише процес: `Submit`, `Approve`, `ApproveStep`, `Reject`, `Reopen`, `Recall`. */
+            action: null | string;
+            /**
+             * Format: date-time
+             * @description Момент дії, UTC.
+             */
+            at: string;
+            /** @description Ім'я виконавця; `system` — системний перехід; зниклий користувач — `#id`. */
+            byDisplayName: string;
+            /** @description Лише правка: код колонки. */
+            columnCode: null | string;
+            /** @description Лише правка: тип колонки (для показу значення за правилом показу). */
+            columnDataType: null | string;
+            /**
+             * Format: int32
+             * @description Лише правка: колонка.
+             */
+            columnDefId: null | number;
+            columnHeaderL10n: null | components["schemas"]["LocalizedText"];
+            /** @description Лише процес: стан до. */
+            fromState: null | string;
+            /** @description `CellEdit` або `Workflow` (SheetActivityKinds). */
+            kind: string;
+            /** @description Лише правка: значення після. */
+            newValue: null | string;
+            /** @description Лише правка: значення до. */
+            oldValue: null | string;
+            /** @description Лише правка: `UserEdit`, `Import`, `ImportOverwrite`, `ApproverEdit`. */
+            origin: null | string;
+            /**
+             * Format: int32
+             * @description Звітний період.
+             */
+            periodKey: number;
+            /** @description Лише процес: коментар (причина відхилення, повернення, відкликання); звичайний текст. */
+            reason: null | string;
+            /** @description Лише правка: ключ рядка. */
+            rowKey: null | string;
+            rowLabelL10n: null | components["schemas"]["LocalizedText"];
+            /** @description Лише правка: код таблиці. */
+            tableCode: null | string;
+            tableNameL10n: null | components["schemas"]["LocalizedText"];
+            /** @description Лише процес: стан після. */
+            toState: null | string;
+        };
+        /** @description Сторінка журналу дій аркуша. */
+        SheetActivityPage: {
+            /** @description Рядки, найновіші перші. */
+            items: components["schemas"]["SheetActivityItem"][];
+            /** @description Непрозорий курсор наступної сторінки; `null` — далі нічого немає. */
+            nextCursor: null | string;
         };
         SheetDto: {
             /** @description Код — ідентичність аркуша й адреса в `PUT …/sheets/{code}`. */

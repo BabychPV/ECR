@@ -18144,6 +18144,193 @@
         ],
         "type": "object"
       },
+      "SheetActivityItem": {
+        "description": "Рядок журналу дій на аркуші: правка комірки (людини) або дія робочого процесу.",
+        "properties": {
+          "action": {
+            "description": "Лише процес: `Submit`, `Approve`, `ApproveStep`, `Reject`, `Reopen`, `Recall`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "at": {
+            "description": "Момент дії, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "byDisplayName": {
+            "description": "Ім'я виконавця; `system` — системний перехід; зниклий користувач — `#id`.",
+            "type": "string"
+          },
+          "columnCode": {
+            "description": "Лише правка: код колонки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "columnDataType": {
+            "description": "Лише правка: тип колонки (для показу значення за правилом показу).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "columnDefId": {
+            "description": "Лише правка: колонка.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "columnHeaderL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Лише правка: заголовок колонки."
+              }
+            ]
+          },
+          "fromState": {
+            "description": "Лише процес: стан до.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "kind": {
+            "description": "`CellEdit` або `Workflow` (SheetActivityKinds).",
+            "type": "string"
+          },
+          "newValue": {
+            "description": "Лише правка: значення після.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "oldValue": {
+            "description": "Лише правка: значення до.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "origin": {
+            "description": "Лише правка: `UserEdit`, `Import`, `ImportOverwrite`, `ApproverEdit`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "periodKey": {
+            "description": "Звітний період.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Лише процес: коментар (причина відхилення, повернення, відкликання); звичайний текст.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rowKey": {
+            "description": "Лише правка: ключ рядка.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rowLabelL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Лише правка: підпис фіксованого рядка; `null` — динамічний."
+              }
+            ]
+          },
+          "tableCode": {
+            "description": "Лише правка: код таблиці.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Лише правка: назва таблиці."
+              }
+            ]
+          },
+          "toState": {
+            "description": "Лише процес: стан після.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "at",
+          "byDisplayName",
+          "origin",
+          "periodKey",
+          "rowKey",
+          "rowLabelL10n",
+          "columnDefId",
+          "columnCode",
+          "columnHeaderL10n",
+          "columnDataType",
+          "tableCode",
+          "tableNameL10n",
+          "oldValue",
+          "newValue",
+          "action",
+          "fromState",
+          "toState",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "SheetActivityPage": {
+        "description": "Сторінка журналу дій аркуша.",
+        "properties": {
+          "items": {
+            "description": "Рядки, найновіші перші.",
+            "items": {
+              "$ref": "#/components/schemas/SheetActivityItem"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Непрозорий курсор наступної сторінки; `null` — далі нічого немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
       "SheetDto": {
         "properties": {
           "code": {
@@ -29797,6 +29984,135 @@
         "summary": "Відкриває поданий документ. Право `Document.Reopen`.",
         "tags": [
           "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/sheets/{sheetDefId}/activity": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Аркуш.",
+            "in": "path",
+            "name": "sheetDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Період.",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Лише дії цього користувача (`UserId`); без нього - усі.",
+            "in": "query",
+            "name": "author",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Розмір сторінки; `0` - 50.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Курсор наступної сторінки.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SheetActivityPage"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SheetActivityPage"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SheetActivityPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Журнал дій на аркуші за період (панель History): правки значень людьми (сітка, імпорт, правка погоджувача)\nі дії процесу з коментарем; найновіші перші, keyset (50 за замовчуванням, до 100). Право `Document.View`;\nаркуш, закритий читачеві, - `404`, як неіснуючий документ; закриті таблиці в журнал не потрапляють.",
+        "tags": [
+          "DocumentWorkflowHistory"
         ]
       }
     },
