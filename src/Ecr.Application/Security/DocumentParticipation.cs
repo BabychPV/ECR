@@ -38,7 +38,7 @@ public static class DocumentParticipation
 {
     /// <summary>Проєктні права, які надання учасника дає В ЙОГО документі (вхід у читання документа).</summary>
     public static readonly IReadOnlySet<string> ImpliedPermissions =
-        new HashSet<string>(StringComparer.Ordinal) { "Document.View" };
+        new HashSet<string>(StringComparer.Ordinal) { "Document.View", "Document.Discuss" };
 
     /// <summary>Діючі надання користувача з фактів передач одного документа.</summary>
     /// <param name="facts">Факти передач документа з погляду користувача.</param>

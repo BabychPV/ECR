@@ -1385,6 +1385,18 @@ public sealed partial class EndpointCoverageTests
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/methodologies`.
         "PUT /api/v1/methodologies/{p}/row-activity-filter",
 
+        // TC (чат таблиці документа): серверна частина й контракт пушаться ПЕРШИМИ, клієнт (lane/integ-tablechat-ui,
+        // сесія Permits) стартує від запушеного schema.d.ts. До появи виклику в `features/documents` споживача немає.
+        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклики у клієнт (UI-lane чату таблиці).
+        "GET /api/v1/documents/{p}/discussions/summary",
+        "GET /api/v1/documents/{p}/tables/{p}/messages",
+        "GET /api/v1/documents/{p}/tables/{p}/mention-candidates",
+        "POST /api/v1/documents/{p}/tables/{p}/messages",
+        "PATCH /api/v1/documents/{p}/tables/{p}/messages/{p}",
+        "DELETE /api/v1/documents/{p}/tables/{p}/messages/{p}",
+        "PUT /api/v1/documents/{p}/tables/{p}/read",
+        "GET /api/v1/me/table-discussion-mentions",
+
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було
         // НЕПРАВДОЮ: жодне місце клієнта нічого не конвертувало.

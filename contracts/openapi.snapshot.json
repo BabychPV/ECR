@@ -5549,6 +5549,30 @@
           "NotAssignedToYou"
         ]
       },
+      "EditTableDiscussionMessageRequest": {
+        "description": "Тіло правки повідомлення.",
+        "properties": {
+          "body": {
+            "description": "Новий текст.",
+            "type": "string"
+          },
+          "mentionUserIds": {
+            "description": "Повний набір згаданих після правки; `null` — лишити як було.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
       "EditorSetDto": {
         "description": "Набір виконавців власника.",
         "properties": {
@@ -7645,6 +7669,20 @@
           "targetRowKey",
           "targetColumnCode",
           "aggregation"
+        ],
+        "type": "object"
+      },
+      "MarkTableDiscussionReadRequest": {
+        "description": "Тіло позначки «прочитано».",
+        "properties": {
+          "lastReadMessageId": {
+            "description": "Ідентифікатор останнього побаченого повідомлення (поріг; не зменшує наявну позначку).",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lastReadMessageId"
         ],
         "type": "object"
       },
@@ -12443,6 +12481,36 @@
         "required": [
           "instanceCount",
           "tables"
+        ],
+        "type": "object"
+      },
+      "PostTableDiscussionMessageRequest": {
+        "description": "Тіло створення повідомлення.",
+        "properties": {
+          "body": {
+            "description": "Простий текст, 1..4000 символів після нормалізації (керівні символи прибираються).",
+            "type": "string"
+          },
+          "mentionUserIds": {
+            "description": "Згадані користувачі (до 10). Ті, хто не бачить таблицю, мовчки відкидаються.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "periodKey": {
+            "description": "Період, у якому пишуть (рік*100+номер).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "body",
+          "periodKey"
         ],
         "type": "object"
       },
@@ -20269,6 +20337,328 @@
         ],
         "type": "object"
       },
+      "TableDiscussionMentionCandidateDto": {
+        "description": "Кандидат у згадку: лише користувач, який бачить таблицю.",
+        "properties": {
+          "name": {
+            "description": "Відображуване ім'я.",
+            "type": "string"
+          },
+          "userId": {
+            "description": "Користувач.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "userId",
+          "name"
+        ],
+        "type": "object"
+      },
+      "TableDiscussionMentionDto": {
+        "description": "Згадка в повідомленні: лише користувач, який сам бачить таблицю.",
+        "properties": {
+          "name": {
+            "description": "Відображуване ім'я.",
+            "type": "string"
+          },
+          "userId": {
+            "description": "Користувач.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "userId",
+          "name"
+        ],
+        "type": "object"
+      },
+      "TableDiscussionMentionTaskDto": {
+        "description": "Непрочитана згадка поточного користувача («Мої задачі»).",
+        "properties": {
+          "authorName": {
+            "description": "Ім'я автора.",
+            "type": "string"
+          },
+          "authorUserId": {
+            "description": "Автор.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "createdAt": {
+            "description": "Коли написано (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "messageId": {
+            "description": "Повідомлення.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "periodKey": {
+            "description": "Період повідомлення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "snippet": {
+            "description": "Початок тексту (до 160 символів).",
+            "type": "string"
+          },
+          "tableCode": {
+            "description": "Код таблиці.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "messageId",
+          "documentId",
+          "tableCode",
+          "periodKey",
+          "authorUserId",
+          "authorName",
+          "snippet",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "TableDiscussionMentionTasksDto": {
+        "description": "Непрочитані згадки поточного користувача, найновіші першими.",
+        "properties": {
+          "items": {
+            "description": "Згадки в таблицях, які користувач досі бачить.",
+            "items": {
+              "$ref": "#/components/schemas/TableDiscussionMentionTaskDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "TableDiscussionMessageDto": {
+        "description": "Повідомлення чату таблиці.",
+        "properties": {
+          "authorName": {
+            "description": "Ім'я автора.",
+            "type": "string"
+          },
+          "authorUserId": {
+            "description": "Автор.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "body": {
+            "description": "Простий текст (ніколи не HTML). `null` для видаленого — текст видаленого клієнту не віддається.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "canDelete": {
+            "description": "Поточний користувач може видалити (автор або модератор).",
+            "type": "boolean"
+          },
+          "canEdit": {
+            "description": "Поточний користувач може правити зараз (автор і вікно 15 хв ще відкрите).",
+            "type": "boolean"
+          },
+          "createdAt": {
+            "description": "Коли написано (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "deletedAt": {
+            "description": "Коли видалено (UTC); `null` — живе.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "editableUntil": {
+            "description": "До якого моменту (UTC) можна правити; `null` — правка недоступна.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "editedAt": {
+            "description": "Коли правлено (UTC); `null` — не правлено.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор; зростає з часом (ключ пагінації).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "isDeleted": {
+            "description": "Видалено: UI показує «повідомлення видалено».",
+            "type": "boolean"
+          },
+          "mentions": {
+            "description": "Згадані користувачі (лише ті, хто бачить таблицю).",
+            "items": {
+              "$ref": "#/components/schemas/TableDiscussionMentionDto"
+            },
+            "type": "array"
+          },
+          "periodKey": {
+            "description": "Період, у якому написано (рік*100+номер).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "tableCode": {
+            "description": "Код таблиці.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tableCode",
+          "periodKey",
+          "authorUserId",
+          "authorName",
+          "body",
+          "isDeleted",
+          "createdAt",
+          "editedAt",
+          "deletedAt",
+          "canEdit",
+          "editableUntil",
+          "canDelete",
+          "mentions"
+        ],
+        "type": "object"
+      },
+      "TableDiscussionPageDto": {
+        "description": "Сторінка повідомлень чату таблиці.",
+        "properties": {
+          "canModerate": {
+            "description": "Поточний користувач може видаляти чужі повідомлення (`Document.DiscussModerate`).",
+            "type": "boolean"
+          },
+          "canWrite": {
+            "description": "Поточний користувач може писати (`Document.Discuss` і доступ до таблиці).",
+            "type": "boolean"
+          },
+          "hasMoreBefore": {
+            "description": "Є старіші за першу повідомлену (для `before`).",
+            "type": "boolean"
+          },
+          "lastMessageId": {
+            "description": "Найбільший `id` чату; для `after` і для «прочитано».",
+            "format": "int64",
+            "type": "integer"
+          },
+          "lastReadMessageId": {
+            "description": "До якого повідомлення поточний користувач прочитав чат.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "messages": {
+            "description": "Повідомлення за зростанням `id` (старіші першими).",
+            "items": {
+              "$ref": "#/components/schemas/TableDiscussionMessageDto"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "description": "Ревізія чату (та сама, що в `ETag`): зростає на кожну зміну, включно з правкою й видаленням.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "messages",
+          "hasMoreBefore",
+          "revision",
+          "lastMessageId",
+          "lastReadMessageId",
+          "canWrite",
+          "canModerate"
+        ],
+        "type": "object"
+      },
+      "TableDiscussionSummaryDto": {
+        "description": "Підсумок чатів усіх таблиць документа, які бачить користувач; таблиці без розмов — відсутні.",
+        "properties": {
+          "canWrite": {
+            "description": "Користувач має право `Document.Discuss` у проєкті документа.",
+            "type": "boolean"
+          },
+          "items": {
+            "description": "Таблиці з хоча б одним повідомленням.",
+            "items": {
+              "$ref": "#/components/schemas/TableDiscussionSummaryItemDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "canWrite"
+        ],
+        "type": "object"
+      },
+      "TableDiscussionSummaryItemDto": {
+        "description": "Підсумок чату однієї таблиці.",
+        "properties": {
+          "lastAt": {
+            "description": "Коли написано останнє живе (UTC); `null` — чат порожній.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastMessageId": {
+            "description": "Найбільший `id` чату.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "mentionedMe": {
+            "description": "Є непрочитана згадка поточного користувача.",
+            "type": "boolean"
+          },
+          "tableCode": {
+            "description": "Код таблиці.",
+            "type": "string"
+          },
+          "total": {
+            "description": "Скільки живих повідомлень.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "unread": {
+            "description": "Скільки чужих живих повідомлень після позначки «прочитано».",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tableCode",
+          "total",
+          "unread",
+          "lastAt",
+          "lastMessageId",
+          "mentionedMe"
+        ],
+        "type": "object"
+      },
       "TableDto": {
         "properties": {
           "code": {
@@ -26464,6 +26854,69 @@
         ]
       }
     },
+    "/api/v1/documents/{documentId}/discussions/summary": {
+      "get": {
+        "description": "Віддає лише таблиці, які користувач бачить і де є повідомлення. `404 ECR-DOC-0404` — документ невидимий.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiscussionSummaryDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiscussionSummaryDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiscussionSummaryDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Підсумок чатів усіх таблиць документа одним запитом (лічильники й «непрочитано»).",
+        "tags": [
+          "TableDiscussions"
+        ]
+      }
+    },
     "/api/v1/documents/{documentId}/edit-assignments": {
       "get": {
         "parameters": [
@@ -27844,6 +28297,691 @@
         "summary": "Додає рядок у динамічну таблицю.",
         "tags": [
           "Cells"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/tables/{tableCode}/mention-candidates": {
+      "get": {
+        "description": "Імена користувачів без доступу не повертаються ніколи. `404` — таблиця невидима.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tableCode",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TableDiscussionMentionCandidateDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TableDiscussionMentionCandidateDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TableDiscussionMentionCandidateDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Кандидати у згадки: лише користувачі, які самі бачать цю таблицю (≥ 2 символи, до 20).",
+        "tags": [
+          "TableDiscussions"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/tables/{tableCode}/messages": {
+      "get": {
+        "description": "Відповідь несе `ETag` (ревізія чату + права читача); `If-None-Match` → `304` без тіла.\n`422 ECR-REQ-0422` — `before` разом з `after`, недійсні межі. `404` — документ чи таблиця невидимі.",
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код таблиці (стабільний між версіями шаблону).",
+            "in": "path",
+            "name": "tableCode",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Повернути повідомлення з `id` менше за це (старіші); без параметрів — найновіші.",
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Повернути повідомлення з `id` більше за це (опитування; зростання).",
+            "in": "query",
+            "name": "after",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "1..100, за замовчуванням 50.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Лише повідомлення цього періоду (фільтр «лише цей період»).",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiscussionPageDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiscussionPageDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiscussionPageDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "304": {
+            "description": "Not Modified"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Повідомлення чату таблиці: сторінка за ключем (`before`) або опитування (`after`).",
+        "tags": [
+          "TableDiscussions"
+        ]
+      },
+      "post": {
+        "description": "`403 ECR-AUTH-0403` — немає `Document.Discuss`; `404 ECR-DOC-0404` — документ чи таблиця невидимі;\n`422 ECR-REQ-0422` (`discussionBodyInvalid`) — порожній чи задовгий текст, недійсний період,\nзабагато згадок; `429` — ліміт запитів. Згадки користувачів без доступу мовчки відкидаються — у відповіді\nлише прийняті.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tableCode",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostTableDiscussionMessageRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostTableDiscussionMessageRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostTableDiscussionMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiscussionMessageDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiscussionMessageDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiscussionMessageDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Пише повідомлення в чат таблиці. Право `Document.Discuss`.",
+        "tags": [
+          "TableDiscussions"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/tables/{tableCode}/messages/{messageId}": {
+      "delete": {
+        "description": "Повторне видалення — `204` без змін. `403 ECR-ACCS-0403` (`discussionDeleteForbidden`) — чуже без\nправа модерації; `404` — таблиця невидима чи повідомлення немає в цьому чаті.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tableCode",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "messageId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "М'яке видалення: власне повідомлення або будь-яке — з правом `Document.DiscussModerate`.",
+        "tags": [
+          "TableDiscussions"
+        ]
+      },
+      "patch": {
+        "description": "`403 ECR-ACCS-0403` (`discussionEditForbidden`) — повідомлення чуже; `422 ECR-REQ-0422`\n(`discussionEditWindowClosed`) — вікно закрито, (`discussionMessageDeleted`) — вже видалено,\n(`discussionBodyInvalid`) — текст недійсний; `404` — таблиця невидима чи повідомлення немає в цьому чаті.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tableCode",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "messageId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditTableDiscussionMessageRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditTableDiscussionMessageRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditTableDiscussionMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiscussionMessageDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiscussionMessageDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiscussionMessageDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Правка свого повідомлення впродовж 15 хвилин після створення.",
+        "tags": [
+          "TableDiscussions"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/tables/{tableCode}/read": {
+      "put": {
+        "description": "Значення понад найбільший `id` чату зрізається до нього. `404` — таблиця невидима.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tableCode",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkTableDiscussionReadRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkTableDiscussionReadRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkTableDiscussionReadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Позначка «прочитано до» (монотонна); знімає згадки користувача до цього повідомлення.",
+        "tags": [
+          "TableDiscussions"
         ]
       }
     },
@@ -32382,6 +33520,47 @@
         "summary": "Аркуші, повернені на доопрацювання — відхилені погоджувачем (`Rejected`) або повернені в роботу\n(`Draft`, остання подія — `Reopen`, не самим викликачем; відкликання автором — ні), над якими працює\nпоточний користувач: власник документа, учасник із наданням ≥ `Write` на аркуш або останній подавач із правом\nписати в аркуш; проєкт не заборонений, аркуш видимий йому. Повторне подання прибирає аркуш із переліку.\nНайдавніші повернення першими; без імен схованого.",
         "tags": [
           "MeReturnedSheets"
+        ]
+      }
+    },
+    "/api/v1/me/table-discussion-mentions": {
+      "get": {
+        "parameters": [
+          {
+            "description": "1..100, за замовчуванням 50.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiscussionMentionTasksDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiscussionMentionTasksDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDiscussionMentionTasksDto"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Непрочитані згадки, найновіші першими; лише таблиці, які користувач досі бачить.",
+        "tags": [
+          "MeTableDiscussionMentions"
         ]
       }
     },
@@ -53916,6 +55095,12 @@
     },
     {
       "name": "SystemHealth"
+    },
+    {
+      "name": "TableDiscussions"
+    },
+    {
+      "name": "MeTableDiscussionMentions"
     },
     {
       "name": "Templates"

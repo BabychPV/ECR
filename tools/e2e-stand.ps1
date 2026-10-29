@@ -514,6 +514,8 @@ try {
             'Permit.EditType', 'Permit.PublishType',
             'Document.View', 'Document.Create', 'Document.Export', 'Document.Import',
             'Document.Reopen',
+            # ✎ TC: чат таблиці — e2e UI-lane на двох користувачах (написати, згадати, видалити чуже). Лише тестова роль.
+            'Document.Discuss', 'Document.DiscussModerate',
             'Project.Manage', 'Period.Configure', 'Period.Reopen',
             # ✎ P44: `Calculation.EditFormula` — `resizableModal.spec` заводить методологію з чернеткою й відкриває
             # вікно формули. Лише тестова роль стенда; ролі продукту не змінюються.

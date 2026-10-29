@@ -76,6 +76,11 @@ public static class PermissionScopes
         "Document.Export",
         "Document.Import",
         "Document.Reopen",
+
+        // TC: чат таблиці. Рішення про таблицю (аркуш × період) приймає межа читання, а не лише право, тож роль,
+        // звужена аркушем, пише/модерує саме в доступних їй таблицях.
+        "Document.Discuss",
+        "Document.DiscussModerate",
     };
 
     /// <summary>Чи дає право роль, звужена аркушами чи періодами.</summary>
