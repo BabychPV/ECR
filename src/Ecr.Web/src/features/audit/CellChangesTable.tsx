@@ -5,11 +5,12 @@ import { cellAuthorHint, cellAuthorName } from '@/features/audit/authorOptions';
 import { DefaultAuditSort, type AuditSort } from '@/features/audit/api';
 import { SortableTh } from '@/features/audit/SortableTh';
 import { decimalDelta } from '@/features/audit/changeDelta';
+import { NumericTypes, auditValueText } from '@/features/audit/auditValue';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { TwoLine } from '@/shared/ui/TwoLine';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
-import { formatDate, formatDecimal, formatPeriodKey } from '@/shared/format';
+import { formatDecimal, formatPeriodKey } from '@/shared/format';
 import './auditTable.css';
 
 /**
@@ -26,36 +27,7 @@ import './auditTable.css';
 
 export type CellChange = CellChangePage['items'][number];
 
-/** Типи колонок, чиє значення — число (`U-05`: одне правило подачі числа). */
-const NumericTypes: readonly string[] = ['Decimal', 'Int', 'Formula', 'Calculated'];
-
-/**
- * Значення журналу — за правилом показу, а не у форматі сховища (`X-35`).
- *
- * ⛔ Журнал показував «Was 53.1771000000000000»: `aud.CellChange` зберігає
- * число з повним масштабом колонки сховища (`decimal(34,16)`, `D-148`).
- * Людина набирала `53.1771` і шукає в журналі саме його. Хвостові нулі
- * прибирає той самий `formatDecimal`, що й сітка (`U-05`/`U-24`), розряди —
- * мовою інтерфейсу.
- *
- * ⚠ Нерозібране значення показується ЯК Є: журнал — доказ, і сховати дивне
- * значення за «—» означало б сховати саму розбіжність.
- */
-export function auditValueText(value: string | null | undefined, dataType: string | null | undefined): string {
-  if (value === null || value === undefined) return '—';
-  if (dataType === null || dataType === undefined) return value;
-
-  if (NumericTypes.includes(dataType)) return formatDecimal(value) ?? value;
-
-  if (dataType === 'Date') {
-    const day = /^\d{4}-\d{2}-\d{2}/.exec(value)?.[0];
-    const shown = day === undefined ? '' : formatDate(day);
-
-    return shown.length > 0 ? shown : value;
-  }
-
-  return value;
-}
+export { auditValueText };
 
 /**
  * Δ для показу: зі знаком «+» для зростання, мовою інтерфейсу; `null` — не число або немає «було».

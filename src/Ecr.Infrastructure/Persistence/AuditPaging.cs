@@ -16,58 +16,26 @@ namespace Ecr.Infrastructure.Persistence;
 internal readonly record struct AuditPosition(DateTime At, long Id, int UserId, string Name);
 
 /// <summary>
-/// Курсор журналів аудиту, прив'язаний до порядку: <c>v2|порядок|ticks|id|userId|ім'я</c> у base64.
+/// Читання курсора журналів аудиту (формат — <see cref="AuditCursorCodec"/>): курсор іншого порядку відхиляється.
 /// </summary>
 /// <remarks>
 /// ⛔ Курсор іншого порядку — не «початок списку», а відмова <c>422 auditCursorSortMismatch</c>: сторінка 3
 /// порядку А не є сторінкою 3 порядку Б, і мовчазне читання з чужої позиції дало б пропуски й дублі.
-/// ⚠ Зіпсований або старий (лише <c>Id</c> / <c>ticks:id</c>) курсор — як і раніше початок списку.
+/// ⚠ Зіпсований або старий курсор — як і раніше початок списку.
 /// </remarks>
 internal static class AuditCursor
 {
-    private const string Prefix = "v2";
-
     public static string Encode(AuditSort sort, DateTime at, long id, int userId, string? name)
-        => Convert.ToBase64String(Encoding.UTF8.GetBytes(string.Join(
-            '|',
-            Prefix,
-            ((int)sort).ToString(CultureInfo.InvariantCulture),
-            at.Ticks.ToString(CultureInfo.InvariantCulture),
-            id.ToString(CultureInfo.InvariantCulture),
-            userId.ToString(CultureInfo.InvariantCulture),
-            name ?? string.Empty)));
+        => AuditCursorCodec.Encode(sort, at, id, userId, name);
 
     public static AuditPosition? Decode(string? cursor, AuditSort expected)
     {
-        if (string.IsNullOrWhiteSpace(cursor))
+        if (AuditCursorCodec.TryDecode(cursor) is not { } decoded)
         {
             return null;
         }
 
-        string text;
-        try
-        {
-            text = Encoding.UTF8.GetString(Convert.FromBase64String(cursor));
-        }
-        catch (FormatException)
-        {
-            return null;
-        }
-
-        var parts = text.Split('|', 6);
-        if (parts.Length != 6
-            || parts[0] != Prefix
-            || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var sortCode)
-            || !long.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var ticks)
-            || !long.TryParse(parts[3], NumberStyles.None, CultureInfo.InvariantCulture, out var id)
-            || !int.TryParse(parts[4], NumberStyles.None, CultureInfo.InvariantCulture, out var userId)
-            || ticks > DateTime.MaxValue.Ticks
-            || !Enum.IsDefined(typeof(AuditSort), sortCode))
-        {
-            return null;
-        }
-
-        if ((AuditSort)sortCode != expected)
+        if (decoded.Sort != expected)
         {
             throw new BusinessRuleException(
                 ErrorCodes.RequestInvalid,
@@ -75,10 +43,9 @@ internal static class AuditCursor
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.auditCursorSortMismatch" });
         }
 
-        return new AuditPosition(new DateTime(ticks, DateTimeKind.Utc), id, userId, parts[5]);
+        return new AuditPosition(decoded.At, decoded.Id, decoded.UserId, decoded.Name);
     }
 }
-
 /// <summary>
 /// Порядок і курсорний предикат сторінок журналів аудиту (один код для всіх вкладок).
 /// </summary>
