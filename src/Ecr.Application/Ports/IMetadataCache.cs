@@ -31,4 +31,24 @@ public interface IMetadataCache
     /// опублікують.
     /// </remarks>
     public Task InvalidateAsync(int templateVersionId, CancellationToken ct);
+
+    /// <summary>
+    /// Похідні від версії дані (граф залежностей формул тощо), що живуть РІВНО стільки, скільки знімок версії:
+    /// тим самим ключем ревізії, тим самим токеном інвалідації (<see cref="InvalidateAsync"/>) і тією ж стелею життя
+    /// (заморожена версія — довго, чернетка — вікно ревізії).
+    /// </summary>
+    /// <typeparam name="T">Тип значення; ЗНАЧЕННЯ СПІЛЬНЕ між запитами — незмінне за побудовою.</typeparam>
+    /// <param name="templateVersionId">Версія шаблону.</param>
+    /// <param name="kind">Вид даних — частина ключа; один вид = один тип й одне джерело.</param>
+    /// <param name="load">Читання з бази; виконується щонайбільше один раз на політ і ключ.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Значення з кешу або щойно прочитане.</returns>
+    /// <remarks>
+    /// ⛔ Чому не окремий кеш: окремий мусив би сам знати, коли версія змінилася (публікація, міграція, правка
+    /// чернетки) — і розійшовся б зі знімком на першій же новій точці інвалідації. Тут кожен виклик
+    /// <see cref="InvalidateAsync"/> (а їх ставлять усі структурні обробники) скидає й похідні.
+    /// </remarks>
+    public Task<T> GetDerivedAsync<T>(
+        int templateVersionId, string kind, Func<CancellationToken, Task<T>> load, CancellationToken ct)
+        where T : class;
 }
