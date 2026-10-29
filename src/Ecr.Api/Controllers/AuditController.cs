@@ -18,6 +18,10 @@ public sealed class AuditController(
     GetStructureChangesHandler structureChanges,
     GetSecurityEventsHandler securityEvents,
     ExportStructureChangesHandler exportStructure,
+    GetWorkflowEventsHandler workflowEvents,
+    ExportCellChangesHandler exportCells,
+    ExportSecurityEventsHandler exportSecurity,
+    ExportWorkflowEventsHandler exportWorkflow,
     IConfiguration configuration) : ControllerBase
 {
     /// <summary>
@@ -254,21 +258,10 @@ public sealed class AuditController(
         // Усі відмови (403/422) — тут, до першого байта відповіді.
         var export = await exportStructure.PrepareAsync(filter, maxRows, ct).ConfigureAwait(false);
 
-        Response.ContentType = "text/csv; charset=utf-8";
-        Response.Headers.ContentDisposition = new System.Net.Http.Headers.ContentDispositionHeaderValue("attachment")
-        {
-            FileName = export.FileName,
-        }.ToString();
+        await StreamCsvAsync(
+            export.FileName, ExportStructureChangesHandler.Columns, export.Rows, ExportStructureChangesHandler.ToCsv, ct)
+            .ConfigureAwait(false);
 
-        await using var writer = new StreamWriter(Response.Body, new System.Text.UTF8Encoding(true), 64 * 1024);
-        await writer.WriteAsync(Ecr.Application.Common.CsvFormat.Row(ExportStructureChangesHandler.Columns)).ConfigureAwait(false);
-
-        await foreach (var row in export.Rows.WithCancellation(ct).ConfigureAwait(false))
-        {
-            await writer.WriteAsync(ExportStructureChangesHandler.ToCsv(row)).ConfigureAwait(false);
-        }
-
-        await writer.FlushAsync(ct).ConfigureAwait(false);
         return new EmptyResult();
     }
 
@@ -286,13 +279,55 @@ public sealed class AuditController(
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public Task<IActionResult> ExportCells(
+    public async Task<IActionResult> ExportCells(
         [FromQuery] DateTime from, [FromQuery] DateTime to,
         [FromQuery] long? documentId, [FromQuery] string? rowKey, [FromQuery] int? columnDefId,
         [FromQuery] int? author, [FromQuery] string? origin, [FromQuery] bool lateOnly,
         [FromQuery] string? q, [FromQuery] int? periodKey, [FromQuery] Ecr.Application.Ports.AuditSort sort,
         CancellationToken ct)
-        => Task.FromResult<IActionResult>(StatusCode(StatusCodes.Status501NotImplemented));
+    {
+        var filter = new Ecr.Application.Ports.CellChangeFilter(
+            from, to, documentId,
+            string.IsNullOrWhiteSpace(rowKey) ? null : rowKey,
+            columnDefId,
+            author,
+            string.IsNullOrWhiteSpace(origin) ? null : origin,
+            lateOnly,
+            string.IsNullOrWhiteSpace(q) ? null : q,
+            PeriodKey: periodKey,
+            Sort: sort);
+
+        var export = await exportCells.PrepareAsync(filter, MaxRows(), ct).ConfigureAwait(false);
+
+        await StreamCsvAsync(
+            export.FileName, ExportCellChangesHandler.Columns, export.Rows, ExportCellChangesHandler.ToCsv, ct)
+            .ConfigureAwait(false);
+
+        return new EmptyResult();
+    }
+
+    private int MaxRows() => configuration.GetValue("Audit:ExportMaxRows", AuditExportRunner.DefaultMaxRows);
+
+    /// <summary>Віддає CSV потоком: UTF-8 з BOM, заголовок, рядки по одному (без повної матеріалізації).</summary>
+    private async Task StreamCsvAsync<T>(
+        string fileName, string[] columns, IAsyncEnumerable<T> rows, Func<T, string> toCsv, CancellationToken ct)
+    {
+        Response.ContentType = "text/csv; charset=utf-8";
+        Response.Headers.ContentDisposition = new System.Net.Http.Headers.ContentDispositionHeaderValue("attachment")
+        {
+            FileName = fileName,
+        }.ToString();
+
+        await using var writer = new StreamWriter(Response.Body, new System.Text.UTF8Encoding(true), 64 * 1024);
+        await writer.WriteAsync(Ecr.Application.Common.CsvFormat.Row(columns)).ConfigureAwait(false);
+
+        await foreach (var row in rows.WithCancellation(ct).ConfigureAwait(false))
+        {
+            await writer.WriteAsync(toCsv(row)).ConfigureAwait(false);
+        }
+
+        await writer.FlushAsync(ct).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Експорт журналу подій безпеки у CSV. Право й фільтри — як у <c>security</c>; порядок — <c>sort</c>.
@@ -304,12 +339,26 @@ public sealed class AuditController(
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public Task<IActionResult> ExportSecurity(
+    public async Task<IActionResult> ExportSecurity(
         [FromQuery] DateTime from, [FromQuery] DateTime to,
         [FromQuery] string? eventType, [FromQuery] int? changedByUserId,
         [FromQuery] Ecr.Application.Ports.AuditSort sort,
         CancellationToken ct)
-        => Task.FromResult<IActionResult>(StatusCode(StatusCodes.Status501NotImplemented));
+    {
+        var filter = new Ecr.Application.Ports.SecurityEventFilter(
+            from, to,
+            string.IsNullOrWhiteSpace(eventType) ? null : eventType,
+            changedByUserId,
+            sort);
+
+        var export = await exportSecurity.PrepareAsync(filter, MaxRows(), ct).ConfigureAwait(false);
+
+        await StreamCsvAsync(
+            export.FileName, ExportSecurityEventsHandler.Columns, export.Rows, ExportSecurityEventsHandler.ToCsv, ct)
+            .ConfigureAwait(false);
+
+        return new EmptyResult();
+    }
 
     /// <summary>
     /// Журнал подій погодження аркушів (<c>wf.ApprovalEvent</c>): подання, затвердження, відхилення, повернення,
@@ -330,12 +379,23 @@ public sealed class AuditController(
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public Task<IActionResult> Workflow(
+    public async Task<IActionResult> Workflow(
         [FromQuery] DateTime from, [FromQuery] DateTime to,
         [FromQuery] string? action, [FromQuery] int? changedByUserId, [FromQuery] long? documentId,
         [FromQuery] int limit, [FromQuery] string? cursor, [FromQuery] Ecr.Application.Ports.AuditSort sort,
         CancellationToken ct)
-        => Task.FromResult<IActionResult>(StatusCode(StatusCodes.Status501NotImplemented));
+    {
+        var filter = new Ecr.Application.Ports.WorkflowEventFilter(
+            from, to,
+            string.IsNullOrWhiteSpace(action) ? null : action,
+            changedByUserId,
+            documentId,
+            sort);
+
+        return Ok(await workflowEvents
+            .HandleAsync(filter, new CursorRequest(limit == 0 ? 50 : limit, cursor), ct)
+            .ConfigureAwait(false));
+    }
 
     /// <summary>Експорт журналу подій погодження у CSV; ті самі правила, що в <c>cells/export.csv</c>.</summary>
     [HttpGet("workflow/export.csv")]
@@ -344,10 +404,25 @@ public sealed class AuditController(
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public Task<IActionResult> ExportWorkflow(
+    public async Task<IActionResult> ExportWorkflow(
         [FromQuery] DateTime from, [FromQuery] DateTime to,
         [FromQuery] string? action, [FromQuery] int? changedByUserId, [FromQuery] long? documentId,
         [FromQuery] Ecr.Application.Ports.AuditSort sort,
         CancellationToken ct)
-        => Task.FromResult<IActionResult>(StatusCode(StatusCodes.Status501NotImplemented));
+    {
+        var filter = new Ecr.Application.Ports.WorkflowEventFilter(
+            from, to,
+            string.IsNullOrWhiteSpace(action) ? null : action,
+            changedByUserId,
+            documentId,
+            sort);
+
+        var export = await exportWorkflow.PrepareAsync(filter, MaxRows(), ct).ConfigureAwait(false);
+
+        await StreamCsvAsync(
+            export.FileName, ExportWorkflowEventsHandler.Columns, export.Rows, ExportWorkflowEventsHandler.ToCsv, ct)
+            .ConfigureAwait(false);
+
+        return new EmptyResult();
+    }
 }
