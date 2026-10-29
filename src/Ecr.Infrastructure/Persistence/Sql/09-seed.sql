@@ -1553,6 +1553,7 @@ USING (VALUES
     -- `auditWindowTooWide` вище (`Q-341`).
     (N'err.ECR-REQ-0422.pageSizeOutOfRange', N'en', N'The page size must be between 1 and {max}.', 1),
     (N'err.ECR-REQ-0422.auditExportTooLarge', N'en', N'The export would contain {total} rows, the limit is {max}: narrow the window or the filters.', 1),
+    (N'err.ECR-REQ-0422.auditCursorSortMismatch', N'en', N'This page position belongs to a different sort order: start again from the first page.', 1),
     -- BE-09b: фільтр стану переліку документів. Невідомий стан — відмова, а не «усі».
     (N'err.ECR-REQ-0422.documentState',      N'en', N'There is no document state "{state}".', 1),
     (N'err.ECR-REQ-0422.documentStateNeedsPeriod', N'en', N'Filtering by document state needs a period: outside a period the state is not defined.', 1),
@@ -7854,6 +7855,9 @@ USING (VALUES
     ,(N'audit.entityLabel.ReportVersion', N'en', N'Report version', 1)
     ,(N'audit.eventLabel.AccessDenied', N'en', N'Access denied', 1)
     ,(N'audit.eventLabel.AuditStructureExported', N'en', N'Structure audit exported', 1)
+    ,(N'audit.eventLabel.AuditCellsExported', N'en', N'Cell changes audit exported', 1)
+    ,(N'audit.eventLabel.AuditSecurityExported', N'en', N'Security events audit exported', 1)
+    ,(N'audit.eventLabel.AuditWorkflowExported', N'en', N'Workflow events audit exported', 1)
     ,(N'audit.eventLabel.ConsistencyCheckRunRequested', N'en', N'Consistency check requested', 1)
     ,(N'audit.eventLabel.DataSourceConnectionTested', N'en', N'Source connection tested', 1)
     ,(N'audit.eventLabel.DataSourceDeleted', N'en', N'Data source deleted', 1)
@@ -9575,6 +9579,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.auditCellNeedsDocument', N'ru', N'Для ключа строки или фильтра по столбцу нужен документ: без него адрес ячейки не является адресом.'),
     (N'err.ECR-REQ-0422.pageSizeOutOfRange', N'ru', N'Размер страницы должен быть от 1 до {max}.'),
     (N'err.ECR-REQ-0422.auditExportTooLarge', N'ru', N'В экспорт попало бы строк: {total}, а ограничение — {max}: сузьте интервал или фильтры.'),
+    (N'err.ECR-REQ-0422.auditCursorSortMismatch', N'ru', N'Позиция страницы относится к другому порядку сортировки: начните с первой страницы.'),
     (N'err.ECR-REQ-0422.documentState', N'ru', N'Состояния документа «{state}» не существует.'),
     (N'err.ECR-REQ-0422.documentStateNeedsPeriod', N'ru', N'Для фильтра по состоянию документа нужен период: вне периода состояние не определено.'),
     (N'err.ECR-REQ-0422.periodMismatch', N'ru', N'Период {periodKey} в запросе не совпадает с периодом {expectedPeriodKey} экземпляра таблицы {tableInstanceId}.'),
@@ -12606,6 +12611,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.auditCellNeedsDocument', N'kz', N'Жол кілті немесе баған сүзгісі үшін құжат қажет: онсыз ұяшық мекенжайы мекенжай болып табылмайды.'),
     (N'err.ECR-REQ-0422.pageSizeOutOfRange', N'kz', N'Бет өлшемі 1 мен {max} аралығында болуы тиіс.'),
     (N'err.ECR-REQ-0422.auditExportTooLarge', N'kz', N'Экспортта {total} жол болар еді, шек — {max}: аралықты немесе сүзгілерді тарылтыңыз.'),
+    (N'err.ECR-REQ-0422.auditCursorSortMismatch', N'kz', N'Бет орны басқа сұрыптау ретіне тиесілі: бірінші беттен бастаңыз.'),
     (N'err.ECR-REQ-0422.documentState', N'kz', N'«{state}» құжат күйі жоқ.'),
     (N'err.ECR-REQ-0422.documentStateNeedsPeriod', N'kz', N'Құжат күйі бойынша сүзу үшін кезең қажет: кезеңнен тыс күй анықталмаған.'),
     (N'err.ECR-REQ-0422.periodMismatch', N'kz', N'Сұраудағы {periodKey} кезеңі {tableInstanceId} кесте данасының {expectedPeriodKey} кезеңіне сәйкес келмейді.'),
@@ -21172,6 +21178,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'audit.entityLabel.ReportVersion', N'ru', N'Версия отчёта'),
     (N'audit.eventLabel.AccessDenied', N'ru', N'Отказ в доступе'),
     (N'audit.eventLabel.AuditStructureExported', N'ru', N'Экспорт аудита структуры'),
+    (N'audit.eventLabel.AuditCellsExported', N'ru', N'Экспорт аудита изменений ячеек'),
+    (N'audit.eventLabel.AuditSecurityExported', N'ru', N'Экспорт аудита событий безопасности'),
+    (N'audit.eventLabel.AuditWorkflowExported', N'ru', N'Экспорт аудита событий согласования'),
     (N'audit.eventLabel.ConsistencyCheckRunRequested', N'ru', N'Запущена проверка согласованности'),
     (N'audit.eventLabel.DataSourceConnectionTested', N'ru', N'Проверено подключение к источнику'),
     (N'audit.eventLabel.DataSourceDeleted', N'ru', N'Источник данных удалён'),
@@ -21230,6 +21239,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'audit.entityLabel.ReportVersion', N'kz', N'Есеп нұсқасы'),
     (N'audit.eventLabel.AccessDenied', N'kz', N'Қол жеткізуден бас тарту'),
     (N'audit.eventLabel.AuditStructureExported', N'kz', N'Құрылым аудитін экспорттау'),
+    (N'audit.eventLabel.AuditCellsExported', N'kz', N'Ұяшық өзгерістері аудитін экспорттау'),
+    (N'audit.eventLabel.AuditSecurityExported', N'kz', N'Қауіпсіздік оқиғалары аудитін экспорттау'),
+    (N'audit.eventLabel.AuditWorkflowExported', N'kz', N'Келісу оқиғалары аудитін экспорттау'),
     (N'audit.eventLabel.ConsistencyCheckRunRequested', N'kz', N'Келісімділік тексеруі сұралды'),
     (N'audit.eventLabel.DataSourceConnectionTested', N'kz', N'Көзге қосылым тексерілді'),
     (N'audit.eventLabel.DataSourceDeleted', N'kz', N'Дерек көзі жойылды'),
