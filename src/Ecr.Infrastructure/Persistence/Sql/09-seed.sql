@@ -9471,6 +9471,39 @@ USING (VALUES
     ,(N'permits.nae.used.empty', N'en', N'No permit refers to this node yet.', 1)
     ,(N'permits.nae.form.keyTaken', N'en', N'A node with this NAE code, region and area already exists.', 1)
     ,(N'permits.nae.form.areaHint', N'en', N'Leave empty when there is no area: it is saved as “-”.', 1)
+    ,(N'permits.nae.import.open', N'en', N'Load from PI AF', 1)
+    ,(N'permits.nae.import.hintNotProvisioned', N'en', N'The NAE structure has not been loaded yet. Load it once from PI AF; after that ECR owns the tree.', 1)
+    ,(N'permits.nae.import.hintAskAdmin', N'en', N'The NAE structure has not been loaded yet. Ask an administrator to load it from PI AF.', 1)
+    ,(N'permits.nae.import.title', N'en', N'Load the structure from PI AF', 1)
+    ,(N'permits.nae.import.description', N'en', N'Reads the equipment tree from PI AF and creates the missing nodes. Existing nodes are never changed or moved.', 1)
+    ,(N'permits.nae.import.source', N'en', N'Data source', 1)
+    ,(N'permits.nae.import.noSources', N'en', N'There is no active data source to load from.', 1)
+    ,(N'permits.nae.import.root', N'en', N'AF root element', 1)
+    ,(N'permits.nae.import.rootHint', N'en', N'Leave empty to use ECR_01_Air Equipment.', 1)
+    ,(N'permits.nae.import.preview', N'en', N'Preview (dry run)', 1)
+    ,(N'permits.nae.import.apply', N'en', N'Load', 1)
+    ,(N'permits.nae.import.close', N'en', N'Close', 1)
+    ,(N'permits.nae.import.stale', N'en', N'The source or root changed: run the preview again.', 1)
+    ,(N'permits.nae.import.previewDone', N'en', N'Preview only: nothing was written.', 1)
+    ,(N'permits.nae.import.applied', N'en', N'Loaded: the nodes were written.', 1)
+    ,(N'permits.nae.import.nothingNew', N'en', N'Nothing new to load: every node already exists.', 1)
+    ,(N'permits.nae.import.willProvision', N'en', N'The NAE registry will be created with its levels and fields.', 1)
+    ,(N'permits.nae.import.didProvision', N'en', N'The NAE registry was created with its levels and fields.', 1)
+    ,(N'permits.nae.import.incomplete', N'en', N'The AF listing may be incomplete: some elements may be missing from this report.', 1)
+    ,(N'permits.nae.import.read', N'en', N'{count} AF elements read', 1)
+    ,(N'permits.nae.import.level', N'en', N'Level', 1)
+    ,(N'permits.nae.import.create', N'en', N'To create', 1)
+    ,(N'permits.nae.import.existing', N'en', N'Already exist', 1)
+    ,(N'permits.nae.import.skipped', N'en', N'{count} elements skipped', 1)
+    ,(N'permits.nae.import.issues', N'en', N'Findings', 1)
+    ,(N'permits.nae.import.severity.warning', N'en', N'Warning', 1)
+    ,(N'permits.nae.import.severity.skipped', N'en', N'Skipped', 1)
+    ,(N'permits.nae.import.issue.noCode', N'en', N'The element has no NAE code.', 1)
+    ,(N'permits.nae.import.issue.noRegion', N'en', N'The element has no Region attribute.', 1)
+    ,(N'permits.nae.import.issue.duplicateBusinessKey', N'en', N'The same NAE code, region and area occur twice in AF.', 1)
+    ,(N'permits.nae.import.issue.pathFlattened', N'en', N'More than two grouping levels under the area: the path was flattened.', 1)
+    ,(N'permits.nae.import.issue.existingElsewhere', N'en', N'This NAE key already belongs to another node.', 1)
+    ,(N'permits.nae.import.issue.sourceIncomplete', N'en', N'The AF listing may be truncated.', 1)
     -- COLL:ui-nae-structure ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -24764,7 +24797,73 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.nae.form.keyTaken', N'ru', N'Узел с таким кодом NAE, регионом и районом уже существует.'),
     (N'permits.nae.form.keyTaken', N'kz', N'Мұндай NAE коды, өңірі және ауданы бар түйін әлдеқашан бар.'),
     (N'permits.nae.form.areaHint', N'ru', N'Оставьте пустым, если района нет: сохранится как «-».'),
-    (N'permits.nae.form.areaHint', N'kz', N'Аудан жоқ болса, бос қалдырыңыз: «-» болып сақталады.')
+    (N'permits.nae.form.areaHint', N'kz', N'Аудан жоқ болса, бос қалдырыңыз: «-» болып сақталады.'),
+    (N'permits.nae.import.open', N'ru', N'Загрузить из PI AF'),
+    (N'permits.nae.import.open', N'kz', N'PI AF-тен жүктеу'),
+    (N'permits.nae.import.hintNotProvisioned', N'ru', N'Структура NAE ещё не загружена. Загрузите её один раз из PI AF; дальше деревом владеет ECR.'),
+    (N'permits.nae.import.hintNotProvisioned', N'kz', N'NAE құрылымы әлі жүктелмеген. Оны PI AF-тен бір рет жүктеңіз; одан әрі ағашты ECR басқарады.'),
+    (N'permits.nae.import.hintAskAdmin', N'ru', N'Структура NAE ещё не загружена. Попросите администратора загрузить её из PI AF.'),
+    (N'permits.nae.import.hintAskAdmin', N'kz', N'NAE құрылымы әлі жүктелмеген. Әкімшіден оны PI AF-тен жүктеуін сұраңыз.'),
+    (N'permits.nae.import.title', N'ru', N'Загрузка структуры из PI AF'),
+    (N'permits.nae.import.title', N'kz', N'Құрылымды PI AF-тен жүктеу'),
+    (N'permits.nae.import.description', N'ru', N'Читает дерево оборудования из PI AF и создаёт недостающие узлы. Существующие узлы не меняются и не переносятся.'),
+    (N'permits.nae.import.description', N'kz', N'PI AF-тен жабдық ағашын оқып, жетіспейтін түйіндерді жасайды. Бар түйіндер өзгертілмейді және жылжытылмайды.'),
+    (N'permits.nae.import.source', N'ru', N'Источник данных'),
+    (N'permits.nae.import.source', N'kz', N'Дерек көзі'),
+    (N'permits.nae.import.noSources', N'ru', N'Нет активного источника данных для загрузки.'),
+    (N'permits.nae.import.noSources', N'kz', N'Жүктеуге арналған белсенді дерек көзі жоқ.'),
+    (N'permits.nae.import.root', N'ru', N'Корневой элемент AF'),
+    (N'permits.nae.import.root', N'kz', N'AF түбірлік элементі'),
+    (N'permits.nae.import.rootHint', N'ru', N'Оставьте пустым, чтобы взять ECR_01_Air Equipment.'),
+    (N'permits.nae.import.rootHint', N'kz', N'ECR_01_Air Equipment алу үшін бос қалдырыңыз.'),
+    (N'permits.nae.import.preview', N'ru', N'Просмотр (пробный запуск)'),
+    (N'permits.nae.import.preview', N'kz', N'Алдын ала қарау (сынақ іске қосу)'),
+    (N'permits.nae.import.apply', N'ru', N'Загрузить'),
+    (N'permits.nae.import.apply', N'kz', N'Жүктеу'),
+    (N'permits.nae.import.close', N'ru', N'Закрыть'),
+    (N'permits.nae.import.close', N'kz', N'Жабу'),
+    (N'permits.nae.import.stale', N'ru', N'Источник или корень изменились: выполните просмотр заново.'),
+    (N'permits.nae.import.stale', N'kz', N'Дерек көзі немесе түбір өзгерді: алдын ала қарауды қайта орындаңыз.'),
+    (N'permits.nae.import.previewDone', N'ru', N'Только просмотр: ничего не записано.'),
+    (N'permits.nae.import.previewDone', N'kz', N'Тек қарау: ештеңе жазылмады.'),
+    (N'permits.nae.import.applied', N'ru', N'Загружено: узлы записаны.'),
+    (N'permits.nae.import.applied', N'kz', N'Жүктелді: түйіндер жазылды.'),
+    (N'permits.nae.import.nothingNew', N'ru', N'Загружать нечего: все узлы уже есть.'),
+    (N'permits.nae.import.nothingNew', N'kz', N'Жүктейтін жаңа ештеңе жоқ: барлық түйін бұрыннан бар.'),
+    (N'permits.nae.import.willProvision', N'ru', N'Справочник NAE будет создан вместе с уровнями и полями.'),
+    (N'permits.nae.import.willProvision', N'kz', N'NAE анықтамалығы деңгейлері мен өрістерімен бірге жасалады.'),
+    (N'permits.nae.import.didProvision', N'ru', N'Справочник NAE создан вместе с уровнями и полями.'),
+    (N'permits.nae.import.didProvision', N'kz', N'NAE анықтамалығы деңгейлері мен өрістерімен бірге жасалды.'),
+    (N'permits.nae.import.incomplete', N'ru', N'Список из AF может быть неполным: часть элементов может отсутствовать в этом отчёте.'),
+    (N'permits.nae.import.incomplete', N'kz', N'AF тізімі толық болмауы мүмкін: кейбір элементтер бұл есепте болмауы мүмкін.'),
+    (N'permits.nae.import.read', N'ru', N'Прочитано элементов AF: {count}'),
+    (N'permits.nae.import.read', N'kz', N'Оқылған AF элементтері: {count}'),
+    (N'permits.nae.import.level', N'ru', N'Уровень'),
+    (N'permits.nae.import.level', N'kz', N'Деңгей'),
+    (N'permits.nae.import.create', N'ru', N'Будет создано'),
+    (N'permits.nae.import.create', N'kz', N'Жасалады'),
+    (N'permits.nae.import.existing', N'ru', N'Уже есть'),
+    (N'permits.nae.import.existing', N'kz', N'Бұрыннан бар'),
+    (N'permits.nae.import.skipped', N'ru', N'Пропущено элементов: {count}'),
+    (N'permits.nae.import.skipped', N'kz', N'Өткізіліп жіберілген элементтер: {count}'),
+    (N'permits.nae.import.issues', N'ru', N'Замечания'),
+    (N'permits.nae.import.issues', N'kz', N'Ескертулер'),
+    (N'permits.nae.import.severity.warning', N'ru', N'Предупреждение'),
+    (N'permits.nae.import.severity.warning', N'kz', N'Ескерту'),
+    (N'permits.nae.import.severity.skipped', N'ru', N'Пропущено'),
+    (N'permits.nae.import.severity.skipped', N'kz', N'Өткізілді'),
+    (N'permits.nae.import.issue.noCode', N'ru', N'У элемента нет кода NAE.'),
+    (N'permits.nae.import.issue.noCode', N'kz', N'Элементте NAE коды жоқ.'),
+    (N'permits.nae.import.issue.noRegion', N'ru', N'У элемента нет атрибута Region.'),
+    (N'permits.nae.import.issue.noRegion', N'kz', N'Элементте Region атрибуты жоқ.'),
+    (N'permits.nae.import.issue.duplicateBusinessKey', N'ru', N'Один и тот же код NAE, регион и район встречаются в AF дважды.'),
+    (N'permits.nae.import.issue.duplicateBusinessKey', N'kz', N'Бірдей NAE коды, өңір және аудан AF-те екі рет кездеседі.'),
+    (N'permits.nae.import.issue.pathFlattened', N'ru', N'Больше двух уровней группировки под районом: путь сплющен.'),
+    (N'permits.nae.import.issue.pathFlattened', N'kz', N'Ауданның астында екіден астам топтау деңгейі бар: жол тегістелді.'),
+    (N'permits.nae.import.issue.existingElsewhere', N'ru', N'Этот ключ NAE уже принадлежит другому узлу.'),
+    (N'permits.nae.import.issue.existingElsewhere', N'kz', N'Бұл NAE кілті басқа түйінге тиесілі.'),
+    (N'permits.nae.import.issue.sourceIncomplete', N'ru', N'Список из AF может быть усечён.'),
+    (N'permits.nae.import.issue.sourceIncomplete', N'kz', N'AF тізімі қысқартылған болуы мүмкін.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
