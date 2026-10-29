@@ -564,6 +564,15 @@
         ],
         "type": "object"
       },
+      "AuditSort": {
+        "description": "Порядок сторінок журналів аудиту (вкладки Cell changes / Structure changes / Security events / Workflow events).",
+        "enum": [
+          "ChangedAtDesc",
+          "ChangedAtAsc",
+          "UserAsc",
+          "UserDesc"
+        ]
+      },
       "AuthProvider": {
         "description": "Провайдер автентифікації. Нижче рівня входу не використовується.",
         "enum": [
@@ -10338,6 +10347,39 @@
         ],
         "type": "object"
       },
+      "PagedResultOfWorkflowEventView": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowEventView"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
       "ParentDeletePolicy": {
         "enum": [
           "Restrict",
@@ -19869,6 +19911,13 @@
             "format": "int32",
             "type": "integer"
           },
+          "entityLabel": {
+            "description": "Читабельний підпис сутності (код/назва на цей момент); `null` — не визначено або сутність видалено: показується ідентифікатор.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "entityType": {
             "description": "Сутність: `cfg.RegistryDef`, `cfg.RegistryRuleDef`.",
             "type": "string"
@@ -23057,6 +23106,103 @@
           "approvedBySubmitter"
         ],
         "type": "object"
+      },
+      "WorkflowEventView": {
+        "description": "Подія переходу стану аркуша (`wf.ApprovalEvent`) у журналі аудиту.",
+        "properties": {
+          "action": {
+            "description": "Дія: `Submit`, `Approve`, `ApproveStep`, `Reject`, `Reopen`, `Recall`.",
+            "type": "string"
+          },
+          "changedAt": {
+            "description": "Момент дії в UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "changedByDisplayName": {
+            "description": "Ім'я автора; `null` — система або запису користувача вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "changedByUserId": {
+            "description": "Хто виконав — <b>UserId</b>; `null` — системний перехід.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "comment": {
+            "description": "Причина/коментар (звичайний текст); `null` — дія без коментаря.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "documentBusinessKey": {
+            "description": "Бізнес-ключ документа; `null` — документа вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "fromStatus": {
+            "description": "Стан до дії.",
+            "type": "string"
+          },
+          "periodKey": {
+            "description": "Звітний період.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetCode": {
+            "description": "Код аркуша; `null` — визначення вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sheetDefId": {
+            "description": "Аркуш.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "stepOrdinal": {
+            "description": "Крок маршруту, якщо маршрут є.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "toStatus": {
+            "description": "Стан після дії.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "changedAt",
+          "action",
+          "fromStatus",
+          "toStatus",
+          "comment",
+          "changedByUserId",
+          "changedByDisplayName",
+          "documentId",
+          "documentBusinessKey",
+          "sheetDefId",
+          "sheetCode",
+          "periodKey",
+          "stepOrdinal"
+        ],
+        "type": "object"
       }
     }
   },
@@ -23171,6 +23317,14 @@
               "format": "int32",
               "type": "integer"
             }
+          },
+          {
+            "description": "Порядок: `ChangedAtDesc` (типово, найновіші першими), `ChangedAtAsc`, `UserAsc`, `UserDesc`; курсор прив'язаний до порядку.",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "$ref": "#/components/schemas/AuditSort"
+            }
           }
         ],
         "responses": {
@@ -23256,6 +23410,142 @@
           }
         },
         "summary": "Історія змін комірок. Право `Security.ViewAudit` — або\n`Document.View`, коли задано повну адресу однієї комірки.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
+    "/api/v1/audit/cells/export.csv": {
+      "get": {
+        "description": "Потік сторінками, стеля `Audit:ExportMaxRows` (типово 100 000); понад неї — `422 auditExportTooLarge`.\nUTF-8 з BOM; час — UTC ISO 8601; значення, що починаються з `= + - @`, нейтралізуються. Експорт сам\nпишеться подією безпеки `AuditCellsExported`.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "documentId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rowKey",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "columnDefId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "author",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lateOnly",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "$ref": "#/components/schemas/AuditSort"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Експорт журналу змін комірок у CSV (гаряче + архів). Право й фільтри — як у `cells`; порядок — `sort`.",
         "tags": [
           "Audit"
         ]
@@ -23452,6 +23742,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Порядок: `ChangedAtDesc` (типово, найновіші першими), `ChangedAtAsc`, `UserAsc`, `UserDesc`; курсор прив'язаний до порядку.",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "$ref": "#/components/schemas/AuditSort"
+            }
           }
         ],
         "responses": {
@@ -23542,6 +23840,97 @@
         ]
       }
     },
+    "/api/v1/audit/security/export.csv": {
+      "get": {
+        "description": "Ті самі стеля, кодування й захист, що в `cells/export.csv`; подія безпеки `AuditSecurityExported`.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "eventType",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "changedByUserId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "$ref": "#/components/schemas/AuditSort"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Експорт журналу подій безпеки у CSV. Право й фільтри — як у `security`; порядок — `sort`.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
     "/api/v1/audit/structure": {
       "get": {
         "description": "Вікно часу **обов'язкове** й обмежене згори, як у `cells`:\n`aud.StructureChange` лежить на тій самій схемі партицій. Запит без\nвікна — `422 ECR-REQ-0422`, а не «весь журнал».",
@@ -23596,6 +23985,14 @@
             "name": "cursor",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Порядок: `ChangedAtDesc` (типово, найновіші першими), `ChangedAtAsc`, `UserAsc`, `UserDesc`; курсор прив'язаний до порядку.",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "$ref": "#/components/schemas/AuditSort"
             }
           }
         ],
@@ -23725,6 +24122,14 @@
               "format": "int32",
               "type": "integer"
             }
+          },
+          {
+            "description": "Порядок: `ChangedAtDesc` (типово, найновіші першими), `ChangedAtAsc`, `UserAsc`, `UserDesc`; курсор прив'язаний до порядку.",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "$ref": "#/components/schemas/AuditSort"
+            }
           }
         ],
         "responses": {
@@ -23770,6 +24175,265 @@
           }
         },
         "summary": "Експорт журналу структурних змін у CSV (`BE-16`). Право й фільтри — як у `structure`.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
+    "/api/v1/audit/workflow": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Початок вікна в UTC, включно.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна в UTC, виключно.",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Дія: `Submit`, `Approve`, `ApproveStep`, `Reject`, `Reopen`, `Recall`.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Автор дії — `UserId`.",
+            "in": "query",
+            "name": "changedByUserId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Документ.",
+            "in": "query",
+            "name": "documentId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Розмір сторінки; `0` — 50.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Курсор наступної сторінки (прив'язаний до sort).",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Порядок; типово найновіші першими.",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "$ref": "#/components/schemas/AuditSort"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfWorkflowEventView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfWorkflowEventView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfWorkflowEventView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Журнал подій погодження аркушів (`wf.ApprovalEvent`): подання, затвердження, відхилення, повернення,\nвідкликання — з коментарем. Право `Security.ViewAudit`; вікно обов'язкове й обмежене, як у `cells`.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
+    "/api/v1/audit/workflow/export.csv": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "changedByUserId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "documentId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "$ref": "#/components/schemas/AuditSort"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Експорт журналу подій погодження у CSV; ті самі правила, що в `cells/export.csv`.",
         "tags": [
           "Audit"
         ]

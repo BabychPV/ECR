@@ -104,6 +104,7 @@ public sealed record CellChangeColumnCount(int ColumnDefId, long Total, long Tod
 /// <param name="ChangeReason">Причина, якщо її вимагала операція.</param>
 /// <param name="ChangedByUserId">Автор — <b>UserId</b>, не SID (R-A2, D-86).</param>
 /// <param name="ChangedByDisplayName">Ім'я автора (`R-18`); <c>null</c> — запису користувача вже немає.</param>
+/// <param name="EntityLabel">Читабельний підпис сутності (код/назва на цей момент); <c>null</c> — не визначено або сутність видалено: показується ідентифікатор.</param>
 public sealed record StructureChangeView(
     DateTime ChangedAt,
     string EntityType,
@@ -113,7 +114,8 @@ public sealed record StructureChangeView(
     string? NewJson,
     string? ChangeReason,
     int ChangedByUserId,
-    string? ChangedByDisplayName = null);
+    string? ChangedByDisplayName = null,
+    string? EntityLabel = null);
 
 /// <summary>Фільтр журналу змін комірок.</summary>
 /// <remarks>
@@ -151,6 +153,7 @@ public sealed record StructureChangeView(
 /// звітний період), тож без неї історія комірки збирала зміни ВСІХ періодів документа, а клієнт відсіював чужі вже
 /// після того, як сервер віддав сторінку.
 /// </param>
+/// <param name="Sort">Порядок сторінок; типово найновіші першими (раніше загальний журнал ішов від найстаріших).</param>
 public sealed record CellChangeFilter(
     DateTime From,
     DateTime To,
@@ -162,7 +165,8 @@ public sealed record CellChangeFilter(
     bool LateOnly = false,
     string? Query = null,
     IReadOnlyList<int>? VisibleColumnIds = null,
-    int? PeriodKey = null)
+    int? PeriodKey = null,
+    AuditSort Sort = AuditSort.ChangedAtDesc)
 {
     /// <summary>Фільтр адресує РІВНО ОДНУ комірку — документ, рядок і колонку.</summary>
     /// <remarks>
@@ -184,14 +188,6 @@ public sealed record CellChangeFilter(
     public bool IsCellAddressWithoutDocument
         => DocumentId is null && (RowKey is not null || ColumnDefId is not null);
 
-    /// <summary>Порядок сторінки: історія ОДНІЄЇ комірки — найновіші першими, загальний журнал — від найстаріших.</summary>
-    /// <remarks>
-    /// ⚠ AN-98: історія комірки відповідає на «що з цим числом було останнім», тож перша сторінка мусить починатися
-    /// з найсвіжішої зміни; «найстаріші 50 за рік» ховали її за першими правками. Загальний журнал лишається за
-    /// зростанням (гортання аудитора від початку вікна). Обидва порядки — за кластерним ключем таблиці
-    /// <c>(ChangedAt, Id)</c> (P1-07): прямий або зворотний обхід індексу без сортування вікна.
-    /// </remarks>
-    public bool NewestFirst => IsSingleCell;
 }
 
 /// <summary>Фільтр загального журналу структурних змін (<c>BE-16</c>).</summary>
@@ -206,11 +202,13 @@ public sealed record CellChangeFilter(
 /// <param name="To">Кінець вікна в UTC, виключно.</param>
 /// <param name="EntityType">Тип сутності (<c>cfg.RegistryDef</c> тощо); <c>null</c> — усі.</param>
 /// <param name="ChangedByUserId">Автор зміни — <b>UserId</b>, не SID (R-A2, D-86).</param>
+/// <param name="Sort">Порядок сторінок (типово — найновіші першими).</param>
 public sealed record StructureChangeFilter(
     DateTime From,
     DateTime To,
     string? EntityType = null,
-    int? ChangedByUserId = null);
+    int? ChangedByUserId = null,
+    AuditSort Sort = AuditSort.ChangedAtDesc);
 
 /// <summary>Остання зміна однієї комірки — хто і коли (<c>BE-06</c>).</summary>
 /// <remarks>
@@ -339,6 +337,13 @@ public interface IAuditReader
     /// <param name="filter">Вікно й звуження журналу.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<int> CountStructureJournalAsync(StructureChangeFilter filter, CancellationToken ct);
+
+    /// <summary>Журнал подій погодження (<c>wf.ApprovalEvent</c>) у вікні часу, курсорна пагінація, порядок з фільтра.</summary>
+    /// <param name="filter">Вікно й звуження журналу.</param>
+    /// <param name="page">Курсорна пагінація.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<PagedResult<WorkflowEventView>> ReadWorkflowEventsAsync(
+        WorkflowEventFilter filter, CursorRequest page, CancellationToken ct);
 
     /// <summary>Журнал подій безпеки (<c>aud.SecurityEvent</c>) у вікні часу, курсорна пагінація.</summary>
     /// <param name="filter">Вікно й звуження журналу.</param>

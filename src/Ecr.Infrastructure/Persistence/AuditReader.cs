@@ -48,8 +48,8 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         // `ChangedAt`, тож `ORDER BY Id` змушував рушій прочитати ВЕСЬ відсічений вікном (до 92 діб) обсяг і
         // сортувати його на кожну сторінку; прямий (чи зворотний, для історії комірки — AN-98) обхід індексу
         // зупиняється після `@take` рядків. `Id` — другий складник: пакет пишеться одним `ChangedAt`.
-        var order = filter.NewestFirst ? "ChangedAt DESC, Id DESC" : "ChangedAt, Id";
-        var outerOrder = filter.NewestFirst ? "a.ChangedAt DESC, a.Id DESC" : "a.ChangedAt, a.Id";
+        var order = (filter.Sort != AuditSort.ChangedAtAsc) ? "ChangedAt DESC, Id DESC" : "ChangedAt, Id";
+        var outerOrder = (filter.Sort != AuditSort.ChangedAtAsc) ? "a.ChangedAt DESC, a.Id DESC" : "a.ChangedAt, a.Id";
 
         var whereText = where.ToString();
         command.Parameters.AddWithValue("@take", page.Limit + 1);
@@ -384,7 +384,7 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
             // ⚠ Курсор — пара кластерного ключа `(ChangedAt, Id)` (P1-07). Перша умова за `ChangedAt` — кордон
             // діапазону для seek по індексу, друга — точна «строго після/перед» позиції; без неї рядки з тим самим
             // `ChangedAt` (пакет) повторилися б чи загубилися на межі сторінки. Напрямок — за порядком сторінки.
-            where.Append(filter.NewestFirst
+            where.Append((filter.Sort != AuditSort.ChangedAtAsc)
                 ? "\n                   AND ChangedAt <= @afterAt AND (ChangedAt < @afterAt OR Id < @afterId)"
                 : "\n                   AND ChangedAt >= @afterAt AND (ChangedAt > @afterAt OR Id > @afterId)");
 
@@ -726,6 +726,11 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
 
         return where;
     }
+
+    /// <inheritdoc />
+    public Task<PagedResult<WorkflowEventView>> ReadWorkflowEventsAsync(
+        WorkflowEventFilter filter, CursorRequest page, CancellationToken ct)
+        => throw new NotSupportedException("Contract commit: implemented in the next commit of lane/integ-audit-sort.");
 
     /// <inheritdoc />
     public async Task<PagedResult<SecurityEventView>> ReadSecurityEventsAsync(
