@@ -35,7 +35,16 @@ public static class StrayValueDetector
 
         foreach (var (block, _) in ordered)
         {
-            known.Add((block.HeaderRow - 1, 1));
+            known.Add((block.TitleRow, 1));
+
+            // Групи заголовків: комірки рядків груп над колонками даних - відоме (їх пише експорт).
+            for (var groupRow = block.HeaderRow - (block.GroupRows ?? 0); groupRow < block.HeaderRow; groupRow++)
+            {
+                foreach (var column in block.Columns)
+                {
+                    known.Add((groupRow, column.Number));
+                }
+            }
 
             // T4-04: стовпець підписів рядків праворуч від колонок даних —
             // довідковий: значень із нього імпорт не бере і сторонніми їх не вважає.
@@ -74,7 +83,7 @@ public static class StrayValueDetector
 
             // Таблиця — найближча ВИЩЕ за комірку: саме під її рядками людина
             // й дописала значення.
-            var owner = ordered.LastOrDefault(b => b.Block.HeaderRow - 1 <= address.RowNumber);
+            var owner = ordered.LastOrDefault(b => b.Block.TitleRow <= address.RowNumber);
             var column = owner.Block?.Columns.FirstOrDefault(c => c.Number == address.ColumnNumber);
 
             rejected.Add(new ImportRejection(
