@@ -60,6 +60,15 @@ public sealed record ExcelWorkbookMap(
 /// <param name="HeaderRow">Номер рядка заголовків.</param>
 /// <param name="Columns">Колонки блоку.</param>
 /// <param name="Rows">Рядки блоку.</param>
+/// <param name="GroupRows">
+/// Групи заголовків колонок: скільки рядків груп лежить НАД рядком заголовків
+/// (<paramref name="HeaderRow"/> - це завжди ОСТАННІЙ рядок шапки, рядок підписів колонок; дані йдуть одразу після нього).
+/// <c>null</c> - груп немає (блок такий, як до появи груп; у карту поле не пишеться).
+/// </param>
+/// <param name="Groups">
+/// Відбиток комірок рядків груп (<see cref="LayoutFingerprint"/>): рядок за рядком згори донизу, по колонці на комірку;
+/// звіряється з книгою як заголовки колонок. <c>null</c> - груп немає.
+/// </param>
 public sealed record ExcelTableBlock(
     long TableInstanceId,
     int TableDefId,
@@ -67,7 +76,18 @@ public sealed record ExcelTableBlock(
     string SheetName,
     int HeaderRow,
     IReadOnlyList<ExcelColumnRef> Columns,
-    IReadOnlyList<ExcelRowRef> Rows);
+    IReadOnlyList<ExcelRowRef> Rows,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    int? GroupRows = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? Groups = null)
+{
+    /// <summary>Рядок з назвою таблиці: над групами (якщо є) і рядком заголовків.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int TitleRow => HeaderRow - 1 - (GroupRows ?? 0);
+}
 
 /// <summary>Колонка блоку.</summary>
 /// <param name="ColumnDefId">Опис колонки.</param>

@@ -77,6 +77,7 @@ import {
 } from './autosave';
 import { beginInFlight, deferUntilInFlightSettles, inFlightEdit, splitByInFlight } from './inFlightEdits';
 import { GridAriaPlugin } from './gridAria';
+import { attachStickyGroupLabels, withHeaderGroups } from './headerGroups';
 import { mergePatchNotices, PatchNoticesAlert, type PatchNotice } from './patchNotices';
 // ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
 // з `permissions.ts`, і хоч обидва дають `rowKey:columnCode`, ключем мапи
@@ -147,6 +148,7 @@ import { useMonthColumnStatuses, type MarkedMonthStatus } from '@/features/grid/
 // тут, а не у вхідному чанку, — бюджет маршруту (`D-132`).
 import '@/shared/theme/cell-states.css';
 import './cellEditors.css';
+import './headerGroups.css';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
 import { lookupTargetsQuery } from '@/features/registries/lookupTargets';
@@ -1282,6 +1284,13 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     ],
   );
 
+  // Групові заголовки (до 3 рівнів): сітці йде дерево `ColumnData`; панелі формул і стану
+  // лишаються на плоскому `columns`. Без груп — той самий масив, шапка в один рядок.
+  const gridColumnData = useMemo(
+    () => withHeaderGroups(columns, data?.headerGroups, data?.columns ?? []),
+    [columns, data?.headerGroups, data?.columns],
+  );
+
   // ⚠ `overrides` перекриває значення зі зрізу лише для комірок, підтверджених
   // ЩОЙНО (`ФВ-2.16`, `#43`): сервер про них ще не знає, і без цього шару
   // підтверджений ввід зникав би з екрана до першого успішного збереження.
@@ -2250,6 +2259,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         installKeyCommitGate(node),
         // ⛔ T5-02: Ctrl+C у вікні коміту, коли `copy` летить у `<body>`.
         installCopyDefer(node, () => writeDeferredCopyRef.current()),
+        // Групові заголовки: мітка групи центрується над видимою частиною клітинки при прокрутці.
+        attachStickyGroupLabels(node),
         (() => {
           const tracker = trackEditorTouched(node);
           editorTouched.current = tracker;
@@ -2682,7 +2693,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           rowSize={rowSize}
           range
           resize
-          columns={columns}
+          columns={gridColumnData}
           source={rows}
           pinnedBottomSource={pinnedTotals}
           readonly={readOnly}

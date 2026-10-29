@@ -60,6 +60,8 @@ public static class LayoutFingerprint
 
         return block with
         {
+            // Групи заголовків: відбиток рядків груп (лише коли вони є - блок без груп не змінюється).
+            Groups = block.GroupRows is > 0 ? GroupsOf(worksheet, block) : block.Groups,
             Columns = [.. block.Columns.Select(column => column with
             {
                 Header = CalculatedCellFingerprint.Of(worksheet.Cell(block.HeaderRow, column.Number)),
@@ -96,6 +98,28 @@ public static class LayoutFingerprint
             }
         }
 
+        if (block.Groups is { } groups && block.GroupRows is > 0)
+        {
+            var now = GroupsOf(worksheet, block);
+
+            if (!string.Equals(groups, now, StringComparison.Ordinal))
+            {
+                // Перша розбіжна комірка: стовпець - за позицією у відбитку.
+                for (var i = 0; i < now.Length / CalculatedCellFingerprint.Width; i++)
+                {
+                    if (i * CalculatedCellFingerprint.Width + CalculatedCellFingerprint.Width > groups.Length
+                        || string.CompareOrdinal(groups, i * CalculatedCellFingerprint.Width, now, i * CalculatedCellFingerprint.Width, CalculatedCellFingerprint.Width) != 0)
+                    {
+                        var column = block.Columns[i % block.Columns.Count];
+                        var row = block.HeaderRow - block.GroupRows.Value + (i / block.Columns.Count);
+                        return (null, column.Code, worksheet.Cell(row, column.Number).Address.ToString() ?? string.Empty);
+                    }
+                }
+
+                return (null, block.Columns[0].Code, worksheet.Cell(block.HeaderRow - block.GroupRows.Value, block.Columns[0].Number).Address.ToString() ?? string.Empty);
+            }
+        }
+
         var labelColumn = LabelColumn(block);
 
         foreach (var row in block.Rows)
@@ -112,6 +136,22 @@ public static class LayoutFingerprint
         }
 
         return PermutedRow(worksheet, block);
+    }
+
+    /// <summary>Відбиток комірок рядків груп: рядок за рядком згори донизу, по комірці на колонку блоку.</summary>
+    private static string GroupsOf(IXLWorksheet worksheet, ExcelTableBlock block)
+    {
+        var builder = new System.Text.StringBuilder();
+
+        for (var row = block.HeaderRow - (block.GroupRows ?? 0); row < block.HeaderRow; row++)
+        {
+            foreach (var column in block.Columns)
+            {
+                builder.Append(CalculatedCellFingerprint.Of(worksheet.Cell(row, column.Number)));
+            }
+        }
+
+        return builder.ToString();
     }
 
     /// <summary>

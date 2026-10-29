@@ -29,7 +29,8 @@ test.describe('Periods: огляд проєктів і плитки року (UI
 
     const year = page.getByTestId('periods-year');
     if (!(await year.isVisible())) {
-      await overview.getByRole('table').getByRole('button').first().click();
+      // Body rows only (the header row's first button is the Project sort toggle, not a project). Not a bare `.first()`: other specs (colGroups, sheetBottom, ...) create `E2E <name> project` fixtures on the shared stand.
+      await overview.locator('tbody').getByRole('row').filter({ hasNotText: /E2E[ -]?(groups|bottom)|E2E(Groups|Bottom)Prj/i }).getByRole('button').first().click();
     }
     await expect(year, 'вибір проєкту не показав плиток року').toBeVisible({ timeout: 30_000 });
 

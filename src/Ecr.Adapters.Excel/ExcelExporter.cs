@@ -488,7 +488,11 @@ public sealed class ExcelExporter(
         worksheet.Cell(titleRow, 1).Value = table.NameL10n.Get(options.Language) ?? table.Code;
         worksheet.Cell(titleRow, 1).Style.Font.Bold = true;
 
-        var headerRow = titleRow + 1;
+        // Групи заголовків колонок: рядки груп лежать між назвою таблиці й рядком підписів колонок;
+        // рядок підписів лишається ОСТАННІМ рядком шапки (HeaderRow). Без груп - рівно як раніше.
+        var groupPaths = HeaderGroupPaths(table, columns);
+        var groupRows = groupPaths.Count == 0 ? 0 : groupPaths.Max(p => p.Count);
+        var headerRow = titleRow + 1 + groupRows;
         var columnRefs = new List<ExcelColumnRef>(columns.Count);
         var columnNumbers = new Dictionary<int, int>(columns.Count);
 
@@ -523,6 +527,11 @@ public sealed class ExcelExporter(
         if (columns.Count > 0)
         {
             worksheet.Range(headerRow, 1, headerRow, columns.Count).Style = headerStyleValue;
+        }
+
+        if (groupRows > 0)
+        {
+            WriteGroupRows(worksheet, groupPaths, groupRows, titleRow + 1, headerStyleValue, options.Language, contentLength);
         }
 
         // Порядок рядків — за описом шаблону, а рядки без опису — у порядку
@@ -584,7 +593,110 @@ public sealed class ExcelExporter(
             worksheet, cells, rowIds, columns, columnNumbers, rowNumbers, formatRules, table.Code, lookups);
 
         return new ExcelTableBlock(
-            instance.TableInstanceId, table.Id, table.Code, sheetName, headerRow, columnRefs, rowRefs);
+            instance.TableInstanceId, table.Id, table.Code, sheetName, headerRow, columnRefs, rowRefs,
+            groupRows > 0 ? groupRows : null);
+    }
+
+    /// <summary>
+    /// Для кожної колонки книги - ланцюг її груп від кореня до найближчої (порожній - колонка без групи).
+    /// Порожній результат - у таблиці немає жодної групи з видимими колонками.
+    /// </summary>
+    private static List<List<ColumnHeaderGroupDef>> HeaderGroupPaths(TableDef table, List<ColumnDef> columns)
+    {
+        var paths = new List<List<ColumnHeaderGroupDef>>(columns.Count);
+
+        if (table.HeaderGroups.Count == 0 || columns.All(c => c.HeaderGroupId is null))
+        {
+            return paths;
+        }
+
+        var byId = table.HeaderGroups.ToDictionary(g => g.Id);
+
+        foreach (var column in columns)
+        {
+            var path = new List<ColumnHeaderGroupDef>();
+            var id = column.HeaderGroupId;
+
+            // Глибина обмежена MaxDepth: дерево з циклом (поза правилами) не зациклить експорт.
+            while (id is { } current && byId.TryGetValue(current, out var group) && path.Count < ColumnHeaderGroupDef.MaxDepth)
+            {
+                path.Insert(0, group);
+                id = group.ParentGroupId;
+            }
+
+            paths.Add(path);
+        }
+
+        return paths.Max(p => p.Count) == 0 ? [] : paths;
+    }
+
+    /// <summary>
+    /// Пише рядки груп: рівень k - рядок <c>firstRow + k</c>; суміжні колонки однієї групи на рівні - одна об'єднана комірка.
+    /// Колонка з неглибоким ланцюгом залишає нижчі рівні порожніми (підпис колонки - в останньому рядку шапки).
+    /// </summary>
+    private static void WriteGroupRows(
+        IXLWorksheet worksheet,
+        List<List<ColumnHeaderGroupDef>> paths,
+        int groupRows,
+        int firstRow,
+        IXLStyle headerStyle,
+        string language,
+        List<int> contentLength)
+    {
+        worksheet.Range(firstRow, 1, firstRow + groupRows - 1, paths.Count).Style = headerStyle;
+
+        for (var level = 0; level < groupRows; level++)
+        {
+            var start = 0;
+
+            while (start < paths.Count)
+            {
+                var group = level < paths[start].Count ? paths[start][level] : null;
+                var end = start;
+
+                // Ділянка: ті самі групи на ВСІХ рівнях до поточного (рівні вище вже об'єднані по-своєму).
+                while (group is not null
+                       && end + 1 < paths.Count
+                       && level < paths[end + 1].Count
+                       && SamePrefix(paths[start], paths[end + 1], level))
+                {
+                    end++;
+                }
+
+                if (group is not null)
+                {
+                    var row = firstRow + level;
+                    var text = group.HeaderL10n.Get(language) ?? group.Code;
+
+                    worksheet.Cell(row, start + 1).Value = text;
+
+                    if (end > start)
+                    {
+                        worksheet.Range(row, start + 1, row, end + 1).Merge();
+                    }
+                    else
+                    {
+                        Widen(contentLength, start + 1, text.Length);
+                    }
+                }
+
+                start = end + 1;
+            }
+        }
+    }
+
+    /// <summary>Чи збігаються ланцюги груп двох колонок до рівня <paramref name="level"/> включно.</summary>
+    private static bool SamePrefix(List<ColumnHeaderGroupDef> a, List<ColumnHeaderGroupDef> b, int level)
+    {
+        for (var i = 0; i <= level; i++)
+        {
+            if (a[i].Id != b[i].Id)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

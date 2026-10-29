@@ -66,7 +66,26 @@ public sealed record TableSliceDto(
     IReadOnlyList<string>? OutOfWindowCells = null,
     IReadOnlyDictionary<string, Ecr.Application.Templates.CellFormatDto>? CellStyles = null,
     CellStyleDto? HeaderStyle = null,
-    CellStyleAccessDto? StyleAccess = null);
+    CellStyleAccessDto? StyleAccess = null)
+{
+    /// <summary>
+    /// Групи заголовків видимих колонок (плоский список). Лише групи, у піддереві яких є хоч одна видима
+    /// колонка зрізу (прихована/заборонена колонка випадає зі спану, група без видимих — не віддається).
+    /// Порожній — груп немає.
+    /// </summary>
+    public IReadOnlyList<ColumnHeaderGroupDto> HeaderGroups { get; init; } = [];
+
+    /// <summary>Максимальна глибина дерева груп (3).</summary>
+    public int MaxHeaderGroupDepth { get; init; } = ColumnHeaderGroupDef.MaxDepth;
+}
+
+/// <summary>Група заголовків у зрізі: підпис уже обрано за мовою запиту (fallback — як у заголовка колонки).</summary>
+/// <param name="Id">Ідентифікатор групи.</param>
+/// <param name="Code">Код групи.</param>
+/// <param name="ParentId">Батько; <c>null</c> — корінь.</param>
+/// <param name="Ordinal">Порядок серед сусідів.</param>
+/// <param name="Label">Підпис.</param>
+public sealed record ColumnHeaderGroupDto(int Id, string Code, int? ParentId, int Ordinal, string Label);
 
 /// <summary>
 /// Чи можна фарбувати комірки таблиці (CELL-STYLE P1A): те, що клієнт має знати, щоб не вмикати «Заливку»/«Колір
@@ -157,7 +176,8 @@ public sealed record ColumnDto(
     bool IsRequiredByMethodology = false,
     CellStyleDto? Style = null,
     int? WidthPx = null,
-    string? Expression = null);
+    string? Expression = null,
+    int? HeaderGroupId = null);
 
 /// <summary>
 /// Підмножина <c>StyleDef</c>, потрібна ЖИВІЙ сітці (директива registry-

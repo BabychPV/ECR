@@ -37,7 +37,19 @@ public sealed record TemplateStructureDto(
     int PresentationRevision,
     bool IsEditable,
     IReadOnlyList<SheetDto> Sheets,
-    IReadOnlyList<SheetGroupRuleDto> GroupRules);
+    IReadOnlyList<SheetGroupRuleDto> GroupRules)
+{
+    /// <summary>Максимальна глибина дерева груп заголовків колонок (3 рівні).</summary>
+    public int MaxHeaderGroupDepth { get; init; } = Ecr.Domain.Entities.Configuration.ColumnHeaderGroupDef.MaxDepth;
+}
+
+/// <summary>Група заголовків колонок таблиці (плоский список; дерево — через <c>ParentId</c>).</summary>
+/// <param name="Id">Ідентифікатор групи.</param>
+/// <param name="Code">Код — унікальний у таблиці, стабільний при клонуванні версії.</param>
+/// <param name="ParentId">Батьківська група тієї ж таблиці; <c>null</c> — корінь.</param>
+/// <param name="Ordinal">Порядок серед сусідів.</param>
+/// <param name="LabelL10n">Підпис усіма мовами каталогу.</param>
+public sealed record TemplateHeaderGroupDto(int Id, string Code, int? ParentId, int Ordinal, LocalizedText LabelL10n);
 
 /// <summary>Одне правило складу документа для конкретної групи аркушів (<c>ФВ-3.2</c>).</summary>
 /// <param name="SheetGroup">Група, якої стосується правило.</param>
@@ -87,7 +99,11 @@ public sealed record TableDto(
     TableLayoutKind LayoutKind, TableRowMode RowMode,
     int? MaxDynamicRows,
     IReadOnlyList<TemplateColumnDto> Columns,
-    IReadOnlyList<TemplateRowDto> Rows);
+    IReadOnlyList<TemplateRowDto> Rows)
+{
+    /// <summary>Групи заголовків колонок таблиці; порожній список — груп немає.</summary>
+    public IReadOnlyList<TemplateHeaderGroupDto> HeaderGroups { get; init; } = [];
+}
 
 /// <summary>
 /// Колонка в СТРУКТУРІ шаблону — опис для адміністратора.
@@ -113,6 +129,7 @@ public sealed record TableDto(
 /// <param name="IsHidden">Колонка прихована; презентаційне поле.</param>
 /// <param name="DisplayFormat">Формат показу; презентаційне поле.</param>
 /// <param name="WidthPx">Типова ширина колонки, px (D-234); <c>null</c> — типова за типом; презентаційне поле.</param>
+/// <param name="HeaderGroupId">Найглибша група заголовків колонки (<c>TableDto.HeaderGroups</c>); <c>null</c> — без групи; презентаційне поле.</param>
 /// <param name="UnitSymbol">Позначення одиниці, якщо задана.</param>
 /// <param name="FormulaExpression">
 /// Текст наявної формули колонки, якщо вона є; <c>null</c> — формули ще
@@ -140,7 +157,8 @@ public sealed record TemplateColumnDto(
     string? UnitSymbol,
     string? FormulaExpression,
     ExpressionDialect? FormulaDialect,
-    int? WidthPx = null);
+    int? WidthPx = null,
+    int? HeaderGroupId = null);
 
 /// <summary>
 /// Рядок у СТРУКТУРІ шаблону — опис, а не дані.

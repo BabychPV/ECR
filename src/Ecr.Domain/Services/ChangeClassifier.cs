@@ -17,6 +17,7 @@ public sealed class ChangeClassifier
         nameof(Entities.Configuration.ColumnDef.IsHidden),
         nameof(Entities.Configuration.ColumnDef.StyleId),
         nameof(Entities.Configuration.ColumnDef.WidthPx),
+        nameof(Entities.Configuration.ColumnDef.HeaderGroupId),
         nameof(Entities.Configuration.RowDef.LabelL10n),
 
         // CELL-STYLE L2: стиль рядка й шапки таблиці — вигляд, не структура. Імена збігаються з

@@ -48,6 +48,18 @@ public sealed class TableDef : Entity<int>
     public IReadOnlyList<ColumnDef> Columns => _columns;
     public IReadOnlyList<RowDef> Rows => _rows;
 
+    private readonly List<ColumnHeaderGroupDef> _headerGroups = [];
+
+    /// <summary>Групи заголовків колонок (плоский список; дерево — через <c>ParentGroupId</c>).</summary>
+    public IReadOnlyList<ColumnHeaderGroupDef> HeaderGroups => _headerGroups;
+
+    /// <summary>Додає групу заголовків.</summary>
+    public void AddHeaderGroup(ColumnHeaderGroupDef group)
+    {
+        ArgumentNullException.ThrowIfNull(group);
+        _headerGroups.Add(group);
+    }
+
     /// <summary>Чи може користувач додавати рядки.</summary>
     public bool AllowsDynamicRows => RowMode is TableRowMode.Dynamic or TableRowMode.Mixed;
 

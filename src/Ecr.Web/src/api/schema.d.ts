@@ -19665,6 +19665,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/tables/{tableId}/header-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Замінює ВСЕ дерево груп заголовків колонок таблиці (до 3 рівнів). Право `Template.Edit`.
+         * @description Презентаційна операція: працює й на опублікованій версії, піднімає `PresentationRevision`.
+         *     Групи зіставляються за кодом; прибрані групи звільняють колонки. Колонки групи мають бути суміжними за
+         *     `Ordinal` (`ECR-TMPL-4229`). Призначення колонки групі — звичайне поле `ColumnDef.HeaderGroupId`
+         *     у `PATCH …/presentation`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                    tableId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ReplaceHeaderGroupsRequest"];
+                    "application/json": components["schemas"]["ReplaceHeaderGroupsRequest"];
+                    "text/json": components["schemas"]["ReplaceHeaderGroupsRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReplaceHeaderGroupsResponse"];
+                        "text/json": components["schemas"]["ReplaceHeaderGroupsResponse"];
+                        "text/plain": components["schemas"]["ReplaceHeaderGroupsResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/tables/{tableId}/rows/{code}": {
         parameters: {
             query?: never;
@@ -23163,6 +23238,8 @@ export interface components {
             expression?: null | string;
             header: string;
             /** Format: int32 */
+            headerGroupId?: null | number;
+            /** Format: int32 */
             id: number;
             isReadOnly: boolean;
             isRequired: boolean;
@@ -23182,6 +23259,28 @@ export interface components {
             unitSymbol: null | string;
             /** Format: int32 */
             widthPx?: null | number;
+        };
+        /** @description Група заголовків у зрізі: підпис уже обрано за мовою запиту (fallback — як у заголовка колонки). */
+        ColumnHeaderGroupDto: {
+            /** @description Код групи. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор групи.
+             */
+            id: number;
+            /** @description Підпис. */
+            label: string;
+            /**
+             * Format: int32
+             * @description Порядок серед сусідів.
+             */
+            ordinal: number;
+            /**
+             * Format: int32
+             * @description Батько; `null` — корінь.
+             */
+            parentId: null | number;
         };
         /** @description Правило умовного форматування (дзеркало клієнтського `ConditionalRule`). */
         ConditionalFormatRuleDto: {
@@ -25137,6 +25236,22 @@ export interface components {
             lookupRegistryDefId: null | number;
             /** Format: int32 */
             ordinal: number;
+        };
+        /** @description Група у запиті заміни дерева. */
+        HeaderGroupInputDto: {
+            /** @description Код групи, унікальний у таблиці; стабільний при клонуванні версії. */
+            code: string;
+            /** @description Підпис мовами каталогу (uk/en/ru/kz); потрібна хоч одна мова. */
+            labelL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: int32
+             * @description Порядок серед сусідів.
+             */
+            ordinal: number;
+            /** @description Код батьківської групи тієї ж таблиці; `null` — корінь. */
+            parentCode: null | string;
         };
         /** @description Одна перевірка у звіті. */
         HealthCheckDto: {
@@ -29067,6 +29182,21 @@ export interface components {
             /** @description Новий набір; порожній прибирає доступ ролі повністю. */
             grants: components["schemas"]["ResourceGrantDto"][];
         };
+        /** @description Запит заміни дерева груп заголовків колонок таблиці. */
+        ReplaceHeaderGroupsRequest: {
+            /** @description Усе дерево (плоский список); порожній список прибирає всі групи. */
+            groups: components["schemas"]["HeaderGroupInputDto"][];
+        };
+        /** @description Дерево груп після заміни й нова ревізія презентаційного шару. */
+        ReplaceHeaderGroupsResponse: {
+            /** @description Групи таблиці: `id`, `code`, `parentId`, `ordinal`, `labelL10n`. */
+            groups: components["schemas"]["TemplateHeaderGroupDto"][];
+            /**
+             * Format: int32
+             * @description Нова ревізія (ключ кешу метаданих).
+             */
+            presentationRevision: number;
+        };
         /** @description Тіло заміни секрету. */
         ReplaceNotificationChannelSecretRequest: {
             /** @description Новий секрет; `null` або порожній — прибрати. */
@@ -31366,6 +31496,8 @@ export interface components {
             code: string;
             /** @description Колонки таблиці в порядку `Ordinal`. */
             columns: components["schemas"]["TemplateColumnDto"][];
+            /** @description Групи заголовків колонок таблиці; порожній список — груп немає. */
+            headerGroups?: components["schemas"]["TemplateHeaderGroupDto"][];
             /**
              * Format: int32
              * @description Ідентифікатор.
@@ -31490,7 +31622,16 @@ export interface components {
             };
             /** @description Опис колонок таблиці. */
             columns: components["schemas"]["ColumnDto"][];
+            /** @description Групи заголовків видимих колонок (плоский список). Лише групи, у піддереві яких є хоч одна видима
+             *     колонка зрізу (прихована/заборонена колонка випадає зі спану, група без видимих — не віддається).
+             *     Порожній — груп немає. */
+            headerGroups?: components["schemas"]["ColumnHeaderGroupDto"][];
             headerStyle?: null | components["schemas"]["CellStyleDto"];
+            /**
+             * Format: int32
+             * @description Максимальна глибина дерева груп (3).
+             */
+            maxHeaderGroupDepth?: number;
             /** @description Комірки, чия остання зміна — правка за політикою `Warn` поза вікном
              *     доступу (`ФВ-2.16`, `D-239`); формат — той самий
              *     `"{rowKey}:{columnCode}"`, що й `PatchCellsResponse.OutOfWindow`.
@@ -31610,6 +31751,11 @@ export interface components {
              *     завжди відкривала порожній редактор, навіть коли формула вже збережена:
              *     вираз ніде не приходив клієнту без окремого запиту, якого не існувало. */
             formulaExpression: null | string;
+            /**
+             * Format: int32
+             * @description Найглибша група заголовків колонки (`TableDto.HeaderGroups`); `null` — без групи; презентаційне поле.
+             */
+            headerGroupId?: null | number;
             /** @description Заголовок усіма мовами каталогу. */
             headerL10n: components["schemas"]["LocalizedText"];
             /**
@@ -31682,6 +31828,28 @@ export interface components {
              */
             toVersionId: number;
         };
+        /** @description Група заголовків колонок таблиці (плоский список; дерево — через `ParentId`). */
+        TemplateHeaderGroupDto: {
+            /** @description Код — унікальний у таблиці, стабільний при клонуванні версії. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор групи.
+             */
+            id: number;
+            /** @description Підпис усіма мовами каталогу. */
+            labelL10n: components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Порядок серед сусідів.
+             */
+            ordinal: number;
+            /**
+             * Format: int32
+             * @description Батьківська група тієї ж таблиці; `null` — корінь.
+             */
+            parentId: null | number;
+        };
         /** @description Створений шаблон. */
         TemplateIdResponse: {
             /**
@@ -31732,6 +31900,11 @@ export interface components {
              *     клієнт, який виводив би його зі статусу самостійно, тримав би другу копію
              *     правила «опублікована незмінна». */
             isEditable: boolean;
+            /**
+             * Format: int32
+             * @description Максимальна глибина дерева груп заголовків колонок (3 рівні).
+             */
+            maxHeaderGroupDepth?: number;
             /**
              * Format: int32
              * @description Ревізія презентаційного шару; частина ключа кешу.

@@ -37,6 +37,9 @@ export interface TableWorkspaceProps {
   readonly deletingRuleCode: string | null;
   readonly onProperties: () => void;
   readonly onConditionalFormat: () => void;
+  /** Діалог «Групи колонок» (презентаційна операція — доступна й на опублікованій версії). */
+  readonly onManageGroups: () => void;
+  readonly canEditPresentation: boolean;
   readonly onDelete: () => void;
   readonly onAddColumn: () => void;
   readonly onFormula: (target: FormulaTarget) => void;
@@ -122,11 +125,18 @@ export function TableWorkspace(props: TableWorkspaceProps): JSX.Element {
           <Tabs.Panel value="columns">
             <Group justify="space-between" align="center" wrap="nowrap">
               <p className="ecr-ctor-hint">{t('ctor.columnsHint')}</p>
-              {canEditStructure && (
-                <Button variant="default" onClick={props.onAddColumn}>
-                  {t('columns.add')}
-                </Button>
-              )}
+              <Group gap="xs" wrap="nowrap">
+                {props.canEditPresentation && (
+                  <Button variant="default" onClick={props.onManageGroups} data-testid="manage-column-groups">
+                    {t('colgroups.manage')}
+                  </Button>
+                )}
+                {canEditStructure && (
+                  <Button variant="default" onClick={props.onAddColumn}>
+                    {t('columns.add')}
+                  </Button>
+                )}
+              </Group>
             </Group>
             {props.columns}
           </Tabs.Panel>

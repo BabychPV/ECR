@@ -3926,6 +3926,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-TMPL-4226` | 422 | обчислювана колонка (`Formula`/`Calculated`) без джерела: ні формули шаблону, ні прив'язки методології |
 | `ECR-TMPL-4227` | 422 | обчислення на НЕобчислюваній колонці: формула шаблону або прив'язка методології на колонці ручного вводу |
 | `ECR-TMPL-4228` | 422 | фіксована таблиця (`RowMode.Fixed`) без жодного живого `RowDef` — публікується структурно порожньою |
+| `ECR-TMPL-4229` | 422 | групи заголовків колонок таблиці некоректні: глибина понад 3, цикл, батько не з тієї ж таблиці, дубль коду, колонка з чужою групою або колонки групи не суміжні за `Ordinal` (`PUT …/tables/{tableId}/header-groups`, `PATCH …/presentation` `ColumnDef.HeaderGroupId`, публікація) |
 | `ECR-CFG-0422` | 422 | код або `RowKey` не відповідає шаблону — помилка введення, не збій |
 | `ECR-CFG-4221` | 422 | `Project.TimeZoneId` не є відомим ідентифікатором IANA: порожньо, невідомий пояс, Windows-ідентифікатор (`Central Asia Standard Time`) або зсув (`+05:00`) |
 | `ECR-REQ-0422` | 422 | параметр самого запиту поза межами: розмір сторінки, ширина або напрям вікна аудиту; **також** (E1-06) помилка читання тіла самим Kestrel (`BadHttpRequestException`): тіло понад межу — статус `413` (`err.ECR-REQ-0422.requestTooLarge`), обірване чи некоректне — `400` (`err.ECR-REQ-0422.malformedRequest`) |
@@ -4191,6 +4192,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}` | `Template.Edit` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableId}/columns` | `Template.Edit` | 7 |
+| `PUT` | `/api/v1/template-versions/{id}/tables/{tableId}/header-groups` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}` | `Template.Edit` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/header-fields` | `Template.View` | 8 |
 | `PUT` | `/api/v1/template-versions/{id}/header-fields/{code}` | `Template.Edit` | 8 |

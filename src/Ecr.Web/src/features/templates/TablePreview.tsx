@@ -20,6 +20,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import type { ConditionalRule } from './conditionalFormat';
 import { conditionalFormatsKey, getConditionalFormats } from './conditionalFormatApi';
 import { dataTypeLabel, rowKindLabel } from './enumLabels';
+import { previewHeaderRows } from './headerGroupTree';
 import { buildTablePreview, cellLook, previewCellLook, type PreviewColumn } from './tablePreviewModel';
 
 /** Коротко про правило. ⚠ Ключі — літерали (сторож каталогу бачить їх у коді). */
@@ -82,7 +83,7 @@ export function TablePreview({
   table,
 }: {
   readonly templateVersionId: number;
-  readonly table: Pick<TableDto, 'columns' | 'rows' | 'layoutKind'>;
+  readonly table: Pick<TableDto, 'columns' | 'rows' | 'layoutKind'> & Partial<Pick<TableDto, 'headerGroups'>>;
 }): JSX.Element {
   const [sample, setSample] = useState('');
   const scheme = useComputedColorScheme('light');
@@ -104,6 +105,12 @@ export function TablePreview({
 
   const model = buildTablePreview(table, rules.data.rules, localized);
   const value = sample.trim().length === 0 ? null : sample;
+  // Групові заголовки: рядки над рядком колонок; без груп — порожньо, шапка як була.
+  const groupRows = previewHeaderRows(
+    table.headerGroups,
+    model.columns.map((column) => table.columns.find((item) => item.code === column.code)?.headerGroupId),
+    (group) => localized(group.labelL10n) || group.code,
+  );
 
   return (
     <Stack gap="sm">
@@ -127,8 +134,18 @@ export function TablePreview({
         <ScrollArea type="auto">
           <Table withTableBorder withColumnBorders aria-label={t('tablePreview.tableLabel')}>
             <Table.Thead>
+              {groupRows.map((cells, level) => (
+                <Table.Tr key={`group-${String(level)}`} data-preview-group-row={level}>
+                  {level === 0 && <Table.Th rowSpan={groupRows.length + 3}>{t('tablePreview.row')}</Table.Th>}
+                  {cells.map((cell, index) => (
+                    <Table.Th key={index} colSpan={cell.span} ta="center" data-preview-group={cell.label ?? undefined}>
+                      {cell.label}
+                    </Table.Th>
+                  ))}
+                </Table.Tr>
+              ))}
               <Table.Tr>
-                <Table.Th rowSpan={3}>{t('tablePreview.row')}</Table.Th>
+                {groupRows.length === 0 && <Table.Th rowSpan={3}>{t('tablePreview.row')}</Table.Th>}
                 {model.columns.map((column) => (
                   <Table.Th
                     key={column.code}
