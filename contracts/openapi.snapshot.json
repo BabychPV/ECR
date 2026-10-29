@@ -15492,6 +15492,13 @@
               "string"
             ]
           },
+          "naeCode": {
+            "description": "Value of the string field `NaeCode` when the registry has one and the node has a value (NAE plan N2: sources render\nas `NaeCode · name`); `null` otherwise.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "ordinal": {
             "description": "Position among siblings.",
             "format": "int32",
