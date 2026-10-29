@@ -106,6 +106,7 @@ public sealed record CellChangeColumnCount(int ColumnDefId, long Total, long Tod
 /// <param name="ChangeReason">Причина, якщо її вимагала операція.</param>
 /// <param name="ChangedByUserId">Автор — <b>UserId</b>, не SID (R-A2, D-86).</param>
 /// <param name="ChangedByDisplayName">Ім'я автора (`R-18`); <c>null</c> — запису користувача вже немає.</param>
+/// <param name="EntityLabel">Читабельний підпис сутності (код/назва на цей момент); <c>null</c> — не визначено або сутність видалено: показується ідентифікатор.</param>
 public sealed record StructureChangeView(
     DateTime ChangedAt,
     string EntityType,
@@ -115,7 +116,8 @@ public sealed record StructureChangeView(
     string? NewJson,
     string? ChangeReason,
     int ChangedByUserId,
-    string? ChangedByDisplayName = null);
+    string? ChangedByDisplayName = null,
+    string? EntityLabel = null);
 
 /// <summary>Фільтр журналу змін комірок.</summary>
 /// <remarks>
@@ -148,17 +150,13 @@ public sealed record StructureChangeView(
 /// Застосовується в SQL ДО <c>TOP</c>/курсора, тож сторінка, <c>nextCursor</c> і підрахунок рахуються по видимих;
 /// порожній перелік — жодного рядка. Колонка, якої немає в переліку, невидима (закрито за замовчуванням).
 /// </param>
-/// <param name="Descending">
-/// Журнал аркуша (<c>SheetActivityQuery</c>): найновіші першими й поза адресою однієї комірки. Не міняє доступ:
-/// поріг права все одно вирішує <see cref="IsSingleCell"/>; цим прапорцем користується лише обробник, що вже
-/// перевірив документ і межі читання.
-/// </param>
 /// <param name="HumanOnly">Лише походження «людина» (<c>CellChangeOrigins.HumanOriginsSql</c>): без перерахунку, інтеграції, міграції.</param>
 /// <param name="PeriodKey">
 /// AN-98 (N3-07): звітний період змін; <c>null</c> — усі. Це вісь, відмінна від вікна <c>ChangedAt</c> (місяць зміни ≠
 /// звітний період), тож без неї історія комірки збирала зміни ВСІХ періодів документа, а клієнт відсіював чужі вже
 /// після того, як сервер віддав сторінку.
 /// </param>
+/// <param name="Sort">Порядок сторінок; типово найновіші першими (раніше загальний журнал ішов від найстаріших).</param>
 public sealed record CellChangeFilter(
     DateTime From,
     DateTime To,
@@ -171,8 +169,8 @@ public sealed record CellChangeFilter(
     string? Query = null,
     IReadOnlyList<int>? VisibleColumnIds = null,
     int? PeriodKey = null,
-    bool Descending = false,
-    bool HumanOnly = false)
+    bool HumanOnly = false,
+    AuditSort Sort = AuditSort.ChangedAtDesc)
 {
     /// <summary>Фільтр адресує РІВНО ОДНУ комірку — документ, рядок і колонку.</summary>
     /// <remarks>
@@ -194,14 +192,6 @@ public sealed record CellChangeFilter(
     public bool IsCellAddressWithoutDocument
         => DocumentId is null && (RowKey is not null || ColumnDefId is not null);
 
-    /// <summary>Порядок сторінки: історія ОДНІЄЇ комірки — найновіші першими, загальний журнал — від найстаріших.</summary>
-    /// <remarks>
-    /// ⚠ AN-98: історія комірки відповідає на «що з цим числом було останнім», тож перша сторінка мусить починатися
-    /// з найсвіжішої зміни; «найстаріші 50 за рік» ховали її за першими правками. Загальний журнал лишається за
-    /// зростанням (гортання аудитора від початку вікна). Обидва порядки — за кластерним ключем таблиці
-    /// <c>(ChangedAt, Id)</c> (P1-07): прямий або зворотний обхід індексу без сортування вікна.
-    /// </remarks>
-    public bool NewestFirst => IsSingleCell || Descending;
 }
 
 /// <summary>Фільтр загального журналу структурних змін (<c>BE-16</c>).</summary>
@@ -216,11 +206,13 @@ public sealed record CellChangeFilter(
 /// <param name="To">Кінець вікна в UTC, виключно.</param>
 /// <param name="EntityType">Тип сутності (<c>cfg.RegistryDef</c> тощо); <c>null</c> — усі.</param>
 /// <param name="ChangedByUserId">Автор зміни — <b>UserId</b>, не SID (R-A2, D-86).</param>
+/// <param name="Sort">Порядок сторінок (типово — найновіші першими).</param>
 public sealed record StructureChangeFilter(
     DateTime From,
     DateTime To,
     string? EntityType = null,
-    int? ChangedByUserId = null);
+    int? ChangedByUserId = null,
+    AuditSort Sort = AuditSort.ChangedAtDesc);
 
 /// <summary>Остання зміна однієї комірки — хто і коли (<c>BE-06</c>).</summary>
 /// <remarks>
@@ -349,6 +341,13 @@ public interface IAuditReader
     /// <param name="filter">Вікно й звуження журналу.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<int> CountStructureJournalAsync(StructureChangeFilter filter, CancellationToken ct);
+
+    /// <summary>Журнал подій погодження (<c>wf.ApprovalEvent</c>) у вікні часу, курсорна пагінація, порядок з фільтра.</summary>
+    /// <param name="filter">Вікно й звуження журналу.</param>
+    /// <param name="page">Курсорна пагінація.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<PagedResult<WorkflowEventView>> ReadWorkflowEventsAsync(
+        WorkflowEventFilter filter, CursorRequest page, CancellationToken ct);
 
     /// <summary>Журнал подій безпеки (<c>aud.SecurityEvent</c>) у вікні часу, курсорна пагінація.</summary>
     /// <param name="filter">Вікно й звуження журналу.</param>
