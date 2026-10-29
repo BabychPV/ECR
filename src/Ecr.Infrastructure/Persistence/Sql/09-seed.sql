@@ -9403,6 +9403,7 @@ USING (VALUES
     ,(N'err.ECR-ACCS-0403.discussionEditForbidden', N'en', N'Only the author can edit a message.', 1)
     ,(N'err.ECR-ACCS-0403.discussionDeleteForbidden', N'en', N'Only the author or a moderator can delete a message.', 1)
     ,(N'err.ECR-ACCS-0403.discussionPeriodForbidden', N'en', N'Your access does not cover this period, so you cannot write in this chat for it.', 1)
+    ,(N'err.ECR-PRD-0409.projectArchivedNoChat', N'en', N'The project of document {documentId} is archived: its table chats are read-only.', 1)
     -- TC:server ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -24529,7 +24530,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-ACCS-0403.discussionDeleteForbidden', N'ru', N'Удалить сообщение может только автор или модератор.'),
     (N'err.ECR-ACCS-0403.discussionDeleteForbidden', N'kz', N'Хабарламаны тек автор немесе модератор жоя алады.'),
     (N'err.ECR-ACCS-0403.discussionPeriodForbidden', N'ru', N'Ваш доступ не охватывает этот период, поэтому писать в чат за него нельзя.'),
-    (N'err.ECR-ACCS-0403.discussionPeriodForbidden', N'kz', N'Сіздің қолжетімділігіңіз бұл кезеңді қамтымайды, сондықтан ол үшін чатқа жазуға болмайды.')
+    (N'err.ECR-ACCS-0403.discussionPeriodForbidden', N'kz', N'Сіздің қолжетімділігіңіз бұл кезеңді қамтымайды, сондықтан ол үшін чатқа жазуға болмайды.'),
+    (N'err.ECR-PRD-0409.projectArchivedNoChat', N'ru', N'Проект документа {documentId} в архиве: чаты его таблиц доступны только для чтения.'),
+    (N'err.ECR-PRD-0409.projectArchivedNoChat', N'kz', N'{documentId} құжатының жобасы мұрағатта: оның кесте чаттары тек оқуға арналған.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

@@ -12,19 +12,20 @@ namespace Ecr.Application.Documents.Discussions;
 /// <summary>Запис у чат таблиці: нове повідомлення, правка, м'яке видалення, «прочитано».</summary>
 /// <remarks>
 /// ⛔ Пише лише в <c>doc.TableDiscussion*</c> і журнал безпеки. Комірки, розрахунки, стани аркушів і перерахунок не
-/// торкаються. Дозволено в будь-якому стані документа (коментар — не дані). Зведення чату (<c>Revision</c>, лічильник)
-/// оновлюється в ТІЙ САМІЙ транзакції, що й повідомлення.
+/// торкаються. Дозволено в будь-якому стані документа й закритому періоді (коментар — не дані), КРІМ заархівованого
+/// проєкту — там чат лише для читання. Зведення чату (<c>Revision</c>, лічильник) оновлюється в ТІЙ САМІЙ транзакції,
+/// що й повідомлення.
 /// </remarks>
 public sealed class TableDiscussionCommands(
     IAccessDecisionService access,
     ICurrentUser currentUser,
     ITableDiscussionStore store,
+    IEditAssignmentManagementStore documents,
     IUnitOfWork uow,
     IAuditWriter audit,
     IClock clock,
     TableDiscussionQueries queries)
 {
-
     /// <summary>Тип події журналу: повідомлення написано.</summary>
     public const string PostedEvent = "TableDiscussionMessagePosted";
 
@@ -34,8 +35,11 @@ public sealed class TableDiscussionCommands(
     /// <summary>Тип події журналу: повідомлення видалено (текст зберігається тут).</summary>
     public const string DeletedEvent = "TableDiscussionMessageDeleted";
 
-    /// <summary>Пише повідомлення.</summary>
-    public async Task<TableDiscussionMessageDto> PostAsync(
+    /// <summary>
+    /// Пише повідомлення. <c>Created = false</c> — повтор із тим самим <c>clientMessageId</c>: повернуто ІСНУЮЧЕ
+    /// повідомлення, друге не створювалося, зведення не змінювалось.
+    /// </summary>
+    public async Task<(TableDiscussionMessageDto Message, bool Created)> PostAsync(
         long documentId, string tableCode, PostTableDiscussionMessageRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -44,6 +48,11 @@ public sealed class TableDiscussionCommands(
             .ResolveAsync(access, currentUser, store, documentId, tableCode, ct).ConfigureAwait(false);
         await DocumentVisibility
             .RequireVisibleAsync(access, chat.Profile, documentId, "Document.Discuss", ct).ConfigureAwait(false);
+
+        if (await TableDiscussionAccess.IsReadOnlyAsync(documents, documentId, ct).ConfigureAwait(false))
+        {
+            throw TableDiscussionAccess.ProjectArchived(documentId);
+        }
 
         var body = TableDiscussionRules.Normalize(request.Body);
         if (body is null || !new PeriodKey(request.PeriodKey).IsValid
@@ -58,38 +67,81 @@ public sealed class TableDiscussionCommands(
                 "err.ECR-ACCS-0403.discussionPeriodForbidden", "Ваш доступ не охоплює цей період.");
         }
 
+        Guid? clientId = request.ClientMessageId is { } given && given != Guid.Empty ? given : null;
+        if (clientId is { } known)
+        {
+            var existing = await store
+                .FindByClientIdAsync(documentId, tableCode, chat.UserId, known, ct).ConfigureAwait(false);
+            if (existing is not null)
+            {
+                return (await MapRowAsync(existing, chat, documentId, ct).ConfigureAwait(false), false);
+            }
+        }
+
         var mentions = await TableDiscussionAccess
             .FilterMentionsAsync(access, documentId, tableCode, request.PeriodKey, request.MentionUserIds, chat.UserId, ct)
             .ConfigureAwait(false);
 
         var now = clock.UtcNow;
-        var message = new TableDiscussionMessage(documentId, tableCode, request.PeriodKey, chat.UserId, body, now);
+        var message = new TableDiscussionMessage(documentId, tableCode, request.PeriodKey, chat.UserId, body, now, clientId);
+        TableDiscussionMessageRow? duplicate = null;
 
-        await uow.ExecuteInTransactionAsync(async innerCt =>
+        try
         {
-            var state = await store.LockStateAsync(documentId, tableCode, innerCt).ConfigureAwait(false);
+            await uow.ExecuteInTransactionAsync(async innerCt =>
+            {
+                // Блокування зведення серіалізує паралельні повтори: другий побачить уже збережене й нічого не пише.
+                var state = await store.LockStateAsync(documentId, tableCode, innerCt).ConfigureAwait(false);
 
-            store.Add(message);
-            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false); // ідентифікатор — з бази
-
-            state.OnPosted(message.Id, now);
-            await store.ReplaceMentionsAsync(message, mentions, innerCt).ConfigureAwait(false);
-
-            await audit.WriteSecurityEventAsync(
-                new SecurityEventRecord(
-                    now, PostedEvent, null, null,
-                    JsonSerializer.Serialize(new
+                if (clientId is { } id)
+                {
+                    duplicate = await store
+                        .FindByClientIdAsync(documentId, tableCode, chat.UserId, id, innerCt).ConfigureAwait(false);
+                    if (duplicate is not null)
                     {
-                        documentId, tableCode, messageId = message.Id, periodKey = request.PeriodKey,
-                        length = body.Length, mentions,
-                    }),
-                    chat.UserId, currentUser.CorrelationId),
-                innerCt).ConfigureAwait(false);
+                        return;
+                    }
+                }
 
-            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
+                store.Add(message);
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false); // ідентифікатор — з бази
 
-        return await MapOneAsync(message, chat, ct).ConfigureAwait(false);
+                state.OnPosted(message.Id, now);
+                await store.ReplaceMentionsAsync(message, mentions, innerCt).ConfigureAwait(false);
+
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        now, PostedEvent, null, null,
+                        JsonSerializer.Serialize(new
+                        {
+                            documentId, tableCode, messageId = message.Id, periodKey = request.PeriodKey,
+                            length = body.Length, mentions,
+                        }),
+                        chat.UserId, currentUser.CorrelationId),
+                    innerCt).ConfigureAwait(false);
+
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (clientId is not null && EditAssignments.EditAssignmentAccess.IsUniqueViolation(ex))
+        {
+            // Паралельний дублікат проскочив повз перевірку: транзакцію відкотило, віддаємо те, що збереглось.
+            duplicate = await store
+                .FindByClientIdAsync(documentId, tableCode, chat.UserId, clientId.Value, ct).ConfigureAwait(false);
+            if (duplicate is null)
+            {
+                throw;
+            }
+        }
+        catch (Exception ex) when (TableDiscussionAccess.IsForeignKeyViolation(ex))
+        {
+            // Документ видалили між перевіркою доступу й записом: чистий 404, не 500.
+            throw DocumentVisibility.DocumentNotFound(documentId);
+        }
+
+        return duplicate is not null
+            ? (await MapRowAsync(duplicate, chat, documentId, ct).ConfigureAwait(false), false)
+            : (await MapOneAsync(message, chat, ct).ConfigureAwait(false), true);
     }
 
     /// <summary>Правка свого повідомлення в межах вікна.</summary>
@@ -102,6 +154,11 @@ public sealed class TableDiscussionCommands(
             .ResolveAsync(access, currentUser, store, documentId, tableCode, ct).ConfigureAwait(false);
         await DocumentVisibility
             .RequireVisibleAsync(access, chat.Profile, documentId, "Document.Discuss", ct).ConfigureAwait(false);
+
+        if (await TableDiscussionAccess.IsReadOnlyAsync(documents, documentId, ct).ConfigureAwait(false))
+        {
+            throw TableDiscussionAccess.ProjectArchived(documentId);
+        }
 
         var now = clock.UtcNow;
         TableDiscussionMessage? edited = null;
@@ -176,8 +233,15 @@ public sealed class TableDiscussionCommands(
         var chat = await TableDiscussionAccess
             .ResolveAsync(access, currentUser, store, documentId, tableCode, ct).ConfigureAwait(false);
 
-        var moderator = await TableDiscussionAccess.CanModerateAsync(access, chat.Profile, documentId, ct).ConfigureAwait(false);
-        var author = await TableDiscussionAccess.CanDiscussAsync(access, chat.Profile, documentId, ct).ConfigureAwait(false);
+        if (await TableDiscussionAccess.IsReadOnlyAsync(documents, documentId, ct).ConfigureAwait(false))
+        {
+            throw TableDiscussionAccess.ProjectArchived(documentId);
+        }
+
+        var moderator = await TableDiscussionAccess
+            .CanModerateAsync(access, chat.Profile, documentId, ct).ConfigureAwait(false);
+        var author = await TableDiscussionAccess
+            .CanDiscussAsync(access, chat.Profile, documentId, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
 
@@ -223,7 +287,10 @@ public sealed class TableDiscussionCommands(
         }, ct).ConfigureAwait(false);
     }
 
-    /// <summary>Позначка «прочитано до» (монотонна; понад найбільший id чату зрізається).</summary>
+    /// <summary>
+    /// Позначка «прочитано до» (монотонна). Поріг зрізається до найбільшого id, ВИДИМОГО читачеві (у його періодах):
+    /// інакше роль, звужена періодами, «прочитала» б повідомлення, яких не бачить, і розкрила б їх існування.
+    /// </summary>
     public async Task MarkReadAsync(
         long documentId, string tableCode, MarkTableDiscussionReadRequest request, CancellationToken ct)
     {
@@ -237,8 +304,9 @@ public sealed class TableDiscussionCommands(
             throw TableDiscussionAccess.BodyInvalid("Недійсна позначка «прочитано».");
         }
 
-        var state = await store.GetStateAsync(documentId, tableCode, ct).ConfigureAwait(false);
-        var upTo = Math.Min(request.LastReadMessageId, state.LastMessageId);
+        var visibleMax = await store
+            .MaxVisibleIdAsync(documentId, tableCode, chat.AllowedPeriods, ct).ConfigureAwait(false);
+        var upTo = Math.Min(request.LastReadMessageId, visibleMax);
         if (upTo == 0)
         {
             return;
@@ -254,14 +322,23 @@ public sealed class TableDiscussionCommands(
     private async Task<TableDiscussionMessageDto> MapOneAsync(
         TableDiscussionMessage message, TableChatAccess chat, CancellationToken ct)
     {
-        var canModerate = await TableDiscussionAccess.CanModerateAsync(access, chat.Profile, message.DocumentId, ct).ConfigureAwait(false);
         var names = await store.UserNamesAsync([message.AuthorUserId], ct).ConfigureAwait(false);
         var row = new TableDiscussionMessageRow(
             message.Id, message.TableDefCode, message.PeriodKey, message.AuthorUserId,
             names.GetValueOrDefault(message.AuthorUserId, string.Empty), message.Body,
             message.CreatedAt, message.EditedAt, message.DeletedAt);
 
-        return (await queries.MapAsync([row], chat.UserId, canModerate, ct).ConfigureAwait(false))[0];
+        return await MapRowAsync(row, chat, message.DocumentId, ct).ConfigureAwait(false);
+    }
+
+    private async Task<TableDiscussionMessageDto> MapRowAsync(
+        TableDiscussionMessageRow row, TableChatAccess chat, long documentId, CancellationToken ct)
+    {
+        // Сюди доходять лише після перевірки Document.Discuss і «не архів» — тож писати можна.
+        var canModerate = await TableDiscussionAccess
+            .CanModerateAsync(access, chat.Profile, documentId, ct).ConfigureAwait(false);
+
+        return (await queries.MapAsync([row], chat.UserId, canWrite: true, canModerate, ct).ConfigureAwait(false))[0];
     }
 
     private static Errors.BusinessRuleException Rule(

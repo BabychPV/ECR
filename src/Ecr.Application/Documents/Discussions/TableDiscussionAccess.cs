@@ -6,6 +6,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 
@@ -168,6 +169,38 @@ internal static class TableDiscussionAccess
     }
 
     public static NotFoundException MessageNotFound(long documentId) => DocumentVisibility.DocumentNotFound(documentId);
+
+    /// <summary>Чи проєкт документа заархівований (чи архівується): чат тоді лише для читання.</summary>
+    public static async Task<bool> IsReadOnlyAsync(IEditAssignmentManagementStore documents, long documentId, CancellationToken ct)
+    {
+        var document = await documents.FindDocumentAsync(documentId, ct).ConfigureAwait(false);
+        return document is not null && (document.ProjectStatus == ProjectStatus.Archived || document.IsArchiving);
+    }
+
+    /// <summary>409 <c>ECR-PRD-0409</c>: у заархівованому проєкті писати в чат не можна (як і створювати документи).</summary>
+    public static BusinessRuleException ProjectArchived(long documentId)
+        => new(
+            ErrorCodes.PeriodClosed,
+            $"Проєкт документа {documentId} заархівований: чат лише для читання.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRD-0409.projectArchivedNoChat",
+                ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+
+    /// <summary>Чи виняток — порушення зовнішнього ключа (документ видалили між перевіркою й записом).</summary>
+    public static bool IsForeignKeyViolation(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (e.GetType().Name == "SqlException" && e.Message.Contains("FOREIGN KEY", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     public static BusinessRuleException BodyInvalid(string message)
         => EditAssignmentAccess.Invalid(

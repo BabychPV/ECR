@@ -73,8 +73,12 @@ public sealed record TableDiscussionSummaryDto(IReadOnlyList<TableDiscussionSumm
 /// <param name="Body">Простий текст, 1..4000 символів після нормалізації (керівні символи прибираються).</param>
 /// <param name="PeriodKey">Період, у якому пишуть (рік*100+номер).</param>
 /// <param name="MentionUserIds">Згадані користувачі (до 10). Ті, хто не бачить таблицю, мовчки відкидаються.</param>
+/// <param name="ClientMessageId">
+/// Необов'язковий GUID клієнта для безпечного повтору: повторний POST з тим самим значенням (той самий автор, документ і
+/// таблиця) повертає ІСНУЮЧЕ повідомлення з <c>200</c>, а не створює друге; нове повідомлення — <c>201</c>.
+/// </param>
 public sealed record PostTableDiscussionMessageRequest(
-    string Body, int PeriodKey, IReadOnlyList<int>? MentionUserIds = null);
+    string Body, int PeriodKey, IReadOnlyList<int>? MentionUserIds = null, Guid? ClientMessageId = null);
 
 /// <summary>Тіло правки повідомлення.</summary>
 /// <param name="Body">Новий текст.</param>

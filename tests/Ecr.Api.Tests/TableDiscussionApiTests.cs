@@ -11,7 +11,10 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -47,7 +50,7 @@ public sealed class TableDiscussionApiTests(SqlServerFixture sql)
         using var bob = await SignedInAsync(app, s.Bob.UserName).ConfigureAwait(true);
 
         var posted = await PostAsync(alice, s, s.Table1, "Перше повідомлення", s.Period).ConfigureAwait(true);
-        Assert.Equal(HttpStatusCode.OK, posted.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, posted.StatusCode);
         var message = JsonDocument.Parse(await posted.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
         Assert.Equal("Перше повідомлення", message.GetProperty("body").GetString());
         Assert.True(message.GetProperty("canEdit").GetBoolean());
@@ -112,7 +115,7 @@ public sealed class TableDiscussionApiTests(SqlServerFixture sql)
         using var viewer = await SignedInAsync(app, s.ViewerOnly.UserName).ConfigureAwait(true);
         using var stranger = await SignedInAsync(app, s.Stranger.UserName).ConfigureAwait(true);
 
-        Assert.Equal(HttpStatusCode.OK, (await PostAsync(alice, s, s.Table2, "Секретна розмова", s.Period).ConfigureAwait(true)).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await PostAsync(alice, s, s.Table2, "Секретна розмова", s.Period).ConfigureAwait(true)).StatusCode);
         await PostAsync(alice, s, s.Table1, "Відкрита розмова", s.Period).ConfigureAwait(true);
 
         // Схована таблиця: GET/POST/PUT read/candidates — ТА САМА 404, що й на неіснуючий документ.
@@ -160,7 +163,7 @@ public sealed class TableDiscussionApiTests(SqlServerFixture sql)
             MessagesUri(s, s.Table2, string.Empty),
             new { body = "Дивись @Боб", periodKey = s.Period, mentionUserIds = new[] { s.Bob.Id, s.Denied.Id, 987654321 } }).ConfigureAwait(true);
         var text = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
-        Assert.True(response.StatusCode == HttpStatusCode.OK, text);
+        Assert.True(response.StatusCode == HttpStatusCode.Created, text);
         var mentions = JsonDocument.Parse(text).RootElement.GetProperty("mentions").EnumerateArray().ToList();
         Assert.Equal([s.Bob.Id], mentions.Select(m => m.GetProperty("userId").GetInt32()).ToList());
         Assert.DoesNotContain(s.Denied.UserName, text, StringComparison.Ordinal);
@@ -346,7 +349,7 @@ public sealed class TableDiscussionApiTests(SqlServerFixture sql)
         using var alice = await SignedInAsync(app, s.Writer.UserName).ConfigureAwait(true);
 
         // Рівно 4000 — можна; 4001 — 422 з ключем.
-        Assert.Equal(HttpStatusCode.OK, (await PostAsync(alice, s, s.Table1, new string('я', 4000), s.Period).ConfigureAwait(true)).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await PostAsync(alice, s, s.Table1, new string('я', 4000), s.Period).ConfigureAwait(true)).StatusCode);
         var tooLong = await PostAsync(alice, s, s.Table1, new string('я', 4001), s.Period).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, tooLong.StatusCode);
         Assert.Equal("err.ECR-REQ-0422.discussionBodyInvalid", await KeyAsync(tooLong).ConfigureAwait(true));
@@ -393,7 +396,7 @@ public sealed class TableDiscussionApiTests(SqlServerFixture sql)
         Assert.Empty((await GetPageAsync(narrowed, s, s.Table1, $"?periodKey={Num(s.Period)}").ConfigureAwait(true)).GetProperty("messages").EnumerateArray());
 
         // Писати можна у видимий період; у невидимий — 403 з ключем.
-        Assert.Equal(HttpStatusCode.OK, (await PostAsync(narrowed, s, s.Table1, "відповідь", Nov).ConfigureAwait(true)).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await PostAsync(narrowed, s, s.Table1, "відповідь", Nov).ConfigureAwait(true)).StatusCode);
         var forbidden = await PostAsync(narrowed, s, s.Table1, "не туди", s.Period).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
         Assert.Equal("err.ECR-ACCS-0403.discussionPeriodForbidden", await KeyAsync(forbidden).ConfigureAwait(true));
@@ -423,7 +426,7 @@ public sealed class TableDiscussionApiTests(SqlServerFixture sql)
         var posted = await manager.PostAsJsonAsync(
             MessagesUri(s, s.Table1, string.Empty),
             new { body = "до видалення", periodKey = s.Period, mentionUserIds = new[] { s.Bob.Id } }).ConfigureAwait(true);
-        Assert.Equal(HttpStatusCode.OK, posted.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, posted.StatusCode);
         await manager.PutAsJsonAsync(ReadUri(s, s.Table1), new { lastReadMessageId = 1 }).ConfigureAwait(true);
 
         var deleted = await manager.DeleteAsync(new Uri($"/api/v1/documents/{Num(s.DocumentId)}", UriKind.Relative)).ConfigureAwait(true);
@@ -434,6 +437,183 @@ public sealed class TableDiscussionApiTests(SqlServerFixture sql)
         Assert.Equal(0, await db.TableDiscussionMentions.CountAsync(m => m.DocumentId == s.DocumentId).ConfigureAwait(true));
         Assert.Equal(0, await db.TableDiscussions.CountAsync(m => m.DocumentId == s.DocumentId).ConfigureAwait(true));
         Assert.Single(await EventDetailsAsync(s, "TableDiscussionMessagePosted").ConfigureAwait(true));
+    }
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Повтор_POST_з_тим_самим_clientMessageId_повертає_існуюче_з_200_без_другого_рядка()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var alice = await SignedInAsync(app, s.Writer.UserName).ConfigureAwait(true);
+        using var bob = await SignedInAsync(app, s.Bob.UserName).ConfigureAwait(true);
+        var clientId = Guid.NewGuid();
+
+        var first = await alice.PostAsJsonAsync(MessagesUri(s, s.Table1, string.Empty), new { body = "раз", periodKey = s.Period, clientMessageId = clientId }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        var firstBody = JsonDocument.Parse(await first.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        var revision = (await GetPageAsync(alice, s, s.Table1, string.Empty).ConfigureAwait(true)).GetProperty("revision").GetInt64();
+
+        // Повтор (навіть з іншим текстом) — 200 і те саме повідомлення; ревізія зведення не рухається.
+        var retry = await alice.PostAsJsonAsync(MessagesUri(s, s.Table1, string.Empty), new { body = "раз (повтор)", periodKey = s.Period, clientMessageId = clientId }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        var retryBody = JsonDocument.Parse(await retry.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        Assert.Equal(firstBody.GetProperty("id").GetInt64(), retryBody.GetProperty("id").GetInt64());
+        Assert.Equal("раз", retryBody.GetProperty("body").GetString());
+        var page = await GetPageAsync(alice, s, s.Table1, string.Empty).ConfigureAwait(true);
+        Assert.Single(page.GetProperty("messages").EnumerateArray());
+        Assert.Equal(revision, page.GetProperty("revision").GetInt64());
+        Assert.Single(await EventDetailsAsync(s, "TableDiscussionMessagePosted").ConfigureAwait(true));
+
+        // Той самий GUID в іншій таблиці або від іншого автора — окремі повідомлення.
+        Assert.Equal(HttpStatusCode.Created, (await alice.PostAsJsonAsync(MessagesUri(s, s.Table2, string.Empty), new { body = "інша таблиця", periodKey = s.Period, clientMessageId = clientId }).ConfigureAwait(true)).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await bob.PostAsJsonAsync(MessagesUri(s, s.Table1, string.Empty), new { body = "інший автор", periodKey = s.Period, clientMessageId = clientId }).ConfigureAwait(true)).StatusCode);
+        Assert.Equal(2, (await GetPageAsync(alice, s, s.Table1, string.Empty).ConfigureAwait(true)).GetProperty("messages").GetArrayLength());
+
+        // Без GUID — кожен POST нове повідомлення.
+        Assert.Equal(HttpStatusCode.Created, (await PostAsync(alice, s, s.Table1, "без id", s.Period).ConfigureAwait(true)).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await PostAsync(alice, s, s.Table1, "без id", s.Period).ConfigureAwait(true)).StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Паралельний_подвійний_POST_з_одним_clientMessageId_дає_один_рядок_і_одну_зміну_ревізії_20_з_20()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var alice = await SignedInAsync(app, s.Writer.UserName).ConfigureAwait(true);
+
+        for (var round = 1; round <= 20; round++)
+        {
+            var clientId = Guid.NewGuid();
+            var before = (await GetPageAsync(alice, s, s.Table1, string.Empty).ConfigureAwait(true)).GetProperty("revision").GetInt64();
+            var payload = new { body = $"гонка {round.ToString(CultureInfo.InvariantCulture)}", periodKey = s.Period, clientMessageId = clientId };
+
+            var responses = await Task.WhenAll(
+                alice.PostAsJsonAsync(MessagesUri(s, s.Table1, string.Empty), payload),
+                alice.PostAsJsonAsync(MessagesUri(s, s.Table1, string.Empty), payload),
+                alice.PostAsJsonAsync(MessagesUri(s, s.Table1, string.Empty), payload)).ConfigureAwait(true);
+
+            var statuses = responses.Select(r => r.StatusCode).OrderBy(c => (int)c).ToList();
+            Assert.True(
+                statuses.SequenceEqual([HttpStatusCode.OK, HttpStatusCode.OK, HttpStatusCode.Created]),
+                $"раунд {round.ToString(CultureInfo.InvariantCulture)}: {string.Join(',', statuses)}; {app.ErrorsText}");
+
+            var ids = new HashSet<long>();
+            foreach (var response in responses)
+            {
+                ids.Add(JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement.GetProperty("id").GetInt64());
+            }
+
+            Assert.Single(ids);
+            var after = (await GetPageAsync(alice, s, s.Table1, string.Empty).ConfigureAwait(true)).GetProperty("revision").GetInt64();
+            Assert.Equal(before + 1, after);
+        }
+
+        Assert.Equal(20, (await GetPageAsync(alice, s, s.Table1, "?limit=100").ConfigureAwait(true)).GetProperty("messages").GetArrayLength());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Заархівований_проєкт_чат_лише_для_читання()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var alice = await SignedInAsync(app, s.Writer.UserName).ConfigureAwait(true);
+        using var moderator = await SignedInAsync(app, s.Moderator.UserName).ConfigureAwait(true);
+
+        var id = await PostIdAsync(alice, s, s.Table1, "до архіву").ConfigureAwait(true);
+        Assert.True((await GetPageAsync(alice, s, s.Table1, string.Empty).ConfigureAwait(true)).GetProperty("canWrite").GetBoolean());
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE p SET p.Status = {(byte)ProjectStatus.Archived} FROM doc.Project AS p JOIN doc.Document AS d ON d.ProjectId = p.Id WHERE d.Id = {s.DocumentId}").ConfigureAwait(true);
+        }
+
+        // Читання працює; писати, правити, видаляти (навіть модератору) — 409 ECR-PRD-0409 з ключем.
+        var page = await GetPageAsync(alice, s, s.Table1, string.Empty).ConfigureAwait(true);
+        Assert.False(page.GetProperty("canWrite").GetBoolean());
+        var shown = Assert.Single(page.GetProperty("messages").EnumerateArray());
+        Assert.False(shown.GetProperty("canEdit").GetBoolean());
+        Assert.False(shown.GetProperty("canDelete").GetBoolean());
+        Assert.False(JsonDocument.Parse(await alice.GetStringAsync(new Uri($"/api/v1/documents/{Num(s.DocumentId)}/discussions/summary", UriKind.Relative)).ConfigureAwait(true)).RootElement.GetProperty("canWrite").GetBoolean());
+
+        foreach (var response in new[]
+        {
+            await PostAsync(alice, s, s.Table1, "після архіву", s.Period).ConfigureAwait(true),
+            await alice.PatchAsJsonAsync(MessageUri(s, s.Table1, id), new { body = "правка" }).ConfigureAwait(true),
+            await moderator.DeleteAsync(MessageUri(s, s.Table1, id)).ConfigureAwait(true),
+        })
+        {
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            Assert.Equal("err.ECR-PRD-0409.projectArchivedNoChat", await KeyAsync(response).ConfigureAwait(true));
+        }
+
+        // «Прочитано» дозволене й в архіві (це не запис у чат).
+        Assert.Equal(HttpStatusCode.NoContent, (await alice.PutAsJsonAsync(ReadUri(s, s.Table1), new { lastReadMessageId = id }).ConfigureAwait(true)).StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Прочитано_для_ролі_звуженої_періодами_зрізається_до_видимого_максимуму()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var alice = await SignedInAsync(app, s.Writer.UserName).ConfigureAwait(true);
+        using var narrowed = await SignedInAsync(app, s.NovemberOnly.UserName).ConfigureAwait(true);
+
+        await PostIdAsync(alice, s, s.Table1, "січень").ConfigureAwait(true);
+        var november = (await PostAsync(alice, s, s.Table1, "листопад", Nov).ConfigureAwait(true));
+        var visibleId = JsonDocument.Parse(await november.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement.GetProperty("id").GetInt64();
+        var hiddenId = await PostIdAsync(alice, s, s.Table1, "січень-пізніше").ConfigureAwait(true);
+        Assert.True(hiddenId > visibleId);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await narrowed.PutAsJsonAsync(ReadUri(s, s.Table1), new { lastReadMessageId = hiddenId + 1000 }).ConfigureAwait(true)).StatusCode);
+
+        var page = await GetPageAsync(narrowed, s, s.Table1, string.Empty).ConfigureAwait(true);
+        Assert.Equal(visibleId, page.GetProperty("lastReadMessageId").GetInt64());
+        Assert.True(page.GetProperty("lastReadMessageId").GetInt64() < hiddenId);
+
+        // Повний доступ: зрізання до найбільшого id чату (як і було).
+        Assert.Equal(HttpStatusCode.NoContent, (await alice.PutAsJsonAsync(ReadUri(s, s.Table1), new { lastReadMessageId = hiddenId + 1000 }).ConfigureAwait(true)).StatusCode);
+        Assert.Equal(hiddenId, (await GetPageAsync(alice, s, s.Table1, string.Empty).ConfigureAwait(true)).GetProperty("lastReadMessageId").GetInt64());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Документ_зник_між_перевіркою_і_записом_дає_чисту_404_а_не_500()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var racing = app.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<Ecr.Application.Ports.ITableDiscussionStore>();
+            services.AddScoped<Ecr.Application.Ports.ITableDiscussionStore, DocumentVanishesStore>();
+        }));
+        using var alice = racing.CreateClient();
+        var login = await alice.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = s.Writer.UserName, password = Password }).ConfigureAwait(true);
+        Assert.True(login.IsSuccessStatusCode, $"Вхід: {login.StatusCode}: {app.ErrorsText}");
+
+        var response = await PostAsync(alice, s, s.Table1, "документ зникає", s.Period).ConfigureAwait(true);
+        var text = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.NotFound, $"{response.StatusCode}: {text}");
+        Assert.Equal("ECR-DOC-0404", JsonDocument.Parse(text).RootElement.GetProperty("errorCode").GetString());
+
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        Assert.Equal(0, await db.TableDiscussionMessages.CountAsync(m => m.DocumentId == s.DocumentId).ConfigureAwait(true));
+        Assert.Equal(0, await db.TableDiscussions.CountAsync(m => m.DocumentId == s.DocumentId).ConfigureAwait(true));
+    }
+
+    /// <summary>Сховище, що «видаляє документ» між перевіркою доступу й записом: повідомлення вказує на неіснуючий документ.</summary>
+    private sealed class DocumentVanishesStore(EcrDbContext db) : TableDiscussionStore(db)
+    {
+        public override void Add(TableDiscussionMessage message)
+        {
+            typeof(TableDiscussionMessage).GetProperty(nameof(TableDiscussionMessage.DocumentId))!.SetValue(message, 987_654_321L);
+            base.Add(message);
+        }
     }
     // ── помічники ───────────────────────────────────────────────────────────────────
 
@@ -458,7 +638,7 @@ public sealed class TableDiscussionApiTests(SqlServerFixture sql)
     {
         var response = await PostAsync(client, s, table, body, s.Period).ConfigureAwait(false);
         var text = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-        Assert.True(response.StatusCode == HttpStatusCode.OK, text);
+        Assert.True(response.StatusCode == HttpStatusCode.Created, text);
         return JsonDocument.Parse(text).RootElement.GetProperty("id").GetInt64();
     }
 

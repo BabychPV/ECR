@@ -82,17 +82,25 @@ public sealed class TableDiscussionsController(
     /// <remarks>
     /// <c>403 ECR-AUTH-0403</c> — немає <c>Document.Discuss</c>; <c>403 ECR-ACCS-0403</c> (<c>discussionPeriodForbidden</c>) —\n    /// роль, звужена періодами, не бачить цей період; <c>404 ECR-DOC-0404</c> — документ чи таблиця невидимі;
     /// <c>422 ECR-REQ-0422</c> (<c>discussionBodyInvalid</c>) — порожній чи задовгий текст, недійсний період,
-    /// забагато згадок; <c>429</c> — ліміт запитів. Згадки користувачів без доступу мовчки відкидаються — у відповіді
+    /// забагато згадок; <c>409 ECR-PRD-0409</c> (<c>projectArchivedNoChat</c>) — проєкт заархівований, чат лише для читання;
+    /// <c>429</c> — ліміт запитів. Повтор з тим самим <c>clientMessageId</c> — <c>200</c> з існуючим повідомленням. Згадки користувачів без доступу мовчки відкидаються — у відповіді
     /// лише прийняті.
     /// </remarks>
     [HttpPost("tables/{tableCode}/messages")]
+    [ProducesResponseType<TableDiscussionMessageDto>(StatusCodes.Status201Created)]
     [ProducesResponseType<TableDiscussionMessageDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Post(
         long documentId, string tableCode, [FromBody] PostTableDiscussionMessageRequest request, CancellationToken ct)
-        => Ok(await commands.PostAsync(documentId, tableCode, request, ct).ConfigureAwait(false));
+    {
+        var (message, created) = await commands.PostAsync(documentId, tableCode, request, ct).ConfigureAwait(false);
+
+        // 201 — нове повідомлення; 200 — повтор із тим самим clientMessageId (повернуто існуюче, друге не створено).
+        return created ? StatusCode(StatusCodes.Status201Created, message) : Ok(message);
+    }
 
     /// <summary>Правка свого повідомлення впродовж 15 хвилин після створення.</summary>
     /// <remarks>
