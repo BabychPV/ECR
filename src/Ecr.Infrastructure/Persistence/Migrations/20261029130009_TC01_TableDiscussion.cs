@@ -43,6 +43,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     Id = table.Column<long>(type: "bigint", nullable: false)
                         .Annotation("SqlServer:Identity", "1, 1"),
                     DocumentId = table.Column<long>(type: "bigint", nullable: false),
+                    ClientMessageId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
                     TableDefCode = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
                     PeriodKey = table.Column<int>(type: "int", nullable: false),
                     AuthorUserId = table.Column<int>(type: "int", nullable: false),
@@ -152,6 +153,14 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 columns: new[] { "DocumentId", "TableDefCode", "Id" },
                 descending: new[] { false, false, true })
                 .Annotation("SqlServer:Include", new[] { "PeriodKey", "AuthorUserId", "CreatedAt", "DeletedAt" });
+
+            migrationBuilder.CreateIndex(
+                name: "UX_TableDiscussionMessage_ClientId",
+                schema: "doc",
+                table: "TableDiscussionMessage",
+                columns: new[] { "DocumentId", "TableDefCode", "AuthorUserId", "ClientMessageId" },
+                unique: true,
+                filter: "[ClientMessageId] IS NOT NULL");
         }
 
         /// <inheritdoc />

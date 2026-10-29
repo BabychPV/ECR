@@ -48,6 +48,12 @@ public sealed class TableDiscussionMessageConfiguration : IEntityTypeConfigurati
                .HasDatabaseName("IX_TableDiscussionMessage_Chat")
                .IncludeProperties(x => new { x.PeriodKey, x.AuthorUserId, x.CreatedAt, x.DeletedAt });
 
+        // Ідемпотентність POST: повтор з тим самим clientMessageId того ж автора в тому ж чаті не дає другого рядка.
+        builder.HasIndex(x => new { x.DocumentId, x.TableDefCode, x.AuthorUserId, x.ClientMessageId })
+               .IsUnique()
+               .HasFilter("[ClientMessageId] IS NOT NULL")
+               .HasDatabaseName("UX_TableDiscussionMessage_ClientId");
+
         builder.HasOne<Document>()
                .WithMany()
                .HasForeignKey(x => x.DocumentId)

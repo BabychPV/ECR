@@ -3608,6 +3608,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
 
+                    b.Property<Guid?>("ClientMessageId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2(3)");
 
@@ -3638,6 +3641,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("IX_TableDiscussionMessage_Chat");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("DocumentId", "TableDefCode", "Id"), new[] { "PeriodKey", "AuthorUserId", "CreatedAt", "DeletedAt" });
+
+                    b.HasIndex("DocumentId", "TableDefCode", "AuthorUserId", "ClientMessageId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_TableDiscussionMessage_ClientId")
+                        .HasFilter("[ClientMessageId] IS NOT NULL");
 
                     b.ToTable("TableDiscussionMessage", "doc", t =>
                         {

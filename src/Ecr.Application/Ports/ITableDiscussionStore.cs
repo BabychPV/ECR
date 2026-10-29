@@ -62,6 +62,14 @@ public interface ITableDiscussionStore
         long documentId, string tableCode, long? before, long? after, int? periodKey,
         IReadOnlyCollection<int>? allowedPeriods, int take, CancellationToken ct);
 
+    /// <summary>Повідомлення автора з цим <c>clientMessageId</c> у цьому чаті (повтор POST); <c>null</c> — немає.</summary>
+    public Task<TableDiscussionMessageRow?> FindByClientIdAsync(
+        long documentId, string tableCode, int authorUserId, Guid clientMessageId, CancellationToken ct);
+
+    /// <summary>Найбільший id повідомлення чату, видимий читачеві (у дозволених періодах; <c>null</c> — усі).</summary>
+    public Task<long> MaxVisibleIdAsync(
+        long documentId, string tableCode, IReadOnlyCollection<int>? allowedPeriods, CancellationToken ct);
+
     /// <summary>Згадані користувачі за повідомленнями (id → користувачі).</summary>
     public Task<IReadOnlyDictionary<long, IReadOnlyList<int>>> MentionsAsync(
         IReadOnlyCollection<long> messageIds, CancellationToken ct);

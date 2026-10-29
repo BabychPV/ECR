@@ -57,7 +57,8 @@ public sealed class TableDiscussionQueries(
             ? []
             : await store.SummaryAsync(documentId, full, restricted, userId, ct).ConfigureAwait(false);
 
-        var canWrite = await TableDiscussionAccess.CanDiscussAsync(access, profile, documentId, ct).ConfigureAwait(false);
+        var canWrite = await TableDiscussionAccess.CanDiscussAsync(access, profile, documentId, ct).ConfigureAwait(false)
+            && !await TableDiscussionAccess.IsReadOnlyAsync(candidateSource, documentId, ct).ConfigureAwait(false);
 
         return new TableDiscussionSummaryDto(
             [.. rows.OrderBy(r => r.TableCode, StringComparer.Ordinal).Select(r => new TableDiscussionSummaryItemDto(
@@ -87,6 +88,13 @@ public sealed class TableDiscussionQueries(
         var canWrite = await TableDiscussionAccess.CanDiscussAsync(access, chat.Profile, documentId, ct).ConfigureAwait(false);
         var canModerate = await TableDiscussionAccess.CanModerateAsync(access, chat.Profile, documentId, ct).ConfigureAwait(false);
 
+        // Заархівований проєкт: чат лише для читання (запис, правка, видалення, модерація вимкнені).
+        if (await TableDiscussionAccess.IsReadOnlyAsync(candidateSource, documentId, ct).ConfigureAwait(false))
+        {
+            canWrite = false;
+            canModerate = false;
+        }
+
         var size = TableDiscussionRules.PageSize(limit);
         var etag = string.Create(
             CultureInfo.InvariantCulture,
@@ -109,7 +117,7 @@ public sealed class TableDiscussionQueries(
             rows = [.. rows.Take(size).Reverse()];
         }
 
-        var messages = await MapAsync(rows, chat.UserId, canModerate, ct).ConfigureAwait(false);
+        var messages = await MapAsync(rows, chat.UserId, canWrite, canModerate, ct).ConfigureAwait(false);
 
         return (new TableDiscussionPageDto(
             messages, hasMore, state.Revision, state.LastMessageId, lastRead, canWrite, canModerate), etag);
@@ -219,7 +227,7 @@ public sealed class TableDiscussionQueries(
 
     /// <summary>Будує DTO повідомлень: імена згаданих, права читача на кожне.</summary>
     internal async Task<IReadOnlyList<TableDiscussionMessageDto>> MapAsync(
-        IReadOnlyList<TableDiscussionMessageRow> rows, int viewerId, bool canModerate, CancellationToken ct)
+        IReadOnlyList<TableDiscussionMessageRow> rows, int viewerId, bool canWrite, bool canModerate, CancellationToken ct)
     {
         if (rows.Count == 0)
         {
@@ -230,16 +238,16 @@ public sealed class TableDiscussionQueries(
         var names = await store
             .UserNamesAsync([.. mentions.Values.SelectMany(v => v).Distinct()], ct).ConfigureAwait(false);
 
-        return [.. rows.Select(r => Map(r, viewerId, canModerate, clock.UtcNow, mentions, names))];
+        return [.. rows.Select(r => Map(r, viewerId, canWrite, canModerate, clock.UtcNow, mentions, names))];
     }
 
     internal static TableDiscussionMessageDto Map(
-        TableDiscussionMessageRow row, int viewerId, bool canModerate, DateTime now,
+        TableDiscussionMessageRow row, int viewerId, bool canWrite, bool canModerate, DateTime now,
         IReadOnlyDictionary<long, IReadOnlyList<int>> mentions, IReadOnlyDictionary<int, string> names)
     {
         var deleted = row.DeletedAt is not null;
         var editableUntil = row.CreatedAt + TableDiscussionMessage.EditWindow;
-        var canEdit = !deleted && row.AuthorUserId == viewerId && now <= editableUntil;
+        var canEdit = canWrite && !deleted && row.AuthorUserId == viewerId && now <= editableUntil;
 
         var mentioned = deleted || !mentions.TryGetValue(row.Id, out var ids)
             ? []
@@ -249,7 +257,7 @@ public sealed class TableDiscussionQueries(
             row.Id, row.TableCode, row.PeriodKey, row.AuthorUserId, row.AuthorName,
             deleted ? null : row.Body, deleted, Utc(row.CreatedAt), Utc(row.EditedAt), Utc(row.DeletedAt),
             canEdit, canEdit ? Utc(editableUntil) : null,
-            !deleted && (row.AuthorUserId == viewerId || canModerate), mentioned);
+            !deleted && ((canWrite && row.AuthorUserId == viewerId) || canModerate), mentioned);
     }
 
     internal static DateTime Utc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);

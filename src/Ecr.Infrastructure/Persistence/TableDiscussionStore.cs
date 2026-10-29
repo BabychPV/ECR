@@ -11,7 +11,7 @@ namespace Ecr.Infrastructure.Persistence;
 /// Жодного запису в комірки, розрахунки чи стани. Блокування — <c>UPDLOCK, HOLDLOCK</c> на ключі зведення: двоє, що
 /// одночасно пишуть у ще не існуючий чат, серіалізуються діапазонним замком, а ревізія зростає без втрат.
 /// </remarks>
-public sealed class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
+public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<TableDiscussionSummaryRow>> SummaryAsync(
@@ -160,6 +160,35 @@ public sealed class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStor
     }
 
     /// <inheritdoc />
+    public async Task<TableDiscussionMessageRow?> FindByClientIdAsync(
+        long documentId, string tableCode, int authorUserId, Guid clientMessageId, CancellationToken ct)
+        => await (
+            from m in db.TableDiscussionMessages.AsNoTracking()
+            where m.DocumentId == documentId && m.TableDefCode == tableCode && m.AuthorUserId == authorUserId
+                  && m.ClientMessageId == clientMessageId
+            join u in db.Users.AsNoTracking() on m.AuthorUserId equals u.Id
+            select new TableDiscussionMessageRow(
+                m.Id, m.TableDefCode, m.PeriodKey, m.AuthorUserId, u.DisplayName, m.Body,
+                m.CreatedAt, m.EditedAt, m.DeletedAt))
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<long> MaxVisibleIdAsync(
+        long documentId, string tableCode, IReadOnlyCollection<int>? allowedPeriods, CancellationToken ct)
+    {
+        var query = db.TableDiscussionMessages.AsNoTracking()
+            .Where(m => m.DocumentId == documentId && m.TableDefCode == tableCode);
+
+        if (allowedPeriods is not null)
+        {
+            var allowed = allowedPeriods.ToList();
+            query = query.Where(m => allowed.Contains(m.PeriodKey));
+        }
+
+        return await query.Select(m => (long?)m.Id).MaxAsync(ct).ConfigureAwait(false) ?? 0;
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<long, IReadOnlyList<int>>> MentionsAsync(
         IReadOnlyCollection<long> messageIds, CancellationToken ct)
     {
@@ -232,7 +261,7 @@ public sealed class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStor
             .FirstOrDefaultAsync(ct);
 
     /// <inheritdoc />
-    public void Add(TableDiscussionMessage message)
+    public virtual void Add(TableDiscussionMessage message)
     {
         ArgumentNullException.ThrowIfNull(message);
         db.TableDiscussionMessages.Add(message);

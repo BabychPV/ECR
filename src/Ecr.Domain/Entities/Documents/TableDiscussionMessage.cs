@@ -25,8 +25,11 @@ public sealed class TableDiscussionMessage : Entity<long>
     private TableDiscussionMessage() { }
 
     /// <summary>Створює повідомлення (текст уже нормалізовано й перевірено на довжину викликачем).</summary>
-    public TableDiscussionMessage(long documentId, string tableDefCode, int periodKey, int authorUserId, string body, DateTime utcNow)
+    public TableDiscussionMessage(
+        long documentId, string tableDefCode, int periodKey, int authorUserId, string body, DateTime utcNow,
+        Guid? clientMessageId = null)
     {
+        ClientMessageId = clientMessageId;
         DocumentId = documentId;
         TableDefCode = tableDefCode;
         PeriodKey = periodKey;
@@ -37,6 +40,12 @@ public sealed class TableDiscussionMessage : Entity<long>
 
     /// <summary>Документ.</summary>
     public long DocumentId { get; private set; }
+
+    /// <summary>
+    /// Ідентифікатор від клієнта для ідемпотентного повтору POST: той самий (документ, таблиця, автор, id) — те саме
+    /// повідомлення, а не друге. <c>null</c> — клієнт дедуплікації не просив.
+    /// </summary>
+    public Guid? ClientMessageId { get; private set; }
 
     /// <summary>Код таблиці в шаблоні (стабільний між версіями).</summary>
     public string TableDefCode { get; private set; } = null!;
