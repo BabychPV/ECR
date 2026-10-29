@@ -155,6 +155,17 @@ export function serverMessageKey(error: unknown): string | null {
 }
 
 /**
+ * Код запису, що вже займає діловий ключ (`entryCode` у тілі відмови `ECR-REG-4092`), якщо сервер його назвав.
+ * ⚠ Це технічний код запису: людині він потрібен лише як «ось хто тримає ключ».
+ */
+export function serverKeyHolder(error: unknown): string | null {
+  if (!(error instanceof EcrApiError)) return null;
+  const holder = error.problem.extensions2?.['entryCode'];
+
+  return typeof holder === 'string' && holder !== '' ? holder : null;
+}
+
+/**
  * Чи відмова про поле коду: «код зайнятий» (409) і «код довідника автоматичний» (422).
  * Решта відмов (порядок рівнів, право, збій) - сповіщення, поле не підсвічується.
  */

@@ -240,7 +240,7 @@ describe('NodeAttributesForm: відмова ділового ключа', () =>
     vi.mocked(apiFetch).mockImplementation((path: string, init?: RequestInit) => {
       if (path.endsWith('/languages')) return Promise.resolve([{ code: 'en', nameNative: 'English', isDefault: true }]);
       if (init?.method === 'POST') {
-        return Promise.reject(new EcrApiError({ status: 409, title: 'taken', extensions2: { messageKey: 'err.ECR-REG-4092.keyTaken' } } as never));
+        return Promise.reject(new EcrApiError({ status: 409, title: 'taken', extensions2: { messageKey: 'err.ECR-REG-4092.keyWindowOverlap', entryCode: 'T-77' } } as never));
       }
 
       return Promise.reject(new Error(`unexpected ${path}`));
@@ -265,7 +265,8 @@ describe('NodeAttributesForm: відмова ділового ключа', () =>
     await user.type(within(form).getByLabelText(/Region code/), 'ATYRAU');
     await user.click(within(form).getByRole('button', { name: 'common.save' }));
 
-    expect(await within(form).findByText('permits.nae.form.keyTaken')).toBeTruthy();
+    // Тримач ключа (entryCode з тіла відмови) називається у формі.
+    expect(await within(form).findByText('permits.nae.form.keyTakenBy {"holder":"T-77"}')).toBeTruthy();
   });
 });
 

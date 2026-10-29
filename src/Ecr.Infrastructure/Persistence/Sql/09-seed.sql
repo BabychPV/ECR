@@ -9527,6 +9527,7 @@ USING (VALUES
     ,(N'permits.nae.used.substances', N'en', N'Substances', 1)
     ,(N'permits.nae.used.empty', N'en', N'No permit refers to this node yet.', 1)
     ,(N'permits.nae.form.keyTaken', N'en', N'A node with this NAE code, region and area already exists.', 1)
+    ,(N'permits.nae.form.keyTakenBy', N'en', N'This NAE code, region and area are already used by the node {holder}.', 1)
     ,(N'permits.nae.form.areaHint', N'en', N'Leave empty when there is no area: it is saved as “-”.', 1)
     ,(N'permits.nae.import.open', N'en', N'Load from PI AF', 1)
     ,(N'permits.nae.import.hintNotProvisioned', N'en', N'The NAE structure has not been loaded yet. Load it once from PI AF; after that ECR owns the tree.', 1)
@@ -24974,6 +24975,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.nae.used.empty', N'kz', N'Бұл түйінге әзірге бірде-бір рұқсат сілтемейді.'),
     (N'permits.nae.form.keyTaken', N'ru', N'Узел с таким кодом NAE, регионом и районом уже существует.'),
     (N'permits.nae.form.keyTaken', N'kz', N'Мұндай NAE коды, өңірі және ауданы бар түйін әлдеқашан бар.'),
+    (N'permits.nae.form.keyTakenBy', N'ru', N'Этот код NAE, регион и район уже использует узел {holder}.'),
+    (N'permits.nae.form.keyTakenBy', N'kz', N'Бұл NAE коды, өңір және аудан {holder} түйінінде әлдеқашан қолданылады.'),
     (N'permits.nae.form.areaHint', N'ru', N'Оставьте пустым, если района нет: сохранится как «-».'),
     (N'permits.nae.form.areaHint', N'kz', N'Аудан жоқ болса, бос қалдырыңыз: «-» болып сақталады.'),
     (N'permits.nae.import.open', N'ru', N'Загрузить из PI AF'),
