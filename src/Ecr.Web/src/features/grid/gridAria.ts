@@ -101,18 +101,28 @@ export class GridAriaPlugin extends BasePlugin {
       let position = 0;
       for (const row of header.querySelectorAll('.header-rgRow')) {
         position += 1;
+        // Групові `.header-rgRow.group` у RevoGrid ПОРОЖНІ (лише висота): клітинки всіх рівнів лежать у `.group-rgRow`.
+        // Порожній `row` — порушення axe `aria-required-children`, тож розпірки ховаємо від дерева доступності.
+        if (row.classList.contains('group')) {
+          if (row.getAttribute('aria-hidden') !== 'true') row.setAttribute('aria-hidden', 'true');
+          continue;
+        }
         if (row.getAttribute('role') !== 'row') row.setAttribute('role', 'row');
         if (row.getAttribute('aria-rowindex') !== String(position)) row.setAttribute('aria-rowindex', String(position));
-        // Клітинки ГРУПОВИХ рядків бібліотека малює без ролі (у колонок вона є), а `aria-colspan` на `div` без ролі
-        // недозволений (axe `aria-required-children`): група — `columnheader`; порожні клітинки над колонкою
-        // без групи (їх перекриває сама колонка) із дерева доступності ховаємо.
-        if (row.classList.contains('group')) {
-          for (const cell of row.querySelectorAll('.rgHeaderCell')) {
-            if (cell.getAttribute('role') !== 'columnheader') cell.setAttribute('role', 'columnheader');
-            const empty = (cell.textContent ?? '').trim().length === 0;
-            if (empty && cell.getAttribute('aria-hidden') !== 'true') cell.setAttribute('aria-hidden', 'true');
-            if (!empty && cell.hasAttribute('aria-hidden')) cell.removeAttribute('aria-hidden');
-          }
+      }
+
+      // Клітинки груп бібліотека малює без ролі (у колонок вона є), а `aria-colspan` на `div` без ролі недозволений.
+      // Блок `.group-rgRow` — один `row` (aria-rowindex 1), група — `columnheader` зі своїм `aria-rowindex` (рівень).
+      // Порожні клітинки над колонкою без групи (їх перекриває сама колонка) ховаємо від дерева доступності.
+      const block = header.querySelector('.group-rgRow');
+      if (block !== null) {
+        if (block.getAttribute('role') !== 'row') block.setAttribute('role', 'row');
+        if (block.getAttribute('aria-rowindex') !== '1') block.setAttribute('aria-rowindex', '1');
+        for (const cell of block.querySelectorAll('.rgHeaderCell')) {
+          if (cell.getAttribute('role') !== 'columnheader') cell.setAttribute('role', 'columnheader');
+          const empty = (cell.textContent ?? '').trim().length === 0;
+          if (empty && cell.getAttribute('aria-hidden') !== 'true') cell.setAttribute('aria-hidden', 'true');
+          if (!empty && cell.hasAttribute('aria-hidden')) cell.removeAttribute('aria-hidden');
         }
       }
     }
