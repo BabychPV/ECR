@@ -1,6 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { cellAppearanceOf, withExplicitTextColour } from '../cellAppearance';
+import { contrast } from '@/shared/theme/contrast';
 import { sameExceptCellStyles, useStyleFreeSlice } from '../useStyleFreeSlice';
 
 /**
@@ -63,5 +64,17 @@ describe('useStyleFreeSlice', () => {
     const { result } = renderHook(() => useStyleFreeSlice<typeof slice>(undefined));
 
     expect(result.current).toBeUndefined();
+  });
+});
+
+describe('автоконтраст без явного кольору тексту', () => {
+  it('заливка без кольору тексту: текст = bestTextOn(заливка), контраст ≥ 4.5:1', () => {
+    const appearance = cellAppearanceOf(orange) as Record<string, string>;
+    const fg = appearance['--ecr-cell-fill-fg'] as string;
+
+    expect(fg).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(contrast(fg, '#ffc000')).toBeGreaterThanOrEqual(4.5);
+    // Явного вибору немає — withExplicitTextColour нічого не змінює.
+    expect(withExplicitTextColour(appearance, null, null)).toBe(appearance);
   });
 });

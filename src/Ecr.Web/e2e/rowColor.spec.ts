@@ -73,6 +73,20 @@ test.describe('rowColor: колір тексту й заливка рядка', 
           await picker.selectOption('row');
           await choose(page, 'fill', Orange);
           await expect(cell(page, filledRow, 2), `${label}: заливка рядка`).toHaveAttribute('data-user-fill', 'true', { timeout: 15_000 });
+          // Без явного кольору тексту лишається автоконтраст (bestTextOn): текст на заливці читається (≥ 4.5:1).
+          const autoRatio = await cell(page, filledRow, 2).evaluate((el) => {
+            const lum = (rgbText: string): number => {
+              const [r = 0, g = 0, b = 0] = (rgbText.match(/\d+/g) ?? []).map(Number).map((v) => {
+                const s = v / 255;
+                return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+              });
+              return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            };
+            const text = lum(getComputedStyle(el).color);
+            const fill = lum(getComputedStyle(el).backgroundColor);
+            return (Math.max(text, fill) + 0.05) / (Math.min(text, fill) + 0.05);
+          });
+          expect(autoRatio, `${label}: автоконтраст тексту на заливці без явного кольору`).toBeGreaterThanOrEqual(4.5);
           await choose(page, 'text', colour);
           await expect(cell(page, filledRow, 2), `${label}: дані користувацького тексту`).toHaveAttribute('data-user-text', 'true', { timeout: 15_000 });
           if (i === 0) await page.screenshot({ path: test.info().outputPath(`rowcolor-${scheme}.png`) });
@@ -116,6 +130,22 @@ test.describe('rowColor: колір тексту й заливка рядка', 
     try {
       doc ??= await createRowColorDocument(page, Number(process.env['ROWCOLOR_ROWS'] ?? Rows));
       await openDocument(page);
+      // Інтервал кадру в самому середовищі без навантаження: «до наступного кадру» складається з кількох таких інтервалів.
+      const idleFrameMs = await page.evaluate(
+        () =>
+          new Promise<number>((resolve) => {
+            const stamps: number[] = [];
+            const tick = (now: number): void => {
+              stamps.push(now);
+              if (stamps.length < 31) requestAnimationFrame(tick);
+              else {
+                const gaps = stamps.slice(1).map((value, index) => value - (stamps[index] ?? 0)).sort((a, b) => a - b);
+                resolve(Math.round(gaps[Math.floor(gaps.length / 2)] ?? 0));
+              }
+            };
+            requestAnimationFrame(tick);
+          }),
+      );
       const cdp = await page.context().newCDPSession(page);
       await cdp.send('Performance.enable');
       await page.evaluate(() => {
@@ -225,7 +255,16 @@ test.describe('rowColor: колір тексту й заливка рядка', 
         scrolls.push({ maxFrame: Math.round(Math.max(...frames)), over50: frames.filter((f) => f > 50).length, frames: frames.length });
       }
 
-      const report = { fills, scrolls };
+      const median = (values: number[]): number => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
+      const report = {
+        idleFrameMs,
+        fillMedianMs: median(fills.map((f) => f.ms)),
+        fillMaxMs: Math.max(...fills.map((f) => f.ms)),
+        scrollMaxFrameMs: Math.max(...scrolls.map((s) => s.maxFrame)),
+        scrollOver50: scrolls.reduce((sum, s) => sum + s.over50, 0),
+        fills,
+        scrolls,
+      };
       await testInfo.attach('rowcolor-perf.json', { body: JSON.stringify(report, null, 2), contentType: 'application/json' });
       console.log(`ROWCOLOR-PERF ${JSON.stringify(report)}`);
 

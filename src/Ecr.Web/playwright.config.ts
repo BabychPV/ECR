@@ -1,4 +1,4 @@
-﻿import { defineConfig, devices } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 
 /**
  * Прогони в справжньому браузері (`D-140`, `D-141`, `D-142`).
@@ -124,7 +124,9 @@ export default defineConfig({
    * змінює кольорів і меж, а саме їх ми й міряємо.
    */
   webServer: {
-    command: `npm run dev -- --port ${webPort} --strictPort`,
+    // Opt-in: E2E_WEB_PROD=1 — production-збірка (
+pm run build ДО прогону) через vite preview; для замірів швидкодії.
+    command: process.env['E2E_WEB_PROD'] === '1' ? `npx vite preview --port ${webPort} --strictPort` : `npm run dev -- --port ${webPort} --strictPort`,
     url: webUrl,
     reuseExistingServer: !standWebPort,
     timeout: 120_000,
