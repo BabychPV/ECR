@@ -2360,8 +2360,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       setNavigated({ key: cellKey(navigateTo.rowKey, column.code), seq: request.seq });
     }
 
-    void revealGridCell(node, coordinate).finally(() => completeCellNavigation(request.seq));
-  }, [navigateTo, data]);
+    void revealGridCell(node, coordinate)
+      .then((revealed) => {
+        // ⛔ Програмний `setCellsFocus` НЕ шле DOM-подію `focuscell` (її шле лише курсор людини), тож без цього
+        // рядок формули й інспектор (History «This cell», Info) не бачили б комірки, до якої перейшли від
+        // зауваження чи з журналу аркуша, хоч підсвітка й фокус стоять на ній.
+        if (revealed) publishFocus(tableInstanceId, periodKey, { rowIndex: coordinate.y, columnIndex: coordinate.x });
+      })
+      .finally(() => completeCellNavigation(request.seq));
+  }, [navigateTo, data, tableInstanceId, periodKey]);
 
   // ⚠ Таймер окремо від переходу: запит завершується одразу після фокуса, і
   // прибирання ефекту переходу гасило б підсвітку ще до того, як її побачать.
