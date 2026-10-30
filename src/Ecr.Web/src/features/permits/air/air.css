@@ -1,0 +1,232 @@
+/*
+ * Картка «Air limits» і майстер імпорту (NAE-план N3/N5). Макет: Design-канва «NAE structure / Permit / Wizard».
+ * Кольори — токени `--mantine-*` (світла й темна теми беруться самі); сітки — власний CSS grid, не Mantine `Grid`.
+ */
+.pa-card,
+.pi-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-md);
+  min-width: 0;
+}
+
+.pa-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mantine-spacing-md);
+}
+
+.pa-import {
+  margin-inline-start: auto;
+}
+
+.pa-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+}
+
+.pa-filter {
+  flex: 1 1 220px;
+  max-width: 360px;
+}
+
+.pa-scroll {
+  overflow: auto;
+  max-height: 70vh;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+}
+
+.pa-table,
+.pa-sub,
+.pi-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--mantine-font-size-sm);
+}
+
+.pa-table th,
+.pa-table td,
+.pa-sub th,
+.pa-sub td,
+.pi-table th,
+.pi-table td {
+  padding: 6px 8px;
+  text-align: start;
+  vertical-align: top;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.pa-table thead th,
+.pi-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--mantine-color-default-hover);
+  font-weight: 600;
+}
+
+.pa-table tr[data-open='true'] > * {
+  background: var(--mantine-color-default-hover);
+}
+
+.pa-num {
+  text-align: end !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.pa-code {
+  font-family: var(--mantine-font-family-monospace);
+  font-weight: 600;
+}
+
+.pa-toggle {
+  width: 36px;
+  padding-inline: 2px !important;
+}
+
+.pa-expander {
+  min-width: 28px;
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.pa-expander:focus-visible {
+  outline: 2px solid var(--mantine-color-blue-filled);
+  outline-offset: 1px;
+}
+
+.pa-subrow > td {
+  padding-block: 4px 10px;
+}
+
+.pa-sub {
+  max-width: 760px;
+}
+
+.pa-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Майстер імпорту */
+.pi-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mantine-spacing-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pi-steps li {
+  flex: 1 1 120px;
+  padding: 6px 10px;
+  text-align: center;
+  font-weight: 600;
+  font-size: var(--mantine-font-size-sm);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  color: var(--mantine-color-dimmed);
+}
+
+.pi-steps li[aria-current='step'] {
+  background: var(--mantine-color-blue-filled);
+  border-color: var(--mantine-color-blue-filled);
+  color: var(--mantine-color-white);
+}
+
+.pi-steps li[data-done='true'] {
+  color: var(--mantine-color-text);
+}
+
+.pi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--mantine-spacing-sm);
+  align-items: start;
+}
+
+.pi-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
+  gap: var(--mantine-spacing-md);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .pi-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.pi-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+  padding: var(--mantine-spacing-md);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+}
+
+.pi-panel[data-emphasis='true'] {
+  border: 2px solid var(--mantine-color-blue-filled);
+}
+
+.pi-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-sm);
+}
+
+.pi-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--mantine-spacing-sm);
+}
+
+.pi-stat {
+  padding: var(--mantine-spacing-sm);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+}
+
+.pi-stat b {
+  display: block;
+  font-size: var(--mantine-font-size-xl);
+}
+
+.pi-pattern {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-xs);
+}
+
+.pi-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mantine-spacing-sm);
+  justify-content: flex-end;
+}
+
+.pi-sev {
+  font-weight: 600;
+}
+
+.pi-sev[data-severity='Error'] {
+  color: var(--mantine-color-red-text);
+}
+
+.pi-sev[data-severity='Warning'] {
+  color: var(--mantine-color-orange-text);
+}
