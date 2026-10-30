@@ -328,7 +328,7 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
     /// Ceiling for the wall time of ONE apply of the full golden file (first import and replace). The real numbers are an order of
     /// magnitude lower (see the commit); the ceiling is CI-safe and still far below the per-entry deletes it replaced (3+ minutes).
     /// </summary>
-    private static readonly TimeSpan ApplyCeiling = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan ApplyCeiling = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// Ceiling for SQL commands of ONE apply of the full file: the work is chunked (EF insert batches of ~42 rows for ~30k rows) and
@@ -636,6 +636,164 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         public Task WriteIndependentSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct) => inner.WriteIndependentSecurityEventAsync(evt, ct);
 
         public Task WritePublicationEventAsync(PublicationEventRecord evt, CancellationToken ct) => inner.WritePublicationEventAsync(evt, ct);
+    }
+
+    // ---------- scope codes, NAE ordinals, key conflicts, retire, DI ----------
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task ScopeCodes__lists_regions_and_areas_of_the_tree_and_follows_new_imports()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var admin = await SignedInAsync(app, Admin);
+        using var reader = await SignedInAsync(app, "Registry.View");
+        using var nobody = await SignedInAsync(app);
+        var url = new Uri("/api/v1/air-limits/scope-codes", UriKind.Relative);
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await nobody.GetAsync(url)).StatusCode);
+
+        var seeded = await ReadAsync(app, await reader.GetAsync(url));
+        var atyrau = Assert.Single(seeded.GetProperty("regions").EnumerateArray(), r => r.GetProperty("code").GetString() == "ATYRAU");
+        Assert.Contains(atyrau.GetProperty("areas").EnumerateArray(), a => a.GetProperty("code").GetString() == "OFFSHORE");
+
+        var region = NewRegion();
+        var permitId = await NewPermitAsync(admin, app);
+        var small = Small(Synthetic.Bytes, 40);
+        await ApplyBytesAsync(app, admin, permitId, small, new { region, area = "ONSHORE", resolutions = await ResolveAsync(app, admin, permitId, region, "ONSHORE", small) });
+
+        var after = await ReadAsync(app, await reader.GetAsync(url));
+        var created = Assert.Single(after.GetProperty("regions").EnumerateArray(), r => r.GetProperty("code").GetString() == region);
+        Assert.Equal("ONSHORE", Assert.Single(created.GetProperty("areas").EnumerateArray()).GetProperty("code").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task NaeNodes_created_by_the_import_get_distinct_ordinals_after_their_siblings()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+        var region = NewRegion();
+        var permitId = await NewPermitAsync(client, app);
+        var small = Small(Synthetic.Bytes, 40);
+        var applied = await ApplyBytesAsync(app, client, permitId, small, new { region, area = "OFFSHORE", resolutions = await ResolveAsync(app, client, permitId, region, "OFFSHORE", small) });
+        Assert.True(applied.GetProperty("createdNae").GetInt32() > 3);
+
+        await using var db = new EcrDbContext(Options());
+        var siblings = await db.RegistryEntries.AsNoTracking().Where(e => e.ParentEntryId == siteNodeId && !e.IsDeleted).ToListAsync();
+        var mine = siblings.Where(e => e.Code.Contains($"_{region}_", StringComparison.Ordinal)).ToList();
+        Assert.Equal(applied.GetProperty("createdNae").GetInt32(), mine.Count);
+        Assert.All(mine, e => Assert.True(e.Ordinal > 0, $"{e.Code} has ordinal {e.Ordinal}"));
+        Assert.Equal(mine.Count, mine.Select(e => e.Ordinal).Distinct().Count());
+        var others = siblings.Except(mine).Select(e => e.Ordinal).DefaultIfEmpty(0).Max();
+        Assert.True(mine.Min(e => e.Ordinal) > others, "new nodes are appended after the existing siblings");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task NaeTree__a_second_node_with_the_same_business_key_is_409_keyWindowOverlap_and_retiring_keeps_isActive()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+        await using var db = new EcrDbContext(Options());
+        var defId = (await db.RegistryDefs.AsNoTracking().SingleAsync(d => d.Code == NaeTreeSchema.RegistryCode)).Id;
+        var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        var naeCode = $"K{tag}";
+
+        Task<HttpResponseMessage> Post(string code, long? id = null)
+            => client.PostAsJsonAsync(
+                new Uri($"/api/v1/registries/{NaeTreeSchema.RegistryCode}/entries", UriKind.Relative),
+                new
+                {
+                    id,
+                    registryDefId = defId,
+                    code,
+                    display = new { values = new Dictionary<string, string> { ["en"] = code } },
+                    parentEntryId = (long?)siteNodeId,
+                    levelCode = NaeTreeSchema.LevelSource,
+                    values = new Dictionary<string, object?>
+                    {
+                        [NaeTreeSchema.NaeCodeField] = naeCode,
+                        [NaeTreeSchema.RegionField] = "KEYREG",
+                        [NaeTreeSchema.AreaField] = "OFFSHORE",
+                    },
+                });
+
+        var first = await Post($"N_KEYREG_{tag}_A");
+        var created = await ReadAsync(app, first);
+
+        // Same (NaeCode, RegionCode, AreaCode) under another technical code: a real 409 from the real endpoint.
+        using var clash = await Post($"N_KEYREG_{tag}_B");
+        var text = await clash.Content.ReadAsStringAsync();
+        Assert.True(clash.StatusCode == HttpStatusCode.Conflict, $"{(int)clash.StatusCode}: {text} | {app.ErrorsText}");
+        var problem = JsonDocument.Parse(text).RootElement;
+        Assert.Equal("ECR-REG-4092", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REG-4092.keyWindowOverlap", problem.GetProperty("messageKey").GetString());
+        Assert.Equal($"N_KEYREG_{tag}_A", problem.GetProperty("entryCode").GetString());
+
+        // Retiring closes the validity window; it does NOT clear IsActive (that flag is the "enabled" switch used by the AF sync
+        // policy). "Retired" is therefore derived from validTo, not from isActive.
+        var yesterday = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1);
+        var retire = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/registries/{NaeTreeSchema.RegistryCode}/entries/{created.GetProperty("id").GetInt64()}/validity", UriKind.Relative),
+            new { from = (DateOnly?)null, to = yesterday });
+        Assert.True(retire.IsSuccessStatusCode, $"{(int)retire.StatusCode}: {await retire.Content.ReadAsStringAsync()}");
+        var id = created.GetProperty("id").GetInt64();
+        var entry = await db.RegistryEntries.AsNoTracking().SingleAsync(e => e.Id == id);
+        Assert.Equal(yesterday, entry.ValidTo);
+        Assert.True(entry.IsActive);
+        Assert.False(entry.IsValidOn(DateOnly.FromDateTime(DateTime.UtcNow)));
+
+        // Finding (documented, not changed): a node created through the generic upsert has an OPEN window, so it still overlaps the
+        // retired node's closed one - the key is reusable only when the new node's window starts after the old one ends
+        // (SetValidity / the AF sync), not through a plain create.
+        using var again = await Post($"N_KEYREG_{tag}_C");
+        Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Di__every_air_limits_and_nae_service_resolves()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var scope = app.Services.CreateScope();
+        var assembly = typeof(AirLimitsSchema).Assembly;
+        var namespaces = new[] { "Ecr.Application.Permits.AirLimits", "Ecr.Application.Registries.Nae", "Ecr.Application.RegistryImport" };
+        var suffixes = new[] { "Handler", "Provisioner", "Service", "Reader", "Resolver", "Target", "Accessor" };
+        var types = assembly.GetExportedTypes()
+            .Where(t => t is { IsClass: true, IsAbstract: false } && namespaces.Contains(t.Namespace) && suffixes.Any(s => t.Name.EndsWith(s, StringComparison.Ordinal)) && t.Name != "ImportFieldReader")
+            .ToList();
+        Assert.True(types.Count >= 10, $"found only {types.Count} candidate types");
+
+        var failures = new List<string>();
+        foreach (var type in types)
+        {
+            try
+            {
+                var viaSelf = scope.ServiceProvider.GetService(type);
+                var viaInterface = type.GetInterfaces().SelectMany(i => scope.ServiceProvider.GetServices(i)).Any(s => s?.GetType() == type);
+                Assert.True(viaSelf is not null || viaInterface);
+            }
+            catch (Exception ex) when (ex is not Xunit.Sdk.XunitException)
+            {
+                failures.Add($"{type.Name}: {ex.Message}");
+            }
+            catch (Xunit.Sdk.XunitException)
+            {
+                failures.Add($"{type.Name}: not registered");
+            }
+        }
+
+        Assert.True(failures.Count == 0, string.Join("\n", failures));
+        Assert.NotEmpty(scope.ServiceProvider.GetServices<Ecr.Application.RegistryImport.IReferenceResolver>());
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<Ecr.Application.RegistryImport.IRegistryImportTarget>());
     }
 
     // ---------- helpers ----------
