@@ -52,6 +52,7 @@ import {
 } from './api';
 import { ColumnDefPicker, savedColumnLabel } from './ColumnDefPicker';
 import { MethodologyConstantUsage } from './ConstantUsage';
+import { MethodologySection } from './MethodologySection';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /** A1-02: поле дати — за `import()` (`D-132`), той самий прийом, що `DocumentHeaderPanel`. */
@@ -248,15 +249,17 @@ export function MethodologyConstantsPanel({
   const saveLoading = usePendingLoading(save.isPending);
 
   return (
-    <>
-      <Group justify="space-between">
-        <Text fw={600}>{t('methodologies.constants')}</Text>
-        {editable && (
+    <MethodologySection
+      sectionId="constants"
+      title={t('methodologies.constants')}
+      actions={
+        editable && (
           <Button size="xs" variant="default" onClick={() => setEditing(emptyConstant)}>
             {t('methodologies.addConstant')}
           </Button>
-        )}
-      </Group>
+        )
+      }
+    >
 
       <AsyncBoundary<MethodologyConstantDto[]>
         isPending={constants.isPending}
@@ -485,7 +488,7 @@ export function MethodologyConstantsPanel({
           <MethodologyConstantUsage methodologyId={methodologyId} versionId={versionId} code={usageFor} />
         )}
       </ResizableModal>
-    </>
+    </MethodologySection>
   );
 }
 
@@ -560,10 +563,10 @@ export function MethodologyRulesPanel({
   const saveLoading = usePendingLoading(save.isPending);
 
   return (
-    <>
-      <Group justify="space-between">
-        <Text fw={600}>{t('methodologies.rules')}</Text>
-        {editable && (
+    <MethodologySection
+      sectionId="rules"
+      title={t('methodologies.rules')}
+      actions={editable && (
           <Button
             size="xs"
             variant="default"
@@ -574,7 +577,7 @@ export function MethodologyRulesPanel({
             {t('methodologies.addRule')}
           </Button>
         )}
-      </Group>
+    >
 
       <AsyncBoundary<MethodologyRuleDto[]>
         isPending={rules.isPending}
@@ -767,7 +770,7 @@ export function MethodologyRulesPanel({
           );
         })()}
       </ResizableModal>
-    </>
+    </MethodologySection>
   );
 }
 
@@ -825,10 +828,10 @@ export function MethodologyRequiredInputsPanel({
   const saveLoading = usePendingLoading(save.isPending);
 
   return (
-    <>
-      <Group justify="space-between">
-        <Text fw={600}>{t('methodologies.requiredInputs')}</Text>
-        {editable && (
+    <MethodologySection
+      sectionId="requiredInputs"
+      title={t('methodologies.requiredInputs')}
+      actions={editable && (
           <Button
             size="xs"
             variant="default"
@@ -839,7 +842,7 @@ export function MethodologyRequiredInputsPanel({
             {t('methodologies.addRequiredInput')}
           </Button>
         )}
-      </Group>
+    >
 
       <AsyncBoundary<MethodologyRequiredInputDto[]>
         isPending={requiredInputs.isPending}
@@ -985,7 +988,7 @@ export function MethodologyRequiredInputsPanel({
           </Stack>
         )}
       </ResizableModal>
-    </>
+    </MethodologySection>
   );
 }
 
@@ -1040,10 +1043,10 @@ export function MethodologyOutputsPanel({
   const saveLoading = usePendingLoading(save.isPending);
 
   return (
-    <>
-      <Group justify="space-between">
-        <Text fw={600}>{t('methodologies.outputs')}</Text>
-        {editable && (
+    <MethodologySection
+      sectionId="outputs"
+      title={t('methodologies.outputs')}
+      actions={editable && (
           <Button
             size="xs"
             variant="default"
@@ -1052,7 +1055,7 @@ export function MethodologyOutputsPanel({
             {t('methodologies.addOutput')}
           </Button>
         )}
-      </Group>
+    >
 
       <AsyncBoundary<MethodologyOutputDto[]>
         isPending={outputs.isPending}
@@ -1180,7 +1183,7 @@ export function MethodologyOutputsPanel({
           </Stack>
         )}
       </ResizableModal>
-    </>
+    </MethodologySection>
   );
 }
 
@@ -1234,10 +1237,10 @@ export function MethodologyTestsPanel({
   const saveLoading = usePendingLoading(save.isPending);
 
   return (
-    <>
-      <Group justify="space-between">
-        <Text fw={600}>{t('methodologies.tests')}</Text>
-        {editable && (
+    <MethodologySection
+      sectionId="tests"
+      title={t('methodologies.tests')}
+      actions={editable && (
           <Button
             size="xs"
             variant="default"
@@ -1254,7 +1257,7 @@ export function MethodologyTestsPanel({
             {t('methodologies.addTest')}
           </Button>
         )}
-      </Group>
+    >
 
       <AsyncBoundary<MethodologyTestCaseDto[]>
         isPending={tests.isPending}
@@ -1375,7 +1378,7 @@ export function MethodologyTestsPanel({
           </Stack>
         )}
       </ResizableModal>
-    </>
+    </MethodologySection>
   );
 }
 
@@ -1434,10 +1437,10 @@ export function MethodologyBindingsPanel({
   const saveLoading = usePendingLoading(save.isPending);
 
   return (
-    <>
-      <Group justify="space-between">
-        <Text fw={600}>{t('methodologies.bindings')}</Text>
-        {editable && (
+    <MethodologySection
+      sectionId="bindings"
+      title={t('methodologies.bindings')}
+      actions={editable && (
           <Button
             size="xs"
             variant="default"
@@ -1454,7 +1457,7 @@ export function MethodologyBindingsPanel({
             {t('methodologies.addBinding')}
           </Button>
         )}
-      </Group>
+    >
 
       <AsyncBoundary<CalculationBindingDto[]>
         isPending={bindings.isPending}
@@ -1580,7 +1583,7 @@ export function MethodologyBindingsPanel({
           </Stack>
         )}
       </ResizableModal>
-    </>
+    </MethodologySection>
   );
 }
 
@@ -1655,8 +1658,7 @@ export function MethodologyModesForm({
   const saveLoading = usePendingLoading(save.isPending);
 
   return (
-    <Stack gap="sm">
-      <Text fw={600}>{t('methodologies.modes')}</Text>
+    <MethodologySection sectionId="modes" title={t('methodologies.modes')}>
       <Text size="sm" c="dimmed">
         {t('methodologies.modesHint')}
       </Text>
@@ -1717,6 +1719,6 @@ export function MethodologyModesForm({
           </Button>
         )}
       </Group>
-    </Stack>
+    </MethodologySection>
   );
 }
