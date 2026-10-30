@@ -9646,6 +9646,10 @@ USING (VALUES
     ,(N'import.restoresFormulaHint', N'en', N'The cell is empty in the file: the manual value will be removed and the formula will calculate the cell again.', 1)
     ,(N'documents.migrateKindOverrideLost', N'en', N'Manual value replaced by formula', 1)
     ,(N'documents.migrateLostFormulaOverrides', N'en', N'Manual values instead of formulas that will not carry over (the target version does not allow them there; the formula will calculate these cells again): {count}.', 1)
+    ,(N'grid.formulaOverride.filterManual', N'en', N'Only rows with manual values', 1)
+    ,(N'grid.formulaOverride.manualCount', N'en', N'Manual: {count}', 1)
+    ,(N'grid.formulaOverride.previousManual', N'en', N'Previous manual value', 1)
+    ,(N'grid.formulaOverride.nextManual', N'en', N'Next manual value', 1)
     -- D461:formula-override-ui ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -24959,7 +24963,15 @@ SELECT v.[Key], v.Lang, v.Val
     (N'documents.migrateKindOverrideLost', N'ru', N'Ручное значение заменит формула'),
     (N'documents.migrateKindOverrideLost', N'kz', N'Қолмен енгізілген мәнді формула ауыстырады'),
     (N'documents.migrateLostFormulaOverrides', N'ru', N'Ручные значения вместо формул, которые не перенесутся (целевая версия их там не допускает; эти ячейки снова рассчитает формула): {count}.'),
-    (N'documents.migrateLostFormulaOverrides', N'kz', N'Көшірілмейтін формулалардың орнындағы қолмен енгізілген мәндер (мақсатты нұсқа оларға рұқсат бермейді; бұл ұяшықтарды қайтадан формула есептейді): {count}.')
+    (N'documents.migrateLostFormulaOverrides', N'kz', N'Көшірілмейтін формулалардың орнындағы қолмен енгізілген мәндер (мақсатты нұсқа оларға рұқсат бермейді; бұл ұяшықтарды қайтадан формула есептейді): {count}.'),
+    (N'grid.formulaOverride.filterManual', N'ru', N'Только строки с ручными значениями'),
+    (N'grid.formulaOverride.filterManual', N'kz', N'Тек қолмен енгізілген мәндері бар жолдар'),
+    (N'grid.formulaOverride.manualCount', N'ru', N'Ручных: {count}'),
+    (N'grid.formulaOverride.manualCount', N'kz', N'Қолмен: {count}'),
+    (N'grid.formulaOverride.previousManual', N'ru', N'Предыдущее ручное значение'),
+    (N'grid.formulaOverride.previousManual', N'kz', N'Алдыңғы қолмен енгізілген мән'),
+    (N'grid.formulaOverride.nextManual', N'ru', N'Следующее ручное значение'),
+    (N'grid.formulaOverride.nextManual', N'kz', N'Келесі қолмен енгізілген мән')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

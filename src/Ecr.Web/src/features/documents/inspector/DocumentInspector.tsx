@@ -12,7 +12,8 @@ import {
 } from 'react';
 import { ActionIcon, Badge, Box, Button, Group, SegmentedControl, Tabs, Text } from '@mantine/core';
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
-import { isHumanOrigin, useCellChanges } from '@/features/audit/api';
+import { useCellChanges } from '@/features/audit/api';
+import { cellAuthorHint, cellAuthorName } from '@/features/audit/authorOptions';
 import { cellChangeReasonText } from '@/features/audit/cellChangeReason';
 import { useTableStatus } from '@/features/documents/api';
 import { formatDateOnly } from '@/shared/format/dateOnly';
@@ -600,10 +601,13 @@ function CellHistory({
         <div key={`${change.changedAt}:${String(change.changedByUserId)}:${change.newValue ?? ''}`} role="listitem" className="ecr-insp-hist">
           <Group justify="space-between" gap="xs" wrap="nowrap">
             {/* AN-115: правка й імпорт — ім'я людини; перерахунок/інтеграція/міграція — «Система». */}
-            <Text size="sm" fw={500} data-inspector-author="">
-              {isHumanOrigin(change.origin)
-                ? (change.changedByDisplayName ?? t('inspector.unknownAuthor', { id: change.changedByUserId }))
-                : t('audit.systemAuthor')}
+            {/* ✎ D-461: та сама підказка, що й у журналі: для системної зміни — хто її запустив. */}
+            <Text size="sm" fw={500} data-inspector-author="" title={cellAuthorHint(change)}>
+              {cellAuthorName({
+                ...change,
+                changedByDisplayName:
+                  change.changedByDisplayName ?? t('inspector.unknownAuthor', { id: change.changedByUserId }),
+              })}
             </Text>
             <Text size="xs" c="dimmed">
               <Timestamp value={change.changedAt} />

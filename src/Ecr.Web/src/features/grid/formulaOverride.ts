@@ -198,3 +198,113 @@ export function restorableCellsIn(
 
   return cells;
 }
+
+/** Що потрібно `annotateOverrideHistory` поза зрізом (сховище правок і причин). */
+export interface OverrideHistoryLookups {
+  /** Незбережена правка комірки (те, що людина зараз бачить), або `undefined`. */
+  readonly held: (cell: { rowKey: string; columnCode: string }) => { value: unknown; isEmpty: boolean } | undefined;
+  /** Чинна причина комірки (`overrideReasons.ts`). */
+  readonly reason: (cell: { rowKey: string; columnCode: string }) => string | undefined;
+  /** Причина до останньої позначки (`previousOverrideReasonOf`). */
+  readonly previousReason: (cell: { rowKey: string; columnCode: string }) => string | undefined;
+}
+
+/**
+ * ✎ D-461: позначає кроки історії станом «ручне значення / формула» до і після (`CellEdit.manualBefore/After`) —
+ * лише для комірок формул, які людина може замінювати. Викликається в мить запису кроку: причина нового ручного
+ * значення ВЖЕ позначена (діалог ставить її до захоплення правки), тож для комірки з новим значенням «до» — це
+ * причина ДО цієї позначки.
+ *
+ * @param revert крок «повернення до збереженого» (правку знято): стан «після» — той, що в зрізі.
+ */
+export function annotateOverrideHistory<T extends { rowKey: string; columnCode: string; after: unknown }>(
+  slice: Pick<TableSliceDto, 'formulaOverride'>,
+  edits: readonly T[],
+  lookups: OverrideHistoryLookups,
+  revert = false,
+): (T & { manualBefore?: { readonly reason: string } | null; manualAfter?: { readonly reason: string } | null })[] {
+  if (slice.formulaOverride?.canOverride !== true) return [...edits];
+
+  return edits.map((edit) => {
+    if (!overridesFormula(slice, edit.rowKey, edit.columnCode)) return edit;
+
+    const saved = manualCellOf(slice, edit.rowKey, edit.columnCode);
+    const savedState = saved === null ? null : { reason: saved.reason };
+    const markedNow = !revert && !isEmptyValue(edit.after) && allowsManual(slice, edit.rowKey, edit.columnCode);
+
+    const held = lookups.held(edit);
+    const manualBefore =
+      held === undefined
+        ? savedState
+        : held.isEmpty || isEmptyValue(held.value)
+          ? null
+          : { reason: (markedNow ? lookups.previousReason(edit) : lookups.reason(edit)) ?? saved?.reason ?? '' };
+
+    const manualAfter = revert
+      ? savedState
+      : isEmptyValue(edit.after)
+        ? null
+        : { reason: lookups.reason(edit) ?? saved?.reason ?? '' };
+
+    return { ...edit, manualBefore, manualAfter };
+  });
+}
+
+/**
+ * ✎ D-461: що записати, застосовуючи крок історії (Undo/Redo): стан «після» `null` — повернути формулу (значення
+ * `null`, без причини); `{ reason }` — ручне значення з цією причиною; без стану — звичайне значення кроку.
+ */
+export function historyWriteOf(edit: {
+  after: unknown;
+  manualAfter?: { readonly reason: string } | null;
+}): { value: unknown; reason: string | null } {
+  if (edit.manualAfter === null) return { value: null, reason: null };
+  if (edit.manualAfter === undefined) return { value: edit.after, reason: null };
+
+  return { value: edit.after, reason: edit.manualAfter.reason };
+}
+
+/** ✎ D-461: ручні комірки зрізу в порядку сітки (рядки × колонки) і рядки, що їх містять. */
+export interface ManualIndex {
+  readonly rowKeys: ReadonlySet<string>;
+  readonly cells: readonly { readonly rowKey: string; readonly columnCode: string }[];
+}
+
+const EmptyManualIndex: ManualIndex = { rowKeys: new Set(), cells: [] };
+
+/**
+ * Індекс ручних комірок для фільтра «Лише рядки з ручними значеннями» і переходу «попередня/наступна».
+ *
+ * ⚠ Рахується з `formulaOverride.manualCells` (сервер віддає лише видимі колонки) один раз на зріз — викликач
+ * мемоїзує за `formulaOverride`/`rows`/`columns`; рядки зрізу не скануються, крім однієї мапи порядку.
+ */
+export function manualIndexOf(
+  slice: Pick<TableSliceDto, 'formulaOverride' | 'rows' | 'columns'> | undefined,
+): ManualIndex {
+  const manual = slice?.formulaOverride?.manualCells;
+  if (slice === undefined || manual === undefined) return EmptyManualIndex;
+
+  const keys = Object.keys(manual);
+  if (keys.length === 0) return EmptyManualIndex;
+
+  const rowOrder = new Map(slice.rows.map((row, index) => [row.rowKey, index]));
+  const columnOrder = new Map(slice.columns.map((column, index) => [column.code, index]));
+  const cells: { rowKey: string; columnCode: string; r: number; c: number }[] = [];
+
+  for (const key of keys) {
+    const separator = key.indexOf(':');
+    if (separator < 0) continue;
+    const rowKey = key.slice(0, separator);
+    const columnCode = key.slice(separator + 1);
+    const r = rowOrder.get(rowKey);
+    const c = columnOrder.get(columnCode);
+    if (r !== undefined && c !== undefined) cells.push({ rowKey, columnCode, r, c });
+  }
+
+  cells.sort((a, b) => a.r - b.r || a.c - b.c);
+
+  return {
+    rowKeys: new Set(cells.map((cell) => cell.rowKey)),
+    cells: cells.map(({ rowKey, columnCode }) => ({ rowKey, columnCode })),
+  };
+}
