@@ -22,6 +22,9 @@ public interface IFormulaOverrideStore
     /// <summary>Скільки комірок (і в скількох документах) зараз мають ручне значення замість цієї формули.</summary>
     public Task<FormulaOverrideCounts> CountAsync(FormulaOverrideTarget target, CancellationToken ct);
 
+    /// <summary>Чи є позначки ручних значень у документах версії шаблону (EXISTS; кешує викликач на ревізію знімка).</summary>
+    public Task<bool> AnyForVersionAsync(int templateVersionId, CancellationToken ct);
+
     /// <summary>Позначки екземпляра таблиці (лише наявних рядків) з іменем автора — для підказки в сітці.</summary>
     public Task<IReadOnlyList<FormulaOverrideMark>> ReadInstanceAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct);

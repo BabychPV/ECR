@@ -132,6 +132,9 @@ public sealed class FormulaOverrideRecalculationRaceTests(SqlServerFixture sql)
             return keys;
         }
 
+        public Task<bool> AnyForVersionAsync(int templateVersionId, CancellationToken ct)
+            => Inner.AnyForVersionAsync(templateVersionId, ct);
+
         public Task<IReadOnlySet<CellAddress>> LockKeysAsync(IReadOnlyCollection<CellAddress> addresses, CancellationToken ct)
             => Inner.LockKeysAsync(addresses, ct);
 

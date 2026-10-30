@@ -88,6 +88,19 @@ public sealed class FormulaOverrideStore(EcrDbContext db) : IFormulaOverrideStor
     }
 
     /// <inheritdoc />
+    /// <remarks>⚠ Колонка належить рівно одній версії, тож «позначка на колонці версії» = «позначка в документі версії».</remarks>
+    public async Task<bool> AnyForVersionAsync(int templateVersionId, CancellationToken ct)
+        => await (
+                from o in db.CellFormulaOverrides.AsNoTracking()
+                join c in db.ColumnDefs.AsNoTracking() on o.ColumnDefId equals c.Id
+                join t in db.TableDefs.AsNoTracking() on c.TableDefId equals t.Id
+                join s in db.SheetDefs.AsNoTracking() on t.SheetDefId equals s.Id
+                where s.TemplateVersionId == templateVersionId
+                select o.TableRowId)
+            .AnyAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<FormulaOverrideMark>> ReadInstanceAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
     {

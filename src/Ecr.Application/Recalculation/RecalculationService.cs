@@ -562,9 +562,15 @@ public sealed class RecalculationService(
         // ✎ D-461: комірки з ручним значенням замість формули — ОДИН запит на прогін (індекс за періодом × екземпляром),
         // далі O(1) на комірку в `Evaluate`. Прогін їх не перезаписує НІКОЛИ (і після вимкнення прапорця формули), а
         // залежні формули читають ручне значення (воно вже в `values` зі сховища).
-        IReadOnlySet<CellAddress>? overridden = formulaOverrides is null || targets.Count == 0
+        // ⚠ Продуктивність (храповик `FormulaJobFixedCostTests`): версія, де жодна формула не дозволяє ручне значення
+        // і позначок немає, не платить НІЧОГО — ні читання позначок, ні блокування перед записом. «Позначки є» —
+        // похідне від версії (один EXISTS на ревізію знімка, `GetDerivedAsync`): позначка з'являється лише за
+        // увімкненого прапорця, а перемикач піднімає ревізію, тож після вимкнення EXISTS перечитується.
+        var overridesActive = targets.Count > 0
+            && await OverridesActiveAsync(snapshot, formulas.Values.Select(f => f.Formula), ct).ConfigureAwait(false);
+        IReadOnlySet<CellAddress>? overridden = !overridesActive
             ? null
-            : await formulaOverrides
+            : await formulaOverrides!
                 .ReadKeysAsync([.. instances.Select(i => i.TableInstanceId)], periodKey, ct)
                 .ConfigureAwait(false);
 
@@ -991,7 +997,8 @@ public sealed class RecalculationService(
             if (batch.Count > 0)
             {
                 await WriteBatchAsync(
-                    instance.DocumentId, batch, rowKeyByRowIdByInstance, isLateEdit, now, token).ConfigureAwait(false);
+                    instance.DocumentId, batch, rowKeyByRowIdByInstance, isLateEdit, now, token, overridesActive)
+                    .ConfigureAwait(false);
             }
 
             await uow.SaveChangesAsync(token).ConfigureAwait(false);
@@ -1009,6 +1016,7 @@ public sealed class RecalculationService(
     /// <param name="rowKeyByRowIdByInstance">Ключ рядка за його ідентифікатором — для аудиту.</param>
     /// <param name="isLateEdit">Зміна в <c>Grace</c> (<c>D-70</c>).</param>
     /// <param name="now">Мить зміни для аудиту.</param>
+    /// <param name="lockOverrides">✎ D-461: блокувати й перечитати позначки ручних значень перед записом (лише коли вони можливі).</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⚠ Виконується ВСЕРЕДИНІ транзакції запису, під спільними блокуваннями
@@ -1028,7 +1036,8 @@ public sealed class RecalculationService(
         Dictionary<long, Dictionary<long, string>> rowKeyByRowIdByInstance,
         bool isLateEdit,
         DateTime now,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool lockOverrides = false)
     {
         // ⚠ Старі значення читаються ДО запису — після `ApplyBatchAsync` їх уже
         // немає ніде, а саме вони й становлять половину запису аудиту
@@ -1036,7 +1045,7 @@ public sealed class RecalculationService(
         // ✎ D-461: ручне значення, поставлене ПАРАЛЕЛЬНО з цим прогоном (після читання позначок на старті), не
         // перезаписується: позначки адрес запису блокуються до коміту й перечитуються — та, що вже є, знімає адресу з
         // пакета; правка, що ставить нову, чекає на цей коміт і пише ручне значення після. Одна команда на пакет.
-        if (formulaOverrides is not null)
+        if (lockOverrides && formulaOverrides is not null)
         {
             var locked = await formulaOverrides
                 .LockKeysAsync([.. batch.SelectMany(item => item.Records.Select(r => r.Address))], ct)
@@ -1338,6 +1347,40 @@ public sealed class RecalculationService(
 
             upserts[address] = new CellRecord(address, table.Id, data);
         }
+    }
+
+    /// <summary>Похідне від версії: «у документах версії є позначки ручних значень».</summary>
+    private sealed record OverrideMarksPresence(bool Any);
+
+    /// <summary>
+    /// ✎ D-461: чи доводиться прогону дивитися на ручні значення: формула версії дозволяє ручне значення (зі знімка,
+    /// без запиту) АБО в документах версії є позначки (EXISTS раз на ревізію знімка — кеш похідних версії).
+    /// </summary>
+    private async Task<bool> OverridesActiveAsync(
+        Domain.Entities.Configuration.TemplateVersionSnapshot snapshot,
+        IEnumerable<Domain.Entities.Configuration.FormulaDef> formulas,
+        CancellationToken ct)
+    {
+        if (formulaOverrides is null)
+        {
+            return false;
+        }
+
+        if (formulas.Any(f => f.AllowManualOverride))
+        {
+            return true;
+        }
+
+        var presence = await metadata
+            .GetDerivedAsync(
+                snapshot.TemplateVersionId,
+                "d461-override-marks",
+                async token => new OverrideMarksPresence(
+                    await formulaOverrides.AnyForVersionAsync(snapshot.TemplateVersionId, token).ConfigureAwait(false)),
+                ct)
+            .ConfigureAwait(false);
+
+        return presence.Any;
     }
 
     /// <summary>

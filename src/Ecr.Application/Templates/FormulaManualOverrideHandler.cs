@@ -60,6 +60,10 @@ public sealed class FormulaManualOverrideHandler(
             await versions.LockVersionForUpdateAsync(templateVersionId, innerCt).ConfigureAwait(false);
             await store.SetAllowManualOverrideAsync(formulaId, allow, innerCt).ConfigureAwait(false);
 
+            // ⛔ Ревізія знімка піднімається, як у презентаційного патча: ключ кешу знімка (і похідних — «позначки є»
+            // у перерахунку) несе ревізію, тож УСІ вузли, а не лише цей, бачать новий прапорець.
+            await versions.IncrementPresentationRevisionAsync(templateVersionId, innerCt).ConfigureAwait(false);
+
             await audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(
                     clock.UtcNow, templateVersionId, "FormulaDef", formulaId,
