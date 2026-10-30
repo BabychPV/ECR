@@ -318,6 +318,129 @@ public sealed partial class DocumentVersionMigrationTests
         }
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "RPT-STABLE")]
+    public async Task Стабільна_вʼюха_після_переносу_з_місяця_веде_ряд_версій_за_справжньою_шкалою()
+    {
+        var s = await ArrangeAsync(Target.AddsC4Only).ConfigureAwait(true);   // 202601 на v1
+        await AddMonthsAsync(s, 202602, 202603).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var response = await PostRangeAsync(client, s, dryRun: false, "FromMonth", 202602).ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {await response.Content.ReadAsStringAsync().ConfigureAwait(true)}");
+
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        // Вихідна версія в будівнику - чернетка; вʼюхи стабільні беруть лише Published/Deprecated (як у бойовій базі).
+        var source = await db.TemplateVersions.SingleAsync(v => v.Id == s.Doc.TemplateVersionId).ConfigureAwait(true);
+        if (source.Status == TemplateVersionStatus.Draft)
+        {
+            source.Publish(1, DateTime.UtcNow);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var generator = new Ecr.Infrastructure.Reporting.ReportViewGenerator(db);
+        await generator.GenerateAsync(s.Doc.TemplateVersionId, CancellationToken.None).ConfigureAwait(true);
+        await generator.GenerateAsync(s.TargetVersionId, CancellationToken.None).ConfigureAwait(true);
+
+        var templateCode = await db.Templates.AsNoTracking().Where(t => t.Id == s.Doc.TemplateId).Select(t => t.Code).SingleAsync().ConfigureAwait(true);
+        var stable = $"v_{templateCode}_{s.Doc.SheetCode}_{s.SourceTableCode}";
+        var versionText = await db.TemplateVersions.AsNoTracking().Where(v => v.Id == s.Doc.TemplateVersionId).Select(v => v.Version).SingleAsync().ConfigureAwait(true);
+        var targetText = await db.TemplateVersions.AsNoTracking().Where(v => v.Id == s.TargetVersionId).Select(v => v.Version).SingleAsync().ConfigureAwait(true);
+
+        var series = new List<string>();
+        await using (var connection = new Microsoft.Data.SqlClient.SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync().ConfigureAwait(true);
+            await using var command = connection.CreateCommand();
+#pragma warning disable CA2100 // ім'я вʼюхи складено з кодів шаблону, не з вводу користувача
+            command.CommandText = "SELECT CONCAT(_PeriodKey, N':', _TemplateVersion) FROM rpt.[" + stable
+                                  + "] WHERE _ProjectId = @p ORDER BY _PeriodKey, _RowKey";
+#pragma warning restore CA2100
+            command.Parameters.AddWithValue("@p", s.Doc.ProjectId);
+            await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(true);
+            while (await reader.ReadAsync().ConfigureAwait(true))
+            {
+                series.Add(reader.GetString(0));
+            }
+        }
+
+        // Один безперервний ряд: січень - v1 (старі Id), лютий і березень - v2; на кожен період по рядку (2 рядки таблиці).
+        Assert.Contains($"202601:{versionText}", series);
+        Assert.Contains($"202602:{targetText}", series);
+        Assert.Contains($"202603:{targetText}", series);
+        Assert.DoesNotContain($"202602:{versionText}", series);
+        Assert.DoesNotContain($"202601:{targetText}", series);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "RPT-STABLE")]
+    public async Task Новий_період_після_переносу_з_місяця_створюється_на_цільовій_версії_а_до_X_на_старій()
+    {
+        var s = await ArrangeAsync(Target.AddsC4Only, extraPermission: "Document.View").ConfigureAwait(true);
+        await AddMonthsAsync(s, 202602).ConfigureAwait(true);
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        await builder.AddPeriodAsync(s.Doc, new PeriodKey(202604)).ConfigureAwait(true);   // ще без екземпляра
+        await builder.AddPeriodAsync(s.Doc, new PeriodKey(202512)).ConfigureAwait(true);   // до X, теж без екземпляра
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var moved = await PostRangeAsync(client, s, dryRun: false, "FromMonth", 202602).ConfigureAwait(true);
+        Assert.True(moved.StatusCode == HttpStatusCode.OK, await moved.Content.ReadAsStringAsync().ConfigureAwait(true));
+        await Task.Delay(TimeSpan.FromSeconds(2.5)).ConfigureAwait(true);   // кеш маркерів міграції
+
+        foreach (var (period, expectedTable) in new[] { (202604, s.TargetTableDefId), (202512, s.Doc.TableDefId) })
+        {
+            using var response = await client.GetAsync(
+                new Uri($"/api/v1/documents/{s.Doc.DocumentId}/tables?periodKey={period}", UriKind.Relative)).ConfigureAwait(true);
+            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(response.StatusCode == HttpStatusCode.OK, $"{period}: {response.StatusCode}: {body} {app.ErrorsText}");
+            var table = Assert.Single(JsonDocument.Parse(body).RootElement.EnumerateArray());
+            Assert.Equal(expectedTable, table.GetProperty("tableDefId").GetInt32());   // створено на версії ПЕРІОДУ
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "RPT-STABLE")]
+    [Trait("Task", "N/20")]
+    public async Task Два_одночасні_переноси_з_місяця_дають_рівно_один_успіх_без_500_і_цілу_шкалу_20_із_20()
+    {
+        for (var attempt = 1; attempt <= 20; attempt++)
+        {
+            var s = await ArrangeAsync(Target.AddsC4Only).ConfigureAwait(true);
+            await AddMonthsAsync(s, 202602, 202603).ConfigureAwait(true);
+
+            using var app = new EcrApiFactory(sql);
+            using var first = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+            using var second = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+            var a = PostRangeAsync(first, s, dryRun: false, "FromMonth", 202602);
+            var b = PostRangeAsync(second, s, dryRun: false, "FromMonth", 202602);
+            using var ra = await a.ConfigureAwait(true);
+            using var rb = await b.ConfigureAwait(true);
+            var statuses = new[] { ra.StatusCode, rb.StatusCode };
+
+            Assert.True(
+                statuses.Count(x => x == HttpStatusCode.OK) == 1 && statuses.All(x => (int)x < 500),
+                $"спроба {attempt}: {ra.StatusCode} / {rb.StatusCode}: {await ra.Content.ReadAsStringAsync().ConfigureAwait(true)} | "
+                + $"{await rb.Content.ReadAsStringAsync().ConfigureAwait(true)} {app.ErrorsText}");
+
+            await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+            var line = await db.ProjectTemplateVersions.AsNoTracking()
+                .Where(t => t.ProjectId == s.Doc.ProjectId).OrderBy(t => t.FromPeriodKey)
+                .Select(t => new { t.FromPeriodKey, t.TemplateVersionId }).ToListAsync().ConfigureAwait(true);
+            Assert.Equal(
+                [(202601, s.Doc.TemplateVersionId), (202602, s.TargetVersionId)],
+                line.Select(t => (t.FromPeriodKey, t.TemplateVersionId)));
+        }
+    }
+
     private async Task<string> PeriodStateAsync(Scenario s, int periodKey)
     {
         await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
