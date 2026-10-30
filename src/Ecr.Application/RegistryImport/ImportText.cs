@@ -115,46 +115,5 @@ public static class ImportText
     /// ONE function for NAE and substance codes (legacy <c>CompositeKeyImport</c> keys): the file mixes
     /// <c>'0333'</c> and <c>2735</c>, <c>'6001'</c> and <c>6001</c>.
     /// </remarks>
-    public static string? NormalizeCode(object? raw, int pad)
-    {
-        if (raw is double d)
-        {
-            if (!double.IsFinite(d) || d < 0 || d != Math.Floor(d) || d > 1e15)
-            {
-                return null;
-            }
-
-            return PadDigits(((long)d).ToString(CultureInfo.InvariantCulture), pad);
-        }
-
-        var text = Clean(AsText(raw));
-
-        if (text.Length == 0)
-        {
-            return null;
-        }
-
-        if (text.All(char.IsAsciiDigit))
-        {
-            return PadDigits(text, pad);
-        }
-
-        // "131.0": a number that went through text.
-        var dot = text.IndexOf('.', StringComparison.Ordinal);
-        if (dot > 0 && text[..dot].All(char.IsAsciiDigit) && text[(dot + 1)..].Length > 0 && text[(dot + 1)..].All(c => c == '0'))
-        {
-            return PadDigits(text[..dot], pad);
-        }
-
-        var us = text.IndexOf('_', StringComparison.Ordinal);
-        if (us > 0 && us < text.Length - 1 && text[..us].All(char.IsAsciiDigit))
-        {
-            return PadDigits(text[..us], pad) + text[us..];
-        }
-
-        return text;
-    }
-
-    private static string PadDigits(string digits, int pad)
-        => digits.Length >= pad ? digits : digits.PadLeft(pad, '0');
+    public static string? NormalizeCode(object? raw, int pad) => Registries.Nae.NaeCodeNormalizer.Normalize(raw, pad);
 }

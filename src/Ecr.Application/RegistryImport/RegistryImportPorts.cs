@@ -119,3 +119,37 @@ public interface ISubstanceResolver : IReferenceResolver
     /// <summary>Kind constant.</summary>
     public const string SubstanceKind = "substance";
 }
+
+/// <summary>What the layout analysis of a file found (wizard steps 1-3): nothing is read from or written to the database.</summary>
+/// <param name="FileSha256">Hash of the uploaded file.</param>
+/// <param name="SheetName">Sheet that was read.</param>
+/// <param name="SheetNames">Visible sheets of the workbook.</param>
+/// <param name="Header">Header block and the column mapping; <c>null</c> when no header block was found.</param>
+/// <param name="Stats">Counters of the parse.</param>
+/// <param name="Groups">Group rows.</param>
+/// <param name="Issues">Findings (columns not found, values that do not read).</param>
+/// <param name="DroppedIssues">Findings beyond the limit.</param>
+/// <param name="CanContinue">The header was found and no finding is an error.</param>
+public sealed record ImportAnalysis(
+    string FileSha256,
+    string SheetName,
+    IReadOnlyList<string> SheetNames,
+    ImportHeaderReport? Header,
+    ImportStats Stats,
+    IReadOnlyList<ImportGroupRow> Groups,
+    IReadOnlyList<ImportIssue> Issues,
+    int DroppedIssues,
+    bool CanContinue);
+
+/// <summary>Reads a workbook with a profile and runs the engine; implemented by the Excel adapter.</summary>
+public interface IRegistryFileImporter
+{
+    /// <summary>Layout analysis: header, mapping, counts, findings.</summary>
+    public Task<ImportAnalysis> AnalyseAsync(Stream file, RegistryImportSpec spec, CancellationToken ct);
+
+    /// <summary>Preview over the database state; nothing is written.</summary>
+    public Task<RegistryImportPreview> PreviewAsync(Stream file, RegistryImportSpec spec, ImportRequest request, CancellationToken ct);
+
+    /// <summary>Commit: the same plan as the preview, all or nothing.</summary>
+    public Task<ImportCommitResult> CommitAsync(Stream file, RegistryImportSpec spec, ImportRequest request, CancellationToken ct);
+}

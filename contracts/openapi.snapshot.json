@@ -269,6 +269,551 @@
           null
         ]
       },
+      "AirLimitsAnalysisDto": {
+        "description": "Result of `POST /api/v1/air-limits/import/analyse`: layout of the file, no database.",
+        "properties": {
+          "analysis": {
+            "$ref": "#/components/schemas/ImportAnalysis",
+            "description": "Header block, mapped and unmapped columns, counts, findings."
+          },
+          "profileCode": {
+            "description": "Profile used; `null` for an unsaved specification.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "profileCode",
+          "analysis"
+        ],
+        "type": "object"
+      },
+      "AirLimitsImportResultDto": {
+        "description": "Result of `POST /api/v1/permits/{permitId}/air-limits/import/apply`.",
+        "properties": {
+          "area": {
+            "description": "Area code.",
+            "type": "string"
+          },
+          "createdNae": {
+            "description": "NAE nodes created in the tree.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "diff": {
+            "$ref": "#/components/schemas/ImportDiffCounts",
+            "description": "New / changed / unchanged / removed counts."
+          },
+          "fileSha256": {
+            "description": "Hash of the uploaded file.",
+            "type": "string"
+          },
+          "fingerprint": {
+            "description": "Fingerprint of the applied plan (equals the preview's).",
+            "type": "string"
+          },
+          "permitId": {
+            "description": "Permit.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "permitNumber": {
+            "description": "Permit number.",
+            "type": "string"
+          },
+          "region": {
+            "description": "Region code.",
+            "type": "string"
+          },
+          "replacedOthers": {
+            "description": "Rows of OTHER permits that were replaced (confirmed), per permit.",
+            "items": {
+              "$ref": "#/components/schemas/OwnerReplace"
+            },
+            "type": "array"
+          },
+          "replacedOwn": {
+            "description": "The permit's own source rows that were replaced.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sources": {
+            "description": "Source rows now in the permit for this region and area.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "substances": {
+            "description": "Substance rows inserted.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "permitId",
+          "permitNumber",
+          "region",
+          "area",
+          "sources",
+          "substances",
+          "createdNae",
+          "replacedOwn",
+          "replacedOthers",
+          "diff",
+          "fingerprint",
+          "fileSha256"
+        ],
+        "type": "object"
+      },
+      "AirLimitsPermitDto": {
+        "description": "Result of `GET /api/v1/permits/{permitId}/air-limits`: the permit card content.",
+        "properties": {
+          "permitId": {
+            "description": "Permit.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "permitNumber": {
+            "description": "Permit number.",
+            "type": "string"
+          },
+          "sources": {
+            "description": "Sources with substances, by NAE code.",
+            "items": {
+              "$ref": "#/components/schemas/AirSourceDto"
+            },
+            "type": "array"
+          },
+          "substanceRows": {
+            "description": "Substance rows in all sources.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "totals": {
+            "description": "Totals per substance, by code.",
+            "items": {
+              "$ref": "#/components/schemas/AirTotalDto"
+            },
+            "type": "array"
+          },
+          "typeCode": {
+            "description": "Permit type code.",
+            "type": "string"
+          },
+          "validFrom": {
+            "description": "First valid day.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validTo": {
+            "description": "First NOT valid day.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "permitId",
+          "permitNumber",
+          "typeCode",
+          "validFrom",
+          "validTo",
+          "sources",
+          "totals",
+          "substanceRows"
+        ],
+        "type": "object"
+      },
+      "AirLimitsPreviewDto": {
+        "description": "Result of `POST /api/v1/permits/{permitId}/air-limits/import/preview`.",
+        "properties": {
+          "area": {
+            "description": "Area code (`-` — none).",
+            "type": "string"
+          },
+          "permitId": {
+            "description": "Permit.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "permitNumber": {
+            "description": "Permit number.",
+            "type": "string"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/RegistryImportPreview",
+            "description": "Counts, findings (errors block, warnings do not), missing NAE and substances, replace scope, fingerprint."
+          },
+          "profileCode": {
+            "description": "Profile used; `null` for an unsaved specification.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "region": {
+            "description": "Region code the import is scoped to.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "permitId",
+          "permitNumber",
+          "region",
+          "area",
+          "profileCode",
+          "preview"
+        ],
+        "type": "object"
+      },
+      "AirLimitsProvisionReport": {
+        "description": "Result of `POST /api/v1/air-limits/provision`.",
+        "properties": {
+          "profileCode": {
+            "description": "Built-in import profile (`ERA_TABLE_33`).",
+            "type": "string"
+          },
+          "profileCreated": {
+            "description": "The profile row was created by this call.",
+            "type": "boolean"
+          },
+          "published": {
+            "description": "The type is published (permits can be created).",
+            "type": "boolean"
+          },
+          "sourcesRegistryCode": {
+            "description": "Registry code of the `AIR_SOURCES` table (what the generic registry rows API takes).",
+            "type": "string"
+          },
+          "substancesRegistryCode": {
+            "description": "Registry code of the `AIR_SOURCE_SUBSTANCES` table.",
+            "type": "string"
+          },
+          "typeCode": {
+            "description": "Permit type code (`AIR_LIMITS`).",
+            "type": "string"
+          },
+          "typeCreated": {
+            "description": "The type was created by this call.",
+            "type": "boolean"
+          },
+          "version": {
+            "description": "Published version of the type.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "typeCode",
+          "typeCreated",
+          "published",
+          "version",
+          "sourcesRegistryCode",
+          "substancesRegistryCode",
+          "profileCode",
+          "profileCreated"
+        ],
+        "type": "object"
+      },
+      "AirSourceDto": {
+        "description": "One source (NAE) of a permit with its substances.",
+        "properties": {
+          "area": {
+            "description": "Area code (`-` — none).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "diameter": {
+            "description": "Diameter, m.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "emissionPointName": {
+            "description": "Emission point name.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "height": {
+            "description": "Height, m.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "hoursPerYear": {
+            "description": "Hours per year.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Row id in `AIR_SOURCES`.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "naeCode": {
+            "description": "Normalised NAE code.",
+            "type": "string"
+          },
+          "naeEntryId": {
+            "description": "Node in the NAE tree.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "productionCode": {
+            "description": "Production code (column A).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "quantity": {
+            "description": "Number of sources.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "region": {
+            "description": "Region code.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "siteLabel": {
+            "description": "Production / site label from the group row of the file.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourceName": {
+            "description": "Source name.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourceType": {
+            "description": "Canonical type: `T` (point) or `P1` (diffuse), Latin letters; the UI maps the label.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "substances": {
+            "description": "Substances, by code.",
+            "items": {
+              "$ref": "#/components/schemas/AirSubstanceDto"
+            },
+            "type": "array"
+          },
+          "temperature": {
+            "description": "Gas temperature.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "velocity": {
+            "description": "Gas velocity.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "volume": {
+            "description": "Gas volume.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "x1": {
+            "description": "Coordinate X1.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "x2": {
+            "description": "Coordinate X2.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "y1": {
+            "description": "Coordinate Y1.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "y2": {
+            "description": "Coordinate Y2.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "naeEntryId",
+          "naeCode",
+          "region",
+          "area",
+          "siteLabel",
+          "productionCode",
+          "sourceName",
+          "quantity",
+          "hoursPerYear",
+          "emissionPointName",
+          "sourceType",
+          "height",
+          "diameter",
+          "velocity",
+          "volume",
+          "temperature",
+          "x1",
+          "y1",
+          "x2",
+          "y2",
+          "substances"
+        ],
+        "type": "object"
+      },
+      "AirSubstanceDto": {
+        "description": "One substance limit of a source.",
+        "properties": {
+          "gramsPerSecond": {
+            "description": "g/s.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Row id in `AIR_SOURCE_SUBSTANCES`.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "mgPerNm3": {
+            "description": "mg/nm3.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "substanceCode": {
+            "description": "Normalised substance code (4 digits).",
+            "type": "string"
+          },
+          "substanceEntryId": {
+            "description": "Entry in the substance registry.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "substanceName": {
+            "description": "Name from the registry (default language).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tonsPerYear": {
+            "description": "t/year (full precision, no rounding).",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "substanceEntryId",
+          "substanceCode",
+          "substanceName",
+          "gramsPerSecond",
+          "mgPerNm3",
+          "tonsPerYear"
+        ],
+        "type": "object"
+      },
+      "AirTotalDto": {
+        "description": "Total of one substance over all sources of the permit (computed, never stored).",
+        "properties": {
+          "gramsPerSecond": {
+            "description": "Sum of g/s.",
+            "format": "decimal",
+            "type": "string"
+          },
+          "sources": {
+            "description": "Sources that limit the substance.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "substanceCode": {
+            "description": "Substance code.",
+            "type": "string"
+          },
+          "substanceEntryId": {
+            "description": "Entry in the substance registry.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "substanceName": {
+            "description": "Name from the registry.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tonsPerYear": {
+            "description": "Sum of t/year.",
+            "format": "decimal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "substanceEntryId",
+          "substanceCode",
+          "substanceName",
+          "sources",
+          "gramsPerSecond",
+          "tonsPerYear"
+        ],
+        "type": "object"
+      },
       "ApplyEditorSetRequest": {
         "description": "Тіло «застосувати набір до зрізів».",
         "properties": {
@@ -6541,6 +7086,14 @@
         },
         "type": "object"
       },
+      "FillDown": {
+        "description": "Empty-cell fill rule.",
+        "enum": [
+          "None",
+          "Merge",
+          "Blank"
+        ]
+      },
       "FormulaDto": {
         "description": "Формула для відповіді клієнту.",
         "properties": {
@@ -6892,6 +7445,22 @@
         ],
         "type": "object"
       },
+      "GroupRowSpec": {
+        "description": "A group row is a data-area row with no keys whose only content is a label in one column.",
+        "properties": {
+          "column": {
+            "description": "1-based column that holds the label.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "minMergedColumns": {
+            "description": "A label counts as a group when its cell is merged across at least this many columns, or when it is the only filled cell in the row.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "GroupSidView": {
         "description": "SID групи з квитка і те, що він дав.",
         "properties": {
@@ -7069,6 +7638,28 @@
         ],
         "type": "object"
       },
+      "HeaderSpec": {
+        "description": "Where the header block is.",
+        "properties": {
+          "fromRow": {
+            "description": "First header row; `null` - detected from the column-number row.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "toRow": {
+            "description": "Last header row; `null` - detected.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "HealthCheckDto": {
         "description": "Одна перевірка у звіті.",
         "properties": {
@@ -7137,6 +7728,76 @@
       "IFormFile": {
         "format": "binary",
         "type": "string"
+      },
+      "ImportAnalysis": {
+        "description": "What the layout analysis of a file found (wizard steps 1-3): nothing is read from or written to the database.",
+        "properties": {
+          "canContinue": {
+            "description": "The header was found and no finding is an error.",
+            "type": "boolean"
+          },
+          "droppedIssues": {
+            "description": "Findings beyond the limit.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "fileSha256": {
+            "description": "Hash of the uploaded file.",
+            "type": "string"
+          },
+          "groups": {
+            "description": "Group rows.",
+            "items": {
+              "$ref": "#/components/schemas/ImportGroupRow"
+            },
+            "type": "array"
+          },
+          "header": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ImportHeaderReport",
+                "description": "Header block and the column mapping; `null` when no header block was found."
+              }
+            ]
+          },
+          "issues": {
+            "description": "Findings (columns not found, values that do not read).",
+            "items": {
+              "$ref": "#/components/schemas/ImportIssue"
+            },
+            "type": "array"
+          },
+          "sheetName": {
+            "description": "Sheet that was read.",
+            "type": "string"
+          },
+          "sheetNames": {
+            "description": "Visible sheets of the workbook.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/ImportStats",
+            "description": "Counters of the parse."
+          }
+        },
+        "required": [
+          "fileSha256",
+          "sheetName",
+          "sheetNames",
+          "header",
+          "stats",
+          "groups",
+          "issues",
+          "droppedIssues",
+          "canContinue"
+        ],
+        "type": "object"
       },
       "ImportApplyRequest": {
         "description": "Запит на застосування імпорту.",
@@ -7212,6 +7873,261 @@
         ],
         "type": "object"
       },
+      "ImportDiffCounts": {
+        "description": "Counts of the diff between the file and the stored rows of the owner.",
+        "properties": {
+          "changedParents": {
+            "description": "In both, different.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "children": {
+            "description": "Child rows that will be inserted.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "newParents": {
+            "description": "In the file only.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "removedParents": {
+            "description": "Stored for the owner in the bucket, not in the file (deleted by the replace).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "skippedParents": {
+            "description": "Left out by a human decision.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "unchangedParents": {
+            "description": "In both, equal.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "newParents",
+          "changedParents",
+          "unchangedParents",
+          "removedParents",
+          "skippedParents",
+          "children"
+        ],
+        "type": "object"
+      },
+      "ImportFieldSpec": {
+        "description": "One mapped field.",
+        "properties": {
+          "choices": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Allowed values for ImportParser.Choice: file text (folded) to canonical value.",
+            "type": "object"
+          },
+          "column": {
+            "description": "Explicit column letter that bypasses header matching.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "factor": {
+            "description": "Multiplier applied to ImportParser.Decimal values (unit conversion).",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fillDown": {
+            "$ref": "#/components/schemas/FillDown",
+            "description": "How an empty cell is filled."
+          },
+          "level": {
+            "$ref": "#/components/schemas/ImportLevel",
+            "description": "Parent (source) or child (substance) level."
+          },
+          "name": {
+            "description": "Unique field name (the target property).",
+            "type": "string"
+          },
+          "nonEmpty": {
+            "description": "Every row must carry a value.",
+            "type": "boolean"
+          },
+          "nonNegative": {
+            "description": "A negative ImportParser.Decimal is an error.",
+            "type": "boolean"
+          },
+          "pad": {
+            "description": "Code width for ImportParser.Code (numeric codes are left-padded with zeros).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "parser": {
+            "$ref": "#/components/schemas/ImportParser",
+            "description": "How a cell is read."
+          },
+          "patterns": {
+            "description": "Header variants (any may match). Folded (case, Latin/Cyrillic look-alikes, spaces, hyphens, punctuation ignored);\n`a...b` or `a*b` means \"a, then b later in the combined header\".",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reference": {
+            "description": "Reference kind to validate against the target registry (`nae`, `substance`); `null` - plain value.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "required": {
+            "description": "The column must be found in the header.",
+            "type": "boolean"
+          },
+          "unitQualifier": {
+            "description": "The text of the LAST header row must equal one of these (e.g. the unit row `г/с`); empty - not checked.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "units": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Unit aliases for ImportParser.Unit: file text (folded) to canonical unit code.",
+            "type": "object"
+          },
+          "warnIfEmpty": {
+            "description": "An empty value is allowed but reported as a per-row WARNING in the preview (not an error, not silent).",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ImportGroupRow": {
+        "description": "A group row.",
+        "properties": {
+          "label": {
+            "description": "Label text.",
+            "type": "string"
+          },
+          "row": {
+            "description": "Excel row.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row",
+          "label"
+        ],
+        "type": "object"
+      },
+      "ImportHeaderReport": {
+        "description": "What the header detection found.",
+        "properties": {
+          "dataFromRow": {
+            "description": "First data row.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "headerFromRow": {
+            "description": "First header row.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "headerToRow": {
+            "description": "Last header row.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "mapped": {
+            "description": "Matched columns.",
+            "items": {
+              "$ref": "#/components/schemas/MappedColumn"
+            },
+            "type": "array"
+          },
+          "unmapped": {
+            "description": "Columns with a header that no field uses.",
+            "items": {
+              "$ref": "#/components/schemas/UnmappedColumn"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "headerFromRow",
+          "headerToRow",
+          "dataFromRow",
+          "mapped",
+          "unmapped"
+        ],
+        "type": "object"
+      },
+      "ImportIssue": {
+        "description": "A finding of the parser or the planner.",
+        "properties": {
+          "args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Placeholders of the catalog text.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "column": {
+            "description": "Excel column letter.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "field": {
+            "description": "Field name.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "messageKey": {
+            "description": "Catalog key.",
+            "type": "string"
+          },
+          "row": {
+            "description": "Excel row, when the finding is about one.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "severity": {
+            "$ref": "#/components/schemas/ImportSeverity",
+            "description": "Warning or error."
+          }
+        },
+        "required": [
+          "severity",
+          "messageKey"
+        ],
+        "type": "object"
+      },
+      "ImportLevel": {
+        "description": "Field level.",
+        "enum": [
+          "Parent",
+          "Child"
+        ]
+      },
       "ImportNaeFromAfRequest": {
         "description": "One-time load of the NAE tree from the PI AF element tree (NAE plan N2).",
         "properties": {
@@ -7265,6 +8181,18 @@
         ],
         "type": "object"
       },
+      "ImportParser": {
+        "description": "Cell parsers.",
+        "enum": [
+          "Text",
+          "Decimal",
+          "Integer",
+          "Code",
+          "Choice",
+          "Date",
+          "Unit"
+        ]
+      },
       "ImportPreview": {
         "description": "Результат попереднього перегляду імпорту.",
         "properties": {
@@ -7317,6 +8245,80 @@
           "rejected",
           "conflicts",
           "overwritable"
+        ],
+        "type": "object"
+      },
+      "ImportProfileDto": {
+        "description": "A stored import profile with its specification.",
+        "properties": {
+          "builtIn": {
+            "description": "Shipped with the system.",
+            "type": "boolean"
+          },
+          "code": {
+            "description": "Profile code.",
+            "type": "string"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Name by language.",
+            "type": "object"
+          },
+          "rowVersion": {
+            "description": "Concurrency token for the next `PUT`.",
+            "type": "string"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/RegistryImportSpec",
+            "description": "The specification: header block, fields with header patterns, group rows, fill rules, parsers."
+          },
+          "updatedAt": {
+            "description": "Last change, UTC.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "nameL10n",
+          "builtIn",
+          "spec",
+          "rowVersion",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ImportProfileSummaryDto": {
+        "description": "A stored import profile in a list.",
+        "properties": {
+          "builtIn": {
+            "description": "Shipped with the system (`ERA_TABLE_33`); a built-in profile is reset by provisioning when it is deleted but can be edited.",
+            "type": "boolean"
+          },
+          "code": {
+            "description": "Profile code.",
+            "type": "string"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Name by language.",
+            "type": "object"
+          },
+          "updatedAt": {
+            "description": "Last change, UTC.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "nameL10n",
+          "builtIn",
+          "updatedAt"
         ],
         "type": "object"
       },
@@ -7377,6 +8379,51 @@
           "columnCode",
           "reasonCode",
           "message"
+        ],
+        "type": "object"
+      },
+      "ImportSeverity": {
+        "description": "Issue severity.",
+        "enum": [
+          "Warning",
+          "Error"
+        ]
+      },
+      "ImportStats": {
+        "description": "Counters of a parse.",
+        "properties": {
+          "children": {
+            "description": "Child rows.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "distinctChildKeys": {
+            "description": "Distinct child keys.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "groupRows": {
+            "description": "Group rows.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "parents": {
+            "description": "Parent rows.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "skippedRows": {
+            "description": "Non-data rows with content (totals, notes).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "parents",
+          "children",
+          "distinctChildKeys",
+          "groupRows",
+          "skippedRows"
         ],
         "type": "object"
       },
@@ -7883,6 +8930,40 @@
           "unmappedEntryIds",
           "unmappedTruncated",
           "targetNotUsable"
+        ],
+        "type": "object"
+      },
+      "MappedColumn": {
+        "description": "A field matched to a column.",
+        "properties": {
+          "column": {
+            "description": "1-based column.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "columnLetter": {
+            "description": "Column letter.",
+            "type": "string"
+          },
+          "field": {
+            "description": "Field name.",
+            "type": "string"
+          },
+          "headerText": {
+            "description": "The combined header text that matched.",
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/ImportLevel",
+            "description": "Parent or child."
+          }
+        },
+        "required": [
+          "field",
+          "level",
+          "column",
+          "columnLetter",
+          "headerText"
         ],
         "type": "object"
       },
@@ -9800,6 +10881,57 @@
         ],
         "type": "object"
       },
+      "MissingAction": {
+        "enum": [
+          "Skip",
+          "Create",
+          null
+        ]
+      },
+      "MissingReference": {
+        "description": "A referenced code the target registry does not have.",
+        "properties": {
+          "code": {
+            "description": "Normalised code.",
+            "type": "string"
+          },
+          "groupLabel": {
+            "description": "Group-row label above (the site), for \"create under\".",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "kind": {
+            "description": "Reference kind.",
+            "type": "string"
+          },
+          "resolved": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MissingAction",
+                "description": "The decision taken, if any."
+              }
+            ]
+          },
+          "row": {
+            "description": "First Excel row.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "code",
+          "row",
+          "groupLabel",
+          "resolved"
+        ],
+        "type": "object"
+      },
       "MonthColumnStatusDto": {
         "description": "Статус місячної колонки (D-441): стан аркуша за період місяця колонки.",
         "properties": {
@@ -10487,6 +11619,39 @@
           "Warn",
           "AllowWithConfirmation"
         ]
+      },
+      "OwnerReplace": {
+        "description": "Stored parents of one owner a replace touches.",
+        "properties": {
+          "children": {
+            "description": "Child rows.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "label": {
+            "description": "Human label (permit number).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "ownerKey": {
+            "description": "Owner.",
+            "type": "string"
+          },
+          "parents": {
+            "description": "Parent rows.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ownerKey",
+          "label",
+          "parents",
+          "children"
+        ],
+        "type": "object"
       },
       "PagedResultOfCellChangeView": {
         "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
@@ -16225,6 +17390,132 @@
         ],
         "type": "object"
       },
+      "RegistryImportPreview": {
+        "description": "What a preview shows.",
+        "properties": {
+          "canApply": {
+            "type": "boolean"
+          },
+          "diff": {
+            "$ref": "#/components/schemas/ImportDiffCounts"
+          },
+          "droppedIssues": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/ImportGroupRow"
+            },
+            "type": "array"
+          },
+          "header": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ImportHeaderReport"
+              }
+            ]
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/ImportIssue"
+            },
+            "type": "array"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/MissingReference"
+            },
+            "type": "array"
+          },
+          "replace": {
+            "$ref": "#/components/schemas/ReplaceScope"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/ImportStats"
+          }
+        },
+        "required": [
+          "header",
+          "stats",
+          "groups",
+          "issues",
+          "droppedIssues",
+          "diff",
+          "missing",
+          "replace",
+          "canApply",
+          "fingerprint"
+        ],
+        "type": "object"
+      },
+      "RegistryImportSpec": {
+        "description": "Layout and mapping of an Excel file onto a two-level target (parent rows with child rows),\nstored as `cfg.RegistryImportProfile.SpecJson` (FEATURE-REGISTRY-TABLES 4.6, NAE/permits plan N4).",
+        "properties": {
+          "childKeyField": {
+            "description": "Name of the field whose filled cell starts a child row.",
+            "type": "string"
+          },
+          "dataStartRow": {
+            "description": "Explicit first data row; `null` - right after the header (and the column-number row).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "fields": {
+            "description": "Field mapping.",
+            "items": {
+              "$ref": "#/components/schemas/ImportFieldSpec"
+            },
+            "type": "array"
+          },
+          "groupRows": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GroupRowSpec",
+                "description": "Group-row rule; `null` - group rows are not recognised (they are skipped as non-data)."
+              }
+            ]
+          },
+          "header": {
+            "$ref": "#/components/schemas/HeaderSpec",
+            "description": "Header block position; auto-detected by default."
+          },
+          "naMarkers": {
+            "description": "Texts treated as \"no value\" for numbers and dates (compared folded); `null` - the defaults.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "parentKeyField": {
+            "description": "Name of the field whose filled cell starts a new parent.",
+            "type": "string"
+          },
+          "sheet": {
+            "description": "Worksheet name; `null` - the first worksheet.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "RegistryKeyCheckRequest": {
         "description": "Запит живої перевірки дублікатів ключа до збереження (§4.5).",
         "properties": {
@@ -17307,6 +18598,32 @@
           "category",
           "tables",
           "rules"
+        ],
+        "type": "object"
+      },
+      "ReplaceScope": {
+        "description": "What the apply will replace; shown BEFORE it (legacy semantics with an explicit confirmation).",
+        "properties": {
+          "confirmationRequired": {
+            "description": "Other owners are touched: the apply needs their keys in IReadOnlyList&lt;string&gt;? ImportRequest.ConfirmedOtherOwners.",
+            "type": "boolean"
+          },
+          "otherOwners": {
+            "description": "Rows of OTHER owners for the same keys (superseded), per owner.",
+            "items": {
+              "$ref": "#/components/schemas/OwnerReplace"
+            },
+            "type": "array"
+          },
+          "thisOwner": {
+            "$ref": "#/components/schemas/OwnerReplace",
+            "description": "The owner's own rows in the bucket (all of them are replaced)."
+          }
+        },
+        "required": [
+          "thisOwner",
+          "otherOwners",
+          "confirmationRequired"
         ],
         "type": "object"
       },
@@ -19192,6 +20509,35 @@
           "dataType",
           "isRequired",
           "lookupRegistryDefId"
+        ],
+        "type": "object"
+      },
+      "SaveImportProfileRequest": {
+        "description": "Body of `PUT /api/v1/air-limits/import-profiles/{code}` (create or replace).",
+        "properties": {
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Name by language.",
+            "type": "object"
+          },
+          "rowVersion": {
+            "description": "Token read with the profile; `null` when the profile is new.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "spec": {
+            "$ref": "#/components/schemas/RegistryImportSpec",
+            "description": "The specification (validated; an invalid one is `422 regSpecInvalid`)."
+          }
+        },
+        "required": [
+          "nameL10n",
+          "spec",
+          "rowVersion"
         ],
         "type": "object"
       },
@@ -24605,6 +25951,35 @@
         ],
         "type": "object"
       },
+      "UnmappedColumn": {
+        "description": "A non-empty column no field uses.",
+        "properties": {
+          "column": {
+            "description": "1-based column.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "columnLetter": {
+            "description": "Column letter.",
+            "type": "string"
+          },
+          "hasData": {
+            "description": "There is data under it.",
+            "type": "boolean"
+          },
+          "headerText": {
+            "description": "Combined header text.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "column",
+          "columnLetter",
+          "headerText",
+          "hasData"
+        ],
+        "type": "object"
+      },
       "UnmappedSourceField": {
         "description": "Поле джерела, яке не лягає нікуди.",
         "properties": {
@@ -26047,6 +27422,336 @@
   },
   "openapi": "3.1.1",
   "paths": {
+    "/api/v1/air-limits/import-profiles": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ImportProfileSummaryDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ImportProfileSummaryDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ImportProfileSummaryDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Import profiles of the sources table. Permission `Registry.View`.",
+        "tags": [
+          "AirLimits"
+        ]
+      }
+    },
+    "/api/v1/air-limits/import-profiles/{code}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Profile code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportProfileDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportProfileDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportProfileDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "One import profile with its specification. Permission `Registry.View`.",
+        "tags": [
+          "AirLimits"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Profile code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveImportProfileRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveImportProfileRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveImportProfileRequest"
+              }
+            }
+          },
+          "description": "Cancellation token.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportProfileDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportProfileDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportProfileDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Creates or replaces an import profile. Permission `Registry.EditDefinition`.",
+        "tags": [
+          "AirLimits"
+        ]
+      }
+    },
+    "/api/v1/air-limits/import/analyse": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "properties": {
+                      "file": {
+                        "$ref": "#/components/schemas/IFormFile"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "request": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "description": "Cancellation token.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirLimitsAnalysisDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirLimitsAnalysisDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirLimitsAnalysisDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Wizard steps 1-3: reads the workbook with a profile (or an unsaved specification) and reports the header block, the\nmapped and unmapped columns, counts and findings. Stateless: nothing is stored. Permission `Registry.EditData`.",
+        "tags": [
+          "AirLimits"
+        ]
+      }
+    },
+    "/api/v1/air-limits/provision": {
+      "post": {
+        "description": "Idempotent: a published type is left as it is (it is never edited by this call). The substance registry the type points at\n(`LAND_AIR_SUBSTANCE` by default) must exist, otherwise `422 ECR-PRM-0422`.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirLimitsProvisionReport"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirLimitsProvisionReport"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirLimitsProvisionReport"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Makes sure the permit type `AIR_LIMITS` (\"Air Limits Import\") is published with its two tables and that the built-in\nimport profile `ERA_TABLE_33` exists. Needs `Permit.EditType` and `Permit.PublishType`.",
+        "tags": [
+          "AirLimits"
+        ]
+      }
+    },
     "/api/v1/audit/cells": {
       "get": {
         "description": "Таблиця партиційована за `ChangedAt`, а не за періодом: місяць\nзміни і звітний період — різні осі (зміна за січень може статися в\nберезні). Тому запит **обов'язково** обмежений вікном часу — інакше він\nпіде по всіх партиціях.\n\n⚠ Одна дія, ДВА рівні доступу (D15-16). `documentId + rowKey +\ncolumnDefId` разом — це історія ОДНІЄЇ комірки, і її бачить той, хто\nбачить документ (`Document.View` плюс грант на проєкт). Будь-який\nширший запит — загальний журнал, і для нього поріг лишається\n`Security.ViewAudit`. Розділяти це на два маршрути означало б\nдублювати вікно, курсор і всі п'ять фільтрів заради різниці, яка\nвиражається самим фільтром.\n\n⚠ `rowKey`/`columnDefId` без `documentId` —\n`422 ECR-REQ-0422`: ключ рядка унікальний у межах екземпляра\nтаблиці, а не системи, тож без документа він не адресує нічого.\nРодина `REQ`, а не `AUD`/`CELL`: суб'єкт відмови —\nпараметр запиту, і саме так тут уже відмовляють обидві перевірки вікна.",
@@ -44162,6 +45867,295 @@
         ]
       }
     },
+    "/api/v1/permits/{permitId}/air-limits": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Permit (header registry entry id).",
+            "in": "path",
+            "name": "permitId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirLimitsPermitDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirLimitsPermitDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirLimitsPermitDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Permit card content: sources (NAE) with their substances and totals per substance. Permission `Registry.View` or grant\n`Read` on the permit's registry.",
+        "tags": [
+          "AirLimits"
+        ]
+      }
+    },
+    "/api/v1/permits/{permitId}/air-limits/import/apply": {
+      "post": {
+        "description": "All or nothing: an error row, an unconfirmed replacement of another permit (`regReplaceNotConfirmed`) or a plan that\ndiffers from the previewed one (`regPlanChanged`) writes nothing.",
+        "parameters": [
+          {
+            "description": "Permit (header registry entry id).",
+            "in": "path",
+            "name": "permitId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "properties": {
+                      "file": {
+                        "$ref": "#/components/schemas/IFormFile"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "request": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "description": "Cancellation token.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirLimitsImportResultDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirLimitsImportResultDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirLimitsImportResultDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Wizard step 5: applies the import in ONE transaction (delete the replaced rows, create the missing NAE nodes, insert).\nPermission `Registry.EditData`.",
+        "tags": [
+          "AirLimits"
+        ]
+      }
+    },
+    "/api/v1/permits/{permitId}/air-limits/import/preview": {
+      "post": {
+        "description": "Errors block the apply (`canApply = false`); warnings (for example an empty `tonsPerYear`) are listed per row and do\nnot. `replace` lists the permit's own rows and the rows of OTHER permits for the same NAE that the apply would replace.",
+        "parameters": [
+          {
+            "description": "Permit (header registry entry id).",
+            "in": "path",
+            "name": "permitId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "properties": {
+                      "file": {
+                        "$ref": "#/components/schemas/IFormFile"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "request": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "description": "Cancellation token.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirLimitsPreviewDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirLimitsPreviewDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirLimitsPreviewDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Wizard step 4: preview of the import into a permit. Nothing is written. Permission `Registry.EditData` on the permit's\ntables.",
+        "tags": [
+          "AirLimits"
+        ]
+      }
+    },
     "/api/v1/projects": {
       "get": {
         "parameters": [
@@ -60570,6 +62564,9 @@
     }
   ],
   "tags": [
+    {
+      "name": "AirLimits"
+    },
     {
       "name": "Audit"
     },
