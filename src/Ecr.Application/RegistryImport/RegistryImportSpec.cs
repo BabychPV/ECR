@@ -190,6 +190,9 @@ public sealed class ImportFieldSpec
     /// <summary>Every row must carry a value.</summary>
     public bool NonEmpty { get; init; }
 
+    /// <summary>An empty value is allowed but reported as a per-row WARNING in the preview (not an error, not silent).</summary>
+    public bool WarnIfEmpty { get; init; }
+
     /// <summary>How a cell is read.</summary>
     public ImportParser Parser { get; init; } = ImportParser.Text;
 

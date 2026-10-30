@@ -674,6 +674,13 @@ public static partial class RegistryImportParser
                     new Dictionary<string, string> { ["field"] = field.Name }));
             }
 
+            if (result.Empty && field.WarnIfEmpty && !field.NonEmpty && !isKey)
+            {
+                _log.Add(new ImportIssue(
+                    ImportSeverity.Warning, RegistryImportKeys.ValueEmpty, row, letter, field.Name,
+                    new Dictionary<string, string> { ["field"] = field.Name }));
+            }
+
             values[field.Name] = result.Value;
             return isKey ? result.Value as string ?? (result.Value is null ? null : Convert.ToString(result.Value, CultureInfo.InvariantCulture)) : null;
         }

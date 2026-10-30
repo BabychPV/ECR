@@ -33,6 +33,9 @@ public static class RegistryImportKeys
     /// <summary>A required value is empty.</summary>
     public const string ValueRequired = "err.ECR-IMP-0422.regValueRequired";
 
+    /// <summary>A value that should be filled is empty (warning, per row).</summary>
+    public const string ValueEmpty = "err.ECR-IMP-0422.regValueEmpty";
+
     /// <summary>A negative number where only non-negative is allowed.</summary>
     public const string ValueNegative = "err.ECR-IMP-0422.regValueNegative";
 

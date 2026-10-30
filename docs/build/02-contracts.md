@@ -4529,6 +4529,14 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/entries/{id}/retire` | `Registry.EditData` або грант `Write` на довідник | 8 |
 | `GET` | `/api/v1/registries/{code}/entries/{id}/references` | `Registry.View` або грант `Read` на довідник | 8 |
 | `POST` | `/api/v1/nae-tree/af-import` | `Registry.EditDefinition` + `Registry.EditData` | 8 |
+| `POST` | `/api/v1/air-limits/provision` | `Permit.EditType` + `Permit.PublishType` | 8 |
+| `GET` | `/api/v1/air-limits/import-profiles` | `Registry.View` | 8 |
+| `GET` | `/api/v1/air-limits/import-profiles/{code}` | `Registry.View` | 8 |
+| `PUT` | `/api/v1/air-limits/import-profiles/{code}` | `Registry.EditDefinition` | 8 |
+| `POST` | `/api/v1/air-limits/import/analyse` | `Registry.EditData` | 8 |
+| `POST` | `/api/v1/permits/{permitId}/air-limits/import/preview` | `Registry.EditData` + грант `Write` на таблиці дозволу | 8 |
+| `POST` | `/api/v1/permits/{permitId}/air-limits/import/apply` | `Registry.EditData` + грант `Write` на таблиці дозволу | 8 |
+| `GET` | `/api/v1/permits/{permitId}/air-limits` | `Registry.View` або грант `Read` на реєстр шапки | 8 |
 | `GET` | `/api/v1/permit-types?category=&status=&q=&limit=&cursor=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types/{code}` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types/{code}/usage` | `Registry.View` | 8 |

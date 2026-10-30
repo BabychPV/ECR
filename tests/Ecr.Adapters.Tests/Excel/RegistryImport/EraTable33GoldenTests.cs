@@ -30,7 +30,12 @@ public sealed class EraTable33GoldenTests
         var parsed = Parse(Synthetic.Bytes);
 
         Assert.False(parsed.HasErrors, string.Join("; ", parsed.Issues.Take(5).Select(i => $"{i.MessageKey} r{i.Row} {i.Field}")));
-        Assert.Empty(parsed.Issues);
+        // The only finding is the one deliberately empty t/year cell: a per-row WARNING (not an error, not silent).
+        var warning = Assert.Single(parsed.Issues);
+        Assert.Equal(ImportSeverity.Warning, warning.Severity);
+        Assert.Equal(RegistryImportKeys.ValueEmpty, warning.MessageKey);
+        Assert.Equal(("tonsPerYear", "AA"), (warning.Field, warning.Column));
+        Assert.NotNull(warning.Row);
         Assert.Equal(373, parsed.Stats.Parents);
         Assert.Equal(2624, parsed.Stats.Children);
         Assert.Equal(55, parsed.Stats.DistinctChildKeys);
@@ -151,7 +156,7 @@ public sealed class EraTable33GoldenTests
         var importer = Importer(target);
         var request = new ImportRequest(Scope, ProfileCode: BuiltInImportProfiles.EraTable33Code);
 
-        ImportPreview preview;
+        RegistryImportPreview preview;
         using (var file = new MemoryStream(Synthetic.Bytes))
         {
             preview = await importer.PreviewAsync(file, Era, request, default);
@@ -172,7 +177,7 @@ public sealed class EraTable33GoldenTests
         Assert.Equal(373, target.Stored.Count);
         Assert.Equal(2624, target.Stored.Sum(p => p.Children.Count));
 
-        ImportPreview again;
+        RegistryImportPreview again;
         using (var file = new MemoryStream(Synthetic.Bytes))
         {
             again = await importer.PreviewAsync(file, Era, request, default);
