@@ -171,7 +171,7 @@ function FieldEditor({
                   <td>
                     <Button
                       variant="subtle"
-                      size="compact-sm"
+                      size="xs"
                       aria-label={t('permits.air.import.map.removeFor', { field: name })}
                       onClick={() => onSpec(withoutField(spec, index))}
                     >
