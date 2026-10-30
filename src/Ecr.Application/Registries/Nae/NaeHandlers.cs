@@ -163,9 +163,17 @@ public sealed class ImportNaeFromAfHandler(
         var existingDefinition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false);
         var existingByCode = new Dictionary<string, RegistryEntry>(StringComparer.OrdinalIgnoreCase);
         var existingBusiness = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Highest ordinal among the live children of each existing parent (0 = roots): new siblings are appended after them.
+        var maxOrdinalByParent = new Dictionary<long, int>();
         if (existingDefinition is not null)
         {
             var entries = (await registries.ListEntriesAsync(existingDefinition.Id, ct).ConfigureAwait(false)).Where(e => !e.IsDeleted).ToList();
+            foreach (var group in entries.GroupBy(e => e.ParentEntryId ?? 0))
+            {
+                maxOrdinalByParent[group.Key] = group.Max(e => e.Ordinal);
+            }
+
             foreach (var e in entries)
             {
                 existingByCode[e.Code] = e;
@@ -251,10 +259,11 @@ public sealed class ImportNaeFromAfHandler(
                         var node = batchNodes[row.Row - 1];
                         row.Entry.Rename(new LocalizedText(new Dictionary<string, string>(node.Display, StringComparer.OrdinalIgnoreCase)));
                         row.Entry.SetLevel(levels[node.LevelCode].Id);
-                        row.Entry.SetOrdinal(node.Ordinal);
-                        if (node.ParentKey is { } parentKey)
+                        var parentId = node.ParentKey is { } parentKey ? ids[codeByKey[parentKey]] : 0L;
+                        row.Entry.SetOrdinal(node.Ordinal + maxOrdinalByParent.GetValueOrDefault(parentId));
+                        if (parentId != 0)
                         {
-                            row.Entry.SetParent(ids[codeByKey[parentKey]]);
+                            row.Entry.SetParent(parentId);
                         }
 
                         ids[node.Code] = row.Entry.Id;

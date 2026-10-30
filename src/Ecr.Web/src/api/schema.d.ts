@@ -261,6 +261,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/air-limits/scope-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Region codes and, per region, area codes used by the NAE tree (with the names of its group nodes) - what the import wizard
+         *     offers instead of free text. Permission `Registry.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirScopeCodesDto"];
+                        "text/json": components["schemas"]["AirScopeCodesDto"];
+                        "text/plain": components["schemas"]["AirScopeCodesDto"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit/cells": {
         parameters: {
             query?: never;
@@ -25154,6 +25204,13 @@ export interface components {
         };
         /** @enum {unknown} */
         AggregationKind: "Sum" | "Avg" | "Min" | "Max" | "Last" | "First" | "TimeWeightedAvg" | "TimeIntegral" | null;
+        /** @description One area of a region. */
+        AirAreaCodeDto: {
+            /** @description Normalised area code (what `area` of the import options takes). */
+            code: string;
+            /** @description Name of the area group node, when the tree has one. */
+            name: null | string;
+        };
         /** @description Result of `POST /api/v1/air-limits/import/analyse`: layout of the file, no database. */
         AirLimitsAnalysisDto: {
             /** @description Header block, mapped and unmapped columns, counts, findings. */
@@ -25273,6 +25330,20 @@ export interface components {
              * @description Published version of the type.
              */
             version: number;
+        };
+        /** @description One region. */
+        AirRegionCodeDto: {
+            /** @description Areas used in the region, by code (`-` style "no area" code included when NAE exist without one). */
+            areas: components["schemas"]["AirAreaCodeDto"][];
+            /** @description Normalised region code (what `region` of the import options takes). */
+            code: string;
+            /** @description Name of the region group node, when the tree has one. */
+            name: null | string;
+        };
+        /** @description Region and area codes of the NAE tree. */
+        AirScopeCodesDto: {
+            /** @description Regions, by code. */
+            regions: components["schemas"]["AirRegionCodeDto"][];
         };
         /** @description One source (NAE) of a permit with its substances. */
         AirSourceDto: {

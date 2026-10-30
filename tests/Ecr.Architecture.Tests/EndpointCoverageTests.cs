@@ -1409,6 +1409,7 @@ public sealed partial class EndpointCoverageTests
         "POST /api/v1/permits/{p}/air-limits/import/preview",
         "POST /api/v1/permits/{p}/air-limits/import/apply",
         "GET /api/v1/permits/{p}/air-limits",
+        "GET /api/v1/air-limits/scope-codes",
 
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було

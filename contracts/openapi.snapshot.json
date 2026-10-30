@@ -269,6 +269,27 @@
           null
         ]
       },
+      "AirAreaCodeDto": {
+        "description": "One area of a region.",
+        "properties": {
+          "code": {
+            "description": "Normalised area code (what `area` of the import options takes).",
+            "type": "string"
+          },
+          "name": {
+            "description": "Name of the area group node, when the tree has one.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ],
+        "type": "object"
+      },
       "AirLimitsAnalysisDto": {
         "description": "Result of `POST /api/v1/air-limits/import/analyse`: layout of the file, no database.",
         "properties": {
@@ -518,6 +539,51 @@
           "substancesRegistryCode",
           "profileCode",
           "profileCreated"
+        ],
+        "type": "object"
+      },
+      "AirRegionCodeDto": {
+        "description": "One region.",
+        "properties": {
+          "areas": {
+            "description": "Areas used in the region, by code (`-` style \"no area\" code included when NAE exist without one).",
+            "items": {
+              "$ref": "#/components/schemas/AirAreaCodeDto"
+            },
+            "type": "array"
+          },
+          "code": {
+            "description": "Normalised region code (what `region` of the import options takes).",
+            "type": "string"
+          },
+          "name": {
+            "description": "Name of the region group node, when the tree has one.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "areas"
+        ],
+        "type": "object"
+      },
+      "AirScopeCodesDto": {
+        "description": "Region and area codes of the NAE tree.",
+        "properties": {
+          "regions": {
+            "description": "Regions, by code.",
+            "items": {
+              "$ref": "#/components/schemas/AirRegionCodeDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "regions"
         ],
         "type": "object"
       },
@@ -27751,6 +27817,56 @@
           }
         },
         "summary": "Makes sure the permit type `AIR_LIMITS` (\"Air Limits Import\") is published with its two tables and that the built-in\nimport profile `ERA_TABLE_33` exists. Needs `Permit.EditType` and `Permit.PublishType`.",
+        "tags": [
+          "AirLimits"
+        ]
+      }
+    },
+    "/api/v1/air-limits/scope-codes": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirScopeCodesDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirScopeCodesDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirScopeCodesDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Region codes and, per region, area codes used by the NAE tree (with the names of its group nodes) - what the import wizard\noffers instead of free text. Permission `Registry.View`.",
         "tags": [
           "AirLimits"
         ]
