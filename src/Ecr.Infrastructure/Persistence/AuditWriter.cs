@@ -301,6 +301,47 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>Рядків структурних змін за один <c>INSERT</c>: 11 параметрів на рядок, ліміт SQL Server — 2100.</summary>
+    private const int MaxStructureChangesPerBatch = 150;
+
+    /// <inheritdoc />
+    public async Task WriteStructureChangesAsync(IReadOnlyList<StructureChangeRecord> changes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+
+        for (var offset = 0; offset < changes.Count; offset += MaxStructureChangesPerBatch)
+        {
+            var count = Math.Min(MaxStructureChangesPerBatch, changes.Count - offset);
+            await using var command = CreateCommand();
+            var values = new string[count];
+            for (var i = 0; i < count; i++)
+            {
+                var change = changes[offset + i];
+                ArgumentNullException.ThrowIfNull(change);
+                AddTimestamp(command, $"@t{i}", change.ChangedAt);
+                AddInt32(command, $"@v{i}", change.TemplateVersionId);
+                AddText(command, $"@et{i}", change.EntityType, EntityTypeLength);
+                AddInt32(command, $"@ei{i}", change.EntityId);
+                command.Parameters.Add($"@cc{i}", SqlDbType.TinyInt).Value = (byte)change.ChangeClass;
+                AddText(command, $"@op{i}", change.Operation, OperationLength);
+                AddText(command, $"@oj{i}", change.OldJson, UnboundedLength);
+                AddText(command, $"@nj{i}", change.NewJson, UnboundedLength);
+                AddText(command, $"@cr{i}", change.ChangeReason, UnboundedLength);
+                AddInt32(command, $"@u{i}", change.ChangedByUserId);
+                AddText(command, $"@x{i}", change.CorrelationId, CorrelationIdLength);
+                values[i] = $"(@t{i}, @v{i}, @et{i}, @ei{i}, @cc{i}, @op{i}, @oj{i}, @nj{i}, @cr{i}, @u{i}, @x{i})";
+            }
+
+            command.CommandText = $"""
+                INSERT INTO aud.StructureChange
+                    (ChangedAt, TemplateVersionId, EntityType, EntityId, ChangeClass, Operation,
+                     OldJson, NewJson, ChangeReason, ChangedByUserId, CorrelationId)
+                VALUES {string.Join(",\n", values)};
+                """;
+            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+    }
+
     /// <inheritdoc />
     public async Task WriteSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct)
     {
