@@ -954,7 +954,12 @@ public sealed class AccessDecisionService(
         var scope = await db.Documents
             .AsNoTracking()
             .Where(d => d.Id == documentId)
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.ProjectId, p.TemplateVersionId })
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new
+            {
+                d.ProjectId,
+                p.TemplateVersionId,
+                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId),
+            })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false)
             ?? throw new NotFoundException(
@@ -966,7 +971,7 @@ public sealed class AccessDecisionService(
                     ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
 
-        var snapshot = await ProjectReadSnapshotAsync(scope.ProjectId, scope.TemplateVersionId, ct).ConfigureAwait(false);
+        var snapshot = await ProjectReadSnapshotAsync(scope.ProjectId, scope.TemplateVersionId, scope.Multi, ct).ConfigureAwait(false);
 
         // ✎ D-443: межі документа з наданнями учасника саме в ньому (лише для профілю-учасника; заборона проєкту
         // перемагає — тоді межі як за ролями, тобто закриті).
@@ -984,9 +989,14 @@ public sealed class AccessDecisionService(
     /// версії не впізнав би їх (читання повертало б порожнє). Проєкт з однією версією - звичайний знімок (+1 малий запит).
     /// </summary>
     private async Task<TemplateVersionSnapshot> ProjectReadSnapshotAsync(
-        int projectId, int currentVersionId, CancellationToken ct)
+        int projectId, int currentVersionId, bool multiVersion, CancellationToken ct)
     {
         var current = await metadata.GetAsync(currentVersionId, ct).ConfigureAwait(false);
+        if (!multiVersion)
+        {
+            return current;   // ознака приїхала у вже наявному запиті документа: зайвого звернення на звичайному шляху немає
+        }
+
         var others = await db.ProjectTemplateVersions
             .AsNoTracking()
             .Where(t => t.ProjectId == projectId && t.TemplateVersionId != currentVersionId)
@@ -1041,7 +1051,13 @@ public sealed class AccessDecisionService(
         var rows = await db.Documents
             .AsNoTracking()
             .Where(d => ids.Contains(d.Id))
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.Id, d.ProjectId, p.TemplateVersionId })
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new
+            {
+                d.Id,
+                d.ProjectId,
+                p.TemplateVersionId,
+                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId),
+            })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -1054,7 +1070,7 @@ public sealed class AccessDecisionService(
         {
             if (!snapshots.TryGetValue((row.ProjectId, row.TemplateVersionId), out var snapshot))
             {
-                snapshot = await ProjectReadSnapshotAsync(row.ProjectId, row.TemplateVersionId, ct).ConfigureAwait(false);
+                snapshot = await ProjectReadSnapshotAsync(row.ProjectId, row.TemplateVersionId, row.Multi, ct).ConfigureAwait(false);
                 snapshots[(row.ProjectId, row.TemplateVersionId)] = snapshot;
             }
 
@@ -3040,12 +3056,17 @@ public sealed class AccessDecisionService(
         var scope = await db.Documents
             .AsNoTracking()
             .Where(d => d.Id == documentId)
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.ProjectId, p.TemplateVersionId })
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new
+            {
+                d.ProjectId,
+                p.TemplateVersionId,
+                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId),
+            })
             .FirstAsync(ct)
             .ConfigureAwait(false);
 
         // ✎ RPT-STABLE Part B: проєкт з кількома версіями за періодами - знімок-обʼєднання (колонки старих періодів теж відомі).
-        return await ProjectReadSnapshotAsync(scope.ProjectId, scope.TemplateVersionId, ct).ConfigureAwait(false);
+        return await ProjectReadSnapshotAsync(scope.ProjectId, scope.TemplateVersionId, scope.Multi, ct).ConfigureAwait(false);
     }
 }
 
