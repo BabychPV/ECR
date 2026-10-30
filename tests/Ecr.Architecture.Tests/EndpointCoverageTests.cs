@@ -1404,7 +1404,6 @@ public sealed partial class EndpointCoverageTests
         // ✎ Card + wizard (lane/integ-ui-permit-card) consume all but `provision`, which stays until the "prepare the type" action
         // has a screen (admin action on the permit types page; not part of N3/N5 UI).
         "POST /api/v1/air-limits/provision",
-        "GET /api/v1/air-limits/scope-codes",
 
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було

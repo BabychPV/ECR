@@ -8,7 +8,7 @@ import { TestProviders } from '@/test/render';
 import * as airApi from '@/features/permits/air/airApi';
 import * as permitsApi from '@/features/permits/api/permitsApi';
 import { permit } from '../../permit/__tests__/permitFixtures';
-import { profiles } from './airFixtures';
+import { profiles, scopeCodes } from './airFixtures';
 
 /**
  * Сторінка майстра імпорту (`/admin/permits/:id/import`): тільки для `AIR_LIMITS`; закінчений дозвіл і відсутність
@@ -24,7 +24,7 @@ vi.mock('@/shared/i18n', async (importOriginal) => ({
     ),
 }));
 vi.mock('@/features/permits/api/permitsApi', () => ({ getPermit: vi.fn() }));
-vi.mock('@/features/permits/air/airApi', () => ({ listImportProfiles: vi.fn() }));
+vi.mock('@/features/permits/air/airApi', () => ({ listImportProfiles: vi.fn(), getAirScopeCodes: vi.fn() }));
 const session = vi.hoisted(() => ({ permissions: [] as string[] }));
 vi.mock('@/shared/session/useSession', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/session/useSession')>()),
@@ -36,6 +36,7 @@ const text = (key: string): string => Catalog[key] ?? key;
 beforeEach(() => {
   session.permissions = ['Registry.View', 'Registry.EditData'];
   vi.mocked(airApi.listImportProfiles).mockResolvedValue(profiles);
+  vi.mocked(airApi.getAirScopeCodes).mockResolvedValue(scopeCodes());
 });
 afterEach(() => {
   cleanup();

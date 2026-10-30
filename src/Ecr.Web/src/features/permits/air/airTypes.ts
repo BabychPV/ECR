@@ -58,5 +58,8 @@ export interface SaveImportProfileRequest {
 }
 
 /** Вузол плоского дерева НАЕ (`GET /registries/NAE_TREE/tree`). */
+export type AirScopeCodes = Schemas['AirScopeCodesDto'];
+export type AirRegionCode = Schemas['AirRegionCodeDto'];
+
 export type NaeTreeNode = Schemas['RegistryTreeNodeDto'];
 export type NaeTree = Schemas['RegistryTreeDto'];

@@ -124,7 +124,9 @@ describe('крок 1', () => {
     expect(fileStepProblem(EmptyDraft)).toBe('file');
     expect(fileStepProblem({ ...base, file: xlsx('a.xls') })).toBe('extension');
     expect(fileStepProblem({ ...base, region: '  ' })).toBe('region');
-    expect(fileStepProblem(base)).toBeNull();
+    expect(fileStepProblem({ ...base, area: '' })).toBe('area');
+    expect(fileStepProblem({ ...base, area: '-' })).toBeNull(); // «-» - регіон без ділянок, вибір зі списку scope-codes
+    expect(fileStepProblem({ ...base, area: 'OFFSHORE' })).toBeNull();
   });
 
   it('нормалізація ділянки', () => {
