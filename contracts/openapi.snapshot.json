@@ -7946,6 +7946,10 @@
             "$ref": "#/components/schemas/FillDown",
             "description": "How an empty cell is filled."
           },
+          "informational": {
+            "description": "Read and validated but not stored: left out of the comparison with stored rows (e.g. a name the registry owns).",
+            "type": "boolean"
+          },
           "level": {
             "$ref": "#/components/schemas/ImportLevel",
             "description": "Parent (source) or child (substance) level."

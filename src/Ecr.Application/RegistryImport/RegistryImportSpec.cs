@@ -190,6 +190,9 @@ public sealed class ImportFieldSpec
     /// <summary>Every row must carry a value.</summary>
     public bool NonEmpty { get; init; }
 
+    /// <summary>Read and validated but not stored: left out of the comparison with stored rows (e.g. a name the registry owns).</summary>
+    public bool Informational { get; init; }
+
     /// <summary>An empty value is allowed but reported as a per-row WARNING in the preview (not an error, not silent).</summary>
     public bool WarnIfEmpty { get; init; }
 
