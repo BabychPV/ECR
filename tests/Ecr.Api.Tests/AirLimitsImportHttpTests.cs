@@ -655,8 +655,9 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         Assert.Equal(HttpStatusCode.Forbidden, (await nobody.GetAsync(url)).StatusCode);
 
         var seeded = await ReadAsync(app, await reader.GetAsync(url));
+        // The REGION group node carries RegionCode without AreaCode: it must not add a "no area" choice to a region that has areas.
         var atyrau = Assert.Single(seeded.GetProperty("regions").EnumerateArray(), r => r.GetProperty("code").GetString() == "ATYRAU");
-        Assert.Contains(atyrau.GetProperty("areas").EnumerateArray(), a => a.GetProperty("code").GetString() == "OFFSHORE");
+        Assert.Equal("OFFSHORE", Assert.Single(atyrau.GetProperty("areas").EnumerateArray()).GetProperty("code").GetString());
 
         var region = NewRegion();
         var permitId = await NewPermitAsync(admin, app);
@@ -666,6 +667,121 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         var after = await ReadAsync(app, await reader.GetAsync(url));
         var created = Assert.Single(after.GetProperty("regions").EnumerateArray(), r => r.GetProperty("code").GetString() == region);
         Assert.Equal("ONSHORE", Assert.Single(created.GetProperty("areas").EnumerateArray()).GetProperty("code").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task ScopeCodes__a_region_node_without_nae_is_listed_with_its_area_nodes()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+        await using var db = new EcrDbContext(Options());
+        var defId = (await db.RegistryDefs.AsNoTracking().SingleAsync(d => d.Code == NaeTreeSchema.RegistryCode)).Id;
+        var region = NewRegion();
+
+        async Task<long> NodeAsync(string code, string level, long? parent, Dictionary<string, object?> values)
+            => (await ReadAsync(app, await client.PostAsJsonAsync(
+                new Uri($"/api/v1/registries/{NaeTreeSchema.RegistryCode}/entries", UriKind.Relative),
+                new { id = (long?)null, registryDefId = defId, code, display = new { values = new Dictionary<string, string> { ["en"] = $"Name {code}" } }, parentEntryId = parent, levelCode = level, values })))
+                .GetProperty("id").GetInt64();
+
+        var url = new Uri("/api/v1/air-limits/scope-codes", UriKind.Relative);
+        var regionId = await NodeAsync($"R_{region}", NaeTreeSchema.LevelRegion, null, []);
+
+        // A brand-new region with no NAE under it can be picked; it has no area yet, so its only choice is "no area".
+        var bare = Assert.Single((await ReadAsync(app, await client.GetAsync(url))).GetProperty("regions").EnumerateArray(), r => r.GetProperty("code").GetString() == region);
+        Assert.Equal($"Name R_{region}", bare.GetProperty("name").GetString());
+        Assert.Equal(AirLimitsSchema.NoArea, Assert.Single(bare.GetProperty("areas").EnumerateArray()).GetProperty("code").GetString());
+
+        // Its AREA nodes are its areas (named), and the "no area" choice disappears.
+        await NodeAsync($"A_{region}_ONSHORE", NaeTreeSchema.LevelArea, regionId, []);
+        var withArea = Assert.Single((await ReadAsync(app, await client.GetAsync(url))).GetProperty("regions").EnumerateArray(), r => r.GetProperty("code").GetString() == region);
+        var area = Assert.Single(withArea.GetProperty("areas").EnumerateArray());
+        Assert.Equal(("ONSHORE", $"Name A_{region}_ONSHORE"), (area.GetProperty("code").GetString(), area.GetProperty("name").GetString()));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Provision__a_missing_shared_registry_is_named_before_anything_is_written_and_a_retry_succeeds()
+    {
+        await PrepareAsync();
+        await using var db = new EcrDbContext(Options());
+        var before = await db.PermitTypeDefs.AsNoTracking().Where(p => p.Code == AirLimitsSchema.TypeCode).Select(p => new { p.Id, p.Version, p.Status }).ToListAsync();
+
+        var missing = $"NO_SUBST_{Guid.NewGuid():N}"[..20].ToUpperInvariant();
+        using (var broken = new EcrApiFactory(sql) { ExtraServices = s => s.AddSingleton(new AirLimitsSettings(NaeTreeSchema.RegistryCode, missing)) })
+        {
+            using var client = await SignedInAsync(broken, Admin);
+            using var refused = await client.PostAsync(new Uri("/api/v1/air-limits/provision", UriKind.Relative), null);
+            var text = await refused.Content.ReadAsStringAsync();
+            Assert.True(refused.StatusCode == HttpStatusCode.UnprocessableEntity, $"{(int)refused.StatusCode}: {text}");
+            Assert.Contains("err.ECR-PRM-0422.sharedRegistryUnknown", text, StringComparison.Ordinal);
+            Assert.Contains(missing, text, StringComparison.Ordinal);
+        }
+
+        // Nothing changed: the same type rows (no new draft, no new version).
+        var after = await db.PermitTypeDefs.AsNoTracking().Where(p => p.Code == AirLimitsSchema.TypeCode).Select(p => new { p.Id, p.Version, p.Status }).ToListAsync();
+        Assert.Equal(before, after);
+
+        // With the prerequisites in place the same call succeeds and stays idempotent.
+        using var app = new EcrApiFactory(sql);
+        using var admin = await SignedInAsync(app, Admin);
+        var report = await ReadAsync(app, await admin.PostAsync(new Uri("/api/v1/air-limits/provision", UriKind.Relative), null));
+        Assert.True(report.GetProperty("published").GetBoolean(), report.ToString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task NaeNodes_left_by_an_import_are_removable_through_the_existing_delete_path_once_their_rows_are_gone()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+        var region = NewRegion();
+        var permitId = await NewPermitAsync(client, app);
+        var small = Small(Synthetic.Bytes, 40);
+        await ApplyBytesAsync(app, client, permitId, small, new { region, area = "OFFSHORE", resolutions = await ResolveAsync(app, client, permitId, region, "OFFSHORE", small) });
+        var card = await CardAsync(app, client, permitId);
+        var source = card.GetProperty("sources")[0];
+        var nodeId = source.GetProperty("naeEntryId").GetInt64();
+        var nodeUrl = new Uri($"/api/v1/registries/{NaeTreeSchema.RegistryCode}/entries/{nodeId}", UriKind.Relative);
+
+        // "Undeletable": the node is still referenced by the permit's AIR_SOURCES row - 409 entryReferenced, and where-used names the permit.
+        using (var blocked = await client.DeleteAsync(nodeUrl))
+        {
+            var text = await blocked.Content.ReadAsStringAsync();
+            Assert.True(blocked.StatusCode == HttpStatusCode.Conflict, $"{(int)blocked.StatusCode}: {text}");
+            Assert.Contains("err.ECR-REG-0409.entryReferenced", text, StringComparison.Ordinal);
+        }
+
+        var refs = await ReadAsync(app, await client.GetAsync(new Uri($"/api/v1/registries/{NaeTreeSchema.RegistryCode}/entries/{nodeId}/references", UriKind.Relative)));
+        Assert.Equal(permitId, Assert.Single(refs.GetProperty("items").EnumerateArray()).GetProperty("permitId").GetInt64());
+
+        // Remove the referencing rows through the ordinary delete (substances, then the source): the node then deletes cleanly.
+        foreach (var substance in source.GetProperty("substances").EnumerateArray())
+        {
+            using var gone = await client.DeleteAsync(new Uri($"/api/v1/registries/{AirLimitsSchema.SubstancesRegistry}/entries/{substance.GetProperty("id").GetInt64()}", UriKind.Relative));
+            Assert.True(gone.IsSuccessStatusCode, await gone.Content.ReadAsStringAsync());
+        }
+
+        using (var gone = await client.DeleteAsync(new Uri($"/api/v1/registries/{AirLimitsSchema.SourcesRegistry}/entries/{source.GetProperty("id").GetInt64()}", UriKind.Relative)))
+        {
+            Assert.True(gone.IsSuccessStatusCode, await gone.Content.ReadAsStringAsync());
+        }
+
+        using (var deleted = await client.DeleteAsync(nodeUrl))
+        {
+            Assert.True(deleted.IsSuccessStatusCode, $"{(int)deleted.StatusCode}: {await deleted.Content.ReadAsStringAsync()}");
+        }
+
+        await using var db = new EcrDbContext(Options());
+        var node = await db.RegistryEntries.AsNoTracking().SingleAsync(e => e.Id == nodeId);
+        Assert.True(node.IsDeleted);
+        Assert.All(await db.RegistryEntryKeys.AsNoTracking().Where(k => k.RegistryEntryId == nodeId).ToListAsync(), k => Assert.False(k.IsLive));
     }
 
     [Fact]
