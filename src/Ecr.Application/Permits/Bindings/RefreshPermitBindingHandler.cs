@@ -183,7 +183,7 @@ public sealed class RefreshPermitBindingHandler(
     {
         // ⛔ L6-02: структура документа - першою, до блокування аркуша (як у створенні рядка).
         DocumentStructure.EnsureUnchanged(
-            await sheetGate.EnterStructureAsync(instance.DocumentId, exclusive: false, ct).ConfigureAwait(false),
+            await sheetGate.EnterStructureForPeriodAsync(instance.DocumentId, exclusive: false, instance.PeriodKey, ct).ConfigureAwait(false),
             instance.TemplateVersionId,
             instance.DocumentId);
 

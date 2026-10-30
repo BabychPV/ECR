@@ -110,6 +110,19 @@ public interface ISheetEditGate
     public Task<int?> EnterStructureAsync(long documentId, bool exclusive, CancellationToken ct);
 
     /// <summary>
+    /// Те саме, але повертає версію шаблону, що діє за ПЕРІОД <paramref name="periodKey"/> (шкала версій проєкту, RPT-STABLE
+    /// Part B), а не чинну версію проєкту: писар порівнює її з версією екземпляра періоду. <c>null</c> період -
+    /// чинна версія проєкту (як у трьохаргументному виклику).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="exclusive">Виняткове блокування.</param>
+    /// <param name="periodKey">Період запису; <c>null</c> - без періоду.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>⚠ Типова реалізація (обгортки у тестах) ігнорує період.</remarks>
+    public Task<int?> EnterStructureForPeriodAsync(long documentId, bool exclusive, int? periodKey, CancellationToken ct)
+        => EnterStructureAsync(documentId, exclusive, ct);
+
+    /// <summary>
     /// Блокування ШАПКИ документа (L6-06): виняткове — правка шапки, спільне —
     /// подання аркуша (воно валідує шапку й кладе її у зріз).
     /// </summary>

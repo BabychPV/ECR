@@ -944,6 +944,42 @@ public sealed record CellChangeSet(
 ```
 
 ```csharp
+// src/Ecr.Application/Ports/IProjectVersionTimeline.cs (RPT-STABLE Part B)
+
+namespace Ecr.Application.Ports;
+
+/// <summary>
+/// Часова шкала версій шаблону проєкту: ЄДИНА відповідь «яка версія діє за період».
+/// Рядок шкали — <c>doc.ProjectTemplateVersion(ProjectId, FromPeriodKey, TemplateVersionId)</c>;
+/// версія періоду = найбільший <c>FromPeriodKey ≤ periodKey</c> (SQL-відповідник — <c>doc.fn_VersionOf</c>).
+/// <c>Project.TemplateVersionId</c> — «чинна/остання» версія для НОВИХ періодів.
+/// </summary>
+public interface IProjectVersionTimeline
+{
+    Task<int> VersionOfAsync(int projectId, int periodKey, CancellationToken ct);
+    Task<int> VersionOfFreshAsync(int projectId, int periodKey, CancellationToken ct);
+    Task<IReadOnlyList<TimelineEntry>> GetAsync(int projectId, CancellationToken ct);
+    Task<int?> CurrentVersionAsync(int projectId, CancellationToken ct);
+    void Invalidate(int projectId);
+}
+```
+
+```csharp
+// src/Ecr.Application/Ports/IColumnRenameMap.cs (RPT-STABLE Part B)
+
+namespace Ecr.Application.Ports;
+
+/// <summary>
+/// Збережена мапа перейменування колонок між версіями шаблону (<c>cfg.ColumnRename</c>): псевдонім для вʼюх SSRS
+/// і міжперіодних формул на межі версій. Пишеться переносом версії з <c>tableRenames</c>.
+/// </summary>
+public interface IColumnRenameMap
+{
+    Task<(IReadOnlyDictionary<int, int> Forward, IReadOnlyDictionary<int, int> Backward)> GetAsync(CancellationToken ct);
+}
+```
+
+```csharp
 // src/Ecr.Application/Ports/IMetadataCache.cs
 
 using Ecr.Domain.Entities.Configuration;
@@ -4099,6 +4135,12 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-SCHM-0422.migrateLookupNotMapped` | 422 | мапа Lookup не покриває всі вжиті значення шапки придатним записом (запису немає в мапі, або `to` відсутній/з чужого довідника/неактивний/видалений/нечинний у вікні проєкту; `refusals` має `lookupValuesNotMapped`); нічого не записано; звіт несе id записів без відповідника (`lookupRemapReport[].unmappedEntryIds`, `targetNotUsable`) |
 | `err.ECR-SCHM-0422.migrateLookupLockedDocuments` | 422 | мапа Lookup переписала б шапку документів із поданими/затвердженими аркушами без згоди (`allowLockedDocuments` не `true`; `refusals` має `lookupLockedDocuments`; `details.lockedDocumentCount` — кількість документів); нічого не записано. Рішення людини 21.10 («давай А») |
 | `err.ECR-SCHM-0422.migrateBackupRequired` | 422 | великий перенос (від 500 000 значень, `MigrateDocumentVersionHandler.BackupConfirmationThreshold`) без `backupConfirmation` у запиті (шлях і/або час резервної копії, ≤ 500 символів); `details.transferredValues`, `details.threshold`; нічого не записано, маркер не ставиться. Значення пишеться в журнал безпеки (`DocumentVersionMigrationStarted`, `DocumentVersionMigrated`). Рішення людини 21.10 («б») |
+| `err.ECR-SCHM-0422.migrateFromMonthDisabled` | 422 | RPT-STABLE Part B: `range = FromMonth`, а прапор `Documents:VersionMigration:FromMonthEnabled` = `false` (типово до B2); стан прапора віддає `GET /documents/{id}/migrate-version` (`fromMonthEnabled`) |
+| `err.ECR-SCHM-0422.migrateFromMonthRequired` | 422 | RPT-STABLE Part B: `range = FromMonth` без `fromPeriodKey`; нічого не змінено |
+| `err.ECR-SCHM-0422.migrateFromMonthInvalid` | 422 | `fromPeriodKey` не є періодом проєкту (`details.periodKey`); нічого не змінено |
+| `err.ECR-SCHM-0422.migrateFromMonthBeforeSegment` | 422 | `fromPeriodKey` раніше початку останнього сегмента шкали версій проєкту (`details.periodKey`, `details.segmentFrom`) |
+| `err.ECR-SCHM-0422.migrateWholeProjectMultiVersion` | 422 | `range = WholeProject`, але шкала проєкту має кілька сегментів — використати `FromMonth` |
+| `err.ECR-SCHM-0422.migrateTargetNotPublished` | 422 | цільова версія — чернетка (рядок шкали не може вказувати на неопубліковану версію) |
 | `err.ECR-SCHM-0422.migrateResumeMismatch` | 422 | перенос проєкту обірвано (маркер `migratingTo` у `doc.Project.ExternalSettingsJson`); повтор іде з ІНШОЮ мапою (колонки, рядки, таблиці, аркуші, шапка, нові рядки, Lookup), ніж збережена (відбиток `planHash`); нічого не змінено. Ручне зняття маркера — лише DBA, SQL у коміті переносу |
 | `err.ECR-SCHM-0422.migrateBindingsNotMapped` | 422 | D-13: активна прив'язка виходу методології (`cfg.CalculationBinding`) до колонки вихідної версії не має відповідника в цільовій — колонки там немає або на ній нема активної прив'язки тієї ж методології й виходу (`refusals` має `bindingsNotMapped`); клон версії шаблону тепер копіює прив'язки сам |
 | `err.ECR-SCHM-0422.migrateMethodologyKeysNotMapped` | 422 | D1: методологія, прив'язана до цільової версії, має опубліковану версію, чиї правила (`MatchJson`) або обов'язкові входи посилаються на колонки ІНШОЇ версії того самого шаблону (`refusals` має `methodologyKeysNotMapped`); 422 несе `details.methodologyKeys` — до 20 підписів «методологія версія правило\|вхід: аркуш.таблиця.колонка»; сухий прогін дає лише `canApply=false`; публікацію шаблону не блокує |
@@ -4268,6 +4310,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/projects/{id}/current-period` | `Period.Configure` | 3 |
 | `PUT` | `/api/v1/projects/{id}/timezone` | `Project.Manage` | 8 |
 | `GET` | `/api/v1/projects/{id}/periods` | `Document.View` | 3 |
+| `GET` | `/api/v1/projects/{id}/template-versions` | `Document.View` | 3 |
 | `POST` | `/api/v1/projects/{id}/recalculate` | `Calculation.Recalculate` | 3 |
 | `GET` | `/api/v1/projects/{id}/recalculation-approvals` | `Calculation.Recalculate` | 4 |
 | `POST` | `/api/v1/projects/{id}/recalculation-approvals` | `Calculation.Recalculate` | 4 |

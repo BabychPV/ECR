@@ -94,6 +94,17 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// мап не було. Більше нуля без <c>allowLockedDocuments</c> — відмова <c>lookupLockedDocuments</c> (<c>ECR-SCHM-0422</c>).
 /// ⛔ Лише кількість.
 /// </param>
+/// <param name="Range">RPT-STABLE Part B: обсяг переносу, як у запиті (<c>WholeProject</c> / <c>FromMonth</c>).</param>
+/// <param name="FromPeriodKey">Запитаний період X (<c>FromMonth</c>); <c>null</c> для <c>WholeProject</c>.</param>
+/// <param name="EffectiveFromPeriodKey">
+/// Період, з якого перенос реально діє: для <c>FromMonth</c> збігається з X, окрім випадку «рік-сімейство Q-17» —
+/// тоді січень року X (див. <paramref name="Warnings"/>); для <c>WholeProject</c> — перший період проєкту; <c>null</c>,
+/// якщо в проєкті ще немає періодів.
+/// </param>
+/// <param name="Warnings">
+/// Попередження (не відмови): <c>effectiveFromShiftedToJanuary</c> (ключ <c>documents.migrateWarnEffectiveFromJanuary</c>,
+/// параметри <c>requested</c>, <c>effective</c>); <c>null</c> — немає.
+/// </param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
     int ProjectId,
@@ -129,7 +140,11 @@ public sealed record DocumentVersionMigrationDto(
     bool? GuardedOverwrittenItemsTruncated = null,
     IReadOnlyList<LookupRemapReportItem>? LookupRemapReport = null,
     long? LookupRemapped = null,
-    int? LockedDocumentCount = null);
+    int? LockedDocumentCount = null,
+    VersionMigrationRange? Range = null,
+    int? FromPeriodKey = null,
+    int? EffectiveFromPeriodKey = null,
+    IReadOnlyList<VersionMigrationWarning>? Warnings = null);
 
 /// <summary>Комірка, значення якої перезапише нова комірочна формула (ACC-OW).</summary>
 /// <param name="SheetCode">Код аркуша вихідної версії.</param>
@@ -153,11 +168,16 @@ public sealed record LockedSheetItem(long DocumentId, string SheetCode, int Peri
 /// <param name="CurrentVersionId">Поточна версія проєкту.</param>
 /// <param name="CurrentVersion">Її номер.</param>
 /// <param name="Targets">Опубліковані версії того самого шаблону, крім поточної, від новішої.</param>
+/// <param name="FromMonthEnabled">
+/// RPT-STABLE Part B: чи доступний перенос «з місяця» (прапор <c>Documents:VersionMigration:FromMonthEnabled</c>,
+/// типово <c>false</c>); <c>false</c> - діалог показує лише «увесь проєкт».
+/// </param>
 public sealed record DocumentVersionMigrationTargetsDto(
     int ProjectId,
     int CurrentVersionId,
     string CurrentVersion,
-    IReadOnlyList<TemplateVersionSummary> Targets);
+    IReadOnlyList<TemplateVersionSummary> Targets,
+    bool FromMonthEnabled = false);
 
 /// <summary>
 /// Перенос документа на нову версію шаблону — явна операція з попереднім
@@ -196,8 +216,27 @@ public sealed class MigrateDocumentVersionHandler(
 
     // ⛔ PRMG: ціль Lookup-поля може бути ГРУПОЮ типів дозволів; порівняння цілі - лише через `LookupTargetMatcher`.
     // `null` (прямий конструктор у тестах) - груп немає.
-    Permits.Groups.ILookupTargetResolver? groups = null)
+    Permits.Groups.ILookupTargetResolver? groups = null,
+
+    // ✎ RPT-STABLE Part B: шкала версій проєкту. `null` (прямий конструктор у тестах) - шкали немає: перенос усього проєкту.
+    IProjectVersionTimeline? timeline = null,
+
+    // ✎ RPT-STABLE Part B: прапор «з місяця». `null` (прямий конструктор у тестах) - вимкнено, як і типова конфігурація.
+    VersionMigrationOptions? migrationOptions = null)
 {
+    private readonly bool _fromMonthEnabled = migrationOptions?.FromMonthEnabled ?? false;
+
+    /// <summary>Відмова, коли запит просить «з місяця», а прапор вимкнено (до B2).</summary>
+    private void EnsureRangeAllowed()
+    {
+        if (Range == VersionMigrationRange.FromMonth && !_fromMonthEnabled)
+        {
+            throw RangeError(
+                "err.ECR-SCHM-0422.migrateFromMonthDisabled",
+                $"Перенос «з місяця» вимкнено ({VersionMigrationOptions.FromMonthEnabledKey} = false): доступний лише перенос усього проєкту.");
+        }
+    }
+
     /// <summary>
     /// Скільки активна (<c>Queued</c>/<c>Running</c>) задача переносу може не оновлюватися, щоб ще вважатися
     /// живою: залишок від краху процесу не мусить назавжди блокувати новий перенос проєкту.
@@ -237,6 +276,15 @@ public sealed class MigrateDocumentVersionHandler(
     /// виклику; не параметр перевантажень, щоб не множити їх (тести й інші виклики незмінні).
     /// </summary>
     public string? BackupConfirmation { get; set; }
+
+    /// <summary>
+    /// RPT-STABLE Part B: обсяг переносу (увесь проєкт / з місяця). Виставляє той, хто викликає (контролер / фонова задача)
+    /// ДО виклику — тим самим прийомом, що й <see cref="BackupConfirmation"/>, щоб не множити перевантаження.
+    /// </summary>
+    public VersionMigrationRange Range { get; set; } = VersionMigrationRange.WholeProject;
+
+    /// <summary>Запитаний період X для <see cref="VersionMigrationRange.FromMonth"/>.</summary>
+    public int? FromPeriodKey { get; set; }
 
     /// <summary>Подія журналу безпеки: значення Lookup шапки документа перенесено на запис нового довідника.</summary>
     public const string LookupRemapEventType = "DocumentHeaderLookupRemapped";
@@ -388,6 +436,7 @@ public sealed class MigrateDocumentVersionHandler(
         var request = await ResolveAsync(documentId, targetVersionId, tolerateSame: false, ct).ConfigureAwait(false);
         VersionMigrationRenames.Validate(renames);
         VersionMigrationLookupRemaps.Validate(lookupRemaps);
+        EnsureRangeAllowed();
 
         if (dryRun)
         {
@@ -495,6 +544,7 @@ public sealed class MigrateDocumentVersionHandler(
         var request = await ResolveAsync(documentId, targetVersionId, tolerateSame: false, ct).ConfigureAwait(false);
         VersionMigrationRenames.Validate(renames);
         VersionMigrationLookupRemaps.Validate(lookupRemaps);
+        EnsureRangeAllowed();
 
         if (request.Archived)
         {
@@ -560,7 +610,9 @@ public sealed class MigrateDocumentVersionHandler(
                     acceptGuardedOverwrite,
                     lookupRemaps is { Count: > 0 } ? lookupRemaps : null,
                     allowLockedDocuments,
-                    BackupConfirmation),
+                    BackupConfirmation,
+                    Range.ToString(),
+                    FromPeriodKey),
                 ct,
                 currentUser.UserId)
             .ConfigureAwait(false);
@@ -1049,6 +1101,9 @@ public sealed class MigrateDocumentVersionHandler(
         // груп); збій або переповнення переліку — скидання всього кешу, не 500.
         GrantProfileInvalidation.Run(profileCache, log, grantedUsers);
 
+        // RPT-STABLE Part B: шкала версій змінилась - скидаємо кеш (інші вузли побачать за TTL; писарі читають свіжо).
+        timeline?.Invalidate(projectId);
+
         // ⛔ LP-41: нова/змінена формула без перерахунку лишається порожньою до явної дії людини (інкрементний
         // шлях не бере формул поза зміненими комірками). Один coalesced перерахунок проєкту — лише коли план
         // щось додав чи змінив і лише ПІСЛЯ коміту; сухий прогін і перенос без змін формул нічого не ставлять.
@@ -1132,8 +1187,101 @@ public sealed class MigrateDocumentVersionHandler(
             .OrderByDescending(v => v.Id)
             .ToList();
 
-        return new DocumentVersionMigrationTargetsDto(projectId, current.Id, current.Version, targets);
+        return new DocumentVersionMigrationTargetsDto(projectId, current.Id, current.Version, targets, _fromMonthEnabled);
     }
+
+    /// <summary>Розв'язаний обсяг переносу: межа для сховища (0 — увесь проєкт), ефективний початок, попередження.</summary>
+    private sealed record RangeInfo(int FromPeriodKey, int? Effective, IReadOnlyList<VersionMigrationWarning>? Warnings);
+
+    private static BusinessRuleException RangeError(string key, string message, params (string Name, int Value)[] details)
+    {
+        var map = new Dictionary<string, object?> { ["messageKey"] = key };
+        foreach (var (name, value) in details)
+        {
+            map[name] = value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return new BusinessRuleException(ErrorCodes.GuardedChangeWithoutStrategy, message, map);
+    }
+
+    /// <summary>
+    /// RPT-STABLE Part B: обсяг переносу. <c>WholeProject</c> можливий лише при одному сегменті шкали; <c>FromMonth</c> -
+    /// з періоду X проєкту, не раніше початку останнього сегмента; для проєкту з таблицею «місяці в колонках» (Q-17) X
+    /// не січня зсувається на січень цього року (рішення людини 30.10) - попередження.
+    /// </summary>
+    private async Task<RangeInfo> ResolveRangeAsync(
+        int projectId, TemplateVersion target, TemplateVersionSnapshot from, TemplateVersionSnapshot to, CancellationToken ct)
+    {
+        if (target.Status != TemplateVersionStatus.Published)
+        {
+            throw RangeError("err.ECR-SCHM-0422.migrateTargetNotPublished", $"Цільова версія {target.Id} не опублікована.");
+        }
+
+        var periodKeys = await store.ListPeriodKeysAsync(projectId, ct).ConfigureAwait(false);
+        timeline?.Invalidate(projectId);   // план читає шкалу свіжо: вона може змінитись іншим вузлом
+        var entries = timeline is null
+            ? []
+            : await timeline.GetAsync(projectId, ct).ConfigureAwait(false);
+        int? first = periodKeys.Count == 0 ? null : periodKeys[0];
+
+        if (Range == VersionMigrationRange.WholeProject)
+        {
+            if (entries.Count > 1)
+            {
+                throw RangeError(
+                    "err.ECR-SCHM-0422.migrateWholeProjectMultiVersion",
+                    $"Проєкт {projectId} має кілька версій шаблону за періодами: перенос усього проєкту недоступний.");
+            }
+
+            return new RangeInfo(0, first, null);
+        }
+
+        if (FromPeriodKey is not { } requested)
+        {
+            throw RangeError("err.ECR-SCHM-0422.migrateFromMonthRequired", "Для переносу «з місяця» потрібен fromPeriodKey.");
+        }
+
+        if (periodKeys.Count == 0 || !periodKeys.Contains(requested))
+        {
+            throw RangeError("err.ECR-SCHM-0422.migrateFromMonthInvalid", $"Період {requested} не належить проєкту {projectId}.", ("periodKey", requested));
+        }
+
+        var hasMonths = from.Sheets.Concat(to.Sheets).SelectMany(s => s.Tables)
+            .Any(t => !t.IsDeleted && t.LayoutKind == TableLayoutKind.MonthsInColumns);
+        var (effective, shifted) = Ecr.Domain.ValueObjects.ProjectVersionTimeline.EffectiveFrom(requested, hasMonths);
+
+        // Січень року X міг бути до початку проєкту: беремо перший наявний період не раніше за нього.
+        effective = periodKeys.First(p => p >= effective);
+
+        var segmentFrom = entries.Count == 0 ? 0 : entries[^1].FromPeriodKey;
+        if (effective < segmentFrom)
+        {
+            throw RangeError(
+                "err.ECR-SCHM-0422.migrateFromMonthBeforeSegment",
+                $"Період {requested} раніше початку чинного сегмента версій ({segmentFrom}).",
+                ("periodKey", requested), ("segmentFrom", segmentFrom));
+        }
+
+        List<VersionMigrationWarning>? warnings = null;
+        if (shifted)
+        {
+            warnings =
+            [
+                new VersionMigrationWarning("effectiveFromShiftedToJanuary", "documents.migrateWarnEffectiveFromJanuary", effective),
+            ];
+        }
+
+        // Початок = перший період проєкту дорівнює «увесь проєкт» для сховища (нема періодів до X).
+        return new RangeInfo(effective <= periodKeys[0] ? 0 : effective, effective, warnings);
+    }
+
+    private static IReadOnlyList<(int FromColumnDefId, int ToColumnDefId)> RenamePairs(
+        VersionMigrationPlan plan, TemplateVersionSnapshot from, TemplateVersionSnapshot to)
+        => [.. plan.Columns
+            .Where(c => from.ColumnsById.TryGetValue(c.SourceColumnDefId, out var f)
+                        && to.ColumnsById.TryGetValue(c.TargetColumnDefId, out var t)
+                        && !string.Equals(f.Code, t.Code, StringComparison.Ordinal))
+            .Select(c => (c.SourceColumnDefId, c.TargetColumnDefId))];
 
     /// <summary>План переносу разом зі звітом, мапінгами й значеннями шапки, які читав аудит мап Lookup.</summary>
     private sealed record PlannedMigration(
@@ -1158,12 +1306,15 @@ public sealed class MigrateDocumentVersionHandler(
         var source = await versions.GetAsync(sourceVersionId, ct).ConfigureAwait(false);
         var from = await metadata.GetAsync(sourceVersionId, ct).ConfigureAwait(false);
         var to = await metadata.GetAsync(target.Id, ct).ConfigureAwait(false);
-        var scope = await store.ReadScopeAsync(projectId, ct).ConfigureAwait(false);
+        EnsureRangeAllowed();   // також для фонової задачі: прапор могли вимкнути між постановкою і стартом
+        var range = await ResolveRangeAsync(projectId, target, from, to, ct).ConfigureAwait(false);
+        var scope = await store.ReadScopeAsync(projectId, range.FromPeriodKey, ct).ConfigureAwait(false);
 
         // Без мап нових читань немає: шлях і кількість запитів як до мап Lookup.
         var lookup = await PrepareLookupAsync(projectId, from, to, lookupRemaps, ct).ConfigureAwait(false);
 
         var plan = VersionMigrationPlanner.Plan(from, to, scope.Cells, scope.HeaderValues, renames, lookup.Input);
+        plan = plan with { FromPeriodKey = range.FromPeriodKey, ColumnRenames = RenamePairs(plan, from, to) };
 
         // ACC-OW: прапор знімає guardedWithData лише для нової комірочної формули на комірці зі значенням.
         var refusals = plan.RefusalsFor(mode, acceptGuardedOverwrite).ToList();
@@ -1319,7 +1470,11 @@ public sealed class MigrateDocumentVersionHandler(
                 ? null
                 : [.. plan.LookupReport.Concat(lookup.NotApplied).OrderBy(i => i.Target.Code, StringComparer.Ordinal)],
             LookupRemapped: lookup.Input is null && lookup.NotApplied.Count == 0 ? null : plan.LookupRemappedValues,
-            LockedDocumentCount: lockedDocumentCount);
+            LockedDocumentCount: lockedDocumentCount,
+            Range: Range,
+            FromPeriodKey: Range == VersionMigrationRange.FromMonth ? FromPeriodKey : null,
+            EffectiveFromPeriodKey: range.Effective,
+            Warnings: range.Warnings);
 
         return new PlannedMigration(
             dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds }, lookup.Rows);

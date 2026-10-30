@@ -773,6 +773,9 @@ BEGIN
     DECLARE @ci TABLE (ColId int NOT NULL PRIMARY KEY, Code nvarchar(64) NOT NULL, DataType tinyint NOT NULL, Fam tinyint NOT NULL,
                        IsMonth bit NOT NULL, MonthNo tinyint NULL, Ord bigint NOT NULL);
     DECLARE @cols TABLE (Seq int IDENTITY(1, 1) PRIMARY KEY, Code nvarchar(64) NOT NULL, FirstOrd bigint NOT NULL);
+    -- RPT-STABLE Part B: code aliases of one group from the persisted rename map (cfg.ColumnRename): a renamed column is
+    -- exposed under BOTH names, each reading the data of every id of the whole alias class (transitive closure).
+    DECLARE @alias TABLE (Code nvarchar(64) NOT NULL, Other nvarchar(64) NOT NULL, PRIMARY KEY (Code, Other));
 
     DECLARE cur_views CURSOR LOCAL FAST_FORWARD FOR
         SELECT GroupId, Header, ViewName FROM @groups ORDER BY GroupId;
@@ -809,6 +812,18 @@ BEGIN
          WHERE x.GroupId = @g AND cd.IsDeleted = 0;
         INSERT INTO @cols (Code, FirstOrd) SELECT Code, MIN(Ord) FROM @ci GROUP BY Code ORDER BY MIN(Ord);
 
+        DELETE FROM @alias;
+        INSERT INTO @alias (Code, Other)
+        SELECT DISTINCT a.Code, b.Code FROM cfg.ColumnRename AS r
+          JOIN @ci AS a ON a.ColId = r.FromColumnDefId JOIN @ci AS b ON b.ColId = r.ToColumnDefId WHERE a.Code <> b.Code
+        UNION
+        SELECT DISTINCT b.Code, a.Code FROM cfg.ColumnRename AS r
+          JOIN @ci AS a ON a.ColId = r.FromColumnDefId JOIN @ci AS b ON b.ColId = r.ToColumnDefId WHERE a.Code <> b.Code;
+        WHILE @@ROWCOUNT > 0
+            INSERT INTO @alias (Code, Other)
+            SELECT DISTINCT x.Code, y.Other FROM @alias AS x JOIN @alias AS y ON y.Code = x.Other
+             WHERE x.Code <> y.Other AND NOT EXISTS (SELECT 1 FROM @alias AS z WHERE z.Code = x.Code AND z.Other = y.Other);
+
         SET @seq = (SELECT MIN(Seq) FROM @cols);
         WHILE @seq IS NOT NULL
         BEGIN
@@ -818,7 +833,8 @@ BEGIN
             SELECT TOP (1) @colType = DataType, @isMonth = IsMonth, @monthNo = MonthNo
               FROM @ci WHERE Code = @colCode ORDER BY Ord DESC;
             SET @conflict = CASE WHEN (SELECT COUNT(DISTINCT Fam) FROM @ci WHERE Code = @colCode) > 1 THEN 1 ELSE 0 END;
-            SET @ids = STUFF((SELECT N',' + CAST(ColId AS nvarchar(10)) FROM @ci WHERE Code = @colCode ORDER BY ColId
+            SET @ids = STUFF((SELECT N',' + CAST(ColId AS nvarchar(10)) FROM @ci
+                               WHERE Code = @colCode OR Code IN (SELECT Other FROM @alias WHERE Code = @colCode) ORDER BY ColId
                               FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
             SET @pred = CASE WHEN CHARINDEX(N',', @ids) > 0 THEN N'x.ColumnDefId IN (' + @ids + N')' ELSE N'x.ColumnDefId = ' + @ids END;
             SET @raw1 = CASE @colType WHEN 0 THEN N'ValueString' WHEN 3 THEN N'ValueBool' WHEN 4 THEN N'ValueDate'

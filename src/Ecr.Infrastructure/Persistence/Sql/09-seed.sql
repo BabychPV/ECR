@@ -9221,6 +9221,19 @@ USING (VALUES
     ,(N'documents.migrateBackupHint', N'en', N'This migration moves {count} values (the limit without a backup confirmation is {threshold}). Take a database backup first and enter its path and/or time.', 1)
     ,(N'documents.migrateBackupMissing', N'en', N'Enter the backup path or time to start the migration.', 1)
     -- MIGRATE-FAST: кінець секції
+    -- RPT-STABLE: Part B ── перенос версії «з місяця» (en; ru/kz — порцією RPT-STABLE: Part B нижче) ──
+    ,(N'err.ECR-SCHM-0422.migrateFromMonthRequired', N'en', N'Nothing was moved: the "From month" migration needs fromPeriodKey (a period of the project, YYYYMM).', 1)
+    ,(N'err.ECR-SCHM-0422.migrateFromMonthInvalid', N'en', N'Nothing was moved: period {periodKey} is not a period of this project.', 1)
+    ,(N'err.ECR-SCHM-0422.migrateFromMonthBeforeSegment', N'en', N'Nothing was moved: period {periodKey} is earlier than {segmentFrom}, where the current template version of the project starts. Choose a period from {segmentFrom} or later.', 1)
+    ,(N'err.ECR-SCHM-0422.migrateWholeProjectMultiVersion', N'en', N'Nothing was moved: the project already uses several template versions by period, so a whole-project migration is unavailable. Use "From month" with a period not earlier than the start of the current version.', 1)
+    ,(N'err.ECR-SCHM-0422.migrateTargetNotPublished', N'en', N'Nothing was moved: the target template version is not published.', 1)
+    ,(N'err.ECR-SCHM-0422.migrateFromMonthDisabled', N'en', N'Nothing was moved: the "From month" migration is not enabled yet. Only the whole-project migration is available.', 1)
+    ,(N'documents.migrateRangeLabel', N'en', N'Scope', 1)
+    ,(N'documents.migrateRangeWhole', N'en', N'Whole project, any time', 1)
+    ,(N'documents.migrateRangeFromMonth', N'en', N'From month', 1)
+    ,(N'documents.migrateFromMonthLabel', N'en', N'First month on the new version', 1)
+    ,(N'documents.migrateWarnEffectiveFromJanuary', N'en', N'The project has a table with months in columns, so the whole year moves to the new version: the migration starts from January ({effective}) instead of {requested}.', 1)
+    -- RPT-STABLE: Part B ── кінець секції en ──
     -- PERMITS: p3-backlog ── en: PUI-4, значення списку вже прибране/змінене деінде; ru/kz — порцією PERMITS: p3-backlog нижче ──
     ,(N'permits.lists.drawer.gone', N'en', N'This value is no longer in the list: it was changed elsewhere. The list has been refreshed.', 1)
     -- PERMITS: p3-backlog ── кінець секції ──
@@ -24298,7 +24311,30 @@ SELECT v.[Key], v.Lang, v.Val
     (N'documents.migrateBackupHint', N'ru', N'Перенос затрагивает {count} значений (лимит без подтверждения резервной копии — {threshold}). Сначала сделайте резервную копию базы и укажите её путь и/или время.'),
     (N'documents.migrateBackupHint', N'kz', N'Көшіру {count} мәнді қамтиды (сақтық көшірмені растамай рұқсат етілетін шек — {threshold}). Алдымен дерекқордың сақтық көшірмесін жасап, оның жолын және/немесе уақытын көрсетіңіз.'),
     (N'documents.migrateBackupMissing', N'ru', N'Укажите путь или время резервной копии, чтобы начать перенос.'),
-    (N'documents.migrateBackupMissing', N'kz', N'Көшіруді бастау үшін сақтық көшірменің жолын немесе уақытын көрсетіңіз.')
+    (N'documents.migrateBackupMissing', N'kz', N'Көшіруді бастау үшін сақтық көшірменің жолын немесе уақытын көрсетіңіз.'),
+    -- RPT-STABLE: Part B ── перенос версії «з місяця» (ru/kz) ──
+    (N'err.ECR-SCHM-0422.migrateFromMonthRequired', N'ru', N'Ничего не перенесено: перенос «С месяца» требует fromPeriodKey (период проекта, ГГГГММ).'),
+    (N'err.ECR-SCHM-0422.migrateFromMonthRequired', N'kz', N'Ештеңе көшірілмеді: «Айдан бастап» көшіру үшін fromPeriodKey (жоба кезеңі, ЖЖЖЖАА) қажет.'),
+    (N'err.ECR-SCHM-0422.migrateFromMonthInvalid', N'ru', N'Ничего не перенесено: период {periodKey} не является периодом этого проекта.'),
+    (N'err.ECR-SCHM-0422.migrateFromMonthInvalid', N'kz', N'Ештеңе көшірілмеді: {periodKey} кезеңі осы жобаның кезеңі емес.'),
+    (N'err.ECR-SCHM-0422.migrateFromMonthBeforeSegment', N'ru', N'Ничего не перенесено: период {periodKey} раньше {segmentFrom}, с которого начинается текущая версия шаблона проекта. Выберите период не раньше {segmentFrom}.'),
+    (N'err.ECR-SCHM-0422.migrateFromMonthBeforeSegment', N'kz', N'Ештеңе көшірілмеді: {periodKey} кезеңі жобаның ағымдағы шаблон нұсқасы басталатын {segmentFrom} кезеңінен ерте. {segmentFrom} немесе одан кейінгі кезеңді таңдаңыз.'),
+    (N'err.ECR-SCHM-0422.migrateWholeProjectMultiVersion', N'ru', N'Ничего не перенесено: проект уже использует несколько версий шаблона по периодам, поэтому перенос всего проекта недоступен. Используйте «С месяца» с периодом не раньше начала текущей версии.'),
+    (N'err.ECR-SCHM-0422.migrateWholeProjectMultiVersion', N'kz', N'Ештеңе көшірілмеді: жоба кезеңдер бойынша бірнеше шаблон нұсқасын пайдаланады, сондықтан бүкіл жобаны көшіру қолжетімсіз. Ағымдағы нұсқаның басынан ерте емес кезеңмен «Айдан бастап» қолданыңыз.'),
+    (N'err.ECR-SCHM-0422.migrateTargetNotPublished', N'ru', N'Ничего не перенесено: целевая версия шаблона не опубликована.'),
+    (N'err.ECR-SCHM-0422.migrateTargetNotPublished', N'kz', N'Ештеңе көшірілмеді: мақсатты шаблон нұсқасы жарияланбаған.'),
+    (N'err.ECR-SCHM-0422.migrateFromMonthDisabled', N'ru', N'Ничего не перенесено: перенос «С месяца» пока не включён. Доступен только перенос всего проекта.'),
+    (N'err.ECR-SCHM-0422.migrateFromMonthDisabled', N'kz', N'Ештеңе көшірілмеді: «Айдан бастап» көшіру әлі қосылмаған. Тек бүкіл жобаны көшіру қолжетімді.'),
+    (N'documents.migrateRangeLabel', N'ru', N'Охват'),
+    (N'documents.migrateRangeLabel', N'kz', N'Қамту'),
+    (N'documents.migrateRangeWhole', N'ru', N'Весь проект, в любое время'),
+    (N'documents.migrateRangeWhole', N'kz', N'Бүкіл жоба, кез келген уақытта'),
+    (N'documents.migrateRangeFromMonth', N'ru', N'С месяца'),
+    (N'documents.migrateRangeFromMonth', N'kz', N'Айдан бастап'),
+    (N'documents.migrateFromMonthLabel', N'ru', N'Первый месяц на новой версии'),
+    (N'documents.migrateFromMonthLabel', N'kz', N'Жаңа нұсқадағы бірінші ай'),
+    (N'documents.migrateWarnEffectiveFromJanuary', N'ru', N'В проекте есть таблица с месяцами в колонках, поэтому весь год переходит на новую версию: перенос начнётся с января ({effective}) вместо {requested}.'),
+    (N'documents.migrateWarnEffectiveFromJanuary', N'kz', N'Жобада бағандарда айлары бар кесте бар, сондықтан бүкіл жыл жаңа нұсқаға көшеді: көшіру {requested} орнына қаңтардан ({effective}) басталады.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
