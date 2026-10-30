@@ -33,47 +33,99 @@ public sealed class GetAirScopeCodesHandler(
         var areaValues = (await rows.ListFieldValuesAsync([AirTables.Field(tables.Nae, NaeTreeSchema.AreaField)], null, ct).ConfigureAwait(false))
             .ToDictionary(v => v.RegistryEntryId, v => v.Text);
 
-        // Pairs actually used by NAE nodes of the tree (the business key carries them), normalised like the import does.
-        var pairs = new HashSet<(string Region, string Area)>();
-        foreach (var entry in entries)
+        var levels = await hierarchy.ListLevelsAsync(tables.Nae.Id, ct).ConfigureAwait(false);
+        int? Level(string code) => levels.FirstOrDefault(l => string.Equals(l.Code, code, StringComparison.OrdinalIgnoreCase))?.Id;
+        var regionLevel = Level(NaeTreeSchema.LevelRegion);
+        var areaLevel = Level(NaeTreeSchema.LevelArea);
+        var sourceLevel = Level(NaeTreeSchema.LevelSource);
+        var byId = entries.ToDictionary(e => e.Id);
+        string Name(Domain.Entities.Dictionaries.RegistryEntry e) => e.DisplayL10n.Get("en") ?? e.Code;
+        string Strip(string code, string prefix) => code.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? code[prefix.Length..] : code;
+
+        // Region code of a REGION node: its RegionCode, else its technical code without "R_".
+        string RegionOf(Domain.Entities.Dictionaries.RegistryEntry e)
+            => AirLimitsSchema.NormalizeScope(regionValues.GetValueOrDefault(e.Id) is { Length: > 0 } r ? r : Strip(e.Code, "R_"), "");
+
+        var regions = new SortedDictionary<string, (string? Name, SortedDictionary<string, string?> Areas, bool LooseSources)>(StringComparer.Ordinal);
+        (string? Name, SortedDictionary<string, string?> Areas, bool LooseSources) RegionSlot(string code)
         {
-            var region = AirLimitsSchema.NormalizeScope(regionValues.GetValueOrDefault(entry.Id), "");
+            if (!regions.TryGetValue(code, out var slot))
+            {
+                slot = (null, new SortedDictionary<string, string?>(StringComparer.Ordinal), false);
+                regions[code] = slot;
+            }
+
+            return slot;
+        }
+
+        // 1. REGION group nodes: a region exists even before it has any NAE under it.
+        foreach (var e in entries.Where(x => regionLevel is not null && x.LevelId == regionLevel))
+        {
+            var code = RegionOf(e);
+            if (code.Length > 0)
+            {
+                var slot = RegionSlot(code);
+                regions[code] = (Name(e), slot.Areas, slot.LooseSources);
+            }
+        }
+
+        // 2. AREA group nodes: the areas of the region they hang under (the REGION group node has RegionCode but no AreaCode, so
+        //    it never yields an area itself).
+        foreach (var e in entries.Where(x => areaLevel is not null && x.LevelId == areaLevel))
+        {
+            var region = "";
+            for (var cursor = e.ParentEntryId; cursor is { } p && byId.TryGetValue(p, out var parent); cursor = parent.ParentEntryId)
+            {
+                if (parent.LevelId == regionLevel)
+                {
+                    region = RegionOf(parent);
+                    break;
+                }
+            }
+
+            if (region.Length == 0)
+            {
+                region = AirLimitsSchema.NormalizeScope(regionValues.GetValueOrDefault(e.Id), "");
+            }
+
+            var area = AirLimitsSchema.NormalizeScope(
+                areaValues.GetValueOrDefault(e.Id) is { Length: > 0 } a ? a : Strip(Strip(e.Code, "A_"), region + "_"), AirLimitsSchema.NoArea);
+            if (region.Length > 0 && area != AirLimitsSchema.NoArea)
+            {
+                RegionSlot(region).Areas[area] = Name(e);
+            }
+        }
+
+        // 3. NAE (source) nodes: the scope their business key carries; a node created by an import may sit outside its region's
+        //    group nodes. A source without an area marks the region as having "no area" sources.
+        foreach (var e in entries.Where(x => x.LevelId is null || x.LevelId == sourceLevel))
+        {
+            var region = AirLimitsSchema.NormalizeScope(regionValues.GetValueOrDefault(e.Id), "");
             if (region.Length == 0)
             {
                 continue;
             }
 
-            pairs.Add((region, AirLimitsSchema.NormalizeScope(areaValues.GetValueOrDefault(entry.Id), AirLimitsSchema.NoArea)));
-        }
-
-        // Names: the REGION / AREA group nodes of the tree (code R_<REGION> / A_<REGION>_<AREA>), when they exist.
-        var levels = await hierarchy.ListLevelsAsync(tables.Nae.Id, ct).ConfigureAwait(false);
-        var regionLevel = levels.FirstOrDefault(l => l.Code == NaeTreeSchema.LevelRegion)?.Id;
-        var areaLevel = levels.FirstOrDefault(l => l.Code == NaeTreeSchema.LevelArea)?.Id;
-        var regionNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var areaNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in entries.Where(e => e.LevelId is not null))
-        {
-            var name = entry.DisplayL10n.Get("en") ?? entry.Code;
-            if (entry.LevelId == regionLevel && entry.Code.StartsWith("R_", StringComparison.OrdinalIgnoreCase))
+            var area = AirLimitsSchema.NormalizeScope(areaValues.GetValueOrDefault(e.Id), AirLimitsSchema.NoArea);
+            var slot = RegionSlot(region);
+            if (area == AirLimitsSchema.NoArea)
             {
-                regionNames[entry.Code[2..]] = name;
+                regions[region] = (slot.Name, slot.Areas, true);
             }
-            else if (entry.LevelId == areaLevel && entry.Code.StartsWith("A_", StringComparison.OrdinalIgnoreCase))
+            else
             {
-                areaNames[entry.Code[2..]] = name;
+                slot.Areas.TryAdd(area, null);
             }
         }
 
-        var regions = pairs.GroupBy(p => p.Region, StringComparer.Ordinal)
-            .OrderBy(g => g.Key, StringComparer.Ordinal)
-            .Select(g => new AirRegionCodeDto(
-                g.Key,
-                regionNames.GetValueOrDefault(g.Key),
-                [.. g.OrderBy(p => p.Area, StringComparer.Ordinal)
-                    .Select(p => new AirAreaCodeDto(p.Area, areaNames.GetValueOrDefault($"{g.Key}_{p.Area}")))]))
-            .ToList();
-        return new AirScopeCodesDto(regions);
+        var list = regions.Select(r => new AirRegionCodeDto(
+                r.Key,
+                r.Value.Name,
+                r.Value.Areas.Count == 0
+                    ? [new AirAreaCodeDto(AirLimitsSchema.NoArea, null)]
+                    : [.. r.Value.Areas.Select(a => new AirAreaCodeDto(a.Key, a.Value)),
+                        .. r.Value.LooseSources ? [new AirAreaCodeDto(AirLimitsSchema.NoArea, null)] : Array.Empty<AirAreaCodeDto>()]))
+            .ToList();        return new AirScopeCodesDto(list);
     }
 }
 
