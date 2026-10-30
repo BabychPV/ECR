@@ -1399,14 +1399,9 @@ public sealed partial class EndpointCoverageTests
 
         // NAE plan N3 ("Air Limits Import" permits): server + contract first; the permit card and the import wizard (plan N5, session
         // Permites) are the consumers. TEMPORARY: remove each line in the commit that adds the client call in `features/permits`.
+        // ✎ Card + wizard (lane/integ-ui-permit-card) consume all but `provision`, which stays until the "prepare the type" action
+        // has a screen (admin action on the permit types page; not part of N3/N5 UI).
         "POST /api/v1/air-limits/provision",
-        "GET /api/v1/air-limits/import-profiles",
-        "GET /api/v1/air-limits/import-profiles/{p}",
-        "PUT /api/v1/air-limits/import-profiles/{p}",
-        "POST /api/v1/air-limits/import/analyse",
-        "POST /api/v1/permits/{p}/air-limits/import/preview",
-        "POST /api/v1/permits/{p}/air-limits/import/apply",
-        "GET /api/v1/permits/{p}/air-limits",
         "GET /api/v1/air-limits/scope-codes",
 
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
