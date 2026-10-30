@@ -2251,6 +2251,23 @@ USING (VALUES
     -- Project.cs/FormulaDefHandlers.cs), нижче — нові.
     (N'err.ECR-AUTH-0401.securityStampStale', N'en', N'Your session is no longer valid: your permissions changed. Sign in again.', 1),
     (N'err.ECR-REG-0422.selfParent',          N'en', N'Entry {entryId} cannot be its own parent.', 1),
+    (N'err.ECR-REG-0422.levelRequired',       N'en', N'An entry of a hierarchical registry needs a level.', 1),
+    (N'err.ECR-REG-0422.levelUnknown',        N'en', N'Level «{levelCode}» is not declared for this registry.', 1),
+    (N'err.ECR-REG-0422.levelOrder',          N'en', N'A node must sit on a deeper level than its parent.', 1),
+    (N'err.ECR-REG-0422.levelSkipsRequired',  N'en', N'The levels between the parent and this node are required and cannot be skipped.', 1),
+    (N'err.ECR-REG-0422.hierarchyCycle',      N'en', N'Entry {entryId} cannot be placed under its own descendant.', 1),
+    (N'err.ECR-REG-0422.hierarchyLevelsInvalid', N'en', N'The level list is invalid: 1 to {max} levels with unique codes and an English name are required.', 1),
+    (N'err.ECR-REG-0422.hierarchyLevelChange', N'en', N'The new level order would leave {count} entries in an invalid place.', 1),
+    (N'err.ECR-REG-0422.hierarchyNotEnabled', N'en', N'Registry «{registryCode}» is not hierarchical.', 1),
+    (N'err.ECR-REG-0422.moveBeforeNotSibling', N'en', N'Entry {entryId} is not a child of the target parent.', 1),
+    (N'err.ECR-REG-0409.levelInUse',          N'en', N'Level «{levelCode}» holds {count} entries and cannot be removed.', 1),
+    (N'err.ECR-REG-0409.nodeHasLiveChildren', N'en', N'The node has {count} live children: retire them too (cascade).', 1),
+    (N'registryAudit.hierarchySaved',         N'en', N'Levels: {count}.', 1),
+    (N'registryAudit.entryMoved',             N'en', N'Siblings renumbered: {count}.', 1),
+    (N'registryAudit.entryRetired',           N'en', N'Entries retired: {count}.', 1),
+    (N'err.ECR-REG-0422.naeTreeIncompatible', N'en', N'Registry «{registryCode}» exists but is not an NAE tree (missing: {missing}).', 1),
+    (N'err.ECR-REG-0422.naeImportRejected',   N'en', N'NAE load rejected at {code}: {reason}.', 1),
+    (N'registryAudit.naeAfImport',            N'en', N'NAE nodes created: {count}.', 1),
     (N'err.ECR-INT-0422.materializationRequiresAggregation', N'en', N'Mapping of field "{sourceField}" names row "{targetRowKey}", but does not say how to fold period points: the system does not know whether the value is instantaneous or cumulative.', 1),
     (N'err.ECR-RPT-0409.versionNotDraft',           N'en', N'Report version {version} is {status}: there is nothing to publish.', 1),
     (N'err.ECR-RPT-0409.snapshotSubmittedContent',  N'en', N'Snapshot {snapshotId} was submitted: its content is not rebuilt, a new snapshot is needed.', 1),
@@ -9483,6 +9500,109 @@ USING (VALUES
     ,(N'workflow.eventAction.Reopen', N'en', N'Returned for edits', 1)
     ,(N'workflow.eventAction.Recall', N'en', N'Recalled', 1)
     -- WFREASONS:sheet-history ── кінець секції ──
+    -- COLL:ui-treeeditor ── загальний редактор дерева (shared/ui/TreeEditor, NAE plan N1/N2): пошук, клавіатура, перенос, виведення; ru/kz — порцією COLL:ui-treeeditor нижче ──
+    ,(N'treeEditor.searchLabel', N'en', N'Search the tree', 1)
+    ,(N'treeEditor.searchPlaceholder', N'en', N'Search by code or name', 1)
+    ,(N'treeEditor.clearSearch', N'en', N'Clear search', 1)
+    ,(N'treeEditor.showRetired', N'en', N'Retired', 1)
+    ,(N'treeEditor.addRoot', N'en', N'Add top-level node', 1)
+    ,(N'treeEditor.keyboardHint', N'en', N'Arrow keys move through the tree, Right and Left expand and collapse, Enter selects, Delete retires, Alt+M moves, Alt+Up and Alt+Down reorder, Insert adds a child.', 1)
+    ,(N'treeEditor.matches', N'en', N'{count} matches', 1)
+    ,(N'treeEditor.loading', N'en', N'Loading the tree…', 1)
+    ,(N'treeEditor.updating', N'en', N'Updating…', 1)
+    ,(N'treeEditor.nothingFound', N'en', N'Nothing found.', 1)
+    ,(N'treeEditor.empty', N'en', N'The tree is empty.', 1)
+    ,(N'treeEditor.retiredTag', N'en', N'Retired', 1)
+    ,(N'treeEditor.childCount', N'en', N'{count} direct children', 1)
+    ,(N'treeEditor.reordered', N'en', N'{name} moved to position {position} of {total}', 1)
+    ,(N'treeEditor.moved', N'en', N'Moved “{name}”.', 1)
+    ,(N'treeEditor.retiredDone', N'en', N'Retired “{name}”.', 1)
+    ,(N'treeEditor.addChild', N'en', N'Add child', 1)
+    ,(N'treeEditor.retire.action', N'en', N'Retire', 1)
+    ,(N'treeEditor.retire.title', N'en', N'Retire “{name}”?', 1)
+    ,(N'treeEditor.retire.text', N'en', N'The node stays in history and in documents that already use it, and disappears from new choices.', 1)
+    ,(N'treeEditor.retire.cascade', N'en', N'It has {count} direct children; they and everything below are retired too.', 1)
+    ,(N'treeEditor.retire.verb', N'en', N'Retire', 1)
+    ,(N'treeEditor.move.action', N'en', N'Move to…', 1)
+    ,(N'treeEditor.move.title', N'en', N'Move “{name}”', 1)
+    ,(N'treeEditor.move.hint', N'en', N'Pick the new parent. Only places allowed by the level order are listed.', 1)
+    ,(N'treeEditor.move.search', N'en', N'Find the new parent', 1)
+    ,(N'treeEditor.move.groupLabel', N'en', N'New parent', 1)
+    ,(N'treeEditor.move.none', N'en', N'There is no allowed place for this node.', 1)
+    ,(N'treeEditor.move.root', N'en', N'Top level (no parent)', 1)
+    ,(N'treeEditor.move.current', N'en', N'(current)', 1)
+    ,(N'treeEditor.move.limited', N'en', N'Showing the first {count} places. Narrow the search to see others.', 1)
+    ,(N'treeEditor.move.confirm', N'en', N'Move', 1)
+    ,(N'treeEditor.panel.empty', N'en', N'Select a node to see its details.', 1)
+    ,(N'treeEditor.panel.code', N'en', N'Code', 1)
+    ,(N'treeEditor.panel.level', N'en', N'Level', 1)
+    ,(N'treeEditor.panel.path', N'en', N'Path', 1)
+    ,(N'treeEditor.panel.validity', N'en', N'Valid', 1)
+    ,(N'treeEditor.panel.children', N'en', N'Direct children', 1)
+    ,(N'treeEditor.panel.fromTo', N'en', N'from {from} until {to}', 1)
+    ,(N'treeEditor.panel.from', N'en', N'from {from}', 1)
+    ,(N'treeEditor.panel.until', N'en', N'until {to}', 1)
+    ,(N'treeEditor.panel.retiredNote', N'en', N'This node is retired: it is hidden from new choices.', 1)
+    -- COLL:ui-treeeditor ── кінець секції ──
+    -- COLL:ui-nae-structure ── сторінка «Структура NAE» (/admin/permits/nae, NAE plan N2): дерево, форма атрибутів, «Де використовується»; ru/kz — порцією COLL:ui-nae-structure нижче ──
+    ,(N'permits.nae.title', N'en', N'NAE structure', 1)
+    ,(N'permits.nae.description', N'en', N'The tree of regions, districts, sites, equipment and NAE items that permits refer to.', 1)
+    ,(N'permits.nae.sourceNote', N'en', N'This structure is a registry: permits and imports refer to its nodes by code. Retire a node instead of deleting it.', 1)
+    ,(N'permits.nae.readOnly', N'en', N'You can browse the structure, but changing it needs the right to edit registry data.', 1)
+    ,(N'permits.nae.treeLabel', N'en', N'NAE structure tree', 1)
+    ,(N'permits.nae.form.newNode', N'en', N'New node', 1)
+    ,(N'permits.nae.form.createTitle', N'en', N'New {level}', 1)
+    ,(N'permits.nae.form.editTitle', N'en', N'Node attributes', 1)
+    ,(N'permits.nae.form.parent', N'en', N'Parent: {path}', 1)
+    ,(N'permits.nae.form.parentRoot', N'en', N'top level', 1)
+    ,(N'permits.nae.form.codeRequired', N'en', N'Enter a code.', 1)
+    ,(N'permits.nae.form.codeTaken', N'en', N'This code is already used in the structure.', 1)
+    ,(N'permits.nae.form.codeAutomatic', N'en', N'The code of this registry is assigned automatically.', 1)
+    ,(N'permits.nae.form.nameRequired', N'en', N'Enter a name.', 1)
+    ,(N'permits.nae.form.fieldRequired', N'en', N'Fill in this field.', 1)
+    ,(N'permits.nae.used.title', N'en', N'Where it is used', 1)
+    ,(N'permits.nae.used.permit', N'en', N'Permit', 1)
+    ,(N'permits.nae.used.type', N'en', N'Type', 1)
+    ,(N'permits.nae.used.valid', N'en', N'Valid', 1)
+    ,(N'permits.nae.used.substances', N'en', N'Substances', 1)
+    ,(N'permits.nae.used.empty', N'en', N'No permit refers to this node yet.', 1)
+    ,(N'permits.nae.form.keyTaken', N'en', N'A node with this NAE code, region and area already exists.', 1)
+    ,(N'permits.nae.form.keyTakenBy', N'en', N'This NAE code, region and area are already used by the node {holder}.', 1)
+    ,(N'permits.nae.form.areaHint', N'en', N'Leave empty when there is no area: it is saved as “-”.', 1)
+    ,(N'permits.nae.import.open', N'en', N'Load from PI AF', 1)
+    ,(N'permits.nae.import.hintNotProvisioned', N'en', N'The NAE structure has not been loaded yet. Load it once from PI AF; after that ECR owns the tree.', 1)
+    ,(N'permits.nae.import.hintAskAdmin', N'en', N'The NAE structure has not been loaded yet. Ask an administrator to load it from PI AF.', 1)
+    ,(N'permits.nae.import.title', N'en', N'Load the structure from PI AF', 1)
+    ,(N'permits.nae.import.description', N'en', N'Reads the equipment tree from PI AF and creates the missing nodes. Existing nodes are never changed or moved.', 1)
+    ,(N'permits.nae.import.source', N'en', N'Data source', 1)
+    ,(N'permits.nae.import.noSources', N'en', N'There is no active data source to load from.', 1)
+    ,(N'permits.nae.import.root', N'en', N'AF root element', 1)
+    ,(N'permits.nae.import.rootHint', N'en', N'Leave empty to use ECR_01_Air Equipment.', 1)
+    ,(N'permits.nae.import.preview', N'en', N'Preview (dry run)', 1)
+    ,(N'permits.nae.import.apply', N'en', N'Load', 1)
+    ,(N'permits.nae.import.close', N'en', N'Close', 1)
+    ,(N'permits.nae.import.stale', N'en', N'The source or root changed: run the preview again.', 1)
+    ,(N'permits.nae.import.previewDone', N'en', N'Preview only: nothing was written.', 1)
+    ,(N'permits.nae.import.applied', N'en', N'Loaded: the nodes were written.', 1)
+    ,(N'permits.nae.import.nothingNew', N'en', N'Nothing new to load: every node already exists.', 1)
+    ,(N'permits.nae.import.willProvision', N'en', N'The NAE registry will be created with its levels and fields.', 1)
+    ,(N'permits.nae.import.didProvision', N'en', N'The NAE registry was created with its levels and fields.', 1)
+    ,(N'permits.nae.import.incomplete', N'en', N'The AF listing may be incomplete: some elements may be missing from this report.', 1)
+    ,(N'permits.nae.import.read', N'en', N'{count} AF elements read', 1)
+    ,(N'permits.nae.import.level', N'en', N'Level', 1)
+    ,(N'permits.nae.import.create', N'en', N'To create', 1)
+    ,(N'permits.nae.import.existing', N'en', N'Already exist', 1)
+    ,(N'permits.nae.import.skipped', N'en', N'{count} elements skipped', 1)
+    ,(N'permits.nae.import.issues', N'en', N'Findings', 1)
+    ,(N'permits.nae.import.severity.warning', N'en', N'Warning', 1)
+    ,(N'permits.nae.import.severity.skipped', N'en', N'Skipped', 1)
+    ,(N'permits.nae.import.issue.noCode', N'en', N'The element has no NAE code.', 1)
+    ,(N'permits.nae.import.issue.noRegion', N'en', N'The element has no Region attribute.', 1)
+    ,(N'permits.nae.import.issue.duplicateBusinessKey', N'en', N'The same NAE code, region and area occur twice in AF.', 1)
+    ,(N'permits.nae.import.issue.pathFlattened', N'en', N'More than two grouping levels under the area: the path was flattened.', 1)
+    ,(N'permits.nae.import.issue.existingElsewhere', N'en', N'This NAE key already belongs to another node.', 1)
+    ,(N'permits.nae.import.issue.sourceIncomplete', N'en', N'The AF listing may be truncated.', 1)
+    -- COLL:ui-nae-structure ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -16580,6 +16700,58 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- HSE301:a5b-jobs ── кінець секції ──
+
+-- NAE1:hierarchy ── ru/kz ієрархічні довідники (рівні, дерево, переміщення, закриття вузла); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.levelRequired', N'ru', N'Запись иерархического справочника должна иметь уровень.'),
+    (N'err.ECR-REG-0422.levelUnknown', N'ru', N'Уровень «{levelCode}» не объявлен в этом справочнике.'),
+    (N'err.ECR-REG-0422.levelOrder', N'ru', N'Узел должен находиться на уровне глубже родительского.'),
+    (N'err.ECR-REG-0422.levelSkipsRequired', N'ru', N'Уровни между родителем и этим узлом обязательны и не могут быть пропущены.'),
+    (N'err.ECR-REG-0422.hierarchyCycle', N'ru', N'Запись {entryId} нельзя поместить под её собственного потомка.'),
+    (N'err.ECR-REG-0422.hierarchyLevelsInvalid', N'ru', N'Список уровней некорректен: нужно от 1 до {max} уровней с уникальными кодами и английским названием.'),
+    (N'err.ECR-REG-0422.hierarchyLevelChange', N'ru', N'Новый порядок уровней оставил бы {count} записей в недопустимом месте.'),
+    (N'err.ECR-REG-0422.hierarchyNotEnabled', N'ru', N'Справочник «{registryCode}» не является иерархическим.'),
+    (N'err.ECR-REG-0422.moveBeforeNotSibling', N'ru', N'Запись {entryId} не является дочерней для выбранного родителя.'),
+    (N'err.ECR-REG-0409.levelInUse', N'ru', N'Уровень «{levelCode}» содержит записей: {count}, удалить его нельзя.'),
+    (N'err.ECR-REG-0409.nodeHasLiveChildren', N'ru', N'У узла есть действующих потомков: {count}. Закройте и их (каскадно).'),
+    (N'registryAudit.hierarchySaved', N'ru', N'Уровней: {count}.'),
+    (N'registryAudit.entryMoved', N'ru', N'Перенумеровано соседних записей: {count}.'),
+    (N'registryAudit.entryRetired', N'ru', N'Закрыто записей: {count}.'),
+    (N'err.ECR-REG-0422.levelRequired', N'kz', N'Иерархиялық анықтамалықтың жазбасында деңгей болуы керек.'),
+    (N'err.ECR-REG-0422.levelUnknown', N'kz', N'«{levelCode}» деңгейі бұл анықтамалықта жарияланбаған.'),
+    (N'err.ECR-REG-0422.levelOrder', N'kz', N'Түйін өзінің аталық түйінінен терең деңгейде тұруы керек.'),
+    (N'err.ECR-REG-0422.levelSkipsRequired', N'kz', N'Аталық түйін мен осы түйін арасындағы деңгейлер міндетті, оларды өткізіп жіберуге болмайды.'),
+    (N'err.ECR-REG-0422.hierarchyCycle', N'kz', N'{entryId} жазбасын өзінің ұрпағының астына орналастыруға болмайды.'),
+    (N'err.ECR-REG-0422.hierarchyLevelsInvalid', N'kz', N'Деңгейлер тізімі жарамсыз: бірегей кодтары мен ағылшынша атауы бар 1-ден {max}-ге дейін деңгей қажет.'),
+    (N'err.ECR-REG-0422.hierarchyLevelChange', N'kz', N'Деңгейлердің жаңа реті {count} жазбаны жарамсыз орында қалдырар еді.'),
+    (N'err.ECR-REG-0422.hierarchyNotEnabled', N'kz', N'«{registryCode}» анықтамалығы иерархиялық емес.'),
+    (N'err.ECR-REG-0422.moveBeforeNotSibling', N'kz', N'{entryId} жазбасы таңдалған аталық түйіннің еншілесі емес.'),
+    (N'err.ECR-REG-0409.levelInUse', N'kz', N'«{levelCode}» деңгейінде {count} жазба бар, оны жоюға болмайды.'),
+    (N'err.ECR-REG-0409.nodeHasLiveChildren', N'kz', N'Түйіннің {count} әрекет ететін еншілесі бар: оларды да жабыңыз (каскадпен).'),
+    (N'registryAudit.hierarchySaved', N'kz', N'Деңгейлер: {count}.'),
+    (N'registryAudit.entryMoved', N'kz', N'Қайта нөмірленген көрші жазбалар: {count}.'),
+    (N'registryAudit.entryRetired', N'kz', N'Жабылған жазбалар: {count}.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- NAE1:hierarchy ── кінець секції ──
+
+-- NAE2:af-import ── ru/kz разове завантаження дерева НАЕ з AF; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.naeTreeIncompatible', N'ru', N'Справочник «{registryCode}» уже существует, но не является деревом НАЕ (нет: {missing}).'),
+    (N'err.ECR-REG-0422.naeImportRejected', N'ru', N'Загрузка НАЕ отклонена на записи {code}: {reason}.'),
+    (N'registryAudit.naeAfImport', N'ru', N'Создано узлов НАЕ: {count}.'),
+    (N'err.ECR-REG-0422.naeTreeIncompatible', N'kz', N'«{registryCode}» анықтамалығы бар, бірақ НАЕ ағашы емес (жоқ: {missing}).'),
+    (N'err.ECR-REG-0422.naeImportRejected', N'kz', N'НАЕ жүктеу {code} жазбасында қабылданбады: {reason}.'),
+    (N'registryAudit.naeAfImport', N'kz', N'Жасалған НАЕ түйіндері: {count}.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- NAE2:af-import ── кінець секції ──
 
 -- I18N:ru-kz-backfill 2026-09-30 ── ru/kz для ключів, що мали лише en (req-g2, rpt-views-health, реєстри, безпека, збір подій та ін.); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
@@ -24783,6 +24955,220 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- WFREASONS:sheet-history ── кінець секції ──
+-- COLL:ui-treeeditor ── ru/kz: загальний редактор дерева (shared/ui/TreeEditor); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'treeEditor.searchLabel', N'ru', N'Поиск по дереву'),
+    (N'treeEditor.searchLabel', N'kz', N'Ағаштан іздеу'),
+    (N'treeEditor.searchPlaceholder', N'ru', N'Поиск по коду или названию'),
+    (N'treeEditor.searchPlaceholder', N'kz', N'Код немесе атау бойынша іздеу'),
+    (N'treeEditor.clearSearch', N'ru', N'Сбросить поиск'),
+    (N'treeEditor.clearSearch', N'kz', N'Іздеуді тазарту'),
+    (N'treeEditor.showRetired', N'ru', N'Выведенные'),
+    (N'treeEditor.showRetired', N'kz', N'Қолданыстан шыққандар'),
+    (N'treeEditor.addRoot', N'ru', N'Добавить узел верхнего уровня'),
+    (N'treeEditor.addRoot', N'kz', N'Жоғары деңгейдегі түйін қосу'),
+    (N'treeEditor.keyboardHint', N'ru', N'Стрелки перемещают по дереву, Вправо и Влево разворачивают и сворачивают, Enter выбирает, Delete выводит из использования, Alt+M переносит, Alt+Вверх и Alt+Вниз меняют порядок, Insert добавляет дочерний узел.'),
+    (N'treeEditor.keyboardHint', N'kz', N'Көрсеткілер ағаш бойымен жылжиды, Оң және Сол көрсеткі ашады және жабады, Enter таңдайды, Delete қолданыстан шығарады, Alt+M жылжытады, Alt+Жоғары және Alt+Төмен ретін өзгертеді, Insert ішкі түйін қосады.'),
+    (N'treeEditor.matches', N'ru', N'Совпадений: {count}'),
+    (N'treeEditor.matches', N'kz', N'Сәйкестіктер: {count}'),
+    (N'treeEditor.loading', N'ru', N'Загрузка дерева…'),
+    (N'treeEditor.loading', N'kz', N'Ағаш жүктелуде…'),
+    (N'treeEditor.updating', N'ru', N'Обновление…'),
+    (N'treeEditor.updating', N'kz', N'Жаңартылуда…'),
+    (N'treeEditor.nothingFound', N'ru', N'Ничего не найдено.'),
+    (N'treeEditor.nothingFound', N'kz', N'Ештеңе табылмады.'),
+    (N'treeEditor.empty', N'ru', N'Дерево пусто.'),
+    (N'treeEditor.empty', N'kz', N'Ағаш бос.'),
+    (N'treeEditor.retiredTag', N'ru', N'Выведен'),
+    (N'treeEditor.retiredTag', N'kz', N'Шығарылған'),
+    (N'treeEditor.childCount', N'ru', N'Прямых дочерних: {count}'),
+    (N'treeEditor.childCount', N'kz', N'Тікелей ішкі түйіндер: {count}'),
+    (N'treeEditor.reordered', N'ru', N'«{name}»: позиция {position} из {total}'),
+    (N'treeEditor.reordered', N'kz', N'«{name}»: {position}-орын, барлығы {total}'),
+    (N'treeEditor.moved', N'ru', N'«{name}» перенесён.'),
+    (N'treeEditor.moved', N'kz', N'«{name}» жылжытылды.'),
+    (N'treeEditor.retiredDone', N'ru', N'«{name}» выведен из использования.'),
+    (N'treeEditor.retiredDone', N'kz', N'«{name}» қолданыстан шығарылды.'),
+    (N'treeEditor.addChild', N'ru', N'Добавить дочерний'),
+    (N'treeEditor.addChild', N'kz', N'Ішкі түйін қосу'),
+    (N'treeEditor.retire.action', N'ru', N'Вывести'),
+    (N'treeEditor.retire.action', N'kz', N'Шығару'),
+    (N'treeEditor.retire.title', N'ru', N'Вывести «{name}» из использования?'),
+    (N'treeEditor.retire.title', N'kz', N'«{name}» қолданыстан шығарылсын ба?'),
+    (N'treeEditor.retire.text', N'ru', N'Узел останется в истории и в документах, где уже используется, но исчезнет из новых выборов.'),
+    (N'treeEditor.retire.text', N'kz', N'Түйін тарихта және оны қолданып жүрген құжаттарда қалады, бірақ жаңа таңдаулардан жоғалады.'),
+    (N'treeEditor.retire.cascade', N'ru', N'Прямых дочерних узлов: {count}; они и всё ниже тоже будут выведены.'),
+    (N'treeEditor.retire.cascade', N'kz', N'Тікелей ішкі түйіндер: {count}; олар және олардың астындағының бәрі де шығарылады.'),
+    (N'treeEditor.retire.verb', N'ru', N'Вывести'),
+    (N'treeEditor.retire.verb', N'kz', N'Шығару'),
+    (N'treeEditor.move.action', N'ru', N'Перенести в…'),
+    (N'treeEditor.move.action', N'kz', N'Жылжыту…'),
+    (N'treeEditor.move.title', N'ru', N'Перенести «{name}»'),
+    (N'treeEditor.move.title', N'kz', N'«{name}» түйінін жылжыту'),
+    (N'treeEditor.move.hint', N'ru', N'Выберите нового родителя. Показаны только места, допустимые порядком уровней.'),
+    (N'treeEditor.move.hint', N'kz', N'Жаңа аталықты таңдаңыз. Деңгей реті рұқсат ететін орындар ғана көрсетіледі.'),
+    (N'treeEditor.move.search', N'ru', N'Найти нового родителя'),
+    (N'treeEditor.move.search', N'kz', N'Жаңа аталықты табу'),
+    (N'treeEditor.move.groupLabel', N'ru', N'Новый родитель'),
+    (N'treeEditor.move.groupLabel', N'kz', N'Жаңа аталық'),
+    (N'treeEditor.move.none', N'ru', N'Для этого узла нет допустимых мест.'),
+    (N'treeEditor.move.none', N'kz', N'Бұл түйін үшін рұқсат етілген орын жоқ.'),
+    (N'treeEditor.move.root', N'ru', N'Верхний уровень (без родителя)'),
+    (N'treeEditor.move.root', N'kz', N'Жоғарғы деңгей (аталықсыз)'),
+    (N'treeEditor.move.current', N'ru', N'(текущий)'),
+    (N'treeEditor.move.current', N'kz', N'(ағымдағы)'),
+    (N'treeEditor.move.limited', N'ru', N'Показаны первые {count} мест. Уточните поиск, чтобы увидеть остальные.'),
+    (N'treeEditor.move.limited', N'kz', N'Алғашқы {count} орын көрсетілген. Қалғандарын көру үшін іздеуді нақтылаңыз.'),
+    (N'treeEditor.move.confirm', N'ru', N'Перенести'),
+    (N'treeEditor.move.confirm', N'kz', N'Жылжыту'),
+    (N'treeEditor.panel.empty', N'ru', N'Выберите узел, чтобы увидеть сведения.'),
+    (N'treeEditor.panel.empty', N'kz', N'Мәліметтерді көру үшін түйінді таңдаңыз.'),
+    (N'treeEditor.panel.code', N'ru', N'Код'),
+    (N'treeEditor.panel.code', N'kz', N'Коды'),
+    (N'treeEditor.panel.level', N'ru', N'Уровень'),
+    (N'treeEditor.panel.level', N'kz', N'Деңгей'),
+    (N'treeEditor.panel.path', N'ru', N'Путь'),
+    (N'treeEditor.panel.path', N'kz', N'Жол'),
+    (N'treeEditor.panel.validity', N'ru', N'Действует'),
+    (N'treeEditor.panel.validity', N'kz', N'Қолданылады'),
+    (N'treeEditor.panel.children', N'ru', N'Прямых дочерних'),
+    (N'treeEditor.panel.children', N'kz', N'Тікелей ішкі түйіндер'),
+    (N'treeEditor.panel.fromTo', N'ru', N'с {from} до {to}'),
+    (N'treeEditor.panel.fromTo', N'kz', N'{from} бастап {to} дейін'),
+    (N'treeEditor.panel.from', N'ru', N'с {from}'),
+    (N'treeEditor.panel.from', N'kz', N'{from} бастап'),
+    (N'treeEditor.panel.until', N'ru', N'до {to}'),
+    (N'treeEditor.panel.until', N'kz', N'{to} дейін'),
+    (N'treeEditor.panel.retiredNote', N'ru', N'Узел выведен из использования: в новых выборах его нет.'),
+    (N'treeEditor.panel.retiredNote', N'kz', N'Түйін қолданыстан шыққан: жаңа таңдауларда көрсетілмейді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-treeeditor ── кінець секції ──
+-- COLL:ui-nae-structure ── ru/kz: сторінка «Структура NAE»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.nae.title', N'ru', N'Структура NAE'),
+    (N'permits.nae.title', N'kz', N'NAE құрылымы'),
+    (N'permits.nae.description', N'ru', N'Дерево регионов, районов, площадок, оборудования и позиций NAE, на которые ссылаются разрешения.'),
+    (N'permits.nae.description', N'kz', N'Рұқсаттар сілтейтін өңірлер, аудандар, алаңдар, жабдық және NAE позицияларының ағашы.'),
+    (N'permits.nae.sourceNote', N'ru', N'Эта структура — справочник: разрешения и импорт ссылаются на её узлы по коду. Узел выводят из использования, а не удаляют.'),
+    (N'permits.nae.sourceNote', N'kz', N'Бұл құрылым — анықтамалық: рұқсаттар мен импорт оның түйіндеріне код арқылы сілтейді. Түйінді жоймайды, қолданыстан шығарады.'),
+    (N'permits.nae.readOnly', N'ru', N'Структуру можно просматривать, но для изменений нужно право редактировать данные справочников.'),
+    (N'permits.nae.readOnly', N'kz', N'Құрылымды қарауға болады, бірақ өзгерту үшін анықтамалық деректерін өңдеу құқығы қажет.'),
+    (N'permits.nae.treeLabel', N'ru', N'Дерево структуры NAE'),
+    (N'permits.nae.treeLabel', N'kz', N'NAE құрылымының ағашы'),
+    (N'permits.nae.form.newNode', N'ru', N'Новый узел'),
+    (N'permits.nae.form.newNode', N'kz', N'Жаңа түйін'),
+    (N'permits.nae.form.createTitle', N'ru', N'Новый узел: {level}'),
+    (N'permits.nae.form.createTitle', N'kz', N'Жаңа түйін: {level}'),
+    (N'permits.nae.form.editTitle', N'ru', N'Атрибуты узла'),
+    (N'permits.nae.form.editTitle', N'kz', N'Түйін атрибуттары'),
+    (N'permits.nae.form.parent', N'ru', N'Родитель: {path}'),
+    (N'permits.nae.form.parent', N'kz', N'Аталық: {path}'),
+    (N'permits.nae.form.parentRoot', N'ru', N'верхний уровень'),
+    (N'permits.nae.form.parentRoot', N'kz', N'жоғарғы деңгей'),
+    (N'permits.nae.form.codeRequired', N'ru', N'Введите код.'),
+    (N'permits.nae.form.codeRequired', N'kz', N'Кодты енгізіңіз.'),
+    (N'permits.nae.form.codeTaken', N'ru', N'Такой код в структуре уже есть.'),
+    (N'permits.nae.form.codeTaken', N'kz', N'Мұндай код құрылымда бар.'),
+    (N'permits.nae.form.codeAutomatic', N'ru', N'Код этого справочника назначается автоматически.'),
+    (N'permits.nae.form.codeAutomatic', N'kz', N'Бұл анықтамалықтың коды автоматты түрде беріледі.'),
+    (N'permits.nae.form.nameRequired', N'ru', N'Введите название.'),
+    (N'permits.nae.form.nameRequired', N'kz', N'Атауын енгізіңіз.'),
+    (N'permits.nae.form.fieldRequired', N'ru', N'Заполните это поле.'),
+    (N'permits.nae.form.fieldRequired', N'kz', N'Осы өрісті толтырыңыз.'),
+    (N'permits.nae.used.title', N'ru', N'Где используется'),
+    (N'permits.nae.used.title', N'kz', N'Қайда қолданылады'),
+    (N'permits.nae.used.permit', N'ru', N'Разрешение'),
+    (N'permits.nae.used.permit', N'kz', N'Рұқсат'),
+    (N'permits.nae.used.type', N'ru', N'Тип'),
+    (N'permits.nae.used.type', N'kz', N'Түрі'),
+    (N'permits.nae.used.valid', N'ru', N'Действует'),
+    (N'permits.nae.used.valid', N'kz', N'Қолданылады'),
+    (N'permits.nae.used.substances', N'ru', N'Вещества'),
+    (N'permits.nae.used.substances', N'kz', N'Заттар'),
+    (N'permits.nae.used.empty', N'ru', N'Ни одно разрешение пока не ссылается на этот узел.'),
+    (N'permits.nae.used.empty', N'kz', N'Бұл түйінге әзірге бірде-бір рұқсат сілтемейді.'),
+    (N'permits.nae.form.keyTaken', N'ru', N'Узел с таким кодом NAE, регионом и районом уже существует.'),
+    (N'permits.nae.form.keyTaken', N'kz', N'Мұндай NAE коды, өңірі және ауданы бар түйін әлдеқашан бар.'),
+    (N'permits.nae.form.keyTakenBy', N'ru', N'Этот код NAE, регион и район уже использует узел {holder}.'),
+    (N'permits.nae.form.keyTakenBy', N'kz', N'Бұл NAE коды, өңір және аудан {holder} түйінінде әлдеқашан қолданылады.'),
+    (N'permits.nae.form.areaHint', N'ru', N'Оставьте пустым, если района нет: сохранится как «-».'),
+    (N'permits.nae.form.areaHint', N'kz', N'Аудан жоқ болса, бос қалдырыңыз: «-» болып сақталады.'),
+    (N'permits.nae.import.open', N'ru', N'Загрузить из PI AF'),
+    (N'permits.nae.import.open', N'kz', N'PI AF-тен жүктеу'),
+    (N'permits.nae.import.hintNotProvisioned', N'ru', N'Структура NAE ещё не загружена. Загрузите её один раз из PI AF; дальше деревом владеет ECR.'),
+    (N'permits.nae.import.hintNotProvisioned', N'kz', N'NAE құрылымы әлі жүктелмеген. Оны PI AF-тен бір рет жүктеңіз; одан әрі ағашты ECR басқарады.'),
+    (N'permits.nae.import.hintAskAdmin', N'ru', N'Структура NAE ещё не загружена. Попросите администратора загрузить её из PI AF.'),
+    (N'permits.nae.import.hintAskAdmin', N'kz', N'NAE құрылымы әлі жүктелмеген. Әкімшіден оны PI AF-тен жүктеуін сұраңыз.'),
+    (N'permits.nae.import.title', N'ru', N'Загрузка структуры из PI AF'),
+    (N'permits.nae.import.title', N'kz', N'Құрылымды PI AF-тен жүктеу'),
+    (N'permits.nae.import.description', N'ru', N'Читает дерево оборудования из PI AF и создаёт недостающие узлы. Существующие узлы не меняются и не переносятся.'),
+    (N'permits.nae.import.description', N'kz', N'PI AF-тен жабдық ағашын оқып, жетіспейтін түйіндерді жасайды. Бар түйіндер өзгертілмейді және жылжытылмайды.'),
+    (N'permits.nae.import.source', N'ru', N'Источник данных'),
+    (N'permits.nae.import.source', N'kz', N'Дерек көзі'),
+    (N'permits.nae.import.noSources', N'ru', N'Нет активного источника данных для загрузки.'),
+    (N'permits.nae.import.noSources', N'kz', N'Жүктеуге арналған белсенді дерек көзі жоқ.'),
+    (N'permits.nae.import.root', N'ru', N'Корневой элемент AF'),
+    (N'permits.nae.import.root', N'kz', N'AF түбірлік элементі'),
+    (N'permits.nae.import.rootHint', N'ru', N'Оставьте пустым, чтобы взять ECR_01_Air Equipment.'),
+    (N'permits.nae.import.rootHint', N'kz', N'ECR_01_Air Equipment алу үшін бос қалдырыңыз.'),
+    (N'permits.nae.import.preview', N'ru', N'Просмотр (пробный запуск)'),
+    (N'permits.nae.import.preview', N'kz', N'Алдын ала қарау (сынақ іске қосу)'),
+    (N'permits.nae.import.apply', N'ru', N'Загрузить'),
+    (N'permits.nae.import.apply', N'kz', N'Жүктеу'),
+    (N'permits.nae.import.close', N'ru', N'Закрыть'),
+    (N'permits.nae.import.close', N'kz', N'Жабу'),
+    (N'permits.nae.import.stale', N'ru', N'Источник или корень изменились: выполните просмотр заново.'),
+    (N'permits.nae.import.stale', N'kz', N'Дерек көзі немесе түбір өзгерді: алдын ала қарауды қайта орындаңыз.'),
+    (N'permits.nae.import.previewDone', N'ru', N'Только просмотр: ничего не записано.'),
+    (N'permits.nae.import.previewDone', N'kz', N'Тек қарау: ештеңе жазылмады.'),
+    (N'permits.nae.import.applied', N'ru', N'Загружено: узлы записаны.'),
+    (N'permits.nae.import.applied', N'kz', N'Жүктелді: түйіндер жазылды.'),
+    (N'permits.nae.import.nothingNew', N'ru', N'Загружать нечего: все узлы уже есть.'),
+    (N'permits.nae.import.nothingNew', N'kz', N'Жүктейтін жаңа ештеңе жоқ: барлық түйін бұрыннан бар.'),
+    (N'permits.nae.import.willProvision', N'ru', N'Справочник NAE будет создан вместе с уровнями и полями.'),
+    (N'permits.nae.import.willProvision', N'kz', N'NAE анықтамалығы деңгейлері мен өрістерімен бірге жасалады.'),
+    (N'permits.nae.import.didProvision', N'ru', N'Справочник NAE создан вместе с уровнями и полями.'),
+    (N'permits.nae.import.didProvision', N'kz', N'NAE анықтамалығы деңгейлері мен өрістерімен бірге жасалды.'),
+    (N'permits.nae.import.incomplete', N'ru', N'Список из AF может быть неполным: часть элементов может отсутствовать в этом отчёте.'),
+    (N'permits.nae.import.incomplete', N'kz', N'AF тізімі толық болмауы мүмкін: кейбір элементтер бұл есепте болмауы мүмкін.'),
+    (N'permits.nae.import.read', N'ru', N'Прочитано элементов AF: {count}'),
+    (N'permits.nae.import.read', N'kz', N'Оқылған AF элементтері: {count}'),
+    (N'permits.nae.import.level', N'ru', N'Уровень'),
+    (N'permits.nae.import.level', N'kz', N'Деңгей'),
+    (N'permits.nae.import.create', N'ru', N'Будет создано'),
+    (N'permits.nae.import.create', N'kz', N'Жасалады'),
+    (N'permits.nae.import.existing', N'ru', N'Уже есть'),
+    (N'permits.nae.import.existing', N'kz', N'Бұрыннан бар'),
+    (N'permits.nae.import.skipped', N'ru', N'Пропущено элементов: {count}'),
+    (N'permits.nae.import.skipped', N'kz', N'Өткізіліп жіберілген элементтер: {count}'),
+    (N'permits.nae.import.issues', N'ru', N'Замечания'),
+    (N'permits.nae.import.issues', N'kz', N'Ескертулер'),
+    (N'permits.nae.import.severity.warning', N'ru', N'Предупреждение'),
+    (N'permits.nae.import.severity.warning', N'kz', N'Ескерту'),
+    (N'permits.nae.import.severity.skipped', N'ru', N'Пропущено'),
+    (N'permits.nae.import.severity.skipped', N'kz', N'Өткізілді'),
+    (N'permits.nae.import.issue.noCode', N'ru', N'У элемента нет кода NAE.'),
+    (N'permits.nae.import.issue.noCode', N'kz', N'Элементте NAE коды жоқ.'),
+    (N'permits.nae.import.issue.noRegion', N'ru', N'У элемента нет атрибута Region.'),
+    (N'permits.nae.import.issue.noRegion', N'kz', N'Элементте Region атрибуты жоқ.'),
+    (N'permits.nae.import.issue.duplicateBusinessKey', N'ru', N'Один и тот же код NAE, регион и район встречаются в AF дважды.'),
+    (N'permits.nae.import.issue.duplicateBusinessKey', N'kz', N'Бірдей NAE коды, өңір және аудан AF-те екі рет кездеседі.'),
+    (N'permits.nae.import.issue.pathFlattened', N'ru', N'Больше двух уровней группировки под районом: путь сплющен.'),
+    (N'permits.nae.import.issue.pathFlattened', N'kz', N'Ауданның астында екіден астам топтау деңгейі бар: жол тегістелді.'),
+    (N'permits.nae.import.issue.existingElsewhere', N'ru', N'Этот ключ NAE уже принадлежит другому узлу.'),
+    (N'permits.nae.import.issue.existingElsewhere', N'kz', N'Бұл NAE кілті басқа түйінге тиесілі.'),
+    (N'permits.nae.import.issue.sourceIncomplete', N'ru', N'Список из AF может быть усечён.'),
+    (N'permits.nae.import.issue.sourceIncomplete', N'kz', N'AF тізімі қысқартылған болуы мүмкін.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-nae-structure ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

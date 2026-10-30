@@ -1,0 +1,313 @@
+/*
+ * Редактор дерева (`shared/ui/TreeEditor`, NAE plan N1/N2). Вигляд - з макета «NAE structure» (hybrid, D15-01):
+ * ліворуч дерево з пошуком, праворуч панель вузла. Кольори - лише токени теми (`--ecr-*`), тож світла й темна теми
+ * однакові за побудовою. Ширина 500 px: панелі переносяться одна під одну (flex-wrap), а не стискаються.
+ */
+
+.ecr-tree {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mantine-spacing-md);
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.ecr-tree-pane {
+  flex: 1 1 18rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--ecr-surface);
+  border: 1px solid var(--ecr-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.ecr-tree-side {
+  flex: 2 1 18rem;
+  min-width: 0;
+}
+
+.ecr-tree-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mantine-spacing-xs);
+  padding: var(--mantine-spacing-xs);
+  border-bottom: 1px solid var(--ecr-border);
+}
+
+.ecr-tree-search {
+  flex: 1 1 10rem;
+  min-width: 0;
+  position: relative;
+  display: flex;
+}
+
+.ecr-tree-search input {
+  flex: 1;
+  min-width: 0;
+  height: var(--ecr-ctl-height, 28px);
+  padding: 0 28px 0 8px;
+  border: 1px solid var(--ecr-border-strong);
+  border-radius: 4px;
+  background: var(--ecr-surface);
+  color: var(--ecr-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.ecr-tree-search input::placeholder {
+  color: var(--ecr-muted);
+}
+
+.ecr-tree-search button {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ecr-muted);
+  cursor: pointer;
+}
+
+.ecr-tree-btn {
+  height: var(--ecr-ctl-height, 28px);
+  padding: 0 var(--mantine-spacing-sm);
+  border: 1px solid var(--ecr-border-strong);
+  border-radius: 4px;
+  background: var(--ecr-surface);
+  color: var(--ecr-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ecr-tree-btn:hover,
+.ecr-tree-search button:hover {
+  background: var(--ecr-hover);
+  color: var(--ecr-text);
+}
+
+.ecr-tree-btn[aria-pressed='true'] {
+  background: var(--ecr-accent-soft);
+  color: var(--ecr-accent-text);
+}
+
+.ecr-tree-search input:focus-visible,
+.ecr-tree-search button:focus-visible,
+.ecr-tree-btn:focus-visible,
+.ecr-tree-row:focus-visible,
+.ecr-tree-empty button:focus-visible {
+  outline: 2px solid var(--ecr-focus);
+  outline-offset: -2px;
+}
+
+/* Вікно прокрутки: висота обмежена, рядки віртуалізовані (позиціонуються абсолютно). */
+.ecr-tree-viewport {
+  --ecr-tree-indent: 18px;
+  max-height: min(60vh, 32rem);
+  min-height: 8rem;
+  overflow: auto;
+}
+
+.ecr-tree-list {
+  position: relative;
+  min-width: 0;
+}
+
+.ecr-tree-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  padding-inline-start: calc(8px + var(--ecr-tree-depth, 0) * var(--ecr-tree-indent));
+  padding-inline-end: 10px;
+  border-inline-start: 3px solid transparent;
+  color: var(--ecr-text);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ecr-tree-row:hover {
+  background: var(--ecr-hover);
+}
+
+.ecr-tree-row[aria-selected='true'] {
+  background: var(--ecr-accent-soft);
+  color: var(--ecr-accent-text);
+  border-inline-start-color: var(--ecr-accent-text);
+  font-weight: 500;
+}
+
+.ecr-tree-caret {
+  flex: none;
+  width: 12px;
+  color: var(--ecr-muted);
+  text-align: center;
+}
+
+.ecr-tree-caret[data-has-children='true']::before {
+  content: '\25B8';
+  display: inline-block;
+}
+
+.ecr-tree-caret[data-open='true']::before {
+  transform: rotate(90deg);
+}
+
+.ecr-tree-kind {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--ecr-border);
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  color: var(--ecr-muted);
+}
+
+.ecr-tree-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ecr-tree-code {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 400 12px/1 var(--mantine-font-family-monospace);
+  color: var(--ecr-muted);
+}
+
+.ecr-tree-row[aria-selected='true'] .ecr-tree-code,
+.ecr-tree-row[aria-selected='true'] .ecr-tree-kind {
+  color: inherit;
+}
+
+.ecr-tree-mark {
+  background: var(--ecr-accent-soft);
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  border-radius: 2px;
+}
+
+.ecr-tree-row[aria-selected='true'] .ecr-tree-mark {
+  background: transparent;
+}
+
+/* Виведений вузол: приглушений і закреслений + ТЕКСТОВА позначка (не лише колір). */
+.ecr-tree-row[data-retired='true'] .ecr-tree-name {
+  color: var(--ecr-muted);
+  text-decoration: line-through;
+}
+
+.ecr-tree-retired {
+  flex: none;
+  padding: 0 5px;
+  border: 1px dashed var(--ecr-border-strong);
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--ecr-muted);
+}
+
+.ecr-tree-count {
+  flex: none;
+  margin-inline-start: auto;
+  color: var(--ecr-muted);
+  font-size: 12px;
+}
+
+.ecr-tree-row[aria-selected='true'] .ecr-tree-count {
+  color: inherit;
+}
+
+.ecr-tree-empty {
+  display: grid;
+  gap: var(--mantine-spacing-xs);
+  justify-items: center;
+  padding: var(--mantine-spacing-lg) var(--mantine-spacing-md);
+  text-align: center;
+  color: var(--ecr-muted);
+  font-size: 13px;
+}
+
+.ecr-tree-empty button {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--ecr-border-strong);
+  border-radius: 4px;
+  background: var(--ecr-surface);
+  color: var(--ecr-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ecr-tree-foot {
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  border-top: 1px solid var(--ecr-border);
+  color: var(--ecr-muted);
+  font-size: 12px;
+}
+
+/* Лише для читалки (живий регіон, підказка клавіш). */
+.ecr-tree-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ecr-tree-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+  padding: var(--mantine-spacing-md);
+  background: var(--ecr-surface);
+  border: 1px solid var(--ecr-border);
+  border-radius: 6px;
+}
+
+.ecr-tree-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+}
+
+.ecr-tree-panel-head h2 {
+  margin: 0;
+  font-size: 16px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ecr-tree-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mantine-spacing-xs);
+}
+
+.ecr-tree-plain {
+  margin: 0;
+}

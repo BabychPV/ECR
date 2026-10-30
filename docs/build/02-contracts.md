@@ -2834,6 +2834,48 @@ public interface IRegistryDraftStore
 }
 ```
 
+#### `IRegistryHierarchyStore`
+
+Рівні ієрархічних довідників `cfg.RegistryLevelDef` і читання дерева (NAE plan N1). Правила розміщення
+(порядок рівнів, пропуск лише необов'язкових, цикли) живуть в `RegistryHierarchyRules`, не в сховищі.
+
+```csharp
+public interface IRegistryHierarchyStore
+{
+    public Task<IReadOnlyList<RegistryLevelDef>> ListLevelsAsync(int registryDefId, CancellationToken ct);
+    public void AddLevel(RegistryLevelDef level);
+    public void RemoveLevel(RegistryLevelDef level);
+    public Task<IReadOnlyDictionary<int, int>> CountEntriesByLevelAsync(int registryDefId, CancellationToken ct);
+    public Task<IReadOnlyList<RegistryEntry>> ListLiveEntriesAsync(int registryDefId, CancellationToken ct);
+    public Task<IReadOnlyList<RegistryEntry>> ListChildrenTrackedAsync(int registryDefId, long? parentEntryId, CancellationToken ct);
+    public Task LockTreeAsync(int registryDefId, CancellationToken ct); // N2: UPDLOCK на рядок опису до кінця транзакції
+}
+```
+
+#### `INaeAfReader`
+
+Читання дерева обладнання AF для разового завантаження дерева НАЕ (NAE plan N2). Лише читання (D-44);
+у тестах — підміна. Реалізація — `PiAfNaeReader` (`DiscoverElementsAsync` + `ReadCurrentAsync`).
+
+```csharp
+public interface INaeAfReader
+{
+    public Task<NaeAfSnapshot> ReadAsync(int dataSourceId, string rootPath, CancellationToken ct);
+}
+```
+
+#### `IRegistryEntryReferenceReader`
+
+«Де використано» запису довідника (дозволи, тип, чинність, кількість речовин). До N3 повертає порожній
+список — таблиць дозволів, що посилаються на вузол НАЕ, ще немає.
+
+```csharp
+public interface IRegistryEntryReferenceReader
+{
+    public Task<IReadOnlyList<RegistryEntryReferenceDto>> ListAsync(int registryDefId, long entryId, CancellationToken ct);
+}
+```
+
 #### `IRegistryKeyStore`
 
 Складені ключі довідника при записі (RT-10a, FEATURE-REGISTRY-TABLES §4.3, D-151…D-153).
@@ -4480,6 +4522,13 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/entries/batch?dryRun=` | `Registry.EditData` | 8 |
 | `GET` | `/api/v1/registries/{code}/entries/{id}/history?cursor=&limit=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/registries/{code}/export?format=&asOf=` | `Registry.View` | 8 |
+| `GET` | `/api/v1/registries/{code}/hierarchy` | `Registry.View` або грант `Read` на довідник | 8 |
+| `PUT` | `/api/v1/registries/{code}/hierarchy` | `Registry.EditDefinition` або грант `Write` на довідник | 8 |
+| `GET` | `/api/v1/registries/{code}/tree?asOf=&includeRetired=&q=` | `Registry.View` або грант `Read` на довідник | 8 |
+| `POST` | `/api/v1/registries/{code}/entries/{id}/move` | `Registry.EditData` або грант `Write` на довідник | 8 |
+| `POST` | `/api/v1/registries/{code}/entries/{id}/retire` | `Registry.EditData` або грант `Write` на довідник | 8 |
+| `GET` | `/api/v1/registries/{code}/entries/{id}/references` | `Registry.View` або грант `Read` на довідник | 8 |
+| `POST` | `/api/v1/nae-tree/af-import` | `Registry.EditDefinition` + `Registry.EditData` | 8 |
 | `GET` | `/api/v1/permit-types?category=&status=&q=&limit=&cursor=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types/{code}` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types/{code}/usage` | `Registry.View` | 8 |

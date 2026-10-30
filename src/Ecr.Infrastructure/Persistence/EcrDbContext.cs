@@ -46,6 +46,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<RegistryDef> RegistryDefs => Set<RegistryDef>();
     public DbSet<RegistryFieldDef> RegistryFieldDefs => Set<RegistryFieldDef>();
     public DbSet<RegistryRuleDef> RegistryRuleDefs => Set<RegistryRuleDef>();
+    public DbSet<RegistryLevelDef> RegistryLevelDefs => Set<RegistryLevelDef>();
     public DbSet<RegistryDefinitionDraft> RegistryDefinitionDrafts => Set<RegistryDefinitionDraft>();
 
     /// <summary>Складені ключі довідників і їхні частини (FEATURE-REGISTRY-TABLES, RT-01).</summary>

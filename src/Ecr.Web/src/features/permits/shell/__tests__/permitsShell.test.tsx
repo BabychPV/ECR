@@ -37,9 +37,9 @@ function show(node: ReactNode): void {
 }
 
 describe('PermitsSubnav', () => {
-  const sections: PermitsSection[] = ['permits', 'types', 'lists', 'groups', 'bindings'];
+  const sections: PermitsSection[] = ['permits', 'types', 'lists', 'groups', 'bindings', 'nae'];
 
-  it('п’ять посилань на свої адреси, в області з імʼям', () => {
+  it('шість посилань на свої адреси, в області з імʼям', () => {
     show(<PermitsSubnav current="permits" />);
     const nav = screen.getByRole('navigation', { name: 'text of permits.nav.aria' });
     const links = within(nav).getAllByRole('link');
@@ -49,6 +49,7 @@ describe('PermitsSubnav', () => {
       '/admin/permits/lists',
       '/admin/permits/groups',
       '/admin/permits/bindings',
+      '/admin/permits/nae',
     ]);
     expect(links.map((a) => a.textContent)).toEqual([
       'text of nav.permits',
@@ -56,6 +57,7 @@ describe('PermitsSubnav', () => {
       'text of permits.lists.title',
       'text of permits.groups.title',
       'text of permits.bindings.title',
+      'text of permits.nae.title',
     ]);
   });
 
@@ -68,6 +70,7 @@ describe('PermitsSubnav', () => {
         '/admin/permits/lists',
         '/admin/permits/groups',
         '/admin/permits/bindings',
+        '/admin/permits/nae',
       ]);
       cleanup();
 

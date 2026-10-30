@@ -1,0 +1,51 @@
+/*
+ * Сторінка «NAE structure» (NAE plan N2). Макет: Design canvas «NAE structure» (board Main), KIT.md D15-01.
+ * Кольори - лише токени теми (`--ecr-*`, `--mantine-*`): літералів кольору тут немає.
+ * Панель вузла: атрибути (форма) і «Де використовується» одна під одною; на 500 px усе переноситься, а не стискається.
+ */
+
+.nae-panel-extra {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-md);
+  margin-top: var(--mantine-spacing-md);
+  padding-top: var(--mantine-spacing-md);
+  border-top: 1px solid var(--ecr-border);
+}
+
+.nae-used-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.nae-used-table th {
+  padding: 6px 4px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--ecr-text);
+  border-bottom: 1px solid var(--ecr-border);
+}
+
+.nae-used-table td {
+  padding: 6px 4px;
+}
+
+.nae-import-report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-xs);
+}
+
+.nae-import-issues {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.nae-import-path {
+  font-family: var(--mantine-font-family-monospace);
+  overflow-wrap: anywhere;
+}

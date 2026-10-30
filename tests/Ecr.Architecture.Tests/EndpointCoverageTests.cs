@@ -1388,6 +1388,15 @@ public sealed partial class EndpointCoverageTests
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/methodologies`.
         "PUT /api/v1/methodologies/{p}/row-activity-filter",
 
+        // NAE plan N1 (hierarchical registry): GET hierarchy, GET tree, POST move and POST retire now have their client
+        // calls in `features/registries/tree/treeApi.ts` (generic tree editor). Only the level-editing PUT is left without a
+        // consumer: the screen that edits hierarchy levels is not built yet (NAE plan N2 / registry constructor).
+        // ⚠ TEMPORARY: remove in the same commit that adds `saveRegistryHierarchy` to a screen.
+        "PUT /api/v1/registries/{p}/hierarchy",
+
+        // NAE plan N2: af-import is consumed by `features/permits/nae/afImportApi.ts` (AfImportPanel),
+        // "where used" (GET .../entries/{p}/references) by `features/permits/nae/referencesApi.ts`.
+
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було
         // НЕПРАВДОЮ: жодне місце клієнта нічого не конвертувало.
