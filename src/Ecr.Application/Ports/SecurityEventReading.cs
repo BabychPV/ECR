@@ -28,8 +28,10 @@ public sealed record SecurityEventView(
 /// <param name="To">Кінець вікна в UTC, виключно.</param>
 /// <param name="EventType">Тип події (точний збіг); <c>null</c> — усі.</param>
 /// <param name="ChangedByUserId">Автор події — <b>UserId</b>.</param>
+/// <param name="Sort">Порядок сторінок (типово — найновіші першими).</param>
 public sealed record SecurityEventFilter(
     DateTime From,
     DateTime To,
     string? EventType = null,
-    int? ChangedByUserId = null);
+    int? ChangedByUserId = null,
+    AuditSort Sort = AuditSort.ChangedAtDesc);

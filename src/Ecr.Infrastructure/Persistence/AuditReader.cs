@@ -42,14 +42,16 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
 
         await using var command = connection.CreateCommand();
 
-        var where = BuildCellChangeWhere(filter, command, Cursor.DecodeAt(page.Cursor));
+        var where = BuildCellChangeWhere(filter, command, AuditCursor.Decode(page.Cursor, filter.Sort));
 
         // ⛔ P1-07: порядок — ЗА КЛАСТЕРНИМ КЛЮЧЕМ таблиці `(ChangedAt, Id)`, а не за `Id`. Партиції йдуть за
         // `ChangedAt`, тож `ORDER BY Id` змушував рушій прочитати ВЕСЬ відсічений вікном (до 92 діб) обсяг і
         // сортувати його на кожну сторінку; прямий (чи зворотний, для історії комірки — AN-98) обхід індексу
         // зупиняється після `@take` рядків. `Id` — другий складник: пакет пишеться одним `ChangedAt`.
-        var order = filter.NewestFirst ? "ChangedAt DESC, Id DESC" : "ChangedAt, Id";
-        var outerOrder = filter.NewestFirst ? "a.ChangedAt DESC, a.Id DESC" : "a.ChangedAt, a.Id";
+        // ⚠ Порядок — з `filter.Sort` (типово найновіші першими; раніше загальний журнал ішов від найстаріших, а
+        // найсвіжіше лежало на останній сторінці). «За користувачем» сортує вікно — див. `AuditPaging`.
+        var order = AuditPaging.Order(filter.Sort, "ChangedAt", "Id", "ChangedByUserId", "ChangedByUserId");
+        var outerOrder = AuditPaging.OuterOrder(filter.Sort, "a", "ChangedAt", "Id", "ChangedByUserId", "ChangedByUserId");
 
         var whereText = where.ToString();
         command.Parameters.AddWithValue("@take", page.Limit + 1);
@@ -72,9 +74,12 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         // (`CountCellChangesByColumnAsync` + межі читання S6) — читач порту не знає, що саме читач бачить.
         return new PagedResult<CellChangeView>(
             items,
-            hasMore ? Cursor.Encode(rows[page.Limit - 1].View.ChangedAt, rows[page.Limit - 1].Id) : null,
+            hasMore ? EncodeCellCursor(filter.Sort, rows[page.Limit - 1]) : null,
             TotalCount: null);
     }
+
+    private static string EncodeCellCursor(AuditSort sort, (long Id, CellChangeView View) last)
+        => AuditCursor.Encode(sort, last.View.ChangedAt, last.Id, last.View.ChangedByUserId, last.View.ChangedByDisplayName);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<CellChangeColumnCount>> CountCellChangesByColumnAsync(
@@ -152,7 +157,8 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                     LocalizedOrNull(reader, 21),
                     LocalizedOrNull(reader, 22),
                     reader.GetBoolean(23),
-                    reader.GetBoolean(24))));
+                    reader.GetBoolean(24),
+                    reader.GetInt64(0))));
         }
 
         return rows;
@@ -249,10 +255,7 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
     /// <summary>План «лише гаряче»: сторінка журналу над самою <c>aud.CellChange</c> (як до НФ-8.9.6).</summary>
     internal static string CellChangesHotSql(string where, string order, string outerOrder)
         => PageWithNames(
-            "SELECT TOP (@take) " + CellChangeColumns + "\n"
-            + "  FROM aud.CellChange\n"
-            + " WHERE " + where + "\n"
-            + " ORDER BY " + order,
+            AuditPaging.TopPage(CellChangeColumns, "aud.CellChange", where, order),
             fromArchive: "CAST(0 AS bit)",
             outerOrder);
 
@@ -262,16 +265,12 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
             "SELECT TOP (@take) " + CellChangeColumns + ", FromArchive\n"
             + "  FROM (\n"
             + "        SELECT " + CellChangeColumns + ", FromArchive\n"
-            + "          FROM (SELECT TOP (@take) " + CellChangeColumns + ", CAST(0 AS bit) AS FromArchive\n"
-            + "                  FROM aud.CellChange\n"
-            + "                 WHERE " + where + "\n"
-            + "                 ORDER BY " + order + ") AS h\n"
+            + "          FROM (" + AuditPaging.TopPage(
+                CellChangeColumns + ", CAST(0 AS bit) AS FromArchive", "aud.CellChange", where, order) + ") AS h\n"
             + "        UNION ALL\n"
             + "        SELECT " + CellChangeColumns + ", FromArchive\n"
-            + "          FROM (SELECT TOP (@take) " + CellChangeColumns + ", CAST(1 AS bit) AS FromArchive\n"
-            + "                  FROM arc.AuditCellChange\n"
-            + "                 WHERE " + where + "\n"
-            + "                 ORDER BY " + order + ") AS r\n"
+            + "          FROM (" + AuditPaging.TopPage(
+                CellChangeColumns + ", CAST(1 AS bit) AS FromArchive", "arc.AuditCellChange", where, order) + ") AS r\n"
             + "       ) AS u\n"
             + " ORDER BY " + order,
             fromArchive: "a.FromArchive",
@@ -342,7 +341,7 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
               OUTER APPLY (SELECT TOP (1) r.LabelL10n
                              FROM cfg.RowDef AS r
                             WHERE r.TableDefId = c.TableDefId AND r.RowKey = a.RowKey AND r.IsDeleted = 0) AS rd
-             ORDER BY {outerOrder};
+             ORDER BY {outerOrder}{AuditPaging.Hint(outerOrder)};
             """;
 
     /// <summary>Екранує спецсимволи <c>LIKE</c> (<c>\ % _ [</c>) під <c>ESCAPE N'\'</c>; довжина — не більше межі.</summary>
@@ -361,7 +360,7 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
     /// Параметри додаються в <paramref name="command"/>.
     /// </summary>
     internal static StringBuilder BuildCellChangeWhere(
-        CellChangeFilter filter, SqlCommand command, (DateTime At, long Id)? after)
+        CellChangeFilter filter, SqlCommand command, AuditPosition? after)
     {
         // ⚠ Вікно за ChangedAt стоїть ПЕРШИМ у WHERE не заради стилю: саме воно
         // відсікає партиції. Курсор за Id додається до нього, а не замість —
@@ -372,28 +371,19 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         // З параметром `datetime` ЗАПИТ ПО ДВОХ ТАБЛИЦЯХ (гаряче + архів, UNION ALL) не відсікав партиції:
         // виміряно 19 заходів у кожну з таблиць замість 1 (`AuditReaderArchiveTests`). Той самий урок, що в
         // `@afterAt` нижче й `@since` у `LastChangesSql`.
-        foreach (var (name, value) in new[] { ("@from", filter.From), ("@to", filter.To) })
+        var (windowFrom, windowTo) = AuditPaging.Window(filter.Sort, filter.From, filter.To, after);
+        foreach (var (name, value) in new[] { ("@from", windowFrom), ("@to", windowTo) })
         {
             var edge = command.Parameters.Add(name, SqlDbType.DateTime2);
             edge.Scale = 3;
             edge.Value = value;
         }
 
-        if (after is { } position)
-        {
-            // ⚠ Курсор — пара кластерного ключа `(ChangedAt, Id)` (P1-07). Перша умова за `ChangedAt` — кордон
-            // діапазону для seek по індексу, друга — точна «строго після/перед» позиції; без неї рядки з тим самим
-            // `ChangedAt` (пакет) повторилися б чи загубилися на межі сторінки. Напрямок — за порядком сторінки.
-            where.Append(filter.NewestFirst
-                ? "\n                   AND ChangedAt <= @afterAt AND (ChangedAt < @afterAt OR Id < @afterId)"
-                : "\n                   AND ChangedAt >= @afterAt AND (ChangedAt > @afterAt OR Id > @afterId)");
-
-            // ⚠ `datetime2(3)` — ширина колонки зі схеми: інша точність змусила б перетворювати КОЛОНКУ.
-            var moment = command.Parameters.Add("@afterAt", SqlDbType.DateTime2);
-            moment.Scale = 3;
-            moment.Value = position.At;
-            command.Parameters.Add("@afterId", SqlDbType.BigInt).Value = position.Id;
-        }
+        // ⚠ Курсор — повний ключ порядку (P1-07): за часом це пара кластерного ключа `(ChangedAt, Id)` (перша умова —
+        // кордон діапазону для seek, друга — точне «строго після»; без неї рядки з тим самим `ChangedAt` (пакет)
+        // повторилися б чи загубилися на межі сторінки), за користувачем — (ім'я, UserId, ChangedAt, Id).
+        // `@afterAt` — `datetime2(3)`, ширина колонки: інша точність змусила б перетворювати КОЛОНКУ.
+        AuditPaging.AppendKeyset(where, filter.Sort, after, command, "ChangedAt", "Id", "ChangedByUserId", "ChangedByUserId");
 
         // ⛔ Умова додається ЛИШЕ за наявності значення, і кожна — іменованим
         // параметром. Правило «жодного значення в текст запиту» винятків не має
@@ -481,6 +471,13 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                 "%" + EscapeLike(query) + "%",
                 SqlDbType.NVarChar,
                 (2 * QueryMaxLength) + 2);
+        }
+
+        if (filter.HumanOnly)
+        {
+            // ⚠ Константа зі спільного переліку «рішення людини» (не вхід користувача): журнал аркуша не показує
+            // перерахунок, інтеграцію й міграцію як «дії людей».
+            where.Append("\n                   AND Origin IN (" + Ecr.Application.Documents.CellChangeOrigins.HumanOriginsSql + ")");
         }
 
         if (filter.LateOnly)
@@ -628,28 +625,28 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
 
         await using var command = connection.CreateCommand();
 
-        var where = StructureJournalWhere(command, filter);
+        var after = AuditCursor.Decode(page.Cursor, filter.Sort);
+        var where = StructureJournalWhere(command, filter, after);
+        AuditPaging.AppendKeyset(
+            where, filter.Sort, after, command,
+            "ChangedAt", "Id", "ChangedByUserId", "ChangedByUserId");
 
         // ⚠ `R-18`: ім'я автора — у зовнішньому запиті, після вибору сторінки
-        // (та сама причина, що в `ReadCellChangesAsync`).
+        // (та сама причина, що в `ReadCellChangesAsync`). Порядок — за кластерним ключем `(ChangedAt, Id)` (типово
+        // найновіші першими; раніше `ORDER BY Id` — найстаріші першими).
+        var order = AuditPaging.Order(filter.Sort, "ChangedAt", "Id", "ChangedByUserId", "ChangedByUserId");
+        var outerOrder = AuditPaging.OuterOrder(filter.Sort, "s", "ChangedAt", "Id", "ChangedByUserId", "ChangedByUserId");
         command.CommandText = $"""
             SELECT s.Id, s.ChangedAt, s.EntityType, s.EntityId, s.Operation,
                    s.OldJson, s.NewJson, s.ChangeReason, s.ChangedByUserId, u.DisplayName
               FROM (
-                    SELECT TOP (@take)
-                           Id, ChangedAt, EntityType, EntityId, Operation,
-                           OldJson, NewJson, ChangeReason, ChangedByUserId
-                      FROM aud.StructureChange
-                     WHERE {where}
-                       AND Id > @after
-                     ORDER BY Id
+                    {AuditPaging.TopPage("Id, ChangedAt, EntityType, EntityId, Operation, OldJson, NewJson, ChangeReason, ChangedByUserId", "aud.StructureChange", where.ToString(), order)}
                    ) AS s
               LEFT JOIN sec.[User] AS u ON u.Id = s.ChangedByUserId
-             ORDER BY s.Id;
+             ORDER BY {outerOrder}{AuditPaging.Hint(outerOrder)};
             """;
 
         command.Parameters.Add("@take", SqlDbType.Int).Value = page.Limit + 1;
-        command.Parameters.Add("@after", SqlDbType.BigInt).Value = Cursor.Decode(page.Cursor);
 
         var rows = new List<(long Id, StructureChangeView View)>();
         await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
@@ -672,11 +669,71 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         }
 
         var hasMore = rows.Count > page.Limit;
+        var items = rows.Take(page.Limit).Select(r => r.View).ToList();
+        var last = hasMore ? rows[page.Limit - 1] : default;
 
         return new PagedResult<StructureChangeView>(
-            rows.Take(page.Limit).Select(r => r.View).ToList(),
-            hasMore ? Cursor.Encode(rows[page.Limit - 1].Id) : null,
+            await WithEntityLabelsAsync(connection, items, ct).ConfigureAwait(false),
+            hasMore
+                ? AuditCursor.Encode(filter.Sort, last.View.ChangedAt, last.Id, last.View.ChangedByUserId, last.View.ChangedByDisplayName)
+                : null,
             TotalCount: null);
+    }
+
+    /// <summary>Таблиці, чий код/ключ показується замість числа в колонці «Сутність» (тип без префікса схеми → таблиця, колонка).</summary>
+    private static readonly Dictionary<string, (string Table, string Label)> EntityLabelSources =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ColumnDef"] = ("cfg.ColumnDef", "Code"),
+            ["TableDef"] = ("cfg.TableDef", "Code"),
+            ["SheetDef"] = ("cfg.SheetDef", "Code"),
+            ["RowDef"] = ("cfg.RowDef", "RowKey"),
+            ["RegistryDef"] = ("cfg.RegistryDef", "Code"),
+        };
+
+    /// <summary>
+    /// Підписи сутностей сторінки: ОДИН запит на тип сутності по ключах СТОРІНКИ (не по журналу), без join.
+    /// Видалена сутність або тип поза переліком — без підпису (клієнт покаже ідентифікатор).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Підпис — ЧИННИЙ код сутності, а не той, що був у момент зміни: журнал-доказ несе <c>EntityType</c>/<c>EntityId</c>
+    /// незмінними, підпис — лише зручність читання.
+    /// </remarks>
+    private static async Task<IReadOnlyList<StructureChangeView>> WithEntityLabelsAsync(
+        SqlConnection connection, List<StructureChangeView> items, CancellationToken ct)
+    {
+        var labels = new Dictionary<(string Type, int Id), string>();
+        var groups = items
+            .Where(i => i.EntityId > 0 && EntityLabelSources.ContainsKey(TrimSchema(i.EntityType)))
+            .GroupBy(i => TrimSchema(i.EntityType), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var group in groups)
+        {
+            var (table, column) = EntityLabelSources[group.Key];
+            await using var command = connection.CreateCommand();
+
+            // Ім'я таблиці й колонки — з закритого словника вище, не від клієнта; ключі їдуть одним JSON-параметром.
+            command.CommandText =
+                $"SELECT Id, {column} FROM {table} WHERE Id IN (SELECT CAST([value] AS int) FROM OPENJSON(@ids));";
+            command.Parameters.Add("@ids", SqlDbType.NVarChar, -1).Value =
+                "[" + string.Join(",", group.Select(i => i.EntityId.ToString(CultureInfo.InvariantCulture)).Distinct()) + "]";
+
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                labels[(group.Key, reader.GetInt32(0))] = reader.GetString(1);
+            }
+        }
+
+        return [.. items.Select(i =>
+            labels.TryGetValue((TrimSchema(i.EntityType), i.EntityId), out var label) ? i with { EntityLabel = label } : i)];
+    }
+
+    private static string TrimSchema(string entityType)
+    {
+        var dot = entityType.LastIndexOf('.');
+
+        return dot < 0 ? entityType : entityType[(dot + 1)..];
     }
 
     /// <inheritdoc />
@@ -699,7 +756,7 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
     /// <c>(ChangedAt, Id)</c>), кожне звуження — лише за наявності значення і лише
     /// іменованим ТИПІЗОВАНИМ параметром.
     /// </remarks>
-    private static StringBuilder StructureJournalWhere(SqlCommand command, StructureChangeFilter filter)
+    private static StringBuilder StructureJournalWhere(SqlCommand command, StructureChangeFilter filter, AuditPosition? after = null)
     {
         var where = new StringBuilder("ChangedAt >= @from AND ChangedAt < @to");
 
@@ -717,7 +774,8 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
 
         // ⚠ `datetime2(3)` — ширина колонки зі схеми: інша точність змусила б
         // перетворювати КОЛОНКУ, і вікно перестало б відсікати партиції.
-        foreach (var (name, value) in new[] { ("@from", filter.From), ("@to", filter.To) })
+        var (windowFrom, windowTo) = AuditPaging.Window(filter.Sort, filter.From, filter.To, after);
+        foreach (var (name, value) in new[] { ("@from", windowFrom), ("@to", windowTo) })
         {
             var moment = command.Parameters.Add(name, SqlDbType.DateTime2);
             moment.Scale = 3;
@@ -725,6 +783,176 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         }
 
         return where;
+    }
+
+    /// <inheritdoc />
+    public async Task<PagedResult<WorkflowEventView>> ReadWorkflowEventsAsync(
+        WorkflowEventFilter filter, CursorRequest page, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        ArgumentNullException.ThrowIfNull(page);
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+
+        // ⚠ `wf.ApprovalEvent` — не партиційована таблиця подій погодження (кластерний ключ `Id`, індексу за `At`
+        // немає): вікно `At` відсікає рядки, але не сторінки, тож сторінка читає вікно й сортує його (Top-N sort).
+        // Подій десятки на аркуш за період, тож це дешево; індекс `(At, Id)` — міграція, потрібна лише за обсягу
+        // понад ~10^6 подій (див. звіт lane/integ-audit-sort).
+        var after = AuditCursor.Decode(page.Cursor, filter.Sort);
+        var where = WorkflowEventWhere(command, filter, after);
+
+        const string userKey = "ISNULL(ByUserId, 0)";
+        AuditPaging.AppendKeyset(where, filter.Sort, after, command, "At", "Id", "ByUserId", userKey);
+        var order = AuditPaging.Order(filter.Sort, "At", "Id", "ByUserId", userKey);
+        var outerOrder = AuditPaging.OuterOrder(filter.Sort, "a", "At", "Id", "ByUserId", userKey);
+
+        // ⚠ Імена документа/аркуша/автора — у зовнішньому запиті, після вибору сторінки (R-18), LEFT: видалений
+        // документ чи користувач не ховає саму подію.
+        command.CommandText = $"""
+            SELECT a.Id, a.At, a.Action, a.FromStatus, a.ToStatus, a.Reason, a.ByUserId, u.DisplayName,
+                   a.DocumentId, d.BusinessKey, a.SheetDefId, sd.Code, a.PeriodKey, a.StepOrdinal
+              FROM (
+                    {AuditPaging.TopPage("Id, At, Action, FromStatus, ToStatus, Reason, ByUserId, DocumentId, SheetDefId, PeriodKey, StepOrdinal", "wf.ApprovalEvent", where.ToString(), order, at: "At", userColumn: "ByUserId")}
+                   ) AS a
+              LEFT JOIN sec.[User] AS u ON u.Id = a.ByUserId
+              LEFT JOIN doc.Document AS d ON d.Id = a.DocumentId
+              LEFT JOIN cfg.SheetDef AS sd ON sd.Id = a.SheetDefId
+             ORDER BY {outerOrder}{AuditPaging.Hint(outerOrder)};
+            """;
+
+        command.Parameters.Add("@take", SqlDbType.Int).Value = page.Limit + 1;
+
+        var rows = new List<(long Id, WorkflowEventView View)>();
+        await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                rows.Add((
+                    reader.GetInt64(0),
+                    new WorkflowEventView(
+                        DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc),
+                        ((Ecr.Domain.Entities.Workflow.ApprovalAction)reader.GetByte(2)).ToString(),
+                        ((Ecr.Domain.Enums.DocumentStatus)reader.GetByte(3)).ToString(),
+                        ((Ecr.Domain.Enums.DocumentStatus)reader.GetByte(4)).ToString(),
+                        StringOrNull(reader, 5),
+                        reader.IsDBNull(6) ? null : reader.GetInt32(6),
+                        StringOrNull(reader, 7),
+                        reader.GetInt64(8),
+                        StringOrNull(reader, 9),
+                        reader.GetInt32(10),
+                        StringOrNull(reader, 11),
+                        reader.GetInt32(12),
+                        reader.IsDBNull(13) ? null : reader.GetInt32(13))));
+            }
+        }
+
+        var hasMore = rows.Count > page.Limit;
+        var last = hasMore ? rows[page.Limit - 1] : default;
+
+        return new PagedResult<WorkflowEventView>(
+            rows.Take(page.Limit).Select(r => r.View).ToList(),
+            hasMore
+                ? AuditCursor.Encode(filter.Sort, last.View.ChangedAt, last.Id, last.View.ChangedByUserId ?? 0, last.View.ChangedByDisplayName)
+                : null,
+            TotalCount: null);
+    }
+
+    /// <summary>Спільна умова переліку й підрахунку подій безпеки (вікно першим, звуження — типізованими параметрами).</summary>
+    private static StringBuilder SecurityEventWhere(SqlCommand command, SecurityEventFilter filter, AuditPosition? after = null)
+    {
+        var where = new StringBuilder("ChangedAt >= @from AND ChangedAt < @to");
+
+        if (filter.EventType is { } eventType)
+        {
+            where.Append("\n                   AND EventType = @eventType");
+            command.Parameters.Add("@eventType", SqlDbType.NVarChar, EntityTypeSize).Value = eventType;
+        }
+
+        if (filter.ChangedByUserId is { } changedBy)
+        {
+            where.Append("\n                   AND ChangedByUserId = @changedBy");
+            command.Parameters.Add("@changedBy", SqlDbType.Int).Value = changedBy;
+        }
+
+        var (windowFrom, windowTo) = AuditPaging.Window(filter.Sort, filter.From, filter.To, after);
+        foreach (var (name, value) in new[] { ("@from", windowFrom), ("@to", windowTo) })
+        {
+            var moment = command.Parameters.Add(name, SqlDbType.DateTime2);
+            moment.Scale = 3;
+            moment.Value = value;
+        }
+
+        return where;
+    }
+
+    /// <inheritdoc />
+    public async Task<int> CountSecurityEventsAsync(SecurityEventFilter filter, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM aud.SecurityEvent WHERE {SecurityEventWhere(command, filter)};";
+
+        return (int)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+    }
+
+    /// <summary>Спільна умова переліку й підрахунку подій погодження.</summary>
+    private static StringBuilder WorkflowEventWhere(SqlCommand command, WorkflowEventFilter filter, AuditPosition? after = null)
+    {
+        var where = new StringBuilder("At >= @from AND At < @to");
+
+        if (filter.Action is { Length: > 0 } action)
+        {
+            // Дія зберігається числом (byte); невідоме ім'я — порожня видача, а не помилка.
+            where.Append("\n                   AND Action = @action");
+            command.Parameters.Add("@action", SqlDbType.TinyInt).Value =
+                Enum.TryParse<Ecr.Domain.Entities.Workflow.ApprovalAction>(action, ignoreCase: true, out var parsed)
+                && Enum.IsDefined(parsed)
+                    ? (byte)parsed
+                    : (byte)0;
+        }
+
+        if (filter.ChangedByUserId is { } changedBy)
+        {
+            where.Append("\n                   AND ByUserId = @changedBy");
+            command.Parameters.Add("@changedBy", SqlDbType.Int).Value = changedBy;
+        }
+
+        if (filter.DocumentId is { } documentId)
+        {
+            where.Append("\n                   AND DocumentId = @documentId");
+            command.Parameters.Add("@documentId", SqlDbType.BigInt).Value = documentId;
+        }
+
+        var (windowFrom, windowTo) = AuditPaging.Window(filter.Sort, filter.From, filter.To, after);
+        foreach (var (name, value) in new[] { ("@from", windowFrom), ("@to", windowTo) })
+        {
+            var moment = command.Parameters.Add(name, SqlDbType.DateTime2);
+            moment.Scale = 3;
+            moment.Value = value;
+        }
+
+        return where;
+    }
+
+    /// <inheritdoc />
+    public async Task<int> CountWorkflowEventsAsync(WorkflowEventFilter filter, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM wf.ApprovalEvent WHERE {WorkflowEventWhere(command, filter)};";
+
+        return (int)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
     }
 
     /// <inheritdoc />
@@ -742,45 +970,26 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         // ⚠ Вікно ПЕРШИМ (відсікає партиції), звуження — лише за наявності значення
         // й іменованим типізованим параметром; ім'я автора — у зовнішньому запиті
         // після вибору сторінки (R-18), як у `ReadStructureJournalAsync`.
-        var where = new StringBuilder("ChangedAt >= @from AND ChangedAt < @to");
+        var after = AuditCursor.Decode(page.Cursor, filter.Sort);
+        var where = SecurityEventWhere(command, filter, after);
 
-        if (filter.EventType is { } eventType)
-        {
-            where.Append("\n                   AND EventType = @eventType");
-            command.Parameters.Add("@eventType", SqlDbType.NVarChar, EntityTypeSize).Value = eventType;
-        }
-
-        if (filter.ChangedByUserId is { } changedBy)
-        {
-            where.Append("\n                   AND ChangedByUserId = @changedBy");
-            command.Parameters.Add("@changedBy", SqlDbType.Int).Value = changedBy;
-        }
-
-        foreach (var (name, value) in new[] { ("@from", filter.From), ("@to", filter.To) })
-        {
-            var moment = command.Parameters.Add(name, SqlDbType.DateTime2);
-            moment.Scale = 3;
-            moment.Value = value;
-        }
+        AuditPaging.AppendKeyset(
+            where, filter.Sort, after, command,
+            "ChangedAt", "Id", "ChangedByUserId", "ChangedByUserId");
+        var order = AuditPaging.Order(filter.Sort, "ChangedAt", "Id", "ChangedByUserId", "ChangedByUserId");
+        var outerOrder = AuditPaging.OuterOrder(filter.Sort, "s", "ChangedAt", "Id", "ChangedByUserId", "ChangedByUserId");
 
         command.CommandText = $"""
             SELECT s.Id, s.ChangedAt, s.EventType, s.TargetUserId, s.TargetRoleId,
                    s.DetailsJson, s.ChangedByUserId, s.CorrelationId, u.DisplayName
               FROM (
-                    SELECT TOP (@take)
-                           Id, ChangedAt, EventType, TargetUserId, TargetRoleId,
-                           DetailsJson, ChangedByUserId, CorrelationId
-                      FROM aud.SecurityEvent
-                     WHERE {where}
-                       AND Id > @after
-                     ORDER BY Id
+                    {AuditPaging.TopPage("Id, ChangedAt, EventType, TargetUserId, TargetRoleId, DetailsJson, ChangedByUserId, CorrelationId", "aud.SecurityEvent", where.ToString(), order)}
                    ) AS s
               LEFT JOIN sec.[User] AS u ON u.Id = s.ChangedByUserId
-             ORDER BY s.Id;
+             ORDER BY {outerOrder}{AuditPaging.Hint(outerOrder)};
             """;
 
         command.Parameters.Add("@take", SqlDbType.Int).Value = page.Limit + 1;
-        command.Parameters.Add("@after", SqlDbType.BigInt).Value = Cursor.Decode(page.Cursor);
 
         var rows = new List<(long Id, SecurityEventView View)>();
         await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
@@ -802,10 +1011,13 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
         }
 
         var hasMore = rows.Count > page.Limit;
+        var last = hasMore ? rows[page.Limit - 1] : default;
 
         return new PagedResult<SecurityEventView>(
             rows.Take(page.Limit).Select(r => r.View).ToList(),
-            hasMore ? Cursor.Encode(rows[page.Limit - 1].Id) : null,
+            hasMore
+                ? AuditCursor.Encode(filter.Sort, last.View.ChangedAt, last.Id, last.View.ChangedByUserId, last.View.ChangedByDisplayName)
+                : null,
             TotalCount: null);
     }
 

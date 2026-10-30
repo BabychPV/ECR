@@ -936,6 +936,23 @@ export function DocumentPage(): JSX.Element {
               <TableChatButton documentId={documentId} />
             </Suspense>
           }
+          sheet={active === undefined ? null : { sheetDefId: active.sheetDefId, code: active.code, name: active.name }}
+          onOpenCell={(target) => {
+            // Журнал аркуша веде в комірку ТІЄЇ Ж таблиці активного аркуша: той самий шлях, що й зауваження.
+            const table = tables.data?.find(
+              (candidate) => candidate.sheetCode === target.sheetCode && candidate.tableCode === target.tableCode,
+            );
+            if (table === undefined) return;
+
+            void import('@/features/grid/cellNavigation').then((module) =>
+              module.requestCellNavigation({
+                tableDefId: table.tableDefId,
+                tableInstanceId: table.tableInstanceId,
+                rowKey: target.rowKey,
+                columnCode: target.columnCode,
+              }),
+            );
+          }}
           onSelectFinding={(finding) => {
             // Знахідка шапки (`tableDefId` 0) веде до панелі шапки, а не в клітинку.
             if (isHeaderFinding(finding)) {

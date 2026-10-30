@@ -1559,6 +1559,7 @@ USING (VALUES
     -- `auditWindowTooWide` вище (`Q-341`).
     (N'err.ECR-REQ-0422.pageSizeOutOfRange', N'en', N'The page size must be between 1 and {max}.', 1),
     (N'err.ECR-REQ-0422.auditExportTooLarge', N'en', N'The export would contain {total} rows, the limit is {max}: narrow the window or the filters.', 1),
+    (N'err.ECR-REQ-0422.auditCursorSortMismatch', N'en', N'This page position belongs to a different sort order: start again from the first page.', 1),
     -- BE-09b: фільтр стану переліку документів. Невідомий стан — відмова, а не «усі».
     (N'err.ECR-REQ-0422.documentState',      N'en', N'There is no document state "{state}".', 1),
     (N'err.ECR-REQ-0422.documentStateNeedsPeriod', N'en', N'Filtering by document state needs a period: outside a period the state is not defined.', 1),
@@ -6694,6 +6695,24 @@ USING (VALUES
     (N'audit.securityEmpty', N'en', N'No security events in this window.', 1),
     (N'audit.details', N'en', N'Details', 1),
     (N'audit.correlation', N'en', N'Correlation ID', 1),
+    -- COLL:audit-sort ── вкладка «Workflow events», сортування заголовків і підпис сутності (ru/kz нижче) ──
+    (N'audit.viewWorkflow', N'en', N'Workflow events', 1),
+    (N'audit.workflowEmpty', N'en', N'No workflow events in this window.', 1),
+    (N'audit.action', N'en', N'Action', 1),
+    (N'audit.comment', N'en', N'Comment', 1),
+    (N'audit.sheet', N'en', N'Sheet', 1),
+    (N'audit.statusChange', N'en', N'Status', 1),
+    (N'audit.systemActor', N'en', N'System', 1),
+    (N'audit.sortBy', N'en', N'Sort by {column}', 1),
+    (N'audit.sortedAsc', N'en', N'sorted ascending', 1),
+    (N'audit.sortedDesc', N'en', N'sorted descending', 1),
+    (N'audit.workflowAction.Submit', N'en', N'Submitted', 1),
+    (N'audit.workflowAction.Approve', N'en', N'Approved', 1),
+    (N'audit.workflowAction.ApproveStep', N'en', N'Step approved', 1),
+    (N'audit.workflowAction.Reject', N'en', N'Rejected', 1),
+    (N'audit.workflowAction.Reopen', N'en', N'Returned for rework', 1),
+    (N'audit.workflowAction.Recall', N'en', N'Recalled', 1),
+    -- COLL:audit-sort ── кінець секції ──
     -- ru/kz — окремою порцією `COLL:reqclose` у блоці I18N нижче.
     -- COLL:reqclose ── кінець секції ──
     -- COLL:fv1315 ── Залежність розкладу збору від іншого розкладу того ж з'єднання (ФВ-13.15, `CollectionScheduleDependencyRules`, `CollectionJob`) ──
@@ -7861,6 +7880,9 @@ USING (VALUES
     ,(N'audit.entityLabel.ReportVersion', N'en', N'Report version', 1)
     ,(N'audit.eventLabel.AccessDenied', N'en', N'Access denied', 1)
     ,(N'audit.eventLabel.AuditStructureExported', N'en', N'Structure audit exported', 1)
+    ,(N'audit.eventLabel.AuditCellsExported', N'en', N'Cell changes audit exported', 1)
+    ,(N'audit.eventLabel.AuditSecurityExported', N'en', N'Security events audit exported', 1)
+    ,(N'audit.eventLabel.AuditWorkflowExported', N'en', N'Workflow events audit exported', 1)
     ,(N'audit.eventLabel.ConsistencyCheckRunRequested', N'en', N'Consistency check requested', 1)
     ,(N'audit.eventLabel.DataSourceConnectionTested', N'en', N'Source connection tested', 1)
     ,(N'audit.eventLabel.DataSourceDeleted', N'en', N'Data source deleted', 1)
@@ -9443,6 +9465,24 @@ USING (VALUES
     ,(N'tableChat.taskOpen', N'en', N'Open discussion', 1)
     ,(N'tableChat.tasksError', N'en', N'Could not load mentions.', 1)
     -- COLL:ui-tablechat ── кінець секції ──
+    -- WFREASONS:sheet-history ── en: Inspector → History без вибраної комірки показує журнал погодження аркуша; ru/kz — порцією WFREASONS:sheet-history нижче ──
+    ,(N'inspector.sheetHistoryTitle', N'en', N'Sheet log', 1)
+    ,(N'inspector.sheetHistoryHint', N'en', N'Select a cell to enable “This cell”.', 1)
+    ,(N'inspector.sheetHistoryEmpty', N'en', N'No edits or approval actions on this sheet yet.', 1)
+    ,(N'inspector.history.modeLabel', N'en', N'What the history shows', 1)
+    ,(N'inspector.history.modeSheet', N'en', N'Sheet log', 1)
+    ,(N'inspector.history.modeCell', N'en', N'This cell', 1)
+    ,(N'inspector.history.scopeSheet', N'en', N'Sheet: {sheet} · {period}', 1)
+    ,(N'inspector.history.scopeCell', N'en', N'Cell: {cell} · {column}', 1)
+    ,(N'inspector.history.includeSystem', N'en', N'Include system changes', 1)
+    ,(N'inspector.history.loadMore', N'en', N'Load more', 1)
+    ,(N'workflow.eventAction.Submit', N'en', N'Submitted', 1)
+    ,(N'workflow.eventAction.Approve', N'en', N'Approved', 1)
+    ,(N'workflow.eventAction.ApproveStep', N'en', N'Approved a step', 1)
+    ,(N'workflow.eventAction.Reject', N'en', N'Rejected', 1)
+    ,(N'workflow.eventAction.Reopen', N'en', N'Returned for edits', 1)
+    ,(N'workflow.eventAction.Recall', N'en', N'Recalled', 1)
+    -- WFREASONS:sheet-history ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -9612,6 +9652,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.auditCellNeedsDocument', N'ru', N'Для ключа строки или фильтра по столбцу нужен документ: без него адрес ячейки не является адресом.'),
     (N'err.ECR-REQ-0422.pageSizeOutOfRange', N'ru', N'Размер страницы должен быть от 1 до {max}.'),
     (N'err.ECR-REQ-0422.auditExportTooLarge', N'ru', N'В экспорт попало бы строк: {total}, а ограничение — {max}: сузьте интервал или фильтры.'),
+    (N'err.ECR-REQ-0422.auditCursorSortMismatch', N'ru', N'Позиция страницы относится к другому порядку сортировки: начните с первой страницы.'),
     (N'err.ECR-REQ-0422.documentState', N'ru', N'Состояния документа «{state}» не существует.'),
     (N'err.ECR-REQ-0422.documentStateNeedsPeriod', N'ru', N'Для фильтра по состоянию документа нужен период: вне периода состояние не определено.'),
     (N'err.ECR-REQ-0422.periodMismatch', N'ru', N'Период {periodKey} в запросе не совпадает с периодом {expectedPeriodKey} экземпляра таблицы {tableInstanceId}.'),
@@ -12652,6 +12693,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.auditCellNeedsDocument', N'kz', N'Жол кілті немесе баған сүзгісі үшін құжат қажет: онсыз ұяшық мекенжайы мекенжай болып табылмайды.'),
     (N'err.ECR-REQ-0422.pageSizeOutOfRange', N'kz', N'Бет өлшемі 1 мен {max} аралығында болуы тиіс.'),
     (N'err.ECR-REQ-0422.auditExportTooLarge', N'kz', N'Экспортта {total} жол болар еді, шек — {max}: аралықты немесе сүзгілерді тарылтыңыз.'),
+    (N'err.ECR-REQ-0422.auditCursorSortMismatch', N'kz', N'Бет орны басқа сұрыптау ретіне тиесілі: бірінші беттен бастаңыз.'),
     (N'err.ECR-REQ-0422.documentState', N'kz', N'«{state}» құжат күйі жоқ.'),
     (N'err.ECR-REQ-0422.documentStateNeedsPeriod', N'kz', N'Құжат күйі бойынша сүзу үшін кезең қажет: кезеңнен тыс күй анықталмаған.'),
     (N'err.ECR-REQ-0422.periodMismatch', N'kz', N'Сұраудағы {periodKey} кезеңі {tableInstanceId} кесте данасының {expectedPeriodKey} кезеңіне сәйкес келмейді.'),
@@ -17018,7 +17060,39 @@ SELECT v.[Key], v.Lang, v.Val
     (N'audit.details', N'ru', N'Детали'),
     (N'audit.details', N'kz', N'Мәліметтер'),
     (N'audit.correlation', N'ru', N'Идентификатор корреляции'),
-    (N'audit.correlation', N'kz', N'Корреляция идентификаторы')
+    (N'audit.correlation', N'kz', N'Корреляция идентификаторы'),
+    (N'audit.viewWorkflow', N'ru', N'События согласования'),
+    (N'audit.viewWorkflow', N'kz', N'Келісу оқиғалары'),
+    (N'audit.workflowEmpty', N'ru', N'В этом окне нет событий согласования.'),
+    (N'audit.workflowEmpty', N'kz', N'Бұл терезеде келісу оқиғалары жоқ.'),
+    (N'audit.action', N'ru', N'Действие'),
+    (N'audit.action', N'kz', N'Әрекет'),
+    (N'audit.comment', N'ru', N'Комментарий'),
+    (N'audit.comment', N'kz', N'Пікір'),
+    (N'audit.sheet', N'ru', N'Лист'),
+    (N'audit.sheet', N'kz', N'Парақ'),
+    (N'audit.statusChange', N'ru', N'Статус'),
+    (N'audit.statusChange', N'kz', N'Күй'),
+    (N'audit.systemActor', N'ru', N'Система'),
+    (N'audit.systemActor', N'kz', N'Жүйе'),
+    (N'audit.sortBy', N'ru', N'Сортировать: {column}'),
+    (N'audit.sortBy', N'kz', N'Сұрыптау: {column}'),
+    (N'audit.sortedAsc', N'ru', N'по возрастанию'),
+    (N'audit.sortedAsc', N'kz', N'өсу бойынша'),
+    (N'audit.sortedDesc', N'ru', N'по убыванию'),
+    (N'audit.sortedDesc', N'kz', N'кему бойынша'),
+    (N'audit.workflowAction.Submit', N'ru', N'Подано'),
+    (N'audit.workflowAction.Submit', N'kz', N'Ұсынылды'),
+    (N'audit.workflowAction.Approve', N'ru', N'Утверждено'),
+    (N'audit.workflowAction.Approve', N'kz', N'Бекітілді'),
+    (N'audit.workflowAction.ApproveStep', N'ru', N'Шаг согласован'),
+    (N'audit.workflowAction.ApproveStep', N'kz', N'Қадам келісілді'),
+    (N'audit.workflowAction.Reject', N'ru', N'Отклонено'),
+    (N'audit.workflowAction.Reject', N'kz', N'Қабылданбады'),
+    (N'audit.workflowAction.Reopen', N'ru', N'Возвращено в работу'),
+    (N'audit.workflowAction.Reopen', N'kz', N'Жұмысқа қайтарылды'),
+    (N'audit.workflowAction.Recall', N'ru', N'Отозвано'),
+    (N'audit.workflowAction.Recall', N'kz', N'Кері шақырылды')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -21218,6 +21292,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'audit.entityLabel.ReportVersion', N'ru', N'Версия отчёта'),
     (N'audit.eventLabel.AccessDenied', N'ru', N'Отказ в доступе'),
     (N'audit.eventLabel.AuditStructureExported', N'ru', N'Экспорт аудита структуры'),
+    (N'audit.eventLabel.AuditCellsExported', N'ru', N'Экспорт аудита изменений ячеек'),
+    (N'audit.eventLabel.AuditSecurityExported', N'ru', N'Экспорт аудита событий безопасности'),
+    (N'audit.eventLabel.AuditWorkflowExported', N'ru', N'Экспорт аудита событий согласования'),
     (N'audit.eventLabel.ConsistencyCheckRunRequested', N'ru', N'Запущена проверка согласованности'),
     (N'audit.eventLabel.DataSourceConnectionTested', N'ru', N'Проверено подключение к источнику'),
     (N'audit.eventLabel.DataSourceDeleted', N'ru', N'Источник данных удалён'),
@@ -21276,6 +21353,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'audit.entityLabel.ReportVersion', N'kz', N'Есеп нұсқасы'),
     (N'audit.eventLabel.AccessDenied', N'kz', N'Қол жеткізуден бас тарту'),
     (N'audit.eventLabel.AuditStructureExported', N'kz', N'Құрылым аудитін экспорттау'),
+    (N'audit.eventLabel.AuditCellsExported', N'kz', N'Ұяшық өзгерістері аудитін экспорттау'),
+    (N'audit.eventLabel.AuditSecurityExported', N'kz', N'Қауіпсіздік оқиғалары аудитін экспорттау'),
+    (N'audit.eventLabel.AuditWorkflowExported', N'kz', N'Келісу оқиғалары аудитін экспорттау'),
     (N'audit.eventLabel.ConsistencyCheckRunRequested', N'kz', N'Келісімділік тексеруі сұралды'),
     (N'audit.eventLabel.DataSourceConnectionTested', N'kz', N'Көзге қосылым тексерілді'),
     (N'audit.eventLabel.DataSourceDeleted', N'kz', N'Дерек көзі жойылды'),
@@ -24663,6 +24743,46 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-tablechat ── кінець секції ──
+-- WFREASONS:sheet-history ── ru/kz: журнал погодження аркуша в Inspector → History; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'inspector.sheetHistoryTitle', N'ru', N'Журнал листа'),
+    (N'inspector.sheetHistoryTitle', N'kz', N'Парақ журналы'),
+    (N'inspector.sheetHistoryHint', N'ru', N'Выберите ячейку, чтобы включить «Эта ячейка».'),
+    (N'inspector.sheetHistoryHint', N'kz', N'«Осы ұяшық» режимін қосу үшін ұяшықты таңдаңыз.'),
+    (N'inspector.sheetHistoryEmpty', N'ru', N'На этом листе ещё нет правок и действий согласования.'),
+    (N'inspector.sheetHistoryEmpty', N'kz', N'Бұл параққа әлі түзетулер мен келісу әрекеттері жасалмаған.'),
+    (N'inspector.history.modeLabel', N'ru', N'Что показывает история'),
+    (N'inspector.history.modeLabel', N'kz', N'Тарих нені көрсетеді'),
+    (N'inspector.history.modeSheet', N'ru', N'Журнал листа'),
+    (N'inspector.history.modeSheet', N'kz', N'Парақ журналы'),
+    (N'inspector.history.modeCell', N'ru', N'Эта ячейка'),
+    (N'inspector.history.modeCell', N'kz', N'Осы ұяшық'),
+    (N'inspector.history.scopeSheet', N'ru', N'Лист: {sheet} · {period}'),
+    (N'inspector.history.scopeSheet', N'kz', N'Парақ: {sheet} · {period}'),
+    (N'inspector.history.scopeCell', N'ru', N'Ячейка: {cell} · {column}'),
+    (N'inspector.history.scopeCell', N'kz', N'Ұяшық: {cell} · {column}'),
+    (N'inspector.history.includeSystem', N'ru', N'Показывать системные изменения'),
+    (N'inspector.history.includeSystem', N'kz', N'Жүйелік өзгерістерді көрсету'),
+    (N'inspector.history.loadMore', N'ru', N'Показать ещё'),
+    (N'inspector.history.loadMore', N'kz', N'Тағы көрсету'),
+    (N'workflow.eventAction.Submit', N'ru', N'Подан'),
+    (N'workflow.eventAction.Submit', N'kz', N'Тапсырылды'),
+    (N'workflow.eventAction.Approve', N'ru', N'Утверждён'),
+    (N'workflow.eventAction.Approve', N'kz', N'Бекітілді'),
+    (N'workflow.eventAction.ApproveStep', N'ru', N'Шаг согласован'),
+    (N'workflow.eventAction.ApproveStep', N'kz', N'Қадам келісілді'),
+    (N'workflow.eventAction.Reject', N'ru', N'Отклонён'),
+    (N'workflow.eventAction.Reject', N'kz', N'Қабылданбады'),
+    (N'workflow.eventAction.Reopen', N'ru', N'Возвращён в работу'),
+    (N'workflow.eventAction.Reopen', N'kz', N'Жұмысқа қайтарылды'),
+    (N'workflow.eventAction.Recall', N'ru', N'Отозван'),
+    (N'workflow.eventAction.Recall', N'kz', N'Кері шақырылды')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- WFREASONS:sheet-history ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

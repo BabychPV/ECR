@@ -327,6 +327,29 @@ public sealed class DocumentReadScope
     public IReadOnlyList<int> VisibleColumnIds()
         => [.. _tableOfColumn.Keys.Where(CanReadColumn).Order()];
 
+    /// <summary>Код аркуша знімка; <c>null</c> — аркуша в знімку немає.</summary>
+    /// <param name="sheetDefId">Аркуш версії шаблону.</param>
+    public string? SheetCodeOf(int sheetDefId) => _sheetCodes.GetValueOrDefault(sheetDefId);
+
+    /// <summary>
+    /// Колонки аркуша, які профіль БАЧИТЬ, — за зростанням (журнал аркуша, SQL-фільтр до <c>TOP</c>);
+    /// <c>null</c> — аркуша немає в знімку або він закритий цілком.
+    /// </summary>
+    /// <param name="sheetDefId">Аркуш версії шаблону.</param>
+    /// <remarks>
+    /// ⛔ Колонки закритих таблиць НЕ входять (<see cref="CanReadColumn"/> їх відсікає), тож їхніх змін немає ні
+    /// на сторінці, ні в курсорі. Межі періоду - ті, що задав <see cref="InPeriod"/>.
+    /// </remarks>
+    public IReadOnlyList<int>? VisibleColumnIdsOfSheet(int sheetDefId)
+    {
+        if (!_tablesOfSheet.TryGetValue(sheetDefId, out var tables) || !CanReadSheet(sheetDefId))
+        {
+            return null;
+        }
+
+        return [.. tables.SelectMany(t => _columnsOfTable[t]).Where(CanReadColumn).Order()];
+    }
+
     /// <summary>Чи бачить профіль таблицю, якій належить колонка.</summary>
     /// <param name="columnDefId">Колонка версії шаблону.</param>
     /// <remarks>

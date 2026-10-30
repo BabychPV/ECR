@@ -61,6 +61,8 @@ export interface paths {
                     q?: string;
                     /** @description Звітний період змін (AN-98); без нього — усі. Чужі періоди відсіює сервер до сторінки. */
                     periodKey?: number;
+                    /** @description Порядок: `ChangedAtDesc` (типово, найновіші першими), `ChangedAtAsc`, `UserAsc`, `UserDesc`; курсор прив'язаний до порядку. */
+                    sort?: components["schemas"]["AuditSort"];
                 };
                 header?: never;
                 path?: never;
@@ -110,6 +112,86 @@ export interface paths {
                         "application/json": components["schemas"]["ProblemDetails"];
                         "text/json": components["schemas"]["ProblemDetails"];
                         "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit/cells/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Експорт журналу змін комірок у CSV (гаряче + архів). Право й фільтри — як у `cells`; порядок — `sort`.
+         * @description Потік сторінками, стеля `Audit:ExportMaxRows` (типово 100 000); понад неї — `422 auditExportTooLarge`.
+         *     UTF-8 з BOM; час — UTC ISO 8601; значення, що починаються з `= + - @`, нейтралізуються. Експорт сам
+         *     пишеться подією безпеки `AuditCellsExported`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    from?: string;
+                    to?: string;
+                    documentId?: number;
+                    rowKey?: string;
+                    columnDefId?: number;
+                    author?: number;
+                    origin?: string;
+                    lateOnly?: boolean;
+                    q?: string;
+                    periodKey?: number;
+                    sort?: components["schemas"]["AuditSort"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -238,6 +320,8 @@ export interface paths {
                     limit?: number;
                     /** @description Курсор наступної сторінки. */
                     cursor?: string;
+                    /** @description Порядок: `ChangedAtDesc` (типово, найновіші першими), `ChangedAtAsc`, `UserAsc`, `UserDesc`; курсор прив'язаний до порядку. */
+                    sort?: components["schemas"]["AuditSort"];
                 };
                 header?: never;
                 path?: never;
@@ -299,6 +383,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audit/security/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Експорт журналу подій безпеки у CSV. Право й фільтри — як у `security`; порядок — `sort`.
+         * @description Ті самі стеля, кодування й захист, що в `cells/export.csv`; подія безпеки `AuditSecurityExported`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    from?: string;
+                    to?: string;
+                    eventType?: string;
+                    changedByUserId?: number;
+                    sort?: components["schemas"]["AuditSort"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit/structure": {
         parameters: {
             query?: never;
@@ -327,6 +483,8 @@ export interface paths {
                     limit?: number;
                     /** @description Курсор наступної сторінки. */
                     cursor?: string;
+                    /** @description Порядок: `ChangedAtDesc` (типово, найновіші першими), `ChangedAtAsc`, `UserAsc`, `UserDesc`; курсор прив'язаний до порядку. */
+                    sort?: components["schemas"]["AuditSort"];
                 };
                 header?: never;
                 path?: never;
@@ -412,6 +570,167 @@ export interface paths {
                     entityType?: string;
                     /** @description Автор зміни — `UserId`. */
                     changedByUserId?: number;
+                    /** @description Порядок: `ChangedAtDesc` (типово, найновіші першими), `ChangedAtAsc`, `UserAsc`, `UserDesc`; курсор прив'язаний до порядку. */
+                    sort?: components["schemas"]["AuditSort"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit/workflow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Журнал подій погодження аркушів (`wf.ApprovalEvent`): подання, затвердження, відхилення, повернення,
+         *     відкликання — з коментарем. Право `Security.ViewAudit`; вікно обов'язкове й обмежене, як у `cells`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна в UTC, включно. */
+                    from?: string;
+                    /** @description Кінець вікна в UTC, виключно. */
+                    to?: string;
+                    /** @description Дія: `Submit`, `Approve`, `ApproveStep`, `Reject`, `Reopen`, `Recall`. */
+                    action?: string;
+                    /** @description Автор дії — `UserId`. */
+                    changedByUserId?: number;
+                    /** @description Документ. */
+                    documentId?: number;
+                    /** @description Розмір сторінки; `0` — 50. */
+                    limit?: number;
+                    /** @description Курсор наступної сторінки (прив'язаний до sort). */
+                    cursor?: string;
+                    /** @description Порядок; типово найновіші першими. */
+                    sort?: components["schemas"]["AuditSort"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfWorkflowEventView"];
+                        "text/json": components["schemas"]["PagedResultOfWorkflowEventView"];
+                        "text/plain": components["schemas"]["PagedResultOfWorkflowEventView"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit/workflow/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Експорт журналу подій погодження у CSV; ті самі правила, що в `cells/export.csv`. */
+        get: {
+            parameters: {
+                query?: {
+                    from?: string;
+                    to?: string;
+                    action?: string;
+                    changedByUserId?: number;
+                    documentId?: number;
+                    sort?: components["schemas"]["AuditSort"];
                 };
                 header?: never;
                 path?: never;
@@ -5243,6 +5562,84 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/sheets/{sheetDefId}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Журнал дій на аркуші за період (панель History): правки значень людьми (сітка, імпорт, правка погоджувача)
+         *     і дії процесу з коментарем; найновіші перші, keyset (50 за замовчуванням, до 100). Право `Document.View`;
+         *     аркуш, закритий читачеві, - `404`, як неіснуючий документ; закриті таблиці в журнал не потрапляють. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Період. */
+                    periodKey?: number;
+                    /** @description Лише дії цього користувача (`UserId`); без нього - усі. */
+                    author?: number;
+                    /** @description Додати системні зміни значень (перерахунок, інтеграція, міграція); типово - лише дії людей. */
+                    includeSystem?: boolean;
+                    /** @description Розмір сторінки; `0` - 50. */
+                    limit?: number;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                    /** @description Аркуш. */
+                    sheetDefId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SheetActivityPage"];
+                        "text/json": components["schemas"]["SheetActivityPage"];
+                        "text/plain": components["schemas"]["SheetActivityPage"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -22923,6 +23320,11 @@ export interface components {
             validTo?: null | string;
         };
         /**
+         * @description Порядок сторінок журналів аудиту (вкладки Cell changes / Structure changes / Security events / Workflow events).
+         * @enum {unknown}
+         */
+        AuditSort: "ChangedAtDesc" | "ChangedAtAsc" | "UserAsc" | "UserDesc";
+        /**
          * @description Провайдер автентифікації. Нижче рівня входу не використовується.
          * @enum {unknown}
          */
@@ -27512,6 +27914,19 @@ export interface components {
              */
             totalCount: null | number;
         };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
+        PagedResultOfWorkflowEventView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["WorkflowEventView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
         /** @enum {unknown} */
         ParentDeletePolicy: "Restrict" | "Cascade" | null;
         /** @description Зміна однієї комірки. Три різні операції (R-B4):
@@ -31135,6 +31550,60 @@ export interface components {
              */
             to: null | string;
         };
+        /** @description Рядок журналу дій на аркуші: правка комірки (людини) або дія робочого процесу. */
+        SheetActivityItem: {
+            /** @description Лише процес: `Submit`, `Approve`, `ApproveStep`, `Reject`, `Reopen`, `Recall`. */
+            action: null | string;
+            /**
+             * Format: date-time
+             * @description Момент дії, UTC.
+             */
+            at: string;
+            /** @description Ім'я виконавця; `system` — системний перехід; зниклий користувач — `#id`. */
+            byDisplayName: string;
+            /** @description Лише правка: код колонки. */
+            columnCode: null | string;
+            /** @description Лише правка: тип колонки (для показу значення за правилом показу). */
+            columnDataType: null | string;
+            /**
+             * Format: int32
+             * @description Лише правка: колонка.
+             */
+            columnDefId: null | number;
+            columnHeaderL10n: null | components["schemas"]["LocalizedText"];
+            /** @description Лише процес: стан до. */
+            fromState: null | string;
+            /** @description `CellEdit` або `Workflow` (SheetActivityKinds). */
+            kind: string;
+            /** @description Лише правка: значення після. */
+            newValue: null | string;
+            /** @description Лише правка: значення до. */
+            oldValue: null | string;
+            /** @description Лише правка: `UserEdit`, `Import`, `ImportOverwrite`, `ApproverEdit`. */
+            origin: null | string;
+            /**
+             * Format: int32
+             * @description Звітний період.
+             */
+            periodKey: number;
+            /** @description Лише процес: коментар (причина відхилення, повернення, відкликання); звичайний текст. */
+            reason: null | string;
+            /** @description Лише правка: ключ рядка. */
+            rowKey: null | string;
+            rowLabelL10n: null | components["schemas"]["LocalizedText"];
+            /** @description Лише правка: код таблиці. */
+            tableCode: null | string;
+            tableNameL10n: null | components["schemas"]["LocalizedText"];
+            /** @description Лише процес: стан після. */
+            toState: null | string;
+        };
+        /** @description Сторінка журналу дій аркуша. */
+        SheetActivityPage: {
+            /** @description Рядки, найновіші перші. */
+            items: components["schemas"]["SheetActivityItem"][];
+            /** @description Непрозорий курсор наступної сторінки; `null` — далі нічого немає. */
+            nextCursor: null | string;
+        };
         SheetDto: {
             /** @description Код — ідентичність аркуша й адреса в `PUT …/sheets/{code}`. */
             code: string;
@@ -31910,6 +32379,8 @@ export interface components {
              * @description Ідентифікатор сутності; `0` — операція над набором.
              */
             entityId: number;
+            /** @description Читабельний підпис сутності (код/назва на цей момент); `null` — не визначено або сутність видалено: показується ідентифікатор. */
+            entityLabel?: null | string;
             /** @description Сутність: `cfg.RegistryDef`, `cfg.RegistryRuleDef`. */
             entityType: string;
             /** @description Стан після зміни. */
@@ -33640,6 +34111,53 @@ export interface components {
             stepOrdinal: null | number;
             /** @description Стан після дії. */
             toState: string;
+        };
+        /** @description Подія переходу стану аркуша (`wf.ApprovalEvent`) у журналі аудиту. */
+        WorkflowEventView: {
+            /** @description Дія: `Submit`, `Approve`, `ApproveStep`, `Reject`, `Reopen`, `Recall`. */
+            action: string;
+            /**
+             * Format: date-time
+             * @description Момент дії в UTC.
+             */
+            changedAt: string;
+            /** @description Ім'я автора; `null` — система або запису користувача вже немає. */
+            changedByDisplayName: null | string;
+            /**
+             * Format: int32
+             * @description Хто виконав — <b>UserId</b>; `null` — системний перехід.
+             */
+            changedByUserId: null | number;
+            /** @description Причина/коментар (звичайний текст); `null` — дія без коментаря. */
+            comment: null | string;
+            /** @description Бізнес-ключ документа; `null` — документа вже немає. */
+            documentBusinessKey: null | string;
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /** @description Стан до дії. */
+            fromStatus: string;
+            /**
+             * Format: int32
+             * @description Звітний період.
+             */
+            periodKey: number;
+            /** @description Код аркуша; `null` — визначення вже немає. */
+            sheetCode: null | string;
+            /**
+             * Format: int32
+             * @description Аркуш.
+             */
+            sheetDefId: number;
+            /**
+             * Format: int32
+             * @description Крок маршруту, якщо маршрут є.
+             */
+            stepOrdinal: null | number;
+            /** @description Стан після дії. */
+            toStatus: string;
         };
     };
     responses: never;

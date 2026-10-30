@@ -4254,6 +4254,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/approve` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/reopen` | `Document.Reopen` | 3 |
 | `GET` | `/api/v1/documents/{id}/workflow/history` | `Document.View` | 3 |
+| `GET` | `/api/v1/documents/{id}/sheets/{sheetDefId}/activity` | `Document.View` | 3 |
 | `GET` | `/api/v1/documents/{id}/submission-target` | `Document.View` | 3 |
 | `GET` | `/api/v1/documents/{id}/versions` | `Document.View` | 3 |
 | `GET` | `/api/v1/documents/{id}/compare` | `Document.View` | 3 |
@@ -4367,6 +4368,10 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/audit/structure` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/audit/structure/export.csv` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/audit/security` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/cells/export.csv` | `Security.ViewAudit` (історія однієї комірки — `Document.View`) | 7 |
+| `GET` | `/api/v1/audit/security/export.csv` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/workflow` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/workflow/export.csv` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/consistency/issues` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/consistency/summary` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/consistency/run` | `System.RunJob` | 5 |
