@@ -9564,10 +9564,14 @@ USING (VALUES
     ,(N'permits.air.import.profile.label', N'en', N'Import profile', 1)
     ,(N'permits.air.import.profile.hint', N'en', N'Describes where the header and the columns are in the file.', 1)
     ,(N'permits.air.import.region.label', N'en', N'Region', 1)
-    ,(N'permits.air.import.region.hint', N'en', N'Code in the NAE tree, for example ATYRAU.', 1)
-    ,(N'permits.air.import.region.required', N'en', N'Enter the region code.', 1)
+    ,(N'permits.air.import.region.hint', N'en', N'Regions that have NAE sources in the NAE tree.', 1)
+    ,(N'permits.air.import.region.required', N'en', N'Choose the region.', 1)
     ,(N'permits.air.import.area.label', N'en', N'Area', 1)
-    ,(N'permits.air.import.area.hint', N'en', N'ONSHORE, OFFSHORE; empty or - if the region has no areas.', 1)
+    ,(N'permits.air.import.area.hint', N'en', N'Areas of the chosen region; "No area" if the region has none.', 1)
+    ,(N'permits.air.import.area.required', N'en', N'Choose the area.', 1)
+    ,(N'permits.air.import.area.none', N'en', N'No area', 1)
+    ,(N'permits.air.import.scope.empty', N'en', N'No regions in the NAE tree', 1)
+    ,(N'permits.air.import.scope.emptyHint', N'en', N'Load or create NAE nodes first: the region and area lists come from the NAE tree.', 1)
     ,(N'permits.air.import.scopeNote', N'en', N'The import replaces the rows of this permit for the chosen region and area, and the rows of other permits for the same NAE (with your confirmation).', 1)
     ,(N'permits.air.import.stats.parents', N'en', N'NAE in file', 1)
     ,(N'permits.air.import.stats.children', N'en', N'Substance rows', 1)
@@ -25171,14 +25175,22 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.air.import.profile.hint', N'kz', N'Файлда тақырып пен бағандар қайда екенін сипаттайды.'),
     (N'permits.air.import.region.label', N'ru', N'Регион'),
     (N'permits.air.import.region.label', N'kz', N'Аймақ'),
-    (N'permits.air.import.region.hint', N'ru', N'Код в дереве НАЕ, например ATYRAU.'),
-    (N'permits.air.import.region.hint', N'kz', N'НАЕ ағашындағы код, мысалы ATYRAU.'),
-    (N'permits.air.import.region.required', N'ru', N'Укажите код региона.'),
-    (N'permits.air.import.region.required', N'kz', N'Аймақ кодын көрсетіңіз.'),
+    (N'permits.air.import.region.hint', N'ru', N'Регионы, для которых в дереве НАЕ есть источники.'),
+    (N'permits.air.import.region.hint', N'kz', N'НАЕ ағашында көздері бар аймақтар.'),
+    (N'permits.air.import.region.required', N'ru', N'Выберите регион.'),
+    (N'permits.air.import.region.required', N'kz', N'Аймақты таңдаңыз.'),
     (N'permits.air.import.area.label', N'ru', N'Участок'),
     (N'permits.air.import.area.label', N'kz', N'Учаске'),
-    (N'permits.air.import.area.hint', N'ru', N'ONSHORE, OFFSHORE; пусто или - если у региона нет участков.'),
-    (N'permits.air.import.area.hint', N'kz', N'ONSHORE, OFFSHORE; аймақта учаскелер болмаса бос немесе -.'),
+    (N'permits.air.import.area.hint', N'ru', N'Участки выбранного региона; «Без участка», если у региона их нет.'),
+    (N'permits.air.import.area.hint', N'kz', N'Таңдалған аймақтың учаскелері; жоқ болса «Учаскесіз».'),
+    (N'permits.air.import.area.required', N'ru', N'Выберите участок.'),
+    (N'permits.air.import.area.required', N'kz', N'Учаскені таңдаңыз.'),
+    (N'permits.air.import.area.none', N'ru', N'Без участка'),
+    (N'permits.air.import.area.none', N'kz', N'Учаскесіз'),
+    (N'permits.air.import.scope.empty', N'ru', N'В дереве НАЕ нет регионов'),
+    (N'permits.air.import.scope.empty', N'kz', N'НАЕ ағашында аймақтар жоқ'),
+    (N'permits.air.import.scope.emptyHint', N'ru', N'Сначала загрузите или создайте узлы НАЕ: списки регионов и участков берутся из дерева НАЕ.'),
+    (N'permits.air.import.scope.emptyHint', N'kz', N'Алдымен НАЕ түйіндерін жүктеңіз немесе жасаңыз: аймақ пен учаске тізімі НАЕ ағашынан алынады.'),
     (N'permits.air.import.scopeNote', N'ru', N'Импорт заменяет строки этого разрешения по выбранным региону и участку, а также строки других разрешений по тем же НАЕ (с вашего подтверждения).'),
     (N'permits.air.import.scopeNote', N'kz', N'Импорт осы рұқсаттың таңдалған аймақ пен учаске бойынша жолдарын, сондай-ақ сол НАЕ бойынша басқа рұқсаттардың жолдарын (сіздің растауыңызбен) ауыстырады.'),
     (N'permits.air.import.stats.parents', N'ru', N'НАЕ в файле'),

@@ -3,6 +3,7 @@ import type {
   AirImportResult,
   AirLimitsPermit,
   AirPreview,
+  AirScopeCodes,
   AirSource,
   ImportProfile,
   ImportProfileSummary,
@@ -200,4 +201,14 @@ export function xlsx(name = 'limits.xlsx'): File {
   return new File([new Uint8Array([80, 75, 3, 4])], name, {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
+}
+
+/** Scope codes of the NAE tree (GET /air-limits/scope-codes): two regions, one with a no-area code. */
+export function scopeCodes(): AirScopeCodes {
+  return {
+    regions: [
+      { code: 'ATYRAU', name: 'Atyrau', areas: [{ code: 'OFFSHORE', name: 'Offshore' }, { code: 'ONSHORE', name: null }] },
+      { code: 'MANGISTAU', name: null, areas: [{ code: '-', name: null }] },
+    ],
+  };
 }

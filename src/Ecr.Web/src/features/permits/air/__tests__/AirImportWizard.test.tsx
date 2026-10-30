@@ -10,7 +10,7 @@ import * as airApi from '@/features/permits/air/airApi';
 import { AirImportWizard } from '../import/AirImportWizard';
 import { EmptyDraft } from '../import/importModel';
 import { PreviewStep } from '../import/PreviewStep';
-import { analysis, preview, profile, profiles, result, tree, xlsx } from './airFixtures';
+import { analysis, preview, profile, profiles, result, scopeCodes, tree, xlsx } from './airFixtures';
 
 /**
  * Майстер імпорту лімітів із Excel (NAE-план N5): файл -> відповідність -> перегляд -> застосування. API замоканий;
@@ -37,6 +37,7 @@ vi.mock('@/features/permits/air/airApi', () => ({
   previewAirImport: vi.fn(),
   applyAirImport: vi.fn(),
   getNaeTree: vi.fn(),
+  getAirScopeCodes: vi.fn(),
 }));
 
 const api = vi.mocked(airApi);
@@ -49,6 +50,7 @@ beforeEach(() => {
   api.previewAirImport.mockResolvedValue(preview());
   api.applyAirImport.mockResolvedValue(result());
   api.getNaeTree.mockResolvedValue(tree());
+  api.getAirScopeCodes.mockResolvedValue(scopeCodes());
 });
 afterEach(() => {
   cleanup();
@@ -70,13 +72,19 @@ function mount(props: { mayImport?: boolean; mayEditProfile?: boolean } = {}): v
 
 const button = (key: string): HTMLButtonElement => screen.getByRole('button', { name: text(key) });
 
-async function fillFile(region = 'atyrau', area = 'offshore'): Promise<void> {
+/** Mantine Select: open by its label, choose the option by its text. */
+async function pick(label: string, option: RegExp): Promise<void> {
+  await userEvent.click(screen.getByRole('textbox', { name: new RegExp(`^${label}`) }));
+  await userEvent.click(await screen.findByRole('option', { name: option }));
+}
+
+async function fillFile(region = 'ATYRAU', area = 'OFFSHORE'): Promise<void> {
   await screen.findByLabelText(new RegExp(text('permits.air.import.region.label')));
   const input = document.querySelector<HTMLInputElement>('input[type="file"]');
   if (input === null) throw new Error('file input');
   await userEvent.upload(input, xlsx());
-  fireEvent.change(screen.getByLabelText(new RegExp(text('permits.air.import.region.label'))), { target: { value: region } });
-  fireEvent.change(screen.getByLabelText(new RegExp(text('permits.air.import.area.label'))), { target: { value: area } });
+  await pick(text('permits.air.import.region.label'), new RegExp(`^${region}`));
+  await pick(text('permits.air.import.area.label'), new RegExp(`^${area}`));
 }
 
 async function toMapping(): Promise<void> {

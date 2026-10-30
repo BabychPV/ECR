@@ -19,10 +19,6 @@ export const ImportSteps: readonly ImportStep[] = ['file', 'mapping', 'preview',
 /** Регіон без ділянок: код `-` (контракт). */
 export const NoArea = '-';
 
-/** Типові коди регіонів і ділянок (підказки; сервер звіряє з деревом НАЕ). */
-export const RegionHints: readonly string[] = ['ATYRAU', 'MANGISTAU'];
-export const AreaHints: readonly string[] = ['ONSHORE', 'OFFSHORE', NoArea];
-
 export type ResolutionChoice = 'unset' | 'skip' | 'create';
 
 export interface Resolution {
@@ -134,11 +130,12 @@ export function buildOptions(
   };
 }
 
-/** Перший крок можна завершити: є файл `.xlsx` і регіон. */
-export function fileStepProblem(draft: ImportDraft): 'file' | 'region' | 'extension' | null {
+/** Перший крок можна завершити: є файл `.xlsx`, регіон і ділянка (обидва - вибір зі списку `scope-codes`, `-` = без ділянки). */
+export function fileStepProblem(draft: ImportDraft): 'file' | 'region' | 'area' | 'extension' | null {
   if (draft.file === null) return 'file';
   if (!/\.xlsx$/i.test(draft.file.name)) return 'extension';
   if (normalizeCode(draft.region) === '') return 'region';
+  if (draft.area === '') return 'area';
 
   return null;
 }
