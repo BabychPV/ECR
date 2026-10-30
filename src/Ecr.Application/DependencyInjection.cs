@@ -59,7 +59,11 @@ public static class DependencyInjection
         services.AddScoped<Security.GetEffectiveAccessHandler>();
         services.AddScoped<DiffTemplateVersionsHandler>();
 
-        // NAE plan N3: \
+        // NAE plan N3: Air Limits Import permits.
+        services.AddScoped<Permits.AirLimits.ProvisionAirLimitsHandler>();
+        services.AddScoped<Permits.AirLimits.AirImportProfileHandler>();
+        services.AddScoped<Permits.AirLimits.AirLimitsImportHandler>();
+        services.AddScoped<Permits.AirLimits.GetAirLimitsPermitHandler>();
         services.AddScoped<PatchPresentationHandler>();
         services.AddScoped<ReplaceHeaderGroupsHandler>();
 

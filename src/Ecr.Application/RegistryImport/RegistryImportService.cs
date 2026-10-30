@@ -67,7 +67,8 @@ public sealed record ImportRequest(
 /// <summary>Result of a commit.</summary>
 /// <param name="Plan">The plan that was applied.</param>
 /// <param name="Diff">Counts.</param>
-public sealed record ImportCommitResult(ImportApplyPlan Plan, ImportDiffCounts Diff);
+/// <param name="Replace">What the apply replaced: the owner's own rows and the confirmed rows of other owners.</param>
+public sealed record ImportCommitResult(ImportApplyPlan Plan, ImportDiffCounts Diff, ReplaceScope Replace);
 
 /// <summary>
 /// Preview and commit over a parsed sheet. The commit rebuilds the SAME plan with the SAME code as the preview
@@ -133,7 +134,7 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
         }
 
         await target.ApplyAsync(built.Plan, ct).ConfigureAwait(false);
-        return new ImportCommitResult(built.Plan, preview.Diff);
+        return new ImportCommitResult(built.Plan, preview.Diff, preview.Replace);
     }
 
     private sealed record Built(RegistryImportPreview Preview, ImportApplyPlan Plan);
@@ -232,6 +233,7 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
             .Where(s => s.OwnerKey != request.Scope.OwnerKey && insertKeys.Contains(s.Key))
             .ToList();
 
+        var ignored = spec.Fields.Where(f => f.Informational).Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
         var added = 0;
         var changed = 0;
         var same = 0;
@@ -241,7 +243,7 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
             {
                 added++;
             }
-            else if (Equivalent(parent, old))
+            else if (Equivalent(parent, old, ignored))
             {
                 same++;
             }
@@ -294,19 +296,19 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
 
     // ---------- equality and fingerprint ----------
 
-    private static bool Equivalent(ImportedParent file, ExistingParent stored)
+    private static bool Equivalent(ImportedParent file, ExistingParent stored, ISet<string> ignored)
     {
-        if (!SameValues(file.Values, stored.Values) || file.Children.Count != stored.Children.Count)
+        if (!SameValues(file.Values, stored.Values, ignored) || file.Children.Count != stored.Children.Count)
         {
             return false;
         }
 
         var storedChildren = stored.Children.ToDictionary(c => c.Key, StringComparer.Ordinal);
-        return file.Children.All(c => storedChildren.TryGetValue(c.Key, out var s) && SameValues(c.Values, s.Values));
+        return file.Children.All(c => storedChildren.TryGetValue(c.Key, out var s) && SameValues(c.Values, s.Values, ignored));
     }
 
-    private static bool SameValues(IReadOnlyDictionary<string, object?> file, IReadOnlyDictionary<string, object?> stored)
-        => file.All(p => SameValue(p.Value, stored.GetValueOrDefault(p.Key)));
+    private static bool SameValues(IReadOnlyDictionary<string, object?> file, IReadOnlyDictionary<string, object?> stored, ISet<string> ignored)
+        => file.Where(p => !ignored.Contains(p.Key)).All(p => SameValue(p.Value, stored.GetValueOrDefault(p.Key)));
 
     private static bool SameValue(object? a, object? b)
     {

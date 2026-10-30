@@ -39,11 +39,12 @@ public static class BuiltInImportProfiles
 
         static ImportFieldSpec Substance(
             string name, string pattern, ImportParser parser = ImportParser.Text, bool required = false,
-            IReadOnlyList<string>? unit = null, string? reference = null, bool nonNegative = false, bool warnIfEmpty = false)
+            IReadOnlyList<string>? unit = null, string? reference = null, bool nonNegative = false, bool warnIfEmpty = false, bool informational = false)
             => new()
             {
                 Name = name,
                 WarnIfEmpty = warnIfEmpty,
+                Informational = informational,
                 Level = ImportLevel.Child,
                 Patterns = [pattern],
                 UnitQualifier = unit ?? [],
@@ -87,7 +88,7 @@ public static class BuiltInImportProfiles
                 Source("x2", "Координаты источника", ImportParser.Decimal, unit: ["Х2|X2"]),
                 Source("y2", "Координаты источника", ImportParser.Decimal, unit: ["Y2|У2"]),
                 Substance("substanceCode", "Код вещества", ImportParser.Code, required: true, reference: ISubstanceResolver.SubstanceKind),
-                Substance("substanceName", "Наименование вещества"),
+                Substance("substanceName", "Наименование вещества", informational: true),
                 Substance("gramsPerSecond", "Выбросы загрязняющего вещества", ImportParser.Decimal, unit: ["г/с"], nonNegative: true),
                 Substance("mgPerNm3", "Выбросы загрязняющего вещества", ImportParser.Decimal, unit: ["мг/нм3"], nonNegative: true),
                 Substance("tonsPerYear", "Выбросы загрязняющего вещества", ImportParser.Decimal, required: true, unit: ["т/год"], nonNegative: true, warnIfEmpty: true),

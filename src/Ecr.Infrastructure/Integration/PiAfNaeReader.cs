@@ -84,15 +84,3 @@ public sealed class PiAfNaeReader(EcrDbContext db, IEnumerable<IExternalDataSour
 
     private readonly record struct SourceEntityRef(string Address);
 }
-
-/// <summary>
-/// "Where used" reader (NAE plan N2). The permit tables that point at registry entries arrive with plan N3 (the AIR permit
-/// type): until then nothing refers to an NAE node, and the honest answer is an empty list, not an invented query.
-/// </summary>
-/// <remarks>TODO(N3): query the permit source tables (AIR_SOURCES / AIR_SOURCE_SUBSTANCES) by the referencing lookup value.</remarks>
-public sealed class PermitReferenceReader : IRegistryEntryReferenceReader
-{
-    /// <inheritdoc />
-    public Task<IReadOnlyList<RegistryEntryReferenceDto>> ListAsync(int registryDefId, long entryId, CancellationToken ct)
-        => Task.FromResult<IReadOnlyList<RegistryEntryReferenceDto>>([]);
-}

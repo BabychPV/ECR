@@ -427,6 +427,13 @@ public static partial class RegistryImportParser
                         continue;
                     }
 
+                    // Substance values without a substance code: an error with row and column, not a silently skipped row.
+                    if (HasChildValuesWithoutKey(r))
+                    {
+                        LogMissingChildKey(r, cField, cCol);
+                        continue;
+                    }
+
                     if (RowHasContent(r))
                     {
                         _skipped++;
@@ -444,6 +451,10 @@ public static partial class RegistryImportParser
                 if (!cEmpty)
                 {
                     AddChild(r, cField, cCol);
+                }
+                else if (HasChildValuesWithoutKey(r))
+                {
+                    LogMissingChildKey(r, cField, cCol);
                 }
             }
 
@@ -463,6 +474,29 @@ public static partial class RegistryImportParser
                 new ImportStats(_parents.Count, _children, childKeys, _groups.Count, _skipped),
                 _log.Dropped);
         }
+
+        /// <summary>The row carries values of the child level (g/s, t/year...) but no child key; a formula anywhere means totals.</summary>
+        private bool HasChildValuesWithoutKey(int row)
+        {
+            var any = false;
+            foreach (var field in _spec.Fields.Where(f => f.Level == ImportLevel.Child && f.Name != _spec.ChildKeyField && _columns.ContainsKey(f.Name)))
+            {
+                var cell = _grid.Get(row, _columns[field.Name]);
+                if (cell.HasFormula)
+                {
+                    return false;
+                }
+
+                any |= !ImportText.IsEmpty(cell.Value);
+            }
+
+            return any;
+        }
+
+        private void LogMissingChildKey(int row, ImportFieldSpec keyField, int keyColumn)
+            => _log.Add(new ImportIssue(
+                ImportSeverity.Error, RegistryImportKeys.ValueRequired, row, ColumnLetters.ToLetters(keyColumn), keyField.Name,
+                new Dictionary<string, string> { ["field"] = keyField.Name }));
 
         private bool TryGroupRow(int row)
         {
