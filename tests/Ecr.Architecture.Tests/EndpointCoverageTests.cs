@@ -587,8 +587,8 @@ public sealed partial class EndpointCoverageTests
         new("features/audit/CellChangesTable.tsx", "`audit.originLabel.${origin}`", 1,
             "features/audit/CellChangesTable.tsx",
             ["audit.originLabel.UserEdit", "audit.originLabel.Import", "audit.originLabel.Recalculation",
-             "audit.originLabel.Migration"],
-            "UI-38: походження зміни словом (OriginIcons)."),
+             "audit.originLabel.Migration", "audit.originLabel.FormulaOverride", "audit.originLabel.FormulaRestored"],
+            "UI-38: походження зміни словом (OriginIcons); ✎ D-461 — ручне значення замість формули й повернення формули."),
         new("features/audit/auditLabels.ts", "key", 1, "features/audit/auditLabels.ts",
             ["audit.operationLabel.Create",
              "audit.operationLabel.Update",
@@ -1387,11 +1387,6 @@ public sealed partial class EndpointCoverageTests
         // екрана налаштувань методології для цього прапорця ще немає — це рідкісна адмін-дія, що змінює числа.
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/methodologies`.
         "PUT /api/v1/methodologies/{p}/row-activity-filter",
-
-        // ✎ D-461 (ручне значення замість формули): серверна частина й контракт пушаться ПЕРШИМИ (lane/integ-fo-server),
-        // клієнт (окрема UI-lane) стартує від запушеного schema.d.ts. До появи виклику в `features/templates` споживача немає.
-        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає перемикач «Дозволити ручне значення» у клієнт.
-        "PUT /api/v1/template-versions/{p}/formulas/{p}/manual-override",
 
         // NAE plan N1 (hierarchical registry): GET hierarchy, GET tree, POST move and POST retire now have their client
         // calls in `features/registries/tree/treeApi.ts` (generic tree editor). Only the level-editing PUT is left without a

@@ -13,6 +13,7 @@ import {
 import { ActionIcon, Badge, Box, Button, Group, SegmentedControl, Tabs, Text } from '@mantine/core';
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
 import { isHumanOrigin, useCellChanges } from '@/features/audit/api';
+import { cellChangeReasonText } from '@/features/audit/cellChangeReason';
 import { useTableStatus } from '@/features/documents/api';
 import { formatDateOnly } from '@/shared/format/dateOnly';
 import { formatPeriodKey } from '@/shared/format/periodKey';
@@ -623,9 +624,23 @@ function CellHistory({
               </Badge>
             )}
           </Group>
+          {/* ✎ D-461: причина ручного значення замість формули — словами під походженням. */}
+          <HistoryReason reason={change.reason} />
         </div>
       ))}
     </div>
+  );
+}
+
+/** ✎ D-461: «Причина: …» рядка історії комірки; без причини — нічого (`cellChangeReasonText`). */
+function HistoryReason({ reason }: { readonly reason: string | null | undefined }): JSX.Element | null {
+  const text = cellChangeReasonText(reason);
+  if (text === null) return null;
+
+  return (
+    <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-line', overflowWrap: 'anywhere' }} data-inspector-reason="">
+      {`${t('audit.reason')}: ${text}`}
+    </Text>
   );
 }
 

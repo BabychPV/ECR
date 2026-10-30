@@ -172,3 +172,28 @@ export function formulasOf(table: TemplateTable): FormulaTarget[] {
 
   return [...columns, ...rows];
 }
+
+/** ✎ D-461: формула однієї комірки таблиці (область `Cell`) — для перемикача «Дозволити ручне значення». */
+export interface CellFormulaTarget {
+  readonly formula: NonNullable<TemplateTable['cellFormulas']>[number];
+  readonly column: TemplateColumnDto | null;
+  readonly row: TemplateRow | null;
+}
+
+/**
+ * ✎ D-461: формули комірок таблиці (`TableDto.cellFormulas`). Редактор виразу для них тут не відкривається
+ * (`formulaApi` адресує лише колонку й рядок) — лише перемикач ручного значення.
+ */
+export function cellFormulasOf(table: TemplateTable): CellFormulaTarget[] {
+  const formulas = table.cellFormulas ?? [];
+  if (formulas.length === 0) return [];
+
+  const columns = new Map(table.columns.map((column) => [column.id, column]));
+  const rows = new Map(table.rows.map((row) => [row.rowKey, row]));
+
+  return formulas.map((formula) => ({
+    formula,
+    column: columns.get(formula.columnDefId) ?? null,
+    row: rows.get(formula.rowKey) ?? null,
+  }));
+}

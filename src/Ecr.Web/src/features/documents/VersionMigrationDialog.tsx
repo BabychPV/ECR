@@ -61,6 +61,9 @@ export function itemKindText(kind: string): string {
       return t('documents.migrateKindModified');
     case 'Presentation':
       return t('documents.migrateKindPresentation');
+    // ✎ D-461: ручне значення замість формули не переїде ручним — комірку знову рахує формула цільової версії.
+    case 'OverrideLost':
+      return t('documents.migrateKindOverrideLost');
     default:
       return kind;
   }
@@ -448,6 +451,14 @@ function MigrationReport({ report }: { readonly report: VersionMigrationReport }
             projects: report.otherProjectsOnSourceVersion,
             documents: report.otherDocumentsOnSourceVersion,
           })}
+        </Alert>
+      )}
+
+      {(report.lostFormulaOverrides ?? 0) > 0 && (
+        // ✎ D-461: перенос не блокує (це не `dataLoss`), але людина мусить знати ДО застосування: ручні значення
+        // замість формул, які цільова версія не дозволяє, замінить формула (журнал — «Formula restored»).
+        <Alert color="statusWarning" data-migrate-lost-formula-overrides="">
+          {t('documents.migrateLostFormulaOverrides', { count: report.lostFormulaOverrides ?? 0 })}
         </Alert>
       )}
 
