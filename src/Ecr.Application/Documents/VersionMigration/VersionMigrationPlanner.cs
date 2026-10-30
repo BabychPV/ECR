@@ -78,6 +78,18 @@ public sealed record VersionMigrationPlan(
     public IReadOnlySet<int> TouchedSheets => TouchedSourceSheetIds ?? new HashSet<int>();
 
     /// <summary>
+    /// RPT-STABLE Part B: ефективний початок переносу «з місяця» (<c>Рік*100+№</c>); <c>0</c> — увесь проєкт.
+    /// Періоди &lt; цього ключа сховище не чіпає (комірки, екземпляри, рядки, стани аркушів, результати валідації).
+    /// </summary>
+    public int FromPeriodKey { get; init; }
+
+    /// <summary>
+    /// RPT-STABLE Part B: пари «колонка вихідної версії → колонка цільової з ІНШИМ кодом» (перейменування за мапою запиту);
+    /// сховище зберігає їх у <c>cfg.ColumnRename</c> (псевдонім для вʼюх SSRS і міжперіодних формул).
+    /// </summary>
+    public IReadOnlyList<(int FromColumnDefId, int ToColumnDefId)> ColumnRenames { get; init; } = [];
+
+    /// <summary>
     /// LP-41: шляхи (<c>SHEET.TABLE</c>) таблиць, де цільова версія ДОДАЄ або ЗМІНЮЄ формулу (нова формула,
     /// змінений вираз/діалект, нова обчислювана колонка). Непорожній — після переносу значення цих формул
     /// без перерахунку лишаться порожніми, тож обробник ставить один перерахунок проєкту.
