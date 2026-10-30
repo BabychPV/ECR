@@ -41,6 +41,7 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
                 LastId = s.LastMessageId,
                 Mentioned = db.TableDiscussionMentions.Any(x =>
                     x.UserId == userId && x.DocumentId == documentId && x.TableDefCode == s.TableDefCode),
+                Revision = s.Revision,
             };
 
         if (periodRestricted.Count == 0)
@@ -75,6 +76,11 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
                     && x.TableDefCode == g.Key
                     && db.TableDiscussionMessages.Any(mm => mm.Id == x.MessageId && mm.DeletedAt == null
                         && pairs.Contains(mm.TableDefCode + "|" + mm.PeriodKey.ToString()))),
+
+                // Та сама ревізія зведення, що в ETag сторінки повідомлень (вона спільна для всіх періодів чату).
+                Revision = db.TableDiscussions
+                    .Where(x => x.DocumentId == documentId && x.TableDefCode == g.Key)
+                    .Select(x => x.Revision).FirstOrDefault(),
             };
 
 #pragma warning restore CA1305
@@ -83,7 +89,7 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
     }
 
     private static List<TableDiscussionSummaryRow> ToRows(List<SummaryShape> shapes)
-        => [.. shapes.Select(s => new TableDiscussionSummaryRow(s.Code, s.Total, s.Unread, s.LastAt, s.LastId, s.Mentioned))];
+        => [.. shapes.Select(s => new TableDiscussionSummaryRow(s.Code, s.Total, s.Unread, s.LastAt, s.LastId, s.Mentioned, s.Revision))];
 
     /// <summary>Форма рядка підсумку для SQL: об'єднання (UNION ALL) вимагає однакової проєкції в обох запитах.</summary>
     private sealed class SummaryShape
@@ -99,6 +105,8 @@ public class TableDiscussionStore(EcrDbContext db) : ITableDiscussionStore
         public long LastId { get; init; }
 
         public bool Mentioned { get; init; }
+
+        public long Revision { get; init; }
     }
 
     /// <inheritdoc />

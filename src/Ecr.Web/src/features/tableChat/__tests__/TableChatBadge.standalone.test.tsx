@@ -25,7 +25,7 @@ describe('TableChatBadge without a router and a QueryClient', () => {
 
   it('renders the counter and a click records the explicit table (the host writes the address)', () => {
     act(() =>
-      publishSummary(7, [{ tableCode: 'T1', total: 3, unread: 1, lastAt: null, lastMessageId: 3, mentionedMe: false }]),
+      publishSummary(7, [{ tableCode: 'T1', total: 3, unread: 1, lastAt: null, lastMessageId: 3, mentionedMe: false, revision: 1 }]),
     );
     const { container } = render(<TableChatBadge documentId={7} tableCode="T1" />);
 
