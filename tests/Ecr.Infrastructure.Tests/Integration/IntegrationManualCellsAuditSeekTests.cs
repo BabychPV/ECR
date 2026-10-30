@@ -45,6 +45,9 @@ public sealed class IntegrationManualCellsAuditSeekTests(SqlServerFixture sql, I
     public static TheoryData<string, string> Queries => new()
     {
         { nameof(IntegrationCellPatcher.ManualCellsSql), IntegrationCellPatcher.ManualCellsSql },
+
+        // D-462: та сама відповідь для таблиці з маршрутизацією Q-17 — журнал усіх екземплярів року.
+        { nameof(IntegrationCellPatcher.ManualCellsRoutedSql), IntegrationCellPatcher.ManualCellsRoutedSql },
         { nameof(SourceEventSyncJob.ManualRowKeysSql), SourceEventSyncJob.ManualRowKeysSql },
     };
 
@@ -130,6 +133,11 @@ public sealed class IntegrationManualCellsAuditSeekTests(SqlServerFixture sql, I
         command.Parameters.Add("@period", System.Data.SqlDbType.Int).Value = doc.PeriodKey.Value;
         command.Parameters.Add("@instance", System.Data.SqlDbType.BigInt).Value = doc.TableInstanceId;
         command.Parameters.Add("@document", System.Data.SqlDbType.BigInt).Value = doc.DocumentId;
+
+        // ⚠ Параметри маршрутизованого тексту (D-462); інші тексти їх не вживають.
+        command.Parameters.Add("@table", System.Data.SqlDbType.Int).Value = doc.TableDefId;
+        command.Parameters.Add("@yearFrom", System.Data.SqlDbType.Int).Value = (doc.PeriodKey.Year * 100) + 1;
+        command.Parameters.Add("@yearTo", System.Data.SqlDbType.Int).Value = (doc.PeriodKey.Year * 100) + 99;
 
         var keys = new List<string>();
         var plans = new List<string>();
