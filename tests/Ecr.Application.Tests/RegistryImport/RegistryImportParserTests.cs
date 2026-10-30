@@ -561,7 +561,7 @@ public sealed class RegistryImportParserTests
         var era = new EraGrid();
         for (var i = 0; i < RegistryImportParser.MaxIssues + 50; i++)
         {
-            era.Source(i + 1, "S", "T", [Sub(333d, "x", gs: "bad")]);
+            era.Source(i + 1, "S", "T", [Sub(333d, "x", gs: "bad", tons: 1d)]);
         }
 
         var parsed = Parse(era);

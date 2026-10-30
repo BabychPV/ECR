@@ -8,16 +8,29 @@ namespace Ecr.Adapters.Excel.RegistryImport;
 /// Opens an <c>.xlsx</c> through the same safety gate as the document import and runs the generic registry import
 /// engine (<see cref="RegistryImportService"/>) on its sheet.
 /// </summary>
-public sealed class ExcelRegistryImporter(RegistryImportService service)
+public sealed class ExcelRegistryImporter(RegistryImportService service) : IRegistryFileImporter
 {
+    /// <summary>Layout analysis: reads the file with the profile, no database.</summary>
+    public async Task<ImportAnalysis> AnalyseAsync(Stream file, RegistryImportSpec spec, CancellationToken ct)
+    {
+        var opened = await OpenAsync(file, spec, ct).ConfigureAwait(false);
+        using (opened.Owner)
+        {
+            var parsed = RegistryImportParser.Parse(opened.Grid, spec);
+            return new ImportAnalysis(
+                opened.Hash, opened.SheetName, opened.SheetNames, parsed.Header, parsed.Stats, parsed.Groups, parsed.Issues,
+                parsed.DroppedIssues, parsed.Header is not null && !parsed.HasErrors);
+        }
+    }
+
     /// <summary>Preview: reads the file, nothing is written.</summary>
-    public async Task<ImportPreview> PreviewAsync(
+    public async Task<RegistryImportPreview> PreviewAsync(
         Stream file, RegistryImportSpec spec, ImportRequest request, CancellationToken ct)
     {
-        var (grid, hash, owner) = await OpenAsync(file, spec, ct).ConfigureAwait(false);
-        using (owner)
+        var opened = await OpenAsync(file, spec, ct).ConfigureAwait(false);
+        using (opened.Owner)
         {
-            return await service.PreviewAsync(grid, spec, request with { FileSha256 = hash }, ct).ConfigureAwait(false);
+            return await service.PreviewAsync(opened.Grid, spec, request with { FileSha256 = opened.Hash }, ct).ConfigureAwait(false);
         }
     }
 
@@ -25,15 +38,14 @@ public sealed class ExcelRegistryImporter(RegistryImportService service)
     public async Task<ImportCommitResult> CommitAsync(
         Stream file, RegistryImportSpec spec, ImportRequest request, CancellationToken ct)
     {
-        var (grid, hash, owner) = await OpenAsync(file, spec, ct).ConfigureAwait(false);
-        using (owner)
+        var opened = await OpenAsync(file, spec, ct).ConfigureAwait(false);
+        using (opened.Owner)
         {
-            return await service.CommitAsync(grid, spec, request with { FileSha256 = hash }, ct).ConfigureAwait(false);
+            return await service.CommitAsync(opened.Grid, spec, request with { FileSha256 = opened.Hash }, ct).ConfigureAwait(false);
         }
     }
 
-    private static async Task<(IImportGrid Grid, string Hash, IDisposable Owner)> OpenAsync(
-        Stream file, RegistryImportSpec spec, CancellationToken ct)
+    private static async Task<Opened> OpenAsync(Stream file, RegistryImportSpec spec, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
         ArgumentNullException.ThrowIfNull(spec);
@@ -63,7 +75,12 @@ public sealed class ExcelRegistryImporter(RegistryImportService service)
                     : workbook.Worksheets.FirstOrDefault(w => w.Visibility == ClosedXML.Excel.XLWorksheetVisibility.Visible)
                       ?? workbook.Worksheets.First();
 
-                return (new ClosedXmlImportGrid(sheet), hash, owner);
+                var names = workbook.Worksheets
+                    .Where(w => w.Visibility == ClosedXML.Excel.XLWorksheetVisibility.Visible)
+                    .Select(w => w.Name)
+                    .ToList();
+
+                return new Opened(new ClosedXmlImportGrid(sheet), hash, owner, sheet.Name, names);
             }
             catch
             {
@@ -77,6 +94,8 @@ public sealed class ExcelRegistryImporter(RegistryImportService service)
             throw;
         }
     }
+
+    private sealed record Opened(IImportGrid Grid, string Hash, IDisposable Owner, string SheetName, IReadOnlyList<string> SheetNames);
 
     private sealed class Owner(IDisposable workbook, IDisposable? buffer) : IDisposable
     {

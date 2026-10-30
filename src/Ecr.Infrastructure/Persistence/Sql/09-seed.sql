@@ -5727,6 +5727,9 @@ USING (VALUES
     (N'err.ECR-IMP-0422.regChildWithoutParent', N'en', N'Row {row}: a substance row has no source above it.', 1),
     (N'err.ECR-IMP-0422.regParentWithoutChildren', N'en', N'Source {key} has no substance rows.', 1),
     (N'err.ECR-IMP-0422.regNoRows',             N'en', N'The file has no data rows.', 1),
+    (N'err.ECR-IMP-0422.regValueEmpty',         N'en', N'"{field}" is empty. The row is imported without it.', 1),
+    -- NAE:n3-air ── "Air Limits Import" permits (provisioning, profiles, wizard backend); ru/kz in the section NAE:n3-air below.
+    (N'err.ECR-IMP-0422.airRequestInvalid',     N'en', N'The import request cannot be read. Reload the page and try again.', 1),
     -- Великий імпорт іде у фон (F-01): людина має знати, де шукати результат.
     (N'import.queued',                          N'en', N'The import is large and is being applied in the background. Follow it in My tasks.', 1),
     -- ⛔ F-27: у «My tasks» замість ідентифікатора файлу експорту.
@@ -16673,6 +16676,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- NAE:n4-import ── кінець секції ──
+-- NAE:n3-air ── ru/kz дозволів "Air Limits Import" (N3); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-IMP-0422.regValueEmpty', N'ru', N'«{field}» не заполнено. Строка импортируется без него.'),
+    (N'err.ECR-IMP-0422.regValueEmpty', N'kz', N'«{field}» толтырылмаған. Жол онсыз импортталады.'),
+    (N'err.ECR-IMP-0422.airRequestInvalid', N'ru', N'Запрос импорта не читается. Обновите страницу и повторите.'),
+    (N'err.ECR-IMP-0422.airRequestInvalid', N'kz', N'Импорт сұрауын оқу мүмкін емес. Бетті жаңартып, қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- NAE:n3-air ── кінець секції ──
 
 -- I18N:ru-kz-backfill 2026-09-30 ── ru/kz для ключів, що мали лише en (req-g2, rpt-views-health, реєстри, безпека, збір подій та ін.); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

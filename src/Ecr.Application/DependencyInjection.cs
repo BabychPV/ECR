@@ -58,6 +58,8 @@ public static class DependencyInjection
         services.AddScoped<Security.GetAccessDiagnosticsHandler>();
         services.AddScoped<Security.GetEffectiveAccessHandler>();
         services.AddScoped<DiffTemplateVersionsHandler>();
+
+        // NAE plan N3: \
         services.AddScoped<PatchPresentationHandler>();
         services.AddScoped<ReplaceHeaderGroupsHandler>();
 

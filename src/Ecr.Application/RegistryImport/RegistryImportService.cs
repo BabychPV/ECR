@@ -37,7 +37,7 @@ public sealed record ImportDiffCounts(
 public sealed record MissingReference(string Kind, string Code, int Row, string? GroupLabel, MissingAction? Resolved);
 
 /// <summary>What a preview shows.</summary>
-public sealed record ImportPreview(
+public sealed record RegistryImportPreview(
     ImportHeaderReport? Header,
     ImportStats Stats,
     IReadOnlyList<ImportGroupRow> Groups,
@@ -79,7 +79,7 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
         resolvers.ToDictionary(r => r.Kind, StringComparer.Ordinal);
 
     /// <summary>Builds the preview. Nothing is written.</summary>
-    public async Task<ImportPreview> PreviewAsync(
+    public async Task<RegistryImportPreview> PreviewAsync(
         IImportGrid grid, RegistryImportSpec spec, ImportRequest request, CancellationToken ct)
     {
         var built = await BuildAsync(grid, spec, request, ct).ConfigureAwait(false);
@@ -136,7 +136,7 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
         return new ImportCommitResult(built.Plan, preview.Diff);
     }
 
-    private sealed record Built(ImportPreview Preview, ImportApplyPlan Plan);
+    private sealed record Built(RegistryImportPreview Preview, ImportApplyPlan Plan);
 
     private async Task<Built> BuildAsync(
         IImportGrid grid, RegistryImportSpec spec, ImportRequest request, CancellationToken ct)
@@ -210,8 +210,10 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
                 }
                 else
                 {
+                    var missingField = isParentLevel ? parentField!.Name : childField!.Name;
                     issues.Add(new ImportIssue(
-                        ImportSeverity.Error, RegistryImportKeys.ReferenceMissing, at.Row, null, null,
+                        ImportSeverity.Error, RegistryImportKeys.ReferenceMissing, at.Row,
+                        parsed.Header?.Mapped.FirstOrDefault(m => m.Field == missingField)?.ColumnLetter, missingField,
                         new Dictionary<string, string> { ["kind"] = kind, ["key"] = code }));
                 }
             }
@@ -284,7 +286,7 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
         var plan = new ImportApplyPlan(
             request.Scope, delete, inserted, creations, fingerprint, request.FileSha256, request.ProfileCode, stats);
 
-        var preview = new ImportPreview(
+        var preview = new RegistryImportPreview(
             parsed.Header, parsed.Stats, parsed.Groups, issues, parsed.DroppedIssues, diff, missing, replace, canApply, fingerprint);
 
         return new Built(preview, plan);
