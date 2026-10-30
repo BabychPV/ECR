@@ -141,10 +141,20 @@
   color: var(--mantine-color-dimmed);
 }
 
+/* Поточний крок: «світлий» варіант Mantine - білий на blue-filled (#228be6) давав контраст 3.55 (реальний axe, ≥ 4.5 потрібно). */
 .pi-steps li[aria-current='step'] {
-  background: var(--mantine-color-blue-filled);
+  background: var(--mantine-color-blue-light);
   border-color: var(--mantine-color-blue-filled);
-  color: var(--mantine-color-white);
+  color: var(--mantine-color-text);
+}
+
+/* Підказка-плейсхолдер полів майстра (FileInput «Choose a file»): типовий gray-5 (#adb5bd) на білому - 2.07. */
+.pi-page {
+  --mantine-color-placeholder: var(--mantine-color-gray-7);
+}
+
+:root[data-mantine-color-scheme='dark'] .pi-page {
+  --mantine-color-placeholder: var(--mantine-color-gray-5);
 }
 
 .pi-steps li[data-done='true'] {
@@ -223,10 +233,19 @@
   font-weight: 600;
 }
 
+/* Реальний axe: `red-text`/`orange-text` у цій темі дають #fa5252/#fd7e14 на сірому тлі таблиці - 3.06 і 2.39. Темніші відтінки. */
 .pi-sev[data-severity='Error'] {
-  color: var(--mantine-color-red-text);
+  color: #a61e1e;
 }
 
 .pi-sev[data-severity='Warning'] {
-  color: var(--mantine-color-orange-text);
+  color: #9c3a0a;
+}
+
+:root[data-mantine-color-scheme='dark'] .pi-sev[data-severity='Error'] {
+  color: var(--mantine-color-red-4);
+}
+
+:root[data-mantine-color-scheme='dark'] .pi-sev[data-severity='Warning'] {
+  color: var(--mantine-color-orange-4);
 }
