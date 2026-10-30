@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Catalog } from '@/test/__tests__/a11yFixtures';
-import { cell, Dash, filterSources, sourceTypeLabel, sourceTypeShort } from '../airCardModel';
+import { cell, Dash, filterSources, num, sourceTypeLabel, sourceTypeShort } from '../airCardModel';
 import { nodeOptions } from '../import/naeNodes';
 import { card, tree } from './airFixtures';
 
@@ -22,6 +22,17 @@ describe('airCardModel', () => {
     expect(cell(null)).toBe(Dash);
     expect(cell('')).toBe(Dash);
     expect(cell('72.3171311')).toBe('72.3171311');
+  });
+
+  it('num: реальний сервер віддає повну шкалу (16 знаків) - нулі хвоста відкидаються, значення не округлюється', () => {
+    expect(num('0.5000000000000000')).toBe('0.5');
+    expect(num('25.0000000000000000')).toBe('25');
+    expect(num('0.0000000000035000')).toBe('0.0000000000035');
+    expect(num('-1.2500')).toBe('-1.25');
+    expect(num('100')).toBe('100');
+    expect(num('0.0000000000000001')).toBe('0.0000000000000001');
+    expect(num(null)).toBe(Dash);
+    expect(num('n/a')).toBe('n/a');
   });
 
   it('пошук: код НАЕ, назва джерела, код і назва речовини', () => {
