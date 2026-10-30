@@ -191,7 +191,7 @@ public sealed class CreateRowHandler(
     {
         // ⛔ L6-02: структура документа — першою, до блокування аркуша.
         DocumentStructure.EnsureUnchanged(
-            await sheetGate.EnterStructureAsync(instance.DocumentId, exclusive: false, ct).ConfigureAwait(false),
+            await sheetGate.EnterStructureForPeriodAsync(instance.DocumentId, exclusive: false, instance.PeriodKey, ct).ConfigureAwait(false),
             instance.TemplateVersionId,
             instance.DocumentId);
 
@@ -394,7 +394,7 @@ public sealed class CreateRowHandler(
     {
         // ⛔ L6-02: структура документа — першою, до блокування аркуша.
         DocumentStructure.EnsureUnchanged(
-            await sheetGate.EnterStructureAsync(instance.DocumentId, exclusive: false, ct).ConfigureAwait(false),
+            await sheetGate.EnterStructureForPeriodAsync(instance.DocumentId, exclusive: false, instance.PeriodKey, ct).ConfigureAwait(false),
             instance.TemplateVersionId,
             instance.DocumentId);
 

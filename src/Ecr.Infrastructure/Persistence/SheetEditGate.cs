@@ -129,11 +129,16 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     }
 
     /// <inheritdoc />
-    public async Task<int?> EnterStructureAsync(long documentId, bool exclusive, CancellationToken ct)
+    public Task<int?> EnterStructureAsync(long documentId, bool exclusive, CancellationToken ct)
+        => EnterStructureForPeriodAsync(documentId, exclusive, periodKey: null, ct);
+
+    /// <inheritdoc />
+    public async Task<int?> EnterStructureForPeriodAsync(long documentId, bool exclusive, int? periodKey, CancellationToken ct)
     {
         var mode = exclusive ? ExclusiveMode : SharedMode;
         var resource = StructureResourceOf(documentId);
-        var (code, version, migrating) = await GetAppLockAsync(resource, mode, documentId, _lockTimeout, ct).ConfigureAwait(false);
+        var (code, version, migrating) = await GetAppLockAsync(resource, mode, documentId, _lockTimeout, ct, periodKey)
+            .ConfigureAwait(false);
 
         // ⚠ Хто чекав, той і читає відмову: перенос — на записи документа, запис — на перенос.
         ThrowIfRefused(code, resource, mode, () => DocumentBusy(
@@ -244,7 +249,7 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     /// бачить перенос, що зафіксувався, поки ми чекали на блокування.
     /// </remarks>
     private async Task<(int Code, int? Version, bool Migrating)> GetAppLockAsync(
-        string resource, string mode, long? versionOfDocument, TimeSpan lockTimeout, CancellationToken ct)
+        string resource, string mode, long? versionOfDocument, TimeSpan lockTimeout, CancellationToken ct, int? periodKey = null)
     {
         var transaction = db.Database.CurrentTransaction
                           ?? throw new InvalidOperationException(
@@ -261,7 +266,7 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
                                        @LockOwner = 'Transaction', @LockTimeout = @LockTimeout;
             SET @Result = @code;
             IF @code >= 0 AND @DocumentId IS NOT NULL
-                SELECT @Version = p.TemplateVersionId,
+                SELECT @Version = CASE WHEN @PeriodKey IS NULL THEN p.TemplateVersionId ELSE doc.fn_VersionOf(p.Id, @PeriodKey) END,
                        @Migrating = CASE WHEN p.ExternalSettingsJson LIKE '%"migratingTo"%' THEN 1 ELSE 0 END
                 FROM   doc.Document d
                 JOIN   doc.Project  p ON p.Id = d.ProjectId
@@ -277,6 +282,10 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
         command.Parameters.Add(new SqlParameter("@DocumentId", SqlDbType.BigInt)
         {
             Value = versionOfDocument is { } id ? id : DBNull.Value,
+        });
+        command.Parameters.Add(new SqlParameter("@PeriodKey", SqlDbType.Int)
+        {
+            Value = periodKey is { } period ? period : DBNull.Value,
         });
         var result = new SqlParameter("@Result", SqlDbType.Int) { Direction = ParameterDirection.Output };
         var version = new SqlParameter("@Version", SqlDbType.Int) { Direction = ParameterDirection.Output };
