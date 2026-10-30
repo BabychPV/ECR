@@ -155,6 +155,10 @@ export function buildMonarchLanguage(options: LanguageOptions): MonarchLanguage 
 
         [/[()]/, '@brackets'],
         [/,/, 'delimiter'],
+        // ✎ lane/integ-methodology-ui: крапка між ланками — лексема мови (`TokenType.Dot`:
+        // `[Period].Days`, `[Аркуш].[Рядок]`), тож `invalid` їй не належить (див. межу файлу вгорі).
+        // Без цього правила календарний контекст із довідки синтаксису фарбувався як помилка.
+        [/\./, 'delimiter'],
         [/(<=|>=|<>|==|&&|\|\||[-+*/%^&<>=?:!])/, 'operator'],
         [/./, 'invalid'],
       ],
