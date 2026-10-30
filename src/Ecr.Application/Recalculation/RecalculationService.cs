@@ -943,7 +943,7 @@ public sealed class RecalculationService(
             // власником): формули, пораховані за старою версією, після переносу
             // не пишуться під старими `ColumnDefId`.
             Documents.DocumentStructure.EnsureUnchanged(
-                await sheetGate.EnterStructureAsync(instance.DocumentId, exclusive: false, token).ConfigureAwait(false),
+                await sheetGate.EnterStructureForPeriodAsync(instance.DocumentId, exclusive: false, instance.PeriodKey, token).ConfigureAwait(false),
                 instance.TemplateVersionId,
                 instance.DocumentId);
 
