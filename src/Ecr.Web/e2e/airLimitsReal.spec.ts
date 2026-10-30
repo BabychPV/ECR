@@ -408,8 +408,8 @@ test.describe('Air limits real', () => {
     await page.getByRole('button', { name: /Next: analyse file/ }).click();
     await expect(page.getByText('Choose the area.')).toBeVisible();
     await page.getByRole('textbox', { name: /^Area/ }).click();
-    // Areas of this region only. The REGION group node carries RegionCode without AreaCode, so the server also offers "-" (No area).
-    await expect(page.getByRole('option')).toHaveText(['No area', Area]);
+    // Areas of this region only, from its AREA nodes. The REGION group node no longer adds "-" (No area): every NAE here has an area.
+    await expect(page.getByRole('option')).toHaveText([Area]);
     await page.keyboard.press('Escape');
     await pick(page, /^Area/, new RegExp(`^${Area}`));
     await page.getByRole('button', { name: /Next: analyse file/ }).click();
@@ -686,8 +686,7 @@ test.describe('Air limits real', () => {
     await page.keyboard.press('Enter');
     await expect(regionInput).toHaveValue(new RegExp(`^${Region}`));
     await page.keyboard.press('Tab');
-    await page.keyboard.press('ArrowDown'); // opens the list on "No area" ("-" sorts first)
-    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown'); // opens the list on the only area of the region (no "-": every NAE has an area)
     await page.keyboard.press('Enter');
     await expect(page.getByRole('textbox', { name: /^Area/ })).toHaveValue(new RegExp(`^${Area}`));
     // До «Next» - Tab-ами, без миші; кільце фокуса видно.
