@@ -144,6 +144,59 @@ public sealed class SchemaValidator(
 
         await ValidatePhysicalModelAsync(ct).ConfigureAwait(false);
         await ValidateRuntimeOptionsAsync(ct).ConfigureAwait(false);
+        await ValidateSqlOnlyProceduresAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Procedures that exist ONLY in <c>Sql/*.sql</c> (no EF migration creates them; <c>deploy-ecr.ps1</c> step 2 does).
+    /// Add a new Sql-only procedure here, in one place.
+    /// </summary>
+    internal static readonly string[] SqlOnlyProcedures =
+    [
+        "rpt.usp_GenerateTemplateViews",
+        "rpt.usp_GenerateStableViews",
+    ];
+
+    /// <summary>Known EF table used to tell "procedure missing" from "metadata not visible to this login".</summary>
+    private const string MetadataCanary = "sys_ecr.UiString";
+
+    /// <summary>
+    /// Non-fatal: warns when Sql-only procedures are missing (database updated without the Sql step of
+    /// <c>deploy-ecr.ps1</c>, e.g. <c>-SkipSchema</c>). Names go only to <see cref="Warnings"/> (server log, never
+    /// <c>/health</c>). If the canary table is not visible either, the login cannot see metadata: no warning (cannot determine).
+    /// Any SQL failure here is swallowed - this check must never stop startup.
+    /// </summary>
+    internal async Task ValidateSqlOnlyProceduresAsync(CancellationToken ct)
+    {
+        try
+        {
+            var missing = new List<string>();
+            foreach (var name in SqlOnlyProcedures)
+            {
+                var state = await db.Database
+                    .SqlQueryRaw<int>(
+                        "SELECT CASE WHEN OBJECT_ID({1}, N'P') IS NOT NULL THEN 0 " +
+                        "WHEN OBJECT_ID({0}, N'U') IS NULL THEN -1 ELSE 1 END AS Value",
+                        MetadataCanary, name)
+                    .ToListAsync(ct).ConfigureAwait(false);
+                if (state.Count > 0 && state[0] == 1)
+                {
+                    missing.Add(name);
+                }
+            }
+
+            if (missing.Count > 0)
+            {
+                _warnings.Add(
+                    $"Відсутні процедури, що створюються лише скриптами Sql ({missing.Count}): {string.Join(", ", missing)}. " +
+                    "Базу оновлено без кроку схеми deploy-ecr.ps1 — виконайте його без -SkipSchema (runbook §8); " +
+                    "доти вʼюхи rpt.* для SSRS не генеруються.");
+            }
+        }
+        catch (Microsoft.Data.SqlClient.SqlException)
+        {
+            // cannot determine - no warning, startup unaffected
+        }
     }
 
     /// <summary>Редакція і версія сервера.</summary>
