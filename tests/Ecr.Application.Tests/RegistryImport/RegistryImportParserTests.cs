@@ -548,6 +548,34 @@ public sealed class RegistryImportParserTests
         => Assert.Contains(Parse(new EraGrid()).Issues, i => i.MessageKey == RegistryImportKeys.NoRows);
 
     [Fact]
+    public void An_empty_tons_per_year_cell_is_a_per_row_warning_not_an_error()
+    {
+        var era = new EraGrid().Source(3d, "S1", "T", [Sub(333d, "x", 0.1d, null, null), Sub(334d, "y", 0.1d, null, 0.5d)]);
+
+        var parsed = Parse(era);
+
+        Assert.False(parsed.HasErrors);
+        var warning = Assert.Single(parsed.Issues);
+        Assert.Equal((ImportSeverity.Warning, RegistryImportKeys.ValueEmpty, "tonsPerYear"), (warning.Severity, warning.MessageKey, warning.Field));
+        Assert.NotNull(warning.Row);
+        Assert.False(string.IsNullOrEmpty(warning.Column));
+        Assert.Equal(2, parsed.Stats.Children);
+    }
+
+    [Fact]
+    public void Substance_values_without_a_substance_code_are_an_error_with_row_and_column()
+    {
+        var era = new EraGrid().Source(3d, "S1", "T", [Sub(333d, "x", 0.1d, null, 0.2d), Sub("", "no code", 0.3d, null, 0.4d)]);
+
+        var parsed = Parse(era);
+
+        Assert.True(parsed.HasErrors);
+        var error = Assert.Single(parsed.Issues, i => i.Severity == ImportSeverity.Error);
+        Assert.Equal((RegistryImportKeys.ValueRequired, "substanceCode"), (error.MessageKey, error.Field));
+        Assert.NotNull(error.Row);
+        Assert.False(string.IsNullOrEmpty(error.Column));
+    }
+    [Fact]
     public void Negative_height_is_refused()
     {
         var era = new EraGrid().Source(3d, "S1", "T", [Sub(333d, "x")], height: -2d);

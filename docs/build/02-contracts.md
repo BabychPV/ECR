@@ -4537,6 +4537,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/permits/{permitId}/air-limits/import/preview` | `Registry.EditData` + грант `Write` на таблиці дозволу | 8 |
 | `POST` | `/api/v1/permits/{permitId}/air-limits/import/apply` | `Registry.EditData` + грант `Write` на таблиці дозволу | 8 |
 | `GET` | `/api/v1/permits/{permitId}/air-limits` | `Registry.View` або грант `Read` на реєстр шапки | 8 |
+
+Порт NAE N3: `IRegistryImportProfileStore` - збережені профілі імпорту таблиці `AIR_SOURCES` (`cfg.RegistryImportProfile`): список, пошук за кодом, додавання, перевірка `RowVersion` для `PUT …/import-profiles/{code}`.
 | `GET` | `/api/v1/permit-types?category=&status=&q=&limit=&cursor=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types/{code}` | `Registry.View` | 8 |
 | `GET` | `/api/v1/permit-types/{code}/usage` | `Registry.View` | 8 |

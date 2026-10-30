@@ -22,7 +22,7 @@ namespace Ecr.Api.Tests;
 /// NAE plan N2 end to end (HTTP + SQL Server, fake AF reader): access matrix, dry run writes nothing, the first apply provisions the
 /// registry (levels, fields, composite key) and builds the tree, a second run changes nothing (create-only, ECR owns the tree),
 /// the composite key lets one NAE code repeat across regions but refuses the same code in the same region and area, an
-/// incompatible registry is refused, and "where used" is an honest empty list.
+/// incompatible registry is refused, and "where used" is empty for a tree that no permit points at (the real usages after an import are pinned in `AirLimitsImportHttpTests`, plan N3).
 /// </summary>
 /// <remarks>
 /// Mutation proofs (local, not committed): remove <c>CreateOnly</c>/the existing-by-code check → the idempotency test creates

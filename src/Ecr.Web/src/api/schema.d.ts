@@ -27576,6 +27576,8 @@ export interface components {
             factor?: null | string;
             /** @description How an empty cell is filled. */
             fillDown?: components["schemas"]["FillDown"];
+            /** @description Read and validated but not stored: left out of the comparison with stored rows (e.g. a name the registry owns). */
+            informational?: boolean;
             /** @description Parent (source) or child (substance) level. */
             level?: components["schemas"]["ImportLevel"];
             /** @description Unique field name (the target property). */
