@@ -307,7 +307,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
     [Trait("Requirement", "RPT-STABLE")]
     public async Task Стабільна_вʼюха_на_синтетичній_таблиці_не_читає_більше_ніж_vN_плюс_20_відсотків()
     {
-        const int rows = 6000;
+        const int rows = 2000;
         const int columns = 40;
         var (templateId, tpl) = await NewTemplateAsync();
         var cols = Enumerable.Range(1, columns).Select(i => ($"C{i}", CellDataType.Decimal)).ToArray();
@@ -343,6 +343,8 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
             command.Parameters.AddWithValue("@t", built.TableId);
             command.Parameters.AddWithValue("@i", instanceId);
             await command.ExecuteNonQueryAsync();
+            command.CommandText = "CHECKPOINT";   // журнал спільної бази не мусить рости від синтетики (TestDatabaseSizeTests)
+            await command.ExecuteNonQueryAsync();
         }
 
         await ExecStableAsync(built.VersionId);
@@ -361,7 +363,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
 
     /// <summary>
     /// Синтетика з маршрутизацією місяців (прапор ON, форма Land у мініатюрі): MonthsInColumns, 12 місячних + 28 звичайних колонок,
-    /// 3000 рядків у 202610 і 202611 (власник). Стабільна проти <c>_v1</c> тим самим запитом. Числа - у виводі.
+    /// 1000 рядків у 202610 і 202611 (власник). Стабільна проти <c>_v1</c> тим самим запитом. Числа - у виводі.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -369,7 +371,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
     [Trait("Requirement", "RPT-STABLE")]
     public async Task Стабільна_вʼюха_з_маршрутизацією_місяців_на_синтетиці_не_читає_більше_ніж_vN_плюс_20_відсотків()
     {
-        const int rows = 3000;
+        const int rows = 1000;
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(202610, columnCount: 28, rowCount: rows, layoutKind: TableLayoutKind.MonthsInColumns, monthColumns: 12);
         await using (var db = sql.CreateContext())
@@ -393,6 +395,8 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
                 """;
             command.Parameters.AddWithValue("@t", doc.TableDefId);
             command.Parameters.AddWithValue("@d", doc.DocumentId);
+            await command.ExecuteNonQueryAsync();
+            command.CommandText = "CHECKPOINT";
             await command.ExecuteNonQueryAsync();
         }
 
