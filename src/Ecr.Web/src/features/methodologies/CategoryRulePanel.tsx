@@ -14,6 +14,7 @@ import {
   methodologyCategoryRule,
   saveMethodologyCategoryRule,
 } from './api';
+import { MethodologySection } from './MethodologySection';
 
 interface Props {
   readonly methodologyId: number;
@@ -74,10 +75,11 @@ export function MethodologyCategoryRulePanel({ methodologyId, versionId, editabl
   const drafting = editable && draft !== null;
 
   return (
-    <>
-      <Group justify="space-between">
-        <Text fw={600}>{t('methodologies.categoryRule')}</Text>
-        {editable && draft === null && (
+    <MethodologySection
+      sectionId="categoryRule"
+      title={t('methodologies.categoryRule')}
+      actions={
+        editable && draft === null && (
           <Group gap="xs">
             {current !== null && (
               <Button size="xs" variant="default" onClick={() => setConfirmingDelete(true)}>
@@ -88,8 +90,9 @@ export function MethodologyCategoryRulePanel({ methodologyId, versionId, editabl
               {current === null ? t('methodologies.categoryRuleSet') : t('methodologies.categoryRuleEdit')}
             </Button>
           </Group>
-        )}
-      </Group>
+        )
+      }
+    >
 
       <AsyncBoundary<MethodologyCategoryRuleDto>
         isPending={rule.isPending}
@@ -177,7 +180,7 @@ export function MethodologyCategoryRulePanel({ methodologyId, versionId, editabl
           </Group>
         </Stack>
       </Modal>
-    </>
+    </MethodologySection>
   );
 }
 
