@@ -1052,13 +1052,7 @@ public sealed class AccessDecisionService(
         var rows = await db.Documents
             .AsNoTracking()
             .Where(d => ids.Contains(d.Id))
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new
-            {
-                d.Id,
-                d.ProjectId,
-                p.TemplateVersionId,
-                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId),
-            })
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.Id, d.ProjectId, p.TemplateVersionId, Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId) })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
