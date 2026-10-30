@@ -293,7 +293,8 @@ export function coerce(raw: string, dataType: string | undefined): unknown {
    * ні розрядних пробілів, ні експоненти, а в буфері Excel вони є щодня.
    * Канон у обох той самий — це твердження в тесті, а не домовленість.
    */
-  if (dataType === 'Decimal') {
+  // ✎ D-461: ручне значення замість формули в колонці `Formula` — число, як і результат формули.
+  if (dataType === 'Decimal' || dataType === 'Formula' || dataType === 'Calculated') {
     if (parseNumber(raw) === null) return raw.trim().length === 0 ? null : raw;
 
     return decimalTextOf(raw) ?? raw;

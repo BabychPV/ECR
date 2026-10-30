@@ -5,7 +5,8 @@ import { listValidationRules, validationRulesKey } from '@/features/templates/va
 import { rowModeLabel } from '@/features/templates/enumLabels';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
-import { formulasOf, type CtorTab, type FormulaTarget, type LocatedTable } from './ctorModel';
+import { cellFormulasOf, formulasOf, type CtorTab, type FormulaTarget, type LocatedTable } from './ctorModel';
+import { FormulaManualOverrideToggle } from '@/features/templates/FormulaManualOverrideToggle';
 import { sheetNameOf, tableNameOf } from './CtorTree';
 
 // ⚠ Обидві вкладки — окремі чанки (бюджет маршруту 250 КБ, `D-132`): той самий модуль
@@ -40,6 +41,11 @@ export interface TableWorkspaceProps {
   /** Діалог «Групи колонок» (презентаційна операція — доступна й на опублікованій версії). */
   readonly onManageGroups: () => void;
   readonly canEditPresentation: boolean;
+  /**
+   * ✎ D-461: право `Template.Edit` — перемикач «Дозволити ручне значення» (діє й на опублікованій версії).
+   * Відсутній — як `canEditPresentation`.
+   */
+  readonly canToggleManualOverride?: boolean;
   readonly onDelete: () => void;
   readonly onAddColumn: () => void;
   readonly onFormula: (target: FormulaTarget) => void;
@@ -59,6 +65,8 @@ export function TableWorkspace(props: TableWorkspaceProps): JSX.Element {
   const { templateVersionId, located, tab, onTab, canEditStructure } = props;
   const { table, sheet, no } = located;
   const formulas = formulasOf(table);
+  const cellFormulas = cellFormulasOf(table);
+  const canToggleOverride = props.canToggleManualOverride ?? props.canEditPresentation;
 
   // Лічильник правил — лише коли перелік уже завантажено (відкрита вкладка або кеш):
   // окремий запит на кожен вибір таблиці заради числа не потрібен.
@@ -112,7 +120,7 @@ export function TableWorkspace(props: TableWorkspaceProps): JSX.Element {
             </Tabs.Tab>
             <Tabs.Tab value="formulas">
               {t('ctor.tab.formulas')}
-              {count(formulas.length)}
+              {count(formulas.length + cellFormulas.length)}
             </Tabs.Tab>
             <Tabs.Tab value="rules">
               {t('ctor.tab.rules')}
@@ -147,7 +155,7 @@ export function TableWorkspace(props: TableWorkspaceProps): JSX.Element {
 
           <Tabs.Panel value="formulas">
             <p className="ecr-ctor-hint">{t('ctor.formulasHint')}</p>
-            {formulas.length === 0 ? (
+            {formulas.length === 0 && cellFormulas.length === 0 ? (
               <Text size="sm" c="dimmed">
                 {t('ctor.formulasEmpty')}
               </Text>
@@ -157,6 +165,7 @@ export function TableWorkspace(props: TableWorkspaceProps): JSX.Element {
                   <Table.Tr>
                     <Table.Th>{t('ctor.formulaTarget')}</Table.Th>
                     <Table.Th>{t('ctor.formulaExpression')}</Table.Th>
+                    <Table.Th>{t('formulas.manualOverrideColumn')}</Table.Th>
                     <Table.Th />
                   </Table.Tr>
                 </Table.Thead>
@@ -184,6 +193,20 @@ export function TableWorkspace(props: TableWorkspaceProps): JSX.Element {
                           <Code>{target.expression}</Code>
                         </Table.Td>
                         <Table.Td>
+                          {/* ✎ D-461: лише формули колонки й комірки — формула рядка в колонках вводу редагується
+                              й без прапорця (рішення людини 30.10), перемикач там нічого б не змінив. */}
+                          {target.kind === 'Column' &&
+                            target.column.formulaId !== null &&
+                            target.column.formulaId !== undefined && (
+                              <FormulaManualOverrideToggle
+                                templateVersionId={templateVersionId}
+                                formulaId={target.column.formulaId}
+                                allow={target.column.allowManualOverride === true}
+                                disabled={!canToggleOverride}
+                              />
+                            )}
+                        </Table.Td>
+                        <Table.Td>
                           {canEditStructure && (
                             <Group justify="flex-end">
                               <Button size="xs" variant="subtle" onClick={() => props.onFormula(target)}>
@@ -195,6 +218,32 @@ export function TableWorkspace(props: TableWorkspaceProps): JSX.Element {
                       </Table.Tr>
                     );
                   })}
+                  {cellFormulas.map(({ formula, column, row }) => (
+                    <Table.Tr key={`cell:${formula.formulaId}`} data-cell-formula={formula.formulaId}>
+                      <Table.Td>
+                        <Text size="sm">
+                          {column === null ? formula.columnDefId : localized(column.headerL10n) || column.code}
+                          {' · '}
+                          {row?.label ?? formula.rowKey}
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          {t('formulas.cellTarget')} · {column?.code ?? formula.columnDefId} · {formula.rowKey}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Code>{formula.expression}</Code>
+                      </Table.Td>
+                      <Table.Td>
+                        <FormulaManualOverrideToggle
+                          templateVersionId={templateVersionId}
+                          formulaId={formula.formulaId}
+                          allow={formula.allowManualOverride}
+                          disabled={!canToggleOverride}
+                        />
+                      </Table.Td>
+                      <Table.Td />
+                    </Table.Tr>
+                  ))}
                 </Table.Tbody>
               </Table>
             )}

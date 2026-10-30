@@ -1,5 +1,6 @@
 import type { ColumnDto, RowDto, TableSliceDto } from '@/api/types';
 import { cellKey, decide } from './permissions';
+import { manualCellOf, overridesFormula } from './formulaOverride';
 import { rowIndexOf } from './rowIndex';
 
 /**
@@ -98,7 +99,13 @@ export function cellStateOf(
     // ⚠ Обчислена комірка розпізнається за ПРИЧИНОЮ відмови, а не за окремим
     // прапорцем: причину рахує сервер, і другий прапорець довелося б тримати
     // синхронним із нею — тобто рано чи пізно він би розійшовся.
-    calculated: decision.reason === 'CalculatedCell',
+    calculated:
+      decision.reason === 'CalculatedCell' ||
+      // ✎ D-461: комірку формули, яку МОЖНА замінити ручним значенням, досі рахує формула — знак `ƒ` лишається,
+      // доки в ній немає ручного значення (тоді — власна позначка `ecr-cell-formula-manual`).
+      (decision.editable &&
+        overridesFormula(slice, rowKey, column.code) &&
+        manualCellOf(slice, rowKey, column.code) === null),
     readOnly: gridReadOnly || !decision.editable,
   };
 

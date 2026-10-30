@@ -19,12 +19,16 @@ export { fileNameOf };
 /**
  * Походження зміни — ті самі значення, що пише `aud.CellChange.Origin`.
  * ✎ D-442: `ApproverEdit` — правка погоджувача поточного кроку на поданому аркуші до погодження.
+ * ✎ D-461: `FormulaOverride` — ручне значення замість формули (з причиною); `FormulaRestored` — ручне значення
+ * прибрано, комірку знову рахує формула (серверні `CellChangeOrigins.FormulaOverride`/`FormulaRestored`).
  */
 export const cellChangeOrigins = [
   'UserEdit',
   'ApproverEdit',
   'Import',
   'ImportOverwrite',
+  'FormulaOverride',
+  'FormulaRestored',
   'Recalculation',
   'Migration',
 ] as const;
@@ -37,11 +41,40 @@ export const cellChangeOrigins = [
  * хто їх запустив), але ім'я біля числа, яке порахувала формула, читалося б як «це ввів він».
  * А імпорт — навпаки: число з книги ввела й застосувала конкретна людина, і «система» ховала б її.
  */
-export const humanCellChangeOrigins: readonly string[] = ['UserEdit', 'ApproverEdit', 'Import', 'ImportOverwrite'];
+export const humanCellChangeOrigins: readonly string[] = [
+  'UserEdit',
+  'ApproverEdit',
+  'Import',
+  'ImportOverwrite',
+  // ✎ D-461: як і на сервері (`IsHuman`), обидва — людські: ручне значення ставить і прибирає людина з правом.
+  'FormulaOverride',
+  'FormulaRestored',
+];
 
 /** Чи зробила зміну з цим походженням людина (`humanCellChangeOrigins`). */
 export function isHumanOrigin(origin: string | null | undefined): boolean {
   return origin !== null && origin !== undefined && humanCellChangeOrigins.includes(origin);
+}
+
+/**
+ * ✎ D-461: причина, з якою перенос версії шаблону повертає формулу замість ручного значення
+ * (`FormulaOverrideMigration.Reason` на сервері — незмінна константа, як і «Excel import»).
+ */
+export const VersionMigrationReason = 'Version migration';
+
+/**
+ * Чи зробила зміну КОМІРКИ людина — за походженням і, для повернення формули, за причиною.
+ *
+ * ✎ D-461 (рішення людини 30.10): `FormulaRestored`, який записав ПЕРЕНОС ВЕРСІЇ (`reason = "Version migration"`), —
+ * дія системи: автор показується як «Система», а того, хто запустив перенос, видно в підказці (рядок журналу
+ * зберігає його `changedByUserId` — нічого не переписується). Сервер це походження вважає людським
+ * (`CellChangeOrigins.IsHuman`): на ньому стоять правила «ручне не перезаписувати» й `HumanOriginsSql`, тож
+ * розрізнення лише для ПОКАЗУ живе тут, а не зміною класу походження в журналі.
+ */
+export function isHumanCellChange(change: { readonly origin: string | null | undefined; readonly reason?: string | null | undefined }): boolean {
+  if (change.origin === 'FormulaRestored' && change.reason === VersionMigrationReason) return false;
+
+  return isHumanOrigin(change.origin);
 }
 
 /**

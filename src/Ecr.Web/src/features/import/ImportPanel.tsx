@@ -431,6 +431,21 @@ export function ImportPanel({
                             {t('import.roundedMark', { value: show(change.roundedFrom) })}
                           </Badge>
                         )}
+                        {change.replacesFormula === true && (
+                          // ✎ D-461: значення ляже РУЧНИМ замість формули (причина журналу — «Excel import»);
+                          // порожнє значення в такій комірці — повернення формули. Позначка — словом, не кольором.
+                          <Badge
+                            ml="xs"
+                            size="xs"
+                            color="brand"
+                            variant="outline"
+                            tt="none"
+                            title={isFormulaRestore(change) ? t('import.restoresFormulaHint') : t('import.replacesFormulaHint')}
+                            data-import-replaces-formula={isFormulaRestore(change) ? 'restore' : 'override'}
+                          >
+                            {isFormulaRestore(change) ? t('import.restoresFormula') : t('import.replacesFormula')}
+                          </Badge>
+                        )}
                       </Table.Td>
                     </Table.Tr>
                   ))}
@@ -579,6 +594,14 @@ function keyOf(change: ImportChange): string {
  */
 function isRounded(change: ImportChange): boolean {
   return change.roundedFrom !== null && change.roundedFrom !== undefined;
+}
+
+/**
+ * ✎ D-461: зміна в комірці з ручним значенням замість формули, де з книги прийшло порожнє, — повернення формули
+ * (сервер: «`NewValue = null` у такій комірці — повернення формули»).
+ */
+function isFormulaRestore(change: ImportChange): boolean {
+  return change.newValue === null || change.newValue === undefined || change.newValue === '';
 }
 
 /**

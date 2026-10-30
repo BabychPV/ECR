@@ -52,7 +52,9 @@ public sealed class HumanOriginSqlLiteralTests
     {
         // ✎ AN-114: свідомий перезапис імпортом — теж правка людини.
         // ✎ D-442: правка погоджувача на поданому аркуші — теж людина (інтеграція її не перезаписує).
+        // ✎ D-461: ручне значення замість формули й повернення формули — теж рішення людини.
         Assert.Equal(
-            "N'UserEdit', N'Import', N'ImportOverwrite', N'ApproverEdit'", CellChangeOrigins.HumanOriginsSql);
+            "N'UserEdit', N'Import', N'ImportOverwrite', N'ApproverEdit', N'FormulaOverride', N'FormulaRestored'",
+            CellChangeOrigins.HumanOriginsSql);
     }
 }

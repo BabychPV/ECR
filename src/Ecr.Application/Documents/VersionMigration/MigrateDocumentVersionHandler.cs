@@ -94,6 +94,11 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// мап не було. Більше нуля без <c>allowLockedDocuments</c> — відмова <c>lookupLockedDocuments</c> (<c>ECR-SCHM-0422</c>).
 /// ⛔ Лише кількість.
 /// </param>
+/// <param name="LostFormulaOverrides">
+/// ✎ D-461: скільки ручних значень замість формул НЕ переїде як ручні (формула цільової версії ручного значення не
+/// дозволяє або колонки немає): комірки знову рахує формула, журнал — FormulaRestored. Перенос не блокує; пункти
+/// звіту — Kind OverrideLost. null — таких немає.
+/// </param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
     int ProjectId,
@@ -129,7 +134,8 @@ public sealed record DocumentVersionMigrationDto(
     bool? GuardedOverwrittenItemsTruncated = null,
     IReadOnlyList<LookupRemapReportItem>? LookupRemapReport = null,
     long? LookupRemapped = null,
-    int? LockedDocumentCount = null);
+    int? LockedDocumentCount = null,
+    long? LostFormulaOverrides = null);
 
 /// <summary>Комірка, значення якої перезапише нова комірочна формула (ACC-OW).</summary>
 /// <param name="SheetCode">Код аркуша вихідної версії.</param>
@@ -196,7 +202,11 @@ public sealed class MigrateDocumentVersionHandler(
 
     // ⛔ PRMG: ціль Lookup-поля може бути ГРУПОЮ типів дозволів; порівняння цілі - лише через `LookupTargetMatcher`.
     // `null` (прямий конструктор у тестах) - груп немає.
-    Permits.Groups.ILookupTargetResolver? groups = null)
+    Permits.Groups.ILookupTargetResolver? groups = null,
+
+    // ✎ D-461: ручні значення замість формул — переїжджають, лише коли цільова формула дозволяє ручне значення.
+    // `null` (прямий конструктор у тестах) — ручних значень немає.
+    IFormulaOverrideStore? formulaOverrides = null)
 {
     /// <summary>
     /// Скільки активна (<c>Queued</c>/<c>Running</c>) задача переносу може не оновлюватися, щоб ще вважатися
@@ -967,6 +977,14 @@ public sealed class MigrateDocumentVersionHandler(
             {
                 formulaTables = plan.FormulaChanges.Count;
 
+                // ✎ D-461: позначки вже переїхали за колонками (діапазони); ті, яких цільова формула не дозволяє, —
+                // знімаються, комірка знову обчислена (перерахунок проєкту нижче), журнал — FormulaRestored.
+                var released = await ReleaseLostOverridesAsync(projectId, target.Id, profile.UserId, innerCt).ConfigureAwait(false);
+                if (released > 0)
+                {
+                    formulaTables = Math.Max(formulaTables, 1);
+                }
+
                 // ⛔ Слід переносу значень Lookup шапки — на КОЖЕН документ, у ТІЙ САМІЙ транзакції (відкат переносу
                 // відкочує й аудит). Старі id взято ДО запису, під блоком проєкту. ⚠ Перерахунок тут НЕ ставиться: кількості
                 // комірок і результати не змінюються, а формули з HDR.<Lookup> ремап не охоплює (див. контракт).
@@ -1060,6 +1078,39 @@ public sealed class MigrateDocumentVersionHandler(
         }
 
         return result!;
+    }
+
+    /// <summary>
+    /// ✎ D-461: після переносу колонок знімає позначки, яких формула ЦІЛЬОВОЇ версії не дозволяє, і пише журнал
+    /// (<c>FormulaRestored</c>, причина «Version migration», старе значення). Повертає кількість знятих.
+    /// </summary>
+    private async Task<int> ReleaseLostOverridesAsync(int projectId, int targetVersionId, int userId, CancellationToken ct)
+    {
+        if (formulaOverrides is null)
+        {
+            return 0;
+        }
+
+        var to = await metadata.GetAsync(targetVersionId, ct).ConfigureAwait(false);
+        var marks = await formulaOverrides.ReadProjectAsync(projectId, ct).ConfigureAwait(false);
+        var lost = FormulaOverrideMigration.Lost(
+            marks, column => to.ColumnsById.ContainsKey(column) ? column : null, to);
+        if (lost.Count == 0)
+        {
+            return 0;
+        }
+
+        await formulaOverrides.ReleaseAsync([.. lost.Select(m => m.Address)], ct).ConfigureAwait(false);
+
+        var now = clock.UtcNow;
+        await audit.WriteCellChangesAsync(
+            [.. lost.Select(m => new CellChangeRecord(
+                now, m.Address, m.DocumentId, m.RowKey, OldValue: m.Value, NewValue: null, userId,
+                CellChangeOrigins.FormulaRestored, IsLateEdit: false, CorrelationId: null,
+                Reason: FormulaOverrideMigration.Reason))],
+            ct).ConfigureAwait(false);
+
+        return lost.Count;
     }
 
     /// <summary>
@@ -1164,6 +1215,19 @@ public sealed class MigrateDocumentVersionHandler(
         var lookup = await PrepareLookupAsync(projectId, from, to, lookupRemaps, ct).ConfigureAwait(false);
 
         var plan = VersionMigrationPlanner.Plan(from, to, scope.Cells, scope.HeaderValues, renames, lookup.Input);
+
+        // ✎ D-461: ручні значення, яких цільова формула не дозволяє, — пункти «OverrideLost» (перенос не блокують).
+        var overrideMap = plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId);
+        var lostOverrides = formulaOverrides is null
+            ? []
+            : FormulaOverrideMigration.Lost(
+                await formulaOverrides.ReadProjectAsync(projectId, ct).ConfigureAwait(false),
+                column => overrideMap.TryGetValue(column, out var mapped) ? mapped : to.ColumnsById.ContainsKey(column) ? column : null,
+                to);
+        if (lostOverrides.Count > 0)
+        {
+            plan = plan with { Items = [.. plan.Items, .. FormulaOverrideMigration.Items(lostOverrides, from)] };
+        }
 
         // ACC-OW: прапор знімає guardedWithData лише для нової комірочної формули на комірці зі значенням.
         var refusals = plan.RefusalsFor(mode, acceptGuardedOverwrite).ToList();
@@ -1319,7 +1383,8 @@ public sealed class MigrateDocumentVersionHandler(
                 ? null
                 : [.. plan.LookupReport.Concat(lookup.NotApplied).OrderBy(i => i.Target.Code, StringComparer.Ordinal)],
             LookupRemapped: lookup.Input is null && lookup.NotApplied.Count == 0 ? null : plan.LookupRemappedValues,
-            LockedDocumentCount: lockedDocumentCount);
+            LockedDocumentCount: lockedDocumentCount,
+            LostFormulaOverrides: lostOverrides.Count == 0 ? null : lostOverrides.Count);
 
         return new PlannedMigration(
             dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds }, lookup.Rows);

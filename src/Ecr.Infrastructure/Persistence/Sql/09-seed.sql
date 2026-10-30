@@ -126,6 +126,13 @@ USING (VALUES
   -- в секції `TC:discuss` наприкінці файлу (повторний сід її не повертає: адміністратор може зняти право з ролі).
   (N'Document.Discuss',         N'Document',    0),
   (N'Document.DiscussModerate', N'Document',    0),
+  -- D461: formula-override ── право «Ручне значення замість формули» (рішення людини 30.10) ──
+  -- Проєктне, звужуване (`PermissionScopes.Narrowable`): рішення про комірку далі проходить крізь межі аркуша й
+  -- періоду і грант Write. Запис у сітку саме по собі формулу НЕ замінює — потрібне це право. Не небезпечне (0):
+  -- значення з обов'язковою причиною в журналі, формулу можна повернути. Роздача — як прецедент `Document.Submit`:
+  -- лише `SystemAdministrator` шаблоном `%`; решті ролей адміністратор видає свідомо.
+  (N'Document.OverrideFormula', N'Document',    0),
+  -- D461: formula-override ── кінець секції ──
   -- PERMITS: permissions ── права типів дозволів (PM-04, рішення «Аудиту» ч.1, варіант б) ──
   -- Окремі глобальні права замість Registry.EditDefinition / Registry.Publish: ними керують реєстри Land, а тип
   -- дозволу — власна сутність. Не небезпечні (0), як і Registry.EditDefinition: `SystemAdministrator` (`%`) бере їх
@@ -9603,6 +9610,47 @@ USING (VALUES
     ,(N'permits.nae.import.issue.existingElsewhere', N'en', N'This NAE key already belongs to another node.', 1)
     ,(N'permits.nae.import.issue.sourceIncomplete', N'en', N'The AF listing may be truncated.', 1)
     -- COLL:ui-nae-structure ── кінець секції ──
+    -- D461:formula-override ── en: право, позначки журналу й відмова «ручне значення замість формули» (D-461); ru/kz — порцією D461:formula-override нижче ──
+    ,(N'permission.Document.OverrideFormula', N'en', N'Replace a formula result with a manual value', 1)
+    ,(N'audit.originLabel.FormulaOverride', N'en', N'Manual value instead of the formula', 1)
+    ,(N'audit.originLabel.FormulaRestored', N'en', N'Formula restored', 1)
+    ,(N'err.ECR-TMPL-0404.formulaById', N'en', N'There is no formula {formulaId} in template version {versionId}.', 1)
+    ,(N'err.ECR-CELL-0422.overrideReasonRequired', N'en', N'A manual value instead of the formula needs a reason of up to {max} characters (column "{columnCode}", row {rowKey}).', 1)
+    -- D461:formula-override ── кінець секції ──
+    -- D461:formula-override-ui ── en: клієнт «ручне значення замість формули» (D-461): сітка, редактор шаблону, журнал, імпорт, перенос; ru/kz — порцією D461:formula-override-ui нижче ──
+    ,(N'grid.formulaOverride.hint', N'en', N'Manual value · {reason} · {author}, {when}', 1)
+    ,(N'grid.formulaOverride.unknownAuthor', N'en', N'deleted user', 1)
+    ,(N'grid.formulaOverride.restoreOnly', N'en', N'This formula no longer allows manual values. You can only restore the formula (Delete).', 1)
+    ,(N'grid.formulaOverride.dialogTitle', N'en', N'Manual value instead of the formula', 1)
+    ,(N'grid.formulaOverride.dialogBody', N'en', N'The formula will stop calculating this cell; recalculation will not overwrite your value. To restore the formula, delete the value.', 1)
+    ,(N'grid.formulaOverride.dialogBodyMany', N'en', N'The formula will stop calculating {count} cells; one reason applies to all of them. To restore the formula, delete the value.', 1)
+    ,(N'grid.formulaOverride.reasonLabel', N'en', N'Reason', 1)
+    ,(N'grid.formulaOverride.reasonHint', N'en', N'Required, up to {max} characters. Shown in the cell tooltip and in the change log.', 1)
+    ,(N'grid.formulaOverride.reasonTooLong', N'en', N'The reason is longer than {max} characters.', 1)
+    ,(N'grid.formulaOverride.save', N'en', N'Save value', 1)
+    ,(N'grid.formulaOverride.restore', N'en', N'Restore formula', 1)
+    ,(N'grid.formulaOverride.restoreMany', N'en', N'Restore formula ({count})', 1)
+    ,(N'grid.formulaOverride.overridableHint', N'en', N'Calculated by a formula. You can replace it with a manual value (a reason is required).', 1)
+    ,(N'formulas.allowManualOverride', N'en', N'Allow manual value', 1)
+    ,(N'formulas.allowManualOverrideHint', N'en', N'Users with the permission can replace the formula result with their own value and a reason. Applies to all documents of this version at once, without a new version.', 1)
+    ,(N'formulas.manualOverrideColumn', N'en', N'Manual value', 1)
+    ,(N'formulas.cellTarget', N'en', N'Cell', 1)
+    ,(N'formulas.disableManualOverrideTitle', N'en', N'Forbid manual values for this formula?', 1)
+    ,(N'formulas.disableManualOverrideBody', N'en', N'Documents with manual values: {documents}; manual values: {cells}. They will stay and can be restored to the formula; new ones will be forbidden.', 1)
+    ,(N'formulas.disableManualOverrideVerb', N'en', N'Forbid new manual values', 1)
+    ,(N'audit.reasonExcelImport', N'en', N'Excel import', 1)
+    ,(N'audit.reasonVersionMigration', N'en', N'Template version migration', 1)
+    ,(N'import.replacesFormula', N'en', N'Replaces formula', 1)
+    ,(N'import.replacesFormulaHint', N'en', N'The value will be saved as a manual value instead of the formula (reason in the log: "Excel import"). Recalculation will not overwrite it.', 1)
+    ,(N'import.restoresFormula', N'en', N'Restores formula', 1)
+    ,(N'import.restoresFormulaHint', N'en', N'The cell is empty in the file: the manual value will be removed and the formula will calculate the cell again.', 1)
+    ,(N'documents.migrateKindOverrideLost', N'en', N'Manual value replaced by formula', 1)
+    ,(N'documents.migrateLostFormulaOverrides', N'en', N'Manual values instead of formulas that will not carry over (the target version does not allow them there; the formula will calculate these cells again): {count}.', 1)
+    ,(N'grid.formulaOverride.filterManual', N'en', N'Only rows with manual values', 1)
+    ,(N'grid.formulaOverride.manualCount', N'en', N'Manual: {count}', 1)
+    ,(N'grid.formulaOverride.previousManual', N'en', N'Previous manual value', 1)
+    ,(N'grid.formulaOverride.nextManual', N'en', N'Next manual value', 1)
+    -- D461:formula-override-ui ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -24836,6 +24884,98 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- TC:server ── кінець секції ──
+-- D461:formula-override ── ru/kz: право, позначки журналу й відмова «ручне значення замість формули» (D-461); власна порція ──
+-- ⚠ kz — робочий переклад, на звірку термінологу.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permission.Document.OverrideFormula', N'ru', N'Заменять результат формулы ручным значением'),
+    (N'permission.Document.OverrideFormula', N'kz', N'Формула нәтижесін қолмен енгізілген мәнмен ауыстыру'),
+    (N'audit.originLabel.FormulaOverride', N'ru', N'Ручное значение вместо формулы'),
+    (N'audit.originLabel.FormulaOverride', N'kz', N'Формуланың орнына қолмен енгізілген мән'),
+    (N'audit.originLabel.FormulaRestored', N'ru', N'Формула восстановлена'),
+    (N'audit.originLabel.FormulaRestored', N'kz', N'Формула қалпына келтірілді'),
+    (N'err.ECR-TMPL-0404.formulaById', N'ru', N'В версии шаблона {versionId} нет формулы {formulaId}.'),
+    (N'err.ECR-TMPL-0404.formulaById', N'kz', N'{versionId} үлгі нұсқасында {formulaId} формуласы жоқ.'),
+    (N'err.ECR-CELL-0422.overrideReasonRequired', N'ru', N'Для ручного значения вместо формулы нужна причина длиной до {max} символов (столбец «{columnCode}», строка {rowKey}).'),
+    (N'err.ECR-CELL-0422.overrideReasonRequired', N'kz', N'Формуланың орнына қолмен енгізілген мәнге {max} таңбаға дейінгі себеп қажет («{columnCode}» бағаны, {rowKey} жолы).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- D461:formula-override ── кінець секції ──
+-- D461:formula-override-ui ── ru/kz: клієнт «ручне значення замість формули» (D-461); власна порція ──
+-- ⚠ kz — робочий переклад, на звірку термінологу.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.formulaOverride.hint', N'ru', N'Ручное значение · {reason} · {author}, {when}'),
+    (N'grid.formulaOverride.hint', N'kz', N'Қолмен енгізілген мән · {reason} · {author}, {when}'),
+    (N'grid.formulaOverride.unknownAuthor', N'ru', N'удалённый пользователь'),
+    (N'grid.formulaOverride.unknownAuthor', N'kz', N'жойылған пайдаланушы'),
+    (N'grid.formulaOverride.restoreOnly', N'ru', N'Формула больше не допускает ручных значений. Можно только вернуть формулу (Delete).'),
+    (N'grid.formulaOverride.restoreOnly', N'kz', N'Формула енді қолмен енгізілген мәнге рұқсат бермейді. Тек формуланы қайтаруға болады (Delete).'),
+    (N'grid.formulaOverride.dialogTitle', N'ru', N'Ручное значение вместо формулы'),
+    (N'grid.formulaOverride.dialogTitle', N'kz', N'Формуланың орнына қолмен енгізілген мән'),
+    (N'grid.formulaOverride.dialogBody', N'ru', N'Формула перестанет считать эту ячейку, пересчёт не перезапишет ваше значение. Чтобы вернуть формулу, удалите значение.'),
+    (N'grid.formulaOverride.dialogBody', N'kz', N'Формула бұл ұяшықты есептеуді тоқтатады, қайта есептеу мәніңізді қайта жазбайды. Формуланы қайтару үшін мәнді өшіріңіз.'),
+    (N'grid.formulaOverride.dialogBodyMany', N'ru', N'Формула перестанет считать ячеек: {count}; одна причина — для всех. Чтобы вернуть формулу, удалите значение.'),
+    (N'grid.formulaOverride.dialogBodyMany', N'kz', N'Формула {count} ұяшықты есептеуді тоқтатады; себеп барлығына ортақ. Формуланы қайтару үшін мәнді өшіріңіз.'),
+    (N'grid.formulaOverride.reasonLabel', N'ru', N'Причина'),
+    (N'grid.formulaOverride.reasonLabel', N'kz', N'Себебі'),
+    (N'grid.formulaOverride.reasonHint', N'ru', N'Обязательно, до {max} символов. Видна в подсказке ячейки и в журнале изменений.'),
+    (N'grid.formulaOverride.reasonHint', N'kz', N'Міндетті, {max} таңбаға дейін. Ұяшық кеңесінде және өзгерістер журналында көрінеді.'),
+    (N'grid.formulaOverride.reasonTooLong', N'ru', N'Причина длиннее {max} символов.'),
+    (N'grid.formulaOverride.reasonTooLong', N'kz', N'Себеп {max} таңбадан ұзын.'),
+    (N'grid.formulaOverride.save', N'ru', N'Сохранить значение'),
+    (N'grid.formulaOverride.save', N'kz', N'Мәнді сақтау'),
+    (N'grid.formulaOverride.restore', N'ru', N'Вернуть формулу'),
+    (N'grid.formulaOverride.restore', N'kz', N'Формуланы қайтару'),
+    (N'grid.formulaOverride.restoreMany', N'ru', N'Вернуть формулу ({count})'),
+    (N'grid.formulaOverride.restoreMany', N'kz', N'Формуланы қайтару ({count})'),
+    (N'grid.formulaOverride.overridableHint', N'ru', N'Считается формулой. Можно заменить ручным значением (нужна причина).'),
+    (N'grid.formulaOverride.overridableHint', N'kz', N'Формуламен есептеледі. Қолмен енгізілген мәнмен ауыстыруға болады (себеп қажет).'),
+    (N'formulas.allowManualOverride', N'ru', N'Разрешить ручное значение'),
+    (N'formulas.allowManualOverride', N'kz', N'Қолмен енгізілген мәнге рұқсат беру'),
+    (N'formulas.allowManualOverrideHint', N'ru', N'Пользователи с правом могут заменить результат формулы своим значением с причиной. Действует сразу для всех документов версии, без новой версии.'),
+    (N'formulas.allowManualOverrideHint', N'kz', N'Құқығы бар пайдаланушылар формула нәтижесін себебімен өз мәнімен ауыстыра алады. Нұсқаның барлық құжаттарына бірден әсер етеді, жаңа нұсқасыз.'),
+    (N'formulas.manualOverrideColumn', N'ru', N'Ручное значение'),
+    (N'formulas.manualOverrideColumn', N'kz', N'Қолмен енгізілген мән'),
+    (N'formulas.cellTarget', N'ru', N'Ячейка'),
+    (N'formulas.cellTarget', N'kz', N'Ұяшық'),
+    (N'formulas.disableManualOverrideTitle', N'ru', N'Запретить ручные значения для этой формулы?'),
+    (N'formulas.disableManualOverrideTitle', N'kz', N'Бұл формула үшін қолмен енгізілген мәндерге тыйым салу керек пе?'),
+    (N'formulas.disableManualOverrideBody', N'ru', N'Документов с ручными значениями: {documents}; ручных значений: {cells}. Они останутся, их можно вернуть к формуле; новые будут запрещены.'),
+    (N'formulas.disableManualOverrideBody', N'kz', N'Қолмен енгізілген мәндері бар құжаттар: {documents}; қолмен енгізілген мәндер: {cells}. Олар сақталады, формулаға қайтаруға болады; жаңаларына тыйым салынады.'),
+    (N'formulas.disableManualOverrideVerb', N'ru', N'Запретить новые ручные значения'),
+    (N'formulas.disableManualOverrideVerb', N'kz', N'Жаңа қолмен енгізілген мәндерге тыйым салу'),
+    (N'audit.reasonExcelImport', N'ru', N'Импорт из Excel'),
+    (N'audit.reasonExcelImport', N'kz', N'Excel-ден импорт'),
+    (N'audit.reasonVersionMigration', N'ru', N'Перенос на версию шаблона'),
+    (N'audit.reasonVersionMigration', N'kz', N'Үлгі нұсқасына көшіру'),
+    (N'import.replacesFormula', N'ru', N'Заменит формулу'),
+    (N'import.replacesFormula', N'kz', N'Формуланы ауыстырады'),
+    (N'import.replacesFormulaHint', N'ru', N'Значение будет сохранено как ручное вместо формулы (причина в журнале: «Импорт из Excel»). Пересчёт его не перезапишет.'),
+    (N'import.replacesFormulaHint', N'kz', N'Мән формуланың орнына қолмен енгізілген мән ретінде сақталады (журналдағы себебі: «Excel-ден импорт»). Қайта есептеу оны қайта жазбайды.'),
+    (N'import.restoresFormula', N'ru', N'Вернёт формулу'),
+    (N'import.restoresFormula', N'kz', N'Формуланы қайтарады'),
+    (N'import.restoresFormulaHint', N'ru', N'В файле ячейка пуста: ручное значение будет удалено, и ячейку снова рассчитает формула.'),
+    (N'import.restoresFormulaHint', N'kz', N'Файлда ұяшық бос: қолмен енгізілген мән өшіріледі, ұяшықты қайтадан формула есептейді.'),
+    (N'documents.migrateKindOverrideLost', N'ru', N'Ручное значение заменит формула'),
+    (N'documents.migrateKindOverrideLost', N'kz', N'Қолмен енгізілген мәнді формула ауыстырады'),
+    (N'documents.migrateLostFormulaOverrides', N'ru', N'Ручные значения вместо формул, которые не перенесутся (целевая версия их там не допускает; эти ячейки снова рассчитает формула): {count}.'),
+    (N'documents.migrateLostFormulaOverrides', N'kz', N'Көшірілмейтін формулалардың орнындағы қолмен енгізілген мәндер (мақсатты нұсқа оларға рұқсат бермейді; бұл ұяшықтарды қайтадан формула есептейді): {count}.'),
+    (N'grid.formulaOverride.filterManual', N'ru', N'Только строки с ручными значениями'),
+    (N'grid.formulaOverride.filterManual', N'kz', N'Тек қолмен енгізілген мәндері бар жолдар'),
+    (N'grid.formulaOverride.manualCount', N'ru', N'Ручных: {count}'),
+    (N'grid.formulaOverride.manualCount', N'kz', N'Қолмен: {count}'),
+    (N'grid.formulaOverride.previousManual', N'ru', N'Предыдущее ручное значение'),
+    (N'grid.formulaOverride.previousManual', N'kz', N'Алдыңғы қолмен енгізілген мән'),
+    (N'grid.formulaOverride.nextManual', N'ru', N'Следующее ручное значение'),
+    (N'grid.formulaOverride.nextManual', N'kz', N'Келесі қолмен енгізілген мән')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- D461:formula-override-ui ── кінець секції ──
 -- COLL:ui-tablechat ── ru/kz: чат таблиці документа, клієнт; власна порція ──
 -- ⚠ kz — робочий переклад, на звірку термінологу.
 INSERT INTO #I18N ([Key], Lang, Val)

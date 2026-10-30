@@ -641,7 +641,11 @@ public sealed class ExcelImporter(
                             .Select(g => new PatchRow(
                                 g.Key,
                                 BaseRowVersion(diff.RowVersions, g.Key),
-                                [.. g.Select(c => new PatchCell(c.ColumnCode, c.NewValue))]))]))
+                                [.. g.Select(c => new PatchCell(
+                                    c.ColumnCode,
+                                    c.NewValue,
+                                    // ✎ D-461: ручне значення замість формули з книги — фіксована причина імпорту.
+                                    OverrideReason: c.ReplacesFormula ? PatchCellsHandler.ExcelImportOverrideReason : null))]))]))
                     .ToList();
 
                 IReadOnlyList<PatchCellsResponse> responses;

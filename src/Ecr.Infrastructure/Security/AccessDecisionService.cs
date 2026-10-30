@@ -1653,6 +1653,10 @@ public sealed class AccessDecisionService(
             RowIsReadOnly = def?.IsReadOnly ?? false,
             // WW-02: комірку рахує комірочна формула — ознака рівня КОМІРКИ, не колонки й не рядка.
             CellIsComputed = !ignoreColumnFlags && slice.ComputedCells.Contains((rowKey, column.Id)),
+
+            // ✎ D-461: формула комірки дозволяє ручне значення, або комірка вже ручна (її можна повернути до формули й
+            // після вимкнення прапорця). Право `Document.OverrideFormula` перевіряє `EditRules.CanEdit`.
+            FormulaOverridable = !ignoreColumnFlags && slice.Overrides.Overridable(rowKey, column),
         };
 
         // ⛔ EA-B: «передача місяця». Факти правила — на КОЖНУ комірку (місяць
@@ -1822,6 +1826,9 @@ public sealed class AccessDecisionService(
         /// іншим власником перевіряється за періодом ВЛАСНИКА, а не періодом екземпляра запиту.
         /// </summary>
         public bool RoutesOwnership { get; init; }
+
+        /// <summary>✎ D-461: які комірки зрізу можна замінити ручним значенням (за формулою чи наявною позначкою).</summary>
+        public FormulaOverrideFacts Overrides { get; init; } = FormulaOverrideFacts.None;
     }
 
     private static readonly IReadOnlySet<(string RowKey, int ColumnDefId)> NoComputedCells =
@@ -1999,6 +2006,12 @@ public sealed class AccessDecisionService(
             MonthEnvironment? monthEnvironment = null;
             var monthStatesBySheet = new Dictionary<int, IReadOnlyDictionary<byte, MonthState>>();
 
+            // ✎ D-461: що з комірок групи можна замінити ручним значенням — ОДИН запит позначок на групу, і лише для
+            // таблиць, де взагалі є формули колонки/комірки (більшість таблиць не платить нічого).
+            var overrideFacts = await FormulaOverrideFacts
+                .LoadAsync(db, snapshot, [.. group.Select(i => (i.Id, i.TableDefId))], periodKey, ct)
+                .ConfigureAwait(false);
+
             foreach (var instance in group)
             {
                 var sheetDefId = sheetOf[instance.Id];
@@ -2138,6 +2151,7 @@ public sealed class AccessDecisionService(
                     Delegation = delegation,
                     DocumentHasAssignments = documentHasAssignments,
                     ComputedCells = ComputedCellsOf(snapshot, instance.TableDefId),
+                    Overrides = overrideFacts.GetValueOrDefault(instance.Id) ?? FormulaOverrideFacts.None,
                     MonthShared = monthShared,
                     Annual = annual,
                     RoutesOwnership = annualRouting,

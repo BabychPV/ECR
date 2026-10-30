@@ -44,6 +44,9 @@ export function applyPatchToSlice(
   slice: TableSliceDto,
   request: PatchCellsRequest,
   response: PatchCellsResponse,
+  // ✎ D-461: хто поставив ручне значення (ім'я з `/me`) і коли — для підказки до перечитування зрізу.
+  author: string | null = null,
+  now: Date = new Date(),
 ): TableSliceDto {
   // ⚠ Чужий зріз не чіпаємо: батч адресується екземпляру таблиці, і
   // застосувати його до сусіднього означало б показати числа не в тій
@@ -73,7 +76,45 @@ export function applyPatchToSlice(
     } satisfies RowDto;
   });
 
-  return changed ? { ...slice, rows } : slice;
+  if (!changed) return slice;
+
+  const info = slice.formulaOverride;
+  if (info === null || info === undefined) return { ...slice, rows };
+
+  return { ...slice, rows, formulaOverride: withManualCells(info, request, author, now) };
+}
+
+/**
+ * ✎ D-461: позначки ручних значень після батчу — те саме, що записав сервер: значення з причиною — ручне,
+ * видалення в ручній комірці — формулу повернуто (позначка знімається; число принесе перерахунок).
+ */
+function withManualCells(
+  info: NonNullable<TableSliceDto['formulaOverride']>,
+  request: PatchCellsRequest,
+  author: string | null,
+  now: Date,
+): NonNullable<TableSliceDto['formulaOverride']> {
+  let manual: typeof info.manualCells | null = null;
+
+  for (const row of request.rows) {
+    for (const cell of row.cells) {
+      const key = `${row.rowKey}:${cell.columnCode}`;
+      const reason = cell.overrideReason;
+
+      if (typeof reason === 'string' && !cell.isEmpty && cell.value !== null && cell.value !== undefined) {
+        manual ??= { ...info.manualCells };
+        manual[key] = { reason, setBy: author, setAt: now.toISOString() };
+        continue;
+      }
+
+      if ((cell.isEmpty || cell.value === null || cell.value === undefined) && key in (manual ?? info.manualCells)) {
+        manual ??= { ...info.manualCells };
+        delete manual[key];
+      }
+    }
+  }
+
+  return manual === null ? info : { ...info, manualCells: manual };
 }
 
 /**

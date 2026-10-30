@@ -48,6 +48,10 @@ namespace Ecr.Application.Ports;
 /// <c>Origin = ApproverEdit</c>, і перезапис видно лише з цього прапорця.
 /// </param>
 /// <param name="Id">Ідентифікатор рядка журналу (другий складник курсора); у відповідь API не потрапляє.</param>
+/// <param name="Reason">
+/// ✎ D-461: причина ручного значення замість формули (<c>aud.CellChange.Reason</c>, <c>Origin = FormulaOverride</c>);
+/// <c>null</c> — інші походження.
+/// </param>
 public sealed record CellChangeView(
     DateTime ChangedAt,
     int PeriodKey,
@@ -73,7 +77,8 @@ public sealed record CellChangeView(
     Ecr.Domain.ValueObjects.LocalizedText? RowLabelL10n = null,
     bool FromArchive = false,
     bool IsOverwrite = false,
-    [property: System.Text.Json.Serialization.JsonIgnore] long Id = 0);
+    [property: System.Text.Json.Serialization.JsonIgnore] long Id = 0,
+    string? Reason = null);
 
 /// <summary>Підсумок журналу змін комірок за вікном (UI-38, C2) — лише те, що читач бачить.</summary>
 /// <param name="Total">Усього змін у вікні й за фільтром.</param>

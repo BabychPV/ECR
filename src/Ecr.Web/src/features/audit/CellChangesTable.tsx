@@ -6,6 +6,7 @@ import { DefaultAuditSort, type AuditSort } from '@/features/audit/api';
 import { SortableTh } from '@/features/audit/SortableTh';
 import { decimalDelta } from '@/features/audit/changeDelta';
 import { NumericTypes, auditValueText } from '@/features/audit/auditValue';
+import { cellChangeReasonText } from '@/features/audit/cellChangeReason';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { TwoLine } from '@/shared/ui/TwoLine';
 import { t } from '@/shared/i18n';
@@ -79,6 +80,10 @@ const OriginIcons: Readonly<Record<string, string>> = {
   Recalculation: 'M18 7V5H6l7 7-7 7h12v-2',
   Migration:
     'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
+  // ✎ D-461: ручне значення замість формули — олівець правки людини (причина стоїть поруч словами);
+  // повернення формули — знак перерахунку. Назва з каталогу каже решту.
+  FormulaOverride: 'M4 20l4-1L19 8l-3-3L5 16z',
+  FormulaRestored: 'M18 7V5H6l7 7-7 7h12v-2',
 };
 
 /** Назва походження мовою інтерфейсу; невідоме серверу значення показується як є (журнал — доказ). */
@@ -170,23 +175,49 @@ export function showsOverwriteMark(change: Pick<CellChange, 'isOverwrite' | 'ori
   return change.isOverwrite && change.origin !== 'ImportOverwrite';
 }
 
+/**
+ * ✎ D-461: причина зміни (`reason`) — під походженням, коли вона є. Довга причина людини (до 1000 символів)
+ * обрізається двома рядками; повний текст — у підказці. Слово «Причина» — прихованим текстом для читалки.
+ */
+function Reason({ reason }: { readonly reason: string | null | undefined }): ReactNode {
+  const text = cellChangeReasonText(reason);
+  if (text === null) return null;
+
+  return (
+    <Text
+      fz="xs"
+      c="var(--ecr-muted)"
+      lineClamp={2}
+      title={`${t('audit.reason')}: ${text}`}
+      style={{ overflowWrap: 'anywhere' }}
+      data-audit-reason=""
+    >
+      <VisuallyHidden>{`${t('audit.reason')}: `}</VisuallyHidden>
+      {text}
+    </Text>
+  );
+}
+
 function OriginCell({ change }: { readonly change: CellChange }): JSX.Element {
   return (
-    <Group gap="xs" wrap="nowrap">
-      <Origin origin={change.origin} />
-      {showsOverwriteMark(change) && (
-        <Badge
-          size="xs"
-          variant="outline"
-          color="statusWarning"
-          leftSection={<Glyph d={OverwritePath} size={10} />}
-          title={t('audit.overwriteHint')}
-          data-audit-overwrite=""
-        >
-          {t('audit.overwriteMark')}
-        </Badge>
-      )}
-    </Group>
+    <>
+      <Group gap="xs" wrap="nowrap">
+        <Origin origin={change.origin} />
+        {showsOverwriteMark(change) && (
+          <Badge
+            size="xs"
+            variant="outline"
+            color="statusWarning"
+            leftSection={<Glyph d={OverwritePath} size={10} />}
+            title={t('audit.overwriteHint')}
+            data-audit-overwrite=""
+          >
+            {t('audit.overwriteMark')}
+          </Badge>
+        )}
+      </Group>
+      <Reason reason={change.reason} />
+    </>
   );
 }
 

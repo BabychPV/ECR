@@ -13,7 +13,18 @@ export interface CellEdit {
   columnCode: string;
   before: unknown;
   after: unknown;
+  /**
+   * ✎ D-461: стан «ручне значення замість формули» ДО і ПІСЛЯ кроку — лише для комірок формул, які людина може
+   * замінювати: `{ reason }` — ручне значення з цією причиною, `null` — комірку рахує формула. Відсутнє — звичайна
+   * комірка. Undo/Redo відтворюють САМЕ стан: повернення до `null` — це повернення формули (значення `null`), а не
+   * запис колишнього обчисленого числа як ручного; повернення до `{ reason }` — ручне значення з тією самою причиною.
+   */
+  manualBefore?: ManualState;
+  manualAfter?: ManualState;
 }
+
+/** ✎ D-461: ручне значення з причиною або `null` — комірку рахує формула. */
+export type ManualState = { readonly reason: string } | null;
 
 /**
  * Крок історії.
@@ -109,7 +120,7 @@ export class UndoStack {
     // одному кроці інакше відкотилися б до проміжного значення.
     return [...step.edits]
       .reverse()
-      .map((edit) => ({ ...edit, before: edit.after, after: edit.before }));
+      .map((edit) => swapped(edit));
   }
 
   /** Повторює скасований крок. */
@@ -121,4 +132,17 @@ export class UndoStack {
 
     return step.edits;
   }
+}
+
+/** Зворотний крок: значення й стан ручного значення (D-461) міняються місцями. */
+function swapped(edit: CellEdit): CellEdit {
+  const { manualBefore, manualAfter, ...rest } = edit;
+
+  return {
+    ...rest,
+    before: edit.after,
+    after: edit.before,
+    ...(manualAfter === undefined ? {} : { manualBefore: manualAfter }),
+    ...(manualBefore === undefined ? {} : { manualAfter: manualBefore }),
+  };
 }

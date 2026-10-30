@@ -1,5 +1,6 @@
 import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { t } from '@/shared/i18n';
+import { overridesFormula } from './formulaOverride';
 
 /**
  * Права по комірках приходять **із сервера** і показуються, а не вгадуються.
@@ -151,7 +152,9 @@ export function decide(slice: TableSliceDto, rowKey: string, column: ColumnDto):
   }
 
   if (column.dataType === 'Formula' || column.dataType === 'Calculated') {
-    return deny('CalculatedCell');
+    // ✎ D-461: сервер зняв `CalculatedCell` (право `Document.OverrideFormula` + формула дозволяє або комірка вже
+    // ручна) — запису в словнику немає, і локальна евристика не має повертати відмову назад.
+    return overridesFormula(slice, rowKey, column.code) ? Editable : deny('CalculatedCell');
   }
 
   if (column.isReadOnly) return deny('ColumnReadOnly');

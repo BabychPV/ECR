@@ -81,6 +81,10 @@ public static class PermissionScopes
         // звужена аркушем, пише/модерує саме в доступних їй таблицях.
         "Document.Discuss",
         "Document.DiscussModerate",
+
+        // ✎ D-461: ручне значення замість формули — рішення про КОМІРКУ, що далі проходить межі аркуша й періоду та
+        // грант Write (`EditRules.CanEdit`); роль, звужена аркушем, замінює формули лише там, де їй дозволено писати.
+        "Document.OverrideFormula",
     };
 
     /// <summary>Чи дає право роль, звужена аркушами чи періодами.</summary>

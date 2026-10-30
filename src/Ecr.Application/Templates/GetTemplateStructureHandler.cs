@@ -130,7 +130,20 @@ public sealed class GetTemplateStructureHandler(
                     .OrderBy(g => g.Ordinal).ThenBy(g => g.Id)
                     .Select(g => new TemplateHeaderGroupDto(g.Id, g.Code, g.ParentGroupId, g.Ordinal, g.HeaderL10n)),
             ],
+            CellFormulas = [.. CellFormulasOf(table)],
         };
+    }
+
+    /// <summary>✎ D-461: формули окремих комірок (Id і прапорець ручного значення) — зі знімка, без запитів.</summary>
+    private static IEnumerable<TemplateCellFormulaDto> CellFormulasOf(TableDef table)
+    {
+        var keys = table.Rows.ToDictionary(r => r.Id, r => r.RowKeyValue);
+        return table.Formulas
+            .Where(f => !f.IsDeleted && f.Scope == FormulaScope.Cell && f.ColumnDefId is not null
+                        && f.RowDefId is { } rowId && keys.ContainsKey(rowId))
+            .OrderBy(f => f.Id)
+            .Select(f => new TemplateCellFormulaDto(
+                f.Id, keys[f.RowDefId!.Value], f.ColumnDefId!.Value, f.Expression, f.Dialect, f.AllowManualOverride));
     }
 
     /// <summary>Рядки таблиці з розгорнутою ієрархією за ключами.</summary>
@@ -164,7 +177,11 @@ public sealed class GetTemplateStructureHandler(
             formula?.Expression,
             formula?.Dialect,
             column.WidthPx,
-            column.HeaderGroupId);
+            column.HeaderGroupId)
+        {
+            FormulaId = formula?.Id,
+            AllowManualOverride = formula?.AllowManualOverride == true,
+        };
     }
 
     private static TemplateRowDto Row(
@@ -184,6 +201,10 @@ public sealed class GetTemplateStructureHandler(
             row.ParentRowDefId is { } parent && keysById.TryGetValue(parent, out var key) ? key : null,
             row.IsReadOnly,
             formula?.Expression,
-            formula?.Dialect);
+            formula?.Dialect)
+        {
+            FormulaId = formula?.Id,
+            AllowManualOverride = formula?.AllowManualOverride == true,
+        };
     }
 }

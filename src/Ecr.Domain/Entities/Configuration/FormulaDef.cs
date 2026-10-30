@@ -39,6 +39,30 @@ public sealed class FormulaDef : Entity<int>
 
     public bool IsDeleted { get; private set; }
 
+    /// <summary>
+    /// ✎ D-461: «Дозволити ручне значення» — у документі комірку цієї формули можна замінити ручним значенням
+    /// (з причиною й окремим правом <c>Document.OverrideFormula</c>), а видаленням — повернути формулу.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Налаштування, а не структура: змінюється й в ОПУБЛІКОВАНІЙ версії без нової версії
+    /// (<c>TR_FormulaDef_Immutable</c> пропускає UPDATE, що міняє лише цей стовпець). Вимкнення не стирає наявних
+    /// ручних значень — нові лише заборонені.
+    /// </remarks>
+    public bool AllowManualOverride { get; private set; }
+
+    /// <summary>✎ D-461: вмикає чи вимикає ручне значення замість формули.</summary>
+    /// <returns><c>true</c>, якщо значення справді змінилося.</returns>
+    public bool SetAllowManualOverride(bool allow)
+    {
+        if (AllowManualOverride == allow)
+        {
+            return false;
+        }
+
+        AllowManualOverride = allow;
+        return true;
+    }
+
     /// <summary>Фіксує обчислений порядок. Викликається лише під час <c>Publish</c>.</summary>
     public void SetEvaluationOrder(int order) => EvaluationOrder = order;
 

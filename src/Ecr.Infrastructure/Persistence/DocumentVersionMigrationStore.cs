@@ -1533,6 +1533,31 @@ public sealed partial class DocumentVersionMigrationStore(
         OPTION (MAXDOP 1, RECOMPILE);
         SET @c += @@ROWCOUNT;
 
+        -- 1в. ✎ D-461: позначки «ручне значення замість формули» (doc.CellFormulaOverride) їдуть за колонкою, як
+        -- значення; без місця в новій версії — знімаються. Те, чого цільова формула не дозволяє, знімає T2
+        -- (`FormulaOverrideMigration`), бо дозвіл — властивість формули, а не колонки.
+        UPDATE fo
+        SET    fo.ColumnDefId = m.n
+        FROM   doc.CellFormulaOverride fo
+        JOIN   doc.TableRow r      ON r.PeriodKey = fo.PeriodKey AND r.Id = fo.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        JOIN   @columnMap m    ON m.o = fo.ColumnDefId
+        WHERE  fo.PeriodKey = @p AND fo.TableRowId BETWEEN @lo AND @hi
+          AND  r.PeriodKey = @p AND r.Id BETWEEN @lo AND @hi
+          AND  m.o <> m.n
+        OPTION (MAXDOP 1, RECOMPILE);
+        SET @c += @@ROWCOUNT;
+
+        DELETE fo
+        FROM   doc.CellFormulaOverride fo
+        JOIN   doc.TableRow r      ON r.PeriodKey = fo.PeriodKey AND r.Id = fo.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        WHERE  fo.PeriodKey = @p AND fo.TableRowId BETWEEN @lo AND @hi
+          AND  r.PeriodKey = @p AND r.Id BETWEEN @lo AND @hi
+          AND  NOT EXISTS (SELECT 1 FROM @columnMap m WHERE m.n = fo.ColumnDefId)
+        OPTION (MAXDOP 1, RECOMPILE);
+        SET @c += @@ROWCOUNT;
+
         -- 2. Рядки: описи рядків — за ключем; рядки без місця в новій версії знімаються.
         UPDATE r
         SET    r.RowDefId = m.n
@@ -1573,6 +1598,17 @@ public sealed partial class DocumentVersionMigrationStore(
         JOIN   doc.TableRow r      ON r.PeriodKey = cs.PeriodKey AND r.Id = cs.TableRowId
         JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
         WHERE  cs.PeriodKey = @p AND cs.TableRowId BETWEEN @lo AND @hi
+          AND  r.PeriodKey = @p AND r.Id BETWEEN @lo AND @hi
+          AND  NOT EXISTS (SELECT 1 FROM @tableMap t WHERE t.o = i.TableDefId)
+        OPTION (MAXDOP 1, RECOMPILE);
+        SET @c += @@ROWCOUNT;
+
+        -- ✎ D-461: позначки ручних значень таблиць, яких немає в новій версії, — до видалення їхніх рядків.
+        DELETE fo
+        FROM   doc.CellFormulaOverride fo
+        JOIN   doc.TableRow r      ON r.PeriodKey = fo.PeriodKey AND r.Id = fo.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        WHERE  fo.PeriodKey = @p AND fo.TableRowId BETWEEN @lo AND @hi
           AND  r.PeriodKey = @p AND r.Id BETWEEN @lo AND @hi
           AND  NOT EXISTS (SELECT 1 FROM @tableMap t WHERE t.o = i.TableDefId)
         OPTION (MAXDOP 1, RECOMPILE);

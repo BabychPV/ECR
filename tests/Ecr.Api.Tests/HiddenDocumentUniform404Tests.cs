@@ -90,8 +90,11 @@ public sealed class HiddenDocumentUniform404Tests(SqlServerFixture sql)
             parts.Add(root.TryGetProperty(name, out var value) ? $"{name}={value}" : $"{name}=<немає>");
         }
 
-        return string.Join("|", parts).Replace(
-            routeDocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture), "<doc>", StringComparison.Ordinal);
+        // ⚠ Заміна лише ЦІЛОГО числа (межі цифр): id 4 не має перетворювати статус «404» на «<doc>0<doc>».
+        return System.Text.RegularExpressions.Regex.Replace(
+            string.Join("|", parts),
+            $@"(?<!\d){routeDocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture)}(?!\d)",
+            "<doc>");
     }
 
     private static async Task<(HttpStatusCode, string)> PatchAsync(

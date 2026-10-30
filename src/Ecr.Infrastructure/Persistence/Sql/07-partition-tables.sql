@@ -61,6 +61,9 @@ INSERT @map (SchemaName, TableName, SchemeName, PartColumn, CompressPk) VALUES
     -- CELL-STYLE L3b: користувацька заливка/колір тексту/жирність комірок — розріджена, належить періоду так само,
     -- як комірка, яку оформлює; зовнішніх ключів на doc.TableRow немає (TRUNCATE ... PARTITIONS архівації).
     (N'doc',  N'CellStyle',         N'ps_ByPeriodKey', N'PeriodKey', 0),
+    -- ✎ D-461: позначки «ручне значення замість формули» — розріджені, належать періоду так само, як комірка;
+    -- зовнішніх ключів на doc.TableRow немає (TRUNCATE ... PARTITIONS архівації).
+    (N'doc',  N'CellFormulaOverride', N'ps_ByPeriodKey', N'PeriodKey', 0),
     -- Аудит партиціонується ОКРЕМО, по ChangedAt: місяць зміни і звітний
     -- період — різні осі (зміна за січень може статися в березні).
     (N'aud',  N'CellChange',        N'ps_AuditByMonth', N'ChangedAt', 1),
@@ -293,7 +296,7 @@ IF EXISTS
       AND t.name IN (N'TableInstance', N'TableRow', N'CellValue',
                      N'CalculationResult', N'CalculationInput', N'CalculationStep',
                      N'CellChange', N'StructureChange', N'SecurityEvent', N'PublicationEvent',
-                     N'RowWindowValue', N'CellStyle')
+                     N'RowWindowValue', N'CellStyle', N'CellFormulaOverride')
       AND ds.type_desc <> N'PARTITION_SCHEME'   -- type_desc, а не type: у type код 'PS'
 )
     THROW 50031, N'Частина індексів партиційованих таблиць лишилася поза схемою партиціонування.', 1;

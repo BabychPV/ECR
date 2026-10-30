@@ -77,7 +77,48 @@ public sealed record TableSliceDto(
 
     /// <summary>Максимальна глибина дерева груп (3).</summary>
     public int MaxHeaderGroupDepth { get; init; } = ColumnHeaderGroupDef.MaxDepth;
+
+    /// <summary>
+    /// ✎ D-461: «ручне значення замість формули» в цій таблиці; <c>null</c> — у таблиці немає формул колонки/комірки
+    /// (більшість таблиць, нуль байтів у відповіді).
+    /// </summary>
+    public FormulaOverrideSliceDto? FormulaOverride { get; init; }
 }
+
+/// <summary>
+/// ✎ D-461: що клієнту треба знати, щоб замінити формулу ручним значенням (з причиною) і повернути формулу.
+/// </summary>
+/// <param name="CanOverride">
+/// У користувача є право <c>Document.OverrideFormula</c> у проєкті документа. Без нього комірки формул лишаються
+/// <c>CalculatedCell</c> у <see cref="TableSliceDto.CellPermissions"/>.
+/// </param>
+/// <param name="OverridableColumns">
+/// Коди обчислюваних колонок, формула яких ЗАРАЗ дозволяє ручне значення (прапорець увімкнено).
+/// </param>
+/// <param name="OverridableCells">
+/// Комірки комірочних формул (<c>"{rowKey}:{columnCode}"</c>), що ЗАРАЗ дозволяють ручне значення.
+/// </param>
+/// <param name="ManualCells">
+/// Комірки, де зараз стоїть ручне значення замість формули: ключ <c>"{rowKey}:{columnCode}"</c>. Видно й після
+/// вимкнення прапорця (значення лишається, його можна лише повернути до формули — видаленням).
+/// </param>
+/// <remarks>
+/// ⚠ Чи можна писати саме зараз (період, стан аркуша, гранти) — як і для будь-якої комірки: комірка, якої немає в
+/// <see cref="TableSliceDto.CellPermissions"/>, редаговна. Запис у комірку формули вимагає <c>overrideReason</c>
+/// (<c>PATCH …/cells</c>); видалення значення (<c>value: null</c>) повертає формулу. Колонки/комірки, яких читач не
+/// бачить, сюди не потрапляють.
+/// </remarks>
+public sealed record FormulaOverrideSliceDto(
+    bool CanOverride,
+    IReadOnlyList<string> OverridableColumns,
+    IReadOnlyList<string> OverridableCells,
+    IReadOnlyDictionary<string, FormulaManualCellDto> ManualCells);
+
+/// <summary>✎ D-461: ручне значення в комірці формули — для підказки «хто, коли, чому».</summary>
+/// <param name="Reason">Причина.</param>
+/// <param name="SetBy">Ім'я автора; <c>null</c> — користувача вже немає.</param>
+/// <param name="SetAt">Коли (UTC).</param>
+public sealed record FormulaManualCellDto(string Reason, string? SetBy, DateTime SetAt);
 
 /// <summary>Група заголовків у зрізі: підпис уже обрано за мовою запиту (fallback — як у заголовка колонки).</summary>
 /// <param name="Id">Ідентифікатор групи.</param>

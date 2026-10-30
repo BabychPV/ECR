@@ -1,5 +1,5 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { Alert, Badge, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
+import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { ActionIcon, Alert, Badge, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -55,6 +55,51 @@ import {
   denyText,
 } from './permissions';
 import { markConfirmed } from './confirmedEdits';
+import {
+  annotateOverrideHistory,
+  historyWriteOf,
+  manualCellHint,
+  manualCellOf,
+  overrideIntentOf,
+  manualIndexOf,
+  restorableCellsIn,
+  splitOverrideEdits,
+} from './formulaOverride';
+import { markOverrideReason, overrideReasonOf, previousOverrideReasonOf } from './overrideReasons';
+
+/**
+ * ✎ D-461: крок історії зі станом «ручне значення / формула» до й після (`annotateOverrideHistory`) — Undo/Redo
+ * відтворюють саме стан комірки формули, а не лише число.
+ */
+function withOverrideHistory<S extends { edits: CellEdit[] }>(
+  slice: TableSliceDto,
+  tableInstanceId: number,
+  periodKey: number,
+  step: S,
+  revert = false,
+): S {
+  if (slice.formulaOverride?.canOverride !== true) return step;
+
+  const pending = pendingSlice(tableInstanceId, periodKey);
+
+  return {
+    ...step,
+    edits: annotateOverrideHistory(
+      slice,
+      step.edits,
+      {
+        held: (cell) => pending.get(pendingCellKey(cell)),
+        reason: (cell) => overrideReasonOf(tableInstanceId, periodKey, cell),
+        previousReason: (cell) => previousOverrideReasonOf(tableInstanceId, periodKey, cell),
+      },
+      revert,
+    ),
+  };
+}
+
+// ✎ D-461: діалог причини ручного значення — лінивим модулем (`D-132`): потрібен лише тоді, коли людина справді
+// замінює формулу.
+const FormulaOverrideReasonDialog = lazy(() => import('./FormulaOverrideReasonDialog'));
 import { markSliceHidden, takeMissedInvalidation } from './sliceCache';
 import { UndoStack, type CellEdit } from './undo';
 import {
@@ -406,6 +451,22 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       apiFetch<TableSliceDto>(`/api/v1/documents/${documentId}/tables/${tableInstanceId}`),
   });
 
+  // ✎ D-461: «Лише рядки з ручними значеннями». Індекс ручних комірок — раз на зріз (не на кожен рендер і не на
+  // комірку); фільтр — ПОГЛЯД на зріз (`view`), а не другий кеш: усе, що адресує рядки індексом (виділення,
+  // вставка, колір, «Повернути формулу», перехід), працює з тими самими рядками, що їх показує сітка. Запис —
+  // за `rowKey`, тож прихованих рядків він не зачіпає. Без ручних комірок фільтр не діє.
+  const [manualOnly, setManualOnly] = useState(false);
+  const fullSlice = slice.data;
+  const manualIndex = useMemo(() => manualIndexOf(fullSlice), [fullSlice]);
+  const filteringManual = manualOnly && manualIndex.rowKeys.size > 0;
+  const view = useMemo(
+    () =>
+      fullSlice === undefined || !filteringManual
+        ? fullSlice
+        : { ...fullSlice, rows: fullSlice.rows.filter((row) => manualIndex.rowKeys.has(row.rowKey)) },
+    [fullSlice, filteringManual, manualIndex],
+  );
+
   // AN-142: поданий аркуш із редаговною (за рішенням сервера) коміркою - текстом якоря - не замикається цілком.
   const readOnly = useMemo(
     () => gridReadOnlyFor(pageReadOnly, sheetState, slice.data),
@@ -420,41 +481,41 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const [styleScope, setStyleScope] = useState<StyleScope>('selection');
   // ⛔ Не матеріалізуємо «всю таблицю» (~180 тис. комірок) на кожну зміну виділення: для області потрібно лише
   // знати, чи є бодай одна дозволена комірка (early-exit); масив будується лише для «Виділення» й для оптимістики ≤ 5000.
-  const styleOffset = slice.data === undefined || !hasRowLabels(slice.data) ? 0 : 1;
+  const styleOffset = view === undefined || !hasRowLabels(view) ? 0 : 1;
   const styleRange = useMemo(
-    () => (slice.data === undefined ? null : scopeRange(slice.data, styleSelection, styleOffset, styleScope)),
-    [slice.data, styleSelection, styleOffset, styleScope],
+    () => (view === undefined ? null : scopeRange(view, styleSelection, styleOffset, styleScope)),
+    [view, styleSelection, styleOffset, styleScope],
   );
   const canColour = useMemo(
     () =>
-      slice.data !== undefined && !readOnly && colourableCells(slice.data, styleRange, styleOffset, 1).length > 0,
-    [slice.data, styleRange, styleOffset, readOnly],
+      view !== undefined && !readOnly && colourableCells(view, styleRange, styleOffset, 1).length > 0,
+    [view, styleRange, styleOffset, readOnly],
   );
   // Сервер вирішив, що фарбувати не можна нічого: причина — його (`styleAccess.deniedReason`, текст `deny.{reason}`).
-  const styleAccess = slice.data?.styleAccess;
+  const styleAccess = view?.styleAccess;
   const styleDenied =
     styleAccess !== null && styleAccess !== undefined && !styleAccess.canStyle && styleAccess.deniedReason !== null
       ? { reason: styleAccess.deniedReason, hint: denyText(styleAccess.deniedReason) }
       : null;
   const applyColour = useCallback(
     (target: ColourTarget, hex: string | null) => {
-      if (slice.data === undefined || !canColour) return;
+      if (view === undefined || !canColour) return;
 
       // Сервер: `""` — зняти, `null` — не чіпати. «Без заливки»/«Автоматичний» = `""`.
       const value = hex ?? '';
       const style = target === 'fill' ? { backgroundHex: value } : { foregroundHex: value };
-      const area = areaOf(slice.data, styleSelection, styleOffset, styleScope);
+      const area = areaOf(view, styleSelection, styleOffset, styleScope);
       // Оптимістика — лише для малих областей; велика чекає відповіді сервера й перечитання зрізу.
-      const cells = colourableCells(slice.data, styleRange, styleOffset, area === null ? Number.POSITIVE_INFINITY : OptimisticMaxCells + 1);
+      const cells = colourableCells(view, styleRange, styleOffset, area === null ? Number.POSITIVE_INFINITY : OptimisticMaxCells + 1);
 
       cellStyles.mutate({
         cells: area !== null && cells.length > OptimisticMaxCells ? [] : cells.map((cell) => ({ ...cell, ...style })),
         // Рядок/колонка/таблиця — один PATCH зі `scope` (сервер розгортає й дає часткову відмову).
-        areas: area === null ? null : areaChunks(slice.data, area),
+        areas: area === null ? null : areaChunks(view, area),
         style,
       });
     },
-    [canColour, cellStyles, slice.data, styleSelection, styleScope, styleOffset, styleRange],
+    [canColour, cellStyles, view, styleSelection, styleScope, styleOffset, styleRange],
   );
 
   const queryClient = useQueryClient();
@@ -581,6 +642,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const [batchConfirm, setBatchConfirm] = useState<{ count: number; apply: () => void } | null>(
     null,
   );
+
+  // ✎ D-461: запит причини ручного значення замість формули. Як і підтвердження вище — до «Зберегти» значення НЕ
+  // застосоване ніде (`onBeforeEdit`/`onBeforeRangeEdit` блокують його синхронно); `apply` робить решту з причиною.
+  const [overrideRequest, setOverrideRequest] = useState<{
+    count: number;
+    initialReason: string;
+    apply: (reason: string) => void;
+  } | null>(null);
 
   /**
    * Запити У ДОРОЗІ і чому другий запит у той самий рядок не шлеться (реєстр — `inFlightEdits.ts`).
@@ -920,6 +989,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     setOverrides(new Map());
     setConfirmRequest(null);
     setBatchConfirm(null);
+    setOverrideRequest(null);
+    setManualOnly(false);
 
     // ⚠ Виділення теж належить ЦЬОМУ зрізу: індекси рядка 50 в іншій таблиці
     // вказують на інші дані, і вставка пішла б від чужого якоря.
@@ -956,7 +1027,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [saveColumnWidths],
   );
 
-  const data = slice.data;
+  const data = view;
 
   /**
    * Підсвічена ціль переходу від зауваження (`ФВ-5.6`).
@@ -1471,7 +1542,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       // яких значення справді змінилося.
       const roundedNow: RoundedCell[] = [];
 
-      const edits: PendingEdit[] = plan.targets.map((target) => {
+      const plannedEdits: PendingEdit[] = plan.targets.map((target) => {
         const column = byCode.get(target.columnCode);
         const value = coerce(pastedIdentifierOf(target.value, column), column?.dataType);
 
@@ -1524,6 +1595,13 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         };
       });
 
+      // ✎ D-461: комірки формул. Видалення там, де й так рахує формула, і нове значення в ручній комірці, формула
+      // якої вже не дозволяє ручного, — не надсилаються; нові ручні значення — з однією причиною на вставку.
+      const overrideSplit = splitOverrideEdits(data, plannedEdits);
+      const edits = overrideSplit.kept;
+      if (overrideSplit.restoreOnly.length > 0) showWarning(t('grid.formulaOverride.restoreOnly'));
+      if (edits.length === 0) return;
+
       const needing = cellsNeedingConfirmation(data, edits);
 
       const commit = (): void => {
@@ -1537,7 +1615,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
         // ⚠ Уся вставка — ОДИН крок історії: інакше одне Ctrl+V з'їдало б усю
         // глибину, а Ctrl+Z відкочував би її по комірці.
-        history.current.push({
+        history.current.push(withOverrideHistory(data, tableInstanceId, periodKey, {
           label: t('grid.paste', { count: edits.length }),
           // ⚠ `G1-05`: «було» — те, що людина БАЧИЛА: незбережене поверх кешу.
           // Інакше Undo вставки поверх незбереженої правки відновлював би
@@ -1552,7 +1630,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
               after: edit.value,
             };
           }),
-        });
+        }));
 
         touchHistory();
         saveThroughStore(edits);
@@ -1566,12 +1644,29 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       // ⛔ `ФВ-2.16`: вставка в комірки `AllowWithConfirmation` ішла повз діалог
       // одиничної правки (`onBeforeEdit` бачить лише введення в комірку).
       // Один діалог на весь пакет; «Скасувати» — пакет не застосовано ЦІЛКОМ.
-      if (needing.length > 0) {
-        setBatchConfirm({ count: needing.length, apply: commit });
+      const proceed = (): void => {
+        if (needing.length > 0) {
+          setBatchConfirm({ count: needing.length, apply: commit });
+          return;
+        }
+
+        commit();
+      };
+
+      // ✎ D-461: спершу причина ручного значення (одна на вставку); «Скасувати» — вставку не застосовано.
+      if (overrideSplit.reasonCells.length > 0) {
+        setOverrideRequest({
+          count: overrideSplit.reasonCells.length,
+          initialReason: '',
+          apply: (reason) => {
+            markOverrideReason(tableInstanceId, periodKey, overrideSplit.reasonCells, reason);
+            proceed();
+          },
+        });
         return;
       }
 
-      commit();
+      proceed();
     },
     [data, readOnly, saveThroughStore, touchHistory, pastedIdentifierOf, tableInstanceId, periodKey],
   );
@@ -1608,12 +1703,20 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         if (held !== undefined && revertsToSaved(data, signal)) {
           const step = revertStep(data, signal, held);
           if (step !== null) {
-            history.current.push({
-              label: t('grid.edit', {
-                column: columnIndexOf(data).get(signal.columnCode)?.header ?? signal.columnCode,
-              }),
-              edits: [step],
-            });
+            history.current.push(
+              withOverrideHistory(
+                data,
+                tableInstanceId,
+                periodKey,
+                {
+                  label: t('grid.edit', {
+                    column: columnIndexOf(data).get(signal.columnCode)?.header ?? signal.columnCode,
+                  }),
+                  edits: [step],
+                },
+                true,
+              ),
+            );
             touchHistory();
           }
 
@@ -1628,10 +1731,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       // самого незбереженого значення кроку не пише.
       const step = asShownStep(data, captured.step, held);
       if (step !== null) {
-        history.current.push({
-          label: t('grid.edit', { column: captured.columnHeader }),
-          edits: [step],
-        });
+        history.current.push(
+          withOverrideHistory(data, tableInstanceId, periodKey, {
+            label: t('grid.edit', { column: captured.columnHeader }),
+            edits: [step],
+          }),
+        );
 
         touchHistory();
       }
@@ -1654,6 +1759,30 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   );
 
   /**
+   * ✎ D-461: «Повернути формулу» — ручні комірки виділення (кнопка тулбара; Delete на комірці робить те саме).
+   * ⚠ Лише ті, що сервер дає писати (`decide`): інакше кнопка обіцяла б те, що `captureEdit` відкине.
+   */
+  const restorableCells = useMemo(() => {
+    if (view === undefined || readOnly) return [];
+    const current = view;
+    const columns = columnIndexOf(current);
+
+    return restorableCellsIn(current, styleSelection, styleOffset).filter((cell) => {
+      const column = columns.get(cell.columnCode);
+      return column !== undefined && decide(current, cell.rowKey, column).editable;
+    });
+  }, [view, readOnly, styleSelection, styleOffset]);
+
+  const restoreFormula = useCallback(() => {
+    for (const cell of restorableCells) {
+      const captured = applyEditedValue({ rowKey: cell.rowKey, columnCode: cell.columnCode, raw: '' });
+      if (captured !== null) {
+        setOverrides((current) => new Map(current).set(cellKey(cell.rowKey, cell.columnCode), null));
+      }
+    }
+  }, [restorableCells, applyEditedValue]);
+
+  /**
    * Протягування маркером заповнення — тим самим шляхом, що й вставка.
    *
    * ⚠ Правила комірки ті самі, що в ручного введення (`captureEdit`: право,
@@ -1663,14 +1792,23 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    * (`D16-02`).
    */
   const applyRangeEdit = useCallback(
-    (detail: RangeEditDetail, confirmed = false) => {
+    (
+      detail: RangeEditDetail,
+      confirmed = false,
+      // ✎ D-461: комірки формул, які пакет пропускає (`splitOverrideEdits`), і чи сітка значень НЕ намалювала
+      // (`onBeforeRangeEdit` заблокував діапазон) — тоді значення кладуться поверх зрізу тут, як і в підтвердженого.
+      override: { skip: ReadonlySet<string>; blocked: boolean } | null = null,
+    ) => {
       if (data === undefined) return;
 
       const range = captureRange(data, detail, rowKeyOf);
 
       // ⛔ `G1-02`: як і в ручного введення — повернення до збереженого, поки
       // летить інше значення комірки, їде слідом, а не знімає правку.
-      const captured = [...range.captured];
+      const captured =
+        override === null
+          ? [...range.captured]
+          : range.captured.filter((edit) => !override.skip.has(cellKey(edit.pending.rowKey, edit.pending.columnCode)));
       const reverted: typeof range.reverted = [];
       for (const signal of range.reverted) {
         const over = captureOverInFlight(data, signal, inFlightEdit(tableInstanceId, periodKey, signal));
@@ -1678,16 +1816,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         else captured.push(over);
       }
 
-      if (confirmed) {
+      if (confirmed || override?.blocked === true) {
         // ⛔ Підтверджене протягування (`ФВ-2.16`) сітка НЕ намалювала:
         // `onBeforeRangeEdit` заблокував його до діалогу. Тож значення кладуться
         // поверх зрізу тут — як і в підтвердженої одиничної правки
         // (`onConfirmEdit`), — інакше вони з'явилися б лише після збереження.
-        markConfirmed(
-          tableInstanceId,
-          periodKey,
-          cellsNeedingConfirmation(data, captured.map((edit) => edit.pending)),
-        );
+        if (confirmed) {
+          markConfirmed(
+            tableInstanceId,
+            periodKey,
+            cellsNeedingConfirmation(data, captured.map((edit) => edit.pending)),
+          );
+        }
         setOverrides((current) => {
           const next = new Map(current);
           for (const edit of captured) {
@@ -1713,12 +1853,19 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         steps.push(step);
         stepHeaders.push(edit.columnHeader);
       }
+      const capturedSteps = steps.length;
       for (const signal of reverted) {
         const step = revertStep(data, signal, slice.get(pendingCellKey(signal)));
         if (step === null) continue;
         steps.push(step);
         stepHeaders.push(columns.get(signal.columnCode)?.header ?? signal.columnCode);
       }
+
+      // ✎ D-461: стан «ручне / формула» кроків — ДО зняття правок (його «до» читає незбережене зі сховища).
+      const historySteps = [
+        ...withOverrideHistory(data, tableInstanceId, periodKey, { edits: steps.slice(0, capturedSteps) }).edits,
+        ...withOverrideHistory(data, tableInstanceId, periodKey, { edits: steps.slice(capturedSteps) }, true).edits,
+      ];
 
       for (const signal of reverted) {
         if (slice.has(pendingCellKey(signal))) discardPendingEdit(tableInstanceId, periodKey, signal);
@@ -1729,7 +1876,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // `grid.edit` з переліком колонок (новий ключ = рядок сіду).
         history.current.push({
           label: t('grid.edit', { column: [...new Set(stepHeaders)].join(', ') }),
-          edits: steps,
+          edits: historySteps,
         });
 
         touchHistory();
@@ -1818,6 +1965,49 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       if (column === undefined) return;
 
       const rowKey = rowKeyOf(detail?.model);
+
+      // ✎ D-461: комірка формули. Delete там, де й так рахує формула, — нічого (сітка не має показати порожнечу);
+      // нове значення в ручній комірці, формула якої вже не дозволяє ручного, — відмова з поясненням; нове ручне
+      // значення — лише з причиною (діалог). Видалення в ручній комірці (повернення формули) іде звичайним шляхом.
+      const raw = String(detail?.val ?? '');
+      const intent = overrideIntentOf(data, rowKey, columnCode, coerce(raw, column.dataType));
+      if (intent === 'noop') {
+        event.preventDefault();
+        return;
+      }
+
+      if (intent === 'restoreOnly') {
+        event.preventDefault();
+        showWarning(t('grid.formulaOverride.restoreOnly'));
+        return;
+      }
+
+      if (intent === 'reason') {
+        if (captureEdit(data, { columnCode, rowKey, raw, untouched: untouchedEditor() }) === null) return;
+
+        event.preventDefault();
+        const confirmHint = confirmationOf(data, rowKey, column);
+        setOverrideRequest({
+          count: 1,
+          initialReason: manualCellOf(data, rowKey, columnCode)?.reason ?? '',
+          apply: (reason) => {
+            markOverrideReason(tableInstanceId, periodKey, [{ rowKey, columnCode }], reason);
+
+            // Комірка ще й `AllowWithConfirmation` (`ФВ-2.16`) — далі звичайне підтвердження.
+            if (confirmHint !== null) {
+              setConfirmRequest({ rowKey, columnCode, value: detail?.val, hint: confirmHint });
+              return;
+            }
+
+            const captured = applyEditedValue({ rowKey, columnCode, raw });
+            if (captured !== null) {
+              setOverrides((current) => new Map(current).set(cellKey(rowKey, columnCode), captured.pending.value));
+            }
+          },
+        });
+        return;
+      }
+
       const hint = confirmationOf(data, rowKey, column);
       if (hint === null) return;
 
@@ -1833,7 +2023,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       event.preventDefault();
       setConfirmRequest({ rowKey, columnCode, value: detail?.val, hint });
     },
-    [data, readOnly],
+    [data, readOnly, applyEditedValue, tableInstanceId, periodKey],
   );
 
   /** Оператор підтвердив правку поза вікном доступу (`ФВ-2.16`, `#43`). */
@@ -1885,16 +2075,48 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       const detail = event.detail;
       const { captured } = captureRange(data, detail, rowKeyOf);
-      const needing = cellsNeedingConfirmation(
+
+      // ✎ D-461: комірки формул у діапазоні (протягування, Delete на кількох комірках).
+      const split = splitOverrideEdits(
         data,
         captured.map((edit) => edit.pending),
       );
-      if (needing.length === 0) return;
+      const skipped = [...split.noop, ...split.restoreOnly];
+      const touchesFormulas = skipped.length > 0 || split.reasonCells.length > 0;
+
+      const needing = cellsNeedingConfirmation(data, split.kept);
+      if (needing.length === 0 && !touchesFormulas) return;
 
       event.preventDefault();
-      setBatchConfirm({ count: needing.length, apply: () => applyRangeEdit(detail, true) });
+      if (split.restoreOnly.length > 0) showWarning(t('grid.formulaOverride.restoreOnly'));
+
+      const override = touchesFormulas
+        ? { skip: new Set(skipped.map((edit) => cellKey(edit.rowKey, edit.columnCode))), blocked: true }
+        : null;
+      const proceed = (): void => {
+        if (needing.length > 0) {
+          setBatchConfirm({ count: needing.length, apply: () => applyRangeEdit(detail, true, override) });
+          return;
+        }
+
+        applyRangeEdit(detail, false, override);
+      };
+
+      if (split.reasonCells.length > 0) {
+        setOverrideRequest({
+          count: split.reasonCells.length,
+          initialReason: '',
+          apply: (reason) => {
+            markOverrideReason(tableInstanceId, periodKey, split.reasonCells, reason);
+            proceed();
+          },
+        });
+        return;
+      }
+
+      proceed();
     },
-    [data, readOnly, applyRangeEdit],
+    [data, readOnly, applyRangeEdit, tableInstanceId, periodKey],
   );
 
   const onConfirmBatch = useCallback(() => {
@@ -2000,7 +2222,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
               : held.isEmpty
                 ? null
                 : held.value;
-          ok = sameColumnValue(columnsByCode.get(edit.columnCode)?.dataType, shown, edit.before);
+          // ✎ D-461: крок чекає, що комірку рахує ФОРМУЛА (`manualBefore === null`), — число там могло змінитися
+          // перерахунком, і це не «чужа правка»: звіряється стан (немає ручного значення ні в зрізі, ні в
+          // незбереженому), а не число.
+          ok =
+            edit.manualBefore === null
+              ? (held === undefined
+                  ? manualCellOf(data, edit.rowKey, edit.columnCode) === null
+                  : held.isEmpty || held.value === null || held.value === undefined)
+              : sameColumnValue(columnsByCode.get(edit.columnCode)?.dataType, shown, edit.before);
           decided.set(key, ok);
         }
         if (ok) applicable.push(edit);
@@ -2013,11 +2243,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       if (applicable.length === 0) return;
 
+      // ✎ D-461: стан «після» — ручне значення з ТІЄЮ САМОЮ причиною (позначка до запиту: її читає `buildRequest`)
+      // або повернення формули (значення `null`, причина не потрібна).
+      for (const edit of applicable) {
+        const write = historyWriteOf(edit);
+        if (write.reason !== null) markOverrideReason(tableInstanceId, periodKey, [edit], write.reason);
+      }
+
       saveThroughStore(
         applicable.map((edit) => ({
           rowKey: edit.rowKey,
           columnCode: edit.columnCode,
-          value: edit.after,
+          value: historyWriteOf(edit).value,
           isEmpty: false,
           baseVersion: rowsByKey.get(edit.rowKey)?.rowVersion ?? null,
           // ⚠ L8-20: значення кешу в мить кроку — за ним `withKnownVersions`
@@ -2380,6 +2617,34 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     return () => clearTimeout(timer);
   }, [navigated]);
 
+  // ✎ D-461: перехід до попередньої/наступної ручної комірки (по колу, у порядку сітки) — тим самим шляхом, що й
+  // перехід від зауваження: прокрутка, фокус, підсвітка.
+  const manualCursor = useRef(-1);
+  const goToManual = useCallback(
+    (step: 1 | -1) => {
+      const cells = manualIndex.cells;
+      const node = gridContainer.current;
+      if (cells.length === 0 || data === undefined || node === null) return;
+
+      const from = manualCursor.current < 0 && step < 0 ? 0 : manualCursor.current;
+      const next = (((from + step) % cells.length) + cells.length) % cells.length;
+      const cell = cells[next];
+      if (cell === undefined) return;
+
+      const coordinate = cellCoordinateOf(data, hasRowLabels(data), cell.rowKey, cell.columnCode);
+      if (coordinate === null) return;
+
+      manualCursor.current = next;
+      setNavigated({ key: cellKey(cell.rowKey, cell.columnCode), seq: -1 - next });
+      void revealGridCell(node, coordinate)
+        .then((revealed) => {
+          if (revealed) publishFocus(tableInstanceId, periodKey, { rowIndex: coordinate.y, columnIndex: coordinate.x });
+        })
+        .catch(() => undefined);
+    },
+    [manualIndex, data, tableInstanceId, periodKey],
+  );
+
   // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
   const saveLoading = usePendingLoading(isPending);
   const addRowLoading = usePendingLoading(addRow.isPending);
@@ -2432,6 +2697,44 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           onScopeChange={setStyleScope}
           pending={cellStyles.isPending}
         />
+        {/* ✎ D-461: фільтр «Лише рядки з ручними значеннями» з лічильником і перехід між ручними комірками —
+            лише для таблиць, де є формули колонки/комірки (`formulaOverride`). */}
+        {fullSlice?.formulaOverride !== null && fullSlice?.formulaOverride !== undefined && (
+          <Group gap="xs" wrap="nowrap" data-manual-filter="">
+            <Button
+              variant={filteringManual ? 'filled' : 'default'}
+              aria-pressed={filteringManual}
+              disabled={manualIndex.cells.length === 0 && !manualOnly}
+              onClick={() => setManualOnly((on) => !on)}
+              rightSection={
+                <Badge size="sm" variant={filteringManual ? 'white' : 'light'} data-manual-count={manualIndex.cells.length}>
+                  {t('grid.formulaOverride.manualCount', { count: manualIndex.cells.length })}
+                </Badge>
+              }
+              data-manual-only-toggle=""
+            >
+              {t('grid.formulaOverride.filterManual')}
+            </Button>
+            {manualIndex.cells.length > 0 && (
+              <>
+                <ActionIcon variant="default" aria-label={t('grid.formulaOverride.previousManual')} title={t('grid.formulaOverride.previousManual')} onClick={() => goToManual(-1)} data-manual-prev="">
+                  ‹
+                </ActionIcon>
+                <ActionIcon variant="default" aria-label={t('grid.formulaOverride.nextManual')} title={t('grid.formulaOverride.nextManual')} onClick={() => goToManual(1)} data-manual-next="">
+                  ›
+                </ActionIcon>
+              </>
+            )}
+          </Group>
+        )}
+        {/* ✎ D-461: повернути формулу у виділених ручних комірках (те саме робить Delete). */}
+        {restorableCells.length > 0 && (
+          <Button variant="default" onClick={restoreFormula} data-restore-formula>
+            {restorableCells.length > 1
+              ? t('grid.formulaOverride.restoreMany', { count: restorableCells.length })
+              : t('grid.formulaOverride.restore')}
+          </Button>
+        )}
         {Object.keys(widths).length > 0 && (
           <Button variant="default" onClick={resetColumnWidths}>
             {t('grid.columnWidths.reset')}
@@ -2830,6 +3133,22 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           </Button>
         </Group>
       </Modal>
+
+      {/* ✎ D-461: причина ручного значення замість формули; закриття без «Зберегти» — значення не застосовано. */}
+      {overrideRequest !== null && (
+        <Suspense fallback={null}>
+          <FormulaOverrideReasonDialog
+            count={overrideRequest.count}
+            initialReason={overrideRequest.initialReason}
+            onCancel={() => setOverrideRequest(null)}
+            onSave={(reason) => {
+              const request = overrideRequest;
+              setOverrideRequest(null);
+              request.apply(reason);
+            }}
+          />
+        </Suspense>
+      )}
     </Stack>
       )}
     </AsyncBoundary>
@@ -3153,6 +3472,12 @@ export function gridColumns(
         const outOfWindowClass = isOutOfWindow ? 'ecr-cell-out-of-window' : null;
         const outOfWindowHint = isOutOfWindow ? t('grid.outOfWindowHint') : null;
 
+        // ✎ D-461: ручне значення замість формули — маркер ПОВЕРХ стану (знак `✎` і лінія згори, `cell-states.css`);
+        // причина, автор і час — текстом у `title`, не лише формою.
+        const manual = manualCellOf(slice, rowKey, column.code);
+        const manualClass = manual === null ? null : 'ecr-cell-formula-manual';
+        const manualHint = manual === null ? null : manualCellHint(manual);
+
         // ⛔ Директива registry-lookup / cell-style, PR B2: оформлення
         // автора шаблону — ШАР ПІД будь-яким станом (`cellStateOf` вище),
         // не заміна: рахується ЗАВЖДИ, незалежно від того, чи спрацював
@@ -3204,6 +3529,7 @@ export function gridColumns(
           saveErrorClass === null &&
           navigationClass === null &&
           outOfWindowClass === null &&
+          manualClass === null &&
           appearance === undefined
         ) {
           return numericClass === null
@@ -3226,10 +3552,16 @@ export function gridColumns(
         // ТЕКСТУ — той самий дефект, half-fixed.
         const submittedHint = readOnly && decision.editable ? t('grid.submittedReadOnlyHint') : null;
 
+        // ✎ D-461: комірку рахує формула, але її можна замінити ручним значенням — сказати про це словами.
+        const overridableHint =
+          state === 'calculated' && decision.editable && !readOnly ? t('grid.formulaOverride.overridableHint') : null;
+
         // Стан доступний і ТЕКСТОМ, не лише кольором/формою: причина заборони
         // чи незаповненого входу вже є на сервері — читалка має її почути.
         const hint = [
+          manualHint,
           decision.hint,
+          overridableHint,
           submittedHint,
           requiredInputMessage,
           saveErrorMessage,
@@ -3248,6 +3580,7 @@ export function gridColumns(
             saveErrorClass,
             navigationClass,
             outOfWindowClass,
+            manualClass,
             numericClass,
             appearanceClass,
           ]
@@ -3258,6 +3591,7 @@ export function gridColumns(
           // розрізнення станів, не залежачи від жодного кольору (`ФВ-14.18`).
           ...(state === null ? {} : { 'data-cell-state': state }),
           ...(isOutOfWindow ? { 'data-out-of-window': 'true' } : {}),
+          ...(manual === null ? {} : { 'data-formula-manual': 'true' }),
 
           // ⚠ Що комірку пофарбувало правило — атрибутом, не лише кольором: тест
           // і людина з інструментами розробника бачать причину підсвітки.

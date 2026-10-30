@@ -280,6 +280,12 @@ public sealed partial class PatchCellsHandler
         foreach (var item in active)
         {
             item.Planned = Blamed(item.Id, () => BuildCellChanges(item.Context, numberCulture));
+
+            // ✎ D-461: значення з книги в комірці формули, що дозволяє ручне значення, — ручне значення (причина —
+            // `ExcelImportOverrideReason`, її ставить імпорт); видалення в ручній комірці — повернення формули.
+            var planned = item.Planned;
+            item.Planned = await BlamedAsync(item.Id, () => PlanFormulaOverridesAsync(item.Request, item.Context, planned, ct))
+                .ConfigureAwait(false);
         }
 
         // ⚠ Межі періоду — одні на книгу (документ × період) і лише тоді, коли
@@ -740,6 +746,12 @@ public sealed partial class PatchCellsHandler
 
         batchSets.AddRange(ownerSetsById.Values);
 
+        // ✎ D-461: позначки ручних значень — тією самою транзакцією й ПЕРЕД значеннями (див. поштучний шлях).
+        foreach (var item in active)
+        {
+            await ApplyFormulaOverrideMarksAsync(item.Context, item.Applied!, now, ct).ConfigureAwait(false);
+        }
+
         IReadOnlyDictionary<long, IReadOnlyDictionary<long, string>> written;
         try
         {
@@ -816,10 +828,12 @@ public sealed partial class PatchCellsHandler
             [.. active.SelectMany(x =>
             {
                 var changes = routedItems.TryGetValue(x.Id, out var routed) ? routed.Physical : x.Applied!;
+                var (overrideReasons, restored) = AuditOverrides(x.Context, x.Applied!);
                 return BuildAuditRecords(
                     x.Request, changes.Upserts, changes.Deletes, userId, now, documentId,
                     changes.RowKeyById, auditPrevious, isLateEdit, AuditCorrelationId(), x.Context.OutOfWindow,
-                    x.OverwrittenRowKeys, approverEdit: x.Context.ApproverEdit);
+                    x.OverwrittenRowKeys, approverEdit: x.Context.ApproverEdit,
+                    overrideReasons: overrideReasons, restored: restored);
             })],
             ct).ConfigureAwait(false);
 

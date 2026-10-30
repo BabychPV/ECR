@@ -5,6 +5,7 @@ import { hasUnsavedChangesExcept, registerUnsavedSource, UnsavedSettleMs } from 
 import { EcrApiError, isSessionClosed, onBeforeLoginRedirect } from '@/api/client';
 import { recordLostEdits } from './lostEdits';
 import { resetConfirmed } from './confirmedEdits';
+import { resetOverrideReasons } from './overrideReasons';
 import { registerHeldEditLookup } from './settleEdits';
 import {
   cellKey,
@@ -658,6 +659,8 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
       resetPending();
       // ⚠ Разом зі сховищем правок — і підтвердження до них (`ФВ-2.16`).
       resetConfirmed();
+      // ✎ D-461: і причини ручних значень замість формул.
+      resetOverrideReasons();
     };
   }, [documentId]);
 

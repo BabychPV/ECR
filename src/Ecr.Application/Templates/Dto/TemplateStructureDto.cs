@@ -103,7 +103,23 @@ public sealed record TableDto(
 {
     /// <summary>Групи заголовків колонок таблиці; порожній список — груп немає.</summary>
     public IReadOnlyList<TemplateHeaderGroupDto> HeaderGroups { get; init; } = [];
+
+    /// <summary>
+    /// ✎ D-461: формули окремих КОМІРОК таблиці (область <c>Cell</c>) — Id для
+    /// <c>PUT …/formulas/{formulaId}/manual-override</c> і стан «Дозволити ручне значення». Порожній — таких немає.
+    /// </summary>
+    public IReadOnlyList<TemplateCellFormulaDto> CellFormulas { get; init; } = [];
 }
+
+/// <summary>✎ D-461: формула однієї комірки таблиці в структурі шаблону.</summary>
+/// <param name="FormulaId">Id формули.</param>
+/// <param name="RowKey">Рядок комірки.</param>
+/// <param name="ColumnDefId">Колонка комірки.</param>
+/// <param name="Expression">Вираз.</param>
+/// <param name="Dialect">Діалект виразу.</param>
+/// <param name="AllowManualOverride">«Дозволити ручне значення».</param>
+public sealed record TemplateCellFormulaDto(
+    int FormulaId, string RowKey, int ColumnDefId, string Expression, ExpressionDialect Dialect, bool AllowManualOverride);
 
 /// <summary>
 /// Колонка в СТРУКТУРІ шаблону — опис для адміністратора.
@@ -158,7 +174,14 @@ public sealed record TemplateColumnDto(
     string? FormulaExpression,
     ExpressionDialect? FormulaDialect,
     int? WidthPx = null,
-    int? HeaderGroupId = null);
+    int? HeaderGroupId = null)
+{
+    /// <summary>✎ D-461: Id формули колонки (для <c>PUT …/formulas/{formulaId}/manual-override</c>); <c>null</c> — формули немає.</summary>
+    public int? FormulaId { get; init; }
+
+    /// <summary>✎ D-461: формула колонки дозволяє ручне значення; <c>false</c> і без формули.</summary>
+    public bool AllowManualOverride { get; init; }
+}
 
 /// <summary>
 /// Рядок у СТРУКТУРІ шаблону — опис, а не дані.
@@ -195,4 +218,14 @@ public sealed record TemplateRowDto(
     string? ParentRowKey,
     bool IsReadOnly,
     string? FormulaExpression,
-    ExpressionDialect? FormulaDialect);
+    ExpressionDialect? FormulaDialect)
+{
+    /// <summary>✎ D-461: Id формули рядка; <c>null</c> — формули немає.</summary>
+    public int? FormulaId { get; init; }
+
+    /// <summary>
+    /// ✎ D-461: формула рядка дозволяє ручне значення. ⚠ Цілі формули рядка в колонках вводу редагуються й без
+    /// прапорця (поведінка до D-461 не змінена) — прапорець для них зберігається, але на редагування не впливає.
+    /// </summary>
+    public bool AllowManualOverride { get; init; }
+}

@@ -1339,6 +1339,13 @@
             "format": "int32",
             "type": "integer"
           },
+          "reason": {
+            "description": "✎ D-461: причина ручного значення замість формули (`aud.CellChange.Reason`, `Origin = FormulaOverride`);\n`null` — інші походження.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "rowKey": {
             "description": "Ключ рядка — щоб журнал читався без join.",
             "type": "string"
@@ -5113,6 +5120,14 @@
               "integer"
             ]
           },
+          "lostFormulaOverrides": {
+            "description": "✎ D-461: скільки ручних значень замість формул НЕ переїде як ручні (формула цільової версії ручного значення не\nдозволяє або колонки немає): комірки знову рахує формула, журнал — FormulaRestored. Перенос не блокує; пункти\nзвіту — Kind OverrideLost. null — таких немає.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "lostValues": {
             "description": "Скільки введених значень зникло б.",
             "format": "int64",
@@ -6226,6 +6241,10 @@
       "FormulaDto": {
         "description": "Формула для відповіді клієнту.",
         "properties": {
+          "allowManualOverride": {
+            "description": "✎ D-461: «Дозволити ручне значення» (змінює `PUT …/formulas/{formulaId}/manual-override`).",
+            "type": "boolean"
+          },
           "columnDefId": {
             "description": "Колонка, якщо `Scope == Column` чи `Cell`.",
             "format": "int32",
@@ -6273,6 +6292,106 @@
           "rowDefId",
           "dialect",
           "expression"
+        ],
+        "type": "object"
+      },
+      "FormulaManualCellDto": {
+        "description": "✎ D-461: ручне значення в комірці формули — для підказки «хто, коли, чому».",
+        "properties": {
+          "reason": {
+            "description": "Причина.",
+            "type": "string"
+          },
+          "setAt": {
+            "description": "Коли (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "setBy": {
+            "description": "Ім'я автора; `null` — користувача вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "reason",
+          "setBy",
+          "setAt"
+        ],
+        "type": "object"
+      },
+      "FormulaManualOverrideResult": {
+        "description": "✎ D-461: відповідь на зміну «Дозволити ручне значення».",
+        "properties": {
+          "allowManualOverride": {
+            "description": "Прапорець ПІСЛЯ виклику.",
+            "type": "boolean"
+          },
+          "changed": {
+            "description": "Чи прапорець справді змінився (`false` — dryRun або вже був таким).",
+            "type": "boolean"
+          },
+          "formulaId": {
+            "description": "Формула.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "overriddenCells": {
+            "description": "Скільки комірок усього.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "overriddenDocuments": {
+            "description": "У скількох документах версії зараз є ручні значення замість цієї формули.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "formulaId",
+          "allowManualOverride",
+          "changed",
+          "overriddenDocuments",
+          "overriddenCells"
+        ],
+        "type": "object"
+      },
+      "FormulaOverrideSliceDto": {
+        "description": "✎ D-461: що клієнту треба знати, щоб замінити формулу ручним значенням (з причиною) і повернути формулу.",
+        "properties": {
+          "canOverride": {
+            "description": "У користувача є право `Document.OverrideFormula` у проєкті документа. Без нього комірки формул лишаються\n`CalculatedCell` у IReadOnlyDictionary&lt;string, string&gt; TableSliceDto.CellPermissions.",
+            "type": "boolean"
+          },
+          "manualCells": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FormulaManualCellDto"
+            },
+            "description": "Комірки, де зараз стоїть ручне значення замість формули: ключ `\"{rowKey}:{columnCode}\"`. Видно й після\nвимкнення прапорця (значення лишається, його можна лише повернути до формули — видаленням).",
+            "type": "object"
+          },
+          "overridableCells": {
+            "description": "Комірки комірочних формул (`\"{rowKey}:{columnCode}\"`), що ЗАРАЗ дозволяють ручне значення.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "overridableColumns": {
+            "description": "Коди обчислюваних колонок, формула яких ЗАРАЗ дозволяє ручне значення (прапорець увімкнено).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "canOverride",
+          "overridableColumns",
+          "overridableCells",
+          "manualCells"
         ],
         "type": "object"
       },
@@ -6751,6 +6870,10 @@
           },
           "oldValue": {
             "description": "Поточне значення; `null` — порожньо."
+          },
+          "replacesFormula": {
+            "description": "✎ D-461: «буде замінено формулу» — значення ляже як РУЧНЕ ЗНАЧЕННЯ ЗАМІСТЬ ФОРМУЛИ (формула дозволяє, у\nкористувача є право `Document.OverrideFormula`); причина журналу — «Excel import». `NewValue = null` у\nтакій комірці — повернення формули.",
+            "type": "boolean"
           },
           "roundedFrom": {
             "description": "Число з файлу ДО округлення до `Scale` колонки (ФВ-9.16b); `null` — не\nокруглювалось. `NewValue` — вже округлене: саме воно буде записано."
@@ -10663,6 +10786,13 @@
             "default": false,
             "description": "Явна порожнеча.",
             "type": "boolean"
+          },
+          "overrideReason": {
+            "description": "✎ D-461: причина ручного значення замість формули — обов'язкова, коли комірку рахує формула, що дозволяє ручне\nзначення (і в користувача є право `Document.OverrideFormula`); обрізається, до 1000 символів, без керівних\nсимволів, крім переносу рядка. Для звичайних комірок ігнорується. Видалення значення (`value: null`) у ручній\nкомірці повертає формулу — причина не потрібна.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "value": {
             "description": "Значення; `null` = стерти."
@@ -18746,6 +18876,24 @@
         ],
         "type": "object"
       },
+      "SetFormulaManualOverrideRequest": {
+        "description": "✎ D-461: тіло `PUT …/formulas/{formulaId}/manual-override`.",
+        "properties": {
+          "allow": {
+            "description": "Дозволити ручне значення.",
+            "type": "boolean"
+          },
+          "dryRun": {
+            "default": false,
+            "description": "`true` — нічого не змінювати, лише порахувати наявні ручні значення.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "allow"
+        ],
+        "type": "object"
+      },
       "SetMethodologyModesRequest": {
         "description": "Запит на зміну режимів обчислення версії-чернетки.",
         "properties": {
@@ -21522,6 +21670,13 @@
       },
       "TableDto": {
         "properties": {
+          "cellFormulas": {
+            "description": "✎ D-461: формули окремих КОМІРОК таблиці (область `Cell`) — Id для\n`PUT …/formulas/{formulaId}/manual-override` і стан «Дозволити ручне значення». Порожній — таких немає.",
+            "items": {
+              "$ref": "#/components/schemas/TemplateCellFormulaDto"
+            },
+            "type": "array"
+          },
           "code": {
             "description": "Код — ідентичність таблиці й адреса в `PUT …/sheets/{sheetCode}/tables/{code}`.",
             "type": "string"
@@ -21754,6 +21909,17 @@
             },
             "type": "array"
           },
+          "formulaOverride": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FormulaOverrideSliceDto",
+                "description": "✎ D-461: «ручне значення замість формули» в цій таблиці; `null` — у таблиці немає формул колонки/комірки\n(більшість таблиць, нуль байтів у відповіді)."
+              }
+            ]
+          },
           "headerGroups": {
             "description": "Групи заголовків видимих колонок (плоский список). Лише групи, у піддереві яких є хоч одна видима\nколонка зрізу (прихована/заборонена колонка випадає зі спану, група без видимих — не віддається).\nПорожній — груп немає.",
             "items": {
@@ -21926,6 +22092,46 @@
         ],
         "type": "object"
       },
+      "TemplateCellFormulaDto": {
+        "description": "✎ D-461: формула однієї комірки таблиці в структурі шаблону.",
+        "properties": {
+          "allowManualOverride": {
+            "description": "«Дозволити ручне значення».",
+            "type": "boolean"
+          },
+          "columnDefId": {
+            "description": "Колонка комірки.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "dialect": {
+            "$ref": "#/components/schemas/ExpressionDialect",
+            "description": "Діалект виразу."
+          },
+          "expression": {
+            "description": "Вираз.",
+            "type": "string"
+          },
+          "formulaId": {
+            "description": "Id формули.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rowKey": {
+            "description": "Рядок комірки.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "formulaId",
+          "rowKey",
+          "columnDefId",
+          "expression",
+          "dialect",
+          "allowManualOverride"
+        ],
+        "type": "object"
+      },
       "TemplateChangeDto": {
         "properties": {
           "changeClass": {
@@ -21967,6 +22173,10 @@
       "TemplateColumnDto": {
         "description": "Колонка в СТРУКТУРІ шаблону — опис для адміністратора.",
         "properties": {
+          "allowManualOverride": {
+            "description": "✎ D-461: формула колонки дозволяє ручне значення; `false` і без формули.",
+            "type": "boolean"
+          },
           "code": {
             "description": "Код колонки — ідентичність, у патчі не змінюється.",
             "type": "string"
@@ -21998,6 +22208,14 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "formulaId": {
+            "description": "✎ D-461: Id формули колонки (для `PUT …/formulas/{formulaId}/manual-override`); `null` — формули немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "headerGroupId": {
@@ -22188,6 +22406,10 @@
       "TemplateRowDto": {
         "description": "Рядок у СТРУКТУРІ шаблону — опис, а не дані.",
         "properties": {
+          "allowManualOverride": {
+            "description": "✎ D-461: формула рядка дозволяє ручне значення. ⚠ Цілі формули рядка в колонках вводу редагуються й без\nпрапорця (поведінка до D-461 не змінена) — прапорець для них зберігається, але на редагування не впливає.",
+            "type": "boolean"
+          },
           "formulaDialect": {
             "oneOf": [
               {
@@ -22204,6 +22426,14 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "formulaId": {
+            "description": "✎ D-461: Id формули рядка; `null` — формули немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "id": {
@@ -50987,6 +51217,122 @@
         ]
       }
     },
+    "/api/v1/template-versions/{id}/formulas/{formulaId}/manual-override": {
+      "put": {
+        "description": "`403` — немає `Template.Edit`; `404 ECR-TMPL-0404` — у версії немає такої (живої) формули.\nВимкнення наявні ручні значення не стирає — лише забороняє нові.",
+        "parameters": [
+          {
+            "description": "Версія шаблону (будь-який стан).",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Формула версії.",
+            "in": "path",
+            "name": "formulaId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetFormulaManualOverrideRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetFormulaManualOverrideRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetFormulaManualOverrideRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormulaManualOverrideResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormulaManualOverrideResult"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormulaManualOverrideResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Вмикає/вимикає ручне значення замість формули; `dryRun` — лише лічильник наявних ручних значень\n(для попередження перед вимкненням).",
+        "tags": [
+          "FormulaManualOverride"
+        ]
+      }
+    },
     "/api/v1/template-versions/{id}/header-fields": {
       "get": {
         "parameters": [
@@ -57306,6 +57652,9 @@
     },
     {
       "name": "Expressions"
+    },
+    {
+      "name": "FormulaManualOverride"
     },
     {
       "name": "GroupAssignments"
