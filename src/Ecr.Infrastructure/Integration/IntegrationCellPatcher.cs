@@ -731,33 +731,18 @@ public sealed class IntegrationCellPatcher(
         """;
 
     /// <summary>Комірки таблиці з маршрутизацією Q-17, останню зміну яких зробила людина (D-462).</summary>
-    private async Task<HashSet<string>> ManualCellsRoutedAsync(
+    private Task<HashSet<string>> ManualCellsRoutedAsync(
         long documentId, int tableDefId, PeriodKey periodKey, CancellationToken ct)
-    {
-        var manual = new HashSet<string>(StringComparer.Ordinal);
-
-        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(
-            db.Database.GetConnectionString());
-
-        await connection.OpenAsync(ct).ConfigureAwait(false);
-
-        await using var command = connection.CreateCommand();
-        command.CommandText = ManualCellsRoutedSql;
-
-        command.Parameters.Add("@document", System.Data.SqlDbType.BigInt).Value = documentId;
-        command.Parameters.Add("@table", System.Data.SqlDbType.Int).Value = tableDefId;
-        command.Parameters.Add("@yearFrom", System.Data.SqlDbType.Int).Value = (periodKey.Year * 100) + 1;
-        command.Parameters.Add("@yearTo", System.Data.SqlDbType.Int).Value = (periodKey.Year * 100) + 99;
-
-        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            manual.Add($"{reader.GetString(0)}:{reader.GetString(1)}");
-        }
-
-        return manual;
-    }
+        => ReadManualAsync(
+            ManualCellsRoutedSql,
+            parameters =>
+            {
+                parameters.Add("@document", System.Data.SqlDbType.BigInt).Value = documentId;
+                parameters.Add("@table", System.Data.SqlDbType.Int).Value = tableDefId;
+                parameters.Add("@yearFrom", System.Data.SqlDbType.Int).Value = (periodKey.Year * 100) + 1;
+                parameters.Add("@yearTo", System.Data.SqlDbType.Int).Value = (periodKey.Year * 100) + 99;
+            },
+            ct);
 
     /// <summary>Комірки, останню зміну яких зробила людина.</summary>
     /// <param name="documentId">Документ екземпляра — провідна колонка індексу журналу (R5-Q1-01).</param>
@@ -773,8 +758,22 @@ public sealed class IntegrationCellPatcher(
     /// ⚠ Береться ОСТАННЯ зміна кожної комірки, а не будь-яка: комірку могли
     /// спершу заповнити руками, а потім свідомо віддати інтеграції.
     /// </remarks>
-    private async Task<HashSet<string>> ManualCellsAsync(
+    private Task<HashSet<string>> ManualCellsAsync(
         long documentId, long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+        => ReadManualAsync(
+            ManualCellsSql,
+            parameters =>
+            {
+                parameters.AddWithValue("@period", periodKey.Value);
+                parameters.AddWithValue("@instance", tableInstanceId);
+                parameters.Add("@document", System.Data.SqlDbType.BigInt).Value = documentId;
+            },
+            ct);
+
+    /// <summary>Виконує запит «правки людини» власним з'єднанням: <c>rowKey:columnCode</c>.</summary>
+    /// <remarks>⚠ Одне місце відкриття з'єднання на обидва запити (сторож <c>OutboundConnectionPolicyTests</c>).</remarks>
+    private async Task<HashSet<string>> ReadManualAsync(
+        string sql, Action<Microsoft.Data.SqlClient.SqlParameterCollection> bind, CancellationToken ct)
     {
         var manual = new HashSet<string>(StringComparer.Ordinal);
 
@@ -784,11 +783,8 @@ public sealed class IntegrationCellPatcher(
         await connection.OpenAsync(ct).ConfigureAwait(false);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = ManualCellsSql;
-
-        command.Parameters.AddWithValue("@period", periodKey.Value);
-        command.Parameters.AddWithValue("@instance", tableInstanceId);
-        command.Parameters.Add("@document", System.Data.SqlDbType.BigInt).Value = documentId;
+        command.CommandText = sql;
+        bind(command.Parameters);
 
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
