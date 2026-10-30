@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Calculations;
+using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
@@ -2739,7 +2739,7 @@ public sealed partial class PatchCellsHandler(
         // версії тримає її винятково, тож запис або йде до переносу цілком, або
         // бачить нову версію і відмовляє, а не пише під старим `ColumnDefId`.
         DocumentStructure.EnsureUnchanged(
-            await sheetGate.EnterStructureAsync(context.Instance.DocumentId, exclusive: false, ct).ConfigureAwait(false),
+            await sheetGate.EnterStructureForPeriodAsync(context.Instance.DocumentId, exclusive: false, context.Instance.PeriodKey, ct).ConfigureAwait(false),
             context.Instance.TemplateVersionId,
             context.Instance.DocumentId);
 

@@ -59,7 +59,8 @@ public sealed partial class DocumentVersionMigrationTests
     public async Task З_місяця_періоди_до_X_лишаються_на_старих_id_разом_із_затвердженим_а_після_X_переходять_і_шкала_веде_версію()
     {
         // TableRenamed зачіпає подане (перейменування), але не губить значень: «увесь проєкт» відмовить, «з лютого» ні.
-        var s = await ArrangeAsync(Target.TableRenamed, submitted: true, approved: true).ConfigureAwait(true);   // 202601: Approved
+        var s = await ArrangeAsync(Target.TableRenamed, submitted: true, approved: true, extraPermission: "Document.View")
+            .ConfigureAwait(true);   // 202601: Approved
         var months = await AddMonthsAsync(s, 202602, 202603).ConfigureAwait(true);
 
         // Стан періоду ДО X фіксується байт-у-байт (ідентифікатори й значення).
@@ -128,6 +129,38 @@ public sealed partial class DocumentVersionMigrationTests
         Assert.Equal(s.Doc.TemplateVersionId, versions.Jan);
         Assert.Equal(s.TargetVersionId, versions.Feb);
         Assert.Equal(s.TargetVersionId, versions.Dec);
+
+        // Перелік документів: templateVersionByPeriod - рідка карта періодів зі СТАРОЮ версією (чинна - цільова).
+        await Task.Delay(TimeSpan.FromSeconds(2.5)).ConfigureAwait(true);   // кеш маркерів міграції оновлюється раз на 2 с
+        var sourceLabel = await db.TemplateVersions.AsNoTracking()
+            .Where(v => v.Id == s.Doc.TemplateVersionId).Select(v => v.Version).SingleAsync().ConfigureAwait(true);
+        using var list = await client.GetAsync(
+            new Uri($"/api/v1/documents?projectId={s.Doc.ProjectId}&periodKey=202602&limit=50", UriKind.Relative)).ConfigureAwait(true);
+        var listBody = await list.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(list.StatusCode == HttpStatusCode.OK, $"{list.StatusCode}: {listBody}");
+        var row = JsonDocument.Parse(listBody).RootElement.GetProperty("items").EnumerateArray()
+            .Single(i => i.GetProperty("id").GetInt64() == s.Doc.DocumentId);
+        var map = row.GetProperty("templateVersionByPeriod");
+        Assert.Equal(sourceLabel, map.GetProperty("202601").GetString());
+        Assert.False(map.TryGetProperty("202602", out _));
+
+        // Читання документа ПО ПЕРІОДАХ: січень віддає структуру СТАРОЇ версії (старий аркуш/таблиця), лютий - нової.
+        foreach (var (period, expectedTable, expectedSheet) in new[]
+                 {
+                     (202601, s.Doc.TableDefId, s.Doc.SheetDefId),
+                     (202602, s.TargetTableDefId, s.TargetSheetDefId),
+                 })
+        {
+            using var tablesResponse = await client.GetAsync(
+                new Uri($"/api/v1/documents/{s.Doc.DocumentId}/tables?periodKey={period}", UriKind.Relative)).ConfigureAwait(true);
+            var tablesBody = await tablesResponse.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(tablesResponse.StatusCode == HttpStatusCode.OK, $"{period}: {tablesResponse.StatusCode}: {tablesBody} {app.ErrorsText}");
+            var tableList = JsonDocument.Parse(tablesBody).RootElement.EnumerateArray().ToList();
+            Assert.True(tableList.Count == 1, $"період {period}: очікувалась одна таблиця, відповідь {tablesBody}");
+            var table = tableList[0];
+            Assert.Equal(expectedTable, table.GetProperty("tableDefId").GetInt32());
+            Assert.Equal(expectedSheet, table.GetProperty("sheetDefId").GetInt32());
+        }
 
         // Друга ціль для «увесь проєкт» тепер недоступна: шкала має два сегменти.
         var again = await PostRangeAsync(client, s, dryRun: false, "WholeProject", null).ConfigureAwait(true);
@@ -222,6 +255,67 @@ public sealed partial class DocumentVersionMigrationTests
         var foreign = await PostRangeAsync(client, s, dryRun: true, "FromMonth", 209912).ConfigureAwait(true);
         await AssertProblemAsync(foreign, HttpStatusCode.UnprocessableEntity, "ECR-SCHM-0422", "err.ECR-SCHM-0422.migrateFromMonthInvalid")
             .ConfigureAwait(true);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "RPT-STABLE")]
+    public async Task Після_переносу_з_місяця_правка_комірки_працює_в_обох_періодах_кожен_на_своїй_версії()
+    {
+        var s = await ArrangeAsync(Target.AddsC4Only, extraPermission: "Document.View", periodKey: 202609).ConfigureAwait(true);
+        var months = await AddMonthsAsync(s, 202610).ConfigureAwait(true);
+        await OpenForEditingAsync(s).ConfigureAwait(true);   // активує проєкт і відкриває 202609
+        await using (var db0 = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var policy = await db0.PeriodPolicies.FirstAsync().ConfigureAwait(true);
+            var october = await db0.Periods
+                .FirstAsync(p => p.ProjectId == s.Doc.ProjectId && p.PeriodKeyValue == 202610).ConfigureAwait(true);
+            october.RecomputeBoundaries(policy, AtyrauZone);
+            october.AdvanceTo(PeriodState.Open, DateTime.UtcNow);
+            await db0.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var moved = await PostRangeAsync(client, s, dryRun: false, "FromMonth", 202610).ConfigureAwait(true);
+        Assert.True(moved.StatusCode == HttpStatusCode.OK, $"{moved.StatusCode}: {await moved.Content.ReadAsStringAsync().ConfigureAwait(true)} {app.ErrorsText}");
+        await Task.Delay(TimeSpan.FromSeconds(2.5)).ConfigureAwait(true);   // кеш маркерів міграції
+
+        var c1 = $"C1_{s.Tag}";
+        foreach (var (instanceId, period, expectedColumn, expectedTable) in new[]
+                 {
+                     (s.Doc.TableInstanceId, 202609, s.Doc.ColumnDefIds[0], s.Doc.TableDefId),
+                     (months[0].TableInstanceId, 202610, s.TargetColumns["C1"], s.TargetTableDefId),
+                 })
+        {
+            using var slice = await client.GetAsync(new Uri($"/api/v1/documents/{s.Doc.DocumentId}/tables/{instanceId}", UriKind.Relative))
+                .ConfigureAwait(true);
+            var sliceBody = await slice.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(slice.StatusCode == HttpStatusCode.OK, $"зріз {period}: {slice.StatusCode}: {sliceBody} {app.ErrorsText}");
+            var row = JsonDocument.Parse(sliceBody).RootElement.GetProperty("rows").EnumerateArray().First();
+            var rowKey = row.GetProperty("rowKey").GetString();
+            var baseVersion = row.GetProperty("rowVersion").GetString();
+
+            using var patched = await client.PatchAsJsonAsync(
+                new Uri($"/api/v1/documents/{s.Doc.DocumentId}/cells", UriKind.Relative),
+                new
+                {
+                    tableInstanceId = instanceId,
+                    periodKey = period,
+                    origin = "UserEdit",
+                    rows = new object[] { new { rowKey, baseVersion, cells = new object[] { new { columnCode = c1, value = "edited" + period } } } },
+                }).ConfigureAwait(true);
+            var patchedBody = await patched.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(patched.StatusCode == HttpStatusCode.OK, $"правка {period}: {patched.StatusCode}: {patchedBody} {app.ErrorsText}");
+
+            await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+            var edited = await db.CellValues.AsNoTracking()
+                .Where(c => c.PeriodKeyValue == period && c.ValueString == "edited" + period).ToListAsync().ConfigureAwait(true);
+            var cell = Assert.Single(edited);
+            Assert.Equal(expectedColumn, cell.ColumnDefId);   // кожен період - на колонці СВОЄЇ версії
+            Assert.Equal(expectedTable, cell.TableDefId);
+        }
     }
 
     private async Task<string> PeriodStateAsync(Scenario s, int periodKey)
