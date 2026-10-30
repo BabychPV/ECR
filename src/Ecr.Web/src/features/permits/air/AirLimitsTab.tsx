@@ -6,7 +6,7 @@ import { formatNumber } from '@/shared/format/number';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Banner } from '@/shared/ui/Banner';
 import { permitImportPath } from '../shell/permitPaths';
-import { cell, filterSources, sourceKey, sourceTypeLabel, sourceTypeShort } from './airCardModel';
+import { cell, filterSources, num, sourceKey, sourceTypeLabel, sourceTypeShort } from './airCardModel';
 import type { AirLimitsPermit, AirSource, AirTotal } from './airTypes';
 import { useAirLimits } from './useAirLimits';
 import './air.css';
@@ -36,9 +36,9 @@ function SubstancesTable({ source, id }: { readonly source: AirSource; readonly 
           <tr key={substance.id}>
             <td className="pa-code">{substance.substanceCode}</td>
             <td>{cell(substance.substanceName)}</td>
-            <td className="pa-num">{cell(substance.gramsPerSecond)}</td>
-            <td className="pa-num">{cell(substance.mgPerNm3)}</td>
-            <td className="pa-num">{cell(substance.tonsPerYear)}</td>
+            <td className="pa-num">{num(substance.gramsPerSecond)}</td>
+            <td className="pa-num">{num(substance.mgPerNm3)}</td>
+            <td className="pa-num">{num(substance.tonsPerYear)}</td>
           </tr>
         ))}
       </tbody>
@@ -123,13 +123,13 @@ function SourcesTable({ sources }: { readonly sources: readonly AirSource[] }): 
                   <td>{cell(source.sourceName)}</td>
                   <td>{cell(source.emissionPointName)}</td>
                   <td title={sourceTypeLabel(source.sourceType)}>{sourceTypeShort(source.sourceType)}</td>
-                  <td className="pa-num">{cell(source.quantity)}</td>
-                  <td className="pa-num">{cell(source.hoursPerYear)}</td>
-                  <td className="pa-num">{cell(source.height)}</td>
-                  <td className="pa-num">{cell(source.diameter)}</td>
-                  <td className="pa-num">{cell(source.velocity)}</td>
-                  <td className="pa-num">{cell(source.volume)}</td>
-                  <td className="pa-num">{cell(source.temperature)}</td>
+                  <td className="pa-num">{num(source.quantity)}</td>
+                  <td className="pa-num">{num(source.hoursPerYear)}</td>
+                  <td className="pa-num">{num(source.height)}</td>
+                  <td className="pa-num">{num(source.diameter)}</td>
+                  <td className="pa-num">{num(source.velocity)}</td>
+                  <td className="pa-num">{num(source.volume)}</td>
+                  <td className="pa-num">{num(source.temperature)}</td>
                   <td className="pa-num">{formatNumber(source.substances.length)}</td>
                 </tr>
                 {expanded && (
@@ -176,8 +176,8 @@ function TotalsTable({ totals }: { readonly totals: readonly AirTotal[] }): JSX.
               </th>
               <td>{cell(total.substanceName)}</td>
               <td className="pa-num">{formatNumber(total.sources)}</td>
-              <td className="pa-num">{cell(total.gramsPerSecond)}</td>
-              <td className="pa-num">{cell(total.tonsPerYear)}</td>
+              <td className="pa-num">{num(total.gramsPerSecond)}</td>
+              <td className="pa-num">{num(total.tonsPerYear)}</td>
             </tr>
           ))}
         </tbody>
