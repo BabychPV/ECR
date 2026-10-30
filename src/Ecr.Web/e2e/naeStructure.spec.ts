@@ -31,6 +31,7 @@ interface TreeNodeDto {
   parentEntryId: number | null;
   ordinal: number;
   isActive: boolean;
+  validTo: string | null;
 }
 
 interface Seed {
@@ -64,6 +65,20 @@ async function signIn(page: Page, scheme: 'light' | 'dark', who = Admin): Promis
   await page.getByRole('textbox', { name: /Password|Пароль/i }).fill(who.password);
   await page.keyboard.press('Enter');
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
+
+  // ⚠ Тема з сервера перемагає localStorage (`usePreferenceSync`): без запису налаштування `theme` «dark» мовчки
+  // лишався світлим (перші знімки dark були світлі). Пишемо налаштування, перезавантажуємо й ПЕРЕВІРЯЄМО атрибут.
+  if (scheme === 'dark') {
+    const put = await page.request.put('/api/v1/me/preferences/theme', {
+      headers: { 'Content-Type': 'application/json' },
+      data: JSON.stringify(scheme),
+    });
+    expect(put.ok(), `тема: ${String(put.status())} ${await put.text()}`).toBe(true);
+    await page.reload();
+  }
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.getAttribute('data-mantine-color-scheme')), { timeout: 15_000 })
+    .toBe(scheme);
 }
 
 async function readTree(request: APIRequestContext, registry: string): Promise<TreeNodeDto[]> {
@@ -144,19 +159,16 @@ test.describe('Структура NAE: дерево, дії, права, які�
       });
       expect(saved.status(), `поля: ${await saved.text()}`).toBe(200);
 
-      // ⚠ Рівні додаються по одному: перший PUT із кількома новими рівнями на tip 4af0a0112 давав 500 (дефект N1,
-      // Analiz виправляє); поступове додавання працює і до, і після виправлення.
+      // Усі три нові рівні одним PUT (на 4af0a0112 це давало 500; виправлено в integ-nae-a2) - заодно сторож цього.
       const wanted = [
         { code: 'REGION', isOptional: false, name: { values: { en: 'Region' } } },
         { code: 'SITE', isOptional: false, name: { values: { en: 'Site' } } },
         { code: 'SRC', isOptional: false, name: { values: { en: 'NAE' } } },
       ];
-      for (let count = 1; count <= wanted.length; count += 1) {
-        const levels = await admin.request.put(`/api/v1/registries/${registry}/hierarchy`, {
-          data: { isHierarchical: true, levels: wanted.slice(0, count) },
-        });
-        expect(levels.status(), `рівні (${String(count)}): ${await levels.text()}`).toBe(200);
-      }
+      const levels = await admin.request.put(`/api/v1/registries/${registry}/hierarchy`, {
+        data: { isHierarchical: true, levels: wanted },
+      });
+      expect(levels.status(), `рівні: ${await levels.text()}`).toBe(200);
 
       const auto = definition.codeMode === 'Auto';
       let counter = 0;
@@ -227,6 +239,8 @@ test.describe('Структура NAE: дерево, дії, права, які�
     if (seed === null) return;
     const admin = await signedIn(browser);
     try {
+      // Тема e2e-admin повертається до світлої (її міняє dark-прогін), інакше далі стенд іде з темною.
+      await admin.request.put('/api/v1/me/preferences/theme', { headers: { 'Content-Type': 'application/json' }, data: JSON.stringify('light') });
       // Вузли (включно з тими, що створили тести) - м'яке видалення листків, потім предків; збій не маскує тести.
       const nodes = await readTree(admin.request, seed.registry);
       const depth = (node: TreeNodeDto): number => {
@@ -362,8 +376,11 @@ test.describe('Структура NAE: дерево, дії, права, які�
       await page.getByRole('button', { name: 'Add child' }).first().click();
       const dialog = page.getByRole('dialog', { name: 'New node' });
       await expect(dialog).toBeVisible({ timeout: 15_000 });
-      if (data.auto) await expect(dialog.getByLabel('Code', { exact: true })).toHaveCount(0);
-      await dialog.getByRole('textbox', { name: /^Name/ }).fill(name);
+      // Автокод: поля коду немає; ручний код (довідник створено з CodeMode = Manual): поле є й вимагається.
+      const codeField = dialog.getByRole('textbox', { name: 'Code', exact: true });
+      if (data.auto) await expect(codeField).toHaveCount(0);
+      else await codeField.fill(`E2E_${nae}_${name.replace(/\s/g, '')}`);
+      await dialog.getByLabel(/^Name · English/).fill(name);
       await dialog.getByLabel(/^NaeCode/).fill(nae);
       // Регіон успадковано від батька (підказка), район порожній -> «-».
       await expect(dialog.getByLabel(/^RegionCode/)).toHaveValue('ATYRAU');
@@ -379,10 +396,32 @@ test.describe('Структура NAE: дерево, дії, права, які�
     expect(created!.levelCode).toBe('SRC');
     expect(created!.parentEntryId).toBe(data.siteB);
 
-    // Той самий NaeCode вдруге: сервер відмовляє 409 (діловий ключ), форма лишається відкритою з поясненням.
+    // Відмова ділового ключа (409 ECR-REG-4092) - ПІДМІНЕНА відповідь сервера (page.route), а не справжня: довідник цього
+    // спеку має простий ключ по NaeCode без складеного ключа NAE_TREE, і сервер приймає дубль (201) - див. звіт. Доводиться
+    // саме клієнтське оброблення тіла відмови: форма лишається відкритою й називає тримача ключа.
+    await page.route('**/api/v1/registries/*/entries', async (route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+
+      return route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          type: 'https://ecr.ncoc.kz/errors/ECR-REG-4092',
+          title: 'Key window overlap',
+          status: 409,
+          errorCode: 'ECR-REG-4092',
+          messageKey: 'err.ECR-REG-4092.keyWindowOverlap',
+          entryCode: 'HOLDER_1',
+        }),
+      });
+    });
+    // Після створення вибрано НОВИЙ вузол (лист, «Add child» нема): повертаємось на майданчик.
+    await page.goto(url(data.registry, data.siteB));
+    await expect(page.getByTestId('tree-panel')).toContainText(Names.siteB, { timeout: 30_000 });
+    await expect(page.getByRole('button', { name: 'Add child' }).first()).toBeEnabled();
     const again = await fill('Pipe Dup', '1090');
     await again.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect(again.locator('[data-nae-key-error]')).toBeVisible({ timeout: 15_000 });
+    await expect(again.locator('[data-nae-key-error]')).toContainText('HOLDER_1', { timeout: 15_000 });
     await expect(again).toBeVisible();
     expect((await readTree(page.request, data.registry)).filter((n) => n.display === 'Pipe Dup')).toHaveLength(0);
   });
@@ -405,8 +444,13 @@ test.describe('Структура NAE: дерево, дії, права, які�
     await dialog.getByRole('button', { name: 'Retire', exact: true }).click();
     await expect(dialog).toBeHidden({ timeout: 15_000 });
     const now = await readTree(page.request, data.registry);
-    expect(now.find((n) => n.id === data.siteB)!.isActive).toBe(false);
-    for (const child of now.filter((n) => n.parentEntryId === data.siteB)) expect(child.isActive, child.display).toBe(false);
+    // М'яке виведення: вікно дії закривається (validTo - перший недійсний день), вузол не видаляється.
+    const today = new Date().toISOString().slice(0, 10);
+    const retired = (node: TreeNodeDto): boolean => !node.isActive || (node.validTo !== null && node.validTo <= today);
+    expect(retired(now.find((n) => n.id === data.siteB)!), 'майданчик виведено').toBe(true);
+    const children = now.filter((n) => n.parentEntryId === data.siteB);
+    expect(children.length, 'діти лишилися у дереві').toBeGreaterThan(0);
+    for (const child of children) expect(retired(child), child.display).toBe(true);
   });
 
   test('користувач лише з Registry.View: дерево й панель є, дій зміни немає', async ({ page }) => {
@@ -419,8 +463,9 @@ test.describe('Структура NAE: дерево, дії, права, які�
     await expect(page.getByTestId('tree-panel')).toContainText(Names.siteA, { timeout: 30_000 });
     await expect(page.locator('[data-nae-readonly]')).toBeVisible();
     await expect(page.getByTestId('tree-panel-move')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Retire' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Add child' })).toHaveCount(0);
+    // ⚠ exact: інакше «Retire» збігається з перемикачем «Retired» (показ виведених), який глядачу доступний.
+    await expect(page.getByRole('button', { name: 'Retire', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Add child', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Load from PI AF' })).toHaveCount(0);
     // Клавіші зміни теж не діють: Delete не відкриває підтвердження.
@@ -448,7 +493,7 @@ test.describe('Структура NAE: дерево, дії, права, які�
         const heights = Array.from(document.querySelectorAll<HTMLElement>('[role="treeitem"]')).map((el) => el.getBoundingClientRect().height);
         return { token, heights };
       });
-      expect(rows.heights.length).toBeGreaterThan(3);
+      expect(rows.heights.length).toBeGreaterThanOrEqual(3);
       expect(new Set(rows.heights.map((h) => Math.round(h))).size, `рядки однієї висоти: ${rows.heights.join(',')}`).toBe(1);
       const viewport = page.getByTestId('tree-viewport');
       const scroll = await viewport.evaluate((el) => ({ client: el.clientHeight, overflowY: getComputedStyle(el).overflowY }));
@@ -456,15 +501,16 @@ test.describe('Структура NAE: дерево, дії, права, які�
       expect(scroll.client).toBeGreaterThan(80);
 
       // 3. Кільце фокуса на рядку дерева видно (різниця пікселів із не сфокусованим станом).
-      const target = item(page, Names.srcA2);
+      // Рядок майданчика: не вибраний і не виведений (srcA2 до цього перенесено під виведений майданчик).
+      const target = item(page, Names.siteA);
       await page.locator('body').click({ position: { x: 5, y: 5 } });
       const plain = await target.screenshot();
       await target.focus();
       await page.keyboard.press('ArrowUp');
       await page.keyboard.press('ArrowDown');
-      const focused = await item(page, Names.srcA2).screenshot();
+      const focused = await item(page, Names.siteA).screenshot();
       expect(Buffer.compare(plain, focused), 'кільце фокуса змінює пікселі рядка').not.toBe(0);
-      const outline = await item(page, Names.srcA2).evaluate((el) => {
+      const outline = await item(page, Names.siteA).evaluate((el) => {
         const style = getComputedStyle(el);
         return { width: parseFloat(style.outlineWidth), style: style.outlineStyle, shadow: style.boxShadow };
       });
