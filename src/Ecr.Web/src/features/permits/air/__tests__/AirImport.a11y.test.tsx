@@ -6,7 +6,7 @@ import { describe as describeViolations, findViolations } from '@/test/a11y';
 import * as airApi from '@/features/permits/air/airApi';
 import { AirLimitsTab } from '../AirLimitsTab';
 import { AirImportWizard } from '../import/AirImportWizard';
-import { analysis, card, preview, profile, profiles, result, tree, xlsx } from './airFixtures';
+import { analysis, card, preview, profile, profiles, result, scopeCodes, tree, xlsx } from './airFixtures';
 
 /**
  * Доступність картки лімітів і майстра імпорту в обох темах (`ФВ-14.16`): картка (згорнута, розкрита, підсумки) і
@@ -31,6 +31,7 @@ vi.mock('@/features/permits/air/airApi', () => ({
   previewAirImport: vi.fn(),
   applyAirImport: vi.fn(),
   getNaeTree: vi.fn(),
+  getAirScopeCodes: vi.fn(),
 }));
 
 const api = vi.mocked(airApi);
@@ -44,6 +45,7 @@ beforeEach(() => {
   api.previewAirImport.mockResolvedValue(preview());
   api.applyAirImport.mockResolvedValue(result());
   api.getNaeTree.mockResolvedValue(tree());
+  api.getAirScopeCodes.mockResolvedValue(scopeCodes());
 });
 afterEach(() => {
   cleanup();
@@ -80,13 +82,16 @@ describe('Air limits - доступність', { timeout: 300_000 }, () => {
           <AirImportWizard permitId={5} mayImport mayEditProfile />
         </Shell>,
       );
-      await screen.findByLabelText(new RegExp(text('permits.air.import.region.label')));
+      await screen.findByRole('textbox', { name: new RegExp('^' + text('permits.air.import.region.label')) });
       await clean(container);
 
       const input = document.querySelector<HTMLInputElement>('input[type="file"]');
       if (input === null) throw new Error('file input');
       await userEvent.upload(input, xlsx());
-      fireEvent.change(screen.getByLabelText(new RegExp(text('permits.air.import.region.label'))), { target: { value: 'ATYRAU' } });
+      await userEvent.click(screen.getByRole('textbox', { name: new RegExp('^' + text('permits.air.import.region.label')) }));
+      await userEvent.click(await screen.findByRole('option', { name: /^ATYRAU/ }));
+      await userEvent.click(screen.getByRole('textbox', { name: new RegExp('^' + text('permits.air.import.area.label')) }));
+      await userEvent.click(await screen.findByRole('option', { name: /^OFFSHORE/ }));
       fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.analyse') }));
       await screen.findByTestId('air-header-report');
       await clean(container);

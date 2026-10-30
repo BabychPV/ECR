@@ -3,6 +3,14 @@ import type { NaeTreeNode } from '../airTypes';
 /** Рівень самого джерела (НАЕ) у дереві: під ним нових вузлів не створюють. */
 export const SourceLevelCode = 'SRC';
 
+/**
+ * Вузол чинний: `isActive` і термін дії не закінчився. Вивід з ужитку (retire) лише закриває `validTo`, а `isActive`
+ * лишається `true` НАВМИСНО (рішення сервера) - тому «закритий» визначається за `validTo` (дати `yyyy-mm-dd` порівнюються рядками).
+ */
+export function isLive(node: Pick<NaeTreeNode, 'isActive' | 'validTo'>, today: string): boolean {
+  return node.isActive && (node.validTo === null || node.validTo === undefined || node.validTo >= today);
+}
+
 export interface NodeOption {
   readonly value: string;
   readonly label: string;
@@ -13,7 +21,7 @@ export interface NodeOption {
  * «Atyrau › Offshore › Barges». Дерево плоске: шлях збирається за `parentEntryId`; цикл чи сирота не зациклюють —
  * довжина шляху обмежена глибиною дерева.
  */
-export function nodeOptions(nodes: readonly NaeTreeNode[]): readonly NodeOption[] {
+export function nodeOptions(nodes: readonly NaeTreeNode[], today: string = new Date().toISOString().slice(0, 10)): readonly NodeOption[] {
   const byId = new Map(nodes.map((node) => [node.id, node] as const));
 
   const pathOf = (node: NaeTreeNode): string => {
@@ -29,7 +37,7 @@ export function nodeOptions(nodes: readonly NaeTreeNode[]): readonly NodeOption[
   };
 
   return nodes
-    .filter((node) => node.isActive && node.levelCode !== SourceLevelCode)
+    .filter((node) => isLive(node, today) && node.levelCode !== SourceLevelCode)
     .map((node) => ({ value: String(node.id), label: pathOf(node) }))
     .sort((a, b) => a.label.localeCompare(b.label));
 }

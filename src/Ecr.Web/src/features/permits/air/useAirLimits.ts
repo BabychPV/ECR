@@ -3,6 +3,7 @@ import {
   analyseAirImport,
   applyAirImport,
   getAirLimits,
+  getAirScopeCodes,
   getImportProfile,
   getNaeTree,
   listImportProfiles,
@@ -15,6 +16,7 @@ import type {
   AirImportResult,
   AirLimitsPermit,
   AirPreview,
+  AirScopeCodes,
   ImportProfile,
   ImportProfileSummary,
   NaeTree,
@@ -30,6 +32,7 @@ export const airKeys = {
   profiles: ['permits', 'air', 'profiles'] as const,
   profile: (code: string) => ['permits', 'air', 'profile', code] as const,
   tree: ['permits', 'air', 'nae-tree'] as const,
+  scope: ['permits', 'air', 'scope-codes'] as const,
 };
 
 /**
@@ -113,4 +116,9 @@ export function useSaveImportProfile() {
       return client.invalidateQueries({ queryKey: airKeys.profiles });
     },
   });
+}
+
+/** Regions and areas for the File step. */
+export function useAirScopeCodes() {
+  return useQuery<AirScopeCodes>({ queryKey: airKeys.scope, queryFn: getAirScopeCodes });
 }

@@ -51,6 +51,16 @@ describe('nodeOptions', () => {
     expect(nodeOptions(tree().nodes).map((o) => o.label)).toEqual(['Atyrau', 'Atyrau › Offshore', 'Atyrau › Offshore › DC05_Island']);
   });
 
+  it('закритий вузол (validTo в минулому, isActive лишається true) не пропонується; чинний до дати - так', () => {
+    const [first, second, third] = tree().nodes;
+    const nodes = [
+      { ...first!, validTo: '2026-01-31' },
+      { ...second!, validTo: '2026-12-31' },
+      { ...third!, validTo: null },
+    ];
+    expect(nodeOptions(nodes, '2026-10-30').map((o) => o.label)).toEqual(['Atyrau › Offshore', 'Atyrau › Offshore › DC05_Island']);
+  });
+
   it('сирота й цикл не зациклюють', () => {
     const nodes = [
       { ...tree().nodes[0]!, id: 10, parentEntryId: 11, display: 'A' },

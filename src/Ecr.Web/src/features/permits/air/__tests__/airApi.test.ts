@@ -4,6 +4,7 @@ import {
   analyseAirImport,
   applyAirImport,
   getAirLimits,
+  getAirScopeCodes,
   getImportProfile,
   getNaeTree,
   listImportProfiles,
@@ -37,11 +38,13 @@ describe('airApi: адреси й методи', () => {
     await listImportProfiles();
     await getImportProfile('ERA TABLE/33');
     await getNaeTree();
+    await getAirScopeCodes();
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       '/api/v1/permits/5/air-limits',
       '/api/v1/air-limits/import-profiles',
       '/api/v1/air-limits/import-profiles/ERA%20TABLE%2F33',
       '/api/v1/registries/NAE_TREE/tree',
+      '/api/v1/air-limits/scope-codes',
     ]);
   });
 

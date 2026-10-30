@@ -5,6 +5,7 @@ import type {
   AirImportResult,
   AirLimitsPermit,
   AirPreview,
+  AirScopeCodes,
   ImportProfile,
   ImportProfileSummary,
   NaeTree,
@@ -81,4 +82,9 @@ export function applyAirImport(permitId: number, file: File, options: AirImportO
 /** Плоске дерево НАЕ (вузли за `parentEntryId`); лише чинні вузли. */
 export function getNaeTree(): Promise<NaeTree> {
   return apiFetch<NaeTree>(`/api/v1/registries/${encodeURIComponent(NaeRegistryCode)}/tree`);
+}
+
+/** Regions and areas of the NAE tree (with group names): the File step picks from them instead of free text. Registry.View. */
+export function getAirScopeCodes(): Promise<AirScopeCodes> {
+  return apiFetch<AirScopeCodes>('/api/v1/air-limits/scope-codes');
 }
