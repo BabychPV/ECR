@@ -80,16 +80,10 @@ public sealed class AirLimitsImportTarget(
                 var doomed = (await StoredAsync(tables, permitId, region, area, keys, token).ConfigureAwait(false))
                     .Where(s => plan.Delete.Any(d => d.OwnerKey == s.Parent.OwnerKey && d.Key == s.Parent.Key))
                     .ToList();
-                foreach (var child in doomed.SelectMany(d => d.ChildIds))
-                {
-                    await deleter.HandleAsync(AirLimitsSchema.SubstancesRegistry, child, token).ConfigureAwait(false);
-                }
-
-                foreach (var source in doomed)
-                {
-                    await deleter.HandleAsync(AirLimitsSchema.SourcesRegistry, source.SourceId, token).ConfigureAwait(false);
-                }
-
+                // Set-based: substances first (a source with substances is referenced), then the sources, one batch each.
+                await deleter.HandleManyAsync(AirLimitsSchema.SubstancesRegistry, [.. doomed.SelectMany(d => d.ChildIds)], token).ConfigureAwait(false);
+                await deleter.HandleManyAsync(AirLimitsSchema.SourcesRegistry, [.. doomed.Select(d => d.SourceId)], token).ConfigureAwait(false);
+                uow.ReleaseSavedRegistryRows();
                 Data.Invalidate();
 
                 // 3. The new rows.
@@ -227,11 +221,18 @@ public sealed class AirLimitsImportTarget(
         var areaTag = area == AirLimitsSchema.NoArea ? "NA" : area;
         var usedCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // Parents are validated and placed once per DISTINCT parent node, not once per created node.
+        var checkedParents = new HashSet<long>();
         foreach (var creation in creations)
         {
             if (!long.TryParse(creation.UnderNode, NumberStyles.None, CultureInfo.InvariantCulture, out var parentId))
             {
                 throw CreateUnderInvalid(creation.Code);
+            }
+
+            if (!checkedParents.Add(parentId))
+            {
+                continue;
             }
 
             var parent = await registries.FindEntryAsync(parentId, ct).ConfigureAwait(false);
@@ -248,8 +249,32 @@ public sealed class AirLimitsImportTarget(
             {
                 throw CreateUnderInvalid(creation.Code);
             }
+        }
 
-            var code = Unique(await IsFreeAsync(tables, $"N_{region}_{areaTag}_{creation.Code}", usedCodes, ct).ConfigureAwait(false));
+        // Codes: one lookup of every wanted base code; only a taken one walks its suffixes one by one.
+        var wanted = creations.Select(c => BaseCode(region, areaTag, c.Code)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var taken = (await registries.FindEntriesByCodesAsync(tables.Nae.Id, wanted, ct).ConfigureAwait(false))
+            .Select(e => e.Code)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // A base code is answered by the one lookup above; only a suffixed candidate asks the database.
+        async Task<bool> IsTakenAsync(string candidate, bool isBase)
+            => usedCodes.Contains(candidate)
+               || (isBase
+                   ? taken.Contains(candidate)
+                   : await registries.FindEntryByCodeAsync(tables.Nae.Id, candidate, ct).ConfigureAwait(false) is not null);
+
+        var writes = new List<RegistryEntryWrite>(creations.Count);
+        foreach (var creation in creations)
+        {
+            var baseCode = BaseCode(region, areaTag, creation.Code);
+            var code = baseCode;
+            for (var i = 2; await IsTakenAsync(code, code == baseCode).ConfigureAwait(false); i++)
+            {
+                code = $"{baseCode}_{i}";
+            }
+
+            usedCodes.Add(code);
             var name = creation.Values.GetValueOrDefault("sourceName") as string ?? creation.Code;
             var fields = new Dictionary<string, object?>(StringComparer.Ordinal)
             {
@@ -260,42 +285,38 @@ public sealed class AirLimitsImportTarget(
                 [NaeTreeSchema.PointNameField] = creation.Values.GetValueOrDefault("emissionPointName") as string,
             };
 
-            var result = await writer.WriteAsync(
-                new RegistryEntryWriteBatch(tables.Nae.Id, [new RegistryEntryWrite(code, fields) { DisplayName = name }]) { CreateOnly = true },
-                ct).ConfigureAwait(false);
-            if (result.Errors.Count > 0)
-            {
-                throw Rejected(creation.Code, result.Errors[0].MessageKey);
-            }
-
-            var entry = result.Rows[0].Entry;
-            entry.Rename(new LocalizedText(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["en"] = name, ["ru"] = name }));
-            entry.SetLevel(source.Id);
-            entry.SetParent(parentId);
-            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            writes.Add(new RegistryEntryWrite(code, fields) { DisplayName = name });
         }
+
+        var result = await writer.WriteAsync(new RegistryEntryWriteBatch(tables.Nae.Id, writes) { CreateOnly = true }, ct).ConfigureAwait(false);
+        if (result.Errors.Count > 0)
+        {
+            throw Rejected(creations[result.Errors[0].Row - 1].Code, result.Errors[0].MessageKey);
+        }
+
+        foreach (var row in result.Rows)
+        {
+            var creation = creations[row.Row - 1];
+            var name = creation.Values.GetValueOrDefault("sourceName") as string ?? creation.Code;
+            row.Entry.Rename(new LocalizedText(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["en"] = name, ["ru"] = name }));
+            row.Entry.SetLevel(source.Id);
+            row.Entry.SetParent(long.Parse(creation.UnderNode!, CultureInfo.InvariantCulture));
+        }
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        uow.ReleaseSavedRegistryRows();
     }
 
-    private async Task<string> IsFreeAsync(AirTables tables, string baseCode, HashSet<string> used, CancellationToken ct)
+    private static string BaseCode(string region, string areaTag, string naeCode)
     {
         var sb = new StringBuilder();
-        foreach (var ch in baseCode)
+        foreach (var ch in $"N_{region}_{areaTag}_{naeCode}")
         {
             sb.Append(char.IsAsciiLetterOrDigit(ch) ? ch : '_');
         }
 
-        var code = sb.Length > 60 ? sb.ToString(0, 60) : sb.ToString();
-        var candidate = code;
-        for (var i = 2; used.Contains(candidate) || await registries.FindEntryByCodeAsync(tables.Nae.Id, candidate, ct).ConfigureAwait(false) is not null; i++)
-        {
-            candidate = $"{code}_{i}";
-        }
-
-        used.Add(candidate);
-        return candidate;
+        return sb.Length > 60 ? sb.ToString(0, 60) : sb.ToString();
     }
-
-    private static string Unique(string code) => code;
 
     // ---------- insert ----------
 
@@ -347,6 +368,7 @@ public sealed class AirLimitsImportTarget(
 
             await uow.SaveChangesAsync(ct).ConfigureAwait(false);
             sourceIds.AddRange(result.Rows.OrderBy(r => r.Row).Select(r => r.Entry.Id));
+            uow.ReleaseSavedRegistryRows();
         }
 
         var childWrites = new List<(string Key, RegistryEntryWrite Write)>();
@@ -387,6 +409,7 @@ public sealed class AirLimitsImportTarget(
 
             await uow.SaveChangesAsync(ct).ConfigureAwait(false);
             done += chunk.Length;
+            uow.ReleaseSavedRegistryRows();
         }
 
         return (sourceIds.Count, done);

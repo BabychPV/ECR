@@ -6,6 +6,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Ecr.Adapters.Tests.Excel.RegistryImport;
 using Ecr.Application.Ports;
+using Ecr.Application.Permits.AirLimits;
 using Ecr.Application.Registries.Nae;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
@@ -16,6 +17,7 @@ using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Ecr.Api.Tests;
 
@@ -31,7 +33,7 @@ namespace Ecr.Api.Tests;
 /// the re-import test doubles the rows.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class AirLimitsImportHttpTests(SqlServerFixture sql)
+public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHelper output)
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static bool prepared;
@@ -318,6 +320,322 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql)
             app, await PostFileAsync(client, Preview(permitId), Synthetic.Bytes, new { region = "X1", profileCode = "NOPE" }),
             HttpStatusCode.UnprocessableEntity, "err.ECR-IMP-0422.airProfileUnknown");
         Assert.Equal(HttpStatusCode.NotFound, (await PostFileAsync(client, Preview(999_999_999), Synthetic.Bytes, new { region = "X1" })).StatusCode);
+    }
+
+    // ---------- N3b: the apply is set-based ----------
+
+    /// <summary>
+    /// Ceiling for the wall time of ONE apply of the full golden file (first import and replace). The real numbers are an order of
+    /// magnitude lower (see the commit); the ceiling is CI-safe and still far below the per-entry deletes it replaced (3+ minutes).
+    /// </summary>
+    private static readonly TimeSpan ApplyCeiling = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Ceiling for SQL commands of ONE apply of the full file: the work is chunked (EF insert batches of ~42 rows for ~30k rows) and
+    /// does not grow per deleted entry. The per-entry delete it replaced issued ~15 commands for each of the 2,997 rows.
+    /// </summary>
+    private const int ApplyCommandCeiling = 3000;
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Apply__full_file_first_import_and_replace_stay_inside_the_time_and_query_budget()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+        var region = NewRegion();
+        var permitId = await NewPermitAsync(client, app);
+        var bystander = await NewPermitAsync(client, app);
+        var resolutions = await ResolveAsync(app, client, permitId, region, "OFFSHORE", Synthetic.Bytes);
+
+        // Another permit in ANOTHER region: its rows must come through both applies untouched.
+        var otherRegion = NewRegion();
+        var otherResolutions = await ResolveAsync(app, client, bystander, otherRegion, "OFFSHORE", Synthetic.Bytes);
+        await ApplyBytesAsync(app, client, bystander, Synthetic.Bytes, new { region = otherRegion, area = "OFFSHORE", resolutions = otherResolutions });
+
+        using var counter = new SqlClientCommandCounter();
+
+        counter.Tally.Reset();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var first = await ApplyBytesAsync(app, client, permitId, Synthetic.Bytes, new { region, area = "OFFSHORE", resolutions });
+        var firstTime = clock.Elapsed;
+        var firstCommands = counter.Tally.Snapshot();
+        Assert.Equal(373, first.GetProperty("sources").GetInt32());
+        Assert.Equal(2624, first.GetProperty("substances").GetInt32());
+
+        counter.Tally.Reset();
+        clock.Restart();
+        var again = await ApplyBytesAsync(app, client, permitId, Synthetic.Bytes, new { region, area = "OFFSHORE" });
+        var replaceTime = clock.Elapsed;
+        var replaceCommands = counter.Tally.Snapshot();
+        Assert.Equal(373, again.GetProperty("replacedOwn").GetInt32());
+
+        output.WriteLine($"first import: {firstTime.TotalSeconds:F1} s, {firstCommands.Total} commands");
+        output.WriteLine($"replace:      {replaceTime.TotalSeconds:F1} s, {replaceCommands.Total} commands");
+        output.WriteLine(replaceCommands.Format());
+
+        Assert.True(firstTime <= ApplyCeiling, $"first import took {firstTime.TotalSeconds:F1} s (ceiling {ApplyCeiling.TotalSeconds} s)");
+        Assert.True(replaceTime <= ApplyCeiling, $"replace took {replaceTime.TotalSeconds:F1} s (ceiling {ApplyCeiling.TotalSeconds} s)");
+        Assert.True(firstCommands.Total <= ApplyCommandCeiling, $"first import issued {firstCommands.Total} commands\n{firstCommands.Format()}");
+        Assert.True(replaceCommands.Total <= ApplyCommandCeiling, $"replace issued {replaceCommands.Total} commands\n{replaceCommands.Format()}");
+
+        // Correctness after the replace: exactly one copy of everything, the values of the model, nothing of the bystander touched.
+        var card = await CardAsync(app, client, permitId);
+        var sources = card.GetProperty("sources").EnumerateArray().ToList();
+        Assert.Equal(373, sources.Count);
+        Assert.Equal(373, sources.Select(s => s.GetProperty("naeCode").GetString()).Distinct().Count());
+        Assert.Equal(2624, card.GetProperty("substanceRows").GetInt32());
+        Assert.Equal(2624, sources.Sum(s => s.GetProperty("substances").GetArrayLength()));
+        Assert.Equal(
+            Synthetic.Model.SelectMany(m => m.Substances).Sum(s => s.TonsPerYear ?? 0m),
+            card.GetProperty("totals").EnumerateArray().Sum(t => Dec(t.GetProperty("tonsPerYear"))));
+
+        var other = await CardAsync(app, client, bystander);
+        Assert.Equal(373, other.GetProperty("sources").GetArrayLength());
+        Assert.Equal(2624, other.GetProperty("substanceRows").GetInt32());
+
+        // The replaced rows are soft-deleted (history kept), not physically gone: 373 + 2,624 per generation.
+        await using var db = new EcrDbContext(Options());
+        var deleted = await db.RegistryEntries.CountAsync(e => e.IsDeleted && e.DeletedByUserId != null && e.DeletedAt != null
+            && (e.Code != null) && db.RegistryDefs.Any(d => d.Id == e.RegistryDefId && (d.Code == AirLimitsSchema.SourcesRegistry || d.Code == AirLimitsSchema.SubstancesRegistry)));
+        Assert.True(deleted >= 373 + 2624, $"soft-deleted air rows: {deleted}");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Replace__scope_leaves_other_areas_and_other_permits_alone()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+        var region = NewRegion();
+        var permitId = await NewPermitAsync(client, app);
+        var neighbour = await NewPermitAsync(client, app);
+        var small = Small(Synthetic.Bytes, 40);
+
+        var offshore = await ResolveAsync(app, client, permitId, region, "OFFSHORE", small);
+        var inOffshore = await ApplyBytesAsync(app, client, permitId, small, new { region, area = "OFFSHORE", resolutions = offshore });
+        var onshore = await ResolveAsync(app, client, permitId, region, "ONSHORE", small);
+        await ApplyBytesAsync(app, client, permitId, small, new { region, area = "ONSHORE", resolutions = onshore });
+        var otherRegion = NewRegion();
+        var theirs = await ResolveAsync(app, client, neighbour, otherRegion, "OFFSHORE", small);
+        await ApplyBytesAsync(app, client, neighbour, small, new { region = otherRegion, area = "OFFSHORE", resolutions = theirs });
+
+        var sources = inOffshore.GetProperty("sources").GetInt32();
+        var substances = inOffshore.GetProperty("substances").GetInt32();
+        Assert.True(sources > 3 && substances > sources);
+        var before = await IdsAsync(app, client, permitId, "OFFSHORE");
+        Assert.Equal(sources, before.Count(i => i.Kind == "source"));
+
+        // Re-import ONLY the ONSHORE scope: the OFFSHORE rows of the same permit and the other permit's rows survive byte for byte.
+        var replaced = await ApplyBytesAsync(app, client, permitId, small, new { region, area = "ONSHORE" });
+        Assert.Equal(sources, replaced.GetProperty("replacedOwn").GetInt32());
+
+        var after = await IdsAsync(app, client, permitId, "OFFSHORE");
+        Assert.Equal(before.Select(b => b.Id).Order(), after.Select(a => a.Id).Order());
+        var cardNow = await CardAsync(app, client, permitId);
+        Assert.Equal(2 * sources, cardNow.GetProperty("sources").GetArrayLength());
+        Assert.Equal(2 * substances, cardNow.GetProperty("substanceRows").GetInt32());
+        var neighbourCard = await CardAsync(app, client, neighbour);
+        Assert.Equal(sources, neighbourCard.GetProperty("sources").GetArrayLength());
+        Assert.Equal(substances, neighbourCard.GetProperty("substanceRows").GetInt32());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Replace__set_based_delete_leaves_the_same_trace_as_deleting_entry_by_entry()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Admin);
+        var small = Small(Synthetic.Bytes, 40);
+
+        // Two identical permits in two regions. A is cleaned the old way (DELETE per entry, substances first), B by the import.
+        var regionA = NewRegion();
+        var regionB = NewRegion();
+        var permitA = await NewPermitAsync(client, app);
+        var permitB = await NewPermitAsync(client, app);
+        await ApplyBytesAsync(app, client, permitA, small, new { region = regionA, area = "OFFSHORE", resolutions = await ResolveAsync(app, client, permitA, regionA, "OFFSHORE", small) });
+        await ApplyBytesAsync(app, client, permitB, small, new { region = regionB, area = "OFFSHORE", resolutions = await ResolveAsync(app, client, permitB, regionB, "OFFSHORE", small) });
+        var oldA = await IdsAsync(app, client, permitA, "OFFSHORE");
+        var oldB = await IdsAsync(app, client, permitB, "OFFSHORE");
+        Assert.Equal(oldA.Count, oldB.Count);
+
+        foreach (var row in oldA.Where(r => r.Kind == "substance").Concat(oldA.Where(r => r.Kind == "source")))
+        {
+            var code = row.Kind == "source" ? AirLimitsSchema.SourcesRegistry : AirLimitsSchema.SubstancesRegistry;
+            var gone = await client.DeleteAsync(new Uri($"/api/v1/registries/{code}/entries/{row.Id}", UriKind.Relative));
+            Assert.True(gone.IsSuccessStatusCode, $"{(int)gone.StatusCode}: {await gone.Content.ReadAsStringAsync()} | {app.ErrorsText}");
+        }
+
+        await ApplyBytesAsync(app, client, permitB, small, new { region = regionB, area = "OFFSHORE" });
+
+        await using var db = new EcrDbContext(Options());
+        var a = await TraceAsync(db, oldA.Select(r => r.Id).ToList());
+        var b = await TraceAsync(db, oldB.Select(r => r.Id).ToList());
+        Assert.Equal(a, b);
+        Assert.Equal(oldA.Count, a.Count(t => t.StartsWith("audit|", StringComparison.Ordinal)));
+        Assert.Equal(oldA.Count, a.Count(t => t.StartsWith("entry|", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Apply__a_failure_after_the_deletes_and_inserts_rolls_everything_back()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql) { ExtraServices = s => s.AddScoped<IAuditWriter>(sp => new FailingImportAudit(ActivatorUtilities.CreateInstance<AuditWriter>(sp))) };
+        using var client = await SignedInAsync(app, Admin);
+        var small = Small(Synthetic.Bytes, 40);
+        var region = NewRegion();
+        var permitId = await NewPermitAsync(client, app);
+        var resolutions = await ResolveAsync(app, client, permitId, region, "OFFSHORE", small);
+
+        // First import fails at the very last step: not a source, a substance or a NAE node of the region may remain.
+        FailingImportAudit.Armed = true;
+        try
+        {
+            using var refused = await PostFileAsync(client, Apply(permitId), small, new { region, area = "OFFSHORE", resolutions });
+            Assert.False(refused.IsSuccessStatusCode);
+        }
+        finally
+        {
+            FailingImportAudit.Armed = false;
+        }
+
+        Assert.Equal(0, (await CardAsync(app, client, permitId)).GetProperty("sources").GetArrayLength());
+        var tree = await ReadAsync(app, await client.GetAsync(new Uri($"/api/v1/registries/{NaeTreeSchema.RegistryCode}/tree", UriKind.Relative)));
+        Assert.DoesNotContain(tree.GetProperty("nodes").EnumerateArray(), n => (n.GetProperty("code").GetString() ?? "").Contains($"_{region}_", StringComparison.Ordinal));
+
+        // A good import, then a replace that fails after its deletes and inserts: the first generation is still there, alive.
+        await ApplyBytesAsync(app, client, permitId, small, new { region, area = "OFFSHORE", resolutions });
+        var before = await IdsAsync(app, client, permitId, "OFFSHORE");
+        FailingImportAudit.Armed = true;
+        try
+        {
+            using var refused = await PostFileAsync(client, Apply(permitId), small, new { region, area = "OFFSHORE" });
+            Assert.False(refused.IsSuccessStatusCode);
+        }
+        finally
+        {
+            FailingImportAudit.Armed = false;
+        }
+
+        var after = await IdsAsync(app, client, permitId, "OFFSHORE");
+        Assert.Equal(before.Select(b => b.Id).Order(), after.Select(a => a.Id).Order());
+        await using var db = new EcrDbContext(Options());
+        var ids = before.Select(b => b.Id).ToList();
+        Assert.Equal(0, await db.RegistryEntries.CountAsync(e => ids.Contains(e.Id) && e.IsDeleted));
+    }
+
+    private sealed record RowId(string Kind, long Id);
+
+    private static async Task<List<RowId>> IdsAsync(EcrApiFactory app, HttpClient client, long permitId, string area)
+    {
+        var card = await CardAsync(app, client, permitId);
+        var rows = new List<RowId>();
+        foreach (var source in card.GetProperty("sources").EnumerateArray()
+                     .Where(s => string.Equals(s.GetProperty("area").GetString(), area, StringComparison.OrdinalIgnoreCase)))
+        {
+            rows.Add(new RowId("source", source.GetProperty("id").GetInt64()));
+            rows.AddRange(source.GetProperty("substances").EnumerateArray().Select(s => new RowId("substance", s.GetProperty("id").GetInt64())));
+        }
+
+        return rows;
+    }
+
+    /// <summary>The shape of what deleting these entries left behind, without the ids and codes that differ per permit.</summary>
+    private static async Task<List<string>> TraceAsync(EcrDbContext db, List<long> ids)
+    {
+        var trace = new List<string>();
+        foreach (var e in await db.RegistryEntries.AsNoTracking().Where(e => ids.Contains(e.Id)).ToListAsync())
+        {
+            trace.Add($"entry|deleted={e.IsDeleted}|by={e.DeletedByUserId}|stamped={e.DeletedAt != null}");
+        }
+
+        foreach (var k in await db.RegistryEntryKeys.AsNoTracking().Where(k => ids.Contains(k.RegistryEntryId)).ToListAsync())
+        {
+            trace.Add($"key|live={k.IsLive}");
+        }
+
+        var low = (int)ids.Min();
+        var high = (int)ids.Max();
+        var idSet = ids.Select(i => (int)i).ToHashSet();
+        var audits = (await db.Database.SqlQuery<AuditShape>(
+            $"SELECT EntityId, EntityType, Operation, CAST(ChangeClass AS int) AS ChangeClass, ChangeReason, ChangedByUserId, OldJson FROM aud.StructureChange WHERE EntityType = N'dic.RegistryEntry' AND Operation = N'Delete' AND EntityId BETWEEN {low} AND {high}")
+            .ToListAsync()).Where(r => idSet.Contains(r.EntityId)).ToList();        foreach (var audit in audits)
+        {
+            var old = JsonDocument.Parse(audit.OldJson ?? "{}").RootElement;
+            trace.Add($"audit|{audit.EntityType}|{audit.Operation}|{audit.ChangeClass}|{audit.ChangeReason}|{audit.ChangedByUserId}|{string.Join(",", old.EnumerateObject().Select(p => p.Name).Order())}");
+        }
+
+        trace.Sort(StringComparer.Ordinal);
+        return trace;
+    }
+
+    private sealed class AuditShape
+    {
+        public int EntityId { get; set; }
+        public string EntityType { get; set; } = string.Empty;
+        public string Operation { get; set; } = string.Empty;
+        public int ChangeClass { get; set; }
+        public string? ChangeReason { get; set; }
+        public int ChangedByUserId { get; set; }
+        public string? OldJson { get; set; }
+    }
+
+    /// <summary>The first <paramref name="sourceRows"/> data rows of the golden table: a small file with the same layout.</summary>
+    private static byte[] Small(byte[] bytes, int sourceRows)
+    {
+        using var input = new MemoryStream(bytes);
+        using var workbook = new ClosedXML.Excel.XLWorkbook(input);
+        var sheet = workbook.Worksheets.First();
+        var first = Synthetic.FirstSourceRow + sourceRows;
+        var last = sheet.LastRowUsed()!.RowNumber();
+        if (last >= first)
+        {
+            sheet.Rows(first, last).Delete();
+        }
+
+        using var output = new MemoryStream();
+        workbook.SaveAs(output);
+        return output.ToArray();
+    }
+
+    private static async Task<JsonElement> ApplyBytesAsync(EcrApiFactory app, HttpClient client, long permitId, byte[] bytes, object options)
+        => await ReadAsync(app, await PostFileAsync(client, Apply(permitId), bytes, options));
+
+    private static async Task<object[]> ResolveAsync(EcrApiFactory app, HttpClient client, long permitId, string region, string area, byte[] bytes)
+    {
+        var preview = (await ReadAsync(app, await PostFileAsync(client, Preview(permitId), bytes, new { region, area }))).GetProperty("preview");
+        return [.. preview.GetProperty("missing").EnumerateArray()
+            .Select(m => (object)new { kind = "nae", code = m.GetProperty("code").GetString(), action = "create", createUnder = siteNodeId.ToString(CultureInfo.InvariantCulture) })];
+    }
+
+    /// <summary>Delegates to the real audit writer, except that the final import record throws while <see cref="Armed"/>.</summary>
+    private sealed class FailingImportAudit(IAuditWriter inner) : IAuditWriter
+    {
+        public static volatile bool Armed;
+
+        public Task WriteCellChangesAsync(IReadOnlyList<CellChangeRecord> changes, CancellationToken ct) => inner.WriteCellChangesAsync(changes, ct);
+
+        public Task WriteStructureChangeAsync(StructureChangeRecord change, CancellationToken ct)
+            => Armed && change.Operation == "AirLimitsImport"
+                ? throw new InvalidOperationException("Injected failure after the deletes and inserts.")
+                : inner.WriteStructureChangeAsync(change, ct);
+
+        public Task WriteStructureChangesAsync(IReadOnlyList<StructureChangeRecord> changes, CancellationToken ct) => inner.WriteStructureChangesAsync(changes, ct);
+
+        public Task WriteSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct) => inner.WriteSecurityEventAsync(evt, ct);
+
+        public Task WriteSecurityEventsAsync(IReadOnlyList<SecurityEventRecord> events, CancellationToken ct) => inner.WriteSecurityEventsAsync(events, ct);
+
+        public Task WriteIndependentSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct) => inner.WriteIndependentSecurityEventAsync(evt, ct);
+
+        public Task WritePublicationEventAsync(PublicationEventRecord evt, CancellationToken ct) => inner.WritePublicationEventAsync(evt, ct);
     }
 
     // ---------- helpers ----------

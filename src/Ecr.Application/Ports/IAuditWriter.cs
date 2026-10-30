@@ -30,6 +30,19 @@ public interface IAuditWriter
     /// <summary>Записує структурну зміну.</summary>
     public Task WriteStructureChangeAsync(StructureChangeRecord change, CancellationToken ct);
 
+    /// <summary>
+    /// Записує групу структурних змін — по запису на зміну, як <see cref="WriteStructureChangeAsync"/>, але за
+    /// мінімум походів до сервера. За замовчуванням — поштучно; сховище перевизначає пакетним <c>INSERT</c>.
+    /// </summary>
+    public async Task WriteStructureChangesAsync(IReadOnlyList<StructureChangeRecord> changes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+        foreach (var change in changes)
+        {
+            await WriteStructureChangeAsync(change, ct).ConfigureAwait(false);
+        }
+    }
+
     /// <summary>Записує подію безпеки.</summary>
     public Task WriteSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct);
 
