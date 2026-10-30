@@ -76,8 +76,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
             // SQL-відповідник ProjectVersionTimeline.VersionOf: найбільший FromPeriodKey ≤ ключа; раніше першого рядка —
             // перший рядок; шкали немає — Project.TemplateVersionId. Скалярна функція без побічних ефектів (інлайниться).
+            // ⚠ EXEC: CREATE FUNCTION мусить бути єдиним оператором пакета, а в ідемпотентному скрипті міграція йде
+            // всередині IF ... BEGIN ... END разом з іншими операторами.
             migrationBuilder.Sql("""
-                CREATE FUNCTION doc.fn_VersionOf (@ProjectId int, @PeriodKey int)
+                EXEC(N'CREATE FUNCTION doc.fn_VersionOf (@ProjectId int, @PeriodKey int)
                 RETURNS int
                 AS
                 BEGIN
@@ -87,7 +89,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         (SELECT TOP (1) t.TemplateVersionId FROM doc.ProjectTemplateVersion t
                          WHERE t.ProjectId = @ProjectId ORDER BY t.FromPeriodKey ASC),
                         (SELECT p.TemplateVersionId FROM doc.Project p WHERE p.Id = @ProjectId));
-                END
+                END');
                 """);
         }
 

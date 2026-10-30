@@ -873,33 +873,32 @@ public sealed class RowStore(
         // ⚠ Аркуші документа — це і є перелік того, що в ньому заповнюють
         // (ФВ-3.2). Таблиці беруться з тих аркушів, а не з усього шаблону:
         // документ навмисно може містити частину.
-        var sheetIds = await db.DocumentSheets
-            .AsNoTracking()
-            .Where(s => s.DocumentId == documentId)
-            .Select(s => s.SheetDefId)
+        // ✎ RPT-STABLE Part B: склад документа не залежить від періоду, а структура - залежить. Один запит дає склад і версію
+        // ПЕРІОДУ (шкала; свіжо з бази - писар уже тримає замок): аркуші складу з ІНШОЇ версії замінюються однойменними аркушами
+        // версії періоду. Зайвих звернень на звичайному шляху немає.
+        var period = periodKey.Value;
+        var docSheets = await (
+                from s in db.DocumentSheets.AsNoTracking()
+                where s.DocumentId == documentId
+                join sd in db.SheetDefs.AsNoTracking() on s.SheetDefId equals sd.Id
+                select new
+                {
+                    Id = sd.Id,
+                    sd.Code,
+                    sd.TemplateVersionId,
+                    PeriodVersion = db.Documents.Where(d => d.Id == documentId)
+                        .Select(d => EcrDbContext.VersionOf(d.ProjectId, period)).FirstOrDefault(),
+                })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        if (sheetIds.Count == 0)
+        if (docSheets.Count == 0)
         {
             return [];
         }
 
-        // ✎ RPT-STABLE Part B: склад документа не залежить від періоду, а структура - залежить. Аркуші складу, що
-        // належать ІНШІЙ версії, ніж та, що діє за цей період (шкала), замінюються однойменними аркушами версії періоду.
-        // ⚠ Свіжо з бази (під спільним `doc-structure` писар вже тримає замок): кеш шкали міг відстати.
-        var periodVersion = await db.Documents
-            .AsNoTracking()
-            .Where(d => d.Id == documentId)
-            .Select(d => EcrDbContext.VersionOf(d.ProjectId, periodKey.Value))
-            .FirstAsync(ct)
-            .ConfigureAwait(false);
-        var docSheets = await db.SheetDefs
-            .AsNoTracking()
-            .Where(s => sheetIds.Contains(s.Id))
-            .Select(s => new { s.Id, s.Code, s.TemplateVersionId })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        var sheetIds = docSheets.Select(s => s.Id).ToList();
+        var periodVersion = docSheets[0].PeriodVersion;
         if (docSheets.Any(s => s.TemplateVersionId != periodVersion))
         {
             var foreignCodes = docSheets.Where(s => s.TemplateVersionId != periodVersion).Select(s => s.Code).ToList();

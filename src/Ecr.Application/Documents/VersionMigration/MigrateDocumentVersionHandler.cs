@@ -1244,7 +1244,7 @@ public sealed class MigrateDocumentVersionHandler(
 
     private static BusinessRuleException RangeError(string key, string message, params (string Name, int Value)[] details)
     {
-        var map = new Dictionary<string, object?> { ["messageKey"] = "err.ECR-SCHM-0422." + key };
+        var map = new Dictionary<string, object?> { ["messageKey"] = key };
         foreach (var (name, value) in details)
         {
             map[name] = value.ToString(CultureInfo.InvariantCulture);
@@ -1263,7 +1263,7 @@ public sealed class MigrateDocumentVersionHandler(
     {
         if (target.Status != TemplateVersionStatus.Published)
         {
-            throw RangeError("migrateTargetNotPublished", $"Цільова версія {target.Id} не опублікована.");
+            throw RangeError("err.ECR-SCHM-0422.migrateTargetNotPublished", $"Цільова версія {target.Id} не опублікована.");
         }
 
         var periodKeys = await store.ListPeriodKeysAsync(projectId, ct).ConfigureAwait(false);
@@ -1278,7 +1278,7 @@ public sealed class MigrateDocumentVersionHandler(
             if (entries.Count > 1)
             {
                 throw RangeError(
-                    "migrateWholeProjectMultiVersion",
+                    "err.ECR-SCHM-0422.migrateWholeProjectMultiVersion",
                     $"Проєкт {projectId} має кілька версій шаблону за періодами: перенос усього проєкту недоступний.");
             }
 
@@ -1287,12 +1287,12 @@ public sealed class MigrateDocumentVersionHandler(
 
         if (FromPeriodKey is not { } requested)
         {
-            throw RangeError("migrateFromMonthRequired", "Для переносу «з місяця» потрібен fromPeriodKey.");
+            throw RangeError("err.ECR-SCHM-0422.migrateFromMonthRequired", "Для переносу «з місяця» потрібен fromPeriodKey.");
         }
 
         if (periodKeys.Count == 0 || !periodKeys.Contains(requested))
         {
-            throw RangeError("migrateFromMonthInvalid", $"Період {requested} не належить проєкту {projectId}.", ("periodKey", requested));
+            throw RangeError("err.ECR-SCHM-0422.migrateFromMonthInvalid", $"Період {requested} не належить проєкту {projectId}.", ("periodKey", requested));
         }
 
         var hasMonths = from.Sheets.Concat(to.Sheets).SelectMany(s => s.Tables)
@@ -1306,7 +1306,7 @@ public sealed class MigrateDocumentVersionHandler(
         if (effective < segmentFrom)
         {
             throw RangeError(
-                "migrateFromMonthBeforeSegment",
+                "err.ECR-SCHM-0422.migrateFromMonthBeforeSegment",
                 $"Період {requested} раніше початку чинного сегмента версій ({segmentFrom}).",
                 ("periodKey", requested), ("segmentFrom", segmentFrom));
         }
