@@ -9234,6 +9234,7 @@ USING (VALUES
     ,(N'err.ECR-SCHM-0422.migrateFromMonthBeforeSegment', N'en', N'Nothing was moved: period {periodKey} is earlier than {segmentFrom}, where the current template version of the project starts. Choose a period from {segmentFrom} or later.', 1)
     ,(N'err.ECR-SCHM-0422.migrateWholeProjectMultiVersion', N'en', N'Nothing was moved: the project already uses several template versions by period, so a whole-project migration is unavailable. Use "From month" with a period not earlier than the start of the current version.', 1)
     ,(N'err.ECR-SCHM-0422.migrateTargetNotPublished', N'en', N'Nothing was moved: the target template version is not published.', 1)
+    ,(N'err.ECR-SCHM-0422.migrateFromMonthDisabled', N'en', N'Nothing was moved: the "From month" migration is not enabled yet. Only the whole-project migration is available.', 1)
     ,(N'documents.migrateRangeLabel', N'en', N'Scope', 1)
     ,(N'documents.migrateRangeWhole', N'en', N'Whole project, any time', 1)
     ,(N'documents.migrateRangeFromMonth', N'en', N'From month', 1)
@@ -24548,6 +24549,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-SCHM-0422.migrateWholeProjectMultiVersion', N'kz', N'Ештеңе көшірілмеді: жоба кезеңдер бойынша бірнеше шаблон нұсқасын пайдаланады, сондықтан бүкіл жобаны көшіру қолжетімсіз. Ағымдағы нұсқаның басынан ерте емес кезеңмен «Айдан бастап» қолданыңыз.'),
     (N'err.ECR-SCHM-0422.migrateTargetNotPublished', N'ru', N'Ничего не перенесено: целевая версия шаблона не опубликована.'),
     (N'err.ECR-SCHM-0422.migrateTargetNotPublished', N'kz', N'Ештеңе көшірілмеді: мақсатты шаблон нұсқасы жарияланбаған.'),
+    (N'err.ECR-SCHM-0422.migrateFromMonthDisabled', N'ru', N'Ничего не перенесено: перенос «С месяца» пока не включён. Доступен только перенос всего проекта.'),
+    (N'err.ECR-SCHM-0422.migrateFromMonthDisabled', N'kz', N'Ештеңе көшірілмеді: «Айдан бастап» көшіру әлі қосылмаған. Тек бүкіл жобаны көшіру қолжетімді.'),
     (N'documents.migrateRangeLabel', N'ru', N'Охват'),
     (N'documents.migrateRangeLabel', N'kz', N'Қамту'),
     (N'documents.migrateRangeWhole', N'ru', N'Весь проект, в любое время'),

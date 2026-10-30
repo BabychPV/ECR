@@ -174,11 +174,16 @@ public sealed record LockedSheetItem(long DocumentId, string SheetCode, int Peri
 /// <param name="CurrentVersionId">Поточна версія проєкту.</param>
 /// <param name="CurrentVersion">Її номер.</param>
 /// <param name="Targets">Опубліковані версії того самого шаблону, крім поточної, від новішої.</param>
+/// <param name="FromMonthEnabled">
+/// RPT-STABLE Part B: чи доступний перенос «з місяця» (прапор <c>Documents:VersionMigration:FromMonthEnabled</c>,
+/// типово <c>false</c>); <c>false</c> - діалог показує лише «увесь проєкт».
+/// </param>
 public sealed record DocumentVersionMigrationTargetsDto(
     int ProjectId,
     int CurrentVersionId,
     string CurrentVersion,
-    IReadOnlyList<TemplateVersionSummary> Targets);
+    IReadOnlyList<TemplateVersionSummary> Targets,
+    bool FromMonthEnabled = false);
 
 /// <summary>
 /// Перенос документа на нову версію шаблону — явна операція з попереднім
@@ -224,8 +229,24 @@ public sealed class MigrateDocumentVersionHandler(
     IFormulaOverrideStore? formulaOverrides = null,
 
     // ✎ RPT-STABLE Part B: шкала версій проєкту. `null` (прямий конструктор у тестах) - шкали немає: перенос усього проєкту.
-    IProjectVersionTimeline? timeline = null)
+    IProjectVersionTimeline? timeline = null,
+
+    // ✎ RPT-STABLE Part B: прапор «з місяця». `null` (прямий конструктор у тестах) - вимкнено, як і типова конфігурація.
+    VersionMigrationOptions? migrationOptions = null)
 {
+    private readonly bool _fromMonthEnabled = migrationOptions?.FromMonthEnabled ?? false;
+
+    /// <summary>Відмова, коли запит просить «з місяця», а прапор вимкнено (до B2).</summary>
+    private void EnsureRangeAllowed()
+    {
+        if (Range == VersionMigrationRange.FromMonth && !_fromMonthEnabled)
+        {
+            throw RangeError(
+                "err.ECR-SCHM-0422.migrateFromMonthDisabled",
+                $"Перенос «з місяця» вимкнено ({VersionMigrationOptions.FromMonthEnabledKey} = false): доступний лише перенос усього проєкту.");
+        }
+    }
+
     /// <summary>
     /// Скільки активна (<c>Queued</c>/<c>Running</c>) задача переносу може не оновлюватися, щоб ще вважатися
     /// живою: залишок від краху процесу не мусить назавжди блокувати новий перенос проєкту.
@@ -425,6 +446,7 @@ public sealed class MigrateDocumentVersionHandler(
         var request = await ResolveAsync(documentId, targetVersionId, tolerateSame: false, ct).ConfigureAwait(false);
         VersionMigrationRenames.Validate(renames);
         VersionMigrationLookupRemaps.Validate(lookupRemaps);
+        EnsureRangeAllowed();
 
         if (dryRun)
         {
@@ -532,6 +554,7 @@ public sealed class MigrateDocumentVersionHandler(
         var request = await ResolveAsync(documentId, targetVersionId, tolerateSame: false, ct).ConfigureAwait(false);
         VersionMigrationRenames.Validate(renames);
         VersionMigrationLookupRemaps.Validate(lookupRemaps);
+        EnsureRangeAllowed();
 
         if (request.Archived)
         {
@@ -1236,7 +1259,7 @@ public sealed class MigrateDocumentVersionHandler(
             .OrderByDescending(v => v.Id)
             .ToList();
 
-        return new DocumentVersionMigrationTargetsDto(projectId, current.Id, current.Version, targets);
+        return new DocumentVersionMigrationTargetsDto(projectId, current.Id, current.Version, targets, _fromMonthEnabled);
     }
 
     /// <summary>Розв'язаний обсяг переносу: межа для сховища (0 — увесь проєкт), ефективний початок, попередження.</summary>
@@ -1355,6 +1378,7 @@ public sealed class MigrateDocumentVersionHandler(
         var source = await versions.GetAsync(sourceVersionId, ct).ConfigureAwait(false);
         var from = await metadata.GetAsync(sourceVersionId, ct).ConfigureAwait(false);
         var to = await metadata.GetAsync(target.Id, ct).ConfigureAwait(false);
+        EnsureRangeAllowed();   // також для фонової задачі: прапор могли вимкнути між постановкою і стартом
         var range = await ResolveRangeAsync(projectId, target, from, to, ct).ConfigureAwait(false);
         var scope = await store.ReadScopeAsync(projectId, range.FromPeriodKey, ct).ConfigureAwait(false);
 

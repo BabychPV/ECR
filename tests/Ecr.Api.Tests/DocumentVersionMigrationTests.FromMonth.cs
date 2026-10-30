@@ -66,6 +66,7 @@ public sealed partial class DocumentVersionMigrationTests
         // Стан періоду ДО X фіксується байт-у-байт (ідентифікатори й значення).
         var jan = await PeriodStateAsync(s, 202601).ConfigureAwait(true);
 
+        using var flag = FromMonthOn();
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
@@ -176,6 +177,7 @@ public sealed partial class DocumentVersionMigrationTests
         var s = await ArrangeAsync(Target.AddsC4Only).ConfigureAwait(true);
         await AddMonthsAsync(s, 202602).ConfigureAwait(true);
 
+        using var flag = FromMonthOn();
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
         var response = await PostRangeAsync(client, s, dryRun: false, "WholeProject", null).ConfigureAwait(true);
@@ -208,6 +210,7 @@ public sealed partial class DocumentVersionMigrationTests
             await db0.SaveChangesAsync().ConfigureAwait(true);
         }
 
+        using var flag = FromMonthOn();
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
@@ -245,6 +248,7 @@ public sealed partial class DocumentVersionMigrationTests
     public async Task Некоректні_межі_та_чернетка_дають_422_з_ключами()
     {
         var s = await ArrangeAsync(Target.AddsC4Only).ConfigureAwait(true);
+        using var flag = FromMonthOn();
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
@@ -276,6 +280,7 @@ public sealed partial class DocumentVersionMigrationTests
             await db0.SaveChangesAsync().ConfigureAwait(true);
         }
 
+        using var flag = FromMonthOn();
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
         var moved = await PostRangeAsync(client, s, dryRun: false, "FromMonth", 202610).ConfigureAwait(true);
@@ -327,6 +332,7 @@ public sealed partial class DocumentVersionMigrationTests
         var s = await ArrangeAsync(Target.AddsC4Only).ConfigureAwait(true);   // 202601 на v1
         await AddMonthsAsync(s, 202602, 202603).ConfigureAwait(true);
 
+        using var flag = FromMonthOn();
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
         var response = await PostRangeAsync(client, s, dryRun: false, "FromMonth", 202602).ConfigureAwait(true);
@@ -387,6 +393,7 @@ public sealed partial class DocumentVersionMigrationTests
         await builder.AddPeriodAsync(s.Doc, new PeriodKey(202604)).ConfigureAwait(true);   // ще без екземпляра
         await builder.AddPeriodAsync(s.Doc, new PeriodKey(202512)).ConfigureAwait(true);   // до X, теж без екземпляра
 
+        using var flag = FromMonthOn();
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
         var moved = await PostRangeAsync(client, s, dryRun: false, "FromMonth", 202602).ConfigureAwait(true);
@@ -416,7 +423,8 @@ public sealed partial class DocumentVersionMigrationTests
             var s = await ArrangeAsync(Target.AddsC4Only).ConfigureAwait(true);
             await AddMonthsAsync(s, 202602, 202603).ConfigureAwait(true);
 
-            using var app = new EcrApiFactory(sql);
+            using var flag = FromMonthOn();
+        using var app = new EcrApiFactory(sql);
             using var first = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
             using var second = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
@@ -439,6 +447,70 @@ public sealed partial class DocumentVersionMigrationTests
                 [(202601, s.Doc.TemplateVersionId), (202602, s.TargetVersionId)],
                 line.Select(t => (t.FromPeriodKey, t.TemplateVersionId)));
         }
+    }
+
+    /// <summary>Вмикає прапор «з місяця» для фабрик, створених у межах області (типово він вимкнений до B2).</summary>
+    private static FromMonthFlag FromMonthOn() => new("true");
+
+    private sealed class FromMonthFlag : IDisposable
+    {
+        private const string Variable = "ECR_Documents__VersionMigration__FromMonthEnabled";
+
+        public FromMonthFlag(string? value) => Environment.SetEnvironmentVariable(Variable, value);
+
+        public void Dispose() => Environment.SetEnvironmentVariable(Variable, null);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "RPT-STABLE")]
+    public async Task Прапор_вимкнено_з_місяця_дає_422_увесь_проєкт_працює_а_перелік_цілей_каже_false()
+    {
+        var s = await ArrangeAsync(Target.AddsC4Only).ConfigureAwait(true);
+        await AddMonthsAsync(s, 202602).ConfigureAwait(true);
+
+        using (var off = new FromMonthFlag(null))   // типова конфігурація: appsettings.json - false
+        using (var app = new EcrApiFactory(sql))
+        {
+            using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+            var targets = await client.GetAsync(
+                new Uri($"/api/v1/documents/{s.Doc.DocumentId}/migrate-version", UriKind.Relative)).ConfigureAwait(true);
+            var targetsBody = await targets.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(targets.StatusCode == HttpStatusCode.OK, targetsBody);
+            Assert.False(JsonDocument.Parse(targetsBody).RootElement.GetProperty("fromMonthEnabled").GetBoolean());
+
+            foreach (var dryRun in new[] { true, false })
+            {
+                var refused = await PostRangeAsync(client, s, dryRun, "FromMonth", 202602).ConfigureAwait(true);
+                await AssertProblemAsync(
+                        refused, HttpStatusCode.UnprocessableEntity, "ECR-SCHM-0422", "err.ECR-SCHM-0422.migrateFromMonthDisabled")
+                    .ConfigureAwait(true);
+            }
+
+            // Нічого не змінено: шкала не отримала рядка цільової версії.
+            await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+            {
+                Assert.False(await db.ProjectTemplateVersions
+                    .AnyAsync(t => t.ProjectId == s.Doc.ProjectId && t.TemplateVersionId == s.TargetVersionId).ConfigureAwait(true));
+            }
+
+            // «Увесь проєкт» працює як раніше.
+            var whole = await PostRangeAsync(client, s, dryRun: false, "WholeProject", null).ConfigureAwait(true);
+            Assert.True(whole.StatusCode == HttpStatusCode.OK, await whole.Content.ReadAsStringAsync().ConfigureAwait(true));
+        }
+
+        // Увімкнено: перелік цілей каже true.
+        var s2 = await ArrangeAsync(Target.AddsC4Only).ConfigureAwait(true);
+        using var on = FromMonthOn();
+        using var app2 = new EcrApiFactory(sql);
+        using var client2 = await SignedInAsync(app2, s2.UserName).ConfigureAwait(true);
+        var targetsOn = await client2.GetAsync(
+            new Uri($"/api/v1/documents/{s2.Doc.DocumentId}/migrate-version", UriKind.Relative)).ConfigureAwait(true);
+        var targetsOnBody = await targetsOn.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(targetsOn.StatusCode == HttpStatusCode.OK, targetsOnBody);
+        Assert.True(JsonDocument.Parse(targetsOnBody).RootElement.GetProperty("fromMonthEnabled").GetBoolean());
     }
 
     private async Task<string> PeriodStateAsync(Scenario s, int periodKey)
