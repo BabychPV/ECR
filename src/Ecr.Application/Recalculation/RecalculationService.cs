@@ -54,7 +54,11 @@ public sealed class RecalculationService(
 
     // ✎ D-461: позначки «ручне значення замість формули». Необов'язковий: прямі `new RecalculationService(...)` у тестах
     // його не передають (ручних значень тоді немає); DI підставляє сховище.
-    IFormulaOverrideStore? formulaOverrides = null) : ISubmitRecalculation
+    IFormulaOverrideStore? formulaOverrides = null,
+
+    // RPT-STABLE Part B: збережена мапа перейменування колонок (псевдонім на межі версій). Необов'язковий: без нього
+    // колонка зі зміненим кодом на межі версій не знаходиться (NULL), як і колонка, якої немає.
+    IColumnRenameMap? columnRenames = null) : ISubmitRecalculation
 {
     /// <summary>
     /// LP-40: джерела знімків довідників цього екземпляра сервісу (скоуп = один прогін задачі чи запит):
@@ -1707,11 +1711,68 @@ public sealed class RecalculationService(
 
             await LoadPeriodAsync(
                     values, stored: null, instance.DocumentId, new PeriodKey(periodKey.Value + offset), offset,
-                    scope.TableDefIds, ct)
+                    scope.TableDefIds, ct, known: null, currentVersionId: instance.TemplateVersionId)
                 .ConfigureAwait(false);
         }
 
         return (values, stored);
+    }
+
+    /// <summary>
+    /// Таблиці/колонки екземплярів ІНШОЇ версії → відповідники у версії <paramref name="currentVersion"/> (за кодами аркуша,
+    /// таблиці й колонки; код, що змінився, - через збережену мапу перейменувань). Екземпляр без таблиці-відповідника
+    /// у результат не потрапляє.
+    /// </summary>
+    private async Task<Dictionary<long, (int TableDefId, Dictionary<int, int> Columns)>> TranslateForeignInstancesAsync(
+        IReadOnlyList<TableInstanceRef> all, int currentVersion, CancellationToken ct)
+    {
+        var result = new Dictionary<long, (int, Dictionary<int, int>)>();
+        var current = await metadata.GetAsync(currentVersion, ct).ConfigureAwait(false);
+        var (forward, backward) = columnRenames is null
+            ? ((IReadOnlyDictionary<int, int>)new Dictionary<int, int>(), (IReadOnlyDictionary<int, int>)new Dictionary<int, int>())
+            : await columnRenames.GetAsync(ct).ConfigureAwait(false);
+
+        foreach (var foreign in all.Where(t => t.TemplateVersionId != currentVersion))
+        {
+            var other = await metadata.GetAsync(foreign.TemplateVersionId, ct).ConfigureAwait(false);
+            var source = other.Sheets
+                .SelectMany(s => s.Tables.Select(t => (Sheet: s, Table: t)))
+                .FirstOrDefault(x => x.Table.Id == foreign.TableDefId);
+            if (source.Table is null)
+            {
+                continue;
+            }
+
+            var target = current.Sheets
+                .Where(s => !s.IsDeleted && string.Equals(s.Code, source.Sheet.Code, StringComparison.Ordinal))
+                .SelectMany(s => s.Tables)
+                .FirstOrDefault(t => !t.IsDeleted && string.Equals(t.Code, source.Table.Code, StringComparison.Ordinal));
+            if (target is null)
+            {
+                continue;
+            }
+
+            var targetByCode = target.Columns.Where(c => !c.IsDeleted).ToDictionary(c => c.Code, c => c.Id, StringComparer.Ordinal);
+            var map = new Dictionary<int, int>();
+            foreach (var column in source.Table.Columns)
+            {
+                if (targetByCode.TryGetValue(column.Code, out var same))
+                {
+                    map[column.Id] = same;
+                }
+                else if ((forward.TryGetValue(column.Id, out var renamed)
+                          && current.ColumnsById.TryGetValue(renamed, out var asNew) && asNew.TableDefId == target.Id)
+                         || (backward.TryGetValue(column.Id, out renamed)
+                             && current.ColumnsById.TryGetValue(renamed, out asNew) && asNew.TableDefId == target.Id))
+                {
+                    map[column.Id] = renamed;
+                }
+            }
+
+            result[foreign.TableInstanceId] = (target.Id, map);
+        }
+
+        return result;
     }
 
     /// <summary>Значення всіх таблиць документа за один період.</summary>
@@ -1734,6 +1795,10 @@ public sealed class RecalculationService(
     /// переліку інших не залежать, тож підмножина надмножини — те саме, що
     /// окремий запит на підмножину.
     /// </param>
+    /// <param name="currentVersionId">
+    /// Версія періоду, що рахується (RPT-STABLE Part B): екземпляри суміжного періоду на іншій версії розвʼязуються
+    /// за кодами в її таблиці/колонки; <c>null</c> - без розвʼязання (поточний період).
+    /// </param>
     private async Task LoadPeriodAsync(
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
         Dictionary<CellKey, CellValueData>? stored,
@@ -1743,10 +1808,27 @@ public sealed class RecalculationService(
         IReadOnlySet<int>? tableDefIds,
         CancellationToken ct,
         (IReadOnlyList<TableInstanceRef> Instances,
-            IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> RowIds)? known = null)
+            IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> RowIds)? known = null,
+        int? currentVersionId = null)
     {
         var all = known?.Instances
                   ?? await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
+
+        // ✎ RPT-STABLE Part B: суміжний період на ІНШІЙ версії шаблону (шкала версій проєкту) - таблиця й колонки
+        // розвʼязуються за КОДОМ у версію періоду, що рахується (+ збережена мапа перейменувань як псевдонім); колонка,
+        // якої в тій версії немає, дає NULL (не 0 і не помилку) - ключа в `values` просто немає.
+        Dictionary<long, (int TableDefId, Dictionary<int, int> Columns)>? translations = null;
+        if (currentVersionId is { } currentVersion && all.Any(t => t.TemplateVersionId != currentVersion))
+        {
+            translations = await TranslateForeignInstancesAsync(all, currentVersion, ct).ConfigureAwait(false);
+            all =
+            [
+                .. all.Where(t => t.TemplateVersionId == currentVersion || translations.ContainsKey(t.TableInstanceId))
+                    .Select(t => translations.TryGetValue(t.TableInstanceId, out var tr)
+                        ? t with { TableDefId = tr.TableDefId, TemplateVersionId = currentVersion }
+                        : t),
+            ];
+        }
 
         // ⛔ `CAL-02`. Фільтр стоїть ДО обох пакетних запитів, а не після них:
         // сенс рядка саме в тому, скільки комірок віддає база, а не скільки з
@@ -1790,7 +1872,15 @@ public sealed class RecalculationService(
                     continue;
                 }
 
-                var key = new CellKey(offset, table.TableDefId, rowKey, cell.Address.ColumnDefId);
+                var columnId = cell.Address.ColumnDefId;
+                if (translations is not null
+                    && translations.TryGetValue(table.TableInstanceId, out var translated)
+                    && !translated.Columns.TryGetValue(columnId, out columnId))
+                {
+                    continue;   // колонки немає у версії періоду, що рахується
+                }
+
+                var key = new CellKey(offset, table.TableDefId, rowKey, columnId);
                 values[key] = FromCellValue(cell.Value);
 
                 if (stored is not null)

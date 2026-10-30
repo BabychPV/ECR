@@ -506,6 +506,50 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
         public IReadOnlyList<ReportViewFailure> Snapshot() => failures;
     }
 
+    // ── RPT-STABLE Part B: збережена мапа перейменувань ──────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "RPT-STABLE")]
+    public async Task Перейменована_колонка_за_мапою_видна_під_обома_іменами_з_даними_обох_версій()
+    {
+        var (templateId, tpl) = await NewTemplateAsync();
+        var v1 = (await AddVersionAsync(templateId, "1", [new("S", "T", [("OLD", CellDataType.Decimal), ("KEEP", CellDataType.String)])]))["S/T"];
+        var v2 = (await AddVersionAsync(templateId, "2", [new("S", "T", [("NEW", CellDataType.Decimal), ("KEEP", CellDataType.String)])]))["S/T"];
+        var p = await NewProjectAsync(v1.VersionId, 202609, 202610);
+        await SeedAsync(p, 202609, v1, ("R1", 1, new() { ["OLD"] = 5m, ["KEEP"] = "k9" }));
+        await SeedAsync(p, 202610, v2, ("R1", 1, new() { ["NEW"] = 7m, ["KEEP"] = "k10" }));
+
+        // Без мапи: дві окремі колонки, кожна лише зі своєю версією.
+        await GenerateAsync(v1.VersionId);
+        await GenerateAsync(v2.VersionId);
+        var stable = StableName(tpl, "S", "T");
+        Assert.Equal(
+            [(202609, (decimal?)5m, (decimal?)null), (202610, null, 7m)],
+            (await RowsAsync(stable, p.ProjectId, "_PeriodKey", "OLD", "NEW"))
+                .Select(r => ((int)r[0]!, (decimal?)r[1], (decimal?)r[2])).ToList());
+
+        // З мапою (cfg.ColumnRename): обидва імені, однакові дані - обʼєднання даних обох ідентифікаторів.
+        await using (var db = sql.CreateContext())
+        {
+            db.ColumnRenames.Add(new ColumnRename(v1.Cols["OLD"], v2.Cols["NEW"]));
+            await db.SaveChangesAsync();
+        }
+
+        var again = await ExecStableAsync(v2.VersionId);
+        Assert.Contains(again, r => r.View == stable && r.Action != "Unchanged");
+        Assert.Equal(
+            [(202609, (decimal?)5m, (decimal?)5m), (202610, 7m, 7m)],
+            (await RowsAsync(stable, p.ProjectId, "_PeriodKey", "OLD", "NEW"))
+                .Select(r => ((int)r[0]!, (decimal?)r[1], (decimal?)r[2])).ToList());
+        Assert.Equal(["OLD", "KEEP", "NEW"], (await ColumnNamesAsync(stable)).Skip(10).ToList());   // за першою появою
+
+        // Ідемпотентність і без побічних ефектів на _vN.
+        Assert.All(await ExecStableAsync(v2.VersionId), r => Assert.Equal("Unchanged", r.Action));
+    }
+
+
     // ── помічники ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private async Task<(int TemplateId, string Code)> NewTemplateAsync()
