@@ -18,7 +18,8 @@ public sealed class AirLimitsController(
     ProvisionAirLimitsHandler provision,
     AirImportProfileHandler profiles,
     AirLimitsImportHandler import,
-    GetAirLimitsPermitHandler permit) : ControllerBase
+    GetAirLimitsPermitHandler permit,
+    GetAirScopeCodesHandler scopeCodes) : ControllerBase
 {
     /// <summary>Largest accepted request body (the workbook is capped separately by the safety gate).</summary>
     public const long MaxImportBodyBytes = 30_000_000;
@@ -42,6 +43,17 @@ public sealed class AirLimitsController(
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<AirLimitsProvisionReport>> Provision(CancellationToken ct)
         => Ok(await provision.HandleAsync(ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Region codes and, per region, area codes used by the NAE tree (with the names of its group nodes) - what the import wizard
+    /// offers instead of free text. Permission <c>Registry.View</c>.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpGet("air-limits/scope-codes")]
+    [ProducesResponseType<AirScopeCodesDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<AirScopeCodesDto>> ScopeCodes(CancellationToken ct)
+        => Ok(await scopeCodes.HandleAsync(ct).ConfigureAwait(false));
 
     /// <summary>Import profiles of the sources table. Permission <c>Registry.View</c>.</summary>
     /// <param name="ct">Cancellation token.</param>

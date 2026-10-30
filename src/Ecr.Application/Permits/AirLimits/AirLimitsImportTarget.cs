@@ -294,13 +294,21 @@ public sealed class AirLimitsImportTarget(
             throw Rejected(creations[result.Errors[0].Row - 1].Code, result.Errors[0].MessageKey);
         }
 
+        // Ordinals: appended after the live siblings of the parent, in file order.
+        var nextOrdinal = (await registries.ListEntriesAsync(tables.Nae.Id, ct).ConfigureAwait(false))
+            .Where(e => !e.IsDeleted && e.ParentEntryId is not null)
+            .GroupBy(e => e.ParentEntryId!.Value)
+            .ToDictionary(g => g.Key, g => g.Max(e => e.Ordinal));
         foreach (var row in result.Rows)
         {
             var creation = creations[row.Row - 1];
             var name = creation.Values.GetValueOrDefault("sourceName") as string ?? creation.Code;
             row.Entry.Rename(new LocalizedText(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["en"] = name, ["ru"] = name }));
             row.Entry.SetLevel(source.Id);
-            row.Entry.SetParent(long.Parse(creation.UnderNode!, CultureInfo.InvariantCulture));
+            var under = long.Parse(creation.UnderNode!, CultureInfo.InvariantCulture);
+            row.Entry.SetParent(under);
+            nextOrdinal[under] = nextOrdinal.GetValueOrDefault(under) + 1;
+            row.Entry.SetOrdinal(nextOrdinal[under]);
         }
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
