@@ -102,7 +102,7 @@ describe('Table chat panel — axe', () => {
     server.candidates = [{ userId: 7, name: 'Aigerim Sadykova' }];
     server.install();
     act(() =>
-      publishSummary(7, [{ tableCode: 'T1', total: 4, unread: 2, lastAt: null, lastMessageId: 4, mentionedMe: false }]),
+      publishSummary(7, [{ tableCode: 'T1', total: 4, unread: 2, lastAt: null, lastMessageId: 4, mentionedMe: false, revision: 1 }]),
     );
 
     const container = mount(scheme);

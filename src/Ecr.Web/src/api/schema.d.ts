@@ -3071,6 +3071,8 @@ export interface paths {
         /**
          * Підсумок чатів усіх таблиць документа одним запитом (лічильники й «непрочитано»).
          * @description Віддає лише таблиці, які користувач бачить і де є повідомлення. `404 ECR-DOC-0404` — документ невидимий.
+         *     Кожен рядок несе `revision` чату (росте на нове/правку/видалення). Відповідь несе `ETag` з усіх
+         *     полів; `If-None-Match` → `304` без тіла (опитування живого оновлення).
          */
         get: {
             parameters: {
@@ -3093,6 +3095,13 @@ export interface paths {
                         "text/json": components["schemas"]["TableDiscussionSummaryDto"];
                         "text/plain": components["schemas"]["TableDiscussionSummaryDto"];
                     };
+                };
+                /** @description Not Modified */
+                304: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
                 };
                 /** @description Not Found */
                 404: {
@@ -6161,6 +6170,81 @@ export interface paths {
                         "application/json": components["schemas"]["SheetActivityPage"];
                         "text/json": components["schemas"]["SheetActivityPage"];
                         "text/plain": components["schemas"]["SheetActivityPage"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/sheets/{sheetDefId}/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Маркер змін даних аркуша за період. Право `Document.View`; доступ — як на читання аркуша.
+         * @description `changed = true` — після `since` дані видимих таблиць аркуша змінив хтось інший; власні записи
+         *     викликача лише пересувають маркер. Схована таблиця не потрапляє в `changedTables`; невидимий документ і
+         *     схований аркуш — `404 ECR-DOC-0404`. Зіпсований маркер — як перше опитування. `Cache-Control: no-store`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Період (рік*100+номер). */
+                    periodKey?: number;
+                    /** @description Маркер попереднього опитування; без нього — лише поточний маркер (`changed = false`). */
+                    since?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                    /** @description Аркуш. */
+                    sheetDefId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SheetChangesDto"];
+                        "text/json": components["schemas"]["SheetChangesDto"];
+                        "text/plain": components["schemas"]["SheetChangesDto"];
                     };
                 };
                 /** @description Not Found */
@@ -35358,6 +35442,40 @@ export interface components {
             /** @description Непрозорий курсор наступної сторінки; `null` — далі нічого немає. */
             nextCursor: null | string;
         };
+        /** @description Таблиця аркуша, дані якої змінив хтось інший після маркера. */
+        SheetChangedTableDto: {
+            /** @description Код таблиці (стабільний між версіями шаблону). */
+            tableCode: string;
+            /**
+             * Format: int64
+             * @description Екземпляр таблиці за період — той, за яким клієнт читає зріз.
+             */
+            tableInstanceId: number;
+        };
+        /** @description Відповідь опитування змін аркуша (живе оновлення сітки). */
+        SheetChangesDto: {
+            /** @description Після `since` дані видимих таблиць аркуша змінив ХТОСЬ ІНШИЙ (людина, імпорт, інтеграція, дозвіл; не сам
+             *     викликач і не перерахунок як такий). Власні записи викликача маркер просто пересувають. */
+            changed: boolean;
+            /** @description Видимі таблиці з чужими змінами (і перерахованими слідом за ними); порожньо, коли `changed = false`.
+             *     Схована від викликача таблиця сюди не потрапляє ніколи. */
+            changedTables: components["schemas"]["SheetChangedTableDto"][];
+            /**
+             * Format: date-time
+             * @description Час найсвіжішої чужої зміни (UTC); `null` — невідомий.
+             */
+            lastChangedAt: null | string;
+            /** @description Його ім'я для відображення; `null` — невідомий чи системний запис. */
+            lastChangedBy: null | string;
+            /**
+             * Format: int32
+             * @description Автор найсвіжішої чужої зміни; `null` — невідомий (зміна без журналу значень).
+             */
+            lastChangedByUserId: null | number;
+            /** @description Непрозорий маркер; наступне опитування передає його в `since`. Без `since` (перше опитування) — лише
+             *     маркер, `changed = false`. */
+            marker: string;
+        };
         SheetDto: {
             /** @description Код — ідентичність аркуша й адреса в `PUT …/sheets/{code}`. */
             code: string;
@@ -36507,6 +36625,12 @@ export interface components {
             lastMessageId: number;
             /** @description Є непрочитана згадка поточного користувача. */
             mentionedMe: boolean;
+            /**
+             * Format: int64
+             * @description Ревізія чату: росте на кожне нове, правлене чи видалене повідомлення (та сама, що в ETag сторінки повідомлень).
+             *     Опитування порівнює її з попередньою і перечитує сторінку лише тоді, коли вона змінилась.
+             */
+            revision: number;
             /** @description Код таблиці. */
             tableCode: string;
             /**

@@ -106,6 +106,53 @@ public sealed class TableDiscussionApiTests(SqlServerFixture sql)
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Підсумок_несе_ревізію_чату_і_ETag_дає_304_до_зміни()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var alice = await SignedInAsync(app, s.Writer.UserName).ConfigureAwait(true);
+        using var bob = await SignedInAsync(app, s.Bob.UserName).ConfigureAwait(true);
+        var uri = new Uri($"/api/v1/documents/{Num(s.DocumentId)}/discussions/summary", UriKind.Relative);
+
+        var id = await PostIdAsync(alice, s, s.Table1, "перше").ConfigureAwait(true);
+        var first = await bob.GetAsync(uri).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var etag = first.Headers.ETag?.Tag;
+        Assert.False(string.IsNullOrEmpty(etag));
+        var revision = (await SummaryAsync(bob, s).ConfigureAwait(true)).GetProperty(s.Table1).GetProperty("revision").GetInt64();
+        Assert.True(revision >= 1);
+
+        // Нічого не змінилось — 304 без тіла.
+        using (var same = new HttpRequestMessage(HttpMethod.Get, uri))
+        {
+            same.Headers.TryAddWithoutValidation("If-None-Match", etag);
+            var response = await bob.SendAsync(same).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.NotModified, response.StatusCode);
+            Assert.Empty(await response.Content.ReadAsByteArrayAsync().ConfigureAwait(true));
+        }
+
+        // Правка старого повідомлення: лічильник той самий, ревізія росте — і ETag теж.
+        Assert.Equal(HttpStatusCode.OK, (await alice.PatchAsJsonAsync(MessageUri(s, s.Table1, id), new { body = "перше (виправлено)" }).ConfigureAwait(true)).StatusCode);
+        using (var edited = new HttpRequestMessage(HttpMethod.Get, uri))
+        {
+            edited.Headers.TryAddWithoutValidation("If-None-Match", etag);
+            var response = await bob.SendAsync(edited).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var item = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement
+                .GetProperty("items").EnumerateArray().Single(i => i.GetProperty("tableCode").GetString() == s.Table1);
+            Assert.Equal(1, item.GetProperty("total").GetInt32());
+            Assert.True(item.GetProperty("revision").GetInt64() > revision);
+            Assert.NotEqual(etag, response.Headers.ETag?.Tag);
+        }
+
+        // «Прочитано» змінює unread без зміни ревізії — ETag теж міняється (304 не ховає змін лічильника).
+        var before = (await bob.GetAsync(uri).ConfigureAwait(true)).Headers.ETag?.Tag;
+        await bob.PutAsJsonAsync(ReadUri(s, s.Table1), new { lastReadMessageId = id }).ConfigureAwait(true);
+        Assert.NotEqual(before, (await bob.GetAsync(uri).ConfigureAwait(true)).Headers.ETag?.Tag);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Схована_таблиця_для_читача_не_існує_а_без_Discuss_лише_читання()
     {
         var s = await ArrangeAsync().ConfigureAwait(true);
