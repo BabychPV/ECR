@@ -135,6 +135,9 @@ public sealed class DocumentStore(
                 TemplateVersion = db.Projects.Where(p => p.Id == d.ProjectId)
                     .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id, (p, v) => v.Version)
                     .FirstOrDefault(),
+                // ✎ RPT-STABLE Part B: ознака «кілька версій за періодами» - у тому самому запиті (без зайвого звернення).
+                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == d.ProjectId
+                    && t.TemplateVersionId != db.Projects.Where(p => p.Id == d.ProjectId).Select(p => p.TemplateVersionId).FirstOrDefault()),
                 // AN-63: періодичність проєкту - підзапит у тому самому запиті (без додаткового роундтрипу); (PeriodKind?) - null, якщо проєкту немає.
                 ProjectPeriodKind = db.Projects.Where(p => p.Id == d.ProjectId).Select(p => (PeriodKind?)p.PeriodKind).FirstOrDefault(),
                 ModifiedBy = db.Users.Where(u => u.Id == d.ModifiedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
@@ -189,8 +192,9 @@ public sealed class DocumentStore(
             ResultsStale: stale is null ? null : stale.ContainsKey(documentId),
             ResultsStaleSince: stale?.GetValueOrDefault(documentId),
             TemplateVersion: document.TemplateVersion,
-            TemplateVersionByPeriod: (await VersionByPeriodAsync([document.ProjectId], ct).ConfigureAwait(false))
-                .GetValueOrDefault(document.ProjectId),
+            TemplateVersionByPeriod: document.Multi
+                ? (await VersionByPeriodAsync([document.ProjectId], ct).ConfigureAwait(false)).GetValueOrDefault(document.ProjectId)
+                : null,
             OwnerUserId: document.CreatedByUserId,
             ProjectIsReadOnly: document.ProjectReadOnly,
             PeriodKind: document.ProjectPeriodKind?.ToString());
@@ -365,7 +369,10 @@ public sealed class DocumentStore(
                 // ✎ RPT-STABLE: типова версія шаблону — скалярний підзапит у тому самому запиті сторінки (запитів не додається).
                 db.Projects.Where(p => p.Id == d.ProjectId)
                     .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id, (p, v) => v.Version)
-                    .FirstOrDefault()))
+                    .FirstOrDefault(),
+                // ✎ RPT-STABLE Part B: ознака «у проєкті кілька версій за періодами» - у тому самому запиті сторінки.
+                db.ProjectTemplateVersions.Any(t => t.ProjectId == d.ProjectId
+                    && t.TemplateVersionId != db.Projects.Where(p => p.Id == d.ProjectId).Select(p => p.TemplateVersionId).FirstOrDefault())))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -392,7 +399,10 @@ public sealed class DocumentStore(
         var staleByDocument = await StaleResultsBatchAsync(
             [.. page1.Select(d => d.Id)], period, starFetched, starMap, ct).ConfigureAwait(false);
 
-        var versionByPeriod = await VersionByPeriodAsync([.. page1.Select(d => d.ProjectId)], ct).ConfigureAwait(false);
+        var multiProjects = page1.Where(d => d.MultiVersion).Select(d => d.ProjectId).ToList();
+        var versionByPeriod = multiProjects.Count == 0
+            ? []
+            : await VersionByPeriodAsync(multiProjects, ct).ConfigureAwait(false);
 
         var items = new List<DocumentSummary>(page1.Count);
         foreach (var d in page1)
@@ -1463,7 +1473,7 @@ public sealed class DocumentStore(
         long Id, int ProjectId, string BusinessKey, DateTime CreatedAt, int SheetCount,
         Domain.ValueObjects.LocalizedText? NameL10n, DateTime ModifiedAt, string? ModifiedByDisplayName,
         string? OwnerDisplayName, string? ApproverDisplayName, PeriodKind? ProjectPeriodKind, int OwnerUserId,
-        string? TemplateVersion);
+        string? TemplateVersion, bool MultiVersion = false);
 
     /// <summary>Стеля кількості правил складу в одній версії.</summary>
     private const int MaxRules = 500;
