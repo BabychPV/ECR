@@ -795,6 +795,13 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- NAE: вивід з ужитку лише закриває validTo - повторне використання бізнес-ключа вимагає НОВОГО вузла з вікном ПІСЛЯ старого.
+    (N'err.ECR-REG-4092.keyTaken', N'en', N'Another entry ({entryCode}) already has {key} = {keyText}.', N'Another entry ({entryCode}) already has {key} = {keyText}. If that entry is retired, create a NEW entry whose validity window starts AFTER the old one ends.'),
+    (N'err.ECR-REG-4092.keyTaken', N'ru', N'У другой записи ({entryCode}) уже есть {key} = {keyText}.', N'У другой записи ({entryCode}) уже есть {key} = {keyText}. Если она выведена из употребления, создайте НОВУЮ запись, срок действия которой начинается ПОСЛЕ окончания срока старой.'),
+    (N'err.ECR-REG-4092.keyTaken', N'kz', N'Басқа жазбада ({entryCode}) {key} = {keyText} мәні бұрыннан бар.', N'Басқа жазбада ({entryCode}) {key} = {keyText} мәні бұрыннан бар. Ол жазба қолданыстан шығарылса, қолданыс мерзімі ескісі аяқталғаннан КЕЙІН басталатын ЖАҢА жазба жасаңыз.'),
+    (N'err.ECR-REG-4092.keyWindowOverlap', N'en', N'Another entry ({entryCode}) already has {key} = {keyText} for an overlapping validity period.', N'Another entry ({entryCode}) already has {key} = {keyText} for an overlapping validity period. A NEW entry whose validity window starts AFTER the old one ends is required.'),
+    (N'err.ECR-REG-4092.keyWindowOverlap', N'ru', N'У другой записи ({entryCode}) уже есть {key} = {keyText} в пересекающемся периоде действия.', N'У другой записи ({entryCode}) уже есть {key} = {keyText} в пересекающемся периоде действия. Нужна НОВАЯ запись, срок действия которой начинается ПОСЛЕ окончания срока старой.'),
+    (N'err.ECR-REG-4092.keyWindowOverlap', N'kz', N'Басқа жазбада ({entryCode}) қиылысатын қолданыс кезеңінде {key} = {keyText} мәні бұрыннан бар.', N'Басқа жазбада ({entryCode}) қиылысатын қолданыс кезеңінде {key} = {keyText} мәні бұрыннан бар. Қолданыс мерзімі ескісі аяқталғаннан КЕЙІН басталатын ЖАҢА жазба қажет.'),
     -- COLL:r11l6 AN-96: плитка рахує ШАБЛОНИ з опублікованою версією (matchesStat), а не версії; kz лишається за термінологом.
     (N'templates.stat.published', N'en', N'published versions', N'with a published version'),
     (N'templates.stat.published', N'ru', N'опубликованных версий', N'с опубликованной версией'),
@@ -5893,8 +5900,8 @@ USING (VALUES
     -- RT: keys
     -- RT-10a: конфлікт складеного ключа довідника (ФВ-8.15, D-151).
     (N'err.ECR-REG-4092', N'en', N'Key already in use', 1),
-    (N'err.ECR-REG-4092.keyTaken', N'en', N'Another entry ({entryCode}) already has {key} = {keyText}.', 1),
-    (N'err.ECR-REG-4092.keyWindowOverlap', N'en', N'Another entry ({entryCode}) already has {key} = {keyText} for an overlapping validity period.', 1),
+    (N'err.ECR-REG-4092.keyTaken', N'en', N'Another entry ({entryCode}) already has {key} = {keyText}. If that entry is retired, create a NEW entry whose validity window starts AFTER the old one ends.', 1),
+    (N'err.ECR-REG-4092.keyWindowOverlap', N'en', N'Another entry ({entryCode}) already has {key} = {keyText} for an overlapping validity period. A NEW entry whose validity window starts AFTER the old one ends is required.', 1),
     -- RT-10b: гонка за ключем (UX_RegistryEntryKey_Live), дубль ключа у файлі CSV, ключ і код рядка — різні записи.
     (N'err.ECR-REG-4092.keyTakenConcurrently', N'en', N'Another entry took the key {keyText} a moment ago. Refresh the list and try again.', 1),
     (N'err.ECR-REG-4092.keyDuplicateInFile', N'en', N'Another row of this file has the same key.', 1),
@@ -13037,8 +13044,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.publicationReason', N'ru', N'Причина изменения'),
     (N'methodologies.publicationChanges', N'ru', N'Изменённые значения на эталонном наборе'),
     (N'err.ECR-REG-4092', N'ru', N'Ключ уже используется'),
-    (N'err.ECR-REG-4092.keyTaken', N'ru', N'У другой записи ({entryCode}) уже есть {key} = {keyText}.'),
-    (N'err.ECR-REG-4092.keyWindowOverlap', N'ru', N'У другой записи ({entryCode}) уже есть {key} = {keyText} в пересекающемся периоде действия.'),
+    (N'err.ECR-REG-4092.keyTaken', N'ru', N'У другой записи ({entryCode}) уже есть {key} = {keyText}. Если она выведена из употребления, создайте НОВУЮ запись, срок действия которой начинается ПОСЛЕ окончания срока старой.'),
+    (N'err.ECR-REG-4092.keyWindowOverlap', N'ru', N'У другой записи ({entryCode}) уже есть {key} = {keyText} в пересекающемся периоде действия. Нужна НОВАЯ запись, срок действия которой начинается ПОСЛЕ окончания срока старой.'),
     (N'err.ECR-REG-4092.keyTakenConcurrently', N'ru', N'Другая запись только что заняла ключ {keyText}. Обновите список и повторите попытку.'),
     (N'err.ECR-REG-4092.keyDuplicateInFile', N'ru', N'В другой строке этого файла такой же ключ.'),
     (N'err.ECR-REG-4092.keyCodeMismatch', N'ru', N'Ключ и код этой строки относятся к разным записям.'),
@@ -16069,8 +16076,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.publicationReason', N'kz', N'Өзгерту себебі'),
     (N'methodologies.publicationChanges', N'kz', N'Эталондық жиынтықтағы өзгерген мәндер'),
     (N'err.ECR-REG-4092', N'kz', N'Кілт бұрыннан пайдаланылуда'),
-    (N'err.ECR-REG-4092.keyTaken', N'kz', N'Басқа жазбада ({entryCode}) {key} = {keyText} мәні бұрыннан бар.'),
-    (N'err.ECR-REG-4092.keyWindowOverlap', N'kz', N'Басқа жазбада ({entryCode}) қиылысатын қолданыс кезеңінде {key} = {keyText} мәні бұрыннан бар.'),
+    (N'err.ECR-REG-4092.keyTaken', N'kz', N'Басқа жазбада ({entryCode}) {key} = {keyText} мәні бұрыннан бар. Ол жазба қолданыстан шығарылса, қолданыс мерзімі ескісі аяқталғаннан КЕЙІН басталатын ЖАҢА жазба жасаңыз.'),
+    (N'err.ECR-REG-4092.keyWindowOverlap', N'kz', N'Басқа жазбада ({entryCode}) қиылысатын қолданыс кезеңінде {key} = {keyText} мәні бұрыннан бар. Қолданыс мерзімі ескісі аяқталғаннан КЕЙІН басталатын ЖАҢА жазба қажет.'),
     (N'err.ECR-REG-4092.keyTakenConcurrently', N'kz', N'Басқа жазба {keyText} кілтін жаңа ғана иеленді. Тізімді жаңартып, әрекетті қайталаңыз.'),
     (N'err.ECR-REG-4092.keyDuplicateInFile', N'kz', N'Осы файлдың басқа жолында дәл осындай кілт бар.'),
     (N'err.ECR-REG-4092.keyCodeMismatch', N'kz', N'Осы жолдың кілті мен коды әртүрлі жазбаларға тиесілі.'),
