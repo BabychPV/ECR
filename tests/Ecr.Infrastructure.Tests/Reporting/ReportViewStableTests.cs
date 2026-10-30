@@ -1,6 +1,7 @@
 // tests/Ecr.Infrastructure.Tests/Reporting/ReportViewStableTests.cs
 using System.Globalization;
 using System.Text.RegularExpressions;
+using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
@@ -419,6 +420,90 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
         Assert.Equal(oldStats.Value, newStats.Value);
         Console.WriteLine($"PERF-ROUTED rows={rows}x2 cols={numeric.Length}: _v1 reads={oldStats.Reads} ms={oldStats.Ms}; stable reads={newStats.Reads} ms={newStats.Ms}");
         Assert.True(newStats.Reads <= oldStats.Reads * 1.2, $"stable reads {newStats.Reads} > 1.2 x _v1 reads {oldStats.Reads}");
+    }
+
+    /// <summary>
+    /// Upgrade from a pre-#653 database (the stable-view procedure is absent): the generator reports an actionable
+    /// failure (no crash, no object names), and the upgrade path - <c>deploy-ecr.ps1</c> step 2 re-runs <c>05-rpt-views.sql</c>
+    /// (CREATE OR ALTER, idempotent) - creates the procedure and the stable views, twice with the same result.
+    /// Mutation: drop the hint from <c>SafeMessage</c> - the first assert is red; make the script non-idempotent
+    /// (plain CREATE PROCEDURE) - the second apply throws.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "RPT-STABLE")]
+    public async Task Оновлення_бази_без_процедури_стабільних_вʼюх_дає_підказку_а_скрипт_05_відновлює_ідемпотентно()
+    {
+        var (templateId, tpl) = await NewTemplateAsync();
+        var v1 = (await AddVersionAsync(templateId, "1", [new("S", "T", [("A", CellDataType.String)])]))["S/T"];
+        var stable = StableName(tpl, "S", "T");
+        try
+        {
+            await GenerateAsync(v1.VersionId);
+            Assert.NotEmpty(await ColumnNamesAsync(stable));
+
+            // The pre-#653 state: no procedure, no stable view.
+            await ScalarRowsAsync("DROP PROCEDURE rpt.usp_GenerateStableViews");
+            await ScalarRowsAsync($"DROP VIEW rpt.[{stable}]");
+
+            var failures = new List<ReportViewFailure>();
+            await using (var db = sql.CreateContext())
+            {
+                var error = await Assert.ThrowsAsync<SqlException>(
+                    () => new ReportViewGenerator(db, new RecordingStatus(failures)).GenerateAsync(v1.VersionId, CancellationToken.None));
+                Assert.Equal(2812, error.Number);
+            }
+
+            var failure = Assert.Single(failures);
+            Assert.Contains("deploy-ecr.ps1", failure.Message, StringComparison.Ordinal);
+            Assert.Contains("2812", failure.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("usp_Generate", failure.Message, StringComparison.Ordinal);
+            Assert.Empty(await ColumnNamesAsync(stable));
+
+            // Upgrade path, applied twice.
+            await ApplyRptViewsScriptAsync();
+            await ApplyRptViewsScriptAsync();
+            Assert.Equal(
+                1,
+                (int)(await ScalarRowsAsync("SELECT COUNT(*) FROM sys.procedures WHERE name = N'usp_GenerateStableViews' AND schema_id = SCHEMA_ID(N'rpt')"))[0][0]!);
+
+            await GenerateAsync(v1.VersionId);
+            Assert.Equal(["_ProjectId", "_ProjectCode", "_DocumentId", "_DocumentKey", "_PeriodKey", "_Status", "_RowId", "_RowKey", "_RowOrdinal", "_TemplateVersion", "A"],
+                await ColumnNamesAsync(stable));
+            await GenerateAsync(v1.VersionId);   // idempotent re-run
+            Assert.Equal(11, (await ColumnNamesAsync(stable)).Count);
+        }
+        finally
+        {
+            await ApplyRptViewsScriptAsync();   // never leave the shared test database without the procedure
+        }
+    }
+
+    private async Task ApplyRptViewsScriptAsync()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Persistence", "Sql", "05-rpt-views.sql");
+        var script = await File.ReadAllTextAsync(path);
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        foreach (var batch in SqlBatches.Split(script))
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = batch;
+            command.CommandTimeout = 300;
+            await command.ExecuteNonQueryAsync();
+        }
+    }
+
+    private sealed class RecordingStatus(List<ReportViewFailure> failures) : Ecr.Application.Ports.IReportViewStatus
+    {
+        public void Failed(ReportViewFailure failure) => failures.Add(failure);
+
+        public void Succeeded(int? templateVersionId)
+        {
+        }
+
+        public IReadOnlyList<ReportViewFailure> Snapshot() => failures;
     }
 
     // ── помічники ───────────────────────────────────────────────────────────────────────────────────────────────────────

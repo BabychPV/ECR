@@ -181,5 +181,19 @@ public sealed partial class ReportViewGenerator(
     internal static string SafeMessage(SqlException ex, string correlationId)
         => ex.Number >= FirstUserDefinedError
             ? ex.Message
-            : $"SQL Server error {ex.Number.ToString(System.Globalization.CultureInfo.InvariantCulture)}; the details are in the server log (correlation {correlationId}).";
+            : $"SQL Server error {ex.Number.ToString(System.Globalization.CultureInfo.InvariantCulture)}; the details are in the server log (correlation {correlationId})."
+              + (ex.Number == MissingProcedureError ? MissingProcedureHint : string.Empty);
+
+    /// <summary>SQL Server 2812: «Could not find stored procedure».</summary>
+    private const int MissingProcedureError = 2812;
+
+    /// <summary>
+    /// ✎ Upgrade gap (RPT-STABLE): <c>Sql/*.sql</c> reach a customer database only through step 2 of <c>deploy-ecr.ps1</c>
+    /// (every script, idempotent, on each deploy/upgrade; never from the application or EF migrations). A database updated
+    /// without that step (<c>-SkipSchema</c>, manual EF-only update) lacks the report-view procedures. The application
+    /// has no right to create them (D-66: EXECUTE only), so the message tells the operator what to run. No object names (SEC TIER2).
+    /// </summary>
+    private const string MissingProcedureHint =
+        " The report-view procedures are missing from this database: the Sql scripts of this release were not applied. "
+        + "Run deploy-ecr.ps1 with the schema step (without -SkipSchema, runbook section 8) and restart the application.";
 }
