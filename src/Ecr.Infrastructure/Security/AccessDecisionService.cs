@@ -1002,6 +1002,7 @@ public sealed class AccessDecisionService(
             .Where(t => t.ProjectId == projectId && t.TemplateVersionId != currentVersionId)
             .Select(t => t.TemplateVersionId)
             .Distinct()
+            .OrderBy(v => v)
             .Take(200)
             .ToListAsync(ct)
             .ConfigureAwait(false);
