@@ -27,12 +27,24 @@ public sealed class TableDiscussionsController(
     /// <summary>Підсумок чатів усіх таблиць документа одним запитом (лічильники й «непрочитано»).</summary>
     /// <remarks>
     /// Віддає лише таблиці, які користувач бачить і де є повідомлення. <c>404 ECR-DOC-0404</c> — документ невидимий.
+    /// Кожен рядок несе <c>revision</c> чату (росте на нове/правку/видалення). Відповідь несе <c>ETag</c> з усіх
+    /// полів; <c>If-None-Match</c> → <c>304</c> без тіла (опитування живого оновлення).
     /// </remarks>
     [HttpGet("discussions/summary")]
     [ProducesResponseType<TableDiscussionSummaryDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Summary(long documentId, CancellationToken ct)
-        => Ok(await queries.GetSummaryAsync(documentId, ct).ConfigureAwait(false));
+    {
+        var (summary, etag) = await queries
+            .GetSummaryIfChangedAsync(documentId, Request.Headers[HeaderNames.IfNoneMatch].ToString(), ct)
+            .ConfigureAwait(false);
+
+        Response.Headers[HeaderNames.ETag] = etag;
+        Response.Headers[HeaderNames.CacheControl] = "private, no-cache";
+
+        return summary is null ? StatusCode(StatusCodes.Status304NotModified) : Ok(summary);
+    }
 
     /// <summary>Повідомлення чату таблиці: сторінка за ключем (<c>before</c>) або опитування (<c>after</c>).</summary>
     /// <param name="documentId">Документ.</param>

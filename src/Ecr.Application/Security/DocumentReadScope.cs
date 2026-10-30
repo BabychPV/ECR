@@ -350,6 +350,24 @@ public sealed class DocumentReadScope
         return [.. tables.SelectMany(t => _columnsOfTable[t]).Where(CanReadColumn).Order()];
     }
 
+    /// <summary>
+    /// Таблиці аркуша, які профіль БАЧИТЬ (<c>tableDefId → код</c>), і сховані колонки цих таблиць; <c>null</c> —
+    /// аркуша немає в знімку або він закритий цілком (маркер змін аркуша, живе оновлення сітки).
+    /// </summary>
+    /// <param name="sheetDefId">Аркуш версії шаблону.</param>
+    /// <remarks>⛔ Схована таблиця сюди не потрапляє ні кодом, ні ідентифікатором. Межі періоду — ті, що задав <see cref="InPeriod"/>.</remarks>
+    public (IReadOnlyDictionary<int, string> Tables, IReadOnlyList<int> HiddenColumnIds)? VisibleTablesOfSheet(int sheetDefId)
+    {
+        if (!_tablesOfSheet.TryGetValue(sheetDefId, out var tables) || !CanReadSheet(sheetDefId))
+        {
+            return null;
+        }
+
+        var visible = tables.Where(CanReadTable).ToDictionary(t => t, t => _tableCodes[t]);
+        var hidden = visible.Keys.SelectMany(t => _columnsOfTable[t]).Where(c => !CanReadColumn(c)).Order().ToList();
+        return (visible, hidden);
+    }
+
     /// <summary>Чи бачить профіль таблицю, якій належить колонка.</summary>
     /// <param name="columnDefId">Колонка версії шаблону.</param>
     /// <remarks>

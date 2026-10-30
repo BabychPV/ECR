@@ -61,8 +61,12 @@ public sealed record TableDiscussionPageDto(
 /// <param name="LastAt">Коли написано останнє живе (UTC); <c>null</c> — чат порожній.</param>
 /// <param name="LastMessageId">Найбільший <c>id</c> чату.</param>
 /// <param name="MentionedMe">Є непрочитана згадка поточного користувача.</param>
+/// <param name="Revision">
+/// Ревізія чату: росте на кожне нове, правлене чи видалене повідомлення (та сама, що в ETag сторінки повідомлень).
+/// Опитування порівнює її з попередньою і перечитує сторінку лише тоді, коли вона змінилась.
+/// </param>
 public sealed record TableDiscussionSummaryItemDto(
-    string TableCode, int Total, int Unread, DateTime? LastAt, long LastMessageId, bool MentionedMe);
+    string TableCode, int Total, int Unread, DateTime? LastAt, long LastMessageId, bool MentionedMe, long Revision);
 
 /// <summary>Підсумок чатів усіх таблиць документа, які бачить користувач; таблиці без розмов — відсутні.</summary>
 /// <param name="Items">Таблиці з хоча б одним повідомленням.</param>

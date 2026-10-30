@@ -150,8 +150,8 @@ describe('the header button', () => {
   it('shows the total unread of the document as a counter and in its name; a click opens and closes the panel', async () => {
     summary = () =>
       summaryOf([
-        { tableCode: 'T1', total: 12, unread: 3, lastAt: '2026-06-01T10:00:00Z', lastMessageId: 12, mentionedMe: false },
-        { tableCode: 'T2', total: 2, unread: 1, lastAt: '2026-06-01T10:00:00Z', lastMessageId: 14, mentionedMe: true },
+        { tableCode: 'T1', total: 12, unread: 3, lastAt: '2026-06-01T10:00:00Z', lastMessageId: 12, mentionedMe: false, revision: 1 },
+        { tableCode: 'T2', total: 2, unread: 1, lastAt: '2026-06-01T10:00:00Z', lastMessageId: 14, mentionedMe: true, revision: 1 },
       ]);
     render(
       <Shell>
@@ -173,7 +173,7 @@ describe('the header button', () => {
   });
 
   it('without unread messages the name is plain "Discussion" and there is no counter', async () => {
-    summary = () => summaryOf([{ tableCode: 'T1', total: 2, unread: 0, lastAt: null, lastMessageId: 2, mentionedMe: false }]);
+    summary = () => summaryOf([{ tableCode: 'T1', total: 2, unread: 0, lastAt: null, lastMessageId: 2, mentionedMe: false, revision: 1 }]);
     render(
       <Shell>
         <TableChatButton documentId={7} />
@@ -186,7 +186,7 @@ describe('the header button', () => {
 
   it('publishes the per-table counters for the badges and withdraws them on unmount', async () => {
     summary = () =>
-      summaryOf([{ tableCode: 'T1', total: 12, unread: 3, lastAt: null, lastMessageId: 12, mentionedMe: false }]);
+      summaryOf([{ tableCode: 'T1', total: 12, unread: 3, lastAt: null, lastMessageId: 12, mentionedMe: false, revision: 1 }]);
     const { unmount } = render(
       <Shell>
         <TableChatButton documentId={7} />
@@ -212,7 +212,7 @@ describe('the header button', () => {
 describe('the badge in a table title', () => {
   it('shows only the total when nothing is new, and nothing for a table of another document', () => {
     act(() =>
-      publishSummary(7, [{ tableCode: 'T1', total: 5, unread: 0, lastAt: null, lastMessageId: 5, mentionedMe: false }]),
+      publishSummary(7, [{ tableCode: 'T1', total: 5, unread: 0, lastAt: null, lastMessageId: 5, mentionedMe: false, revision: 1 }]),
     );
     render(
       <Shell>
@@ -229,7 +229,7 @@ describe('the badge in a table title', () => {
 
   it('a click opens the panel on THIS table, whatever cell was focused', async () => {
     act(() =>
-      publishSummary(7, [{ tableCode: 'T2', total: 5, unread: 2, lastAt: null, lastMessageId: 5, mentionedMe: false }]),
+      publishSummary(7, [{ tableCode: 'T2', total: 5, unread: 2, lastAt: null, lastMessageId: 5, mentionedMe: false, revision: 1 }]),
     );
     act(() =>
       publishInspectedCell({

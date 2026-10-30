@@ -19066,6 +19066,77 @@
         ],
         "type": "object"
       },
+      "SheetChangedTableDto": {
+        "description": "Таблиця аркуша, дані якої змінив хтось інший після маркера.",
+        "properties": {
+          "tableCode": {
+            "description": "Код таблиці (стабільний між версіями шаблону).",
+            "type": "string"
+          },
+          "tableInstanceId": {
+            "description": "Екземпляр таблиці за період — той, за яким клієнт читає зріз.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tableCode",
+          "tableInstanceId"
+        ],
+        "type": "object"
+      },
+      "SheetChangesDto": {
+        "description": "Відповідь опитування змін аркуша (живе оновлення сітки).",
+        "properties": {
+          "changed": {
+            "description": "Після `since` дані видимих таблиць аркуша змінив ХТОСЬ ІНШИЙ (людина, імпорт, інтеграція, дозвіл; не сам\nвикликач і не перерахунок як такий). Власні записи викликача маркер просто пересувають.",
+            "type": "boolean"
+          },
+          "changedTables": {
+            "description": "Видимі таблиці з чужими змінами (і перерахованими слідом за ними); порожньо, коли `changed = false`.\nСхована від викликача таблиця сюди не потрапляє ніколи.",
+            "items": {
+              "$ref": "#/components/schemas/SheetChangedTableDto"
+            },
+            "type": "array"
+          },
+          "lastChangedAt": {
+            "description": "Час найсвіжішої чужої зміни (UTC); `null` — невідомий.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastChangedBy": {
+            "description": "Його ім'я для відображення; `null` — невідомий чи системний запис.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastChangedByUserId": {
+            "description": "Автор найсвіжішої чужої зміни; `null` — невідомий (зміна без журналу значень).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "marker": {
+            "description": "Непрозорий маркер; наступне опитування передає його в `since`. Без `since` (перше опитування) — лише\nмаркер, `changed = false`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "marker",
+          "changed",
+          "lastChangedByUserId",
+          "lastChangedBy",
+          "lastChangedAt",
+          "changedTables"
+        ],
+        "type": "object"
+      },
       "SheetDto": {
         "properties": {
           "code": {
@@ -21495,6 +21566,11 @@
             "description": "Є непрочитана згадка поточного користувача.",
             "type": "boolean"
           },
+          "revision": {
+            "description": "Ревізія чату: росте на кожне нове, правлене чи видалене повідомлення (та сама, що в ETag сторінки повідомлень).\nОпитування порівнює її з попередньою і перечитує сторінку лише тоді, коли вона змінилась.",
+            "format": "int64",
+            "type": "integer"
+          },
           "tableCode": {
             "description": "Код таблиці.",
             "type": "string"
@@ -21516,7 +21592,8 @@
           "unread",
           "lastAt",
           "lastMessageId",
-          "mentionedMe"
+          "mentionedMe",
+          "revision"
         ],
         "type": "object"
       },
@@ -28332,7 +28409,7 @@
     },
     "/api/v1/documents/{documentId}/discussions/summary": {
       "get": {
-        "description": "Віддає лише таблиці, які користувач бачить і де є повідомлення. `404 ECR-DOC-0404` — документ невидимий.",
+        "description": "Віддає лише таблиці, які користувач бачить і де є повідомлення. `404 ECR-DOC-0404` — документ невидимий.\nКожен рядок несе `revision` чату (росте на нове/правку/видалення). Відповідь несе `ETag` з усіх\nполів; `If-None-Match` → `304` без тіла (опитування живого оновлення).",
         "parameters": [
           {
             "in": "path",
@@ -28365,6 +28442,9 @@
               }
             },
             "description": "OK"
+          },
+          "304": {
+            "description": "Not Modified"
           },
           "404": {
             "content": {
@@ -32596,6 +32676,118 @@
         "summary": "Журнал дій на аркуші за період (панель History): правки значень людьми (сітка, імпорт, правка погоджувача)\nі дії процесу з коментарем; найновіші перші, keyset (50 за замовчуванням, до 100). Право `Document.View`;\nаркуш, закритий читачеві, - `404`, як неіснуючий документ; закриті таблиці в журнал не потрапляють.",
         "tags": [
           "DocumentWorkflowHistory"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/sheets/{sheetDefId}/changes": {
+      "get": {
+        "description": "`changed = true` — після `since` дані видимих таблиць аркуша змінив хтось інший; власні записи\nвикликача лише пересувають маркер. Схована таблиця не потрапляє в `changedTables`; невидимий документ і\nсхований аркуш — `404 ECR-DOC-0404`. Зіпсований маркер — як перше опитування. `Cache-Control: no-store`.",
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Аркуш.",
+            "in": "path",
+            "name": "sheetDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Період (рік*100+номер).",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Маркер попереднього опитування; без нього — лише поточний маркер (`changed = false`).",
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SheetChangesDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SheetChangesDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SheetChangesDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Маркер змін даних аркуша за період. Право `Document.View`; доступ — як на читання аркуша.",
+        "tags": [
+          "SheetChanges"
         ]
       }
     },
@@ -57414,6 +57606,9 @@
     },
     {
       "name": "Security"
+    },
+    {
+      "name": "SheetChanges"
     },
     {
       "name": "SmtpSettings"
