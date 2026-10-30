@@ -158,7 +158,8 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                     LocalizedOrNull(reader, 22),
                     reader.GetBoolean(23),
                     reader.GetBoolean(24),
-                    reader.GetInt64(0))));
+                    reader.GetInt64(0),
+                    StringOrNull(reader, 25))));
         }
 
         return rows;
@@ -205,7 +206,7 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
 
     /// <summary>Колонки рядка журналу змін комірок, спільні для <c>aud.CellChange</c> і <c>arc.AuditCellChange</c>.</summary>
     private const string CellChangeColumns =
-        "Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId, OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, IsOutOfWindow, IsOverwrite";
+        "Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId, OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, IsOutOfWindow, IsOverwrite, Reason";
 
     /// <summary>
     /// Пробник архіву: чи є в <c>arc.AuditCellChange</c> бодай один рядок у вікні запиту.
@@ -329,7 +330,7 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                    a.OldValue, a.NewValue, a.ChangedByUserId, a.Origin, a.IsLateEdit,
                    u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType,
                    a.IsOutOfWindow, sd.Code, sd.NameL10n, td.Code, td.NameL10n, rd.LabelL10n,
-                   {fromArchive}, a.IsOverwrite
+                   {fromArchive}, a.IsOverwrite, a.Reason
               FROM (
                     {pageSource}
                    ) AS a

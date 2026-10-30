@@ -50,7 +50,11 @@ public sealed class RecalculationService(
 
     // Q-17: власність введених комірок таблиць «місяці в колонках». Необов'язковий: прямі `new RecalculationService(...)`
     // у тестах його не передають; DI підставляє роутер, а вимкнений прапор (за замовчуванням) означає «не застосовується».
-    IMonthColumnRouter? monthRouter = null) : ISubmitRecalculation
+    IMonthColumnRouter? monthRouter = null,
+
+    // ✎ D-461: позначки «ручне значення замість формули». Необов'язковий: прямі `new RecalculationService(...)` у тестах
+    // його не передають (ручних значень тоді немає); DI підставляє сховище.
+    IFormulaOverrideStore? formulaOverrides = null) : ISubmitRecalculation
 {
     /// <summary>
     /// LP-40: джерела знімків довідників цього екземпляра сервісу (скоуп = один прогін задачі чи запит):
@@ -535,7 +539,7 @@ public sealed class RecalculationService(
         }
         else
         {
-            var affected = Plan(dirty, plan);
+            var affected = WithSeedWriters(Plan(dirty, plan), dirty, plan, snapshot, formulas, rowIdsByTable);
 
             // ⛔ Крос-аркушні rollup рахуються ТУТ САМО, а не «колись».
             // Відкладення має сенс на інтерактивному шляху, де людина чекає на
@@ -554,6 +558,15 @@ public sealed class RecalculationService(
         {
             return 0;
         }
+
+        // ✎ D-461: комірки з ручним значенням замість формули — ОДИН запит на прогін (індекс за періодом × екземпляром),
+        // далі O(1) на комірку в `Evaluate`. Прогін їх не перезаписує НІКОЛИ (і після вимкнення прапорця формули), а
+        // залежні формули читають ручне значення (воно вже в `values` зі сховища).
+        IReadOnlySet<CellAddress>? overridden = formulaOverrides is null || targets.Count == 0
+            ? null
+            : await formulaOverrides
+                .ReadKeysAsync([.. instances.Select(i => i.TableInstanceId)], periodKey, ct)
+                .ConfigureAwait(false);
 
         // ⛔ Директива №14 частина 3, `CAL-03`. Розбір винесено СЮДИ з
         // `Evaluate` не заради економії: класифікатор рядкової локальності
@@ -734,7 +747,7 @@ public sealed class RecalculationService(
                 Evaluate(
                     owner.Table, owner.Formula, expression, rows, rowFilter,
                     periodKey, context, values, stored, sink,
-                    foreignByTable?.GetValueOrDefault(owner.Table.Id));
+                    foreignByTable?.GetValueOrDefault(owner.Table.Id), overridden);
             }
         }
 
@@ -1020,6 +1033,29 @@ public sealed class RecalculationService(
         // ⚠ Старі значення читаються ДО запису — після `ApplyBatchAsync` їх уже
         // немає ніде, а саме вони й становлять половину запису аудиту
         // (той самий порядок, що в `PatchCellsHandler.ReadPreviousValuesAsync`).
+        // ✎ D-461: ручне значення, поставлене ПАРАЛЕЛЬНО з цим прогоном (після читання позначок на старті), не
+        // перезаписується: позначки адрес запису блокуються до коміту й перечитуються — та, що вже є, знімає адресу з
+        // пакета; правка, що ставить нову, чекає на цей коміт і пише ручне значення після. Одна команда на пакет.
+        if (formulaOverrides is not null)
+        {
+            var locked = await formulaOverrides
+                .LockKeysAsync([.. batch.SelectMany(item => item.Records.Select(r => r.Address))], ct)
+                .ConfigureAwait(false);
+            if (locked.Count > 0)
+            {
+                var unlocked = batch
+                    .Select(item => (item.Target, Records: (IReadOnlyList<CellRecord>)[.. item.Records.Where(r => !locked.Contains(r.Address))]))
+                    .Where(item => item.Records.Count > 0)
+                    .ToArray();
+                if (unlocked.Length == 0)
+                {
+                    return;
+                }
+
+                batch = unlocked;
+            }
+        }
+
         var previous = await cellStore
             .ReadCellsAsync([.. batch.SelectMany(item => item.Records.Select(r => r.Address))], ct)
             .ConfigureAwait(false);
@@ -1185,7 +1221,8 @@ public sealed class RecalculationService(
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
         Dictionary<CellKey, CellValueData> stored,
         Dictionary<CellAddress, CellRecord> upserts,
-        HashSet<int>? foreignColumns = null)
+        HashSet<int>? foreignColumns = null,
+        IReadOnlySet<CellAddress>? overridden = null)
     {
         // ФВ-0.2: діапазони цієї формули — за ключами, зафіксованими при публікації.
         context.UseFormula(formula, parsed.Root);
@@ -1202,10 +1239,10 @@ public sealed class RecalculationService(
             // значення двома шляхами. Обчислена комірка тієї ж колонки (формула рівня комірки в рядку підсумків)
             // лишається справою екземпляра перегляду: власник бачить лише ВВЕДЕНІ комірки, тож пропуск лишив би
             // дірку у формулах, що читають весь рядок.
-            if (foreignColumns is not null
-                && foreignColumns.Contains(columnDefId)
-                && stored.TryGetValue(new CellKey(0, table.Id, rowKey, columnDefId), out var ownerInput)
-                && !ownerInput.IsCalculated)
+            // ✎ D-461: ОДНЕ правило «введене людиною в ціль формули не перезаписується» на два випадки — Q-17.3
+            // (введена комірка власника в колонці з чужим власником) і ручне значення замість формули
+            // (`doc.CellFormulaOverride`). Перевірка — O(1) за вже прочитаними наборами, без запитів на комірку.
+            if (IsManualTarget(table.Id, rowKey, rowId, columnDefId, periodKey, stored, foreignColumns, overridden))
             {
                 continue;
             }
@@ -1301,6 +1338,125 @@ public sealed class RecalculationService(
 
             upserts[address] = new CellRecord(address, table.Id, data);
         }
+    }
+
+    /// <summary>
+    /// ✎ D-461: ціль формули, яку прогін НЕ перезаписує: ручне значення замість формули (позначка) або (Q-17.3)
+    /// введена комірка власника в колонці з чужим власником.
+    /// </summary>
+    private static bool IsManualTarget(
+        int tableDefId,
+        string rowKey,
+        long rowId,
+        int columnDefId,
+        PeriodKey periodKey,
+        Dictionary<CellKey, CellValueData> stored,
+        HashSet<int>? foreignColumns,
+        IReadOnlySet<CellAddress>? overridden)
+        => (overridden is { Count: > 0 } && overridden.Contains(new CellAddress(periodKey, rowId, columnDefId)))
+           || (foreignColumns is not null
+               && foreignColumns.Contains(columnDefId)
+               && stored.TryGetValue(new CellKey(0, tableDefId, rowKey, columnDefId), out var ownerInput)
+               && !ownerInput.IsCalculated);
+
+    /// <summary>
+    /// ✎ D-461: до формул, що ЧИТАЮТЬ насіння, додає формули, що його ПИШУТЬ (колонки — на обчислюваній колонці,
+    /// комірки), і все, що читає їхній результат. Інакше повернення формули (видалення ручного значення) лишило б
+    /// комірку порожньою до наступної правки входу.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Звичайна правка вводу формулу-«автора» не має (у комірку формули без ручного значення писати не можна), тож
+    /// для неї набір не змінюється. Для ручного значення автор рахується, але сама ручна комірка пропускається в
+    /// <see cref="Evaluate"/> — дешево й однаково. Рядкова локальність (`CAL-03`) звужує автора до рядків насіння.
+    /// Колонка → таблиця — за знімком (O(1)); ключ рядка — лише для комірочних формул тієї колонки.
+    /// </remarks>
+    private static IReadOnlyList<int> WithSeedWriters(
+        IReadOnlyList<int> affected,
+        DirtySet dirty,
+        RecalculationPlan plan,
+        Domain.Entities.Configuration.TemplateVersionSnapshot snapshot,
+        Dictionary<int, (Domain.Entities.Configuration.TableDef Table, Domain.Entities.Configuration.FormulaDef Formula)> formulas,
+        Dictionary<int, IReadOnlyDictionary<string, long>> rowIdsByTable)
+    {
+        HashSet<int>? writers = null;
+        Dictionary<int, List<(int Id, Domain.Entities.Configuration.FormulaDef Formula, Domain.Entities.Configuration.TableDef Table)>>? byColumn = null;
+        Dictionary<int, Dictionary<long, string>>? keyByRowId = null;
+
+        foreach (var seed in dirty.Seeds)
+        {
+            if (!snapshot.ColumnsById.TryGetValue(seed.ColumnDefId, out var column))
+            {
+                continue;
+            }
+
+            byColumn ??= formulas
+                .Where(p => p.Value.Formula.ColumnDefId is not null
+                            && p.Value.Formula.Scope is Domain.Enums.FormulaScope.Column or Domain.Enums.FormulaScope.Cell)
+                .GroupBy(p => p.Value.Formula.ColumnDefId!.Value)
+                .ToDictionary(g => g.Key, g => g.Select(p => (p.Key, p.Value.Formula, p.Value.Table)).ToList());
+
+            if (!byColumn.TryGetValue(column.Id, out var candidates))
+            {
+                continue;
+            }
+
+            foreach (var (id, formula, table) in candidates)
+            {
+                if (plan.IsSnapshot(id))
+                {
+                    continue;
+                }
+
+                if (formula.Scope == Domain.Enums.FormulaScope.Column)
+                {
+                    if (column.IsComputed)
+                    {
+                        (writers ??= []).Add(id);
+                    }
+
+                    continue;
+                }
+
+                // Комірочна: лише якщо рядок насіння — рядок формули.
+                keyByRowId ??= [];
+                if (!keyByRowId.TryGetValue(table.Id, out var keys))
+                {
+                    keys = rowIdsByTable.TryGetValue(table.Id, out var byKey)
+                        ? byKey.ToDictionary(p => p.Value, p => p.Key)
+                        : [];
+                    keyByRowId[table.Id] = keys;
+                }
+
+                if (keys.TryGetValue(seed.TableRowId, out var seedKey)
+                    && formula.RowDefId is { } rowDefId
+                    && table.Rows.FirstOrDefault(r => r.Id == rowDefId)?.RowKeyValue == seedKey)
+                {
+                    (writers ??= []).Add(id);
+                }
+            }
+        }
+
+        if (writers is null)
+        {
+            return affected;
+        }
+
+        var all = new HashSet<int>(affected);
+        var queue = new Queue<int>(writers.Where(all.Add));
+        while (queue.Count > 0)
+        {
+            foreach (var dependent in plan.DependentsOfFormula(queue.Dequeue()))
+            {
+                if (!plan.IsSnapshot(dependent) && !plan.IsCrossSheet(dependent) && all.Add(dependent))
+                {
+                    queue.Enqueue(dependent);
+                }
+            }
+        }
+
+        var ordered = all.ToList();
+        ordered.Sort((a, b) => plan.EvaluationOrder(a).CompareTo(plan.EvaluationOrder(b)));
+        return ordered;
     }
 
     /// <summary>

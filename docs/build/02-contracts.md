@@ -3323,6 +3323,32 @@ public interface ICellStyleStore
 }
 ```
 
+#### `IFormulaOverrideStore`
+
+✎ D-461: «ручне значення замість формули». Прапорець формули `cfg.FormulaDef.AllowManualOverride` (сирий UPDATE лише цього
+стовпця — тригер незмінності пропускає його й у Published/Deprecated) і позначки комірок `doc.CellFormulaOverride`
+(`PeriodKey, TableRowId, ColumnDefId` → `TableInstanceId, Reason ≤ 1000, SetByUserId, SetAt`; партиція `ps_ByPeriodKey`, без
+зовнішніх ключів — як `doc.CellStyle`). Значення лежить у `doc.CellValue` з `IsCalculated = 0`; позначка робить його
+однозначним і тримає чинну причину для підказки. Записи — набором (одна команда на батч), у поточній транзакції; правка пише
+позначки ПЕРЕД значеннями, перерахунок блокує позначки адрес запису (`LockKeysAsync`, `UPDLOCK, HOLDLOCK`) перед своїм MERGE —
+ручне значення не перезаписується паралельним прогоном.
+
+```csharp
+public interface IFormulaOverrideStore
+{
+    public Task<FormulaOverrideTarget?> FindFormulaAsync(int templateVersionId, int formulaId, CancellationToken ct);
+    public Task SetAllowManualOverrideAsync(int formulaId, bool allow, CancellationToken ct);
+    public Task<FormulaOverrideCounts> CountAsync(FormulaOverrideTarget target, CancellationToken ct);
+    public Task<IReadOnlyList<FormulaOverrideMark>> ReadInstanceAsync(long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
+    public Task<IReadOnlyDictionary<CellAddress, CellFormulaOverride>> ReadAsync(IReadOnlyCollection<CellAddress> addresses, CancellationToken ct);
+    public Task<IReadOnlySet<CellAddress>> ReadKeysAsync(IReadOnlyCollection<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct);
+    public Task<IReadOnlySet<CellAddress>> LockKeysAsync(IReadOnlyCollection<CellAddress> addresses, CancellationToken ct);
+    public Task<IReadOnlyList<ProjectFormulaOverride>> ReadProjectAsync(int projectId, CancellationToken ct);
+    public Task ReleaseAsync(IReadOnlyList<CellAddress> addresses, CancellationToken ct);
+    public Task ApplyAsync(IReadOnlyList<CellFormulaOverride> upserts, IReadOnlyList<CellAddress> removals, CancellationToken ct);
+}
+```
+
 **Правила `PATCH …/cell-styles` (CELL-STYLE L3b).**
 
 - Поле `null`/відсутнє — не чіпати; `""` — зняти; `#rrggbb` — задати. `isBold: false` означає «не задано» (жирність колонки так не зняти), а не «зняти жирність».
@@ -4248,6 +4274,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/{scope}/{target}` | `Template.Edit` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/cell/{rowKey}/{columnDefId}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/cell/{rowKey}/{columnDefId}` | `Template.Edit` | 7 |
+| `PUT` | `/api/v1/template-versions/{id}/formulas/{formulaId}/manual-override` | `Template.Edit` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/tables/{tableId}/validation-rules` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableId}/validation-rules/{code}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableId}/validation-rules/{code}` | `Template.Edit` | 7 |
@@ -5528,6 +5555,8 @@ public sealed record RowDto(
 **Черга «До погодження» (ФВ-12.5, рішення людини 12.10 17:12Z, квіз 6, №4).** `GET /api/v1/me/approval-queue?limit=&cursor=` → `ApprovalQueueDto { items: ApprovalQueueItemDto[], nextCursor: string | null }`. Елемент: `documentId` (int64), `documentKey` (string), `projectCode` (string), `templateCode` (string), `sheetDefId` (int32), `sheetCode` (string), `periodKey` (int32, `Рік*100+№`), `submittedAt` (UTC), `submittedByDisplayName` (string | null), `stepOrdinal` / `stepCount` / `stepRoleCode` (int | null / int | null / string | null — `null`, коли маршруту погодження немає й затвердження одноетапне). У списку рівно ті аркуші, які викликач МОЖЕ затвердити зараз (`POST …/approve` дав би `204`), тож окремого `canApprove` немає: аркуш Submitted; проєкт документа видимий викликачу (`SeesDocumentsOf`), а за обмежень нижче проєкту — аркуш у складі документа й читається в цьому періоді (як `RequireSheetVisible`); крок маршруту — роль викликача (`RoleIdsAt`, лише чинний маршрут `ApprovalRoute.Resolve`, ЄДИНИЙ вибір із затвердженням); рівень гранта на аркуш у періоді ≥ `Approve` (`EditRules.CanApprove`); ~~подав не сам викликач (F-25)~~ — ✎ 2026-10-23 (D-440, AN-127): власне подання викликача в черзі ЛИШАЄТЬСЯ, і він затверджує його сам, якщо роль кроку й грант це дають (`err.ECR-ACCS-0403.approveOwnSubmission` виведено). Невидиме не розкривається: ні назви, ні існування документа/аркуша, схованого від викликача, у відповіді немає. Симуляція «очима користувача» й профіль інтеграції — порожня черга. Порядок — за давністю подання (`submittedAt`, далі внутрішній id), `limit` 1..200 (за замовчуванням 50; поза межами — стискається), `cursor` — непрозорий рядок з `nextCursor`; зіпсований `cursor` → `422 ECR-REQ-0422` `err.ECR-REQ-0422.approvalQueueCursorInvalid`. Сторінка може бути коротшою за `limit` при непорожньому `nextCursor` (за один запит переглядається обмежена кількість кандидатів — продовжувати за курсором). Читання — порт `IApprovalQueueStore` (проєкти, чинні маршрути з кодами ролей, подані аркуші keyset-порціями; рішення — в пам'яті обробника, без звернень на кандидата). Міграції немає.
 
 **Журнал аркуша: позначка «погоджено автором подання» (D-440, AN-127, ✎ 2026-10-23).** `GET /api/v1/documents/{id}/workflow/history?periodKey=` → `WorkflowEventDto[]`; до полів додано `approvedBySubmitter` (bool, обов'язкове): `true` лише для `Approve`/`ApproveStep`, які виконав той самий користувач, що й найближче ПОПЕРЕДНЄ `Submit` цього аркуша за період (за журналом `wf.ApprovalEvent`, не за рядком стану — повторне подання іншою людиною позначку старої події не змінює). Клієнт (`WorkflowHistory`) показує підпис `workflow.historyApprovedBySubmitter`. Міграції немає.
+
+**✎ D-461: ручне значення замість формули (рішення людини 30.10).** `PUT /template-versions/{id}/formulas/{formulaId}/manual-override` `{allow, dryRun}` → `200 {formulaId, allowManualOverride, changed, overriddenDocuments, overriddenCells}` — і на опублікованій версії (без нової версії; `aud.StructureChange`); `404 ECR-TMPL-0404` (`formulaById`). `PATCH …/cells`: поле комірки `overrideReason` — обов'язкове для запису в комірку формули, що дозволяє ручне значення, за правом `Document.OverrideFormula` (без права/прапорця — `403 ECR-ACCS-0403 CalculatedCell`; без причини — `422 ECR-CELL-0422 overrideReasonRequired`); `value: null`/`isEmpty` у ручній комірці повертає формулу. Зріз: `formulaOverride {canOverride, overridableColumns[], overridableCells[], manualCells{"rowKey:code": {reason, setBy, setAt}}}` (лише таблиці з формулами колонки/комірки). Структура: `formulaId`/`allowManualOverride` колонки й рядка, `cellFormulas[]` таблиці. Журнал: `reason`, походження `FormulaOverride`/`FormulaRestored`. Імпорт: `replacesFormula` у змінах перегляду. Перенос версії: `lostFormulaOverrides`, пункти `OverrideLost`.
 
 **Запис у таблицю документа: нерозкриття існування (EA6-D1, рішення «Аудиту» 12.10).** `PATCH …/documents/{id}/cells` (екземпляр таблиці — з тіла) віддає ТЕ САМЕ тіло `404 ECR-DOC-0404`, `err.ECR-DOC-0404.document`, що й `POST …/rows` і `DELETE …/rows/{rowKey}` (D3-A S-4), для: відсутнього екземпляра, екземпляра ЧУЖОГО документа, невидимого й неіснуючого документа — байт у байт з точністю до id (`DocumentVisibility.ResolveInDocumentAsync`). Перебором пар (документ, екземпляр) існування чужих документів і екземплярів не розкривається. Схована від читача таблиця ВИДИМОГО документа лишається `err.ECR-DOC-0404.tableInstance` (D-6; те саме в поштучному записі, книзі й читанні зрізу). Читання зрізу (`GET …/tables/{id}`) лишає окремий `tableInstanceNotInDocument` — не писальний шлях.
 **Видимість виконавця, причина «не передано вам», копіювання без примітки (RC20 D-2/D-3/D-4).** (1) `EditAssignmentRecipientDto.visibility` (enum `RecipientVisibility`: `Unknown` | `Visible` | `NotVisible`): чи бачить виконавець документ (і аркуш передачі) за ПРЯМИМИ призначеннями ролей — профіль будується так само, як при передачі. Доменний обліковий запис без видимості за профілем — `Unknown` (групи AD чужої людини з токена його сесії невідомі, P-02), а не `NotVisible`. Обчислюється лише в переліку `GET …/edit-assignments` (стеля 200 профілів, решта — `Unknown`); у відповідях upsert/fill/validate/return/copy поле — `Unknown`. Прихований від виконавця аркуш НЕ блокує створення передачі (як і раніше): клієнт показує позначку. (2) Нова причина відмови запису `EditDenyReason.NotAssignedToYou` (текст `deny.NotAssignedToYou`): виконавець хоча б однієї діючої передачі цього документа (в межах того ж аркуша/таблиці/періоду, делегатор активний), у якого за роллю лише `Read`, у комірці поза своїми передачами. Замінює `InsufficientGrantLevel` лише для виконавця; дозволів не змінює, рівень рядка (створення) і `NoGrant` — як були. (3) `POST …/edit-assignments/copy` НЕ переносить `note` джерела (вона писана про місяць джерела): нова цільова передача — без примітки, примітка наявної цільової лишається (раніше перезаписувалась приміткою джерела).

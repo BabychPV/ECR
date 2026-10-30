@@ -55,6 +55,7 @@ BEGIN
         CorrelationId   nvarchar(64)   NULL,
         IsOutOfWindow   bit            NOT NULL CONSTRAINT DF_CellChange_OutOfWindow DEFAULT(0),
         IsOverwrite     bit            NOT NULL CONSTRAINT DF_CellChange_Overwrite DEFAULT(0),
+        Reason          nvarchar(1000) NULL,
         CONSTRAINT PK_CellChange PRIMARY KEY CLUSTERED (ChangedAt, Id) ON ps_AuditByMonth(ChangedAt)
     ) ON ps_AuditByMonth(ChangedAt);
 END
@@ -79,6 +80,15 @@ GO
 IF COL_LENGTH(N'aud.CellChange', N'IsOverwrite') IS NULL
     ALTER TABLE aud.CellChange
         ADD IsOverwrite bit NOT NULL CONSTRAINT DF_CellChange_Overwrite DEFAULT(0);
+GO
+
+-- ✎ D-461: причина ручного значення замість формули (`Origin = FormulaOverride`) — журнал і є записом «хто/чому».
+-- NULL для всіх інших походжень і для давніх рядків. Апгрейд наявних баз — ADD nullable-колонки (лише метадані).
+-- ⛔ Дзеркала — `arc.CellChange` і ціль SWITCH `arc.AuditCellChange` (12-archive-tables.sql): та сама колонка ТИМ
+-- САМИМ порядком (після IsOverwrite), інакше SWITCH падає (Msg 4943/4904).
+IF COL_LENGTH(N'aud.CellChange', N'Reason') IS NULL
+    ALTER TABLE aud.CellChange
+        ADD Reason nvarchar(1000) NULL;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_Cell'

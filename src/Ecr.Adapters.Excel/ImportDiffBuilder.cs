@@ -129,6 +129,9 @@ public sealed class ImportDiffBuilder
 
         var columnsById = table.Columns.ToDictionary(c => c.Id);
 
+        // ✎ D-461: формули таблиці, що дозволяють ручне значення (зі знімка, без запитів).
+        var overridePolicy = Ecr.Application.Documents.FormulaOverride.FormulaOverridePolicy.For(table);
+
         var changes = new List<ImportChange>();
         var rejected = new List<ImportRejection>();
         var overwritable = new List<ImportChange>();
@@ -232,7 +235,16 @@ public sealed class ImportDiffBuilder
                 // Комірка книги збігається з відбитком експорту — її не чіпали,
                 // число змінила система (перерахунок після вивантаження): книга
                 // застаріла, правити в ній нічого. Інакше — правку вніс користувач.
-                if (IsCalculated(definition))
+                // ✎ D-461: комірка формули, що ЗАРАЗ дозволяє ручне значення, і рішення доступу дозволило запис саме як
+                // ручне значення (право `Document.OverrideFormula`, решта правил) — значення з книги стає ручним
+                // значенням замість формули («буде замінено формулу» в перегляді), а не відмовою.
+                var replacesFormula = rowIds.TryGetValue(row.RowKey, out var overrideRowId)
+                    && decisions.TryGetValue(new CellAddress(period, overrideRowId, column.ColumnDefId), out var overrideDecision)
+                    && overrideDecision.IsAllowed
+                    && overrideDecision.ViaFormulaOverride
+                    && (incoming is null || overridePolicy.Allows(row.RowKey, definition));
+
+                if (IsCalculated(definition) && !replacesFormula)
                 {
                     var stale = CalculatedCellFingerprint.Unchanged(row, block.Columns, column, cell);
 
@@ -502,7 +514,10 @@ public sealed class ImportDiffBuilder
 
                     overwritable.Add(new ImportChange(
                         row.RowKey, column.Code, Display(existing, definition), incoming, table.Code, table.NameL10n,
-                        roundedFrom));
+                        roundedFrom)
+                    {
+                        ReplacesFormula = replacesFormula,
+                    });
 
                     continue;
                 }
@@ -519,7 +534,10 @@ public sealed class ImportDiffBuilder
 
                 changes.Add(new ImportChange(
                     row.RowKey, column.Code, Display(existing, definition), incoming, table.Code, table.NameL10n,
-                    roundedFrom));
+                    roundedFrom)
+                {
+                    ReplacesFormula = replacesFormula,
+                });
             }
         }
 

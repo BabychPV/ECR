@@ -603,6 +603,8 @@ try {
             'Document.Reopen',
             # ✎ TC: чат таблиці — e2e UI-lane на двох користувачах (написати, згадати, видалити чуже). Лише тестова роль.
             'Document.Discuss', 'Document.DiscussModerate',
+            # ✎ D-461: ручне значення замість формули — e2e UI-lane (замінити, повернути формулу). Лише тестова роль.
+            'Document.OverrideFormula',
             'Project.Manage', 'Period.Configure', 'Period.Reopen',
             # ✎ P44: `Calculation.EditFormula` — `resizableModal.spec` заводить методологію з чернеткою й відкриває
             # вікно формули. Лише тестова роль стенда; ролі продукту не змінюються.

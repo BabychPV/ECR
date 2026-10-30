@@ -105,6 +105,9 @@ public sealed class DocumentReadScope
 
     private static readonly IReadOnlyList<ParticipationGrant> NoGrants = [];
 
+    /// <summary>✎ D-461: проєкт документа — для проєктних прав зрізу (<c>Document.OverrideFormula</c>).</summary>
+    public int ProjectId => _projectId;
+
     /// <summary>Чи враховано в межах надання учасника документа (D-443).</summary>
     public bool HasParticipation => _grants.Count > 0;
 

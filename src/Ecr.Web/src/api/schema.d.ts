@@ -19036,6 +19036,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/formulas/{formulaId}/manual-override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Вмикає/вимикає ручне значення замість формули; `dryRun` — лише лічильник наявних ручних значень
+         *     (для попередження перед вимкненням).
+         * @description `403` — немає `Template.Edit`; `404 ECR-TMPL-0404` — у версії немає такої (живої) формули.
+         *     Вимкнення наявні ручні значення не стирає — лише забороняє нові.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія шаблону (будь-який стан). */
+                    id: number;
+                    /** @description Формула версії. */
+                    formulaId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SetFormulaManualOverrideRequest"];
+                    "application/json": components["schemas"]["SetFormulaManualOverrideRequest"];
+                    "text/json": components["schemas"]["SetFormulaManualOverrideRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FormulaManualOverrideResult"];
+                        "text/json": components["schemas"]["FormulaManualOverrideResult"];
+                        "text/plain": components["schemas"]["FormulaManualOverrideResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/header-fields": {
         parameters: {
             query?: never;
@@ -24216,6 +24293,9 @@ export interface components {
              * @description Звітний період.
              */
             periodKey: number;
+            /** @description ✎ D-461: причина ручного значення замість формули (`aud.CellChange.Reason`, `Origin = FormulaOverride`);
+             *     `null` — інші походження. */
+            reason?: null | string;
             /** @description Ключ рядка — щоб журнал читався без join. */
             rowKey: string;
             rowLabelL10n?: null | components["schemas"]["LocalizedText"];
@@ -25990,6 +26070,13 @@ export interface components {
             lookupRemapped?: null | number;
             /**
              * Format: int64
+             * @description ✎ D-461: скільки ручних значень замість формул НЕ переїде як ручні (формула цільової версії ручного значення не
+             *     дозволяє або колонки немає): комірки знову рахує формула, журнал — FormulaRestored. Перенос не блокує; пункти
+             *     звіту — Kind OverrideLost. null — таких немає.
+             */
+            lostFormulaOverrides?: null | number;
+            /**
+             * Format: int64
              * @description Скільки введених значень зникло б.
              */
             lostValues: number;
@@ -26496,6 +26583,8 @@ export interface components {
         };
         /** @description Формула для відповіді клієнту. */
         FormulaDto: {
+            /** @description ✎ D-461: «Дозволити ручне значення» (змінює `PUT …/formulas/{formulaId}/manual-override`). */
+            allowManualOverride?: boolean;
             /**
              * Format: int32
              * @description Колонка, якщо `Scope == Column` чи `Cell`.
@@ -26522,6 +26611,55 @@ export interface components {
              * @description Таблиця, якій належить формула.
              */
             tableDefId: number;
+        };
+        /** @description ✎ D-461: ручне значення в комірці формули — для підказки «хто, коли, чому». */
+        FormulaManualCellDto: {
+            /** @description Причина. */
+            reason: string;
+            /**
+             * Format: date-time
+             * @description Коли (UTC).
+             */
+            setAt: string;
+            /** @description Ім'я автора; `null` — користувача вже немає. */
+            setBy: null | string;
+        };
+        /** @description ✎ D-461: відповідь на зміну «Дозволити ручне значення». */
+        FormulaManualOverrideResult: {
+            /** @description Прапорець ПІСЛЯ виклику. */
+            allowManualOverride: boolean;
+            /** @description Чи прапорець справді змінився (`false` — dryRun або вже був таким). */
+            changed: boolean;
+            /**
+             * Format: int32
+             * @description Формула.
+             */
+            formulaId: number;
+            /**
+             * Format: int32
+             * @description Скільки комірок усього.
+             */
+            overriddenCells: number;
+            /**
+             * Format: int32
+             * @description У скількох документах версії зараз є ручні значення замість цієї формули.
+             */
+            overriddenDocuments: number;
+        };
+        /** @description ✎ D-461: що клієнту треба знати, щоб замінити формулу ручним значенням (з причиною) і повернути формулу. */
+        FormulaOverrideSliceDto: {
+            /** @description У користувача є право `Document.OverrideFormula` у проєкті документа. Без нього комірки формул лишаються
+             *     `CalculatedCell` у IReadOnlyDictionary&lt;string, string&gt; TableSliceDto.CellPermissions. */
+            canOverride: boolean;
+            /** @description Комірки, де зараз стоїть ручне значення замість формули: ключ `"{rowKey}:{columnCode}"`. Видно й після
+             *     вимкнення прапорця (значення лишається, його можна лише повернути до формули — видаленням). */
+            manualCells: {
+                [key: string]: components["schemas"]["FormulaManualCellDto"];
+            };
+            /** @description Комірки комірочних формул (`"{rowKey}:{columnCode}"`), що ЗАРАЗ дозволяють ручне значення. */
+            overridableCells: string[];
+            /** @description Коди обчислюваних колонок, формула яких ЗАРАЗ дозволяє ручне значення (прапорець увімкнено). */
+            overridableColumns: string[];
         };
         /**
          * @description Тип результату формули методології (директива ПК-1 №05, поправка 2-біс).
@@ -26733,6 +26871,10 @@ export interface components {
             newValue: unknown;
             /** @description Поточне значення; `null` — порожньо. */
             oldValue: unknown;
+            /** @description ✎ D-461: «буде замінено формулу» — значення ляже як РУЧНЕ ЗНАЧЕННЯ ЗАМІСТЬ ФОРМУЛИ (формула дозволяє, у
+             *     користувача є право `Document.OverrideFormula`); причина журналу — «Excel import». `NewValue = null` у
+             *     такій комірці — повернення формули. */
+            replacesFormula?: boolean;
             /** @description Число з файлу ДО округлення до `Scale` колонки (ФВ-9.16b); `null` — не
              *     округлювалось. `NewValue` — вже округлене: саме воно буде записано. */
             roundedFrom?: unknown;
@@ -28519,6 +28661,11 @@ export interface components {
              * @default false
              */
             isEmpty: boolean;
+            /** @description ✎ D-461: причина ручного значення замість формули — обов'язкова, коли комірку рахує формула, що дозволяє ручне
+             *     значення (і в користувача є право `Document.OverrideFormula`); обрізається, до 1000 символів, без керівних
+             *     символів, крім переносу рядка. Для звичайних комірок ігнорується. Видалення значення (`value: null`) у ручній
+             *     комірці повертає формулу — причина не потрібна. */
+            overrideReason?: null | string;
             /** @description Значення; `null` = стерти. */
             value: unknown;
         };
@@ -32265,6 +32412,16 @@ export interface components {
             /** @description Причина закріплення; потрапляє в аудит. */
             reason: null | string;
         };
+        /** @description ✎ D-461: тіло `PUT …/formulas/{formulaId}/manual-override`. */
+        SetFormulaManualOverrideRequest: {
+            /** @description Дозволити ручне значення. */
+            allow: boolean;
+            /**
+             * @description `true` — нічого не змінювати, лише порахувати наявні ручні значення.
+             * @default false
+             */
+            dryRun: boolean;
+        };
         /** @description Запит на зміну режимів обчислення версії-чернетки. */
         SetMethodologyModesRequest: {
             /** @description Джерело тривалості періоду (ФВ-16.11). */
@@ -33481,6 +33638,9 @@ export interface components {
             unread: number;
         };
         TableDto: {
+            /** @description ✎ D-461: формули окремих КОМІРОК таблиці (область `Cell`) — Id для
+             *     `PUT …/formulas/{formulaId}/manual-override` і стан «Дозволити ручне значення». Порожній — таких немає. */
+            cellFormulas?: components["schemas"]["TemplateCellFormulaDto"][];
             /** @description Код — ідентичність таблиці й адреса в `PUT …/sheets/{sheetCode}/tables/{code}`. */
             code: string;
             /** @description Колонки таблиці в порядку `Ordinal`. */
@@ -33611,6 +33771,7 @@ export interface components {
             };
             /** @description Опис колонок таблиці. */
             columns: components["schemas"]["ColumnDto"][];
+            formulaOverride?: null | components["schemas"]["FormulaOverrideSliceDto"];
             /** @description Групи заголовків видимих колонок (плоский список). Лише групи, у піддереві яких є хоч одна видима
              *     колонка зрізу (прихована/заборонена колонка випадає зі спану, група без видимих — не віддається).
              *     Порожній — груп немає. */
@@ -33710,6 +33871,27 @@ export interface components {
             /** @description Назва мовами каталогу. */
             nameL10n: components["schemas"]["LocalizedText"];
         };
+        /** @description ✎ D-461: формула однієї комірки таблиці в структурі шаблону. */
+        TemplateCellFormulaDto: {
+            /** @description «Дозволити ручне значення». */
+            allowManualOverride: boolean;
+            /**
+             * Format: int32
+             * @description Колонка комірки.
+             */
+            columnDefId: number;
+            /** @description Діалект виразу. */
+            dialect: components["schemas"]["ExpressionDialect"];
+            /** @description Вираз. */
+            expression: string;
+            /**
+             * Format: int32
+             * @description Id формули.
+             */
+            formulaId: number;
+            /** @description Рядок комірки. */
+            rowKey: string;
+        };
         TemplateChangeDto: {
             /** @description Клас ризику; `Breaking` у версії з документами — відмова. */
             changeClass: components["schemas"]["ChangeClass"];
@@ -33724,6 +33906,8 @@ export interface components {
         };
         /** @description Колонка в СТРУКТУРІ шаблону — опис для адміністратора. */
         TemplateColumnDto: {
+            /** @description ✎ D-461: формула колонки дозволяє ручне значення; `false` і без формули. */
+            allowManualOverride?: boolean;
             /** @description Код колонки — ідентичність, у патчі не змінюється. */
             code: string;
             /** @description Тип даних; змінюється лише клоном версії. */
@@ -33740,6 +33924,11 @@ export interface components {
              *     завжди відкривала порожній редактор, навіть коли формула вже збережена:
              *     вираз ніде не приходив клієнту без окремого запиту, якого не існувало. */
             formulaExpression: null | string;
+            /**
+             * Format: int32
+             * @description ✎ D-461: Id формули колонки (для `PUT …/formulas/{formulaId}/manual-override`); `null` — формули немає.
+             */
+            formulaId?: null | number;
             /**
              * Format: int32
              * @description Найглибша група заголовків колонки (`TableDto.HeaderGroups`); `null` — без групи; презентаційне поле.
@@ -33849,10 +34038,18 @@ export interface components {
         };
         /** @description Рядок у СТРУКТУРІ шаблону — опис, а не дані. */
         TemplateRowDto: {
+            /** @description ✎ D-461: формула рядка дозволяє ручне значення. ⚠ Цілі формули рядка в колонках вводу редагуються й без
+             *     прапорця (поведінка до D-461 не змінена) — прапорець для них зберігається, але на редагування не впливає. */
+            allowManualOverride?: boolean;
             formulaDialect: null | components["schemas"]["ExpressionDialect"];
             /** @description Текст наявної формули рядка, якщо вона є; `null` — формули ще
              *     немає. Той самий фікс, що й string? TemplateColumnDto.FormulaExpression. */
             formulaExpression: null | string;
+            /**
+             * Format: int32
+             * @description ✎ D-461: Id формули рядка; `null` — формули немає.
+             */
+            formulaId?: null | number;
             /**
              * Format: int32
              * @description Ідентифікатор; ним адресується презентаційний патч (`ФВ-2.6`, порядок рядків).

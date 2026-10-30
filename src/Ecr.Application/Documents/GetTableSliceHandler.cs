@@ -66,6 +66,10 @@ namespace Ecr.Application.Documents;
 /// Q-17: роутер власності місячних стовпців - значення колонки з іншим власником маскується, якщо період власника поза
 /// областю ролі читача. <c>null</c> або прапор вимкнено - як до Q-17.
 /// </param>
+/// <param name="formulaOverrides">
+/// ✎ D-461: позначки «ручне значення замість формули» (<see cref="FormulaOverrideSliceDto"/>). <c>null</c> — лише тести,
+/// що конструюють обробник вручну (тоді ручних значень у відповіді немає).
+/// </param>
 public sealed class GetTableSliceHandler(
     IRowStore rowStore,
     ICellStore cellStore,
@@ -85,7 +89,8 @@ public sealed class GetTableSliceHandler(
     IRegistryStore? registries = null,
     Microsoft.Extensions.Logging.ILogger<Calculations.CalculatedCellOverlay>? overlayLog = null,
     Permits.Groups.IPermitGroupResolver? groups = null,
-    IMonthColumnRouter? monthRouter = null)
+    IMonthColumnRouter? monthRouter = null,
+    IFormulaOverrideStore? formulaOverrides = null)
 {
     /// <summary>
     /// Q-17: колонки таблиці з іншим власником, період якого НЕ в області ролі читача (<c>InPeriod(власник)</c>).
@@ -483,12 +488,82 @@ public sealed class GetTableSliceHandler(
         var styleAccess = CellStyleAccessPolicy.Build(
             styleDecisions, keyById, columns.ToDictionary(c => c.Id, c => c.Code));
 
+        var formulaOverride = await FormulaOverrideAsync(
+                table, tableInstanceId, instance.PeriodKey, keyById, columns, profile, anyPeriodScope.ProjectId, ct)
+            .ConfigureAwait(false);
+
         return new TableSliceDto(
             tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations, formats, outOfWindow,
             userStyles, StyleOf(styleById, table.HeaderStyleId), styleAccess)
         {
             HeaderGroups = headerGroups,
+            FormulaOverride = formulaOverride,
         };
+    }
+
+    /// <summary>
+    /// ✎ D-461: ручні значення замість формул і що з формул таблиці дозволяє ручне значення; <c>null</c> — у таблиці
+    /// немає формул колонки/комірки (нуль звернень до бази й нуль байтів у відповіді).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ S6, нерозкриття: лише ВИДИМІ колонки (<paramref name="columns"/> — без схованих і заборонених), як і значення.
+    /// Один запит позначок на зріз, лише коли в таблиці є формули колонки/комірки.
+    /// </remarks>
+    private async Task<FormulaOverrideSliceDto?> FormulaOverrideAsync(
+        Domain.Entities.Configuration.TableDef table,
+        long tableInstanceId,
+        int periodKey,
+        Dictionary<long, string> keyById,
+        List<ColumnDto> columns,
+        AccessProfile profile,
+        int projectId,
+        CancellationToken ct)
+    {
+        var policy = FormulaOverride.FormulaOverridePolicy.For(table);
+        if (!policy.HasTargets)
+        {
+            return null;
+        }
+
+        var visibleCodeById = columns.ToDictionary(c => c.Id, c => c.Code);
+        var computedVisible = table.Columns
+            .Where(c => c.IsComputed && visibleCodeById.ContainsKey(c.Id))
+            .ToList();
+
+        var overridableColumns = computedVisible
+            .Where(c => policy.ColumnFormula(c.Id)?.AllowManualOverride == true)
+            .Select(c => c.Code)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        var overridableCells = policy.AllowingCells
+            .Where(cell => visibleCodeById.ContainsKey(cell.ColumnDefId))
+            .Select(cell => $"{cell.RowKey}:{visibleCodeById[cell.ColumnDefId]}")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        var manual = new Dictionary<string, FormulaManualCellDto>(StringComparer.Ordinal);
+        if (formulaOverrides is not null)
+        {
+            var marks = await formulaOverrides
+                .ReadInstanceAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(periodKey), ct)
+                .ConfigureAwait(false);
+
+            foreach (var mark in marks)
+            {
+                if (keyById.TryGetValue(mark.TableRowId, out var rowKey)
+                    && visibleCodeById.TryGetValue(mark.ColumnDefId, out var code))
+                {
+                    manual[$"{rowKey}:{code}"] = new FormulaManualCellDto(mark.Reason, mark.SetByDisplayName, mark.SetAt);
+                }
+            }
+        }
+
+        // ⚠ Право — проєктне (храповик ФВ-6.8: через `PermissionCheck.IsGrantedIn`); симуляція не пише нічого.
+        var canOverride = !profile.IsSimulation
+                          && PermissionCheck.IsGrantedIn(profile, EditRules.OverrideFormulaPermission, projectId);
+
+        return new FormulaOverrideSliceDto(canOverride, overridableColumns, overridableCells, manual);
     }
 
     /// <summary>

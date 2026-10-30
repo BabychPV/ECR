@@ -100,6 +100,7 @@ public static class DependencyInjection
 
         // П'ятий зріз — формула колонки чи рядка (W5.3), за зразком вище.
         services.AddScoped<SaveFormulaDefHandler>();
+        services.AddScoped<FormulaManualOverrideHandler>(); // ✎ D-461
         services.AddScoped<DeleteFormulaDefHandler>();
 
         // Шостий і сьомий зрізи (W5.4): правила валідації таблиці

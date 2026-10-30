@@ -47,6 +47,9 @@ public sealed class FormulaDefConfiguration : IEntityTypeConfiguration<FormulaDe
         builder.Property(x => x.IsSnapshot).HasDefaultValue(false, "DF_Formula_Snap");
         builder.Property(x => x.IsDeleted).HasDefaultValue(false, "DF_Formula_Del");
 
+        // ✎ D-461: «Дозволити ручне значення». ADD з DEFAULT на наявній таблиці — лише метадані.
+        builder.Property(x => x.AllowManualOverride).HasDefaultValue(false, "DF_Formula_AllowOverride");
+
         // ⛔ `.WithMany(t => t.Formulas)` обов'язково: інакше `TableDef.Formulas`
         // лишається неоголошеною навігацією, і EF заводить ДРУГИЙ, тіньовий
         // зовнішній ключ (`TableDefId1`) саме під неї — з ним публікація

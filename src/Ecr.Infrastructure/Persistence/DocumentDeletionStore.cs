@@ -157,6 +157,11 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
             .Where(s => rows.Any(r => r.Id == s.TableRowId && r.PeriodKeyValue == s.PeriodKeyValue))
             .ExecuteDeleteAsync(ct).ConfigureAwait(false);
 
+        // ✎ D-461: позначки «ручне значення замість формули» — без зовнішнього ключа (як doc.CellStyle), видаляються явно.
+        await db.CellFormulaOverrides
+            .Where(o => instances.Any(i => i.Id == o.TableInstanceId && i.PeriodKeyValue == o.PeriodKeyValue))
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
         // ⛔ L10-06: значення PI за вікном рядка ключуються екземпляром таблиці
         // без зовнішнього ключа — після видалення екземплярів їх уже не знайти.
         await db.RowWindowValues

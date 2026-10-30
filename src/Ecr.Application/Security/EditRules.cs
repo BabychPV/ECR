@@ -125,6 +125,18 @@ public readonly record struct CellAccessContext(
     /// навіть без ролі на проєкт. Лише ознака для перевірки видимості служби; правила <see cref="EditRules"/> її не читають.
     /// </summary>
     public bool ParticipatesInDocument { get; init; }
+
+    /// <summary>
+    /// ✎ D-461: комірку рахує формула (<see cref="ColumnIsComputed"/> чи <see cref="CellIsComputed"/>), а формула
+    /// ДОЗВОЛЯЄ ручне значення (<c>FormulaDef.AllowManualOverride</c>) або комірка вже тримає ручне значення
+    /// (<c>doc.CellFormulaOverride</c> — його можна повернути до формули й після вимкнення прапорця). Рахує служба.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Знімає ЛИШЕ <see cref="EditDenyReason.CalculatedCell"/> і лише разом із правом
+    /// <see cref="EditRules.OverrideFormulaPermission"/> у проєкті: запис у аркуш сам по собі формулу не замінює.
+    /// Симуляція, архів, період, вікно доступу, стан аркуша, «лише читання» й грант на комірку перевіряються як для всіх.
+    /// </remarks>
+    public bool FormulaOverridable { get; init; }
 }
 
 /// <summary>
@@ -221,9 +233,18 @@ public static class EditRules
                 break;
         }
 
+        // ✎ D-461: обчислювану комірку можна замінити ручним значенням, лише коли формула це дозволяє (чи комірка вже
+        // ручна) І в користувача є окреме проєктне право. Решта перевірок нижче — як для будь-якої комірки.
+        var viaOverride = false;
         if (context.ColumnIsComputed || context.CellIsComputed)
         {
-            return EditDecision.Deny(EditDenyReason.CalculatedCell);
+            if (!context.FormulaOverridable
+                || !PermissionCheck.IsGrantedIn(profile, OverrideFormulaPermission, context.ProjectId))
+            {
+                return EditDecision.Deny(EditDenyReason.CalculatedCell);
+            }
+
+            viaOverride = true;
         }
 
         if (context.ColumnIsReadOnly)
@@ -290,13 +311,23 @@ public static class EditRules
             return EditDecision.Deny(EditDenyReason.LockedByOwner);
         }
 
-        if (lifted)
-        {
-            return EditDecision.AllowViaAssignment();
-        }
+        var allowed = lifted
+            ? EditDecision.AllowViaAssignment()
+            : byApprover ? EditDecision.AllowByApprover() : EditDecision.Allow();
 
-        return byApprover ? EditDecision.AllowByApprover() : EditDecision.Allow();
+        return viaOverride ? allowed with { ViaFormulaOverride = true } : allowed;
     }
+
+    /// <summary>
+    /// ✎ D-461: проєктне право «ручне значення замість формули». Разом із дозволом формули
+    /// (<see cref="CellAccessContext.FormulaOverridable"/>) і звичайним правом писати комірку знімає
+    /// <see cref="EditDenyReason.CalculatedCell"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Право проєктне й звужуване (<c>PermissionScopes.Narrowable</c>): перевіряється через
+    /// <see cref="PermissionCheck.IsGrantedIn"/> у проєкті документа (храповик ФВ-6.8).
+    /// </remarks>
+    public const string OverrideFormulaPermission = "Document.OverrideFormula";
 
     /// <summary>
     /// Проєктне право, що разом із рівнем <see cref="GrantLevel.Write"/> дає

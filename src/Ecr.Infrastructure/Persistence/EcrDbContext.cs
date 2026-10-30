@@ -97,6 +97,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
 
     /// <summary>Користувацька заливка/колір тексту/жирність комірок (CELL-STYLE L3b).</summary>
     public DbSet<CellStyle> CellStyles => Set<CellStyle>();
+
+    /// <summary>✎ D-461: позначки «ручне значення замість формули».</summary>
+    public DbSet<CellFormulaOverride> CellFormulaOverrides => Set<CellFormulaOverride>();
     public DbSet<DocumentHeaderValue> DocumentHeaderValues => Set<DocumentHeaderValue>();
 
     /// <summary>Передачі зрізу документа виконавцям (EA-1): зріз, ексклюзивність, стан валідації.</summary>

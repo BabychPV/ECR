@@ -98,6 +98,7 @@ public static class DependencyInjection
             sp.GetRequiredService<IMetadataCache>(),
             sp.GetRequiredService<EcrDbContext>()));
         services.AddScoped<ICellStyleStore, CellStyleStore>();
+        services.AddScoped<IFormulaOverrideStore, FormulaOverrideStore>(); // ✎ D-461: ручне значення замість формули
         services.AddScoped<IRowStore, RowStore>();
         services.AddScoped<IDocumentHeaderStore, DocumentHeaderStore>();
         services.AddScoped<ITableFillStore, TableFillStore>();

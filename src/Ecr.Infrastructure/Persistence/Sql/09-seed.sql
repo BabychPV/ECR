@@ -126,6 +126,13 @@ USING (VALUES
   -- в секції `TC:discuss` наприкінці файлу (повторний сід її не повертає: адміністратор може зняти право з ролі).
   (N'Document.Discuss',         N'Document',    0),
   (N'Document.DiscussModerate', N'Document',    0),
+  -- D461: formula-override ── право «Ручне значення замість формули» (рішення людини 30.10) ──
+  -- Проєктне, звужуване (`PermissionScopes.Narrowable`): рішення про комірку далі проходить крізь межі аркуша й
+  -- періоду і грант Write. Запис у сітку саме по собі формулу НЕ замінює — потрібне це право. Не небезпечне (0):
+  -- значення з обов'язковою причиною в журналі, формулу можна повернути. Роздача — як прецедент `Document.Submit`:
+  -- лише `SystemAdministrator` шаблоном `%`; решті ролей адміністратор видає свідомо.
+  (N'Document.OverrideFormula', N'Document',    0),
+  -- D461: formula-override ── кінець секції ──
   -- PERMITS: permissions ── права типів дозволів (PM-04, рішення «Аудиту» ч.1, варіант б) ──
   -- Окремі глобальні права замість Registry.EditDefinition / Registry.Publish: ними керують реєстри Land, а тип
   -- дозволу — власна сутність. Не небезпечні (0), як і Registry.EditDefinition: `SystemAdministrator` (`%`) бере їх
@@ -9603,6 +9610,13 @@ USING (VALUES
     ,(N'permits.nae.import.issue.existingElsewhere', N'en', N'This NAE key already belongs to another node.', 1)
     ,(N'permits.nae.import.issue.sourceIncomplete', N'en', N'The AF listing may be truncated.', 1)
     -- COLL:ui-nae-structure ── кінець секції ──
+    -- D461:formula-override ── en: право, позначки журналу й відмова «ручне значення замість формули» (D-461); ru/kz — порцією D461:formula-override нижче ──
+    ,(N'permission.Document.OverrideFormula', N'en', N'Replace a formula result with a manual value', 1)
+    ,(N'audit.originLabel.FormulaOverride', N'en', N'Manual value instead of the formula', 1)
+    ,(N'audit.originLabel.FormulaRestored', N'en', N'Formula restored', 1)
+    ,(N'err.ECR-TMPL-0404.formulaById', N'en', N'There is no formula {formulaId} in template version {versionId}.', 1)
+    ,(N'err.ECR-CELL-0422.overrideReasonRequired', N'en', N'A manual value instead of the formula needs a reason of up to {max} characters (column "{columnCode}", row {rowKey}).', 1)
+    -- D461:formula-override ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -24836,6 +24850,25 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- TC:server ── кінець секції ──
+-- D461:formula-override ── ru/kz: право, позначки журналу й відмова «ручне значення замість формули» (D-461); власна порція ──
+-- ⚠ kz — робочий переклад, на звірку термінологу.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permission.Document.OverrideFormula', N'ru', N'Заменять результат формулы ручным значением'),
+    (N'permission.Document.OverrideFormula', N'kz', N'Формула нәтижесін қолмен енгізілген мәнмен ауыстыру'),
+    (N'audit.originLabel.FormulaOverride', N'ru', N'Ручное значение вместо формулы'),
+    (N'audit.originLabel.FormulaOverride', N'kz', N'Формуланың орнына қолмен енгізілген мән'),
+    (N'audit.originLabel.FormulaRestored', N'ru', N'Формула восстановлена'),
+    (N'audit.originLabel.FormulaRestored', N'kz', N'Формула қалпына келтірілді'),
+    (N'err.ECR-TMPL-0404.formulaById', N'ru', N'В версии шаблона {versionId} нет формулы {formulaId}.'),
+    (N'err.ECR-TMPL-0404.formulaById', N'kz', N'{versionId} үлгі нұсқасында {formulaId} формуласы жоқ.'),
+    (N'err.ECR-CELL-0422.overrideReasonRequired', N'ru', N'Для ручного значения вместо формулы нужна причина длиной до {max} символов (столбец «{columnCode}», строка {rowKey}).'),
+    (N'err.ECR-CELL-0422.overrideReasonRequired', N'kz', N'Формуланың орнына қолмен енгізілген мәнге {max} таңбаға дейінгі себеп қажет («{columnCode}» бағаны, {rowKey} жолы).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- D461:formula-override ── кінець секції ──
 -- COLL:ui-tablechat ── ru/kz: чат таблиці документа, клієнт; власна порція ──
 -- ⚠ kz — робочий переклад, на звірку термінологу.
 INSERT INTO #I18N ([Key], Lang, Val)

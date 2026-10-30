@@ -59,6 +59,9 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
     /// <summary><c>CorrelationId</c> в усіх таблицях <c>aud.*</c> — <c>nvarchar(64)</c>.</summary>
     private const int CorrelationIdLength = 64;
 
+    /// <summary>✎ D-461: довжина <c>aud.CellChange.Reason</c> — причина ручного значення замість формули.</summary>
+    private const int ReasonLength = Domain.Entities.Documents.CellFormulaOverride.MaxReasonLength;
+
     /// <summary><c>EntityType</c>/<c>EventType</c> — <c>nvarchar(64)</c>.</summary>
     private const int EntityTypeLength = 64;
 
@@ -125,6 +128,7 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
         new("CorrelationId", SqlDbType.NVarChar, CorrelationIdLength),
         new("IsOutOfWindow", SqlDbType.Bit),
         new("IsOverwrite", SqlDbType.Bit),
+        new("Reason", SqlDbType.NVarChar, ReasonLength),
     ];
 
     /// <inheritdoc />
@@ -163,6 +167,7 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
             EnsureFits(nameof(CellChangeRecord.RowKey), change.RowKey, RowKeyLength);
             EnsureFits(nameof(CellChangeRecord.Origin), change.Origin, OriginLength);
             EnsureFits(nameof(CellChangeRecord.CorrelationId), change.CorrelationId, CorrelationIdLength);
+            EnsureFits(nameof(CellChangeRecord.Reason), change.Reason, ReasonLength);
         }
 
         await using var command = CreateCommand();
@@ -174,9 +179,9 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
         command.CommandText = """
             INSERT INTO aud.CellChange
                 (ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId,
-                 OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow, IsOverwrite)
+                 OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow, IsOverwrite, Reason)
             SELECT ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId,
-                   OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow, IsOverwrite
+                   OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow, IsOverwrite, Reason
             FROM @changes;
             """;
 
@@ -227,6 +232,7 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
             SetText(row, 11, c.CorrelationId);
             row.SetBoolean(12, c.IsOutOfWindow);
             row.SetBoolean(13, c.IsOverwrite);
+            SetText(row, 14, c.Reason);
 
             yield return row;
         }

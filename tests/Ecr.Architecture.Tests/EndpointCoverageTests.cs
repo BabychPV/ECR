@@ -1388,6 +1388,11 @@ public sealed partial class EndpointCoverageTests
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/methodologies`.
         "PUT /api/v1/methodologies/{p}/row-activity-filter",
 
+        // ✎ D-461 (ручне значення замість формули): серверна частина й контракт пушаться ПЕРШИМИ (lane/integ-fo-server),
+        // клієнт (окрема UI-lane) стартує від запушеного schema.d.ts. До появи виклику в `features/templates` споживача немає.
+        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає перемикач «Дозволити ручне значення» у клієнт.
+        "PUT /api/v1/template-versions/{p}/formulas/{p}/manual-override",
+
         // NAE plan N1 (hierarchical registry): GET hierarchy, GET tree, POST move and POST retire now have their client
         // calls in `features/registries/tree/treeApi.ts` (generic tree editor). Only the level-editing PUT is left without a
         // consumer: the screen that edits hierarchy levels is not built yet (NAE plan N2 / registry constructor).
