@@ -24,6 +24,11 @@ interface Token {
   readonly type: string;
 }
 
+/** Дія-масив: класи груп регулярного виразу. `Array.isArray` не звужує `readonly string[]`. */
+function isGroups(action: TokenRule[1]): action is readonly string[] {
+  return Array.isArray(action);
+}
+
 function tokenize(code: string): Token[] {
   const language = buildMonarchLanguage({ dialect: 'Methodology', functionNames: Functions });
   const flags = language.ignoreCase ? 'iy' : 'y';
@@ -55,8 +60,8 @@ function tokenize(code: string): Token[] {
       const text = match[0];
       if (typeof action === 'string') {
         tokens.push({ text, type: action });
-      } else if (Array.isArray(action)) {
-        action.forEach((type, index) => tokens.push({ text: match[index + 1] ?? '', type: String(type) }));
+      } else if (isGroups(action)) {
+        action.forEach((type, index) => tokens.push({ text: match[index + 1] ?? '', type }));
       } else if ('cases' in action) {
         tokens.push({ text, type: resolveCases(action.cases, text) });
       } else {
