@@ -260,6 +260,29 @@ test.describe('D-461 formula override', () => {
 
     // Рядки 4–5 (індекси 3, 4): ручні значення з причиною.
     await enterManual(page, colF1, 3, '100', 'Meter replaced on site');
+    await expect(cellAt(page, colF1, 3)).toHaveAttribute('data-formula-manual', 'true', { timeout: 15_000 });
+    await expect
+      .poll(async () => asNumber((await sliceOf(page, arranged)).rows[3]?.cells['F1']), { timeout: 30_000 })
+      .toBe(100);
+
+    // Ctrl+Z: заміну скасовано — формула повернулась (4 × 2 = 8), маркера немає; Ctrl+Y — знову ручне з тією
+    // самою причиною.
+    await cellAt(page, colA, 0).click();
+    await page.keyboard.press('Control+z');
+    await expect
+      .poll(async () => asNumber((await sliceOf(page, arranged)).rows[3]?.cells['F1']), { timeout: 60_000 })
+      .toBe(8);
+    await expect(cellAt(page, colF1, 3)).toHaveText(shows(8), { timeout: 30_000 });
+    await expect(cellAt(page, colF1, 3)).not.toHaveAttribute('data-formula-manual', 'true');
+
+    await page.keyboard.press('Control+y');
+    await expect
+      .poll(async () => asNumber((await sliceOf(page, arranged)).rows[3]?.cells['F1']), { timeout: 60_000 })
+      .toBe(100);
+    await expect(cellAt(page, colF1, 3)).toHaveAttribute('title', /Manual value · Meter replaced on site · /, {
+      timeout: 15_000,
+    });
+
     await enterManual(page, colF1, 4, '200', 'Estimated by engineer');
 
     for (const [row, reason] of [
@@ -278,6 +301,19 @@ test.describe('D-461 formula override', () => {
     await expect
       .poll(async () => (await sliceOf(page, arranged)).rows.map((row) => asNumber(row.cells['F1'])), { timeout: 30_000 })
       .toEqual([2, 4, 6, 100, 200]);
+
+    // Фільтр «Лише рядки з ручними значеннями»: лічильник 2, у сітці лише рядки 4–5; вимкнення — знову 5.
+    const toggle = page.locator('[data-manual-only-toggle]');
+    await expect(page.locator('[data-manual-count]')).toHaveAttribute('data-manual-count', '2');
+    const renderedRows = page.locator(`revo-grid revogr-data[type="rgRow"] .rgCell[data-rgcol="${String(colA)}"]`);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await expect(renderedRows).toHaveCount(2);
+    await expect(cellAt(page, colF1, 0)).toHaveText(shows(100));
+    await expect(cellAt(page, colF1, 1)).toHaveText(shows(200));
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await expect(renderedRows).toHaveCount(Rows);
 
     // Правка A в рядку 4: F2 перераховується, ручне F1 — ні.
     await cellAt(page, colA, 3).click();
