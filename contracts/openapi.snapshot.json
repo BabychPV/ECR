@@ -5254,6 +5254,11 @@
             "format": "int32",
             "type": "integer"
           },
+          "fromMonthEnabled": {
+            "default": false,
+            "description": "RPT-STABLE Part B: чи доступний перенос «з місяця» (прапор `Documents:VersionMigration:FromMonthEnabled`,\nтипово `false`); `false` - діалог показує лише «увесь проєкт».",
+            "type": "boolean"
+          },
           "projectId": {
             "description": "Проєкт документа — переноситься весь.",
             "format": "int32",

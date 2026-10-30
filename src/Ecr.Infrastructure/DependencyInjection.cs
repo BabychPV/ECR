@@ -226,6 +226,12 @@ public static class DependencyInjection
 
         services.AddScoped<IColumnRenameMap, ColumnRenameMap>();
 
+        // RPT-STABLE Part B: прапор переносу «з місяця» (типово вимкнено до B2).
+        services.AddSingleton(new Ecr.Application.Documents.VersionMigration.VersionMigrationOptions(
+            bool.TryParse(
+                configuration[Ecr.Application.Documents.VersionMigration.VersionMigrationOptions.FromMonthEnabledKey],
+                out var fromMonthEnabled) && fromMonthEnabled));
+
         // ⛔ `ITemplateStructure`/`CachedTemplateStructure` тут БІЛЬШЕ НЕМАЄ
         // (`Q-192`, `AR-06`, `unreachable-mechanisms.md` §4a). Порт існував
         // лише заради синхронного читання кешу в `ExtractDependencies`; після

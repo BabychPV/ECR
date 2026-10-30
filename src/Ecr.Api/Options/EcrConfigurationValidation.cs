@@ -139,6 +139,9 @@ public static partial class EcrConfigurationValidation
 
         // Q-17: читається `GetValue<bool>` у DependencyInjection (Infrastructure).
         "Collection:MonthColumnRouting",
+
+        // RPT-STABLE Part B: перенос версії «з місяця» (типово вимкнено).
+        Ecr.Application.Documents.VersionMigration.VersionMigrationOptions.FromMonthEnabledKey,
         Ecr.Api.Startup.StaleMapWarmService.EnabledKey,
         "Jobs:NightlyRecalculation:Enabled",
         "Logging:File:Json",

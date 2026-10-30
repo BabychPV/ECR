@@ -26132,6 +26132,12 @@ export interface components {
              */
             currentVersionId: number;
             /**
+             * @description RPT-STABLE Part B: чи доступний перенос «з місяця» (прапор `Documents:VersionMigration:FromMonthEnabled`,
+             *     типово `false`); `false` - діалог показує лише «увесь проєкт».
+             * @default false
+             */
+            fromMonthEnabled: boolean;
+            /**
              * Format: int32
              * @description Проєкт документа — переноситься весь.
              */
