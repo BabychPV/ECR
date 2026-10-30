@@ -126,6 +126,9 @@ const PermitNaePage = lazy(async () => ({
 const PermitPage = lazy(async () => ({
   default: (await import('@/pages/admin/PermitPage')).PermitPage,
 }));
+const PermitAirImportPage = lazy(async () => ({
+  default: (await import('@/pages/admin/PermitAirImportPage')).PermitAirImportPage,
+}));
 
 /**
  * Межа очікування для маршрутів поза каркасом.
@@ -455,6 +458,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminPermit, 'admin'),
             element: guarded(routes.adminPermit.handle, <PermitPage />),
             handle: routes.adminPermit.handle,
+          },
+          {
+            path: relativePath(routes.adminPermitImport, 'admin'),
+            element: guarded(routes.adminPermitImport.handle, <PermitAirImportPage />),
+            handle: routes.adminPermitImport.handle,
           },
           {
             path: relativePath(routes.adminMethodologies, 'admin'),
