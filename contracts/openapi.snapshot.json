@@ -4998,6 +4998,22 @@
             "description": "Сухий прогін: нічого не змінено.",
             "type": "boolean"
           },
+          "effectiveFromPeriodKey": {
+            "description": "Період, з якого перенос реально діє: для `FromMonth` збігається з X, окрім випадку «рік-сімейство Q-17» —\nтоді січень року X (див. Warnings); для `WholeProject` — перший період проєкту; `null`,\nякщо в проєкті ще немає періодів.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "fromPeriodKey": {
+            "description": "Запитаний період X (`FromMonth`); `null` для `WholeProject`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "fromVersion": {
             "description": "Її номер.",
             "type": "string"
@@ -5161,6 +5177,17 @@
             "format": "int32",
             "type": "integer"
           },
+          "range": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VersionMigrationRange",
+                "description": "RPT-STABLE Part B: обсяг переносу, як у запиті (`WholeProject` / `FromMonth`)."
+              }
+            ]
+          },
           "refusals": {
             "description": "Причини відмови: `structural`, `dataLoss`, `guardedWithData`, `sheetsLocked`, `projectArchived`.",
             "items": {
@@ -5181,6 +5208,16 @@
             "description": "Скільки введених значень переїде.",
             "format": "int64",
             "type": "integer"
+          },
+          "warnings": {
+            "description": "Попередження (не відмови): `effectiveFromShiftedToJanuary` (ключ `documents.migrateWarnEffectiveFromJanuary`,\nпараметри `requested`, `effective`); `null` — немає.",
+            "items": {
+              "$ref": "#/components/schemas/VersionMigrationWarning"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           }
         },
         "required": [
@@ -9300,6 +9337,14 @@
             "description": "`true` — лише звіт, без змін (завжди синхронно: швидкий).",
             "type": "boolean"
           },
+          "fromPeriodKey": {
+            "description": "Період X (`Рік*100+№`) для `Range = FromMonth`; для `WholeProject` ігнорується.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "lookupRemaps": {
             "description": "Необов'язкові мапи записів Lookup по полях ШАПКИ: `[{target:{kind:\"header\",code}, mappings:[{from,to}]}]`, де\n`from` — запис вихідного довідника, `to` — запису довідника цільової версії. Діють лише для поля, чий\nдовідник між версіями змінився (інакше ціль у звіті має `applied = false`). Повна мапа (кожне вжите значення\nмає придатний відповідник: існує, у новому довіднику, активний, не видалений, чинний у вікні проєкту) знімає з поля\n`guardedWithData` і переписує значення в шапці в тій самій транзакції; часткова — `422 ECR-SCHM-0422`\n(`migrateLookupNotMapped`), нічого не записано. Зайві пари ігноруються. Колонки Lookup (`kind = column`)\nне підтримуються (`422 migrateLookupRemapInvalid`). Перерахунок не ставиться. Без поля поведінка незмінна.",
             "items": {
@@ -9318,6 +9363,17 @@
               {
                 "$ref": "#/components/schemas/VersionMigrationMode",
                 "description": "Режим; без нього — `Safe`."
+              }
+            ]
+          },
+          "range": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VersionMigrationRange",
+                "description": "RPT-STABLE Part B. Обсяг переносу: `WholeProject` (типово; поведінка як раніше — усі періоди проєкту, у будь-який\nчас) або `FromMonth` (з періоду `fromPeriodKey`). Для `FromMonth` періоди &lt; X лишаються на старих\nідентифікаторах структури, УКЛЮЧНО з поданими/затвердженими; періоди ≥ X переходять на нову версію; нові періоди\nпроєкту йдуть на нову версію; подані/затверджені перевіряються лише для періодів ≥ X. Якщо у проєкті є таблиця з\nмісяцями в колонках (Q-17) і X — не січень, увесь рік переходить з ЯНВАРЯ цього року: відповідь несе\n`effectiveFromPeriodKey` і попередження `effectiveFromShiftedToJanuary`. X мусить бути ≥ початку останнього\nсегмента шкали версій проєкту (`GET /projects/{id}/template-versions`); `WholeProject` можливий, лише коли\nшкала має один сегмент. Помилки (`422 ECR-SCHM-0422`): `migrateFromMonthRequired`,\n`migrateFromMonthInvalid`, `migrateFromMonthBeforeSegment`, `migrateWholeProjectMultiVersion`,\n`migrateTargetNotPublished`."
               }
             ]
           },
@@ -12979,6 +13035,67 @@
           "periodKind",
           "currentPeriodId",
           "periodCount"
+        ],
+        "type": "object"
+      },
+      "ProjectTemplateTimelineDto": {
+        "description": "Часова шкала версій шаблону проєкту: з якого періоду яка версія діє.",
+        "properties": {
+          "currentVersionId": {
+            "description": "Чинна (остання) версія — за нею створюються НОВІ періоди.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "items": {
+            "description": "Рядки шкали за зростанням початку; порожньо — проєкт має одну (чинну) версію на всі періоди.",
+            "items": {
+              "$ref": "#/components/schemas/ProjectTemplateTimelineItemDto"
+            },
+            "type": "array"
+          },
+          "projectId": {
+            "description": "Проєкт.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "projectId",
+          "currentVersionId",
+          "items"
+        ],
+        "type": "object"
+      },
+      "ProjectTemplateTimelineItemDto": {
+        "description": "Рядок часової шкали версій шаблону проєкту (RPT-STABLE Part B).",
+        "properties": {
+          "fromPeriodKey": {
+            "description": "Перший період дії версії (`Рік*100+№`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "templateCode": {
+            "description": "Код шаблону.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "templateVersionId": {
+            "description": "Версія шаблону.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "version": {
+            "description": "Номер версії (як у переліку документів).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fromPeriodKey",
+          "templateVersionId",
+          "version",
+          "templateCode"
         ],
         "type": "object"
       },
@@ -24213,6 +24330,13 @@
           "Presentation"
         ]
       },
+      "VersionMigrationRange": {
+        "enum": [
+          "WholeProject",
+          "FromMonth",
+          null
+        ]
+      },
       "VersionMigrationTableRename": {
         "description": "Перейменування таблиці між версіями: «було → стало» за кодом таблиці (і, за потреби, колонок).",
         "properties": {
@@ -24245,6 +24369,32 @@
         "required": [
           "fromTableCode",
           "toTableCode"
+        ],
+        "type": "object"
+      },
+      "VersionMigrationWarning": {
+        "description": "Попередження переносу (не відмова): зміст для діалогу — ключ повідомлення і, за потреби, період.",
+        "properties": {
+          "code": {
+            "description": "Короткий код: `effectiveFromShiftedToJanuary`.",
+            "type": "string"
+          },
+          "messageKey": {
+            "description": "Ключ UiString (`migration.warn.*`) у каталозі en/ru/kz.",
+            "type": "string"
+          },
+          "periodKey": {
+            "description": "Період, якого стосується (напр. ефективний початок).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "messageKey"
         ],
         "type": "object"
       },
@@ -43115,6 +43265,70 @@
           }
         },
         "summary": "Перерахунок УСЬОГО проєкту. Право `Calculation.Recalculate`.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/template-versions": {
+      "get": {
+        "description": "Порожній `items` — проєкт на одній (чинній) версії всі періоди. `currentVersionId` — версія для НОВИХ\nперіодів. Невидимий проєкт — той самий `404`, що й неіснуючий.",
+        "parameters": [
+          {
+            "description": "Проєкт.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectTemplateTimelineDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectTemplateTimelineDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectTemplateTimelineDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Часова шкала версій шаблону проєкту (RPT-STABLE Part B): з якого періоду яка версія діє. Право\n`Document.View` і видимий проєкт.",
         "tags": [
           "Projects"
         ]

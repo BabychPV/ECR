@@ -219,6 +219,11 @@ public static class DependencyInjection
             sp.GetRequiredService<CacheLifetimes>(),
             sp.GetRequiredService<Caching.SingleFlight<TemplateVersionSnapshot>>()));
 
+        // ✎ RPT-STABLE Part B: часова шкала версій проєкту — ЄДИНА відповідь «яка версія за період».
+        services.AddScoped<IProjectVersionTimeline>(sp => new ProjectVersionTimelineService(
+            sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+            sp.GetRequiredService<EcrDbContext>()));
+
         // ⛔ `ITemplateStructure`/`CachedTemplateStructure` тут БІЛЬШЕ НЕМАЄ
         // (`Q-192`, `AR-06`, `unreachable-mechanisms.md` §4a). Порт існував
         // лише заради синхронного читання кешу в `ExtractDependencies`; після
