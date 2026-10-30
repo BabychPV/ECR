@@ -62,7 +62,11 @@ public sealed class IntegrationCellPatcher(
 
     // ⛔ PRMG: ціль Lookup-колонки може бути ГРУПОЮ типів дозволів; порівняння цілі - лише через `LookupTargetMatcher`.
     // `null` (прямий конструктор у тестах) - груп немає.
-    Application.Permits.Groups.ILookupTargetResolver? groups = null) : ICellPatcher
+    Application.Permits.Groups.ILookupTargetResolver? groups = null,
+
+    // ⛔ D-462 (Q-17 разом зі збором): з увімкненим `Collection:MonthColumnRouting` значення й журнал колонки з чужим
+    // власником лежать в екземплярі-ВЛАСНИКУ. `null` (прямий конструктор у тестах) — маршрутизації немає.
+    IMonthColumnRouter? monthRouter = null) : ICellPatcher
 {
     /// <summary>Скільки разів пробувати запис, якщо рядок змінили між читанням і записом.</summary>
     public const int MaxAttempts = 3;
@@ -184,11 +188,13 @@ public sealed class IntegrationCellPatcher(
             .ConfigureAwait(false);
 
         var columnById = columns.ToDictionary(c => c.Id);
+        var routed = await RoutedAsync(instance.DocumentId, instance.TableDefId, ct).ConfigureAwait(false);
 
         for (var attempt = 1; ; attempt++)
         {
             var plan = await PlanAsync(
-                    instance.DocumentId, tableInstanceId, periodKey, cells, columnById, rowsOf, ct)
+                    instance.DocumentId, tableInstanceId, periodKey, cells, columnById, rowsOf, ct,
+                    routed ? instance.TableDefId : null)
                 .ConfigureAwait(false);
             var rejected = plan.Rejected.Count == 0 ? null : plan.Rejected;
 
@@ -271,17 +277,22 @@ public sealed class IntegrationCellPatcher(
         IReadOnlyList<PlannedCell> cells,
         Dictionary<int, ColumnDef> columnById,
         RowsOf? rowsOf,
-        CancellationToken ct)
+        CancellationToken ct,
+        int? routedTableDefId = null)
     {
         var existing = (await rowStore.GetRowsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false))
             .ToDictionary(r => r.RowKey, StringComparer.Ordinal);
 
-        var manual = await ManualCellsAsync(documentId, tableInstanceId, periodKey, ct).ConfigureAwait(false);
+        var manual = routedTableDefId is { } table
+            ? await ManualCellsRoutedAsync(documentId, table, periodKey, ct).ConfigureAwait(false)
+            : await ManualCellsAsync(documentId, tableInstanceId, periodKey, ct).ConfigureAwait(false);
 
         var kept = new List<string>();
         var candidates = KeepManual(cells, columnById, manual, kept);
 
-        var current = await CurrentValuesAsync(periodKey, candidates, existing, ct).ConfigureAwait(false);
+        var current = routedTableDefId is null
+            ? await CurrentValuesAsync(periodKey, candidates, existing, ct).ConfigureAwait(false)
+            : await LogicalValuesAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
 
         var changed = candidates
             .Where(c => !existing.TryGetValue(c.Cell.RowKey, out var row)
@@ -585,6 +596,50 @@ public sealed class IntegrationCellPatcher(
             : await cellStore.ReadCellsAsync(addresses, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Чи застосовна до таблиці маршрутизація Q-17 (<c>Collection:MonthColumnRouting</c>, таблиця
+    /// <c>MonthsInColumns</c>, документ місячного проєкту).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Прапор вимкнено — жодного звернення до бази (як і решта споживачів роутера).
+    /// </remarks>
+    private async Task<bool> RoutedAsync(long documentId, int tableDefId, CancellationToken ct)
+    {
+        if (monthRouter is not { Enabled: true })
+        {
+            return false;
+        }
+
+        var table = await db.TableDefs.AsNoTracking().FirstOrDefaultAsync(t => t.Id == tableDefId, ct).ConfigureAwait(false);
+
+        return table is not null
+               && monthRouter.AppliesToTable(table)
+               && await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false) is not null;
+    }
+
+    /// <summary>
+    /// Чинні значення таблиці так, як їх бачить людина: ЛОГІЧНИЙ зріз (Q-17) — введені комірки колонок із чужим
+    /// власником узято з екземпляра-власника, на ідентифікаторах рядків екземпляра запиту (D-462).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Фізичне читання за адресами екземпляра запиту (<see cref="CurrentValuesAsync"/>) для такої колонки не
+    /// бачить нічого — і незмінне значення щопрогону «змінювалося»: запис, «дотик» рядка і перерахунок на
+    /// кожен збір. Зріз читає <c>MonthRoutedCellStore</c> тим самим правилом, що й сітка.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<CellAddress, CellValueData>> LogicalValuesAsync(
+        long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+    {
+        var slice = await cellStore.ReadSliceAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
+
+        var values = new Dictionary<CellAddress, CellValueData>(slice.Count);
+        foreach (var record in slice)
+        {
+            values[new CellAddress(periodKey, record.Address.TableRowId, record.Address.ColumnDefId)] = record.Value;
+        }
+
+        return values;
+    }
+
     /// <summary>Чи збіглося б записане значення з чинним.</summary>
     /// <remarks>
     /// ⚠ Порівняння — тим самим критерієм, яким обробник вирішує «зміни не
@@ -645,6 +700,64 @@ public sealed class IntegrationCellPatcher(
           JOIN cfg.ColumnDef AS cd ON cd.Id = lc.ColumnDefId
          WHERE lc.rn = 1 AND lc.Origin IN ({CellChangeOrigins.HumanOriginsSql});
         """;
+
+    /// <summary>
+    /// Те саме для таблиці з маршрутизацією Q-17 (D-462): журнал комірок УСІХ екземплярів цієї таблиці документа
+    /// в році періоду — правка людини колонки з чужим власником лежить на фізичній адресі власника.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Остання зміна (рядок, колонка) — серед усіх екземплярів року: у колонки один власник, а фізичні копії
+    /// в інших екземплярах (дані до ввімкнення маршрутизації) старші за його записи.
+    /// </remarks>
+    public const string ManualCellsRoutedSql = $"""
+        WITH last_change AS (
+            SELECT c.RowKey, c.ColumnDefId, c.Origin,
+                   ROW_NUMBER() OVER (PARTITION BY c.RowKey, c.ColumnDefId
+                                          ORDER BY c.ChangedAt DESC, c.Id DESC) AS rn
+              FROM doc.TableInstance AS i
+              JOIN doc.TableRow AS r
+                ON r.PeriodKey = i.PeriodKey AND r.TableInstanceId = i.Id
+              JOIN aud.CellChange AS c
+                ON c.DocumentId = @document
+               AND c.TableRowId = r.Id
+               AND c.PeriodKey = r.PeriodKey
+             WHERE i.DocumentId = @document AND i.TableDefId = @table
+               AND i.PeriodKey BETWEEN @yearFrom AND @yearTo
+        )
+        SELECT lc.RowKey, cd.Code
+          FROM last_change AS lc
+          JOIN cfg.ColumnDef AS cd ON cd.Id = lc.ColumnDefId
+         WHERE lc.rn = 1 AND lc.Origin IN ({CellChangeOrigins.HumanOriginsSql});
+        """;
+
+    /// <summary>Комірки таблиці з маршрутизацією Q-17, останню зміну яких зробила людина (D-462).</summary>
+    private async Task<HashSet<string>> ManualCellsRoutedAsync(
+        long documentId, int tableDefId, PeriodKey periodKey, CancellationToken ct)
+    {
+        var manual = new HashSet<string>(StringComparer.Ordinal);
+
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(
+            db.Database.GetConnectionString());
+
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = ManualCellsRoutedSql;
+
+        command.Parameters.Add("@document", System.Data.SqlDbType.BigInt).Value = documentId;
+        command.Parameters.Add("@table", System.Data.SqlDbType.Int).Value = tableDefId;
+        command.Parameters.Add("@yearFrom", System.Data.SqlDbType.Int).Value = (periodKey.Year * 100) + 1;
+        command.Parameters.Add("@yearTo", System.Data.SqlDbType.Int).Value = (periodKey.Year * 100) + 99;
+
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            manual.Add($"{reader.GetString(0)}:{reader.GetString(1)}");
+        }
+
+        return manual;
+    }
 
     /// <summary>Комірки, останню зміну яких зробила людина.</summary>
     /// <param name="documentId">Документ екземпляра — провідна колонка індексу журналу (R5-Q1-01).</param>
