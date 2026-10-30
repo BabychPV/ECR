@@ -84,7 +84,7 @@ public sealed class RowStore(
                     join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
                     select new TableInstanceRef(
                         instance.Id, instance.DocumentId, instance.TableDefId,
-                        project.TemplateVersionId, instance.PeriodKeyValue),
+                        EcrDbContext.VersionOf(project.Id, instance.PeriodKeyValue), instance.PeriodKeyValue),
                 r => r.TableInstanceId,
                 ct).ConfigureAwait(false))
             .ToDictionary(r => r.TableInstanceId);
@@ -791,7 +791,7 @@ public sealed class RowStore(
             .Join(db.Documents, t => t.DocumentId, d => d.Id, (t, d) => new { t, d.ProjectId })
             .Join(db.Projects, x => x.ProjectId, p => p.Id,
                   (x, p) => new TableInstanceRef(
-                      x.t.Id, x.t.DocumentId, x.t.TableDefId, p.TemplateVersionId, x.t.PeriodKeyValue))
+                      x.t.Id, x.t.DocumentId, x.t.TableDefId, EcrDbContext.VersionOf(p.Id, x.t.PeriodKeyValue), x.t.PeriodKeyValue))
             .Take(MaxTableInstances)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -883,6 +883,33 @@ public sealed class RowStore(
         if (sheetIds.Count == 0)
         {
             return [];
+        }
+
+        // ✎ RPT-STABLE Part B: склад документа не залежить від періоду, а структура - залежить. Аркуші складу, що
+        // належать ІНШІЙ версії, ніж та, що діє за цей період (шкала), замінюються однойменними аркушами версії періоду.
+        // ⚠ Свіжо з бази (під спільним `doc-structure` писар вже тримає замок): кеш шкали міг відстати.
+        var periodVersion = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => EcrDbContext.VersionOf(d.ProjectId, periodKey.Value))
+            .FirstAsync(ct)
+            .ConfigureAwait(false);
+        var docSheets = await db.SheetDefs
+            .AsNoTracking()
+            .Where(s => sheetIds.Contains(s.Id))
+            .Select(s => new { s.Id, s.Code, s.TemplateVersionId })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (docSheets.Any(s => s.TemplateVersionId != periodVersion))
+        {
+            var foreignCodes = docSheets.Where(s => s.TemplateVersionId != periodVersion).Select(s => s.Code).ToList();
+            var mapped = await db.SheetDefs
+                .AsNoTracking()
+                .Where(s => s.TemplateVersionId == periodVersion && foreignCodes.Contains(s.Code))
+                .Select(s => s.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            sheetIds = [.. docSheets.Where(s => s.TemplateVersionId == periodVersion).Select(s => s.Id).Concat(mapped)];
         }
 
         var tableDefIds = await db.TableDefs
@@ -1130,7 +1157,7 @@ public sealed class RowStore(
                 join d in db.Documents.AsNoTracking() on t.DocumentId equals d.Id
                 join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
                 orderby t.PeriodKeyValue
-                select new { t.Id, t.DocumentId, t.TableDefId, p.TemplateVersionId, t.PeriodKeyValue })
+                select new { t.Id, t.DocumentId, t.TableDefId, TemplateVersionId = EcrDbContext.VersionOf(p.Id, t.PeriodKeyValue), t.PeriodKeyValue })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 

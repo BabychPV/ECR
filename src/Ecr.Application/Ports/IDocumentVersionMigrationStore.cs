@@ -126,11 +126,28 @@ public interface IDocumentVersionMigrationStore
     /// </remarks>
     public Task<int?> LockProjectVersionAsync(int projectId, CancellationToken ct);
 
+    /// <summary>Ключі періодів проєкту за зростанням (RPT-STABLE Part B). Типова реалізація (обгортки) — порожній перелік.</summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<int>> ListPeriodKeysAsync(int projectId, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<int>>([]);
+
     /// <summary>Документи проєкту за зростанням <c>Id</c> — порядок, у якому перенос блокує їхню структуру.</summary>
     public Task<IReadOnlyList<long>> ListDocumentIdsAsync(int projectId, CancellationToken ct);
 
     /// <summary>Рахує, що лежить у документах проєкту.</summary>
     public Task<VersionMigrationScope> ReadScopeAsync(int projectId, CancellationToken ct);
+
+    /// <summary>
+    /// Те саме, але лише за періоди ≥ <paramref name="fromPeriodKey"/> (RPT-STABLE Part B, перенос «з місяця»): значення,
+    /// подані/затверджені пари — тільки з цих періодів; шапка документа не залежить від періоду. <c>0</c> — увесь проєкт.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="fromPeriodKey">Ефективний початок.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>⚠ Типова реалізація (обгортки у тестах) ігнорує межу: перенос усього проєкту.</remarks>
+    public Task<VersionMigrationScope> ReadScopeAsync(int projectId, int fromPeriodKey, CancellationToken ct)
+        => ReadScopeAsync(projectId, ct);
 
     /// <summary>
     /// Непорожні значення шапки документів проєкту для вказаних полів: документ, поле, запис довідника та ознака
