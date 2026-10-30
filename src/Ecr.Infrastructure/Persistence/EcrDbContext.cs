@@ -86,6 +86,20 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
 
     // doc
     public DbSet<Project> Projects => Set<Project>();
+
+    /// <summary>Часова шкала версій шаблону проєкту (RPT-STABLE Part B).</summary>
+    public DbSet<ProjectTemplateVersion> ProjectTemplateVersions => Set<ProjectTemplateVersion>();
+
+    /// <summary>Збережена мапа перейменування колонок між версіями (RPT-STABLE Part B).</summary>
+    public DbSet<ColumnRename> ColumnRenames => Set<ColumnRename>();
+
+    /// <summary>
+    /// Версія шаблону проєкту за період (SQL: <c>doc.fn_VersionOf</c>) — для запитів-приєднань. Поза запитом кидає.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="periodKey">Період.</param>
+    public static int VersionOf(int projectId, int periodKey)
+        => throw new NotSupportedException("EcrDbContext.VersionOf можна викликати лише всередині LINQ-запиту.");
     public DbSet<PeriodPolicy> PeriodPolicies => Set<PeriodPolicy>();
     public DbSet<Period> Periods => Set<Period>();
     public DbSet<Document> Documents => Set<Document>();
@@ -247,6 +261,11 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
         ArgumentNullException.ThrowIfNull(modelBuilder);
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(EcrDbContext).Assembly);
+
+        // ✎ RPT-STABLE Part B: SQL-відповідник `ProjectVersionTimeline.VersionOf` для запитів-приєднань
+        // (скалярна функція, створена міграцією; паритет зі C# доводить `ProjectVersionTimelineTests`).
+        modelBuilder.HasDbFunction(typeof(EcrDbContext).GetMethod(nameof(VersionOf), [typeof(int), typeof(int)])!)
+            .HasSchema("doc").HasName("fn_VersionOf");
 
         // ⚠ Конфігурація тут, а не в `Configurations/`: сутність чужа (її
         // оголошує пакет DataProtection), і єдине, що ми про неї вирішуємо, —

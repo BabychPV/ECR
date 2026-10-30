@@ -1033,6 +1033,23 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("ColumnHeaderGroupDef", "cfg");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.ColumnRename", b =>
+                {
+                    b.Property<int>("FromColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ToColumnDefId")
+                        .HasColumnType("int");
+
+                    b.HasKey("FromColumnDefId", "ToColumnDefId")
+                        .HasName("PK_ColumnRename");
+
+                    b.HasIndex("ToColumnDefId")
+                        .HasDatabaseName("IX_ColumnRename_To");
+
+                    b.ToTable("ColumnRename", "cfg");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.ConditionalFormatRule", b =>
                 {
                     b.Property<int>("Id")
@@ -3566,6 +3583,26 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_Project_TzIana", "LEN(TimeZoneId) > 0 AND TimeZoneId NOT LIKE N'%[ +:]%'");
                         });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.ProjectTemplateVersion", b =>
+                {
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("FromPeriodKey")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TemplateVersionId")
+                        .HasColumnType("int");
+
+                    b.HasKey("ProjectId", "FromPeriodKey")
+                        .HasName("PK_ProjectTemplateVersion");
+
+                    b.HasIndex("TemplateVersionId")
+                        .HasDatabaseName("IX_ProjectTemplateVersion_TemplateVersion");
+
+                    b.ToTable("ProjectTemplateVersion", "doc");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.TableDiscussionMention", b =>
@@ -7364,6 +7401,23 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_Project_TV");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.ProjectTemplateVersion", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Documents.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_ProjectTemplateVersion_Project");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.TemplateVersion", null)
+                        .WithMany()
+                        .HasForeignKey("TemplateVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_ProjectTemplateVersion_TemplateVersion");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.TableDiscussionMention", b =>
