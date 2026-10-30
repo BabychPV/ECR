@@ -1,5 +1,5 @@
 import type { JSX, ReactNode } from 'react';
-import { Chip, NativeSelect, Switch, Text, TextInput } from '@mantine/core';
+import { Chip, MultiSelect, NativeSelect, Switch, Text, TextInput } from '@mantine/core';
 import { FilterInline, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { t } from '@/shared/i18n';
 import { statusKey } from '@/shared/ui/StatusBadge';
@@ -34,6 +34,9 @@ interface DocumentListFilterBarProps {
 
   /** ✎ D-450: ім'я обраної у фільтрі «Власник» людини, якщо воно вже є на сторінці переліку (див. `DocumentOwnerFilter`). */
   readonly ownerName?: string | undefined;
+
+  /** Різні версії шаблону на завантаженій сторінці (для фільтра колонки «Version»); порожньо - поле не малюється. */
+  readonly versionOptions?: readonly string[] | undefined;
 }
 
 /**
@@ -62,6 +65,7 @@ export function DocumentListFilterBar({
   children,
   staleOnPage = 0,
   ownerName,
+  versionOptions = [],
 }: DocumentListFilterBarProps): JSX.Element {
   const noPeriod = periodKey === null;
   // Той самий запит, що в смузі лічильників (`DocumentListSummaryStrip`): один ключ — один мережевий виклик.
@@ -123,6 +127,28 @@ export function DocumentListFilterBar({
               const value = event.currentTarget.value;
               filters.setProjectId(value === '' ? null : Number(value));
             }}
+          />
+        )}
+
+        {/* ✎ Колонка «Version»: мультивибір різних версій, що є на завантаженій сторінці (+ вже обрані з адреси,
+            яких на цій сторінці немає, — щоб їх було чим зняти). Фільтр клієнтський (`filters.versions`). */}
+        {(versionOptions.length > 0 || filters.versions.length > 0) && (
+          <MultiSelect
+            size="xs"
+            miw={160}
+            maw={260}
+            label={t('documents.versionColumn')}
+            description={t('documents.versionFilterHint')}
+            styles={readerOnlyDescription}
+            placeholder={filters.versions.length === 0 ? t('documents.versionAll') : undefined}
+            data={[...new Set([...versionOptions, ...filters.versions])].map((version) => ({
+              value: version,
+              label: t('documents.versionValue', { version }),
+            }))}
+            value={[...filters.versions]}
+            onChange={filters.setVersions}
+            clearable
+            data-version-filter=""
           />
         )}
 

@@ -10,6 +10,13 @@ import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSumma
 import { useDocumentListFilters } from '@/features/documents/documentListFilters';
 import { EyeIcon, IssueCount } from '@/features/documents/DocumentListMarks';
 import { documentState, hasSheetStates, sheetLabels } from '@/features/documents/documentSheets';
+import {
+  distinctVersions,
+  filterByVersions,
+  nextVersionSort,
+  sortByVersion,
+} from '@/features/documents/documentVersion';
+import { DocumentVersionCell, DocumentVersionTh } from '@/features/documents/DocumentVersionColumn';
 import { parseDocumentsView } from '@/features/documents/documentsBoardModel';
 import '@/features/documents/documentsList.css';
 import { LateEditsMark } from '@/features/documents/LateEditsMark';
@@ -343,6 +350,7 @@ export function DocumentsPage(): JSX.Element {
         periodKey={periodKey}
         filters={filters}
         projects={projects.data?.items ?? []}
+        versionOptions={distinctVersions(query.data?.items ?? [], periodKey)}
         staleOnPage={query.data?.items.filter((d) => d.resultsStale === true).length ?? 0}
         // ✎ D-450: під фільтром за людиною кожен рядок сторінки — її документ, тож ім'я вже є без окремого запиту.
         ownerName={
@@ -397,7 +405,8 @@ export function DocumentsPage(): JSX.Element {
         isPending={query.isPending}
         error={query.error}
         data={query.data}
-        isEmpty={(page) => page.items.length === 0}
+        // Клієнтський фільтр версії може спорожнити сторінку - тоді це «нічого не знайшлося», а не порожня таблиця.
+        isEmpty={(page) => filterByVersions(page.items, filters.versions, periodKey).length === 0}
         emptyTitle={
           filters.active
             ? t('documents.noMatch')
@@ -422,7 +431,12 @@ export function DocumentsPage(): JSX.Element {
         skeleton="table"
         onRetry={() => void query.refetch()}
       >
-        {(page) => (
+        {(page) => {
+          // Колонка «Version»: фільтр і сортування - клієнтські, над ЗАВАНТАЖЕНОЮ сторінкою (сервер їх не має).
+          const filtered = filterByVersions(page.items, filters.versions, periodKey);
+          const rows = sortByVersion(filtered, filters.versionSort, periodKey);
+
+          return (
           <>
             {/* ⛔ Відмова переліку проєктів — окрема від відмови переліку
                 документів (та під власною межею вище): сама таблиця приїхала,
@@ -450,7 +464,7 @@ export function DocumentsPage(): JSX.Element {
             {view === 'board' ? (
               <Suspense fallback={<Skeleton height={240} />}>
                 <DocumentsBoard
-                  documents={page.items}
+                  documents={filtered}
                   documentHref={documentHref}
                   projectCode={(projectId) => projects.data?.items.find((project) => project.id === projectId)?.code}
                   onQuickLook={(documentId, opener) => {
@@ -470,6 +484,10 @@ export function DocumentsPage(): JSX.Element {
                       <Table.Th>{t('documents.sheets')}</Table.Th>
                       <Table.Th>{t('documents.issues')}</Table.Th>
                       <Table.Th data-column="updated">{t('documents.updated')}</Table.Th>
+                      <DocumentVersionTh
+                        sort={filters.versionSort}
+                        onSort={() => filters.setVersionSort(nextVersionSort(filters.versionSort))}
+                      />
                       <Table.Th>{t('documents.state')}</Table.Th>
                       <Table.Th>
                         <VisuallyHidden>{t('documents.quickLookColumn')}</VisuallyHidden>
@@ -477,7 +495,7 @@ export function DocumentsPage(): JSX.Element {
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
-                    {page.items.map((document) => {
+                    {rows.map((document) => {
                       const name = localized(document.nameL10n);
                       const state = documentState(document);
                       const errors = document.errorCount;
@@ -569,6 +587,9 @@ export function DocumentsPage(): JSX.Element {
                               </Group>
                             </Box>
                           </Table.Td>
+                          <Table.Td data-column="version">
+                            <DocumentVersionCell source={document} periodKey={periodKey} />
+                          </Table.Td>
                           <Table.Td data-column="state">
                             {state === null ? <Text c="dimmed">—</Text> : <StatusBadge kind="sheet" state={state} quiet />}
                           </Table.Td>
@@ -604,7 +625,8 @@ export function DocumentsPage(): JSX.Element {
               </Button>
             )}
           </>
-        )}
+          );
+        }}
       </AsyncBoundary>
 
       {/* ⚠ Шторка монтується лише за `?panel=` — запити заповненості й історії
