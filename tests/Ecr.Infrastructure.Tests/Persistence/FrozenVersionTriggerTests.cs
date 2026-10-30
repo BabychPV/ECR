@@ -68,6 +68,8 @@ public sealed class FrozenVersionTriggerTests(SqlServerFixture sql)
     [Theory]
     [InlineData("UPDATE cfg.FormulaDef SET Expression = N'2+2' WHERE Id = {0}")]
     [InlineData("DELETE FROM cfg.FormulaDef WHERE Id = {0}")]
+    // ✎ D-461: прапорець ручного значення не «прикриває» структурну зміну в тому самому UPDATE.
+    [InlineData("UPDATE cfg.FormulaDef SET AllowManualOverride = 1, Expression = N'2+2' WHERE Id = {0}")]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-7.1")]
     public async Task Зміна_або_видалення_формули_виведеної_з_обігу_версії_відхиляється(string statement)
@@ -97,6 +99,25 @@ public sealed class FrozenVersionTriggerTests(SqlServerFixture sql)
 
         Assert.Equal(77, await ScalarAsync<int>(
             $"SELECT Ordinal FROM cfg.ColumnDef WHERE Id = {chain.Doc.ColumnDefIds[0]}"));
+    }
+
+    /// <summary>
+    /// ✎ D-461: «Дозволити ручне значення» — налаштування, а не структура: UPDATE лише цього стовпця проходить і в
+    /// Published, і в Deprecated (рішення людини 30.10, без нової версії).
+    /// </summary>
+    /// <remarks>Мутація: повернути безумовну відмову UPDATE формули в тригері — червоніє (50003).</remarks>
+    [Theory]
+    [InlineData(Published)]
+    [InlineData(Deprecated)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-461")]
+    public async Task Прапорець_ручного_значення_змінюється_в_замороженій_версії(int status)
+    {
+        var chain = await ChainAsync(status);
+
+        await ExecuteAsync($"UPDATE cfg.FormulaDef SET AllowManualOverride = 1 WHERE Id = {chain.FormulaId}");
+
+        Assert.True(await ScalarAsync<bool>($"SELECT AllowManualOverride FROM cfg.FormulaDef WHERE Id = {chain.FormulaId}"));
     }
 
     // ── INSERT ───────────────────────────────────────────────────────────────
