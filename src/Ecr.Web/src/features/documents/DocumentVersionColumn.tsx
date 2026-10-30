@@ -40,6 +40,9 @@ export function DocumentVersionCell({
       radius="sm"
       size="sm"
       tt="none"
+      // ⚠ Текст - кольором тексту теми: `outline` + `gray` у світлій темі малює gray-6 (#868e96) на білому, < AA
+      // (справжній axe на живому стенді); рамка лишається сірою.
+      c="var(--mantine-color-text)"
       title={hint}
       data-document-version={version}
       data-version-source={fromPeriod ? 'period' : 'template'}
