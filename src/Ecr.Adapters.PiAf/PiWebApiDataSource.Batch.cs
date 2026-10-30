@@ -84,7 +84,7 @@ public sealed partial class PiWebApiDataSource
         try
         {
             using var attribute = await GetAsync(
-                source.Endpoint, $"attributes?path={Uri.EscapeDataString(path)}", source.SecretName, ct)
+                source, $"attributes?path={Uri.EscapeDataString(path)}", ct)
                 .ConfigureAwait(false);
 
             return new AttributeRef(
@@ -229,7 +229,7 @@ public sealed partial class PiWebApiDataSource
 
         try
         {
-            recorded = await GetAsync(source.Endpoint, query.ToString(), source.SecretName, ct).ConfigureAwait(false);
+            recorded = await GetAsync(source, query.ToString(), ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

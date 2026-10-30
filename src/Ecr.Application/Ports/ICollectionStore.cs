@@ -42,10 +42,32 @@ public interface ICollectionStore
     /// повторний запуск того самого діапазону не дублює даних (ФВ-11.3).
     /// Значення зберігаються <b>в одиниці джерела</b> (ФВ-16.9).
     /// </summary>
-    /// <returns>Скільки точок фактично записано.</returns>
+    /// <returns>
+    /// Скільки точок батча прийнято (без дублів ключа в самому батчі) — і нових, і наявних. ⚠ D-462: наявна
+    /// точка з тим самим значенням, одиницею і якістю НЕ переписується, але в число входить.
+    /// </returns>
     public Task<int> UpsertRawPointsAsync(
         long collectionRunId, int sourceEntityId,
         IReadOnlyList<SourceDataPoint> points, CancellationToken ct);
+
+    /// <summary>
+    /// Видаляє сирі точки атрибута за <c>[fromUtc, toUtc)</c>, чиїх міток немає серед <paramref name="present"/>
+    /// — тих, що джерело віддало за цей інтервал (D-462).
+    /// </summary>
+    /// <param name="sourceEntityId">Сутність джерела.</param>
+    /// <param name="sourcePath">Атрибут.</param>
+    /// <param name="fromUtc">Початок інтервалу, включно.</param>
+    /// <param name="toUtc">Кінець інтервалу, виключно.</param>
+    /// <param name="present">Мітки, які джерело віддало за інтервал (точність — до мілісекунд сховища).</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки точок видалено.</returns>
+    /// <remarks>
+    /// ⛔ Викликач гарантує, що інтервал прочитано ПОВНІСТЮ й без відмов: сховище не знає, чи відповідь джерела
+    /// повна, і видалить усе, чого немає в переліку. Порожній перелік — нічого не видаляється.
+    /// </remarks>
+    public Task<int> DeleteMissingRawPointsAsync(
+        int sourceEntityId, string sourcePath, DateTime fromUtc, DateTime toUtc,
+        IReadOnlyCollection<DateTime> present, CancellationToken ct);
 
     /// <summary>Записує покриті інтервали в <c>itg.CollectionCoverage</c>.</summary>
     public Task WriteCoverageAsync(

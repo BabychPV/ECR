@@ -212,7 +212,20 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         IF @lock < 0
             THROW 50001, N'ext.RawDataPoint: не вдалося взяти лок таблиці для запису точок (sp_getapplock < 0).', 1;
 
-        WITH batch AS (
+        -- ⛔ D-462: батч спершу згортається в табличну змінну (дубль ключа — виграє ОСТАННЯ точка): її розмір і є
+        -- «скільки точок прийнято», а MERGE далі переписує лише ті наявні точки, чиє значення, одиниця чи якість
+        -- справді змінилися. Повторне читання незмінного діапазону більше не переписує рядків.
+        DECLARE @batch TABLE (
+            SourcePath nvarchar(4000) NOT NULL,
+            Ts datetime2(3) NOT NULL,
+            ValueNumeric decimal(34,16) NULL,
+            ValueString nvarchar(max) NULL,
+            UnitId int NULL,
+            Quality nvarchar(4000) NULL);
+
+        INSERT @batch (SourcePath, Ts, ValueNumeric, ValueString, UnitId, Quality)
+        SELECT b.SourcePath, b.Ts, b.ValueNumeric, b.ValueString, b.UnitId, b.Quality
+        FROM (
             SELECT j.SourcePath,
                    j.Ts,
                    CAST(j.Num AS decimal(34,16)) AS ValueNumeric,
@@ -228,20 +241,25 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
                        Str nvarchar(max) '$.ValueString',
                        UnitId int '$.UnitId',
                        Quality nvarchar(4000) '$.Quality') AS j
-        )
+        ) AS b
+        WHERE b.rn = 1;
+
+        SET @written = @@ROWCOUNT;
+
         MERGE ext.RawDataPoint AS t
-        USING (SELECT SourcePath, Ts, ValueNumeric, ValueString, UnitId, Quality FROM batch WHERE rn = 1) AS s
+        USING @batch AS s
            ON t.SourceEntityId = @entity AND t.SourcePath = s.SourcePath AND t.[Timestamp] = s.Ts
-        WHEN MATCHED THEN
+        WHEN MATCHED AND EXISTS (SELECT t.ValueNumeric, t.ValueString, t.UnitId, t.Quality
+                                 EXCEPT
+                                 SELECT s.ValueNumeric, s.ValueString, s.UnitId, s.Quality) THEN
             UPDATE SET ValueNumeric = s.ValueNumeric, ValueString = s.ValueString,
-                       UnitId = s.UnitId, Quality = s.Quality
+                       UnitId = s.UnitId, Quality = s.Quality,
+                       RetrievedAt = @retrievedAt, CollectionRunId = @run
         WHEN NOT MATCHED BY TARGET THEN
             INSERT (SourceEntityId, SourcePath, [Timestamp], ValueNumeric, ValueString, UnitId, Quality,
                     RetrievedAt, CollectionRunId)
             VALUES (@entity, s.SourcePath, s.Ts, s.ValueNumeric, s.ValueString, s.UnitId, s.Quality,
                     @retrievedAt, @run);
-
-        SET @written = @@ROWCOUNT;
 
         COMMIT TRANSACTION;
         """;
@@ -262,6 +280,85 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         string? ValueString,
         int? UnitId,
         string? Quality);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Під тим самим локом таблиці, що й upsert (<see cref="RawPointLockResource"/>), і одним пакетом: мітки —
+    /// у табличну змінну з ключем (а не <c>OPENJSON</c> у кожному <c>NOT EXISTS</c>), діапазон — пошуком по
+    /// <c>UQ_RawDataPoint</c> (сутність, шлях, мітка).
+    /// </remarks>
+    public async Task<int> DeleteMissingRawPointsAsync(
+        int sourceEntityId,
+        string sourcePath,
+        DateTime fromUtc,
+        DateTime toUtc,
+        IReadOnlyCollection<DateTime> present,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+        ArgumentNullException.ThrowIfNull(present);
+
+        // ⛔ Порожній перелік — не «видалити все»: сховище не знає, чи повна відповідь джерела (D-462).
+        if (present.Count == 0 || toUtc <= fromUtc)
+        {
+            return 0;
+        }
+
+        var stamps = present
+            .Select(t => ToStoredPrecision(t).ToString(StoredTimestampFormat, CultureInfo.InvariantCulture))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        var deleted = new SqlParameter("@deleted", SqlDbType.Int) { Direction = ParameterDirection.Output };
+
+        await db.Database
+            .ExecuteSqlRawAsync(
+                DeleteMissingRawPointsSql,
+                [
+                    new SqlParameter("@present", SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(stamps) },
+                    new SqlParameter("@entity", SqlDbType.Int) { Value = sourceEntityId },
+                    new SqlParameter("@path", SqlDbType.NVarChar, 400) { Value = sourcePath },
+                    new SqlParameter("@from", SqlDbType.DateTime2) { Scale = 3, Value = ToStoredPrecision(fromUtc) },
+                    new SqlParameter("@to", SqlDbType.DateTime2) { Scale = 3, Value = ToStoredPrecision(toUtc) },
+                    new SqlParameter("@resource", SqlDbType.NVarChar, 255) { Value = RawPointLockResource },
+                    deleted,
+                ],
+                ct)
+            .ConfigureAwait(false);
+
+        return deleted.Value is int count ? count : 0;
+    }
+
+    /// <summary>Видалення сирих точок атрибута, яких джерело за інтервал не віддало (D-462).</summary>
+    private static readonly string DeleteMissingRawPointsSql = $"""
+        SET XACT_ABORT ON;
+        BEGIN TRANSACTION;
+
+        DECLARE @lock int;
+        EXEC @lock = sp_getapplock @Resource = @resource, @LockMode = 'Exclusive',
+                                   @LockOwner = 'Transaction', @LockTimeout = {RawPointLockTimeoutMs};
+        IF @lock < 0
+            THROW 50001, N'ext.RawDataPoint: не вдалося взяти лок таблиці для видалення точок (sp_getapplock < 0).', 1;
+
+        DECLARE @seen TABLE (Ts datetime2(3) NOT NULL PRIMARY KEY);
+
+        INSERT @seen (Ts)
+        SELECT DISTINCT j.Ts
+        FROM OPENJSON(@present) WITH (Ts datetime2(3) '$') AS j
+        WHERE j.Ts IS NOT NULL;
+
+        DELETE t
+        FROM ext.RawDataPoint AS t
+        WHERE t.SourceEntityId = @entity
+          AND t.SourcePath = @path
+          AND t.[Timestamp] >= @from
+          AND t.[Timestamp] < @to
+          AND NOT EXISTS (SELECT 1 FROM @seen AS s WHERE s.Ts = t.[Timestamp]);
+
+        SET @deleted = @@ROWCOUNT;
+
+        COMMIT TRANSACTION;
+        """;
 
     /// <inheritdoc />
     public async Task WriteCoverageAsync(
