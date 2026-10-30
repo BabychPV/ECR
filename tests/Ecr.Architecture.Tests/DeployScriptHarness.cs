@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Ecr.TestKit;
 using Xunit;
 
@@ -100,6 +100,8 @@ internal static class DeployScriptHarness
     // (3) ОДИН повтор запуску ЛИШЕ за коду 139, причина - у stderr. Інші коди й провали перевірок не повторюються.
     private const string LauncherScript = """
         #!/bin/sh
+        # Тести інколи звужують PATH: утиліти обгортки (mktemp, cat, rm, flock) шукаємо й у системних каталогах.
+        PATH="$PATH:/usr/bin:/bin"
         export TERM=dumb POWERSHELL_TELEMETRY_OPTOUT=1 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
         lockdir="${TMPDIR:-/tmp}"
         if command -v flock >/dev/null 2>&1; then
