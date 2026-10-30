@@ -965,6 +965,21 @@ public interface IProjectVersionTimeline
 ```
 
 ```csharp
+// src/Ecr.Application/Ports/IColumnRenameMap.cs (RPT-STABLE Part B)
+
+namespace Ecr.Application.Ports;
+
+/// <summary>
+/// Збережена мапа перейменування колонок між версіями шаблону (<c>cfg.ColumnRename</c>): псевдонім для вʼюх SSRS
+/// і міжперіодних формул на межі версій. Пишеться переносом версії з <c>tableRenames</c>.
+/// </summary>
+public interface IColumnRenameMap
+{
+    Task<(IReadOnlyDictionary<int, int> Forward, IReadOnlyDictionary<int, int> Backward)> GetAsync(CancellationToken ct);
+}
+```
+
+```csharp
 // src/Ecr.Application/Ports/IMetadataCache.cs
 
 using Ecr.Domain.Entities.Configuration;
