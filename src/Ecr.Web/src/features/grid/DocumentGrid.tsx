@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { Alert, Badge, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
+import { ActionIcon, Alert, Badge, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -2717,12 +2717,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             </Button>
             {manualIndex.cells.length > 0 && (
               <>
-                <Button variant="default" px="xs" aria-label={t('grid.formulaOverride.previousManual')} title={t('grid.formulaOverride.previousManual')} onClick={() => goToManual(-1)} data-manual-prev="">
+                <ActionIcon variant="default" aria-label={t('grid.formulaOverride.previousManual')} title={t('grid.formulaOverride.previousManual')} onClick={() => goToManual(-1)} data-manual-prev="">
                   ‹
-                </Button>
-                <Button variant="default" px="xs" aria-label={t('grid.formulaOverride.nextManual')} title={t('grid.formulaOverride.nextManual')} onClick={() => goToManual(1)} data-manual-next="">
+                </ActionIcon>
+                <ActionIcon variant="default" aria-label={t('grid.formulaOverride.nextManual')} title={t('grid.formulaOverride.nextManual')} onClick={() => goToManual(1)} data-manual-next="">
                   ›
-                </Button>
+                </ActionIcon>
               </>
             )}
           </Group>
