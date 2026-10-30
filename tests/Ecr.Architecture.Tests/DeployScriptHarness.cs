@@ -101,7 +101,9 @@ internal static class DeployScriptHarness
     private const string LauncherScript = """
         #!/bin/sh
         # Тести інколи звужують PATH: утиліти обгортки (mktemp, cat, rm, flock) шукаємо й у системних каталогах.
-        PATH="$PATH:/usr/bin:/bin"
+        ORIG_PATH="$PATH"
+        SYS_PATH="$PATH:/usr/bin:/bin"
+        PATH="$SYS_PATH"
         export TERM=dumb POWERSHELL_TELEMETRY_OPTOUT=1 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
         lockdir="${TMPDIR:-/tmp}"
         if command -v flock >/dev/null 2>&1; then
@@ -118,7 +120,8 @@ internal static class DeployScriptHarness
         attempt=1
         note=""
         while :; do
-          "$ECR_REAL_PWSH" -NoLogo "$@" >"$d/out" 2>"$d/err"
+          # pwsh бачить ЛИШЕ початковий PATH: тести навмисно звужують його (напр. "git недоступний").
+          PATH="$ORIG_PATH" "$ECR_REAL_PWSH" -NoLogo "$@" >"$d/out" 2>"$d/err"
           code=$?
           if [ "$code" -eq 139 ] && [ "$attempt" -lt 2 ]; then
             note="ecr-pwsh-launcher: pwsh exit 139 (SIGSEGV on start), launch retried once"
