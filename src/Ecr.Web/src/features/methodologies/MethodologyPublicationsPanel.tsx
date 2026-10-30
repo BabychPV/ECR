@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import { Code, Stack, Table, Text } from '@mantine/core';
+import { Code, Table } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
@@ -7,6 +7,7 @@ import { queryKeys } from '@/api/queryKeys';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Timestamp } from '@/shared/ui/Timestamp';
+import { MethodologySection } from './MethodologySection';
 
 /** Одна публікація версії з журналу `aud.PublicationEvent`. */
 export type MethodologyPublicationEntry = components['schemas']['MethodologyPublicationEntry'];
@@ -50,8 +51,9 @@ export function MethodologyPublicationsPanel({ methodologyId }: { readonly metho
   });
 
   return (
-    <Stack gap="xs">
-      <Text fw={600}>{t('methodologies.publications')}</Text>
+    // ⚠ Журнал — єдина секція, згорнута за замовчуванням (`KIT.md` §4, «рідкісне — у згорнутих
+    // секціях»): це історія, а не крок доведення версії до готовності, як решта панелей.
+    <MethodologySection sectionId="publications" title={t('methodologies.publications')} defaultExpanded={false}>
 
       <AsyncBoundary<MethodologyPublicationEntry[]>
         isPending={publications.isPending}
@@ -90,6 +92,6 @@ export function MethodologyPublicationsPanel({ methodologyId }: { readonly metho
           </Table>
         )}
       </AsyncBoundary>
-    </Stack>
+    </MethodologySection>
   );
 }

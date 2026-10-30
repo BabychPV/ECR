@@ -9829,6 +9829,49 @@ USING (VALUES
     ,(N'err.ECR-REQ-0422.piEventFilter', N'en', N'The name or element filter is longer than {max} characters.', 1)
     ,(N'audit.eventLabel.PiEventDataExported', N'en', N'PI event data exported', 1)
     -- D465:pi-events ── кінець секції ──
+    -- COLL:ui-methodology ── сторінка версії методології: довідка синтаксису формули, межі матриці покриття (lane/integ-methodology-ui); ru/kz — порцією COLL:ui-methodology нижче ──
+    ,(N'methodologies.ruleCoveragePeriodMissing', N'en', N'Choose both periods to see the coverage matrix.', 1)
+    ,(N'methodologies.syntaxHelp.toggle', N'en', N'Syntax help', 1)
+    ,(N'methodologies.syntaxHelp.intro', N'en', N'Methodology formulas use their own dialect. Below is what the server accepts; it checks the formula again when you save it.', 1)
+    ,(N'methodologies.syntaxHelp.references', N'en', N'References', 1)
+    ,(N'methodologies.syntaxHelp.refArgument', N'en', N'An input of the formula: a column of the bound row or a declared argument. The name may contain dots.', 1)
+    ,(N'methodologies.syntaxHelp.refConstant', N'en', N'A constant of this methodology version that is valid in the document period.', 1)
+    ,(N'methodologies.syntaxHelp.refFormula', N'en', N'The result of another formula of this version. Not followed by a name, "!" means logical NOT: !(…), !@Flag.', 1)
+    ,(N'methodologies.syntaxHelp.refHeader', N'en', N'A field of the document header.', 1)
+    ,(N'methodologies.syntaxHelp.refPeriod', N'en', N'The calendar of the current period: {properties}.', 1)
+    ,(N'methodologies.syntaxHelp.operators', N'en', N'Operators and values', 1)
+    ,(N'methodologies.syntaxHelp.opArithmetic', N'en', N'Arithmetic; % is the remainder of a division.', 1)
+    ,(N'methodologies.syntaxHelp.opComparison', N'en', N'Comparison; = and == mean the same, and so do <> and !=.', 1)
+    ,(N'methodologies.syntaxHelp.opLogic', N'en', N'Logic; the words can be written in any letter case.', 1)
+    ,(N'methodologies.syntaxHelp.opTernary', N'en', N'If the condition holds, the first value, otherwise the second.', 1)
+    ,(N'methodologies.syntaxHelp.opLiterals', N'en', N'Numbers use a dot as the decimal separator; text goes in single quotes (a quote inside is doubled); true, false and null.', 1)
+    ,(N'methodologies.syntaxHelp.functions', N'en', N'Functions', 1)
+    ,(N'methodologies.syntaxHelp.caseSensitive', N'en', N'Function names are case-sensitive: Pow, not POW.', 1)
+    ,(N'methodologies.syntaxHelp.functionsEmpty', N'en', N'The server returned no functions for this dialect.', 1)
+    ,(N'methodologies.syntaxHelp.argsExact', N'en', N'arguments: {count}', 1)
+    ,(N'methodologies.syntaxHelp.argsRange', N'en', N'arguments: {min}–{max}', 1)
+    ,(N'methodologies.syntaxHelp.argsAtLeast', N'en', N'arguments: {min} or more', 1)
+    ,(N'methodologies.syntaxHelp.extension', N'en', N'extension', 1)
+    ,(N'methodologies.syntaxHelp.extensionHint', N'en', N'Not part of the legacy calculation engine.', 1)
+    ,(N'methodologies.syntaxHelp.notAllowed', N'en', N'Not in this dialect', 1)
+    ,(N'methodologies.syntaxHelp.noCaret', N'en', N'"^" is not a power here (in the legacy engine it is bitwise XOR): write Pow(a, b).', 1)
+    ,(N'methodologies.syntaxHelp.noAmpersand', N'en', N'"&" does not join text; for a logical AND write and.', 1)
+    ,(N'methodologies.syntaxHelp.noBareName', N'en', N'A name without a prefix is not accepted: write @Name, CST.Name or !Name.', 1)
+    ,(N'methodologies.syntaxHelp.noCellRef', N'en', N'References to document cells are not allowed: a methodology works with its inputs.', 1)
+    ,(N'methodologies.syntaxHelp.examples', N'en', N'Examples', 1)
+    ,(N'methodologies.syntaxHelp.exArgConstant', N'en', N'An input times a constant', 1)
+    ,(N'methodologies.syntaxHelp.exDotted', N'en', N'An input whose name contains dots', 1)
+    ,(N'methodologies.syntaxHelp.exFormulaRefs', N'en', N'Results of other formulas', 1)
+    ,(N'methodologies.syntaxHelp.exTernary', N'en', N'A condition with two outcomes', 1)
+    ,(N'methodologies.syntaxHelp.exIf', N'en', N'The same choice with if()', 1)
+    ,(N'methodologies.syntaxHelp.exNot', N'en', N'"!" before @ is logical NOT', 1)
+    ,(N'methodologies.syntaxHelp.exPow', N'en', N'A power', 1)
+    ,(N'methodologies.syntaxHelp.exRound', N'en', N'Rounding to 3 digits', 1)
+    ,(N'methodologies.syntaxHelp.exIn', N'en', N'The value is one of a list', 1)
+    ,(N'methodologies.syntaxHelp.exPeriod', N'en', N'Hours in the current period', 1)
+    ,(N'methodologies.syntaxHelp.exModulo', N'en', N'The remainder of a division', 1)
+    ,(N'methodologies.syntaxHelp.exLogic', N'en', N'Two conditions at once', 1)
+    -- COLL:ui-methodology ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -25858,6 +25901,96 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- D465:pi-events ── кінець секції ──
+-- COLL:ui-methodology ── ru/kz: сторінка версії методології — довідка синтаксису, межі матриці покриття; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'methodologies.ruleCoveragePeriodMissing', N'ru', N'Выберите оба периода, чтобы увидеть матрицу покрытия.'),
+    (N'methodologies.ruleCoveragePeriodMissing', N'kz', N'Қамту матрицасын көру үшін екі кезеңді де таңдаңыз.'),
+    (N'methodologies.syntaxHelp.toggle', N'ru', N'Справка по синтаксису'),
+    (N'methodologies.syntaxHelp.toggle', N'kz', N'Синтаксис анықтамасы'),
+    (N'methodologies.syntaxHelp.intro', N'ru', N'У формул методологии свой диалект. Ниже — то, что принимает сервер; при сохранении он проверяет формулу ещё раз.'),
+    (N'methodologies.syntaxHelp.intro', N'kz', N'Әдістеме формулаларының өз диалектісі бар. Төменде сервер қабылдайтыны көрсетілген; сақтаған кезде ол формуланы қайта тексереді.'),
+    (N'methodologies.syntaxHelp.references', N'ru', N'Ссылки'),
+    (N'methodologies.syntaxHelp.references', N'kz', N'Сілтемелер'),
+    (N'methodologies.syntaxHelp.refArgument', N'ru', N'Входное значение формулы: колонка связанной строки или объявленный аргумент. Имя может содержать точки.'),
+    (N'methodologies.syntaxHelp.refArgument', N'kz', N'Формуланың кіріс мәні: байланысқан жолдың бағаны немесе жарияланған аргумент. Атауда нүктелер болуы мүмкін.'),
+    (N'methodologies.syntaxHelp.refConstant', N'ru', N'Константа этой версии методологии, действующая в периоде документа.'),
+    (N'methodologies.syntaxHelp.refConstant', N'kz', N'Құжат кезеңінде әрекет ететін осы әдістеме нұсқасының тұрақтысы.'),
+    (N'methodologies.syntaxHelp.refFormula', N'ru', N'Результат другой формулы этой версии. Если сразу за ним нет имени, «!» означает логическое НЕ: !(…), !@Flag.'),
+    (N'methodologies.syntaxHelp.refFormula', N'kz', N'Осы нұсқаның басқа формуласының нәтижесі. Одан кейін бірден атау болмаса, «!» логикалық ЕМЕС дегенді білдіреді: !(…), !@Flag.'),
+    (N'methodologies.syntaxHelp.refHeader', N'ru', N'Поле шапки документа.'),
+    (N'methodologies.syntaxHelp.refHeader', N'kz', N'Құжат тақырыбының өрісі.'),
+    (N'methodologies.syntaxHelp.refPeriod', N'ru', N'Календарь текущего периода: {properties}.'),
+    (N'methodologies.syntaxHelp.refPeriod', N'kz', N'Ағымдағы кезеңнің күнтізбесі: {properties}.'),
+    (N'methodologies.syntaxHelp.operators', N'ru', N'Операторы и значения'),
+    (N'methodologies.syntaxHelp.operators', N'kz', N'Операторлар мен мәндер'),
+    (N'methodologies.syntaxHelp.opArithmetic', N'ru', N'Арифметика; % — остаток от деления.'),
+    (N'methodologies.syntaxHelp.opArithmetic', N'kz', N'Арифметика; % — бөлудің қалдығы.'),
+    (N'methodologies.syntaxHelp.opComparison', N'ru', N'Сравнение; = и == означают одно и то же, как и <> и !=.'),
+    (N'methodologies.syntaxHelp.opComparison', N'kz', N'Салыстыру; = және == бірдей мағынада, <> және != да солай.'),
+    (N'methodologies.syntaxHelp.opLogic', N'ru', N'Логика; слова можно писать в любом регистре.'),
+    (N'methodologies.syntaxHelp.opLogic', N'kz', N'Логика; сөздерді кез келген регистрмен жазуға болады.'),
+    (N'methodologies.syntaxHelp.opTernary', N'ru', N'Если условие выполняется — первое значение, иначе — второе.'),
+    (N'methodologies.syntaxHelp.opTernary', N'kz', N'Шарт орындалса — бірінші мән, әйтпесе — екінші.'),
+    (N'methodologies.syntaxHelp.opLiterals', N'ru', N'Числа — с точкой как десятичным разделителем; текст — в одинарных кавычках (кавычка внутри удваивается); true, false и null.'),
+    (N'methodologies.syntaxHelp.opLiterals', N'kz', N'Сандар — ондық бөлгіш ретінде нүктемен; мәтін — жалқы тырнақшада (ішіндегі тырнақша екі еселенеді); true, false және null.'),
+    (N'methodologies.syntaxHelp.functions', N'ru', N'Функции'),
+    (N'methodologies.syntaxHelp.functions', N'kz', N'Функциялар'),
+    (N'methodologies.syntaxHelp.caseSensitive', N'ru', N'В именах функций регистр важен: Pow, а не POW.'),
+    (N'methodologies.syntaxHelp.caseSensitive', N'kz', N'Функция атауларында регистр маңызды: POW емес, Pow.'),
+    (N'methodologies.syntaxHelp.functionsEmpty', N'ru', N'Сервер не вернул функций для этого диалекта.'),
+    (N'methodologies.syntaxHelp.functionsEmpty', N'kz', N'Сервер бұл диалект үшін функцияларды қайтармады.'),
+    (N'methodologies.syntaxHelp.argsExact', N'ru', N'аргументов: {count}'),
+    (N'methodologies.syntaxHelp.argsExact', N'kz', N'аргументтер: {count}'),
+    (N'methodologies.syntaxHelp.argsRange', N'ru', N'аргументов: {min}–{max}'),
+    (N'methodologies.syntaxHelp.argsRange', N'kz', N'аргументтер: {min}–{max}'),
+    (N'methodologies.syntaxHelp.argsAtLeast', N'ru', N'аргументов: {min} и больше'),
+    (N'methodologies.syntaxHelp.argsAtLeast', N'kz', N'аргументтер: {min} және одан көп'),
+    (N'methodologies.syntaxHelp.extension', N'ru', N'расширение'),
+    (N'methodologies.syntaxHelp.extension', N'kz', N'кеңейту'),
+    (N'methodologies.syntaxHelp.extensionHint', N'ru', N'Отсутствует в прежнем расчётном движке.'),
+    (N'methodologies.syntaxHelp.extensionHint', N'kz', N'Бұрынғы есептеу қозғалтқышында жоқ.'),
+    (N'methodologies.syntaxHelp.notAllowed', N'ru', N'Нет в этом диалекте'),
+    (N'methodologies.syntaxHelp.notAllowed', N'kz', N'Бұл диалектіде жоқ'),
+    (N'methodologies.syntaxHelp.noCaret', N'ru', N'«^» здесь не степень (в прежнем движке это побитовое XOR): пишите Pow(a, b).'),
+    (N'methodologies.syntaxHelp.noCaret', N'kz', N'Мұнда «^» дәреже емес (бұрынғы қозғалтқышта бұл биттік XOR): Pow(a, b) деп жазыңыз.'),
+    (N'methodologies.syntaxHelp.noAmpersand', N'ru', N'«&» не соединяет текст; для логического И пишите and.'),
+    (N'methodologies.syntaxHelp.noAmpersand', N'kz', N'«&» мәтінді біріктірмейді; логикалық ЖӘНЕ үшін and деп жазыңыз.'),
+    (N'methodologies.syntaxHelp.noBareName', N'ru', N'Имя без префикса не принимается: пишите @Name, CST.Name или !Name.'),
+    (N'methodologies.syntaxHelp.noBareName', N'kz', N'Префиксі жоқ атау қабылданбайды: @Name, CST.Name немесе !Name деп жазыңыз.'),
+    (N'methodologies.syntaxHelp.noCellRef', N'ru', N'Ссылки на ячейки документа запрещены: методология работает со своими входными значениями.'),
+    (N'methodologies.syntaxHelp.noCellRef', N'kz', N'Құжат ұяшықтарына сілтемелерге тыйым салынған: әдістеме өз кіріс мәндерімен жұмыс істейді.'),
+    (N'methodologies.syntaxHelp.examples', N'ru', N'Примеры'),
+    (N'methodologies.syntaxHelp.examples', N'kz', N'Мысалдар'),
+    (N'methodologies.syntaxHelp.exArgConstant', N'ru', N'Входное значение, умноженное на константу'),
+    (N'methodologies.syntaxHelp.exArgConstant', N'kz', N'Тұрақтыға көбейтілген кіріс мәні'),
+    (N'methodologies.syntaxHelp.exDotted', N'ru', N'Входное значение с точками в имени'),
+    (N'methodologies.syntaxHelp.exDotted', N'kz', N'Атауында нүктелері бар кіріс мәні'),
+    (N'methodologies.syntaxHelp.exFormulaRefs', N'ru', N'Результаты других формул'),
+    (N'methodologies.syntaxHelp.exFormulaRefs', N'kz', N'Басқа формулалардың нәтижелері'),
+    (N'methodologies.syntaxHelp.exTernary', N'ru', N'Условие с двумя исходами'),
+    (N'methodologies.syntaxHelp.exTernary', N'kz', N'Екі нәтижесі бар шарт'),
+    (N'methodologies.syntaxHelp.exIf', N'ru', N'Тот же выбор через if()'),
+    (N'methodologies.syntaxHelp.exIf', N'kz', N'Сол таңдау if() арқылы'),
+    (N'methodologies.syntaxHelp.exNot', N'ru', N'«!» перед @ — логическое НЕ'),
+    (N'methodologies.syntaxHelp.exNot', N'kz', N'@ алдындағы «!» — логикалық ЕМЕС'),
+    (N'methodologies.syntaxHelp.exPow', N'ru', N'Степень'),
+    (N'methodologies.syntaxHelp.exPow', N'kz', N'Дәреже'),
+    (N'methodologies.syntaxHelp.exRound', N'ru', N'Округление до 3 знаков'),
+    (N'methodologies.syntaxHelp.exRound', N'kz', N'3 таңбаға дейін дөңгелектеу'),
+    (N'methodologies.syntaxHelp.exIn', N'ru', N'Значение входит в список'),
+    (N'methodologies.syntaxHelp.exIn', N'kz', N'Мән тізімге кіреді'),
+    (N'methodologies.syntaxHelp.exPeriod', N'ru', N'Часы текущего периода'),
+    (N'methodologies.syntaxHelp.exPeriod', N'kz', N'Ағымдағы кезеңнің сағаттары'),
+    (N'methodologies.syntaxHelp.exModulo', N'ru', N'Остаток от деления'),
+    (N'methodologies.syntaxHelp.exModulo', N'kz', N'Бөлудің қалдығы'),
+    (N'methodologies.syntaxHelp.exLogic', N'ru', N'Два условия одновременно'),
+    (N'methodologies.syntaxHelp.exLogic', N'kz', N'Бір мезгілде екі шарт')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-methodology ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
