@@ -32,6 +32,11 @@ const LifecycleDialogs = lazy(() =>
 const loadTableTab = () => import('@/features/permits/permit/TableTab');
 const TableTab = lazy(() => loadTableTab().then((module) => ({ default: module.TableTab })));
 
+// Картка лімітів «Air limits» (NAE-план N3) — окремим чанком: потрібна лише дозволу типу `AIR_LIMITS`.
+const AirLimitsTab = lazy(() => import('@/features/permits/air/AirLimitsTab').then((module) => ({ default: module.AirLimitsTab })));
+const AirTypeCode = 'AIR_LIMITS';
+const AirTabId = 'air';
+
 const OverviewTabId = 'overview';
 const TabParam = 'tab';
 
@@ -86,7 +91,9 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
   const [params, setParams] = useSearchParams();
 
   const requested = params.get(TabParam) ?? OverviewTabId;
-  const tab = permit.tables.some((table) => table.code === requested) ? requested : OverviewTabId;
+  const hasAir = permit.typeCode === AirTypeCode;
+  const tab =
+    permit.tables.some((table) => table.code === requested) || (hasAir && requested === AirTabId) ? requested : OverviewTabId;
   const dialog = readLifecycleDialog(params.get(DialogParam));
 
   const update = (change: (next: URLSearchParams) => void): void => {
@@ -133,6 +140,7 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
         <Tabs value={tab} onChange={selectTab} keepMounted={false}>
           <Tabs.List aria-label={t('permits.page.tabs.aria')} mb="md">
             <Tabs.Tab value={OverviewTabId}>{t('permits.page.tabs.overview')}</Tabs.Tab>
+            {hasAir && <Tabs.Tab value={AirTabId}>{t('permits.page.tabs.air')}</Tabs.Tab>}
             {permit.tables.map((table) => (
               <Tabs.Tab
                 key={table.code}
@@ -150,6 +158,13 @@ function PermitScreen({ permit }: { readonly permit: Permit }): JSX.Element {
           <Tabs.Panel value={OverviewTabId}>
             <OverviewTab permit={permit} caps={caps} onActivate={() => open('activate')} onRenew={() => open('renew')} />
           </Tabs.Panel>
+          {hasAir && (
+            <Tabs.Panel value={AirTabId}>
+              <Suspense fallback={<Skeleton height={160} role="status" aria-label={t('common.loading')} />}>
+                <AirLimitsTab permitId={permit.id} mayImport={mayEdit && permit.status !== PermitStatus.Expired} />
+              </Suspense>
+            </Tabs.Panel>
+          )}
           {permit.tables.map((table) => (
             <Tabs.Panel key={table.code} value={table.code}>
               {typeQuery.isError ? (
