@@ -16,7 +16,7 @@ public sealed class ColumnRenameMap(EcrDbContext db) : IColumnRenameMap
             return cached;
         }
 
-        var rows = await db.ColumnRenames.AsNoTracking().ToListAsync(ct).ConfigureAwait(false);
+        var rows = await db.ColumnRenames.AsNoTracking().Take(100_000).ToListAsync(ct).ConfigureAwait(false);
         var forward = new Dictionary<int, int>();
         var backward = new Dictionary<int, int>();
         foreach (var row in rows)
