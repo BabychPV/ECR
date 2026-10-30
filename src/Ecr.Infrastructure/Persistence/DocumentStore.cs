@@ -314,7 +314,11 @@ public sealed class DocumentStore(
                 // AN-63: періодичність проєкту - скалярний підзапит у тому самому запиті сторінки (запитів не додається).
                 db.Projects.Where(p => p.Id == d.ProjectId).Select(p => (PeriodKind?)p.PeriodKind).FirstOrDefault(),
                 // ✎ D-450: ідентифікатор власника поруч з іменем, тим самим розкриттям (звуженому читачеві `For` знімає обидва).
-                d.CreatedByUserId))
+                d.CreatedByUserId,
+                // ✎ RPT-STABLE: типова версія шаблону — скалярний підзапит у тому самому запиті сторінки (запитів не додається).
+                db.Projects.Where(p => p.Id == d.ProjectId)
+                    .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id, (p, v) => v.Version)
+                    .FirstOrDefault()))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -359,7 +363,8 @@ public sealed class DocumentStore(
                 staleByDocument is null ? null : staleByDocument.ContainsKey(d.Id),
                 staleByDocument?.GetValueOrDefault(d.Id),
                 PeriodKind: d.ProjectPeriodKind?.ToString(),
-                OwnerUserId: d.OwnerUserId));
+                OwnerUserId: d.OwnerUserId,
+                TemplateVersion: d.TemplateVersion));
         }
 
         return new PagedResult<DocumentSummary>(
@@ -1407,7 +1412,8 @@ public sealed class DocumentStore(
     private sealed record DocumentRow(
         long Id, int ProjectId, string BusinessKey, DateTime CreatedAt, int SheetCount,
         Domain.ValueObjects.LocalizedText? NameL10n, DateTime ModifiedAt, string? ModifiedByDisplayName,
-        string? OwnerDisplayName, string? ApproverDisplayName, PeriodKind? ProjectPeriodKind, int OwnerUserId);
+        string? OwnerDisplayName, string? ApproverDisplayName, PeriodKind? ProjectPeriodKind, int OwnerUserId,
+        string? TemplateVersion);
 
     /// <summary>Стеля кількості правил складу в одній версії.</summary>
     private const int MaxRules = 500;

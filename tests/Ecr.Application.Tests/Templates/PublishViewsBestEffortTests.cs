@@ -177,6 +177,7 @@ public sealed class PublishViewsBestEffortTests(SqlServerFixture sql)
             "SELECT COUNT(*) FROM aud.PublicationEvent WHERE EntityType = N'TemplateVersion' AND EntityId = @id",
             ("@id", versionId)))!;
 
+    // ✎ RPT-STABLE: лише вʼюхи з версією (`_vN`); стабільна вʼюха без версії читає таблицю одним проходом, тож ліміт 250 її не стосується.
     private async Task<List<string>> ViewsLikeAsync(string templateCode)
     {
         var result = new List<string>();
@@ -184,7 +185,7 @@ public sealed class PublishViewsBestEffortTests(SqlServerFixture sql)
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT name FROM sys.views WHERE schema_id = SCHEMA_ID(N'rpt') AND name LIKE @p";
-        command.Parameters.AddWithValue("@p", $"v[_]{templateCode}[_]%");
+        command.Parameters.AddWithValue("@p", $"v[_]{templateCode}[_]%[_]v[0-9]%");
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
