@@ -31,13 +31,20 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// <c>MigrateDocumentVersionHandler.BackupConfirmationThreshold</c> значень, пишеться в журнал безпеки; 
 /// задачі, поставлені до цього поля, десеріалізуються з <c>null</c>.
 /// </param>
+/// <param name="Range">
+/// Обсяг переносу (<see cref="VersionMigrationRange"/> рядком); <c>null</c> — увесь проєкт (задачі, поставлені до
+/// RPT-STABLE Part B).
+/// </param>
+/// <param name="FromPeriodKey">Запитаний період X для <c>FromMonth</c>; <c>null</c> — не задано.</param>
 public sealed record MigrateDocumentVersionTask(
     long DocumentId, int TargetVersionId, string Mode, JobActor? Actor = null,
     IReadOnlyList<VersionMigrationTableRename>? TableRenames = null,
     bool AcceptGuardedOverwrite = false,
     IReadOnlyList<VersionMigrationLookupRemap>? LookupRemaps = null,
     bool AllowLockedDocuments = false,
-    string? BackupConfirmation = null);
+    string? BackupConfirmation = null,
+    string? Range = null,
+    int? FromPeriodKey = null);
 
 /// <summary>Підсумок фонового переносу.</summary>
 /// <param name="ToVersion">Цільова версія.</param>

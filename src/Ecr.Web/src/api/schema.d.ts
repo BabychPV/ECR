@@ -13581,6 +13581,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/template-versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Часова шкала версій шаблону проєкту (RPT-STABLE Part B): з якого періоду яка версія діє. Право
+         *     `Document.View` і видимий проєкт.
+         * @description Порожній `items` — проєкт на одній (чинній) версії всі періоди. `currentVersionId` — версія для НОВИХ
+         *     періодів. Невидимий проєкт — той самий `404`, що й неіснуючий.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Проєкт. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectTemplateTimelineDto"];
+                        "text/json": components["schemas"]["ProjectTemplateTimelineDto"];
+                        "text/plain": components["schemas"]["ProjectTemplateTimelineDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{id}/timezone": {
         parameters: {
             query?: never;
@@ -27102,6 +27159,18 @@ export interface components {
             documentId: number;
             /** @description Сухий прогін: нічого не змінено. */
             dryRun: boolean;
+            /**
+             * Format: int32
+             * @description Період, з якого перенос реально діє: для `FromMonth` збігається з X, окрім випадку «рік-сімейство Q-17» —
+             *     тоді січень року X (див. Warnings); для `WholeProject` — перший період проєкту; `null`,
+             *     якщо в проєкті ще немає періодів.
+             */
+            effectiveFromPeriodKey?: null | number;
+            /**
+             * Format: int32
+             * @description Запитаний період X (`FromMonth`); `null` для `WholeProject`.
+             */
+            fromPeriodKey?: null | number;
             /** @description Її номер. */
             fromVersion: string;
             /**
@@ -27231,6 +27300,7 @@ export interface components {
              * @description Його проєкт — версія живе на проєкті, тож переносяться всі його документи.
              */
             projectId: number;
+            range?: null | components["schemas"]["VersionMigrationRange"];
             /** @description Причини відмови: `structural`, `dataLoss`, `guardedWithData`, `sheetsLocked`, `projectArchived`. */
             refusals: string[];
             /** @description Її номер. */
@@ -27245,6 +27315,9 @@ export interface components {
              * @description Скільки введених значень переїде.
              */
             transferredValues: number;
+            /** @description Попередження (не відмови): `effectiveFromShiftedToJanuary` (ключ `documents.migrateWarnEffectiveFromJanuary`,
+             *     параметри `requested`, `effective`); `null` — немає. */
+            warnings?: null | components["schemas"]["VersionMigrationWarning"][];
         };
         /** @description Куди можна перенести документ: поточна версія й опубліковані версії того самого шаблону. */
         DocumentVersionMigrationTargetsDto: {
@@ -29173,6 +29246,11 @@ export interface components {
             backupConfirmation?: null | string;
             /** @description `true` — лише звіт, без змін (завжди синхронно: швидкий). */
             dryRun: boolean;
+            /**
+             * Format: int32
+             * @description Період X (`Рік*100+№`) для `Range = FromMonth`; для `WholeProject` ігнорується.
+             */
+            fromPeriodKey?: null | number;
             /** @description Необов'язкові мапи записів Lookup по полях ШАПКИ: `[{target:{kind:"header",code}, mappings:[{from,to}]}]`, де
              *     `from` — запис вихідного довідника, `to` — запису довідника цільової версії. Діють лише для поля, чий
              *     довідник між версіями змінився (інакше ціль у звіті має `applied = false`). Повна мапа (кожне вжите значення
@@ -29182,6 +29260,7 @@ export interface components {
              *     не підтримуються (`422 migrateLookupRemapInvalid`). Перерахунок не ставиться. Без поля поведінка незмінна. */
             lookupRemaps?: null | components["schemas"]["VersionMigrationLookupRemap"][];
             mode: null | components["schemas"]["VersionMigrationMode"];
+            range?: null | components["schemas"]["VersionMigrationRange"];
             /** @description Необов'язкова мапа «було → стало» кодів таблиць (і колонок) для структури, перейменованої в цільовій версії
              *     (напр. `T9a_03 → T9a_17a`): без неї таблиця з новим кодом — «нова», а стара — «зникла», і введені в неї
              *     значення блокують перенос (`dataLoss`). Діє лише там, де відповідника за кодом немає; суперечність парі
@@ -31139,6 +31218,38 @@ export interface components {
             status: components["schemas"]["ProjectStatus"];
             /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Atyrau`). */
             timeZoneId: string;
+        };
+        /** @description Часова шкала версій шаблону проєкту: з якого періоду яка версія діє. */
+        ProjectTemplateTimelineDto: {
+            /**
+             * Format: int32
+             * @description Чинна (остання) версія — за нею створюються НОВІ періоди.
+             */
+            currentVersionId: number;
+            /** @description Рядки шкали за зростанням початку; порожньо — проєкт має одну (чинну) версію на всі періоди. */
+            items: components["schemas"]["ProjectTemplateTimelineItemDto"][];
+            /**
+             * Format: int32
+             * @description Проєкт.
+             */
+            projectId: number;
+        };
+        /** @description Рядок часової шкали версій шаблону проєкту (RPT-STABLE Part B). */
+        ProjectTemplateTimelineItemDto: {
+            /**
+             * Format: int32
+             * @description Перший період дії версії (`Рік*100+№`).
+             */
+            fromPeriodKey: number;
+            /** @description Код шаблону. */
+            templateCode: null | string;
+            /**
+             * Format: int32
+             * @description Версія шаблону.
+             */
+            templateVersionId: number;
+            /** @description Номер версії (як у переліку документів). */
+            version: string;
         };
         /** @description Публічні дані екрана входу. */
         PublicBootstrapResponse: {
@@ -36631,6 +36742,8 @@ export interface components {
          * @enum {unknown}
          */
         VersionMigrationMode: "Safe" | "Presentation";
+        /** @enum {unknown} */
+        VersionMigrationRange: "WholeProject" | "FromMonth" | null;
         /** @description Перейменування таблиці між версіями: «було → стало» за кодом таблиці (і, за потреби, колонок). */
         VersionMigrationTableRename: {
             /** @description Перейменування колонок цієї таблиці; `null` — колонки збігаються за кодами. */
@@ -36641,6 +36754,18 @@ export interface components {
             sheetCode?: null | string;
             /** @description Код таблиці в цільовій версії; рівний FromTableCode — лише перейменування колонок. */
             toTableCode: string;
+        };
+        /** @description Попередження переносу (не відмова): зміст для діалогу — ключ повідомлення і, за потреби, період. */
+        VersionMigrationWarning: {
+            /** @description Короткий код: `effectiveFromShiftedToJanuary`. */
+            code: string;
+            /** @description Ключ UiString (`migration.warn.*`) у каталозі en/ru/kz. */
+            messageKey: string;
+            /**
+             * Format: int32
+             * @description Період, якого стосується (напр. ефективний початок).
+             */
+            periodKey?: null | number;
         };
         /** @description Подія журналу переходів стану аркуша (`BE-11b`). */
         WorkflowEventDto: {

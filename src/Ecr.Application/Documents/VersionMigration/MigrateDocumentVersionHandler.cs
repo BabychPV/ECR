@@ -99,6 +99,17 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// дозволяє або колонки немає): комірки знову рахує формула, журнал — FormulaRestored. Перенос не блокує; пункти
 /// звіту — Kind OverrideLost. null — таких немає.
 /// </param>
+/// <param name="Range">RPT-STABLE Part B: обсяг переносу, як у запиті (<c>WholeProject</c> / <c>FromMonth</c>).</param>
+/// <param name="FromPeriodKey">Запитаний період X (<c>FromMonth</c>); <c>null</c> для <c>WholeProject</c>.</param>
+/// <param name="EffectiveFromPeriodKey">
+/// Період, з якого перенос реально діє: для <c>FromMonth</c> збігається з X, окрім випадку «рік-сімейство Q-17» —
+/// тоді січень року X (див. <paramref name="Warnings"/>); для <c>WholeProject</c> — перший період проєкту; <c>null</c>,
+/// якщо в проєкті ще немає періодів.
+/// </param>
+/// <param name="Warnings">
+/// Попередження (не відмови): <c>effectiveFromShiftedToJanuary</c> (ключ <c>documents.migrateWarnEffectiveFromJanuary</c>,
+/// параметри <c>requested</c>, <c>effective</c>); <c>null</c> — немає.
+/// </param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
     int ProjectId,
@@ -135,7 +146,11 @@ public sealed record DocumentVersionMigrationDto(
     IReadOnlyList<LookupRemapReportItem>? LookupRemapReport = null,
     long? LookupRemapped = null,
     int? LockedDocumentCount = null,
-    long? LostFormulaOverrides = null);
+    long? LostFormulaOverrides = null,
+    VersionMigrationRange? Range = null,
+    int? FromPeriodKey = null,
+    int? EffectiveFromPeriodKey = null,
+    IReadOnlyList<VersionMigrationWarning>? Warnings = null);
 
 /// <summary>Комірка, значення якої перезапише нова комірочна формула (ACC-OW).</summary>
 /// <param name="SheetCode">Код аркуша вихідної версії.</param>
@@ -247,6 +262,15 @@ public sealed class MigrateDocumentVersionHandler(
     /// виклику; не параметр перевантажень, щоб не множити їх (тести й інші виклики незмінні).
     /// </summary>
     public string? BackupConfirmation { get; set; }
+
+    /// <summary>
+    /// RPT-STABLE Part B: обсяг переносу (увесь проєкт / з місяця). Виставляє той, хто викликає (контролер / фонова задача)
+    /// ДО виклику — тим самим прийомом, що й <see cref="BackupConfirmation"/>, щоб не множити перевантаження.
+    /// </summary>
+    public VersionMigrationRange Range { get; set; } = VersionMigrationRange.WholeProject;
+
+    /// <summary>Запитаний період X для <see cref="VersionMigrationRange.FromMonth"/>.</summary>
+    public int? FromPeriodKey { get; set; }
 
     /// <summary>Подія журналу безпеки: значення Lookup шапки документа перенесено на запис нового довідника.</summary>
     public const string LookupRemapEventType = "DocumentHeaderLookupRemapped";
@@ -570,7 +594,9 @@ public sealed class MigrateDocumentVersionHandler(
                     acceptGuardedOverwrite,
                     lookupRemaps is { Count: > 0 } ? lookupRemaps : null,
                     allowLockedDocuments,
-                    BackupConfirmation),
+                    BackupConfirmation,
+                    Range.ToString(),
+                    FromPeriodKey),
                 ct,
                 currentUser.UserId)
             .ConfigureAwait(false);
