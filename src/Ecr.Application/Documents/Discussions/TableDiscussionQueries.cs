@@ -62,8 +62,42 @@ public sealed class TableDiscussionQueries(
 
         return new TableDiscussionSummaryDto(
             [.. rows.OrderBy(r => r.TableCode, StringComparer.Ordinal).Select(r => new TableDiscussionSummaryItemDto(
-                r.TableCode, r.Total, r.Unread, r.LastAt, r.LastMessageId, r.MentionedMe))],
+                r.TableCode, r.Total, r.Unread, r.LastAt, r.LastMessageId, r.MentionedMe, r.Revision))],
             canWrite);
+    }
+
+    /// <summary>
+    /// Підсумок для опитування (живе оновлення, 30 с): та сама ОДНА команда, що й <see cref="GetSummaryAsync"/>, плюс
+    /// ETag з усіх полів відповіді. <paramref name="ifNoneMatch"/> збігся — <c>Summary = null</c> (304 без тіла).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ ETag рахується з ВІДПОВІДІ (ревізії, лічильники, «непрочитано», згадка, право запису), а не лише з ревізій:
+    /// «прочитано» в іншій вкладці міняє <c>unread</c> без зміни ревізії. Тому 304 економить тіло, а не запит до бази.
+    /// </remarks>
+    public async Task<(TableDiscussionSummaryDto? Summary, string ETag)> GetSummaryIfChangedAsync(
+        long documentId, string? ifNoneMatch, CancellationToken ct)
+    {
+        var summary = await GetSummaryAsync(documentId, ct).ConfigureAwait(false);
+        var etag = SummaryETag(summary);
+        return (IsNotModified(ifNoneMatch, etag) ? null : summary, etag);
+    }
+
+    /// <summary>ETag підсумку: короткий хеш усіх полів відповіді в стабільному порядку.</summary>
+    internal static string SummaryETag(TableDiscussionSummaryDto summary)
+    {
+        var text = new System.Text.StringBuilder(summary.CanWrite ? "w" : "-");
+        foreach (var item in summary.Items)
+        {
+            text.Append('|').Append(item.TableCode)
+                .Append(':').Append(item.Revision.ToString(CultureInfo.InvariantCulture))
+                .Append(':').Append(item.Total.ToString(CultureInfo.InvariantCulture))
+                .Append(':').Append(item.Unread.ToString(CultureInfo.InvariantCulture))
+                .Append(':').Append(item.LastMessageId.ToString(CultureInfo.InvariantCulture))
+                .Append(':').Append(item.MentionedMe ? '1' : '0');
+        }
+
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text.ToString()));
+        return "\"ds-" + Convert.ToHexString(hash, 0, 12) + "\"";
     }
 
     /// <summary>

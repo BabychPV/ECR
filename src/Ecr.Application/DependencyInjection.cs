@@ -259,6 +259,9 @@ public static class DependencyInjection
         services.AddScoped<Documents.Discussions.TableDiscussionQueries>();
         services.AddScoped<Documents.Discussions.TableDiscussionCommands>();
 
+        // Живе оновлення сітки: маркер змін аркуша (опитування).
+        services.AddScoped<Documents.SheetChanges.GetSheetChangesHandler>();
+
         // Локалізація (модуль 3.7)
         services.AddScoped<Localization.GetUiStringsHandler>();
 

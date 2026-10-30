@@ -10,8 +10,9 @@ namespace Ecr.Application.Ports;
 /// <param name="LastAt">Час останнього живого.</param>
 /// <param name="LastMessageId">Найбільший id чату.</param>
 /// <param name="MentionedMe">Є непрочитана згадка читача.</param>
+/// <param name="Revision">Ревізія чату (<c>doc.TableDiscussion.Revision</c>): росте на кожне нове, правлене й видалене.</param>
 public sealed record TableDiscussionSummaryRow(
-    string TableCode, int Total, int Unread, DateTime? LastAt, long LastMessageId, bool MentionedMe);
+    string TableCode, int Total, int Unread, DateTime? LastAt, long LastMessageId, bool MentionedMe, long Revision);
 
 /// <summary>Повідомлення з іменем автора для відповіді.</summary>
 public sealed record TableDiscussionMessageRow(
