@@ -80,8 +80,10 @@ public interface IApprovalQueueStore
 /// <param name="TemplateCode">Код шаблону.</param>
 /// <param name="Status">Статус проєкту.</param>
 /// <param name="IsArchiving">Іде архівація.</param>
+/// <param name="MultiVersion">RPT-STABLE B2: частина періодів проєкту на іншій версії шаблону (шкала версій).</param>
 public sealed record ApprovalQueueProject(
-    int ProjectId, string ProjectCode, int TemplateVersionId, string TemplateCode, ProjectStatus Status, bool IsArchiving);
+    int ProjectId, string ProjectCode, int TemplateVersionId, string TemplateCode, ProjectStatus Status, bool IsArchiving,
+    bool MultiVersion = false);
 
 /// <summary>Чинні маршрути з кроками й кодами ролей.</summary>
 /// <param name="Routes">Маршрути з кроками.</param>

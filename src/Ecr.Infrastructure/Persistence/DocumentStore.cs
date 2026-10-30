@@ -913,6 +913,27 @@ public sealed class DocumentStore(
     }
 
     /// <inheritdoc />
+    public async Task<int> GetTemplateVersionIdForPeriodAsync(long documentId, int periodKey, CancellationToken ct)
+    {
+        // ✎ RPT-STABLE B2: той самий один запит, але версія - ПЕРІОДУ (doc.fn_VersionOf), а не чинна версія проєкту.
+        var found = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => (int?)EcrDbContext.VersionOf(d.ProjectId, periodKey))
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return found ?? throw new Ecr.Application.Errors.NotFoundException(
+            "ECR-DOC-0404",
+            $"Документ {documentId} не знайдено.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-DOC-0404.document",
+                ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⛔ `DAT-01`. Раніше документ брався ВІДСТЕЖУВАНИМ, і «дотик» їхав у
     /// базу звичайним <c>SaveChanges</c> — тобто

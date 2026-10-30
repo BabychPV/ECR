@@ -50,24 +50,34 @@ public sealed partial class ProjectTemplateVersionReadGuardTests
         ["src/Ecr.Infrastructure/Persistence/SheetEditGate.cs"] = (1, Kind.Current),            // без періоду - чинна версія
         ["src/Ecr.Infrastructure/Persistence/CollectionStore.cs"] = (1, Kind.Current),          // збір пише в чинну версію
         ["src/Ecr.Infrastructure/Persistence/SourceEventMapStore.cs"] = (1, Kind.Current),
-        ["src/Ecr.Infrastructure/Persistence/ApprovalQueueStore.cs"] = (2, Kind.Current),
+        ["src/Ecr.Infrastructure/Persistence/ApprovalQueueStore.cs"] = (3, Kind.Current),       // + ознака MultiVersion у тому ж запиті
         ["src/Ecr.Infrastructure/Security/ResourceNameResolver.cs"] = (1, Kind.Current),
         ["src/Ecr.Infrastructure/Security/EffectiveAccessStore.cs"] = (1, Kind.Current),
         ["src/Ecr.Infrastructure/Persistence/MonthColumnRouter.cs"] = (2, Kind.Current),        // сімейство року іде однією версією (правило січня)
 
-        // Борг: відповідає про документ/період, а бере чинну версію проєкту.
-        ["src/Ecr.Application/Workflow/ApprovalQueue/ListMyApprovalQueueHandler.cs"] = (4, Kind.Debt),
-        ["src/Ecr.Application/Workflow/ReturnedSheets/ListMyReturnedSheetsHandler.cs"] = (3, Kind.Debt),
-        ["src/Ecr.Infrastructure/Persistence/ArchiveAwareCellReader.cs"] = (1, Kind.Debt),
-        ["src/Ecr.Infrastructure/Persistence/CalculationResultStore.cs"] = (1, Kind.Debt),
-        ["src/Ecr.Infrastructure/Persistence/ConsistencyIssueReader.cs"] = (1, Kind.Debt),
-        ["src/Ecr.Infrastructure/Security/AccessDecisionService.cs"] = (9, Kind.Debt),
+        // ✎ RPT-STABLE B2: колишній борг переведено на шкалу; лишились лише читання, що за визначенням про чинну версію.
+        // Черга «До погодження» / «Повернуті»: чинна версія - лише запасна гілка для проєкту з однією версією
+        // (MultiVersion = false) або без шкали; інакше VersionOfAsync(проєкт, період подання).
+        ["src/Ecr.Application/Workflow/ApprovalQueue/ListMyApprovalQueueHandler.cs"] = (1, Kind.Current),
+        ["src/Ecr.Application/Workflow/ReturnedSheets/ListMyReturnedSheetsHandler.cs"] = (1, Kind.Current),
+
+        // Зріз звіту без періоду (річний/проєктний) - чинна версія; із періодом - doc.fn_VersionOf.
+        ["src/Ecr.Infrastructure/Persistence/CalculationResultStore.cs"] = (1, Kind.Current),
+
+        // AccessDecisionService: (1) знімки читання документа/правок - обʼєднання ВСІХ версій шкали (чинна + ознака Multi,
+        // ProjectReadSnapshotAsync), 3 запити × 2 читання; (2) дійсність надання учасника - зріз за КОДАМИ аркуша/таблиці, а
+        // гранти скопійовано на нові Id переносом (FinishSql), тож чинна версія достатня; (3) роль ОСТАННЬОГО кроку маршруту
+        // документа (без періоду) - маршрут чинної версії. Поточний крок за періодом - уже doc.fn_VersionOf.
+        ["src/Ecr.Infrastructure/Security/AccessDecisionService.cs"] = (8, Kind.Current),
     };
 
     [Fact]
     [Trait("Requirement", "RPT-STABLE")]
     public void Версію_проєкту_читають_лише_перелічені_файли_і_лічильники_не_ростуть()
     {
+        // ✎ RPT-STABLE B2: борг закрито - нові записи Debt не допускаються (лише Current з причиною).
+        Assert.DoesNotContain(Allowed, a => a.Value.Kind == Kind.Debt);
+
         var root = RepositoryRoot();
         var found = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var file in Directory.EnumerateFiles(Path.Combine(root, "src"), "*.cs", SearchOption.AllDirectories))

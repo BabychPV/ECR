@@ -235,7 +235,7 @@ public sealed class PatchCellStylesHandler(
 
             // ⛔ L6-02: структура документа — першою; перенос версії тримає її винятково.
             DocumentStructure.EnsureUnchanged(
-                await sheetGate.EnterStructureAsync(documentId, exclusive: false, innerCt).ConfigureAwait(false),
+                await sheetGate.EnterStructureForPeriodAsync(documentId, exclusive: false, instance.PeriodKey, innerCt).ConfigureAwait(false),
                 instance.TemplateVersionId,
                 documentId);
 

@@ -561,7 +561,7 @@ public sealed class ExcelImporter(
                 // `sheet-edit`). Аркуші вище прочитано за версією ДО транзакції;
                 // перенос, що зафіксувався відтоді, — відмова, а не блокування
                 // аркушів старої структури.
-                var locked = await sheetGate.EnterStructureAsync(documentId, exclusive: false, innerCt)
+                var locked = await sheetGate.EnterStructureForPeriodAsync(documentId, exclusive: false, plan.PeriodKey, innerCt)
                     .ConfigureAwait(false);
                 foreach (var version in templateVersions)
                 {

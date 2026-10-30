@@ -89,7 +89,7 @@ public sealed class GetSubmissionTargetHandler(
 
         var choice = SubmissionPeriodSelector.Choose(calendar);
 
-        var templateVersionId = await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
+        var templateVersionId = await Documents.DocumentPeriodVersion.GetAsync(documents, documentId, key.Value, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
         var sheet = snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId);
 

@@ -560,11 +560,16 @@ public sealed partial class PatchCellsHandler
         // версію — тоді другого звернення немає.
         if (heldSheetStatuses is null)
         {
-            var locked = await sheetGate.EnterStructureAsync(documentId, exclusive: false, ct).ConfigureAwait(false);
-            foreach (var item in active)
+            // ✎ RPT-STABLE B2: версія під блокуванням - версія ПЕРІОДУ (шкала); один виклик на період книги (зазвичай один).
+            foreach (var byPeriod in active.GroupBy(x => x.Context.Instance.PeriodKey).OrderBy(g => g.Key))
             {
-                Blamed(item.Id, () => DocumentStructure.EnsureUnchanged(
-                    locked, item.Context.Instance.TemplateVersionId, documentId));
+                var locked = await sheetGate
+                    .EnterStructureForPeriodAsync(documentId, exclusive: false, byPeriod.Key, ct).ConfigureAwait(false);
+                foreach (var item in byPeriod)
+                {
+                    Blamed(item.Id, () => DocumentStructure.EnsureUnchanged(
+                        locked, item.Context.Instance.TemplateVersionId, documentId));
+                }
             }
         }
 
