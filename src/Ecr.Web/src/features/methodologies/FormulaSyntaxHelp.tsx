@@ -152,7 +152,10 @@ export function FormulaSyntaxHelp({ versionId }: { readonly versionId: number })
         </Button>
       </Group>
 
-      <Paper id={bodyId} hidden={!open} withBorder p="sm" data-testid="syntax-help">
+      {/* ⚠ `hidden` — на звичайному `div`, а не на `Paper`: CSS Paper задає `display` і перекриває
+          атрибут, тож закрита довідка лишалася видимою порожньою рамкою (e2e на стенді, 5/5). */}
+      <div id={bodyId} hidden={!open} data-testid="syntax-help">
+      <Paper withBorder p="sm">
         {open && (
           <Stack gap="md">
             <Text size="sm" c="dimmed">
@@ -209,6 +212,7 @@ export function FormulaSyntaxHelp({ versionId }: { readonly versionId: number })
           </Stack>
         )}
       </Paper>
+      </div>
     </Stack>
   );
 }
