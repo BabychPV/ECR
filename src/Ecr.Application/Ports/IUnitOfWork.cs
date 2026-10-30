@@ -37,4 +37,17 @@ public interface IUnitOfWork
     /// DbContext.
     /// </remarks>
     public Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, CancellationToken ct);
+
+    /// <summary>
+    /// Перестає відстежувати вже збережені записи довідників, їхні значення й рядки ключів (NAE N3b).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Для масового запису частинами: кожне наступне <see cref="SaveChangesAsync"/> обходить УСІ відстежувані
+    /// сутності, тож без цього вартість кожної порції росте з усім, що вже записано. Нічого не змінює в базі;
+    /// не збережене (додане/змінене) лишається під відстеженням. Викликач не має більше тримати цих об'єктів.
+    /// За замовчуванням — нічого.
+    /// </remarks>
+    public void ReleaseSavedRegistryRows()
+    {
+    }
 }

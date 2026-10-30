@@ -39,6 +39,21 @@ public sealed class UnitOfWork(
     private HashSet<int> ChangedRegistries => RegistryChangesInTransaction.GetValue(db, _ => []);
 
     /// <inheritdoc />
+    public void ReleaseSavedRegistryRows()
+    {
+        foreach (var entry in db.ChangeTracker.Entries().ToList())
+        {
+            if (entry.State == EntityState.Unchanged
+                && entry.Entity is Domain.Entities.Dictionaries.RegistryEntry
+                    or Domain.Entities.Dictionaries.RegistryValue
+                    or Domain.Entities.Dictionaries.RegistryEntryKey)
+            {
+                entry.State = EntityState.Detached;
+            }
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<int> SaveChangesAsync(CancellationToken ct)
     {
         StampRegistryDataChanges();

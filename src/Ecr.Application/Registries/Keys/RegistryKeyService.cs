@@ -200,6 +200,28 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
     }
 
     /// <summary>
+    /// <see cref="ReleaseAsync"/> для набору записів: рядки ключів читаються пакетом (NAE N3b).
+    /// Той самий результат — усі рядки ключів кожного запису виведено з унікальності; без збереження.
+    /// </summary>
+    /// <param name="entries">Записи, щойно видалені логічно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task ReleaseManyAsync(IReadOnlyCollection<RegistryEntry> entries, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+
+        var ids = entries.Where(e => e.IsPersisted).Select(e => e.Id).ToList();
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var row in await store.ListKeysForEntriesAsync(ids, ct).ConfigureAwait(false))
+        {
+            row.Retire();
+        }
+    }
+
+    /// <summary>
     /// Перераховує ключі запису, перевіряє їх і зберігає одиницю роботи — в одній транзакції,
     /// якщо в довідника є активні ключі.
     /// </summary>
