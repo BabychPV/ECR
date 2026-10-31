@@ -194,6 +194,70 @@ public sealed class CollectionRunnerMissingPointsTests
         Assert.Equal(4, world.Deletions.Count);
     }
 
+    /// <summary>
+    /// ✎ Аудит 31.10 (G1): мітка ПОЗА запитаним шматком (RTQP віддав місцевий час, переозначений як UTC) — за цей
+    /// шматок і атрибут нічого не видаляється; інші шматки й атрибути — як і доти. Прочитане зберігається.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: прибрати перевірку меж у <c>CollectionRunner.Track</c> — з'являється видалення Flow/доба 1.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "D-462")]
+    public async Task Мітка_поза_шматком_зсув_поясу_не_видаляє_за_шматок()
+    {
+        var world = new World(HourlyPoints(Flow, Temp))
+        {
+            Transform = (request, result) => request.SourcePath == Flow && request.FromUtc == From
+                ? result with { Points = [.. result.Points.Select(p => p with { Timestamp = p.Timestamp.AddHours(5) })] }
+                : result,
+        };
+
+        await world.Runner.RunAsync(SourceEntityId, From, To, world.Progress, CancellationToken.None);
+
+        Assert.DoesNotContain(world.Deletions, d => d.Path == Flow && d.From == From);
+        Assert.Contains(world.Deletions, d => d.Path == Flow && d.From == From.AddDays(1));
+        Assert.Contains(world.Deletions, d => d.Path == Temp && d.From == From);
+    }
+
+    /// <summary>
+    /// ✎ Аудит 31.10 (G5): шматок, який обслужила ЗАПАСНА адреса, не видаляє зниклих (запасна може відставати);
+    /// <c>Collection:DeleteMissingOnSecondary = true</c> — видаляє.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "D-462")]
+    [InlineData(false, 0)]
+    [InlineData(true, 4)]
+    public async Task Відповідь_запасної_адреси_видаляє_лише_з_явним_налаштуванням(bool onSecondary, int deletions)
+    {
+        var world = new World(
+            HourlyPoints(Flow, Temp),
+            options: new CollectionRunnerOptions(TimeSpan.FromDays(1), DeleteMissingPoints: true, DeleteMissingOnSecondary: onSecondary))
+        {
+            Transform = (_, result) => result with { ServedBySecondary = true },
+        };
+
+        await world.Runner.RunAsync(SourceEntityId, From, To, world.Progress, CancellationToken.None);
+
+        Assert.Equal(deletions, world.Deletions.Count);
+    }
+
+    /// <summary>✎ Аудит 31.10 (G6): відповідь із пропусками чи самих помилок (<c>DeletionUnsafe</c>) не видаляє.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "D-462")]
+    public async Task Ненадійна_відповідь_не_видаляє_за_шматок()
+    {
+        var world = new World(HourlyPoints(Flow, Temp))
+        {
+            Transform = (request, result) => request.SourcePath == Temp ? result with { DeletionUnsafe = true } : result,
+        };
+
+        await world.Runner.RunAsync(SourceEntityId, From, To, world.Progress, CancellationToken.None);
+
+        Assert.DoesNotContain(world.Deletions, d => d.Path == Temp);
+        Assert.Equal(2, world.Deletions.Count(d => d.Path == Flow));
+    }
+
     private static List<SourceDataPoint> HourlyPoints(string a, string b, DateTime? from = null)
     {
         var start = from ?? From;
@@ -284,8 +348,9 @@ public sealed class CollectionRunnerMissingPointsTests
                     var batch = inside.Take(request.MaxPoints).ToList();
                     var truncated = batch.Count > 0 && batch.Count >= request.MaxPoints;
 
-                    return Task.FromResult(new CollectionResult(
-                        batch, truncated ? [new TimeInterval(batch[^1].Timestamp, request.ToUtc)] : [], null));
+                    var result = new CollectionResult(
+                        batch, truncated ? [new TimeInterval(batch[^1].Timestamp, request.ToUtc)] : [], null);
+                    return Task.FromResult(Transform?.Invoke(request, result) ?? result);
                 });
 
             var catalog = Substitute.For<IUnitCatalog>();
@@ -316,6 +381,9 @@ public sealed class CollectionRunnerMissingPointsTests
         public Func<CollectionRequest, bool>? Throw { get; init; }
 
         public int Removed { get; init; }
+
+        /// <summary>✎ Аудит 31.10: підміна успішної відповіді (зсув міток, запасна адреса, ненадійна відповідь).</summary>
+        public Func<CollectionRequest, CollectionResult, CollectionResult>? Transform { get; init; }
 
         public CollectionRunner Runner { get; }
     }

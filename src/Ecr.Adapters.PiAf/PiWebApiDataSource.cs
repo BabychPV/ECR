@@ -278,7 +278,8 @@ public sealed partial class PiWebApiDataSource(
             + $"&maxCount={request.MaxPoints.ToString(CultureInfo.InvariantCulture)}",
             ct).ConfigureAwait(false);
 
-        return Batch(Points(recorded.RootElement, request.SourcePath, attribute.DefaultUnits), request);
+        return Batch(Points(recorded.RootElement, request.SourcePath, attribute.DefaultUnits), request)
+            with { ServedBySecondary = failover.IsOnSecondary(source.Id) };
     }
 
     /// <summary>Атрибута за шляхом немає — увесь інтервал у відмову.</summary>
@@ -297,16 +298,36 @@ public sealed partial class PiWebApiDataSource(
     /// ⚠ Порожній батч НЕ вважається обрізаним: із MaxPoints = 0 умова
     /// «набрали стелю» була б істинною завжди, і points[^1] упало б на
     /// порожньому списку — на діапазоні, у якому просто немає даних.
+    /// <para>
+    /// ✎ Аудит 31.10 (G6): тіло без <c>Items</c> — не «порожній період», а незрозуміла відповідь: увесь інтервал у
+    /// відмову (як <see cref="Unresolved"/>), інакше видалення зниклих точок (D-462) стерло б наші точки шматка.
+    /// Пропущені (нерозбірні) елементи чи відповідь із самих помилок — <see cref="CollectionResult.DeletionUnsafe"/>.
+    /// </para>
     /// </remarks>
-    private static CollectionResult Batch(List<SourceDataPoint> points, CollectionRequest request)
+    private static CollectionResult Batch(ParsedPoints parsed, CollectionRequest request)
     {
+        if (parsed.MissingItems)
+        {
+            return Unresolved(request);
+        }
+
+        var points = parsed.Points;
         var truncated = points.Count > 0 && points.Count >= request.MaxPoints;
 
         return new CollectionResult(
             points,
             truncated ? [new TimeInterval(points[^1].Timestamp, request.ToUtc)] : [],
-            null);
+            null)
+        {
+            DeletionUnsafe = parsed.Unreliable,
+        };
     }
+
+    /// <summary>Розібрані точки відповіді та ознаки її придатності як доказу відсутності (G6).</summary>
+    /// <param name="Points">Точки.</param>
+    /// <param name="MissingItems">У тілі немає масиву <c>Items</c>.</param>
+    /// <param name="Unreliable">Частину елементів пропущено або всі елементи — помилки (<c>Good: false</c>).</param>
+    private sealed record ParsedPoints(List<SourceDataPoint> Points, bool MissingItems, bool Unreliable);
 
     /// <inheritdoc />
     /// <remarks>
@@ -679,20 +700,33 @@ public sealed partial class PiWebApiDataSource(
         => status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
 
     /// <summary>Точки батча в одиниці ДЖЕРЕЛА (ФВ-16.10).</summary>
-    private static List<SourceDataPoint> Points(JsonElement root, string sourcePath, string? defaultUnits)
+    private static ParsedPoints Points(JsonElement root, string sourcePath, string? defaultUnits)
     {
         var points = new List<SourceDataPoint>();
 
-        if (!root.TryGetProperty("Items", out var items))
+        if (!root.TryGetProperty("Items", out var items) || items.ValueKind != JsonValueKind.Array)
         {
-            return points;
+            return new ParsedPoints(points, MissingItems: true, Unreliable: true);
         }
+
+        var skipped = false;
+        var total = 0;
+        var bad = 0;
 
         foreach (var item in items.EnumerateArray())
         {
+            total++;
+            if (item.ValueKind == JsonValueKind.Object
+                && item.TryGetProperty("Good", out var good) && good.ValueKind == JsonValueKind.False)
+            {
+                bad++;
+            }
+
             if (!item.TryGetProperty("Timestamp", out var stamp)
                 || !stamp.TryGetDateTime(out var timestamp))
             {
+                // ⚠ G6: нерозбірна мітка — точку не записати, але й відсутністю її не вважати.
+                skipped = true;
                 continue;
             }
 
@@ -707,7 +741,8 @@ public sealed partial class PiWebApiDataSource(
                 Quality(item)));
         }
 
-        return points;
+        // ⚠ G6: відповідь лише з помилок (кожен елемент `Good: false`) — збій джерела, а не дані.
+        return new ParsedPoints(points, MissingItems: false, Unreliable: skipped || (total > 0 && bad == total));
     }
 
     /// <summary>Значення точки: число або текст, ніколи обидва.</summary>
