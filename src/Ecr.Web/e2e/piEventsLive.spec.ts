@@ -39,11 +39,10 @@ test.describe('події з PI', () => {
     await expect(detail.locator('[data-pi-event-attribute="Volume"] [data-pi-event-pi-value]')).toContainText('12.5 Sm3');
     await expect(detail.locator('[data-pi-event-comparison]').first()).toBeVisible();
 
-    // Фільтр стану: лише незакриті.
-    await page.locator('[data-pi-events-status]').first().click();
-    await page.getByRole('option', { name: 'Open', exact: true }).click();
-    await page.keyboard.press('Escape');
+    // Фільтр назви (на сервері, без регістру): лише незакрита подія. Фільтр стану перевіряє API-тест.
+    await page.getByRole('textbox', { name: 'Name contains' }).fill('OPEN');
     await expect(table.getByRole('row')).toHaveCount(2, { timeout: 30_000 });
+    await expect(panel.locator('[data-pi-event-reason="Open"]')).toBeVisible();
 
     // Журнал видалень повною звіркою за вікно.
     await expect(page.getByText('E2E flaring removed')).toBeVisible({ timeout: 30_000 });
