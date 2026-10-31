@@ -40,7 +40,7 @@ test.describe('події з PI', () => {
     await expect(detail.locator('[data-pi-event-comparison]').first()).toBeVisible();
 
     // Фільтр стану: лише незакриті.
-    await page.getByLabel('Link status').click();
+    await page.locator('[data-pi-events-status]').first().click();
     await page.getByRole('option', { name: 'Open', exact: true }).click();
     await page.keyboard.press('Escape');
     await expect(table.getByRole('row')).toHaveCount(2, { timeout: 30_000 });
