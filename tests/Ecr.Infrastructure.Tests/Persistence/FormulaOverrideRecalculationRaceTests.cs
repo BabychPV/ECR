@@ -116,6 +116,78 @@ public sealed class FormulaOverrideRecalculationRaceTests(SqlServerFixture sql)
         Assert.Equal(40m, await OutputAsync(doc, doc.RowIds[1]));
     }
 
+    /// <summary>
+    /// ✎ Аудит 31.10 (F3): прогін, що НЕ знає про ручні значення (знімок іншого процесу з прапорцем «вимкнено» у вікні
+    /// ревізії, кешоване «позначок немає», прогін, що почався до перемикача): позначок не читає й не блокує. Ручне
+    /// значення, що вже стоїть, однаково не перезаписується — сторож у самому MERGE запису комірок.
+    /// </summary>
+    /// <remarks>Мутаційний доказ: прибрати умову позначки з MERGE <c>NormalizedCellStore.UpsertAsync</c> — OUT = 20.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-461")]
+    public async Task Прогін_без_знання_про_позначки_не_перезаписує_ручне_значення()
+    {
+        var doc = await ArrangeAsync();
+        await SetManualAsync(doc, doc.RowIds[0], useLockingOrder: true);
+
+        await using (var db = CreateContext())
+        {
+            await Service(db, doc, unaware: true).RecalculateAllAsync(doc.DocumentId, doc.PeriodKey, CancellationToken.None);
+        }
+
+        Assert.Equal(Manual, await OutputAsync(doc, doc.RowIds[0]));
+        Assert.Equal(40m, await OutputAsync(doc, doc.RowIds[1]));
+    }
+
+    /// <summary>
+    /// ✎ Аудит 31.10 (F3): нова позначка перечитує прапорець формули з БАЗИ (не зі знімка): вимкнений — нічого не
+    /// записано, сховище каже «відмова».
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-461")]
+    public async Task Нова_позначка_при_вимкненому_в_базі_прапорці_не_ставиться()
+    {
+        var doc = await ArrangeAsync();
+        var formulaId = await InsertFormulaAsync(doc, allow: false);
+        var address = new CellAddress(doc.PeriodKey, doc.RowIds[0], doc.ColumnDefIds[2]);
+        var mark = new CellFormulaOverride(address, doc.TableInstanceId, "stale", 1, Now);
+
+        await using (var db = CreateContext())
+        {
+            await using var tx = await db.Database.BeginTransactionAsync();
+            Assert.False(await new FormulaOverrideStore(db).ApplyAsync([mark], [], CancellationToken.None, [formulaId]));
+            await tx.RollbackAsync();
+        }
+
+        await ExecuteAsync($"UPDATE cfg.FormulaDef SET AllowManualOverride = 1 WHERE Id = {formulaId}");
+
+        await using (var db = CreateContext())
+        {
+            await using var tx = await db.Database.BeginTransactionAsync();
+            Assert.True(await new FormulaOverrideStore(db).ApplyAsync([mark], [], CancellationToken.None, [formulaId]));
+            await tx.CommitAsync();
+        }
+
+        await using (var db = CreateContext())
+        {
+            Assert.Single(await new FormulaOverrideStore(db).ReadAsync([address], CancellationToken.None));
+        }
+    }
+
+    private async Task<int> InsertFormulaAsync(TestDocument doc, bool allow)
+    {
+        await using var db = CreateContext();
+        var formula = new FormulaDef(doc.TableDefId, FormulaScope.Column, "1", ExpressionDialect.Template);
+        formula.AssignColumn(doc.ColumnDefIds[2]);
+        formula.SetAllowManualOverride(allow);
+        db.FormulaDefs.Add(formula);
+        await db.SaveChangesAsync();
+        return formula.Id;
+    }
+
     /// <summary>Сховище, що зупиняє прогін одразу після читання позначок на старті.</summary>
     private sealed class GatedStore : IFormulaOverrideStore
     {
@@ -160,8 +232,10 @@ public sealed class FormulaOverrideRecalculationRaceTests(SqlServerFixture sql)
         public Task ReleaseAsync(IReadOnlyList<CellAddress> addresses, CancellationToken ct)
             => Inner.ReleaseAsync(addresses, ct);
 
-        public Task ApplyAsync(IReadOnlyList<CellFormulaOverride> upserts, IReadOnlyList<CellAddress> removals, CancellationToken ct)
-            => Inner.ApplyAsync(upserts, removals, ct);
+        public Task<bool> ApplyAsync(
+            IReadOnlyList<CellFormulaOverride> upserts, IReadOnlyList<CellAddress> removals, CancellationToken ct,
+            IReadOnlyCollection<int>? allowingFormulaIds = null)
+            => Inner.ApplyAsync(upserts, removals, ct, allowingFormulaIds);
     }
 
     private async Task<TestDocument> ArrangeAsync()
@@ -216,7 +290,8 @@ public sealed class FormulaOverrideRecalculationRaceTests(SqlServerFixture sql)
         await tx.CommitAsync();
     }
 
-    private static RecalculationService Service(EcrDbContext db, TestDocument doc, IFormulaOverrideStore? store = null)
+    private static RecalculationService Service(
+        EcrDbContext db, TestDocument doc, IFormulaOverrideStore? store = null, bool unaware = false)
     {
         var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);
         var clock = new TestClock(Now);
@@ -246,7 +321,7 @@ public sealed class FormulaOverrideRecalculationRaceTests(SqlServerFixture sql)
             new NormalizedCellStore(db), new RowStore(db, bulk, clock), periods, Metadata(doc), versions,
             new RealFormulaEngine(), units, Substitute.For<IRegistryStore>(), headers,
             new AuditWriter(db), clock, new UnitOfWork(db), new SheetEditGate(db),
-            formulaOverrides: store ?? new FormulaOverrideStore(db));
+            formulaOverrides: unaware ? null : store ?? new FormulaOverrideStore(db));
     }
 
     /// <summary>Знімок: OUT (Formula) = [IN] * 2 з «Дозволити ручне значення».</summary>

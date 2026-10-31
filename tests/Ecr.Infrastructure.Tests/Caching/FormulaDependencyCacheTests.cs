@@ -128,6 +128,45 @@ public sealed class FormulaDependencyCacheTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// ✎ Аудит 31.10 (F3): «коротке» похідне (відповідь «позначок ручних значень немає») не живе на ОПУБЛІКОВАНІЙ
+    /// версії довше за вікно ревізії — інакше перша позначка, що не піднімає ревізію, ховалася б від перерахунку
+    /// годинами. Звичайне похідне тієї ж версії живе довго, як і доти.
+    /// </summary>
+    /// <remarks>Мутаційний доказ: ігнорувати <c>shortLived</c> у <c>MetadataCache.GetDerivedAsync</c> — червоніє.</remarks>
+    [Fact]
+    public async Task Коротке_похідне_опублікованої_версії_не_переживає_вікно_ревізії()
+    {
+        var world = await ArrangeAsync(published: true);
+        var clock = new ManualClock();
+        var memory = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+        var shortLoads = 0;
+        var longLoads = 0;
+
+        async Task ReadAsync()
+        {
+            await using var db = CreateContext(new DbCommandCounter());
+            var cache = new MetadataCache(memory, db);
+            await cache.GetDerivedAsync(
+                world.VersionId, "test-short", _ => Task.FromResult(new Box(++shortLoads)), CancellationToken.None,
+                shortLived: _ => true);
+            await cache.GetDerivedAsync(
+                world.VersionId, "test-long", _ => Task.FromResult(new Box(++longLoads)), CancellationToken.None,
+                shortLived: _ => false);
+        }
+
+        await ReadAsync();
+        await ReadAsync();
+        Assert.Equal((1, 1), (shortLoads, longLoads));
+
+        clock.Advance(TimeSpan.FromSeconds(6));
+        await ReadAsync();
+
+        Assert.Equal((2, 1), (shortLoads, longLoads));
+    }
+
+    private sealed record Box(int Value);
+
     [Fact]
     public async Task Різні_версії_не_ділять_запис()
     {

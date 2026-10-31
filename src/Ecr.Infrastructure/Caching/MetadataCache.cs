@@ -135,7 +135,8 @@ public sealed class MetadataCache(
 
     /// <inheritdoc />
     public async Task<T> GetDerivedAsync<T>(
-        int templateVersionId, string kind, Func<CancellationToken, Task<T>> load, CancellationToken ct)
+        int templateVersionId, string kind, Func<CancellationToken, Task<T>> load, CancellationToken ct,
+        Func<T, bool>? shortLived = null)
         where T : class
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(kind);
@@ -168,7 +169,8 @@ public sealed class MetadataCache(
                     var options = new MemoryCacheEntryOptions
                     {
                         Priority = CacheItemPriority.High,
-                        AbsoluteExpirationRelativeToNow = state.Frozen ? Lifetime : DraftLifetime,
+                        AbsoluteExpirationRelativeToNow =
+                            state.Frozen && shortLived?.Invoke(value) != true ? Lifetime : DraftLifetime,
                     };
                     options.AddExpirationToken(new CancellationChangeToken(invalidation));
                     memory.Set(key, value, options);

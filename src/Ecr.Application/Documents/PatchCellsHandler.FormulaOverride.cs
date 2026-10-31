@@ -255,7 +255,30 @@ public sealed partial class PatchCellsHandler
             .Where(d => KeyOf(applied, d) is { } key && plan.Restores.Contains(key))
             .ToList();
 
-        await formulaOverrides.ApplyAsync(marks, removals, ct).ConfigureAwait(false);
+        // ✎ Аудит 31.10 (F3): прапорець формули — з БАЗИ під спільним замком рядка формули в ТІЙ САМІЙ команді, що
+        // ставить позначки, а не лише за знімком із кешу процесу (до 5 с застарілим): вимкнення, що закомітилось після
+        // знімка цієї правки, або дочекається її коміту, або відмовить їй — нова позначка після «вимкнено» не ляже.
+        IReadOnlyCollection<int>? allowing = null;
+        if (marks.Count > 0)
+        {
+            var policy = FormulaOverridePolicy.For(context.Table);
+            var ids = new HashSet<int>();
+            foreach (var mark in marks)
+            {
+                if (KeyOf(applied, mark.Address) is { } key
+                    && policy.FormulaOf(key.RowKey, context.Snapshot.ColumnsById[key.ColumnDefId]) is { } formula)
+                {
+                    ids.Add(formula.Id);
+                }
+            }
+
+            allowing = ids;
+        }
+
+        if (!await formulaOverrides.ApplyAsync(marks, removals, ct, allowing).ConfigureAwait(false))
+        {
+            throw CalculatedCellRefusal();
+        }
     }
 
     /// <summary>Причини ручних значень за адресами застосованих змін — для журналу.</summary>

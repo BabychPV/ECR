@@ -977,6 +977,15 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
     /// ⚠ Умова стоїть на <c>WHEN MATCHED</c>, а не на <c>USING</c>: рядок, що
     /// не збігся, має бути ВСТАВЛЕНИЙ, і відсікати його до <c>ON</c> означало б
     /// втратити вставки.
+    ///
+    /// ⛔ Аудит 31.10 (F3, D-461): ОБЧИСЛЕНЕ значення (<c>IsCalculated = 1</c>) НІКОЛИ не лягає на комірку з позначкою
+    /// ручного значення (<c>doc.CellFormulaOverride</c>) — незалежно від того, що прогін знав про позначки на старті.
+    /// Перерахунок іншого процесу міг читати знімок із прапорцем «вимкнено» (вікно ревізії, прогін, що почався до
+    /// перемикача) і не блокувати позначок; правка, що поставила позначку після, тоді перезаписувалась. Перевірка —
+    /// у ТІЙ САМІЙ команді (нуль нових звернень, храповики кількості звернень незмінні). ⚠ <c>READUNCOMMITTED</c>:
+    /// правка пише позначку ПЕРЕД коміркою (<c>PatchCellsHandler</c>, порядок «позначки → комірки»), тож незакомічена
+    /// позначка вже видна, а очікування на її замок під утримуваним замком комірки дало б цикл із правкою, яка чекає
+    /// на цю комірку. Відкочена правка лишає комірку необчисленою до наступного прогону — у безпечний бік.
     /// </remarks>
     private static async Task<int> UpsertAsync(
         SqlConnection connection, SqlTransaction tx, IReadOnlyList<CellRecord> upserts, CancellationToken ct)
@@ -1012,6 +1021,11 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
                                source.ValueNumeric, source.ValueDate, source.ValueBool,
                                source.ValueRegistryEntryId, source.ValueUnitId,
                                source.IsCalculated, source.IsEmpty)
+                    AND (source.IsCalculated = 0 OR NOT EXISTS (
+                        SELECT 1 FROM doc.CellFormulaOverride AS o WITH (READUNCOMMITTED)
+                         WHERE o.PeriodKey = target.PeriodKey
+                           AND o.TableRowId = target.TableRowId
+                           AND o.ColumnDefId = target.ColumnDefId))
                 THEN UPDATE SET
                     TableDefId = source.TableDefId,
                     ValueString = source.ValueString,

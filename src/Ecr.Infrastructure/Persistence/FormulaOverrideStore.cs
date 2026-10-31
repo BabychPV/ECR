@@ -96,6 +96,7 @@ public sealed class FormulaOverrideStore(EcrDbContext db) : IFormulaOverrideStor
                 join t in db.TableDefs.AsNoTracking() on c.TableDefId equals t.Id
                 join s in db.SheetDefs.AsNoTracking() on t.SheetDefId equals s.Id
                 where s.TemplateVersionId == templateVersionId
+                      && db.TableRows.Any(r => r.PeriodKeyValue == o.PeriodKeyValue && r.Id == o.TableRowId && !r.IsDeleted)
                 select o.TableRowId)
             .AnyAsync(ct)
             .ConfigureAwait(false);
@@ -256,9 +257,19 @@ public sealed class FormulaOverrideStore(EcrDbContext db) : IFormulaOverrideStor
     /// Оновлення наявної позначки міняє причину, автора й час (нова причина — новий запис журналу).
     /// ⚠ Набором: не більше ДВОХ команд на батч (зняття й постановка), хоч би скільки комірок — JSON-параметр і
     /// <c>OPENJSON</c>, без параметра на комірку (стеля 2100) і без команди на комірку.
+    /// <para>
+    /// ⛔ Аудит 31.10 (F3): з <paramref name="allowingFormulaIds"/> прапорець перечитується з БАЗИ в ТІЙ САМІЙ команді,
+    /// що ставить позначки (нуль нових звернень): рядки <c>cfg.FormulaDef</c> — спільним замком до коміту
+    /// (<c>HOLDLOCK</c>, читання з блокуванням, не з версій RCSI). Перемикач (<c>FormulaManualOverrideHandler</c>: U на
+    /// рядку версії, X на рядку формули) тоді серіалізується з правкою: або правка раніша (позначку видно в його
+    /// лічильнику й у EXISTS перерахунку), або вона бачить вимкнений прапорець і нічого не пише. Замок саме на рядку
+    /// ФОРМУЛИ, а не версії: спільний замок версії до читання формули складався б у цикл із перемикачем
+    /// (U версії → X формули → X версії).
+    /// </para>
     /// </remarks>
-    public async Task ApplyAsync(
-        IReadOnlyList<CellFormulaOverride> upserts, IReadOnlyList<CellAddress> removals, CancellationToken ct)
+    public async Task<bool> ApplyAsync(
+        IReadOnlyList<CellFormulaOverride> upserts, IReadOnlyList<CellAddress> removals, CancellationToken ct,
+        IReadOnlyCollection<int>? allowingFormulaIds = null)
     {
         ArgumentNullException.ThrowIfNull(upserts);
         ArgumentNullException.ThrowIfNull(removals);
@@ -293,8 +304,20 @@ public sealed class FormulaOverrideStore(EcrDbContext db) : IFormulaOverrideStor
                         at = m.SetAt.ToString("yyyy-MM-ddTHH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture),
                     }));
 
-            await db.Database.ExecuteSqlInterpolatedAsync(
+            var formulas = System.Text.Json.JsonSerializer.Serialize(
+                allowingFormulaIds is null ? [] : allowingFormulaIds.Distinct().ToArray());
+            var check = allowingFormulaIds is null ? 0 : 1;
+
+            try
+            {
+                await db.Database.ExecuteSqlInterpolatedAsync(
                     $"""
+                     IF {check} = 1 AND EXISTS (
+                         SELECT 1
+                           FROM OPENJSON({formulas}) WITH (f int '$') AS j
+                           LEFT JOIN cfg.FormulaDef AS d WITH (HOLDLOCK, ROWLOCK) ON d.Id = j.f
+                          WHERE d.Id IS NULL OR d.IsDeleted = 1 OR d.AllowManualOverride = 0)
+                         THROW {RefusedError}, N'D-461: the formula no longer allows manual values.', 1;
                      MERGE doc.CellFormulaOverride WITH (HOLDLOCK) AS t
                      USING (SELECT p, r, c, i, reason, u, at
                               FROM OPENJSON({json})
@@ -305,9 +328,19 @@ public sealed class FormulaOverrideStore(EcrDbContext db) : IFormulaOverrideStor
                           VALUES (s.p, s.r, s.c, s.i, s.reason, s.u, s.at);
                      """,
                     ct)
-                .ConfigureAwait(false);
+                    .ConfigureAwait(false);
+            }
+            catch (Microsoft.Data.SqlClient.SqlException error) when (error.Number == RefusedError)
+            {
+                return false;
+            }
         }
+
+        return true;
     }
+
+    /// <summary>Номер помилки «формула вже не дозволяє ручне значення» (F3) — лише між командою й цим сховищем.</summary>
+    private const int RefusedError = 50461;
 
     /// <inheritdoc />
     /// <remarks>
