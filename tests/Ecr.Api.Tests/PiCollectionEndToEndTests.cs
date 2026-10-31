@@ -257,11 +257,67 @@ public sealed class PiCollectionEndToEndTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// ✎ D-462 (річний період, рішення власника продукту): ручний збір за РІК → комірка (сума року) → результат;
+    /// аркуш подано — виправлення й видалення з PI до комірки не доходять; аркуш відкликано — комірка наздоганяє
+    /// сирий шар за ВЕСЬ рік, перерахунок дає новий результат.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЯ: прибрати <c>SheetMaterializationTrigger.AfterCommitAsync</c> у <c>RecallSheetHandler</c> — після
+    /// відкликання задачі матеріалізації немає, комірка лишається 4, тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-462")]
+    public async Task Річний_період_збір_за_рік_і_відкликаний_аркуш_наздоганяє_виправлення_й_видалення()
+    {
+        var january = new DateTime(2026, 1, 15, 0, 0, 0, DateTimeKind.Utc);
+        var june = new DateTime(2026, 6, 15, 0, 0, 0, DateTimeKind.Utc);
+        var pi = new FakePi();
+        pi.Set(Flow, january, 1.5m);
+        pi.Set(Flow, june, 2.5m);
+
+        var stand = await ArrangeAsync(pi, routing: false, annual: true);
+        using var app = stand.App;
+        var yearFrom = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var yearTo = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        try
+        {
+            // 1. Збір за рік (53 шматки по 7 діб): сума року 4 → EMISSION 10.
+            await stand.CollectAsync(yearFrom, yearTo);
+            Assert.Equal(4m, await stand.CellAsync(stand.ColumnA));
+            var first = await stand.EmissionAsync();
+            Assert.Equal(10m, first.Value);
+
+            // 2. Аркуш подано: виправлення (червень 2.5 → 6.5) і видалення (січень) з PI сирий шар бачить, комірка — ні.
+            await stand.SubmitSheetAsync();
+            pi.Set(Flow, june, 6.5m);
+            pi.Remove(Flow, january);
+            await stand.CollectAsync(yearFrom, yearTo);
+            Assert.Equal([june], await stand.RawTimestampsAsync());
+            Assert.Equal(4m, await stand.CellAsync(stand.ColumnA));
+            Assert.Equal(first.RunId, (await stand.EmissionAsync()).RunId);
+
+            // 3. Відкликання повертає аркуш у роботу — матеріалізація за весь рік: A = 6.5, EMISSION = 16.25, новий прогін.
+            await stand.RecallSheetAsync();
+            Assert.Equal(6.5m, await stand.CellAsync(stand.ColumnA));
+            var caughtUp = await stand.EmissionAsync();
+            Assert.Equal(16.25m, caughtUp.Value);
+            Assert.NotEqual(first.RunId, caughtUp.RunId);
+        }
+        finally
+        {
+            await stand.DeactivateAsync();
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Стенд
     // ─────────────────────────────────────────────────────────────────────────
 
-    private async Task<Stand> ArrangeAsync(FakePi pi, bool routing, bool closedAnchor = false)
+    private async Task<Stand> ArrangeAsync(FakePi pi, bool routing, bool closedAnchor = false, bool annual = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = routing
@@ -295,6 +351,15 @@ public sealed class PiCollectionEndToEndTests(SqlServerFixture sql)
             }
             else
             {
+                if (annual)
+                {
+                    // Річний період: 2026-01-01 … 2026-12-31, проєкт `Yearly` (PI-збір — річна звітність).
+                    await db.Database.ExecuteSqlInterpolatedAsync(
+                        $"UPDATE doc.Period SET PeriodEnd = {new DateOnly(2026, 12, 31)} WHERE ProjectId = {doc.ProjectId} AND PeriodKey = {doc.PeriodKey.Value}");
+                    await db.Database.ExecuteSqlInterpolatedAsync(
+                        $"UPDATE doc.Project SET PeriodKind = {(byte)PeriodKind.Yearly} WHERE Id = {doc.ProjectId}");
+                }
+
                 var period = await db.Periods.SingleAsync(p => p.ProjectId == doc.ProjectId && p.PeriodKeyValue == doc.PeriodKey.Value);
                 period.TransitionTo(PeriodState.Open, now);
             }
@@ -318,6 +383,7 @@ public sealed class PiCollectionEndToEndTests(SqlServerFixture sql)
 
         var tag = Guid.NewGuid().ToString("N")[..8];
         int entityId;
+        int userId;
         var userName = $"pie2e_{tag}";
 
         await using (var db = builder.CreateContext())
@@ -361,6 +427,7 @@ public sealed class PiCollectionEndToEndTests(SqlServerFixture sql)
                 db.RolePermissions.Add(new RolePermission(role.Id, permission));
             }
 
+            userId = user.Id;
             db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
             db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, doc.ProjectId, GrantLevel.Submit));
             await db.SaveChangesAsync();
@@ -393,7 +460,7 @@ public sealed class PiCollectionEndToEndTests(SqlServerFixture sql)
         Assert.True(login.IsSuccessStatusCode, $"вхід: {login.StatusCode}: {factory.ErrorsText}");
 
         var stand = new Stand(
-            factory, app, client, jobs, builder, doc, entityId, rowKey, columnA, columnACode, emissionColumn, monthColumn);
+            factory, app, client, jobs, builder, doc, entityId, rowKey, columnA, columnACode, emissionColumn, monthColumn, userId);
 
         if (!routing)
         {
@@ -420,7 +487,8 @@ public sealed class PiCollectionEndToEndTests(SqlServerFixture sql)
         int columnA,
         string columnACode,
         int emissionColumn,
-        int? monthColumn) : IDisposable
+        int? monthColumn,
+        int userId) : IDisposable
     {
         private int pumped;
 
@@ -489,6 +557,26 @@ public sealed class PiCollectionEndToEndTests(SqlServerFixture sql)
                 .SingleAsync();
 
             return string.Join(",", versions.Select(Convert.ToBase64String)) + "|" + audit.ToString(CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>Подає аркуш (стан у базі; автор — користувач стенда, маршруту немає).</summary>
+        public async Task SubmitSheetAsync()
+        {
+            await using var db = builder.CreateContext();
+            var state = new Ecr.Domain.Entities.Workflow.ApprovalState(doc.DocumentId, doc.SheetDefId, doc.PeriodKey.Value);
+            state.Submit(userId, DateTime.UtcNow);
+            db.ApprovalStates.Add(state);
+            await db.SaveChangesAsync();
+        }
+
+        /// <summary>Відкликає подання маршрутом API і виконує все, що воно поставило в чергу.</summary>
+        public async Task RecallSheetAsync()
+        {
+            var response = await client.PostAsJsonAsync(
+                new Uri($"/api/v1/documents/{doc.DocumentId}/recall", UriKind.Relative),
+                new { sheetDefId = doc.SheetDefId, periodKey = doc.PeriodKey.Value, reason = "D-462 e2e: повернення в роботу" });
+            Assert.True(response.IsSuccessStatusCode, $"відкликання: {response.StatusCode}: {await response.Content.ReadAsStringAsync()}: {factory.ErrorsText}");
+            await PumpAsync();
         }
 
         /// <summary>Тіла подій журналу покриття сутності з цим статусом.</summary>
