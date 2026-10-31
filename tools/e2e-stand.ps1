@@ -730,6 +730,25 @@ try {
         $ErrorActionPreference = $previousEapMonth
     }
     if ($LASTEXITCODE -ne 0) { Fail 'не вдалося позначити місячну колонку' }
+
+    # ⛔ D-463: «Дані з PI» і «Звідки це значення» читають ЗІБРАНЕ (`ext.RawDataPoint`), а живого PI на стенді
+    # немає. Тож з'єднання, ВИМКНЕНА сутність, прогін, точки періоду документа (щогодини) і року до нього (щодня)
+    # та покриття з прогалиною кладуться сирим SQL — лише в тимчасову базу стенда. Мапінг на комірку сценарій
+    # `piRawDataLive.spec.ts` заводить і прибирає сам через API.
+    Step 'дані з PI для e2e «Дані з PI» (D-463)'
+    $previousEapPi = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $piSeed = Join-Path $root 'tools/e2e/pi-raw-data-seed.sql'
+        $piEntity = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d $Database -i $piSeed `
+            -v "DocumentId=$($env:ECR_E2E_DOCUMENT)" "PeriodKey=$($open.periodKey)") | Select-Object -Last 1
+    }
+    finally {
+        $ErrorActionPreference = $previousEapPi
+    }
+    if ($LASTEXITCODE -ne 0 -or -not ("$piEntity".Trim() -match '^\d+$')) { Fail "не вдалося покласти дані з PI: $piEntity" }
+    $env:ECR_E2E_PI_ENTITY = "$piEntity".Trim()
+    Write-Host "      сутність PI $($env:ECR_E2E_PI_ENTITY)"
     Step 'прогрів Vite (кеш залежностей)'
     Assert-WebPortFree
     $warmStart = Get-Date
