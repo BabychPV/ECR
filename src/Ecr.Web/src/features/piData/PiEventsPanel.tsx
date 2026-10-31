@@ -121,6 +121,7 @@ export default function PiEventsPanel({
                   size="xs"
                   miw={220}
                   label={t('piEvents.statusFilter')}
+                  data-pi-events-status=""
                   clearable
                   value={statuses}
                   onChange={(values) => setStatuses(SourceEventStatuses.filter((status) => values.includes(status)))}
