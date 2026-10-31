@@ -3098,7 +3098,7 @@ GO
 CREATE INDEX IX_CollectionCoverage_PeriodEvents
     ON itg.CollectionCoverage (SourceEntityId, PeriodKey, Id)
     INCLUDE (Status, Details, CoveredFrom)
-    WHERE [Status] IS NOT NULL;
+    WHERE [Status] IS NOT NULL AND [PeriodKey] IS NOT NULL;
 GO
 
 CREATE TABLE itg.ArchiveRun

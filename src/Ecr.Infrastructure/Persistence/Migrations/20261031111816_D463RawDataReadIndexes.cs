@@ -22,7 +22,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 schema: "itg",
                 table: "CollectionCoverage",
                 columns: new[] { "SourceEntityId", "PeriodKey", "Id" },
-                filter: "[Status] IS NOT NULL")
+                filter: "[Status] IS NOT NULL AND [PeriodKey] IS NOT NULL")
                 .Annotation("SqlServer:Include", new[] { "Status", "Details", "CoveredFrom" });
         }
 

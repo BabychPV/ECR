@@ -385,9 +385,12 @@ public sealed class CollectionCoverageConfiguration : IEntityTypeConfiguration<C
         // немає даних, стеля точок). Індекс подій синку довідника вище їх не містить (`PeriodKey IS NULL`),
         // острівний — теж (`Status IS NULL`); без цього індексу — скан усього журналу покриття на кожне
         // відкриття джерела комірки. Status/Details/CoveredFrom у INCLUDE — без Key Lookup.
+        // ⚠ Фільтр із `PeriodKey IS NOT NULL` — рівно доповнення до індексу подій синку вище: інакше оптимізатор
+        // брав би цей індекс і для дедупу синку довідника (`PeriodKey IS NULL`), і храповик плану
+        // `RegistrySyncDedupPlanTests` червонів. Запит (`CellSourceStore.PeriodEventsSql`) повторює фільтр дослівно.
         builder.HasIndex(x => new { x.SourceEntityId, x.PeriodKey, x.Id }, "IX_CollectionCoverage_PeriodEvents")
                .IncludeProperties(x => new { x.Status, x.Details, x.CoveredFrom })
-               .HasFilter("[Status] IS NOT NULL");
+               .HasFilter("[Status] IS NOT NULL AND [PeriodKey] IS NOT NULL");
     }
 }
 

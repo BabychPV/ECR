@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Ecr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(EcrDbContext))]
-    [Migration("20261031085712_D463RawDataReadIndexes")]
+    [Migration("20261031111816_D463RawDataReadIndexes")]
     partial class D463RawDataReadIndexes
     {
         /// <inheritdoc />
@@ -4915,7 +4915,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "CollectionRunId", "CoveredFrom" }, "IX_CollectionCoverage_CollectionRunId"), new[] { "CoveredTo" });
 
                     b.HasIndex(new[] { "SourceEntityId", "PeriodKey", "Id" }, "IX_CollectionCoverage_PeriodEvents")
-                        .HasFilter("[Status] IS NOT NULL");
+                        .HasFilter("[Status] IS NOT NULL AND [PeriodKey] IS NOT NULL");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "SourceEntityId", "PeriodKey", "Id" }, "IX_CollectionCoverage_PeriodEvents"), new[] { "Status", "Details", "CoveredFrom" });
 

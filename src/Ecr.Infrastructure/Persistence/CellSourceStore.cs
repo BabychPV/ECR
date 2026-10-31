@@ -17,10 +17,13 @@ namespace Ecr.Infrastructure.Persistence;
 public sealed class CellSourceStore(EcrDbContext db) : ICellSourceStore
 {
     /// <summary>Події журналу покриття сутності за період, новіші першими.</summary>
+    /// <remarks>⚠ <c>PeriodKey IS NOT NULL</c> — дослівно фільтр <c>IX_CollectionCoverage_PeriodEvents</c>: з параметром
+    /// оптимізатор сам не виводить його з <c>PeriodKey = @period</c> для фільтрованого індексу.</remarks>
     public const string PeriodEventsSql = """
         SELECT TOP (@take) c.Id, c.[Status], c.Details, c.CoveredFrom
         FROM itg.CollectionCoverage AS c
-        WHERE c.SourceEntityId = @entity AND c.PeriodKey = @period AND c.[Status] IS NOT NULL
+        WHERE c.SourceEntityId = @entity AND c.PeriodKey = @period
+          AND c.[Status] IS NOT NULL AND c.PeriodKey IS NOT NULL
         ORDER BY c.Id DESC;
         """;
 

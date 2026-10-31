@@ -4912,7 +4912,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "CollectionRunId", "CoveredFrom" }, "IX_CollectionCoverage_CollectionRunId"), new[] { "CoveredTo" });
 
                     b.HasIndex(new[] { "SourceEntityId", "PeriodKey", "Id" }, "IX_CollectionCoverage_PeriodEvents")
-                        .HasFilter("[Status] IS NOT NULL");
+                        .HasFilter("[Status] IS NOT NULL AND [PeriodKey] IS NOT NULL");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "SourceEntityId", "PeriodKey", "Id" }, "IX_CollectionCoverage_PeriodEvents"), new[] { "Status", "Details", "CoveredFrom" });
 
