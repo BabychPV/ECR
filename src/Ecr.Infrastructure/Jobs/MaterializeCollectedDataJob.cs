@@ -84,7 +84,10 @@ public sealed class MaterializeCollectedDataJob(
     /// журналі покриття з'являється рядок <see cref="PointCeilingStatus"/>.
     /// </para>
     /// </remarks>
-    public const int MaxPoints = 500_000;
+    // ✎ D-462: 600 000 — понад рік хвилинних точок (527 040 у високосний рік): річний період збору з хвилинним
+    // тегом у не-місячній колонці не мусить упиратися в стелю. Пам'ять обмежена: рядок точки ~64 Б, ~40 МБ на поле,
+    // поля згортаються по черзі; колонки місяців читають лише свій місяць.
+    public const int MaxPoints = 600_000;
 
     /// <summary>Статус рядка журналу покриття, коли поле перевищило стелю точок.</summary>
     public const string PointCeilingStatus = CollectionCoverage.SkippedPointCeiling;
@@ -196,17 +199,44 @@ public sealed class MaterializeCollectedDataJob(
 
         await progress.ReportKeyAsync(30, "jobs.materializeFolding", ct).ConfigureAwait(false);
 
-        var bounds = Domain.Entities.Documents.Period.UtcBounds(
-            period.PeriodStart, period.PeriodEnd, SiteTimeZone.Create(period.TimeZoneId).ToTimeZoneInfo());
+        var zone = SiteTimeZone.Create(period.TimeZoneId).ToTimeZoneInfo();
+        var bounds = Domain.Entities.Documents.Period.UtcBounds(period.PeriodStart, period.PeriodEnd, zone);
+
+        // ⛔ D-462 (річні періоди з місяцями в колонках): колонка місяця m згортає точки лише МІСЯЦЯ m усередині
+        // періоду, а не всього періоду. Доти мапінг на `M3` річного періоду отримував суму за рік. Місяць поза
+        // періодом (колонка M11 місячного екземпляра жовтня) — не комірка цього періоду: не пишеться й не
+        // очищується (з Q-17 її пише період-власник). Один запит на всі колонки-адресати.
+        var targetIds = maps.Select(m => m.TargetColumnDefId!.Value).Distinct().ToList();
+        var months = await db.ColumnDefs
+            .AsNoTracking()
+            .Where(c => targetIds.Contains(c.Id) && c.IsMonthColumn && c.MonthNumber != null)
+            .Select(c => new { c.Id, c.MonthNumber })
+            .ToDictionaryAsync(c => c.Id, c => (int)c.MonthNumber!.Value, ct)
+            .ConfigureAwait(false);
+
+        Domain.Entities.Documents.Period.UtcRange? RangeOf(EntityFieldMap map)
+        {
+            if (!months.TryGetValue(map.TargetColumnDefId!.Value, out var month) || month is < 1 or > 12)
+            {
+                return bounds;
+            }
+
+            var first = new DateOnly(period.PeriodStart.Year, month, 1);
+            var last = first.AddMonths(1).AddDays(-1);
+            var from = first > period.PeriodStart ? first : period.PeriodStart;
+            var to = last < period.PeriodEnd ? last : period.PeriodEnd;
+
+            return from > to ? null : Domain.Entities.Documents.Period.UtcBounds(from, to, zone);
+        }
 
         // ⛔ D2-02: неповне покриття й «немає даних» сигналізуються лише ПІСЛЯ
         // кінця періоду — у відкритому місяці хвіст без точок природний, і подія
         // щопрогону була б шумом. Без годинника (пряме конструювання в старих
         // тестах) кінець невідомий — подій немає; контейнер годинник завжди дає.
-        var ended = clock is not null && clock.UtcNow >= bounds.EndUtc;
+        var now = clock?.UtcNow;
 
         var (aggregated, overCeiling, unitFailures, partial, noData) =
-            await AggregateAsync(task, maps, bounds, ended, ct).ConfigureAwait(false);
+            await AggregateAsync(task, maps, RangeOf, now, ct).ConfigureAwait(false);
 
         // ⛔ D2-02 (HU-13 Q2, варіант A): часткове число ЗАПИСАНО, але не мовчки —
         // подія з часткою покриття; поле без придатних точок НЕ записано й не
@@ -363,6 +393,15 @@ public sealed class MaterializeCollectedDataJob(
         {
             // Розводимо по одній нижче.
         }
+        catch (AccessDeniedException ex) when (IsSheetLocked(ex))
+        {
+            // ⛔ D-462: аркуш подано / затверджено — запис інтеграції відхиляється ЦІЛКОМ, і це не збій задачі (доти
+            // задача падала й повторювалась із листом JobFailed на кожен збір). Кожна комірка — подія
+            // `cellRejected` із кодом; комірки наздоженуть сирий шар, коли аркуш повернуть у роботу
+            // (`SheetMaterializationTrigger`). Перерахунку немає: нічого не записано.
+            return (new IntegrationWriteResult(0, []), [.. cells.Select(c => new RejectedCell(
+                $"{c.RowKey}:{c.ColumnDefId.ToString(CultureInfo.InvariantCulture)}", ex.ErrorCode))]);
+        }
 
         var applied = 0;
         var kept = new List<string>();
@@ -411,6 +450,10 @@ public sealed class MaterializeCollectedDataJob(
         return (new IntegrationWriteResult(applied, kept, awaiting, conflicts, SkippedClosedPeriod: closed), rejected);
     }
 
+    /// <summary>Відмова через поданий чи затверджений аркуш (причина відмови в подробицях — ім'я причини обробника).</summary>
+    private static bool IsSheetLocked(AccessDeniedException ex)
+        => ex.Details?.GetValueOrDefault("reason") is "DocumentSubmitted" or "DocumentApproved";
+
     /// <summary>Вердикт обробника про дані, а не збій чи «зараз недоступно».</summary>
     private static bool IsCellVerdict(Exception ex)
         => ex is DomainException
@@ -455,8 +498,11 @@ public sealed class MaterializeCollectedDataJob(
     /// <summary>Згортає сирі точки ПЕРІОДУ екземпляра в одне значення на мапінг.</summary>
     /// <param name="task">Завдання.</param>
     /// <param name="maps">Матеріалізовані мапінги сутності.</param>
-    /// <param name="period">Межі періоду екземпляра в UTC, <c>[початок, кінець)</c>.</param>
-    /// <param name="ended">Період уже скінчився: неповне покриття й відсутність даних — події (D2-02).</param>
+    /// <param name="rangeOf">
+    /// Діапазон згортки мапінгу в UTC, <c>[початок, кінець)</c>: період екземпляра або місяць колонки місяця всередині
+    /// нього (D-462); <c>null</c> — колонка не належить цьому періоду.
+    /// </param>
+    /// <param name="now">Годинник; діапазон, що скінчився, дає події неповного покриття й відсутності даних (D2-02).</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Значення для запису, поля понад стелю точок, неповне покриття і поля без даних.</returns>
     /// <remarks>
@@ -470,7 +516,10 @@ public sealed class MaterializeCollectedDataJob(
     /// на всі поля віддав би один щільний тег за рахунок решти.
     /// </remarks>
     private async Task<Aggregation> AggregateAsync(
-        MaterializeTask task, List<EntityFieldMap> maps, Domain.Entities.Documents.Period.UtcRange period, bool ended,
+        MaterializeTask task,
+        List<EntityFieldMap> maps,
+        Func<EntityFieldMap, Domain.Entities.Documents.Period.UtcRange?> rangeOf,
+        DateTime? now,
         CancellationToken ct)
     {
         var result = new List<IntegrationCellValue>(maps.Count);
@@ -481,9 +530,19 @@ public sealed class MaterializeCollectedDataJob(
         var ceiling = PointCeilingPerField;
         UnitCatalogSnapshot? units = null;
 
-        foreach (var field in maps.Select(m => m.SourceField).Distinct(StringComparer.Ordinal))
+        // ⚠ Згортка — на пару «поле + діапазон»: колонки місяців річного періоду мають власні діапазони (D-462).
+        foreach (var group in maps.GroupBy(m => (Field: m.SourceField, Range: rangeOf(m))))
         {
-            var fieldMaps = maps.Where(m => string.Equals(m.SourceField, field, StringComparison.Ordinal)).ToList();
+            if (group.Key.Range is not { } period)
+            {
+                continue;
+            }
+
+            var field = group.Key.Field;
+            var fieldMaps = group.ToList();
+
+            // ⛔ D2-02: неповне покриття й «немає даних» — лише ПІСЛЯ кінця діапазону (див. ExecuteAsync).
+            var ended = now is { } at && at >= period.EndUtc;
 
             // ⚠ Згортка за часом бачить і точки без числа (погана якість, текст):
             // вони роблять прогалиною відрізки, що на них спираються. Згортки

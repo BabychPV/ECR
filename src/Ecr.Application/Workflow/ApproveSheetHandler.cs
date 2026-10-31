@@ -25,7 +25,10 @@ public sealed class ApproveSheetHandler(
 
     // ✎ D-451: лист «Аркуш повернуто» після відхилення — ПІСЛЯ коміту, без права валити дію; `null` — тестові
     // фабрики обробника без пошти.
-    SheetWorkflowNotifier? notifier = null)
+    SheetWorkflowNotifier? notifier = null,
+    // D-462: повернутий аркуш знову редагований — комірки наздоганяють сирий шар (SheetMaterializationTrigger);
+    // `null` — тестові фабрики обробника без черги.
+    IMaterializationScheduler? materialization = null)
 {
     /// <summary>Затверджує або відхиляє аркуш.</summary>
     /// <param name="documentId">Документ.</param>
@@ -111,8 +114,23 @@ public sealed class ApproveSheetHandler(
                 // Слід лишається в журналі: `GetWorkflowHistoryHandler` позначає таке погодження.
                 await ApproveCoreAsync(state, documentId, sheetDefId, periodKey, approved, reason, userId, innerCt)
                     .ConfigureAwait(false);
+
+                // ⛔ D-462: відхилення — аркуш знову редагований; черга в базі — постановка тут, останнім оператором.
+                if (!approved)
+                {
+                    await SheetMaterializationTrigger
+                        .InsideTransactionAsync(materialization, documentId, sheetDefId, periodKey, innerCt)
+                        .ConfigureAwait(false);
+                }
             },
             ct).ConfigureAwait(false);
+
+        if (!approved)
+        {
+            await SheetMaterializationTrigger
+                .AfterCommitAsync(materialization, documentId, sheetDefId, periodKey, ct)
+                .ConfigureAwait(false);
+        }
 
         // ✎ D-451: відхилення (`Submitted → Rejected`, `ApprovalAction.Reject`) — повернення погоджувачем; лист
         // власнику й учасникам Write/Submit, за ввімкненим правилом, ПІСЛЯ коміту. Затвердження листа не дає.
