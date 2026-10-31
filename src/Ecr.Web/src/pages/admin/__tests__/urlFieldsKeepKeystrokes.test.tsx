@@ -21,7 +21,7 @@ import { testTheme } from '@/test/render';
  * переходом, тобто пізніше за подію вводу: React повертав полю старе значення
  * між натисканнями, і наступна клавіша лягала поверх старого.
  *
- * Тут повільний рендер імітовано прямо: `setSearchParams` застосовується з
+ * Тут повільний рендер імітовано прямо: `setSearchParams` і `navigate` застосовуються з
  * затримкою `LagMs`, тож кожна клавіша приходить, поки адреса ще несе старе
  * значення, а запізнілі відлуння проміжних значень прилітають ПОСЕРЕД набору.
  *
@@ -52,6 +52,18 @@ vi.mock('react-router-dom', async (importOriginal) => {
       );
 
       return [params, lagged] as const;
+    },
+    // ⚠ Сеттери `useUrlState` переходять через `useNavigate` (будують запит від живої
+    // адреси, а не від знімка `setSearchParams`), тож запізнення імітуємо й тут.
+    useNavigate: () => {
+      const navigate = actual.useNavigate();
+
+      return useCallback<typeof navigate>(
+        ((...call: Parameters<typeof navigate>) => {
+          setTimeout(() => void navigate(...(call as [never])), LagMs);
+        }) as typeof navigate,
+        [navigate],
+      );
     },
   };
 });
