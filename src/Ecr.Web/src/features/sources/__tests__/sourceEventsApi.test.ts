@@ -84,6 +84,12 @@ describe('features/sources/sourceEventsApi', () => {
     expect(accepted).toEqual({ jobId: 'job-1' });
   });
 
+  it('D-464: підтвердження масового видалення — та сама адреса з ?confirmRemoval=true', async () => {
+    await syncSourceEvents(5, true);
+
+    expect(apiEnqueue).toHaveBeenLastCalledWith('/api/v1/sources/5/source-events/sync?confirmRemoval=true', undefined);
+  });
+
   it('HSE301 A6: CRUD мапінгу — методи й адреси', async () => {
     await fetchSourceEventMaps(5);
     expect(firstCall().line).toBe('GET /api/v1/source-event-maps?sourceEntityId=5');

@@ -19,6 +19,8 @@ import type { DocumentSummary, JobStatus } from "@/api/types";
 import { formatDateOnly, formatDateTime, formatNumber, parseDateOnly } from "@/shared/format";
 import { useFocusAfterBusy } from "@/shared/a11y/focus";
 import { t } from "@/shared/i18n";
+import { Banner } from "@/shared/ui/Banner";
+import { ConfirmModal } from "@/shared/ui/ConfirmModal";
 import { ErrorAlert } from "@/shared/ui/ErrorAlert";
 import { FilterInline, FilterRow } from "@/shared/ui/FilterBar";
 import { PeriodPicker } from "@/shared/ui/PeriodPicker";
@@ -322,6 +324,28 @@ export function SourceEventsTable({
     },
   });
 
+  /*
+   * ⛔ D-464: прогін НЕ видалив зниклі з PI події, бо їх більше за ліміт «повної звірки» (`eventRemovalBlocked`
+   * завершеної задачі) — людині видно скільки і яка межа, а «Підтвердити видалення» ставить той самий синк із
+   * `confirmRemoval` (право те саме, слід — у журналі). Без підтвердження сервер не видаляє нічого.
+   */
+  const removalBlocked =
+    syncOutcome === "succeeded" ? (syncJob.data?.eventRemovalBlocked ?? null) : null;
+  const [confirming, setConfirming] = useState(false);
+  const confirmRemoval = useMutation({
+    meta: { handled: true },
+    mutationFn: () => syncSourceEvents(sourceEntityId, true),
+    onSuccess: (accepted) => {
+      setConfirming(false);
+      setSyncJobId(accepted.jobId);
+      notifications.show({
+        message: t("sourceEvents.removalConfirmQueued", {
+          job: humanizeJobId(accepted.jobId),
+        }),
+      });
+    },
+  });
+
   // ⚠ «Отримати з PI зараз» на час запиту `loading` (= `disabled`) — фокус повертається на кнопку.
   const syncFocus = useFocusAfterBusy(sync.isPending);
 
@@ -354,6 +378,43 @@ export function SourceEventsTable({
           </Button>
         )}
       </Group>
+
+      {canManage && removalBlocked !== null && (
+        <Banner
+          tone="warning"
+          title={t("sourceEvents.removalBlockedTitle")}
+          text={t("sourceEvents.removalBlockedText", {
+            count: formatNumber(removalBlocked.candidates),
+            limit: formatNumber(removalBlocked.limit),
+            linked: formatNumber(removalBlocked.linked),
+          })}
+          actions={[
+            {
+              label: t("sourceEvents.removalConfirmAction", {
+                count: formatNumber(removalBlocked.candidates),
+              }),
+              onClick: () => setConfirming(true),
+            },
+          ]}
+          testId="source-events-removal-blocked"
+        />
+      )}
+
+      {confirmRemoval.error !== null && <ErrorAlert error={confirmRemoval.error} />}
+
+      {canManage && removalBlocked !== null && (
+        <ConfirmModal
+          opened={confirming}
+          title={t("sourceEvents.removalConfirmTitle", {
+            count: formatNumber(removalBlocked.candidates),
+          })}
+          text={t("sourceEvents.removalConfirmText")}
+          verb={t("sourceEvents.removalConfirmVerb")}
+          isPending={confirmRemoval.isPending}
+          onConfirm={() => confirmRemoval.mutate()}
+          onClose={() => setConfirming(false)}
+        />
+      )}
 
       {sync.error !== null && (
         <Stack gap="xs" data-source-events-sync-error="">

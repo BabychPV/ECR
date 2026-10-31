@@ -124,10 +124,21 @@ export function fetchSourceEvents(
 /**
  * «Отримати з PI зараз»: ставить синхронізацію подій сутності в чергу (`202`, `jobId`). Повторне натискання
  * зливається з задачею, що вже є; без активного мапінгу подій — `422`.
+ *
+ * D-464: `confirmRemoval` — підтвердити масове видалення зниклих у PI подій, яке попередній прогін заблокував лімітом
+ * (`JobStatus.eventRemovalBlocked`); те саме право, слід — у журналі структурних змін.
  */
-export function syncSourceEvents(sourceEntityId: number): Promise<AcceptedJob> {
-  return apiEnqueue(`/api/v1/sources/${sourceEntityId}/source-events/sync`);
+export function syncSourceEvents(sourceEntityId: number, confirmRemoval = false): Promise<AcceptedJob> {
+  // ⚠ Обидві адреси — повними літералами (сторож шукає `/api/v1/…`), запит — після літерального `?`.
+  return apiEnqueue(
+    confirmRemoval
+      ? `/api/v1/sources/${sourceEntityId}/source-events/sync?confirmRemoval=true`
+      : `/api/v1/sources/${sourceEntityId}/source-events/sync`,
+  );
 }
+
+/** D-464: блок ліміту видалення з підсумку синку (`JobStatus.eventRemovalBlocked`); `null` — не блокувалось. */
+export type SourceEventRemovalBlock = components['schemas']['SourceEventRemovalBlock'];
 
 /** Мапінги подій; за `sourceEntityId` — лише сутності. */
 export function fetchSourceEventMaps(sourceEntityId?: number): Promise<SourceEventMap[]> {

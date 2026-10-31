@@ -26,13 +26,22 @@ public enum SourceEventAction
 
     /// <summary>Нічого не змінювати: рядок є, а подія знову без кінця чи екземпляр недоступний.</summary>
     KeepAsIs,
+
+    /// <summary>
+    /// D-464: період відкритий, але аркуш таблиці поданий чи затверджений — запис пропущено (патчер однаково відмовив
+    /// би), зв'язок не змінюється. Подія дійде після повернення / відкликання / перевідкриття аркуша (негайний синк).
+    /// </summary>
+    SheetLocked,
 }
 
 /// <summary>Період, у який потрапляє початок події, і стан його екземпляра таблиці.</summary>
 /// <param name="PeriodKey">Ключ періоду.</param>
 /// <param name="State">Стан періоду.</param>
 /// <param name="TableInstanceId">Екземпляр таблиці мапінгу в цьому періоді; <c>null</c> — його ще немає.</param>
-public sealed record SourceEventPeriodTarget(int PeriodKey, PeriodState State, long? TableInstanceId);
+/// <param name="SheetLocked">
+/// D-464: аркуш таблиці мапінгу в цьому періоді поданий чи затверджений — запис рядків заборонено до повернення.
+/// </param>
+public sealed record SourceEventPeriodTarget(int PeriodKey, PeriodState State, long? TableInstanceId, bool SheetLocked = false);
 
 /// <summary>Наявний зв'язок «подія ↔ рядок» — те, що синхронізація знає з минулих прогонів.</summary>
 /// <param name="SourceEventId">ID події в джерелі, за яким зв'язок зараз ключований.</param>
@@ -91,7 +100,10 @@ public sealed record SourceEventSyncInput(
 /// <param name="Action">Що з нею робити.</param>
 /// <param name="Link">Наявний зв'язок (за ID чи за природним ключем); <c>null</c> — подію бачимо вперше.</param>
 /// <param name="RowKey">Ключ рядка: наявного зв'язку, інакше <c>EF-…</c> від ID події.</param>
-/// <param name="Target">Період початку події; <c>null</c> — його немає.</param>
+/// <param name="Target">
+/// Період початку події; <c>null</c> — його немає. D-464: для незакритої події (<see cref="SourceEventAction.Open"/>)
+/// теж заповнений — так видно подію, що лишилась відкритою, коли її період уже закрили (рядка не буде ніколи).
+/// </param>
 /// <param name="ElementToStore">
 /// Ключовий вигляд первинного елемента, який зв'язок має записати (M6); <c>null</c> — джерело його не дало
 /// чи ключ «початок + елемент» неоднозначний (інша подія чи зв'язок несе той самий) — тоді не пишемо.
@@ -161,6 +173,8 @@ public sealed record SourceEventSyncPlan(
 /// (<c>Truncated = false</c>, без <c>ErrorCode</c>): усічене читання не доводить зникнення.</item>
 /// <item>Закритий період — нуль записів; рядок прив'язаної події, чий початок переїхав в інший період,
 /// не переноситься.</item>
+/// <item>D-464: поданий чи затверджений аркуш періоду — нуль записів (<see cref="SourceEventAction.SheetLocked"/>),
+/// зв'язок не змінюється.</item>
 /// </list>
 /// </remarks>
 public static class SourceEventSyncPlanner
@@ -437,8 +451,10 @@ public static class SourceEventSyncPlanner
         {
             // Рядок є, а PI знову показує подію відкритою: «знову триває» синхронізація виразити
             // не може (Missing → Open заборонено) — рядок і зв'язок лишаються як є.
-            return new SourceEventPlanItem(
-                ev, hasRow ? SourceEventAction.KeepAsIs : SourceEventAction.Open, link, rowKey, null);
+            // D-464: період незакритої події — лише для звіту «відкрита на момент закриття періоду».
+            return hasRow
+                ? new SourceEventPlanItem(ev, SourceEventAction.KeepAsIs, link, rowKey, null)
+                : new SourceEventPlanItem(ev, SourceEventAction.Open, link, rowKey, periodOf(ev.StartUtc));
         }
 
         var target = periodOf(ev.StartUtc);
@@ -454,8 +470,15 @@ public static class SourceEventSyncPlanner
                 ev, hasRow ? SourceEventAction.KeepAsIs : SourceEventAction.PeriodNotOpen, link, rowKey, target);
         }
 
-        return target.State is PeriodState.Open or PeriodState.Grace
-            ? new SourceEventPlanItem(ev, SourceEventAction.Write, link, rowKey, target)
-            : new SourceEventPlanItem(ev, SourceEventAction.PeriodClosed, link, rowKey, target);
+        if (target.State is not (PeriodState.Open or PeriodState.Grace))
+        {
+            return new SourceEventPlanItem(ev, SourceEventAction.PeriodClosed, link, rowKey, target);
+        }
+
+        // ⛔ D-464: поданий/затверджений аркуш — без запису (раніше кожен прогін слав патчеру кожну подію року й
+        // писав по події покриття на кожну відмову). Зв'язок не чіпаємо: після повернення аркуша подія запишеться.
+        return target.SheetLocked
+            ? new SourceEventPlanItem(ev, SourceEventAction.SheetLocked, link, rowKey, target)
+            : new SourceEventPlanItem(ev, SourceEventAction.Write, link, rowKey, target);
     }
 }

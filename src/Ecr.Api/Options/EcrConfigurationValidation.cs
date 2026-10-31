@@ -93,6 +93,10 @@ public static partial class EcrConfigurationValidation
         // D-462: 0 — без нарізки (інтервал цілком); від'ємне — помилка. Тайм-аут команди ODBC — від секунди.
         (Ecr.Adapters.PiAf.CollectionRunnerOptions.ChunkDaysKey, 0),
         (Ecr.Adapters.PiAf.PiSqlClientOptions.CommandTimeoutSecondsKey, 1),
+
+        // D-464: тайм-аут читання подій — від секунди; стеля сторінок подій — від однієї (нуль = нічого не читати).
+        (Ecr.Adapters.PiAf.PiSqlClientOptions.EventQueryTimeoutSecondsKey, 1),
+        (Ecr.Infrastructure.Jobs.SourceEventSyncOptions.MaxEventPagesKey, 1),
         ("Logging:File:RetainedFiles", 1),
         ("Logging:File:FileSizeLimitMb", 1),
 
@@ -169,6 +173,9 @@ public static partial class EcrConfigurationValidation
         (Infrastructure.Jobs.DbBackgroundJobScheduler.ModeKey, Enum.GetNames<Infrastructure.Jobs.JobQueueMode>()),
         (Infrastructure.Jobs.JobLaneMap.ExecutorKey, Enum.GetNames<Infrastructure.Jobs.RecalculationExecutor>()),
         (Ecr.Api.Observability.TelemetrySetup.ProtocolKey, Enum.GetNames<OpenTelemetry.Exporter.OtlpExportProtocol>()),
+
+        // D-464: «Month» — помісячне читання вікна подій; «Mnth» інакше мовчки лишав би одне читання на рік.
+        (Ecr.Infrastructure.Jobs.SourceEventSyncOptions.EventQueryChunkKey, Enum.GetNames<Ecr.Infrastructure.Jobs.SourceEventQueryChunk>()),
     ];
 
     /// <summary>Ключ додаткових портів SMTP (ent6 S4).</summary>

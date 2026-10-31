@@ -7400,6 +7400,17 @@
               "string"
             ]
           },
+          "eventRemovalBlocked": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SourceEventRemovalBlock",
+                "description": "D-464: `Succeeded` синк подій НЕ видалив зниклі з PI події, бо їх більше за ліміт «повної звірки» — скільки\nі яка межа; клієнт показує «Підтвердити видалення». `null` — інша задача, не завершена чи без блокування\n(`SourceEventSyncOutcome`). Заповнює `GetJobStatusHandler`."
+              }
+            ]
+          },
           "fanOut": {
             "oneOf": [
               {
@@ -21187,6 +21198,38 @@
           "events",
           "truncated",
           "errorCode"
+        ],
+        "type": "object"
+      },
+      "SourceEventRemovalBlock": {
+        "description": "D-464: масове видалення зниклих подій, заблоковане лімітом «повної звірки» за прогін синку\n(`JobStatus.eventRemovalBlocked`): скільки подій чекають підтвердження і яка межа.",
+        "properties": {
+          "candidates": {
+            "description": "Скільки рядків було б видалено (сума за заблокованими мапінгами).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "limit": {
+            "description": "Дозволено без підтвердження (сума меж заблокованих мапінгів).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "linked": {
+            "description": "Зв'язків-з-рядками у вікні (сума за заблокованими мапінгами) — база відсотка.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "maps": {
+            "description": "Скільки мапінгів прогону заблоковано.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "maps",
+          "candidates",
+          "limit",
+          "linked"
         ],
         "type": "object"
       },
@@ -52335,7 +52378,7 @@
     },
     "/api/v1/sources/{id}/source-events/sync": {
       "post": {
-        "description": "Повторне натискання зливається з задачею, що вже чекає чи виконується (ціль `source-events-e{id}`), — та\nсама задача, що й за розкладом. Немає активного мапінгу подій — `422`.",
+        "description": "Повторне натискання зливається з задачею, що вже чекає чи виконується (ціль `source-events-e{id}`), — та\nсама задача, що й за розкладом; підтверджена — власна ціль `source-events-e{id}-confirm`. Немає активного\nмапінгу подій — `422`.",
         "parameters": [
           {
             "description": "Сутність-шаблон подій.",
@@ -52346,6 +52389,14 @@
               "format": "int32",
               "pattern": "^-?(?:0|[1-9]\\d*)$",
               "type": "integer"
+            }
+          },
+          {
+            "description": "D-464: підтвердити масове видалення зниклих у PI подій, заблоковане лімітом «повної звірки»\n(`max(10, 20 %)`, не більше 200 за мапінг; `JobStatus.eventRemovalBlocked` попереднього прогону).\nПраво те саме, слід — у журналі структурних змін (`SourceEventRemovalConfirmed`).",
+            "in": "query",
+            "name": "confirmRemoval",
+            "schema": {
+              "type": "boolean"
             }
           }
         ],

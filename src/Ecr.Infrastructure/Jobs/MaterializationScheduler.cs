@@ -68,6 +68,9 @@ public sealed class MaterializationScheduler(
             .ConfigureAwait(false);
 
         await MaterializationTargets.EnqueueAsync(jobs, targets, range: null, ct).ConfigureAwait(false);
+
+        // D-464: мапінги подій документів проєкту — негайний синк (правило — SourceEventSyncTrigger).
+        await SourceEventSyncTrigger.EnqueueForPeriodsAsync(db, jobs, projectId, periodKeys, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -83,6 +86,9 @@ public sealed class MaterializationScheduler(
             throw new InvalidOperationException(
                 "Матеріалізацію після повернення аркуша ставлять лише після коміту переходу: транзакція ще відкрита.");
         }
+
+        // D-464: мапінги подій аркуша — негайний синк (правило — SourceEventSyncTrigger).
+        await SourceEventSyncTrigger.EnqueueForSheetAsync(db, jobs, documentId, sheetDefId, ct).ConfigureAwait(false);
 
         var projectId = await db.Documents
             .AsNoTracking()

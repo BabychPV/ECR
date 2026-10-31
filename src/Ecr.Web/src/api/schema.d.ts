@@ -19285,11 +19285,17 @@ export interface paths {
         /**
          * «Отримати з PI зараз»: ставить синхронізацію подій сутності в чергу. Право `Integration.Manage`.
          * @description Повторне натискання зливається з задачею, що вже чекає чи виконується (ціль `source-events-e{id}`), — та
-         *     сама задача, що й за розкладом. Немає активного мапінгу подій — `422`.
+         *     сама задача, що й за розкладом; підтверджена — власна ціль `source-events-e{id}-confirm`. Немає активного
+         *     мапінгу подій — `422`.
          */
         post: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description D-464: підтвердити масове видалення зниклих у PI подій, заблоковане лімітом «повної звірки»
+                     *     (`max(10, 20 %)`, не більше 200 за мапінг; `JobStatus.eventRemovalBlocked` попереднього прогону).
+                     *     Право те саме, слід — у журналі структурних змін (`SourceEventRemovalConfirmed`). */
+                    confirmRemoval?: boolean;
+                };
                 header?: never;
                 path: {
                     /** @description Сутність-шаблон подій. */
@@ -27739,6 +27745,7 @@ export interface components {
             error: null | string;
             /** @description Код каталогу помилок провалу (BE-08). */
             errorCode?: null | string;
+            eventRemovalBlocked?: null | components["schemas"]["SourceEventRemovalBlock"];
             fanOut?: null | components["schemas"]["FanOutStatus"];
             /** @description Ідентифікатор. */
             jobId: string;
@@ -34040,6 +34047,30 @@ export interface components {
             toUtc: string;
             /** @description Подій було більше за стелю проби. */
             truncated: boolean;
+        };
+        /** @description D-464: масове видалення зниклих подій, заблоковане лімітом «повної звірки» за прогін синку
+         *     (`JobStatus.eventRemovalBlocked`): скільки подій чекають підтвердження і яка межа. */
+        SourceEventRemovalBlock: {
+            /**
+             * Format: int32
+             * @description Скільки рядків було б видалено (сума за заблокованими мапінгами).
+             */
+            candidates: number;
+            /**
+             * Format: int32
+             * @description Дозволено без підтвердження (сума меж заблокованих мапінгів).
+             */
+            limit: number;
+            /**
+             * Format: int32
+             * @description Зв'язків-з-рядками у вікні (сума за заблокованими мапінгами) — база відсотка.
+             */
+            linked: number;
+            /**
+             * Format: int32
+             * @description Скільки мапінгів прогону заблоковано.
+             */
+            maps: number;
         };
         /** @description Рядок таблиці подій: зв'язок «подія джерела ↔ рядок документа» зі станом (HSE301 A6). */
         SourceEventRowDto: {

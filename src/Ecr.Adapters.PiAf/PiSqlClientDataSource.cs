@@ -33,6 +33,19 @@ public sealed partial class PiSqlClientDataSource(
         ? seconds
         : PiSqlClientOptions.DefaultCommandTimeoutSeconds;
 
+    /// <summary>
+    /// D-464: тайм-аут читання подій; без налаштування — <see cref="PiSqlClientOptions.DefaultEventQueryTimeoutSeconds"/>.
+    /// </summary>
+    private readonly int eventQueryTimeoutSeconds = options?.EventQueryTimeoutSeconds is > 0 and var eventSeconds
+        ? eventSeconds
+        : PiSqlClientOptions.DefaultEventQueryTimeoutSeconds;
+
+    /// <summary>Чинний тайм-аут команди тега/каталогу, с (для тестів налаштування).</summary>
+    internal int CommandTimeoutSeconds => commandTimeoutSeconds;
+
+    /// <summary>Чинний тайм-аут читання подій, с (D-464; для тестів налаштування).</summary>
+    internal int EventQueryTimeoutSeconds => eventQueryTimeoutSeconds;
+
     /// <summary>Перемикання на запасну адресу при відмові зв'язку з основною (D-462).</summary>
     private EndpointFailover Failover => failover ??= new EndpointFailover(log, nameof(PiSqlClientDataSource));
 
@@ -147,7 +160,14 @@ public sealed partial class PiSqlClientDataSource(
         var source = await store.FindDataSourceAsync(dataSourceId, ct).ConfigureAwait(false)
                      ?? throw Unavailable($"Джерело {dataSourceId} не існує або вимкнене.", dataSourceId);
 
-        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
+        return await WithConnectionAsync(source, connection => ReadCatalogAsync(connection, source, ct), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Каталог елементів і атрибутів відкритим з'єднанням (D-464: з'єднання — з оренди).</summary>
+    private async Task<IReadOnlyList<SourceEntityDescriptor>> ReadCatalogAsync(
+        OdbcConnection connection, Domain.Entities.External.DataSource source, CancellationToken ct)
+    {
         using var command = NewCommand(connection);
         command.CommandText = Query(source.Code, CatalogQueryKey, DefaultCatalogQuery);
 
@@ -218,20 +238,11 @@ public sealed partial class PiSqlClientDataSource(
 
         var (element, attribute) = Split(request.SourcePath);
 
-        var connection = await LeaseAsync(source, ct).ConfigureAwait(false);
-        var reusable = false;
-
-        try
-        {
-            var result = await ReadPageAsync(connection, source, request, queryText, element, attribute, ct)
-                .ConfigureAwait(false);
-            reusable = true;
-            return result;
-        }
-        finally
-        {
-            await ReturnAsync(connection, source, reusable).ConfigureAwait(false);
-        }
+        return await WithConnectionAsync(
+                source,
+                connection => ReadPageAsync(connection, source, request, queryText, element, attribute, ct),
+                ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Одна сторінка значень атрибута відкритим з'єднанням (D-462: з'єднання — з оренди).</summary>
@@ -350,8 +361,23 @@ public sealed partial class PiSqlClientDataSource(
 
         var (element, attribute) = Split(request.SourcePath);
 
-        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
+        return await WithConnectionAsync(
+                source,
+                connection => ReadSummaryAsync(connection, source, request, configured, element, attribute, ct),
+                ct)
+            .ConfigureAwait(false);
+    }
 
+    /// <summary>Summary вікна відкритим з'єднанням (D-464: з'єднання — з оренди).</summary>
+    private async Task<WindowResult> ReadSummaryAsync(
+        OdbcConnection connection,
+        Domain.Entities.External.DataSource source,
+        WindowRequest request,
+        string configured,
+        string element,
+        string attribute,
+        CancellationToken ct)
+    {
         var lookup = await TemplateAsync(connection, source.Code, element, ct).ConfigureAwait(false);
 
         if (lookup.Ambiguous)
@@ -486,13 +512,14 @@ public sealed partial class PiSqlClientDataSource(
 
         var queryText = ConfiguredOrRefuse(source.Code, CurrentValueQueryKey, "CurrentValue");
 
-        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
-
-        return await ReadCurrentPathsAsync(
-                paths,
-                element => TemplateAsync(connection, source.Code, element, ct),
-                (path, element, template, attribute) => ReadCurrentPointAsync(
-                    connection, source.Code, queryText, path, element, template, attribute, ct))
+        return await WithConnectionAsync(
+                source,
+                connection => ReadCurrentPathsAsync(
+                    paths,
+                    element => TemplateAsync(connection, source.Code, element, ct),
+                    (path, element, template, attribute) => ReadCurrentPointAsync(
+                        connection, source.Code, queryText, path, element, template, attribute, ct)),
+                ct)
             .ConfigureAwait(false);
     }
 
@@ -640,18 +667,26 @@ public sealed partial class PiSqlClientDataSource(
 
         var text = EventQueryOrRefuse(EventQueryKey, IExternalDataSource.EventQueryKind, source.Code);
 
-        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
-        using var command = NewCommand(connection);
-        command.CommandText = EventQuery(text, query.Template);
-        command.Parameters.Add(new OdbcParameter("from", OdbcType.DateTime) { Value = from });
-        command.Parameters.Add(new OdbcParameter("to", OdbcType.DateTime) { Value = to });
+        return await WithConnectionAsync(
+                source,
+                async connection =>
+                {
+                    // ⛔ D-464: власний тайм-аут читання подій (`PiSqlClient:EventQueryTimeoutSeconds`, типово 300 с):
+                    // повна звірка річного періоду — один запит на весь рік, і 60 с сторінки тега для нього замало.
+                    using var command = NewCommand(connection, eventQueryTimeoutSeconds);
+                    command.CommandText = EventQuery(text, query.Template);
+                    command.Parameters.Add(new OdbcParameter("from", OdbcType.DateTime) { Value = from });
+                    command.Parameters.Add(new OdbcParameter("to", OdbcType.DateTime) { Value = to });
 
-        using var reader = await RetryAsync(
-            () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
-            IsTransientOdbcFailure,
-            ct).ConfigureAwait(false);
+                    using var reader = await RetryAsync(
+                        () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
+                        IsTransientOdbcFailure,
+                        ct).ConfigureAwait(false);
 
-        return await ReadEventRowsAsync(reader, source.Code, query.Template, query.MaxEvents, query.Attributes, ct)
+                    return await ReadEventRowsAsync(reader, source.Code, query.Template, query.MaxEvents, query.Attributes, ct)
+                        .ConfigureAwait(false);
+                },
+                ct)
             .ConfigureAwait(false);
     }
 
@@ -664,16 +699,22 @@ public sealed partial class PiSqlClientDataSource(
 
         var text = EventQueryOrRefuse(EventTemplateQueryKey, IExternalDataSource.EventTemplateQueryKind, source.Code);
 
-        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
-        using var command = NewCommand(connection);
-        command.CommandText = text;
+        return await WithConnectionAsync(
+                source,
+                async connection =>
+                {
+                    using var command = NewCommand(connection);
+                    command.CommandText = text;
 
-        using var reader = await RetryAsync(
-            () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
-            IsTransientOdbcFailure,
-            ct).ConfigureAwait(false);
+                    using var reader = await RetryAsync(
+                        () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
+                        IsTransientOdbcFailure,
+                        ct).ConfigureAwait(false);
 
-        return await ReadEventTemplatesAsync(reader, ct).ConfigureAwait(false);
+                    return await ReadEventTemplatesAsync(reader, ct).ConfigureAwait(false);
+                },
+                ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Події з результату запиту подій (контракт колонок — <see cref="EventQueryKey"/>).</summary>
@@ -890,17 +931,23 @@ public sealed partial class PiSqlClientDataSource(
 
         var queryText = ConfiguredOrRefuse(source.Code, ElementListQueryKey, IExternalDataSource.ElementListQueryKind);
 
-        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
-        using var command = NewCommand(connection);
-        command.CommandText = queryText;
-        command.Parameters.Add(new OdbcParameter("root", OdbcType.NVarChar) { Value = root });
+        return await WithConnectionAsync(
+                source,
+                async connection =>
+                {
+                    using var command = NewCommand(connection);
+                    command.CommandText = queryText;
+                    command.Parameters.Add(new OdbcParameter("root", OdbcType.NVarChar) { Value = root });
 
-        using var reader = await RetryAsync(
-            () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
-            IsTransientOdbcFailure,
-            ct).ConfigureAwait(false);
+                    using var reader = await RetryAsync(
+                        () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
+                        IsTransientOdbcFailure,
+                        ct).ConfigureAwait(false);
 
-        return await ReadElementsAsync(reader, MaxCatalogRows, ct).ConfigureAwait(false);
+                    return await ReadElementsAsync(reader, MaxCatalogRows, ct).ConfigureAwait(false);
+                },
+                ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1596,11 +1643,43 @@ public sealed partial class PiSqlClientDataSource(
     }
 
     /// <summary>Команда з тайм-аутом із налаштування (D-462), а не типовими 30 с драйвера.</summary>
-    private OdbcCommand NewCommand(OdbcConnection connection)
+    private OdbcCommand NewCommand(OdbcConnection connection) => NewCommand(connection, commandTimeoutSeconds);
+
+    /// <summary>Команда з заданим тайм-аутом (D-464: читання подій має власний).</summary>
+    private static OdbcCommand NewCommand(OdbcConnection connection, int timeoutSeconds)
     {
         var command = connection.CreateCommand();
-        command.CommandTimeout = commandTimeoutSeconds;
+        command.CommandTimeout = timeoutSeconds;
         return command;
+    }
+
+    /// <summary>
+    /// D-464: читання орендованим з'єднанням — кожен метод читання адаптера, а не лише сторінка тега (D-462).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Раніше події, шаблони подій, поточні значення, перелік елементів, summary вікна й каталог відкривали
+    /// НОВЕ з'єднання ODBC (з повторами відкриття й перемиканням адрес) на кожен виклик — синк подій, що читає
+    /// кілька шаблонів і сторінок, робив стільки ж рукостискань RTQP. Тепер з'єднання одне на екземпляр адаптера
+    /// (scope задачі). ⚠ Повертається на повторне використання лише після УСПІШНОГО читання: будь-яка відмова
+    /// (тайм-аут, обрив, відмова даних) закриває своє з'єднання, і наступне читання відкриває нове — тим самим
+    /// <see cref="OpenAsync"/>, тобто з тим самим перемиканням на запасну адресу (D-462).
+    /// </remarks>
+    private async Task<T> WithConnectionAsync<T>(
+        Domain.Entities.External.DataSource source, Func<OdbcConnection, Task<T>> read, CancellationToken ct)
+    {
+        var connection = await LeaseAsync(source, ct).ConfigureAwait(false);
+        var reusable = false;
+
+        try
+        {
+            var result = await read(connection).ConfigureAwait(false);
+            reusable = true;
+            return result;
+        }
+        finally
+        {
+            await ReturnAsync(connection, source, reusable).ConfigureAwait(false);
+        }
     }
 
     /// <summary>Вільне з'єднання і джерело, з яким його відкрито.</summary>

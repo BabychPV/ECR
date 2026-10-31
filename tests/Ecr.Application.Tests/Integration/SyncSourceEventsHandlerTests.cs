@@ -4,6 +4,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Integration.SourceEvents;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
 using Ecr.TestKit;
@@ -25,6 +26,8 @@ public sealed class SyncSourceEventsHandlerTests
     private readonly ICollectionStore _sources = Substitute.For<ICollectionStore>();
     private readonly ISourceEventMapStore _maps = Substitute.For<ISourceEventMapStore>();
     private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
+    private readonly IClock _clock = Substitute.For<IClock>();
 
     public SyncSourceEventsHandlerTests()
     {
@@ -103,7 +106,44 @@ public sealed class SyncSourceEventsHandlerTests
             Actor);
     }
 
-    private SyncSourceEventsHandler Sync() => new(_sources, _maps, _jobs, _access, _user);
+    /// <summary>
+    /// D-464: підтвердження масового видалення лишає слід у журналі структурних змін (хто, яка сутність, яка задача),
+    /// звичайна синхронізація — ні; відмова в праві — ні постановки, ні сліду.
+    /// </summary>
+    /// <remarks>Мутація: прибрати запис журналу в <c>SyncSourceEventsHandler</c> — тест червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Decision", "D-464")]
+    public async Task D464_підтвердження_видалення_пишеться_в_журнал_структурних_змін_а_звичайний_синк_ні()
+    {
+        var now = new DateTime(2026, 10, 31, 12, 0, 0, DateTimeKind.Utc);
+        _clock.UtcNow.Returns(now);
+        _user.CorrelationId.Returns("corr-1");
+
+        await Sync().HandleAsync(EntityId, default);
+        await _audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
+
+        await Sync().HandleAsync(EntityId, default, confirmRemoval: true);
+
+        await _audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r =>
+                r.EntityType == "ext.SourceEntity"
+                && r.EntityId == EntityId
+                && r.Operation == SyncSourceEventsHandler.RemovalConfirmedOperation
+                && r.ChangedByUserId == Actor
+                && r.ChangedAt == now
+                && r.CorrelationId == "corr-1"
+                && r.NewJson!.Contains("job-1", StringComparison.Ordinal)
+                && r.ChangeReason!.Contains("integrationAudit.sourceEventRemovalConfirmed", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+
+        _audit.ClearReceivedCalls();
+        Allow("Integration.View");
+        await Assert.ThrowsAsync<AccessDeniedException>(() => Sync().HandleAsync(EntityId, default, confirmRemoval: true));
+        await _audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
+    }
+
+    private SyncSourceEventsHandler Sync() => new(_sources, _maps, _jobs, _access, _user, _audit, _clock);
 
     private void Allow(string permission)
         => _access.BuildProfileAsync(Actor, Arg.Any<CancellationToken>())
