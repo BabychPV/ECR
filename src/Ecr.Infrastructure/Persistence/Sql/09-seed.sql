@@ -9640,6 +9640,7 @@ USING (VALUES
     ,(N'formulas.disableManualOverrideVerb', N'en', N'Forbid new manual values', 1)
     ,(N'audit.reasonExcelImport', N'en', N'Excel import', 1)
     ,(N'audit.reasonVersionMigration', N'en', N'Template version migration', 1)
+    ,(N'audit.reasonVersionMigrationNoFormula', N'en', N'Template version migration: the cell has no formula in the new version; the value stays as entered data', 1)
     ,(N'import.replacesFormula', N'en', N'Replaces formula', 1)
     ,(N'import.replacesFormulaHint', N'en', N'The value will be saved as a manual value instead of the formula (reason in the log: "Excel import"). Recalculation will not overwrite it.', 1)
     ,(N'import.restoresFormula', N'en', N'Restores formula', 1)
@@ -9824,6 +9825,7 @@ USING (VALUES
     ,(N'sourceEvents.monthColumnWarningHint', N'en', N'Some fields write into month columns. An EF event is written as its own row; calculate monthly totals with template formulas and remove these fields.', 1)
     ,(N'sourceEvents.fieldMonthColumn', N'en', N'Month column: an EF event is written as its own row; calculate monthly totals with template formulas.', 1)
     ,(N'err.ECR-INT-0422.eventMapMonthColumn', N'en', N'Column "{targetColumn}" is a month column. An EF event is written as its own row and processed by the methodology; calculate monthly totals with template formulas.', 1)
+    ,(N'err.ECR-INT-0422.eventRemovalConfirmInvalid', N'en', N'A removal confirmation must name the mapping and the number of rows shown (more than 0), for at most {max} mappings.', 1)
     ,(N'err.ECR-REQ-0422.piEventFilter', N'en', N'The name or element filter is longer than {max} characters.', 1)
     ,(N'audit.eventLabel.PiEventDataExported', N'en', N'PI event data exported', 1)
     -- D465:pi-events ── кінець секції ──
@@ -25128,6 +25130,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'audit.reasonExcelImport', N'kz', N'Excel-ден импорт'),
     (N'audit.reasonVersionMigration', N'ru', N'Перенос на версию шаблона'),
     (N'audit.reasonVersionMigration', N'kz', N'Үлгі нұсқасына көшіру'),
+    (N'audit.reasonVersionMigrationNoFormula', N'ru', N'Перенос на версию шаблона: в новой версии у ячейки нет формулы, значение остаётся введённым'),
+    (N'audit.reasonVersionMigrationNoFormula', N'kz', N'Үлгі нұсқасына көшіру: жаңа нұсқада ұяшықтың формуласы жоқ, мән енгізілген күйінде қалады'),
     (N'import.replacesFormula', N'ru', N'Заменит формулу'),
     (N'import.replacesFormula', N'kz', N'Формуланы ауыстырады'),
     (N'import.replacesFormulaHint', N'ru', N'Значение будет сохранено как ручное вместо формулы (причина в журнале: «Импорт из Excel»). Пересчёт его не перезапишет.'),
@@ -25844,6 +25848,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'sourceEvents.fieldMonthColumn', N'kz', N'Ай бағаны: EF оқиғасы жеке жол ретінде жазылады; айлық қорытындыларды үлгі формулаларымен есептеңіз.'),
     (N'err.ECR-INT-0422.eventMapMonthColumn', N'ru', N'Столбец «{targetColumn}» — столбец месяца. Событие EF записывается отдельной строкой и обрабатывается методикой; месячные итоги считайте формулами шаблона.'),
     (N'err.ECR-INT-0422.eventMapMonthColumn', N'kz', N'«{targetColumn}» бағаны — ай бағаны. EF оқиғасы жеке жол ретінде жазылады және әдістемемен өңделеді; айлық қорытындыларды үлгі формулаларымен есептеңіз.'),
+    (N'err.ECR-INT-0422.eventRemovalConfirmInvalid', N'ru', N'Подтверждение удаления должно называть сопоставление и показанное число строк (больше 0), не более чем для {max} сопоставлений.'),
+    (N'err.ECR-INT-0422.eventRemovalConfirmInvalid', N'kz', N'Жоюды растау салыстыруды және көрсетілген жолдар санын (0-ден көп) атауы керек, ең көбі {max} салыстыру үшін.'),
     (N'err.ECR-REQ-0422.piEventFilter', N'ru', N'Фильтр названия или элемента длиннее {max} символов.'),
     (N'err.ECR-REQ-0422.piEventFilter', N'kz', N'Атау немесе элемент сүзгісі {max} таңбадан ұзын.'),
     (N'audit.eventLabel.PiEventDataExported', N'ru', N'Экспорт данных событий PI'),

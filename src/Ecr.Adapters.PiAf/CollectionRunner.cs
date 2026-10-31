@@ -265,6 +265,18 @@ public sealed partial class CollectionRunner(
             }
 
             accepted = true;
+
+            // ✎ Аудит 31.10 (G5/G6): запасна адреса (може відставати) і відповідь, що не доводить відсутності.
+            if (result.ServedBySecondary && !settings.DeleteMissingOnSecondary)
+            {
+                state.RemovalUnsafe ??= "secondary";
+            }
+
+            if (result.DeletionUnsafe)
+            {
+                state.RemovalUnsafe ??= "unreliable";
+            }
+
             Track(state, result.Points, interval, window);
 
             // ⚠ Успішні точки зберігаються НАВІТЬ при частковій
@@ -970,6 +982,15 @@ public sealed partial class CollectionRunner(
         foreach (var point in points)
         {
             state.Seen.Add(point.Timestamp);
+
+            // ⛔ Аудит 31.10 (G1): мітка ПОЗА запитаним шматком [from, to) — ознака, що джерело віддає час в іншій
+            // шкалі (RTQP без поясу, переозначений як UTC, а насправді місцевий): тоді «чого немає серед міток» —
+            // не те, чого немає в PI, і видалення стирало б незачеплену частину кожного шматка щопрогону. Саме
+            // тлумачення поясу не змінюється — лише видалення за такий шматок не ведеться.
+            if (point.Timestamp < interval.FromUtc || point.Timestamp >= interval.ToUtc)
+            {
+                state.RemovalUnsafe ??= "outOfChunk";
+            }
         }
 
         // ⚠ Запобіжник пам'яті, а не правило: шматок, у якому атрибут має понад стелю міток, видаленню не
@@ -1018,6 +1039,13 @@ public sealed partial class CollectionRunner(
 
         state.Seen = null;
 
+        if (state.RemovalUnsafe is { } unsafeReason)
+        {
+            state.RemovalUnsafe = null;
+            LogRemovalSkipped(log, runId, sourceEntityId, state.Path, unsafeReason, interval.FromUtc, interval.ToUtc);
+            return 0;
+        }
+
         // ⚠ Без токена прогону: видалення — одна коротка інструкція під локом таблиці, мітки вже прочитано, і
         // обрив посеред означав би лише повтор наступного разу.
         var removed = await store
@@ -1032,6 +1060,12 @@ public sealed partial class CollectionRunner(
 
         return removed;
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "CollectionRunner: прогін {RunId} сутності {SourceEntityId}: зниклі точки атрибута {SourcePath} за [{FromUtc}, {ToUtc}) НЕ видалено — відповідь не доводить відсутності ({Reason}: outOfChunk — мітка поза шматком, ймовірно зсув поясу; secondary — запасна адреса, Collection:DeleteMissingOnSecondary; unreliable — пропущені чи лише помилкові елементи). Прочитане збережено (D-462, аудит 31.10).")]
+    private static partial void LogRemovalSkipped(
+        ILogger logger, long runId, int sourceEntityId, string sourcePath, string reason, DateTime fromUtc, DateTime toUtc);
 
     [LoggerMessage(
         Level = LogLevel.Information,

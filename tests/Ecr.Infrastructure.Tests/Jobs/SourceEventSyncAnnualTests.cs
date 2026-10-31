@@ -247,10 +247,21 @@ public sealed partial class SourceEventSyncAnnualTests(SqlServerFixture sql)
         await RunAsync(stand, source, progress: progress);
 
         Assert.Equal(12, (await RowKeysAsync(stand)).Count);
-        Assert.Equal(new SourceEventRemovalBlock(1, 11, 10, 12), SourceEventSyncOutcome.RemovalBlockOf("Succeeded", progress.Last));
+        var block = SourceEventSyncOutcome.RemovalBlockOf("Succeeded", progress.Last)!;
+        Assert.Equal((1, 11, 10, 12), (block.Maps, block.Candidates, block.Limit, block.Linked));
+
+        // ✎ Аудит 31.10 (G3): підтвердження прив'язане до показаного — мапінг і 11 кандидатів.
+        var shown = Assert.Single(block.PerMap!);
+        Assert.Equal(new SourceEventRemovalConfirmation(stand.MapId, 11), shown);
+
+        // Підтвердження ІНШОГО мапінгу чи меншої кількості не відкриває видалення — блок і банер знову.
+        var stale = new CapturingProgress();
+        await RunAsync(stand, source, confirm: [new SourceEventRemovalConfirmation(stand.MapId, 10)], progress: stale);
+        Assert.Equal(12, (await RowKeysAsync(stand)).Count);
+        Assert.NotNull(SourceEventSyncOutcome.RemovalBlockOf("Succeeded", stale.Last));
 
         var confirmed = new CapturingProgress();
-        await RunAsync(stand, source, confirm: true, progress: confirmed);
+        await RunAsync(stand, source, confirm: block.PerMap, progress: confirmed);
 
         Assert.Equal(["EF-E00"], await RowKeysAsync(stand));
         Assert.Equal(11, await RemovedCountAsync(stand));
@@ -446,7 +457,7 @@ public sealed partial class SourceEventSyncAnnualTests(SqlServerFixture sql)
         FakeEventSource source,
         DateTime? from = null,
         DateTime? to = null,
-        bool confirm = false,
+        IReadOnlyList<SourceEventRemovalConfirmation>? confirm = null,
         SourceEventSyncOptions? options = null,
         IJobProgress? progress = null)
     {
@@ -467,7 +478,7 @@ public sealed partial class SourceEventSyncAnnualTests(SqlServerFixture sql)
 
         // ⚠ Без вікна — повна звірка (як розклад і негайний синк); `to` — «зараз» годинника.
         await job.ExecuteAsync(
-            new SourceEventSyncRequest(stand.EntityId, from, to ?? Now, confirm),
+            new SourceEventSyncRequest(stand.EntityId, from, to ?? Now, confirm is { Count: > 0 }, confirm),
             progress ?? Substitute.For<IJobProgress>(),
             CancellationToken.None);
     }

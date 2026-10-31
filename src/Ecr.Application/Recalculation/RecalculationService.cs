@@ -1377,7 +1377,12 @@ public sealed class RecalculationService(
                 "d461-override-marks",
                 async token => new OverrideMarksPresence(
                     await formulaOverrides.AnyForVersionAsync(snapshot.TemplateVersionId, token).ConfigureAwait(false)),
-                ct)
+                ct,
+
+                // ✎ Аудит 31.10 (F3): «позначок немає» — не довше за вікно ревізії й на опублікованій версії: перша
+                // позначка ревізії не піднімає (гонка з вимкненням прапорця), і кешована на години відповідь «немає»
+                // ховала б її від перерахунку. Застаріле «є» коштує лише зайвого читання позначок.
+                shortLived: p => !p.Any)
             .ConfigureAwait(false);
 
         return presence.Any;

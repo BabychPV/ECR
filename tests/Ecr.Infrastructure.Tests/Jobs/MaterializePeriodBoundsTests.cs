@@ -187,6 +187,55 @@ public sealed class MaterializePeriodBoundsTests(SqlServerFixture sql)
         Assert.Empty(coverage.ReceivedCalls());
     }
 
+    /// <summary>
+    /// ✎ Аудит 31.10 (D-462): прогін збору впав ПІСЛЯ того, як частину шматків записано й зниклі точки видалено, —
+    /// матеріалізація вікна однаково ставиться (інакше комірки лишаються зі старими числами, а наступний прогін тих
+    /// точок уже не бачить), а задача падає з тією самою причиною.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: прибрати постановку з гілки винятку в <c>CollectionJob</c> — задач немає, червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-462")]
+    public async Task Збій_прогону_після_запису_однаково_ставить_матеріалізацію_вікна()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+
+        await using var db = builder.CreateContext();
+        await OpenAsync(db, chain.ProjectId, 202601);
+        var stand = await ArrangeSourceAsync(db, chain, fields: 1);
+
+        var runner = Substitute.For<ICollectionRunner>();
+        runner.RunAsync(Arg.Any<int>(), Arg.Any<DateTime>(), Arg.Any<DateTime>(), Arg.Any<IJobProgress>(), Arg.Any<CancellationToken>())
+            .Returns<Task<CollectionRunSummary>>(_ => throw new InvalidOperationException("db went away"));
+
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        var collection = new CollectionJob(
+            runner,
+            db,
+            jobs,
+            new TestClock(Now),
+            Substitute.For<INotificationOutbox>(),
+            new OutboxDispatcher(db, new TestClock(Now), Substitute.For<INotificationSender>()),
+            Substitute.For<IRegistrySyncJob>());
+
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => collection.ExecuteAsync(
+            new CollectionJobRequest(
+                stand.SourceEntityId,
+                new DateTime(2026, 1, 10, 0, 0, 0, DateTimeKind.Utc),
+                new DateTime(2026, 1, 20, 0, 0, 0, DateTimeKind.Utc)),
+            Substitute.For<IJobProgress>(),
+            CancellationToken.None));
+        Assert.Equal("db went away", failure.Message);
+
+        var tasks = jobs.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueAsync))
+            .Select(c => (MaterializeTask)c.GetArguments()[0]!)
+            .ToList();
+        Assert.Equal([chain.TableInstanceId], tasks.Select(t => t.TableInstanceId));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

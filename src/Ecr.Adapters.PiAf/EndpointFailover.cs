@@ -30,6 +30,14 @@ internal sealed partial class EndpointFailover(ILogger log, string transport)
     /// <summary>Джерела, для яких цей екземпляр уже перейшов на запасну адресу.</summary>
     private readonly ConcurrentDictionary<int, bool> onSecondary = new();
 
+    /// <summary>
+    /// ✎ Аудит 31.10 (G5): чи цей екземпляр уже перейшов на запасну адресу джерела — тоді й наступні звернення
+    /// прогону обслуговує вона (перемикання липке). З'єднання, відкрите ще на основній, дає хибне «так» — лише в
+    /// безпечний бік (видалення зниклих точок пропускається).
+    /// </summary>
+    /// <param name="sourceId">Джерело.</param>
+    public bool IsOnSecondary(int sourceId) => onSecondary.ContainsKey(sourceId);
+
     /// <summary>Роль адреси, яка обслужила останнє звернення до джерела; для журналу й тестів.</summary>
     public string? LastServedBy { get; private set; }
 

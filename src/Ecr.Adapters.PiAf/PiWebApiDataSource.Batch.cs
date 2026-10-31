@@ -282,7 +282,10 @@ public sealed partial class PiWebApiDataSource
                 // інтервал у FailedIntervals, як і коли WebId не знайдено.
                 // Сусіди з того самого запиту від цього не страждають.
                 items[index] = streams.TryGetValue(attribute.WebId!, out var stream) && !Failed(stream)
-                    ? new BatchReadItem(Batch(Points(stream, request.SourcePath, attribute.DefaultUnits), request), null)
+                    ? new BatchReadItem(
+                        Batch(Points(stream, request.SourcePath, attribute.DefaultUnits), request)
+                            with { ServedBySecondary = failover.IsOnSecondary(source.Id) },
+                        null)
                     : new BatchReadItem(Unresolved(request), null);
             }
         }

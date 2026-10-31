@@ -568,6 +568,11 @@ public sealed class MaterializeCollectedDataJob(
                 units ??= await new UnitCatalog(db).GetAsync(ct).ConfigureAwait(false);
             }
 
+            // ✎ Аудит 31.10 (G4): порожнє вікно очищує комірку лише тоді, коли його точки справді видаляли (D-462);
+            // запит — лише для порожнього вікна.
+            var removed = inside.Count == 0
+                && await CollectedFold.RemovedInWindowAsync(db, task.SourceEntityId, field, period, ct).ConfigureAwait(false);
+
             foreach (var map in fieldMaps)
             {
                 // ⚠ `Aggregation` не може бути null: пара «рядок + агрегація»
@@ -578,7 +583,7 @@ public sealed class MaterializeCollectedDataJob(
 
                 var label = $"{field} (map {map.Id.ToString(CultureInfo.InvariantCulture)})";
 
-                var outcome = CollectedFold.FoldMap(kind, map.IsStep, map.SourceUnitId, inside, bounds, period, units);
+                var outcome = CollectedFold.FoldMap(kind, map.IsStep, map.SourceUnitId, inside, bounds, period, units, removed);
 
                 if (outcome.Kind == FoldOutcomeKind.MixedUnits)
                 {

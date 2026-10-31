@@ -53,8 +53,18 @@ public interface IFormulaOverrideStore
     public Task ReleaseAsync(IReadOnlyList<CellAddress> addresses, CancellationToken ct);
 
     /// <summary>Ставить/оновлює позначки й знімає їх — у поточній транзакції.</summary>
-    public Task ApplyAsync(
-        IReadOnlyList<CellFormulaOverride> upserts, IReadOnlyList<CellAddress> removals, CancellationToken ct);
+    /// <param name="upserts">Позначки, що ставляться/оновлюються.</param>
+    /// <param name="removals">Позначки, що знімаються.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <param name="allowingFormulaIds">
+    /// ✎ Аудит 31.10 (F3): формули, що мусять ЗАРАЗ (за базою, не за кешованим знімком) дозволяти ручне значення, щоб
+    /// <paramref name="upserts"/> лягли; їхні рядки <c>cfg.FormulaDef</c> блокуються спільно до коміту — перемикач
+    /// прапорця або чекає на коміт правки, або правка бачить уже вимкнений прапорець. <c>null</c> — без перевірки.
+    /// </param>
+    /// <returns><c>false</c> — хоч одна формула вже не дозволяє: НІЧОГО не записано (викликач відмовляє).</returns>
+    public Task<bool> ApplyAsync(
+        IReadOnlyList<CellFormulaOverride> upserts, IReadOnlyList<CellAddress> removals, CancellationToken ct,
+        IReadOnlyCollection<int>? allowingFormulaIds = null);
 }
 
 /// <summary>Формула шаблону з погляду «ручного значення»: де вона рахує і чи дозволяє ручне значення.</summary>

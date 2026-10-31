@@ -39,12 +39,17 @@ public sealed class SyncSourceEventsHandler(
     /// <summary>Ставить синхронізацію; повертає ідентифікатор задачі (наявної чи нової).</summary>
     /// <param name="sourceEntityId">Сутність-шаблон подій.</param>
     /// <param name="ct">Скасування.</param>
-    /// <param name="confirmRemoval">
+    /// <param name="confirmRemovals">
     /// Підтвердити масове видалення зниклих подій, заблоковане лімітом «повної звірки». Право те саме
-    /// (<c>Integration.Manage</c>); D-464: віддає контролер (<c>?confirmRemoval=true</c>), слід — у журналі.
+    /// (<c>Integration.Manage</c>); D-464: віддає контролер, слід — у журналі. ✎ Аудит 31.10 (G3): не голий прапор, а
+    /// те, що людина бачила, — мапінг і кількість кандидатів (<c>eventRemovalBlocked.perMap</c>); порожньо — звичайний синк.
     /// </param>
-    public async Task<string> HandleAsync(int sourceEntityId, CancellationToken ct, bool confirmRemoval = false)
+    public async Task<string> HandleAsync(
+        int sourceEntityId, CancellationToken ct, IReadOnlyList<SourceEventRemovalConfirmation>? confirmRemovals = null)
     {
+        var confirmations = Confirmations(confirmRemovals);
+        var confirmRemoval = confirmations.Count > 0;
+
         await PermissionCheck
             .RequireAsync(access, currentUser, SaveDataSourceHandler.Permission, ct)
             .ConfigureAwait(false);
@@ -74,7 +79,8 @@ public sealed class SyncSourceEventsHandler(
         var jobId = await jobs
             .EnqueueCoalescedAsync<ISourceEventSyncJob>(
                 confirmRemoval ? SourceEventSyncTarget.OfConfirmed(sourceEntityId) : SourceEventSyncTarget.Of(sourceEntityId),
-                new SourceEventSyncRequest(sourceEntityId, ConfirmRemoval: confirmRemoval),
+                new SourceEventSyncRequest(
+                    sourceEntityId, ConfirmRemoval: confirmRemoval, ConfirmedRemovals: confirmRemoval ? confirmations : null),
                 ct,
                 currentUser.UserId)
             .ConfigureAwait(false);
@@ -92,7 +98,14 @@ public sealed class SyncSourceEventsHandler(
                     sourceEntityId,
                     RemovalConfirmedOperation,
                     oldJson: null,
-                    newJson: System.Text.Json.JsonSerializer.Serialize(new { sourceEntityId, entity = entity.Code, jobId }),
+                    newJson: System.Text.Json.JsonSerializer.Serialize(
+                        new
+                        {
+                            sourceEntityId,
+                            entity = entity.Code,
+                            jobId,
+                            maps = confirmations.Select(c => new { mapId = c.MapId, candidates = c.Candidates }),
+                        }),
                     IntegrationConfigAudit.Reason(
                         "integrationAudit.sourceEventRemovalConfirmed", ("entity", entity.Code), ("job", jobId)),
                     ct)
@@ -100,5 +113,32 @@ public sealed class SyncSourceEventsHandler(
         }
 
         return jobId;
+    }
+
+    /// <summary>
+    /// ✎ Аудит 31.10 (G3): перелік підтверджень — мапінг і кандидати &gt; 0, по одному на мапінг (найбільше з повторів
+    /// НЕ береться — береться перше: людина підтверджує те, що бачила), не більше
+    /// <see cref="SourceEventSyncOutcome.MaxConfirmations"/>; інакше <c>422 ECR-INT-0422.eventRemovalConfirmInvalid</c>.
+    /// </summary>
+    private static List<SourceEventRemovalConfirmation> Confirmations(IReadOnlyList<SourceEventRemovalConfirmation>? input)
+    {
+        if (input is not { Count: > 0 })
+        {
+            return [];
+        }
+
+        if (input.Count > SourceEventSyncOutcome.MaxConfirmations || input.Any(c => c is null || c.MapId <= 0 || c.Candidates <= 0))
+        {
+            throw new BusinessRuleException(
+                "ECR-INT-0422",
+                "Підтвердження масового видалення має називати мапінг і кількість кандидатів (> 0).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0422.eventRemovalConfirmInvalid",
+                    ["max"] = SourceEventSyncOutcome.MaxConfirmations.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+
+        return [.. input.GroupBy(c => c.MapId).Select(g => g.First())];
     }
 }

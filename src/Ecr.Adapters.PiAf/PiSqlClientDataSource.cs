@@ -238,11 +238,14 @@ public sealed partial class PiSqlClientDataSource(
 
         var (element, attribute) = Split(request.SourcePath);
 
-        return await WithConnectionAsync(
+        var result = await WithConnectionAsync(
                 source,
                 connection => ReadPageAsync(connection, source, request, queryText, element, attribute, ct),
                 ct)
             .ConfigureAwait(false);
+
+        // ✎ Аудит 31.10 (G5): відповідь запасної адреси — не доказ відсутності точок (видалення зниклих — збирач).
+        return result with { ServedBySecondary = Failover.IsOnSecondary(source.Id) };
     }
 
     /// <summary>Одна сторінка значень атрибута відкритим з'єднанням (D-462: з'єднання — з оренди).</summary>

@@ -358,6 +358,12 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
 
         SET @deleted = @@ROWCOUNT;
 
+        -- ✎ Аудит 31.10 (G4): позначка «точки цього інтервалу видалено» — тією самою транзакцією; лише вона дозволяє
+        -- матеріалізації очистити комірку, у вікні якої не лишилося точок (`CollectionCoverage.PointsRemoved`).
+        IF @deleted > 0
+            INSERT itg.CollectionCoverage (SourceEntityId, CoveredFrom, CoveredTo, CollectionRunId, PeriodKey, [Status], Details)
+            VALUES (@entity, @from, @to, NULL, NULL, N'{CollectionCoverage.PointsRemoved}', @path);
+
         COMMIT TRANSACTION;
         """;
 

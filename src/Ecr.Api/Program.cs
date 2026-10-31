@@ -64,7 +64,8 @@ builder.Services.AddExcelAdapters();
 builder.Services.AddPiAfAdapters(
     Ecr.Adapters.PiAf.CollectionRunnerOptions.From(
         builder.Configuration[Ecr.Adapters.PiAf.CollectionRunnerOptions.ChunkDaysKey],
-        builder.Configuration[Ecr.Adapters.PiAf.CollectionRunnerOptions.DeleteMissingPointsKey]),
+        builder.Configuration[Ecr.Adapters.PiAf.CollectionRunnerOptions.DeleteMissingPointsKey],
+        builder.Configuration[Ecr.Adapters.PiAf.CollectionRunnerOptions.DeleteMissingOnSecondaryKey]),
     new Ecr.Adapters.PiAf.PiSqlClientOptions(
         builder.Configuration.GetValue<int?>(Ecr.Adapters.PiAf.PiSqlClientOptions.CommandTimeoutSecondsKey),
         builder.Configuration.GetValue<int?>(Ecr.Adapters.PiAf.PiSqlClientOptions.EventQueryTimeoutSecondsKey)));

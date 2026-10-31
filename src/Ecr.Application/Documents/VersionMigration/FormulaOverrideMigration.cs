@@ -22,6 +22,12 @@ public static class FormulaOverrideMigration
     /// <summary>Причина рядків журналу, коли перенос повертає формулу.</summary>
     public const string Reason = "Version migration";
 
+    /// <summary>
+    /// ✎ Аудит 31.10 (F2): причина рядка журналу, коли в цільовій версії комірку більше не рахує жодна формула —
+    /// позначка знімається, а значення лишається ЗВИЧАЙНИМ введеним (<c>IsCalculated = 0</c>).
+    /// </summary>
+    public const string UnformulatedReason = "Version migration: no formula";
+
     /// <summary>Вид пункту звіту.</summary>
     public const string ItemKind = "OverrideLost";
 
@@ -59,6 +65,13 @@ public static class FormulaOverrideMigration
                 policies[table.Id] = policy = FormulaOverridePolicy.For(table);
             }
 
+            // ✎ Аудит 31.10 (F2): комірку в цільовій версії не рахує жодна формула — це не втрата ручного значення, а
+            // звичайне введене значення (<see cref="Unformulated"/>); повертати їй <c>IsCalculated = 1</c> не можна.
+            if (policy.FormulaOf(mark.RowKey, column) is null && !column.IsComputed)
+            {
+                continue;
+            }
+
             if (!policy.Allows(mark.RowKey, column))
             {
                 lost.Add(mark);
@@ -66,6 +79,51 @@ public static class FormulaOverrideMigration
         }
 
         return lost;
+    }
+
+    /// <summary>
+    /// ✎ Аудит 31.10 (F2): позначки, чию комірку в ЦІЛЬОВІЙ версії не рахує жодна формула (колонка вводу без формули
+    /// колонки чи комірки). Позначка знімається, значення лишається звичайним введеним (<c>IsCalculated = 0</c>);
+    /// журнал — причина <see cref="UnformulatedReason"/>. Не <c>OverrideLost</c>: значення не замінює формула.
+    /// </summary>
+    /// <param name="marks">Позначки проєкту.</param>
+    /// <param name="targetColumnOf">Колонка цільової версії для колонки позначки; <c>null</c> — відповідника немає.</param>
+    /// <param name="target">Знімок цільової версії.</param>
+    public static List<ProjectFormulaOverride> Unformulated(
+        IReadOnlyList<ProjectFormulaOverride> marks,
+        Func<int, int?> targetColumnOf,
+        TemplateVersionSnapshot target)
+    {
+        ArgumentNullException.ThrowIfNull(marks);
+        ArgumentNullException.ThrowIfNull(targetColumnOf);
+        ArgumentNullException.ThrowIfNull(target);
+
+        var policies = new Dictionary<int, FormulaOverridePolicy>();
+        var tables = target.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
+        var result = new List<ProjectFormulaOverride>();
+
+        foreach (var mark in marks)
+        {
+            if (targetColumnOf(mark.Address.ColumnDefId) is not { } columnId
+                || !target.ColumnsById.TryGetValue(columnId, out var column)
+                || column.IsComputed
+                || !tables.TryGetValue(column.TableDefId, out var table))
+            {
+                continue;
+            }
+
+            if (!policies.TryGetValue(table.Id, out var policy))
+            {
+                policies[table.Id] = policy = FormulaOverridePolicy.For(table);
+            }
+
+            if (policy.FormulaOf(mark.RowKey, column) is null)
+            {
+                result.Add(mark);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>Пункти звіту: по одному на колонку вихідної версії (шлях <c>SHEET.TABLE.COLUMN</c>) з кількістю.</summary>

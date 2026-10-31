@@ -80,7 +80,11 @@ public sealed class CellSourceStore(EcrDbContext db, Ecr.Application.Ports.IUnit
             catalog = await units.GetAsync(ct).ConfigureAwait(false);
         }
 
-        var outcome = Jobs.CollectedFold.FoldMap(kind, map.IsStep, map.SourceUnitId, inside, bounds, range, catalog);
+        // ✎ Аудит 31.10 (G4): «очищено» — лише коли точки вікна справді видаляли (те саме правило, що в матеріалізації).
+        var removed = inside.Count == 0
+            && await Jobs.CollectedFold.RemovedInWindowAsync(db, map.SourceEntityId, map.SourcePath, range, ct).ConfigureAwait(false);
+
+        var outcome = Jobs.CollectedFold.FoldMap(kind, map.IsStep, map.SourceUnitId, inside, bounds, range, catalog, removed);
         switch (outcome.Kind)
         {
             case Jobs.FoldOutcomeKind.MixedUnits:

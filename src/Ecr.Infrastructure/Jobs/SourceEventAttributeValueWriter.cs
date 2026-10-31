@@ -78,6 +78,30 @@ public static class SourceEventAttributeValueWriter
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
+    /// <summary>
+    /// ✎ Аудит 31.10 (G7): знімає значення зв'язків, які прогін знімає без рядка, — у ПОТОЧНІЙ транзакції контексту
+    /// (тій самій, що видаляє самі зв'язки), одна команда.
+    /// </summary>
+    /// <param name="db">Контекст задачі.</param>
+    /// <param name="linkIds">Зв'язки.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки значень знято.</returns>
+    public static async Task<int> DropAsync(EcrDbContext db, IReadOnlyCollection<long> linkIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(linkIds);
+
+        var ids = linkIds.Where(id => id > 0).Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return 0;
+        }
+
+        await using var command = await CommandAsync(db, DropSql, ct).ConfigureAwait(false);
+        command.Parameters.Add("@links", SqlDbType.NVarChar, -1).Value = JsonSerializer.Serialize(ids, Json);
+        return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
     /// <summary>Записує прочитане й знімає значення видалених зв'язків.</summary>
     /// <param name="db">Контекст задачі (його з'єднання).</param>
     /// <param name="readings">Зв'язки з подіями цього прогону; повтор зв'язку — береться останній.</param>

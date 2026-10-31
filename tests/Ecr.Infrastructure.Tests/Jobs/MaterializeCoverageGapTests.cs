@@ -154,8 +154,13 @@ public sealed class MaterializeCoverageGapTests(SqlServerFixture sql)
         var (db, chain, stand) = await ArrangeAsync(AggregationKind.Sum);
         await using var _ = db;
 
-        // У січні жодної точки (лише лютий).
-        await PointsAsync(db, stand.SourceEntityId, [(stand.Field, JanEndUtc.AddHours(1), 5m, "Good")]);
+        // Січнева точка була, і джерело її більше не віддає: видалення зниклих (D-462) лишає в січні нуль точок
+        // (лише лютий) і позначку видалення.
+        await PointsAsync(
+            db, stand.SourceEntityId,
+            [(stand.Field, JanStartUtc.AddDays(3), 7m, "Good"), (stand.Field, JanEndUtc.AddHours(1), 5m, "Good")]);
+        Assert.Equal(1, await new CollectionStore(db, new TestClock(AfterJanuary))
+            .DeleteMissingRawPointsAsync(stand.SourceEntityId, stand.Field, JanStartUtc, JanEndUtc, [], CancellationToken.None));
 
         var patcher = RecordingPatcher();
         var coverage = Substitute.For<ICoverageJournal>();
@@ -164,6 +169,31 @@ public sealed class MaterializeCoverageGapTests(SqlServerFixture sql)
 
         Assert.Null(Assert.Single(Written(patcher)).Value);
         Assert.DoesNotContain(Events(coverage), e => e.Status == CollectionCoverage.SkippedNoData);
+    }
+
+    /// <remarks>
+    /// ✎ Аудит 31.10 (G4): у вікні точок НЕ БУЛО ніколи (новий мапінг на комірці з числом, місяць поза наздоганянням) —
+    /// це «немає даних», а не «видалено в PI»: комірку не очищено. МУТАЦІЯ: не вимагати позначки видалення в
+    /// <c>CollectedFold.FoldMap</c> — комірку очищено, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-462")]
+    public async Task Поле_у_вікні_якого_точок_не_було_ніколи_не_очищує_комірку()
+    {
+        var (db, chain, stand) = await ArrangeAsync(AggregationKind.Sum);
+        await using var _ = db;
+
+        await PointsAsync(db, stand.SourceEntityId, [(stand.Field, JanEndUtc.AddHours(1), 5m, "Good")]);
+
+        var patcher = RecordingPatcher();
+        var coverage = Substitute.For<ICoverageJournal>();
+
+        await RunAsync(db, chain, stand, patcher, coverage, AfterJanuary);
+
+        Assert.Empty(Written(patcher));
+        Assert.Contains(Events(coverage), e => e.Status == CollectionCoverage.SkippedNoData);
     }
 
     [Theory]

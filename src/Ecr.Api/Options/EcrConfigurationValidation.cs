@@ -151,6 +151,9 @@ public static partial class EcrConfigurationValidation
 
         // D-462: видалення сирих точок, яких PI більше не віддає (повністю перечитаний шматок вікна).
         Ecr.Adapters.PiAf.CollectionRunnerOptions.DeleteMissingPointsKey,
+
+        // ✎ Аудит 31.10 (G5): видаляти зниклі точки й за відповіддю запасної адреси (типово false).
+        Ecr.Adapters.PiAf.CollectionRunnerOptions.DeleteMissingOnSecondaryKey,
         Ecr.Api.Startup.StaleMapWarmService.EnabledKey,
         "Jobs:NightlyRecalculation:Enabled",
         "Logging:File:Json",

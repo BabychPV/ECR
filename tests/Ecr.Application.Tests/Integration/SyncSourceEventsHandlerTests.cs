@@ -85,17 +85,28 @@ public sealed class SyncSourceEventsHandlerTests
     public async Task Підтвердження_масового_видалення_ставить_прапор_у_payload_на_власну_ціль_і_лише_з_правом_Manage()
     {
         Allow("Integration.View");
-        await Assert.ThrowsAsync<AccessDeniedException>(() => Sync().HandleAsync(EntityId, default, confirmRemoval: true));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => Sync().HandleAsync(EntityId, default, Shown));
         await _jobs.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<ISourceEventSyncJob>(default!, default, default);
 
         Allow("Integration.Manage");
-        await Sync().HandleAsync(EntityId, default, confirmRemoval: true);
+        await Sync().HandleAsync(EntityId, default, Shown);
 
+        // ✎ Аудит 31.10 (G3): payload несе ПОКАЗАНЕ — мапінг і кандидатів, не голий прапор.
         await _jobs.Received(1).EnqueueCoalescedAsync<ISourceEventSyncJob>(
             "source-events-e5-confirm",
-            Arg.Is<object?>(p => p is SourceEventSyncRequest && ((SourceEventSyncRequest)p).ConfirmRemoval),
+            Arg.Is<object?>(p => p is SourceEventSyncRequest
+                                 && ((SourceEventSyncRequest)p).ConfirmRemoval
+                                 && ((SourceEventSyncRequest)p).ConfirmedRemovals!.Single() == Shown[0]),
             Arg.Any<CancellationToken>(),
             Actor);
+
+        // Підтвердження без мапінгу чи з нулем кандидатів — 422, нічого не поставлено.
+        _jobs.ClearReceivedCalls();
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sync().HandleAsync(EntityId, default, [new SourceEventRemovalConfirmation(0, 3)]));
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Sync().HandleAsync(EntityId, default, [new SourceEventRemovalConfirmation(12, 0)]));
+        await _jobs.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<ISourceEventSyncJob>(default!, default, default);
 
         // Звичайна постановка прапора не несе (розклад і збір його не ставлять).
         await Sync().HandleAsync(EntityId, default);
@@ -123,7 +134,7 @@ public sealed class SyncSourceEventsHandlerTests
         await Sync().HandleAsync(EntityId, default);
         await _audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
 
-        await Sync().HandleAsync(EntityId, default, confirmRemoval: true);
+        await Sync().HandleAsync(EntityId, default, Shown);
 
         await _audit.Received(1).WriteStructureChangeAsync(
             Arg.Is<StructureChangeRecord>(r =>
@@ -139,9 +150,12 @@ public sealed class SyncSourceEventsHandlerTests
 
         _audit.ClearReceivedCalls();
         Allow("Integration.View");
-        await Assert.ThrowsAsync<AccessDeniedException>(() => Sync().HandleAsync(EntityId, default, confirmRemoval: true));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => Sync().HandleAsync(EntityId, default, Shown));
         await _audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
     }
+
+    /// <summary>Блок, який людина бачила: мапінг 12, 37 кандидатів.</summary>
+    private static readonly SourceEventRemovalConfirmation[] Shown = [new(12, 37)];
 
     private SyncSourceEventsHandler Sync() => new(_sources, _maps, _jobs, _access, _user, _audit, _clock);
 

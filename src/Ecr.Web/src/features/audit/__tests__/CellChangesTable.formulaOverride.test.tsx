@@ -51,6 +51,10 @@ describe('cellChangeReasonText (D-461)', () => {
   it('системні літерали сервера — ключами каталогу, точним збігом', () => {
     expect(cellChangeReasonText('Excel import')).toBe('⟦audit.reasonExcelImport⟧');
     expect(cellChangeReasonText('Version migration')).toBe('⟦audit.reasonVersionMigration⟧');
+    // ✎ Аудит 31.10 (F2): перенос на версію, де комірку не рахує жодна формула.
+    expect(cellChangeReasonText('Version migration: no formula')).toBe(
+      '⟦audit.reasonVersionMigrationNoFormula⟧',
+    );
   });
 
   it('причина людини (навіть схожа на літерал) — як є; порожньої немає', () => {

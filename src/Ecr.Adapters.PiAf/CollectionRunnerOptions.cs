@@ -11,13 +11,20 @@ namespace Ecr.Adapters.PiAf;
 /// <param name="DeleteMissingPoints">
 /// Чи видаляти сирі точки, яких джерело не віддало за ПОВНІСТЮ прочитаний шматок запитаного діапазону.
 /// </param>
+/// <param name="DeleteMissingOnSecondary">
+/// ✎ Аудит 31.10 (G5): чи видаляти зниклі точки й тоді, коли шматок обслужила ЗАПАСНА адреса (може відставати);
+/// типово <c>false</c>.
+/// </param>
 /// <remarks>
 /// ⚠ Ключі читає <c>Program.cs</c> і передає в <see cref="DependencyInjection.AddPiAfAdapters"/>: адаптер не
 /// бере залежності від конфігурації, як і решта його налаштувань (секрети — за іменем, запити — через
 /// <c>ISecretProvider</c>).
 /// </remarks>
-public sealed record CollectionRunnerOptions(TimeSpan? ChunkSize, bool DeleteMissingPoints)
+public sealed record CollectionRunnerOptions(TimeSpan? ChunkSize, bool DeleteMissingPoints, bool DeleteMissingOnSecondary = false)
 {
+    /// <summary>Ключ перемикача видалення зниклих точок за відповіддю запасної адреси (G5).</summary>
+    public const string DeleteMissingOnSecondaryKey = "Collection:DeleteMissingOnSecondary";
+
     /// <summary>Ключ довжини шматка в добах; <c>0</c> — без нарізки.</summary>
     public const string ChunkDaysKey = "Collection:ChunkDays";
 
@@ -53,9 +60,10 @@ public sealed record CollectionRunnerOptions(TimeSpan? ChunkSize, bool DeleteMis
     /// <summary>Налаштування з рядкових значень конфігурації; порожнє — типове.</summary>
     /// <param name="chunkDays">Значення <see cref="ChunkDaysKey"/>.</param>
     /// <param name="deleteMissingPoints">Значення <see cref="DeleteMissingPointsKey"/>.</param>
+    /// <param name="deleteMissingOnSecondary">Значення <see cref="DeleteMissingOnSecondaryKey"/>; порожнє — <c>false</c>.</param>
     /// <returns>Налаштування збирача.</returns>
     /// <exception cref="FormatException">Значення не читається (перевірку старту обійдено).</exception>
-    public static CollectionRunnerOptions From(string? chunkDays, string? deleteMissingPoints)
+    public static CollectionRunnerOptions From(string? chunkDays, string? deleteMissingPoints, string? deleteMissingOnSecondary = null)
     {
         var days = string.IsNullOrWhiteSpace(chunkDays)
             ? DefaultChunkDays
@@ -63,6 +71,8 @@ public sealed record CollectionRunnerOptions(TimeSpan? ChunkSize, bool DeleteMis
 
         var delete = string.IsNullOrWhiteSpace(deleteMissingPoints) || bool.Parse(deleteMissingPoints);
 
-        return new(days > 0 ? TimeSpan.FromDays(days) : null, delete);
+        var onSecondary = !string.IsNullOrWhiteSpace(deleteMissingOnSecondary) && bool.Parse(deleteMissingOnSecondary);
+
+        return new(days > 0 ? TimeSpan.FromDays(days) : null, delete, onSecondary);
     }
 }

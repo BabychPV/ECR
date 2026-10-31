@@ -103,10 +103,13 @@ public sealed class SourceEventsController(
     /// «Отримати з PI зараз»: ставить синхронізацію подій сутності в чергу. Право <c>Integration.Manage</c>.
     /// </summary>
     /// <param name="id">Сутність-шаблон подій.</param>
-    /// <param name="confirmRemoval">
+    /// <param name="body">
     /// D-464: підтвердити масове видалення зниклих у PI подій, заблоковане лімітом «повної звірки»
-    /// (<c>max(10, 20 %)</c>, не більше 200 за мапінг; <c>JobStatus.eventRemovalBlocked</c> попереднього прогону).
-    /// Право те саме, слід — у журналі структурних змін (<c>SourceEventRemovalConfirmed</c>).
+    /// (<c>max(10, 20 %)</c>, не більше 200 за мапінг, усі рядки вікна — завжди; <c>JobStatus.eventRemovalBlocked</c>
+    /// попереднього прогону). ✎ Аудит 31.10 (G3): <c>confirmRemovals</c> — мапінги й кандидати з
+    /// <c>eventRemovalBlocked.perMap</c>, тобто саме те, що людина бачила; задача видаляє понад ліміт лише в них і
+    /// лише коли кандидатів не більше. Порожнє тіло — звичайний синк. Право те саме, слід — у журналі структурних змін
+    /// (<c>SourceEventRemovalConfirmed</c>).
     /// </param>
     /// <param name="ct">Скасування.</param>
     /// <remarks>
@@ -119,10 +122,13 @@ public sealed class SourceEventsController(
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public async Task<IActionResult> Sync(int id, [FromQuery] bool confirmRemoval, CancellationToken ct)
+    public async Task<IActionResult> Sync(
+        int id,
+        [FromBody] Contracts.SourceEventSyncBody? body,
+        CancellationToken ct)
     {
         // ⚠ 202 з jobId (сторож ApiConventionTests читає саме літерал у тілі дії).
-        var jobId = await sync.HandleAsync(id, ct, confirmRemoval).ConfigureAwait(false);
+        var jobId = await sync.HandleAsync(id, ct, body?.ConfirmRemovals).ConfigureAwait(false);
 
         return Accepted(new Contracts.JobAcceptedResponse(jobId));
     }
