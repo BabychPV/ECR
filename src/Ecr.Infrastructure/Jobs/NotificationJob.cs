@@ -137,6 +137,7 @@ public sealed class NotificationJob(
             .Where(c => c.Status != null
                         && c.CoveredFrom >= since
                         && c.Status != CollectionCoverage.ConflictKeptManual
+                        && c.Status != CollectionCoverage.PointsRemoved
                         && c.Status != CollectionCoverage.RegistryAutoCreated)
             .GroupBy(c => new { c.SourceEntityId, c.PeriodKey, c.Status })
             .Select(g => new

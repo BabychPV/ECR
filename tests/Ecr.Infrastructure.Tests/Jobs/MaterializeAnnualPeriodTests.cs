@@ -68,12 +68,15 @@ public sealed class MaterializeAnnualPeriodTests(SqlServerFixture sql)
         var stand = await ArrangeAsync();
         await using var _ = stand;
 
-        // Березень видалено в джерелі в усіх полях.
+        // Березень видалено в джерелі в усіх полях: точки були, видалення зниклих (D-462) їх зняло й лишило
+        // позначку (✎ аудит 31.10, G4 — без неї порожній місяць не очищується).
+        var marchFrom = new DateTime(2026, 2, 28, 19, 0, 0, DateTimeKind.Utc);
+        var marchTo = new DateTime(2026, 3, 31, 19, 0, 0, DateTimeKind.Utc);
+        var store = new CollectionStore(stand.Db, new TestClock(AfterYear));
         foreach (var field in stand.Fields.Values)
         {
-            await PointsAsync(
-                stand.Db, stand.EntityId, field,
-                Enumerable.Range(0, 8760).Select(h => YearStartUtc.AddHours(h)).Where(t => t.AddHours(5).Month != 3));
+            await PointsAsync(stand.Db, stand.EntityId, field, Enumerable.Range(0, 8760).Select(h => YearStartUtc.AddHours(h)));
+            Assert.Equal(31 * 24, await store.DeleteMissingRawPointsAsync(stand.EntityId, field, marchFrom, marchTo, [], CancellationToken.None));
         }
 
         var written = await RunAsync(stand, new DbCommandCounter());

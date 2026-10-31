@@ -44,6 +44,30 @@ internal static class CollectedFold
             .Select(p => new PointRow(p.Timestamp, p.ValueNumeric, p.Quality, p.UnitId))
             .ToListAsync(ct);
 
+    /// <summary>
+    /// ✎ Аудит 31.10 (G4): чи видаляли за вікно зниклі в джерелі точки поля (позначка
+    /// <see cref="Domain.Entities.Integration.CollectionCoverage.PointsRemoved"/>, яку пише видалення).
+    /// </summary>
+    /// <remarks>⚠ Викликається лише для ПОРОЖНЬОГО вікна: звичайна згортка звернень не додає.</remarks>
+    /// <param name="db">Контекст.</param>
+    /// <param name="sourceEntityId">Сутність.</param>
+    /// <param name="field">Шлях поля.</param>
+    /// <param name="range">Вікно згортки.</param>
+    /// <param name="ct">Скасування.</param>
+    public static Task<bool> RemovedInWindowAsync(
+        EcrDbContext db, int sourceEntityId, string field, Domain.Entities.Documents.Period.UtcRange range,
+        CancellationToken ct)
+        => db.CollectionCoverages
+            .AsNoTracking()
+            .AnyAsync(
+                c => c.SourceEntityId == sourceEntityId
+                     && c.Status == Domain.Entities.Integration.CollectionCoverage.PointsRemoved
+                     && c.PeriodKey == null
+                     && c.Details == field
+                     && c.CoveredFrom < range.EndUtc
+                     && c.CoveredTo > range.StartUtc,
+                ct);
+
     /// <summary>Межові точки для згортки за часом: остання ДО вікна й перша НА чи ПІСЛЯ кінця.</summary>
     /// <remarks>
     /// ⚠ Межові точки беруться без фільтра якості: погана межова точка робить
@@ -83,6 +107,10 @@ internal static class CollectedFold
     /// <param name="bounds">Межові точки (лише для згорток за часом).</param>
     /// <param name="range">Вікно.</param>
     /// <param name="units">Довідник одиниць для межових точок іншої одиниці (Y1-01); може бути <c>null</c>.</param>
+    /// <param name="pointsRemoved">
+    /// ✎ Аудит 31.10 (G4): у вікні справді ВИДАЛЯЛИ зниклі в джерелі точки (<see cref="RemovedInWindowAsync"/>). Лише
+    /// тоді порожнє вікно — «очистити»; інакше — «немає даних» (комірку не чіпати).
+    /// </param>
     public static FoldOutcome FoldMap(
         AggregationKind kind,
         bool isStep,
@@ -90,7 +118,8 @@ internal static class CollectedFold
         IReadOnlyList<PointRow> inside,
         Bounds bounds,
         Domain.Entities.Documents.Period.UtcRange range,
-        UnitCatalogSnapshot? units)
+        UnitCatalogSnapshot? units,
+        bool pointsRemoved = false)
     {
         ArgumentNullException.ThrowIfNull(inside);
 
@@ -106,7 +135,8 @@ internal static class CollectedFold
         var series = IsTimeFold(kind) ? TimeSeries(bounds, inside, sourceUnitId, units) : points;
 
         // ⛔ D-462: у вікні НЕ лишилося жодної сирої точки (джерело видалило всі) — комірку очищують.
-        if (inside.Count == 0 && (series.Count == 0
+        // ✎ Аудит 31.10 (G4): лише коли точки вікна справді видаляли; «не було ніколи» — не «видалено».
+        if (pointsRemoved && inside.Count == 0 && (series.Count == 0
                 || PeriodFold.Fold(kind, series, range.StartUtc, range.EndUtc, isStep, maxGap: null).Value is null))
         {
             return new FoldOutcome(FoldOutcomeKind.Clear, null, null);
