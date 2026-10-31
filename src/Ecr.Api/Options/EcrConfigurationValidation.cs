@@ -88,6 +88,7 @@ public static partial class EcrConfigurationValidation
         ("Registries:ExportMaxRows", 1),
         ("Campaign:AtRiskDays", 0),
         ("Integration:CatalogTimeoutSeconds", 1),
+        ("Integration:RawDataExportMaxRows", 1), // D-463: нуль — кожен експорт «Даних з PI» відмовою, а не «без стелі».
 
         // D-462: 0 — без нарізки (інтервал цілком); від'ємне — помилка. Тайм-аут команди ODBC — від секунди.
         (Ecr.Adapters.PiAf.CollectionRunnerOptions.ChunkDaysKey, 0),

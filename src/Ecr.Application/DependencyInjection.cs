@@ -496,6 +496,10 @@ public static class DependencyInjection
         // Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
         services.AddScoped<Sources.PreviewMappingHandler>();
 
+        // D-463: «Дані з PI» (адміністратор інтеграції) і «Звідки це значення» (комірка документа).
+        services.AddScoped<Integration.RawData.RawDataHandler>();
+        services.AddScoped<Integration.RawData.CellSourceHandler>();
+
         // Заведення мапінгу поля джерела (Прогалина 1 директиви паритету).
         services.AddScoped<Sources.CreateEntityFieldMapHandler>();
 

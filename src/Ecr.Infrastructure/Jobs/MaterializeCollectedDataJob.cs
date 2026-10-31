@@ -200,7 +200,6 @@ public sealed class MaterializeCollectedDataJob(
         await progress.ReportKeyAsync(30, "jobs.materializeFolding", ct).ConfigureAwait(false);
 
         var zone = SiteTimeZone.Create(period.TimeZoneId).ToTimeZoneInfo();
-        var bounds = Domain.Entities.Documents.Period.UtcBounds(period.PeriodStart, period.PeriodEnd, zone);
 
         // ⛔ D-462 (річні періоди з місяцями в колонках): колонка місяця m згортає точки лише МІСЯЦЯ m усередині
         // періоду, а не всього періоду. Доти мапінг на `M3` річного періоду отримував суму за рік. Місяць поза
@@ -214,20 +213,13 @@ public sealed class MaterializeCollectedDataJob(
             .ToDictionaryAsync(c => c.Id, c => (int)c.MonthNumber!.Value, ct)
             .ConfigureAwait(false);
 
+        // ⛔ D-463: правило вікна — `Period.FoldBounds`, те саме, яким «Звідки це значення» показує точки комірки.
         Domain.Entities.Documents.Period.UtcRange? RangeOf(EntityFieldMap map)
-        {
-            if (!months.TryGetValue(map.TargetColumnDefId!.Value, out var month) || month is < 1 or > 12)
-            {
-                return bounds;
-            }
-
-            var first = new DateOnly(period.PeriodStart.Year, month, 1);
-            var last = first.AddMonths(1).AddDays(-1);
-            var from = first > period.PeriodStart ? first : period.PeriodStart;
-            var to = last < period.PeriodEnd ? last : period.PeriodEnd;
-
-            return from > to ? null : Domain.Entities.Documents.Period.UtcBounds(from, to, zone);
-        }
+            => Domain.Entities.Documents.Period.FoldBounds(
+                period.PeriodStart,
+                period.PeriodEnd,
+                months.TryGetValue(map.TargetColumnDefId!.Value, out var month) ? month : null,
+                zone);
 
         // ⛔ D2-02: неповне покриття й «немає даних» сигналізуються лише ПІСЛЯ
         // кінця періоду — у відкритому місяці хвіст без точок природний, і подія
@@ -548,21 +540,13 @@ public sealed class MaterializeCollectedDataJob(
             // вони роблять прогалиною відрізки, що на них спираються. Згортки
             // точок бачать лише точки з числом (непридатні за якістю відсіює
             // `PeriodFold`), тож і стеля для них та сама.
-            var needsTime = fieldMaps.Any(m => IsTimeFold(m.Aggregation));
+            var needsTime = fieldMaps.Any(m => CollectedFold.IsTimeFold(m.Aggregation));
 
             // ⚠ `Take(ceiling + 1)`: зайва точка — єдиний дешевий спосіб знати,
             // що ряд ДОВШИЙ за стелю, а не рівно такий.
-            var inside = await db.RawDataPoints
-                .AsNoTracking()
-                .Where(p => p.SourceEntityId == task.SourceEntityId
-                            && p.SourcePath == field
-                            && p.Timestamp >= period.StartUtc
-                            && p.Timestamp < period.EndUtc
-                            && (needsTime || p.ValueNumeric != null))
-                .OrderBy(p => p.Timestamp)
-                .Take(ceiling + 1)
-                .Select(p => new PointRow(p.Timestamp, p.ValueNumeric, p.Quality, p.UnitId))
-                .ToListAsync(ct)
+            // ⛔ D-463: читання, межі й згортка — `CollectedFold`, ті самі, що в «Звідки це значення».
+            var inside = await CollectedFold
+                .LoadInsideAsync(db, task.SourceEntityId, field, period, needsTime, ceiling + 1, ct)
                 .ConfigureAwait(false);
 
             if (inside.Count > ceiling)
@@ -571,25 +555,15 @@ public sealed class MaterializeCollectedDataJob(
                 continue;
             }
 
-            // Згортки точок — лише точки з числом. Якість несе `IsGood`, і
-            // `PeriodFold` відсіює непридатні (HSE301 §4.6, C1-04) так само, як
-            // вікно рядка (`WindowFold`); частка відсіяних — у `PartialCoverage`.
-            var points = inside
-                .Where(p => p.Value is not null)
-                .Select(p => p.ToTimed())
-                .ToList();
-
             // ⛔ HSE301 §4.1: значення на межах періоду інтерполюються з останньої
-            // точки ДО нього й першої НА чи ПІСЛЯ кінця. Без них інтеграл місяця,
-            // де стиснення PI не лишило точок біля опівночі, недораховував би
-            // краї — а подія без точок усередині дала б нуль замість об'єму.
+            // точки ДО нього й першої НА чи ПІСЛЯ кінця.
             var bounds = needsTime
-                ? await BoundsAsync(task.SourceEntityId, field, period, ct).ConfigureAwait(false)
+                ? await CollectedFold.LoadBoundsAsync(db, task.SourceEntityId, field, period, ct).ConfigureAwait(false)
                 : default;
 
-            // ⛔ Y1-01: межова точка старої одиниці джерела переводиться в оголошену (нижче, `Edge`) — для
+            // ⛔ Y1-01: межова точка старої одиниці джерела переводиться в оголошену — для
             // цього потрібен довідник, навіть коли самій згортці він не потрібен.
-            if (fieldMaps.Any(m => IsTimeFold(m.Aggregation) && HasForeignEdge(bounds, m.SourceUnitId)))
+            if (fieldMaps.Any(m => CollectedFold.IsTimeFold(m.Aggregation) && CollectedFold.HasForeignEdge(bounds, m.SourceUnitId)))
             {
                 units ??= await new UnitCatalog(db).GetAsync(ct).ConfigureAwait(false);
             }
@@ -602,42 +576,25 @@ public sealed class MaterializeCollectedDataJob(
                     ?? throw new InvalidOperationException(
                         $"Мапінг {map.Id} не називає способу згортання: конфігурація неповна.");
 
-                // ⛔ X3-02 / ФВ-16.10, D-79: точка несе СВОЮ одиницю джерела. Після прийняття нової одиниці
-                // (ФВ-16.9, `AcceptSourceUnitChange`) у періоді можуть лежати точки старої — переведення
-                // всього ряду за ПОТОЧНОЮ одиницею мапінгу дало б тихий ×24 (`Sm3/h` → `Sm3/d`). Змішаний
-                // ряд не згортається: комірка не пишеться, задача відмовляє з переліком (той самий канал,
-                // що й несумісна одиниця). Точка без одиниці (`UnitId = null`) — «нема з чим порівняти»,
-                // як і в `BoundaryUnitConversion.IsDeclaredUnit`.
-                //
-                // ⛔ Y1-01: відмова — лише за точки ВСЕРЕДИНІ періоду. Межові точки (до початку й на/після
-                // кінця) лежать у СУСІДНЬОМУ періоді: збір «з початку періоду», який радить відмова, їх не
-                // перечитує (PI `recorded` без `boundaryType` — `Inside`), і відмова через них не лікувалась
-                // ніколи. Тому межову точку в іншій одиниці переводимо в оголошену (`Edge`).
-                if (HasForeignUnit(inside, map.SourceUnitId))
+                var label = $"{field} (map {map.Id.ToString(CultureInfo.InvariantCulture)})";
+
+                var outcome = CollectedFold.FoldMap(kind, map.IsStep, map.SourceUnitId, inside, bounds, period, units);
+
+                if (outcome.Kind == FoldOutcomeKind.MixedUnits)
                 {
-                    // ⛔ Y4-05: причина - мовонейтральний код, а не українська фраза: рядок іде параметром `{fields}` у
-                    // локалізований текст `boundaryConversionFailed`. Що робити (зібрати період заново), каже відмова.
-                    unitFailures.Add(
-                        $"{field} (map {map.Id.ToString(CultureInfo.InvariantCulture)}): {MixedSourceUnitsReason}");
+                    // ⛔ Y4-05: причина — мовонейтральний код (`boundaryConversionFailed` локалізує).
+                    unitFailures.Add($"{label}: {MixedSourceUnitsReason}");
                     continue;
                 }
 
-                var series = IsTimeFold(kind)
-                    ? TimeSeries(bounds, inside, map.SourceUnitId, units)
-                    : points;
-
-                // ⛔ D-462 (рішення власника продукту): у періоді НЕ лишилося жодної сирої точки поля (джерело
-                // видалило всі) — комірку ОЧИЩУЄМО (порожньо, не 0), а не лишаємо число, якого джерело вже не
-                // підтверджує. Запис — тим самим патчером: правка людини, закритий період, поданий аркуш не
-                // чіпаються (і дають власні події); очищення порожньої комірки — не запис і не перерахунок.
-                if (inside.Count == 0 && (series.Count == 0
-                        || PeriodFold.Fold(kind, series, period.StartUtc, period.EndUtc, map.IsStep, maxGap: null).Value is null))
+                if (outcome.Kind == FoldOutcomeKind.Clear)
                 {
+                    // ⛔ D-462: комірку ОЧИЩУЄМО тим самим патчером (порожньо, не 0).
                     result.Add(new IntegrationCellValue(map.TargetRowKey!, map.TargetColumnDefId!.Value, null));
                     continue;
                 }
 
-                if (series.Count == 0)
+                if (outcome.Folded is not { } folded)
                 {
                     // ⛔ D2-02: не мовчки — після кінця періоду подія «немає даних».
                     if (ended)
@@ -648,198 +605,30 @@ public sealed class MaterializeCollectedDataJob(
                     continue;
                 }
 
-                // ⛔ Згортка винесена в `PeriodFold` і НЕ дублюється: другий її
-                // споживач — попередній перегляд мапінгу (`ФВ-13.14`), і власна
-                // копія там показувала б число, якого ця задача не запише.
-                //
-                // ⚠ `maxGap: null` — порогу прогалини в конфігурації поки немає
-                // (HSE301 §4.1: число обирає викликач із конфігурації, не з коду).
-                var folded = PeriodFold.Fold(kind, series, period.StartUtc, period.EndUtc, map.IsStep, maxGap: null);
-                if (folded.Value is not { } value)
-                {
-                    // `covered == 0` для згортки за часом / жодної придатної точки
-                    // всередині для згортки точок: комірку НЕ чіпаємо (див. подію).
-                    if (ended)
-                    {
-                        noData.Add(new NoDataField(field, map.Id));
-                    }
-
-                    continue;
-                }
-
-                // ⛔ D2-02: число ЗАПИСУЄТЬСЯ (HU-13 Q2, варіант A), але з подією
-                // `PartialCoverage` і часткою покриття — інтеграл лише покритих
-                // відрізків менший за справжній об'єм, і це має бути видно.
-                // Для згорток точок частка — придатні серед точок періоду
-                // (C1-04): відсіяні Bad/Questionable не зникають мовчки.
-                if (ended && folded.PercentGood is { } good && good < MinPercentGood)
+                // ⛔ D2-02: число ЗАПИСУЄТЬСЯ (HU-13 Q2, варіант A), але з подією `PartialCoverage`.
+                if (ended && outcome.PercentGood is { } good && good < MinPercentGood)
                 {
                     partial.Add(new PartialField(field, map.Id, good));
                 }
 
-                // ⛔ ФВ-16.10, HSE301 §4.2: конверсія ПІСЛЯ згортки, одна арифметика
-                // на всю межу (`BoundaryUnitConversion`). Сирі точки лишаються в
-                // одиниці джерела (ФВ-11.7).
-                BoundaryValue boundary;
-                try
-                {
-                    units ??= NeedsCatalog(kind, map)
-                        ? await new UnitCatalog(db).GetAsync(ct).ConfigureAwait(false)
-                        : null;
+                units ??= CollectedFold.NeedsCatalog(kind, map.SourceUnitId, map.TargetUnitId)
+                    ? await new UnitCatalog(db).GetAsync(ct).ConfigureAwait(false)
+                    : null;
 
-                    boundary = units is null
-                        ? BoundaryValue.Unchanged(value)
-                        : BoundaryUnitConversion.ConvertFolded(kind, value, map.SourceUnitId, map.TargetUnitId, units);
-                }
-                catch (Exception ex) when (ex is DomainException or EcrException)
+                var (storable, failure) = CollectedFold.ToStorable(kind, folded, map.SourceUnitId, map.TargetUnitId, units);
+                if (failure is not null)
                 {
-                    // ⛔ Несумісні одиниці (`Sm3` ↔ `m3`) — НЕ тихе число: комірка
-                    // не пишеться, а задача після запису решти полів відмовляє.
-                    unitFailures.Add($"{field} (map {map.Id.ToString(CultureInfo.InvariantCulture)}): {FailureReason.Of(ex)}");
+                    // ⛔ Несумісні одиниці — НЕ тихе число: задача відмовляє після запису решти полів.
+                    unitFailures.Add($"{label}: {failure}");
                     continue;
                 }
 
-                // ⛔ Z1-01: до масштабу сховища — хвіст ділення (Avg, integral/covered, ÷3600)
-                // інакше відхиляє ВЕСЬ батч сутності (`ECR-CELL-0422 tooManyDecimals`).
-                result.Add(new IntegrationCellValue(map.TargetRowKey!, map.TargetColumnDefId!.Value, boundary.Storable));
+                result.Add(new IntegrationCellValue(map.TargetRowKey!, map.TargetColumnDefId!.Value, storable));
             }
         }
 
         return new Aggregation(result, overCeiling, unitFailures, partial, noData);
     }
-
-    /// <summary>Межові точки для згортки за часом: остання ДО періоду й перша НА чи ПІСЛЯ кінця.</summary>
-    /// <remarks>
-    /// ⚠ Межові точки беруться без фільтра якості: погана межова точка робить
-    /// крайній відрізок прогалиною, і це правильніше, ніж перескочити через неї
-    /// до ще давнішої.
-    /// </remarks>
-    private async Task<Bounds> BoundsAsync(
-        int sourceEntityId, string field, Domain.Entities.Documents.Period.UtcRange period, CancellationToken ct)
-    {
-        var before = await db.RawDataPoints
-            .AsNoTracking()
-            .Where(p => p.SourceEntityId == sourceEntityId && p.SourcePath == field && p.Timestamp < period.StartUtc)
-            .OrderByDescending(p => p.Timestamp)
-            .Select(p => new PointRow(p.Timestamp, p.ValueNumeric, p.Quality, p.UnitId))
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
-
-        var after = await db.RawDataPoints
-            .AsNoTracking()
-            .Where(p => p.SourceEntityId == sourceEntityId && p.SourcePath == field && p.Timestamp >= period.EndUtc)
-            .OrderBy(p => p.Timestamp)
-            .Select(p => new PointRow(p.Timestamp, p.ValueNumeric, p.Quality, p.UnitId))
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
-
-        return new Bounds(before, after);
-    }
-
-    /// <summary>Ряд для згортки за часом: межа до періоду, точки періоду, межа на чи після кінця.</summary>
-    private static List<TimedPoint> TimeSeries(
-        Bounds bounds, List<PointRow> inside, int? declaredSourceUnitId, UnitCatalogSnapshot? units)
-    {
-        var series = new List<TimedPoint>(inside.Count + 2);
-        if (bounds.Before is { } before)
-        {
-            series.Add(Edge(before, declaredSourceUnitId, units).ToTimed());
-        }
-
-        series.AddRange(inside.Select(p => p.ToTimed()));
-
-        if (bounds.After is { } after)
-        {
-            series.Add(Edge(after, declaredSourceUnitId, units).ToTimed());
-        }
-
-        return series;
-    }
-
-    /// <summary>Межова точка в оголошеній одиниці джерела (Y1-01).</summary>
-    /// <remarks>
-    /// <para>
-    /// ⛔ Точка несе СВОЮ одиницю (X3-02): межова точка сусіднього періоду, зібрана до прийняття нової
-    /// одиниці, переводиться в оголошену мапінгом тією ж арифметикою межі (<see cref="BoundaryUnitConversion"/>) —
-    /// це миттєве значення швидкості, а не згортка, тож переводиться як є (<c>Sm3/s</c> → <c>Sm3/h</c> = ×3600).
-    /// </para>
-    /// <para>
-    /// ⛔ Не переводиться (інша розмірність, одиниці немає в довіднику) — точка стає БЕЗ числа: крайній
-    /// відрізок — прогалина, а не тихе число в чужій одиниці; покриття (<c>PercentGood</c>,
-    /// <c>PartialCoverage</c>) про це скаже.
-    /// </para>
-    /// </remarks>
-    private static PointRow Edge(PointRow point, int? declaredSourceUnitId, UnitCatalogSnapshot? units)
-    {
-        if (point.UnitId is not { } actual || declaredSourceUnitId is not { } declared || actual == declared)
-        {
-            return point;
-        }
-
-        if (point.Value is not { } value || units is null)
-        {
-            return point with { Value = null };
-        }
-
-        try
-        {
-            return point with { Value = BoundaryUnitConversion.Convert(value, actual, declared, units) };
-        }
-        catch (Exception ex) when (ex is DomainException or EcrException)
-        {
-            return point with { Value = null };
-        }
-    }
-
-    /// <summary>Чи є межова точка з одиницею джерела, іншою за оголошену (Y1-01).</summary>
-    private static bool HasForeignEdge(Bounds bounds, int? declaredSourceUnitId)
-        => declaredSourceUnitId is { } declared
-           && ((bounds.Before?.UnitId is { } b && b != declared) || (bounds.After?.UnitId is { } a && a != declared));
-
-    /// <summary>Чи є в ряді точка з одиницею джерела, іншою за оголошену мапінгом (X3-02).</summary>
-    /// <param name="rows">Точки, які підуть у згортку.</param>
-    /// <param name="declaredSourceUnitId">Одиниця джерела з мапінгу; <c>null</c> — не оголошена, звіряти нема з чим.</param>
-    private static bool HasForeignUnit(IReadOnlyList<PointRow> rows, int? declaredSourceUnitId)
-        => declaredSourceUnitId is { } declared
-           && rows.Any(p => p.UnitId is { } unit && unit != declared);
-
-    /// <summary>Чи згортка за часом (потребує міток часу й меж періоду).</summary>
-    private static bool IsTimeFold(AggregationKind? kind)
-        => kind is AggregationKind.TimeWeightedAvg or AggregationKind.TimeIntegral;
-
-    /// <summary>Чи потрібен довідник одиниць: інтеграл або дві різні оголошені одиниці.</summary>
-    /// <remarks>
-    /// ⚠ Без цього кожен прогін читав би довідник, навіть коли одиниць у
-    /// мапінгах немає, — а таких мапінгів сьогодні більшість.
-    /// </remarks>
-    private static bool NeedsCatalog(AggregationKind kind, EntityFieldMap map)
-        => kind == AggregationKind.TimeIntegral
-           || (map.SourceUnitId is { } from && map.TargetUnitId is { } to && from != to);
-
-    /// <summary>Сира точка періоду, як її бачить згортка.</summary>
-    /// <remarks>
-    /// Названий тип, а не анонімний: архітектурне правило «<c>ToListAsync</c>
-    /// без <c>Take</c>» читає інструкцію цілком (`D1-08`).
-    /// </remarks>
-    private sealed record PointRow(DateTime Timestamp, decimal? Value, string? Quality, int? UnitId)
-    {
-        /// <summary>
-        /// Точка для згортки за часом: придатна, лише якщо має число і якість
-        /// <see cref="WindowFold.GoodQuality"/> (або не вказана) — те саме
-        /// тлумачення, що й у вікна рядка (HSE301 §4.6).
-        /// </summary>
-        public TimedPoint ToTimed()
-            => new(
-                Timestamp,
-                Value ?? 0m,
-                Value is not null
-                && (Quality is null || string.Equals(Quality, WindowFold.GoodQuality, StringComparison.OrdinalIgnoreCase)));
-    }
-
-    /// <summary>Межові точки періоду для згортки за часом; <c>null</c> — точки за межею немає.</summary>
-    /// <param name="Before">Остання точка до початку періоду.</param>
-    /// <param name="After">Перша точка на чи після кінця періоду.</param>
-    private readonly record struct Bounds(PointRow? Before, PointRow? After);
 
     /// <summary>Результат згортки періоду.</summary>
     /// <param name="Values">Значення для запису.</param>

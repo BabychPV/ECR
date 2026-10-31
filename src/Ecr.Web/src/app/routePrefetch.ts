@@ -104,6 +104,9 @@ const MappingPreviewPageLoader = async () => ({
 });
 export const MappingPreviewPage = lazy(MappingPreviewPageLoader);
 
+const PiDataPageLoader = async () => ({ default: (await import('@/pages/admin/PiDataPage')).PiDataPage });
+export const PiDataPage = lazy(PiDataPageLoader);
+
 const PipelinePageLoader = async () => ({
   default: (await import('@/pages/admin/PipelinePage')).PipelinePage,
 });
@@ -176,6 +179,7 @@ const routeChunkLoaders: Partial<Record<string, () => Promise<unknown>>> = {
   [routes.adminPeriods.id]: PeriodsPageLoader,
   [routes.adminSources.id]: SourcesPageLoader,
   [routes.adminMapping.id]: MappingPreviewPageLoader,
+  [routes.adminPiData.id]: PiDataPageLoader,
   [routes.adminPipeline.id]: PipelinePageLoader,
   [routes.adminJobs.id]: JobsPageLoader,
   [routes.adminSnapshots.id]: SnapshotsPageLoader,

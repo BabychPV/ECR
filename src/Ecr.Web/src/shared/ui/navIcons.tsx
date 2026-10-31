@@ -171,6 +171,16 @@ function MappingIcon(): JSX.Element {
   );
 }
 
+/** Дані з PI — лінія ряду над віссю часу (`D-463`). */
+function PiDataIcon(): JSX.Element {
+  return (
+    <Icon>
+      <path d="M4 19h16" />
+      <path d="M4 15l4-5 4 3 4-7 4 4" />
+    </Icon>
+  );
+}
+
 /** Pipeline — три вузли, з'єднані в ланцюг (кроки конвеєра даних). */
 function PipelineIcon(): JSX.Element {
   return (
@@ -293,6 +303,7 @@ const navIcons: Record<string, () => JSX.Element> = {
   sources: SourcesIcon,
   mapping: MappingIcon,
   pipeline: PipelineIcon,
+  piData: PiDataIcon,
   jobs: JobsIcon,
   snapshots: SnapshotsIcon,
   audit: AuditIcon,

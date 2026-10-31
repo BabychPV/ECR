@@ -4213,6 +4213,248 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Мапінги, що живлять комірку: тег, згортка, одиниці, вікно періоду, останній збір, події покриття. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Ключ рядка. */
+                    rowKey?: string;
+                    /** @description Колонка (`ColumnDto.id` зрізу). */
+                    columnDefId?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    documentId: number;
+                    /** @description Екземпляр таблиці документа. */
+                    tableInstanceId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CellSourceView"];
+                        "text/json": components["schemas"]["CellSourceView"];
+                        "text/plain": components["schemas"]["CellSourceView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-source/points": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Сторінка сирих точок тега мапінгу за період комірки, новіші першими. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Ключ рядка. */
+                    rowKey?: string;
+                    /** @description Колонка. */
+                    columnDefId?: number;
+                    /** @description Мапінг із `sources[].mapId`; чужий — `404`. */
+                    mapId?: number;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                    /** @description Розмір сторінки 1..500; `0` — 100. */
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    documentId: number;
+                    /** @description Екземпляр таблиці. */
+                    tableInstanceId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfRawPointView"];
+                        "text/json": components["schemas"]["PagedResultOfRawPointView"];
+                        "text/plain": components["schemas"]["PagedResultOfRawPointView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-source/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Згорнутий ряд тега мапінгу за період комірки (≤ buckets кошиків). */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Ключ рядка. */
+                    rowKey?: string;
+                    /** @description Колонка. */
+                    columnDefId?: number;
+                    /** @description Мапінг із `sources[].mapId`. */
+                    mapId?: number;
+                    /** @description Кількість кошиків 1..2000; `0` — 500. */
+                    buckets?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    documentId: number;
+                    /** @description Екземпляр таблиці. */
+                    tableInstanceId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RawSeriesView"];
+                        "text/json": components["schemas"]["RawSeriesView"];
+                        "text/plain": components["schemas"]["RawSeriesView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-styles": {
         parameters: {
             query?: never;
@@ -18380,6 +18622,395 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sources/{id}/raw-data/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Покриття вікна збором: злиті зібрані інтервали, прогалини, останній прогін і останній успіх. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна. */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (≤ 400 діб від початку). */
+                    toUtc?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність збору. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RawCoverageView"];
+                        "text/json": components["schemas"]["RawCoverageView"];
+                        "text/plain": components["schemas"]["RawCoverageView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/raw-data/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Точки тега у CSV потоком, за зростанням часу.
+         * @description Стеля `Integration:RawDataExportMaxRows` (типово 100 000); понад неї — `422 auditExportTooLarge`
+         *     до першого байта. UTF-8 з BOM; час — UTC ISO 8601; текстові значення, що починаються з `= + - @`,
+         *     нейтралізуються. Експорт пишеться подією безпеки `PiRawDataExported` (без значень).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Тег. */
+                    path?: string;
+                    /** @description Початок вікна. */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (≤ 400 діб від початку). */
+                    toUtc?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність збору. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/raw-data/points": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Сторінка точок тега, новіші першими (курсор за міткою часу). */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Тег — шлях атрибута в джерелі (1..400 символів, дослівно). */
+                    path?: string;
+                    /** @description Початок вікна (UTC, включно); `null` — 7 діб до кінця. */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (UTC, виключно); `null` — «зараз». Вікно ≤ 400 діб. */
+                    toUtc?: string;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                    /** @description Розмір сторінки 1..500; `0` — 100. */
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність збору. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfRawPointView"];
+                        "text/json": components["schemas"]["PagedResultOfRawPointView"];
+                        "text/plain": components["schemas"]["PagedResultOfRawPointView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/raw-data/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Згорнутий ряд тега для графіка: ≤ buckets кошиків (кількість, мін, макс, середнє)
+         *     на все вікно — розмір відповіді не залежить від кількості точок. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Тег. */
+                    path?: string;
+                    /** @description Початок вікна. */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (≤ 400 діб від початку). */
+                    toUtc?: string;
+                    /** @description Кількість кошиків 1..2000; `0` — 500. */
+                    buckets?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність збору. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RawSeriesView"];
+                        "text/json": components["schemas"]["RawSeriesView"];
+                        "text/plain": components["schemas"]["RawSeriesView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/raw-data/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Сутність і її теги (поля мапінгів; без мапінгів — шлях самої сутності). */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Сутність збору. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RawDataTagsView"];
+                        "text/json": components["schemas"]["RawDataTagsView"];
+                        "text/plain": components["schemas"]["RawDataTagsView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sources/{id}/registry": {
         parameters: {
             query?: never;
@@ -24345,6 +24976,34 @@ export interface components {
          * @enum {unknown}
          */
         CellDataType: "String" | "Int" | "Decimal" | "Bool" | "Date" | "Lookup" | "Formula" | "Unit" | "Calculated";
+        /** @description Значення за правилом згортки поруч зі значенням комірки. */
+        CellFoldView: {
+            /** @description CellFoldComparison: `Match`; `ManualEdit` — інше значення, останній запис людини;
+             *             `NotUpdated` — інше значення, останній запис машини (точки змінилися після запису); `NotWritten` —
+             *             записів у комірку не було (значення збору не записано); `NotComparable` — числа за правилом немає. */
+            comparison: string;
+            /**
+             * Format: decimal
+             * @description Частка придатних точок / покритого часу.
+             */
+            percentGood: null | string;
+            /** @description Стан згортки (CellFoldState). */
+            state: string;
+            /**
+             * Format: date-time
+             * @description Коли (UTC).
+             */
+            storedAt: null | string;
+            /** @description Хто записав (`Integration`, `UserEdit`, `Import`…). */
+            storedOrigin: null | string;
+            /** @description Значення в комірці за останнім записом журналу змін; `null` — записів немає. */
+            storedValue: null | string;
+            /**
+             * Format: decimal
+             * @description Значення в одиниці документа — те, що записала б матеріалізація.
+             */
+            value: null | string;
+        };
         /** @description Результат спрацювання правила умовного форматування (ФВ-2.6/2.7): колір
          *     `#rrggbb` (або `null` — колір теми) і жирність. */
         CellFormatDto: {
@@ -24357,6 +25016,90 @@ export interface components {
             /** @description Штрих (`hatch` — «неактуальна комірка»); лише від умовного форматування, `null` — немає.
              *     ⚠ Додано в L6 останнім необов'язковим полем: клієнт, що його не знає, малює решту як раніше. */
             pattern?: null | string;
+        };
+        /** @description Подія журналу покриття. */
+        CellSourceEvent: {
+            /**
+             * Format: date-time
+             * @description Коли записано (UTC).
+             */
+            at: string;
+            /** @description Конверт `{"k":…,"p":{…}}` або старий текст. */
+            details: null | string;
+            /**
+             * Format: int64
+             * @description Ідентифікатор рядка.
+             */
+            id: number;
+            /** @description Статус (`CollectionCoverage.KnownStatuses`). */
+            status: string;
+        };
+        /** @description Один мапінг, що живить комірку. */
+        CellSourceItem: {
+            /** @description Згортка періоду. */
+            aggregation: null | string;
+            /** @description Події покриття даних тега за період, новіші першими. */
+            events: components["schemas"]["CellSourceEvent"][];
+            fold: null | components["schemas"]["CellFoldView"];
+            /** @description Мапінг діє. */
+            isActive: boolean;
+            /** @description Останній прогін сутності й останній успіх. */
+            lastCollection: components["schemas"]["RawCollectionStatus"];
+            /**
+             * Format: int32
+             * @description Мапінг — ключ для точок і графіка.
+             */
+            mapId: number;
+            /**
+             * Format: int64
+             * @description Зібраних точок тега за вікно.
+             */
+            pointCount: number;
+            /** @description Код сутності. */
+            sourceEntityCode: string;
+            /**
+             * Format: int32
+             * @description Сутність збору.
+             */
+            sourceEntityId: number;
+            /** @description Підпис сутності. */
+            sourceEntityName: null | string;
+            /** @description Тег. */
+            sourcePath: string;
+            /** @description Одиниця джерела. */
+            sourceUnitCode: null | string;
+            /** @description Одиниця документа. */
+            targetUnitCode: null | string;
+        };
+        /** @description Звідки комірка отримує значення з PI. */
+        CellSourceView: {
+            /**
+             * Format: date-time
+             * @description Початок вікна згортки (UTC); `null` — колонка місяця поза періодом без власника.
+             */
+            periodFromUtc: null | string;
+            /**
+             * Format: int32
+             * @description Період екземпляра комірки.
+             */
+            periodKey: number;
+            /**
+             * Format: date-time
+             * @description Кінець вікна згортки (UTC, виключно).
+             */
+            periodToUtc: null | string;
+            /** @description Мапінги, що живлять комірку; порожньо — значення не з PI. */
+            sources: components["schemas"]["CellSourceItem"][];
+            /**
+             * Format: int32
+             * @description Місяць колонки місяця (1..12): вікно — лише цей місяць періоду (D-462); `null` — увесь період.
+             */
+            windowMonth: null | number;
+            /**
+             * Format: int32
+             * @description Період, у якому згортається комірка (Q-17 — період-власник колонки).
+             */
+            windowPeriodKey: number;
         };
         /** @description Чи можна фарбувати комірки таблиці (CELL-STYLE P1A): те, що клієнт має знати, щоб не вмикати «Заливку»/«Колір
          *     тексту» там, де `PATCH …/cell-styles` однаково відмовить 403. */
@@ -28520,6 +29263,19 @@ export interface components {
         };
         /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
          *     перевіряється архітектурним тестом. */
+        PagedResultOfRawPointView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["RawPointView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
         PagedResultOfRegistryEntryHistoryItemDto: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["RegistryEntryHistoryItemDto"][];
@@ -29835,6 +30591,190 @@ export interface components {
              *     має бути відповідь, а не літерал `"Publish"`, однаковий для кожної
              *     публікації. */
             reason: string;
+        };
+        /** @description Стан збору сутності. */
+        RawCollectionStatus: {
+            /**
+             * Format: date-time
+             * @description Завершення останнього прогону; `null` — триває.
+             */
+            lastRunFinishedAt: null | string;
+            /**
+             * Format: int64
+             * @description Останній прогін; `null` — збору ще не було.
+             */
+            lastRunId: null | number;
+            /**
+             * Format: date-time
+             * @description Початок останнього прогону (UTC).
+             */
+            lastRunStartedAt: null | string;
+            /** @description `Running`/`Succeeded`/`Degraded`/`Failed`. */
+            lastRunStatus: null | string;
+            /**
+             * Format: date-time
+             * @description Завершення останнього успішного (`Succeeded`/`Degraded`) прогону.
+             */
+            lastSucceededAt: null | string;
+        };
+        /** @description Покриття вікна збором: що зібрано, де прогалини, коли збирали востаннє. */
+        RawCoverageView: {
+            /** @description Злиті покриті інтервали, обрізані вікном. */
+            covered: components["schemas"]["RawInterval"][];
+            /**
+             * Format: date-time
+             * @description Початок вікна.
+             */
+            fromUtc: string;
+            /** @description Прогалини вікна — часу, за який збір не відзвітував успіхом. */
+            gaps: components["schemas"]["RawInterval"][];
+            /** @description Інтервалів більше за стелю: прогалини після останнього не обчислено. */
+            isTruncated: boolean;
+            /** @description Останній прогін і останній успіх. */
+            lastCollection: components["schemas"]["RawCollectionStatus"];
+            /**
+             * Format: date-time
+             * @description Кінець вікна (виключно).
+             */
+            toUtc: string;
+        };
+        /** @description Тег сутності — поле мапінгу. */
+        RawDataTag: {
+            /** @description Згортка періоду (`Sum`, `Avg`, …); `null` — не задана. */
+            aggregation: null | string;
+            /** @description Мапінг діє; `false` — призупинений. */
+            isActive: boolean;
+            /**
+             * Format: int32
+             * @description Мапінг; `null` — тег сутності без мапінгу (сама сутність).
+             */
+            mapId: null | number;
+            /** @description Шлях атрибута в джерелі. */
+            sourcePath: string;
+            /** @description Одиниця джерела; `null` — не оголошена. */
+            sourceUnitCode: null | string;
+            /** @description Колонка документа; `null` — не матеріалізується чи колонку видалено. */
+            targetColumnCode: null | string;
+            /** @description Рядок документа; `null` — точки лишаються сирими. */
+            targetRowKey: null | string;
+        };
+        /** @description Сутність збору і її теги (`GET /sources/{id}/raw-data/tags`). */
+        RawDataTagsView: {
+            /** @description Код у джерелі. */
+            code: string;
+            /** @description Підпис; `null` — не задано. */
+            displayName: null | string;
+            /** @description Чи сутність діє. */
+            isActive: boolean;
+            /** @description Тегів більше за стелю. */
+            isTruncated: boolean;
+            /**
+             * Format: int32
+             * @description Сутність.
+             */
+            sourceEntityId: number;
+            /** @description Теги: поля мапінгів; без мапінгів — шлях самої сутності. */
+            tags: components["schemas"]["RawDataTag"][];
+        };
+        /** @description Інтервал часу `[FromUtc, ToUtc)`. */
+        RawInterval: {
+            /**
+             * Format: date-time
+             * @description Початок.
+             */
+            fromUtc: string;
+            /**
+             * Format: date-time
+             * @description Кінець.
+             */
+            toUtc: string;
+        };
+        /** @description Точка для таблиці «Дані з PI». */
+        RawPointView: {
+            /**
+             * Format: int64
+             * @description Прогін збору, що її приніс.
+             */
+            collectionRunId: number;
+            /** @description Якість за класифікацією джерела; `null` — не повідомлена. */
+            quality: null | string;
+            /**
+             * Format: date-time
+             * @description Коли точку отримано (UTC).
+             */
+            retrievedAt: string;
+            /**
+             * Format: date-time
+             * @description Мітка часу точки (UTC).
+             */
+            timestamp: string;
+            /** @description Код одиниці джерела; `null` — не повідомлена. */
+            unitCode: null | string;
+            /**
+             * Format: decimal
+             * @description Число в одиниці ДЖЕРЕЛА (ФВ-16.10); конверсія — лише при записі в документ.
+             */
+            valueNumeric: null | string;
+            /** @description Текст для нечислових атрибутів. */
+            valueString: null | string;
+        };
+        /** @description Кошик графіка. */
+        RawSeriesBucket: {
+            /**
+             * Format: decimal
+             * @description Середнє арифметичне числових.
+             */
+            avg: null | string;
+            /**
+             * Format: decimal
+             * @description Максимум числових.
+             */
+            max: null | string;
+            /**
+             * Format: decimal
+             * @description Мінімум числових; `null` — числових немає.
+             */
+            min: null | string;
+            /**
+             * Format: int64
+             * @description Усіх точок.
+             */
+            points: number;
+            /**
+             * Format: date-time
+             * @description Початок кошика.
+             */
+            startUtc: string;
+        };
+        /** @description Згорнутий ряд для графіка: не більше заданого числа кошиків незалежно від довжини вікна. */
+        RawSeriesView: {
+            /**
+             * Format: int64
+             * @description Ширина кошика.
+             */
+            bucketSeconds: number;
+            /** @description Непорожні кошики за зростанням часу. */
+            buckets: components["schemas"]["RawSeriesBucket"][];
+            /**
+             * Format: date-time
+             * @description Початок вікна.
+             */
+            fromUtc: string;
+            /**
+             * Format: int64
+             * @description З них числових — лише вони на графіку.
+             */
+            numericPoints: number;
+            /**
+             * Format: date-time
+             * @description Кінець вікна (виключно).
+             */
+            toUtc: string;
+            /**
+             * Format: int64
+             * @description Усіх точок у вікні.
+             */
+            totalPoints: number;
         };
         /** @description Запит на перерахунок документа (Q-331). */
         RecalculateDocumentRequest: {
