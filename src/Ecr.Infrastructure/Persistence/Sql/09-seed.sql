@@ -9640,6 +9640,7 @@ USING (VALUES
     ,(N'formulas.disableManualOverrideVerb', N'en', N'Forbid new manual values', 1)
     ,(N'audit.reasonExcelImport', N'en', N'Excel import', 1)
     ,(N'audit.reasonVersionMigration', N'en', N'Template version migration', 1)
+    ,(N'audit.reasonVersionMigrationNoFormula', N'en', N'Template version migration: the cell has no formula in the new version; the value stays as entered data', 1)
     ,(N'import.replacesFormula', N'en', N'Replaces formula', 1)
     ,(N'import.replacesFormulaHint', N'en', N'The value will be saved as a manual value instead of the formula (reason in the log: "Excel import"). Recalculation will not overwrite it.', 1)
     ,(N'import.restoresFormula', N'en', N'Restores formula', 1)
@@ -25128,6 +25129,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'audit.reasonExcelImport', N'kz', N'Excel-ден импорт'),
     (N'audit.reasonVersionMigration', N'ru', N'Перенос на версию шаблона'),
     (N'audit.reasonVersionMigration', N'kz', N'Үлгі нұсқасына көшіру'),
+    (N'audit.reasonVersionMigrationNoFormula', N'ru', N'Перенос на версию шаблона: в новой версии у ячейки нет формулы, значение остаётся введённым'),
+    (N'audit.reasonVersionMigrationNoFormula', N'kz', N'Үлгі нұсқасына көшіру: жаңа нұсқада ұяшықтың формуласы жоқ, мән енгізілген күйінде қалады'),
     (N'import.replacesFormula', N'ru', N'Заменит формулу'),
     (N'import.replacesFormula', N'kz', N'Формуланы ауыстырады'),
     (N'import.replacesFormulaHint', N'ru', N'Значение будет сохранено как ручное вместо формулы (причина в журнале: «Импорт из Excel»). Пересчёт его не перезапишет.'),

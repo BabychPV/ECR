@@ -1093,21 +1093,42 @@ public sealed class MigrateDocumentVersionHandler(
 
         var to = await metadata.GetAsync(targetVersionId, ct).ConfigureAwait(false);
         var marks = await formulaOverrides.ReadProjectAsync(projectId, ct).ConfigureAwait(false);
-        var lost = FormulaOverrideMigration.Lost(
-            marks, column => to.ColumnsById.ContainsKey(column) ? column : null, to);
-        if (lost.Count == 0)
+        Func<int, int?> targetColumnOf = column => to.ColumnsById.ContainsKey(column) ? column : null;
+        var lost = FormulaOverrideMigration.Lost(marks, targetColumnOf, to);
+
+        // ✎ Аудит 31.10 (F2): цільова комірка без жодної формули — позначка знімається, але значення лишається
+        // ЗВИЧАЙНИМ введеним (`IsCalculated = 0`, без `ReleaseAsync`): доти воно ставало «обчисленим» у колонці вводу, а
+        // журнал казав `FormulaRestored` з `NewValue = null`, хоча формули немає й значення не змінилося. Журнал —
+        // `FormulaOverride` (людське походження, як і було: сторожі інтеграції й далі бачать значення людини) зі
+        // значенням без змін і окремою причиною `UnformulatedReason`.
+        var unformulated = FormulaOverrideMigration.Unformulated(marks, targetColumnOf, to);
+        if (lost.Count == 0 && unformulated.Count == 0)
         {
             return 0;
         }
 
-        await formulaOverrides.ReleaseAsync([.. lost.Select(m => m.Address)], ct).ConfigureAwait(false);
+        if (lost.Count > 0)
+        {
+            await formulaOverrides.ReleaseAsync([.. lost.Select(m => m.Address)], ct).ConfigureAwait(false);
+        }
+
+        if (unformulated.Count > 0)
+        {
+            await formulaOverrides.ApplyAsync([], [.. unformulated.Select(m => m.Address)], ct).ConfigureAwait(false);
+        }
 
         var now = clock.UtcNow;
         await audit.WriteCellChangesAsync(
-            [.. lost.Select(m => new CellChangeRecord(
-                now, m.Address, m.DocumentId, m.RowKey, OldValue: m.Value, NewValue: null, userId,
-                CellChangeOrigins.FormulaRestored, IsLateEdit: false, CorrelationId: null,
-                Reason: FormulaOverrideMigration.Reason))],
+            [
+                .. lost.Select(m => new CellChangeRecord(
+                    now, m.Address, m.DocumentId, m.RowKey, OldValue: m.Value, NewValue: null, userId,
+                    CellChangeOrigins.FormulaRestored, IsLateEdit: false, CorrelationId: null,
+                    Reason: FormulaOverrideMigration.Reason)),
+                .. unformulated.Select(m => new CellChangeRecord(
+                    now, m.Address, m.DocumentId, m.RowKey, OldValue: m.Value, NewValue: m.Value, userId,
+                    CellChangeOrigins.FormulaOverride, IsLateEdit: false, CorrelationId: null,
+                    Reason: FormulaOverrideMigration.UnformulatedReason)),
+            ],
             ct).ConfigureAwait(false);
 
         return lost.Count;
