@@ -90,7 +90,7 @@ public sealed class CoverageDetailsTests
     /// </summary>
     [Theory]
     [InlineData("MaterializeCollectedDataJob.cs", 9)]
-    [InlineData("SourceEventSyncJob.cs", 12)]
+    [InlineData("SourceEventSyncJob.cs", 14)]
     [InlineData("RowWindowFetchJob.cs", 1)]
     public void Coverage_events_in_jobs_take_details_from_the_envelope_helper(string file, int expectedCalls)
     {

@@ -987,7 +987,7 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
             Convert.ToInt32(
                 await ScalarAsync(
                     $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} "
-                    + "AND Status = N'SourceDataRefused' AND Details LIKE N'%coverageEvents.eventsTruncated%'"),
+                    + "AND Status = N'SourceDataRefused' AND Details LIKE N'%coverageEvents.eventsTruncatedCap%'"),
                 CultureInfo.InvariantCulture));
     }
 
@@ -1404,12 +1404,22 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
         Assert.Equal(0, await JournalCountAsync(stand));
         Assert.Empty(trigger.ReceivedCalls());
+
+        // D-464: поданий аркуш — ОДНА зведена подія на період (запис E2 і видалення E1 пропущено), а не по події.
         Assert.Equal(
             1,
             Convert.ToInt32(
                 await ScalarAsync(
                     $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} "
-                    + "AND Status = N'SkippedPeriodClosed' AND Details LIKE N'%eventRemovalSheetSubmitted%'"),
+                    + "AND Status = N'SkippedPeriodClosed' AND Details LIKE N'%eventSheetLocked%' "
+                    + "AND Details LIKE N'%\"writes\":\"1\"%' AND Details LIKE N'%\"removals\":\"1\"%'"),
+                CultureInfo.InvariantCulture));
+        Assert.Equal(
+            0,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} "
+                    + "AND (Details LIKE N'%eventRemovalSheetSubmitted%' OR Details LIKE N'%eventWriteFailed%')"),
                 CultureInfo.InvariantCulture));
     }
 
