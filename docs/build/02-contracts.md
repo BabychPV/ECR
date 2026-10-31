@@ -3524,6 +3524,7 @@ public interface IRawDataReader
     public Task<IReadOnlyList<RawBucket>> BucketsAsync(RawSeriesKey key, long bucketSeconds, CancellationToken ct);
     public Task<IReadOnlyList<RawInterval>> CoveredAsync(int sourceEntityId, DateTime fromUtc, DateTime toUtc, int take, CancellationToken ct);
     public Task<RawCollectionStatus> LastCollectionAsync(int sourceEntityId, CancellationToken ct);
+    public Task<int> CountEventMapsAsync(int sourceEntityId, CancellationToken ct); // D-465: перемикач «Події»
 }
 
 public interface ICellSourceStore
@@ -3533,6 +3534,37 @@ public interface ICellSourceStore
     public Task<IReadOnlyList<CellSourceEvent>> PeriodEventsAsync(int sourceEntityId, int periodKey, int take, CancellationToken ct);
 }
 ```
+
+#### `ISourceEventViewStore` (`D-465`)
+
+Читаюча сторона подій PI (Event Frames), уже синхронізованих у рядки: «Дані з PI → Події» і «Звідки це значення» для
+комірки рядка `EF-…`. ⛔ Лише сховище — у PI наживо порт не ходить: значення атрибутів — останнє прочитання синку
+(`ext.SourceEventAttributeValue`). Порт нічого не вирішує про доступ (документ/колонку маскує обробник). Звернень на
+сторінку — сталий набір: зв'язки — seek `IX_SEL_MapStart`, значення — префікс `PK_SourceEventAttributeValue`, комірки —
+ключ рядка + `PK_CellValue` + `IX_CellChange_Cell`, видалення — кластерний ключ `aud.StructureChange` за часом.
+«Що записав би синк» рахує `PiEventComparison` тим самим `SourceEventRowBuilder`, що й запис (поля — тим самим
+`SourceEventFieldPlans.LoadAsync`).
+
+```csharp
+public interface ISourceEventViewStore
+{
+    public Task<IReadOnlyList<PiEventMap>> MapsAsync(int sourceEntityId, CancellationToken ct);
+    public Task<PiEventMap?> MapAsync(int mapId, CancellationToken ct);
+    public Task<PiEventMapContext> ContextAsync(PiEventMap map, CancellationToken ct);
+    public Task<IReadOnlyList<SourceEventPeriod>> PeriodsAsync(PiEventMap map, CancellationToken ct);
+    public Task<IReadOnlyList<PiEventLink>> LinksAsync(int mapId, PiEventFilter filter, PiEventCursor? before, int take, CancellationToken ct);
+    public Task<int> CountLinksAsync(int mapId, PiEventFilter filter, CancellationToken ct);
+    public Task<IReadOnlyList<PiEventLink>> LinksOfRowAsync(long tableInstanceId, string rowKey, int take, CancellationToken ct);
+    public Task<IReadOnlyList<PiObservedValue>> ValuesAsync(IReadOnlyCollection<long> linkIds, CancellationToken ct);
+    public Task<IReadOnlyList<PiCellValue>> CellsAsync(IReadOnlyList<PiRowAddress> rows, IReadOnlyCollection<int> columnDefIds, CancellationToken ct);
+    public Task<IReadOnlyList<PiEventRemoval>> RemovalsAsync(int sourceEntityId, DateTime fromUtc, DateTime toUtc, int take, CancellationToken ct);
+}
+```
+
+Порівняння (`comparison`): `Match` | `ManualEdit` (причина `KeptManual`) | `NotWritten` (причини `Open`, `OpenAtPeriodClose`,
+`PeriodClosed`, `PeriodNotOpen`, `SheetLocked`, `RowLimit`, `Unmapped`, `PeriodChanged`, `Missing`) | `NotUpdated`
+(`Pending` — PI дав нове значення після останнього синку) | `NoSourceValue` | `NotComparable` (текст PI довший за
+4 000) | `Hidden` (документ чи колонку читач не бачить).
 
 #### `IDataSourceStore`
 
@@ -4136,6 +4168,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-REQ-0422.rawDataRangeTooLong` | 422 | D-463: вікно «Даних з PI» довше за `maxDays` (400) діб |
 | `err.ECR-REQ-0422.rawDataPath` | 422 | D-463: шлях тега порожній або довший за `max` (400) символів |
 | `err.ECR-REQ-0422.rawDataBuckets` | 422 | D-463: кількість кошиків графіка поза 1..`max` (2000) |
+| `err.ECR-REQ-0422.piEventFilter` | 422 | D-465: фільтр назви чи елемента подій довший за `max` (200) символів |
+| `err.ECR-INT-0422.eventMapMonthColumn` | 422 | D-465: поле мапінгу подій цілить у колонку місяця (`IsMonthColumn`) — подія EF записується окремим рядком, місячні підсумки рахують формули шаблону; `targetColumn`, `columnDefId` |
 | `err.ECR-CALC-0422.methodologyImportBlocked` | 422 | пакет методологій має блокери (нерезолвні посилання тощо) — запис не виконується (`POST /methodologies/import`) |
 | `err.ECR-CALC-0422.methodologyImportTimeZone` | 422 | пояс дат AF в імпорті пакета невідомий |
 | `err.ECR-CALC-0409.methodologyImportConflict` | 409 | пакет змінює вже наявну версію методології без нового номера версії |
@@ -4345,7 +4379,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/documents/{id}/header` | `Document.View` | 8 |
 | `PATCH` | `/api/v1/documents/{id}/header` | — (через грант Write на проєкт) | 8 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}` | `Document.View` | 1 |
-| `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}/cell-source` | `Document.View` (D-463 «Звідки це значення»: `rowKey`, `columnDefId`; доступ рівно до комірки — видимість документа, право в проєкті, Deny аркуша/таблиці/колонки, прихована колонка, Q-17, існування рядка; невидиме — та сама `404 err.ECR-DOC-0404.document`, що й у зрізу; комірка без мапінгу — `200` з порожнім `sources`; вікно — `Period.FoldBounds`, як у матеріалізації: колонка місяця — лише свій місяць (`windowMonth`), Q-17 — період-власник (`windowPeriodKey`), поза періодом — `periodFromUtc = null`; `sources[].fold` — значення за правилом згортки тим самим кодом (`CollectedFold`, ≤ 50 000 точок, інакше `TooManyPoints`) і порівняння з останнім записом журналу змін комірки: `Match`/`ManualEdit`/`NotUpdated`/`NotWritten`/`NotComparable`) | 5 |
+| `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}/cell-source` | `Document.View` (D-463 «Звідки це значення»: `rowKey`, `columnDefId`; доступ рівно до комірки — видимість документа, право в проєкті, Deny аркуша/таблиці/колонки, прихована колонка, Q-17, існування рядка; невидиме — та сама `404 err.ECR-DOC-0404.document`, що й у зрізу; комірка без мапінгу — `200` з порожнім `sources`; вікно — `Period.FoldBounds`, як у матеріалізації: колонка місяця — лише свій місяць (`windowMonth`), Q-17 — період-власник (`windowPeriodKey`), поза періодом — `periodFromUtc = null`; `sources[].fold` — значення за правилом згортки тим самим кодом (`CollectedFold`, ≤ 50 000 точок, інакше `TooManyPoints`) і порівняння з останнім записом журналу змін комірки: `Match`/`ManualEdit`/`NotUpdated`/`NotWritten`/`NotComparable`; D-465: `eventSources[]` — для рядка події `EF-…`: подія (ID, назва, час у поясі проєкту й UTC, елемент, `Modified`, стан зв'язку, останній синк), шаблон, атрибут колонки, значення PI за останнім прочитанням, «що записав би синк», комірка, `comparison`/`reason`; інші рядки — порожньо без жодного звернення) | 5 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}/cell-source/points` | `Document.View` (D-463: те саме + `mapId` мапінгу комірки (чужий — та сама 404); точки лише вікна періоду комірки; `limit` 1..500) | 5 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}/cell-source/series` | `Document.View` (D-463: те саме + `mapId`; ≤ `buckets` (1..2000) кошиків за період комірки) | 5 |
 | `PATCH` | `/api/v1/documents/{id}/cells` | — (через `IAccessDecisionService`) | 1 |
@@ -4499,6 +4533,10 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/sources/{id}/raw-data/series` | `Integration.View` (або `Integration.Manage`; D-463: ≤ `buckets` (1..2000, типово 500) кошиків мін/макс/середнє на все вікно, згортка в SQL) | 5 |
 | `GET` | `/api/v1/sources/{id}/raw-data/coverage` | `Integration.View` (або `Integration.Manage`; D-463: злиті покриті інтервали, прогалини вікна, останній прогін і останній успіх) | 5 |
 | `GET` | `/api/v1/sources/{id}/raw-data/export.csv` | `Integration.View` (або `Integration.Manage`; D-463: потоком, стеля `Integration:RawDataExportMaxRows` (100 000) — понад неї `422 auditExportTooLarge` до першого байта; подія безпеки `PiRawDataExported` без значень) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/events/maps` | `Integration.View` (або `Integration.Manage`; D-465: мапінги подій сутності-шаблону (документ — лише якщо читач його бачить: інакше `documentVisible=false` без `documentId`/`documentKey`), `hasMonthColumnFields`, періоди проєктів, що перетинають вікно ≤ 400 діб) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/events` | `Integration.View` (або `Integration.Manage`; D-465: зв'язки ОДНОГО мапінгу (`mapId`, типово перший) за вікном початку ≤ 400 діб, keyset (початок, Id), новіші першими, `limit` 1..200 (типово 50), фільтри `status[]`, `element` (префікс), `name` (містить, ≤ 200); кожна подія — значення атрибутів за останнім прочитанням синку, «що записав би синк», комірка (лише видимого документа й колонки), `comparison`/`reason`; чужий `mapId` — 404) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/events/removed` | `Integration.View` (або `Integration.Manage`; D-465: журнал `aud.StructureChange` `SourceEventRowRemoved` сутності за вікном моменту видалення, ≤ 200 записів, без значень комірок; рядок — лише видимого документа) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/events/export.csv` | `Integration.View` (або `Integration.Manage`; D-465: «подія × поле мапінгу» потоком, ті самі фільтри; стеля `Integration:RawDataExportMaxRows` → `422 auditExportTooLarge` до першого байта; захист від формул; подія безпеки `PiEventDataExported` без значень; комірки невидимого документа — порожні) | 5 |
 | `GET` | `/api/v1/collection-schedules` | `Integration.EditSchedule` | 7 |
 | `POST` | `/api/v1/collection-schedules` | `Integration.EditSchedule` | 7 |
 | `PUT` | `/api/v1/collection-schedules/{id}` | `Integration.EditSchedule` | 7 |

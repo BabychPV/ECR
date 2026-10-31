@@ -82,6 +82,8 @@ public sealed partial class DenyLeakGuardTests
     /// </remarks>
     private static readonly Dictionary<string, (int Count, string Why)> Reviewed = new(StringComparer.Ordinal)
     {
+        ["src/Ecr.Application/Integration/RawData/PiEventDataHandler.cs | деталь eventMapId | mapId.Value.ToString(CultureInfo.InvariantCulture)"] =
+            (1, "D-465: ехо параметра запиту mapId (ідентифікатор мапінгу) адміністратору інтеграції ПІСЛЯ права Integration.View/Manage; не колонка і не значення комірки"),
         ["src/Ecr.Application/Documents/EditAssignments/EditAssignmentHandlers.cs | деталь sheetCodes | own.VisibleSheetCodes"] =
             (1, "коди аркушів, які передавач САМ бачить (DocumentReadScope.CanReadSheetCode) і не може писати; схований аркуш не називається, а лише дає перевищення без імені"),
         ["src/Ecr.Application/Consistency/GetConsistencyIssuesHandler.cs | деталь severity | severity.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)"] =

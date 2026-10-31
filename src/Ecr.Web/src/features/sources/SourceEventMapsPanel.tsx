@@ -134,9 +134,22 @@ export function SourceEventMapsPanel({
                   <Table.Td>{volumeModeLabel(map.volumeMode)}</Table.Td>
                   <Table.Td>{formatNumber(map.fields.length)}</Table.Td>
                   <Table.Td>
-                    <Badge variant="light" color={map.isActive ? 'statusSuccess' : 'gray'}>
-                      {map.isActive ? t('sourceEvents.mapActive') : t('sourceEvents.mapPausedState')}
-                    </Badge>
+                    <Group gap="xs" wrap="nowrap">
+                      <Badge variant="light" color={map.isActive ? 'statusSuccess' : 'gray'}>
+                        {map.isActive ? t('sourceEvents.mapActive') : t('sourceEvents.mapPausedState')}
+                      </Badge>
+                      {/* D-465: поля на колонки місяця — попередження без автовиправлення (подія EF — окремий рядок). */}
+                      {(map.monthColumnFieldIds?.length ?? 0) > 0 && (
+                        <Badge
+                          variant="light"
+                          color="statusWarning"
+                          title={t('sourceEvents.monthColumnWarningHint')}
+                          data-source-event-map-month-warning=""
+                        >
+                          {t('sourceEvents.monthColumnWarning')}
+                        </Badge>
+                      )}
+                    </Group>
                   </Table.Td>
                   {canManage && (
                     <Table.Td>

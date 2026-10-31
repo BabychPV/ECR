@@ -59,6 +59,9 @@ public interface IRawDataReader
     public Task<IReadOnlyList<RawInterval>> CoveredAsync(
         int sourceEntityId, DateTime fromUtc, DateTime toUtc, int take, CancellationToken ct);
 
+    /// <summary>D-465: скільки мапінгів подій (діючих і призупинених) має сутність.</summary>
+    public Task<int> CountEventMapsAsync(int sourceEntityId, CancellationToken ct);
+
     /// <summary>Останній прогін збору сутності й момент завершення останнього успішного.</summary>
     public Task<RawCollectionStatus> LastCollectionAsync(int sourceEntityId, CancellationToken ct);
 }

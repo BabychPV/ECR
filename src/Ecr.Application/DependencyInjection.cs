@@ -499,6 +499,7 @@ public static class DependencyInjection
         // D-463: «Дані з PI» (адміністратор інтеграції) і «Звідки це значення» (комірка документа).
         services.AddScoped<Integration.RawData.RawDataHandler>();
         services.AddScoped<Integration.RawData.CellSourceHandler>();
+        services.AddScoped<Integration.RawData.PiEventDataHandler>();
 
         // Заведення мапінгу поля джерела (Прогалина 1 директиви паритету).
         services.AddScoped<Sources.CreateEntityFieldMapHandler>();

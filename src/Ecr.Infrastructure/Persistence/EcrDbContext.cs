@@ -203,6 +203,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<SourceEventValueMap> SourceEventValueMaps => Set<SourceEventValueMap>();
     public DbSet<SourceEventLink> SourceEventLinks => Set<SourceEventLink>();
 
+    /// <summary>D-465: значення атрибутів подій за останнім прочитанням синку (лише зміни).</summary>
+    public DbSet<SourceEventAttributeValue> SourceEventAttributeValues => Set<SourceEventAttributeValue>();
+
     // itg
     public DbSet<CollectionRun> CollectionRuns => Set<CollectionRun>();
     public DbSet<CollectionCoverage> CollectionCoverages => Set<CollectionCoverage>();

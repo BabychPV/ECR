@@ -107,6 +107,8 @@ public sealed partial class PermitGroupGuardTests
         // Свіжість знімка гарантує сам споживач (EnsureFreshAsync) або спільні помічники порту, що кличуть її всередині:
         // `LookupTargetMatcher.EnsureFreshOnMismatchAsync` (перевірки належності) і `LookupTargetEntries.ListAsync` (читання складу).
         // `SourceEventMapSupport.BuildSpecsAsync(` - лише пересилає резолвер у `SourceEventMapHandlers`, де є `EnsureFreshOnMismatchAsync`.
+        // D-465: `SourceEventFieldPlans.LoadAsync(` (поля мапінгу подій — синк і перегляд) кличе `EnsureFreshAsync` сам; файл помічника
+        // і сам є споживачем, тож перевіряється цим же сторожем.
         // ⛔ Виклик, а не підрядок: коментарі (`//`, `///`, `/* */`) і рядкові літерали вирізаються, імена - з межею слова (`\b`).
         var offenders = consumers
             .Where(f => !CallsFreshness(f.Text))
@@ -245,7 +247,7 @@ public sealed partial class PermitGroupGuardTests
     [GeneratedRegex(@"\bEnsureFreshOnMismatchAsync\s*\(")]
     private static partial Regex FreshOnMismatchCall();
 
-    [GeneratedRegex(@"\b(?:LookupTargetEntries\s*\.\s*ListAsync|SourceEventMapSupport\s*\.\s*BuildSpecsAsync)\s*\(")]
+    [GeneratedRegex(@"\b(?:LookupTargetEntries\s*\.\s*ListAsync|SourceEventMapSupport\s*\.\s*BuildSpecsAsync|SourceEventFieldPlans\s*\.\s*LoadAsync)\s*\(")]
     private static partial Regex HelperCall();
 
     [Fact]

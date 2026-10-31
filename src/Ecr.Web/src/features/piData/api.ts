@@ -88,9 +88,14 @@ export function fetchRawCoverage(entityId: number, window: RawWindow): Promise<R
 }
 
 /** Події журналу покриття сутності (чому зібране не лягло в документи), новіші першими. */
-export function fetchEntityCoverageEvents(entityId: number, cursor: string | null): Promise<CoverageEventPage> {
+export function fetchEntityCoverageEvents(
+  entityId: number,
+  cursor: string | null,
+  periodKey: number | null = null,
+): Promise<CoverageEventPage> {
   const query = new URLSearchParams({ entity: String(entityId), limit: '50' });
   if (cursor !== null) query.set('cursor', cursor);
+  if (periodKey !== null) query.set('periodKey', String(periodKey));
 
   return apiFetch<CoverageEventPage>(`/api/v1/collection-runs/coverage-events?${query.toString()}`);
 }

@@ -71,6 +71,10 @@ public sealed partial class SourceEventSyncJob(
     private bool _confirmRemoval;
     private int _actorUserId;
 
+    // D-465: зв'язки, зняті цим мапінгом без рядка (передача братньому шаблону, зниклі без рядка) — їхні значення
+    // атрибутів знімаються разом із записом значень мапінгу.
+    private readonly List<long> _droppedLinkIds = [];
+
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "source-event-sync";
 
@@ -795,6 +799,10 @@ public sealed partial class SourceEventSyncJob(
             {
                 await coverage.RecordManyAsync(events, ct).ConfigureAwait(false);
             }
+
+            // D-465: значення атрибутів за цим прочитанням — лише змінене, одним MERGE на сторінку зв'язків (після
+            // збереження: новий зв'язок уже має Id). Зняті без рядка зв'язки забирають свої значення тим самим кроком.
+            await WriteAttributeValuesAsync(plan, linkByEventId, now, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -1152,12 +1160,44 @@ public sealed partial class SourceEventSyncJob(
         return removed;
     }
 
+    /// <summary>
+    /// D-465: значення атрибутів подій мапінгу за цим прочитанням (<see cref="SourceEventAttributeValueWriter"/>):
+    /// кожна подія плану, чий зв'язок пережив прогін, — навіть не записана (поданий аркуш, закритий період), бо
+    /// перегляд пояснює саме розбіжність «PI каже / у комірці».
+    /// </summary>
+    private async Task WriteAttributeValuesAsync(
+        SourceEventSyncPlan plan, Dictionary<string, SourceEventLink> linkByEventId, DateTime now, CancellationToken ct)
+    {
+        var readings = new List<SourceEventReading>();
+        foreach (var item in plan.Items)
+        {
+            if (linkByEventId.TryGetValue(item.Event.EventId, out var link) && link.Id > 0)
+            {
+                readings.Add(new SourceEventReading(link.Id, item.Event));
+            }
+        }
+
+        var dropped = _droppedLinkIds.ToList();
+        _droppedLinkIds.Clear();
+        if (readings.Count == 0 && dropped.Count == 0)
+        {
+            return;
+        }
+
+        await SourceEventAttributeValueWriter.WriteAsync(db, readings, dropped, _runId, now, ct).ConfigureAwait(false);
+    }
+
     private void Drop(
         SourceEventLink link,
         List<SourceEventLink> links,
         Dictionary<string, SourceEventLink> linkByEventId,
         HashSet<string> removed)
     {
+        if (link.Id > 0)
+        {
+            _droppedLinkIds.Add(link.Id);
+        }
+
         db.SourceEventLinks.Remove(link);
         links.Remove(link);
         linkByEventId.Remove(link.SourceEventId);
@@ -1442,6 +1482,8 @@ public sealed partial class SourceEventSyncJob(
             DELETE FROM doc.TableRow
              WHERE PeriodKey = @period AND TableInstanceId = @instance AND RowKey = @rowKey;
             DELETE FROM ext.SourceEventLink WHERE Id = @link;
+            -- D-465: значення атрибутів події за останнім прочитанням — разом зі зв'язком (FK немає, усі ключі Restrict).
+            DELETE FROM ext.SourceEventAttributeValue WHERE LinkId = @link;
             -- L3-13: провенанс вікна рядка (ключ — RowKey) знімається з чинних, історія лишається;
             -- інакше повернена подія з тим самим ID дає рядок, який RowWindowFetchJob вважає вже підтягнутим.
             UPDATE ext.RowWindowValue SET IsCurrent = 0
@@ -1916,59 +1958,27 @@ public sealed partial class SourceEventSyncJob(
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Поля мапінгу з колонками, записами довідників і явними відповідностями.</summary>
-    private async Task<List<SourceEventFieldPlan>> FieldPlansAsync(SourceEventMap map, CancellationToken ct)
+    /// <remarks>D-465: одне місце з переглядом — <see cref="SourceEventFieldPlans.LoadAsync"/>.</remarks>
+    private async Task<IReadOnlyList<SourceEventFieldPlan>> FieldPlansAsync(SourceEventMap map, CancellationToken ct)
     {
-        var columnIds = map.Fields.Select(f => f.TargetColumnDefId).ToList();
-        var columns = await db.ColumnDefs
-            .AsNoTracking()
-            .Where(c => columnIds.Contains(c.Id) && !c.IsDeleted)
-            .ToDictionaryAsync(c => c.Id, ct)
-            .ConfigureAwait(false);
+        var set = await SourceEventFieldPlans.LoadAsync(db, map, groups, ct).ConfigureAwait(false);
 
-        var targetIds = columns.Values
-            .Where(c => c.DataType == CellDataType.Lookup && c.LookupRegistryDefId is not null)
-            .Select(c => c.LookupRegistryDefId!.Value)
-            .Distinct()
-            .ToList();
-
-        // Permits PRMG: ціль-група не має власних записів - читаються записи реєстрів її складу
-        // (`ExpandRegistryIds`: для не-групи це [ціль], тож Land читає рівно ті самі записи).
-        if (groups is not null && targetIds.Count > 0)
+        // D-465 (рішення власника продукту — варіант A): подія EF — окремий рядок, місячні підсумки рахують формули
+        // шаблону. Новий мапінг на колонку місяця збереження відхиляє; наявний — лише попередження в журналі сервера
+        // (поведінка запису не змінюється).
+        var monthColumns = set.Columns.Values.Where(c => c.IsMonthColumn).Select(c => c.Code).ToList();
+        if (monthColumns.Count > 0)
         {
-            await groups.EnsureFreshAsync(ct).ConfigureAwait(false);
+            LogMonthColumnMap(_logger, map.Id, string.Join(", ", monthColumns));
         }
 
-        List<int> registryIds = [.. targetIds.SelectMany(id => groups?.ExpandRegistryIds(id) ?? [id]).Distinct()];
-
-        var entries = (await db.RegistryEntries
-                .AsNoTracking()
-                .Where(e => registryIds.Contains(e.RegistryDefId) && !e.IsDeleted && e.IsActive)
-                .ToListAsync(ct)
-                .ConfigureAwait(false))
-            .ToLookup(
-                e => e.RegistryDefId,
-                e => new SourceEventLookupEntry(e.Id, e.Code, [.. e.DisplayL10n.Values.Values]));
-
-        return [.. map.Fields
-            .Where(f => columns.ContainsKey(f.TargetColumnDefId))
-            .Select(f =>
-            {
-                var column = columns[f.TargetColumnDefId];
-                return new SourceEventFieldPlan(
-                    column.Id,
-                    column.Code,
-                    column.DataType,
-                    f.SourceAttribute,
-                    f.AttributeScope,
-                    f.ValueKind,
-                    f.SourceUnitId,
-                    f.TargetUnitId,
-                    column.LookupRegistryDefId is { } registryId
-                        ? [.. (groups?.ExpandRegistryIds(registryId) ?? [registryId]).SelectMany(member => entries[member])]
-                        : [],
-                    f.Values.ToDictionary(v => v.SourceValue, v => v.RegistryEntryId, StringComparer.OrdinalIgnoreCase));
-            })];
+        return set.Plans;
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "SourceEventSyncJob: мапінг подій {MapId} пише в колонки місяця ({Columns}). Подія EF записується окремим рядком, місячні підсумки рахуйте формулами шаблону (D-465); приберіть ці поля з мапінгу.")]
+    private static partial void LogMonthColumnMap(ILogger logger, int mapId, string columns);
 
     private static SourceEventLinkState State(SourceEventLink link)
         => new(

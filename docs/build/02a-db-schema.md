@@ -2526,6 +2526,39 @@ CREATE UNIQUE INDEX UX_SEL_NaturalKey ON ext.SourceEventLink (SourceEventMapId, 
     WHERE PrimaryElement IS NOT NULL;
 GO
 
+-- D-465 (міграція D465SourceEventAttributeValues): «Дані з PI → Події» — сторінка зв'язків ОДНОГО мапінгу за вікном
+-- початку, новіші першими (keyset StartUtc, Id). UX_SEL_NaturalKey фільтрований (старі зв'язки без елемента не входять),
+-- тож без цього індексу — скан усіх зв'язків мапінгу за рік. Фільтри списку — у INCLUDE (без Key Lookup).
+CREATE INDEX IX_SEL_MapStart ON ext.SourceEventLink (SourceEventMapId, StartUtc, Id)
+    INCLUDE ([Status], PrimaryElement, EventName);
+GO
+
+-- D-465: значення атрибутів події PI за ОСТАННІМ прочитанням синку — те, що перегляд показує поруч із коміркою рядка
+-- події. Пише лише SourceEventSyncJob одним MERGE (OPENJSON) на сторінку з 500 зв'язків і ЛИШЕ змінене (ValueHash —
+-- SHA-256 канонічного вигляду; незмінене не переписується, ChangedAt — момент, коли значення вперше побачили), тож
+-- щопрогінне перечитування року не дає записів. Атрибут, якого джерело для зв'язку сторінки більше не повертає,
+-- знімається. ⚠ Без FK на ext.SourceEventLink (усі ключі моделі Restrict, а зв'язок видаляє синк): значення
+-- знімаються тим самим кроком — у тій самій ADO-транзакції видалення рядка повною звіркою і тим самим прогоном для
+-- зв'язку, знятого без рядка (передача братньому шаблону). Не партиційована й не посилається на doc.*, тож архівація
+-- (TRUNCATE … WITH (PARTITIONS)) її не зачіпає.
+CREATE TABLE ext.SourceEventAttributeValue
+(
+    LinkId            bigint          NOT NULL,   -- ext.SourceEventLink.Id
+    Scope             tinyint         NOT NULL,   -- SourceEventAttributeScope: 0 Event, 1 PrimaryElement
+    Attribute         nvarchar(200)   NOT NULL,
+    ValueNumeric      decimal(34,16)  NULL,       -- одиниця джерела; поза діапазоном — лише текстом
+    ValueText         nvarchar(4000)  NULL,
+    IsTruncated       bit             NOT NULL,   -- текст довший за 4000: збережено початок, порівняння не робиться
+    SourceUnit        nvarchar(64)    NULL,
+    ValueHash         binary(32)      NOT NULL,
+    SourceModifiedUtc datetime2(3)    NULL,       -- Modified події в PI на момент прочитання
+    ChangedAt         datetime2(3)    NOT NULL,
+    RunId             varchar(32)     NOT NULL,
+    CONSTRAINT PK_SourceEventAttributeValue PRIMARY KEY (LinkId, Scope, Attribute),
+    CONSTRAINT CK_SEAV_Scope CHECK (Scope BETWEEN 0 AND 1)
+);
+GO
+
 CREATE TABLE ext.ConsistencyRule
 (
     Id             int            IDENTITY(1,1) NOT NULL,

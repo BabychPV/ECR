@@ -50,6 +50,7 @@ const Fed: CellSourceView = {
       },
     },
   ],
+  eventSources: [],
 };
 
 const requested: string[] = [];
@@ -115,6 +116,71 @@ describe('CellSourceSection', () => {
     expect(document.querySelector('[data-cell-source-comparison="ManualEdit"]')?.textContent).toBe('⟦cellSource.compareManualEdit⟧');
 
     expect(requested[0]).toBe('/api/v1/documents/7/tables/70/cell-source?rowKey=R1&columnDefId=5');
+  });
+
+  it('D-465: комірка рядка події PI — подія, атрибут, значення PI, що записав би синк, комірка й порівняння', async () => {
+    serve(200, {
+      ...Fed,
+      sources: [],
+      eventSources: [
+        {
+          mapId: 21,
+          sourceEntityId: 4,
+          sourceEntityCode: 'FlareEvent',
+          sourceEntityName: 'Flare events',
+          mapIsActive: true,
+          event: {
+            linkId: 9,
+            mapId: 21,
+            eventId: 'EF-GUID-1',
+            eventName: 'Flaring May',
+            startUtc: '2026-05-20T06:00:00Z',
+            startLocal: '2026-05-20T11:00:00+05:00',
+            endUtc: null,
+            endLocal: null,
+            timeZoneId: 'Asia/Atyrau',
+            primaryElement: 'FLARE-1',
+            sourceModifiedUtc: '2026-05-21T00:00:00Z',
+            status: 'Synced',
+            reason: null,
+            periodKey: 202601,
+            row: null,
+            rowHidden: false,
+            firstSeenAt: '2026-05-21T00:00:00Z',
+            lastSeenAt: '2026-10-01T00:00:00Z',
+            lastSyncAt: '2026-10-01T00:00:00Z',
+            attributes: [],
+          },
+          attribute: {
+            columnDefId: 5,
+            columnCode: 'VOL',
+            attribute: 'Volume',
+            scope: 'Event',
+            piValueNumeric: '99',
+            piValueText: null,
+            piValueTruncated: false,
+            piUnit: 'Sm3',
+            piChangedAt: '2026-10-01T00:00:00Z',
+            expectedValue: '99',
+            cellValue: '42',
+            cellOrigin: 'UserEdit',
+            comparison: 'ManualEdit',
+            reason: 'KeptManual',
+          },
+        },
+      ],
+    });
+    show();
+
+    expect(await screen.findByText('Flaring May')).toBeTruthy();
+    expect(document.querySelector('[data-cell-event-source]')).not.toBeNull();
+    expect(screen.getByText('EF-GUID-1')).toBeTruthy();
+    expect(screen.getByText('99 Sm3')).toBeTruthy();
+    expect(screen.getByText('42')).toBeTruthy();
+    expect(document.querySelector('[data-pi-event-comparison="ManualEdit"]')).not.toBeNull();
+    expect(screen.getByText('⟦piEvents.reasonKeptManual⟧')).toBeTruthy();
+    // Секції мапінгу збору немає: кнопки сирих точок теж.
+    expect(screen.queryByRole('button', { name: /cellSource\.showPoints/ })).toBeNull();
   });
 
   it('комірка без мапінгу — секції немає', async () => {
