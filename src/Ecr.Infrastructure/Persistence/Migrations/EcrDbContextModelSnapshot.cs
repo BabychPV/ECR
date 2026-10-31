@@ -4132,6 +4132,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("UQ_EntityFieldMap");
 
+                    b.HasIndex(new[] { "TargetColumnDefId", "TargetRowKey" }, "IX_EntityFieldMap_TargetCell")
+                        .HasFilter("[TargetColumnDefId] IS NOT NULL");
+
                     b.ToTable("EntityFieldMap", "ext", t =>
                         {
                             t.HasCheckConstraint("CK_EFM_Materialization", "TargetRowKey IS NULL OR TransformCode IS NOT NULL");
@@ -4907,6 +4910,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasIndex(new[] { "CollectionRunId", "CoveredFrom" }, "IX_CollectionCoverage_CollectionRunId");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "CollectionRunId", "CoveredFrom" }, "IX_CollectionCoverage_CollectionRunId"), new[] { "CoveredTo" });
+
+                    b.HasIndex(new[] { "SourceEntityId", "PeriodKey", "Id" }, "IX_CollectionCoverage_PeriodEvents")
+                        .HasFilter("[Status] IS NOT NULL");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "SourceEntityId", "PeriodKey", "Id" }, "IX_CollectionCoverage_PeriodEvents"), new[] { "Status", "Details", "CoveredFrom" });
 
                     b.HasIndex(new[] { "SourceEntityId", "Id" }, "IX_CollectionCoverage_RegistryEvents")
                         .HasFilter("[Status] IS NOT NULL AND [PeriodKey] IS NULL");

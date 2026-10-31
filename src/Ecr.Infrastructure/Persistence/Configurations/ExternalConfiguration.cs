@@ -139,6 +139,11 @@ public sealed class EntityFieldMapConfiguration : IEntityTypeConfiguration<Entit
         builder.HasIndex(x => new { x.SourceEntityId, x.SourceField })
                .IsUnique().HasDatabaseName("UQ_EntityFieldMap");
 
+        // D-463: «Звідки це значення» — мапінги, що цілять у комірку (колонка + рядок). Комірковий вхід
+        // відкривають усі користувачі документів; без індексу — скан мапінгів на кожне відкриття інспектора.
+        builder.HasIndex(x => new { x.TargetColumnDefId, x.TargetRowKey }, "IX_EntityFieldMap_TargetCell")
+               .HasFilter("[TargetColumnDefId] IS NOT NULL");
+
         builder.HasOne<SourceEntity>().WithMany().HasForeignKey(x => x.SourceEntityId)
                .HasConstraintName("FK_EFM_Entity");
         builder.HasOne<ColumnDef>().WithMany().HasForeignKey(x => x.TargetColumnDefId)
@@ -375,6 +380,14 @@ public sealed class CollectionCoverageConfiguration : IEntityTypeConfiguration<C
         builder.HasIndex(x => new { x.SourceEntityId, x.Id }, "IX_CollectionCoverage_RegistryEvents")
                .IncludeProperties(x => new { x.Status, x.PeriodKey, x.Details })
                .HasFilter("[Status] IS NOT NULL AND [PeriodKey] IS NULL");
+
+        // D-463: події матеріалізації однієї сутності за ПЕРІОД («Звідки це значення»: неповне покриття,
+        // немає даних, стеля точок). Індекс подій синку довідника вище їх не містить (`PeriodKey IS NULL`),
+        // острівний — теж (`Status IS NULL`); без цього індексу — скан усього журналу покриття на кожне
+        // відкриття джерела комірки. Status/Details/CoveredFrom у INCLUDE — без Key Lookup.
+        builder.HasIndex(x => new { x.SourceEntityId, x.PeriodKey, x.Id }, "IX_CollectionCoverage_PeriodEvents")
+               .IncludeProperties(x => new { x.Status, x.Details, x.CoveredFrom })
+               .HasFilter("[Status] IS NOT NULL");
     }
 }
 

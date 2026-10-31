@@ -2251,6 +2251,12 @@ CREATE TABLE ext.EntityFieldMap
 );
 GO
 
+-- D-463 «Звідки це значення»: мапінги, що цілять у комірку (колонка + рядок). Міграція D463RawDataReadIndexes.
+CREATE INDEX IX_EntityFieldMap_TargetCell
+    ON ext.EntityFieldMap (TargetColumnDefId, TargetRowKey)
+    WHERE TargetColumnDefId IS NOT NULL;
+GO
+
 CREATE TABLE ext.CollectionSchedule
 (
     Id             int          IDENTITY(1,1) NOT NULL,
@@ -3084,6 +3090,15 @@ CREATE INDEX IX_CollectionCoverage_SourceEntity_CoveredTo
     ON itg.CollectionCoverage (SourceEntityId, CoveredTo)
     INCLUDE (CoveredFrom)
     WHERE [Status] IS NULL;
+GO
+
+-- D-463 «Звідки це значення»: події матеріалізації однієї сутності за період (неповне покриття,
+-- немає даних, стеля точок) — seek замість скану журналу на кожне відкриття інспектора.
+-- Міграція D463RawDataReadIndexes.
+CREATE INDEX IX_CollectionCoverage_PeriodEvents
+    ON itg.CollectionCoverage (SourceEntityId, PeriodKey, Id)
+    INCLUDE (Status, Details, CoveredFrom)
+    WHERE [Status] IS NOT NULL;
 GO
 
 CREATE TABLE itg.ArchiveRun
