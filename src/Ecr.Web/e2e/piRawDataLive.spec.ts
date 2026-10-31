@@ -4,8 +4,9 @@ import { expect, test, type Page } from '@playwright/test';
  * D-463 на живому стенді: «Дані з PI» (адміністратор інтеграції) і «Звідки це значення» (комірка документа).
  *
  * ⚠ Точки, сутність і покриття кладе стенд (`tools/e2e/pi-raw-data-seed.sql`, `ECR_E2E_PI_ENTITY`); мапінг на
- * комірку сценарій заводить сам через API на ту комірку, яку щойно вибрав у сітці, і прибирає у `finally` —
- * активний мапінг на колонку блокував би перенос версії документа в інших сценаріях (`migrateMappingsNotMapped`).
+ * комірку сценарій заводить сам через API на ту комірку, яку щойно вибрав у сітці, і призупиняє у `finally` —
+ * активний мапінг на колонку блокував би перенос версії документа в інших сценаріях (`migrateMappingsNotMapped`),
+ * а видалити мапінг із зібраними точками сервер не дає.
  * Запуск: `tools/e2e-stand.ps1 … -Grep "дані з PI"`.
  */
 const Admin = { user: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
@@ -28,19 +29,20 @@ test.describe('дані з PI', () => {
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 30_000 });
 
     // Тег без мапінгів — шлях самої сутності; графік — SVG з підсумком словами.
-    await expect(page.getByLabel(/^Tag/)).toHaveValue(Tag, { timeout: 30_000 });
+    await expect(page.getByRole('textbox', { name: 'Tag' })).toHaveValue(Tag, { timeout: 30_000 });
     const chart = page.locator('[data-pi-chart] svg[role="img"]');
     await expect(chart).toBeVisible({ timeout: 30_000 });
     await expect(chart).toHaveAttribute('aria-label', /numeric points/);
 
-    // Покриття: стенд залишив прогалину; останній прогін — успішний.
+    // Покриття: суцільне за рік, крім доби, яку стенд лишив прогалиною; останній прогін — успішний.
     await expect(page.locator('[data-pi-coverage]')).toBeVisible();
+    await expect(page.locator('[data-pi-gaps] li')).not.toHaveCount(0);
 
     // Сирі точки: таблиця з рядками, нові зверху.
     const table = page.getByRole('table', { name: /Raw points/ });
     await expect(table.getByRole('row').nth(1)).toBeVisible({ timeout: 30_000 });
 
-    // Вікно останніх 30 днів документа: прогалина в покритті видна поіменно.
+    // Вікно останніх 90 днів: те саме покриття, свіжі точки періоду документа.
     await page.goto(`/admin/pi-data?entity=${EntityId}&range=90d`);
     await expect(page.locator('[data-pi-coverage]')).toBeVisible({ timeout: 30_000 });
 
@@ -103,7 +105,7 @@ test.describe('дані з PI', () => {
       }
     }
 
-    expect(created.status(), `мапінг: ${await created.text()}`).toBe(201);
+    expect(created.ok(), `мапінг: ${String(created.status())} ${await created.text()}`).toBe(true);
     const map = (await created.json()) as { id: number };
 
     try {
@@ -125,8 +127,10 @@ test.describe('дані з PI', () => {
       await expect(modal.locator('svg[role="img"]')).toBeVisible({ timeout: 30_000 });
       await expect(modal.getByRole('table', { name: /Raw points/ }).getByRole('row').nth(1)).toBeVisible();
     } finally {
-      const removed = await page.request.delete(`/api/v1/entity-field-maps/${String(map.id)}`);
-      expect(removed.ok(), `прибирання мапінгу: ${String(removed.status())} ${await removed.text()}`).toBe(true);
+      // ⚠ Видалити мапінг із зібраними точками сервер не дає (`ECR-INT-0409 mappingHasCollectedData`) — пауза:
+      // призупинений мапінг не матеріалізується і не блокує перенос версії документа.
+      const paused = await page.request.post(`/api/v1/entity-field-maps/${String(map.id)}/pause`);
+      expect(paused.ok(), `пауза мапінгу: ${String(paused.status())} ${await paused.text()}`).toBe(true);
     }
   });
 });
