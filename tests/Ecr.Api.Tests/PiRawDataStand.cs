@@ -35,10 +35,14 @@ internal static class PiRawDataStand
     public static readonly DateTime PeriodToUtc = new(2026, 1, 31, 19, 0, 0, DateTimeKind.Utc);
 
     /// <summary>Документ + сутність + мапінг на (колонка 2, рядок 1) з агрегацією <c>Sum</c>.</summary>
-    public static async Task<Stand> ArrangeAsync(SqlServerFixture sql, int columnCount = 3)
+    /// <param name="sql">Фікстура.</param>
+    /// <param name="columnCount">Звичайних колонок.</param>
+    /// <param name="monthColumns">Колонок місяців M1..Mn (D-462).</param>
+    /// <param name="mappedColumn">Індекс колонки мапінгу в <c>ColumnDefIds</c> (типово друга).</param>
+    public static async Task<Stand> ArrangeAsync(SqlServerFixture sql, int columnCount = 3, int monthColumns = 0, int mappedColumn = 1)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var doc = await builder.BuildAsync(columnCount: columnCount, rowCount: 3, ct: CancellationToken.None)
+        var doc = await builder.BuildAsync(columnCount: columnCount, rowCount: 3, monthColumns: monthColumns, ct: CancellationToken.None)
             .ConfigureAwait(false);
         var tag = doc.SheetCode["SHEET".Length..];
 
@@ -57,7 +61,7 @@ internal static class PiRawDataStand
 
         var field = $"\\\\AF\\Plant\\Stack{unique}|CO";
         var rowKey = $"R1_{tag}";
-        var map = EntityFieldMap.ToColumn(entity.Id, field, doc.ColumnDefIds[1]);
+        var map = EntityFieldMap.ToColumn(entity.Id, field, doc.ColumnDefIds[mappedColumn]);
         map.SetMaterialization(rowKey, AggregationKind.Sum);
         db.EntityFieldMaps.Add(map);
 
@@ -67,7 +71,7 @@ internal static class PiRawDataStand
         run.Complete("Succeeded", 0, PeriodToUtc, null);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        return new Stand(doc, tag, entity.Id, field, rowKey, map.Id, run.Id);
+        return new Stand(doc, tag, entity.Id, field, rowKey, map.Id, run.Id) { MappedColumnId = doc.ColumnDefIds[mappedColumn] };
     }
 
     /// <summary>Кладе <paramref name="count"/> точок ряду від <paramref name="from"/> з кроком <paramref name="step"/>; значення — номер точки.</summary>
@@ -206,7 +210,7 @@ internal static class PiRawDataStand
     public sealed record Stand(TestDocument Doc, string Tag, int EntityId, string Field, string RowKey, int MapId, long RunId)
     {
         /// <summary>Колонка, у яку цілить мапінг.</summary>
-        public int MappedColumnId => Doc.ColumnDefIds[1];
+        public int MappedColumnId { get; init; } = Doc.ColumnDefIds[1];
 
         /// <summary>Адреса джерела комірки.</summary>
         public string CellSourceUrl(string? rowKey = null, int? columnId = null, long? documentId = null, long? instanceId = null)

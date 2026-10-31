@@ -115,4 +115,41 @@ public sealed class RawDataQueryTests
         Assert.False(CellSourceHandler.Concerns(new(4, "ConflictKeptManual", Env("k", ("field", @"\\AF\Stack|CO")), Now), map));
         Assert.False(CellSourceHandler.Concerns(new(5, "SkippedPointCeiling", "старий текст", Now), map));
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Вікно_згортки_колонка_місяця_лише_свій_місяць_звичайна_увесь_період_поза_періодом_null()
+    {
+        var zone = Ecr.Domain.ValueObjects.SiteTimeZone.Create("Asia/Atyrau").ToTimeZoneInfo();
+        var year = (new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31));
+        var march = (new DateOnly(2026, 3, 1), new DateOnly(2026, 3, 31));
+        static DateTime U(int y, int m, int d, int h) => new(y, m, d, h, 0, 0, DateTimeKind.Utc);
+
+        var whole = Ecr.Domain.Entities.Documents.Period.FoldBounds(year.Item1, year.Item2, null, zone)!.Value;
+        Assert.Equal((U(2025, 12, 31, 19), U(2026, 12, 31, 19)), (whole.StartUtc, whole.EndUtc));
+
+        var m3 = Ecr.Domain.Entities.Documents.Period.FoldBounds(year.Item1, year.Item2, 3, zone)!.Value;
+        Assert.Equal((U(2026, 2, 28, 19), U(2026, 3, 31, 19)), (m3.StartUtc, m3.EndUtc));
+
+        // Місячний екземпляр березня: M3 — березень, M11 — не комірка цього періоду.
+        Assert.Equal(m3, Ecr.Domain.Entities.Documents.Period.FoldBounds(march.Item1, march.Item2, 3, zone));
+        Assert.Null(Ecr.Domain.Entities.Documents.Period.FoldBounds(march.Item1, march.Item2, 11, zone));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Порівняння_з_коміркою_лише_з_журналу_змін_комірки()
+    {
+        var at = Now;
+        var value = new CellFold(CellFoldState.Value, 12.345m, 100m);
+
+        Assert.Equal("NotWritten", CellSourceHandler.Compare(value, null, 2).Comparison);
+        Assert.Equal("Match", CellSourceHandler.Compare(value, new CellLastWrite("Integration", "12.35", at), 2).Comparison);
+        Assert.Equal("NotUpdated", CellSourceHandler.Compare(value, new CellLastWrite("Integration", "11", at), 2).Comparison);
+        Assert.Equal("ManualEdit", CellSourceHandler.Compare(value, new CellLastWrite("UserEdit", "11", at), 2).Comparison);
+        Assert.Equal("ManualEdit", CellSourceHandler.Compare(value, new CellLastWrite("Import", null, at), 2).Comparison);
+        Assert.Equal(
+            "NotComparable",
+            CellSourceHandler.Compare(new CellFold(CellFoldState.TooManyPoints, null, null), new CellLastWrite("UserEdit", "1", at), 2).Comparison);
+    }
 }

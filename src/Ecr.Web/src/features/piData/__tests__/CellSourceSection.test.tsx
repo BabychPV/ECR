@@ -15,8 +15,10 @@ const Cell = { documentId: 7, tableInstanceId: 70, rowKey: 'R1', columnDefId: 5 
 
 const Fed: CellSourceView = {
   periodKey: 202601,
-  periodFromUtc: '2025-12-31T19:00:00Z',
-  periodToUtc: '2026-01-31T19:00:00Z',
+  windowPeriodKey: 202601,
+  windowMonth: 3,
+  periodFromUtc: '2026-02-28T19:00:00Z',
+  periodToUtc: '2026-03-31T19:00:00Z',
   sources: [
     {
       mapId: 11,
@@ -37,6 +39,15 @@ const Fed: CellSourceView = {
         lastSucceededAt: '2026-02-01T00:01:00Z',
       },
       events: [{ id: 1, status: 'PartialCoverage', details: 'old free text', at: '2026-02-01T00:02:00Z' }],
+      fold: {
+        state: 'Value',
+        value: '2294.0000000000000000',
+        percentGood: '100',
+        storedValue: '2000',
+        storedOrigin: 'UserEdit',
+        storedAt: '2026-04-01T00:00:00Z',
+        comparison: 'ManualEdit',
+      },
     },
   ],
 };
@@ -95,6 +106,13 @@ describe('CellSourceSection', () => {
     expect(screen.getByText('kg → t')).toBeTruthy();
     expect(screen.getByText('old free text')).toBeTruthy();
     expect(screen.getByRole('button', { name: /cellSource\.showPoints/ })).toBeTruthy();
+
+    // D-462: колонка місяця — вікно названо місяцем; значення за правилом і в комірці з ознакою розбіжності.
+    expect(document.querySelector('[data-cell-source-window="3"]')).not.toBeNull();
+    expect(screen.getByText(/cellSource\.windowMonth/)).toBeTruthy();
+    expect(screen.getByText('2294 t')).toBeTruthy();
+    expect(screen.getByText('2000')).toBeTruthy();
+    expect(document.querySelector('[data-cell-source-comparison="ManualEdit"]')?.textContent).toBe('⟦cellSource.compareManualEdit⟧');
 
     expect(requested[0]).toBe('/api/v1/documents/7/tables/70/cell-source?rowKey=R1&columnDefId=5');
   });
