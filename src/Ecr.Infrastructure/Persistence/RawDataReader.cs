@@ -91,6 +91,10 @@ public sealed class RawDataReader(EcrDbContext db) : IRawDataReader
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public Task<int> CountEventMapsAsync(int sourceEntityId, CancellationToken ct)
+        => db.SourceEventMaps.AsNoTracking().CountAsync(m => m.SourceEntityId == sourceEntityId, ct);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<RawDataTag>> ListTagsAsync(int sourceEntityId, int max, CancellationToken ct)
     {
         // ⚠ Один запит: мапінги + колонка + одиниця джерела; призупинені теж — їхні точки лишаються.

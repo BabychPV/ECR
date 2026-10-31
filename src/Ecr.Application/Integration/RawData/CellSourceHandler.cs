@@ -39,6 +39,9 @@ namespace Ecr.Application.Integration.RawData;
 /// <param name="access">Рішення доступу.</param>
 /// <param name="currentUser">Поточний користувач.</param>
 /// <param name="monthRouter">Q-17: власність місячних колонок; <c>null</c> — лише тести.</param>
+/// <param name="events">
+/// D-465: події PI (Event Frames) — комірка рядка події (<c>EF-…</c>); <c>null</c> — лише тести без подій.
+/// </param>
 public sealed class CellSourceHandler(
     IRowStore rows,
     IMetadataCache metadata,
@@ -47,8 +50,15 @@ public sealed class CellSourceHandler(
     IUnitCatalog units,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IMonthColumnRouter? monthRouter = null)
+    IMonthColumnRouter? monthRouter = null,
+    ISourceEventViewStore? events = null)
 {
+    /// <summary>Префікс ключа рядка події джерела (§4.7.4, крок 2) — лише такі рядки питають зв'язки подій.</summary>
+    public const string EventRowKeyPrefix = "EF-";
+
+    /// <summary>Стеля зв'язків подій на рядок (у нормі один; братні мапінги — кілька).</summary>
+    public const int MaxEventLinks = 5;
+
     /// <summary>Проєктне право читання комірки.</summary>
     public const string Permission = "Document.View";
 
@@ -107,13 +117,68 @@ public sealed class CellSourceHandler(
                 fold));
         }
 
+        // D-465: рядок події PI — подія, атрибут цієї колонки, прочитане з PI і порівняння з коміркою. Лише для ключа
+        // `EF-…`: інші рядки не платять жодного звернення (сталі звернення D-463 не змінюються).
+        IReadOnlyList<CellEventSourceItem> eventSources = rowKey!.StartsWith(EventRowKeyPrefix, StringComparison.OrdinalIgnoreCase)
+            ? await EventSourcesAsync(documentId, tableInstanceId, rowKey, columnDefId, cell.PeriodKey, ct).ConfigureAwait(false)
+            : [];
+
         return new CellSourceView(
             cell.PeriodKey,
             cell.Window?.StartUtc,
             cell.Window?.EndUtc,
             items,
             cell.WindowPeriodKey,
-            cell.Month);
+            cell.Month,
+            eventSources);
+    }
+
+    /// <summary>
+    /// D-465: події PI, що ведуть рядок комірки, — подія, атрибут колонки, значення за останнім прочитанням синку,
+    /// що записав би синк, що в комірці, порівняння й причина. Доступ уже доведено (<see cref="ResolveAsync"/>).
+    /// </summary>
+    private async Task<IReadOnlyList<CellEventSourceItem>> EventSourcesAsync(
+        long documentId, long tableInstanceId, string rowKey, int columnDefId, int periodKey, CancellationToken ct)
+    {
+        if (events is null)
+        {
+            return [];
+        }
+
+        var links = await events.LinksOfRowAsync(tableInstanceId, rowKey, MaxEventLinks, ct).ConfigureAwait(false);
+        var result = new List<CellEventSourceItem>(links.Count);
+        foreach (var link in links.Where(l => l.PeriodKey == periodKey))
+        {
+            var map = await events.MapAsync(link.MapId, ct).ConfigureAwait(false);
+
+            // ⛔ Мапінг чужого документа на той самий екземпляр не буває (екземпляр належить документу), але й не
+            // повинен відкривати нічого: лише мапінг цього документа і лише поле ЦІЄЇ колонки.
+            if (map is null || map.DocumentId != documentId || map.Fields.All(f => f.ColumnDefId != columnDefId))
+            {
+                continue;
+            }
+
+            var context = await events.ContextAsync(map, ct).ConfigureAwait(false);
+            var values = await events.ValuesAsync([link.Id], ct).ConfigureAwait(false);
+            var cells = await events
+                .CellsAsync([new PiRowAddress(periodKey, tableInstanceId, rowKey, documentId)], [columnDefId], ct)
+                .ConfigureAwait(false);
+            var tz = SiteTimeZone.Create(map.TimeZoneId).ToTimeZoneInfo();
+
+            var attribute = PiEventComparison
+                .Compare(link, context, tz, values, column => cells.FirstOrDefault(c => c.ColumnDefId == column), _ => true)
+                .FirstOrDefault(a => a.ColumnDefId == columnDefId);
+            if (attribute is null)
+            {
+                continue;
+            }
+
+            var view = PiEventDataHandler.ToView(link, map, context, tz, documentVisible: true, [attribute]);
+            result.Add(new CellEventSourceItem(
+                map.MapId, map.SourceEntityId, map.SourceEntityCode, map.SourceEntityName, map.IsActive, view, attribute));
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -351,13 +416,32 @@ public sealed class CellSourceHandler(
 /// <param name="Sources">Мапінги, що живлять комірку; порожньо — значення не з PI.</param>
 /// <param name="WindowPeriodKey">Період, у якому згортається комірка (Q-17 — період-власник колонки).</param>
 /// <param name="WindowMonth">Місяць колонки місяця (1..12): вікно — лише цей місяць періоду (D-462); <c>null</c> — увесь період.</param>
+/// <param name="EventSources">D-465: події PI, що ведуть рядок комірки (рядок <c>EF-…</c>); порожньо — не рядок події.</param>
 public sealed record CellSourceView(
     int PeriodKey,
     DateTime? PeriodFromUtc,
     DateTime? PeriodToUtc,
     IReadOnlyList<CellSourceItem> Sources,
     int WindowPeriodKey,
-    int? WindowMonth);
+    int? WindowMonth,
+    IReadOnlyList<CellEventSourceItem> EventSources);
+
+/// <summary>Подія PI, що веде рядок комірки (<c>D-465</c>).</summary>
+/// <param name="MapId">Мапінг подій.</param>
+/// <param name="SourceEntityId">Сутність-шаблон подій.</param>
+/// <param name="SourceEntityCode">Код шаблону.</param>
+/// <param name="SourceEntityName">Підпис сутності.</param>
+/// <param name="MapIsActive">Мапінг діє.</param>
+/// <param name="Event">Подія (ідентичність, час, стан зв'язку, останній синк).</param>
+/// <param name="Attribute">Атрибут цієї колонки: прочитане з PI, що записав би синк, що в комірці, порівняння.</param>
+public sealed record CellEventSourceItem(
+    int MapId,
+    int SourceEntityId,
+    string SourceEntityCode,
+    string? SourceEntityName,
+    bool MapIsActive,
+    PiEventView Event,
+    PiEventAttributeView Attribute);
 
 /// <summary>Один мапінг, що живить комірку.</summary>
 /// <param name="MapId">Мапінг — ключ для точок і графіка.</param>

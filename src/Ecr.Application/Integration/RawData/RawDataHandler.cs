@@ -65,13 +65,15 @@ public sealed class RawDataHandler(
 
         var entity = await EntityAsync(sourceEntityId, ct).ConfigureAwait(false);
         var tags = await reader.ListTagsAsync(sourceEntityId, MaxTags + 1, ct).ConfigureAwait(false);
+        var eventMaps = await reader.CountEventMapsAsync(sourceEntityId, ct).ConfigureAwait(false);
 
         // ⚠ Без мапінгів збір читає саму сутність (`CollectionRunner.Paths`) — тег той самий.
         IReadOnlyList<RawDataTag> shown = tags.Count == 0
             ? [new RawDataTag(entity.EntityPath ?? entity.Code, null, null, null, null, null, entity.IsActive)]
             : [.. tags.Take(MaxTags)];
 
-        return new RawDataTagsView(entity.Id, entity.Code, entity.DisplayName, entity.IsActive, shown, tags.Count > MaxTags);
+        return new RawDataTagsView(
+            entity.Id, entity.Code, entity.DisplayName, entity.IsActive, shown, tags.Count > MaxTags, eventMaps);
     }
 
     /// <summary>Сторінка точок тега, новіші першими.</summary>

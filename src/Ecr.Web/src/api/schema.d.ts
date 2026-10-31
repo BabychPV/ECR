@@ -18701,6 +18701,340 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sources/{id}/raw-data/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Сторінка подій мапінгу за вікном початку, новіші першими (курсор за початком і Id). */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Мапінг; `null` — перший мапінг сутності. */
+                    mapId?: number;
+                    /** @description Початок вікна (UTC, включно). */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (UTC, виключно); ≤ 400 діб від початку. */
+                    toUtc?: string;
+                    /** @description Стани зв'язку; порожньо — усі. */
+                    status?: components["schemas"]["SourceEventLinkStatus"][];
+                    /** @description Первинний елемент починається з (без регістру). */
+                    element?: string;
+                    /** @description Назва події містить. */
+                    name?: string;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                    /** @description 1..200; `0` — 50. */
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність-шаблон подій. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfPiEventView"];
+                        "text/json": components["schemas"]["PagedResultOfPiEventView"];
+                        "text/plain": components["schemas"]["PagedResultOfPiEventView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/raw-data/events/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Події мапінгу × поля у CSV потоком.
+         * @description Стеля `Integration:RawDataExportMaxRows` (типово 100 000 рядків «подія × поле»); понад неї —
+         *     `422 auditExportTooLarge` до першого байта. UTF-8 з BOM; час — UTC ISO 8601; текст джерела й комірок
+         *     нейтралізується від формул. Подія безпеки `PiEventDataExported` (без значень). Комірки документа, якого
+         *     читач не бачить, — порожні.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Мапінг; `null` — перший. */
+                    mapId?: number;
+                    /** @description Початок вікна. */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (≤ 400 діб). */
+                    toUtc?: string;
+                    /** @description Стани зв'язку. */
+                    status?: components["schemas"]["SourceEventLinkStatus"][];
+                    /** @description Первинний елемент починається з. */
+                    element?: string;
+                    /** @description Назва містить. */
+                    name?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність-шаблон подій. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/raw-data/events/maps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Мапінги подій сутності й періоди, що перетинають вікно. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна (UTC); `null` — 7 діб до кінця. */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (UTC, виключно); `null` — «зараз». Вікно ≤ 400 діб. */
+                    toUtc?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність-шаблон подій. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PiEventMapsView"];
+                        "text/json": components["schemas"]["PiEventMapsView"];
+                        "text/plain": components["schemas"]["PiEventMapsView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/raw-data/events/removed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Журнал видалень рядків подій сутності (повна звірка) за вікно моменту видалення, новіші першими. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна. */
+                    fromUtc?: string;
+                    /** @description Кінець вікна (≤ 400 діб). */
+                    toUtc?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність-шаблон подій. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PiEventRemovalsView"];
+                        "text/json": components["schemas"]["PiEventRemovalsView"];
+                        "text/plain": components["schemas"]["PiEventRemovalsView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sources/{id}/raw-data/export.csv": {
         parameters: {
             query?: never;
@@ -24982,6 +25316,29 @@ export interface components {
          * @enum {unknown}
          */
         CellDataType: "String" | "Int" | "Decimal" | "Bool" | "Date" | "Lookup" | "Formula" | "Unit" | "Calculated";
+        /** @description Подія PI, що веде рядок комірки (`D-465`). */
+        CellEventSourceItem: {
+            /** @description Атрибут цієї колонки: прочитане з PI, що записав би синк, що в комірці, порівняння. */
+            attribute: components["schemas"]["PiEventAttributeView"];
+            /** @description Подія (ідентичність, час, стан зв'язку, останній синк). */
+            event: components["schemas"]["PiEventView"];
+            /**
+             * Format: int32
+             * @description Мапінг подій.
+             */
+            mapId: number;
+            /** @description Мапінг діє. */
+            mapIsActive: boolean;
+            /** @description Код шаблону. */
+            sourceEntityCode: string;
+            /**
+             * Format: int32
+             * @description Сутність-шаблон подій.
+             */
+            sourceEntityId: number;
+            /** @description Підпис сутності. */
+            sourceEntityName: null | string;
+        };
         /** @description Значення за правилом згортки поруч зі значенням комірки. */
         CellFoldView: {
             /** @description CellFoldComparison: `Match`; `ManualEdit` — інше значення, останній запис людини;
@@ -25079,6 +25436,8 @@ export interface components {
         };
         /** @description Звідки комірка отримує значення з PI. */
         CellSourceView: {
+            /** @description D-465: події PI, що ведуть рядок комірки (рядок `EF-…`); порожньо — не рядок події. */
+            eventSources: components["schemas"]["CellEventSourceItem"][];
             /**
              * Format: date-time
              * @description Початок вікна згортки (UTC); `null` — колонка місяця поза періодом без власника.
@@ -29257,6 +29616,19 @@ export interface components {
         };
         /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
          *     перевіряється архітектурним тестом. */
+        PagedResultOfPiEventView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["PiEventView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
         PagedResultOfProjectSummary: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["ProjectSummary"][];
@@ -30442,6 +30814,222 @@ export interface components {
             /** @description Опубліковані таблиці з кількістю рядків; таблиць, що лише в чернетці, тут немає. */
             tables: components["schemas"]["PermitTypeTableUsageDto"][];
         };
+        /** @description Атрибут події: що прочитано з PI, що записав би синк, що в комірці. */
+        PiEventAttributeView: {
+            /** @description Атрибут або `$start`/`$end`/`$name`. */
+            attribute: string;
+            /** @description Хто записав комірку востаннє (`Integration`, `UserEdit`…). */
+            cellOrigin: null | string;
+            /** @description Що в комірці; `null` — порожньо чи приховано. */
+            cellValue: null | string;
+            /** @description Код колонки. */
+            columnCode: null | string;
+            /**
+             * Format: int32
+             * @description Колонка; `null` — атрибут прочитано, але не мапиться (звуження тощо).
+             */
+            columnDefId: null | number;
+            /** @description PiValueComparison; `null` — атрибут не мапиться в колонку. */
+            comparison: null | string;
+            /** @description Що записав би синк (одиниця й пояс документа); `null` — нічого. */
+            expectedValue: null | string;
+            /**
+             * Format: date-time
+             * @description Коли синк уперше прочитав це значення (UTC).
+             */
+            piChangedAt: null | string;
+            /** @description UOM джерела. */
+            piUnit: null | string;
+            /**
+             * Format: decimal
+             * @description Число з PI (одиниця джерела).
+             */
+            piValueNumeric: null | string;
+            /** @description Текст із PI (для дат — ISO UTC). */
+            piValueText: null | string;
+            /** @description Текст PI довший за сховище — показано початок. */
+            piValueTruncated: boolean;
+            /** @description PiValueReason; `null` — без причини. */
+            reason: null | string;
+            /** @description Де лежить атрибут. */
+            scope: components["schemas"]["SourceEventAttributeScope"];
+        };
+        /** @description Поле мапінгу подій. */
+        PiEventMapField: {
+            /** @description Код колонки; `null` — колонку видалено. */
+            columnCode: null | string;
+            /**
+             * Format: int32
+             * @description Колонка.
+             */
+            columnDefId: number;
+            /** @description Колонка місяця (D-465: такі поля збереження відхиляє; наявні — попередження). */
+            isMonthColumn: boolean;
+            /** @description Де лежить атрибут. */
+            scope: components["schemas"]["SourceEventAttributeScope"];
+            /** @description Атрибут або `$start`/`$end`/`$name`. */
+            sourceAttribute: string;
+        };
+        /** @description Мапінг подій. */
+        PiEventMapView: {
+            /**
+             * Format: int64
+             * @description Документ — лише якщо видимий.
+             */
+            documentId: null | number;
+            /** @description Бізнес-ключ — лише якщо видимий. */
+            documentKey: null | string;
+            /** @description Читач бачить документ (і таблицю) мапінгу. */
+            documentVisible: boolean;
+            /** @description Поля. */
+            fields: components["schemas"]["PiEventMapField"][];
+            /** @description Є поля на колонки місяця (D-465: варто прибрати). */
+            hasMonthColumnFields: boolean;
+            /** @description Діє. */
+            isActive: boolean;
+            /**
+             * Format: int32
+             * @description Мапінг.
+             */
+            mapId: number;
+            /** @description Код таблиці. */
+            tableCode: string;
+        };
+        /** @description Мапінги подій сутності для перемикача «Дані з PI → Події». */
+        PiEventMapsView: {
+            /** @description Код шаблону. */
+            code: string;
+            /** @description Підпис. */
+            displayName: null | string;
+            /** @description Мапінги (документ — лише видимий читачеві). */
+            maps: components["schemas"]["PiEventMapView"][];
+            /** @description Періоди проєктів мапінгів, що перетинають вікно, — для журналу покриття за період. */
+            periods: components["schemas"]["PiEventPeriodView"][];
+            /**
+             * Format: int32
+             * @description Сутність-шаблон.
+             */
+            sourceEntityId: number;
+        };
+        /** @description Період проєкту, що перетинає вікно. */
+        PiEventPeriodView: {
+            /** Format: date-time */
+            fromUtc: string;
+            /** Format: int32 */
+            periodKey: number;
+            state: string;
+            /** Format: date-time */
+            toUtc: string;
+        };
+        /** @description Запис журналу видалення рядка події. */
+        PiEventRemovalView: {
+            eventId: null | string;
+            eventName: null | string;
+            /** Format: date-time */
+            eventStartUtc: null | string;
+            /** Format: int32 */
+            mapId: null | number;
+            /** Format: int32 */
+            periodKey: null | number;
+            /** Format: date-time */
+            removedAt: string;
+            row: null | components["schemas"]["PiEventRowView"];
+            rowHidden: boolean;
+            runId: null | string;
+        };
+        /** @description Журнал видалень за вікно. */
+        PiEventRemovalsView: {
+            /** @description Записів більше за стелю. */
+            isTruncated: boolean;
+            /** @description Записи, новіші першими. */
+            items: components["schemas"]["PiEventRemovalView"][];
+        };
+        /** @description Рядок документа, у який лягла подія (лише для того, хто документ бачить). */
+        PiEventRowView: {
+            /** Format: int64 */
+            documentId: number;
+            documentKey: string;
+            /** Format: int32 */
+            periodKey: number;
+            rowKey: string;
+            /** Format: int64 */
+            tableInstanceId: number;
+        };
+        /** @description Подія PI з порівнянням атрибутів. */
+        PiEventView: {
+            /** @description Атрибути з порівнянням. */
+            attributes: components["schemas"]["PiEventAttributeView"][];
+            /**
+             * Format: date-time
+             * @description Кінець у поясі проєкту.
+             */
+            endLocal: null | string;
+            /**
+             * Format: date-time
+             * @description Кінець, UTC; `null` — триває.
+             */
+            endUtc: null | string;
+            /** @description ID події в PI. */
+            eventId: string;
+            /** @description Назва. */
+            eventName: null | string;
+            /**
+             * Format: date-time
+             * @description Уперше побачено.
+             */
+            firstSeenAt: string;
+            /**
+             * Format: date-time
+             * @description Востаннє повернуто джерелом.
+             */
+            lastSeenAt: string;
+            /**
+             * Format: date-time
+             * @description Останній прогін синку.
+             */
+            lastSyncAt: string;
+            /**
+             * Format: int64
+             * @description Зв'язок.
+             */
+            linkId: number;
+            /**
+             * Format: int32
+             * @description Мапінг.
+             */
+            mapId: number;
+            /**
+             * Format: int32
+             * @description Період, у який лягає початок події.
+             */
+            periodKey: null | number;
+            /** @description Первинний елемент (ключовий вигляд). */
+            primaryElement: null | string;
+            /** @description Причина на рівні події (PiValueReason). */
+            reason: null | string;
+            row: null | components["schemas"]["PiEventRowView"];
+            /** @description Рядок є, але документ читачеві не видно. */
+            rowHidden: boolean;
+            /**
+             * Format: date-time
+             * @description `Modified` події в PI.
+             */
+            sourceModifiedUtc: null | string;
+            /**
+             * Format: date-time
+             * @description Початок у поясі проєкту.
+             */
+            startLocal: string;
+            /**
+             * Format: date-time
+             * @description Початок, UTC.
+             */
+            startUtc: string;
+            /** @description Стан зв'язку. */
+            status: string;
+            /** @description Пояс проєкту. */
+            timeZoneId: string;
+        };
         /** @description Тіло створення повідомлення. */
         PostTableDiscussionMessageRequest: {
             /** @description Простий текст, 1..4000 символів після нормалізації (керівні символи прибираються). */
@@ -30671,6 +31259,11 @@ export interface components {
             code: string;
             /** @description Підпис; `null` — не задано. */
             displayName: null | string;
+            /**
+             * Format: int32
+             * @description D-465: мапінгів подій (Event Frames) у сутності; більше нуля — сутність-шаблон подій, і екран показує «Події».
+             */
+            eventMapCount: number;
             /** @description Чи сутність діє. */
             isActive: boolean;
             /** @description Тегів більше за стелю. */
@@ -33983,6 +34576,10 @@ export interface components {
             id: number;
             /** @description Чи діє синхронізація за мапінгом. */
             isActive: boolean;
+            /** @description D-465: Id полів, що цілять у колонку місяця (подія EF — окремий рядок; місячні підсумки — формулами шаблону). Нове
+             *     таке поле збереження відхиляє; наявні лише позначаються попередженням. `null` — не обчислювалось (відповідь
+             *     на зміну). */
+            monthColumnFieldIds?: null | number[];
             /** @description Версія для оптимістичного блокування (hex, AN-40 / L9-06): клієнт повертає її в
              *     `rowVersion` запиту на зміну, і пауза зі застарілого рядка переліку дає `409`,
              *     а не мовчки відкочує чужу правку полів. */

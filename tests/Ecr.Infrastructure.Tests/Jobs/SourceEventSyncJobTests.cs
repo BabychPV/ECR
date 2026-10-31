@@ -51,7 +51,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// </list>
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
+public sealed partial class SourceEventSyncJobTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 2, 5, 9, 0, 0, DateTimeKind.Utc);
 

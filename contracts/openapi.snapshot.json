@@ -1482,6 +1482,54 @@
           "Calculated"
         ]
       },
+      "CellEventSourceItem": {
+        "description": "Подія PI, що веде рядок комірки (`D-465`).",
+        "properties": {
+          "attribute": {
+            "$ref": "#/components/schemas/PiEventAttributeView",
+            "description": "Атрибут цієї колонки: прочитане з PI, що записав би синк, що в комірці, порівняння."
+          },
+          "event": {
+            "$ref": "#/components/schemas/PiEventView",
+            "description": "Подія (ідентичність, час, стан зв'язку, останній синк)."
+          },
+          "mapId": {
+            "description": "Мапінг подій.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "mapIsActive": {
+            "description": "Мапінг діє.",
+            "type": "boolean"
+          },
+          "sourceEntityCode": {
+            "description": "Код шаблону.",
+            "type": "string"
+          },
+          "sourceEntityId": {
+            "description": "Сутність-шаблон подій.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sourceEntityName": {
+            "description": "Підпис сутності.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "mapId",
+          "sourceEntityId",
+          "sourceEntityCode",
+          "sourceEntityName",
+          "mapIsActive",
+          "event",
+          "attribute"
+        ],
+        "type": "object"
+      },
       "CellFoldView": {
         "description": "Значення за правилом згортки поруч зі значенням комірки.",
         "properties": {
@@ -1713,6 +1761,13 @@
       "CellSourceView": {
         "description": "Звідки комірка отримує значення з PI.",
         "properties": {
+          "eventSources": {
+            "description": "D-465: події PI, що ведуть рядок комірки (рядок `EF-…`); порожньо — не рядок події.",
+            "items": {
+              "$ref": "#/components/schemas/CellEventSourceItem"
+            },
+            "type": "array"
+          },
           "periodFromUtc": {
             "description": "Початок вікна згортки (UTC); `null` — колонка місяця поза періодом без власника.",
             "format": "date-time",
@@ -1761,7 +1816,8 @@
           "periodToUtc",
           "sources",
           "windowPeriodKey",
-          "windowMonth"
+          "windowMonth",
+          "eventSources"
         ],
         "type": "object"
       },
@@ -10663,6 +10719,39 @@
         ],
         "type": "object"
       },
+      "PagedResultOfPiEventView": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/PiEventView"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
       "PagedResultOfProjectSummary": {
         "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
         "properties": {
@@ -13174,6 +13263,561 @@
         ],
         "type": "object"
       },
+      "PiEventAttributeView": {
+        "description": "Атрибут події: що прочитано з PI, що записав би синк, що в комірці.",
+        "properties": {
+          "attribute": {
+            "description": "Атрибут або `$start`/`$end`/`$name`.",
+            "type": "string"
+          },
+          "cellOrigin": {
+            "description": "Хто записав комірку востаннє (`Integration`, `UserEdit`…).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "cellValue": {
+            "description": "Що в комірці; `null` — порожньо чи приховано.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "columnCode": {
+            "description": "Код колонки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "columnDefId": {
+            "description": "Колонка; `null` — атрибут прочитано, але не мапиться (звуження тощо).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "comparison": {
+            "description": "PiValueComparison; `null` — атрибут не мапиться в колонку.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "expectedValue": {
+            "description": "Що записав би синк (одиниця й пояс документа); `null` — нічого.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "piChangedAt": {
+            "description": "Коли синк уперше прочитав це значення (UTC).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "piUnit": {
+            "description": "UOM джерела.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "piValueNumeric": {
+            "description": "Число з PI (одиниця джерела).",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "piValueText": {
+            "description": "Текст із PI (для дат — ISO UTC).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "piValueTruncated": {
+            "description": "Текст PI довший за сховище — показано початок.",
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "PiValueReason; `null` — без причини.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "scope": {
+            "$ref": "#/components/schemas/SourceEventAttributeScope",
+            "description": "Де лежить атрибут."
+          }
+        },
+        "required": [
+          "columnDefId",
+          "columnCode",
+          "attribute",
+          "scope",
+          "piValueNumeric",
+          "piValueText",
+          "piValueTruncated",
+          "piUnit",
+          "piChangedAt",
+          "expectedValue",
+          "cellValue",
+          "cellOrigin",
+          "comparison",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "PiEventMapField": {
+        "description": "Поле мапінгу подій.",
+        "properties": {
+          "columnCode": {
+            "description": "Код колонки; `null` — колонку видалено.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "columnDefId": {
+            "description": "Колонка.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isMonthColumn": {
+            "description": "Колонка місяця (D-465: такі поля збереження відхиляє; наявні — попередження).",
+            "type": "boolean"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/SourceEventAttributeScope",
+            "description": "Де лежить атрибут."
+          },
+          "sourceAttribute": {
+            "description": "Атрибут або `$start`/`$end`/`$name`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "columnDefId",
+          "columnCode",
+          "sourceAttribute",
+          "scope",
+          "isMonthColumn"
+        ],
+        "type": "object"
+      },
+      "PiEventMapView": {
+        "description": "Мапінг подій.",
+        "properties": {
+          "documentId": {
+            "description": "Документ — лише якщо видимий.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "documentKey": {
+            "description": "Бізнес-ключ — лише якщо видимий.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "documentVisible": {
+            "description": "Читач бачить документ (і таблицю) мапінгу.",
+            "type": "boolean"
+          },
+          "fields": {
+            "description": "Поля.",
+            "items": {
+              "$ref": "#/components/schemas/PiEventMapField"
+            },
+            "type": "array"
+          },
+          "hasMonthColumnFields": {
+            "description": "Є поля на колонки місяця (D-465: варто прибрати).",
+            "type": "boolean"
+          },
+          "isActive": {
+            "description": "Діє.",
+            "type": "boolean"
+          },
+          "mapId": {
+            "description": "Мапінг.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "tableCode": {
+            "description": "Код таблиці.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mapId",
+          "isActive",
+          "documentVisible",
+          "documentId",
+          "documentKey",
+          "tableCode",
+          "fields",
+          "hasMonthColumnFields"
+        ],
+        "type": "object"
+      },
+      "PiEventMapsView": {
+        "description": "Мапінги подій сутності для перемикача «Дані з PI → Події».",
+        "properties": {
+          "code": {
+            "description": "Код шаблону.",
+            "type": "string"
+          },
+          "displayName": {
+            "description": "Підпис.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "maps": {
+            "description": "Мапінги (документ — лише видимий читачеві).",
+            "items": {
+              "$ref": "#/components/schemas/PiEventMapView"
+            },
+            "type": "array"
+          },
+          "periods": {
+            "description": "Періоди проєктів мапінгів, що перетинають вікно, — для журналу покриття за період.",
+            "items": {
+              "$ref": "#/components/schemas/PiEventPeriodView"
+            },
+            "type": "array"
+          },
+          "sourceEntityId": {
+            "description": "Сутність-шаблон.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sourceEntityId",
+          "code",
+          "displayName",
+          "maps",
+          "periods"
+        ],
+        "type": "object"
+      },
+      "PiEventPeriodView": {
+        "description": "Період проєкту, що перетинає вікно.",
+        "properties": {
+          "fromUtc": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "periodKey": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          },
+          "toUtc": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "periodKey",
+          "state",
+          "fromUtc",
+          "toUtc"
+        ],
+        "type": "object"
+      },
+      "PiEventRemovalView": {
+        "description": "Запис журналу видалення рядка події.",
+        "properties": {
+          "eventId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "eventName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "eventStartUtc": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "mapId": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "periodKey": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "removedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "row": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PiEventRowView"
+              }
+            ]
+          },
+          "rowHidden": {
+            "type": "boolean"
+          },
+          "runId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "removedAt",
+          "eventId",
+          "eventName",
+          "eventStartUtc",
+          "periodKey",
+          "mapId",
+          "row",
+          "rowHidden",
+          "runId"
+        ],
+        "type": "object"
+      },
+      "PiEventRemovalsView": {
+        "description": "Журнал видалень за вікно.",
+        "properties": {
+          "isTruncated": {
+            "description": "Записів більше за стелю.",
+            "type": "boolean"
+          },
+          "items": {
+            "description": "Записи, новіші першими.",
+            "items": {
+              "$ref": "#/components/schemas/PiEventRemovalView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "isTruncated"
+        ],
+        "type": "object"
+      },
+      "PiEventRowView": {
+        "description": "Рядок документа, у який лягла подія (лише для того, хто документ бачить).",
+        "properties": {
+          "documentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "documentKey": {
+            "type": "string"
+          },
+          "periodKey": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "rowKey": {
+            "type": "string"
+          },
+          "tableInstanceId": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "documentId",
+          "documentKey",
+          "periodKey",
+          "tableInstanceId",
+          "rowKey"
+        ],
+        "type": "object"
+      },
+      "PiEventView": {
+        "description": "Подія PI з порівнянням атрибутів.",
+        "properties": {
+          "attributes": {
+            "description": "Атрибути з порівнянням.",
+            "items": {
+              "$ref": "#/components/schemas/PiEventAttributeView"
+            },
+            "type": "array"
+          },
+          "endLocal": {
+            "description": "Кінець у поясі проєкту.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "endUtc": {
+            "description": "Кінець, UTC; `null` — триває.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "eventId": {
+            "description": "ID події в PI.",
+            "type": "string"
+          },
+          "eventName": {
+            "description": "Назва.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "firstSeenAt": {
+            "description": "Уперше побачено.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "lastSeenAt": {
+            "description": "Востаннє повернуто джерелом.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "lastSyncAt": {
+            "description": "Останній прогін синку.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "linkId": {
+            "description": "Зв'язок.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "mapId": {
+            "description": "Мапінг.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "periodKey": {
+            "description": "Період, у який лягає початок події.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "primaryElement": {
+            "description": "Первинний елемент (ключовий вигляд).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "description": "Причина на рівні події (PiValueReason).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "row": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PiEventRowView",
+                "description": "Рядок документа — лише якщо видимий."
+              }
+            ]
+          },
+          "rowHidden": {
+            "description": "Рядок є, але документ читачеві не видно.",
+            "type": "boolean"
+          },
+          "sourceModifiedUtc": {
+            "description": "`Modified` події в PI.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "startLocal": {
+            "description": "Початок у поясі проєкту.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "startUtc": {
+            "description": "Початок, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "description": "Стан зв'язку.",
+            "type": "string"
+          },
+          "timeZoneId": {
+            "description": "Пояс проєкту.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "linkId",
+          "mapId",
+          "eventId",
+          "eventName",
+          "startUtc",
+          "startLocal",
+          "endUtc",
+          "endLocal",
+          "timeZoneId",
+          "primaryElement",
+          "sourceModifiedUtc",
+          "status",
+          "reason",
+          "periodKey",
+          "row",
+          "rowHidden",
+          "firstSeenAt",
+          "lastSeenAt",
+          "lastSyncAt",
+          "attributes"
+        ],
+        "type": "object"
+      },
       "PostTableDiscussionMessageRequest": {
         "description": "Тіло створення повідомлення.",
         "properties": {
@@ -13684,6 +14328,11 @@
               "string"
             ]
           },
+          "eventMapCount": {
+            "description": "D-465: мапінгів подій (Event Frames) у сутності; більше нуля — сутність-шаблон подій, і екран показує «Події».",
+            "format": "int32",
+            "type": "integer"
+          },
           "isActive": {
             "description": "Чи сутність діє.",
             "type": "boolean"
@@ -13711,7 +14360,8 @@
           "displayName",
           "isActive",
           "tags",
-          "isTruncated"
+          "isTruncated",
+          "eventMapCount"
         ],
         "type": "object"
       },
@@ -21053,6 +21703,17 @@
           "isActive": {
             "description": "Чи діє синхронізація за мапінгом.",
             "type": "boolean"
+          },
+          "monthColumnFieldIds": {
+            "description": "D-465: Id полів, що цілять у колонку місяця (подія EF — окремий рядок; місячні підсумки — формулами шаблону). Нове\nтаке поле збереження відхиляє; наявні лише позначаються попередженням. `null` — не обчислювалось (відповідь\nна зміну).",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "rowVersion": {
             "description": "Версія для оптимістичного блокування (hex, AN-40 / L9-06): клієнт повертає її в\n`rowVersion` запиту на зміну, і пауза зі застарілого рядка переліку дає `409`,\nа не мовчки відкочує чужу правку полів.",
@@ -51513,6 +52174,540 @@
         ]
       }
     },
+    "/api/v1/sources/{id}/raw-data/events": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Сутність-шаблон подій.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Мапінг; `null` — перший мапінг сутності.",
+            "in": "query",
+            "name": "mapId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Початок вікна (UTC, включно).",
+            "in": "query",
+            "name": "fromUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна (UTC, виключно); ≤ 400 діб від початку.",
+            "in": "query",
+            "name": "toUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Стани зв'язку; порожньо — усі.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/SourceEventLinkStatus"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "Первинний елемент починається з (без регістру).",
+            "in": "query",
+            "name": "element",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Назва події містить.",
+            "in": "query",
+            "name": "name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Курсор наступної сторінки.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "1..200; `0` — 50.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfPiEventView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfPiEventView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfPiEventView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Сторінка подій мапінгу за вікном початку, новіші першими (курсор за початком і Id).",
+        "tags": [
+          "PiEventData"
+        ]
+      }
+    },
+    "/api/v1/sources/{id}/raw-data/events/export.csv": {
+      "get": {
+        "description": "Стеля `Integration:RawDataExportMaxRows` (типово 100 000 рядків «подія × поле»); понад неї —\n`422 auditExportTooLarge` до першого байта. UTF-8 з BOM; час — UTC ISO 8601; текст джерела й комірок\nнейтралізується від формул. Подія безпеки `PiEventDataExported` (без значень). Комірки документа, якого\nчитач не бачить, — порожні.",
+        "parameters": [
+          {
+            "description": "Сутність-шаблон подій.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Мапінг; `null` — перший.",
+            "in": "query",
+            "name": "mapId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Початок вікна.",
+            "in": "query",
+            "name": "fromUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна (≤ 400 діб).",
+            "in": "query",
+            "name": "toUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Стани зв'язку.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/SourceEventLinkStatus"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "Первинний елемент починається з.",
+            "in": "query",
+            "name": "element",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Назва містить.",
+            "in": "query",
+            "name": "name",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Події мапінгу × поля у CSV потоком.",
+        "tags": [
+          "PiEventData"
+        ]
+      }
+    },
+    "/api/v1/sources/{id}/raw-data/events/maps": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Сутність-шаблон подій.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Початок вікна (UTC); `null` — 7 діб до кінця.",
+            "in": "query",
+            "name": "fromUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна (UTC, виключно); `null` — «зараз». Вікно ≤ 400 діб.",
+            "in": "query",
+            "name": "toUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PiEventMapsView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PiEventMapsView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PiEventMapsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Мапінги подій сутності й періоди, що перетинають вікно.",
+        "tags": [
+          "PiEventData"
+        ]
+      }
+    },
+    "/api/v1/sources/{id}/raw-data/events/removed": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Сутність-шаблон подій.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Початок вікна.",
+            "in": "query",
+            "name": "fromUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна (≤ 400 діб).",
+            "in": "query",
+            "name": "toUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PiEventRemovalsView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PiEventRemovalsView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PiEventRemovalsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Журнал видалень рядків подій сутності (повна звірка) за вікно моменту видалення, новіші першими.",
+        "tags": [
+          "PiEventData"
+        ]
+      }
+    },
     "/api/v1/sources/{id}/raw-data/export.csv": {
       "get": {
         "description": "Стеля `Integration:RawDataExportMaxRows` (типово 100 000); понад неї — `422 auditExportTooLarge`\nдо першого байта. UTF-8 з BOM; час — UTC ISO 8601; текстові значення, що починаються з `= + - @`,\nнейтралізуються. Експорт пишеться подією безпеки `PiRawDataExported` (без значень).",
@@ -59424,6 +60619,9 @@
     },
     {
       "name": "PermitTypes"
+    },
+    {
+      "name": "PiEventData"
     },
     {
       "name": "PiRawData"

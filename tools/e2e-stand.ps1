@@ -749,6 +749,24 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not ("$piEntity".Trim() -match '^\d+$')) { Fail "не вдалося покласти дані з PI: $piEntity" }
     $env:ECR_E2E_PI_ENTITY = "$piEntity".Trim()
     Write-Host "      сутність PI $($env:ECR_E2E_PI_ENTITY)"
+
+    # ⛔ D-465: «Дані з PI → Події» читають те, що синк подій уже записав (зв'язки, значення атрибутів за останнім
+    # прочитанням, журнал видалень); живого PI на стенді немає. Вимкнена сутність і ПРИЗУПИНЕНИЙ мапінг на документ
+    # стенда кладуться сирим SQL у тимчасову базу: синк не запускається, перенос версії не блокується.
+    Step 'події з PI для e2e «Дані з PI → Події» (D-465)'
+    $previousEapEf = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $efSeed = Join-Path $root 'tools/e2e/pi-events-seed.sql'
+        $efEntity = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d $Database -i $efSeed `
+            -v "DocumentId=$($env:ECR_E2E_DOCUMENT)" "PeriodKey=$($open.periodKey)") | Select-Object -Last 1
+    }
+    finally {
+        $ErrorActionPreference = $previousEapEf
+    }
+    if ($LASTEXITCODE -ne 0 -or -not ("$efEntity".Trim() -match '^\d+$')) { Fail "не вдалося покласти події з PI: $efEntity" }
+    $env:ECR_E2E_PI_EVENTS_ENTITY = "$efEntity".Trim()
+    Write-Host "      сутність подій PI $($env:ECR_E2E_PI_EVENTS_ENTITY)"
     Step 'прогрів Vite (кеш залежностей)'
     Assert-WebPortFree
     $warmStart = Get-Date

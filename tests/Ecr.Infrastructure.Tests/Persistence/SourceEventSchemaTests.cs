@@ -51,7 +51,9 @@ public sealed class SourceEventSchemaTests(SqlServerFixture sql)
             ORDER BY t.name
             """);
 
-        Assert.Equal(["SourceEventFieldMap", "SourceEventLink", "SourceEventMap", "SourceEventValueMap"], tables);
+        // D-465: + значення атрибутів за останнім прочитанням синку (міграція D465SourceEventAttributeValues).
+        Assert.Equal(
+            ["SourceEventAttributeValue", "SourceEventFieldMap", "SourceEventLink", "SourceEventMap", "SourceEventValueMap"], tables);
     }
 
     [Fact]

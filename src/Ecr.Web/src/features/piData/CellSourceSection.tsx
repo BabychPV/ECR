@@ -8,6 +8,8 @@ import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
 import { formatMonthYear } from '@/shared/format/period';
 import { fetchCellSource, type CellFoldView, type CellRef, type CellSourceItem, type CellSourceView } from './api';
+import { formatProjectTime, formatUtcMoment, piValueText, type CellEventSourceItem } from './eventsApi';
+import { ComparisonCell } from './PiEventAttributes';
 import { lastCollectionItems } from './lastCollectionItems';
 import { exactDecimal } from './RawPointsTable';
 
@@ -33,9 +35,98 @@ export function CellSourceSection({ cell }: { readonly cell: CellRef }): JSX.Ele
   });
 
   // ⚠ Помилка й завантаження — без шуму: секція допоміжна, а відмова доступу тут означає «не показувати».
-  if (query.data === undefined || query.data.sources.length === 0) return null;
+  if (query.data === undefined) return null;
 
-  return <Sources cell={cell} view={query.data} />;
+  // D-465: рядок події PI (`EF-…`) — подія й атрибут цієї колонки; мапінг збору — тег і згортка.
+  return (
+    <>
+      {query.data.sources.length > 0 && <Sources cell={cell} view={query.data} />}
+      {query.data.eventSources.length > 0 && <EventSources items={query.data.eventSources} />}
+    </>
+  );
+}
+
+/**
+ * «Звідки це значення» для комірки рядка події PI (`D-465`): подія (ID, назва, час у поясі проєкту з UTC), шаблон,
+ * атрибут, прочитане з PI востаннє, що записав би синк, що в комірці, порівняння з причиною, стан зв'язку й
+ * останній синк. Доступ — рівно доступ до комірки (сервер).
+ */
+function EventSources({ items }: { readonly items: readonly CellEventSourceItem[] }): JSX.Element {
+  return (
+    <Box mt="md" data-cell-event-source="">
+      <Title order={3} size="h5" mb="xs">
+        {t('cellSource.title')}
+      </Title>
+      <Text size="xs" c="dimmed" mb="xs">
+        {t('cellSource.eventHint')}
+      </Text>
+      <Stack gap="md">
+        {items.map((item) => (
+          <KeyValue key={`${String(item.mapId)}:${String(item.event.linkId)}`} items={eventItems(item)} />
+        ))}
+      </Stack>
+    </Box>
+  );
+}
+
+function eventItems(item: CellEventSourceItem): KeyValueItem[] {
+  const { event, attribute } = item;
+
+  return [
+    {
+      label: t('cellSource.event'),
+      value: (
+        <Stack gap="xs">
+          <Text size="sm">{event.eventName ?? event.eventId}</Text>
+          <Text size="xs" c="dimmed" ff="monospace" data-cell-event-id="">
+            {event.eventId}
+          </Text>
+        </Stack>
+      ),
+    },
+    {
+      label: t('cellSource.template'),
+      value: (
+        <Group gap="xs" wrap="nowrap">
+          <Text size="sm">{item.sourceEntityName ?? item.sourceEntityCode}</Text>
+          {!item.mapIsActive && (
+            <Badge size="xs" color="statusWarning" variant="light">
+              {t('cellSource.paused')}
+            </Badge>
+          )}
+        </Group>
+      ),
+    },
+    {
+      label: t('cellSource.eventTime'),
+      value: (
+        <Stack gap="xs">
+          <Text size="sm" title={formatUtcMoment(event.startUtc)}>
+            {formatProjectTime(event.startUtc, event.timeZoneId, event.startLocal)}
+            {event.endUtc === null
+              ? ` · ${t('piEvents.stillOpen')}`
+              : ` → ${formatProjectTime(event.endUtc, event.timeZoneId, event.endLocal)}`}
+          </Text>
+          <Text size="xs" c="dimmed">
+            {formatUtcMoment(event.startUtc)}
+          </Text>
+        </Stack>
+      ),
+    },
+    { label: t('cellSource.element'), value: event.primaryElement, mono: true },
+    { label: t('cellSource.attribute'), value: attribute.attribute, mono: true },
+    {
+      label: t('piEvents.piValue'),
+      value: `${piValueText(attribute)}${attribute.piUnit === null ? '' : ` ${attribute.piUnit}`}`,
+      mono: true,
+    },
+    { label: t('piEvents.expected'), value: attribute.expectedValue ?? '—', mono: true },
+    { label: t('cellSource.storedValue'), value: attribute.cellValue ?? '—', mono: true },
+    { label: t('piEvents.comparison'), value: <ComparisonCell attribute={attribute} /> },
+    { label: t('cellSource.linkStatus'), value: event.status, mono: true },
+    { label: t('piEvents.modified'), value: <Timestamp value={event.sourceModifiedUtc} /> },
+    { label: t('piEvents.lastSync'), value: <Timestamp value={event.lastSyncAt} /> },
+  ];
 }
 
 function Sources({ cell, view }: { readonly cell: CellRef; readonly view: CellSourceView }): JSX.Element {
