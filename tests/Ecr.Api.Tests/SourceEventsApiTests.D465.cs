@@ -243,6 +243,63 @@ public sealed partial class SourceEventsApiTests
         Assert.Equal(118, written.Count);
     }
 
+    private static readonly System.Threading.AsyncLocal<System.Runtime.CompilerServices.StrongBox<bool>?> MeasuringD465 = new();
+
+    /// <summary>
+    /// Звернення до БД сторінки подій і «Звідки це значення» для рядка EF — сталі: 10 подій і 110 подій у вікні дають
+    /// однакову кількість команд (зв'язки, значення, комірки — по одній на сторінку, а не на подію).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-465")]
+    public async Task Звернення_сторінки_подій_не_ростуть_з_кількістю_подій()
+    {
+        await using var stand = await ArrangeAsync();
+        var mapId = await AddMapAsync(stand);
+        var start = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc);
+        for (var i = 0; i < 10; i++)
+        {
+            await AddLinkAsync(mapId, $"Q{i:D3}", start.AddHours(i), written: true);
+        }
+
+        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300);
+        app.Server.PreserveExecutionContext = true;
+        using var client = await SignedInAsync(app, ["Integration.View"], stand.ProjectId, GrantLevel.Read);
+        using var counter = new SqlClientCommandCounter(new CommandTally(), _ => MeasuringD465.Value is { Value: true });
+        var url = $"/api/v1/sources/{stand.EntityId}/raw-data/events?fromUtc=2026-01-01T00:00:00Z&toUtc=2026-03-01T00:00:00Z&limit=200";
+
+        async Task<int> MeasureAsync()
+        {
+            counter.Tally.Reset();
+            var flag = new System.Runtime.CompilerServices.StrongBox<bool>(true);
+            MeasuringD465.Value = flag;
+            try
+            {
+                Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(new Uri(url, UriKind.Relative))).StatusCode);
+            }
+            finally
+            {
+                flag.Value = false;
+                MeasuringD465.Value = null;
+            }
+
+            return counter.Tally.Snapshot().Total;
+        }
+
+        await MeasureAsync(); // розігрів: профіль, плани
+        var few = await MeasureAsync();
+        for (var i = 10; i < 110; i++)
+        {
+            await AddLinkAsync(mapId, $"Q{i:D3}", start.AddHours(i), written: true);
+        }
+
+        var many = await MeasureAsync();
+
+        Assert.Equal(few, many);
+        Assert.InRange(few, 1, 30);
+    }
+
     private Task<int> ExportEventsAsync(int mapId)
         => ScalarAsync(
             "SELECT COUNT(*) FROM aud.SecurityEvent WHERE EventType = N'PiEventDataExported' AND DetailsJson LIKE N'%\"mapId\":"
