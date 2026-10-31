@@ -63,7 +63,8 @@ public interface ICollectionStore
     /// <returns>Скільки точок видалено.</returns>
     /// <remarks>
     /// ⛔ Викликач гарантує, що інтервал прочитано ПОВНІСТЮ й без відмов: сховище не знає, чи відповідь джерела
-    /// повна, і видалить усе, чого немає в переліку. Порожній перелік — нічого не видаляється.
+    /// повна, і видалить усе, чого немає в переліку. Порожній перелік (джерело успішно віддало нуль точок) —
+    /// видаляються всі точки атрибута в інтервалі.
     /// </remarks>
     public Task<int> DeleteMissingRawPointsAsync(
         int sourceEntityId, string sourcePath, DateTime fromUtc, DateTime toUtc,

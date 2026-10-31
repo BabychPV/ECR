@@ -287,6 +287,12 @@ public sealed class MaterializeCollectedDataJob(
         // ECR-CELL-0422 validationBlocked тощо), — не мовчки і не аварія задачі: людина
         // його не правила, наступний прогін спробує знову — той самий статус, яким синк
         // подій журналює відхилену подію (`SourceEventSyncJob`, `EventWriteFailed`).
+        // ⛔ D-462 (Q-17, варіант A): комірки колонок закритого періоду-власника (якоря року) не записано, решту —
+        // записано; кожна — подія `SkippedPeriodClosed` з коміркою й періодом, без значення.
+        events.AddRange((written.SkippedClosedPeriod ?? []).Select(cell => new CoverageEvent(
+            task.SourceEntityId, periodKey, CollectionCoverage.SkippedPeriodClosed,
+            CoverageDetails.OwnerPeriodClosed(cell))));
+
         events.AddRange(rejected.Select(cell => new CoverageEvent(
             task.SourceEntityId, periodKey, CollectionCoverage.SkippedWriteConflict,
             CoverageDetails.CellRejected(cell.Cell, cell.Code))));
@@ -362,6 +368,7 @@ public sealed class MaterializeCollectedDataJob(
         var kept = new List<string>();
         var awaiting = new List<string>();
         var conflicts = new List<string>();
+        var closed = new List<string>();
         var refused = new List<(IntegrationCellValue Cell, string Code)>();
 
         foreach (var cell in cells)
@@ -376,6 +383,7 @@ public sealed class MaterializeCollectedDataJob(
                 kept.AddRange(one.KeptManual);
                 awaiting.AddRange(one.AwaitingConfirmation ?? []);
                 conflicts.AddRange(one.WriteConflicts ?? []);
+                closed.AddRange(one.SkippedClosedPeriod ?? []);
             }
             catch (Exception ex) when (IsCellVerdict(ex))
             {
@@ -400,7 +408,7 @@ public sealed class MaterializeCollectedDataJob(
                 r.Code))
             .ToList();
 
-        return (new IntegrationWriteResult(applied, kept, awaiting, conflicts), rejected);
+        return (new IntegrationWriteResult(applied, kept, awaiting, conflicts, SkippedClosedPeriod: closed), rejected);
     }
 
     /// <summary>Вердикт обробника про дані, а не збій чи «зараз недоступно».</summary>
@@ -558,6 +566,18 @@ public sealed class MaterializeCollectedDataJob(
                 var series = IsTimeFold(kind)
                     ? TimeSeries(bounds, inside, map.SourceUnitId, units)
                     : points;
+
+                // ⛔ D-462 (рішення власника продукту): у періоді НЕ лишилося жодної сирої точки поля (джерело
+                // видалило всі) — комірку ОЧИЩУЄМО (порожньо, не 0), а не лишаємо число, якого джерело вже не
+                // підтверджує. Запис — тим самим патчером: правка людини, закритий період, поданий аркуш не
+                // чіпаються (і дають власні події); очищення порожньої комірки — не запис і не перерахунок.
+                if (inside.Count == 0 && (series.Count == 0
+                        || PeriodFold.Fold(kind, series, period.StartUtc, period.EndUtc, map.IsStep, maxGap: null).Value is null))
+                {
+                    result.Add(new IntegrationCellValue(map.TargetRowKey!, map.TargetColumnDefId!.Value, null));
+                    continue;
+                }
+
                 if (series.Count == 0)
                 {
                     // ⛔ D2-02: не мовчки — після кінця періоду подія «немає даних».

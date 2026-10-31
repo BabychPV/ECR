@@ -298,8 +298,9 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentNullException.ThrowIfNull(present);
 
-        // ⛔ Порожній перелік — не «видалити все»: сховище не знає, чи повна відповідь джерела (D-462).
-        if (present.Count == 0 || toUtc <= fromUtc)
+        // ⚠ Порожній перелік — «джерело за інтервал не має жодної точки»: видаляється все (D-462). Повноту
+        // відповіді гарантує викликач — сховище не знає, чи читання було успішним.
+        if (toUtc <= fromUtc)
         {
             return 0;
         }
