@@ -48,6 +48,56 @@ public static class CoverageDetails
 
     public const string EventsTruncatedKey = "coverageEvents.eventsTruncated";
 
+    /// <summary>D-464: обрізання сторінками зі стелею й ключем, яким її підняти (замінює <see cref="EventsTruncatedKey"/>).</summary>
+    public const string EventsTruncatedCapKey = "coverageEvents.eventsTruncatedCap";
+
+    /// <summary>D-464: аркуш поданий/затверджений — записи й видалення подій періоду пропущено (одна подія на період).</summary>
+    public const string EventSheetLockedKey = "coverageEvents.eventSheetLocked";
+
+    /// <summary>D-464: подія ще триває, а її період закрито — рядка не буде (одна подія на період за прогін).</summary>
+    public const string EventOpenAtPeriodCloseKey = "coverageEvents.eventOpenAtPeriodClose";
+
+    /// <summary>D-464: початок прив'язаної події переїхав в інший період — рядок лишився у старому.</summary>
+    public const string EventPeriodChangedKey = "coverageEvents.eventPeriodChanged";
+
+    /// <summary>
+    /// D-464: подій у вікні більше, ніж дочитали стелею сторінок: пізніші за <paramref name="after"/> не синхронізовано,
+    /// видалення зниклих вимкнено. Повідомлення називає стелю (<paramref name="maxPages"/> × <paramref name="pageSize"/>)
+    /// і ключ, яким її підняти.
+    /// </summary>
+    public static string EventsTruncatedCap(int count, int pages, object after, int maxPages, int pageSize)
+        => Encode(
+            EventsTruncatedCapKey,
+            ("count", Text(count)),
+            ("pages", Text(pages)),
+            ("after", Text(after)),
+            ("maxPages", Text(maxPages)),
+            ("pageSize", Text(pageSize)),
+            ("cap", Text((long)maxPages * pageSize)));
+
+    /// <summary>
+    /// D-464: аркуш періоду поданий чи затверджений — <paramref name="writes"/> подій не записано і
+    /// <paramref name="removals"/> зниклих не видалено; дійдуть після повернення аркуша.
+    /// </summary>
+    public static string EventSheetLocked(int writes, int removals, object status)
+        => Encode(EventSheetLockedKey, ("writes", Text(writes)), ("removals", Text(removals)), ("status", Text(status)));
+
+    /// <summary>D-464: <paramref name="count"/> подій закритого періоду ще тривають у PI — рядків не буде.</summary>
+    public static string EventOpenAtPeriodClose(int count)
+        => Encode(EventOpenAtPeriodCloseKey, ("count", Text(count)));
+
+    /// <summary>
+    /// D-464: початок події <paramref name="eventId"/> тепер у періоді <paramref name="to"/> (<c>null</c> — періоду немає),
+    /// рядок <paramref name="rowKey"/> лишився в <paramref name="from"/> і не переноситься.
+    /// </summary>
+    public static string EventPeriodChanged(object eventId, object rowKey, int from, int? to)
+        => Encode(
+            EventPeriodChangedKey,
+            ("eventId", Text(eventId)),
+            ("rowKey", Text(rowKey)),
+            ("from", Text(from)),
+            ("to", to is { } target ? Text(target) : "—"));
+
     /// <summary>
     /// Подій у вікні більше, ніж дочитали сторінками (L3-07): пізніші за <paramref name="after"/> цим прогоном не
     /// синхронізовано, видалення зниклих пропущено.

@@ -267,6 +267,8 @@ public sealed class GetJobStatusHandler(
             WrittenPeriods = FormulaRecalcOutcome.WrittenPeriodsOf(status.State, status.Message) is { Count: > 0 } wp
                 ? wp
                 : null,
+            // D-464: блок ліміту видалення синку подій — теж із сирого конверта.
+            EventRemovalBlocked = SourceEvents.SourceEventSyncOutcome.RemovalBlockOf(status.State, status.Message),
         };
     }
 }

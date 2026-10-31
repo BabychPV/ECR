@@ -349,6 +349,11 @@ public interface IJobProgress
 /// комірки (задача формул одна на документ, L2). <c>null</c> — невідомо (старий конверт, інша задача, нічого не
 /// записано): клієнт перечитує період правки, як раніше. Заповнює <c>GetJobStatusHandler</c>.
 /// </param>
+/// <param name="EventRemovalBlocked">
+/// D-464: <c>Succeeded</c> синк подій НЕ видалив зниклі з PI події, бо їх більше за ліміт «повної звірки» — скільки
+/// і яка межа; клієнт показує «Підтвердити видалення». <c>null</c> — інша задача, не завершена чи без блокування
+/// (<c>SourceEventSyncOutcome</c>). Заповнює <c>GetJobStatusHandler</c>.
+/// </param>
 public sealed record JobStatus(
     string JobId,
     string State,
@@ -366,7 +371,8 @@ public sealed record JobStatus(
     FanOutStatus? FanOut = null,
     string? EffectiveState = null,
     int? WrittenCount = null,
-    IReadOnlyList<int>? WrittenPeriods = null);
+    IReadOnlyList<int>? WrittenPeriods = null,
+    Integration.SourceEvents.SourceEventRemovalBlock? EventRemovalBlocked = null);
 
 /// <summary>Ідентифікатор поточної задачі; його несе канал прогресу воркера.</summary>
 /// <remarks>Потрібен задачі, що розкладає роботу на дочірні, щоб позначити їх своїм <c>JobId</c>.</remarks>

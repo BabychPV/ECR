@@ -66,7 +66,8 @@ builder.Services.AddPiAfAdapters(
         builder.Configuration[Ecr.Adapters.PiAf.CollectionRunnerOptions.ChunkDaysKey],
         builder.Configuration[Ecr.Adapters.PiAf.CollectionRunnerOptions.DeleteMissingPointsKey]),
     new Ecr.Adapters.PiAf.PiSqlClientOptions(
-        builder.Configuration.GetValue<int?>(Ecr.Adapters.PiAf.PiSqlClientOptions.CommandTimeoutSecondsKey)));
+        builder.Configuration.GetValue<int?>(Ecr.Adapters.PiAf.PiSqlClientOptions.CommandTimeoutSecondsKey),
+        builder.Configuration.GetValue<int?>(Ecr.Adapters.PiAf.PiSqlClientOptions.EventQueryTimeoutSecondsKey)));
 // ⚠ Окремим викликом, а не всередині AddPiAfAdapters: SQL-джерело (FLERT,
 // ФВ-11.8) — не PI, і зібрати їх в одну реєстрацію означало б повторити в
 // композиції рівно ту помилку, через яку не-PI джерело так довго не мало
