@@ -186,6 +186,26 @@ describe('таблиця на весь екран', () => {
     vi.useRealTimers();
   });
 
+  it('клік, що прийшов ДО перемальовки після виходу, знову вмикає режим (а не вимикає вдруге)', () => {
+    // ⛔ Флейк e2e sheetFocus.spec.ts:121 (run 41186933182): адреса вже без `full=1`, але рендер
+    // (перехід react-router, `startTransition`) ще не закомічений — кнопка показує «Exit full screen».
+    // Клік рішення брав зі ЗАСТАРІЛОГО `full` і вдруге «вимикав» уже вимкнений режим. Тут обидві
+    // події в одному `act`: між ними React не перемальовує, як і в повільному переході на CI.
+    show(Three, '/documents/1?periodKey=202610&full=1');
+    const button = screen.getByTestId('sheet-full-toggle');
+
+    act(() => {
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }),
+      );
+      expect(button.getAttribute('data-full')).toBe('true');
+      button.click();
+    });
+
+    expect(new URLSearchParams(search).get('full')).toBe('1');
+    expect(screen.getByTestId('sheet-full-toggle').getAttribute('data-full')).toBe('true');
+  });
+
   it('Esc у редакторі комірки НЕ виходить з повного екрана і не перехоплюється', async () => {
     show(Three, '/documents/1?periodKey=202610&full=1');
 

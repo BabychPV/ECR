@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { useMediaQuery } from '@mantine/hooks';
 import { useTableStatus } from '@/features/documents/api';
 import { focusSoon } from '@/shared/a11y/focus';
@@ -139,8 +139,22 @@ export function SheetWorkspace({
     focusSoon(split.current?.querySelector<HTMLElement>(selector));
   }, [navigatorOpen]);
 
+  // Останній ВІДОМИЙ стан режиму: те, що вже закомічено, або те, що щойно запитано (`setFull`).
+  //
+  // ⛔ Флейк e2e `sheetFocus.spec.ts:121` (run 41186933182, спроба 1): react-router оновлює адресу
+  // одразу, а рендер — у `startTransition`; на повільному CI після виходу (Ctrl+Shift+Enter) дерево ще
+  // ~200 мс показувало «Exit full screen», і клік по кнопці, що брав рішення з відрендереного `full`,
+  // вдруге ВИМИКАВ уже вимкнений режим (адреса не мінялась). Тепер обидва входи (кнопка й клавіші)
+  // перемикають від цього ref: `setFull` пише в нього одразу, а рендер синхронізує лише при зміні `full`
+  // (layout-ефект — після коміту), тож застарілий перерендер старого дерева запит не перетирає.
+  const fullRef = useRef(full);
+  useLayoutEffect(() => {
+    fullRef.current = full;
+  }, [full]);
+
   const setFull = useCallback(
     (next: boolean, refocus: boolean) => {
+      fullRef.current = next;
       setFullParam(next ? '1' : null);
       if (refocus) focusSoon(fullBtn.current);
     },
@@ -157,8 +171,6 @@ export function SheetWorkspace({
   // (`defaultPrevented`), другий слухач пропускає.
   const setFullRef = useRef(setFull);
   setFullRef.current = setFull;
-  const fullRef = useRef(full);
-  fullRef.current = full;
 
   useEffect(() => {
     if (view === 'all') return;
@@ -282,7 +294,7 @@ export function SheetWorkspace({
       data-testid="sheet-full-toggle"
       data-full={full ? 'true' : 'false'}
       onClick={() => {
-        setFull(!full, false);
+        setFull(!fullRef.current, false);
       }}
     >
       <Icon path={full ? CollapseIcon : ExpandIcon} size={16} />
