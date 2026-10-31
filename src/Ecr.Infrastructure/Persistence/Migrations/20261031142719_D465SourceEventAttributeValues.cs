@@ -34,13 +34,31 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     table.CheckConstraint("CK_SEAV_Scope", "Scope BETWEEN 0 AND 1");
                 });
 
-            migrationBuilder.CreateIndex(
-                name: "IX_SEL_MapStart",
-                schema: "ext",
-                table: "SourceEventLink",
-                columns: new[] { "SourceEventMapId", "StartUtc", "Id" })
-                .Annotation("SqlServer:Include", new[] { "Status", "PrimaryElement", "EventName" });
+            // ✎ Аудит 31.10 (F4): на наявній таблиці зв'язків — сирим SQL, ONLINE де є, з перевіркою наявності
+            // (той самий прийом, що `D463RawDataReadIndexes`/`AN34CollectionCoverageDedupIndex`).
+            migrationBuilder.Sql(CreateMapStartIndexSql(D463RawDataReadIndexes.EngineEditionExpression));
         }
+
+        /// <summary>Ім'я індексу keyset-сторінки зв'язків мапінгу.</summary>
+        public const string MapStartIndexName = "IX_SEL_MapStart";
+
+        /// <summary>T-SQL, що створює <c>IX_SEL_MapStart</c>, якщо його ще немає, для заданої редакції сервера.</summary>
+        /// <param name="engineEdition">Вираз T-SQL типу <c>int</c>.</param>
+        /// <returns>Текст T-SQL.</returns>
+        public static string CreateMapStartIndexSql(string engineEdition)
+            => $"""
+                DECLARE @d465Edition int = {engineEdition};
+                DECLARE @d465Online nvarchar(40) =
+                    CASE WHEN @d465Edition IN (3, 5, 8) THEN N' WITH (ONLINE = ON)' ELSE N'' END;
+                DECLARE @d465Create nvarchar(max) =
+                      N'CREATE NONCLUSTERED INDEX {MapStartIndexName} ON ext.SourceEventLink (SourceEventMapId, StartUtc, Id) '
+                    + N'INCLUDE (Status, PrimaryElement, EventName)'
+                    + @d465Online
+                    + N';';
+
+                IF INDEXPROPERTY(OBJECT_ID(N'ext.SourceEventLink'), N'{MapStartIndexName}', 'IndexID') IS NULL
+                    EXEC sys.sp_executesql @d465Create;
+                """;
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
