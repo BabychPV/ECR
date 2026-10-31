@@ -9715,6 +9715,20 @@ USING (VALUES
     ,(N'err.ECR-REQ-0422.rawDataRangeTooLong', N'en', N'The period is longer than {maxDays} days. Choose a shorter period.', 1)
     ,(N'err.ECR-REQ-0422.rawDataPath', N'en', N'The PI tag path must be from 1 to {max} characters.', 1)
     ,(N'err.ECR-REQ-0422.rawDataBuckets', N'en', N'The number of chart intervals must be from 1 to {max}.', 1)
+    ,(N'cellSource.noWindow', N'en', N'Not a cell of this period: this month column is filled in another period.', 1)
+    ,(N'cellSource.windowMonth', N'en', N'Only {month} (month column)', 1)
+    ,(N'cellSource.foldValue', N'en', N'Value by the aggregation rule', 1)
+    ,(N'cellSource.storedValue', N'en', N'In the cell', 1)
+    ,(N'cellSource.compareMatch', N'en', N'Matches', 1)
+    ,(N'cellSource.compareManualEdit', N'en', N'Different value: manual edit', 1)
+    ,(N'cellSource.compareNotUpdated', N'en', N'Different value: not updated since new points', 1)
+    ,(N'cellSource.compareNotWritten', N'en', N'Not written: the collected value has not been written to the cell', 1)
+    ,(N'cellSource.foldNoData', N'en', N'No usable points in the window', 1)
+    ,(N'cellSource.foldCleared', N'en', N'No points left in the window: collection clears the cell', 1)
+    ,(N'cellSource.foldMixedUnits', N'en', N'Points in different source units: not aggregated', 1)
+    ,(N'cellSource.foldUnitFailure', N'en', N'The result cannot be converted to the document unit', 1)
+    ,(N'cellSource.foldTooManyPoints', N'en', N'Too many points to calculate here; collection still aggregates them', 1)
+    ,(N'cellSource.foldNoAggregation', N'en', N'The mapping has no aggregation rule', 1)
     -- D463:pi-data ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -25171,7 +25185,35 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.rawDataPath', N'ru', N'Путь тега PI должен быть от 1 до {max} символов.'),
     (N'err.ECR-REQ-0422.rawDataPath', N'kz', N'PI тегінің жолы 1-ден {max} таңбаға дейін болуы тиіс.'),
     (N'err.ECR-REQ-0422.rawDataBuckets', N'ru', N'Число интервалов графика должно быть от 1 до {max}.'),
-    (N'err.ECR-REQ-0422.rawDataBuckets', N'kz', N'График аралықтарының саны 1-ден {max}-ге дейін болуы тиіс.')
+    (N'err.ECR-REQ-0422.rawDataBuckets', N'kz', N'График аралықтарының саны 1-ден {max}-ге дейін болуы тиіс.'),
+    (N'cellSource.noWindow', N'ru', N'Не ячейка этого периода: этот столбец месяца заполняется в другом периоде.'),
+    (N'cellSource.noWindow', N'kz', N'Бұл кезеңнің ұяшығы емес: бұл ай бағаны басқа кезеңде толтырылады.'),
+    (N'cellSource.windowMonth', N'ru', N'Только {month} (столбец месяца)'),
+    (N'cellSource.windowMonth', N'kz', N'Тек {month} (ай бағаны)'),
+    (N'cellSource.foldValue', N'ru', N'Значение по правилу свёртки'),
+    (N'cellSource.foldValue', N'kz', N'Біріктіру ережесі бойынша мән'),
+    (N'cellSource.storedValue', N'ru', N'В ячейке'),
+    (N'cellSource.storedValue', N'kz', N'Ұяшықта'),
+    (N'cellSource.compareMatch', N'ru', N'Совпадает'),
+    (N'cellSource.compareMatch', N'kz', N'Сәйкес'),
+    (N'cellSource.compareManualEdit', N'ru', N'Другое значение: ручная правка'),
+    (N'cellSource.compareManualEdit', N'kz', N'Басқа мән: қолмен түзету'),
+    (N'cellSource.compareNotUpdated', N'ru', N'Другое значение: не обновлено после новых точек'),
+    (N'cellSource.compareNotUpdated', N'kz', N'Басқа мән: жаңа нүктелерден кейін жаңартылмаған'),
+    (N'cellSource.compareNotWritten', N'ru', N'Пропущено: собранное значение в ячейку не записывалось'),
+    (N'cellSource.compareNotWritten', N'kz', N'Өткізілген: жиналған мән ұяшыққа жазылмаған'),
+    (N'cellSource.foldNoData', N'ru', N'В окне нет пригодных точек'),
+    (N'cellSource.foldNoData', N'kz', N'Терезеде жарамды нүктелер жоқ'),
+    (N'cellSource.foldCleared', N'ru', N'В окне не осталось точек: сбор очищает ячейку'),
+    (N'cellSource.foldCleared', N'kz', N'Терезеде нүкте қалмады: жинау ұяшықты тазартады'),
+    (N'cellSource.foldMixedUnits', N'ru', N'Точки в разных единицах источника: не сворачиваются'),
+    (N'cellSource.foldMixedUnits', N'kz', N'Көздің әртүрлі бірліктеріндегі нүктелер: біріктірілмейді'),
+    (N'cellSource.foldUnitFailure', N'ru', N'Результат не переводится в единицу документа'),
+    (N'cellSource.foldUnitFailure', N'kz', N'Нәтижені құжат бірлігіне аудару мүмкін емес'),
+    (N'cellSource.foldTooManyPoints', N'ru', N'Слишком много точек для расчёта здесь; сбор их всё равно сворачивает'),
+    (N'cellSource.foldTooManyPoints', N'kz', N'Мұнда есептеу үшін нүктелер тым көп; жинау оларды бәрібір біріктіреді'),
+    (N'cellSource.foldNoAggregation', N'ru', N'У сопоставления нет правила свёртки'),
+    (N'cellSource.foldNoAggregation', N'kz', N'Сәйкестендіруде біріктіру ережесі жоқ')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

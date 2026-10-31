@@ -23,6 +23,7 @@ export type RawCollectionStatus = components['schemas']['RawCollectionStatus'];
 export type CellSourceView = components['schemas']['CellSourceView'];
 export type CellSourceItem = components['schemas']['CellSourceItem'];
 export type CellSourceEvent = components['schemas']['CellSourceEvent'];
+export type CellFoldView = components['schemas']['CellFoldView'];
 type CoverageEventPage = components['schemas']['PagedResultOfCoverageEventView'];
 
 /** Розмір сторінки таблиці точок. */

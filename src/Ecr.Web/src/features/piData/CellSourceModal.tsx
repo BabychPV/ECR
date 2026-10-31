@@ -37,7 +37,7 @@ export function CellSourceModal({
     <Modal opened onClose={onClose} size="xl" title={t('cellSource.modalTitle', { tag: source.sourcePath })}>
       <Stack gap="md" data-cell-source-modal="">
         <Text size="xs" c="dimmed">
-          {t('cellSource.modalHint', { aggregation: source.aggregation ?? '—', period: String(view.periodKey) })}
+          {t('cellSource.modalHint', { aggregation: source.aggregation ?? '—', period: String(view.windowPeriodKey) })}
         </Text>
         <AsyncBoundary<RawSeriesView>
           isPending={series.isPending}

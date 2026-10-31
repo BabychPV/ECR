@@ -1482,6 +1482,67 @@
           "Calculated"
         ]
       },
+      "CellFoldView": {
+        "description": "Значення за правилом згортки поруч зі значенням комірки.",
+        "properties": {
+          "comparison": {
+            "description": "CellFoldComparison: `Match`; `ManualEdit` — інше значення, останній запис людини;\n        `NotUpdated` — інше значення, останній запис машини (точки змінилися після запису); `NotWritten` —\n        записів у комірку не було (значення збору не записано); `NotComparable` — числа за правилом немає.",
+            "type": "string"
+          },
+          "percentGood": {
+            "description": "Частка придатних точок / покритого часу.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "state": {
+            "description": "Стан згортки (CellFoldState).",
+            "type": "string"
+          },
+          "storedAt": {
+            "description": "Коли (UTC).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "storedOrigin": {
+            "description": "Хто записав (`Integration`, `UserEdit`, `Import`…).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "storedValue": {
+            "description": "Значення в комірці за останнім записом журналу змін; `null` — записів немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "value": {
+            "description": "Значення в одиниці документа — те, що записала б матеріалізація.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "state",
+          "value",
+          "percentGood",
+          "storedValue",
+          "storedOrigin",
+          "storedAt",
+          "comparison"
+        ],
+        "type": "object"
+      },
       "CellFormatDto": {
         "description": "Результат спрацювання правила умовного форматування (ФВ-2.6/2.7): колір\n`#rrggbb` (або `null` — колір теми) і жирність.",
         "properties": {
@@ -1568,6 +1629,17 @@
             },
             "type": "array"
           },
+          "fold": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CellFoldView",
+                "description": "Значення за правилом згортки й порівняння з коміркою; `null` — вікна немає."
+              }
+            ]
+          },
           "isActive": {
             "description": "Мапінг діє.",
             "type": "boolean"
@@ -1582,7 +1654,7 @@
             "type": "integer"
           },
           "pointCount": {
-            "description": "Зібраних точок тега за період.",
+            "description": "Зібраних точок тега за вікно.",
             "format": "int64",
             "type": "integer"
           },
@@ -1633,7 +1705,8 @@
           "isActive",
           "pointCount",
           "lastCollection",
-          "events"
+          "events",
+          "fold"
         ],
         "type": "object"
       },
@@ -1641,19 +1714,25 @@
         "description": "Звідки комірка отримує значення з PI.",
         "properties": {
           "periodFromUtc": {
-            "description": "Початок вікна згортки (UTC, у поясі проєкту).",
+            "description": "Початок вікна згортки (UTC); `null` — колонка місяця поза періодом без власника.",
             "format": "date-time",
-            "type": "string"
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "periodKey": {
-            "description": "Період комірки.",
+            "description": "Період екземпляра комірки.",
             "format": "int32",
             "type": "integer"
           },
           "periodToUtc": {
             "description": "Кінець вікна згортки (UTC, виключно).",
             "format": "date-time",
-            "type": "string"
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "sources": {
             "description": "Мапінги, що живлять комірку; порожньо — значення не з PI.",
@@ -1661,13 +1740,28 @@
               "$ref": "#/components/schemas/CellSourceItem"
             },
             "type": "array"
+          },
+          "windowMonth": {
+            "description": "Місяць колонки місяця (1..12): вікно — лише цей місяць періоду (D-462); `null` — увесь період.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "windowPeriodKey": {
+            "description": "Період, у якому згортається комірка (Q-17 — період-власник колонки).",
+            "format": "int32",
+            "type": "integer"
           }
         },
         "required": [
           "periodKey",
           "periodFromUtc",
           "periodToUtc",
-          "sources"
+          "sources",
+          "windowPeriodKey",
+          "windowMonth"
         ],
         "type": "object"
       },

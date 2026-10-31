@@ -6,8 +6,10 @@ import { KeyValue, type KeyValueItem } from '@/shared/ui/KeyValue';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
-import { fetchCellSource, type CellRef, type CellSourceItem, type CellSourceView } from './api';
+import { formatMonthYear } from '@/shared/format/period';
+import { fetchCellSource, type CellFoldView, type CellRef, type CellSourceItem, type CellSourceView } from './api';
 import { lastCollectionItems } from './lastCollectionItems';
+import { exactDecimal } from './RawPointsTable';
 
 /** Вікно з графіком і точками — окремий лінивий чанк: відкривають його рідко, а секцію бачать у кожній комірці. */
 const CellSourceModal = lazy(async () => ({ default: (await import('./CellSourceModal')).CellSourceModal }));
@@ -108,15 +110,120 @@ function items(view: CellSourceView, source: CellSourceItem): KeyValueItem[] {
           : `${source.sourceUnitCode ?? '—'} → ${source.targetUnitCode ?? '—'}`,
       mono: true,
     },
-    {
-      label: t('cellSource.window'),
-      value: (
-        <>
-          <Timestamp value={view.periodFromUtc} /> — <Timestamp value={view.periodToUtc} />
-        </>
-      ),
-    },
+    { label: t('cellSource.window'), value: <WindowLabel view={view} /> },
     { label: t('cellSource.points'), value: String(source.pointCount), mono: true },
+    ...foldItems(source),
     ...lastCollectionItems(source.lastCollection),
   ];
+}
+
+/**
+ * Вікно згортки: для колонки місяця — назва місяця (D-462: колонка M3 річного періоду згортає лише березень), далі
+ * точні межі в UTC-моментах; без вікна — «не комірка цього періоду».
+ */
+function WindowLabel({ view }: { readonly view: CellSourceView }): JSX.Element {
+  if (view.periodFromUtc == null || view.periodToUtc == null) {
+    return <Text size="sm">{t('cellSource.noWindow')}</Text>;
+  }
+
+  return (
+    <Stack gap="xs" data-cell-source-window={view.windowMonth ?? 'period'}>
+      {view.windowMonth != null && (
+        <Text size="sm" fw={500}>
+          {t('cellSource.windowMonth', {
+            month: formatMonthYear(Math.floor(view.windowPeriodKey / 100), view.windowMonth),
+          })}
+        </Text>
+      )}
+      <Text size="sm">
+        <Timestamp value={view.periodFromUtc} /> — <Timestamp value={view.periodToUtc} />
+      </Text>
+    </Stack>
+  );
+}
+
+/** «Значення за правилом згортки» і що в комірці — лише те, що відомо з журналу змін самої комірки. */
+function foldItems(source: CellSourceItem): KeyValueItem[] {
+  const fold = source.fold;
+  if (fold == null) return [];
+
+  const unit = source.targetUnitCode == null ? '' : ` ${source.targetUnitCode}`;
+
+  return [
+    {
+      label: t('cellSource.foldValue'),
+      value:
+        fold.state === 'Value' && fold.value != null ? (
+          <Text size="sm" ff="monospace" data-cell-source-fold="">
+            {`${exactDecimal(fold.value)}${unit}`}
+          </Text>
+        ) : (
+          <Text size="sm" c="dimmed" data-cell-source-fold={fold.state}>
+            {foldStateText(fold.state)}
+          </Text>
+        ),
+    },
+    {
+      label: t('cellSource.storedValue'),
+      value: (
+        <Group gap="xs" wrap="nowrap">
+          <Text size="sm" ff="monospace">
+            {fold.storedValue == null ? '—' : exactDecimal(fold.storedValue)}
+          </Text>
+          <ComparisonBadge fold={fold} />
+        </Group>
+      ),
+    },
+  ];
+}
+
+function ComparisonBadge({ fold }: { readonly fold: CellFoldView }): JSX.Element | null {
+  const text = comparisonText(fold.comparison);
+  if (text === null) return null;
+
+  return (
+    <Badge
+      size="xs"
+      variant="light"
+      color={fold.comparison === 'Match' ? 'statusSuccess' : 'statusWarning'}
+      data-cell-source-comparison={fold.comparison}
+    >
+      {text}
+    </Badge>
+  );
+}
+
+/** Літеральні `t(...)`: ключ зі змінної вимагав би запису в `EndpointCoverageTests.DynamicKeySites`. */
+function comparisonText(comparison: string): string | null {
+  switch (comparison) {
+    case 'Match':
+      return t('cellSource.compareMatch');
+    case 'ManualEdit':
+      return t('cellSource.compareManualEdit');
+    case 'NotUpdated':
+      return t('cellSource.compareNotUpdated');
+    case 'NotWritten':
+      return t('cellSource.compareNotWritten');
+    default:
+      return null;
+  }
+}
+
+function foldStateText(state: string): string {
+  switch (state) {
+    case 'NoData':
+      return t('cellSource.foldNoData');
+    case 'Cleared':
+      return t('cellSource.foldCleared');
+    case 'MixedUnits':
+      return t('cellSource.foldMixedUnits');
+    case 'UnitFailure':
+      return t('cellSource.foldUnitFailure');
+    case 'TooManyPoints':
+      return t('cellSource.foldTooManyPoints');
+    case 'NoAggregation':
+      return t('cellSource.foldNoAggregation');
+    default:
+      return state;
+  }
 }

@@ -24976,6 +24976,34 @@ export interface components {
          * @enum {unknown}
          */
         CellDataType: "String" | "Int" | "Decimal" | "Bool" | "Date" | "Lookup" | "Formula" | "Unit" | "Calculated";
+        /** @description Значення за правилом згортки поруч зі значенням комірки. */
+        CellFoldView: {
+            /** @description CellFoldComparison: `Match`; `ManualEdit` — інше значення, останній запис людини;
+             *             `NotUpdated` — інше значення, останній запис машини (точки змінилися після запису); `NotWritten` —
+             *             записів у комірку не було (значення збору не записано); `NotComparable` — числа за правилом немає. */
+            comparison: string;
+            /**
+             * Format: decimal
+             * @description Частка придатних точок / покритого часу.
+             */
+            percentGood: null | string;
+            /** @description Стан згортки (CellFoldState). */
+            state: string;
+            /**
+             * Format: date-time
+             * @description Коли (UTC).
+             */
+            storedAt: null | string;
+            /** @description Хто записав (`Integration`, `UserEdit`, `Import`…). */
+            storedOrigin: null | string;
+            /** @description Значення в комірці за останнім записом журналу змін; `null` — записів немає. */
+            storedValue: null | string;
+            /**
+             * Format: decimal
+             * @description Значення в одиниці документа — те, що записала б матеріалізація.
+             */
+            value: null | string;
+        };
         /** @description Результат спрацювання правила умовного форматування (ФВ-2.6/2.7): колір
          *     `#rrggbb` (або `null` — колір теми) і жирність. */
         CellFormatDto: {
@@ -25012,6 +25040,7 @@ export interface components {
             aggregation: null | string;
             /** @description Події покриття даних тега за період, новіші першими. */
             events: components["schemas"]["CellSourceEvent"][];
+            fold: null | components["schemas"]["CellFoldView"];
             /** @description Мапінг діє. */
             isActive: boolean;
             /** @description Останній прогін сутності й останній успіх. */
@@ -25023,7 +25052,7 @@ export interface components {
             mapId: number;
             /**
              * Format: int64
-             * @description Зібраних точок тега за період.
+             * @description Зібраних точок тега за вікно.
              */
             pointCount: number;
             /** @description Код сутності. */
@@ -25046,21 +25075,31 @@ export interface components {
         CellSourceView: {
             /**
              * Format: date-time
-             * @description Початок вікна згортки (UTC, у поясі проєкту).
+             * @description Початок вікна згортки (UTC); `null` — колонка місяця поза періодом без власника.
              */
-            periodFromUtc: string;
+            periodFromUtc: null | string;
             /**
              * Format: int32
-             * @description Період комірки.
+             * @description Період екземпляра комірки.
              */
             periodKey: number;
             /**
              * Format: date-time
              * @description Кінець вікна згортки (UTC, виключно).
              */
-            periodToUtc: string;
+            periodToUtc: null | string;
             /** @description Мапінги, що живлять комірку; порожньо — значення не з PI. */
             sources: components["schemas"]["CellSourceItem"][];
+            /**
+             * Format: int32
+             * @description Місяць колонки місяця (1..12): вікно — лише цей місяць періоду (D-462); `null` — увесь період.
+             */
+            windowMonth: null | number;
+            /**
+             * Format: int32
+             * @description Період, у якому згортається комірка (Q-17 — період-власник колонки).
+             */
+            windowPeriodKey: number;
         };
         /** @description Чи можна фарбувати комірки таблиці (CELL-STYLE P1A): те, що клієнт має знати, щоб не вмикати «Заливку»/«Колір
          *     тексту» там, де `PATCH …/cell-styles` однаково відмовить 403. */
