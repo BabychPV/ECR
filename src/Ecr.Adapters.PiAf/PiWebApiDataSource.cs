@@ -24,10 +24,20 @@ namespace Ecr.Adapters.PiAf;
 /// в тестах, що підміняють транспорт одним обробником: тоді Negotiate іде тим
 /// самим <paramref name="http"/>.
 /// </param>
+/// <param name="logger">Журнал перемикання на запасну адресу (D-462); <c>null</c> — тести.</param>
 public sealed partial class PiWebApiDataSource(
-    HttpClient http, ICollectionStore store, ISecretProvider secrets, IHttpClientFactory? clients = null)
+    HttpClient http, ICollectionStore store, ISecretProvider secrets, IHttpClientFactory? clients = null,
+    Microsoft.Extensions.Logging.ILogger<PiWebApiDataSource>? logger = null)
     : IExternalDataSource, IHierarchicalCatalogSource, IBatchCollectionSource
 {
+    /// <summary>Перемикання на запасну адресу при відмові зв'язку з основною (D-462).</summary>
+    private readonly EndpointFailover failover = new(
+        (Microsoft.Extensions.Logging.ILogger?)logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+        nameof(PiWebApiDataSource));
+
+    /// <summary>Роль адреси, що обслужила останній запит (<c>primary</c>/<c>secondary</c>); для тестів і діагностики.</summary>
+    internal string? LastServedBy => failover.LastServedBy;
+
     /// <summary>Скільки разів повторювати запит, який відмовив через 5xx або таймаут.</summary>
     /// <remarks>
     /// ⚠ Три, а не «поки не вийде». Джерело, яке лежить, від наполегливості
@@ -167,7 +177,7 @@ public sealed partial class PiWebApiDataSource(
         Domain.Entities.External.DataSource source, string path, CancellationToken ct)
     {
         using var element = await GetAsync(
-            source.Endpoint, $"elements?path={Uri.EscapeDataString(path)}", source.SecretName, ct)
+            source, $"elements?path={Uri.EscapeDataString(path)}", ct)
             .ConfigureAwait(false);
 
         var id = Text(element.RootElement, "Id");
@@ -262,11 +272,10 @@ public sealed partial class PiWebApiDataSource(
         }
 
         using var recorded = await GetAsync(
-            source.Endpoint,
+            source,
             $"streams/{Uri.EscapeDataString(attribute.WebId)}/recorded"
             + $"?startTime={Iso(request.FromUtc)}&endTime={Iso(request.ToUtc)}"
             + $"&maxCount={request.MaxPoints.ToString(CultureInfo.InvariantCulture)}",
-            source.SecretName,
             ct).ConfigureAwait(false);
 
         return Batch(Points(recorded.RootElement, request.SourcePath, attribute.DefaultUnits), request);
@@ -334,7 +343,7 @@ public sealed partial class PiWebApiDataSource(
             try
             {
                 using var attribute = await GetAsync(
-                    source.Endpoint, $"attributes?path={Uri.EscapeDataString(path)}", source.SecretName, ct)
+                    source, $"attributes?path={Uri.EscapeDataString(path)}", ct)
                     .ConfigureAwait(false);
                 webId = Text(attribute.RootElement, "WebId");
                 defaultUnits = Text(attribute.RootElement, "DefaultUnitsName");
@@ -352,7 +361,7 @@ public sealed partial class PiWebApiDataSource(
             }
 
             using var value = await GetAsync(
-                source.Endpoint, $"streams/{Uri.EscapeDataString(webId)}/value", source.SecretName, ct)
+                source, $"streams/{Uri.EscapeDataString(webId)}/value", ct)
                 .ConfigureAwait(false);
 
             if (CurrentPoint(value.RootElement, path, defaultUnits) is { } point)
@@ -431,6 +440,31 @@ public sealed partial class PiWebApiDataSource(
     private Task<JsonDocument> GetAsync(
         string endpoint, string path, string secretName, CancellationToken ct)
         => GetAsync(new Uri($"{endpoint.TrimEnd('/')}/{path}"), path, secretName, ct);
+
+    /// <summary>GET до джерела: основна адреса, а при відмові ЗВ'ЯЗКУ — запасна (D-462).</summary>
+    /// <remarks>
+    /// ⚠ Обидві адреси йдуть тим самим клієнтом і тим самим обробником: <c>GuardedSocketConnect</c> (заборонені
+    /// IP) і таймаут Q-250 діють на запасну так само, як на основну.
+    /// </remarks>
+    private Task<JsonDocument> GetAsync(
+        Domain.Entities.External.DataSource source, string path, CancellationToken ct)
+        => failover.RunAsync(
+            source,
+            (endpoint, token) => GetAsync(endpoint, path, source.SecretName, token),
+            IsConnectionFailure,
+            ct);
+
+    /// <summary>
+    /// Відмова ЗВ'ЯЗКУ: мережева (без коду відповіді) або тайм-аут після всіх спроб. Код відповіді (4xx/5xx),
+    /// автентифікація й завелика відповідь — ні: сервер відповів, і інша адреса того самого PI відповіла б так само.
+    /// </summary>
+    internal static bool IsConnectionFailure(Exception ex) => ex switch
+    {
+        SourceAuthenticationException => false,
+        HttpRequestException { StatusCode: null } => true,
+        BusinessRuleException rule => rule.Details?.GetValueOrDefault("messageKey") is "err.ECR-INT-0503.piWebApiTimeout",
+        _ => false,
+    };
 
     private async Task<JsonDocument> GetAsync(
         Uri uri, string path, string secretName, CancellationToken ct)

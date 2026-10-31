@@ -46,6 +46,49 @@ public interface IMaterializationScheduler
     /// </param>
     /// <param name="ct">Токен скасування.</param>
     public Task EnqueueAfterTransitionAsync(int projectId, IReadOnlyCollection<int> periodKeys, CancellationToken ct);
+
+    /// <summary>
+    /// D-462: аркуш повернуто на доопрацювання / відкликано / перевідкрито (знову редагований) — ставить
+    /// матеріалізацію його екземплярам таблиць за період, де є матеріалізовані мапінги збору, на ВЕСЬ період.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період аркуша.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Поки аркуш подано, запис інтеграції відхиляється (<c>SkippedWriteConflict</c>/<c>cellRejected</c>), а
+    /// наступний збір перечитує лише своє вікно (<c>LookbackDays</c>): виправлення, видалення й очищення,
+    /// пропущені за поданим аркушем, раніше не доходили до комірок НІКОЛИ. Ті самі правила виклику, що й у
+    /// <see cref="EnqueueAfterTransitionAsync"/>: після коміту або всередині транзакції (<see cref="EnlistsInCallerTransaction"/>) —
+    /// див. <see cref="SheetMaterializationTrigger"/>. Тіло за замовчуванням нічого не робить (підробки порту).
+    /// </remarks>
+    public Task EnqueueAfterSheetReturnAsync(long documentId, int sheetDefId, int periodKey, CancellationToken ct)
+        => Task.CompletedTask;
+}
+
+/// <summary>
+/// D-462: єдине місце правила «аркуш знову редагований → матеріалізація» для обробників повернення
+/// (відхилення погоджувачем, відкликання, перевідкриття документа).
+/// </summary>
+/// <remarks>
+/// ⛔ Порядок як у переходах періоду (<c>ReopenPeriodHandler</c>): черга в базі — постановка всередині транзакції
+/// переходу, останнім оператором; черга поза базою — лише після коміту.
+/// </remarks>
+public static class SheetMaterializationTrigger
+{
+    /// <summary>Виклик усередині транзакції переходу: ставить, лише якщо черга приєднується до транзакції.</summary>
+    public static Task InsideTransactionAsync(
+        IMaterializationScheduler? scheduler, long documentId, int sheetDefId, int periodKey, CancellationToken ct)
+        => scheduler is { EnlistsInCallerTransaction: true }
+            ? scheduler.EnqueueAfterSheetReturnAsync(documentId, sheetDefId, periodKey, ct)
+            : Task.CompletedTask;
+
+    /// <summary>Виклик після коміту переходу: ставить, лише якщо черга НЕ приєднується до транзакції.</summary>
+    public static Task AfterCommitAsync(
+        IMaterializationScheduler? scheduler, long documentId, int sheetDefId, int periodKey, CancellationToken ct)
+        => scheduler is { EnlistsInCallerTransaction: false }
+            ? scheduler.EnqueueAfterSheetReturnAsync(documentId, sheetDefId, periodKey, ct)
+            : Task.CompletedTask;
 }
 
 /// <summary>Які переходи періоду потребують задачі матеріалізації.</summary>

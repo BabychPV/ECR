@@ -62,7 +62,11 @@ public sealed class IntegrationCellPatcher(
 
     // ⛔ PRMG: ціль Lookup-колонки може бути ГРУПОЮ типів дозволів; порівняння цілі - лише через `LookupTargetMatcher`.
     // `null` (прямий конструктор у тестах) - груп немає.
-    Application.Permits.Groups.ILookupTargetResolver? groups = null) : ICellPatcher
+    Application.Permits.Groups.ILookupTargetResolver? groups = null,
+
+    // ⛔ D-462 (Q-17 разом зі збором): з увімкненим `Collection:MonthColumnRouting` значення й журнал колонки з чужим
+    // власником лежать в екземплярі-ВЛАСНИКУ. `null` (прямий конструктор у тестах) — маршрутизації немає.
+    IMonthColumnRouter? monthRouter = null) : ICellPatcher
 {
     /// <summary>Скільки разів пробувати запис, якщо рядок змінили між читанням і записом.</summary>
     public const int MaxAttempts = 3;
@@ -143,7 +147,7 @@ public sealed class IntegrationCellPatcher(
     /// <param name="ColumnDefId">Колонка-адресат.</param>
     /// <param name="Value">Значення так, як його прийме <see cref="CellValueReader.Read"/>.</param>
     /// <param name="Kind">Вид значення — лише для рядків (<see cref="ApplyIntegrationRowsAsync"/>).</param>
-    private sealed record PlannedCell(string RowKey, int ColumnDefId, object Value, IntegrationValueKind? Kind = null);
+    private sealed record PlannedCell(string RowKey, int ColumnDefId, object? Value, IntegrationValueKind? Kind = null);
 
     /// <summary>Запис рядків документа (<see cref="ApplyIntegrationRowsAsync"/>), а не комірок збору.</summary>
     /// <param name="DocumentId">Документ — для меж періоду в перевірці чинності запису довідника.</param>
@@ -184,17 +188,20 @@ public sealed class IntegrationCellPatcher(
             .ConfigureAwait(false);
 
         var columnById = columns.ToDictionary(c => c.Id);
+        var routing = await RoutingAsync(instance.DocumentId, instance.TableDefId, ct).ConfigureAwait(false);
 
         for (var attempt = 1; ; attempt++)
         {
             var plan = await PlanAsync(
-                    instance.DocumentId, tableInstanceId, periodKey, cells, columnById, rowsOf, ct)
+                    instance.DocumentId, tableInstanceId, periodKey, cells, columnById, rowsOf, ct, routing)
                 .ConfigureAwait(false);
             var rejected = plan.Rejected.Count == 0 ? null : plan.Rejected;
+            var closed = plan.SkippedClosed.Count == 0 ? null : plan.SkippedClosed;
 
             if (plan.Rows.Count == 0)
             {
-                return new IntegrationWriteResult(0, plan.Kept, plan.AwaitingConfirmation, Rejected: rejected);
+                return new IntegrationWriteResult(
+                    0, plan.Kept, plan.AwaitingConfirmation, Rejected: rejected, SkippedClosedPeriod: closed);
             }
 
             try
@@ -205,7 +212,8 @@ public sealed class IntegrationCellPatcher(
                         ct)
                     .ConfigureAwait(false);
 
-                return new IntegrationWriteResult(plan.Applied, plan.Kept, plan.AwaitingConfirmation, Rejected: rejected);
+                return new IntegrationWriteResult(
+                    plan.Applied, plan.Kept, plan.AwaitingConfirmation, Rejected: rejected, SkippedClosedPeriod: closed);
             }
             catch (EcrException ex) when (IsRowRace(ex) || IsCreatedMeanwhile(ex))
             {
@@ -221,7 +229,8 @@ public sealed class IntegrationCellPatcher(
                         plan.Kept,
                         plan.AwaitingConfirmation,
                         [.. plan.Rows.SelectMany(r => r.Cells.Select(c => $"{r.RowKey}:{c.ColumnCode}"))],
-                        rejected);
+                        rejected,
+                        closed);
                 }
             }
         }
@@ -229,7 +238,15 @@ public sealed class IntegrationCellPatcher(
 
     /// <summary>Те, що піде в обробник за одну спробу, і те, що лишено.</summary>
     private sealed record WritePlan(
-        List<PatchRow> Rows, List<string> Kept, int Applied, List<string> AwaitingConfirmation, List<string> Rejected);
+        List<PatchRow> Rows,
+        List<string> Kept,
+        int Applied,
+        List<string> AwaitingConfirmation,
+        List<string> Rejected,
+        List<string> SkippedClosed);
+
+    /// <summary>Маршрутизація Q-17 таблиці: опис таблиці й документ місячного проєкту.</summary>
+    private sealed record Routing(TableDef Table, MonthRoutingDocument Document);
 
     /// <summary>
     /// Рядок, якого не було, створили між читанням обробника і вставкою:
@@ -271,22 +288,39 @@ public sealed class IntegrationCellPatcher(
         IReadOnlyList<PlannedCell> cells,
         Dictionary<int, ColumnDef> columnById,
         RowsOf? rowsOf,
-        CancellationToken ct)
+        CancellationToken ct,
+        Routing? routing = null)
     {
         var existing = (await rowStore.GetRowsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false))
             .ToDictionary(r => r.RowKey, StringComparer.Ordinal);
 
-        var manual = await ManualCellsAsync(documentId, tableInstanceId, periodKey, ct).ConfigureAwait(false);
+        var manual = routing is not null
+            ? await ManualCellsRoutedAsync(documentId, routing.Table.Id, periodKey, ct).ConfigureAwait(false)
+            : await ManualCellsAsync(documentId, tableInstanceId, periodKey, ct).ConfigureAwait(false);
 
         var kept = new List<string>();
         var candidates = KeepManual(cells, columnById, manual, kept);
 
-        var current = await CurrentValuesAsync(periodKey, candidates, existing, ct).ConfigureAwait(false);
+        var current = routing is null
+            ? await CurrentValuesAsync(periodKey, candidates, existing, ct).ConfigureAwait(false)
+            : await LogicalValuesAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
 
+        // ⚠ D-462: очищення (Value = null) рядка, якого ще немає, — не запис: створювати рядок заради порожнечі не можна.
         var changed = candidates
-            .Where(c => !existing.TryGetValue(c.Cell.RowKey, out var row)
-                        || !Unchanged(c.Cell, c.Column, row.Id, periodKey, current))
+            .Where(c => existing.TryGetValue(c.Cell.RowKey, out var row)
+                ? !Unchanged(c.Cell, c.Column, row.Id, periodKey, current)
+                : c.Cell.Value is not null)
             .ToList();
+
+        var skippedClosed = routing is null
+            ? []
+            : await ClosedOwnersAsync(routing, periodKey, changed, ct).ConfigureAwait(false);
+
+        if (skippedClosed.Count > 0)
+        {
+            var skipped = skippedClosed.Select(c => c[..c.LastIndexOf('@')]).ToHashSet(StringComparer.Ordinal);
+            changed = [.. changed.Where(c => !skipped.Contains($"{c.Cell.RowKey}:{c.Column.Code}"))];
+        }
 
         var rejected = rowsOf is null
             ? new HashSet<string>(StringComparer.Ordinal)
@@ -329,7 +363,56 @@ public sealed class IntegrationCellPatcher(
             kept,
             applied,
             [.. awaiting.Order(StringComparer.Ordinal)],
-            [.. rejected.Order(StringComparer.Ordinal)]);
+            [.. rejected.Order(StringComparer.Ordinal)],
+            skippedClosed);
+    }
+
+    /// <summary>
+    /// D-462 (Q-17, варіант A рішення власника продукту): змінені комірки колонок, чий власник — інший і ЗАКРИТИЙ
+    /// період (якір року): <c>rowKey:columnCode@periodKey</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Обробник запису відхиляє батч ЦІЛКОМ, якщо хоч одна комірка лягає в закритий період власника, — і
+    /// матеріалізація відкритого місяця падала через одну колонку закритого якоря. Тепер такі комірки знімаються з
+    /// батча до обробника (решта пишеться), а задача кладе подію в журнал покриття. Значень у переліку немає.
+    /// </remarks>
+    private async Task<List<string>> ClosedOwnersAsync(
+        Routing routing, PeriodKey periodKey, List<(PlannedCell Cell, ColumnDef Column)> changed, CancellationToken ct)
+    {
+        var owners = new Dictionary<int, PeriodKey>();
+        foreach (var column in changed.Select(c => c.Column).DistinctBy(c => c.Id))
+        {
+            var owner = await monthRouter!
+                .OwnerPeriodAsync(routing.Document, routing.Table, column, periodKey, ct)
+                .ConfigureAwait(false);
+            if (owner != periodKey)
+            {
+                owners[column.Id] = owner;
+            }
+        }
+
+        if (owners.Count == 0)
+        {
+            return [];
+        }
+
+        var keys = owners.Values.Select(o => o.Value).Distinct().ToList();
+        var closedKeys = (await db.Periods.AsNoTracking()
+                .Where(p => p.ProjectId == routing.Document.ProjectId && keys.Contains(p.PeriodKeyValue)
+                            && p.State == PeriodState.Closed)
+                .Select(p => p.PeriodKeyValue)
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .ToHashSet();
+
+        return
+        [
+            .. changed
+                .Where(c => owners.TryGetValue(c.Column.Id, out var owner) && closedKeys.Contains(owner.Value))
+                .Select(c => c.Cell.RowKey + ":" + c.Column.Code + "@"
+                             + owners[c.Column.Id].Value.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .Order(StringComparer.Ordinal),
+        ];
     }
 
     /// <summary>
@@ -374,7 +457,7 @@ public sealed class IntegrationCellPatcher(
 
             if (isLookup)
             {
-                lookups.Add((address, (long)cell.Value, column.LookupRegistryDefId));
+                lookups.Add((address, (long)cell.Value!, column.LookupRegistryDefId));
             }
         }
 
@@ -478,7 +561,7 @@ public sealed class IntegrationCellPatcher(
             // колонки (не більше 16) ДО відсіву незмінних і до обробника (<see cref="IntegrationValueScale"/>).
             // Інакше колонка зі `Scale = 3` відхиляла `1.3333333333333333` (`ValidateValue` п. 7), обробник —
             // увесь батч таблиці, а порівняння з чинним значенням бачило б «зміну» на кожному прогоні.
-            candidates.Add((cell with { Value = IntegrationValueScale.ToColumn(cell.Value, column) }, column));
+            candidates.Add((cell.Value is null ? cell : cell with { Value = IntegrationValueScale.ToColumn(cell.Value, column) }, column));
         }
 
         return candidates;
@@ -585,6 +668,55 @@ public sealed class IntegrationCellPatcher(
             : await cellStore.ReadCellsAsync(addresses, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Чи застосовна до таблиці маршрутизація Q-17 (<c>Collection:MonthColumnRouting</c>, таблиця
+    /// <c>MonthsInColumns</c>, документ місячного проєкту).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Прапор вимкнено — жодного звернення до бази (як і решта споживачів роутера).
+    /// </remarks>
+    private async Task<Routing?> RoutingAsync(long documentId, int tableDefId, CancellationToken ct)
+    {
+        if (monthRouter is not { Enabled: true })
+        {
+            return null;
+        }
+
+        var table = await db.TableDefs.AsNoTracking().FirstOrDefaultAsync(t => t.Id == tableDefId, ct).ConfigureAwait(false);
+
+        if (table is null || !monthRouter.AppliesToTable(table))
+        {
+            return null;
+        }
+
+        return await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false) is { } document
+            ? new Routing(table, document)
+            : null;
+    }
+
+    /// <summary>
+    /// Чинні значення таблиці так, як їх бачить людина: ЛОГІЧНИЙ зріз (Q-17) — введені комірки колонок із чужим
+    /// власником узято з екземпляра-власника, на ідентифікаторах рядків екземпляра запиту (D-462).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Фізичне читання за адресами екземпляра запиту (<see cref="CurrentValuesAsync"/>) для такої колонки не
+    /// бачить нічого — і незмінне значення щопрогону «змінювалося»: запис, «дотик» рядка і перерахунок на
+    /// кожен збір. Зріз читає <c>MonthRoutedCellStore</c> тим самим правилом, що й сітка.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<CellAddress, CellValueData>> LogicalValuesAsync(
+        long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+    {
+        var slice = await cellStore.ReadSliceAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
+
+        var values = new Dictionary<CellAddress, CellValueData>(slice.Count);
+        foreach (var record in slice)
+        {
+            values[new CellAddress(periodKey, record.Address.TableRowId, record.Address.ColumnDefId)] = record.Value;
+        }
+
+        return values;
+    }
+
     /// <summary>Чи збіглося б записане значення з чинним.</summary>
     /// <remarks>
     /// ⚠ Порівняння — тим самим критерієм, яким обробник вирішує «зміни не
@@ -601,7 +733,15 @@ public sealed class IntegrationCellPatcher(
         PeriodKey periodKey,
         IReadOnlyDictionary<CellAddress, CellValueData> current)
     {
-        if (!current.TryGetValue(new CellAddress(periodKey, rowId, column.Id), out var stored))
+        var found = current.TryGetValue(new CellAddress(periodKey, rowId, column.Id), out var stored);
+
+        // ⚠ D-462: очищення — «незмінне», якщо комірки немає або вона вже порожня (інакше щопрогону запис і перерахунок).
+        if (cell.Value is null)
+        {
+            return !found || stored!.IsEmpty;
+        }
+
+        if (!found)
         {
             return false;
         }
@@ -646,6 +786,49 @@ public sealed class IntegrationCellPatcher(
          WHERE lc.rn = 1 AND lc.Origin IN ({CellChangeOrigins.HumanOriginsSql});
         """;
 
+    /// <summary>
+    /// Те саме для таблиці з маршрутизацією Q-17 (D-462): журнал комірок УСІХ екземплярів цієї таблиці документа
+    /// в році періоду — правка людини колонки з чужим власником лежить на фізичній адресі власника.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Остання зміна (рядок, колонка) — серед усіх екземплярів року: у колонки один власник, а фізичні копії
+    /// в інших екземплярах (дані до ввімкнення маршрутизації) старші за його записи.
+    /// </remarks>
+    public const string ManualCellsRoutedSql = $"""
+        WITH last_change AS (
+            SELECT c.RowKey, c.ColumnDefId, c.Origin,
+                   ROW_NUMBER() OVER (PARTITION BY c.RowKey, c.ColumnDefId
+                                          ORDER BY c.ChangedAt DESC, c.Id DESC) AS rn
+              FROM doc.TableInstance AS i
+              JOIN doc.TableRow AS r
+                ON r.PeriodKey = i.PeriodKey AND r.TableInstanceId = i.Id
+              JOIN aud.CellChange AS c
+                ON c.DocumentId = @document
+               AND c.TableRowId = r.Id
+               AND c.PeriodKey = r.PeriodKey
+             WHERE i.DocumentId = @document AND i.TableDefId = @table
+               AND i.PeriodKey BETWEEN @yearFrom AND @yearTo
+        )
+        SELECT lc.RowKey, cd.Code
+          FROM last_change AS lc
+          JOIN cfg.ColumnDef AS cd ON cd.Id = lc.ColumnDefId
+         WHERE lc.rn = 1 AND lc.Origin IN ({CellChangeOrigins.HumanOriginsSql});
+        """;
+
+    /// <summary>Комірки таблиці з маршрутизацією Q-17, останню зміну яких зробила людина (D-462).</summary>
+    private Task<HashSet<string>> ManualCellsRoutedAsync(
+        long documentId, int tableDefId, PeriodKey periodKey, CancellationToken ct)
+        => ReadManualAsync(
+            ManualCellsRoutedSql,
+            parameters =>
+            {
+                parameters.Add("@document", System.Data.SqlDbType.BigInt).Value = documentId;
+                parameters.Add("@table", System.Data.SqlDbType.Int).Value = tableDefId;
+                parameters.Add("@yearFrom", System.Data.SqlDbType.Int).Value = (periodKey.Year * 100) + 1;
+                parameters.Add("@yearTo", System.Data.SqlDbType.Int).Value = (periodKey.Year * 100) + 99;
+            },
+            ct);
+
     /// <summary>Комірки, останню зміну яких зробила людина.</summary>
     /// <param name="documentId">Документ екземпляра — провідна колонка індексу журналу (R5-Q1-01).</param>
     /// <param name="tableInstanceId">Екземпляр таблиці.</param>
@@ -660,8 +843,22 @@ public sealed class IntegrationCellPatcher(
     /// ⚠ Береться ОСТАННЯ зміна кожної комірки, а не будь-яка: комірку могли
     /// спершу заповнити руками, а потім свідомо віддати інтеграції.
     /// </remarks>
-    private async Task<HashSet<string>> ManualCellsAsync(
+    private Task<HashSet<string>> ManualCellsAsync(
         long documentId, long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+        => ReadManualAsync(
+            ManualCellsSql,
+            parameters =>
+            {
+                parameters.AddWithValue("@period", periodKey.Value);
+                parameters.AddWithValue("@instance", tableInstanceId);
+                parameters.Add("@document", System.Data.SqlDbType.BigInt).Value = documentId;
+            },
+            ct);
+
+    /// <summary>Виконує запит «правки людини» власним з'єднанням: <c>rowKey:columnCode</c>.</summary>
+    /// <remarks>⚠ Одне місце відкриття з'єднання на обидва запити (сторож <c>OutboundConnectionPolicyTests</c>).</remarks>
+    private async Task<HashSet<string>> ReadManualAsync(
+        string sql, Action<Microsoft.Data.SqlClient.SqlParameterCollection> bind, CancellationToken ct)
     {
         var manual = new HashSet<string>(StringComparer.Ordinal);
 
@@ -671,11 +868,8 @@ public sealed class IntegrationCellPatcher(
         await connection.OpenAsync(ct).ConfigureAwait(false);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = ManualCellsSql;
-
-        command.Parameters.AddWithValue("@period", periodKey.Value);
-        command.Parameters.AddWithValue("@instance", tableInstanceId);
-        command.Parameters.Add("@document", System.Data.SqlDbType.BigInt).Value = documentId;
+        command.CommandText = sql;
+        bind(command.Parameters);
 
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
 

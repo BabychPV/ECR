@@ -37,7 +37,10 @@ public sealed class RecallSheetHandler(
     Reporting.ReportSnapshotSync reports,
     IUnitOfWork uow,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    // D-462: повернутий аркуш знову редагований — комірки наздоганяють сирий шар (SheetMaterializationTrigger);
+    // `null` — тестові фабрики обробника без черги.
+    IMaterializationScheduler? materialization = null)
 {
     /// <summary>Відкликає аркуш.</summary>
     /// <param name="documentId">Документ.</param>
@@ -157,7 +160,15 @@ public sealed class RecallSheetHandler(
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             await reports.RefreshAsync(documentId, key, innerCt).ConfigureAwait(false);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            await SheetMaterializationTrigger
+                .InsideTransactionAsync(materialization, documentId, sheetDefId, periodKey, innerCt)
+                .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        await SheetMaterializationTrigger
+            .AfterCommitAsync(materialization, documentId, sheetDefId, periodKey, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Чи пропустив би <see cref="HandleAsync"/> цього користувача саме зараз.</summary>

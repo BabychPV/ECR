@@ -35,8 +35,16 @@ public sealed partial class CollectionRunner(
     TimeSpan? maxRunDuration = null,
     ILogger<CollectionRunner>? logger = null,
     int? maxPagesPerRead = null,
-    int? maxParallelReads = null) : ICollectionRunner
+    int? maxParallelReads = null,
+    CollectionRunnerOptions? options = null) : ICollectionRunner
 {
+    /// <summary>Нарізка на шматки й видалення зниклих точок (D-462); <c>null</c> — обидва вимкнені.</summary>
+    /// <remarks>
+    /// ⚠ Без параметра (прямий конструктор у тестах) — поведінка до D-462: інтервал читається цілком, сирі точки
+    /// не видаляються. Контейнер передає налаштовані значення завжди (<c>AddPiAfAdapters</c>).
+    /// </remarks>
+    private readonly CollectionRunnerOptions settings = options ?? CollectionRunnerOptions.Off;
+
     /// <summary>Лог збоїв прогону; без реєстрації (тести) — порожній.</summary>
     private readonly ILogger log = (ILogger?)logger ?? NullLogger.Instance;
 
@@ -144,8 +152,12 @@ public sealed partial class CollectionRunner(
         var units = await unitConverter.UnitsAsync(ct).ConfigureAwait(false);
         var paths = Paths(entity, maps);
 
-        var work = await PlanAsync(sourceEntityId, fromUtc, toUtc, ct).ConfigureAwait(false);
-        var isCatchUp = work.Count > 1;
+        var window = new TimeInterval(fromUtc, toUtc);
+        var (work, requested) = await PlanAsync(sourceEntityId, fromUtc, toUtc, ct).ConfigureAwait(false);
+
+        // ⚠ Наздоганяння — це прогалини ПОЗА запитаним діапазоном, а не кількість інтервалів: запитаний діапазон
+        // тепер іде шматками (D-462), і «більше одного інтервалу» вже не означає прогалин.
+        var isCatchUp = work.Count > requested;
 
         var runId = await store
             .StartRunAsync(sourceEntityId, work.Min(w => w.FromUtc), toUtc, isCatchUp, null, ct)
@@ -173,6 +185,10 @@ public sealed partial class CollectionRunner(
         // перетворилося б на нескінченний цикл рівно тоді, коли джерело
         // відмовляє стало.
         var reacquired = false;
+
+        // ⚠ D-462: момент, з якого ПРОДОВЖИТИ запитаний діапазон, якщо прогін обірвав годинник (Q-250);
+        // `null` — запитаний діапазон пройдено до кінця (або прогін обірвано не годинником).
+        DateTime? resumeFrom = null;
 
         // Атрибути, чиї мапінги цей прогін поставив на паузу (ФВ-16.9).
         var pausedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -249,6 +265,7 @@ public sealed partial class CollectionRunner(
             }
 
             accepted = true;
+            Track(state, result.Points, interval, window);
 
             // ⚠ Успішні точки зберігаються НАВІТЬ при частковій
             // відмові батча: викинути прочитане через те, що хвіст
@@ -281,6 +298,17 @@ public sealed partial class CollectionRunner(
             if (result.FailedIntervals.Count == 0)
             {
                 state.Cursor = interval.ToUtc;
+
+                // ⛔ D-462: атрибут прочитано в шматку ПОВНІСТЮ й без відмов — лише тепер відомо, яких точок у
+                // джерелі за цей шматок більше немає.
+                if (await RemoveMissingAsync(runId, sourceEntityId, state, interval, window, pausedPaths)
+                        .ConfigureAwait(false) > 0
+                    && (earliestWritten is null || interval.FromUtc < earliestWritten))
+                {
+                    // Видалене — теж зміна сирого шару: матеріалізація мусить її побачити.
+                    earliestWritten = interval.FromUtc;
+                }
+
                 return false;
             }
 
@@ -571,6 +599,18 @@ public sealed partial class CollectionRunner(
             // наступний прогін почав би цей інтервал спочатку і знову вперся б
             // у той самий ліміт (аудит B3).
             covered = CoveredWithInFlight();
+
+            // ⛔ D-462: запитаний діапазон, що не вклався в годинник, продовжується з ПЕРШОГО непрочитаного
+            // шматка (з точністю до прочитаних сторінок), а не з початку — інакше довгий ручний збір щоразу
+            // перечитував би ту саму голову й упирався в той самий ліміт. Шматки запитаного діапазону — перші
+            // `requested` у `work`, тож `step` поза ними означає, що запитане вже пройдено.
+            if (step < requested)
+            {
+                resumeFrom = inFlight is { } open && inFlightReached > open.FromUtc
+                    ? inFlightReached
+                    : work[step].FromUtc;
+            }
+
             inFlight = null;
 
             failureCode ??= SourceUnavailable;
@@ -660,7 +700,8 @@ public sealed partial class CollectionRunner(
         return new CollectionRunSummary(
             earliestWritten is { } changed && changed < fromUtc ? changed : fromUtc,
             retrieved,
-            Degraded: failureCode is not null);
+            Degraded: failureCode is not null,
+            ResumeFromUtc: resumeFrom);
     }
 
     /// <summary>Конверт причини (<c>Q-326</c>): ключ каталогу й параметри підстановки.</summary>
@@ -848,7 +889,8 @@ public sealed partial class CollectionRunner(
         return $"{message} Причина від джерела: {trimmed}";
     }
 
-    /// <summary>Що читати: запитаний діапазон плюс давніші прогалини.</summary>
+    /// <summary>Що читати: запитаний діапазон плюс давніші прогалини — шматками (D-462).</summary>
+    /// <returns>Інтервали для читання і скільки перших із них — шматки запитаного діапазону.</returns>
     /// <remarks>
     /// ⛔ Аудит I1-04: запитаний діапазон йде ПЕРШИМ, прогалини — за ним (давнє
     /// першим уже серед них). Покриття пишеться на сутність, тож атрибут, що
@@ -859,8 +901,14 @@ public sealed partial class CollectionRunner(
     /// на прогалині, і нові дані ВСІХ атрибутів сутності не надходили зовсім.
     /// Прогалина від порядку не страждає: прочитане до обриву покривається
     /// (аудит B3), і наступний прогін продовжує з місця зупинки.
+    /// <para>
+    /// ⛔ D-462: і запитаний діапазон, і прогалини ріжуться на шматки <see cref="CollectionRunnerOptions.ChunkSize"/>
+    /// за зростанням часу. Послідовний адаптер читає інтервал атрибут за атрибутом, а покриття рахується лише
+    /// за прочитане ВСІМА атрибутами — річний інтервал п'ятдесяти тегів не покривався жодною хвилиною, доки
+    /// його не дочитано цілком, і обрив годинником губив усе. Шматок — одиниця покриття й продовження.
+    /// </para>
     /// </remarks>
-    private async Task<List<TimeInterval>> PlanAsync(
+    private async Task<(List<TimeInterval> Work, int Requested)> PlanAsync(
         int sourceEntityId, DateTime fromUtc, DateTime toUtc, CancellationToken ct)
     {
         var gaps = await catchUp
@@ -870,15 +918,126 @@ public sealed partial class CollectionRunner(
         // Запитаний діапазон читається ЗАВЖДИ, навіть якщо покриття за нього
         // вже є: джерело переписує значення заднім числом, і «вже збирали» не
         // означає «те саме число».
-        var work = new List<TimeInterval> { new(fromUtc, toUtc) };
+        var work = Chunks(new TimeInterval(fromUtc, toUtc), settings.ChunkSize).ToList();
+        var requested = work.Count;
 
         work.AddRange(gaps
             .Where(g => g.From < fromUtc)
             .Select(g => new TimeInterval(g.From, g.To < fromUtc ? g.To : fromUtc))
-            .Where(g => g.ToUtc > g.FromUtc));
+            .Where(g => g.ToUtc > g.FromUtc)
+            .SelectMany(g => Chunks(g, settings.ChunkSize)));
 
-        return work;
+        return (work, requested);
     }
+
+    /// <summary>Ріже інтервал на шматки не довші за <paramref name="size"/>; <c>null</c> — інтервал цілком.</summary>
+    /// <param name="interval">Інтервал.</param>
+    /// <param name="size">Довжина шматка.</param>
+    /// <returns>Шматки за зростанням часу, без проміжків і перекриттів.</returns>
+    /// <remarks>
+    /// ⚠ Межі шматків — від ПОЧАТКУ інтервалу, а не вирівняні на добу: продовження (D-462) стартує з довільної
+    /// мітки, і вирівнювання дало б перший шматок-обрізок без жодної користі.
+    /// </remarks>
+    internal static IEnumerable<TimeInterval> Chunks(TimeInterval interval, TimeSpan? size)
+    {
+        if (size is not { } step || step <= TimeSpan.Zero || interval.ToUtc - interval.FromUtc <= step)
+        {
+            yield return interval;
+            yield break;
+        }
+
+        for (var start = interval.FromUtc; start < interval.ToUtc; start += step)
+        {
+            var end = interval.ToUtc - start > step ? start + step : interval.ToUtc;
+            yield return new TimeInterval(start, end);
+        }
+    }
+
+    /// <summary>Запам'ятовує мітки сторінки, якщо шматок підлягає видаленню зниклих точок (D-462).</summary>
+    /// <param name="state">Курсор атрибута в шматку.</param>
+    /// <param name="points">Сира сторінка — разом із точками, які попередня сторінка вже віддала.</param>
+    /// <param name="interval">Шматок.</param>
+    /// <param name="window">Запитаний діапазон прогону.</param>
+    private void Track(PathCursor state, IReadOnlyList<SourceDataPoint> points, TimeInterval interval, TimeInterval window)
+    {
+        if (!settings.DeleteMissingPoints || state.Untracked || !InWindow(interval, window))
+        {
+            return;
+        }
+
+        state.Seen ??= [];
+
+        foreach (var point in points)
+        {
+            state.Seen.Add(point.Timestamp);
+        }
+
+        // ⚠ Запобіжник пам'яті, а не правило: шматок, у якому атрибут має понад стелю міток, видаленню не
+        // підлягає зовсім (краще зайва точка, ніж набір міток на сотні мегабайт).
+        if (state.Seen.Count > CollectionRunnerOptions.MaxTrackedTimestamps)
+        {
+            state.Seen = null;
+            state.Untracked = true;
+        }
+    }
+
+    /// <summary>Шматок лежить у ЗАПИТАНОМУ діапазоні прогону (вікні), а не в прогалині наздоганяння.</summary>
+    private static bool InWindow(TimeInterval interval, TimeInterval window)
+        => interval.FromUtc >= window.FromUtc && interval.ToUtc <= window.ToUtc;
+
+    /// <summary>
+    /// Видаляє сирі точки атрибута, яких джерело за ПОВНІСТЮ прочитаний шматок вікна більше не віддає (D-462).
+    /// </summary>
+    /// <param name="runId">Прогін.</param>
+    /// <param name="sourceEntityId">Сутність.</param>
+    /// <param name="state">Курсор атрибута: шматок дочитано, мітки — у <see cref="PathCursor.Seen"/>.</param>
+    /// <param name="interval">Шматок.</param>
+    /// <param name="window">Запитаний діапазон прогону.</param>
+    /// <param name="pausedPaths">Атрибути на паузі — їхніх точок цей прогін не писав і не видаляє.</param>
+    /// <returns>Скільки точок видалено.</returns>
+    /// <remarks>
+    /// ⛔ Видаляється ЛИШЕ за шматок, який атрибут дочитав до кінця без жодної відмови (виклик — з гілки
+    /// «хвоста немає»: жодної помилки транспорту, відмови, часткової відмови чи обриву годинником) і лише у вікні
+    /// (запитаний діапазон). Успішна ПОРОЖНЯ відповідь — теж відповідь (рішення власника продукту, D-462):
+    /// видаляються всі наші точки шматка, а кількість видаленого — у журнал (Information), щоб мовчазний збій
+    /// архіву було видно. Помилка порожнечею не вважається ніколи — до цієї гілки вона не доходить.
+    /// <para>
+    /// ⚠ Наслідки — тим самим шляхом, що й будь-яка зміна сирого шару: матеріалізація перерахує період (вікно
+    /// матеріалізації містить вікно збору), патчер не чіпає правок людини, закритих періодів і поданих аркушів, а
+    /// перерахунок ставить <c>ICalculationTrigger</c>, лише якщо число в комірці справді змінилося.
+    /// </para>
+    /// </remarks>
+    private async Task<int> RemoveMissingAsync(
+        long runId, int sourceEntityId, PathCursor state, TimeInterval interval, TimeInterval window,
+        HashSet<string> pausedPaths)
+    {
+        if (state.Seen is not { } seen || pausedPaths.Contains(state.Path) || !InWindow(interval, window))
+        {
+            return 0;
+        }
+
+        state.Seen = null;
+
+        // ⚠ Без токена прогону: видалення — одна коротка інструкція під локом таблиці, мітки вже прочитано, і
+        // обрив посеред означав би лише повтор наступного разу.
+        var removed = await store
+            .DeleteMissingRawPointsAsync(
+                sourceEntityId, state.Path, interval.FromUtc, interval.ToUtc, seen, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        if (removed > 0)
+        {
+            LogPointsRemoved(log, runId, sourceEntityId, state.Path, removed, interval.FromUtc, interval.ToUtc);
+        }
+
+        return removed;
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "CollectionRunner: прогін {RunId} сутності {SourceEntityId}: {Removed} сирих точок атрибута {SourcePath} видалено — джерело за [{FromUtc}, {ToUtc}) їх більше не віддає (D-462).")]
+    private static partial void LogPointsRemoved(
+        ILogger logger, long runId, int sourceEntityId, string sourcePath, int removed, DateTime fromUtc, DateTime toUtc);
 
     /// <summary>Читає один інтервал одного атрибута, перетворюючи відмову на результат.</summary>
     /// <remarks>
