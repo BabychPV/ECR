@@ -88,7 +88,11 @@ public sealed class FormulaOverrideStore(EcrDbContext db) : IFormulaOverrideStor
     }
 
     /// <inheritdoc />
-    /// <remarks>⚠ Колонка належить рівно одній версії, тож «позначка на колонці версії» = «позначка в документі версії».</remarks>
+    /// <remarks>
+    /// ⚠ Колонка належить рівно одній версії, тож «позначка на колонці версії» = «позначка в документі версії».
+    /// ✎ Аудит 31.10 (F5b): позначки видалених рядків не рахуються (як у <see cref="CountAsync"/> і
+    /// <see cref="ReadInstanceAsync"/>) — та сама одна команда, лише напівз'єднання з рядком.
+    /// </remarks>
     public async Task<bool> AnyForVersionAsync(int templateVersionId, CancellationToken ct)
         => await (
                 from o in db.CellFormulaOverrides.AsNoTracking()
