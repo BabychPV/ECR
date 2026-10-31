@@ -34,7 +34,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// 31.10.2026. Підроблене лише джерело подій, годинник і черга (для перевірки негайного синку).
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class SourceEventSyncAnnualTests(SqlServerFixture sql)
+public sealed partial class SourceEventSyncAnnualTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 10, 31, 9, 0, 0, DateTimeKind.Utc);
     private static readonly TimeZoneInfo Atyrau = TimeZoneInfo.FindSystemTimeZoneById("Asia/Atyrau");
