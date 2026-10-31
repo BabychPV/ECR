@@ -156,7 +156,7 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
         var before = PeriodFold.Fold(AggregationKind.Avg, series);
 
         Assert.Equal(3, series.Count);
-        Assert.Equal(decimal.GetBits(before), decimal.GetBits(Assert.Single(written).Value));
+        Assert.Equal(decimal.GetBits(before), decimal.GetBits(Assert.Single(written).Value!.Value));
         Assert.Equal(5m, Assert.IsType<decimal>(await CellAsync(stand, stand.Columns[0])));
     }
 
@@ -246,7 +246,7 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
         // • брати межову точку без переведення (0.001 як «Sm3/h») → краї майже нульові, менше за 2 678.4, червоний.
         var written = await RunAsync(stand);
 
-        var value = Assert.Single(written).Value;
+        var value = Assert.Single(written).Value!.Value;
         Assert.True(Math.Abs(value - 2678.4m) < 0.000001m, $"Очікувано 2 678.4, отримано {value}.");
     }
 
@@ -271,7 +271,7 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
         // виняток, червоний.
         var written = await RunAsync(stand);
 
-        var value = Assert.Single(written).Value;
+        var value = Assert.Single(written).Value!.Value;
         Assert.True(value > 0m && value < 2678.4m, $"Очікувано частковий інтеграл без краю, отримано {value}.");
     }
 

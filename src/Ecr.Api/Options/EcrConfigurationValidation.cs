@@ -88,6 +88,11 @@ public static partial class EcrConfigurationValidation
         ("Registries:ExportMaxRows", 1),
         ("Campaign:AtRiskDays", 0),
         ("Integration:CatalogTimeoutSeconds", 1),
+        ("Integration:RawDataExportMaxRows", 1), // D-463: нуль — кожен експорт «Даних з PI» відмовою, а не «без стелі».
+
+        // D-462: 0 — без нарізки (інтервал цілком); від'ємне — помилка. Тайм-аут команди ODBC — від секунди.
+        (Ecr.Adapters.PiAf.CollectionRunnerOptions.ChunkDaysKey, 0),
+        (Ecr.Adapters.PiAf.PiSqlClientOptions.CommandTimeoutSecondsKey, 1),
         ("Logging:File:RetainedFiles", 1),
         ("Logging:File:FileSizeLimitMb", 1),
 
@@ -139,6 +144,9 @@ public static partial class EcrConfigurationValidation
 
         // Q-17: читається `GetValue<bool>` у DependencyInjection (Infrastructure).
         "Collection:MonthColumnRouting",
+
+        // D-462: видалення сирих точок, яких PI більше не віддає (повністю перечитаний шматок вікна).
+        Ecr.Adapters.PiAf.CollectionRunnerOptions.DeleteMissingPointsKey,
         Ecr.Api.Startup.StaleMapWarmService.EnabledKey,
         "Jobs:NightlyRecalculation:Enabled",
         "Logging:File:Json",

@@ -1,6 +1,7 @@
 // src/Ecr.Infrastructure/Jobs/MaterializationScheduler.cs
 using Ecr.Application.Ports;
 using Ecr.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -65,6 +66,59 @@ public sealed class MaterializationScheduler(
         targets = await MaterializationTargets
             .KeepClosedWithRawPointsAsync(db, targets, ct)
             .ConfigureAwait(false);
+
+        await MaterializationTargets.EnqueueAsync(jobs, targets, range: null, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Запитів для аркуша без мапінгів збору — два легкі (проєкт документа, пошук мапінгів проєкту за період);
+    /// екземпляри аркуша читаються, лише якщо мапінги є. Діапазон — увесь період (<c>range: null</c>): для річного
+    /// періоду це весь рік, тож комірки наздоганяють поточний сирий шар повністю.
+    /// </remarks>
+    public async Task EnqueueAfterSheetReturnAsync(long documentId, int sheetDefId, int periodKey, CancellationToken ct)
+    {
+        if (db.Database.CurrentTransaction is not null && !EnlistsInCallerTransaction)
+        {
+            throw new InvalidOperationException(
+                "Матеріалізацію після повернення аркуша ставлять лише після коміту переходу: транзакція ще відкрита.");
+        }
+
+        var projectId = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => (int?)d.ProjectId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (projectId is null)
+        {
+            return;
+        }
+
+        var targets = (await MaterializationTargets
+                .FindAsync(db, sourceEntityId: null, projectId, [periodKey], null, null, int.MaxValue, ct)
+                .ConfigureAwait(false))
+            .Where(t => t.DocumentId == documentId)
+            .ToList();
+
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        var instanceIds = targets.Select(t => t.TableInstanceId).Distinct().ToList();
+        var ofSheet = (await db.TableInstances
+                .AsNoTracking()
+                .Where(i => i.PeriodKeyValue == periodKey && instanceIds.Contains(i.Id)
+                            && db.TableDefs.Any(t => t.Id == i.TableDefId && t.SheetDefId == sheetDefId))
+                .Select(i => i.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .ToHashSet();
+
+        targets = targets.Where(t => ofSheet.Contains(t.TableInstanceId)).ToList();
+        targets = await MaterializationTargets.KeepClosedWithRawPointsAsync(db, targets, ct).ConfigureAwait(false);
 
         await MaterializationTargets.EnqueueAsync(jobs, targets, range: null, ct).ConfigureAwait(false);
     }

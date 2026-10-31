@@ -59,7 +59,14 @@ builder.Logging.AddEcrFileLog();
 builder.Services.AddEcrInfrastructure(builder.Configuration);
 builder.Services.AddEcrCalculations(builder.Configuration.GetSection(CalculationLimits.SectionName).Get<CalculationLimits>());
 builder.Services.AddExcelAdapters();
-builder.Services.AddPiAfAdapters();
+// D-462: шматки збору, видалення зниклих у PI точок і тайм-аут команди ODBC — з конфігурації (діапазони
+// перевіряє EcrConfigurationValidation на старті).
+builder.Services.AddPiAfAdapters(
+    Ecr.Adapters.PiAf.CollectionRunnerOptions.From(
+        builder.Configuration[Ecr.Adapters.PiAf.CollectionRunnerOptions.ChunkDaysKey],
+        builder.Configuration[Ecr.Adapters.PiAf.CollectionRunnerOptions.DeleteMissingPointsKey]),
+    new Ecr.Adapters.PiAf.PiSqlClientOptions(
+        builder.Configuration.GetValue<int?>(Ecr.Adapters.PiAf.PiSqlClientOptions.CommandTimeoutSecondsKey)));
 // ⚠ Окремим викликом, а не всередині AddPiAfAdapters: SQL-джерело (FLERT,
 // ФВ-11.8) — не PI, і зібрати їх в одну реєстрацію означало б повторити в
 // композиції рівно ту помилку, через яку не-PI джерело так довго не мало

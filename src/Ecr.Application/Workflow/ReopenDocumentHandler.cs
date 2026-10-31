@@ -27,7 +27,10 @@ public sealed class ReopenDocumentHandler(
     Reporting.ReportSnapshotSync reports,
 
     // ✎ D-451: лист «Аркуш повернуто» — ПІСЛЯ коміту, без права валити дію; `null` — тестові фабрики без пошти.
-    SheetWorkflowNotifier? notifier = null)
+    SheetWorkflowNotifier? notifier = null,
+    // D-462: повернутий аркуш знову редагований — комірки наздоганяють сирий шар (SheetMaterializationTrigger);
+    // `null` — тестові фабрики обробника без черги.
+    IMaterializationScheduler? materialization = null)
 {
     /// <summary>Право, без якого повернення в роботу неможливе (ФВ-6.12).</summary>
     public const string Permission = "Document.Reopen";
@@ -139,7 +142,15 @@ public sealed class ReopenDocumentHandler(
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             await reports.RefreshAsync(documentId, key, innerCt).ConfigureAwait(false);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            await SheetMaterializationTrigger
+                .InsideTransactionAsync(materialization, documentId, sheetDefId, periodKey, innerCt)
+                .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        await SheetMaterializationTrigger
+            .AfterCommitAsync(materialization, documentId, sheetDefId, periodKey, ct)
+            .ConfigureAwait(false);
 
         // ✎ D-451: «повернути для правок» (`Submitted/Approved → Draft`, `ApprovalAction.Reopen`) — повернення
         // погоджувачем із правом `Document.Reopen` (кнопку клієнт показує лише тому, хто погоджує). Відкликання

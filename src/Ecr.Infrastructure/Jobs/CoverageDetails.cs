@@ -93,6 +93,20 @@ public static class CoverageDetails
             ? Encode(PeriodMissingKey)
             : Encode(PeriodClosedKey, ("state", Text(state)));
 
+    /// <summary>D-462 (Q-17): комірку колонки закритого періоду-власника не записано.</summary>
+    public static string OwnerPeriodClosed(string cell)
+    {
+        // `rowKey:columnCode@periodKey` — від патчера (D-462); ключ той самий, що «період закритий».
+        var at = cell.LastIndexOf('@');
+        return at < 0
+            ? Encode(PeriodClosedKey, ("state", Text(Domain.Enums.PeriodState.Closed)), ("cell", Text(cell)))
+            : Encode(
+                PeriodClosedKey,
+                ("state", Text(Domain.Enums.PeriodState.Closed)),
+                ("cell", Text(cell[..at])),
+                ("period", Text(cell[(at + 1)..])));
+    }
+
     /// <summary>Поле має більше точок за період, ніж стеля згортки.</summary>
     public static string PointCeiling(object field, int limit)
         => Encode(PointCeilingKey, ("field", Text(field)), ("limit", Text(limit)));
