@@ -265,8 +265,32 @@ public sealed partial class SourceEventSyncAnnualTests
         return ((int)(long)stats["ServerRoundtrips"]!, result);
     }
 
-    /// <summary>Шум для планів: 4 000 зв'язків чужого мапінгу й 12 000 значень.</summary>
+    // Шум кладеться ОДИН раз на базу колекції: кожен випадок теорії інакше додавав би свої тисячі рядків, а стеля
+    // файлів тестової бази (TestDatabaseSizeTests) спільна на колекцію.
+    private static readonly SemaphoreSlim NoiseGate = new(1, 1);
+    private static string? _noiseDatabase;
+
+    /// <summary>Шум для планів (раз на базу): 2 000 зв'язків чужого мапінгу й 4 000 значень.</summary>
     private async Task<int> NoiseAsync(Stand stand)
+    {
+        await NoiseGate.WaitAsync();
+        try
+        {
+            if (_noiseDatabase != sql.DatabaseName)
+            {
+                await InsertNoiseAsync(stand);
+                _noiseDatabase = sql.DatabaseName;
+            }
+
+            return 2000;
+        }
+        finally
+        {
+            NoiseGate.Release();
+        }
+    }
+
+    private async Task InsertNoiseAsync(Stand stand)
     {
         int noiseMapId;
         await using (var db = sql.CreateContext())
@@ -297,17 +321,16 @@ public sealed partial class SourceEventSyncAnnualTests
             INSERT INTO ext.SourceEventLink (SourceEventMapId, SourceEventId, EventName, StartUtc, [Status], FirstSeenAt, LastSeenAt, LastSyncAt)
             SELECT {noiseMapId}, CONCAT(N'N', t.n), CONCAT(N'Noise ', t.n), DATEADD(MINUTE, t.n * 90, '2026-01-01'), N'Open',
                    '2026-10-01', '2026-10-01', '2026-10-01'
-              FROM (SELECT TOP (4000) ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS n
+              FROM (SELECT TOP (2000) ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS n
                       FROM sys.all_objects AS a CROSS JOIN sys.all_objects AS b) AS t;
             INSERT INTO ext.SourceEventAttributeValue (LinkId, Scope, Attribute, ValueNumeric, ValueText, IsTruncated, SourceUnit, ValueHash, SourceModifiedUtc, ChangedAt, RunId)
             SELECT l.Id, 0, a.name, 1, NULL, 0, NULL, HASHBYTES('SHA2_256', a.name), NULL, '2026-10-01', 'noise'
               FROM ext.SourceEventLink AS l
-             CROSS JOIN (VALUES (N'A'), (N'B'), (N'C')) AS a(name)
+             CROSS JOIN (VALUES (N'A'), (N'B')) AS a(name)
              WHERE l.SourceEventMapId = {noiseMapId};
             UPDATE STATISTICS ext.SourceEventLink; UPDATE STATISTICS ext.SourceEventAttributeValue;
+            CHECKPOINT;
             """);
-
-        return 4000;
     }
 
     private async Task<List<string>> PlanAsync(string text, Stand stand, string table)

@@ -19,7 +19,7 @@ const Attribute = {
   columnCode: 'VOL',
   attribute: 'Volume',
   scope: 'Event',
-  piValueNumeric: '3.5',
+  piValueNumeric: '3.5000000000000000',
   piValueText: null,
   piValueTruncated: false,
   piUnit: 'Sm3',
