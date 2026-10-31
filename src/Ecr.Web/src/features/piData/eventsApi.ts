@@ -126,6 +126,12 @@ export function formatUtcMoment(utc: string | null): string {
 
 /** Значення PI для показу: число дослівно, інакше текст. */
 export function piValueText(attribute: PiEventAttributeView): string {
-  if (attribute.piValueNumeric !== null) return attribute.piValueNumeric;
+  // ⚠ decimal(34,16) сервер віддає рядком із хвостовими нулями — показ без них (як у сирих точках D-463).
+  if (attribute.piValueNumeric !== null) return trimDecimal(attribute.piValueNumeric);
   return attribute.piValueText ?? '—';
+}
+
+/** Десяткове число дослівно, без хвостових нулів після коми. */
+export function trimDecimal(value: string): string {
+  return value.includes('.') ? value.replace(/0+$/, '').replace(/\.$/, '') : value;
 }
