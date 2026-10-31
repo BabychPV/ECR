@@ -1,4 +1,6 @@
 import {
+  Suspense,
+  lazy,
   memo,
   useCallback,
   useEffect,
@@ -39,6 +41,14 @@ import { SheetLog, type InspectorSheet, type SheetLogTarget } from './SheetLog';
 import './inspector.css';
 
 export type { InspectorSheet, SheetLogTarget } from './SheetLog';
+
+/**
+ * D-463 «Звідки це значення» — лінивий чанк (`D-132`): секцію бачать лише у вкладці Info і лише для комірки,
+ * яку живить мапінг PI; решта комірок не платить ні байтом бандла.
+ */
+const CellSourceSection = lazy(async () => ({
+  default: (await import('@/features/piData/CellSourceSection')).CellSourceSection,
+}));
 
 /**
  * Інспектор документа справа: вкладки Issues / History / Info (`UI-25`).
@@ -703,6 +713,16 @@ function InfoTab({
   return (
     <Box p="sm" data-inspector-info="">
       <KeyValue items={items} />
+      <Suspense fallback={null}>
+        <CellSourceSection
+          cell={{
+            documentId,
+            tableInstanceId: cell.tableInstanceId,
+            rowKey: cell.rowKey,
+            columnDefId: cell.columnDefId,
+          }}
+        />
+      </Suspense>
     </Box>
   );
 }
