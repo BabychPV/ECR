@@ -32,14 +32,21 @@ function serve(): void {
 
       if (url.pathname === Events && method === 'GET') return json({ items: [], nextCursor: null, totalCount: 0 });
       if (url.pathname === `${Events}/sync` && method === 'POST') {
-        posts.push(url.search);
-        return json({ jobId: url.search.includes('confirmRemoval=true') ? 'sync-2' : 'sync-1' }, 202);
+        const body = typeof init?.body === 'string' ? init.body : '';
+        posts.push(body);
+        return json({ jobId: body.includes('confirmRemovals') ? 'sync-2' : 'sync-1' }, 202);
       }
       if (url.pathname === '/api/v1/jobs/sync-1') {
         return json({
           jobId: 'sync-1',
           state: 'Succeeded',
-          eventRemovalBlocked: { maps: 1, candidates: 57, limit: 30, linked: 150 },
+          eventRemovalBlocked: {
+            maps: 1,
+            candidates: 57,
+            limit: 30,
+            linked: 150,
+            perMap: [{ mapId: 7, candidates: 57 }],
+          },
         });
       }
       if (url.pathname === '/api/v1/jobs/sync-2') return json({ jobId: 'sync-2', state: 'Running' });
@@ -75,7 +82,7 @@ afterEach(() => {
 });
 
 describe('SourceEventsTable — ліміт масового видалення (D-464)', () => {
-  it('показує лічильники і після підтвердження ставить синк із confirmRemoval', async () => {
+  it('показує лічильники і після підтвердження ставить синк із показаними блоками', async () => {
     serve();
     renderTable(true);
 
@@ -95,7 +102,10 @@ describe('SourceEventsTable — ліміт масового видалення (
       )!,
     );
 
-    await waitFor(() => expect(posts).toEqual(['', '?confirmRemoval=true']));
+    // ✎ Аудит 31.10 (G3): тіло несе рівно показане — мапінг 7, 57 кандидатів.
+    await waitFor(() =>
+      expect(posts).toEqual(['', JSON.stringify({ confirmRemovals: [{ mapId: 7, candidates: 57 }] })]),
+    );
     await waitFor(() => expect(screen.queryByTestId('source-events-removal-blocked')).toBeNull());
   });
 });

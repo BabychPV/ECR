@@ -21884,6 +21884,16 @@
             "description": "Скільки мапінгів прогону заблоковано.",
             "format": "int32",
             "type": "integer"
+          },
+          "perMap": {
+            "description": "✎ Аудит 31.10 (G3): заблоковані мапінги поіменно — саме їх (і не більше кандидатів) підтверджує людина\n(`POST …/source-events/sync` з `confirmRemovals`); `null` — конверт до цієї правки.",
+            "items": {
+              "$ref": "#/components/schemas/SourceEventRemovalConfirmation"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           }
         },
         "required": [
@@ -21891,6 +21901,26 @@
           "candidates",
           "limit",
           "linked"
+        ],
+        "type": "object"
+      },
+      "SourceEventRemovalConfirmation": {
+        "description": "✎ Аудит 31.10 (G3): підтвердження масового видалення, прив'язане до того, що людина бачила: мапінг і скільки\nкандидатів на видалення в ньому було заблоковано. Задача видаляє понад ліміт лише в цьому мапінгу й лише якщо\nкандидатів зараз не більше; інакше — звичайні межі й новий банер.",
+        "properties": {
+          "candidates": {
+            "description": "Скільки рядків людина погодилась видалити (кандидатів у заблокованому прогоні).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "mapId": {
+            "description": "Мапінг подій.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mapId",
+          "candidates"
         ],
         "type": "object"
       },
@@ -22053,6 +22083,22 @@
           "lastSeenAt",
           "lastSyncAt"
         ],
+        "type": "object"
+      },
+      "SourceEventSyncBody": {
+        "description": "✎ Аудит 31.10 (G3): тіло «Отримати з PI зараз» (`POST /sources/{id}/source-events/sync`); порожнє — звичайний синк.",
+        "properties": {
+          "confirmRemovals": {
+            "description": "Підтвердження масового видалення — мапінги й кількість кандидатів із `eventRemovalBlocked.perMap` задачі, яку\nлюдина бачила (D-464); `null` чи порожньо — без підтвердження.",
+            "items": {
+              "$ref": "#/components/schemas/SourceEventRemovalConfirmation"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
         "type": "object"
       },
       "SourceEventTemplate": {
@@ -53585,16 +53631,49 @@
               "pattern": "^-?(?:0|[1-9]\\d*)$",
               "type": "integer"
             }
-          },
-          {
-            "description": "D-464: підтвердити масове видалення зниклих у PI подій, заблоковане лімітом «повної звірки»\n(`max(10, 20 %)`, не більше 200 за мапінг; `JobStatus.eventRemovalBlocked` попереднього прогону).\nПраво те саме, слід — у журналі структурних змін (`SourceEventRemovalConfirmed`).",
-            "in": "query",
-            "name": "confirmRemoval",
-            "schema": {
-              "type": "boolean"
-            }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SourceEventSyncBody"
+                  }
+                ]
+              }
+            },
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SourceEventSyncBody"
+                  }
+                ]
+              }
+            },
+            "text/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SourceEventSyncBody"
+                  }
+                ]
+              }
+            }
+          },
+          "description": "Скасування."
+        },
         "responses": {
           "202": {
             "content": {

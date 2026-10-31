@@ -143,7 +143,8 @@ public sealed record SourceEventPlanItem(
 /// ЛИШАЄТЬСЯ (його веде зв'язок братнього шаблону).
 /// </param>
 /// <param name="SourceEmpty">
-/// Джерело при повному читанні повернуло НУЛЬ подій: підозріло (збій, а не «усе видалено») — видаляти не можна.
+/// Джерело при повному читанні повернуло НУЛЬ подій ВЛАСНОГО шаблону мапінгу (і без братніх, або з кандидатами на
+/// видалення): підозріло (збій, а не «усе видалено») — видаляти не можна.
 /// </param>
 public sealed record SourceEventSyncPlan(
     IReadOnlyList<SourceEventPlanItem> Items,
@@ -255,8 +256,13 @@ public static class SourceEventSyncPlanner
                                     or SourceEventLinkStatus.RowLimit))
                 .ToList();
 
+        // ✎ Аудит 31.10 (G2): «джерело порожнє» — за ВЛАСНИМ шаблоном мапінгу. Доти досить було, щоб братній шаблон
+        // повернув хоч щось, — і нуль власних подій при прив'язаних рядках вікна йшов у видалення (малий мапінг —
+        // повністю, без підтвердження). Власних подій нуль, а кандидати на видалення є — та сама ознака збою читання.
+        var sourceEmpty = !suppressed && input.Events.Count == 0 && (other.Count == 0 || gone.Count > 0);
+
         return new SourceEventSyncPlan(
-            items, missing, nonRoot, filtered, suppressed, gone, !suppressed && input.Events.Count == 0 && other.Count == 0, handedOff);
+            items, missing, nonRoot, filtered, suppressed, gone, sourceEmpty, handedOff);
     }
 
     /// <summary>Кінець події: <c>NULL</c> чи сторожова дата — подія ще триває.</summary>

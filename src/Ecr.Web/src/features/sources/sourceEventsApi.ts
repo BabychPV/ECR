@@ -125,17 +125,23 @@ export function fetchSourceEvents(
  * «Отримати з PI зараз»: ставить синхронізацію подій сутності в чергу (`202`, `jobId`). Повторне натискання
  * зливається з задачею, що вже є; без активного мапінгу подій — `422`.
  *
- * D-464: `confirmRemoval` — підтвердити масове видалення зниклих у PI подій, яке попередній прогін заблокував лімітом
+ * D-464: підтвердити масове видалення зниклих у PI подій, яке попередній прогін заблокував лімітом
  * (`JobStatus.eventRemovalBlocked`); те саме право, слід — у журналі структурних змін.
+ * ✎ Аудит 31.10 (G3): підтвердження — не голий прапор, а ПОКАЗАНЕ людині (`eventRemovalBlocked.perMap`: мапінг і
+ * кандидати) тілом `confirmRemovals`; сервер видаляє понад ліміт лише в цих мапінгах і не більше показаного.
  */
-export function syncSourceEvents(sourceEntityId: number, confirmRemoval = false): Promise<AcceptedJob> {
-  // ⚠ Обидві адреси — повними літералами (сторож шукає `/api/v1/…`), запит — після літерального `?`.
+export function syncSourceEvents(
+  sourceEntityId: number,
+  confirmRemovals?: readonly SourceEventRemovalConfirmation[],
+): Promise<AcceptedJob> {
   return apiEnqueue(
-    confirmRemoval
-      ? `/api/v1/sources/${sourceEntityId}/source-events/sync?confirmRemoval=true`
-      : `/api/v1/sources/${sourceEntityId}/source-events/sync`,
+    `/api/v1/sources/${sourceEntityId}/source-events/sync`,
+    confirmRemovals !== undefined && confirmRemovals.length > 0 ? { confirmRemovals } : undefined,
   );
 }
+
+/** ✎ Аудит 31.10 (G3): один підтверджений блок — мапінг і скільки рядків людині показали. */
+export type SourceEventRemovalConfirmation = components['schemas']['SourceEventRemovalConfirmation'];
 
 /** D-464: блок ліміту видалення з підсумку синку (`JobStatus.eventRemovalBlocked`); `null` — не блокувалось. */
 export type SourceEventRemovalBlock = components['schemas']['SourceEventRemovalBlock'];

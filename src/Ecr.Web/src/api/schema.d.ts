@@ -19624,12 +19624,7 @@ export interface paths {
          */
         post: {
             parameters: {
-                query?: {
-                    /** @description D-464: підтвердити масове видалення зниклих у PI подій, заблоковане лімітом «повної звірки»
-                     *     (`max(10, 20 %)`, не більше 200 за мапінг; `JobStatus.eventRemovalBlocked` попереднього прогону).
-                     *     Право те саме, слід — у журналі структурних змін (`SourceEventRemovalConfirmed`). */
-                    confirmRemoval?: boolean;
-                };
+                query?: never;
                 header?: never;
                 path: {
                     /** @description Сутність-шаблон подій. */
@@ -19637,7 +19632,14 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Скасування. */
+            requestBody?: {
+                content: {
+                    "application/*+json": null | components["schemas"]["SourceEventSyncBody"];
+                    "application/json": null | components["schemas"]["SourceEventSyncBody"];
+                    "text/json": null | components["schemas"]["SourceEventSyncBody"];
+                };
+            };
             responses: {
                 /** @description Accepted */
                 202: {
@@ -34668,6 +34670,24 @@ export interface components {
              * @description Скільки мапінгів прогону заблоковано.
              */
             maps: number;
+            /** @description ✎ Аудит 31.10 (G3): заблоковані мапінги поіменно — саме їх (і не більше кандидатів) підтверджує людина
+             *     (`POST …/source-events/sync` з `confirmRemovals`); `null` — конверт до цієї правки. */
+            perMap?: null | components["schemas"]["SourceEventRemovalConfirmation"][];
+        };
+        /** @description ✎ Аудит 31.10 (G3): підтвердження масового видалення, прив'язане до того, що людина бачила: мапінг і скільки
+         *     кандидатів на видалення в ньому було заблоковано. Задача видаляє понад ліміт лише в цьому мапінгу й лише якщо
+         *     кандидатів зараз не більше; інакше — звичайні межі й новий банер. */
+        SourceEventRemovalConfirmation: {
+            /**
+             * Format: int32
+             * @description Скільки рядків людина погодилась видалити (кандидатів у заблокованому прогоні).
+             */
+            candidates: number;
+            /**
+             * Format: int32
+             * @description Мапінг подій.
+             */
+            mapId: number;
         };
         /** @description Рядок таблиці подій: зв'язок «подія джерела ↔ рядок документа» зі станом (HSE301 A6). */
         SourceEventRowDto: {
@@ -34754,6 +34774,12 @@ export interface components {
             timeZoneId: string;
             /** @description Значення без відповідника в довіднику. */
             unmapped: components["schemas"]["SourceEventUnmappedItem"][];
+        };
+        /** @description ✎ Аудит 31.10 (G3): тіло «Отримати з PI зараз» (`POST /sources/{id}/source-events/sync`); порожнє — звичайний синк. */
+        SourceEventSyncBody: {
+            /** @description Підтвердження масового видалення — мапінги й кількість кандидатів із `eventRemovalBlocked.perMap` задачі, яку
+             *     людина бачила (D-464); `null` чи порожньо — без підтвердження. */
+            confirmRemovals?: null | components["schemas"]["SourceEventRemovalConfirmation"][];
         };
         /** @description Шаблон подій джерела з атрибутами — для конфігуратора. */
         SourceEventTemplate: {

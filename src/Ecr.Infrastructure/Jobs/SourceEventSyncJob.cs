@@ -68,7 +68,11 @@ public sealed partial class SourceEventSyncJob(
 
     // Стан ОДНОГО прогону (екземпляр задачі — scoped, на прогін новий).
     private string _runId = string.Empty;
-    private bool _confirmRemoval;
+    /// <summary>
+    /// ✎ Аудит 31.10 (G3): підтверджені людиною блоки — мапінг → скільки кандидатів вона погодилась видалити. Голого
+    /// «підтверджено» більше немає: понад ліміт видаляється лише в цих мапінгах і не більше показаного.
+    /// </summary>
+    private Dictionary<int, int> _confirmedRemovals = [];
     private int _actorUserId;
 
     // D-465: зв'язки, зняті цим мапінгом без рядка (передача братньому шаблону, зниклі без рядка) — їхні значення
@@ -100,7 +104,11 @@ public sealed partial class SourceEventSyncJob(
 
         // Прогін, його автор і підтвердження масового видалення — для журналу складу видалених (Б1) і ліміту (Б3).
         _runId = Guid.NewGuid().ToString("N");
-        _confirmRemoval = request.ConfirmRemoval;
+        _confirmedRemovals = request.ConfirmRemoval && request.ConfirmedRemovals is { } confirmed
+            ? confirmed.Where(c => c.MapId > 0 && c.Candidates > 0)
+                .GroupBy(c => c.MapId)
+                .ToDictionary(g => g.Key, g => g.First().Candidates)
+            : [];
         _actorUserId = await db.Users
             .AsNoTracking()
             .Where(u => u.UserName == IntegrationActor.UserName)
@@ -230,6 +238,9 @@ public sealed partial class SourceEventSyncJob(
                     [SourceEventSyncOutcome.RemovalCountParam] = Text(totals.BlockedCandidates),
                     [SourceEventSyncOutcome.RemovalLimitParam] = Text(totals.BlockedLimit),
                     [SourceEventSyncOutcome.RemovalLinkedParam] = Text(totals.BlockedLinked),
+
+                    // ✎ Аудит 31.10 (G3): заблоковані мапінги поіменно — підтвердження прив'язується саме до них.
+                    [SourceEventSyncOutcome.RemovalMapsParam] = SourceEventSyncOutcome.FormatMaps(totals.BlockedMaps),
                 },
                 ct)
             .ConfigureAwait(false);
@@ -793,7 +804,25 @@ public sealed partial class SourceEventSyncJob(
                 totals.Missing++;
             }
 
-            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            // ✎ Аудит 31.10 (G7, D-465): зв'язки, зняті без рядка (`Drop`), і ЇХНІ значення атрибутів — одним комітом.
+            // Доти значення знімав пізніший крок (`WriteAttributeValuesAsync`), і збій між ними лишав сирітки
+            // `ext.SourceEventAttributeValue` без зв'язку (ключів-FK немає). Команда та сама, що й доти, — лише раніше.
+            if (_droppedLinkIds.Count > 0)
+            {
+                var dropped = _droppedLinkIds.ToList();
+                await new UnitOfWork(db, clock).ExecuteInTransactionAsync(
+                    async innerCt =>
+                    {
+                        await SourceEventAttributeValueWriter.DropAsync(db, dropped, innerCt).ConfigureAwait(false);
+                        await db.SaveChangesAsync(innerCt).ConfigureAwait(false);
+                    },
+                    ct).ConfigureAwait(false);
+                _droppedLinkIds.Clear();
+            }
+            else
+            {
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
 
             if (events.Count > 0)
             {
@@ -833,7 +862,8 @@ public sealed partial class SourceEventSyncJob(
 
     /// <summary>
     /// Чи перевищує масове видалення ліміт: більше за <c>max(10, 20 % зв'язків-з-рядками у вікні)</c> АБО більше за
-    /// 200 абсолютно.
+    /// 200 абсолютно, АБО (✎ аудит 31.10, G2) зникли б УСІ зв'язки-з-рядками вікна, хоч би скільки їх було: малий мапінг
+    /// (≤ 10 рядків) доти стирався цілком без підтвердження.
     /// </summary>
     /// <param name="candidates">Скільки рядків було б видалено після гардів.</param>
     /// <param name="linkedWithRows">Зв'язків з рядком, чий початок у вікні прогону.</param>
@@ -842,7 +872,7 @@ public sealed partial class SourceEventSyncJob(
     {
         var percent = Math.Max(MinRemovalsAllowed, linkedWithRows * MaxRemovalFraction);
         limit = (int)Math.Min(MaxRemovalsPerRun, Math.Floor(percent));
-        return candidates > percent || candidates > MaxRemovalsPerRun;
+        return candidates > percent || candidates > MaxRemovalsPerRun || (candidates > 0 && candidates >= linkedWithRows);
     }
 
     /// <summary>Видалення, яке РІШЕНО виконати: подія зникла, гарди пройдено.</summary>
@@ -972,7 +1002,11 @@ public sealed partial class SourceEventSyncJob(
         // немає) Gone не має, тож ліміт його не зачіпає.
         var linkedWithRows = links.Count(l => l.HasRow && l.StartUtc >= from && l.StartUtc < to);
         var exceeds = ExceedsRemovalLimit(rows.Count, linkedWithRows, out var limit);
-        if (exceeds && !_confirmRemoval)
+
+        // ✎ Аудит 31.10 (G3): підтвердження діє лише на ЦЕЙ мапінг і лише якщо кандидатів не більше, ніж людина бачила;
+        // інакше — звичайні межі й новий банер із новими числами.
+        var confirmedHere = _confirmedRemovals.TryGetValue(map.Id, out var confirmedCount) && rows.Count <= confirmedCount;
+        if (exceeds && !confirmedHere)
         {
             events.Add(new CoverageEvent(
                 map.SourceEntityId,
@@ -984,6 +1018,7 @@ public sealed partial class SourceEventSyncJob(
             totals.BlockedCandidates += rows.Count;
             totals.BlockedLimit += limit;
             totals.BlockedLinked += linkedWithRows;
+            totals.BlockedMaps.Add(new SourceEventRemovalConfirmation(map.Id, rows.Count));
             LogRemovalLimit(_logger, map.Id, rows.Count, linkedWithRows, MaxRemovalsPerRun);
             return new RemovalDecision([], [], true);
         }
@@ -2065,6 +2100,9 @@ public sealed partial class SourceEventSyncJob(
 
         /// <summary>D-464: зв'язків-з-рядками у вікні заблокованих мапінгів.</summary>
         public int BlockedLinked { get; set; }
+
+        /// <summary>✎ Аудит 31.10 (G3): заблоковані мапінги й їхні кандидати — для прив'язаного підтвердження.</summary>
+        public List<SourceEventRemovalConfirmation> BlockedMaps { get; } = [];
 
         /// <summary>D-464: подій не записано через поданий/затверджений аркуш.</summary>
         public int SheetLocked { get; set; }

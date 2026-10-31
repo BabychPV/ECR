@@ -22,6 +22,16 @@ namespace Ecr.Api.Contracts;
 /// <param name="JobId">Ідентифікатор фонової задачі для опитування стану.</param>
 public sealed record JobAcceptedResponse(string JobId);
 
+/// <summary>
+/// ✎ Аудит 31.10 (G3): тіло «Отримати з PI зараз» (<c>POST /sources/{id}/source-events/sync</c>); порожнє — звичайний синк.
+/// </summary>
+/// <param name="ConfirmRemovals">
+/// Підтвердження масового видалення — мапінги й кількість кандидатів із <c>eventRemovalBlocked.perMap</c> задачі, яку
+/// людина бачила (D-464); <c>null</c> чи порожньо — без підтвердження.
+/// </param>
+public sealed record SourceEventSyncBody(
+    IReadOnlyList<Ecr.Application.Integration.SourceEvents.SourceEventRemovalConfirmation>? ConfirmRemovals = null);
+
 /// <summary>Створений проєкт.</summary>
 /// <param name="ProjectId">Ідентифікатор.</param>
 public sealed record ProjectIdResponse(int ProjectId);

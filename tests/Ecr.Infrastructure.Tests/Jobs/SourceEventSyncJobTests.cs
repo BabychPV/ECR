@@ -1313,7 +1313,8 @@ public sealed partial class SourceEventSyncJobTests(SqlServerFixture sql)
     [Trait("Directive", "HSE301-EFSYNC")]
     [Trait("Finding", "audit-B3")]
     [InlineData(3, 4, false)] // 75 %, але ≤ 10 — дозволено (мінімум)
-    [InlineData(10, 10, false)] // рівно мінімум
+    [InlineData(10, 10, true)] // ✎ G2: усі рядки вікна — лише з підтвердженням, хоч і в межах мінімуму
+    [InlineData(10, 11, false)] // рівно мінімум, не всі
     [InlineData(11, 11, true)] // 11 із 11 > max(10, 2.2)
     [InlineData(11, 100, false)] // 11 % від 100 і > 10, але ≤ 20 % → дозволено
     [InlineData(21, 100, true)] // 21 % > 20 %
@@ -1370,7 +1371,7 @@ public sealed partial class SourceEventSyncJobTests(SqlServerFixture sql)
         }
 
         // Підтвердження вручну (Integration.Manage ставить прапор у payload) — видалення виконується.
-        await RunAsync(stand, source, trigger: trigger, confirm: true);
+        await RunAsync(stand, source, trigger: trigger, confirm: [new SourceEventRemovalConfirmation(stand.MapId, 14)]);
         Assert.Equal(["EF-M01", "EF-M02"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
         Assert.Equal(14, await JournalCountAsync(stand));
     }
@@ -1697,7 +1698,8 @@ public sealed partial class SourceEventSyncJobTests(SqlServerFixture sql)
     private async Task RunAsync(
         Stand stand, FakeEventSource source, bool freshContainer = false, ICalculationTrigger? trigger = null,
         ILogger<SourceEventSyncJob>? logger = null, int? entityId = null,
-        DateTime? from = null, DateTime? to = null, bool confirm = false, bool clearTrackerOnWrite = false,
+        DateTime? from = null, DateTime? to = null, IReadOnlyList<SourceEventRemovalConfirmation>? confirm = null,
+        bool clearTrackerOnWrite = false,
         Func<Task>? afterRemovalDecision = null, ICellPatcher? patcherOverride = null,
         Application.Permits.Groups.ILookupTargetResolver? groups = null)
     {
@@ -1731,7 +1733,7 @@ public sealed partial class SourceEventSyncJobTests(SqlServerFixture sql)
             groups);
 
         await job.ExecuteAsync(
-            new SourceEventSyncRequest(entityId ?? stand.EntityId, from ?? From, to ?? Now, confirm),
+            new SourceEventSyncRequest(entityId ?? stand.EntityId, from ?? From, to ?? Now, confirm is { Count: > 0 }, confirm),
             Substitute.For<IJobProgress>(),
             CancellationToken.None);
     }

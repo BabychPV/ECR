@@ -21,8 +21,17 @@ public interface ISourceEventSyncJob : IBackgroundJob;
 /// Ручне підтвердження масового видалення подій, зниклих з джерела (ліміт «повної звірки»): ставить лише обробник з
 /// правом <c>Integration.Manage</c>; розклад і збір його не ставлять.
 /// </param>
+/// <param name="ConfirmedRemovals">
+/// ✎ Аудит 31.10 (G3): ЯКІ саме блоки людина підтвердила (мапінг і кількість кандидатів, що їй показали). Видалення
+/// понад ліміт — лише в цих мапінгах і лише коли кандидатів не більше; без переліку <see cref="ConfirmRemoval"/> нічого
+/// не відкриває (звичайні межі).
+/// </param>
 public sealed record SourceEventSyncRequest(
-    int SourceEntityId, DateTime? FromUtc = null, DateTime? ToUtc = null, bool ConfirmRemoval = false)
+    int SourceEntityId,
+    DateTime? FromUtc = null,
+    DateTime? ToUtc = null,
+    bool ConfirmRemoval = false,
+    IReadOnlyList<Integration.SourceEvents.SourceEventRemovalConfirmation>? ConfirmedRemovals = null)
 {
     private static readonly System.Text.Json.JsonSerializerOptions Options =
         new(System.Text.Json.JsonSerializerDefaults.Web);

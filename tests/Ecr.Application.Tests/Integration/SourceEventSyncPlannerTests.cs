@@ -263,10 +263,14 @@ public sealed class SourceEventSyncPlannerTests
         Assert.Equal(["GONE"], plan.Gone!.Select(g => g.SourceEventId));
         Assert.Equal(["GONE"], plan.Missing.Select(m => m.SourceEventId));
 
-        // Власних подій нуль, але братній шаблон щось віддав — це не «джерело порожнє».
+        // Власних подій нуль, братній шаблон щось віддав, а зв'язки вікна зникли б — ✎ аудит 31.10 (G2): це «джерело
+        // порожнє» (за власним шаблоном), видаляти не можна. Без кандидатів (усе передано братньому) — ні.
         var emptyOwn = SourceEventSyncPlanner.Plan(
             Input([], [moved], [January]) with { OtherTemplateIds = new HashSet<string> { "X" } });
-        Assert.False(emptyOwn.SourceEmpty);
+        Assert.True(emptyOwn.SourceEmpty);
+        var allHandedOff = SourceEventSyncPlanner.Plan(
+            Input([], [moved], [January]) with { OtherTemplateIds = new HashSet<string> { "MOVED" } });
+        Assert.False(allHandedOff.SourceEmpty);
     }
 
     [Theory]

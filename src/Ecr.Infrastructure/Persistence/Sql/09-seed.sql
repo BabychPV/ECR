@@ -9825,6 +9825,7 @@ USING (VALUES
     ,(N'sourceEvents.monthColumnWarningHint', N'en', N'Some fields write into month columns. An EF event is written as its own row; calculate monthly totals with template formulas and remove these fields.', 1)
     ,(N'sourceEvents.fieldMonthColumn', N'en', N'Month column: an EF event is written as its own row; calculate monthly totals with template formulas.', 1)
     ,(N'err.ECR-INT-0422.eventMapMonthColumn', N'en', N'Column "{targetColumn}" is a month column. An EF event is written as its own row and processed by the methodology; calculate monthly totals with template formulas.', 1)
+    ,(N'err.ECR-INT-0422.eventRemovalConfirmInvalid', N'en', N'A removal confirmation must name the mapping and the number of rows shown (more than 0), for at most {max} mappings.', 1)
     ,(N'err.ECR-REQ-0422.piEventFilter', N'en', N'The name or element filter is longer than {max} characters.', 1)
     ,(N'audit.eventLabel.PiEventDataExported', N'en', N'PI event data exported', 1)
     -- D465:pi-events ── кінець секції ──
@@ -25847,6 +25848,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'sourceEvents.fieldMonthColumn', N'kz', N'Ай бағаны: EF оқиғасы жеке жол ретінде жазылады; айлық қорытындыларды үлгі формулаларымен есептеңіз.'),
     (N'err.ECR-INT-0422.eventMapMonthColumn', N'ru', N'Столбец «{targetColumn}» — столбец месяца. Событие EF записывается отдельной строкой и обрабатывается методикой; месячные итоги считайте формулами шаблона.'),
     (N'err.ECR-INT-0422.eventMapMonthColumn', N'kz', N'«{targetColumn}» бағаны — ай бағаны. EF оқиғасы жеке жол ретінде жазылады және әдістемемен өңделеді; айлық қорытындыларды үлгі формулаларымен есептеңіз.'),
+    (N'err.ECR-INT-0422.eventRemovalConfirmInvalid', N'ru', N'Подтверждение удаления должно называть сопоставление и показанное число строк (больше 0), не более чем для {max} сопоставлений.'),
+    (N'err.ECR-INT-0422.eventRemovalConfirmInvalid', N'kz', N'Жоюды растау салыстыруды және көрсетілген жолдар санын (0-ден көп) атауы керек, ең көбі {max} салыстыру үшін.'),
     (N'err.ECR-REQ-0422.piEventFilter', N'ru', N'Фильтр названия или элемента длиннее {max} символов.'),
     (N'err.ECR-REQ-0422.piEventFilter', N'kz', N'Атау немесе элемент сүзгісі {max} таңбадан ұзын.'),
     (N'audit.eventLabel.PiEventDataExported', N'ru', N'Экспорт данных событий PI'),

@@ -23,14 +23,16 @@ public sealed partial class SourceEventsApiTests
         await using var stand = await ArrangeAsync();
         await AddMapAsync(stand);
         using var app = new EcrApiFactory(sql);
-        var confirmed = new Uri($"/api/v1/sources/{stand.EntityId}/source-events/sync?confirmRemoval=true", UriKind.Relative);
+        // ✎ Аудит 31.10 (G3): підтвердження — тілом, прив'язане до показаного блоку (мапінг і кандидати).
+        var confirmed = new Uri($"/api/v1/sources/{stand.EntityId}/source-events/sync", UriKind.Relative);
+        var shown = new { confirmRemovals = new[] { new { mapId = 1, candidates = 11 } } };
         var journal =
             "SELECT COUNT(*) FROM aud.StructureChange WHERE Operation = N'SourceEventRemovalConfirmed' "
             + $"AND EntityType = N'ext.SourceEntity' AND EntityId = {stand.EntityId}";
 
         using (var viewer = await SignedInAsync(app, ["Integration.View"], null, null))
         {
-            Assert.Equal(HttpStatusCode.Forbidden, (await viewer.PostAsJsonAsync(confirmed, new { })).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await viewer.PostAsJsonAsync(confirmed, shown)).StatusCode);
         }
 
         Assert.Equal(0, await ScalarAsync(journal));
@@ -42,7 +44,12 @@ public sealed partial class SourceEventsApiTests
         Assert.Equal(HttpStatusCode.Accepted, plain.StatusCode);
         Assert.Equal(0, await ScalarAsync(journal));
 
-        var accepted = await manager.PostAsJsonAsync(confirmed, new { });
+        // Без тіла взагалі (так шле клієнт звичайний синк) — теж звичайний синк.
+        var bodiless = await manager.PostAsync(new Uri($"/api/v1/sources/{stand.EntityId}/source-events/sync", UriKind.Relative), null);
+        Assert.True(bodiless.StatusCode == HttpStatusCode.Accepted, $"{bodiless.StatusCode}: {app.ErrorsText}");
+        Assert.Equal(0, await ScalarAsync(journal));
+
+        var accepted = await manager.PostAsJsonAsync(confirmed, shown);
         Assert.True(accepted.StatusCode == HttpStatusCode.Accepted, $"{accepted.StatusCode}: {app.ErrorsText}");
         var jobId = (await JsonAsync(accepted)).GetProperty("jobId").GetString();
         Assert.False(string.IsNullOrWhiteSpace(jobId));

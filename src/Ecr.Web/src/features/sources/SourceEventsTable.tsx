@@ -331,10 +331,12 @@ export function SourceEventsTable({
    */
   const removalBlocked =
     syncOutcome === "succeeded" ? (syncJob.data?.eventRemovalBlocked ?? null) : null;
+  // ✎ Аудит 31.10 (G3): підтверджується рівно показане — мапінги й кандидати; без переліку (старий підсумок) — нічого.
+  const shownBlocks = removalBlocked?.perMap ?? [];
   const [confirming, setConfirming] = useState(false);
   const confirmRemoval = useMutation({
     meta: { handled: true },
-    mutationFn: () => syncSourceEvents(sourceEntityId, true),
+    mutationFn: () => syncSourceEvents(sourceEntityId, shownBlocks),
     onSuccess: (accepted) => {
       setConfirming(false);
       setSyncJobId(accepted.jobId);
@@ -388,14 +390,18 @@ export function SourceEventsTable({
             limit: formatNumber(removalBlocked.limit),
             linked: formatNumber(removalBlocked.linked),
           })}
-          actions={[
-            {
-              label: t("sourceEvents.removalConfirmAction", {
-                count: formatNumber(removalBlocked.candidates),
-              }),
-              onClick: () => setConfirming(true),
-            },
-          ]}
+          actions={
+            shownBlocks.length > 0
+              ? [
+                  {
+                    label: t("sourceEvents.removalConfirmAction", {
+                      count: formatNumber(removalBlocked.candidates),
+                    }),
+                    onClick: () => setConfirming(true),
+                  },
+                ]
+              : []
+          }
           testId="source-events-removal-blocked"
         />
       )}
