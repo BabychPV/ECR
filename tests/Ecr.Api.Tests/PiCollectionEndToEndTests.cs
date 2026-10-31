@@ -102,6 +102,20 @@ public sealed class PiCollectionEndToEndTests(SqlServerFixture sql)
             Assert.Equal(recalculations, stand.Enqueued<IRecalculationJob>());
             Assert.Equal(rawRun, await stand.RawRunIdAsync(Mid.AddHours(6)));
             Assert.Equal(afterDeletion.RunId, (await stand.EmissionAsync()).RunId);
+
+            // 5. ✎ D-462 (рішення власника продукту): в PI видалили ВСІ точки періоду. Успішна порожня відповідь
+            //    видаляє наші точки шматка, комірку ОЧИЩЕНО (порожньо, не 0), перерахунок пройшов, старого числа
+            //    в результатах більше немає.
+            pi.Remove(Flow, Mid.AddHours(6));
+            await stand.CollectAsync(From, To);
+            Assert.Empty(await stand.RawTimestampsAsync());
+            Assert.Null(await stand.CellAsync(stand.ColumnA));
+            Assert.Equal(recalculations + 1, stand.Enqueued<IRecalculationJob>());
+            Assert.DoesNotContain("16.25", await stand.ResultsBodyAsync(), StringComparison.Ordinal);
+
+            // Очищене повторно не «очищується»: ні запису, ні перерахунку.
+            await stand.CollectAsync(From, To);
+            Assert.Equal(recalculations + 1, stand.Enqueued<IRecalculationJob>());
         }
         finally
         {
@@ -201,11 +215,53 @@ public sealed class PiCollectionEndToEndTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// ✎ D-462 (Q-17, варіант A рішення власника продукту): якір року ЗАКРИТИЙ — колонка відкритого жовтня
+    /// записується, колонка якоря не чіпається, у журналі покриття подія з коміркою й періодом, прогін не падає.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЯ: прибрати <c>ClosedOwnersAsync</c> у патчері — обробник відхиляє батч цілком (403 PeriodClosed),
+    /// задача матеріалізації падає, і жовтень теж лишається порожнім.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-462")]
+    [Trait("Decision", "Q-17")]
+    public async Task Закритий_якір_року_колонка_місяця_пишеться_колонка_якоря_ні_і_є_подія()
+    {
+        var october = new DateTime(2026, 10, 10, 0, 0, 0, DateTimeKind.Utc);
+        var pi = new FakePi();
+        pi.Set(Flow, october, 3m);
+        pi.Set("E1|Plain", october, 9m);
+
+        var stand = await ArrangeAsync(pi, routing: true, closedAnchor: true);
+        using var app = stand.App;
+
+        try
+        {
+            await stand.CollectAsync(
+                new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2026, 10, 20, 0, 0, 0, DateTimeKind.Utc));
+
+            Assert.Equal([(202610, 3m)], await stand.StoredAsync(stand.MonthColumn!.Value));
+            Assert.Empty(await stand.StoredAsync(stand.ColumnA));
+
+            var events = await stand.CoverageEventsAsync(Ecr.Domain.Entities.Integration.CollectionCoverage.SkippedPeriodClosed);
+            var skipped = Assert.Single(events);
+            Assert.Contains("202601", skipped, StringComparison.Ordinal);
+            Assert.Contains(stand.ColumnACode, skipped, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await stand.DeactivateAsync();
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Стенд
     // ─────────────────────────────────────────────────────────────────────────
 
-    private async Task<Stand> ArrangeAsync(FakePi pi, bool routing)
+    private async Task<Stand> ArrangeAsync(FakePi pi, bool routing, bool closedAnchor = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = routing
@@ -234,7 +290,7 @@ public sealed class PiCollectionEndToEndTests(SqlServerFixture sql)
                         : db.Periods.Add(new Period(
                             doc.ProjectId, new PeriodKey(key), (byte)m,
                             new DateOnly(2026, m, 1), new DateOnly(2026, m, DateTime.DaysInMonth(2026, m)))).Entity;
-                    period.AdvanceTo(PeriodState.Open, now);
+                    period.AdvanceTo(closedAnchor && m == 1 ? PeriodState.Closed : PeriodState.Open, now);
                 }
             }
             else
@@ -433,6 +489,27 @@ public sealed class PiCollectionEndToEndTests(SqlServerFixture sql)
                 .SingleAsync();
 
             return string.Join(",", versions.Select(Convert.ToBase64String)) + "|" + audit.ToString(CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>Тіла подій журналу покриття сутності з цим статусом.</summary>
+        public async Task<List<string>> CoverageEventsAsync(string status)
+        {
+            await using var db = builder.CreateContext();
+
+            return await db.CollectionCoverages.AsNoTracking()
+                .Where(c => c.SourceEntityId == entityId && c.Status == status)
+                .Select(c => c.Details ?? string.Empty)
+                .ToListAsync();
+        }
+
+        /// <summary>Сира відповідь <c>calculation-results</c> актуального прогону.</summary>
+        public async Task<string> ResultsBodyAsync()
+        {
+            var response = await client.GetAsync(new Uri(
+                $"/api/v1/documents/{doc.DocumentId}/calculation-results?periodKey={doc.PeriodKey.Value}", UriKind.Relative));
+            var body = await response.Content.ReadAsStringAsync();
+            Assert.True(response.StatusCode == HttpStatusCode.OK, $"результати: {response.StatusCode}: {body}: {factory.ErrorsText}");
+            return body;
         }
 
         public async Task<List<DateTime>> RawTimestampsAsync()

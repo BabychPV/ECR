@@ -105,43 +105,65 @@ public sealed class MaterializeCoverageGapTests(SqlServerFixture sql)
         Assert.Empty(Events(coverage));
     }
 
-    [Theory]
+    /// <remarks>
+    /// Точки є, але всі погані — <c>covered == 0</c>, згортка повертає <c>null</c> (HSE301 §4.1: не 0): комірку не
+    /// записано й не очищено, подія <c>SkippedNoData</c>.
+    /// </remarks>
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "D2-02")]
-    [InlineData(AggregationKind.Sum)]
-    [InlineData(AggregationKind.TimeWeightedAvg)]
-    public async Task Поле_без_придатних_точок_після_кінця_періоду_дає_SkippedNoData_і_не_чіпає_комірку(AggregationKind kind)
+    public async Task Поле_лише_з_непридатними_точками_після_кінця_періоду_дає_SkippedNoData_і_не_чіпає_комірку()
     {
-        var (db, chain, stand) = await ArrangeAsync(kind);
+        var (db, chain, stand) = await ArrangeAsync(AggregationKind.TimeWeightedAvg);
         await using var _ = db;
 
-        // Sum: у січні жодної точки (лише лютий). TimeWeightedAvg: точки є, але всі
-        // погані — `covered == 0`, згортка повертає `null` (HSE301 §4.1: не 0).
         await PointsAsync(db, stand.SourceEntityId,
-            kind == AggregationKind.Sum
-                ? [(stand.Field, JanEndUtc.AddHours(1), 5m, "Good")]
-                : [
-                    (stand.Field, JanStartUtc, 10m, "Bad"),
-                    (stand.Field, SixtyPercent, 10m, "Bad"),
-                    (stand.Field, JanEndUtc, 10m, "Bad"),
-                ]);
+        [
+            (stand.Field, JanStartUtc, 10m, "Bad"),
+            (stand.Field, SixtyPercent, 10m, "Bad"),
+            (stand.Field, JanEndUtc, 10m, "Bad"),
+        ]);
 
         var patcher = RecordingPatcher();
         var coverage = Substitute.For<ICoverageJournal>();
 
         await RunAsync(db, chain, stand, patcher, coverage, AfterJanuary);
 
-        // Комірку не записано й не очищено: запису немає зовсім.
         Assert.Empty(Written(patcher));
 
-        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути голий `continue` у гілках «серія порожня» /
-        // `folded.Value is null` → подій немає, червоний.
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути голий `continue` у гілці `folded.Value is null` → подій немає, червоний.
         var noData = Assert.Single(Events(coverage));
         Assert.Equal(CollectionCoverage.SkippedNoData, noData.Status);
         Assert.True(JobProgressMessageCodec.TryDecode(noData.Details, out var envelope));
         Assert.Equal(CoverageDetails.NoDataKey, envelope.Key);
         Assert.Equal(stand.Field, envelope.Params!["field"]);
+    }
+
+    /// <remarks>
+    /// ✎ D-462 (рішення власника продукту): у періоді НЕ лишилося жодної сирої точки поля (усі видалено в джерелі) —
+    /// комірку ОЧИЩЕНО (значення <c>null</c> — порожньо, не 0), а не лишено число попереднього прогону.
+    /// МУТАЦІЯ: прибрати гілку очищення в <c>AggregateAsync</c> — запису немає, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-462")]
+    public async Task Поле_без_жодної_точки_в_періоді_очищує_комірку_порожнечею()
+    {
+        var (db, chain, stand) = await ArrangeAsync(AggregationKind.Sum);
+        await using var _ = db;
+
+        // У січні жодної точки (лише лютий).
+        await PointsAsync(db, stand.SourceEntityId, [(stand.Field, JanEndUtc.AddHours(1), 5m, "Good")]);
+
+        var patcher = RecordingPatcher();
+        var coverage = Substitute.For<ICoverageJournal>();
+
+        await RunAsync(db, chain, stand, patcher, coverage, AfterJanuary);
+
+        Assert.Null(Assert.Single(Written(patcher)).Value);
+        Assert.DoesNotContain(Events(coverage), e => e.Status == CollectionCoverage.SkippedNoData);
     }
 
     [Theory]

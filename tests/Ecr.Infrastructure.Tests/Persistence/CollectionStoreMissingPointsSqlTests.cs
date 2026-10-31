@@ -107,9 +107,10 @@ public sealed class CollectionStoreMissingPointsSqlTests(SqlServerFixture sql)
                 [(Flow, Day.AddHours(1)), (Flow, Day.AddHours(2)), (Temp, Day.AddHours(3)), (Flow, Day.AddDays(1))],
                 (await ReadAsync(entityId)).Select(p => (p.SourcePath, p.Timestamp)));
 
-            // ⛔ Порожній перелік — НЕ «видалити все».
-            Assert.Equal(0, await store.DeleteMissingRawPointsAsync(entityId, Flow, Day, Day.AddDays(2), [], CancellationToken.None));
-            Assert.Equal(4, (await ReadAsync(entityId)).Count);
+            // ✎ D-462: порожній перелік — джерело успішно віддало нуль точок: видаляється все атрибута в інтервалі
+            // (і лише його: Temp лишається).
+            Assert.Equal(3, await store.DeleteMissingRawPointsAsync(entityId, Flow, Day, Day.AddDays(2), [], CancellationToken.None));
+            Assert.Equal([(Temp, Day.AddHours(3))], (await ReadAsync(entityId)).Select(p => (p.SourcePath, p.Timestamp)));
         }
         finally
         {

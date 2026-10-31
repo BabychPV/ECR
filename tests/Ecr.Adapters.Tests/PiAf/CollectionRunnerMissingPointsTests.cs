@@ -92,18 +92,62 @@ public sealed class CollectionRunnerMissingPointsTests
         Assert.Contains(world.Deletions, d => d.Path == Flow && d.From == From);
     }
 
+    /// <remarks>
+    /// ✎ Рішення власника продукту (D-462): УСПІШНА порожня відповідь за шматок — теж відповідь; наші точки шматка
+    /// видаляються (порожній перелік міток), кількість — у журнал.
+    /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Decision", "D-462")]
-    public async Task Шматок_без_жодної_точки_від_джерела_не_видаляє_нічого()
+    public async Task Успішна_порожня_відповідь_за_шматок_видаляє_всі_наші_точки_шматка()
     {
-        // Друга доба — порожня відповідь (мовчазний збій архіву виглядав би так само).
+        // Друга доба — джерело успішно віддало нуль точок.
         var world = new World(HourlyPoints(Flow, Temp).Where(p => p.Timestamp < From.AddDays(1)).ToList());
 
         await world.Runner.RunAsync(SourceEntityId, From, To, world.Progress, CancellationToken.None);
 
-        Assert.All(world.Deletions, d => Assert.Equal(From, d.From));
-        Assert.Equal(2, world.Deletions.Count);
+        Assert.Equal(4, world.Deletions.Count);
+        Assert.All(
+            world.Deletions.Where(d => d.From == From.AddDays(1)),
+            d => Assert.Empty(d.Present));
+    }
+
+    /// <remarks>
+    /// ⛔ Помилка — ніколи не «порожньо»: виняток транспорту за шматок не видаляє нічого за цей атрибут і шматок.
+    /// МУТАЦІЯ: викликати видалення з гілки відмови (<c>Collected is null</c>) — тут з'являється видалення Temp/доба 1.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "D-462")]
+    public async Task Виняток_джерела_не_вважається_порожньою_відповіддю()
+    {
+        var world = new World(HourlyPoints(Flow, Temp))
+        {
+            Throw = r => r.SourcePath == Temp && r.FromUtc < From.AddDays(1),
+        };
+
+        await world.Runner.RunAsync(SourceEntityId, From, To, world.Progress, CancellationToken.None);
+
+        Assert.DoesNotContain(world.Deletions, d => d.Path == Temp && d.From == From);
+        Assert.Contains(world.Deletions, d => d.Path == Temp && d.From == From.AddDays(1));
+    }
+
+    /// <summary>
+    /// ✎ Рішення власника продукту (D-462): нарізка не змінює кількості запитів звичайного прогону — типовий
+    /// плановий прогін (7 діб) за типових налаштувань — один запит на тег.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "D-462")]
+    public async Task Плановий_прогін_7_діб_за_типових_налаштувань_один_запит_на_тег()
+    {
+        var to = From.AddDays(7);
+        var world = new World(HourlyPoints(Flow, Temp), to: to, options: CollectionRunnerOptions.Default);
+
+        await world.Runner.RunAsync(SourceEntityId, From, to, world.Progress, CancellationToken.None);
+
+        Assert.Equal(2, world.Requests.Count);
+        Assert.All(world.Requests, r => Assert.Equal((From, to), (r.FromUtc, r.ToUtc)));
     }
 
     /// <remarks>⛔ МУТАЦІЯ: прибрати <c>InWindow</c> у <c>Track</c>/<c>RemoveMissingAsync</c> — з'являється видалення за прогалину.</remarks>
@@ -223,6 +267,11 @@ public sealed class CollectionRunnerMissingPointsTests
                         .Where(p => p.SourcePath == request.SourcePath && p.Timestamp >= request.FromUtc && p.Timestamp < request.ToUtc)
                         .ToList();
 
+                    if (Throw?.Invoke(request) == true)
+                    {
+                        throw new HttpRequestException("connection reset");
+                    }
+
                     if (Refuse?.Invoke(request) == true)
                     {
                         // Половина діапазону — і відмова на хвості, як часткова відмова батча.
@@ -263,6 +312,8 @@ public sealed class CollectionRunnerMissingPointsTests
         public List<Deletion> Deletions { get; } = [];
 
         public Func<CollectionRequest, bool>? Refuse { get; init; }
+
+        public Func<CollectionRequest, bool>? Throw { get; init; }
 
         public int Removed { get; init; }
 
