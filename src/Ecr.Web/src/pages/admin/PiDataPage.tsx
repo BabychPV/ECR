@@ -1,5 +1,5 @@
 import { Suspense, lazy, useMemo, useState, type JSX } from 'react';
-import { Anchor, Button, Card, Group, Select, Skeleton, Stack, Text, Title } from '@mantine/core';
+import { Anchor, Button, Card, Group, SegmentedControl, Select, Skeleton, Stack, Text, Title } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -17,7 +17,13 @@ import {
 } from '@/features/piData/api';
 import { CoverageSummary } from '@/features/piData/CoverageSummary';
 import { EntityCoverageEvents } from '@/features/piData/EntityCoverageEvents';
-import { DefaultPreset, RangePresets, isRangePreset, presetWindow, type RangePreset } from '@/features/piData/rangePresets';
+import {
+  DefaultPreset,
+  RangePresets,
+  isRangePreset,
+  presetWindow,
+  type RangePreset,
+} from '@/features/piData/rangePresets';
 import { RawPointsTable } from '@/features/piData/RawPointsTable';
 import { saveBlob } from '@/features/piData/saveBlob';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -32,6 +38,12 @@ import { t } from '@/shared/i18n';
  */
 const SeriesChart = lazy(async () => ({ default: (await import('@/features/piData/SeriesChart')).SeriesChart }));
 
+/** D-465: події PI (Event Frames) — свій лінивий чанк: сторінка часових рядів його не вантажить. */
+const PiEventsPanel = lazy(() => import('@/features/piData/PiEventsPanel'));
+
+/** Що показує сторінка: часові ряди (`ext.RawDataPoint`) чи події PI (`ext.SourceEventLink`). */
+type PiDataView = 'series' | 'events';
+
 /**
  * «Дані з PI» (`D-463`): що саме збір приніс із PI для сутності й тега — графік за вікно (до року), сирі точки
  * сторінками, покриття вікна збором і події «чому не лягло в документи», CSV.
@@ -43,6 +55,7 @@ export function PiDataPage(): JSX.Element {
   const [entityId, setEntityId] = useUrlNumber('entity');
   const [tagParam, setTag] = useUrlState('tag');
   const [rangeParam, setRange] = useUrlState('range');
+  const [viewParam, setView] = useUrlState('view');
   const preset: RangePreset = isRangePreset(rangeParam) ? rangeParam : DefaultPreset;
 
   // ⚠ Вікно рахується раз на зміну пресета, а не на кожен рендер: інакше ключ запиту зсувався б щомиті.
@@ -64,6 +77,10 @@ export function PiDataPage(): JSX.Element {
     tags.data?.tags.find((item) => item.sourcePath === tagParam)?.sourcePath ?? tags.data?.tags[0]?.sourcePath ?? null;
   const unit = tags.data?.tags.find((item) => item.sourcePath === tag)?.sourceUnitCode ?? null;
   const ref: RawSeriesRef | null = entityId === null || tag === null ? null : { entityId, path: tag, ...window };
+
+  // D-465: сутність-шаблон подій (є мапінги подій) відкривається на «Подіях»; перемикач — в адресі.
+  const hasEvents = (tags.data?.eventMapCount ?? 0) > 0;
+  const view: PiDataView = !hasEvents || viewParam === 'series' ? 'series' : 'events';
 
   return (
     <>
@@ -87,16 +104,31 @@ export function PiDataPage(): JSX.Element {
                 label: source.displayName ?? source.code,
               }))}
             />
-            <Select
-              size="xs"
-              miw={260}
-              label={t('piData.tag')}
-              searchable
-              disabled={tags.data === undefined}
-              value={tag}
-              onChange={(value) => setTag(value)}
-              data={(tags.data?.tags ?? []).map((item) => ({ value: item.sourcePath, label: item.sourcePath }))}
-            />
+            {hasEvents && (
+              <SegmentedControl
+                size="xs"
+                aria-label={t('piData.viewLabel')}
+                value={view}
+                onChange={(value) => setView(value === 'series' ? 'series' : null)}
+                data={[
+                  { value: 'events', label: t('piData.viewEvents') },
+                  { value: 'series', label: t('piData.viewSeries') },
+                ]}
+                data-pi-data-view=""
+              />
+            )}
+            {view === 'series' && (
+              <Select
+                size="xs"
+                miw={260}
+                label={t('piData.tag')}
+                searchable
+                disabled={tags.data === undefined}
+                value={tag}
+                onChange={(value) => setTag(value)}
+                data={(tags.data?.tags ?? []).map((item) => ({ value: item.sourcePath, label: item.sourcePath }))}
+              />
+            )}
             <Select
               size="xs"
               miw={180}
@@ -106,7 +138,7 @@ export function PiDataPage(): JSX.Element {
               onChange={(value) => setRange(value === DefaultPreset ? null : value)}
               data={RangePresets.map((value) => ({ value, label: presetLabel(value) }))}
             />
-            {ref !== null && <ExportButton series={ref} />}
+            {view === 'series' && ref !== null && <ExportButton series={ref} />}
           </FilterRow>
         }
       />
@@ -133,31 +165,37 @@ export function PiDataPage(): JSX.Element {
           skeleton="form"
           onRetry={() => void tags.refetch()}
         >
-          {(loaded) => (
-            <Stack gap="lg">
-              {ref !== null && <SeriesSection series={ref} unit={unit} />}
-              <CoverageSection entityId={loaded.sourceEntityId} window={window} />
-              {ref !== null && (
-                <Section title={t('piData.pointsTitle')}>
-                  <RawPointsTable
-                    queryKey={['piData', 'points', ref.entityId, ref.path, ref.fromUtc, ref.toUtc]}
-                    load={(cursor) => fetchRawPoints(ref, cursor)}
-                  />
+          {(loaded) =>
+            view === 'events' ? (
+              <Suspense fallback={<Skeleton height={320} />}>
+                <PiEventsPanel entityId={loaded.sourceEntityId} window={window} />
+              </Suspense>
+            ) : (
+              <Stack gap="lg">
+                {ref !== null && <SeriesSection series={ref} unit={unit} />}
+                <CoverageSection entityId={loaded.sourceEntityId} window={window} />
+                {ref !== null && (
+                  <Section title={t('piData.pointsTitle')}>
+                    <RawPointsTable
+                      queryKey={['piData', 'points', ref.entityId, ref.path, ref.fromUtc, ref.toUtc]}
+                      load={(cursor) => fetchRawPoints(ref, cursor)}
+                    />
+                  </Section>
+                )}
+                <Section
+                  title={t('piData.eventsTitle')}
+                  hint={t('piData.eventsHint')}
+                  extra={
+                    <Anchor component={Link} to={`/admin/sources?entity=${String(loaded.sourceEntityId)}`} size="sm">
+                      {t('piData.runsLink')}
+                    </Anchor>
+                  }
+                >
+                  <EntityCoverageEvents entityId={loaded.sourceEntityId} />
                 </Section>
-              )}
-              <Section
-                title={t('piData.eventsTitle')}
-                hint={t('piData.eventsHint')}
-                extra={
-                  <Anchor component={Link} to={`/admin/sources?entity=${String(loaded.sourceEntityId)}`} size="sm">
-                    {t('piData.runsLink')}
-                  </Anchor>
-                }
-              >
-                <EntityCoverageEvents entityId={loaded.sourceEntityId} />
-              </Section>
-            </Stack>
-          )}
+              </Stack>
+            )
+          }
         </AsyncBoundary>
       )}
     </>
@@ -184,7 +222,11 @@ function SeriesSection({ series, unit }: { readonly series: RawSeriesRef; readon
         {(data) => (
           <Stack gap="xs">
             <Text size="xs" c="dimmed">
-              {t('piData.chartMeta', { points: data.totalPoints, buckets: data.buckets.length, seconds: data.bucketSeconds })}
+              {t('piData.chartMeta', {
+                points: data.totalPoints,
+                buckets: data.buckets.length,
+                seconds: data.bucketSeconds,
+              })}
             </Text>
             <Suspense fallback={<Skeleton height={220} />}>
               <SeriesChart series={data} unit={unit} />

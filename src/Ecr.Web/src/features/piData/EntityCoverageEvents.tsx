@@ -15,10 +15,17 @@ import { fetchEntityCoverageEvents } from './api';
  * ⚠ Той самий серверний журнал і ті самі бейджі й розгортання конверта, що в секції `/admin/sources`
  * (`CoverageEventsPanel`), лише відфільтровані сутністю, яку людина зараз розглядає.
  */
-export function EntityCoverageEvents({ entityId }: { readonly entityId: number }): JSX.Element {
+export function EntityCoverageEvents({
+  entityId,
+  periodKey = null,
+}: {
+  readonly entityId: number;
+  /** D-465: лише події цього періоду (вкладка «Події» — журнал синку за період вікна); `null` — усі. */
+  readonly periodKey?: number | null;
+}): JSX.Element {
   const events = useInfiniteQuery({
-    queryKey: ['piData', 'coverageEvents', entityId],
-    queryFn: ({ pageParam }: { pageParam: string | null }) => fetchEntityCoverageEvents(entityId, pageParam),
+    queryKey: ['piData', 'coverageEvents', entityId, periodKey],
+    queryFn: ({ pageParam }: { pageParam: string | null }) => fetchEntityCoverageEvents(entityId, pageParam, periodKey),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last?.nextCursor ?? null,
   });

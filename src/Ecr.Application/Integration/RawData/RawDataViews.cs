@@ -8,13 +8,17 @@ namespace Ecr.Application.Integration.RawData;
 /// <param name="IsActive">Чи сутність діє.</param>
 /// <param name="Tags">Теги: поля мапінгів; без мапінгів — шлях самої сутності.</param>
 /// <param name="IsTruncated">Тегів більше за стелю.</param>
+/// <param name="EventMapCount">
+/// D-465: мапінгів подій (Event Frames) у сутності; більше нуля — сутність-шаблон подій, і екран показує «Події».
+/// </param>
 public sealed record RawDataTagsView(
     int SourceEntityId,
     string Code,
     string? DisplayName,
     bool IsActive,
     IReadOnlyList<RawDataTag> Tags,
-    bool IsTruncated);
+    bool IsTruncated,
+    int EventMapCount);
 
 /// <summary>Точка для таблиці «Дані з PI».</summary>
 /// <param name="Timestamp">Мітка часу точки (UTC).</param>

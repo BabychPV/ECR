@@ -171,7 +171,47 @@ public sealed class SourceEventLinkConfiguration : IEntityTypeConfiguration<Sour
         builder.HasIndex(x => new { x.TableInstanceId, x.RowKey })
                .HasDatabaseName("IX_SEL_Row");
 
+        // D-465: «Дані з PI» для подій — сторінка зв'язків ОДНОГО мапінгу за вікно початку, новіші першими
+        // (keyset за StartUtc, Id). `UX_SEL_NaturalKey` фільтрований (старі зв'язки без елемента в нього не входять),
+        // тож без цього індексу — скан усіх зв'язків мапінгу за рік на кожну сторінку. Фільтри списку (стан, елемент,
+        // назва) — у INCLUDE: підрахунок і пошук сторінки під фільтром — без Key Lookup на кожен зв'язок вікна.
+        builder.HasIndex(x => new { x.SourceEventMapId, x.StartUtc, x.Id })
+               .IncludeProperties(x => new { x.Status, x.PrimaryElement, x.EventName })
+               .HasDatabaseName("IX_SEL_MapStart");
+
         builder.HasOne<SourceEventMap>().WithMany().HasForeignKey(x => x.SourceEventMapId)
                .HasConstraintName("FK_SEL_Map");
+    }
+}
+
+/// <summary>
+/// Конфігурація <see cref="SourceEventAttributeValue"/> — значень атрибутів подій за останнім прочитанням (<c>D-465</c>).
+/// </summary>
+/// <remarks>
+/// ⚠ Без зовнішнього ключа на <c>ext.SourceEventLink</c> — див. <see cref="SourceEventAttributeValue"/>: усі ключі
+/// моделі <c>Restrict</c>, а зв'язок видаляє синк; значення знімаються тим самим кроком.
+/// </remarks>
+public sealed class SourceEventAttributeValueConfiguration : IEntityTypeConfiguration<SourceEventAttributeValue>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<SourceEventAttributeValue> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("SourceEventAttributeValue", "ext", t => t.HasCheckConstraint(
+            "CK_SEAV_Scope", "Scope BETWEEN 0 AND 1"));
+
+        // ⛔ Ключ — зв'язок першим: перегляд читає значення сторінки зв'язків seek-ом за префіксом,
+        // а синк зіставляє (MERGE) і знімає значення зв'язку тим самим префіксом.
+        builder.HasKey(x => new { x.LinkId, x.Scope, x.Attribute }).HasName("PK_SourceEventAttributeValue");
+
+        builder.Property(x => x.Attribute).HasMaxLength(SourceEventMap.MaxAttributeLength).IsRequired();
+        builder.Property(x => x.ValueNumeric).HasColumnType("decimal(34,16)");
+        builder.Property(x => x.ValueText).HasMaxLength(SourceEventAttributeValue.MaxTextLength);
+        builder.Property(x => x.SourceUnit).HasMaxLength(SourceEventAttributeValue.MaxUnitLength);
+        builder.Property(x => x.ValueHash).HasColumnType("binary(32)").IsRequired();
+        builder.Property(x => x.SourceModifiedUtc).HasColumnType("datetime2(3)");
+        builder.Property(x => x.ChangedAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.RunId).HasMaxLength(32).IsUnicode(false).IsRequired();
     }
 }

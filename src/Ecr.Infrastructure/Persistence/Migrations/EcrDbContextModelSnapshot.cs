@@ -4596,6 +4596,58 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.External.SourceEventAttributeValue", b =>
+                {
+                    b.Property<long>("LinkId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Scope")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("Attribute")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("ChangedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<bool>("IsTruncated")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("RunId")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(32)");
+
+                    b.Property<DateTime?>("SourceModifiedUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("SourceUnit")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<byte[]>("ValueHash")
+                        .IsRequired()
+                        .HasColumnType("binary(32)");
+
+                    b.Property<decimal?>("ValueNumeric")
+                        .HasPrecision(34, 16)
+                        .HasColumnType("decimal(34,16)");
+
+                    b.Property<string>("ValueText")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.HasKey("LinkId", "Scope", "Attribute")
+                        .HasName("PK_SourceEventAttributeValue");
+
+                    b.ToTable("SourceEventAttributeValue", "ext", t =>
+                        {
+                            t.HasCheckConstraint("CK_SEAV_Scope", "Scope BETWEEN 0 AND 1");
+                        });
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.External.SourceEventFieldMap", b =>
                 {
                     b.Property<int>("Id")
@@ -4716,6 +4768,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TableInstanceId", "RowKey")
                         .HasDatabaseName("IX_SEL_Row");
+
+                    b.HasIndex("SourceEventMapId", "StartUtc", "Id")
+                        .HasDatabaseName("IX_SEL_MapStart");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("SourceEventMapId", "StartUtc", "Id"), new[] { "Status", "PrimaryElement", "EventName" });
 
                     b.HasIndex("SourceEventMapId", "StartUtc", "PrimaryElement")
                         .IsUnique()

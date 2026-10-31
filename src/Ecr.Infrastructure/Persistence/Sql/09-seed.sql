@@ -9744,6 +9744,89 @@ USING (VALUES
     ,(N'coverageEvents.eventPeriodChanged', N'en', N'Event {eventId} now starts in another period ({to}); its row {rowKey} stays in period {from} and was not moved. Check the event in PI and correct the rows manually.', 1)
     ,(N'integrationAudit.sourceEventRemovalConfirmed', N'en', N'Removal of events missing from PI confirmed manually for entity "{entity}" (job {job}).', 1)
     -- D464:ef-hard ── кінець секції ──
+    -- D465:pi-events ── en: «Дані з PI» для подій PI (D-465): перемикач, список подій, порівняння, причини, видалення, комірка рядка події, колонка місяця; ru/kz — порцією D465:pi-events нижче ──
+    ,(N'piData.viewLabel', N'en', N'What to show', 1)
+    ,(N'piData.viewEvents', N'en', N'PI events', 1)
+    ,(N'piData.viewSeries', N'en', N'Time series', 1)
+    ,(N'piEvents.listTitle', N'en', N'Events from PI', 1)
+    ,(N'piEvents.listHint', N'en', N'Event Frames that synchronization read from PI for this template: attribute values from the last read, the document row each event went to, and whether the cells match. Click an event to see its attributes.', 1)
+    ,(N'piEvents.map', N'en', N'Mapping (document · table)', 1)
+    ,(N'piEvents.mapPaused', N'en', N'paused', 1)
+    ,(N'piEvents.documentHidden', N'en', N'Document not available to you', 1)
+    ,(N'piEvents.statusFilter', N'en', N'Link status', 1)
+    ,(N'piEvents.elementFilter', N'en', N'Element starts with', 1)
+    ,(N'piEvents.nameFilter', N'en', N'Name contains', 1)
+    ,(N'piEvents.monthColumnWarning', N'en', N'This mapping writes into month columns. An EF event is written as its own row; calculate monthly totals with template formulas and remove these fields from the mapping.', 1)
+    ,(N'piEvents.start', N'en', N'Start / end (site time)', 1)
+    ,(N'piEvents.startUtc', N'en', N'Event start (UTC)', 1)
+    ,(N'piEvents.stillOpen', N'en', N'still in progress', 1)
+    ,(N'piEvents.event', N'en', N'Event', 1)
+    ,(N'piEvents.modified', N'en', N'Modified in PI', 1)
+    ,(N'piEvents.status', N'en', N'Status', 1)
+    ,(N'piEvents.row', N'en', N'Document row', 1)
+    ,(N'piEvents.rowHidden', N'en', N'Written to a document you do not have access to', 1)
+    ,(N'piEvents.noRow', N'en', N'No row', 1)
+    ,(N'piEvents.attributesColumn', N'en', N'Cells', 1)
+    ,(N'piEvents.allMatch', N'en', N'Match PI', 1)
+    ,(N'piEvents.differs', N'en', N'{count} of {total} differ', 1)
+    ,(N'piEvents.attributesTitle', N'en', N'Attributes of event {event}', 1)
+    ,(N'piEvents.lastSync', N'en', N'Last synchronization', 1)
+    ,(N'piEvents.empty', N'en', N'No events in this period', 1)
+    ,(N'piEvents.emptyHint', N'en', N'Synchronization has not read any events of this template that start in the chosen period. Check the synchronization runs or choose another period.', 1)
+    ,(N'piEvents.noMatch', N'en', N'No events match the filters', 1)
+    ,(N'piEvents.clearFilters', N'en', N'Clear filters', 1)
+    ,(N'piEvents.noMaps', N'en', N'This entity has no event mappings', 1)
+    ,(N'piEvents.noMapsHint', N'en', N'Create an event mapping on the PI events tab of the source to synchronize Event Frames into a document table.', 1)
+    ,(N'piEvents.attribute', N'en', N'PI attribute → column', 1)
+    ,(N'piEvents.notMapped', N'en', N'not mapped to a column', 1)
+    ,(N'piEvents.piValue', N'en', N'PI value (last read)', 1)
+    ,(N'piEvents.truncated', N'en', N'Long text: the beginning is shown, not compared', 1)
+    ,(N'piEvents.readAt', N'en', N'read', 1)
+    ,(N'piEvents.expected', N'en', N'Synchronization would write', 1)
+    ,(N'piEvents.cellValue', N'en', N'In the cell', 1)
+    ,(N'piEvents.comparison', N'en', N'Comparison', 1)
+    ,(N'piEvents.compareMatch', N'en', N'Matches', 1)
+    ,(N'piEvents.compareManualEdit', N'en', N'Manual edit', 1)
+    ,(N'piEvents.compareNotWritten', N'en', N'Not written', 1)
+    ,(N'piEvents.compareNotUpdated', N'en', N'Not updated yet', 1)
+    ,(N'piEvents.compareNoSourceValue', N'en', N'No value in PI', 1)
+    ,(N'piEvents.compareNotComparable', N'en', N'Not compared', 1)
+    ,(N'piEvents.compareHidden', N'en', N'Hidden', 1)
+    ,(N'piEvents.reasonOpen', N'en', N'The event is still in progress: the row is written when it ends.', 1)
+    ,(N'piEvents.reasonPeriodClosed', N'en', N'The period is closed: nothing is written.', 1)
+    ,(N'piEvents.reasonPeriodNotOpen', N'en', N'The period or its table does not exist yet: retried by the next run.', 1)
+    ,(N'piEvents.reasonSheetLocked', N'en', N'The sheet is submitted or approved: written after it is returned.', 1)
+    ,(N'piEvents.reasonRowLimit', N'en', N'The table row limit is reached: no row was created.', 1)
+    ,(N'piEvents.reasonUnmapped', N'en', N'No matching registry entry, unit or column type: the cell is not filled.', 1)
+    ,(N'piEvents.reasonPeriodChanged', N'en', N'The event now starts in another period; its row stayed in the old one.', 1)
+    ,(N'piEvents.reasonOpenAtPeriodClose', N'en', N'The event was still in progress when its period was closed: there will be no row.', 1)
+    ,(N'piEvents.reasonKeptManual', N'en', N'The last change was made by a person: synchronization keeps it.', 1)
+    ,(N'piEvents.reasonMissing', N'en', N'PI no longer returns this event; the row is kept as it is.', 1)
+    ,(N'piEvents.reasonPending', N'en', N'PI has a newer value: the next synchronization run writes it.', 1)
+    ,(N'piEvents.coverageTitle', N'en', N'Synchronization events for the period', 1)
+    ,(N'piEvents.coverageHint', N'en', N'Why events did not reach documents in this period: submitted sheet, events still open when the period closed, events moved to another period, read limit and other reasons.', 1)
+    ,(N'piEvents.period', N'en', N'Period', 1)
+    ,(N'piEvents.removedTitle', N'en', N'Rows removed by full reconciliation', 1)
+    ,(N'piEvents.removedHint', N'en', N'Event rows removed because PI no longer returned the event. Each removal is kept in the change log with the removed values.', 1)
+    ,(N'piEvents.removedAt', N'en', N'Removed', 1)
+    ,(N'piEvents.removedEmpty', N'en', N'No rows removed in this period', 1)
+    ,(N'piEvents.removedEmptyHint', N'en', N'Rows are removed only when a full read of the period no longer contains the event.', 1)
+    ,(N'piEvents.removedTruncated', N'en', N'Only the latest {count} removals are shown. Choose a shorter period.', 1)
+    ,(N'piEvents.run', N'en', N'Run', 1)
+    ,(N'cellSource.eventHint', N'en', N'This row was created from a PI event (Event Frame). Below: what synchronization last read from PI for this column and how it compares with the cell.', 1)
+    ,(N'cellSource.event', N'en', N'PI event', 1)
+    ,(N'cellSource.template', N'en', N'Event template', 1)
+    ,(N'cellSource.eventTime', N'en', N'Event time (site)', 1)
+    ,(N'cellSource.element', N'en', N'Primary element', 1)
+    ,(N'cellSource.attribute', N'en', N'PI attribute', 1)
+    ,(N'cellSource.linkStatus', N'en', N'Link status', 1)
+    ,(N'sourceEvents.monthColumnWarning', N'en', N'Month columns', 1)
+    ,(N'sourceEvents.monthColumnWarningHint', N'en', N'Some fields write into month columns. An EF event is written as its own row; calculate monthly totals with template formulas and remove these fields.', 1)
+    ,(N'sourceEvents.fieldMonthColumn', N'en', N'Month column: an EF event is written as its own row; calculate monthly totals with template formulas.', 1)
+    ,(N'err.ECR-INT-0422.eventMapMonthColumn', N'en', N'Column "{targetColumn}" is a month column. An EF event is written as its own row and processed by the methodology; calculate monthly totals with template formulas.', 1)
+    ,(N'err.ECR-REQ-0422.piEventFilter', N'en', N'The name or element filter is longer than {max} characters.', 1)
+    ,(N'audit.eventLabel.PiEventDataExported', N'en', N'PI event data exported', 1)
+    -- D465:pi-events ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -25598,6 +25681,177 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- D464:ef-hard ── кінець секції ──
+-- D465:pi-events ── ru/kz: «Дані з PI» для подій PI (D-465); власна порція ──
+-- ⚠ kz — робочий переклад, на звірку термінологу.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'piData.viewLabel', N'ru', N'Что показать'),
+    (N'piData.viewLabel', N'kz', N'Нені көрсету'),
+    (N'piData.viewEvents', N'ru', N'События PI'),
+    (N'piData.viewEvents', N'kz', N'PI оқиғалары'),
+    (N'piData.viewSeries', N'ru', N'Временные ряды'),
+    (N'piData.viewSeries', N'kz', N'Уақыт қатарлары'),
+    (N'piEvents.listTitle', N'ru', N'События из PI'),
+    (N'piEvents.listTitle', N'kz', N'PI-дан келген оқиғалар'),
+    (N'piEvents.listHint', N'ru', N'Event Frames, которые синхронизация прочитала из PI для этого шаблона: значения атрибутов последнего чтения, строка документа, куда легло событие, и совпадают ли ячейки. Нажмите на событие, чтобы увидеть атрибуты.'),
+    (N'piEvents.listHint', N'kz', N'Синхрондау осы үлгі үшін PI-дан оқыған Event Frames: соңғы оқудағы атрибут мәндері, оқиға түскен құжат жолы және ұяшықтардың сәйкестігі. Атрибуттарды көру үшін оқиғаны басыңыз.'),
+    (N'piEvents.map', N'ru', N'Сопоставление (документ · таблица)'),
+    (N'piEvents.map', N'kz', N'Сәйкестендіру (құжат · кесте)'),
+    (N'piEvents.mapPaused', N'ru', N'приостановлено'),
+    (N'piEvents.mapPaused', N'kz', N'тоқтатылған'),
+    (N'piEvents.documentHidden', N'ru', N'Документ вам недоступен'),
+    (N'piEvents.documentHidden', N'kz', N'Құжат сізге қолжетімсіз'),
+    (N'piEvents.statusFilter', N'ru', N'Состояние связи'),
+    (N'piEvents.statusFilter', N'kz', N'Байланыс күйі'),
+    (N'piEvents.elementFilter', N'ru', N'Элемент начинается с'),
+    (N'piEvents.elementFilter', N'kz', N'Элемент басталады'),
+    (N'piEvents.nameFilter', N'ru', N'Название содержит'),
+    (N'piEvents.nameFilter', N'kz', N'Атауында бар'),
+    (N'piEvents.monthColumnWarning', N'ru', N'Это сопоставление пишет в столбцы месяцев. Событие EF записывается отдельной строкой; месячные итоги считайте формулами шаблона и уберите эти поля из сопоставления.'),
+    (N'piEvents.monthColumnWarning', N'kz', N'Бұл сәйкестендіру ай бағандарына жазады. EF оқиғасы жеке жол ретінде жазылады; айлық қорытындыларды үлгі формулаларымен есептеңіз және бұл өрістерді сәйкестендіруден алып тастаңыз.'),
+    (N'piEvents.start', N'ru', N'Начало / конец (время площадки)'),
+    (N'piEvents.start', N'kz', N'Басталуы / аяқталуы (алаң уақыты)'),
+    (N'piEvents.startUtc', N'ru', N'Начало события (UTC)'),
+    (N'piEvents.startUtc', N'kz', N'Оқиғаның басталуы (UTC)'),
+    (N'piEvents.stillOpen', N'ru', N'ещё продолжается'),
+    (N'piEvents.stillOpen', N'kz', N'әлі жалғасуда'),
+    (N'piEvents.event', N'ru', N'Событие'),
+    (N'piEvents.event', N'kz', N'Оқиға'),
+    (N'piEvents.modified', N'ru', N'Изменено в PI'),
+    (N'piEvents.modified', N'kz', N'PI-де өзгертілген'),
+    (N'piEvents.status', N'ru', N'Состояние'),
+    (N'piEvents.status', N'kz', N'Күйі'),
+    (N'piEvents.row', N'ru', N'Строка документа'),
+    (N'piEvents.row', N'kz', N'Құжат жолы'),
+    (N'piEvents.rowHidden', N'ru', N'Записано в документ, к которому у вас нет доступа'),
+    (N'piEvents.rowHidden', N'kz', N'Сізге қолжетімсіз құжатқа жазылған'),
+    (N'piEvents.noRow', N'ru', N'Строки нет'),
+    (N'piEvents.noRow', N'kz', N'Жол жоқ'),
+    (N'piEvents.attributesColumn', N'ru', N'Ячейки'),
+    (N'piEvents.attributesColumn', N'kz', N'Ұяшықтар'),
+    (N'piEvents.allMatch', N'ru', N'Совпадают с PI'),
+    (N'piEvents.allMatch', N'kz', N'PI-мен сәйкес'),
+    (N'piEvents.differs', N'ru', N'Расходятся: {count} из {total}'),
+    (N'piEvents.differs', N'kz', N'{total} ішінен {count} сәйкес емес'),
+    (N'piEvents.attributesTitle', N'ru', N'Атрибуты события {event}'),
+    (N'piEvents.attributesTitle', N'kz', N'{event} оқиғасының атрибуттары'),
+    (N'piEvents.lastSync', N'ru', N'Последняя синхронизация'),
+    (N'piEvents.lastSync', N'kz', N'Соңғы синхрондау'),
+    (N'piEvents.empty', N'ru', N'Событий за этот период нет'),
+    (N'piEvents.empty', N'kz', N'Бұл кезеңде оқиғалар жоқ'),
+    (N'piEvents.emptyHint', N'ru', N'Синхронизация не прочитала событий этого шаблона, начинающихся в выбранном периоде. Проверьте прогоны синхронизации или выберите другой период.'),
+    (N'piEvents.emptyHint', N'kz', N'Синхрондау таңдалған кезеңде басталатын осы үлгінің оқиғаларын оқымады. Синхрондау жүрістерін тексеріңіз немесе басқа кезеңді таңдаңыз.'),
+    (N'piEvents.noMatch', N'ru', N'Нет событий под фильтры'),
+    (N'piEvents.noMatch', N'kz', N'Сүзгілерге сәйкес оқиғалар жоқ'),
+    (N'piEvents.clearFilters', N'ru', N'Сбросить фильтры'),
+    (N'piEvents.clearFilters', N'kz', N'Сүзгілерді тазалау'),
+    (N'piEvents.noMaps', N'ru', N'У этой сущности нет сопоставлений событий'),
+    (N'piEvents.noMaps', N'kz', N'Бұл нысанда оқиға сәйкестендірулері жоқ'),
+    (N'piEvents.noMapsHint', N'ru', N'Создайте сопоставление событий на вкладке «События из PI» источника, чтобы синхронизировать Event Frames в таблицу документа.'),
+    (N'piEvents.noMapsHint', N'kz', N'Event Frames құжат кестесіне синхрондау үшін көздің «PI оқиғалары» қойындысында оқиға сәйкестендіруін жасаңыз.'),
+    (N'piEvents.attribute', N'ru', N'Атрибут PI → столбец'),
+    (N'piEvents.attribute', N'kz', N'PI атрибуты → баған'),
+    (N'piEvents.notMapped', N'ru', N'не сопоставлен со столбцом'),
+    (N'piEvents.notMapped', N'kz', N'бағанмен сәйкестендірілмеген'),
+    (N'piEvents.piValue', N'ru', N'Значение PI (последнее чтение)'),
+    (N'piEvents.piValue', N'kz', N'PI мәні (соңғы оқу)'),
+    (N'piEvents.truncated', N'ru', N'Длинный текст: показано начало, не сравнивается'),
+    (N'piEvents.truncated', N'kz', N'Ұзын мәтін: басы көрсетілген, салыстырылмайды'),
+    (N'piEvents.readAt', N'ru', N'прочитано'),
+    (N'piEvents.readAt', N'kz', N'оқылды'),
+    (N'piEvents.expected', N'ru', N'Синхронизация записала бы'),
+    (N'piEvents.expected', N'kz', N'Синхрондау жазар еді'),
+    (N'piEvents.cellValue', N'ru', N'В ячейке'),
+    (N'piEvents.cellValue', N'kz', N'Ұяшықта'),
+    (N'piEvents.comparison', N'ru', N'Сравнение'),
+    (N'piEvents.comparison', N'kz', N'Салыстыру'),
+    (N'piEvents.compareMatch', N'ru', N'Совпадает'),
+    (N'piEvents.compareMatch', N'kz', N'Сәйкес'),
+    (N'piEvents.compareManualEdit', N'ru', N'Ручная правка'),
+    (N'piEvents.compareManualEdit', N'kz', N'Қолмен түзету'),
+    (N'piEvents.compareNotWritten', N'ru', N'Не записано'),
+    (N'piEvents.compareNotWritten', N'kz', N'Жазылмаған'),
+    (N'piEvents.compareNotUpdated', N'ru', N'Ещё не обновлено'),
+    (N'piEvents.compareNotUpdated', N'kz', N'Әлі жаңартылмаған'),
+    (N'piEvents.compareNoSourceValue', N'ru', N'Нет значения в PI'),
+    (N'piEvents.compareNoSourceValue', N'kz', N'PI-де мән жоқ'),
+    (N'piEvents.compareNotComparable', N'ru', N'Не сравнивается'),
+    (N'piEvents.compareNotComparable', N'kz', N'Салыстырылмайды'),
+    (N'piEvents.compareHidden', N'ru', N'Скрыто'),
+    (N'piEvents.compareHidden', N'kz', N'Жасырын'),
+    (N'piEvents.reasonOpen', N'ru', N'Событие ещё продолжается: строка запишется, когда оно завершится.'),
+    (N'piEvents.reasonOpen', N'kz', N'Оқиға әлі жалғасуда: ол аяқталғанда жол жазылады.'),
+    (N'piEvents.reasonPeriodClosed', N'ru', N'Период закрыт: ничего не записывается.'),
+    (N'piEvents.reasonPeriodClosed', N'kz', N'Кезең жабық: ештеңе жазылмайды.'),
+    (N'piEvents.reasonPeriodNotOpen', N'ru', N'Периода или его таблицы ещё нет: повтор следующим прогоном.'),
+    (N'piEvents.reasonPeriodNotOpen', N'kz', N'Кезең немесе оның кестесі әлі жоқ: келесі жүрісте қайталанады.'),
+    (N'piEvents.reasonSheetLocked', N'ru', N'Лист подан или утверждён: запишется после возврата.'),
+    (N'piEvents.reasonSheetLocked', N'kz', N'Парақ тапсырылған немесе бекітілген: қайтарылғаннан кейін жазылады.'),
+    (N'piEvents.reasonRowLimit', N'ru', N'Достигнут лимит строк таблицы: строка не создана.'),
+    (N'piEvents.reasonRowLimit', N'kz', N'Кесте жолдарының шегіне жетті: жол жасалмады.'),
+    (N'piEvents.reasonUnmapped', N'ru', N'Нет соответствия в справочнике, единице или типе столбца: ячейка не заполняется.'),
+    (N'piEvents.reasonUnmapped', N'kz', N'Анықтамалықта, бірлікте немесе баған түрінде сәйкестік жоқ: ұяшық толтырылмайды.'),
+    (N'piEvents.reasonPeriodChanged', N'ru', N'Начало события переехало в другой период; строка осталась в прежнем.'),
+    (N'piEvents.reasonPeriodChanged', N'kz', N'Оқиғаның басталуы басқа кезеңге көшті; жол бұрынғы кезеңде қалды.'),
+    (N'piEvents.reasonOpenAtPeriodClose', N'ru', N'Событие ещё продолжалось, когда его период закрыли: строки не будет.'),
+    (N'piEvents.reasonOpenAtPeriodClose', N'kz', N'Оқиғаның кезеңі жабылғанда ол әлі жалғасып жатты: жол болмайды.'),
+    (N'piEvents.reasonKeptManual', N'ru', N'Последнее изменение сделал человек: синхронизация его сохраняет.'),
+    (N'piEvents.reasonKeptManual', N'kz', N'Соңғы өзгерісті адам жасады: синхрондау оны сақтайды.'),
+    (N'piEvents.reasonMissing', N'ru', N'PI больше не возвращает это событие; строка оставлена как есть.'),
+    (N'piEvents.reasonMissing', N'kz', N'PI бұл оқиғаны енді қайтармайды; жол сол күйінде қалды.'),
+    (N'piEvents.reasonPending', N'ru', N'В PI новое значение: его запишет следующий прогон синхронизации.'),
+    (N'piEvents.reasonPending', N'kz', N'PI-де жаңа мән бар: оны келесі синхрондау жүрісі жазады.'),
+    (N'piEvents.coverageTitle', N'ru', N'События синхронизации за период'),
+    (N'piEvents.coverageTitle', N'kz', N'Кезеңдегі синхрондау оқиғалары'),
+    (N'piEvents.coverageHint', N'ru', N'Почему события не попали в документы за период: поданный лист, события, открытые на закрытие периода, переезд в другой период, предел чтения и другие причины.'),
+    (N'piEvents.coverageHint', N'kz', N'Кезеңде оқиғалардың құжаттарға неге түспегені: тапсырылған парақ, кезең жабылғанда ашық оқиғалар, басқа кезеңге көшу, оқу шегі және басқа себептер.'),
+    (N'piEvents.period', N'ru', N'Период'),
+    (N'piEvents.period', N'kz', N'Кезең'),
+    (N'piEvents.removedTitle', N'ru', N'Строки, удалённые полной сверкой'),
+    (N'piEvents.removedTitle', N'kz', N'Толық салыстырумен жойылған жолдар'),
+    (N'piEvents.removedHint', N'ru', N'Строки событий, удалённые, потому что PI больше не возвращал событие. Каждое удаление сохранено в журнале изменений вместе с удалёнными значениями.'),
+    (N'piEvents.removedHint', N'kz', N'PI оқиғаны енді қайтармағандықтан жойылған оқиға жолдары. Әр жою өзгерістер журналында жойылған мәндерімен сақталған.'),
+    (N'piEvents.removedAt', N'ru', N'Удалено'),
+    (N'piEvents.removedAt', N'kz', N'Жойылды'),
+    (N'piEvents.removedEmpty', N'ru', N'За этот период строки не удалялись'),
+    (N'piEvents.removedEmpty', N'kz', N'Бұл кезеңде жолдар жойылмады'),
+    (N'piEvents.removedEmptyHint', N'ru', N'Строки удаляются, только когда полное чтение периода больше не содержит событие.'),
+    (N'piEvents.removedEmptyHint', N'kz', N'Жолдар кезеңді толық оқуда оқиға болмаған жағдайда ғана жойылады.'),
+    (N'piEvents.removedTruncated', N'ru', N'Показаны только последние {count} удалений. Выберите период короче.'),
+    (N'piEvents.removedTruncated', N'kz', N'Тек соңғы {count} жою көрсетілген. Қысқарақ кезеңді таңдаңыз.'),
+    (N'piEvents.run', N'ru', N'Прогон'),
+    (N'piEvents.run', N'kz', N'Жүріс'),
+    (N'cellSource.eventHint', N'ru', N'Эта строка создана из события PI (Event Frame). Ниже — что синхронизация последний раз прочитала из PI для этого столбца и как это соотносится с ячейкой.'),
+    (N'cellSource.eventHint', N'kz', N'Бұл жол PI оқиғасынан (Event Frame) жасалған. Төменде — синхрондау осы баған үшін PI-дан соңғы рет не оқығаны және оның ұяшықпен салыстыруы.'),
+    (N'cellSource.event', N'ru', N'Событие PI'),
+    (N'cellSource.event', N'kz', N'PI оқиғасы'),
+    (N'cellSource.template', N'ru', N'Шаблон событий'),
+    (N'cellSource.template', N'kz', N'Оқиғалар үлгісі'),
+    (N'cellSource.eventTime', N'ru', N'Время события (площадка)'),
+    (N'cellSource.eventTime', N'kz', N'Оқиға уақыты (алаң)'),
+    (N'cellSource.element', N'ru', N'Первичный элемент'),
+    (N'cellSource.element', N'kz', N'Бастапқы элемент'),
+    (N'cellSource.attribute', N'ru', N'Атрибут PI'),
+    (N'cellSource.attribute', N'kz', N'PI атрибуты'),
+    (N'cellSource.linkStatus', N'ru', N'Состояние связи'),
+    (N'cellSource.linkStatus', N'kz', N'Байланыс күйі'),
+    (N'sourceEvents.monthColumnWarning', N'ru', N'Столбцы месяцев'),
+    (N'sourceEvents.monthColumnWarning', N'kz', N'Ай бағандары'),
+    (N'sourceEvents.monthColumnWarningHint', N'ru', N'Часть полей пишет в столбцы месяцев. Событие EF записывается отдельной строкой; месячные итоги считайте формулами шаблона и уберите эти поля.'),
+    (N'sourceEvents.monthColumnWarningHint', N'kz', N'Кейбір өрістер ай бағандарына жазады. EF оқиғасы жеке жол ретінде жазылады; айлық қорытындыларды үлгі формулаларымен есептеп, бұл өрістерді алып тастаңыз.'),
+    (N'sourceEvents.fieldMonthColumn', N'ru', N'Столбец месяца: событие EF записывается отдельной строкой; месячные итоги считайте формулами шаблона.'),
+    (N'sourceEvents.fieldMonthColumn', N'kz', N'Ай бағаны: EF оқиғасы жеке жол ретінде жазылады; айлық қорытындыларды үлгі формулаларымен есептеңіз.'),
+    (N'err.ECR-INT-0422.eventMapMonthColumn', N'ru', N'Столбец «{targetColumn}» — столбец месяца. Событие EF записывается отдельной строкой и обрабатывается методикой; месячные итоги считайте формулами шаблона.'),
+    (N'err.ECR-INT-0422.eventMapMonthColumn', N'kz', N'«{targetColumn}» бағаны — ай бағаны. EF оқиғасы жеке жол ретінде жазылады және әдістемемен өңделеді; айлық қорытындыларды үлгі формулаларымен есептеңіз.'),
+    (N'err.ECR-REQ-0422.piEventFilter', N'ru', N'Фильтр названия или элемента длиннее {max} символов.'),
+    (N'err.ECR-REQ-0422.piEventFilter', N'kz', N'Атау немесе элемент сүзгісі {max} таңбадан ұзын.'),
+    (N'audit.eventLabel.PiEventDataExported', N'ru', N'Экспорт данных событий PI'),
+    (N'audit.eventLabel.PiEventDataExported', N'kz', N'PI оқиғалары деректерінің экспорты')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- D465:pi-events ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
