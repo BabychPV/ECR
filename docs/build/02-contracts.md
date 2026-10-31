@@ -3505,6 +3505,35 @@ public interface ICollectionRunReader
 }
 ```
 
+#### `IRawDataReader` і `ICellSourceStore` (`D-463`)
+
+Читаюча сторона зібраних точок PI (`ext.RawDataPoint`): «Дані з PI» (адміністратор інтеграції) і «Звідки це
+значення» (комірка документа). ⛔ Кожен метод над `ext.RawDataPoint` адресує РІВНО ОДИН ряд «сутність + шлях»
+у напіввідкритому вікні — префікс `UQ_RawDataPoint`, тобто seek (`WITH (FORCESEEK)`, параметри `nvarchar(400)` /
+`datetime2(3)`); результат обмежений стелею або числом кошиків (≤ 2000). `ICellSourceStore` нічого не вирішує
+про доступ — його кличе `CellSourceHandler` після перевірки доступу до самої комірки.
+
+```csharp
+public interface IRawDataReader
+{
+    public Task<RawSourceEntity?> FindEntityAsync(int sourceEntityId, CancellationToken ct);
+    public Task<IReadOnlyList<RawDataTag>> ListTagsAsync(int sourceEntityId, int max, CancellationToken ct);
+    public Task<IReadOnlyList<RawPoint>> PageAsync(RawSeriesKey key, DateTime? before, int take, CancellationToken ct);
+    public Task<IReadOnlyList<RawPoint>> PageAscendingAsync(RawSeriesKey key, DateTime? after, int take, CancellationToken ct);
+    public Task<long> CountAsync(RawSeriesKey key, CancellationToken ct);
+    public Task<IReadOnlyList<RawBucket>> BucketsAsync(RawSeriesKey key, long bucketSeconds, CancellationToken ct);
+    public Task<IReadOnlyList<RawInterval>> CoveredAsync(int sourceEntityId, DateTime fromUtc, DateTime toUtc, int take, CancellationToken ct);
+    public Task<RawCollectionStatus> LastCollectionAsync(int sourceEntityId, CancellationToken ct);
+}
+
+public interface ICellSourceStore
+{
+    public Task<IReadOnlyList<CellSourceMap>> MapsAsync(int columnDefId, string rowKey, int max, CancellationToken ct);
+    public Task<CellPeriodWindow?> PeriodAsync(long documentId, int periodKey, CancellationToken ct);
+    public Task<IReadOnlyList<CellSourceEvent>> PeriodEventsAsync(int sourceEntityId, int periodKey, int take, CancellationToken ct);
+}
+```
+
 #### `IDataSourceStore`
 
 Конфігурація підключень (`ext.DataSource`) для екрана джерел (`BE-21`,
@@ -4103,6 +4132,10 @@ public sealed class NotFoundException(string errorCode, string message)
 | `messageKey` | HTTP | Коли |
 |---|---|---|
 | `err.ECR-ACCS-0403.importDeniedCells` | 403 | `POST /documents/{id}/import/apply` (і постановка у чергу): перегляд побудовано виконавцем із чинною передачею місяця (EA), і в ньому є хоч одна комірка, заборонена йому правами, — ВЕСЬ перегляд відхилено, нічого не записано («все або нічого», рішення людини 12.10). `deniedCount` — усі заборонені комірки (рядок); `cells` — до 20 тих, що виконавець бачить (`tableCode`, `rowKey`, `columnCode`, `excelCell`, `messageKey`), комірки прихованих колонок лише в `deniedCount`. Перегляд (`import/preview`) показує ті самі комірки в `rejected` і далі відповідає 200; для решти користувачів — без змін (заборонені комірки показані, решта застосовується). ⚠ **Лише відмови ПРАВАМИ** (`ECR-ACCS-0403`) вмикають «все або нічого»: не-правові відмови перегляду (`ECR-CELL-4221` обчислювана, тип/межі/довжина/точність, `ECR-ROW-0404`, `ECR-CELL-0409` конфлікт версій, відмови довідників) його НЕ вмикають і застосовуються як раніше (показані в `rejected`, решта пишеться) — прийнятий дефолт, питання про розширення — до людини. Виконавцем вважається користувач, у якого хоч одне рішення доступу дозволене через передачу або відмовлене станом передачі (Заповнено/Валідовано/Строк минув/«не передано вам»); у змішаному випадку (виконавець + власні права через роль у цьому ж документі) відхиляється весь файл |
+| `err.ECR-REQ-0422.rawDataRange` | 422 | D-463: вікно «Даних з PI» порожнє або перевернуте (`fromUtc` ≥ `toUtc`); деталі `fromUtc`, `toUtc` |
+| `err.ECR-REQ-0422.rawDataRangeTooLong` | 422 | D-463: вікно «Даних з PI» довше за `maxDays` (400) діб |
+| `err.ECR-REQ-0422.rawDataPath` | 422 | D-463: шлях тега порожній або довший за `max` (400) символів |
+| `err.ECR-REQ-0422.rawDataBuckets` | 422 | D-463: кількість кошиків графіка поза 1..`max` (2000) |
 | `err.ECR-CALC-0422.methodologyImportBlocked` | 422 | пакет методологій має блокери (нерезолвні посилання тощо) — запис не виконується (`POST /methodologies/import`) |
 | `err.ECR-CALC-0422.methodologyImportTimeZone` | 422 | пояс дат AF в імпорті пакета невідомий |
 | `err.ECR-CALC-0409.methodologyImportConflict` | 409 | пакет змінює вже наявну версію методології без нового номера версії |
@@ -4312,6 +4345,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/documents/{id}/header` | `Document.View` | 8 |
 | `PATCH` | `/api/v1/documents/{id}/header` | — (через грант Write на проєкт) | 8 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}` | `Document.View` | 1 |
+| `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}/cell-source` | `Document.View` (D-463 «Звідки це значення»: `rowKey`, `columnDefId`; доступ рівно до комірки — видимість документа, право в проєкті, Deny аркуша/таблиці/колонки, прихована колонка, Q-17, існування рядка; невидиме — та сама `404 err.ECR-DOC-0404.document`, що й у зрізу; комірка без мапінгу — `200` з порожнім `sources`; вікно — `Period.FoldBounds`, як у матеріалізації: колонка місяця — лише свій місяць (`windowMonth`), Q-17 — період-власник (`windowPeriodKey`), поза періодом — `periodFromUtc = null`; `sources[].fold` — значення за правилом згортки тим самим кодом (`CollectedFold`, ≤ 50 000 точок, інакше `TooManyPoints`) і порівняння з останнім записом журналу змін комірки: `Match`/`ManualEdit`/`NotUpdated`/`NotWritten`/`NotComparable`) | 5 |
+| `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}/cell-source/points` | `Document.View` (D-463: те саме + `mapId` мапінгу комірки (чужий — та сама 404); точки лише вікна періоду комірки; `limit` 1..500) | 5 |
+| `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}/cell-source/series` | `Document.View` (D-463: те саме + `mapId`; ≤ `buckets` (1..2000) кошиків за період комірки) | 5 |
 | `PATCH` | `/api/v1/documents/{id}/cells` | — (через `IAccessDecisionService`) | 1 |
 | `PATCH` | `/api/v1/documents/{id}/tables/{tableInstanceId}/cell-styles` | — (грант `Write` на комірку через `IAccessDecisionService`, як `PATCH …/cells`; документ/період редаговані; 12.10 — користувацька заливка/колір тексту/жирність) | 1 |
 | `POST` | `/api/v1/documents/{id}/rows` | — | 1 |
@@ -4458,6 +4494,11 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/sources/{id}/registry/policy` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/sources/{id}/collect` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/sources/{id}/mapping/preview` | `Integration.Manage` | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/tags` | `Integration.View` (або `Integration.Manage`; D-463: теги сутності — поля мапінгів, без мапінгів — шлях сутності) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/points` | `Integration.View` (або `Integration.Manage`; D-463: `path` 1..400, вікно `fromUtc`/`toUtc` ≤ 400 діб, типово 7 діб; keyset за міткою часу, новіші першими; `limit` 1..500, типово 100) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/series` | `Integration.View` (або `Integration.Manage`; D-463: ≤ `buckets` (1..2000, типово 500) кошиків мін/макс/середнє на все вікно, згортка в SQL) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/coverage` | `Integration.View` (або `Integration.Manage`; D-463: злиті покриті інтервали, прогалини вікна, останній прогін і останній успіх) | 5 |
+| `GET` | `/api/v1/sources/{id}/raw-data/export.csv` | `Integration.View` (або `Integration.Manage`; D-463: потоком, стеля `Integration:RawDataExportMaxRows` (100 000) — понад неї `422 auditExportTooLarge` до першого байта; подія безпеки `PiRawDataExported` без значень) | 5 |
 | `GET` | `/api/v1/collection-schedules` | `Integration.EditSchedule` | 7 |
 | `POST` | `/api/v1/collection-schedules` | `Integration.EditSchedule` | 7 |
 | `PUT` | `/api/v1/collection-schedules/{id}` | `Integration.EditSchedule` | 7 |

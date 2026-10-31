@@ -517,6 +517,8 @@ public static class DependencyInjection
         services.AddScoped<IDataSourceStore, DataSourceStore>();
         services.AddScoped<ICollectionRunReader, CollectionRunReader>();
         services.AddScoped<Ecr.Application.Sources.IMappingPreviewStore, MappingPreviewStore>();
+        services.AddScoped<Ecr.Application.Integration.RawData.IRawDataReader, RawDataReader>(); // D-463
+        services.AddScoped<Ecr.Application.Integration.RawData.ICellSourceStore, CellSourceStore>(); // D-463
         services.AddScoped<IStyleCatalog, StyleCatalog>();
         services.AddScoped<IConditionalFormatStore, ConditionalFormatStore>();
         services.AddScoped<IReportDefinitionStore, ReportDefinitionStore>();

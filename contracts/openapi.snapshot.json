@@ -1482,6 +1482,67 @@
           "Calculated"
         ]
       },
+      "CellFoldView": {
+        "description": "Значення за правилом згортки поруч зі значенням комірки.",
+        "properties": {
+          "comparison": {
+            "description": "CellFoldComparison: `Match`; `ManualEdit` — інше значення, останній запис людини;\n        `NotUpdated` — інше значення, останній запис машини (точки змінилися після запису); `NotWritten` —\n        записів у комірку не було (значення збору не записано); `NotComparable` — числа за правилом немає.",
+            "type": "string"
+          },
+          "percentGood": {
+            "description": "Частка придатних точок / покритого часу.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "state": {
+            "description": "Стан згортки (CellFoldState).",
+            "type": "string"
+          },
+          "storedAt": {
+            "description": "Коли (UTC).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "storedOrigin": {
+            "description": "Хто записав (`Integration`, `UserEdit`, `Import`…).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "storedValue": {
+            "description": "Значення в комірці за останнім записом журналу змін; `null` — записів немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "value": {
+            "description": "Значення в одиниці документа — те, що записала б матеріалізація.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "state",
+          "value",
+          "percentGood",
+          "storedValue",
+          "storedOrigin",
+          "storedAt",
+          "comparison"
+        ],
+        "type": "object"
+      },
       "CellFormatDto": {
         "description": "Результат спрацювання правила умовного форматування (ФВ-2.6/2.7): колір\n`#rrggbb` (або `null` — колір теми) і жирність.",
         "properties": {
@@ -1515,6 +1576,192 @@
           "backgroundHex",
           "foregroundHex",
           "isBold"
+        ],
+        "type": "object"
+      },
+      "CellSourceEvent": {
+        "description": "Подія журналу покриття.",
+        "properties": {
+          "at": {
+            "description": "Коли записано (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "details": {
+            "description": "Конверт `{\"k\":…,\"p\":{…}}` або старий текст.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор рядка.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "status": {
+            "description": "Статус (`CollectionCoverage.KnownStatuses`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "details",
+          "at"
+        ],
+        "type": "object"
+      },
+      "CellSourceItem": {
+        "description": "Один мапінг, що живить комірку.",
+        "properties": {
+          "aggregation": {
+            "description": "Згортка періоду.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "events": {
+            "description": "Події покриття даних тега за період, новіші першими.",
+            "items": {
+              "$ref": "#/components/schemas/CellSourceEvent"
+            },
+            "type": "array"
+          },
+          "fold": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CellFoldView",
+                "description": "Значення за правилом згортки й порівняння з коміркою; `null` — вікна немає."
+              }
+            ]
+          },
+          "isActive": {
+            "description": "Мапінг діє.",
+            "type": "boolean"
+          },
+          "lastCollection": {
+            "$ref": "#/components/schemas/RawCollectionStatus",
+            "description": "Останній прогін сутності й останній успіх."
+          },
+          "mapId": {
+            "description": "Мапінг — ключ для точок і графіка.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "pointCount": {
+            "description": "Зібраних точок тега за вікно.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "sourceEntityCode": {
+            "description": "Код сутності.",
+            "type": "string"
+          },
+          "sourceEntityId": {
+            "description": "Сутність збору.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sourceEntityName": {
+            "description": "Підпис сутності.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourcePath": {
+            "description": "Тег.",
+            "type": "string"
+          },
+          "sourceUnitCode": {
+            "description": "Одиниця джерела.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetUnitCode": {
+            "description": "Одиниця документа.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "mapId",
+          "sourceEntityId",
+          "sourceEntityCode",
+          "sourceEntityName",
+          "sourcePath",
+          "aggregation",
+          "sourceUnitCode",
+          "targetUnitCode",
+          "isActive",
+          "pointCount",
+          "lastCollection",
+          "events",
+          "fold"
+        ],
+        "type": "object"
+      },
+      "CellSourceView": {
+        "description": "Звідки комірка отримує значення з PI.",
+        "properties": {
+          "periodFromUtc": {
+            "description": "Початок вікна згортки (UTC); `null` — колонка місяця поза періодом без власника.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "periodKey": {
+            "description": "Період екземпляра комірки.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "periodToUtc": {
+            "description": "Кінець вікна згортки (UTC, виключно).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sources": {
+            "description": "Мапінги, що живлять комірку; порожньо — значення не з PI.",
+            "items": {
+              "$ref": "#/components/schemas/CellSourceItem"
+            },
+            "type": "array"
+          },
+          "windowMonth": {
+            "description": "Місяць колонки місяця (1..12): вікно — лише цей місяць періоду (D-462); `null` — увесь період.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "windowPeriodKey": {
+            "description": "Період, у якому згортається комірка (Q-17 — період-власник колонки).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "periodKey",
+          "periodFromUtc",
+          "periodToUtc",
+          "sources",
+          "windowPeriodKey",
+          "windowMonth"
         ],
         "type": "object"
       },
@@ -10449,6 +10696,39 @@
         ],
         "type": "object"
       },
+      "PagedResultOfRawPointView": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/RawPointView"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
       "PagedResultOfRegistryEntryHistoryItemDto": {
         "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
         "properties": {
@@ -13230,6 +13510,380 @@
         },
         "required": [
           "reason"
+        ],
+        "type": "object"
+      },
+      "RawCollectionStatus": {
+        "description": "Стан збору сутності.",
+        "properties": {
+          "lastRunFinishedAt": {
+            "description": "Завершення останнього прогону; `null` — триває.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastRunId": {
+            "description": "Останній прогін; `null` — збору ще не було.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "lastRunStartedAt": {
+            "description": "Початок останнього прогону (UTC).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastRunStatus": {
+            "description": "`Running`/`Succeeded`/`Degraded`/`Failed`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastSucceededAt": {
+            "description": "Завершення останнього успішного (`Succeeded`/`Degraded`) прогону.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "lastRunId",
+          "lastRunStatus",
+          "lastRunStartedAt",
+          "lastRunFinishedAt",
+          "lastSucceededAt"
+        ],
+        "type": "object"
+      },
+      "RawCoverageView": {
+        "description": "Покриття вікна збором: що зібрано, де прогалини, коли збирали востаннє.",
+        "properties": {
+          "covered": {
+            "description": "Злиті покриті інтервали, обрізані вікном.",
+            "items": {
+              "$ref": "#/components/schemas/RawInterval"
+            },
+            "type": "array"
+          },
+          "fromUtc": {
+            "description": "Початок вікна.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "gaps": {
+            "description": "Прогалини вікна — часу, за який збір не відзвітував успіхом.",
+            "items": {
+              "$ref": "#/components/schemas/RawInterval"
+            },
+            "type": "array"
+          },
+          "isTruncated": {
+            "description": "Інтервалів більше за стелю: прогалини після останнього не обчислено.",
+            "type": "boolean"
+          },
+          "lastCollection": {
+            "$ref": "#/components/schemas/RawCollectionStatus",
+            "description": "Останній прогін і останній успіх."
+          },
+          "toUtc": {
+            "description": "Кінець вікна (виключно).",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fromUtc",
+          "toUtc",
+          "covered",
+          "gaps",
+          "isTruncated",
+          "lastCollection"
+        ],
+        "type": "object"
+      },
+      "RawDataTag": {
+        "description": "Тег сутності — поле мапінгу.",
+        "properties": {
+          "aggregation": {
+            "description": "Згортка періоду (`Sum`, `Avg`, …); `null` — не задана.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isActive": {
+            "description": "Мапінг діє; `false` — призупинений.",
+            "type": "boolean"
+          },
+          "mapId": {
+            "description": "Мапінг; `null` — тег сутності без мапінгу (сама сутність).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sourcePath": {
+            "description": "Шлях атрибута в джерелі.",
+            "type": "string"
+          },
+          "sourceUnitCode": {
+            "description": "Одиниця джерела; `null` — не оголошена.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetColumnCode": {
+            "description": "Колонка документа; `null` — не матеріалізується чи колонку видалено.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetRowKey": {
+            "description": "Рядок документа; `null` — точки лишаються сирими.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "sourcePath",
+          "mapId",
+          "targetColumnCode",
+          "targetRowKey",
+          "aggregation",
+          "sourceUnitCode",
+          "isActive"
+        ],
+        "type": "object"
+      },
+      "RawDataTagsView": {
+        "description": "Сутність збору і її теги (`GET /sources/{id}/raw-data/tags`).",
+        "properties": {
+          "code": {
+            "description": "Код у джерелі.",
+            "type": "string"
+          },
+          "displayName": {
+            "description": "Підпис; `null` — не задано.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isActive": {
+            "description": "Чи сутність діє.",
+            "type": "boolean"
+          },
+          "isTruncated": {
+            "description": "Тегів більше за стелю.",
+            "type": "boolean"
+          },
+          "sourceEntityId": {
+            "description": "Сутність.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "tags": {
+            "description": "Теги: поля мапінгів; без мапінгів — шлях самої сутності.",
+            "items": {
+              "$ref": "#/components/schemas/RawDataTag"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "sourceEntityId",
+          "code",
+          "displayName",
+          "isActive",
+          "tags",
+          "isTruncated"
+        ],
+        "type": "object"
+      },
+      "RawInterval": {
+        "description": "Інтервал часу `[FromUtc, ToUtc)`.",
+        "properties": {
+          "fromUtc": {
+            "description": "Початок.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "toUtc": {
+            "description": "Кінець.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fromUtc",
+          "toUtc"
+        ],
+        "type": "object"
+      },
+      "RawPointView": {
+        "description": "Точка для таблиці «Дані з PI».",
+        "properties": {
+          "collectionRunId": {
+            "description": "Прогін збору, що її приніс.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "quality": {
+            "description": "Якість за класифікацією джерела; `null` — не повідомлена.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "retrievedAt": {
+            "description": "Коли точку отримано (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "timestamp": {
+            "description": "Мітка часу точки (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "unitCode": {
+            "description": "Код одиниці джерела; `null` — не повідомлена.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "valueNumeric": {
+            "description": "Число в одиниці ДЖЕРЕЛА (ФВ-16.10); конверсія — лише при записі в документ.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "valueString": {
+            "description": "Текст для нечислових атрибутів.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "timestamp",
+          "valueNumeric",
+          "valueString",
+          "unitCode",
+          "quality",
+          "retrievedAt",
+          "collectionRunId"
+        ],
+        "type": "object"
+      },
+      "RawSeriesBucket": {
+        "description": "Кошик графіка.",
+        "properties": {
+          "avg": {
+            "description": "Середнє арифметичне числових.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "max": {
+            "description": "Максимум числових.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "min": {
+            "description": "Мінімум числових; `null` — числових немає.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "points": {
+            "description": "Усіх точок.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "startUtc": {
+            "description": "Початок кошика.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "startUtc",
+          "points",
+          "min",
+          "max",
+          "avg"
+        ],
+        "type": "object"
+      },
+      "RawSeriesView": {
+        "description": "Згорнутий ряд для графіка: не більше заданого числа кошиків незалежно від довжини вікна.",
+        "properties": {
+          "bucketSeconds": {
+            "description": "Ширина кошика.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "buckets": {
+            "description": "Непорожні кошики за зростанням часу.",
+            "items": {
+              "$ref": "#/components/schemas/RawSeriesBucket"
+            },
+            "type": "array"
+          },
+          "fromUtc": {
+            "description": "Початок вікна.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "numericPoints": {
+            "description": "З них числових — лише вони на графіку.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "toUtc": {
+            "description": "Кінець вікна (виключно).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "totalPoints": {
+            "description": "Усіх точок у вікні.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fromUtc",
+          "toUtc",
+          "bucketSeconds",
+          "totalPoints",
+          "numericPoints",
+          "buckets"
         ],
         "type": "object"
       },
@@ -30852,6 +31506,423 @@
         "summary": "Зріз таблиці для grid.",
         "tags": [
           "Cells"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-source": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Екземпляр таблиці документа.",
+            "in": "path",
+            "name": "tableInstanceId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Ключ рядка.",
+            "in": "query",
+            "name": "rowKey",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Колонка (`ColumnDto.id` зрізу).",
+            "in": "query",
+            "name": "columnDefId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CellSourceView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CellSourceView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CellSourceView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Мапінги, що живлять комірку: тег, згортка, одиниці, вікно періоду, останній збір, події покриття.",
+        "tags": [
+          "CellSource"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-source/points": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Екземпляр таблиці.",
+            "in": "path",
+            "name": "tableInstanceId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Ключ рядка.",
+            "in": "query",
+            "name": "rowKey",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Колонка.",
+            "in": "query",
+            "name": "columnDefId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Мапінг із `sources[].mapId`; чужий — `404`.",
+            "in": "query",
+            "name": "mapId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Курсор наступної сторінки.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Розмір сторінки 1..500; `0` — 100.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRawPointView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRawPointView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRawPointView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Сторінка сирих точок тега мапінгу за період комірки, новіші першими.",
+        "tags": [
+          "CellSource"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-source/series": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Екземпляр таблиці.",
+            "in": "path",
+            "name": "tableInstanceId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Ключ рядка.",
+            "in": "query",
+            "name": "rowKey",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Колонка.",
+            "in": "query",
+            "name": "columnDefId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Мапінг із `sources[].mapId`.",
+            "in": "query",
+            "name": "mapId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Кількість кошиків 1..2000; `0` — 500.",
+            "in": "query",
+            "name": "buckets",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawSeriesView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawSeriesView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawSeriesView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Згорнутий ряд тега мапінгу за період комірки (≤ buckets кошиків).",
+        "tags": [
+          "CellSource"
         ]
       }
     },
@@ -50321,6 +51392,584 @@
         ]
       }
     },
+    "/api/v1/sources/{id}/raw-data/coverage": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Сутність збору.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Початок вікна.",
+            "in": "query",
+            "name": "fromUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна (≤ 400 діб від початку).",
+            "in": "query",
+            "name": "toUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawCoverageView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawCoverageView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawCoverageView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Покриття вікна збором: злиті зібрані інтервали, прогалини, останній прогін і останній успіх.",
+        "tags": [
+          "PiRawData"
+        ]
+      }
+    },
+    "/api/v1/sources/{id}/raw-data/export.csv": {
+      "get": {
+        "description": "Стеля `Integration:RawDataExportMaxRows` (типово 100 000); понад неї — `422 auditExportTooLarge`\nдо першого байта. UTF-8 з BOM; час — UTC ISO 8601; текстові значення, що починаються з `= + - @`,\nнейтралізуються. Експорт пишеться подією безпеки `PiRawDataExported` (без значень).",
+        "parameters": [
+          {
+            "description": "Сутність збору.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Тег.",
+            "in": "query",
+            "name": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Початок вікна.",
+            "in": "query",
+            "name": "fromUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна (≤ 400 діб від початку).",
+            "in": "query",
+            "name": "toUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Точки тега у CSV потоком, за зростанням часу.",
+        "tags": [
+          "PiRawData"
+        ]
+      }
+    },
+    "/api/v1/sources/{id}/raw-data/points": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Сутність збору.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Тег — шлях атрибута в джерелі (1..400 символів, дослівно).",
+            "in": "query",
+            "name": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Початок вікна (UTC, включно); `null` — 7 діб до кінця.",
+            "in": "query",
+            "name": "fromUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна (UTC, виключно); `null` — «зараз». Вікно ≤ 400 діб.",
+            "in": "query",
+            "name": "toUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Курсор наступної сторінки.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Розмір сторінки 1..500; `0` — 100.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRawPointView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRawPointView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRawPointView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Сторінка точок тега, новіші першими (курсор за міткою часу).",
+        "tags": [
+          "PiRawData"
+        ]
+      }
+    },
+    "/api/v1/sources/{id}/raw-data/series": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Сутність збору.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Тег.",
+            "in": "query",
+            "name": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Початок вікна.",
+            "in": "query",
+            "name": "fromUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна (≤ 400 діб від початку).",
+            "in": "query",
+            "name": "toUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кількість кошиків 1..2000; `0` — 500.",
+            "in": "query",
+            "name": "buckets",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawSeriesView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawSeriesView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawSeriesView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Згорнутий ряд тега для графіка: ≤ buckets кошиків (кількість, мін, макс, середнє)\nна все вікно — розмір відповіді не залежить від кількості точок.",
+        "tags": [
+          "PiRawData"
+        ]
+      }
+    },
+    "/api/v1/sources/{id}/raw-data/tags": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Сутність збору.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawDataTagsView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawDataTagsView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawDataTagsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Сутність і її теги (поля мапінгів; без мапінгів — шлях самої сутності).",
+        "tags": [
+          "PiRawData"
+        ]
+      }
+    },
     "/api/v1/sources/{id}/registry": {
       "put": {
         "description": "⚠ Право на дані перевіряється для цільового довідника, а при відв'язці чи\nпереприв'язці — і для поточного: після прив'язки синк пише в довідник від\n`svc-integration`, тож прив'язка — делегування права на його дані.\nБез права — `403 ECR-AUTH-0403`. `D-202`, доповнення 2026-09-29\n(`docs/tz/10-decisions.md` §1.19) — судження розробки, на підтвердження.\nОдна сутність на довідник у з'єднанні (AN-34 L4-01): довідник, який уже тримає\nінша сутність цього з'єднання (активна чи вимкнена), — `409 ECR-INT-0409`\n(`err.ECR-INT-0409.registryAlreadyBound`); відв'язка першої звільняє довідник.",
@@ -57660,6 +59309,9 @@
       "name": "Cells"
     },
     {
+      "name": "CellSource"
+    },
+    {
       "name": "CollectionRuns"
     },
     {
@@ -57772,6 +59424,9 @@
     },
     {
       "name": "PermitTypes"
+    },
+    {
+      "name": "PiRawData"
     },
     {
       "name": "Preferences"

@@ -17,6 +17,7 @@ import {
   HealthPage,
   JobsPage,
   MappingPreviewPage,
+  PiDataPage,
   PipelinePage,
   MethodologiesPage,
   MethodologyVersionsPage,
@@ -490,6 +491,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminMapping, 'admin'),
             element: guarded(routes.adminMapping.handle, <MappingPreviewPage />),
             handle: routes.adminMapping.handle,
+          },
+          {
+            path: relativePath(routes.adminPiData, 'admin'),
+            element: guarded(routes.adminPiData.handle, <PiDataPage />),
+            handle: routes.adminPiData.handle,
           },
           {
             path: relativePath(routes.adminPipeline, 'admin'),

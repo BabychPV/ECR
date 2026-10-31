@@ -542,6 +542,23 @@ export const routes = {
    * що й у перегляду мапінгу: конвеєр читає `/api/v1/sources` і перегляд
    * мапінгу, а обидва сервер віддає лише з `Integration.Manage`.
    */
+  /**
+   * «Дані з PI» (`D-463`): уже зібрані точки сутності збору — графік за вікно до року, сирі точки, покриття і
+   * події «чому не лягло в документи». ⚠ `Integration.View` АБО `Integration.Manage` — та сама межа, що в
+   * журналу прогонів і покриття на сервері (`RawDataHandler`): хто бачить, що і коли збір приніс, бачить і значення.
+   */
+  adminPiData: {
+    id: 'admin-pi-data',
+    path: '/admin/pi-data',
+    handle: {
+      labelKey: 'nav.piData',
+      descriptionKey: 'nav.piData.description',
+      permission: 'Integration.View',
+      alsoPermittedBy: ['Integration.Manage'],
+      icon: 'piData',
+    },
+    showInNav: true,
+  },
   adminPipeline: {
     id: 'admin-pipeline',
     path: '/admin/pipeline',
@@ -711,6 +728,7 @@ export const navGroups: readonly NavGroup[] = [
       routes.adminSources,
       routes.adminMapping,
       routes.adminPipeline,
+      routes.adminPiData,
     ],
   },
   { id: 'access', labelKey: 'nav.group.access', routes: [routes.adminSecurity, routes.adminPeriods] },
