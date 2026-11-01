@@ -15,6 +15,7 @@ interface ShortcutRow {
  * ⚠ Кожен підпис — окремим викликом із ЛІТЕРАЛОМ (сторож каталогу розбирає лише так).
  * ⚠ Перелік — лише те, що в коді перевірено: стрілки, Tab, Esc — RevoGrid; Enter/F2 — `f2Edit.ts`;
  * Ctrl+C/V — `clipboard.ts`/`bodyPaste.ts`; Ctrl+Z/Y/S — `shortcutKey.ts`; F9 — `isRecalculateKey`;
+ * Shift+F5 — `isRefreshKey` (`liveRefresh/SheetLiveRefresh.tsx`);
  * Ctrl+K — палітра оболонки. PageUp/Home/Delete з макета не обіцяємо, доки їх не перевірено.
  */
 function rows(): ShortcutRow[] {
@@ -28,6 +29,7 @@ function rows(): ShortcutRow[] {
     { keys: 'Ctrl+Z · Ctrl+Y', what: t('grid.keys.undo'), edit: true },
     { keys: 'Ctrl+S', what: t('grid.keys.save'), edit: true },
     { keys: 'F9', what: t('grid.keys.recalc'), edit: true },
+    { keys: 'Shift+F5', what: t('grid.keys.refresh') },
     { keys: 'Ctrl+K', what: t('grid.keys.palette') },
     { keys: 'Ctrl+Shift+Enter', what: t('grid.keys.fullscreen') },
   ];

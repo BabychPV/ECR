@@ -155,6 +155,41 @@ async function invalidateScopes(client: QueryClient, scopes: readonly SliceScope
 }
 
 /**
+ * LIVE-REFRESH B2/B3: перечитати РІВНО названі зрізи (кнопка «Refresh» аркуша, банер «Updated by …»).
+ *
+ * ⚠ Ті самі ключі кешу, що тримає `DocumentGrid`: перезапит без перезавантаження сторінки. Видимий
+ * змонтований зріз перезапитується; прихований (`C1-01`) лише стає застарілим і дочитується при показі
+ * (`takeMissedInvalidation`); незмонтований — застарілий, прочитає свіже сам при монтуванні.
+ *
+ * ⚠ Незбережені правки живуть НЕ в зрізі, а в `pendingStore` — перезапит їх не чіпає; комірка, яку
+ * тим часом змінив хтось інший, іде чинним правилом конфлікту (`knownVersions.ts`, AN-39/L8-20).
+ */
+export async function refreshSlices(
+  client: QueryClient,
+  periodKey: number,
+  tableInstanceIds: Iterable<number>,
+): Promise<void> {
+  const ids = new Set(tableInstanceIds);
+  if (ids.size === 0) return;
+
+  const named = (query: Query): boolean => {
+    const address = sliceAddressOf(query.queryKey);
+
+    return address !== null && address.periodKey === periodKey && ids.has(address.tableInstanceId);
+  };
+
+  for (const query of client.getQueryCache().findAll({ predicate: (candidate) => named(candidate) && isHiddenSlice(candidate) })) {
+    const address = sliceAddressOf(query.queryKey);
+    if (address !== null) missedWhileHidden.add(sliceId(address.tableInstanceId, address.periodKey));
+  }
+
+  await Promise.all([
+    client.invalidateQueries({ predicate: (query) => named(query) && !isHiddenSlice(query) }),
+    client.invalidateQueries({ predicate: (query) => named(query) && isHiddenSlice(query), refetchType: 'none' }),
+  ]);
+}
+
+/**
  * Зрізи, чиї сітки змонтовані, але приховані (`C1-01`): ключ `tableInstanceId:periodKey` →
  * скільки прихованих спостерігачів його тримає.
  *
