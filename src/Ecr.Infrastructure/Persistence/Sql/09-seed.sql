@@ -795,6 +795,13 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- NAE: вивід з ужитку лише закриває validTo - повторне використання бізнес-ключа вимагає НОВОГО вузла з вікном ПІСЛЯ старого.
+    (N'err.ECR-REG-4092.keyTaken', N'en', N'Another entry ({entryCode}) already has {key} = {keyText}.', N'Another entry ({entryCode}) already has {key} = {keyText}. If that entry is retired, create a NEW entry whose validity window starts AFTER the old one ends.'),
+    (N'err.ECR-REG-4092.keyTaken', N'ru', N'У другой записи ({entryCode}) уже есть {key} = {keyText}.', N'У другой записи ({entryCode}) уже есть {key} = {keyText}. Если она выведена из употребления, создайте НОВУЮ запись, срок действия которой начинается ПОСЛЕ окончания срока старой.'),
+    (N'err.ECR-REG-4092.keyTaken', N'kz', N'Басқа жазбада ({entryCode}) {key} = {keyText} мәні бұрыннан бар.', N'Басқа жазбада ({entryCode}) {key} = {keyText} мәні бұрыннан бар. Ол жазба қолданыстан шығарылса, қолданыс мерзімі ескісі аяқталғаннан КЕЙІН басталатын ЖАҢА жазба жасаңыз.'),
+    (N'err.ECR-REG-4092.keyWindowOverlap', N'en', N'Another entry ({entryCode}) already has {key} = {keyText} for an overlapping validity period.', N'Another entry ({entryCode}) already has {key} = {keyText} for an overlapping validity period. A NEW entry whose validity window starts AFTER the old one ends is required.'),
+    (N'err.ECR-REG-4092.keyWindowOverlap', N'ru', N'У другой записи ({entryCode}) уже есть {key} = {keyText} в пересекающемся периоде действия.', N'У другой записи ({entryCode}) уже есть {key} = {keyText} в пересекающемся периоде действия. Нужна НОВАЯ запись, срок действия которой начинается ПОСЛЕ окончания срока старой.'),
+    (N'err.ECR-REG-4092.keyWindowOverlap', N'kz', N'Басқа жазбада ({entryCode}) қиылысатын қолданыс кезеңінде {key} = {keyText} мәні бұрыннан бар.', N'Басқа жазбада ({entryCode}) қиылысатын қолданыс кезеңінде {key} = {keyText} мәні бұрыннан бар. Қолданыс мерзімі ескісі аяқталғаннан КЕЙІН басталатын ЖАҢА жазба қажет.'),
     -- COLL:r11l6 AN-96: плитка рахує ШАБЛОНИ з опублікованою версією (matchesStat), а не версії; kz лишається за термінологом.
     (N'templates.stat.published', N'en', N'published versions', N'with a published version'),
     (N'templates.stat.published', N'ru', N'опубликованных версий', N'с опубликованной версией'),
@@ -5715,6 +5722,38 @@ USING (VALUES
     (N'err.ECR-IMP-0422.mapBroken',             N'en', N'The service sheet of the workbook is empty or damaged. Export the document again.', 1),
     -- ⛔ L6-01: понад стелю змін у таблиці — відмова всього імпорту, а не застосування перших 5000.
     (N'err.ECR-IMP-0422.importTooManyChanges',  N'en', N'Table {tableCode} has more than {maxChanges} changes. Nothing was imported: split the changes into several files.', 1),
+    -- NAE:n4-import ── generic registry import engine (Excel with a header block, groups, two levels); ru/kz in the section NAE:n4-import below.
+    (N'err.ECR-IMP-0422.regSpecInvalid',        N'en', N'The import profile is not valid ({where}): {reason}.', 1),
+    (N'err.ECR-IMP-0422.regHeaderNotFound',     N'en', N'The header of the table was not found in the file. Set the header rows in the import profile.', 1),
+    (N'err.ECR-IMP-0422.regRejected',           N'en', N'The file has {errorCount} error(s). Nothing was imported: fix them and upload the file again.', 1),
+    (N'err.ECR-IMP-0422.regReplaceNotConfirmed', N'en', N'The import replaces rows of other permits ({owners}). Confirm the replacement to continue.', 1),
+    (N'err.ECR-IMP-0422.regPlanChanged',        N'en', N'The data changed since the preview. Nothing was imported: build the preview again.', 1),
+    (N'err.ECR-IMP-0422.regColumnMissing',      N'en', N'The column for "{field}" was not found in the file header.', 1),
+    (N'err.ECR-IMP-0422.regColumnAmbiguous',    N'en', N'Several columns match "{field}": {columns}. Make the header pattern more specific.', 1),
+    (N'err.ECR-IMP-0422.regColumnClaimed',      N'en', N'Column {column} is already used by "{other}" and cannot also be "{field}".', 1),
+    (N'err.ECR-IMP-0422.regValueInvalid',       N'en', N'"{field}": the value "{value}" cannot be read.', 1),
+    (N'err.ECR-IMP-0422.regValueRequired',      N'en', N'"{field}" must not be empty.', 1),
+    (N'err.ECR-IMP-0422.regValueNegative',      N'en', N'"{field}" must not be negative ("{value}").', 1),
+    (N'err.ECR-IMP-0422.regValueAmbiguous',     N'en', N'"{field}": "{value}" was read with the comma as the decimal separator. Check that it is not a thousands separator.', 1),
+    (N'err.ECR-IMP-0422.regDuplicateParent',    N'en', N'Source {key} appears twice: rows {firstRow} and {row}.', 1),
+    (N'err.ECR-IMP-0422.regDuplicateChild',     N'en', N'Substance {key} appears twice under source {parent}.', 1),
+    (N'err.ECR-IMP-0422.regReferenceMissing',   N'en', N'{kind} {key} does not exist in the system. Create it or skip it.', 1),
+    (N'err.ECR-IMP-0422.regReferenceUnchecked', N'en', N'Codes of kind {kind} were not checked against the system.', 1),
+    (N'err.ECR-IMP-0422.regChildWithoutParent', N'en', N'Row {row}: a substance row has no source above it.', 1),
+    (N'err.ECR-IMP-0422.regParentWithoutChildren', N'en', N'Source {key} has no substance rows.', 1),
+    (N'err.ECR-IMP-0422.regNoRows',             N'en', N'The file has no data rows.', 1),
+    (N'err.ECR-IMP-0422.regValueEmpty',         N'en', N'"{field}" is empty. The row is imported without it.', 1),
+    -- NAE:n3-air ── "Air Limits Import" permits (provisioning, profiles, wizard backend); ru/kz in the section NAE:n3-air below.
+    (N'err.ECR-IMP-0422.airRequestInvalid',     N'en', N'The import request cannot be read. Reload the page and try again.', 1),
+    (N'err.ECR-IMP-0422.airNotProvisioned',     N'en', N'The Air Limits Import permit type is not set up yet. Ask an administrator to provision it.', 1),
+    (N'err.ECR-IMP-0422.airScopeInvalid',       N'en', N'Choose the region of the import.', 1),
+    (N'err.ECR-IMP-0422.airNotAirPermit',       N'en', N'This permit is not an Air Limits Import permit.', 1),
+    (N'err.ECR-IMP-0422.airCreateUnderInvalid', N'en', N'NAE {key} cannot be created under the chosen node. Choose a site or equipment group.', 1),
+    (N'err.ECR-IMP-0422.airWriteRejected',      N'en', N'The import was refused at {key} ({reason}). Nothing was imported.', 1),
+    (N'err.ECR-IMP-0422.airProfileUnknown',     N'en', N'The import profile {code} does not exist.', 1),
+    (N'err.ECR-REG-0409.profileChanged',        N'en', N'The import profile {code} was changed after you opened it. Reload it and try again.', 1),
+    (N'err.ECR-REG-0404.importProfile',         N'en', N'The import profile {code} does not exist.', 1),
+    (N'registryAudit.airLimitsImport',          N'en', N'Air limits imported: {sources} sources, {substances} substance rows.', 1),
     -- Великий імпорт іде у фон (F-01): людина має знати, де шукати результат.
     (N'import.queued',                          N'en', N'The import is large and is being applied in the background. Follow it in My tasks.', 1),
     -- ⛔ F-27: у «My tasks» замість ідентифікатора файлу експорту.
@@ -5861,8 +5900,8 @@ USING (VALUES
     -- RT: keys
     -- RT-10a: конфлікт складеного ключа довідника (ФВ-8.15, D-151).
     (N'err.ECR-REG-4092', N'en', N'Key already in use', 1),
-    (N'err.ECR-REG-4092.keyTaken', N'en', N'Another entry ({entryCode}) already has {key} = {keyText}.', 1),
-    (N'err.ECR-REG-4092.keyWindowOverlap', N'en', N'Another entry ({entryCode}) already has {key} = {keyText} for an overlapping validity period.', 1),
+    (N'err.ECR-REG-4092.keyTaken', N'en', N'Another entry ({entryCode}) already has {key} = {keyText}. If that entry is retired, create a NEW entry whose validity window starts AFTER the old one ends.', 1),
+    (N'err.ECR-REG-4092.keyWindowOverlap', N'en', N'Another entry ({entryCode}) already has {key} = {keyText} for an overlapping validity period. A NEW entry whose validity window starts AFTER the old one ends is required.', 1),
     -- RT-10b: гонка за ключем (UX_RegistryEntryKey_Live), дубль ключа у файлі CSV, ключ і код рядка — різні записи.
     (N'err.ECR-REG-4092.keyTakenConcurrently', N'en', N'Another entry took the key {keyText} a moment ago. Refresh the list and try again.', 1),
     (N'err.ECR-REG-4092.keyDuplicateInFile', N'en', N'Another row of this file has the same key.', 1),
@@ -9842,6 +9881,200 @@ USING (VALUES
     ,(N'err.ECR-REQ-0422.piEventFilter', N'en', N'The name or element filter is longer than {max} characters.', 1)
     ,(N'audit.eventLabel.PiEventDataExported', N'en', N'PI event data exported', 1)
     -- D465:pi-events ── кінець секції ──
+    -- COLL:ui-permit-card ── en: картка лімітів "Air limits" дозволу (NAE-план N3); ru/kz — порцією COLL:ui-permit-card нижче ──
+    ,(N'permits.page.tabs.air', N'en', N'Air limits', 1)
+    ,(N'permits.air.title', N'en', N'Emission sources', 1)
+    ,(N'permits.air.counts', N'en', N'{sources} sources · {rows} substance rows', 1)
+    ,(N'permits.air.import', N'en', N'Import from Excel…', 1)
+    ,(N'permits.air.empty.title', N'en', N'No emission sources yet', 1)
+    ,(N'permits.air.empty.text', N'en', N'Import the limits table from an Excel workbook to fill this permit.', 1)
+    ,(N'permits.air.empty.readOnly', N'en', N'This permit has no sources. You can view it, but not import into it.', 1)
+    ,(N'permits.air.view.aria', N'en', N'Card view', 1)
+    ,(N'permits.air.view.sources', N'en', N'Sources', 1)
+    ,(N'permits.air.view.totals', N'en', N'Totals', 1)
+    ,(N'permits.air.filter.label', N'en', N'Filter sources', 1)
+    ,(N'permits.air.filter.placeholder', N'en', N'Filter NAE, source, substance…', 1)
+    ,(N'permits.air.filter.none', N'en', N'Nothing matches the filter.', 1)
+    ,(N'permits.air.sources.aria', N'en', N'Emission sources table', 1)
+    ,(N'permits.air.sources.toggle', N'en', N'Show substances', 1)
+    ,(N'permits.air.sources.expand', N'en', N'Substances of source {nae}', 1)
+    ,(N'permits.air.sources.nae', N'en', N'NAE', 1)
+    ,(N'permits.air.sources.source', N'en', N'Source', 1)
+    ,(N'permits.air.sources.point', N'en', N'Point', 1)
+    ,(N'permits.air.sources.type', N'en', N'Type', 1)
+    ,(N'permits.air.sources.quantity', N'en', N'Qty', 1)
+    ,(N'permits.air.sources.hours', N'en', N'Hours/yr', 1)
+    ,(N'permits.air.sources.height', N'en', N'Height, m', 1)
+    ,(N'permits.air.sources.diameter', N'en', N'Diameter, m', 1)
+    ,(N'permits.air.sources.velocity', N'en', N'Velocity, m/s', 1)
+    ,(N'permits.air.sources.volume', N'en', N'Volume, m³/s', 1)
+    ,(N'permits.air.sources.temperature', N'en', N'Temp, °C', 1)
+    ,(N'permits.air.sources.substances', N'en', N'Substances', 1)
+    ,(N'permits.air.type.point', N'en', N'T — point source', 1)
+    ,(N'permits.air.type.diffuse', N'en', N'P1 — diffuse source', 1)
+    ,(N'permits.air.type.pointShort', N'en', N'T', 1)
+    ,(N'permits.air.type.diffuseShort', N'en', N'P1', 1)
+    ,(N'permits.air.substances.aria', N'en', N'Substances of source {nae}', 1)
+    ,(N'permits.air.substances.code', N'en', N'Code', 1)
+    ,(N'permits.air.substances.name', N'en', N'Substance', 1)
+    ,(N'permits.air.substances.gs', N'en', N'g/s', 1)
+    ,(N'permits.air.substances.mg', N'en', N'mg/nm³', 1)
+    ,(N'permits.air.substances.ty', N'en', N't/year', 1)
+    ,(N'permits.air.totals.aria', N'en', N'Totals per substance', 1)
+    ,(N'permits.air.totals.sources', N'en', N'Sources', 1)
+    -- COLL:ui-permit-card ── кінець секції ──
+    -- COLL:ui-air-import ── en: майстер імпорту лімітів із Excel (NAE-план N5); ru/kz — порцією COLL:ui-air-import нижче ──
+    ,(N'permits.air.import.title', N'en', N'Import from Excel', 1)
+    ,(N'permits.air.import.back', N'en', N'Back to {permit}', 1)
+    ,(N'permits.air.import.unsupported.title', N'en', N'Not an Air Limits permit', 1)
+    ,(N'permits.air.import.unsupported.text', N'en', N'The Excel import works only for permits of type Air Limits Import.', 1)
+    ,(N'permits.air.import.expired.title', N'en', N'The permit has expired', 1)
+    ,(N'permits.air.import.expired.text', N'en', N'Data of an expired permit is read-only; the steps below can be viewed but not applied.', 1)
+    ,(N'permits.air.import.readOnly.title', N'en', N'View only', 1)
+    ,(N'permits.air.import.readOnly.text', N'en', N'You have no right to edit permit data, so the import cannot be run.', 1)
+    ,(N'permits.air.import.steps.aria', N'en', N'Import steps', 1)
+    ,(N'permits.air.import.step.file', N'en', N'File', 1)
+    ,(N'permits.air.import.step.mapping', N'en', N'Mapping', 1)
+    ,(N'permits.air.import.step.preview', N'en', N'Preview', 1)
+    ,(N'permits.air.import.step.apply', N'en', N'Result', 1)
+    ,(N'permits.air.import.hint.file', N'en', N'Choose the workbook, the region and the area the limits belong to.', 1)
+    ,(N'permits.air.import.hint.mapping', N'en', N'Check how the columns of the file are matched to fields. Nothing is saved yet.', 1)
+    ,(N'permits.air.import.hint.preview', N'en', N'Resolve missing NAE codes, read the findings and confirm what will be replaced.', 1)
+    ,(N'permits.air.import.hint.apply', N'en', N'The import was applied in one transaction.', 1)
+    ,(N'permits.air.import.analyse', N'en', N'Next: analyse file', 1)
+    ,(N'permits.air.import.toPreview', N'en', N'Next: preview', 1)
+    ,(N'permits.air.import.apply', N'en', N'Apply import (all or nothing)', 1)
+    ,(N'permits.air.import.rerun', N'en', N'Run preview again', 1)
+    ,(N'permits.air.import.file.label', N'en', N'Excel workbook', 1)
+    ,(N'permits.air.import.file.hint', N'en', N'A .xlsx file with the emission limits table.', 1)
+    ,(N'permits.air.import.file.placeholder', N'en', N'Choose a file', 1)
+    ,(N'permits.air.import.file.required', N'en', N'Choose a workbook.', 1)
+    ,(N'permits.air.import.file.extension', N'en', N'Only .xlsx workbooks are accepted.', 1)
+    ,(N'permits.air.import.profile.label', N'en', N'Import profile', 1)
+    ,(N'permits.air.import.profile.hint', N'en', N'Describes where the header and the columns are in the file.', 1)
+    ,(N'permits.air.import.region.label', N'en', N'Region', 1)
+    ,(N'permits.air.import.region.hint', N'en', N'Regions that have NAE sources in the NAE tree.', 1)
+    ,(N'permits.air.import.region.required', N'en', N'Choose the region.', 1)
+    ,(N'permits.air.import.area.label', N'en', N'Area', 1)
+    ,(N'permits.air.import.area.hint', N'en', N'Areas of the chosen region; "No area" if the region has none.', 1)
+    ,(N'permits.air.import.area.required', N'en', N'Choose the area.', 1)
+    ,(N'permits.air.import.area.none', N'en', N'No area', 1)
+    ,(N'permits.air.import.scope.empty', N'en', N'No regions in the NAE tree', 1)
+    ,(N'permits.air.import.scope.emptyHint', N'en', N'Load or create NAE nodes first: the region and area lists come from the NAE tree.', 1)
+    ,(N'permits.air.import.scopeNote', N'en', N'The import replaces the rows of this permit for the chosen region and area, and the rows of other permits for the same NAE (with your confirmation).', 1)
+    ,(N'permits.air.import.stats.parents', N'en', N'NAE in file', 1)
+    ,(N'permits.air.import.stats.children', N'en', N'Substance rows', 1)
+    ,(N'permits.air.import.stats.distinct', N'en', N'Distinct substances', 1)
+    ,(N'permits.air.import.stats.missing', N'en', N'Missing in tree', 1)
+    ,(N'permits.air.import.stats.errors', N'en', N'Errors', 1)
+    ,(N'permits.air.import.stats.warnings', N'en', N'Warnings', 1)
+    ,(N'permits.air.import.map.header', N'en', N'Header rows {from}–{to} · data from row {data} · group rows {groups} · skipped rows {skipped}', 1)
+    ,(N'permits.air.import.map.mappedAria', N'en', N'Matched columns', 1)
+    ,(N'permits.air.import.map.field', N'en', N'Target field', 1)
+    ,(N'permits.air.import.map.headerText', N'en', N'Header in file', 1)
+    ,(N'permits.air.import.map.matched', N'en', N'Column', 1)
+    ,(N'permits.air.import.map.level', N'en', N'Level', 1)
+    ,(N'permits.air.import.map.parser', N'en', N'Parser', 1)
+    ,(N'permits.air.import.map.required', N'en', N'Required', 1)
+    ,(N'permits.air.import.map.patterns', N'en', N'Header patterns (variants separated by |)', 1)
+    ,(N'permits.air.import.map.patternsHint', N'en', N'Several variants of the header text are separated by |. Use a…b for “a, then b later in the combined header”.', 1)
+    ,(N'permits.air.import.map.editorAria', N'en', N'Mapping editor', 1)
+    ,(N'permits.air.import.map.fieldName', N'en', N'Field name', 1)
+    ,(N'permits.air.import.map.patternsFor', N'en', N'Header patterns of field {field}', 1)
+    ,(N'permits.air.import.map.levelFor', N'en', N'Level of field {field}', 1)
+    ,(N'permits.air.import.map.parserFor', N'en', N'Parser of field {field}', 1)
+    ,(N'permits.air.import.map.requiredFor', N'en', N'Field {field} is required', 1)
+    ,(N'permits.air.import.map.removeFor', N'en', N'Remove field {field}', 1)
+    ,(N'permits.air.import.map.remove', N'en', N'Remove', 1)
+    ,(N'permits.air.import.map.notFound', N'en', N'not found', 1)
+    ,(N'permits.air.import.map.newName', N'en', N'New field name', 1)
+    ,(N'permits.air.import.map.add', N'en', N'Add field', 1)
+    ,(N'permits.air.import.map.edit', N'en', N'Edit mapping', 1)
+    ,(N'permits.air.import.map.discard', N'en', N'Discard changes', 1)
+    ,(N'permits.air.import.map.reanalyse', N'en', N'Re-analyse file', 1)
+    ,(N'permits.air.import.map.reanalyseFirst', N'en', N'The mapping was changed: re-analyse the file before the preview.', 1)
+    ,(N'permits.air.import.map.saveProfile', N'en', N'Save as profile…', 1)
+    ,(N'permits.air.import.map.problemTitle', N'en', N'The mapping is not valid', 1)
+    ,(N'permits.air.import.map.nameRequired', N'en', N'Every field needs a name.', 1)
+    ,(N'permits.air.import.map.nameDuplicate', N'en', N'Field names must be unique.', 1)
+    ,(N'permits.air.import.map.unmapped', N'en', N'Unmapped columns: {count}', 1)
+    ,(N'permits.air.import.map.hasData', N'en', N'has data', 1)
+    ,(N'permits.air.import.save.code', N'en', N'Profile code', 1)
+    ,(N'permits.air.import.save.codeHint', N'en', N'Latin capitals, digits and _ (2–64 characters).', 1)
+    ,(N'permits.air.import.save.codeInvalid', N'en', N'Start with a capital letter; use only A–Z, 0–9 and _.', 1)
+    ,(N'permits.air.import.save.name', N'en', N'Profile name', 1)
+    ,(N'permits.air.import.save.nameRequired', N'en', N'Enter a name.', 1)
+    ,(N'permits.air.import.save.submit', N'en', N'Save profile', 1)
+    ,(N'permits.air.import.save.done', N'en', N'Profile {code} saved and selected.', 1)
+    ,(N'permits.air.import.issues.title', N'en', N'Findings', 1)
+    ,(N'permits.air.import.issues.aria', N'en', N'Import findings', 1)
+    ,(N'permits.air.import.issues.none', N'en', N'No findings.', 1)
+    ,(N'permits.air.import.issues.severity', N'en', N'Severity', 1)
+    ,(N'permits.air.import.issues.error', N'en', N'Error', 1)
+    ,(N'permits.air.import.issues.warning', N'en', N'Warning', 1)
+    ,(N'permits.air.import.issues.row', N'en', N'Row', 1)
+    ,(N'permits.air.import.issues.column', N'en', N'Column', 1)
+    ,(N'permits.air.import.issues.field', N'en', N'Field', 1)
+    ,(N'permits.air.import.issues.message', N'en', N'Message', 1)
+    ,(N'permits.air.import.issues.more', N'en', N'Show more ({shown} of {total} shown)', 1)
+    ,(N'permits.air.import.issues.dropped', N'en', N'More findings were left out by the server: {count}.', 1)
+    ,(N'permits.air.import.missing.title', N'en', N'NAE codes missing in the tree: {count}', 1)
+    ,(N'permits.air.import.missing.hint', N'en', N'Choose for each code: create it under a node of the NAE tree, or skip it. All codes must be decided before applying.', 1)
+    ,(N'permits.air.import.missing.aria', N'en', N'NAE codes missing in the tree', 1)
+    ,(N'permits.air.import.missing.code', N'en', N'NAE', 1)
+    ,(N'permits.air.import.missing.group', N'en', N'Group row in file', 1)
+    ,(N'permits.air.import.missing.action', N'en', N'Action', 1)
+    ,(N'permits.air.import.missing.actionFor', N'en', N'Action for NAE {code}', 1)
+    ,(N'permits.air.import.missing.underFor', N'en', N'Node to create NAE {code} under', 1)
+    ,(N'permits.air.import.missing.choose', N'en', N'Choose…', 1)
+    ,(N'permits.air.import.missing.create', N'en', N'Create under a node', 1)
+    ,(N'permits.air.import.missing.skip', N'en', N'Skip this NAE', 1)
+    ,(N'permits.air.import.missing.skipAll', N'en', N'Skip all undecided ({count})', 1)
+    ,(N'permits.air.import.missing.under', N'en', N'Choose a node…', 1)
+    ,(N'permits.air.import.missing.noNodes', N'en', N'No nodes found', 1)
+    ,(N'permits.air.import.replace.title', N'en', N'What this import replaces', 1)
+    ,(N'permits.air.import.replace.scope', N'en', N'Permit {permit} · region {region} · area {area}', 1)
+    ,(N'permits.air.import.replace.new', N'en', N'New source rows', 1)
+    ,(N'permits.air.import.replace.thisOwner', N'en', N'Replaced in THIS permit', 1)
+    ,(N'permits.air.import.replace.counts', N'en', N'{parents} NAE · {rows} rows', 1)
+    ,(N'permits.air.import.replace.others', N'en', N'Also replaced — OTHER permits for the same NAE', 1)
+    ,(N'permits.air.import.replace.owner', N'en', N'{label}: {parents} NAE · {rows} rows', 1)
+    ,(N'permits.air.import.replace.confirm', N'en', N'I understand that the rows of the other permits listed above will be replaced.', 1)
+    ,(N'permits.air.import.diff.aria', N'en', N'Changes by source', 1)
+    ,(N'permits.air.import.diff.new', N'en', N'New', 1)
+    ,(N'permits.air.import.diff.changed', N'en', N'Changed', 1)
+    ,(N'permits.air.import.diff.unchanged', N'en', N'Unchanged', 1)
+    ,(N'permits.air.import.diff.removed', N'en', N'Removed', 1)
+    ,(N'permits.air.import.diff.skipped', N'en', N'Skipped by decision', 1)
+    ,(N'permits.air.import.gate.aria', N'en', N'Why the import cannot be applied yet', 1)
+    ,(N'permits.air.import.gate.errors', N'en', N'The file has errors — fix them and upload again.', 1)
+    ,(N'permits.air.import.gate.unresolved', N'en', N'Decide every missing NAE code: create or skip.', 1)
+    ,(N'permits.air.import.gate.confirm', N'en', N'Confirm the replacement of the other permits’ rows.', 1)
+    ,(N'permits.air.import.gate.stale', N'en', N'The settings changed after the preview — run the preview again.', 1)
+    ,(N'permits.air.import.stale.title', N'en', N'The preview is out of date', 1)
+    ,(N'permits.air.import.stale.text', N'en', N'The decisions or the plan changed. Run the preview again before applying.', 1)
+    ,(N'permits.air.import.done.title', N'en', N'Import applied to {permit}', 1)
+    ,(N'permits.air.import.done.text', N'en', N'The permit card now shows the imported sources and substances.', 1)
+    ,(N'permits.air.import.done.toast', N'en', N'Limits imported into {permit}', 1)
+    ,(N'permits.air.import.done.sources', N'en', N'Sources in the permit', 1)
+    ,(N'permits.air.import.done.substances', N'en', N'Substance rows inserted', 1)
+    ,(N'permits.air.import.done.createdNae', N'en', N'NAE created in the tree', 1)
+    ,(N'permits.air.import.done.replacedOwn', N'en', N'Own rows replaced', 1)
+    ,(N'permits.air.import.done.others', N'en', N'Rows of other permits that were replaced', 1)
+    ,(N'permits.air.import.done.fingerprint', N'en', N'Plan fingerprint: {value}', 1)
+    ,(N'permits.air.import.done.open', N'en', N'Open the permit card', 1)
+    -- COLL:ui-air-import ── кінець секції ──
+    -- COLL:ui-docs-version-col ── en: колонка «Version» переліку документів (версія шаблону за період; фільтр, сортування); ru/kz — порцією COLL:ui-docs-version-col нижче ──
+    ,(N'documents.versionColumn', N'en', N'Version', 1)
+    ,(N'documents.versionValue', N'en', N'v{version}', 1)
+    ,(N'documents.versionUnknown', N'en', N'Template version not shown', 1)
+    ,(N'documents.versionForPeriod', N'en', N'Template version for {period}', 1)
+    ,(N'documents.versionSortBy', N'en', N'Sort by version (documents on this page)', 1)
+    ,(N'documents.versionSortedAsc', N'en', N'sorted ascending', 1)
+    ,(N'documents.versionSortedDesc', N'en', N'sorted descending', 1)
+    ,(N'documents.versionAll', N'en', N'All versions', 1)
+    ,(N'documents.versionFilterHint', N'en', N'Filters the documents loaded on this page', 1)
+    -- COLL:ui-docs-version-col ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -12835,8 +13068,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.publicationReason', N'ru', N'Причина изменения'),
     (N'methodologies.publicationChanges', N'ru', N'Изменённые значения на эталонном наборе'),
     (N'err.ECR-REG-4092', N'ru', N'Ключ уже используется'),
-    (N'err.ECR-REG-4092.keyTaken', N'ru', N'У другой записи ({entryCode}) уже есть {key} = {keyText}.'),
-    (N'err.ECR-REG-4092.keyWindowOverlap', N'ru', N'У другой записи ({entryCode}) уже есть {key} = {keyText} в пересекающемся периоде действия.'),
+    (N'err.ECR-REG-4092.keyTaken', N'ru', N'У другой записи ({entryCode}) уже есть {key} = {keyText}. Если она выведена из употребления, создайте НОВУЮ запись, срок действия которой начинается ПОСЛЕ окончания срока старой.'),
+    (N'err.ECR-REG-4092.keyWindowOverlap', N'ru', N'У другой записи ({entryCode}) уже есть {key} = {keyText} в пересекающемся периоде действия. Нужна НОВАЯ запись, срок действия которой начинается ПОСЛЕ окончания срока старой.'),
     (N'err.ECR-REG-4092.keyTakenConcurrently', N'ru', N'Другая запись только что заняла ключ {keyText}. Обновите список и повторите попытку.'),
     (N'err.ECR-REG-4092.keyDuplicateInFile', N'ru', N'В другой строке этого файла такой же ключ.'),
     (N'err.ECR-REG-4092.keyCodeMismatch', N'ru', N'Ключ и код этой строки относятся к разным записям.'),
@@ -15867,8 +16100,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.publicationReason', N'kz', N'Өзгерту себебі'),
     (N'methodologies.publicationChanges', N'kz', N'Эталондық жиынтықтағы өзгерген мәндер'),
     (N'err.ECR-REG-4092', N'kz', N'Кілт бұрыннан пайдаланылуда'),
-    (N'err.ECR-REG-4092.keyTaken', N'kz', N'Басқа жазбада ({entryCode}) {key} = {keyText} мәні бұрыннан бар.'),
-    (N'err.ECR-REG-4092.keyWindowOverlap', N'kz', N'Басқа жазбада ({entryCode}) қиылысатын қолданыс кезеңінде {key} = {keyText} мәні бұрыннан бар.'),
+    (N'err.ECR-REG-4092.keyTaken', N'kz', N'Басқа жазбада ({entryCode}) {key} = {keyText} мәні бұрыннан бар. Ол жазба қолданыстан шығарылса, қолданыс мерзімі ескісі аяқталғаннан КЕЙІН басталатын ЖАҢА жазба жасаңыз.'),
+    (N'err.ECR-REG-4092.keyWindowOverlap', N'kz', N'Басқа жазбада ({entryCode}) қиылысатын қолданыс кезеңінде {key} = {keyText} мәні бұрыннан бар. Қолданыс мерзімі ескісі аяқталғаннан КЕЙІН басталатын ЖАҢА жазба қажет.'),
     (N'err.ECR-REG-4092.keyTakenConcurrently', N'kz', N'Басқа жазба {keyText} кілтін жаңа ғана иеленді. Тізімді жаңартып, әрекетті қайталаңыз.'),
     (N'err.ECR-REG-4092.keyDuplicateInFile', N'kz', N'Осы файлдың басқа жолында дәл осындай кілт бар.'),
     (N'err.ECR-REG-4092.keyCodeMismatch', N'kz', N'Осы жолдың кілті мен коды әртүрлі жазбаларға тиесілі.'),
@@ -16991,6 +17224,82 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- NAE2:af-import ── кінець секції ──
+-- NAE:n4-import ── ru/kz загального рушія імпорту довідників з Excel (N4); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-IMP-0422.regSpecInvalid', N'ru', N'Профиль импорта недопустим ({where}): {reason}.'),
+    (N'err.ECR-IMP-0422.regSpecInvalid', N'kz', N'Импорт профилі жарамсыз ({where}): {reason}.'),
+    (N'err.ECR-IMP-0422.regHeaderNotFound', N'ru', N'Заголовок таблицы в файле не найден. Укажите строки заголовка в профиле импорта.'),
+    (N'err.ECR-IMP-0422.regHeaderNotFound', N'kz', N'Файлдан кесте тақырыбы табылмады. Импорт профилінде тақырып жолдарын көрсетіңіз.'),
+    (N'err.ECR-IMP-0422.regRejected', N'ru', N'В файле ошибок: {errorCount}. Ничего не импортировано: исправьте их и загрузите файл заново.'),
+    (N'err.ECR-IMP-0422.regRejected', N'kz', N'Файлда қателер бар: {errorCount}. Ештеңе импортталмады: оларды түзетіп, файлды қайта жүктеңіз.'),
+    (N'err.ECR-IMP-0422.regReplaceNotConfirmed', N'ru', N'Импорт заменит строки других разрешений ({owners}). Подтвердите замену, чтобы продолжить.'),
+    (N'err.ECR-IMP-0422.regReplaceNotConfirmed', N'kz', N'Импорт басқа рұқсаттардың жолдарын ауыстырады ({owners}). Жалғастыру үшін ауыстыруды растаңыз.'),
+    (N'err.ECR-IMP-0422.regPlanChanged', N'ru', N'Данные изменились после предпросмотра. Ничего не импортировано: постройте предпросмотр заново.'),
+    (N'err.ECR-IMP-0422.regPlanChanged', N'kz', N'Алдын ала қарағаннан кейін деректер өзгерді. Ештеңе импортталмады: алдын ала қарауды қайта жасаңыз.'),
+    (N'err.ECR-IMP-0422.regColumnMissing', N'ru', N'Столбец «{field}» не найден в заголовке файла.'),
+    (N'err.ECR-IMP-0422.regColumnMissing', N'kz', N'«{field}» бағаны файл тақырыбынан табылмады.'),
+    (N'err.ECR-IMP-0422.regColumnAmbiguous', N'ru', N'Полю «{field}» соответствует несколько столбцов: {columns}. Уточните шаблон заголовка.'),
+    (N'err.ECR-IMP-0422.regColumnAmbiguous', N'kz', N'«{field}» өрісіне бірнеше баған сәйкес келеді: {columns}. Тақырып үлгісін нақтылаңыз.'),
+    (N'err.ECR-IMP-0422.regColumnClaimed', N'ru', N'Столбец {column} уже занят полем «{other}» и не может быть полем «{field}».'),
+    (N'err.ECR-IMP-0422.regColumnClaimed', N'kz', N'{column} бағанын «{other}» өрісі алып қойған, ол «{field}» бола алмайды.'),
+    (N'err.ECR-IMP-0422.regValueInvalid', N'ru', N'«{field}»: значение «{value}» не читается.'),
+    (N'err.ECR-IMP-0422.regValueInvalid', N'kz', N'«{field}»: «{value}» мәні оқылмайды.'),
+    (N'err.ECR-IMP-0422.regValueRequired', N'ru', N'«{field}» не может быть пустым.'),
+    (N'err.ECR-IMP-0422.regValueRequired', N'kz', N'«{field}» бос болмауы керек.'),
+    (N'err.ECR-IMP-0422.regValueNegative', N'ru', N'«{field}» не может быть отрицательным («{value}»).'),
+    (N'err.ECR-IMP-0422.regValueNegative', N'kz', N'«{field}» теріс болмауы керек («{value}»).'),
+    (N'err.ECR-IMP-0422.regValueAmbiguous', N'ru', N'«{field}»: «{value}» прочитано с запятой как десятичным разделителем. Убедитесь, что это не разделитель тысяч.'),
+    (N'err.ECR-IMP-0422.regValueAmbiguous', N'kz', N'«{field}»: «{value}» үтір ондық бөлгіш ретінде оқылды. Бұл мыңдық бөлгіш емес екенін тексеріңіз.'),
+    (N'err.ECR-IMP-0422.regDuplicateParent', N'ru', N'Источник {key} встречается дважды: строки {firstRow} и {row}.'),
+    (N'err.ECR-IMP-0422.regDuplicateParent', N'kz', N'{key} көзі екі рет кездеседі: {firstRow} және {row} жолдары.'),
+    (N'err.ECR-IMP-0422.regDuplicateChild', N'ru', N'Вещество {key} встречается дважды у источника {parent}.'),
+    (N'err.ECR-IMP-0422.regDuplicateChild', N'kz', N'{key} заты {parent} көзінде екі рет кездеседі.'),
+    (N'err.ECR-IMP-0422.regReferenceMissing', N'ru', N'{kind} {key} отсутствует в системе. Создайте его или пропустите.'),
+    (N'err.ECR-IMP-0422.regReferenceMissing', N'kz', N'{kind} {key} жүйеде жоқ. Оны жасаңыз немесе өткізіп жіберіңіз.'),
+    (N'err.ECR-IMP-0422.regReferenceUnchecked', N'ru', N'Коды вида {kind} не проверены по системе.'),
+    (N'err.ECR-IMP-0422.regReferenceUnchecked', N'kz', N'{kind} түріндегі кодтар жүйе бойынша тексерілмеді.'),
+    (N'err.ECR-IMP-0422.regChildWithoutParent', N'ru', N'Строка {row}: у строки вещества нет источника выше.'),
+    (N'err.ECR-IMP-0422.regChildWithoutParent', N'kz', N'{row}-жол: заттың жолының үстінде көз жоқ.'),
+    (N'err.ECR-IMP-0422.regParentWithoutChildren', N'ru', N'У источника {key} нет строк веществ.'),
+    (N'err.ECR-IMP-0422.regParentWithoutChildren', N'kz', N'{key} көзінде заттардың жолдары жоқ.'),
+    (N'err.ECR-IMP-0422.regNoRows', N'ru', N'В файле нет строк данных.'),
+    (N'err.ECR-IMP-0422.regNoRows', N'kz', N'Файлда деректер жолдары жоқ.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- NAE:n4-import ── кінець секції ──
+-- NAE:n3-air ── ru/kz дозволів "Air Limits Import" (N3); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-IMP-0422.regValueEmpty', N'ru', N'«{field}» не заполнено. Строка импортируется без него.'),
+    (N'err.ECR-IMP-0422.regValueEmpty', N'kz', N'«{field}» толтырылмаған. Жол онсыз импортталады.'),
+    (N'err.ECR-IMP-0422.airRequestInvalid', N'ru', N'Запрос импорта не читается. Обновите страницу и повторите.'),
+    (N'err.ECR-IMP-0422.airRequestInvalid', N'kz', N'Импорт сұрауын оқу мүмкін емес. Бетті жаңартып, қайталаңыз.'),
+    (N'err.ECR-IMP-0422.airNotProvisioned', N'ru', N'Тип разрешения «Air Limits Import» ещё не настроен. Попросите администратора выполнить настройку.'),
+    (N'err.ECR-IMP-0422.airNotProvisioned', N'kz', N'«Air Limits Import» рұқсат түрі әлі бапталмаған. Әкімшіден баптауды сұраңыз.'),
+    (N'err.ECR-IMP-0422.airScopeInvalid', N'ru', N'Выберите регион импорта.'),
+    (N'err.ECR-IMP-0422.airScopeInvalid', N'kz', N'Импорт аймағын таңдаңыз.'),
+    (N'err.ECR-IMP-0422.airNotAirPermit', N'ru', N'Это разрешение не относится к типу «Air Limits Import».'),
+    (N'err.ECR-IMP-0422.airNotAirPermit', N'kz', N'Бұл рұқсат «Air Limits Import» түріне жатпайды.'),
+    (N'err.ECR-IMP-0422.airCreateUnderInvalid', N'ru', N'НАЕ {key} нельзя создать под выбранным узлом. Выберите площадку или группу оборудования.'),
+    (N'err.ECR-IMP-0422.airCreateUnderInvalid', N'kz', N'НАЕ {key} таңдалған түйін астында жасалмайды. Алаңды немесе жабдық тобын таңдаңыз.'),
+    (N'err.ECR-IMP-0422.airWriteRejected', N'ru', N'Импорт отклонён на {key} ({reason}). Ничего не импортировано.'),
+    (N'err.ECR-IMP-0422.airWriteRejected', N'kz', N'Импорт {key} жолында қабылданбады ({reason}). Ештеңе импортталмады.'),
+    (N'err.ECR-IMP-0422.airProfileUnknown', N'ru', N'Профиль импорта {code} не существует.'),
+    (N'err.ECR-IMP-0422.airProfileUnknown', N'kz', N'{code} импорт профилі жоқ.'),
+    (N'err.ECR-REG-0409.profileChanged', N'ru', N'Профиль импорта {code} изменили после открытия. Загрузите его заново.'),
+    (N'err.ECR-REG-0409.profileChanged', N'kz', N'{code} импорт профилін ашқаннан кейін өзгертті. Оны қайта жүктеңіз.'),
+    (N'err.ECR-REG-0404.importProfile', N'ru', N'Профиль импорта {code} не существует.'),
+    (N'err.ECR-REG-0404.importProfile', N'kz', N'{code} импорт профилі жоқ.'),
+    (N'registryAudit.airLimitsImport', N'ru', N'Импортированы лимиты: источников {sources}, строк веществ {substances}.'),
+    (N'registryAudit.airLimitsImport', N'kz', N'Лимиттер импортталды: көздер {sources}, заттар жолдары {substances}.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- NAE:n3-air ── кінець секції ──
 
 -- I18N:ru-kz-backfill 2026-09-30 ── ru/kz для ключів, що мали лише en (req-g2, rpt-views-health, реєстри, безпека, збір подій та ін.); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
@@ -25894,6 +26203,409 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- D465:pi-events ── кінець секції ──
+-- COLL:ui-permit-card ── ru/kz: картка лімітів "Air limits" дозволу (NAE-план N3); власна порція ──
+-- ⚠ kz — робочий переклад, на звірку термінологу.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.page.tabs.air', N'ru', N'Лимиты выбросов'),
+    (N'permits.page.tabs.air', N'kz', N'Шығарынды лимиттері'),
+    (N'permits.air.title', N'ru', N'Источники выбросов'),
+    (N'permits.air.title', N'kz', N'Шығарынды көздері'),
+    (N'permits.air.counts', N'ru', N'Источников: {sources} · строк веществ: {rows}'),
+    (N'permits.air.counts', N'kz', N'Көздер: {sources} · заттар жолдары: {rows}'),
+    (N'permits.air.import', N'ru', N'Импорт из Excel…'),
+    (N'permits.air.import', N'kz', N'Excel-ден импорттау…'),
+    (N'permits.air.empty.title', N'ru', N'Источников выбросов пока нет'),
+    (N'permits.air.empty.title', N'kz', N'Шығарынды көздері әлі жоқ'),
+    (N'permits.air.empty.text', N'ru', N'Загрузите таблицу лимитов из книги Excel, чтобы заполнить это разрешение.'),
+    (N'permits.air.empty.text', N'kz', N'Бұл рұқсатты толтыру үшін лимиттер кестесін Excel кітабынан жүктеңіз.'),
+    (N'permits.air.empty.readOnly', N'ru', N'В этом разрешении нет источников. Его можно смотреть, но нельзя импортировать в него.'),
+    (N'permits.air.empty.readOnly', N'kz', N'Бұл рұқсатта көздер жоқ. Оны көруге болады, бірақ импорттауға болмайды.'),
+    (N'permits.air.view.aria', N'ru', N'Вид карточки'),
+    (N'permits.air.view.aria', N'kz', N'Карточка көрінісі'),
+    (N'permits.air.view.sources', N'ru', N'Источники'),
+    (N'permits.air.view.sources', N'kz', N'Көздер'),
+    (N'permits.air.view.totals', N'ru', N'Итоги'),
+    (N'permits.air.view.totals', N'kz', N'Қорытындылар'),
+    (N'permits.air.filter.label', N'ru', N'Фильтр источников'),
+    (N'permits.air.filter.label', N'kz', N'Көздерді сүзу'),
+    (N'permits.air.filter.placeholder', N'ru', N'Фильтр: НАЕ, источник, вещество…'),
+    (N'permits.air.filter.placeholder', N'kz', N'Сүзгі: НАЕ, көз, зат…'),
+    (N'permits.air.filter.none', N'ru', N'Ничего не подходит под фильтр.'),
+    (N'permits.air.filter.none', N'kz', N'Сүзгіге ештеңе сәйкес келмейді.'),
+    (N'permits.air.sources.aria', N'ru', N'Таблица источников выбросов'),
+    (N'permits.air.sources.aria', N'kz', N'Шығарынды көздері кестесі'),
+    (N'permits.air.sources.toggle', N'ru', N'Показать вещества'),
+    (N'permits.air.sources.toggle', N'kz', N'Заттарды көрсету'),
+    (N'permits.air.sources.expand', N'ru', N'Вещества источника {nae}'),
+    (N'permits.air.sources.expand', N'kz', N'{nae} көзінің заттары'),
+    (N'permits.air.sources.nae', N'ru', N'НАЕ'),
+    (N'permits.air.sources.nae', N'kz', N'НАЕ'),
+    (N'permits.air.sources.source', N'ru', N'Источник'),
+    (N'permits.air.sources.source', N'kz', N'Көз'),
+    (N'permits.air.sources.point', N'ru', N'Точка выброса'),
+    (N'permits.air.sources.point', N'kz', N'Шығарынды нүктесі'),
+    (N'permits.air.sources.type', N'ru', N'Тип'),
+    (N'permits.air.sources.type', N'kz', N'Түрі'),
+    (N'permits.air.sources.quantity', N'ru', N'Кол-во'),
+    (N'permits.air.sources.quantity', N'kz', N'Саны'),
+    (N'permits.air.sources.hours', N'ru', N'Часов/год'),
+    (N'permits.air.sources.hours', N'kz', N'Сағат/жыл'),
+    (N'permits.air.sources.height', N'ru', N'Высота, м'),
+    (N'permits.air.sources.height', N'kz', N'Биіктігі, м'),
+    (N'permits.air.sources.diameter', N'ru', N'Диаметр, м'),
+    (N'permits.air.sources.diameter', N'kz', N'Диаметрі, м'),
+    (N'permits.air.sources.velocity', N'ru', N'Скорость, м/с'),
+    (N'permits.air.sources.velocity', N'kz', N'Жылдамдық, м/с'),
+    (N'permits.air.sources.volume', N'ru', N'Объём, м³/с'),
+    (N'permits.air.sources.volume', N'kz', N'Көлемі, м³/с'),
+    (N'permits.air.sources.temperature', N'ru', N'Темп., °C'),
+    (N'permits.air.sources.temperature', N'kz', N'Темп., °C'),
+    (N'permits.air.sources.substances', N'ru', N'Веществ'),
+    (N'permits.air.sources.substances', N'kz', N'Заттар'),
+    (N'permits.air.type.point', N'ru', N'Т — точечный источник'),
+    (N'permits.air.type.point', N'kz', N'Т — нүктелік көз'),
+    (N'permits.air.type.diffuse', N'ru', N'П1 — неорганизованный источник'),
+    (N'permits.air.type.diffuse', N'kz', N'П1 — ұйымдастырылмаған көз'),
+    (N'permits.air.type.pointShort', N'ru', N'Т'),
+    (N'permits.air.type.pointShort', N'kz', N'Т'),
+    (N'permits.air.type.diffuseShort', N'ru', N'П1'),
+    (N'permits.air.type.diffuseShort', N'kz', N'П1'),
+    (N'permits.air.substances.aria', N'ru', N'Вещества источника {nae}'),
+    (N'permits.air.substances.aria', N'kz', N'{nae} көзінің заттары'),
+    (N'permits.air.substances.code', N'ru', N'Код'),
+    (N'permits.air.substances.code', N'kz', N'Коды'),
+    (N'permits.air.substances.name', N'ru', N'Вещество'),
+    (N'permits.air.substances.name', N'kz', N'Зат'),
+    (N'permits.air.substances.gs', N'ru', N'г/с'),
+    (N'permits.air.substances.gs', N'kz', N'г/с'),
+    (N'permits.air.substances.mg', N'ru', N'мг/нм³'),
+    (N'permits.air.substances.mg', N'kz', N'мг/нм³'),
+    (N'permits.air.substances.ty', N'ru', N'т/год'),
+    (N'permits.air.substances.ty', N'kz', N'т/жыл'),
+    (N'permits.air.totals.aria', N'ru', N'Итоги по веществам'),
+    (N'permits.air.totals.aria', N'kz', N'Заттар бойынша қорытындылар'),
+    (N'permits.air.totals.sources', N'ru', N'Источников'),
+    (N'permits.air.totals.sources', N'kz', N'Көздер')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-permit-card ── кінець секції ──
+-- COLL:ui-air-import ── ru/kz: майстер імпорту лімітів із Excel (NAE-план N5); власна порція ──
+-- ⚠ kz — робочий переклад, на звірку термінологу.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permits.air.import.title', N'ru', N'Импорт из Excel'),
+    (N'permits.air.import.title', N'kz', N'Excel-ден импорттау'),
+    (N'permits.air.import.back', N'ru', N'Назад к {permit}'),
+    (N'permits.air.import.back', N'kz', N'{permit} рұқсатына оралу'),
+    (N'permits.air.import.unsupported.title', N'ru', N'Это не разрешение «Air Limits Import»'),
+    (N'permits.air.import.unsupported.title', N'kz', N'Бұл «Air Limits Import» рұқсаты емес'),
+    (N'permits.air.import.unsupported.text', N'ru', N'Импорт из Excel работает только для разрешений типа Air Limits Import.'),
+    (N'permits.air.import.unsupported.text', N'kz', N'Excel-ден импорттау тек Air Limits Import түріндегі рұқсаттарға жұмыс істейді.'),
+    (N'permits.air.import.expired.title', N'ru', N'Разрешение закончилось'),
+    (N'permits.air.import.expired.title', N'kz', N'Рұқсаттың мерзімі аяқталды'),
+    (N'permits.air.import.expired.text', N'ru', N'Данные закончившегося разрешения только для чтения: шаги ниже можно просмотреть, но не применить.'),
+    (N'permits.air.import.expired.text', N'kz', N'Мерзімі аяқталған рұқсат деректері тек оқуға арналған: төмендегі қадамдарды қарауға болады, бірақ қолдануға болмайды.'),
+    (N'permits.air.import.readOnly.title', N'ru', N'Только просмотр'),
+    (N'permits.air.import.readOnly.title', N'kz', N'Тек қарау'),
+    (N'permits.air.import.readOnly.text', N'ru', N'У вас нет права изменять данные разрешений, поэтому импорт запустить нельзя.'),
+    (N'permits.air.import.readOnly.text', N'kz', N'Рұқсат деректерін өзгерту құқығыңыз жоқ, сондықтан импортты іске қосу мүмкін емес.'),
+    (N'permits.air.import.steps.aria', N'ru', N'Шаги импорта'),
+    (N'permits.air.import.steps.aria', N'kz', N'Импорт қадамдары'),
+    (N'permits.air.import.step.file', N'ru', N'Файл'),
+    (N'permits.air.import.step.file', N'kz', N'Файл'),
+    (N'permits.air.import.step.mapping', N'ru', N'Соответствие'),
+    (N'permits.air.import.step.mapping', N'kz', N'Сәйкестік'),
+    (N'permits.air.import.step.preview', N'ru', N'Просмотр'),
+    (N'permits.air.import.step.preview', N'kz', N'Қарап шығу'),
+    (N'permits.air.import.step.apply', N'ru', N'Результат'),
+    (N'permits.air.import.step.apply', N'kz', N'Нәтиже'),
+    (N'permits.air.import.hint.file', N'ru', N'Выберите книгу, регион и участок, к которым относятся лимиты.'),
+    (N'permits.air.import.hint.file', N'kz', N'Лимиттер қатысты кітапты, аймақты және учаскені таңдаңыз.'),
+    (N'permits.air.import.hint.mapping', N'ru', N'Проверьте, как колонки файла сопоставлены полям. Пока ничего не сохраняется.'),
+    (N'permits.air.import.hint.mapping', N'kz', N'Файл бағандары өрістерге қалай сәйкестендірілгенін тексеріңіз. Әзірге ештеңе сақталмайды.'),
+    (N'permits.air.import.hint.preview', N'ru', N'Решите вопрос с отсутствующими кодами НАЕ, прочитайте замечания и подтвердите, что будет заменено.'),
+    (N'permits.air.import.hint.preview', N'kz', N'Жоқ НАЕ кодтарын шешіңіз, ескертпелерді оқыңыз және нені ауыстыратынын растаңыз.'),
+    (N'permits.air.import.hint.apply', N'ru', N'Импорт применён одной транзакцией.'),
+    (N'permits.air.import.hint.apply', N'kz', N'Импорт бір транзакциямен қолданылды.'),
+    (N'permits.air.import.analyse', N'ru', N'Далее: разобрать файл'),
+    (N'permits.air.import.analyse', N'kz', N'Келесі: файлды талдау'),
+    (N'permits.air.import.toPreview', N'ru', N'Далее: просмотр'),
+    (N'permits.air.import.toPreview', N'kz', N'Келесі: қарап шығу'),
+    (N'permits.air.import.apply', N'ru', N'Применить импорт (всё или ничего)'),
+    (N'permits.air.import.apply', N'kz', N'Импортты қолдану (бәрі немесе ештеңе)'),
+    (N'permits.air.import.rerun', N'ru', N'Повторить просмотр'),
+    (N'permits.air.import.rerun', N'kz', N'Қарап шығуды қайталау'),
+    (N'permits.air.import.file.label', N'ru', N'Книга Excel'),
+    (N'permits.air.import.file.label', N'kz', N'Excel кітабы'),
+    (N'permits.air.import.file.hint', N'ru', N'Файл .xlsx с таблицей лимитов выбросов.'),
+    (N'permits.air.import.file.hint', N'kz', N'Шығарынды лимиттері кестесі бар .xlsx файлы.'),
+    (N'permits.air.import.file.placeholder', N'ru', N'Выберите файл'),
+    (N'permits.air.import.file.placeholder', N'kz', N'Файлды таңдаңыз'),
+    (N'permits.air.import.file.required', N'ru', N'Выберите книгу.'),
+    (N'permits.air.import.file.required', N'kz', N'Кітапты таңдаңыз.'),
+    (N'permits.air.import.file.extension', N'ru', N'Принимаются только книги .xlsx.'),
+    (N'permits.air.import.file.extension', N'kz', N'Тек .xlsx кітаптары қабылданады.'),
+    (N'permits.air.import.profile.label', N'ru', N'Профиль импорта'),
+    (N'permits.air.import.profile.label', N'kz', N'Импорт профилі'),
+    (N'permits.air.import.profile.hint', N'ru', N'Описывает, где в файле шапка и колонки.'),
+    (N'permits.air.import.profile.hint', N'kz', N'Файлда тақырып пен бағандар қайда екенін сипаттайды.'),
+    (N'permits.air.import.region.label', N'ru', N'Регион'),
+    (N'permits.air.import.region.label', N'kz', N'Аймақ'),
+    (N'permits.air.import.region.hint', N'ru', N'Регионы, для которых в дереве НАЕ есть источники.'),
+    (N'permits.air.import.region.hint', N'kz', N'НАЕ ағашында көздері бар аймақтар.'),
+    (N'permits.air.import.region.required', N'ru', N'Выберите регион.'),
+    (N'permits.air.import.region.required', N'kz', N'Аймақты таңдаңыз.'),
+    (N'permits.air.import.area.label', N'ru', N'Участок'),
+    (N'permits.air.import.area.label', N'kz', N'Учаске'),
+    (N'permits.air.import.area.hint', N'ru', N'Участки выбранного региона; «Без участка», если у региона их нет.'),
+    (N'permits.air.import.area.hint', N'kz', N'Таңдалған аймақтың учаскелері; жоқ болса «Учаскесіз».'),
+    (N'permits.air.import.area.required', N'ru', N'Выберите участок.'),
+    (N'permits.air.import.area.required', N'kz', N'Учаскені таңдаңыз.'),
+    (N'permits.air.import.area.none', N'ru', N'Без участка'),
+    (N'permits.air.import.area.none', N'kz', N'Учаскесіз'),
+    (N'permits.air.import.scope.empty', N'ru', N'В дереве НАЕ нет регионов'),
+    (N'permits.air.import.scope.empty', N'kz', N'НАЕ ағашында аймақтар жоқ'),
+    (N'permits.air.import.scope.emptyHint', N'ru', N'Сначала загрузите или создайте узлы НАЕ: списки регионов и участков берутся из дерева НАЕ.'),
+    (N'permits.air.import.scope.emptyHint', N'kz', N'Алдымен НАЕ түйіндерін жүктеңіз немесе жасаңыз: аймақ пен учаске тізімі НАЕ ағашынан алынады.'),
+    (N'permits.air.import.scopeNote', N'ru', N'Импорт заменяет строки этого разрешения по выбранным региону и участку, а также строки других разрешений по тем же НАЕ (с вашего подтверждения).'),
+    (N'permits.air.import.scopeNote', N'kz', N'Импорт осы рұқсаттың таңдалған аймақ пен учаске бойынша жолдарын, сондай-ақ сол НАЕ бойынша басқа рұқсаттардың жолдарын (сіздің растауыңызбен) ауыстырады.'),
+    (N'permits.air.import.stats.parents', N'ru', N'НАЕ в файле'),
+    (N'permits.air.import.stats.parents', N'kz', N'Файлдағы НАЕ'),
+    (N'permits.air.import.stats.children', N'ru', N'Строк веществ'),
+    (N'permits.air.import.stats.children', N'kz', N'Заттар жолдары'),
+    (N'permits.air.import.stats.distinct', N'ru', N'Разных веществ'),
+    (N'permits.air.import.stats.distinct', N'kz', N'Әртүрлі заттар'),
+    (N'permits.air.import.stats.missing', N'ru', N'Нет в дереве'),
+    (N'permits.air.import.stats.missing', N'kz', N'Ағашта жоқ'),
+    (N'permits.air.import.stats.errors', N'ru', N'Ошибок'),
+    (N'permits.air.import.stats.errors', N'kz', N'Қателер'),
+    (N'permits.air.import.stats.warnings', N'ru', N'Предупреждений'),
+    (N'permits.air.import.stats.warnings', N'kz', N'Ескертулер'),
+    (N'permits.air.import.map.header', N'ru', N'Строки шапки {from}–{to} · данные с строки {data} · групповых строк {groups} · пропущено строк {skipped}'),
+    (N'permits.air.import.map.header', N'kz', N'Тақырып жолдары {from}–{to} · деректер {data}-жолдан · топтық жолдар {groups} · өткізілген жолдар {skipped}'),
+    (N'permits.air.import.map.mappedAria', N'ru', N'Сопоставленные колонки'),
+    (N'permits.air.import.map.mappedAria', N'kz', N'Сәйкестендірілген бағандар'),
+    (N'permits.air.import.map.field', N'ru', N'Целевое поле'),
+    (N'permits.air.import.map.field', N'kz', N'Мақсатты өріс'),
+    (N'permits.air.import.map.headerText', N'ru', N'Заголовок в файле'),
+    (N'permits.air.import.map.headerText', N'kz', N'Файлдағы тақырып'),
+    (N'permits.air.import.map.matched', N'ru', N'Колонка'),
+    (N'permits.air.import.map.matched', N'kz', N'Баған'),
+    (N'permits.air.import.map.level', N'ru', N'Уровень'),
+    (N'permits.air.import.map.level', N'kz', N'Деңгей'),
+    (N'permits.air.import.map.parser', N'ru', N'Разбор'),
+    (N'permits.air.import.map.parser', N'kz', N'Талдау'),
+    (N'permits.air.import.map.required', N'ru', N'Обязательное'),
+    (N'permits.air.import.map.required', N'kz', N'Міндетті'),
+    (N'permits.air.import.map.patterns', N'ru', N'Шаблоны заголовка (варианты через |)'),
+    (N'permits.air.import.map.patterns', N'kz', N'Тақырып үлгілері (нұсқалар | арқылы)'),
+    (N'permits.air.import.map.patternsHint', N'ru', N'Несколько вариантов текста заголовка разделяются знаком |. Запись a…b означает «a, затем b дальше в составном заголовке».'),
+    (N'permits.air.import.map.patternsHint', N'kz', N'Тақырып мәтінінің бірнеше нұсқасы | белгісімен бөлінеді. a…b жазбасы «a, содан кейін құрама тақырыпта b» дегенді білдіреді.'),
+    (N'permits.air.import.map.editorAria', N'ru', N'Редактор соответствия'),
+    (N'permits.air.import.map.editorAria', N'kz', N'Сәйкестік редакторы'),
+    (N'permits.air.import.map.fieldName', N'ru', N'Имя поля'),
+    (N'permits.air.import.map.fieldName', N'kz', N'Өріс атауы'),
+    (N'permits.air.import.map.patternsFor', N'ru', N'Шаблоны заголовка поля {field}'),
+    (N'permits.air.import.map.patternsFor', N'kz', N'{field} өрісінің тақырып үлгілері'),
+    (N'permits.air.import.map.levelFor', N'ru', N'Уровень поля {field}'),
+    (N'permits.air.import.map.levelFor', N'kz', N'{field} өрісінің деңгейі'),
+    (N'permits.air.import.map.parserFor', N'ru', N'Разбор поля {field}'),
+    (N'permits.air.import.map.parserFor', N'kz', N'{field} өрісін талдау'),
+    (N'permits.air.import.map.requiredFor', N'ru', N'Поле {field} обязательное'),
+    (N'permits.air.import.map.requiredFor', N'kz', N'{field} өрісі міндетті'),
+    (N'permits.air.import.map.removeFor', N'ru', N'Удалить поле {field}'),
+    (N'permits.air.import.map.removeFor', N'kz', N'{field} өрісін жою'),
+    (N'permits.air.import.map.remove', N'ru', N'Удалить'),
+    (N'permits.air.import.map.remove', N'kz', N'Жою'),
+    (N'permits.air.import.map.notFound', N'ru', N'не найдена'),
+    (N'permits.air.import.map.notFound', N'kz', N'табылмады'),
+    (N'permits.air.import.map.newName', N'ru', N'Имя нового поля'),
+    (N'permits.air.import.map.newName', N'kz', N'Жаңа өріс атауы'),
+    (N'permits.air.import.map.add', N'ru', N'Добавить поле'),
+    (N'permits.air.import.map.add', N'kz', N'Өріс қосу'),
+    (N'permits.air.import.map.edit', N'ru', N'Изменить соответствие'),
+    (N'permits.air.import.map.edit', N'kz', N'Сәйкестікті өзгерту'),
+    (N'permits.air.import.map.discard', N'ru', N'Отменить изменения'),
+    (N'permits.air.import.map.discard', N'kz', N'Өзгерістерді болдырмау'),
+    (N'permits.air.import.map.reanalyse', N'ru', N'Разобрать файл заново'),
+    (N'permits.air.import.map.reanalyse', N'kz', N'Файлды қайта талдау'),
+    (N'permits.air.import.map.reanalyseFirst', N'ru', N'Соответствие изменено: разберите файл заново перед просмотром.'),
+    (N'permits.air.import.map.reanalyseFirst', N'kz', N'Сәйкестік өзгертілді: қарап шығу алдында файлды қайта талдаңыз.'),
+    (N'permits.air.import.map.saveProfile', N'ru', N'Сохранить как профиль…'),
+    (N'permits.air.import.map.saveProfile', N'kz', N'Профиль ретінде сақтау…'),
+    (N'permits.air.import.map.problemTitle', N'ru', N'Соответствие некорректно'),
+    (N'permits.air.import.map.problemTitle', N'kz', N'Сәйкестік жарамсыз'),
+    (N'permits.air.import.map.nameRequired', N'ru', N'У каждого поля должно быть имя.'),
+    (N'permits.air.import.map.nameRequired', N'kz', N'Әр өрістің атауы болуы керек.'),
+    (N'permits.air.import.map.nameDuplicate', N'ru', N'Имена полей должны быть уникальными.'),
+    (N'permits.air.import.map.nameDuplicate', N'kz', N'Өріс атаулары бірегей болуы керек.'),
+    (N'permits.air.import.map.unmapped', N'ru', N'Колонок без соответствия: {count}'),
+    (N'permits.air.import.map.unmapped', N'kz', N'Сәйкестігі жоқ бағандар: {count}'),
+    (N'permits.air.import.map.hasData', N'ru', N'есть данные'),
+    (N'permits.air.import.map.hasData', N'kz', N'деректер бар'),
+    (N'permits.air.import.save.code', N'ru', N'Код профиля'),
+    (N'permits.air.import.save.code', N'kz', N'Профиль коды'),
+    (N'permits.air.import.save.codeHint', N'ru', N'Латинские заглавные буквы, цифры и _ (2–64 символа).'),
+    (N'permits.air.import.save.codeHint', N'kz', N'Латын бас әріптері, сандар және _ (2–64 таңба).'),
+    (N'permits.air.import.save.codeInvalid', N'ru', N'Начните с заглавной буквы; только A–Z, 0–9 и _.'),
+    (N'permits.air.import.save.codeInvalid', N'kz', N'Бас әріптен бастаңыз; тек A–Z, 0–9 және _.'),
+    (N'permits.air.import.save.name', N'ru', N'Название профиля'),
+    (N'permits.air.import.save.name', N'kz', N'Профиль атауы'),
+    (N'permits.air.import.save.nameRequired', N'ru', N'Укажите название.'),
+    (N'permits.air.import.save.nameRequired', N'kz', N'Атауын көрсетіңіз.'),
+    (N'permits.air.import.save.submit', N'ru', N'Сохранить профиль'),
+    (N'permits.air.import.save.submit', N'kz', N'Профильді сақтау'),
+    (N'permits.air.import.save.done', N'ru', N'Профиль {code} сохранён и выбран.'),
+    (N'permits.air.import.save.done', N'kz', N'{code} профилі сақталды және таңдалды.'),
+    (N'permits.air.import.issues.title', N'ru', N'Замечания'),
+    (N'permits.air.import.issues.title', N'kz', N'Ескертпелер'),
+    (N'permits.air.import.issues.aria', N'ru', N'Замечания к импорту'),
+    (N'permits.air.import.issues.aria', N'kz', N'Импорт ескертпелері'),
+    (N'permits.air.import.issues.none', N'ru', N'Замечаний нет.'),
+    (N'permits.air.import.issues.none', N'kz', N'Ескертпелер жоқ.'),
+    (N'permits.air.import.issues.severity', N'ru', N'Важность'),
+    (N'permits.air.import.issues.severity', N'kz', N'Маңыздылығы'),
+    (N'permits.air.import.issues.error', N'ru', N'Ошибка'),
+    (N'permits.air.import.issues.error', N'kz', N'Қате'),
+    (N'permits.air.import.issues.warning', N'ru', N'Предупреждение'),
+    (N'permits.air.import.issues.warning', N'kz', N'Ескерту'),
+    (N'permits.air.import.issues.row', N'ru', N'Строка'),
+    (N'permits.air.import.issues.row', N'kz', N'Жол'),
+    (N'permits.air.import.issues.column', N'ru', N'Колонка'),
+    (N'permits.air.import.issues.column', N'kz', N'Баған'),
+    (N'permits.air.import.issues.field', N'ru', N'Поле'),
+    (N'permits.air.import.issues.field', N'kz', N'Өріс'),
+    (N'permits.air.import.issues.message', N'ru', N'Сообщение'),
+    (N'permits.air.import.issues.message', N'kz', N'Хабарлама'),
+    (N'permits.air.import.issues.more', N'ru', N'Показать ещё (показано {shown} из {total})'),
+    (N'permits.air.import.issues.more', N'kz', N'Көбірек көрсету ({total} ішінен {shown} көрсетілді)'),
+    (N'permits.air.import.issues.dropped', N'ru', N'Сервер отбросил ещё замечаний: {count}.'),
+    (N'permits.air.import.issues.dropped', N'kz', N'Сервер тағы ескертпелерді қалдырды: {count}.'),
+    (N'permits.air.import.missing.title', N'ru', N'Кодов НАЕ нет в дереве: {count}'),
+    (N'permits.air.import.missing.title', N'kz', N'Ағашта жоқ НАЕ кодтары: {count}'),
+    (N'permits.air.import.missing.hint', N'ru', N'Для каждого кода выберите: создать под узлом дерева НАЕ или пропустить. Перед применением нужно решить по всем кодам.'),
+    (N'permits.air.import.missing.hint', N'kz', N'Әр код үшін таңдаңыз: НАЕ ағашының түйіні астында жасау немесе өткізіп жіберу. Қолдану алдында барлық кодтар бойынша шешім қабылдау керек.'),
+    (N'permits.air.import.missing.aria', N'ru', N'Коды НАЕ, которых нет в дереве'),
+    (N'permits.air.import.missing.aria', N'kz', N'Ағашта жоқ НАЕ кодтары'),
+    (N'permits.air.import.missing.code', N'ru', N'НАЕ'),
+    (N'permits.air.import.missing.code', N'kz', N'НАЕ'),
+    (N'permits.air.import.missing.group', N'ru', N'Групповая строка в файле'),
+    (N'permits.air.import.missing.group', N'kz', N'Файлдағы топтық жол'),
+    (N'permits.air.import.missing.action', N'ru', N'Действие'),
+    (N'permits.air.import.missing.action', N'kz', N'Әрекет'),
+    (N'permits.air.import.missing.actionFor', N'ru', N'Действие для НАЕ {code}'),
+    (N'permits.air.import.missing.actionFor', N'kz', N'{code} НАЕ үшін әрекет'),
+    (N'permits.air.import.missing.underFor', N'ru', N'Узел, под которым создать НАЕ {code}'),
+    (N'permits.air.import.missing.underFor', N'kz', N'{code} НАЕ жасалатын түйін'),
+    (N'permits.air.import.missing.choose', N'ru', N'Выберите…'),
+    (N'permits.air.import.missing.choose', N'kz', N'Таңдаңыз…'),
+    (N'permits.air.import.missing.create', N'ru', N'Создать под узлом'),
+    (N'permits.air.import.missing.create', N'kz', N'Түйін астында жасау'),
+    (N'permits.air.import.missing.skip', N'ru', N'Пропустить этот НАЕ'),
+    (N'permits.air.import.missing.skip', N'kz', N'Бұл НАЕ-ні өткізу'),
+    (N'permits.air.import.missing.skipAll', N'ru', N'Пропустить все нерешённые ({count})'),
+    (N'permits.air.import.missing.skipAll', N'kz', N'Шешілмеген барлығын өткізу ({count})'),
+    (N'permits.air.import.missing.under', N'ru', N'Выберите узел…'),
+    (N'permits.air.import.missing.under', N'kz', N'Түйінді таңдаңыз…'),
+    (N'permits.air.import.missing.noNodes', N'ru', N'Узлов не найдено'),
+    (N'permits.air.import.missing.noNodes', N'kz', N'Түйіндер табылмады'),
+    (N'permits.air.import.replace.title', N'ru', N'Что заменит этот импорт'),
+    (N'permits.air.import.replace.title', N'kz', N'Бұл импорт нені ауыстырады'),
+    (N'permits.air.import.replace.scope', N'ru', N'Разрешение {permit} · регион {region} · участок {area}'),
+    (N'permits.air.import.replace.scope', N'kz', N'{permit} рұқсаты · аймақ {region} · учаске {area}'),
+    (N'permits.air.import.replace.new', N'ru', N'Новые строки источников'),
+    (N'permits.air.import.replace.new', N'kz', N'Көздердің жаңа жолдары'),
+    (N'permits.air.import.replace.thisOwner', N'ru', N'Заменяется в ЭТОМ разрешении'),
+    (N'permits.air.import.replace.thisOwner', N'kz', N'ОСЫ рұқсатта ауыстырылады'),
+    (N'permits.air.import.replace.counts', N'ru', N'НАЕ: {parents} · строк: {rows}'),
+    (N'permits.air.import.replace.counts', N'kz', N'НАЕ: {parents} · жолдар: {rows}'),
+    (N'permits.air.import.replace.others', N'ru', N'Также заменяются — ДРУГИЕ разрешения по тем же НАЕ'),
+    (N'permits.air.import.replace.others', N'kz', N'Сондай-ақ ауыстырылады — сол НАЕ бойынша БАСҚА рұқсаттар'),
+    (N'permits.air.import.replace.owner', N'ru', N'{label}: НАЕ {parents} · строк {rows}'),
+    (N'permits.air.import.replace.owner', N'kz', N'{label}: НАЕ {parents} · жолдар {rows}'),
+    (N'permits.air.import.replace.confirm', N'ru', N'Я понимаю, что строки перечисленных выше других разрешений будут заменены.'),
+    (N'permits.air.import.replace.confirm', N'kz', N'Жоғарыда аталған басқа рұқсаттардың жолдары ауыстырылатынын түсінемін.'),
+    (N'permits.air.import.diff.aria', N'ru', N'Изменения по источникам'),
+    (N'permits.air.import.diff.aria', N'kz', N'Көздер бойынша өзгерістер'),
+    (N'permits.air.import.diff.new', N'ru', N'Новых'),
+    (N'permits.air.import.diff.new', N'kz', N'Жаңа'),
+    (N'permits.air.import.diff.changed', N'ru', N'Изменённых'),
+    (N'permits.air.import.diff.changed', N'kz', N'Өзгерген'),
+    (N'permits.air.import.diff.unchanged', N'ru', N'Без изменений'),
+    (N'permits.air.import.diff.unchanged', N'kz', N'Өзгеріссіз'),
+    (N'permits.air.import.diff.removed', N'ru', N'Удаляемых'),
+    (N'permits.air.import.diff.removed', N'kz', N'Жойылатын'),
+    (N'permits.air.import.diff.skipped', N'ru', N'Пропущено по решению'),
+    (N'permits.air.import.diff.skipped', N'kz', N'Шешім бойынша өткізілген'),
+    (N'permits.air.import.gate.aria', N'ru', N'Почему импорт пока нельзя применить'),
+    (N'permits.air.import.gate.aria', N'kz', N'Импортты неге әлі қолдануға болмайды'),
+    (N'permits.air.import.gate.errors', N'ru', N'В файле есть ошибки — исправьте их и загрузите снова.'),
+    (N'permits.air.import.gate.errors', N'kz', N'Файлда қателер бар — оларды түзетіп, қайта жүктеңіз.'),
+    (N'permits.air.import.gate.unresolved', N'ru', N'Решите по каждому отсутствующему коду НАЕ: создать или пропустить.'),
+    (N'permits.air.import.gate.unresolved', N'kz', N'Жоқ НАЕ кодтарының бәрі бойынша шешіңіз: жасау немесе өткізу.'),
+    (N'permits.air.import.gate.confirm', N'ru', N'Подтвердите замену строк других разрешений.'),
+    (N'permits.air.import.gate.confirm', N'kz', N'Басқа рұқсаттар жолдарын ауыстыруды растаңыз.'),
+    (N'permits.air.import.gate.stale', N'ru', N'Параметры изменились после просмотра — повторите просмотр.'),
+    (N'permits.air.import.gate.stale', N'kz', N'Қарап шыққаннан кейін параметрлер өзгерді — қарап шығуды қайталаңыз.'),
+    (N'permits.air.import.stale.title', N'ru', N'Просмотр устарел'),
+    (N'permits.air.import.stale.title', N'kz', N'Қарап шығу ескірді'),
+    (N'permits.air.import.stale.text', N'ru', N'Решения или план изменились. Повторите просмотр перед применением.'),
+    (N'permits.air.import.stale.text', N'kz', N'Шешімдер немесе жоспар өзгерді. Қолдану алдында қарап шығуды қайталаңыз.'),
+    (N'permits.air.import.done.title', N'ru', N'Импорт применён к {permit}'),
+    (N'permits.air.import.done.title', N'kz', N'Импорт {permit} рұқсатына қолданылды'),
+    (N'permits.air.import.done.text', N'ru', N'Карточка разрешения теперь показывает загруженные источники и вещества.'),
+    (N'permits.air.import.done.text', N'kz', N'Рұқсат карточкасында енді жүктелген көздер мен заттар көрінеді.'),
+    (N'permits.air.import.done.toast', N'ru', N'Лимиты импортированы в {permit}'),
+    (N'permits.air.import.done.toast', N'kz', N'Лимиттер {permit} рұқсатына импортталды'),
+    (N'permits.air.import.done.sources', N'ru', N'Источников в разрешении'),
+    (N'permits.air.import.done.sources', N'kz', N'Рұқсаттағы көздер'),
+    (N'permits.air.import.done.substances', N'ru', N'Добавлено строк веществ'),
+    (N'permits.air.import.done.substances', N'kz', N'Қосылған заттар жолдары'),
+    (N'permits.air.import.done.createdNae', N'ru', N'НАЕ создано в дереве'),
+    (N'permits.air.import.done.createdNae', N'kz', N'Ағашта жасалған НАЕ'),
+    (N'permits.air.import.done.replacedOwn', N'ru', N'Заменено своих строк'),
+    (N'permits.air.import.done.replacedOwn', N'kz', N'Ауыстырылған өз жолдары'),
+    (N'permits.air.import.done.others', N'ru', N'Заменённые строки других разрешений'),
+    (N'permits.air.import.done.others', N'kz', N'Ауыстырылған басқа рұқсаттар жолдары'),
+    (N'permits.air.import.done.fingerprint', N'ru', N'Отпечаток плана: {value}'),
+    (N'permits.air.import.done.fingerprint', N'kz', N'Жоспар іздері: {value}'),
+    (N'permits.air.import.done.open', N'ru', N'Открыть карточку разрешения'),
+    (N'permits.air.import.done.open', N'kz', N'Рұқсат карточкасын ашу')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-air-import ── кінець секції ──
+-- COLL:ui-docs-version-col ── ru/kz: колонка «Version» переліку документів; власна порція ──
+-- ⚠ kz — робочий переклад, на звірку термінологу.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'documents.versionColumn', N'ru', N'Версия'),
+    (N'documents.versionColumn', N'kz', N'Нұсқа'),
+    (N'documents.versionValue', N'ru', N'v{version}'),
+    (N'documents.versionValue', N'kz', N'v{version}'),
+    (N'documents.versionUnknown', N'ru', N'Версия шаблона не показана'),
+    (N'documents.versionUnknown', N'kz', N'Үлгі нұсқасы көрсетілмейді'),
+    (N'documents.versionForPeriod', N'ru', N'Версия шаблона за {period}'),
+    (N'documents.versionForPeriod', N'kz', N'{period} үшін үлгі нұсқасы'),
+    (N'documents.versionSortBy', N'ru', N'Сортировать по версии (документы этой страницы)'),
+    (N'documents.versionSortBy', N'kz', N'Нұсқа бойынша сұрыптау (осы беттегі құжаттар)'),
+    (N'documents.versionSortedAsc', N'ru', N'по возрастанию'),
+    (N'documents.versionSortedAsc', N'kz', N'өсу бойынша'),
+    (N'documents.versionSortedDesc', N'ru', N'по убыванию'),
+    (N'documents.versionSortedDesc', N'kz', N'кему бойынша'),
+    (N'documents.versionAll', N'ru', N'Все версии'),
+    (N'documents.versionAll', N'kz', N'Барлық нұсқалар'),
+    (N'documents.versionFilterHint', N'ru', N'Фильтрует документы, загруженные на этой странице'),
+    (N'documents.versionFilterHint', N'kz', N'Осы бетке жүктелген құжаттарды сүзеді')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-docs-version-col ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

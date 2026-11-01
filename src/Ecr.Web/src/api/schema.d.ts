@@ -4,6 +4,313 @@
  */
 
 export interface paths {
+    "/api/v1/air-limits/import-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Import profiles of the sources table. Permission `Registry.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ImportProfileSummaryDto"][];
+                        "text/json": components["schemas"]["ImportProfileSummaryDto"][];
+                        "text/plain": components["schemas"]["ImportProfileSummaryDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/air-limits/import-profiles/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One import profile with its specification. Permission `Registry.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Profile code. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ImportProfileDto"];
+                        "text/json": components["schemas"]["ImportProfileDto"];
+                        "text/plain": components["schemas"]["ImportProfileDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Creates or replaces an import profile. Permission `Registry.EditDefinition`. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Profile code. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveImportProfileRequest"];
+                    "application/json": components["schemas"]["SaveImportProfileRequest"];
+                    "text/json": components["schemas"]["SaveImportProfileRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ImportProfileDto"];
+                        "text/json": components["schemas"]["ImportProfileDto"];
+                        "text/plain": components["schemas"]["ImportProfileDto"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/air-limits/import/analyse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Wizard steps 1-3: reads the workbook with a profile (or an unsaved specification) and reports the header block, the
+         *     mapped and unmapped columns, counts and findings. Stateless: nothing is stored. Permission `Registry.EditData`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    } & {
+                        request?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirLimitsAnalysisDto"];
+                        "text/json": components["schemas"]["AirLimitsAnalysisDto"];
+                        "text/plain": components["schemas"]["AirLimitsAnalysisDto"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/air-limits/provision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Makes sure the permit type `AIR_LIMITS` ("Air Limits Import") is published with its two tables and that the built-in
+         *     import profile `ERA_TABLE_33` exists. Needs `Permit.EditType` and `Permit.PublishType`.
+         * @description Idempotent: a published type is left as it is (it is never edited by this call). The substance registry the type points at
+         *     (`LAND_AIR_SUBSTANCE` by default) must exist, otherwise `422 ECR-PRM-0422`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirLimitsProvisionReport"];
+                        "text/json": components["schemas"]["AirLimitsProvisionReport"];
+                        "text/plain": components["schemas"]["AirLimitsProvisionReport"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/air-limits/scope-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Region codes and, per region, area codes used by the NAE tree (with the names of its group nodes) - what the import wizard
+         *     offers instead of free text. Permission `Registry.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirScopeCodesDto"];
+                        "text/json": components["schemas"]["AirScopeCodesDto"];
+                        "text/plain": components["schemas"]["AirScopeCodesDto"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit/cells": {
         parameters: {
             query?: never;
@@ -12781,6 +13088,213 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/permits/{permitId}/air-limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Permit card content: sources (NAE) with their substances and totals per substance. Permission `Registry.View` or grant
+         *     `Read` on the permit's registry. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Permit (header registry entry id). */
+                    permitId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirLimitsPermitDto"];
+                        "text/json": components["schemas"]["AirLimitsPermitDto"];
+                        "text/plain": components["schemas"]["AirLimitsPermitDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permits/{permitId}/air-limits/import/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Wizard step 5: applies the import in ONE transaction (delete the replaced rows, create the missing NAE nodes, insert).
+         *     Permission `Registry.EditData`.
+         * @description All or nothing: an error row, an unconfirmed replacement of another permit (`regReplaceNotConfirmed`) or a plan that
+         *     differs from the previewed one (`regPlanChanged`) writes nothing.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Permit (header registry entry id). */
+                    permitId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    } & {
+                        request?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirLimitsImportResultDto"];
+                        "text/json": components["schemas"]["AirLimitsImportResultDto"];
+                        "text/plain": components["schemas"]["AirLimitsImportResultDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permits/{permitId}/air-limits/import/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Wizard step 4: preview of the import into a permit. Nothing is written. Permission `Registry.EditData` on the permit's
+         *     tables.
+         * @description Errors block the apply (`canApply = false`); warnings (for example an empty `tonsPerYear`) are listed per row and do
+         *     not. `replace` lists the permit's own rows and the rows of OTHER permits for the same NAE that the apply would replace.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Permit (header registry entry id). */
+                    permitId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Cancellation token. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    } & {
+                        request?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AirLimitsPreviewDto"];
+                        "text/json": components["schemas"]["AirLimitsPreviewDto"];
+                        "text/plain": components["schemas"]["AirLimitsPreviewDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects": {
         parameters: {
             query?: never;
@@ -24747,6 +25261,292 @@ export interface components {
         };
         /** @enum {unknown} */
         AggregationKind: "Sum" | "Avg" | "Min" | "Max" | "Last" | "First" | "TimeWeightedAvg" | "TimeIntegral" | null;
+        /** @description One area of a region. */
+        AirAreaCodeDto: {
+            /** @description Normalised area code (what `area` of the import options takes). */
+            code: string;
+            /** @description Name of the area group node, when the tree has one. */
+            name: null | string;
+        };
+        /** @description Result of `POST /api/v1/air-limits/import/analyse`: layout of the file, no database. */
+        AirLimitsAnalysisDto: {
+            /** @description Header block, mapped and unmapped columns, counts, findings. */
+            analysis: components["schemas"]["ImportAnalysis"];
+            /** @description Profile used; `null` for an unsaved specification. */
+            profileCode: null | string;
+        };
+        /** @description Result of `POST /api/v1/permits/{permitId}/air-limits/import/apply`. */
+        AirLimitsImportResultDto: {
+            /** @description Area code. */
+            area: string;
+            /**
+             * Format: int32
+             * @description NAE nodes created in the tree.
+             */
+            createdNae: number;
+            /** @description New / changed / unchanged / removed counts. */
+            diff: components["schemas"]["ImportDiffCounts"];
+            /** @description Hash of the uploaded file. */
+            fileSha256: string;
+            /** @description Fingerprint of the applied plan (equals the preview's). */
+            fingerprint: string;
+            /**
+             * Format: int64
+             * @description Permit.
+             */
+            permitId: number;
+            /** @description Permit number. */
+            permitNumber: string;
+            /** @description Region code. */
+            region: string;
+            /** @description Rows of OTHER permits that were replaced (confirmed), per permit. */
+            replacedOthers: components["schemas"]["OwnerReplace"][];
+            /**
+             * Format: int32
+             * @description The permit's own source rows that were replaced.
+             */
+            replacedOwn: number;
+            /**
+             * Format: int32
+             * @description Source rows now in the permit for this region and area.
+             */
+            sources: number;
+            /**
+             * Format: int32
+             * @description Substance rows inserted.
+             */
+            substances: number;
+        };
+        /** @description Result of `GET /api/v1/permits/{permitId}/air-limits`: the permit card content. */
+        AirLimitsPermitDto: {
+            /**
+             * Format: int64
+             * @description Permit.
+             */
+            permitId: number;
+            /** @description Permit number. */
+            permitNumber: string;
+            /** @description Sources with substances, by NAE code. */
+            sources: components["schemas"]["AirSourceDto"][];
+            /**
+             * Format: int32
+             * @description Substance rows in all sources.
+             */
+            substanceRows: number;
+            /** @description Totals per substance, by code. */
+            totals: components["schemas"]["AirTotalDto"][];
+            /** @description Permit type code. */
+            typeCode: string;
+            /**
+             * Format: date
+             * @description First valid day.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description First NOT valid day.
+             */
+            validTo: null | string;
+        };
+        /** @description Result of `POST /api/v1/permits/{permitId}/air-limits/import/preview`. */
+        AirLimitsPreviewDto: {
+            /** @description Area code (`-` — none). */
+            area: string;
+            /**
+             * Format: int64
+             * @description Permit.
+             */
+            permitId: number;
+            /** @description Permit number. */
+            permitNumber: string;
+            /** @description Counts, findings (errors block, warnings do not), missing NAE and substances, replace scope, fingerprint. */
+            preview: components["schemas"]["RegistryImportPreview"];
+            /** @description Profile used; `null` for an unsaved specification. */
+            profileCode: null | string;
+            /** @description Region code the import is scoped to. */
+            region: string;
+        };
+        /** @description Result of `POST /api/v1/air-limits/provision`. */
+        AirLimitsProvisionReport: {
+            /** @description Built-in import profile (`ERA_TABLE_33`). */
+            profileCode: string;
+            /** @description The profile row was created by this call. */
+            profileCreated: boolean;
+            /** @description The type is published (permits can be created). */
+            published: boolean;
+            /** @description Registry code of the `AIR_SOURCES` table (what the generic registry rows API takes). */
+            sourcesRegistryCode: string;
+            /** @description Registry code of the `AIR_SOURCE_SUBSTANCES` table. */
+            substancesRegistryCode: string;
+            /** @description Permit type code (`AIR_LIMITS`). */
+            typeCode: string;
+            /** @description The type was created by this call. */
+            typeCreated: boolean;
+            /**
+             * Format: int32
+             * @description Published version of the type.
+             */
+            version: number;
+        };
+        /** @description One region. */
+        AirRegionCodeDto: {
+            /** @description Areas used in the region, by code (`-` style "no area" code included when NAE exist without one). */
+            areas: components["schemas"]["AirAreaCodeDto"][];
+            /** @description Normalised region code (what `region` of the import options takes). */
+            code: string;
+            /** @description Name of the region group node, when the tree has one. */
+            name: null | string;
+        };
+        /** @description Region and area codes of the NAE tree. */
+        AirScopeCodesDto: {
+            /** @description Regions, by code. */
+            regions: components["schemas"]["AirRegionCodeDto"][];
+        };
+        /** @description One source (NAE) of a permit with its substances. */
+        AirSourceDto: {
+            /** @description Area code (`-` — none). */
+            area: null | string;
+            /**
+             * Format: decimal
+             * @description Diameter, m.
+             */
+            diameter: null | string;
+            /** @description Emission point name. */
+            emissionPointName: null | string;
+            /**
+             * Format: decimal
+             * @description Height, m.
+             */
+            height: null | string;
+            /**
+             * Format: decimal
+             * @description Hours per year.
+             */
+            hoursPerYear: null | string;
+            /**
+             * Format: int64
+             * @description Row id in `AIR_SOURCES`.
+             */
+            id: number;
+            /** @description Normalised NAE code. */
+            naeCode: string;
+            /**
+             * Format: int64
+             * @description Node in the NAE tree.
+             */
+            naeEntryId: number;
+            /** @description Production code (column A). */
+            productionCode: null | string;
+            /**
+             * Format: decimal
+             * @description Number of sources.
+             */
+            quantity: null | string;
+            /** @description Region code. */
+            region: null | string;
+            /** @description Production / site label from the group row of the file. */
+            siteLabel: null | string;
+            /** @description Source name. */
+            sourceName: null | string;
+            /** @description Canonical type: `T` (point) or `P1` (diffuse), Latin letters; the UI maps the label. */
+            sourceType: null | string;
+            /** @description Substances, by code. */
+            substances: components["schemas"]["AirSubstanceDto"][];
+            /**
+             * Format: decimal
+             * @description Gas temperature.
+             */
+            temperature: null | string;
+            /**
+             * Format: decimal
+             * @description Gas velocity.
+             */
+            velocity: null | string;
+            /**
+             * Format: decimal
+             * @description Gas volume.
+             */
+            volume: null | string;
+            /**
+             * Format: decimal
+             * @description Coordinate X1.
+             */
+            x1: null | string;
+            /**
+             * Format: decimal
+             * @description Coordinate X2.
+             */
+            x2: null | string;
+            /**
+             * Format: decimal
+             * @description Coordinate Y1.
+             */
+            y1: null | string;
+            /**
+             * Format: decimal
+             * @description Coordinate Y2.
+             */
+            y2: null | string;
+        };
+        /** @description One substance limit of a source. */
+        AirSubstanceDto: {
+            /**
+             * Format: decimal
+             * @description g/s.
+             */
+            gramsPerSecond: null | string;
+            /**
+             * Format: int64
+             * @description Row id in `AIR_SOURCE_SUBSTANCES`.
+             */
+            id: number;
+            /**
+             * Format: decimal
+             * @description mg/nm3.
+             */
+            mgPerNm3: null | string;
+            /** @description Normalised substance code (4 digits). */
+            substanceCode: string;
+            /**
+             * Format: int64
+             * @description Entry in the substance registry.
+             */
+            substanceEntryId: number;
+            /** @description Name from the registry (default language). */
+            substanceName: null | string;
+            /**
+             * Format: decimal
+             * @description t/year (full precision, no rounding).
+             */
+            tonsPerYear: null | string;
+        };
+        /** @description Total of one substance over all sources of the permit (computed, never stored). */
+        AirTotalDto: {
+            /**
+             * Format: decimal
+             * @description Sum of g/s.
+             */
+            gramsPerSecond: string;
+            /**
+             * Format: int32
+             * @description Sources that limit the substance.
+             */
+            sources: number;
+            /** @description Substance code. */
+            substanceCode: string;
+            /**
+             * Format: int64
+             * @description Entry in the substance registry.
+             */
+            substanceEntryId: number;
+            /** @description Name from the registry. */
+            substanceName: null | string;
+            /**
+             * Format: decimal
+             * @description Sum of t/year.
+             */
+            tonsPerYear: string;
+        };
         /** @description Тіло «застосувати набір до зрізів». */
         ApplyEditorSetRequest: {
             /**
@@ -27770,6 +28570,11 @@ export interface components {
             /** Format: date-time */
             lastModified?: null | string;
         };
+        /**
+         * @description Empty-cell fill rule.
+         * @enum {unknown}
+         */
+        FillDown: "None" | "Merge" | "Blank";
         /** @description Формула для відповіді клієнту. */
         FormulaDto: {
             /** @description ✎ D-461: «Дозволити ручне значення» (змінює `PUT …/formulas/{formulaId}/manual-override`). */
@@ -27942,6 +28747,19 @@ export interface components {
              */
             validTo: null | string;
         };
+        /** @description A group row is a data-area row with no keys whose only content is a label in one column. */
+        GroupRowSpec: {
+            /**
+             * Format: int32
+             * @description 1-based column that holds the label.
+             */
+            column?: number;
+            /**
+             * Format: int32
+             * @description A label counts as a group when its cell is merged across at least this many columns, or when it is the only filled cell in the row.
+             */
+            minMergedColumns?: number;
+        };
         /** @description SID групи з квитка і те, що він дав. */
         GroupSidView: {
             /** @description Чи знайшлося ЧИННЕ призначення на цей SID. */
@@ -28008,6 +28826,19 @@ export interface components {
             /** @description Код батьківської групи тієї ж таблиці; `null` — корінь. */
             parentCode: null | string;
         };
+        /** @description Where the header block is. */
+        HeaderSpec: {
+            /**
+             * Format: int32
+             * @description First header row; `null` - detected from the column-number row.
+             */
+            fromRow?: null | number;
+            /**
+             * Format: int32
+             * @description Last header row; `null` - detected.
+             */
+            toRow?: null | number;
+        };
         /** @description Одна перевірка у звіті. */
         HealthCheckDto: {
             /** @description Подробиці перевірки; текст винятку сюди не потрапляє (ФВ-6.11). */
@@ -28040,6 +28871,29 @@ export interface components {
         };
         /** Format: binary */
         IFormFile: string;
+        /** @description What the layout analysis of a file found (wizard steps 1-3): nothing is read from or written to the database. */
+        ImportAnalysis: {
+            /** @description The header was found and no finding is an error. */
+            canContinue: boolean;
+            /**
+             * Format: int32
+             * @description Findings beyond the limit.
+             */
+            droppedIssues: number;
+            /** @description Hash of the uploaded file. */
+            fileSha256: string;
+            /** @description Group rows. */
+            groups: components["schemas"]["ImportGroupRow"][];
+            header: null | components["schemas"]["ImportHeaderReport"];
+            /** @description Findings (columns not found, values that do not read). */
+            issues: components["schemas"]["ImportIssue"][];
+            /** @description Sheet that was read. */
+            sheetName: string;
+            /** @description Visible sheets of the workbook. */
+            sheetNames: string[];
+            /** @description Counters of the parse. */
+            stats: components["schemas"]["ImportStats"];
+        };
         /** @description Запит на застосування імпорту. */
         ImportApplyRequest: {
             /** @description ✎ AN-114 (D-338). Рядки, для яких людина свідомо перезаписує чужі правки,
@@ -28076,6 +28930,144 @@ export interface components {
             tableCode?: null | string;
             tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
+        /** @description Counts of the diff between the file and the stored rows of the owner. */
+        ImportDiffCounts: {
+            /**
+             * Format: int32
+             * @description In both, different.
+             */
+            changedParents: number;
+            /**
+             * Format: int32
+             * @description Child rows that will be inserted.
+             */
+            children: number;
+            /**
+             * Format: int32
+             * @description In the file only.
+             */
+            newParents: number;
+            /**
+             * Format: int32
+             * @description Stored for the owner in the bucket, not in the file (deleted by the replace).
+             */
+            removedParents: number;
+            /**
+             * Format: int32
+             * @description Left out by a human decision.
+             */
+            skippedParents: number;
+            /**
+             * Format: int32
+             * @description In both, equal.
+             */
+            unchangedParents: number;
+        };
+        /** @description One mapped field. */
+        ImportFieldSpec: {
+            /** @description Allowed values for ImportParser.Choice: file text (folded) to canonical value. */
+            choices?: {
+                [key: string]: string;
+            };
+            /** @description Explicit column letter that bypasses header matching. */
+            column?: null | string;
+            /**
+             * Format: decimal
+             * @description Multiplier applied to ImportParser.Decimal values (unit conversion).
+             */
+            factor?: null | string;
+            /** @description How an empty cell is filled. */
+            fillDown?: components["schemas"]["FillDown"];
+            /** @description Read and validated but not stored: left out of the comparison with stored rows (e.g. a name the registry owns). */
+            informational?: boolean;
+            /** @description Parent (source) or child (substance) level. */
+            level?: components["schemas"]["ImportLevel"];
+            /** @description Unique field name (the target property). */
+            name?: string;
+            /** @description Every row must carry a value. */
+            nonEmpty?: boolean;
+            /** @description A negative ImportParser.Decimal is an error. */
+            nonNegative?: boolean;
+            /**
+             * Format: int32
+             * @description Code width for ImportParser.Code (numeric codes are left-padded with zeros).
+             */
+            pad?: number;
+            /** @description How a cell is read. */
+            parser?: components["schemas"]["ImportParser"];
+            /** @description Header variants (any may match). Folded (case, Latin/Cyrillic look-alikes, spaces, hyphens, punctuation ignored);
+             *     `a...b` or `a*b` means "a, then b later in the combined header". */
+            patterns?: string[];
+            /** @description Reference kind to validate against the target registry (`nae`, `substance`); `null` - plain value. */
+            reference?: null | string;
+            /** @description The column must be found in the header. */
+            required?: boolean;
+            /** @description The text of the LAST header row must equal one of these (e.g. the unit row `г/с`); empty - not checked. */
+            unitQualifier?: string[];
+            /** @description Unit aliases for ImportParser.Unit: file text (folded) to canonical unit code. */
+            units?: {
+                [key: string]: string;
+            };
+            /** @description An empty value is allowed but reported as a per-row WARNING in the preview (not an error, not silent). */
+            warnIfEmpty?: boolean;
+        };
+        /** @description A group row. */
+        ImportGroupRow: {
+            /** @description Label text. */
+            label: string;
+            /**
+             * Format: int32
+             * @description Excel row.
+             */
+            row: number;
+        };
+        /** @description What the header detection found. */
+        ImportHeaderReport: {
+            /**
+             * Format: int32
+             * @description First data row.
+             */
+            dataFromRow: number;
+            /**
+             * Format: int32
+             * @description First header row.
+             */
+            headerFromRow: number;
+            /**
+             * Format: int32
+             * @description Last header row.
+             */
+            headerToRow: number;
+            /** @description Matched columns. */
+            mapped: components["schemas"]["MappedColumn"][];
+            /** @description Columns with a header that no field uses. */
+            unmapped: components["schemas"]["UnmappedColumn"][];
+        };
+        /** @description A finding of the parser or the planner. */
+        ImportIssue: {
+            /** @description Placeholders of the catalog text. */
+            args?: null | {
+                [key: string]: string;
+            };
+            /** @description Excel column letter. */
+            column?: null | string;
+            /** @description Field name. */
+            field?: null | string;
+            /** @description Catalog key. */
+            messageKey: string;
+            /**
+             * Format: int32
+             * @description Excel row, when the finding is about one.
+             */
+            row?: null | number;
+            /** @description Warning or error. */
+            severity: components["schemas"]["ImportSeverity"];
+        };
+        /**
+         * @description Field level.
+         * @enum {unknown}
+         */
+        ImportLevel: "Parent" | "Child";
         /** @description One-time load of the NAE tree from the PI AF element tree (NAE plan N2). */
         ImportNaeFromAfRequest: {
             /**
@@ -28098,6 +29090,11 @@ export interface components {
             /** @description Таблиця (як `tableCode` відмови-конфлікту перегляду). */
             tableCode: string;
         };
+        /**
+         * @description Cell parsers.
+         * @enum {unknown}
+         */
+        ImportParser: "Text" | "Decimal" | "Integer" | "Code" | "Choice" | "Date" | "Unit";
         /** @description Результат попереднього перегляду імпорту. */
         ImportPreview: {
             /** @description Комірки, які зміняться. */
@@ -28124,6 +29121,42 @@ export interface components {
              *     чіпали, можуть повернути новіші чужі. `null` — попереджень немає. */
             warnings?: null | string[];
         };
+        /** @description A stored import profile with its specification. */
+        ImportProfileDto: {
+            /** @description Shipped with the system. */
+            builtIn: boolean;
+            /** @description Profile code. */
+            code: string;
+            /** @description Name by language. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /** @description Concurrency token for the next `PUT`. */
+            rowVersion: string;
+            /** @description The specification: header block, fields with header patterns, group rows, fill rules, parsers. */
+            spec: components["schemas"]["RegistryImportSpec"];
+            /**
+             * Format: date-time
+             * @description Last change, UTC.
+             */
+            updatedAt: string;
+        };
+        /** @description A stored import profile in a list. */
+        ImportProfileSummaryDto: {
+            /** @description Shipped with the system (`ERA_TABLE_33`); a built-in profile is reset by provisioning when it is deleted but can be edited. */
+            builtIn: boolean;
+            /** @description Profile code. */
+            code: string;
+            /** @description Name by language. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: date-time
+             * @description Last change, UTC.
+             */
+            updatedAt: string;
+        };
         /** @description Відхилена комірка з причиною — користувач має бачити, які саме (ФВ-4.4). */
         ImportRejection: {
             /** @description Колонка; для відмови цілої таблиці — її код. */
@@ -28147,6 +29180,39 @@ export interface components {
             /** @description Таблиця відмови (`V-10`, як і в ImportChange). */
             tableCode?: null | string;
             tableNameL10n?: null | components["schemas"]["LocalizedText"];
+        };
+        /**
+         * @description Issue severity.
+         * @enum {unknown}
+         */
+        ImportSeverity: "Warning" | "Error";
+        /** @description Counters of a parse. */
+        ImportStats: {
+            /**
+             * Format: int32
+             * @description Child rows.
+             */
+            children: number;
+            /**
+             * Format: int32
+             * @description Distinct child keys.
+             */
+            distinctChildKeys: number;
+            /**
+             * Format: int32
+             * @description Group rows.
+             */
+            groupRows: number;
+            /**
+             * Format: int32
+             * @description Parent rows.
+             */
+            parents: number;
+            /**
+             * Format: int32
+             * @description Non-data rows with content (totals, notes).
+             */
+            skippedRows: number;
         };
         /** @description Тіла відповідей, спільні для кількох контролерів. */
         JobAcceptedResponse: {
@@ -28405,6 +29471,22 @@ export interface components {
              * @description Скільки значень без придатного відповідника (разом зі значеннями без запису).
              */
             unmappedValues: number;
+        };
+        /** @description A field matched to a column. */
+        MappedColumn: {
+            /**
+             * Format: int32
+             * @description 1-based column.
+             */
+            column: number;
+            /** @description Column letter. */
+            columnLetter: string;
+            /** @description Field name. */
+            field: string;
+            /** @description The combined header text that matched. */
+            headerText: string;
+            /** @description Parent or child. */
+            level: components["schemas"]["ImportLevel"];
         };
         /** @description Підсумок одного мапінгу. */
         MappedFieldPreview: {
@@ -29288,6 +30370,23 @@ export interface components {
             /** @description Задача: `GET /jobs/{jobId}` дає прогрес і підсумок. */
             jobId: string;
         };
+        /** @enum {unknown} */
+        MissingAction: "Skip" | "Create" | null;
+        /** @description A referenced code the target registry does not have. */
+        MissingReference: {
+            /** @description Normalised code. */
+            code: string;
+            /** @description Group-row label above (the site), for "create under". */
+            groupLabel: null | string;
+            /** @description Reference kind. */
+            kind: string;
+            resolved: null | components["schemas"]["MissingAction"];
+            /**
+             * Format: int32
+             * @description First Excel row.
+             */
+            row: number;
+        };
         /** @description Статус місячної колонки (D-441): стан аркуша за період місяця колонки. */
         MonthColumnStatusDto: {
             /** @description Код колонки. */
@@ -29610,6 +30709,23 @@ export interface components {
          * @enum {unknown}
          */
         OutOfWindowBehavior: "Hide" | "ReadOnly" | "Warn" | "AllowWithConfirmation";
+        /** @description Stored parents of one owner a replace touches. */
+        OwnerReplace: {
+            /**
+             * Format: int32
+             * @description Child rows.
+             */
+            children: number;
+            /** @description Human label (permit number). */
+            label: null | string;
+            /** @description Owner. */
+            ownerKey: string;
+            /**
+             * Format: int32
+             * @description Parent rows.
+             */
+            parents: number;
+        };
         /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
          *     перевіряється архітектурним тестом. */
         PagedResultOfCellChangeView: {
@@ -32299,6 +33415,42 @@ export interface components {
             /** @description `true` — вибірка вперлась у стелю, реальних документів більше. */
             truncated: boolean;
         };
+        /** @description What a preview shows. */
+        RegistryImportPreview: {
+            canApply: boolean;
+            diff: components["schemas"]["ImportDiffCounts"];
+            /** Format: int32 */
+            droppedIssues: number;
+            fingerprint: string;
+            groups: components["schemas"]["ImportGroupRow"][];
+            header: null | components["schemas"]["ImportHeaderReport"];
+            issues: components["schemas"]["ImportIssue"][];
+            missing: components["schemas"]["MissingReference"][];
+            replace: components["schemas"]["ReplaceScope"];
+            stats: components["schemas"]["ImportStats"];
+        };
+        /** @description Layout and mapping of an Excel file onto a two-level target (parent rows with child rows),
+         *     stored as `cfg.RegistryImportProfile.SpecJson` (FEATURE-REGISTRY-TABLES 4.6, NAE/permits plan N4). */
+        RegistryImportSpec: {
+            /** @description Name of the field whose filled cell starts a child row. */
+            childKeyField?: string;
+            /**
+             * Format: int32
+             * @description Explicit first data row; `null` - right after the header (and the column-number row).
+             */
+            dataStartRow?: null | number;
+            /** @description Field mapping. */
+            fields?: components["schemas"]["ImportFieldSpec"][];
+            groupRows?: null | components["schemas"]["GroupRowSpec"];
+            /** @description Header block position; auto-detected by default. */
+            header?: components["schemas"]["HeaderSpec"];
+            /** @description Texts treated as "no value" for numbers and dates (compared folded); `null` - the defaults. */
+            naMarkers?: null | string[];
+            /** @description Name of the field whose filled cell starts a new parent. */
+            parentKeyField?: string;
+            /** @description Worksheet name; `null` - the first worksheet. */
+            sheet?: null | string;
+        };
         /** @description Запит живої перевірки дублікатів ключа до збереження (§4.5). */
         RegistryKeyCheckRequest: {
             /** @description Коди полів майбутнього ключа в порядку частин. */
@@ -32769,6 +33921,15 @@ export interface components {
             rules: components["schemas"]["PermitTypeRuleDto"][];
             /** @description Повний склад таблиць після правки. */
             tables: components["schemas"]["PermitTypeTableDto"][];
+        };
+        /** @description What the apply will replace; shown BEFORE it (legacy semantics with an explicit confirmation). */
+        ReplaceScope: {
+            /** @description Other owners are touched: the apply needs their keys in IReadOnlyList&lt;string&gt;? ImportRequest.ConfirmedOtherOwners. */
+            confirmationRequired: boolean;
+            /** @description Rows of OTHER owners for the same keys (superseded), per owner. */
+            otherOwners: components["schemas"]["OwnerReplace"][];
+            /** @description The owner's own rows in the bucket (all of them are replaced). */
+            thisOwner: components["schemas"]["OwnerReplace"];
         };
         /** @description Запит на заміну набору ролей користувача. */
         ReplaceUserRolesRequest: {
@@ -33629,6 +34790,17 @@ export interface components {
              * @description `null` — нове поле стає останнім за порядком.
              */
             ordinal: null | number;
+        };
+        /** @description Body of `PUT /api/v1/air-limits/import-profiles/{code}` (create or replace). */
+        SaveImportProfileRequest: {
+            /** @description Name by language. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /** @description Token read with the profile; `null` when the profile is new. */
+            rowVersion: null | string;
+            /** @description The specification (validated; an invalid one is `422 regSpecInvalid`). */
+            spec: components["schemas"]["RegistryImportSpec"];
         };
         /** @description Правило категорії константи версії (L-2): вираз діалекту Methodology. */
         SaveMethodologyCategoryRuleRequest: {
@@ -36183,6 +37355,20 @@ export interface components {
              *     «не знаю» не те саме, що «ніде»). Знімок каталогу його не несе.
              */
             usedIn?: null | number;
+        };
+        /** @description A non-empty column no field uses. */
+        UnmappedColumn: {
+            /**
+             * Format: int32
+             * @description 1-based column.
+             */
+            column: number;
+            /** @description Column letter. */
+            columnLetter: string;
+            /** @description There is data under it. */
+            hasData: boolean;
+            /** @description Combined header text. */
+            headerText: string;
         };
         /** @description Поле джерела, яке не лягає нікуди. */
         UnmappedSourceField: {

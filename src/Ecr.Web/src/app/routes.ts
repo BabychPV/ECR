@@ -453,6 +453,15 @@ export const routes = {
       crumb: { ancestorIds: ['admin-permits'] },
     },
   },
+  adminPermitImport: {
+    id: 'admin-permit-import',
+    path: '/admin/permits/:id/import',
+    handle: {
+      labelKey: 'permits.air.import.title',
+      permission: 'Registry.View',
+      crumb: { ancestorIds: ['admin-permits'] },
+    },
+  },
   adminMethodologies: {
     id: 'admin-methodologies',
     path: '/admin/methodologies',

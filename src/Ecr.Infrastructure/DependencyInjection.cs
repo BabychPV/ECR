@@ -144,7 +144,15 @@ public static class DependencyInjection
         services.AddScoped<IRegistryStore, RegistryStore>();
         services.AddScoped<IRegistryHierarchyStore, RegistryHierarchyStore>();
         services.AddScoped<INaeAfReader, Integration.PiAfNaeReader>();
-        services.AddScoped<IRegistryEntryReferenceReader, Integration.PermitReferenceReader>();
+        services.AddScoped<IRegistryEntryReferenceReader, Application.Permits.AirLimits.AirLimitsReferenceReader>();
+        services.AddScoped<IRegistryImportProfileStore, RegistryImportProfileStore>();
+        services.AddSingleton(new Application.Permits.AirLimits.AirLimitsSettings(
+            configuration["AirLimits:NaeRegistryCode"] is { Length: > 0 } nae ? nae : Application.Permits.AirLimits.AirLimitsSettings.Default.NaeRegistryCode,
+            configuration["AirLimits:SubstanceRegistryCode"] is { Length: > 0 } substances ? substances : Application.Permits.AirLimits.AirLimitsSettings.Default.SubstanceRegistryCode));
+        services.AddScoped<Application.Permits.AirLimits.AirLimitsSettingsAccessor>();
+        services.AddScoped<Application.RegistryImport.IRegistryImportTarget, Application.Permits.AirLimits.AirLimitsImportTarget>();
+        services.AddScoped<Application.RegistryImport.IReferenceResolver, Application.Permits.AirLimits.NaeReferenceResolver>();
+        services.AddScoped<Application.RegistryImport.IReferenceResolver, Application.Permits.AirLimits.SubstanceReferenceResolver>();
         services.AddScoped<IRegistryUseStore, RegistryUseStore>(); // RT-23b
         services.AddScoped<IRegistryImpactStore, RegistryImpactStore>(); // RT-25
         services.AddScoped<IRegistryDraftStore, RegistryDraftStore>();

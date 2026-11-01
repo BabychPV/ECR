@@ -66,7 +66,7 @@ public sealed class RegistryKeyConflictHttpTests(SqlServerFixture sql)
         Assert.Equal("1D-2 · 370 Winter", problem.GetProperty("keyText").GetString());
         Assert.Equal($"E1{fixture.Tag}", problem.GetProperty("entryCode").GetString());
         Assert.Equal(firstId.ToString(System.Globalization.CultureInfo.InvariantCulture), problem.GetProperty("entryId").GetString());
-        Assert.Equal($"Another entry (E1{fixture.Tag}) already has PK = 1D-2 · 370 Winter.", problem.GetProperty("detail").GetString());
+        Assert.Equal($"Another entry (E1{fixture.Tag}) already has PK = 1D-2 · 370 Winter. If that entry is retired, create a NEW entry whose validity window starts AFTER the old one ends.", problem.GetProperty("detail").GetString());
         Assert.Equal("Key already in use", problem.GetProperty("title").GetString());
 
         // Відмова відкотила ВСЕ: ні запису, ні значень, ні рядка ключа другого не лишилось.

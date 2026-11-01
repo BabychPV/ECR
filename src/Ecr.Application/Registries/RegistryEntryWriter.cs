@@ -445,6 +445,9 @@ public sealed class RegistryEntryWriter(
             ? []
             : await keys.ListActiveKeysAsync(definition.Id, ct).ConfigureAwait(false);
 
+        // Опис полів за кодом - раз на пакет, а не на кожен запис (NAE N3b).
+        var fieldsByCode = definition.Fields.ToDictionary(f => f.Code, StringComparer.Ordinal);
+        var lookupTargets = await PrefetchLookupTargetsAsync(fieldsByCode, targets, ct).ConfigureAwait(false);
         var errors = new List<RegistryEntryImportError>();
         var staged = new List<RegistryEntry>();
         var keyed = new List<KeyedTarget>();
@@ -533,7 +536,7 @@ public sealed class RegistryEntryWriter(
 
             // Проба кожного значення окремо — заради поля в помилці (як ResolveRowAsync імпорту):
             // RegistryValue.Set не знає коду поля.
-            if (Probe(definition, values) is { } probe)
+            if (Probe(definition, values, fieldsByCode) is { } probe)
             {
                 errors.Add(new RegistryEntryImportError(row, code, probe.Field, probe.MessageKey, probe.Params));
                 continue;
@@ -556,8 +559,8 @@ public sealed class RegistryEntryWriter(
             try
             {
                 var prefetch = new RegistryValuesPrefetch(
-                    isNew ? null : valuesByEntry.GetValueOrDefault(entry.Id) ?? [], LookupTargets: null);
-                changes = await ApplyValuesAsync(definition, entry, values, prefetch, ct).ConfigureAwait(false);
+                    isNew ? null : valuesByEntry.GetValueOrDefault(entry.Id) ?? [], lookupTargets);
+                changes = await ApplyValuesAsync(definition, entry, values, prefetch, ct, fieldsByCode).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is DomainException or BusinessRuleException)
             {
@@ -661,6 +664,40 @@ public sealed class RegistryEntryWriter(
             .ConfigureAwait(false);
 
         return new RegistryEntryWriteResult(added, updated, unchanged, errors, Applied: true) { Rows = written };
+    }
+
+    /// <summary>
+    /// Цілі <c>Lookup</c>-значень пакета - одним читанням на ~1000 Id замість запиту на кожне значення (NAE N3b).
+    /// Беруться лише значення, що однозначно є цілим числом; решта (рядки, помилки) іде звичайним шляхом
+    /// <see cref="RequireLookupTargetAsync"/>, а ціль, якої тут немає, читається з бази поштучно, як і раніше.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<long, RegistryEntry>?> PrefetchLookupTargetsAsync(
+        IReadOnlyDictionary<string, RegistryFieldDef> fieldsByCode, IReadOnlyList<WriteTarget> targets, CancellationToken ct)
+    {
+        var lookupCodes = fieldsByCode.Values.Where(f => f.DataType == CellDataType.Lookup).Select(f => f.Code).ToHashSet(StringComparer.Ordinal);
+        if (lookupCodes.Count == 0)
+        {
+            return null;
+        }
+
+        var ids = new HashSet<long>();
+        foreach (var target in targets)
+        {
+            foreach (var code in lookupCodes)
+            {
+                if (target.Values.TryGetValue(code, out var raw) && CellValueReader.Normalize(raw) is long or int or short)
+                {
+                    ids.Add(Convert.ToInt64(CellValueReader.Normalize(raw), System.Globalization.CultureInfo.InvariantCulture));
+                }
+            }
+        }
+
+        if (ids.Count == 0)
+        {
+            return null;
+        }
+
+        return (await registries.FindEntriesByIdsAsync(ids, ct).ConfigureAwait(false)).ToDictionary(e => e.Id);
     }
 
     /// <summary>Вікно для аудиту: <c>[2024-01-01, ∞)</c>.</summary>
@@ -864,19 +901,21 @@ public sealed class RegistryEntryWriter(
     /// випадках — змінюється лише ДЖЕРЕЛО тих самих рядків.
     /// </param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="fieldsByCode">Поля опису за кодом, якщо виклик уже їх зібрав (пакет); <c>null</c> - зібрати тут.</param>
     internal async Task<IReadOnlyList<RegistryValueFieldChange>> ApplyValuesAsync(
         RegistryDef definition,
         RegistryEntry entry,
         IReadOnlyDictionary<string, object?> values,
         RegistryValuesPrefetch? prefetch,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyDictionary<string, RegistryFieldDef>? fieldsByCode = null)
     {
         if (values is null || values.Count == 0)
         {
             return [];
         }
 
-        var fields = definition.Fields.ToDictionary(f => f.Code, StringComparer.Ordinal);
+        var fields = fieldsByCode ?? definition.Fields.ToDictionary(f => f.Code, StringComparer.Ordinal);
 
         var unknown = values.Keys.Where(code => !fields.ContainsKey(code)).ToList();
         if (unknown.Count > 0)
@@ -1013,9 +1052,10 @@ public sealed class RegistryEntryWriter(
     /// одноразовому об'єкті поза контекстом — помилка з кодом поля.
     /// </summary>
     private static (string Field, string MessageKey, IReadOnlyDictionary<string, string>? Params)? Probe(
-        RegistryDef definition, IReadOnlyDictionary<string, object?> values)
+        RegistryDef definition, IReadOnlyDictionary<string, object?> values,
+        IReadOnlyDictionary<string, RegistryFieldDef>? fieldsByCode = null)
     {
-        var fields = definition.Fields.ToDictionary(f => f.Code, StringComparer.Ordinal);
+        var fields = fieldsByCode ?? definition.Fields.ToDictionary(f => f.Code, StringComparer.Ordinal);
         foreach (var (code, raw) in values)
         {
             if (raw is null || !fields.TryGetValue(code, out var field) || field.DataType == CellDataType.Lookup)

@@ -98,6 +98,24 @@ public sealed class RegistryKeyStore(EcrDbContext db) : IRegistryKeyStore
                 .ToListAsync(ct).ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<RegistryEntryKey>> ListKeysForEntriesAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(registryEntryIds);
+
+        var found = new List<RegistryEntryKey>();
+        foreach (var chunk in registryEntryIds.Distinct().Chunk(IdsPerQuery))
+        {
+            var wanted = chunk.ToList();
+            found.AddRange(await db.RegistryEntryKeys
+                .Where(k => wanted.Contains(k.RegistryEntryId))
+                .ToListAsync(ct).ConfigureAwait(false));
+        }
+
+        return found;
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⚠ Той самий зміст, що в поштучних <see cref="ListCurrentValuesAsync"/> і
     /// <see cref="ListEntryKeysAsync"/>: відстежувані рядки з бази (зі змінами в пам'яті) плюс

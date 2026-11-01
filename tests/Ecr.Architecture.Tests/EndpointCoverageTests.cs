@@ -1403,6 +1403,12 @@ public sealed partial class EndpointCoverageTests
         // NAE plan N2: af-import is consumed by `features/permits/nae/afImportApi.ts` (AfImportPanel),
         // "where used" (GET .../entries/{p}/references) by `features/permits/nae/referencesApi.ts`.
 
+        // NAE plan N3 ("Air Limits Import" permits): server + contract first; the permit card and the import wizard (plan N5, session
+        // Permites) are the consumers. TEMPORARY: remove each line in the commit that adds the client call in `features/permits`.
+        // ✎ Card + wizard (lane/integ-ui-permit-card) consume all but `provision`, which stays until the "prepare the type" action
+        // has a screen (admin action on the permit types page; not part of N3/N5 UI).
+        "POST /api/v1/air-limits/provision",
+
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було
         // НЕПРАВДОЮ: жодне місце клієнта нічого не конвертувало.
