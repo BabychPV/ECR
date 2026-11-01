@@ -43,6 +43,8 @@ interface Ids {
 const ids = {} as Ids;
 const createdPermits: number[] = [];
 let regionNodeId = 0;
+/** Other top-level REGION nodes the spec creates (removed with their subtree in afterAll). */
+const extraRegionNodes: number[] = [];
 let viewerUserId = 0;
 let viewerRoleId = 0;
 
@@ -337,7 +339,7 @@ test.describe('Air limits real', () => {
 
     // Вузли регіону - листки першими.
     const nodes = await treeNodes(admin);
-    const mine = new Set<number>([regionNodeId]);
+    const mine = new Set<number>([regionNodeId, ...extraRegionNodes]);
     for (let grew = true; grew;) {
       grew = false;
       for (const node of nodes) {
@@ -382,6 +384,25 @@ test.describe('Air limits real', () => {
     await expect(page.getByText('No emission sources yet')).toBeVisible();
     await expect(page.getByRole('link', { name: /Import from Excel/ })).toBeVisible();
     await expectNoRawKeys(page);
+  });
+
+  test('Air limits real: scope codes come from REGION/AREA nodes and provisioning is repeatable', async () => {
+    interface Scope { regions: { code: string; areas: { code: string }[] }[] }
+    const areasOf = (scope: Scope, code: string): string[] | undefined => scope.regions.find((r) => r.code === code)?.areas.map((a) => a.code);
+
+    // The spec's region: its AREA node gives exactly one area; the REGION node itself no longer adds "-".
+    expect(areasOf(await ok<Scope>(await admin.get('/api/v1/air-limits/scope-codes'), 'scope-codes'), Region)).toEqual([Area]);
+
+    // A brand-new REGION node with nothing under it is already pickable, with "-" (no area) only.
+    const treeId = (await ok<{ id: number }>(await admin.get(`/api/v1/registries/${NaeTree}/definition`), 'NAE_TREE')).id;
+    // Its code/name must not contain `Region`: the wizard tests pick `Region` by prefix and by typed search.
+    const emptyRegion = `E2EEMPTY${Stamp}`;
+    extraRegionNodes.push(await addNode(admin, treeId, `${emptyRegion}_R`, null, 'REGION', { RegionCode: emptyRegion }));
+    expect(areasOf(await ok<Scope>(await admin.get('/api/v1/air-limits/scope-codes'), 'scope-codes'), emptyRegion)).toEqual(['-']);
+
+    // Provisioning again (shared registries present) reuses the published type and the profile - nothing new is created.
+    const again = await ok<{ typeCreated: boolean; profileCreated: boolean; published: boolean }>(await admin.post('/api/v1/air-limits/provision'), 'provision again');
+    expect(again).toMatchObject({ typeCreated: false, profileCreated: false, published: true });
   });
 
   test('Air limits real: wizard end to end - mapping, issues, missing NAE, apply, counts, card', async ({ page }) => {
