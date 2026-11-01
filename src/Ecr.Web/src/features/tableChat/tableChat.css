@@ -184,19 +184,17 @@
   margin-top: 2px;
 }
 
-/* LIVE-REFRESH A2: "N new messages" over the bottom of the list while the user reads older ones. */
+/* LIVE-REFRESH A2: "N new messages" under the list while the user reads older ones.
+   ⚠ In the flow, not an overlay over the list: the overlaid pill lost clicks to the message actions under it
+   (e2e: "subtree intercepts pointer events"). */
 .ecr-chat-newpill {
   flex: none;
   display: flex;
   justify-content: center;
-  height: 0;
-  overflow: visible;
-  position: relative;
-  z-index: 1;
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-md) 0;
 }
 
 .ecr-chat-newpill > button {
-  transform: translateY(calc(-100% - var(--mantine-spacing-xs)));
   box-shadow: var(--mantine-shadow-sm);
 }
 

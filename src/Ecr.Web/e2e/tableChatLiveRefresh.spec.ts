@@ -111,7 +111,9 @@ test.describe('Live refresh: two users on the stand', () => {
       // The administrator: panel open on the table, scrolled up to read older messages.
       await admin.page.goto(`${DocumentUrl}&panel=discussion&table=${encodeURIComponent(table.tableCode)}`);
       const panel = admin.page.locator('[data-chat-panel]');
-      await expect(panel.locator('[data-chat-message]')).toHaveCount(25, { timeout: 90_000 });
+      // The chat may already hold messages of earlier specs: count from what is there.
+      await expect(panel.locator('[data-chat-message]').last()).toContainText('history 25', { timeout: 90_000 });
+      const loaded = await panel.locator('[data-chat-message]').count();
       const composer = panel.getByRole('textbox', { name: /^Message/ });
       await composer.fill('draft that must survive the poll');
       await panel.getByRole('log').evaluate((node) => {
@@ -120,12 +122,12 @@ test.describe('Live refresh: two users on the stand', () => {
 
       // A message of the administrator reaches the reviewer's counter (≤ 35 s by the DoD).
       await post(admin.page.request, 'counter check');
-      await expect(panel.locator('[data-chat-message]')).toHaveCount(26, { timeout: FastPoll });
+      await expect(panel.locator('[data-chat-message]')).toHaveCount(loaded + 1, { timeout: FastPoll });
       await expect(button).toHaveAccessibleName(`Discussion, ${String(before + 1)} unread`, { timeout: SlowPoll });
 
       // A message of the reviewer reaches the open panel (≤ 15 s); scrolled up, the pill says so.
       await post(reviewer.page.request, 'live reply from the second user');
-      await expect(panel.locator('[data-chat-message]')).toHaveCount(27, { timeout: FastPoll });
+      await expect(panel.locator('[data-chat-message]')).toHaveCount(loaded + 2, { timeout: FastPoll });
       const pill = panel.locator('[data-chat-new-pill]');
       await expect(pill).toHaveText('New messages: 1');
       await expect(composer).toHaveValue('draft that must survive the poll');
@@ -175,18 +177,14 @@ test.describe('Live refresh: two users on the stand', () => {
         return route.continue();
       });
       const mine = grid.locator(`revogr-data[type="rgRow"] .rgCell[data-rgrow="1"][data-rgcol="${col}"]`);
+      const own = `${String(700 + Math.floor(Math.random() * 99))}`;
       await mine.click();
       await page.waitForTimeout(300);
-      await page.keyboard.type('777');
+      await page.keyboard.type(own);
       await page.keyboard.press('Enter');
-      await expect(mine).toHaveText('777');
+      await expect(mine).toHaveText(own);
       await expect.poll(() => held, { timeout: 15_000 }).toBeGreaterThan(0);
-      written.set(`${target.row1.rowKey}:${target.column}`, {
-        tableInstanceId: table.tableInstanceId,
-        rowKey: target.row1.rowKey,
-        columnCode: target.column,
-        original: target.row1.cells[target.column],
-      });
+      remember(table.tableInstanceId, target.row1, target.column);
 
       // The reviewer changes row 0: the administrator gets the polite banner within one marker interval.
       const second = `${String(5000 + Math.floor(Math.random() * 999))}`;
@@ -202,19 +200,19 @@ test.describe('Live refresh: two users on the stand', () => {
       // Refresh while my PATCH is still held: the reload waits for it — my value stays on screen.
       await page.getByTestId('sheet-live-refresh').click();
       await page.waitForTimeout(1_500);
-      await expect(mine).toHaveText('777');
+      await expect(mine).toHaveText(own);
       release();
 
       const firstCellNow = grid.locator(`revogr-data[type="rgRow"] .rgCell[data-rgrow="0"][data-rgcol="${col}"]`);
       await expect(firstCellNow).toHaveText(second, { timeout: 30_000 });
-      await expect(mine).toHaveText('777');
+      await expect(mine).toHaveText(own);
       await expect(banner).toHaveCount(0);
       await page.unroute(`**/api/v1/documents/${DocumentId}/cells`);
 
       // The server has both: the reviewer's value and mine.
       const after = await sliceOf(admin.page.request, table.tableInstanceId);
       const row1 = after.rows.find((row) => row.rowKey === target.row1.rowKey);
-      expect(String(row1?.cells[target.column])).toBe('777');
+      expect(String(row1?.cells[target.column])).toBe(own);
 
       // My own edit never raises the banner: one more marker interval without it.
       await page.waitForTimeout(SlowPoll);
@@ -225,6 +223,49 @@ test.describe('Live refresh: two users on the stand', () => {
       await reviewer.context.close();
     }
   });
+
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`Live refresh: ${scheme} — banner, Refresh and the chat panel: axe contrast, screenshots 1440 and 500 px`, async ({ browser }) => {
+      const admin = await openAs(browser, Admin, scheme);
+      const reviewer = await openAs(browser, Reviewer);
+
+      try {
+        const { page } = admin;
+        await page.goto(
+          `${DocumentUrl}&sheet=${encodeURIComponent(table.sheetCode)}&table=${encodeURIComponent(table.tableCode)}&panel=discussion`,
+        );
+        await expect(page.locator('[data-chat-panel]')).toBeVisible({ timeout: 90_000 });
+        await expect(page.getByTestId('sheet-refresh')).toBeVisible({ timeout: 90_000 });
+        // Let the first marker poll take the baseline before the other user writes.
+        await page.waitForTimeout(3_000);
+
+        const target = await writableColumn(reviewer.page.request);
+        await reviewerWrites(reviewer.page.request, target.row0, target.column, 8000 + Math.floor(Math.random() * 999));
+        await expect(page.getByTestId('sheet-live-banner')).toBeVisible({ timeout: SlowPoll });
+
+        await shot(page, `banner-${scheme}-1440`);
+        for (const rule of ['color-contrast', 'button-name', 'aria-allowed-attr', 'aria-valid-attr-value']) {
+          expect(await axeViolations(page, rule), `${scheme}: axe ${rule}`).toEqual([]);
+        }
+
+        // 500 px: the chat panel is a layer over the whole page there (by design) — close it to see the banner.
+        await page.locator('[data-chat-panel]').getByRole('button', { name: 'Close discussion' }).click();
+        await expect(page.locator('[data-chat-panel]')).toHaveCount(0);
+        await page.setViewportSize({ width: 500, height: 800 });
+        await expect(page.getByTestId('sheet-live-banner')).toBeVisible();
+        const box = await page.getByTestId('sheet-live-banner').boundingBox();
+        expect((box?.x ?? 0) + (box?.width ?? 0), '500 px: the banner must fit the viewport').toBeLessThanOrEqual(500);
+        await shot(page, `banner-${scheme}-500`);
+        expect(await axeViolations(page, 'color-contrast'), `${scheme} 500px: axe color-contrast`).toEqual([]);
+
+        await page.getByTestId('sheet-live-refresh').click();
+        await expect(page.getByTestId('sheet-live-banner')).toHaveCount(0, { timeout: 30_000 });
+      } finally {
+        await admin.context.close();
+        await reviewer.context.close();
+      }
+    });
+  }
 
   test('Live refresh: a user who does not see the changed table gets no banner; a hidden sheet answers 404', async ({ browser }) => {
     const admin = await openAs(browser, Admin);
@@ -318,7 +359,13 @@ interface Target {
   readonly row1: SliceBody['rows'][number];
 }
 
-/** A column of the first table both row 0 and row 1 accept (probed with their own values, so nothing changes). */
+/** The value a cell had BEFORE this spec touched it (first time only) — `afterAll` puts it back. */
+function remember(tableInstanceId: number, row: SliceBody['rows'][number], columnCode: string): void {
+  const key = `${row.rowKey}:${columnCode}`;
+  if (!written.has(key)) written.set(key, { tableInstanceId, rowKey: row.rowKey, columnCode, original: row.cells[columnCode] });
+}
+
+/** A column of the first table that accepts a number in row 0 (probed with a number; restored in `afterAll`). */
 async function writableColumn(request: APIRequestContext): Promise<Target> {
   const slice = await sliceOf(request, table.tableInstanceId);
   const [row0, row1] = slice.rows;
@@ -327,12 +374,7 @@ async function writableColumn(request: APIRequestContext): Promise<Target> {
   for (const candidate of slice.columns.slice(0, 8)) {
     const probe = 1000 + Math.floor(Math.random() * 999);
     if ((await patchCell(request, slice, row0, candidate.code, probe)) !== 200) continue;
-    written.set(`${row0.rowKey}:${candidate.code}`, {
-      tableInstanceId: slice.tableInstanceId,
-      rowKey: row0.rowKey,
-      columnCode: candidate.code,
-      original: row0.cells[candidate.code],
-    });
+    remember(slice.tableInstanceId, row0, candidate.code);
     const fresh = await sliceOf(request, table.tableInstanceId);
     const freshRow0 = fresh.rows[0];
     const freshRow1 = fresh.rows[1];
@@ -350,14 +392,7 @@ async function reviewerWrites(request: APIRequestContext, row0: SliceBody['rows'
   const row = fresh.rows.find((candidate) => candidate.rowKey === row0.rowKey) ?? row0;
   const status = await patchCell(request, fresh, row, column, value);
   expect(status, 'PATCH by the other user').toBe(200);
-  if (!written.has(`${row0.rowKey}:${column}`)) {
-    written.set(`${row0.rowKey}:${column}`, {
-      tableInstanceId: fresh.tableInstanceId,
-      rowKey: row0.rowKey,
-      columnCode: column,
-      original: row0.cells[column],
-    });
-  }
+  remember(fresh.tableInstanceId, row0, column);
 }
 
 async function shot(page: Page, name: string): Promise<void> {
@@ -378,8 +413,25 @@ async function openAs(
   await page.getByRole('textbox', { name: /Password|Пароль/i }).fill(user.password);
   await page.keyboard.press('Enter');
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
+  await ensureScheme(page, user.user, scheme);
 
   return { page, context };
+}
+
+/** Theme `scheme` on `<html>`; if it is another one, through the user menu (as in `tableChat.spec.ts`). */
+async function ensureScheme(page: Page, userName: string, scheme: 'light' | 'dark'): Promise<void> {
+  const html = page.locator('html');
+  await expect(page.getByRole('button', { name: new RegExp(userName, 'i') }).first()).toBeVisible({ timeout: 30_000 });
+
+  if ((await html.getAttribute('data-mantine-color-scheme')) !== scheme) {
+    await page.getByRole('button', { name: new RegExp(userName, 'i') }).first().click();
+    await page.getByText(scheme === 'dark' ? 'Dark' : 'Light', { exact: true }).first().click();
+    await page.keyboard.press('Escape');
+  }
+
+  await expect(html, `theme ${scheme} was not applied`).toHaveAttribute('data-mantine-color-scheme', scheme, {
+    timeout: 15_000,
+  });
 }
 
 interface GrantRow {
