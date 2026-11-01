@@ -306,23 +306,5 @@ public sealed class DeployWorkerModeTests
     }
 
     /// <summary><c>pwsh</c> з PATH; на Windows без нього — вбудований <c>powershell.exe</c>.</summary>
-    private static string FindPowerShell()
-    {
-        var names = OperatingSystem.IsWindows() ? new[] { "pwsh.exe", "powershell.exe" } : ["pwsh"];
-        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        foreach (var name in names)
-        {
-            foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-            {
-                var candidate = Path.Combine(dir, name);
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
-            }
-        }
-
-        // ⛔ Не пропуск: без PowerShell сторож мовчав би саме там, де його чекають.
-        throw new InvalidOperationException("Немає pwsh у PATH (на Windows — і powershell.exe): тест не може виконати deploy-ecr.ps1.");
-    }
+    private static string FindPowerShell() => DeployScriptHarness.FindPowerShell();
 }
