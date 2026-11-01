@@ -429,8 +429,9 @@ test.describe('Air limits real', () => {
     await page.getByRole('button', { name: /Next: analyse file/ }).click();
     await expect(page.getByText('Choose the area.')).toBeVisible();
     await page.getByRole('textbox', { name: /^Area/ }).click();
-    // Areas of this region only, from its AREA nodes. The REGION group node no longer adds "-" (No area): every NAE here has an area.
-    await expect(page.getByRole('option')).toHaveText([Area]);
+    // Areas of this region only, from its AREA nodes (label "OFFSHORE - <AREA node name>"). The REGION group node no longer
+    // adds "-" (No area): every NAE here has an area.
+    await expect(page.getByRole('option')).toHaveText([new RegExp(`^${Area}\\b`)]);
     await page.keyboard.press('Escape');
     await pick(page, /^Area/, new RegExp(`^${Area}`));
     await page.getByRole('button', { name: /Next: analyse file/ }).click();
