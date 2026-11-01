@@ -152,10 +152,26 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
   useEffect(() => {
     stick.current = true;
     markedUpTo.current = 0;
+    setNewBelow(0);
   }, [table.tableCode, filter]);
 
   const firstId = state.messages[0]?.id;
   const lastId = state.messages.at(-1)?.id;
+
+  /*
+   * LIVE-REFRESH A2: messages that arrived BELOW while the user reads older ones. The list does not jump (the
+   * scroll position is kept), a pill says how many are new; a click (or scrolling down) brings the user there.
+   * `seenUpTo` — the newest message id the user had at the bottom of the list.
+   */
+  const seenUpTo = useRef(0);
+  const [newBelow, setNewBelow] = useState(0);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  const atBottom = (): void => {
+    seenUpTo.current = stateRef.current.messages.at(-1)?.id ?? 0;
+    setNewBelow(0);
+  };
 
   useLayoutEffect(() => {
     const node = scroller.current;
@@ -168,8 +184,29 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
       return;
     }
 
-    if (stick.current) node.scrollTop = node.scrollHeight;
+    if (stick.current) {
+      node.scrollTop = node.scrollHeight;
+      atBottom();
+      return;
+    }
+
+    // Scrolled up: count what came after the last message seen at the bottom (own messages do not count).
+    const fresh = state.messages.filter(
+      (message) => message.id > seenUpTo.current && message.authorUserId !== me && !message.isDeleted,
+    ).length;
+    setNewBelow(fresh);
+    // `state.messages`/`me` are read at the moment the ids change; the trigger is the ids.
   }, [firstId, lastId, state.status]);
+
+  const showNewest = (): void => {
+    const node = scroller.current;
+    stick.current = true;
+    if (node !== null) {
+      node.scrollTop = node.scrollHeight;
+      node.focus();
+    }
+    atBottom();
+  };
 
   // The read mark of the FIRST load of this table: "new" marks survive a filter switch and the mark-read of the poll.
   const baselineRef = useRef<{ readonly table: string; readonly value: number } | null>(null);
@@ -278,6 +315,7 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
         onScroll={(event) => {
           const node = event.currentTarget;
           stick.current = node.scrollHeight - node.scrollTop - node.clientHeight < StickThresholdPx;
+          if (stick.current && newBelow > 0) atBottom();
         }}
       >
         {state.status === 'loading' && (
@@ -329,6 +367,14 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
           </ol>
         )}
       </div>
+
+      {newBelow > 0 && (
+        <div className="ecr-chat-newpill">
+          <Button size="xs" radius="xl" variant="filled" onClick={showNewest} data-chat-new-pill={String(newBelow)}>
+            {t('tableChat.newBelow', { n: newBelow })}
+          </Button>
+        </div>
+      )}
 
       <div className="ecr-chat-foot">
         {state.status === 'ready' && state.canWrite && (
