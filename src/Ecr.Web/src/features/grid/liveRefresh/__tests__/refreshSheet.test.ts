@@ -11,13 +11,13 @@ import { refreshSheetTables } from '../refreshSheet';
  * it waits for own PATCHes in flight, does not touch the pending store, holds the autosave during the refetch and
  * plans it again after.
  *
- * Mutation proofs: drop `await whenInFlightSettles()` in `refreshSheet.ts` → the
+ * Mutation proofs (run 02.11 on this lane, both red): drop `await whenInFlightSettles()` in `refreshSheet.ts` → the
  * first test is red (the slice is refetched while the PATCH flies); drop the `scheduleAutosave()` in `finally` →
  * the autosave test is red.
  */
 const autosave = vi.hoisted(() => ({ cancel: vi.fn(), schedule: vi.fn() }));
-vi.mock('../../autosave', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../autosave')>()),
+vi.mock('@/features/grid/autosave', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/features/grid/autosave')>()),
   cancelAutosave: autosave.cancel,
   scheduleAutosave: autosave.schedule,
 }));
