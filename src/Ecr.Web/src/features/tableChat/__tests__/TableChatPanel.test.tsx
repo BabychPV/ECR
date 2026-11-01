@@ -7,6 +7,7 @@ import { MemoryRouter } from 'react-router-dom';
 import type { DocumentTableDto } from '@/api/types';
 import { Catalog } from '@/test/__tests__/a11yFixtures';
 import { testTheme } from '@/test/render';
+import { DiscussionPollMs } from '../api';
 import { TableChatPanel } from '../TableChatPanel';
 import { FakeChatServer, message } from './fakeChatServer';
 
@@ -352,14 +353,15 @@ describe('the poll', () => {
     vi.useFakeTimers();
   });
 
-  it('polls every 15 s with after=lastMessageId; 304 changes nothing; a new revision refetches the loaded window', async () => {
+  it('polls every 10 s with after=lastMessageId; 304 changes nothing; a new revision refetches the loaded window', async () => {
+    expect(DiscussionPollMs).toBe(10_000);
     server.messages = [message(1), message(2)];
     mount();
     await tick(100);
     expect(messageEls()).toHaveLength(2);
     const loads = server.of('GET', '/messages').length;
 
-    await tick(14_000);
+    await tick(9_000);
     expect(server.of('GET', '/messages')).toHaveLength(loads);
 
     await tick(1_100);
@@ -370,20 +372,20 @@ describe('the poll', () => {
     expect(messageEls()).toHaveLength(2);
 
     // Unchanged chat: the second poll carries the ETag of the first and gets 304.
-    await tick(15_000);
+    await tick(10_000);
     const secondPoll = server.of('GET', '/messages').at(-1);
     expect(secondPoll?.headers['if-none-match']).toBe(`"${String(server.revision)}"`);
 
     // An OLD message is edited by somebody else: lastMessageId does not move, the revision does.
     server.messages[0] = { ...message(1), body: 'edited elsewhere', editedAt: '2026-06-01T11:00:00Z' };
     server.touch();
-    await tick(15_000);
+    await tick(10_000);
     expect(screen.getByText('edited elsewhere')).toBeTruthy();
 
     // A new message arrives.
     server.messages.push(message(3, { body: 'brand new' }));
     server.touch();
-    await tick(15_000);
+    await tick(10_000);
     expect(screen.getByText('brand new')).toBeTruthy();
     expect(messageEls()).toHaveLength(3);
   });
@@ -408,6 +410,58 @@ describe('the poll', () => {
     });
 
     expect(screen.getByText('while hidden')).toBeTruthy();
+  });
+
+  it('scrolled up: new messages do not move the list or touch the composer; a pill says how many and brings the user down', async () => {
+    server.messages = Array.from({ length: 5 }, (_, i) => message(i + 1));
+    mount();
+    await tick(100);
+    const list = screen.getByRole('log');
+    const area = screen.getByRole('textbox', { name: /Message/ }) as HTMLTextAreaElement;
+    fireEvent.change(area, { target: { value: 'half-typed reply' } });
+
+    // The user scrolls up to read: 1000 px of content, 200 px window, at the top.
+    let top = 0;
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => 1000 });
+    Object.defineProperty(list, 'clientHeight', { configurable: true, get: () => 200 });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => top,
+      set: (value: number) => {
+        top = value;
+      },
+    });
+    fireEvent.scroll(list);
+    expect(document.querySelector('[data-chat-new-pill]')).toBeNull();
+
+    // Two messages by somebody else and one own arrive with the next poll.
+    server.messages.push(message(6), message(7), message(8, { authorUserId: 1, authorName: 'Me' }));
+    server.touch();
+    await tick(10_000);
+
+    expect(messageEls()).toHaveLength(8);
+    expect(list.scrollTop).toBe(0);
+    expect(area.value).toBe('half-typed reply');
+    const pill = screen.getByRole('button', { name: text('tableChat.newBelow').replace('{n}', '2') });
+    expect(pill.getAttribute('data-chat-new-pill')).toBe('2');
+
+    fireEvent.click(pill);
+    expect(list.scrollTop).toBe(1000);
+    expect(document.querySelector('[data-chat-new-pill]')).toBeNull();
+    expect(area.value).toBe('half-typed reply');
+  });
+
+  it('at the bottom the list follows new messages and no pill appears', async () => {
+    server.messages = [message(1)];
+    mount();
+    await tick(100);
+
+    server.messages.push(message(2, { body: 'next' }));
+    server.touch();
+    await tick(10_000);
+
+    expect(screen.getByText('next')).toBeTruthy();
+    expect(document.querySelector('[data-chat-new-pill]')).toBeNull();
   });
 
   it('stops polling when the panel closes (unmounts)', async () => {
