@@ -86,7 +86,7 @@ function violations(value: unknown, schema: Schema, at: string): string[] {
 }
 
 async function callEverything(): Promise<void> {
-  await getDiscussionSummary(7);
+  await getDiscussionSummary(7, null);
   await getMessages(7, 'T1', { limit: 50, periodKey: 202606 }, null);
   await getMessages(7, 'T1', { after: 10, limit: 100 }, '"5"');
   await getMessages(7, 'T1', { before: 4, limit: 50 }, null);
@@ -160,6 +160,13 @@ describe('table chat api.ts ↔ openapi.snapshot.json', () => {
     await getMessages(7, 'T1', { after: 10, limit: 100 }, '"5"');
 
     expect(calls[0]?.headers['if-none-match']).toBe('"5"');
+  });
+
+  it('the summary poll sends the previous ETag as If-None-Match', async () => {
+    stubFetch();
+    await getDiscussionSummary(7, '"s9"');
+
+    expect(calls[0]?.headers['if-none-match']).toBe('"s9"');
   });
 
   it('encodes the table code and puts the query into the address', async () => {
