@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JSX } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import type { DocumentTableDto } from '@/api/types';
 import { isFullToggleKey, SheetWorkspace, shouldExitOnEscape } from '../SheetWorkspace';
@@ -16,6 +17,12 @@ vi.mock('@/features/grid/DocumentGrid', () => ({
 }));
 
 vi.mock('@/features/documents/api', () => ({ useTableStatus: () => ({ data: [] }) }));
+
+// ⚠ Опитування маркера змін (setInterval 30 с) під `vi.runAllTimers()` крутилося б без кінця; його перевіряє
+// `liveRefresh/__tests__`, тут — лише панель і повний екран.
+vi.mock('../liveRefresh/useSheetChanges', () => ({
+  useSheetChanges: () => ({ change: null, stopped: false, clear: () => undefined, rebase: () => Promise.resolve() }),
+}));
 
 function table(ordinal: number): DocumentTableDto {
   return {
@@ -45,10 +52,13 @@ function Probe(): null {
 function show(tables: DocumentTableDto[], entry = '/documents/1?periodKey=202610'): void {
   render(
     <MantineProvider>
-      <MemoryRouter initialEntries={[entry]}>
-        <SheetWorkspace documentId={1} periodKey={202610} readOnly={false} tables={tables} />
-        <Probe />
-      </MemoryRouter>
+      {/* LIVE-REFRESH: «Refresh» і маркер змін аркуша працюють через кеш запитів. */}
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={[entry]}>
+          <SheetWorkspace documentId={1} periodKey={202610} readOnly={false} tables={tables} />
+          <Probe />
+        </MemoryRouter>
+      </QueryClientProvider>
     </MantineProvider>,
   );
 }

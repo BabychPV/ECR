@@ -92,6 +92,22 @@ export function hasInFlight(): boolean {
   return false;
 }
 
+/**
+ * LIVE-REFRESH B3: проміс, що справджується, коли в документа не лишилось жодного запиту в дорозі.
+ *
+ * ⛔ Перечитування зрізу, поки летить власний `PATCH`, могло б прочитати знімок ДО нього, а відповідь
+ * `PATCH` (яка вже зняла правку зі сховища) — прийти раніше: збережене значення зникло б з екрана.
+ */
+export function whenInFlightSettles(): Promise<void> {
+  return new Promise((resolve) => {
+    const check = (): void => {
+      if (hasInFlight()) waiting.add(check);
+      else resolve();
+    };
+    check();
+  });
+}
+
 /** Повторити відкладене, щойно звільниться будь-який запит у дорозі. */
 export function deferUntilInFlightSettles(retry: () => void): void {
   waiting.add(retry);
