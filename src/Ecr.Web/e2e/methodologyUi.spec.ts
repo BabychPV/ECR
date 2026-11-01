@@ -269,7 +269,8 @@ test.describe('Methodology page UI: syntax help, rule coverage periods, collapsi
     await expect(page.getByTestId('methodology-section-toggle-publications')).toHaveAttribute('aria-expanded', 'false');
 
     // Заголовки секцій — h2 з кнопкою всередині.
-    await expect(page.getByRole('heading', { level: 2, name: /Rules/ }).getByRole('button')).toHaveCount(1);
+    // ⚠ Через кнопку, а не за назвою: заголовок секції — «Row selection rules» (сід), а /Rules/ чутливий до регістру.
+    await expect(page.getByTestId('methodology-section-toggle-rules').locator('xpath=ancestor::h2')).toHaveCount(1);
 
     // Повернути стан, щоб наступні тести бачили розгорнуту сторінку.
     await page.getByTestId('methodology-section-toggle-rules').click();
